@@ -190,3 +190,15 @@ def test_end_line_is_the_exact_last_line_of_each_python_definition( tmp_path ):
     from cosa.repo.symindex import py_index as pi
     got = { r[ "name" ]: ( r[ "line" ], r[ "end_line" ] ) for r in pi.extract_python( sp.spec_for( root ), root / "pkg" / "spans.py", include_all=True ) }
     assert got == { "one": ( 1, 1 ), "multi": ( 4, 7 ), "decorated": ( 12, 14 ), "K": ( 17, 21 ), "K.m": ( 18, 19 ), "K.n": ( 21, 21 ) }
+
+
+def test_the_fixture_tree_shows_each_kind_of_member_in_its_scope( tmp_path ):
+    gen      = bd.build( make_repo( tmp_path ), tmp_path / "out" )[ "gen_dir" ]
+    found    = { ( r[ "lang" ], r[ "name" ] ): r[ "scope" ] for r in bd.read_searchable( gen ) }
+    public   = { ( r[ "lang" ], r[ "name" ] ) for r in bd.read_symbols( gen ) }
+    hidden   = [ ( "py", "Widget._hidden" ), ( "py", "_private_fn" ), ( "ts", "Box.hidden" ), ( "ts", "Box.#secret" ) ]
+    assert all( found[ k ] == "private" for k in hidden )                                       # searchable, class named in the name
+    assert not any( k in public for k in hidden )                                               # and still not in the public listing
+    assert ( "ts", "Box.get" ) in public and found[ ( "ts", "Box.get" ) ] == "public"
+    assert not any( "<locals>" in name for _, name in found )                                   # a nested helper is never searchable
+    assert ( "py", "_private_fn.<locals>.nested_helper" ) in { ( r[ "lang" ], r[ "name" ] ) for r in bd.read_symbols( gen, all_symbols=True ) }      # positive control: it is in the full listing

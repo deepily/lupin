@@ -1,6 +1,8 @@
 // Extract function/class/method definitions from JS/TS files with the TypeScript compiler.
 // stdin : JSON { "root": "<abs dir>", "files": [ "<abs path>", ... ], "typescript": "<path to typescript module>" }
-// stdout: JSON [ { file, name, kind, sig, doc, pin, line } ... ]   (file relative to root)
+// stdout: JSON [ { file, name, kind, sig, doc, doc_full, pin, line, end_line, public } ... ]   (file relative to root)
+// A private, protected or #private class member is reported with "public": false; every other definition is public.
+// "doc_limit" and "doc_marker" in the request say how long doc_full may be and what ends a cut one (the Python side owns both values).
 // With "mode": "shapes" in the request the output is instead { scanned: [ file ... ], skipped: [ file ... ], defs: [ { file, name, kinds } ... ] }:
 // one entry per function-like definition at any depth, private and nested included ("public_only": true drops both),
 // kinds being the pre-order node kind names of its body with names, literal values and access modifiers erased, for the duplicate finder.
@@ -33,6 +35,17 @@ function firstDocLine( node, sf ) {
     return lines.length > 0 ? lines[ 0 ] : "";
 }
 
+// The whole JSDoc of a node: description and tags, whitespace folded to single spaces, cut to the requested length.
+function fullDoc( node, sf ) {
+    const docs = ts.getJSDocCommentsAndTags( node ).filter( ts.isJSDoc );
+    if ( docs.length === 0 ) return "";
+    const jsdoc = docs[ docs.length - 1 ];
+    const tag   = t => [ "@" + t.tagName.text, t.name ? t.name.getText( sf ) : "", ts.getTextOfJSDocComment( t.comment ) || "" ].filter( x => x.length > 0 ).join( " " );
+    const text  = [ ts.getTextOfJSDocComment( jsdoc.comment ) || "" ].concat( ( jsdoc.tags || [] ).map( tag ) ).join( " " ).replace( /\s+/g, " " ).trim();
+    const chars = Array.from( text );                                    // code points, as Python counts them
+    return chars.length > req.doc_limit ? chars.slice( 0, req.doc_limit ).join( "" ) + req.doc_marker : text;
+}
+
 function leafTokens( node, sf, acc ) {
     if ( node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode ) return acc;
     const kids = node.getChildren( sf );
@@ -56,7 +69,15 @@ function params( node, sf ) {
 function isPrivate( member ) {
     const mods = ts.getModifiers( member ) || [];
     if ( mods.some( m => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword ) ) return true;
-    return member.name && ts.isPrivateIdentifier( member.name );
+    return !!( member.name && ts.isPrivateIdentifier( member.name ) );
+}
+
+// The one rule for a function that is hidden from the public listing: a private or protected method, constructor or accessor,
+// or a function held in a private or protected class property. The symbol pass and the shapes pass both ask it.
+function isHiddenFn( n ) {
+    const field = ts.isPropertyDeclaration( n.parent );
+    const member = ts.isMethodDeclaration( n ) || ts.isConstructorDeclaration( n ) || ts.isGetAccessorDeclaration( n ) || ts.isSetAccessorDeclaration( n ) || field;
+    return member && isPrivate( field ? n.parent : n );
 }
 
 
@@ -172,8 +193,7 @@ function shapes( req ) {
                 } else if ( isFnLike( c ) ) {
                     const name = fnName( c, sf );
                     // A function that is the value of a class property is as private as the property.
-                    const field  = ts.isPropertyDeclaration( c.parent );
-                    const hidden = ( ts.isMethodDeclaration( c ) || ts.isConstructorDeclaration( c ) || ts.isGetAccessorDeclaration( c ) || ts.isSetAccessorDeclaration( c ) || field ) && isPrivate( field ? c.parent : c );
+                    const hidden = isHiddenFn( c );
                     const skip = req.public_only && ( nested || hidden );
                     if ( name === null && req.bodies ) account.anonymous_walked++;
                     if ( name !== null && !skip ) {
@@ -191,9 +211,11 @@ function shapes( req ) {
 
 const out = [];
 
-function emit( file, name, kind, sig, node, sf, docNode ) {
+function emit( file, name, kind, sig, node, sf, docNode, isPublic = true ) {
     const pos = sf.getLineAndCharacterOfPosition( node.getStart( sf ) );
-    out.push( { file, name, kind, sig, doc: firstDocLine( docNode || node, sf ), pin: pinOf( node, sf ), line: pos.line + 1 } );
+    const end = sf.getLineAndCharacterOfPosition( node.getEnd() );
+    out.push( { file, name, kind, sig, doc: firstDocLine( docNode || node, sf ), doc_full: fullDoc( docNode || node, sf ), pin: pinOf( node, sf ),
+                line: pos.line + 1, end_line: end.line + 1, public: isPublic } );
 }
 
 for ( const abs of req.mode === "shapes" ? [] : req.files ) {
@@ -206,9 +228,9 @@ for ( const abs of req.mode === "shapes" ? [] : req.files ) {
         } else if ( ts.isClassDeclaration( st ) && st.name ) {
             emit( rel, st.name.text, "class", "", st, sf );
             for ( const m of st.members ) {
-                if ( ( ts.isMethodDeclaration( m ) || ts.isConstructorDeclaration( m ) || ts.isGetAccessorDeclaration( m ) || ts.isSetAccessorDeclaration( m ) ) && !isPrivate( m ) ) {
+                if ( ts.isMethodDeclaration( m ) || ts.isConstructorDeclaration( m ) || ts.isGetAccessorDeclaration( m ) || ts.isSetAccessorDeclaration( m ) ) {
                     const mname = ts.isConstructorDeclaration( m ) ? "constructor" : m.name.getText( sf );
-                    emit( rel, st.name.text + "." + mname, "method", params( m, sf ), m, sf );
+                    emit( rel, st.name.text + "." + mname, "method", params( m, sf ), m, sf, null, !isHiddenFn( m ) );
                 }
             }
         } else if ( ts.isVariableStatement( st ) ) {

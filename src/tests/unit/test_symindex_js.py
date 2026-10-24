@@ -7,6 +7,7 @@ import pathlib
 
 import pytest
 
+from cosa.repo.symindex import extractor_contract as ec
 from cosa.repo.symindex import js_index as ji
 from cosa.repo.symindex import spec as sp
 from cosa.repo.symindex.errors import DependencyMissing
@@ -41,8 +42,9 @@ def test_typescript_fixtures_class_methods_typed_arrows_generics( tmp_path ):
     assert by[ "mul" ][ "doc" ] == "Typed arrow."
     assert by[ "emptyDoc" ][ "doc" ] == "" and by[ "tagOnly" ][ "doc" ] == ""                   # an empty JSDoc and a tag-only JSDoc give no summary
     assert by[ "plain" ][ "sig" ] == "(x: string)" and by[ "fe" ][ "sig" ] == "(y)"
-    assert "Box.hidden" not in by and "Box.#secret" not in by and "notFn" not in by     # private members and non-functions are skipped
-    assert all( r[ "lang" ] == "ts" and r[ "public" ] is True and r[ "line" ] >= 1 for r in recs )
+    assert "notFn" not in by                                                          # a non-function is skipped
+    assert by[ "Box.hidden" ][ "public" ] is False and by[ "Box.#secret" ][ "public" ] is False       # private members are returned, hidden from the public listing
+    assert all( r[ "lang" ] == "ts" and r[ "line" ] >= 1 and r[ "public" ] is ( r[ "name" ] not in ( "Box.hidden", "Box.#secret" ) ) for r in recs )
 
 
 def test_plain_javascript_is_indexed_too( tmp_path ):
@@ -110,3 +112,83 @@ def test_a_tsx_file_is_pinned_from_a_markup_aware_parse( tmp_path ):
     # The pins are those of the TSX parse. Read as plain TS the markup is garbled into other tokens
     # and the pins are 00e71c5bfe and 439959156c, so this fails if the symbols pass stops reading .tsx as TSX.
     assert { r[ "name" ]: r[ "pin" ] for r in recs } == { "Comp": "25d4c17a99", "other": "1ce7f8f44d" }
+
+
+def test_the_typescript_toolchain_is_present_so_no_typescript_test_can_pass_by_not_running():
+    # red when: node or node_modules/typescript is missing. A missing tool must fail the TypeScript tests, never skip them.
+    assert pathlib.Path( ji.find_node() ).is_file()
+    assert ( ji.find_typescript( REPO_ROOT ) / "package.json" ).is_file()
+
+
+MEMBERS = '''export class K {
+    /** Public one. */
+    pub(): void {}
+    /**
+     * Hidden helper.
+     * @param n the count
+     */
+    private hid( n: number ): number {
+        return n;
+    }
+    protected prot(): void {}
+    #sec(): void {}
+    private get g(): number { return 1; }
+    private set g( v: number ) {}
+    private static sm(): void {}
+    private arrow = () => 1;
+    open = () => 2;
+    constructor( private v: number ) {}
+}
+class Plain { private constructor() {} }
+'''
+
+
+def _members( tmp_path ):
+    root = tmp_path / "r"; root.mkdir()
+    ( root / "m.ts" ).write_text( MEMBERS, encoding="utf-8" )
+    return root, ji.extract_js( root, [ root / "m.ts" ] )
+
+
+def test_private_protected_and_hash_private_members_are_returned_hidden_with_their_class_named( tmp_path ):
+    _, recs = _members( tmp_path )
+    flags = sorted( ( r[ "name" ], r[ "kind" ], r[ "public" ] ) for r in recs )
+    assert flags == sorted( [ ( "K", "class", True ), ( "K.pub", "method", True ), ( "K.hid", "method", False ), ( "K.prot", "method", False ),
+                              ( "K.#sec", "method", False ), ( "K.g", "method", False ), ( "K.g", "method", False ), ( "K.sm", "method", False ),
+                              ( "K.constructor", "method", True ), ( "Plain", "class", True ), ( "Plain.constructor", "method", False ) ] )
+    assert not any( "arrow" in r[ "name" ] or "open" in r[ "name" ] for r in recs )               # a class-property function is not a member of the listing, hidden or not
+
+
+def test_the_symbol_pass_and_the_shapes_pass_agree_on_which_members_are_hidden( tmp_path ):
+    # red when: the two walkers stop sharing the rule for a hidden member (a private constructor, accessor, #name or static)
+    root, recs = _members( tmp_path )
+    f          = root / "m.ts"
+    every      = { d[ "name" ] for d in ji.extract_js_shapes( root, [ f ] )[ "defs" ] }
+    public     = { d[ "name" ] for d in ji.extract_js_shapes( root, [ f ], public_only=True )[ "defs" ] }
+    hidden     = { r[ "name" ] for r in recs if not r[ "public" ] }
+    assert hidden == ( every - public ) - { "K.arrow" }                                           # shapes also reports the private property function, which the listing never did
+    assert "K.arrow" in every - public and "K.open" in public
+
+
+def test_end_line_is_the_last_line_of_the_definition( tmp_path ):
+    _, recs = _members( tmp_path )
+    by = { r[ "name" ]: r for r in recs }
+    assert ( by[ "K.pub" ][ "line" ], by[ "K.pub" ][ "end_line" ] ) == ( 3, 3 )
+    assert ( by[ "K.hid" ][ "line" ], by[ "K.hid" ][ "end_line" ] ) == ( 8, 10 )                  # a multi-line body
+    assert by[ "K" ][ "end_line" ] == 19
+
+
+def test_doc_full_is_the_whole_jsdoc_with_its_tags_folded_to_one_line( tmp_path ):
+    _, recs = _members( tmp_path )
+    by = { r[ "name" ]: r for r in recs }
+    assert by[ "K.hid" ][ "doc" ] == "Hidden helper." and by[ "K.hid" ][ "doc_full" ] == "Hidden helper. @param n the count"
+    assert by[ "K.prot" ][ "doc_full" ] == "" and by[ "K.pub" ][ "doc_full" ] == "Public one."
+
+
+@pytest.mark.parametrize( "text", [ " ".join( f"word{i}" for i in range( 300 ) ), "𝔘" * 900, " ".join( [ "x" * 100 ] * 8 ), " ".join( [ "y" * 99 ] * 8 ) ] )
+def test_doc_full_is_cut_exactly_where_the_python_extractor_cuts_it( tmp_path, text ):
+    # the texts: far over the limit, astral characters (counted as code points), and 799 / 800 characters either side of the cut
+    root = tmp_path / "r"; root.mkdir()
+    ( root / "c.ts" ).write_text( f"/**\n * {text}\n */\nexport function f() {{}}\n", encoding="utf-8" )
+    got = ji.extract_js( root, [ root / "c.ts" ] )[ 0 ][ "doc_full" ]
+    assert got == ec.fold_doc( text )
+    assert len( got ) <= ec.DOC_FULL_LIMIT + len( ec.DOC_FULL_MARKER )

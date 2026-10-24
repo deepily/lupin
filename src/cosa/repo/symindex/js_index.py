@@ -12,6 +12,7 @@ import pathlib
 import shutil
 import subprocess
 
+from cosa.repo.symindex import extractor_contract as ec
 from cosa.repo.symindex.errors import DependencyMissing
 
 EXTRACTOR = pathlib.Path( __file__ ).resolve().with_name( "ts_extract.js" )
@@ -66,8 +67,9 @@ def extract_js( root, files ):
     Requires:
         - files are absolute paths under root
     Ensures:
-        - returns a list of symbol dicts (lang "ts", file, name, kind, sig, doc, pin, line, public)
-        - private and protected members are not returned
+        - returns a list of symbol dicts (lang "ts", file, name, kind, sig, doc, doc_full, pin, line, end_line, public)
+        - a private, protected or #private member is returned with public False, named after its class
+        - doc_full is the whole JSDoc, folded and cut as extractor_contract.fold_doc does
         - an empty file list returns [] without starting node
     Raises:
         - DependencyMissing when node or typescript is absent
@@ -75,9 +77,10 @@ def extract_js( root, files ):
     """
     if not files: return []
     out = []
-    for r in _run( root, files, {} ):
+    for r in _run( root, files, { "doc_limit": ec.DOC_FULL_LIMIT, "doc_marker": ec.DOC_FULL_MARKER } ):
         out.append( { "lang": "ts", "file": r[ "file" ], "name": r[ "name" ], "kind": r[ "kind" ], "sig": r[ "sig" ],
-                      "doc": r[ "doc" ], "pin": r[ "pin" ], "line": r[ "line" ], "public": True } )
+                      "doc": r[ "doc" ], "doc_full": r[ "doc_full" ], "pin": r[ "pin" ], "line": r[ "line" ], "end_line": r[ "end_line" ],
+                      "public": r[ "public" ] } )
     return out
 
 

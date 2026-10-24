@@ -42,7 +42,23 @@ empty result.
 RECORD_KEYS   = ( "lang", "file", "name", "kind", "sig", "doc", "line", "public" )
 OPTIONAL_KEYS = { "end_line": int, "doc_full": str }          # an extractor may add these; the builder never needs them
 BUILDER_KEYS  = ( "scope", "id" )                           # computed by the builder; an extractor that returns one is refused
+DOC_FULL_LIMIT  = 800                                         # characters of whole docstring an extractor keeps
+DOC_FULL_MARKER = "…"                                         # ends a docstring that was cut
 KINDS         = frozenset( { "function", "class", "method", "constructor", "enum", "mixin", "extension" } )
+
+
+def fold_doc( text ):
+    """
+    Fold a whole docstring into the single line the index stores as `doc_full`.
+
+    Requires:
+        - text is a string
+    Ensures:
+        - returns text with every run of whitespace folded to one space and the ends trimmed
+        - a result longer than DOC_FULL_LIMIT characters is cut there and ends with DOC_FULL_MARKER
+    """
+    folded = " ".join( text.split() )
+    return folded if len( folded ) <= DOC_FULL_LIMIT else folded[ :DOC_FULL_LIMIT ] + DOC_FULL_MARKER
 
 
 def validate_record( rec ):

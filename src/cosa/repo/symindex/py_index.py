@@ -11,6 +11,8 @@ import ast
 import copy
 import hashlib
 
+from cosa.repo.symindex.extractor_contract import fold_doc
+
 _DEFS = ( ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef )
 
 
@@ -109,7 +111,7 @@ def extract_python( spec, path, include_all=False ):
     Requires:
         - path lies under spec.module_base
     Ensures:
-        - returns a list of dicts (lang, file, name, kind, sig, doc, pin, line, end_line, public)
+        - returns a list of dicts (lang, file, name, kind, sig, doc, doc_full, pin, line, end_line, public)
         - `module` is the dotted module name relative to spec.module_base, for id building
         - a file that does not parse raises SyntaxError; the caller records it
     Raises:
@@ -132,6 +134,7 @@ def extract_python( spec, path, include_all=False ):
                       "kind"   : kind,
                       "sig"    : "" if is_class else f"({ast.unparse( node.args )}){ret}",
                       "doc"    : first_doc_line( node ),
+                      "doc_full": fold_doc( ast.get_docstring( node ) or "" ),
                       "pin"    : pin( node ),
                       "line"   : node.lineno,
                       "end_line": node.end_lineno,

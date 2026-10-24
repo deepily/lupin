@@ -5,6 +5,7 @@ import ast
 
 import pytest
 
+from cosa.repo.symindex import extractor_contract as ec
 from cosa.repo.symindex import py_index as pi
 from cosa.repo.symindex import spec as sp
 from cosa.repo.symindex.build import collect
@@ -93,3 +94,17 @@ def test_unparseable_file_is_listed_not_fatal( tmp_path ):
     data = collect( sp.spec_for( root ) )
     assert sorted( data[ "unparsed" ] ) == [ "pkg/binary.py", "pkg/broken.py" ]
     assert any( r[ "name" ] == "public_fn" for r in data[ "symbols" ] )
+
+
+def test_doc_full_is_the_whole_docstring_folded_and_empty_without_one( tmp_path ):
+    root = make_repo( tmp_path )
+    recs = { r[ "name" ]: r for r in pi.extract_python( sp.spec_for( root ), root / "pkg" / "util.py", include_all=True ) }
+    assert recs[ "public_fn" ][ "doc" ] == "Adds things." and recs[ "public_fn" ][ "doc_full" ] == "Adds things. More detail."
+    assert recs[ "_private_fn" ][ "doc_full" ] == ""
+
+
+def test_a_long_docstring_is_cut_at_the_limit_with_the_marker( tmp_path ):
+    root = make_repo( tmp_path )
+    ( root / "pkg" / "long.py" ).write_text( 'def f():\n    """' + " ".join( f"word{i}" for i in range( 300 ) ) + '"""\n', encoding="utf-8" )
+    got = pi.extract_python( sp.spec_for( root ), root / "pkg" / "long.py" )[ 0 ][ "doc_full" ]
+    assert len( got ) == ec.DOC_FULL_LIMIT + len( ec.DOC_FULL_MARKER ) and got.endswith( ec.DOC_FULL_MARKER )

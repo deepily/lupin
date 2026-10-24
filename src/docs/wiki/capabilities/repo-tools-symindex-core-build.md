@@ -26,7 +26,8 @@ Companion to [[symbol-index]], which covers the CLI, `build`, `ensure` and `is_f
 ## Reading a generation
 - `current_generation( out_dir )` follows the `current` link and returns the folder, or `None` when nothing is published or the link is broken.
 - `read_header( gen )` returns the parsed `header.json`: root, repo, manifest, pin algorithm, counts, missing tools, unparsed files.
-- `read_symbols( gen, all_symbols=False )` returns the records of `symbols.jsonl`, or of `symbols-all.jsonl` when `all_symbols` is true. The lint, the diff and the reuse tools all read through these two.
+- `read_symbols( gen, all_symbols=False )` returns the records of `symbols.jsonl`, or of `symbols-all.jsonl` when `all_symbols` is true. The lint and the diff read through it.
+- `read_searchable( gen, tests=False )` returns the records whose `scope` is `public` or `private`, plus `test` when asked, never `nested`. The judge, the vectors and the purpose lines read through it.
 - `symbol_line( r )` renders one record as the `symbols.md` line: `<file>::<name><sig> — <doc> [<id>@<pin>]`.
 
 ## Not here

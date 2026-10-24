@@ -115,8 +115,8 @@ One table maps the labels in use, so a receipt cited in a plan's prior-art table
   `CALL_FAILED`, `KEY_UNREADABLE`, `DEPENDENCY_MISSING`, `NOT_LUPIN_TREE`, `INDEX_STALE` and `NO_MATCH`.
   Treat it as unknown. `NO_MATCH` does not rule `DISTINCT`; read the nearest entries first.
 - A reuse miss is a symbol that should have been on the shortlist and was not.
-- A receipt for a `_private` or nested definition has `need_text` in its id, so its id is not the one the plan's id definition gives.
-- The id changes when the definition's signature or first docstring line changes, because the public index sha does not cover private definitions.
+- A receipt for a nested definition (a helper inside a function) has `need_text` in its id. So its id is not the one the plan's id definition gives. A `_private` definition has no such field, because the snapshot holds it.
+- The index sha comes from `search_sha`, so it moves when a private definition's signature, pin or docstring changes, as well as a public one.
 - Cite the id from the call you made on the final head. An id from an earlier edit still replays, but it describes the older text.
 - Report a miss to the manager as a task-store row with the receipt id and the symbol.
 - The counter-reviewer replays your receipts with `replay( receipt_id )`.

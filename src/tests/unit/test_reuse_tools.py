@@ -971,3 +971,20 @@ def test_the_index_sha_comes_from_search_sha_and_falls_back_to_symbols_sha_for_a
         rt.check_exists_impl( N( label ), ctx )
         names.append( [ p.name for p in ( data_dir / "snapshots" ).glob( "*.json.gz" ) ] )
     assert len( names[ 0 ] ) == len( names[ 1 ] ) == 1 and names[ 0 ] != names[ 1 ]
+
+
+BOX_TS = 'export class Box {\n    /** Public one. */\n    open(): void {}\n    /** Hidden helper. */\n    private hid(): void {}\n}\n'
+
+
+def test_a_private_typescript_member_is_askable_by_id_and_is_a_candidate_for_other_entries( env ):
+    # red when: the entry lookup stops reading symbols-all.jsonl, or the TypeScript extractor drops private members again
+    js = env[ 0 ] / "src" / "lupin_app" / "static" / "js"; js.mkdir( parents=True )
+    ( js / "box.ts" ).write_text( BOX_TS, encoding="utf-8" )
+    hid = "src.lupin_app.static.js.box.Box.hid"
+    own = Recorder()
+    r   = rt.fetch_similar_impl( hid, ctx_for( env, own ) )
+    assert r[ "status" ] == "ok" and not any( b[ "state" ][ "candidate" ].startswith( hid ) for b in own.seen )      # resolved, and never asked about itself
+    assert any( b[ "state" ][ "candidate" ].startswith( "src.lupin_app.static.js.box.Box.open" ) for b in own.seen )
+    other = Recorder()
+    rt.fetch_similar_impl( "cosa.mathx.add", ctx_for( env, other ) )
+    assert any( b[ "state" ][ "candidate" ].startswith( hid ) for b in other.seen )                                # the private member is a candidate for another entry

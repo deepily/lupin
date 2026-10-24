@@ -324,3 +324,10 @@ def test_editing_the_dart_extractor_source_makes_a_built_index_stale( tmp_path, 
     assert bd.is_fresh( spec, out ) is True                                                         # a comment edit leaves it fresh
     monkeypatch.setattr( bd, "EXTRACTOR_LOGIC", bd.logic_version( py, js, dart.replace( "!n.startsWith( '_' )", "n.isNotEmpty", 1 ) ) )
     assert bd.is_fresh( spec, out ) is False                                                        # a code edit to dart_extract.dart makes it stale
+
+
+def test_fold_doc_keeps_a_text_of_exactly_the_limit_and_cuts_one_character_more():
+    at, over = "a" * ec.DOC_FULL_LIMIT, "a" * ( ec.DOC_FULL_LIMIT + 1 )
+    assert ec.fold_doc( at ) == at
+    assert ec.fold_doc( over ) == at + ec.DOC_FULL_MARKER
+    assert ec.fold_doc( "  one\n\n two\t three  " ) == "one two three"
