@@ -110,7 +110,7 @@ def name_hits( names, text ):
     List the names that appear in the text as whole words.
 
     Requires:
-        - names is an iterable of strings
+        - names is an iterable of non-empty strings; an empty name matches everywhere
         - text is a string
 
     Ensures:

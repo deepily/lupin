@@ -89,6 +89,33 @@ def test_exact_clone_renamed_clone_and_distinct_lookalike_are_told_apart( tmp_pa
     assert all( 0.6 <= n[ "jaccard" ] <= 1 for n in rep[ "near" ] )
 
 
+@pytest.mark.parametrize( "a, b, expected", [
+    ( { 1, 2, 3, 4 }, { 3, 4, 5, 6 }, 1 / 3 ),
+    ( { 1, 2, 3 },    { 1, 2, 3 },    1.0 ),
+    ( { 1, 2 },       { 3, 4 },       0.0 ),
+    ( { 1 },          { 1, 2, 3, 4 }, 0.25 ),
+    ( set(),          { 1, 2 },       0.0 ),
+] )
+def test_jaccard_is_pinned_to_literal_values( a, b, expected ):
+    assert dp.jaccard( a, b ) == pytest.approx( expected, abs=0 )
+    assert dp.jaccard( b, a ) == dp.jaccard( a, b )
+
+
+def test_jaccard_of_two_empty_sets_raises():
+    with pytest.raises( ZeroDivisionError ):
+        dp.jaccard( set(), set() )
+
+
+@pytest.mark.parametrize( "threshold", [ 0.6, 0.3 ] )
+def test_find_duplicates_equals_the_golden_captured_before_jaccard_was_factored_out( tmp_path, threshold ):
+    # Golden captured by running find_duplicates on CLONES at d0bd4f604, before dups.jaccard existed.
+    spec, files = _clone_repo( tmp_path )
+    rep = dp.find_duplicates( spec, files, min_nodes=20, threshold=threshold )
+    assert rep[ "exact" ] == [ [ "c.alpha", "c.beta" ] ]
+    assert rep[ "near" ]  == [ { "ids": [ "c.alpha", "c.gamma" ], "jaccard": 0.8214 },
+                               { "ids": [ "c.beta", "c.gamma" ],  "jaccard": 0.8214 } ]
+
+
 def test_near_pass_does_not_repeat_an_exact_pair_and_respects_threshold( tmp_path ):
     spec, files = _clone_repo( tmp_path )
     rep = dp.find_duplicates( spec, files, min_nodes=20, threshold=0.6 )

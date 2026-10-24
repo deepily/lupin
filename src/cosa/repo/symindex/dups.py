@@ -68,6 +68,23 @@ def shingles_of( seq ):
     return { hash( tuple( seq[ i:i + SHINGLE ] ) ) for i in range( max( len( seq ) - SHINGLE + 1, 1 ) ) }
 
 
+def jaccard( a, b ):
+    """
+    Return the Jaccard similarity of two shingle sets.
+
+    Requires:
+        - a and b are sets, and at least one of them is not empty
+
+    Ensures:
+        - returns len( a & b ) / len( a | b ), a float from 0.0 to 1.0, unrounded
+        - the same set twice gives 1.0 and two sets with nothing in common give 0.0
+
+    Raises:
+        - ZeroDivisionError if both sets are empty
+    """
+    return len( a & b ) / float( len( a | b ) )
+
+
 def _functions( spec, paths, scanned, include_private=False ):
     """
     Yield every function and method in the given Python files.
@@ -162,7 +179,7 @@ def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_
             okey, os_ = sets[ other ]
             if okey == key or okey[ 0 ] != key[ 0 ] or ( fid, other ) in seen: continue
             seen.add( ( fid, other ) )
-            jac = len( s & os_ ) / float( len( s | os_ ) )
+            jac = jaccard( s, os_ )
             if jac >= threshold: near.append( { "ids": [ fid, other ], "jaccard": round( jac, 4 ) } )
     near.sort( key=lambda d: ( -d[ "jaccard" ], d[ "ids" ] ) )
     prov = { "index_root": str( spec.root ), "min_nodes": min_nodes, "threshold": threshold, "shingle": SHINGLE,
