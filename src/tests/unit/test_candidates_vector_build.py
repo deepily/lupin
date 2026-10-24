@@ -393,6 +393,11 @@ class SizeClient:
         return [ [ float( len( t ) ), 0.0 ] for t in texts ]
 
 
+def test_embed_all_is_the_public_name_and_the_old_private_name_is_the_same_function():
+    assert vb._embed_all is vb.embed_all
+    assert vb.embed_all.__name__ == "embed_all"
+
+
 def test_a_batch_stops_before_rows_times_the_longest_text_passes_the_character_budget():
     texts  = [ "a" * 1000, "a" * 1000, "b" * 12000, "c" * 1000, "c" * 1000 ]
     client = SizeClient()

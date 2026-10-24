@@ -94,7 +94,7 @@ def entry_texts( entry, purpose ):
     return { "code": code, "prose": prose, "concat": code + "\n" + prose }
 
 
-def _embed_all( client, texts, content_type, role, batch_size, pause_seconds, sleep ):
+def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sleep ):
     """
     Embed every text in batches, one batch at a time, with a pause between batches.
 
@@ -124,6 +124,9 @@ def _embed_all( client, texts, content_type, role, batch_size, pause_seconds, sl
         if i < len( texts ): sleep( pause_seconds )
     if len( { len( v ) for v in vectors } ) > 1: raise CandidateError( EMBEDDING_SHAPE, "the vectors differ in length" )
     return vectors
+
+
+_embed_all = embed_all    # the old private name, kept so existing callers and tests do not change
 
 
 def reuse_mismatches( old_manifest, info ):
@@ -224,7 +227,7 @@ def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pa
     for name in vs.MATRICES:
         content_type, role = vs.DOCUMENT_ROLES[ name ]
         reusable = { i: ( reuse.row_texts[ name ][ k ], reuse.matrices[ name ][ k ] ) for k, i in enumerate( reuse.ids ) } if usable else {}
-        embed    = lambda batch, ct=content_type, r=role: _embed_all( client, batch, ct, r, batch_size, pause_seconds, sleep )
+        embed    = lambda batch, ct=content_type, r=role: embed_all( client, batch, ct, r, batch_size, pause_seconds, sleep )
         vectors, embedded = _matrix_rows( row_ids, texts[ name ], hashes[ name ], reusable, embed )
         if len( { len( v ) for v in vectors } ) > 1: raise CandidateError( EMBEDDING_SHAPE, f"{name} mixes reused and new vectors of different lengths" )
         if stats is not None: stats[ name ] = { "reused": len( rows ) - embedded, "embedded": embedded }
