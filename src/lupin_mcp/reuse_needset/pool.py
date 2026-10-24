@@ -57,7 +57,7 @@ class Measure:
 
 def nth_record( rows, seen, key ):
     """
-    Pick the record for the next definition of a name in a file.
+    Pick the record for the next script definition of a name in a file.
 
     Requires:
         - rows are the records of that name sorted by line; seen is a Counter that the caller keeps for one walk
@@ -82,21 +82,21 @@ def measure( root, records ):
         - returns { record id: Measure } for every record found in its source
         - Python records are measured from the AST, script records from the compiler's node kinds, as the duplicate finder does
         - a script class, which the duplicate finder skips, is measured the way a Python class is: its whole node tree
+        - a Python record is matched to its definition by file, name and line, so a definition the index lacks cannot lend its measure to another
+        - a script record is matched by order among the definitions of one name in its file, because the compiler's shapes carry no line
         - a record whose source cannot be found is absent from the result
     """
     root, out = pathlib.Path( root ), {}
+    py_rows   = { ( r[ "file" ], r[ "name" ], r[ "line" ] ): r for r in records if r[ "file" ].endswith( ".py" ) }
     by_file   = collections.defaultdict( lambda: collections.defaultdict( list ) )
     for r in sorted( records, key=lambda r: r[ "line" ] ): by_file[ r[ "file" ] ][ r[ "name" ] ].append( r )
-    for rel, names in sorted( by_file.items() ):
-        if not rel.endswith( ".py" ): continue
+    for rel in sorted( { r[ "file" ] for r in records if r[ "file" ].endswith( ".py" ) } ):
         try:
             tree = ast.parse( ( root / rel ).read_text( encoding="utf-8" ), rel )
         except ( SyntaxError, UnicodeDecodeError, OSError ):
             continue
-        seen = collections.Counter()
         for parts, node, _ in _walk_scope( tree.body, [], False, True ):
-            name = ".".join( parts )
-            rec  = nth_record( names[ name ], seen, name )
+            rec = py_rows.get( ( rel, ".".join( parts ), node.lineno ) )
             if rec is not None: out[ rec[ "id" ] ] = Measure( sum( 1 for _ in ast.walk( node ) ), frozenset( dups.shingles( node ) ) )
     script_files = [ root / rel for rel in sorted( by_file ) if not rel.endswith( ".py" ) ]
     if script_files:

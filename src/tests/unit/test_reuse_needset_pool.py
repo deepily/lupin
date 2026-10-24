@@ -84,6 +84,12 @@ def write_tree( tmp_path ):
     return tmp_path
 
 
+def def_line( path, name ):
+    """Return the 1-based line where a Python function of the given name is defined in a file."""
+    lines = pathlib.Path( path ).read_text( encoding="utf-8" ).splitlines()
+    return next( i for i, l in enumerate( lines, 1 ) if l.startswith( f"def {name}(" ) )
+
+
 def rec( id, file, name, lang="py", doc="Docs.", kind="function", line=1 ):
     """Return a minimal index record."""
     return { "id": id, "file": file, "name": name, "lang": lang, "doc": doc, "kind": kind, "line": line }
@@ -110,7 +116,9 @@ def test_measure_counts_nodes_for_both_languages_and_skips_what_it_cannot_read( 
     root    = write_tree( tmp_path )
     ( root / "pkg" / "broken.py" ).write_text( "def (:\n", encoding="utf-8" )
     ( root / "pkg" / "binary.py" ).write_bytes( b"\xff\xfe\x00" )
-    records = [ rec( "pkg.a.twin_a", "pkg/a.py", "twin_a" ), rec( "pkg.a.twin_b", "pkg/a.py", "twin_b" ), rec( "pkg.a.tiny", "pkg/a.py", "tiny" ),
+    where   = root / "pkg" / "a.py"
+    records = [ rec( "pkg.a.twin_a", "pkg/a.py", "twin_a", line=def_line( where, "twin_a" ) ), rec( "pkg.a.twin_b", "pkg/a.py", "twin_b", line=def_line( where, "twin_b" ) ),
+                rec( "pkg.a.tiny", "pkg/a.py", "tiny", line=def_line( where, "tiny" ) ),
                 rec( "pkg.broken.x", "pkg/broken.py", "x" ), rec( "pkg.binary.y", "pkg/binary.py", "y" ), rec( "pkg.gone.z", "pkg/gone.py", "z" ),
                 rec( "pkg.a.missing_name", "pkg/a.py", "missing_name" ),
                 rec( "web.m.tsOne", "web/m.ts", "tsOne", "ts" ), rec( "web.m.tsTwo", "web/m.ts", "tsTwo", "ts" ), rec( "web.m.absent", "web/m.ts", "absent", "ts" ),
@@ -140,6 +148,9 @@ def test_a_name_defined_twice_in_a_file_gets_one_measure_per_record( tmp_path ):
     ( tmp_path / "one.py" ).write_text( first + "\n    def m( self, a ):\n        return a * 2 + 1\n", encoding="utf-8" )
     both = pool.measure( tmp_path, [ rec( "solo.K.m", "solo.py", "K.m", line=2 ), rec( "one.K.m", "one.py", "K.m", line=2 ) ] )
     assert both[ "one.K.m" ].nodes == both[ "solo.K.m" ].nodes, "a definition with no record of its own changes no other record"
+    ( tmp_path / "late.py" ).write_text( first + "\n    def m( self, a ):\n        return a * 2 + 1\n", encoding="utf-8" )
+    late = pool.measure( tmp_path, [ rec( "late.K.m#2", "late.py", "K.m", line=5 ) ] )
+    assert late[ "late.K.m#2" ].nodes > both[ "solo.K.m" ].nodes, "a Python record whose earlier twin is missing from the index keeps its own definition"
 
 
 def test_measure_of_python_only_records_never_starts_node( tmp_path, monkeypatch ):
