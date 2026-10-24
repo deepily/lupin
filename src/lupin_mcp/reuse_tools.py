@@ -45,7 +45,7 @@ PACKED_TOOL_VERSION = "2"                                       # receipts of th
 TOOL_VERSIONS = ( TOOL_VERSION, PACKED_TOOL_VERSION )
 QUESTIONS     = ( "choice", "provides" )                         # the three-way Choice, or the Noul and Score question
 WIDE_K         = 512                                              # the shortlist size of a widened lookup, against the stage's own 128
-WIDEN_CAUSES   = ( "NEAR_CUTOFF", "LOW_CONFIDENCE" )                  # a first sweep widens when NEAR_CUTOFF holds and no cause beyond these does
+WIDEN_CAUSES   = ( "NEAR_CUTOFF", "LOW_CONFIDENCE", "NO_MATCH" )                  # a first sweep widens when NEAR_CUTOFF holds and no cause beyond these does
 RETIRED_ROUTES = ( "pages", "pages_then_full" )                  # the page route was removed; a receipt of it stays readable and replays to ROUTE_RETIRED
 MAX_PACK_SIZE = 10_000                                          # more than the catalogue holds; the bound only refuses nonsense
 PACK_SIZE_VARIABLE    = "LUPIN_REUSE_JEV_PACK_SIZE"
@@ -1376,7 +1376,7 @@ def check_exists_impl( need, ctx ):
         - need is a non-empty description of the capability
     Ensures:
         - returns { status, receipt_id, verdict, cause, causes, shortlist, nearest, ... }
-        - verdict is REUSE, EXTEND, NEW or UNCERTAIN_READ_SOURCE; an UNCERTAIN verdict always carries a cause
+        - verdict is `REUSE`, `EXTEND` or `UNCERTAIN_READ_SOURCE` (a receipt stored before the retirement of `NEW` may still say `NEW`); an uncertain verdict always carries a cause, `NO_MATCH` when nothing relevant was found
     """
     if not isinstance( need, str ) or not need.strip(): return { "status": "error", "error": "EMPTY_NEED" }
     try:

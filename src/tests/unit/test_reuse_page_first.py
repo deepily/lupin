@@ -152,7 +152,7 @@ def test_no_pages_at_all_is_a_plain_sweep_with_route_full( env ):
     need = "something unrelated [nopages]"
     fake = PageFake( need )
     r    = run( env, need, fake )
-    assert r[ "verdict" ] == "NEW" and receipt_of( env, r )[ "route" ] == "full" and receipt_of( env, r )[ "pages" ] is None
+    assert r[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and receipt_of( env, r )[ "route" ] == "full" and receipt_of( env, r )[ "pages" ] is None
     assert len( fake.seen ) == 3
 
 
@@ -178,7 +178,7 @@ def test_replay_frozen_treats_a_receipt_with_no_route_as_a_plain_sweep( env ):
     del old[ "stats" ][ "failed_attempts" ]                                                                    # and before the call budget
     path.write_text( json.dumps( old, sort_keys=True ), encoding="utf-8" )
     rep = rt.replay_impl( r[ "receipt_id" ], ctx )
-    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "NEW" and rep[ "differences" ][ "frozen" ] == []
+    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
 
 
 
@@ -218,7 +218,7 @@ def test_a_failed_call_receipt_still_replays_to_uncertain_after_a_later_run_answ
     root, data, out = env
     bad  = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=FailsOnServe( need, { FEEDS_PAGE: CHOSEN } ) ) )
     good = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=PageFake( need, { FEEDS_PAGE: CHOSEN } ) ) )          # the same call now succeeds
-    assert bad[ "cause" ] == "CALL_FAILED" and good[ "verdict" ] == "NEW"
+    assert bad[ "cause" ] == "CALL_FAILED" and good[ "verdict" ] == "UNCERTAIN_READ_SOURCE"
     rep = rt.replay_impl( bad[ "receipt_id" ], rt.ReuseContext( root, data, out_dir=out ) )
     assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
 

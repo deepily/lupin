@@ -25,13 +25,13 @@ def _decide( top, policy ):
 
 # A confidence bar of 0 keeps LOW_CONFIDENCE out of these cases: near a cut-off of 0.5 no answer can be confident, so under the
 # shipped bar of 0.9 that cause always holds first. The fitted policy moves the bar, so the band is tested on its own here.
-AT_HALF = dict( { k: v for k, v in vd.POLICY.items() if k != "band" }, threshold=0.5 )                                # the arithmetic below is written around a cut-off of 0.5, not the shipped 0.3
+AT_HALF = dict( { k: v for k, v in vd.POLICY.items() if k not in ( "band", "no_new" ) }, threshold=0.5 )                                # the arithmetic below is written around a cut-off of 0.5, not the shipped 0.3
 BASE   = dict( AT_HALF, confidence=0.0 )
 BANDED = dict( BASE, band=BAND )
 
 
 def test_the_cause_list_names_near_cutoff_after_the_existing_causes():
-    assert vd.CAUSES[ -1 ] == "NEAR_CUTOFF" and vd.CAUSES[ :-1 ] == ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE" )
+    assert vd.CAUSES[ -2: ] == ( "NEAR_CUTOFF", "NO_MATCH" ) and vd.CAUSES[ :-2 ] == ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE" )
 
 
 CUTS = ( ( "threshold", 0.5 ), ( "strong", 0.9 ) )

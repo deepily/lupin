@@ -102,14 +102,14 @@ class TestT2Replay:
 
     def test_real_verdict_table( self ):
         out = am.t2_replay( { "n1": [ "a" ], "n2": [ "b" ] }, self.ANSWERS )
-        assert out[ "verdicts" ] == { "n1": [ "REUSE", "REUSE" ], "n2": [ "REUSE", "NEW" ] }
+        assert out[ "verdicts" ] == { "n1": [ "REUSE", "REUSE" ], "n2": [ "REUSE", "UNCERTAIN_READ_SOURCE" ] }
         assert out[ "flip_rate" ] == 0.5
         assert out[ "needs" ] == 2
 
     def test_agreement_against_the_full_sweep( self ):
-        # full sweep: n1 REUSE REUSE, n2 REUSE NEW. A shortlist of only b flips n1 to NEW in both repeats.
+        # full sweep: n1 REUSE REUSE, n2 REUSE UNCERTAIN_READ_SOURCE (NO_MATCH). A shortlist of only b flips n1 to UNCERTAIN_READ_SOURCE in both repeats.
         out = am.t2_replay( { "n1": [ "b" ], "n2": [ "b" ] }, self.ANSWERS )
-        assert out[ "verdicts" ] == { "n1": [ "NEW", "NEW" ], "n2": [ "REUSE", "NEW" ] }
+        assert out[ "verdicts" ] == { "n1": [ "UNCERTAIN_READ_SOURCE", "UNCERTAIN_READ_SOURCE" ], "n2": [ "REUSE", "UNCERTAIN_READ_SOURCE" ] }
         assert out[ "agreement" ] == 0.5
 
     def test_uncached_answers_are_counted_not_guessed( self ):

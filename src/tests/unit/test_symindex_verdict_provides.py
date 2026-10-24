@@ -25,7 +25,11 @@ def _a( i, provides, p23=0.0 ):
 def _low( n ): return [ _a( f"u{k:04d}", 0.05 ) for k in range( n ) ]
 
 
-def _decide( extra, failed=(), flags=(), n_low=20, expect_extra=True, policy=vd.POLICY_PROVIDES ):
+LEGACY_PROVIDES = { k: v for k, v in vd.POLICY_PROVIDES.items() if k != "no_new" }          # the policy of a receipt stored before the retirement of NEW
+
+
+def _decide( extra, failed=(), flags=(), n_low=20, expect_extra=True, policy=None ):
+    if policy is None: policy = LEGACY_PROVIDES
     rows     = _low( n_low ) + extra
     expected = [ r[ "id" ] for r in rows ] if expect_extra else [ r[ "id" ] for r in _low( n_low ) ]
     return vd.decide_provides( rows, expected, failed, set( flags ), policy )
@@ -47,7 +51,7 @@ def test_decide_is_pinned_on_a_stored_case():
 
 
 def test_the_policy_is_the_one_in_the_design():
-    assert vd.POLICY_PROVIDES == { "threshold": 0.5, "reuse": 0.7, "floor": 0.3, "coverage": 0.5, "shortlist": 10, "sum_tolerance": 0.02 }
+    assert vd.POLICY_PROVIDES == { "threshold": 0.5, "reuse": 0.7, "floor": 0.3, "coverage": 0.5, "shortlist": 10, "sum_tolerance": 0.02, "no_new": True }
 
 
 def test_the_new_function_returns_exactly_the_keys_decide_returns():
@@ -301,3 +305,20 @@ def test_the_first_bad_flag_in_sorted_order_is_the_one_named():
     with pytest.raises( ValueError, match="'BAD_00'" ):
         vd.decide_provides( [], [], [], bad | { "INDEX_STALE" } )
 
+
+
+# --- no_new: the retirement of the NEW verdict (Rick, D1, 2026-10-24) ---------------------------------------------
+
+def test_a_below_floor_sweep_under_the_shipped_pair_policy_is_uncertain_with_no_match():
+    r = _decide( [], policy=vd.POLICY_PROVIDES )
+    assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ], r[ "shortlist" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH", [ "NO_MATCH" ], [] )
+
+
+def test_the_same_sweep_under_a_pair_policy_stored_before_no_new_still_gives_new():
+    r = _decide( [] )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "NEW", [] )
+
+
+def test_no_match_in_the_pair_rule_never_accompanies_another_cause():
+    r = _decide( [], flags=[ "KEY_UNREADABLE" ], policy=vd.POLICY_PROVIDES )
+    assert r[ "causes" ] == [ "KEY_UNREADABLE" ]

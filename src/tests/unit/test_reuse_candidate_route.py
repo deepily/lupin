@@ -211,7 +211,7 @@ def test_the_environment_builds_the_candidate_stage_and_a_missing_storage_key_is
 def test_the_caller_sees_how_many_entries_were_not_asked_and_a_full_sweep_says_none( env ):
     need = "read an RSS feed [cand-public]"
     r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need ), FakeStage() ) )
-    assert r[ "verdict" ] == "NEW" and ( r[ "entries_total" ], r[ "entries_asked" ], r[ "entries_not_asked" ] ) == ( 3, 2, 1 )
+    assert r[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and ( r[ "entries_total" ], r[ "entries_asked" ], r[ "entries_not_asked" ] ) == ( 3, 2, 1 )
     full = rt.sweep_need_impl( need, None, ctx_with( env, PackedFake( need ), FakeStage() ) )
     assert ( full[ "entries_total" ], full[ "entries_asked" ], full[ "entries_not_asked" ] ) == ( None, None, None )
 

@@ -4873,12 +4873,12 @@ def _reuse_call( impl_name, root, *args ) -> dict:
 @_offloaded_tool
 def check_exists( need: str, root: Optional[ str ] = None ) -> dict:
     """
-    Should this be built? Returns REUSE, EXTEND, NEW or UNCERTAIN_READ_SOURCE for a planned capability.
+    Should this be built? Gives a verdict and the existing symbols that may do it.
 
     Describe the need in one or two sentences before writing new code. The answer carries a
     shortlist of existing symbols, the nearest entries, and a receipt_id to cite. UNCERTAIN_READ_SOURCE
     always carries a `cause`; it means read the source of the shortlist and nearest entries, and is
-    never a NEW. NEW does not rule the need distinct: read the nearest entries first.
+    never a guess. The cause NO_MATCH (nothing relevant found) does not rule the need distinct: read the nearest entries first.
 
     Args:
         need: what the new code would do

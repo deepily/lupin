@@ -20,7 +20,7 @@ def _ans( i, probs ): return { "id": i, "probabilities": probs }
 def _unrelated( n ): return [ _ans( f"u{i:04d}", _p( 0.05, 0.05, 0.9 ) ) for i in range( n ) ]
 
 
-TABLE_POLICY = { k: v for k, v in vd.POLICY.items() if k != "band" }          # the table's boundaries are pinned without the band, which would turn a value at a cut-off into NEAR_CUTOFF
+TABLE_POLICY = { k: v for k, v in vd.POLICY.items() if k not in ( "band", "no_new" ) }          # the table's boundaries are pinned without the band, which would turn a value at a cut-off into NEAR_CUTOFF, and without no_new, the policy of a receipt stored before the retirement of NEW (see the no_new tests at the end of this file)
 
 
 def _decide( extra, failed=(), flags=(), n_unrelated=50, expect_extra=True, policy=None ):
@@ -271,7 +271,37 @@ def test_a_strong_reuse_beside_a_doubtful_extend_is_reuse_and_without_a_strong_m
 def test_the_shipped_policy_has_no_band_so_a_row_near_the_cutoff_never_yields_near_cutoff():
     assert "band" not in vd.POLICY                                                                  # off by Rick's ruling of 2026-10-21
     near    = _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ], policy=vd.POLICY )                 # p_overlap 0.28, 0.02 from the cut of 0.3
-    assert "NEAR_CUTOFF" not in near[ "causes" ] and near[ "verdict" ] != "UNCERTAIN_READ_SOURCE"
+    assert near[ "causes" ] == [ "NO_MATCH" ]                                                          # no band: no NEAR_CUTOFF; the row is below the cut, so nothing matched
     banded  = _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ], policy=dict( vd.POLICY, band=0.076 ) )   # the same row under a policy that carries the band
     assert banded[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and "NEAR_CUTOFF" in banded[ "causes" ]
     assert _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ] )[ "verdict" ] != "UNCERTAIN_READ_SOURCE"        # the table policy, with no band, decides it
+
+
+# --- no_new: the retirement of the NEW verdict (Rick, D1, 2026-10-24) ---------------------------------------------
+
+def test_the_shipped_policy_retires_new_and_the_cause_comes_last():
+    assert vd.POLICY[ "no_new" ] is True and vd.CAUSES[ -1 ] == "NO_MATCH"
+
+
+def test_an_empty_shortlist_under_the_shipped_policy_is_uncertain_with_no_match_and_still_names_what_to_read():
+    r = _decide( [], n_unrelated=5000, policy=vd.POLICY )
+    assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ], r[ "shortlist" ], r[ "shortlist_total" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH", [ "NO_MATCH" ], [], 0 )
+    assert len( r[ "nearest" ] ) == 10 and r[ "nearest" ][ 0 ][ "id" ] == "u0000"
+
+
+def test_the_same_input_under_a_policy_stored_before_no_new_still_gives_new():
+    old = { k: v for k, v in vd.POLICY.items() if k != "no_new" }
+    r   = _decide( [], policy=old )
+    assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ] ) == ( "NEW", None, [] )
+
+
+def test_no_match_never_rests_on_a_failed_or_unsure_call():
+    failed = _decide( [], failed=[ "u0001" ], policy=vd.POLICY )
+    flagged = _decide( [], flags=[ "KEY_UNREADABLE" ], policy=vd.POLICY )
+    unsure = _decide( [ _ans( "d", _DOUBTFUL ) ], policy=vd.POLICY )
+    assert failed[ "causes" ] == [ "CALL_FAILED" ] and flagged[ "causes" ] == [ "KEY_UNREADABLE" ] and unsure[ "causes" ] == [ "LOW_CONFIDENCE" ]
+
+
+def test_a_strong_reuse_under_the_shipped_policy_is_not_a_no_match():
+    r = _decide( [ _ans( "A", _STRONG ) ], policy=vd.POLICY )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "REUSE", [] )

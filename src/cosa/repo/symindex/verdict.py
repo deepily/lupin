@@ -13,9 +13,10 @@ STRONG_MATCH = 0.9      # the best entry's overlap and confidence must both reac
 
 # threshold 0.3 is the fitted cut (seed 20261014, rate 0.05): projects-data/lupin/reuse-review/negatives-2026.10.14/verdict-fit-receipt-band-0.076.json, sha256 43428afca1631f00aac4a41b8802773974166a8e0bd08acc2db11d5b34a8deb7; strong is not fitted
 # the band is off by Rick's ruling (see the row a9c46718 history): the shipped policy has no "band" key, so NEAR_CUTOFF never holds and the candidate stage never widens. Kept for the later fix: band 0.076, the 95th percentile of how far a repeat sits from its entry's mean over the 30 band-fit needs (receipt projects-data/lupin/reuse-review/e2e-results/bandfit-4-receipt.json; the receipt above records it as given, not fitted); to turn the band on, add "band": 0.076 back to the policy
-POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH }
+# no_new: an empty shortlist is the cause NO_MATCH and the old verdict is gone, by Rick's ruling of the remediation plan; a policy without the key, such as one stored in an old receipt, still decides and replays as it did
+POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH, "no_new": True }
 
-CAUSES  = ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE", "NEAR_CUTOFF" )
+CAUSES  = ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE", "NEAR_CUTOFF", "NO_MATCH" )
 BAND_DECIMALS = 6       # the distance from a cut-off is rounded to this many places before it meets the band, as the stored numbers are
 ANSWERS = ( "reuse", "extend", "unrelated" )
 
@@ -109,6 +110,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
     Ensures:
         - returns { verdict, cause, causes, shortlist, shortlist_total, nearest, doubtful, malformed, missing }
         - verdict is `REUSE`, `EXTEND`, `NEW` or `UNCERTAIN_READ_SOURCE`; cause is None unless `UNCERTAIN_READ_SOURCE`
+        - a policy with `no_new` (the shipped one) never returns `NEW`: an empty shortlist from a sweep with no other cause holds the cause `NO_MATCH` alone, so it never rests on a failed or unsure call; a policy without it keeps the old `NEW` verdict
         - causes lists every cause that holds, in the order of `CAUSES`
         - coverage is set equality: CALL_FAILED holds when any call failed or any expected id is
           neither answered nor failed nor malformed; `missing` is the sorted list of those ids
@@ -154,6 +156,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
     if doubtful and not strong: holds.add( "LOW_CONFIDENCE" )
     if "band" in policy and _near_cutoff( rows, policy ): holds.add( "NEAR_CUTOFF" )
     relevant = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "threshold" ] ]
+    if "no_new" in policy and not relevant and not holds: holds.add( "NO_MATCH" )          # a complete, confident sweep that found nothing; it never rests on a failed or unsure call
     deciding = [ r for r in relevant if _is_strong( r, policy ) ] if strong else relevant
     causes   = [ c for c in CAUSES if c in holds ]
     if causes:          verdict = "UNCERTAIN_READ_SOURCE"
@@ -173,7 +176,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
 
 LEVELS = ( "0", "1", "2", "3" )
 
-POLICY_PROVIDES = { "threshold": 0.5, "reuse": 0.7, "floor": 0.3, "coverage": 0.5, "shortlist": 10, "sum_tolerance": 0.02 }
+POLICY_PROVIDES = { "threshold": 0.5, "reuse": 0.7, "floor": 0.3, "coverage": 0.5, "shortlist": 10, "sum_tolerance": 0.02, "no_new": True }
 
 
 def _number_reason( values, low=0.0, high=1.0 ):
@@ -269,6 +272,7 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=None ):
           reported under `MALFORMED_ANSWER` and never half used
         - `CALL_FAILED` holds when a call failed, an expected id is unaccounted for, or nothing was
           answered at all, so an empty sweep is never `NEW`
+        - a policy with `no_new` holds the cause `NO_MATCH` in place of `NEW`, alone, as in decide
         - `REUSE` when some entry has provides at or above policy["reuse"]; `EXTEND` when some entry has
           provides from policy["floor"] up to policy["reuse"] and coverage at or above policy["coverage"]
         - `LOW_CONFIDENCE` holds when neither applies and some entry sits in the provides band or has
@@ -309,6 +313,7 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=None ):
     extend   = [ r for r in banded if r[ "coverage" ] >= policy[ "coverage" ] ]
     low      = not reuse and not extend and ( bool( banded ) or any( r[ "coverage" ] >= policy[ "coverage" ] for r in ordered ) )
     if low: holds.add( "LOW_CONFIDENCE" )
+    if "no_new" in policy and not reuse and not extend and not holds: holds.add( "NO_MATCH" )          # a complete, confident sweep that found nothing; it never rests on a failed or unsure call
     causes   = [ c for c in CAUSES if c in holds ]
     gaps     = [ c for c in causes if c != "LOW_CONFIDENCE" ]
     if gaps or low:     verdict, causal = "UNCERTAIN_READ_SOURCE", []

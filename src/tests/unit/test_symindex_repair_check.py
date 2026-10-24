@@ -223,3 +223,13 @@ def test_each_wrapper_counts_from_its_own_first_repeat():
     b = rc.replayer_over( tool, first_repeat=7 )
     a( "r" ), a( "r" ), b( "r" )
     assert seen == [ 1, 2, 7 ]
+
+
+def test_a_no_match_head_is_a_readable_empty_shortlist_not_a_failure():
+    assert rc.read_head( head( "UNCERTAIN_READ_SOURCE", "NO_MATCH", [], sha="s1" ) ) == rc.Replayed( [], "s1" )          # the shipped policy's word for the old verdict NEW
+
+
+def test_a_miss_is_repaired_when_the_before_state_is_no_match():
+    tool = lambda receipt_id, repeat: head( "UNCERTAIN_READ_SOURCE", "NO_MATCH", [], sha="before" ) if repeat <= 5 else head( "REUSE", None, [ "target" ], sha="after" )
+    out  = rc.run_repair_check( rc.replayer_over( tool ), lambda: None, "r1", "target", runs=5 )
+    assert ( out.verdict, out.before, out.after ) == ( rc.REPAIRED, 0, 5 )

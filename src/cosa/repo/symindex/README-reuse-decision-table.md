@@ -95,12 +95,12 @@ holds is also listed, in this order, in `causes`.
 | 7a | `NEAR_CUTOFF` | the policy has a `band` and any answered entry is inside it of a cut-off: its `p_overlap` of the threshold or the strong cut-off, its confidence of the confidence bar (when its `p_overlap` reaches the floor) or of the strong cut-off (when its `p_overlap` reaches it), or its `p_overlap` of the floor (when its confidence is under the bar); the edge is outside; a policy with no `band` never has this cause | UNCERTAIN_READ_SOURCE |
 | 8 | none of the above, and some shortlist entry has `choice = reuse` | | REUSE |
 | 9 | none of the above, the shortlist is not empty, no entry has `choice = reuse` | | EXTEND |
-| 10 | none of the above, the shortlist is empty | | NEW |
+| 10 | `NO_MATCH` | none of the above, the shortlist is empty. This replaces the verdict `NEW` for every policy that carries `no_new` (the shipped one); a policy stored before it still decides `NEW` | UNCERTAIN_READ_SOURCE |
 
 The order follows the pipeline: a tree that cannot be indexed comes before an incomplete index,
 which comes before a stale one, a missing key, failed calls and finally an unsure model. A verdict
-of NEW needs a complete sweep, no doubtful call and an empty shortlist, so a NEW never rests on a
-failed or unsure call. NEW still does not rule DISTINCT: the reviewer reads the shortlist's source
+of `NEW` (now the cause `NO_MATCH`) needs a complete sweep, no doubtful call and an empty shortlist, so a `NEW` never rests on a
+failed or unsure call, which is why `NO_MATCH` is never listed beside another cause. It still does not rule `DISTINCT`: the reviewer reads the shortlist's source
 first (plan 2, section 8).
 
 The shortlist holds at most `K` relevant entries, best `p_overlap` first, ties broken by symbol id.
@@ -115,12 +115,12 @@ expected ids that received no account at all.
 
 | Sweep | Result |
 | --- | --- |
-| 5,000 entries, all `unrelated >= 0.85`, none failed | NEW |
+| 5,000 entries, all `unrelated >= 0.85`, none failed | UNCERTAIN_READ_SOURCE, cause `NO_MATCH` |
 | the same, one entry `reuse 0.95` | REUSE, shortlist of 1 |
 | the same, one entry `extend 0.92` | EXTEND |
 | one entry `reuse 0.6, unrelated 0.4` (confidence 0.6) | UNCERTAIN, cause LOW_CONFIDENCE |
 | one entry `unrelated 0.6, reuse 0.3, extend 0.1` (`p_overlap` 0.4, confidence 0.6) | UNCERTAIN, cause LOW_CONFIDENCE |
-| one entry `unrelated 0.75, reuse 0.2, extend 0.05` (`p_overlap` 0.25, below `F`) | NEW |
+| one entry `unrelated 0.75, reuse 0.2, extend 0.05` (`p_overlap` 0.25, below `F`) | UNCERTAIN_READ_SOURCE, cause `NO_MATCH` |
 | one entry `reuse 0.95` and one `reuse 0.7, extend 0.2` (confidence 0.7) | REUSE, shortlist of 2, `doubtful` lists the second |
 | one failed call and one doubtful call | UNCERTAIN, cause CALL_FAILED, causes `[CALL_FAILED, LOW_CONFIDENCE]` |
 | one answer `reuse 0.9, extend 0.9, unrelated 0.9` | UNCERTAIN, cause MALFORMED_ANSWER, reason `sum_not_one` |

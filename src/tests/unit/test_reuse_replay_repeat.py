@@ -32,7 +32,7 @@ def test_a_repeat_is_a_new_draw_that_can_differ_from_the_cached_answer( env ):
     again = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert again[ "head" ][ "verdict" ] == "REUSE" and len( fake.bodies ) == sent                # repeat 0 still reads the cache
     one   = rt.replay_impl( r[ "receipt_id" ], ctx, repeat=1 )
-    assert one[ "head" ][ "verdict" ] == "NEW" and len( fake.bodies ) > sent                     # repeat 1 asked again
+    assert one[ "head" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and len( fake.bodies ) > sent                     # repeat 1 asked again
 
 
 def test_the_same_repeat_asked_twice_is_a_cache_hit_and_another_repeat_is_not( env ):
@@ -114,7 +114,7 @@ def test_a_replay_repeat_does_not_read_a_flip_repeat_s_cached_answer( env ):
     reuse_flip.repeat_sweeper( ctx.pack_size, 6, 1 )( ctx, need, entries )              # a measurement draw 1, cached under its own keys
     sent = len( fake.bodies )
     one  = rt.replay_impl( r[ "receipt_id" ], ctx, repeat=1 )
-    assert len( fake.bodies ) > sent and one[ "head" ][ "verdict" ] == "NEW"             # a replay draw 1 asked again, and did not read it
+    assert len( fake.bodies ) > sent and one[ "head" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE"             # a replay draw 1 asked again, and did not read it
 
 
 def test_a_pair_replay_repeat_is_cached_under_replay_keys_and_not_measurement_keys( env ):

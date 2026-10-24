@@ -17,6 +17,7 @@ import pytest
 
 from cosa.repo.doc_lint import jev_transport
 from cosa.repo.symindex import build as sx_build
+from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex.spec import git_toplevel
 from lupin_mcp import reuse_tools as rt
 from tests.unit.symindex_helpers import make_lupin_repo
@@ -102,7 +103,7 @@ def test_reuse_extend_and_new_verdicts_and_the_request_shape( env ):
     ext = rt.check_exists_impl( N( "extend" ), ctx_for( env, FakeJev( { FEEDS_TEXT: resp( 0.02, 0.93, 0.05 ) }, need=N( "extend" ) ) ) )
     assert ext[ "verdict" ] == "EXTEND"
     new = rt.check_exists_impl( N( "new" ), ctx_for( env, FakeJev( need=N( "new" ) ) ) )
-    assert new[ "verdict" ] == "NEW" and new[ "shortlist" ] == [] and len( new[ "nearest" ] ) == 3    # NEW still names what to read
+    assert ( new[ "verdict" ], new[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH" ) and new[ "shortlist" ] == [] and len( new[ "nearest" ] ) == 3    # NO_MATCH still names what to read
 
 
 def test_a_client_that_builds_the_request_wrongly_fails_instead_of_getting_an_answer( env ):
@@ -138,7 +139,7 @@ def test_an_incomplete_receipt_never_shadows_the_complete_one_for_the_same_quest
     need    = N( "shadow" )
     broken  = rt.check_exists_impl( need, ctx_for( env, None ) )
     healthy = rt.check_exists_impl( need, ctx_for( env, FakeJev( need=need ) ) )
-    assert broken[ "cause" ] == "KEY_UNREADABLE" and healthy[ "cause" ] is None and healthy[ "verdict" ] == "NEW"
+    assert broken[ "cause" ] == "KEY_UNREADABLE" and ( healthy[ "cause" ], healthy[ "verdict" ] ) == ( "NO_MATCH", "UNCERTAIN_READ_SOURCE" )
     assert broken[ "receipt_id" ] != healthy[ "receipt_id" ]
     assert rt.check_exists_impl( need, ctx_for( env, None ) )[ "receipt_id" ] == broken[ "receipt_id" ]
 
@@ -354,7 +355,7 @@ def test_gate_ii_the_id_recomputes_from_the_stored_inputs_and_an_edited_input_is
     r  = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )
     c  = ctx_for( env, FakeJev() )
     st = rt.load_receipt( c, r[ "receipt_id" ] )
-    assert rt.receipt_id( st[ "tool" ], st[ "query" ], st[ "index_sha" ], st[ "model" ], st[ "policy" ], st[ "prompt_template_hash" ] ) == r[ "receipt_id" ]
+    assert rt.receipt_id( st[ "tool" ], st[ "query" ], st[ "index_sha" ], st[ "model" ], st[ "policy" ], st[ "prompt_template_hash" ], causes=st[ "causes" ] ) == r[ "receipt_id" ]
     path = env[ 1 ] / "receipts" / f"{r[ 'receipt_id' ]}.json"
     for field, value in ( ( "query", "tampered" ), ( "model", "jev-9" ), ( "index_sha", "0" * 40 ), ( "prompt_template_hash", "x" ) ):
         doc = json.loads( path.read_text( encoding="utf-8" ) ); doc[ field ] = value
@@ -443,7 +444,7 @@ def test_two_servers_writing_receipts_at_once_leave_one_complete_receipt( env ):
     for p in procs: p.start()
     for p in procs: p.join(); assert p.exitcode == 0
     files = receipts( env )
-    assert len( files ) == 1 and json.loads( files[ 0 ].read_text( encoding="utf-8" ) )[ "verdict" ] == "NEW"
+    assert len( files ) == 1 and json.loads( files[ 0 ].read_text( encoding="utf-8" ) )[ "verdict" ] == "UNCERTAIN_READ_SOURCE"
     assert not list( ( env[ 1 ] / "receipts" ).glob( ".*.tmp" ) )
 
 
@@ -612,12 +613,12 @@ def test_c2c_frozen_replay_uses_the_stored_template_and_model_not_the_current_on
 
 def test_c2d_the_frozen_rerun_really_runs_a_tampered_stored_verdict_shows_as_a_difference( env ):
     c, r, path = _healthy( env, answers={ FEEDS_TEXT: UNREL } )
-    assert r[ "verdict" ] == "NEW"
+    assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH" )
     doc = json.loads( path.read_text( encoding="utf-8" ) ); doc[ "verdict" ] = "REUSE"              # not an id input, so it loads
     path.write_text( rt.canonical( doc ) + "\n", encoding="utf-8" )
     rep = rt.replay_impl( r[ "receipt_id" ], c )
-    assert rep[ "stored" ][ "verdict" ] == "REUSE" and rep[ "frozen" ][ "verdict" ] == "NEW"
-    assert "verdict REUSE -> NEW" in rep[ "differences" ][ "frozen" ]
+    assert rep[ "stored" ][ "verdict" ] == "REUSE" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE"
+    assert "verdict REUSE -> UNCERTAIN_READ_SOURCE" in rep[ "differences" ][ "frozen" ]
 
 
 def test_c2e_replay_at_head_writes_no_receipt_and_no_cache_entry_the_frozen_run_did_not_have( env ):
@@ -912,3 +913,13 @@ def test_a_receipt_written_from_a_worktree_is_readable_from_main( tmp_path, monk
     assert not list( seat.rglob( "receipts" ) )                                                         # nothing was written inside the worktree
     again = rt.load_receipt( ctx_main, r[ "receipt_id" ] )                                              # main reads the seat's receipt
     assert again[ "id" ] == r[ "receipt_id" ] and again[ "query" ] == NEED
+
+
+def test_a_receipt_stored_before_no_new_replays_to_new_and_its_head_now_says_no_match( env ):
+    old = { k: v for k, v in vd.POLICY.items() if k != "no_new" }                                  # the policy such a receipt carries
+    r   = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( need=NEED ), policy=old ) )
+    assert r[ "verdict" ] == "NEW"
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, FakeJev( need=NEED ) ) )
+    assert rep[ "frozen" ][ "verdict" ] == "NEW" and rep[ "differences" ][ "frozen" ] == []
+    assert ( rep[ "head" ][ "verdict" ], rep[ "head" ][ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH" )
+    assert "verdict NEW -> UNCERTAIN_READ_SOURCE" in rep[ "differences" ][ "head" ]

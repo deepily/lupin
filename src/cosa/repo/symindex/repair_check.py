@@ -15,6 +15,7 @@ FLIPPY_BEFORE   = "FLIPPY_BEFORE"
 FLIPPY_AFTER    = "FLIPPY_AFTER"
 NOT_REPAIRED    = "NOT_REPAIRED"
 NO_INPUT_CHANGE = "NO_INPUT_CHANGE"
+READABLE_CAUSES = ( "LOW_CONFIDENCE", "NO_MATCH" )          # an uncertain head with one of these still holds a real shortlist, empty or not
 CALL_FAILED     = "CALL_FAILED"
 
 Replayed = namedtuple( "Replayed", [ "ids", "index_sha" ] )
@@ -100,6 +101,8 @@ def read_head( result ):
           a stale index, a foreign tree, a missing tool) raises ReplayFailed naming the cause
         - a head that is uncertain only for low confidence returns its shortlist, since that is a real
           shortlist and its absence of the symbol is a finding
+        - a head whose cause is `NO_MATCH` (the shipped policy's word for what was once the verdict `NEW`) returns its empty
+          shortlist, since a complete sweep that found nothing is the "before" state of a miss
 
     Raises:
         - ReplayFailed in the cases above
@@ -107,7 +110,7 @@ def read_head( result ):
     if result[ "status" ] != "ok": raise ReplayFailed( f"replay error: {result[ 'error' ]}" )
     head = result[ "head" ]
     if head is None: raise ReplayFailed( "replay returned no HEAD run" )
-    if head[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and head[ "cause" ] != "LOW_CONFIDENCE": raise ReplayFailed( f"uncertain read: {head[ 'cause' ]}" )
+    if head[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and head[ "cause" ] not in READABLE_CAUSES: raise ReplayFailed( f"uncertain read: {head[ 'cause' ]}" )
     return Replayed( [ entry[ "id" ] for entry in head[ "shortlist" ] ], head[ "index_sha" ] )
 
 

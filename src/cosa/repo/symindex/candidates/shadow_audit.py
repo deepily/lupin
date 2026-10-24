@@ -24,6 +24,7 @@ SAMPLE_BUCKETS = 10000
 Z_ONE_SIDED_95 = 1.6448536269514722
 CONFIDENCE     = 0.95
 MATCHING       = ( "REUSE", "EXTEND" )
+NO_MATCH       = "NO_MATCH"
 OUTCOMES       = ( "miss", "ok", "inconclusive" )
 ITEM_FIELDS    = ( "id", "need", "language", "generation", "index_sha", "live", "queued_on", "attempts" )
 TEMP_PREFIX    = ".tmp-"
@@ -82,22 +83,24 @@ def is_sampled( need, generation, rate=SAMPLE_RATE ):
     return int( digest[ :8 ], 16 ) % SAMPLE_BUCKETS < round( rate * SAMPLE_BUCKETS )
 
 
-def compare( live_verdict, full_verdict, causal_ids, candidate_ids ):
+def compare( live_verdict, full_verdict, causal_ids, candidate_ids, full_cause=None ):
     """
     Compare the full sweep with the shortlist the stage kept.
 
     Requires:
         - causal_ids is the full sweep's ids that made it a reuse or an extend, empty for any other verdict
         - candidate_ids is every id the stage kept
+        - full_cause is the cause the full sweep reported, or None; the cause `NO_MATCH` is how the shipped policy says nothing matched
 
     Ensures:
-        - returns "inconclusive" when the full sweep could not decide, so the audit is not counted
+        - returns "inconclusive" when the full sweep could not decide, so the audit is not counted; a sweep that found no match is decided, whether it says `NEW` (a policy before `no_new`) or `UNCERTAIN_READ_SOURCE` with the cause `NO_MATCH`
         - returns "inconclusive" when the full sweep matched but named no causal id, since that answer is malformed
         - returns "miss" when the full sweep matched and none of its causal ids was kept
         - returns "ok" otherwise, including when the judge disagreed with itself about a kept id
         - live_verdict does not change the outcome: the stage is judged on what it kept
     """
-    if full_verdict not in MATCHING and full_verdict != "NEW": return "inconclusive"
+    no_match = full_verdict == "NEW" or ( full_verdict == "UNCERTAIN_READ_SOURCE" and full_cause == NO_MATCH )
+    if full_verdict not in MATCHING and not no_match: return "inconclusive"
     if full_verdict in MATCHING and not causal_ids: return "inconclusive"
     if full_verdict in MATCHING and not set( causal_ids ) & set( candidate_ids ): return "miss"
     return "ok"
@@ -119,7 +122,7 @@ def audit_receipt( need, language, generation, index_sha, live, sweep, today ):
 
     Requires:
         - live holds verdict and candidate_ids of the lookup that was served
-        - sweep holds verdict and causal_ids of the full sweep
+        - sweep holds verdict and causal_ids of the full sweep, and the cause when it has one
         - today is an ISO date string
 
     Ensures:
@@ -128,7 +131,7 @@ def audit_receipt( need, language, generation, index_sha, live, sweep, today ):
         - the need's words are not kept, only its hash
     """
     candidates = set( live[ "candidate_ids" ] )
-    outcome    = compare( live[ "verdict" ], sweep[ "verdict" ], sweep[ "causal_ids" ], candidates )
+    outcome    = compare( live[ "verdict" ], sweep[ "verdict" ], sweep[ "causal_ids" ], candidates, sweep[ "cause" ] if "cause" in sweep else None )
     digest     = need_hash( need )
     rid        = _receipt_id( digest, generation, index_sha )
     missed     = sorted( set( sweep[ "causal_ids" ] ) - candidates ) if outcome == "miss" else []

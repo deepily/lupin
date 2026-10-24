@@ -147,7 +147,7 @@ def test_an_unreached_entry_is_never_reported_as_new( env, monkeypatch ):
     assert ( cut[ "verdict" ], cut[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "CALL_FAILED" )
     assert cut[ "shortlist" ] == []
     full = rt.check_exists_impl( NEED + " [control]", make_ctx( env, call_budget=100 ) )
-    assert full[ "verdict" ] == "NEW" and full[ "stats" ][ "not_checked" ] == 0
+    assert full[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and full[ "stats" ][ "not_checked" ] == 0
 
 
 def test_when_every_call_fails_and_retries_the_attempts_still_stop_at_the_budget( env, monkeypatch ):
@@ -166,7 +166,7 @@ def test_cache_hits_cost_nothing_and_are_still_served_after_the_budget_is_spent(
     seen = counting_door( monkeypatch )
     again = rt.run_question( make_ctx( env, call_budget=1 ), "check_exists", NEED, NEED, write=False )      # not stored: the same inputs would return the first receipt
     assert seen == [] and again[ "stats" ][ "attempts" ] == 0 and again[ "stats" ][ "cache_hits" ] == 3
-    assert again[ "verdict" ] == "NEW"
+    assert again[ "verdict" ] == "UNCERTAIN_READ_SOURCE"
 
 
 def test_a_budget_above_the_hard_cap_is_refused_never_clamped( env ):

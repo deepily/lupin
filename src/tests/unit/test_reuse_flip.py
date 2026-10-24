@@ -50,7 +50,7 @@ def test_a_repeat_is_asked_again_and_the_same_repeat_is_not( env ):
     first  = rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 1 )
     second = rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 2 )
     again  = rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 1 )
-    assert ( first[ "verdict" ], second[ "verdict" ] ) == ( "REUSE", "NEW" )
+    assert ( first[ "verdict" ], second[ "verdict" ] ) == ( "REUSE", "UNCERTAIN_READ_SOURCE" )
     assert fake.calls == 2 and again[ "verdict" ] == first[ "verdict" ]                       # repeat 1 again is a cache hit and sends nothing
 
 

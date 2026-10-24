@@ -104,15 +104,16 @@ One table maps the labels in use, so a receipt cited in a plan's prior-art table
 | --- | --- | --- |
 | `REUSE` | `reuse-as-is` | `DUPLICATE` |
 | `EXTEND` | `extend-existing` | `EXTEND <symbol>` |
-| `NEW` | the third label in `plan-review.md` section 4 (no prior art found) | `DISTINCT <why>`, only after the reviewer has read the shortlist's source; a `NEW` verdict does not rule `DISTINCT` by itself |
 | `UNCERTAIN_READ_SOURCE` | none yet: read the source first | the reviewer rules only after reading the candidates |
+
+`check_exists` no longer returns `NEW` (Rick's ruling of 24 October). A sweep that found nothing is `UNCERTAIN_READ_SOURCE` with the cause `NO_MATCH`: it still names the nearest entries, which you read. `DISTINCT` is only a ruling the reviewer makes after reading those entries; the checker never says `DISTINCT` itself.
 
 ## Rules
 
 - Jev builds shortlists and you rule. Every `DUPLICATE` or `DISTINCT` ruling comes from reading source.
 - An `uncertain` cause obliges you to read the candidates. The causes are `LOW_CONFIDENCE`,
-  `CALL_FAILED`, `KEY_UNREADABLE`, `DEPENDENCY_MISSING`, `NOT_LUPIN_TREE` and `INDEX_STALE`.
-  Treat it as unknown, never as `NEW`.
+  `CALL_FAILED`, `KEY_UNREADABLE`, `DEPENDENCY_MISSING`, `NOT_LUPIN_TREE`, `INDEX_STALE` and `NO_MATCH`.
+  Treat it as unknown. `NO_MATCH` does not rule `DISTINCT`; read the nearest entries first.
 - A reuse miss is a symbol that should have been on the shortlist and was not.
 - A receipt for a `_private` or nested definition has `need_text` in its id, so its id is not the one the plan's id definition gives.
 - The id changes when the definition's signature or first docstring line changes, because the public index sha does not cover private definitions.

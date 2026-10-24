@@ -116,6 +116,16 @@ class TestCompare:
     def test_an_undecided_full_sweep_is_inconclusive( self ):
         assert sa.compare( "NEW", "UNCERTAIN_READ_SOURCE", [], [ "a" ] ) == "inconclusive"
 
+    def test_a_no_match_from_the_full_sweep_is_ok_like_the_old_new_verdict( self ):
+        assert sa.compare( "NEW", "UNCERTAIN_READ_SOURCE", [], [ "a" ], "NO_MATCH" ) == "ok"
+
+    def test_an_uncertain_full_sweep_with_any_other_cause_is_inconclusive( self ):
+        assert sa.compare( "NEW", "UNCERTAIN_READ_SOURCE", [], [ "a" ], "LOW_CONFIDENCE" ) == "inconclusive"
+
+    def test_the_receipt_reads_the_cause_of_the_sweep_when_it_has_one( self ):
+        rec = sa.audit_receipt( "n", "py", GEN, "idx-1", LIVE, { **sweep_of( "UNCERTAIN_READ_SOURCE" ), "cause": "NO_MATCH" }, "2026-10-15" )
+        assert rec[ "outcome" ] == "ok" and rec[ "full_verdict" ] == "UNCERTAIN_READ_SOURCE"
+
     def test_the_served_verdict_does_not_change_the_outcome( self ):
         assert sa.compare( "REUSE", "REUSE", [ "z" ], [ "a" ] ) == "miss"
         assert sa.compare( "REUSE", "REUSE", [ "a" ], [ "a" ] ) == "ok"
