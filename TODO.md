@@ -16,6 +16,25 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-23 evening (Cheech 🌿 `21aa6e8a`, skeleton crew, no seats)
+
+### Rick's rulings
+- ~17:30: write the team's response to the two expert critiques of the reuse checker, checked against the code. Done: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.23-reuse-detection-response-to-expert-critiques.md` (row `6a259ea2`, still held).
+- Evening, by voice: answer his six follow-up points in the same document. They cover unindexed files, private methods, language filtering, the missing baseline, first-pass coverage and the judge's inputs. Done as its section 7.
+- Rick will run the same cascaded review with and without the reuse index and compare the code produced. That experiment is the go/no-go test for the checker.
+- ~23:20: run session end with push and backup; **pick the decisions up tomorrow morning**.
+
+### ⏰ Pick up first, morning of 2026-10-24: nine decisions waiting on Rick
+Sections 5 and 7.3 of the response document. Each has our recommendation there.
+1. Retire the "write new" verdict now (recommend yes) · 2. Test set of 80 to 120 needs · 3. Two people settle disputed labels · 4. Stop rule (first expert's thresholds) · 5. Two engineer-week ceiling
+6. Search only the target language by default · 7. Add private and protected methods · 8. Index tests as a separate scope · 9. The with-and-without cascaded review as the go/no-go test
+
+Rows re-chased to 2026-10-24 10:30 EDT: `b7fc7240` (spot-check, now waits on these decisions; old blocker `a9c46718` is done), `874dff1a` (waits on gate `f21c6315`).
+
+### Not mine, flagged by the orphan check
+- `d6846ef5` (María, blocked on Rick) and `d3550878` (Mr. Radio, blocked on me, the VM nightly refresh) are past their chase dates.
+- TODO.md is 1,174 lines, well past the ~200-line signal; no horizon tags. Archiving it is Rick's call.
+
 ## 📚 Decisions log 2026-10-21 day to night (Cheech 🌿 `e448d721`)
 
 ### Rick's rulings

@@ -8,6 +8,24 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.23 evening - Session 21aa6e8a (Cheech 🌿, manager; skeleton crew, no seats) | Response to the two expert critiques of the reuse checker
+
+- **Wrote** `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.23-reuse-detection-response-to-expert-critiques.md` on Rick's voice request (row `6a259ea2`). It accepts the central critique: retire the "write new" verdict, give "not sure" a recorded search, and measure plain Claude Code first. It checks every expert claim against the code and stored data.
+- **Measured 23 Oct**:
+  - The judge recognised 256 of 438 held-out twins (58.4%); the earlier 51% also required a top-ten place.
+  - Negatives: 13.9% false "relevant" on near neighbours, 0.36% on random entries, so the "385 false hits per sweep" estimate does not hold.
+  - Of 200 stored full-sweep receipts: 21 "write new", 85 "not sure".
+  - Embedding prefixes are correct, and twin mining is not circular.
+- **Section 7** answers Rick's six follow-ups.
+  - Shipped Python is 99.7% indexed and shipped TypeScript 97.8%; the gap is test code.
+  - About 31% of definitions (the private ones) are left out of the catalogue.
+  - `check_exists` has no language filter.
+  - The judge never gets the purpose line that search uses.
+  - Rick's with-and-without cascaded review becomes the go/no-go test.
+- **Open**: nine decisions for Rick (sections 5 and 7.3), queued in TODO.md for the morning of 10-24. Rows `b7fc7240` and `874dff1a` re-chased to 10-24 10:30 EDT.
+- **Memento sweep**: none from the last two days to digest, 8 older trashed, 7 kept for the two standing managers.
+- **Files**: the response document, history.md, TODO.md.
+
 ## 2026.10.21 day to night - Session e448d721 (Cheech 🌿, manager; crew Maya, Pocholo, Clayton, all reaped by session end) | Band off, results page, problem statement for an outside expert, first expert response
 
 - **Landed by me** on the working branch. Pocholo passed each code change, with mutants.
