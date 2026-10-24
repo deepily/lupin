@@ -242,6 +242,15 @@ def test_name_hits_returns_names_in_the_order_given_not_the_order_in_the_text():
     assert nw.name_hits( [ "zeta", "alpha" ], "alpha then zeta" ) == [ "zeta", "alpha" ]
 
 
+def test_name_hits_refuses_an_empty_name_even_when_the_other_names_are_fine():
+    with pytest.raises( ValueError, match="empty name" ):
+        nw.name_hits( [ "alpha", "" ], "alpha" )
+
+
+def test_name_hits_accepts_any_iterable_of_names():
+    assert nw.name_hits( ( n for n in ( "alpha", "beta" ) ), "alpha only" ) == [ "alpha" ]
+
+
 def test_prompt_names_the_offending_own_word_and_nothing_else( src_root ):
     need   = _input( src_root )
     prompt = nw.build_prompt( need, failures=[ "own_identifier" ], own_words=[ "raw_text" ] )

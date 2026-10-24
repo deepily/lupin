@@ -110,14 +110,19 @@ def name_hits( names, text ):
     List the names that appear in the text as whole words.
 
     Requires:
-        - names is an iterable of non-empty strings; an empty name matches everywhere
+        - names is an iterable of non-empty strings
         - text is a string
 
     Ensures:
         - returns the names found, in the order given
         - a name counts only when no letter, digit or underscore touches it on either side
         - a name is matched literally, never as a pattern
+
+    Raises:
+        - ValueError if any name is empty, because an empty name would match wherever two non-word characters meet
     """
+    names = list( names )
+    if "" in names: raise ValueError( "name_hits was given an empty name" )
     return [ name for name in names if re.search( r"(?<![A-Za-z0-9_])" + re.escape( name ) + r"(?![A-Za-z0-9_])", text ) ]
 
 
