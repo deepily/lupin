@@ -84,8 +84,8 @@ def good_reply( labels, verdict="distinct" ):
     return json.dumps( { "verdicts": [ { "candidate": label, "verdict": verdict, "reason": "because" } for label in labels ] } )
 
 
-def run( defs, cands, backend, ledger, slot=0, cfg=CFG, parallel=1 ):
-    return asyncio.run( jd.judge_run( defs, cands, backend, ledger, slot, cfg, SCRUB, parallel ) )
+def run( defs, cands, backend, ledger, slot=0, cfg=None, parallel=1 ):
+    return asyncio.run( jd.judge_run( defs, cands, backend, ledger, slot, CFG if cfg is None else cfg, SCRUB, parallel ) )
 
 
 # ---- the prompt ---------------------------------------------------------------------------------------------------

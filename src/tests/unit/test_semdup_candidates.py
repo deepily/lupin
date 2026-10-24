@@ -32,12 +32,13 @@ def vector( text ):
     return [ float( text.split().count( w ) ) for w in VOCAB ]
 
 
-def make_defs( rows=POOL ):
-    """Build definition records from the table."""
+def make_defs( rows=None ):
+    """Build definition records from the table, the pool table unless rows are given."""
+    rows = POOL if rows is None else rows
     return [ { "id": i, "name": n, "file": f, "text": t, "sig": "", "origin": o, "lang": l, "nodes": 30 } for i, n, f, t, o, l in rows ]
 
 
-def make_pool( rows=POOL ):
+def make_pool( rows=None ):
     defs = make_defs( rows )
     return defs, cd.build_pool( defs, { d[ "id" ]: vector( d[ "text" ] ) for d in defs } )
 
