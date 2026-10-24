@@ -29,6 +29,7 @@
     "esbuild": "^0.24.2",
     "eslint": "^8.57.1",
     "happy-dom": "^20.9.0",
+    "jscpd": "5.3.3",
     "markdownlint-cli2": "0.18.1",
     "stylelint": "^17.11.0",
     "stylelint-config-standard": "^40.0.0",
