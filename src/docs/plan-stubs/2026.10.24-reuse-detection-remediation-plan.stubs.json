@@ -132,11 +132,19 @@
             "name": "Semantic duplicate checker",
             "steps": [
                 {
+                    "key": "ph2-s14",
+                    "name": "C0 Shared pure moves with direct tests",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "dups.jaccard, harness_runner.run_parallel, need_writer.name_hits and vector_build.embed_all moved without changing any result; each has a direct test against literal values or a golden captured at d0bd4f604; existing run_all and own_words_found tests pass unchanged",
+                    "owner_role": "implementer"
+                },
+                {
                     "key": "ph2-s1",
                     "name": "C1 Freeze machinery",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "build_config, freeze and verify_frozen raise CONFIG_DRIFT on any changed field; refreezing raises CONFIG_ALREADY_FROZEN; mutation arms redden",
+                    "acceptance": "build_config takes backend, temperature and unscorable_policy with no default; freeze raises CONFIG_UNDECIDED while backend or temperature is empty, CONFIG_DRIFT on any changed field, CONFIG_ALREADY_FROZEN on a second freeze; aggregate_runs raises POLICY_UNDECIDED on an unscorable report while the policy is empty; mutation arms redden named tests",
                     "owner_role": "implementer"
                 },
                 {
@@ -144,7 +152,7 @@
                     "name": "C2 Extraction",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "Python and TypeScript bodies, lines and calls extracted; completeness raises EXTRACT_INCOMPLETE; script-file census guard green",
+                    "acceptance": "Python via py_index.extract_python plus end_line, text, calls, nodes, declared; TypeScript and JavaScript via the opt-in bodies flag on shapes() with no third walker; completeness raises EXTRACT_INCOMPLETE; a Python SyntaxError file lands in skipped_python; the shapes output without the flag equals a golden captured at d0bd4f604; ts_extract.js 100% under c8 via extract.test.ts on a verified-idle :8000, with doc-lint-ts-counts.json regenerated; extraction census over 207 script files closes with zero skipped",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph2-s1"
@@ -155,7 +163,7 @@
                     "name": "C3 Blindness",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "scrub and assert_blind raise BLINDNESS_BREACH; identical definitions under two worktree paths give identical prompt bytes",
+                    "acceptance": "scrub holds only reuse-tool-unique strings; assert_blind raises BLINDNESS_BREACH; identical definitions under two worktree paths give identical prompts; candidate order is stable under reordering; the blindness census over the frozen server and the existing client reports zero breaches, with a positive control",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph2-s1"
@@ -166,10 +174,11 @@
                     "name": "C4 Candidates",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "embedding, word and structural lists fused to the top candidates; jscpd added as a pinned dependency; a real jscpd report parsed",
+                    "acceptance": "embedding, word and structural lists fused with depth=list_depth, limit 10, head 2; jscpd added as a pinned dependency; a real jscpd report parsed; the live jscpd test fails (never skips) when node or jscpd is missing; the 50% clone cover boundary is covered by a mutation arm",
                     "owner_role": "implementer",
                     "depends_on": [
-                        "ph2-s2"
+                        "ph2-s2",
+                        "ph2-s14"
                     ]
                 },
                 {
@@ -177,11 +186,12 @@
                     "name": "C5 Judge",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "one call per new definition through model_transport and the Ledger; unreadable replies retried once; resume makes no repeat call",
+                    "acceptance": "one call per new definition through model_transport, harness_runner.run_parallel and the Ledger; no call cap set; unreadable replies retried once; resume makes no repeat call; a parallel failure keeps finished records; OR rule on pair verdicts",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph2-s3",
-                        "ph2-s4"
+                        "ph2-s4",
+                        "ph2-s14"
                     ]
                 },
                 {
@@ -189,7 +199,7 @@
                     "name": "C6 Clusters and the score",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "surplus per 100 passing tests matches the hand-worked cases; zero passing tests raises NO_PASSING_TESTS",
+                    "acceptance": "surplus per 100 passing tests matches the hand-worked cases; an unscorable run (EXTRACT_INCOMPLETE, NO_PASSING_TESTS, BLINDNESS_BREACH, RUN_INCOMPLETE) writes a report with its cause and exits 2, each cause tested; a scored run exits 0",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph2-s5"
@@ -200,32 +210,43 @@
                     "name": "C7 Proof code",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "planted rewrites, monolith pairs, evaluate_bar at exact thresholds and an append-only proof ledger tested with a fake judge",
+                    "acceptance": "planted rewrites and Opus work-alikes, monolith pairs with source tags, banned_names, strip_names, select_originals, evaluate_bar at exact thresholds, the self-agreement count (hand-worked 4/5 flag against 2/5 four-way, one-pass pairs excluded), per-stratum figures with intervals and the append-only proof ledger tested, with mutation arms",
                     "owner_role": "implementer",
                     "depends_on": [
-                        "ph2-s6"
+                        "ph2-s6",
+                        "ph2-s14"
                     ]
                 },
                 {
                     "key": "ph2-s8",
-                    "name": "C8 Live smoke and throughput",
+                    "name": "C8 Live smoke and throughput measurement",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "20 real definitions judged through the Max-plan door in the 10 a.m. to 1 p.m. Eastern window; seconds per call, failure rate and concurrency recorded",
+                    "acceptance": "20 real definitions judged through the Max-plan door in the 10 a.m. to 1 p.m. Eastern window; a smoke file records date, host, sha, config sha, seconds per call, failure rate and the concurrency that held; a failure rate above the stated bound reopens the backend decision",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph2-s7"
                     ]
                 },
                 {
-                    "key": "ph2-s9",
-                    "name": "Rick approves the frozen prompt and backend",
+                    "key": "ph2-s15",
+                    "name": "Rick decides P4 (judge temperature) and P5",
                     "item_class": "decision",
                     "priority": "P2",
-                    "acceptance": "Rick has chosen the Max-plan or work-server backend and approved the prompt text, and freeze is committed",
+                    "acceptance": "Rick has named the judge backend and its temperature (Max plan, which cannot set one, or the work server at 0) and the unscorable policy; both fields are filled in the config template",
+                    "owner_role": "rick",
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph2-s9",
+                    "name": "Rick approves the frozen prompt; freeze is committed",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick has approved the prompt text, freeze is committed with backend, temperature and unscorable_policy filled, and the config sha is recorded",
                     "owner_role": "rick",
                     "depends_on": [
-                        "ph2-s8"
+                        "ph2-s8",
+                        "ph2-s15"
                     ],
                     "gate_class": "operator"
                 },
@@ -246,11 +267,12 @@
                     "name": "Rick and the second reviewer label the proof set",
                     "item_class": "gate",
                     "priority": "P2",
-                    "acceptance": "every planted pair, monolith pair and flag is labelled blind and independently by both people",
+                    "acceptance": "every planted pair, monolith pair and flag is labelled blind and independently by both people through the packet tool of Phase 3 step D5",
                     "owner_role": "rick",
                     "depends_on": [
                         "ph2-s7",
-                        "ph3-s2"
+                        "ph3-s2",
+                        "ph3-s6"
                     ],
                     "gate_class": "operator"
                 },
@@ -259,7 +281,7 @@
                     "name": "Run the proof",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "proof_run passes 80% found, 80% of flags right and 90% self-agreement, with every run kept in the proof ledger",
+                    "acceptance": "proof_run passes 80% found, 80% of flags right and 90% self-agreement on the flag, with every run kept in the proof ledger, the pool size and each stratum printed",
                     "owner_role": "tester",
                     "depends_on": [
                         "ph2-s9",
@@ -289,7 +311,7 @@
                     "name": "D1 Schema, quota and the draw",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "quota table sums to 240 ts, 160 py, 300 matched, 100 none; draw raises QUOTA_UNFILLABLE naming the cell",
+                    "acceptance": "plan_quota without kind_split raises KIND_SPLIT_UNSET; with a split it sums to 240 ts, 160 py, 300 matched, 100 none via quota_split.quotas; draw raises QUOTA_UNFILLABLE naming the cell; the manifest records the seed, kind table and source commit before the first draft",
                     "owner_role": "implementer"
                 },
                 {
@@ -306,21 +328,33 @@
                     "name": "D2 Seeds and key evidence",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "seed pool, stripped need input and key evidence built and tested",
+                    "acceptance": "seed pool, stripped need input, twin groups through reuse_need_check.twin_groups and a dups adapter, and key evidence built; work-alike candidates by the vector route and the sampled route, with selection_route recorded; tests include a neighbour only the sampled route finds",
                     "owner_role": "implementer",
                     "depends_on": [
-                        "ph3-s1"
+                        "ph3-s1",
+                        "ph3-s7",
+                        "ph2-s14"
                     ]
+                },
+                {
+                    "key": "ph3-s13",
+                    "name": "D3a identifier_tokens TypeScript branch",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "identifier_tokens on a real TypeScript signature returns names only: no string, number or other TS_TYPE_WORDS; destructured, rest, generic and default parameters covered; Python behaviour unchanged",
+                    "owner_role": "implementer"
                 },
                 {
                     "key": "ph3-s4",
                     "name": "D3 Drafting",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "needs drafted by Fable after a 10-need live smoke",
+                    "acceptance": "needs drafted by Fable through run_parallel and the Ledger after a 10-need live smoke that also measures the sampled route's yield; leak_check passes before the checker sees a draft; replacements are reported per cell and reason with the original seed list kept",
                     "owner_role": "implementer",
                     "depends_on": [
-                        "ph3-s3"
+                        "ph3-s3",
+                        "ph3-s13",
+                        "ph2-s14"
                     ]
                 },
                 {
@@ -347,10 +381,10 @@
                 },
                 {
                     "key": "ph3-s7",
-                    "name": "Rick approves the source commit and kind split",
+                    "name": "Rick names the source commit and fills in the kind split (P6)",
                     "item_class": "decision",
                     "priority": "P2",
-                    "acceptance": "Rick has named the source commit and approved the kind split",
+                    "acceptance": "Rick has named the source commit and filled in the kind_split table; the manifest records who set it and when",
                     "owner_role": "rick",
                     "depends_on": [
                         "ph3-s1"
@@ -398,7 +432,7 @@
                     "name": "D7 Statistics",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "kappa and the 95% miss-rate bound computed and tested against hand-worked values",
+                    "acceptance": "the 95% miss-rate bound comes from harness_report.upper_bound, pinned to 0.0099 for 0 in 300 and 0.0256 for 3 in 300 against an independent bisection; kappa tested by hand-worked cases in Phase 3 step D5",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph3-s10"
@@ -409,12 +443,24 @@
                     "name": "D8 Loss tracing",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "loss-report produced from the Phase 1 checker with lost_at counts by kind and language",
+                    "acceptance": "loss-report produced from the Phase 1 checker through a ledgered, resumable probe with the isolation profile; lost_at counts by kind, language and selection_route; ALT_MATCH and FALSE_MATCH listed for review; miss rate and bound computed after confirmations",
                     "owner_role": "tester",
                     "depends_on": [
                         "ph3-s10",
                         "ph1-s10"
                     ]
+                },
+                {
+                    "key": "ph3-s14",
+                    "name": "Reviewers confirm ALT_MATCH and FALSE_MATCH items",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "Rick and the second reviewer have ruled every ALT_MATCH and FALSE_MATCH item; confirmed alternatives are added to their keys and the affected needs are re-traced",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph3-s12"
+                    ],
+                    "gate_class": "operator"
                 }
             ]
         },
@@ -458,7 +504,7 @@
             "phase": 8,
             "name": "Scoring, stop rule and report",
             "steps": [],
-            "expand_trigger": "Phases 3 and 7 close",
+            "expand_trigger": "Phases 3 and 7 close; Rick decides P5",
             "depends_on": [
                 "ph3",
                 "ph7"
