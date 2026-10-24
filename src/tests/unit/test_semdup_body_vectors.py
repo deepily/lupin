@@ -137,6 +137,19 @@ def test_an_unreadable_cache_file_is_embedded_again(tmp_path):
     assert bv.ensure_vectors( [ d ], client, tmp_path, 1000 )[ "embedded" ] == 1 and len( client.calls ) == 1
 
 
+def test_a_cache_file_the_system_cannot_read_is_embedded_again(tmp_path, monkeypatch):
+    d = definition( "a", "alpha" )
+    bv.ensure_vectors( [ d ], FakeClient(), tmp_path, 1000 )
+    target = cached_file( tmp_path )
+    real_read_text = type( target ).read_text
+    def read_text( self, *args, **kwargs ):
+        if self == target: raise PermissionError( "denied" )
+        return real_read_text( self, *args, **kwargs )
+    monkeypatch.setattr( type( target ), "read_text", read_text )
+    client = FakeClient()
+    assert bv.ensure_vectors( [ d ], client, tmp_path, 1000 )[ "embedded" ] == 1 and len( client.calls ) == 1
+
+
 def test_integers_in_a_cached_vector_are_read_as_floats(tmp_path):
     d = definition( "a", "alpha" )
     bv.ensure_vectors( [ d ], FakeClient(), tmp_path, 1000 )
