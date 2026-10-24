@@ -2,6 +2,9 @@
 Unit tests for cosa.repo.symindex.dups, diff and wiki_lint, and the command line.
 """
 import json
+import os
+import subprocess
+import sys
 import pathlib
 
 import pytest
@@ -104,6 +107,35 @@ def test_jaccard_is_pinned_to_literal_values( a, b, expected ):
 def test_jaccard_of_two_empty_sets_raises():
     with pytest.raises( ZeroDivisionError ):
         dp.jaccard( set(), set() )
+
+
+SHINGLE_PROBE = "from cosa.repo.symindex import dups as dp; print( sorted( dp.shingles_of( list( 'ABCDEFGH' ) ) ) )"
+
+
+def _probe_shingles( seed, tmp_path ):
+    """Run the probe in a fresh interpreter whose string hashing is salted with the given seed."""
+    env = { **os.environ, "PYTHONHASHSEED": str( seed ), "PYTHONPATH": str( REPO_ROOT / "src" ) }
+    return subprocess.run( [ sys.executable, "-c", SHINGLE_PROBE ], env=env, cwd=str( tmp_path ), capture_output=True, text=True, check=True ).stdout.strip()
+
+
+def test_shingle_hashes_are_the_same_in_two_processes_with_different_hash_salts( tmp_path ):
+    first, second = _probe_shingles( 1, tmp_path ), _probe_shingles( 2, tmp_path )
+    assert first == second
+    assert first == "[1317413206214955833, 2656846964114934332, 6929466994886972531, 15095985781846024571]"
+    assert str( sorted( dp.shingles_of( list( "ABCDEFGH" ) ) ) ) == first            # this process agrees with both
+
+
+def test_a_builtin_hash_would_have_failed_the_two_process_test( tmp_path ):
+    """Positive control: the old hash( tuple ) form differs between the same two salts."""
+    probe = "print( hash( ( 'A', 'B', 'C', 'D', 'E' ) ) )"
+    run   = lambda seed: subprocess.run( [ sys.executable, "-c", probe ], env={ **os.environ, "PYTHONHASHSEED": str( seed ) }, cwd=str( tmp_path ), capture_output=True, text=True, check=True ).stdout
+    assert run( 1 ) != run( 2 )
+
+
+def test_a_list_shorter_than_one_window_gives_a_single_shingle_and_an_empty_list_gives_one_too():
+    assert len( dp.shingles_of( [ "A", "B" ] ) ) == 1
+    assert len( dp.shingles_of( [] ) ) == 1
+    assert dp.shingles_of( [ "A", "B" ] ) != dp.shingles_of( [ "A", "C" ] )
 
 
 @pytest.mark.parametrize( "threshold", [ 0.6, 0.3 ] )

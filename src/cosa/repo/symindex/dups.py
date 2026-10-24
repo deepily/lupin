@@ -58,14 +58,38 @@ def shingles( node ):
     Return the shingle set of a definition.
 
     Ensures:
-        - returns the set of SHINGLE-long windows over the pre-order node types, each hashed to an int
+        - returns the set of SHINGLE-long windows over the pre-order node types, each hashed to an int that is stable across processes
     """
     return shingles_of( _preorder_types( normalised( node ) ) )
 
 
+def _window_hash( window ):
+    """
+    Return a hash of a window of node type names that is the same in every process.
+
+    Requires:
+        - window is a sequence of strings that hold no unit separator character
+
+    Ensures:
+        - returns the same int for the same window in every process and on every host, unlike hash() on strings,
+          which Python salts afresh for each process
+    """
+    return int.from_bytes( hashlib.blake2b( "\x1f".join( window ).encode( "utf-8" ), digest_size=8 ).digest(), "big" )
+
+
 def shingles_of( seq ):
-    """Ensures: returns the hashed SHINGLE-long windows over a list of node type names."""
-    return { hash( tuple( seq[ i:i + SHINGLE ] ) ) for i in range( max( len( seq ) - SHINGLE + 1, 1 ) ) }
+    """
+    Return the shingle set of a list of node type names.
+
+    Requires:
+        - seq is a list of strings
+
+    Ensures:
+        - returns the set of fixed-length windows (the module shingle length), each hashed to an int that is stable across processes, so a
+          set stored by one run can be compared with a set built by another
+        - a list shorter than one window gives one window holding the whole list
+    """
+    return { _window_hash( seq[ i:i + SHINGLE ] ) for i in range( max( len( seq ) - SHINGLE + 1, 1 ) ) }
 
 
 def jaccard( a, b ):
