@@ -13,7 +13,7 @@ DRAFTER = { "model": "claude-fable-5-1", "prompt_version": "needset-draft-012345
 
 def matched( **over ):
     """Build a valid matched need and apply overrides to the new_need arguments."""
-    args = dict( kind="near_copy", write_lang="ts", selection_route=None, seed="a.b.seed", key_symbols=[ "a.b.twin" ], key_lang="ts",
+    args = dict( kind="near_copy", write_lang="ts", selection_route=None, seed="a.b.seed", key_symbols=[ "a.b.twin" ], key_lang="ts", key_source="twin",
                  need="A function that formats a count of milliseconds as minutes and seconds.", source_commit="abc123", drafter=DRAFTER )
     args.update( over )
     return schema.new_need( **args )
@@ -21,7 +21,7 @@ def matched( **over ):
 
 def none_need():
     """Build a valid nothing-exists need."""
-    return schema.new_need( "nothing", "py", None, None, [], None, "A function that rotates a list left by a given count.", "abc123", DRAFTER )
+    return schema.new_need( "nothing", "py", None, None, [], None, None, "A function that rotates a list left by a given count.", "abc123", DRAFTER )
 
 
 def test_new_need_builds_a_valid_drafted_record_with_a_stable_id():
@@ -48,16 +48,16 @@ def test_a_smoke_need_carries_the_flag_and_no_other_value_is_accepted():
 
 
 def test_a_routed_kind_needs_a_route_and_an_unrouted_kind_refuses_one():
-    assert matched( kind="work_alike", selection_route="sampled" )[ "selection_route" ] == "sampled"
-    assert matched( kind="cross_language", selection_route="vector", key_lang="py" )[ "selection_route" ] == "vector"
-    with pytest.raises( er.NeedsetError, match="selection_route must be one of" ): matched( kind="work_alike", selection_route=None )
+    assert matched( kind="work_alike", selection_route="sampled", key_source="bm25" )[ "selection_route" ] == "sampled"
+    assert matched( kind="cross_language", selection_route="vector", key_lang="py", key_source="vector" )[ "selection_route" ] == "vector"
+    with pytest.raises( er.NeedsetError, match="selection_route must be one of" ): matched( kind="work_alike", selection_route=None, key_source="bm25" )
     with pytest.raises( er.NeedsetError, match="only for work_alike" ): matched( selection_route="vector" )
 
 
 def test_a_nothing_need_has_no_seed_no_key_and_no_key_language():
-    assert none_need()[ "key" ] == { "symbols": [], "key_lang": None, "version": 1 }
-    for bad in ( dict( seed="x" ), dict( key_symbols=[ "x" ] ), dict( key_lang="py" ) ):
-        args = dict( kind="nothing", write_lang="py", selection_route=None, seed=None, key_symbols=[], key_lang=None, need="A function that rotates a list left.", source_commit="c", drafter=DRAFTER )
+    assert none_need()[ "key" ] == { "symbols": [], "key_lang": None, "source": None, "version": 1 }
+    for bad in ( dict( seed="x" ), dict( key_symbols=[ "x" ] ), dict( key_lang="py" ), dict( key_source="bm25" ) ):
+        args = dict( kind="nothing", write_lang="py", selection_route=None, seed=None, key_symbols=[], key_lang=None, key_source=None, need="A function that rotates a list left.", source_commit="c", drafter=DRAFTER )
         args.update( bad )
         with pytest.raises( er.NeedsetError, match="nothing need has no seed" ): schema.new_need( **args )
 
@@ -190,3 +190,14 @@ def test_the_error_code_leads_the_message_and_is_kept():
     e = er.NeedsetError( er.BAD_NEED, "n-1: why" )
     assert str( e ) == "BAD_NEED: n-1: why" and e.code == "BAD_NEED" and e.detail == "n-1: why"
     assert str( er.NeedsetError( er.PACKET_LEAK ) ) == "PACKET_LEAK"
+
+
+def test_the_key_source_follows_the_kind_and_the_route():
+    assert matched()[ "key" ][ "source" ] == "twin"
+    for source in ( "bm25", "directory", "random" ): assert matched( kind="work_alike", selection_route="sampled", key_source=source )[ "key" ][ "source" ] == source
+    assert matched( kind="cross_language", selection_route="vector", key_source="vector" )[ "key" ][ "source" ] == "vector"
+    bad = ( dict( kind="near_copy", key_source="bm25" ), dict( kind="work_alike", selection_route="sampled", key_source="twin" ),
+            dict( kind="work_alike", selection_route="sampled", key_source="vector" ), dict( kind="work_alike", selection_route="vector", key_source="bm25" ),
+            dict( kind="work_alike", selection_route="vector", key_source=None ) )
+    for over in bad:
+        with pytest.raises( er.NeedsetError, match="key.source must be one of" ): matched( **over )
