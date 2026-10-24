@@ -60,6 +60,7 @@ def test_a_held_stage_answers_what_the_folder_path_answers( held, tmp_path ):
     gen = tmp_path / "gen"
     gen.mkdir()
     ( gen / "symbols.jsonl" ).write_text( "\n".join( json.dumps( e ) for e in ENTRIES ) + "\n", encoding="utf-8" )
+    ( gen / "symbols-all.jsonl" ).write_text( "\n".join( json.dumps( e ) for e in ENTRIES ) + "\n", encoding="utf-8" )
     wanted = search.answer( { "need": "profile", "K": 3, "index_dir": str( gen ), "vectors_dir": str( root / "vectors" ), "query_vectors": QUERY, "wiki": [ "py:c" ] }, loader )
     got    = rs.search( with_vectors( root, wiki=[ "py:c" ] ) )
     assert got == resident.trim_lists( wanted ) and got[ "shortlist" ] == sorted( got[ "shortlist" ] )

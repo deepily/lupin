@@ -16,9 +16,9 @@ from cosa.repo.symindex.candidates import search
 from cosa.repo.symindex.candidates.errors import CandidateError, DEPENDENCY_MISSING
 
 ENTRIES = [
-    { "id": "py:a", "pin": "pa", "file": "a.py", "module": "a", "name": "get_user_profile", "sig": "(uid)", "doc": "Return the profile." },
-    { "id": "py:b", "pin": "pb", "file": "b.py", "module": "b", "name": "load_settings",    "sig": "(path)", "doc": "Read settings." },
-    { "id": "py:c", "pin": "pc", "file": "c.py", "module": "c", "name": "zero_row",         "sig": "()",     "doc": "Nothing." },
+    { "id": "py:a", "pin": "pa", "file": "a.py", "module": "a", "name": "get_user_profile", "sig": "(uid)", "doc": "Return the profile.", "scope": "public" },
+    { "id": "py:b", "pin": "pb", "file": "b.py", "module": "b", "name": "load_settings",    "sig": "(path)", "doc": "Read settings.", "scope": "public" },
+    { "id": "py:c", "pin": "pc", "file": "c.py", "module": "c", "name": "zero_row",         "sig": "()",     "doc": "Nothing.", "scope": "public" },
 ]
 
 
@@ -37,6 +37,7 @@ def generation( tmp_path ):
     gen = tmp_path / "gen"
     gen.mkdir()
     ( gen / "symbols.jsonl" ).write_text( "\n".join( json.dumps( e ) for e in ENTRIES ) + "\n", encoding="utf-8" )
+    ( gen / "symbols-all.jsonl" ).write_text( "\n".join( json.dumps( e ) for e in ENTRIES ) + "\n", encoding="utf-8" )          # the searchable listing the process reads
     return gen
 
 

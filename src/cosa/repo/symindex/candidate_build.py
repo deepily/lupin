@@ -157,7 +157,7 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
     cache     = sp.candidate_dir( "query_cache", data, config, dir_env )
     gen       = sx_build.ensure( root ) if index is None else pathlib.Path( index ).parent
     header    = sx_build.read_header( gen )
-    entries   = sx_build.read_symbols( gen )
+    entries   = sx_build.read_searchable( gen )
     with fr.refresh_lock( data / fr.LOCK_FILE ):
         held      = fr.read_build_info( live ) if skip_if_current else None
         if held is not None and held[ "index_manifest" ] == fr.index_manifest( header ):
@@ -195,11 +195,11 @@ def sample_purposes( root, writer, store_path, count, batch_size=pl.BATCH_SIZE, 
         - store_path is a purpose.jsonl path that is not the live store
 
     Ensures:
-        - the entries are the public symbols sorted by id, taking every k-th, so two runs pick the same ones
+        - the entries are the searchable symbols (public and private) sorted by id, taking every k-th, so two runs pick the same ones
         - returns the write report with the sampled ids added as "ids"
     """
     gen     = sx_build.ensure( pathlib.Path( root ) ) if index is None else pathlib.Path( index ).parent
-    entries = sorted( sx_build.read_symbols( gen ), key=lambda e: e[ "id" ] )
+    entries = sorted( sx_build.read_searchable( gen ), key=lambda e: e[ "id" ] )
     step    = max( 1, len( entries ) // count )
     chosen  = entries[ ::step ][ :count ]
     report  = pl.write_purpose_lines( chosen, writer, store_path, WRITER_VERSION,

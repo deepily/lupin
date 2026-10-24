@@ -14,6 +14,8 @@ LUPIN_JS_DIR      = "src/lupin_app/static/js"
 SKIP_PARTS        = frozenset( { "tests", "migrations", ".venv", "vendor", "node_modules", "rnd", "__pycache__", ".git" } )
 DART_SKIP_PARTS   = frozenset( { "generated", ".dart_tool", "build" } )
 SKIP_SUFFIXES     = ( ".d.ts", ".min.js", ".g.dart", ".freezed.dart" )
+SCRIPT_SUFFIXES   = ( ".js", ".mjs", ".cjs", ".ts", ".tsx" )          # what a script file is, for every reader of the index
+SUFFIX_LANG       = { ".py": "py", ".js": "ts", ".mjs": "ts", ".cjs": "ts", ".ts": "ts", ".tsx": "ts", ".dart": "dart" }          # the `lang` of a record, by suffix
 
 
 class NotARepo( Exception ):
@@ -100,6 +102,17 @@ def spec_for( root ):
     return IndexSpec( root, root.name, [ root ], [ root ], [], root, skip )
 
 
+def is_test_path( rel_path ):
+    """
+    Say whether a relative path lies in a tests directory.
+
+    Ensures:
+        - True iff a directory component of the path is named `tests`
+        - the file name itself is never matched
+    """
+    return "tests" in pathlib.PurePosixPath( rel_path ).parts[ :-1 ]
+
+
 def skipped( rel_path, skip_parts ):
     """
     Say whether a relative path is excluded from the index.
@@ -140,7 +153,7 @@ def all_files( spec ):
         - build() and the freshness check both read this function, so they never disagree
     """
     return sorted( set( iter_files( spec, spec.py_roots, { ".py" } ) )
-                   | set( iter_files( spec, spec.js_roots, { ".js", ".ts", ".tsx" } ) )
+                   | set( iter_files( spec, spec.js_roots, set( SCRIPT_SUFFIXES ) ) )
                    | set( iter_files( spec, spec.dart_roots, { ".dart" } ) ) )
 
 

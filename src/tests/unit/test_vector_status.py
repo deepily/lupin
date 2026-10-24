@@ -47,7 +47,7 @@ def world( tmp_path, monkeypatch ):
     head    = { "header": HEADER }
     monkeypatch.setattr( vs.sx_build, "current_generation", lambda out: "gen" )
     monkeypatch.setattr( vs.sx_build, "read_header", lambda gen: head[ "header" ] )
-    monkeypatch.setattr( vs.sx_build, "read_symbols", lambda gen: symbols )
+    monkeypatch.setattr( vs.sx_build, "read_searchable", lambda gen: symbols )
     monkeypatch.setattr( vs, "default_out_dir", lambda root: tmp_path / "idx" )
     monkeypatch.setattr( vs, "data_dir", lambda root: tmp_path / "data" )
     monkeypatch.setattr( vr, "data_dir", lambda root: tmp_path / "data" )

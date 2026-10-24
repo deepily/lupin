@@ -110,7 +110,7 @@ def world( tmp_path, monkeypatch ):
     symbols = [ tvb.entry( "b", "pb", doc="Does b." ), tvb.entry( "a", "pa" ) ]
     for s in symbols: s.update( lang="py", kind="function", line=1, public=True )
     monkeypatch.setattr( cb.sx_build, "ensure", lambda root: "gen" )
-    monkeypatch.setattr( cb.sx_build, "read_symbols", lambda gen: symbols )
+    monkeypatch.setattr( cb.sx_build, "read_searchable", lambda gen: symbols )
     monkeypatch.setattr( cb.sx_build, "read_header", lambda gen: { "manifest": { "m.py": [ 1, 2 ] }, "symbols_sha": "sha-1" } )
     monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path / "data" )
     environ = {}
@@ -550,7 +550,7 @@ def test_main_sample_mode_reads_the_named_index( monkeypatch, main_repo, tmp_pat
 def test_run_reads_the_named_index_writes_only_under_out_dir_and_ignores_storage_overrides( world, tmp_path, monkeypatch ):
     read = []
     monkeypatch.setattr( cb.sx_build, "ensure", lambda root: pytest.fail( "the index must not be ensured or built" ) )
-    monkeypatch.setattr( cb.sx_build, "read_symbols", lambda gen: read.append( gen ) or world[ "symbols" ] )
+    monkeypatch.setattr( cb.sx_build, "read_searchable", lambda gen: read.append( gen ) or world[ "symbols" ] )
     monkeypatch.setattr( cb, "data_dir", lambda root: pytest.fail( "the shared data dir must not be used" ) )
     out = tmp_path / "out"
     idx = tmp_path / "gen" / "symbols.jsonl"
@@ -570,7 +570,7 @@ def test_run_reads_the_named_index_writes_only_under_out_dir_and_ignores_storage
 def test_sample_purposes_reads_the_named_index( world, tmp_path, monkeypatch ):
     read = []
     monkeypatch.setattr( cb.sx_build, "ensure", lambda root: pytest.fail( "no ensure" ) )
-    monkeypatch.setattr( cb.sx_build, "read_symbols", lambda gen: read.append( gen ) or world[ "symbols" ] )
+    monkeypatch.setattr( cb.sx_build, "read_searchable", lambda gen: read.append( gen ) or world[ "symbols" ] )
     report = cb.sample_purposes( world[ "root" ], answering_writer( [] ), tmp_path / "s.jsonl", 2, index=tmp_path / "g" / "symbols.jsonl" )
     assert read == [ tmp_path / "g" ] and len( report[ "ids" ] ) == 2
 

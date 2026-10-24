@@ -305,3 +305,17 @@ def test_no_match_never_rests_on_a_failed_or_unsure_call():
 def test_a_strong_reuse_under_the_shipped_policy_is_not_a_no_match():
     r = _decide( [ _ans( "A", _STRONG ) ], policy=vd.POLICY )
     assert ( r[ "verdict" ], r[ "causes" ] ) == ( "REUSE", [] )
+
+
+# the no-relevant rows of the table above (the ones that give NEW without no_new), run again under the shipped policy
+NO_RELEVANT_ROWS = [ ( "empty", [], 50 ), ( "many_unrelated", [], 5000 ), ( "just_under_the_cut", [ _ans( "below", _p( 0.14, 0.15, 0.71 ) ) ], 50 ),
+                     ( "just_under_the_floor", [ _ans( "below", _p( 0.29, 0.0, 0.71 ) ) ], 50 ) ]
+
+
+@pytest.mark.parametrize( "name, extra, n", NO_RELEVANT_ROWS, ids=[ r[ 0 ] for r in NO_RELEVANT_ROWS ] )
+def test_every_no_relevant_row_of_the_table_is_no_match_under_the_shipped_policy_and_new_without_no_new( name, extra, n ):
+    # red when: the `no_new` line of decide is edited or deleted (the `not holds` clause is held by test_no_match_never_rests_on_a_failed_or_unsure_call)
+    shipped = _decide( extra, n_unrelated=n, policy=vd.POLICY )
+    legacy  = _decide( extra, n_unrelated=n )
+    assert ( shipped[ "verdict" ], shipped[ "cause" ], shipped[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH", [ "NO_MATCH" ] ), name
+    assert ( legacy[ "verdict" ], legacy[ "causes" ] ) == ( "NEW", [] ), name

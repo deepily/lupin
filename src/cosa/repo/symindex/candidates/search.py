@@ -144,7 +144,7 @@ def answer( request, load_vectors ):
     """
     validate_request( request )
     try:
-        entries  = sx_build.read_symbols( request[ "index_dir" ] )
+        entries  = sx_build.read_searchable( request[ "index_dir" ] )
         purposes = read_purposes( request.get( "purposes" ) )
         stage    = cs.build_stage( entries, purposes, **{ k: request[ "fusion" ][ k ] for k in FUSION_KEYS } if "fusion" in request else {} )
     except ( OSError, ValueError, KeyError, TypeError ) as e:

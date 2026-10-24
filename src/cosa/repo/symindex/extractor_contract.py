@@ -40,6 +40,8 @@ empty result.
 """
 
 RECORD_KEYS   = ( "lang", "file", "name", "kind", "sig", "doc", "line", "public" )
+OPTIONAL_KEYS = { "end_line": int, "doc_full": str }          # an extractor may add these; the builder never needs them
+BUILDER_KEYS  = ( "scope", "id" )                           # computed by the builder; an extractor that returns one is refused
 KINDS         = frozenset( { "function", "class", "method", "constructor", "enum", "mixin", "extension" } )
 
 
@@ -54,6 +56,8 @@ def validate_record( rec ):
     Raises:
         - ValueError naming the first violation: a missing key, a bad type, an unknown kind,
           or neither `pin` nor `pin_text`
+        - ValueError for an optional key (`end_line`, `doc_full`) of the wrong type
+        - ValueError for a key the builder computes (`scope`, `id`)
     """
     for k in RECORD_KEYS:
         if k not in rec: raise ValueError( f"record is missing key {k!r}: {rec!r}" )
@@ -61,3 +65,7 @@ def validate_record( rec ):
     if not isinstance( rec[ "line" ], int ) or rec[ "line" ] < 1: raise ValueError( f"line must be a positive int: {rec[ 'line' ]!r}" )
     if not isinstance( rec[ "public" ], bool ): raise ValueError( f"public must be a bool: {rec[ 'public' ]!r}" )
     if "pin" not in rec and "pin_text" not in rec: raise ValueError( "record needs `pin` or `pin_text`" )
+    for k, kind in OPTIONAL_KEYS.items():
+        if k in rec and ( not isinstance( rec[ k ], kind ) or isinstance( rec[ k ], bool ) ): raise ValueError( f"{k} must be a {kind.__name__}: {rec[ k ]!r}" )
+    for k in BUILDER_KEYS:
+        if k in rec: raise ValueError( f"{k} is computed by the builder, an extractor must not return it: {rec!r}" )

@@ -21,9 +21,10 @@ from cosa.repo.symindex.extractor_contract import validate_record
 from cosa.repo.symindex.js_index import extract_js, find_node, find_typescript, typescript_version
 from cosa.repo.symindex.paths import default_out_dir
 from cosa.repo.symindex.py_index import extract_python
-from cosa.repo.symindex.spec import is_lupin_tree, iter_files, manifest, spec_for
+from cosa.repo.symindex.spec import SCRIPT_SUFFIXES, is_lupin_tree, is_test_path, iter_files, manifest, spec_for
 
 KEEP_GENERATIONS = 3
+SEARCH_SCOPES    = ( "public", "private" )          # the scopes a search may ask about; `test` only on request, `nested` never
 
 
 def logic_version( py_source, js_source, dart_source ):
@@ -91,7 +92,7 @@ def environment( spec ):
           never required
     """
     algo, missing = [ f"py{sys.version_info.major}.{sys.version_info.minor}.x{EXTRACTOR_LOGIC}" ], []
-    if iter_files( spec, spec.js_roots, { ".js", ".ts", ".tsx" } ):
+    if iter_files( spec, spec.js_roots, set( SCRIPT_SUFFIXES ) ):
         try:
             find_node()
             algo.append( f"ts{typescript_version( find_typescript( spec.root ) )}" )
@@ -129,7 +130,7 @@ def collect( spec ):
         except ( SyntaxError, UnicodeDecodeError ):
             unparsed.append( p.relative_to( spec.root ).as_posix() ); continue
         recs.extend( found )
-    js_files = iter_files( spec, spec.js_roots, { ".js", ".ts", ".tsx" } )
+    js_files = iter_files( spec, spec.js_roots, set( SCRIPT_SUFFIXES ) )
     if js_files and "node" not in missing and "typescript" not in missing:
         recs.extend( extract_js( spec.root, js_files ) )
     dart_files = iter_files( spec, spec.dart_roots, { ".dart" } )
@@ -143,6 +144,7 @@ def collect( spec ):
     for r in recs:
         if "pin" not in r: r[ "pin" ] = _hash_text( r[ "pin_text" ] )
         r.pop( "pin_text", None )
+        r[ "scope" ] = scope_of( r )
     recs.sort( key=lambda r: ( r[ "file" ], r[ "line" ], r[ "name" ] ) )
     _assign_ids( spec, recs )
     per_file = _route_files( spec, recs, py_files )
@@ -185,6 +187,46 @@ def _route_files( spec, recs, py_files ):
     return out
 
 
+def scope_of( rec ):
+    """
+    Classify one definition for the search.
+
+    Requires:
+        - rec holds file, name and public
+    Ensures:
+        - returns `test` for a file under a tests directory
+        - otherwise `public` for a public definition, `nested` for a helper inside a function
+          (its name holds `<locals>`), and `private` for any other definition
+    """
+    if is_test_path( rec[ "file" ] ): return "test"
+    if rec[ "public" ]: return "public"
+    return "nested" if "<locals>" in rec[ "name" ] else "private"
+
+
+def judge_doc( rec ):
+    """
+    Return the docstring text the judge reads.
+
+    Ensures:
+        - returns the whole docstring when the record has one, else its first line
+    """
+    return rec[ "doc_full" ] if "doc_full" in rec else rec[ "doc" ]
+
+
+def search_sha( records ):
+    """
+    Hash the definitions a search may ask about.
+
+    Requires:
+        - records are searchable definitions, each with id, pin, sig and doc
+    Ensures:
+        - returns 40 hex characters over the sorted ( id, pin, signature, judge docstring ) rows
+        - a new or changed private definition changes it, though the public listing does not move
+    """
+    rows = sorted( f"{r[ 'id' ]}\t{r[ 'pin' ]}\t{r[ 'sig' ]}\t{judge_doc( r )}" for r in records )
+    return hashlib.sha1( "\n".join( rows ).encode( "utf-8" ) ).hexdigest()
+
+
 def symbol_line( r ):
     """Ensures: returns the symbols.md line "<file>::<name><sig> — <doc> [<id>@<pin>]"."""
     return f"{r[ 'file' ]}::{r[ 'name' ]}{r[ 'sig' ]}{SEP}{r[ 'doc' ]} [{r[ 'id' ]}@{r[ 'pin' ]}]"
@@ -208,10 +250,12 @@ def _write_generation( tmp, spec, data, man ):
     symbols_md = "\n".join( symbol_line( r ) for r in data[ "symbols" ] ) + "\n"
     files      = { "symbols.md": symbols_md, "routes.md": "\n".join( data[ "routes" ] ) + "\n",
                    "symbols.jsonl": _jsonl( data[ "symbols" ] ), "symbols-all.jsonl": _jsonl( data[ "all_symbols" ] ) }
+    searchable = [ r for r in data[ "all_symbols" ] if r[ "scope" ] in SEARCH_SCOPES ]
     header     = { "index_root"   : str( spec.root ), "repo": spec.name, "manifest": man,
                    "symbols_sha"  : hashlib.sha1( symbols_md.encode( "utf-8" ) ).hexdigest(),
+                   "search_sha"   : search_sha( searchable ),
                    "pin_algorithm": data[ "pin_algorithm" ],
-                   "counts"       : { "symbols": len( data[ "symbols" ] ), "all": len( data[ "all_symbols" ] ), "routes": len( data[ "routes" ] ) },
+                   "counts"       : { "symbols": len( data[ "symbols" ] ), "searchable": len( searchable ), "all": len( data[ "all_symbols" ] ), "routes": len( data[ "routes" ] ) },
                    "missing_dependencies": data[ "missing" ], "unparsed": data[ "unparsed" ] }
     files[ "header.json" ] = json.dumps( header, indent=2, sort_keys=True ) + "\n"
     for name, text in files.items():
@@ -299,6 +343,26 @@ def read_symbols( gen, all_symbols=False ):
     """
     text = ( pathlib.Path( gen ) / ( "symbols-all.jsonl" if all_symbols else "symbols.jsonl" ) ).read_text( encoding="utf-8" )
     return [ json.loads( line ) for line in text.splitlines() if line ]
+
+
+def read_searchable( gen, tests=False ):
+    """
+    Read the definitions a search may ask about.
+
+    Requires:
+        - gen is a published generation written with scopes
+    Ensures:
+        - returns the records of `symbols-all.jsonl` whose scope is public or private, in file order
+        - nested helpers are never returned
+        - tests adds the records of scope `test`
+    """
+    scopes = SEARCH_SCOPES + ( "test", ) if tests else SEARCH_SCOPES
+    return [ r for r in read_symbols( gen, all_symbols=True ) if r[ "scope" ] in scopes ]
+
+
+def searchable_jsonl( gen, tests=False ):
+    """Ensures: returns read_searchable( gen, tests ) as the jsonl text a generation file holds."""
+    return _jsonl( read_searchable( gen, tests ) )
 
 
 def is_fresh( spec, out_dir ):

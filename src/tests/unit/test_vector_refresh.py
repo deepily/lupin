@@ -52,7 +52,7 @@ def world( tmp_path, monkeypatch ):
     header  = { "manifest": { "m.py": [ 1, 2 ] }, "symbols_sha": "sha-1" }
     monkeypatch.setattr( vr.sx_build, "ensure", lambda root: "gen" )
     monkeypatch.setattr( vr.sx_build, "read_header", lambda gen: header )
-    monkeypatch.setattr( vr.sx_build, "read_symbols", lambda gen: symbols )
+    monkeypatch.setattr( vr.sx_build, "read_searchable", lambda gen: symbols )
     monkeypatch.setattr( vr, "data_dir", lambda root: tmp_path / "data" )
     monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path / "data" )
     return { "root": tmp_path / "repo", "data": tmp_path / "data", "state": str( tmp_path / "data" / "refresh" / vr.STATE_NAME ),

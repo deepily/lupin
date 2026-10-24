@@ -16,7 +16,7 @@ from cosa.repo.symindex import build as build_mod
 from cosa.repo.symindex.diff import diff_generations
 from cosa.repo.symindex.dups import DEFAULT_MIN_NODE, DEFAULT_THRESH, find_duplicates
 from cosa.repo.symindex.paths import default_out_dir
-from cosa.repo.symindex.spec import git_toplevel, iter_files, spec_for
+from cosa.repo.symindex.spec import SCRIPT_SUFFIXES, git_toplevel, iter_files, spec_for
 from cosa.repo.symindex.wiki_lint import queue
 
 
@@ -58,7 +58,7 @@ def main( argv=None ):
         return 0
     if a.cmd == "dups":
         rep = find_duplicates( spec, iter_files( spec, spec.py_roots, { ".py" } ), a.min_nodes, a.threshold,
-                               js_files=iter_files( spec, spec.js_roots, { ".js", ".ts", ".tsx" } ), include_private=not a.public_only )
+                               js_files=iter_files( spec, spec.js_roots, set( SCRIPT_SUFFIXES ) ), include_private=not a.public_only )
         if a.json: print( json.dumps( rep, indent=2 ) )
         else:
             for g in rep[ "exact" ]: print( f"EXACT x{len( g )}: " + " == ".join( g ) )

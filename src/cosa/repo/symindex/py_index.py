@@ -109,7 +109,7 @@ def extract_python( spec, path, include_all=False ):
     Requires:
         - path lies under spec.module_base
     Ensures:
-        - returns a list of dicts (lang, file, name, kind, sig, doc, pin, line, public)
+        - returns a list of dicts (lang, file, name, kind, sig, doc, pin, line, end_line, public)
         - `module` is the dotted module name relative to spec.module_base, for id building
         - a file that does not parse raises SyntaxError; the caller records it
     Raises:
@@ -134,6 +134,7 @@ def extract_python( spec, path, include_all=False ):
                       "doc"    : first_doc_line( node ),
                       "pin"    : pin( node ),
                       "line"   : node.lineno,
+                      "end_line": node.end_lineno,
                       "public" : public,
                       "_node"  : node } )
     return out

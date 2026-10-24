@@ -5,6 +5,7 @@ The fake is keyed on the hash of a request body written out LITERALLY in this fi
 that builds the request wrongly gets an unexpected-request failure instead of a canned answer.
 """
 import copy
+import gzip
 import hashlib
 import json
 import multiprocessing
@@ -240,19 +241,36 @@ def test_fetch_similar_resolves_a_private_definition_against_the_whole_index( en
     assert fake.unexpected == [] and all( b[ "state" ][ "need" ] == text for b in fake.seen )
 
 
-def test_replay_of_a_private_definition_receipt_is_deterministic_and_tamper_evident( env ):
-    # red when: replay asks for the bare id instead of the stored need text (CACHE_MISSING), or the need text is outside the receipt id
+def test_a_private_definition_is_in_the_snapshot_so_its_receipt_replays_without_a_stored_need_text( env ):
+    # red when: the snapshot goes back to the public listing, or replay stops reading a private entry from it
     _add_module( env, "priv", 'def _helper( x ):\n    """Normalise one value."""\n    return x\n' )
-    text = "cosa.priv._helper(x) — Normalise one value."
-    fake = FakeJev( need=text, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
+    fake = FakeJev( need="cosa.priv._helper(x) — Normalise one value.", answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
     ctx  = ctx_for( env, fake )
     f    = rt.fetch_similar_impl( "cosa.priv._helper", ctx )
     rep  = rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )
     assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] }
+    assert "need_text" not in rep[ "stored" ] and [ s[ "id" ] for s in rep[ "frozen" ][ "shortlist" ] ] == [ "cosa.mathx.add" ]
+    path = env[ 1 ] / "receipts" / f"{f[ 'receipt_id' ]}.json"
+    doc  = json.loads( path.read_text( encoding="utf-8" ) )
+    doc[ "query" ] = "cosa.priv._other"
+    path.write_text( json.dumps( doc ), encoding="utf-8" )
+    assert rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )[ "error" ] == "RECEIPT_ID_MISMATCH"
+
+
+def test_replay_of_a_nested_definition_receipt_is_deterministic_and_tamper_evident( env ):
+    # red when: replay asks for the bare id instead of the stored need text (CACHE_MISSING), or the need text is outside the receipt id
+    _add_module( env, "nest", 'def outer( x ):\n    def _inner( y ):\n        """Normalise one value."""\n        return y\n    return _inner( x )\n' )
+    entry = "cosa.nest.outer.<locals>._inner"
+    text  = f"{entry}(y) — Normalise one value."
+    fake  = FakeJev( need=text, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
+    ctx   = ctx_for( env, fake )
+    f     = rt.fetch_similar_impl( entry, ctx )
+    rep   = rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )
+    assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] }
     assert rep[ "stored" ][ "need_text" ] == text and [ s[ "id" ] for s in rep[ "frozen" ][ "shortlist" ] ] == [ "cosa.mathx.add" ]
     path = env[ 1 ] / "receipts" / f"{f[ 'receipt_id' ]}.json"
     doc  = json.loads( path.read_text( encoding="utf-8" ) )
-    doc[ "need_text" ] = "cosa.priv._helper(x) — Something else."
+    doc[ "need_text" ] = f"{entry}(y) — Something else."
     path.write_text( json.dumps( doc ), encoding="utf-8" )
     assert rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )[ "error" ] == "RECEIPT_ID_MISMATCH"
     again = rt.fetch_similar_impl( "cosa.mathx.add", ctx_for( env, FakeJev( need=MATHX_TEXT ) ) )
@@ -792,7 +810,7 @@ C1_CASES = [ ( "email",      "Mail ops@example.com when done" ),
 C1_CLEAN = [ "Open /app/docs?path=lupin/x.md", "Route /app/docs and /data/users", "Use Foo::bar here", "Route /api/v2/submit and and/or I/O", "Version 1.2.3 of the API", "Skip dir names (skip_dir_names)", "A plain sentence." ]
 
 
-def _rec( id_, sig="()", doc="Does a thing.", lang="py" ): return { "id": id_, "sig": sig, "doc": doc, "file": "x", "lang": lang }
+def _rec( id_, sig="()", doc="Does a thing.", lang="py" ): return { "id": id_, "sig": sig, "doc": doc, "file": "x", "lang": lang, "scope": "public" }
 
 
 @pytest.mark.parametrize( "name,doc", C1_CASES )
@@ -818,8 +836,8 @@ def test_c1_looks_at_the_signature_and_the_id_after_blanking_not_before():
 
 def test_the_backstop_drops_before_the_sweep_so_the_dropped_symbol_never_reaches_a_body( env, monkeypatch ):
     # red when: prepare() sends entries that sendable() dropped
-    orig = rt.sx_build.read_symbols
-    monkeypatch.setattr( rt.sx_build, "read_symbols", lambda gen, all_symbols=False: orig( gen, all_symbols ) + [ _rec( "cosa.leak.fn", doc="Reads /home/someone/.cfg" ) ] )
+    orig = rt.sx_build.read_searchable
+    monkeypatch.setattr( rt.sx_build, "read_searchable", lambda gen, tests=False: orig( gen, tests ) + [ _rec( "cosa.leak.fn", doc="Reads /home/someone/.cfg" ) ] )
     fake = Recorder()
     r = rt.check_exists_impl( NEED, ctx_for( env, fake ) )
     assert r[ "stats" ][ "entries" ] == 3 and not any( "leak" in rt.canonical( b ) for b in fake.seen )
@@ -829,8 +847,8 @@ def test_typescript_and_javascript_entries_are_sent_with_their_defaults_blanked(
     # red when: a language filter is put back in prepare() or sendable() (the draft's B1)
     ts = _rec( "src.lupin_app.static.ts.log.say", sig='(message: string, type: LogType = "info"): void', doc="Write one log line.", lang="ts" )
     js = _rec( "src.lupin_app.static.js.ui.show", sig="(title, mode = 'full', opts = { sep: `,` })", doc="Show a panel.", lang="js" )
-    orig = rt.sx_build.read_symbols
-    monkeypatch.setattr( rt.sx_build, "read_symbols", lambda gen, all_symbols=False: orig( gen, all_symbols ) + [ ts, js ] )
+    orig = rt.sx_build.read_searchable
+    monkeypatch.setattr( rt.sx_build, "read_searchable", lambda gen, tests=False: orig( gen, tests ) + [ ts, js ] )
     fake = Recorder()
     r = rt.check_exists_impl( NEED, ctx_for( env, fake ) )
     sent = [ b[ "state" ][ "candidate" ] for b in fake.seen ]
@@ -923,3 +941,33 @@ def test_a_receipt_stored_before_no_new_replays_to_new_and_its_head_now_says_no_
     assert rep[ "frozen" ][ "verdict" ] == "NEW" and rep[ "differences" ][ "frozen" ] == []
     assert ( rep[ "head" ][ "verdict" ], rep[ "head" ][ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH" )
     assert "verdict NEW -> UNCERTAIN_READ_SOURCE" in rep[ "differences" ][ "head" ]
+
+
+def test_a_receipt_whose_snapshot_records_have_no_scope_key_still_replays( env ):
+    # red when: load_snapshot or replay starts to require the `scope` key an old snapshot does not have
+    fake = FakeJev( need=FEEDS_TEXT, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
+    f    = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake ) )
+    snap = sorted( ( env[ 1 ] / "snapshots" ).glob( "*.json.gz" ) )
+    assert len( snap ) == 1
+    doc  = json.loads( gzip.decompress( snap[ 0 ].read_bytes() ).decode( "utf-8" ) )
+    old  = [ r for r in ( json.loads( l ) for l in doc[ "symbols_jsonl" ].splitlines() ) if r[ "public" ] ]
+    for r in old: del r[ "scope" ]
+    assert old and all( "scope" not in r for r in old )                                       # the fixture tree holds public definitions only, so this is the old shape: no scope key
+    doc[ "symbols_jsonl" ] = "\n".join( json.dumps( r ) for r in old ) + "\n"
+    snap[ 0 ].write_bytes( gzip.compress( rt.canonical( doc ).encode( "utf-8" ), mtime=0 ) )
+    rep = rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )
+    assert rep[ "status" ] == "ok" and rep[ "differences" ][ "frozen" ] == []
+
+
+def test_the_index_sha_comes_from_search_sha_and_falls_back_to_symbols_sha_for_an_old_header( env, monkeypatch ):
+    # red when: prepare() reads symbols_sha only (a private edit would not move the receipt) or requires search_sha (an old generation would crash)
+    names = []
+    for label in ( "new", "old" ):
+        if label == "old":
+            orig = rt.sx_build.read_header
+            monkeypatch.setattr( rt.sx_build, "read_header", lambda gen: { k: v for k, v in orig( gen ).items() if k != "search_sha" } )
+        data_dir = env[ 1 ] / label
+        ctx = rt.ReuseContext( env[ 0 ], data_dir, out_dir=env[ 2 ], transport=FakeJev( need=N( label ) ) )
+        rt.check_exists_impl( N( label ), ctx )
+        names.append( [ p.name for p in ( data_dir / "snapshots" ).glob( "*.json.gz" ) ] )
+    assert len( names[ 0 ] ) == len( names[ 1 ] ) == 1 and names[ 0 ] != names[ 1 ]

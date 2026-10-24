@@ -13,7 +13,7 @@ from tests.unit.test_reuse_tools import FEEDS_TEXT, FakeJev
 from tests.unit.test_reuse_page_first import HIT
 
 NEED    = "read an RSS feed [pin]"
-PINNED  = { "packed": "9f37ab288d110bf280321db3d17d3311b001b2d6", "old": "95d85b4660ba7b851c020d80a4e52c5a3855c8d6" }      # taken at db8e910eb, before unit 5
+PINNED  = { "packed": "db99d078ad9ffe612a9e33ab20c476cfa99d26da", "old": "b661799dbcd432ece5afa9c1c8f2a9b5788d105b" }      # re-taken when the receipt's index_sha began to derive from search_sha (step S3); first taken at db8e910eb, before unit 5
 
 
 @pytest.fixture( autouse=True )

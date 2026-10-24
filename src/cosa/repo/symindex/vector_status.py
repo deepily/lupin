@@ -101,7 +101,7 @@ def compute( root, now, stale_hours=DEFAULT_STALE_HOURS, config=None, environ=No
     if gen is not None:
         screen  = screen if screen is not None else pl.default_screen()
         settled = info.get( "unwritten_pins", [] ) if info is not None and info[ "index_manifest" ] == current else []
-        missing = vr.missing_purpose_lines( sx_build.read_symbols( gen ), sp.candidate_dir( "purpose", data, config, environ ) / "purpose.jsonl", screen, settled )
+        missing = vr.missing_purpose_lines( sx_build.read_searchable( gen ), sp.candidate_dir( "purpose", data, config, environ ) / "purpose.jsonl", screen, settled )
     built_at  = info[ "built_at" ] if info is not None else None
     age       = age_hours( built_at, now ) if info is not None else None
     differs   = info is not None and current is not None and info[ "index_manifest" ] != current

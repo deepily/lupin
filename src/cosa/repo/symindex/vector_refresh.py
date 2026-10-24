@@ -150,7 +150,7 @@ def run_refresh( root, writer, client, state_path, now, force=False, log=print, 
         purpose   = sp.candidate_dir( "purpose", data, config, environ )
         gen       = sx_build.ensure( root )
         header    = sx_build.read_header( gen )
-        entries   = sx_build.read_symbols( gen )
+        entries   = sx_build.read_searchable( gen )
         fresh, why = check_fresh( live, header, entries, purpose / "purpose.jsonl", client, screen )
         if fresh:
             summary = { "ran": True, "outcome": "fresh", "reason": why }

@@ -322,3 +322,16 @@ def test_the_same_sweep_under_a_pair_policy_stored_before_no_new_still_gives_new
 def test_no_match_in_the_pair_rule_never_accompanies_another_cause():
     r = _decide( [], flags=[ "KEY_UNREADABLE" ], policy=vd.POLICY_PROVIDES )
     assert r[ "causes" ] == [ "KEY_UNREADABLE" ]
+
+
+NO_RELEVANT_PAIR_ROWS = [ ( "empty", [], 20 ), ( "many_low", [], 5000 ), ( "just_under_the_floor", [ _a( "below", 0.29 ) ], 20 ),
+                          ( "low_provides_coverage_under_half", [ _a( "ok", 0.1, 0.49 ) ], 20 ) ]
+
+
+@pytest.mark.parametrize( "name, extra, n", NO_RELEVANT_PAIR_ROWS, ids=[ r[ 0 ] for r in NO_RELEVANT_PAIR_ROWS ] )
+def test_every_no_relevant_pair_row_is_no_match_under_the_shipped_policy_and_new_without_no_new( name, extra, n ):
+    # red when: the `no_new` line of decide_provides is edited or deleted (its holds clause is held by test_no_match_in_the_pair_rule_never_accompanies_another_cause)
+    shipped = _decide( extra, n_low=n, policy=vd.POLICY_PROVIDES )
+    legacy  = _decide( extra, n_low=n )
+    assert ( shipped[ "verdict" ], shipped[ "cause" ], shipped[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH", [ "NO_MATCH" ] ), name
+    assert ( legacy[ "verdict" ], legacy[ "causes" ] ) == ( "NEW", [] ), name

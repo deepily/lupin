@@ -879,8 +879,14 @@ def index_sha( symbols_sha, l0, pins="" ):
 
 
 def save_snapshot( ctx, sha_, gen, l0 ):
-    """Ensures: stores the symbols and L0 lines an index_sha names, compressed and content-addressed, once."""
-    text = ( gen / "symbols.jsonl" ).read_text( encoding="utf-8" )
+    """
+    Store the definitions and index lines an index_sha names, compressed, once.
+
+    Ensures:
+        - the definitions are the searchable listing a call judged (public and private), not the public file
+        - they are not filtered by language: the language is on the receipt and applied again at replay
+    """
+    text = sx_build.searchable_jsonl( gen )
     blob = gzip.compress( canonical( { "symbols_jsonl": text, "l0": l0 } ).encode( "utf-8" ), mtime=0 )
     write_once( ctx.data / "snapshots" / f"{sha_}.json.gz", blob )
 
@@ -1053,11 +1059,11 @@ def prepare( ctx ):
     if ctx.transport is None:
         if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=_live_budget( ctx ), transient=ctx.sweeper is not None )
         else: flags.add( "KEY_UNREADABLE" )
-    symbols    = sx_build.read_symbols( gen )
+    symbols    = sx_build.read_searchable( gen )
     entries, _ = sendable( symbols, ctx.exclude_prefixes )
     l0         = l0_lines( ctx.wiki_dir )
-    ctx.pages  = page_candidates( ctx.wiki_dir, symbols )
-    sha_       = index_sha( header[ "symbols_sha" ], l0, pages_digest( ctx.pages ) )
+    ctx.pages  = page_candidates( ctx.wiki_dir, [ s for s in symbols if s[ "scope" ] == "public" ] )
+    sha_       = index_sha( header[ "search_sha" ] if "search_sha" in header else header[ "symbols_sha" ], l0, pages_digest( ctx.pages ) )
     save_snapshot( ctx, sha_, gen, l0 )
     return flags, entries, sha_, gen
 
