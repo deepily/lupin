@@ -105,6 +105,22 @@ def extract_sentence( reply_text ):
     return " ".join( reply_text.split() ).strip( " \"'`" )
 
 
+def name_hits( names, text ):
+    """
+    List the names that appear in the text as whole words.
+
+    Requires:
+        - names is an iterable of strings
+        - text is a string
+
+    Ensures:
+        - returns the names found, in the order given
+        - a name counts only when no letter, digit or underscore touches it on either side
+        - a name is matched literally, never as a pattern
+    """
+    return [ name for name in names if re.search( r"(?<![A-Za-z0-9_])" + re.escape( name ) + r"(?![A-Za-z0-9_])", text ) ]
+
+
 def own_words_found( sentence, need ):
     """
     List the member's own names that appear in the sentence, outside its opening phrase.
@@ -117,7 +133,7 @@ def own_words_found( sentence, need ):
     """
     opener = OPENERS[ need.kind ]
     body   = sentence[ len( opener ): ] if sentence.startswith( opener ) else sentence
-    return [ name for name in need.forbidden if re.search( r"(?<![A-Za-z0-9_])" + re.escape( name ) + r"(?![A-Za-z0-9_])", body ) ]
+    return name_hits( need.forbidden, body )
 
 
 def check_form( sentence, need ):

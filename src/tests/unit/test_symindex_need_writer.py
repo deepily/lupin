@@ -226,6 +226,22 @@ def test_own_words_found_skips_the_opening_phrase( tmp_path ):
     assert nw.own_words_found( "A function that calls it.", need ) == []
 
 
+@pytest.mark.parametrize( "names, text, expected", [
+    ( [ "get_user", "id" ],  "calls get_user then id",          [ "get_user", "id" ] ),
+    ( [ "get_user", "id" ],  "calls get_user_id and idle",      [] ),
+    ( [ "id", "get_user" ],  "(id) and get_user.",              [ "id", "get_user" ] ),
+    ( [ "a.b", "x" ],        "see a.b and axb",                 [ "a.b" ] ),
+    ( [],                    "anything at all",                 [] ),
+] )
+def test_name_hits_matches_the_whole_word_regex_it_was_moved_from( names, text, expected ):
+    # Answers worked out by hand from the whole-word regex that own_words_found carried at d0bd4f604.
+    assert nw.name_hits( names, text ) == expected
+
+
+def test_name_hits_returns_names_in_the_order_given_not_the_order_in_the_text():
+    assert nw.name_hits( [ "zeta", "alpha" ], "alpha then zeta" ) == [ "zeta", "alpha" ]
+
+
 def test_prompt_names_the_offending_own_word_and_nothing_else( src_root ):
     need   = _input( src_root )
     prompt = nw.build_prompt( need, failures=[ "own_identifier" ], own_words=[ "raw_text" ] )
