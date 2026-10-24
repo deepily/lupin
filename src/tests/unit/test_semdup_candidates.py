@@ -190,4 +190,27 @@ def test_candidate_rows_build_one_row_per_new_definition_from_the_three_lists():
     d01 = rows[ 0 ]
     got = { c[ "id" ]: c[ "from" ] for c in d01[ "candidates" ] }
     assert "structural" in got[ "d12" ] and got[ "d02" ][ 0 ] == "embedding" and "d01" not in got
-    assert all( r[ "short" ] is False for r in rows )
+    assert all( r[ "short" ] is False for r in rows ) and [ r[ "outside_pool" ] for r in rows ] == [ 0, 0, 0, 0 ]
+
+
+def test_a_clone_partner_outside_the_pool_is_passed_over_and_counted_instead_of_crashing():
+    defs, pool = make_pool()
+    partners   = { "d01": [ "x-gone", "d12", "x-also-gone", "d05" ] }
+    assert cd.structural_list( defs[ 0 ], pool, partners, 10 ) == [ "d12", "d05" ]
+    assert cd.structural_list( defs[ 0 ], pool, partners, 1 ) == [ "d12" ]
+    assert cd.outside_pool( defs[ 0 ], pool, partners ) == 2 and cd.outside_pool( defs[ 1 ], pool, partners ) == 0
+    row = cd.candidate_rows( [ defs[ 0 ] ], pool, cd.word_index( pool ), partners, CFG )[ 0 ]
+    assert row[ "outside_pool" ] == 2 and "structural" in dict( ( c[ "id" ], c[ "from" ] ) for c in row[ "candidates" ] )[ "d12" ]
+    assert all( not c[ "id" ].startswith( "x-" ) for c in row[ "candidates" ] )
+
+
+def test_a_server_definition_cannot_be_given_a_candidate_row():
+    defs, pool = make_pool()
+    with pytest.raises( ValueError, match="d02 has origin 'server'" ):
+        cd.candidate_rows( [ defs[ 1 ] ], pool, cd.word_index( pool ), {}, CFG )
+
+
+def test_a_new_definition_that_is_not_in_the_pool_is_refused_by_name():
+    defs, pool = make_pool()
+    with pytest.raises( ValueError, match="d99 is not in the pool" ):
+        cd.candidate_rows( [ { **defs[ 0 ], "id": "d99" } ], pool, cd.word_index( pool ), {}, CFG )

@@ -76,20 +76,35 @@ def partner_map( pairs ):
 
 def _keep( d, ids, pool, depth ):
     """
-    Take the first depth ids that are not the definition itself or a redefinition of it.
+    Take the first depth ids that are in the pool and are not d or a redefinition of it.
 
     Requires:
-        - ids are pool ids in rank order
+        - ids are definition ids in rank order
 
     Ensures:
         - returns at most depth ids, in the order given
+        - an id that is not in the pool, such as the partner of a clone that a filter took out, is passed over
     """
     out = []
     for i in ids:
+        if i not in pool[ "position" ]: continue
         if same_slot( d, pool[ "defs" ][ pool[ "position" ][ i ] ] ): continue
         out.append( i )
         if len( out ) == depth: break
     return out
+
+
+def outside_pool( d, pool, partners ):
+    """
+    Count the clone partners of d that are not in the pool.
+
+    Requires:
+        - partners came from partner_map
+
+    Ensures:
+        - returns how many of d's partners the structural list passed over, so a narrowed pool is reported and not hidden
+    """
+    return sum( 1 for i in partners.get( d[ "id" ], [] ) if i not in pool[ "position" ] )
 
 
 def embedding_list( d, pool, depth ):
@@ -168,11 +183,19 @@ def candidate_rows( new_defs, pool, index, partners, cfg ):
     Build the candidate row of every new definition.
 
     Requires:
-        - new_defs are the pool definitions with origin "new"; the other arguments are as for the list builders
+        - new_defs are definitions of the pool with origin "new"; the other arguments are as for the list builders
 
     Ensures:
-        - returns one row per definition, in the order given
+        - returns one row per definition, in the order given, each with outside_pool: the clone partners that were not in the pool
+
+    Raises:
+        - ValueError if a definition has another origin or is not in the pool, since a server definition must never be judged as the run's own
     """
     depth = cfg[ "list_depth" ]
-    return [ candidates_for( d, pool, { "embedding": embedding_list( d, pool, depth ), "words": word_list( d, pool, index, depth ), "structural": structural_list( d, pool, partners, depth ) }, cfg )
-             for d in new_defs ]
+    rows  = []
+    for d in new_defs:
+        if d[ "origin" ] != "new": raise ValueError( f"{d[ 'id' ]} has origin {d[ 'origin' ]!r}, only new definitions get candidate rows" )
+        if d[ "id" ] not in pool[ "position" ]: raise ValueError( f"{d[ 'id' ]} is not in the pool" )
+        lists = { "embedding": embedding_list( d, pool, depth ), "words": word_list( d, pool, index, depth ), "structural": structural_list( d, pool, partners, depth ) }
+        rows.append( { **candidates_for( d, pool, lists, cfg ), "outside_pool": outside_pool( d, pool, partners ) } )
+    return rows

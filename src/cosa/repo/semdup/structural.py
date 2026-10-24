@@ -125,6 +125,8 @@ def clone_pairs( *pair_lists ):
     Ensures:
         - returns one list ordered by size, largest first, then by ids
         - a pair found by two sources keeps its larger size and the source that gave it
+        - size is a token count for jscpd and an AST-node figure for dups, so the two are not on one scale; script and Python
+          definitions are never paired by these sources, and the larger-size rule matters only for lists built by hand
     """
     best = {}
     for pairs in pair_lists:
