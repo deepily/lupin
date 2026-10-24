@@ -157,3 +157,36 @@ def test_every_read_symbols_call_in_src_is_an_allowed_one():
 def test_the_census_goes_red_for_a_stray_caller():
     stray = "src/cosa/somewhere.py:12:    recs = bd.read_symbols( gen )"
     assert _stray_calls( [ stray ] ) == [ stray ]
+
+
+END_LINE_SOURCE = '''def one(): return 1
+
+
+def multi( a,
+           b ):
+    x = a + b
+    return x
+    # a trailing comment is not part of the definition
+
+
+@decorator
+def decorated():
+    """Doc
+    over lines."""
+
+
+class K:
+    def m( self ):
+        return 1
+
+    def n( self ): pass
+'''
+
+
+def test_end_line_is_the_exact_last_line_of_each_python_definition( tmp_path ):
+    # red when: end_line is off by one either way, or is the start line (the 24 October mutation arms)
+    root = make_repo( tmp_path )
+    ( root / "pkg" / "spans.py" ).write_text( END_LINE_SOURCE, encoding="utf-8" )
+    from cosa.repo.symindex import py_index as pi
+    got = { r[ "name" ]: ( r[ "line" ], r[ "end_line" ] ) for r in pi.extract_python( sp.spec_for( root ), root / "pkg" / "spans.py", include_all=True ) }
+    assert got == { "one": ( 1, 1 ), "multi": ( 4, 7 ), "decorated": ( 12, 14 ), "K": ( 17, 21 ), "K.m": ( 18, 19 ), "K.n": ( 21, 21 ) }
