@@ -6,7 +6,7 @@ pins:
   - scripts.delivery_latency.up_hours@8c951de3b6
   - scripts.delivery_latency.largest_silent_stretch@7a7dfd94d8
   - scripts.delivery_latency.read_deliveries@065a26020c
-  - scripts.delivery_latency.main@7291a9b168
+  - scripts.delivery_latency.main@31a40ff3a5
 ---
 # Delivery latency measure
 
@@ -21,4 +21,4 @@ Measures how long each commit waits before it lands on a target branch. It is th
 - `up_hours` counts the hours of a span that fall inside any boot interval.
 - `largest_silent_stretch` finds the longest commit-free stretch inside a delivery, counted in box-up hours. The gap ending at the landing is a candidate: branch finished, then sat.
 - `read_deliveries` reads the deliveries to a branch from its reflog. It counts entries whose verb starts with merge, which includes fast-forward deliveries that a merge-commit scan misses.
-- `main` refuses when it parses zero boot intervals or finds zero deliveries. It then prints the tail episodes and their box-up hours. Box up means an action window existed, never that a person failed to act.
+- `main` refuses when it parses zero boot intervals or finds zero deliveries. It then prints the tail episodes and their box-up hours. It also prints the share held by one silent stretch per episode, or n/a when no box-up hours were counted. Box up means an action window existed, never that a person failed to act.
