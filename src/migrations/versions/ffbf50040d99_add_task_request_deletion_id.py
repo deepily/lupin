@@ -7,7 +7,7 @@ An admit request must name one ticket of the requester's own to delete. The
 request rides on the ticket (see 8beada291153), so the pledge rides there too.
 The verdict reads the row it drops from this column rather than parsing an
 audit string.
-Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md §3.3.
+Plan: the R&D write-up "sword of damocles enforcement plan".
 
 What it adds:
 1. `request_deletion_id` UUID NULL — the ticket pledged on this row's admit request.
