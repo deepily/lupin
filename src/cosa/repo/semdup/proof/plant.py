@@ -47,6 +47,21 @@ def select_originals( pool, count, seed, min_nodes, script_share=SCRIPT_SHARE ):
     return sorted( chosen, key=lambda d: d[ "id" ] )
 
 
+def python_need( rec, root ):
+    """
+    Build the stripped need input for a Python definition.
+
+    Requires:
+        - rec is a Python definition record; root is the repository root, whose spec names the folder module ids resolve under
+
+    Ensures:
+        - returns need_input.build_input( module.name, the spec's module base )
+    """
+    spec   = sp.spec_for( root )
+    module = py_index.module_name( spec, pathlib.Path( root ) / rec[ "file" ] )
+    return need_input.build_input( f"{module}.{rec[ 'name' ]}", str( spec.module_base ) )
+
+
 def python_forbidden( rec, root ):
     """
     List the names need_input forbids for a Python definition.
@@ -55,11 +70,9 @@ def python_forbidden( rec, root ):
         - rec is a Python definition record; root is the repository root, whose spec names the folder module ids resolve under
 
     Ensures:
-        - returns need_input.build_input( module.name, the spec's module base ).forbidden, longest first
+        - returns the forbidden list of python_need( rec, root ), longest first
     """
-    spec   = sp.spec_for( root )
-    module = py_index.module_name( spec, pathlib.Path( root ) / rec[ "file" ] )
-    return need_input.build_input( f"{module}.{rec[ 'name' ]}", str( spec.module_base ) ).forbidden
+    return python_need( rec, root ).forbidden
 
 
 def banned_names( rec, forbidden=() ):
