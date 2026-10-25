@@ -157,6 +157,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-seeded-miss-stand-ins]] — the seeded-miss run's throwaway repository, stand-in Jev, stage and store. `lupin_mcp` (reuse_seeded_miss_e2e)
 - [[reuse-seeded-miss-scenario]] — the seeded-miss run: record a miss, repair a docstring and prove it by replay, dry or live. `lupin_mcp` (reuse_seeded_miss_e2e)
 - [[needset-records-and-quota]] — the need-set record and validator, named errors, the kind-by-language quota and the seeded draw. `lupin_mcp` (reuse_needset)
+- [[needset-seed-pool]] — which symbols may seed a need set item, their twin groups and the cell pools. `lupin_mcp` (reuse_needset)
+- [[needset-member-text]] — stripped member text for the drafter and raw bodies for search, Python and script. `lupin_mcp` (reuse_needset)
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection. `lupin_mcp` (reuse_stage2_negatives)
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows. `lupin_mcp` (reuse_stage2_run)
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it. `lupin_mcp` (reuse_stage2_fit)
