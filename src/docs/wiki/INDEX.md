@@ -159,6 +159,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-records-and-quota]] — the need-set record and validator, named errors, the kind-by-language quota and the seeded draw. `lupin_mcp` (reuse_needset)
 - [[needset-seed-pool]] — which symbols may seed a need set item, their twin groups and the cell pools. `lupin_mcp` (reuse_needset)
 - [[needset-member-text]] — stripped member text for the drafter and raw bodies for search, Python and script. `lupin_mcp` (reuse_needset)
+- [[needset-drafter-plumbing]] — need-set drafter calls, the shared ledger, reply parsing and the leak check. `lupin_mcp` (reuse_needset)
+- [[needset-drafting-flows]] — drafting a need for a seed, a cell and the nothing cell, with replacements. `lupin_mcp` (reuse_needset)
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection. `lupin_mcp` (reuse_stage2_negatives)
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows. `lupin_mcp` (reuse_stage2_run)
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it. `lupin_mcp` (reuse_stage2_fit)
