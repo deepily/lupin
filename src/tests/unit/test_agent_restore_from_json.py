@@ -13,6 +13,13 @@ from cosa.agents.todo_list_agent import TodoListAgent
 from cosa.agents.iterative_debugging_agent import IterativeDebuggingAgent
 
 
+@pytest.fixture( autouse=True )
+def no_model_server( monkeypatch ):
+    # ReceptionistAgent sizes its memory block from the model server's window and tokenizer while it is built
+    monkeypatch.setattr( "cosa.agents.model_window.get_context_window", lambda base_url, model_name, timeout=20: 8192 )
+    monkeypatch.setattr( "cosa.agents.model_window.count_tokens", lambda base_url, model_name, text, timeout=20: ( 10, 8192 ) )
+
+
 def _write( tmp_path, data ):
     path = tmp_path / "state.json"
     path.write_text( json.dumps( data ) )
