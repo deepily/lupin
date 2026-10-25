@@ -17,9 +17,9 @@ pins:
 The small functions behind `spawn_sessions` and `dismiss_sessions` ([[mcp-session-spawn-and-reap]]). They live in `session_spawner.py`.
 - `resolve_manager_identity` takes the manager's session id and persona from bridge metadata. It prefers the stable session id, so lineage survives a `/clear`.
 - `resolve_spawn_config` reads the spawn INI keys with defaults: cap 8, ack timeout 120 seconds, memento on, and a model per role.
-- `render_task_prompt` fills `{token}` placeholders in a task template and can prepend a seed memento.
+- `render_task_prompt` fills `{token}` placeholders in a task template and can append a seed memento after the task.
 - `persona_chain_csv` turns a persona preference into the comma list carried in the `COSA_VOICE_PERSONA_CHAIN` variable of the child.
 - `build_spawn_argv` builds the headless `start-cc-with-tmux.sh` command. `default_runner` runs it with a 30 second timeout and never raises on a non-zero exit.
 - `venv_alarm`, `artifact_alarm` and `placement_alarm` each give one top-level line when a seat got no interpreter, no borrowed artifacts, or the shared main checkout.
 - The three alarms are separate fields because each answers a different question. A caller reads the top of a result, not a nested dict.
-- `reap_stale_spawned` is the idle backstop. It reaps spawned sessions that a supplied staleness test flags, so a forgotten manager strands no seats.
+- `reap_stale_spawned` is the idle backstop. It reaps spawned sessions that a supplied staleness test flags. Only its smoke test calls it so far.

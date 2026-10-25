@@ -18,6 +18,7 @@ After the go, the verb proves the memento is complete and fresh, then types the 
 - `build_nonce_line` returns the stamp line `SELF-RESPIN-NONCE: <uuid> @ <time>` that the memento must carry.
 - `stamp_nonce_into` is retired and always raises `ValueError` naming the replacement. Nothing calls it.
 - `verify_memento_content` returns a verdict and a reason. It fails an empty file, a blank nonce, or a body under the minimum size once nonce lines are removed.
+- It also fails when the exact nonce line is missing, or its time is unparseable or outside the cycle window. It never raises.
 - `build_wake_text` builds the one-line rehydrate prompt typed after the clear. It asks the seat to write a wake proof file only if it did rehydrate.
 - `pane_idle_rule` returns the idle-prompt rule of the DM injector, read from the listener and not copied.
 - `build_guarded_clear_argv` builds the detached command that types the text into the pane. It first consumes a one-shot fire token, so the clear cannot fire twice.
