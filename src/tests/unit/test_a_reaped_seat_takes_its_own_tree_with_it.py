@@ -507,3 +507,43 @@ def test_a_tag_named_like_the_seat_branch_never_loses_its_commit( repo, tmp_path
 
     assert ( out[ "removed" ], out[ "kept_reason" ] ) == ( False, "unmerged" )
     assert tree.exists() and _has_branch( repo, "feat-s" )
+
+
+# ---- the result stays small (row f25c0608) ------------------------------------------------
+
+def _many_blockers( n ): return [ f"io/run-output/file-{i:06d}.json" for i in range( n ) ]
+
+
+def test_a_tree_kept_for_ignored_files_reports_their_count_and_a_capped_sample():
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr = _setup( tmp, "/seats/rio" )
+        blockers = _many_blockers( 40000 )
+        res = ss.dismiss_sessions( mgr, session_names=[ SEAT ], runner=_OK_RUNNER, session_dir=sd,
+                                   seat_teardown_fn=lambda n, c: { "removed": False, "kept_reason": "ignored_files_present",
+                                                                   "path": c, "ignored_blockers": blockers, "errors": [] }, **_NOOP )
+        tree = res[ "seat_trees" ][ SEAT ]
+        assert tree[ "kept_reason" ] == "ignored_files_present" and tree[ "path" ] == "/seats/rio"
+        assert tree[ "ignored_blockers_count" ] == 40000
+        assert tree[ "ignored_blockers_sample" ] == blockers[ :st.SAMPLE_LIMIT ] and len( tree[ "ignored_blockers_sample" ] ) == st.SAMPLE_LIMIT
+        assert "ignored_blockers" not in tree
+        assert len( json.dumps( res ) ) < 20_000
+        assert "ignored_files_present at /seats/rio" in res[ "seat_tree_notice" ]
+
+
+def test_summarise_outcome_keeps_a_short_list_whole_and_counts_it():
+    got = st.summarise_outcome( { "removed": False, "ignored_blockers": [ "a", "b" ], "errors": [ "e1" ] } )
+    assert got == { "removed": False, "ignored_blockers_count": 2, "ignored_blockers_sample": [ "a", "b" ],
+                    "errors_count": 1, "errors_sample": [ "e1" ] }
+
+
+def test_summarise_outcome_caps_errors_too_and_does_not_touch_the_input():
+    original = { "errors": _many_blockers( 100 ), "ignored_blockers": [] }
+    got      = st.summarise_outcome( original )
+    assert got[ "errors_count" ] == 100 and len( got[ "errors_sample" ] ) == st.SAMPLE_LIMIT
+    assert got[ "ignored_blockers_count" ] == 0 and got[ "ignored_blockers_sample" ] == []
+    assert len( original[ "errors" ] ) == 100 and "errors_count" not in original
+
+
+def test_summarise_outcome_passes_a_raised_teardown_string_and_a_dict_without_the_lists_through():
+    assert st.summarise_outcome( "RuntimeError: git gone" ) == "RuntimeError: git gone"
+    assert st.summarise_outcome( { "removed": True } ) == { "removed": True }
