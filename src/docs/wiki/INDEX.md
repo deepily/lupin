@@ -153,6 +153,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it
 - [[reuse-stage-two-fit-and-report]] — the stage-two threshold fit on the fit half, its check-half reading and the printed report
+- [[reuse-fresh-needs-run]] — the fresh-needs confirmation through the candidate stage: asks, estimate, guards and spending steps
+- [[reuse-fresh-needs-figures]] — the fresh-needs report: agreement with the full sweep, false reuse and tokens per need
 - [[mcp-task-store-tools]] — the ten MCP tools a session uses to read and write the task store over HTTP. `lupin_mcp` (task_store_tools, cosa_voice_mcp)
 - [[mcp-task-store-impls]] — the eight task-store tool implementations: create, correlate, reassign, amend, request, unpark ask, get and query
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
