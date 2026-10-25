@@ -48,6 +48,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Quality tooling
 
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
+- [[live-probe-and-one-shot-scripts]] — the Gate B admission observer, queue WebSocket listener, live probes and one-shot bridge and DM topic fixes. `scripts` (observe_gate_b_admission, ws_job_listener, tfe_to_cc_phase3_live, probe_broadcast_ack_two_sided, probe_commons_post_direct, backfill_bridge_sender_id, migrate-dm-topic-case)
 - [[debug-and-diagnostic-scripts]] — standalone debug scripts for the proxy matcher, queue endpoint, WebSocket auth and notification delivery. `scripts` (debug, test_websocket_notification)
 - [[coverage-and-junit-scripts]] — the thread-credited coverage detector, its pytest plugin and the junit run comparison. `scripts` (detect_thread_credited_coverage, thread_attribution_plugin, e2e_junit_diff)
 - [[fleet-hygiene-scripts]] — the stale seat scan, the arbiter venv import gate and the Claude permission merge. `scripts` (stale-seat-scan, check-arbiter-venv, apply_claude_permissions)
