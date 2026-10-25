@@ -198,6 +198,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[merge-cc-hooks]] — merging the hooks template into a Claude Code settings file without dropping a hook. `scripts` (lib)
 - [[loc-count-classifier]] — the lines-of-code counter: file buckets, language and the code, comment, docstring and blank split. `scripts` (loc-analysis)
 - [[loc-rollup-and-report]] — the release and monthly added-and-deleted roll-up and the markdown report over the counter's rows. `scripts` (loc-analysis)
+- [[stale-mcp-process-reading]] — the stale-MCP check's reads of boot time, process stat, argv, environment, working directory and tmux panes. `scripts` (stale_mcp_check)
+- [[stale-mcp-census]] — finding cosa-voice MCP processes older than their modules, the census, report and exit codes. `scripts` (stale_mcp_check)
 - [[needset-records-and-quota]] — the need-set record and validator, named errors, the kind-by-language quota and the seeded draw. `lupin_mcp` (reuse_needset)
 - [[needset-seed-pool]] — which symbols may seed a need set item, their twin groups and the cell pools. `lupin_mcp` (reuse_needset)
 - [[needset-member-text]] — stripped member text for the drafter and raw bodies for search, Python and script. `lupin_mcp` (reuse_needset)
