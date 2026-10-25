@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.memento_repo_root.repo_root_owning@e8e4cdb494
   - lupin_mcp.memento_repo_root.slot_base_root@224b4ae134
   - lupin_mcp.memento_merge_claim.default_ancestry_probe@4933ba4c44
-  - lupin_mcp.memento_merge_claim.find_merge_claims@de3eca6c25
+  - lupin_mcp.memento_merge_claim.find_merge_claims@d4e54f8ff6
   - lupin_mcp.memento_merge_claim.refuted_merge_claim@8ecce5c911
   - lupin_mcp.memento_slot_audit.verdict_for@59df0b75b2
   - lupin_mcp.memento_slot_audit.audit_one@4653558fca
@@ -29,7 +29,7 @@ Where a seat's memento must live, how a path is checked against that, and how a 
 - `slot_base_root( start, slot )` is the single answer for either slot. `io` collapses a linked worktree to the main checkout, and `root` keeps the worktree as itself. `resolve_repo_root` returns the root that owns this seat's memento for a slot.
 - `verify_memento_at_any_readable_slot` proves the memento at the primary slot, then at the `io` slot. A complete, fresh file at the fallback slot passes.
 - `stray_record_clause` names up to three records this persona has under another session id. `mirror_home_clause` adds a sentence when the path is under the out-of-repo mirror home.
-- `find_merge_claims( text )` lists each negative merge claim, such as "not merged", that names a commit in the same clause, as (line, sha, line text). A line showing a live query is skipped.
+- `find_merge_claims( text )` lists each negative merge claim, such as "not merged", that names a commit in the same clause, as (line, sha, line text). It skips a line showing a live query. It also skips a sha introduced as a base ("on top of", whole words only) and a denied claim ("none holds unmerged work").
 - `refuted_merge_claim( text, repo_root )` returns the first claim git proves false, because the commit is already an ancestor of HEAD. It returns None when no claim can be refuted.
 - `default_ancestry_probe( sha, repo_root )` is True for an ancestor of HEAD and False for a commit that is not. It is None when git cannot answer, which allows the memento.
 - `audit_one` classifies one memento file by comparing the `slot=` its header declares with where it sits. `verdict_for( declared, actual )` names the relationship and the remedy.
