@@ -134,6 +134,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[doc-viewer]] — serving repo files and the `io/` folder to the browser by `path=<project>/<rel>`, and admin upload into them. `cosa.rest.routers` (docs_files, io_files, _scope_registry), `cosa.rest` (upload_size_guard), `cosa.config` (docview_manifest)
 - [[system-admin-and-stats]] — the small routers that report on the server, steer it, and map clean URLs to pages. `cosa.rest.routers` (system, mode, stats, multiplexer_config, pages, websocket_admin)
 - [[symbol-index]] — the list of every Python, JavaScript, TypeScript and Dart definition in a tree, each with a content pin that wiki pages quote. `cosa.repo.symindex` (build, py_index, spec, paths, wiki_lint)
+- [[symindex-tests-scope]] — the separate index of test files, kept apart from the main index so a test is never a reuse candidate by default. `cosa.repo.symindex` (spec)
 - [[semdup-proof-run]] — the proof run, its ledger and record, and the candidate pairs from the monolith script. `cosa.repo.semdup.proof` (proof_run, monolith_pairs)
 - [[semdup-proof-plant]] — planted rewrites of originals and the pure functions that test the proof's bar. `cosa.repo.semdup.proof` (plant, proof_bar)
 - [[semdup-clusters-and-config]] — duplicate clusters, the surplus-per-100-tests score and the frozen run configuration. `cosa.repo.semdup` (cluster, config)
