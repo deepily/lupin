@@ -6,8 +6,9 @@ pins:
   - lupin_model_server.main.require_api_key@6fa99107ab
   - lupin_model_server.main.health@c4a1f59126
   - lupin_model_server.main.transcribe@55357c6093
-  - lupin_model_server.main.embeddings_generate@5eaa3796e5
-  - lupin_model_server.main.embeddings_batch@8e459f27e1
+  - lupin_model_server.main.embeddings_generate@7dac0affde
+  - lupin_model_server.main.embeddings_batch@d3df19befa
+  - lupin_model_server.main.embeddings_info@ee147063c7
   - lupin_model_server.main.admin_metrics@461a1ce807
 ---
 # Model server
@@ -18,8 +19,8 @@ A standalone FastAPI app in `src/lupin_model_server/main.py` that holds Whisper 
 - `lifespan` installs the API key, then loads Whisper, the code encoder and the prose encoder in turn. A failed load is recorded in `load_errors`; the app still starts.
 - `health` needs no key. It answers 200 only when all three models are loaded and `load_errors` is empty; otherwise 503, with the error list in the body.
 - `transcribe` takes an uploaded `audio` file and returns `{"text": ...}`. On a CUDA out-of-memory error it frees the cache and retries once.
-- `embeddings_generate` takes `text` and `content_type` (`code` or `prose`, default `prose`) and returns `embedding` and `dim`. `embeddings_batch` takes `texts` and returns `embeddings`, `count` and `dim`.
-- `/embeddings/info` reports the two model names and whether each is loaded. `admin_metrics` serves Prometheus text.
+- `embeddings_generate` takes `text` and `content_type` (`code` or `prose`, default `prose`) and returns `embedding` and `dim`. `embeddings_batch` takes `texts` and returns `embeddings`, `count` and `dim`. Both take an optional `role`, `query` or `document`, and echo it back. A role adds that engine's prefix and normalises the vector.
+- `embeddings_info` reports the two model names and whether each is loaded. Its `engines` block adds, per engine, the revision, dtype, device, prefixes and dimensions, plus the device class and library versions. `admin_metrics` serves Prometheus text.
 - Settings are env vars read at import: `LUPIN_MODEL_SERVER_DEVICE`, `_WHISPER_ID`, `_CODE_EMBED`, `_PROSE_EMBED`, `_WARMUP_MP3`, `_PORT`, `_KEYS_DIR` and `_API_KEY_NAME`. The Dockerfile starts it with uvicorn on 7998.
 - `speech_to_text_provider.py` and `embedding_provider.py` in `src/cosa/memory` call it. Both read `LUPIN_MODEL_SERVER_URL`, then the INI key `model server url`. In model-server mode only, `src/lupin_app/main.py` also reads the URL and polls `health` at startup. It waits up to 60 s, the code default, then logs a timeout and continues.
 

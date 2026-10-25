@@ -3,7 +3,7 @@ capability: rest-routers-podcast-proxy
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.podcast_proxy.AskIn@580f498a12
-  - cosa.rest.routers.podcast_proxy.ask_for_a_podcast@6146da7129
+  - cosa.rest.routers.podcast_proxy.ask_for_a_podcast@004fddb5b8
   - cosa.rest.routers.podcast_proxy.StartIn@835326d441
   - cosa.rest.routers.podcast_proxy.copy_directory@1e0fec326a
   - cosa.rest.routers.podcast_proxy.start_a_podcast@20db8c9947
@@ -17,7 +17,7 @@ pins:
 The `/api/podcast-proxy` routes. A seat asks, the operator answers yes on a card, and the seat starts the job. A signed-in person can start one from the doc viewer. Every refusal the doors raise themselves has the body `{ detail: { code, message } }`.
 
 ## What it does
-- `ask_for_a_podcast` is `POST /api/podcast-proxy/ask`. It takes `AskIn` (`path`, `actor`), judges the file, writes the yes/no card itself and returns `card_id` with `name`, `size`, `sha256`, `asked_by`, `expires_at` and `pushed`. A live card for the same file and bytes answers 409 `waiting_card`.
+- `ask_for_a_podcast` is `POST /api/podcast-proxy/ask`. It takes `AskIn` (`path`, `actor`), judges the file, writes the yes/no card itself and returns `card_id` with `name`, `size`, `sha256`, `asked_by`, `expires_at` and `pushed`. A live card for the same file and bytes answers 409 `waiting_card`. The card waits 60 seconds and defaults to yes.
 - `ask_for_a_podcast` and `start_a_podcast` need an `actor` shaped like `<persona> <hex tail>` (a tail of 6 or more lowercase hex characters), or they answer 400 `bad_actor`. Ask does not compare the tail to the caller's session. Start answers 403 `wrong_session` when the card was asked by another session.
 - `start_a_podcast` is `POST /api/podcast-proxy/start`. It takes `StartIn` (`card_id`, `actor`), re-reads the card and the file, spends the card once, and queues the job.
 - `podcast_card_status` is `GET /api/podcast-proxy/card/{card_id}`. It describes a card: `state`, `spent` and `job_id`. A card this feature did not write answers 404 `no_card`.
