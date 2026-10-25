@@ -196,6 +196,11 @@ def call( world, clock, host_path=None, card_id="", actor=ACTOR ):
                                       sleep_fn=clock.sleep, now_fn=lambda: clock.now )
 
 
+def only_card_default( world ):
+    """The default answer the ask door wrote on the one card."""
+    return only_card( world ).response_default
+
+
 def only_card( world ): return next( iter( world[ "cards" ].rows.values() ) )
 
 
@@ -221,9 +226,24 @@ def test_an_answer_that_is_not_a_yes_starts_nothing( world, value, status ):
     assert world[ "flow" ].calls == []
 
 
-def test_a_timed_out_default_starts_nothing_even_when_it_says_yes( world ):
+def test_a_yes_with_a_typed_comment_starts_one_job_through_the_real_doors( world ):
+    # Rick's yes of 2026-10-24 carried a comment and was refused as not_yes.
+    out = call( world, Clock( lambda n: rick_answers( world, "yes [comment: go]" ) ) )
+    assert out[ "status" ] == "started" and len( world[ "flow" ].calls ) == 1
+
+
+def test_a_timed_out_default_of_yes_starts_one_job( world ):
     clock = Clock( lambda n: world[ "cards" ].answer( only_card( world ).id, value="yes", source="timeout_default" ) )
-    assert call( world, clock )[ "status" ] == "default_used" and world[ "flow" ].calls == []
+    assert call( world, clock )[ "status" ] == "started" and len( world[ "flow" ].calls ) == 1
+    assert only_card_default( world ) == "yes"
+
+
+def test_a_timed_out_default_of_no_on_an_old_card_starts_nothing( world ):
+    def settle( n ):
+        card = only_card( world )
+        card.response_default = "no"
+        world[ "cards" ].answer( card.id, value="no", source="timeout_default" )
+    assert call( world, Clock( settle ) )[ "status" ] == "default_used" and world[ "flow" ].calls == []
 
 
 def test_an_unanswered_card_expires_where_the_server_says_and_starts_nothing( world ):

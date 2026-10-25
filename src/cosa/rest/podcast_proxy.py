@@ -52,9 +52,18 @@ COMMAND   = "agent router go to podcast generator"
 VIEWER_NAMESPACE  = uuid.UUID( "6f0d8a52-3a4b-4c1e-9d7e-2b1c5a9e4f10" )
 VIEWER_STARTED_BY = "viewer:"
 
-# How long a yes stays good, and how long the card waits for an answer. The INI key overrides it.
+# How long a yes stays good. The INI key overrides it.
 MAX_AGE_KEY     = "podcast proxy card max age seconds"
 MAX_AGE_DEFAULT = 900
+
+# Rick's ruling: a podcast card waits one minute and silence is a yes. This
+# card alone; the promotion gate's "silence is not approval" is unchanged.
+ASK_TIMEOUT_SECONDS = 60
+RESPONSE_DEFAULT    = "yes"
+UNANSWERED_MEANS    = "If you do not answer within a minute, the podcast starts: silence is a yes here (the operator's ruling of 2026-10-24)."
+
+# The answer card appends a typed comment to the chosen word: "yes [comment: …]".
+COMMENT_MARKER = "[comment:"
 DRY_RUN_KEY     = "podcast proxy dry run"
 DRY_RUN_STATUS  = "dry run"
 DRY_RUN_ENV     = "LUPIN_PODCAST_PROXY_DRY_RUN"
@@ -322,7 +331,7 @@ def card_text( payload ):
     Ensures:
         - returns a (question, abstract) pair
         - both name the file, its size and who asked; the abstract also names who will start it
-        - the abstract ends with `UNANSWERED_MEANS`, because silence refuses here as everywhere
+        - the abstract ends with `UNANSWERED_MEANS`: silence on this card is a yes
         - the question carries no path and no hash, which a voice would read as noise
     """
     size = human_size( payload[ "size" ] )
@@ -334,9 +343,44 @@ def card_text( payload ):
         f"- asked by: {payload[ 'asked_by' ]}\n"
         f"- will be started by: {payload[ 'asked_by' ]}, once you say yes\n"
         f"- the script is written first and a Script Review card follows; audio is bought after that\n\n"
-        f"{promotion_gate.UNANSWERED_MEANS}"
+        f"{UNANSWERED_MEANS}"
     )
     return question, abstract
+
+
+def answer_word( value ):
+    """
+    The word a person chose on a yes/no card, without the comment the card may append.
+
+    Requires:
+        - value is the stored answer's "value", of any type
+
+    Ensures:
+        - returns the lowercased text before `COMMENT_MARKER`, stripped: "Yes [comment: go]" gives "yes"
+        - returns "" for a value that is not a string
+    """
+    if not isinstance( value, str ): return ""
+    return value.split( COMMENT_MARKER, 1 )[ 0 ].strip().lower()
+
+
+def default_yes_due( card, now ):
+    """
+    Whether a card's own default of yes now stands as its answer.
+
+    Requires:
+        - card is a Notification written by the ask door; now is aware
+
+    Ensures:
+        - False unless the card's response_default is "yes", so a card asked under the old default of no never qualifies
+        - True when the card was settled by its timed-out default and that default is yes
+        - False when a person answered, whatever they chose
+        - otherwise True once the card is expired or its expires_at has passed, whether or not a sweep has stamped it yet
+    """
+    if answer_word( card.response_default ) != RESPONSE_DEFAULT: return False
+    answer = card.response_value if isinstance( card.response_value, dict ) else { }
+    if answer.get( "source" ) == "timeout_default": return answer_word( answer.get( "value" ) ) == RESPONSE_DEFAULT
+    if card.responded_at is not None and card.state == "responded": return False
+    return card.state == "expired" or ( card.expires_at is not None and card.expires_at <= now )
 
 
 PAYLOAD_KEYS = frozenset( { "kind", "command", "scope_path", "server_path", "name", "size", "sha256", "asked_by", "asked_by_session" } )
@@ -366,9 +410,10 @@ def start_refusal( card, actor_session, now, max_age ):
 
     Ensures:
         - returns None only when every one of these holds: the card exists and carries the payload
-          this feature's ask writes, no more and no less; it asked a question; it was answered; the answer is a yes a person gave,
-          not the timed-out default; the server saw it arrive on the operator's own login; the caller is the
-          seat that asked, by stable id (a courtesy check, not a lock); the card is no older than max_age
+          this feature's ask writes, no more and no less; it asked a question; either its own default of yes now stands
+          (`default_yes_due`), or it was answered with a yes a person gave, a typed comment after the word allowed, that the
+          server saw arrive on the operator's own login; the caller is the seat that asked, by stable id (a courtesy check,
+          not a lock); the card is no older than max_age
         - returns a StartRefusal otherwise, whose code names the first failed condition
         - the card's message and abstract are never read: they are text, and the payload is what the server wrote
     """
@@ -380,16 +425,17 @@ def start_refusal( card, actor_session, now, max_age ):
     if card.response_requested is not True:
         return StartRefusal( 403, "bad_card", "That notification asked no question, so it cannot approve a podcast." )
     answer = card.response_value if isinstance( card.response_value, dict ) else { }
-    if card.responded_at is None or card.state != "responded":
-        return StartRefusal( 403, "not_answered", "That card has no answer yet, so the podcast is not started." )
-    if answer.get( "source" ) == "timeout_default":
-        return StartRefusal( 403, "default_answer", "That card was settled by its timed-out default, not by an answer, so the podcast is not started." )
-    if str( answer.get( "value", "" ) ).strip().lower() != "yes":
-        return StartRefusal( 403, "not_yes", "The answer on that card was not yes, so the podcast is not started." )
-    answered_by = answer.get( "answered_by" )
-    if not promotion_gate.answer_posted_by_the_operator( answered_by ):
-        return StartRefusal( 403, "wrong_login", f"That card was answered by {promotion_gate.describe_who_answered( answered_by )}, "
-                                                     f"not by the operator's own login, so the podcast is not started." )
+    if not default_yes_due( card, now ):
+        if card.responded_at is None or card.state != "responded":
+            return StartRefusal( 403, "not_answered", "That card has no answer yet, so the podcast is not started." )
+        if answer.get( "source" ) == "timeout_default":
+            return StartRefusal( 403, "default_answer", "That card was settled by its timed-out default of no, so the podcast is not started." )
+        if answer_word( answer.get( "value" ) ) != "yes":
+            return StartRefusal( 403, "not_yes", "The answer on that card was not yes, so the podcast is not started." )
+        answered_by = answer.get( "answered_by" )
+        if not promotion_gate.answer_posted_by_the_operator( answered_by ):
+            return StartRefusal( 403, "wrong_login", f"That card was answered by {promotion_gate.describe_who_answered( answered_by )}, "
+                                                         f"not by the operator's own login, so the podcast is not started." )
     if payload[ "asked_by_session" ] != actor_session:
         return StartRefusal( 403, "wrong_session", f"That card was asked by {payload[ 'asked_by' ]}, and only that session starts it." )
     if card.created_at is None or ( now - card.created_at ).total_seconds() > max_age:
@@ -445,15 +491,17 @@ def card_state( card, now ):
 
     Ensures:
         - returns "waiting" for an open question that has not expired
-        - "yes" only for a yes a person gave on the operator's own login; "wrong_login" for a yes from anyone else
-        - "no" for a person's no, "default_answer" for the timed-out default, "expired" for a card that timed out unanswered
+        - "yes" when the card's own default of yes now stands (`default_yes_due`)
+        - "yes" for a yes a person gave on the operator's own login, a typed comment allowed; "wrong_login" for a yes from anyone else
+        - "no" for a person's no, "default_answer" for a timed-out default of no, "expired" for an old card that timed out unanswered
     """
+    if default_yes_due( card, now ): return "yes"
     answer = card.response_value if isinstance( card.response_value, dict ) else { }
     if card.responded_at is None or card.state != "responded":
         if card.state == "expired" or ( card.expires_at is not None and card.expires_at <= now ): return "expired"
         return "waiting"
     if answer.get( "source" ) == "timeout_default": return "default_answer"
-    if str( answer.get( "value", "" ) ).strip().lower() != "yes": return "no"
+    if answer_word( answer.get( "value" ) ) != "yes": return "no"
     return "yes" if promotion_gate.answer_posted_by_the_operator( answer.get( "answered_by" ) ) else "wrong_login"
 
 

@@ -19,6 +19,7 @@ CARD_FACTS_PATH       = "/api/podcast-proxy/card/{card_id}"
 DRY_RUN_STATUS        = "dry run"   # the start door's own word when its dry-run switch is on; the tool must not call that started
 POLL_INTERVAL_SECONDS = 3.0
 POLL_FAILURE_LIMIT    = 5
+COMMENT_MARKER        = "[comment:"   # the answer card appends a typed comment to the chosen word: "yes [comment: …]"
 WORKTREE_ADVICE       = "write it to the main checkout's io/tmp"
 CLAIMED_NO_JOB_HINT   = "A start of this card is under way, or one did not finish. Do not start it again: read the card, and if it stays so, ask afresh with the path for a new card."
 
@@ -109,7 +110,25 @@ def _verdict( answer ):
     value = answer.get( "response_value" )
     value = value if isinstance( value, dict ) else { }
     if value.get( "source" ) == "timeout_default": return "default"
-    return "yes" if str( value.get( "value", "" ) ).strip().lower() == "yes" else "no"
+    word  = value.get( "value" )
+    word  = word.split( COMMENT_MARKER, 1 )[ 0 ].strip().lower() if isinstance( word, str ) else ""
+    return "yes" if word == "yes" else "no"
+
+
+def _start_or_settle( card_id, api_base_url, api_key, actor, request_fn ):
+    """
+    Start a card nobody answered, and let the server judge it by the card's own default.
+
+    Ensures:
+        - returns what `_start` returns when the server accepts the card's default of yes
+        - returns { status: "default_used", card_id } when the server refuses a timed-out default of no (default_answer)
+        - returns { status: "expired", card_id } when the server says the card has no answer (not_answered)
+        - returns any other refusal as `_start` shaped it
+    """
+    started = _start( card_id, api_base_url, api_key, actor, request_fn )
+    if started.get( "reason" ) == "default_answer": return { "status": "default_used", "card_id": card_id }
+    if started.get( "reason" ) == "not_answered":   return { "status": "expired", "card_id": card_id }
+    return started
 
 
 def _code_of( refused ):
@@ -146,11 +165,13 @@ def podcast_for_rick_impl(
         - card_id is a card this seat was given earlier, or empty to ask afresh
 
     Ensures:
-        - returns { status: "started", card_id, ... } only after a person's yes and a successful start
+        - returns { status: "started", card_id, ... } after a person's yes (a typed comment allowed), or after the card's
+          own default of yes stood, and a successful start
         - returns { status: "dry run", card_id, job_id } when the server's dry-run switch is on: the yes was spent and nothing was queued
         - returns { status: "declined", card_id } for a no or a neither, and never calls start
-        - returns { status: "default_used", card_id } for a timed-out default, and never calls start
-        - returns { status: "expired", card_id } when the card's expiry passes unanswered
+        - a timed-out default or an expiry with no answer calls start once, and the server judges it by the card's own default
+        - returns { status: "default_used", card_id } when the server refuses a timed-out default of no
+        - returns { status: "expired", card_id } when the server says the card was never answered
         - returns { status: "error", reason, detail } for a path refusal, a refused ask, a refused start, or an unreadable card
         - reason is the server's detail.code when it sent one; prose is never parsed
         - a card already waiting for the same file surfaces as reason "card_already_waiting", with its card_id and a resume hint when the server names it
@@ -208,13 +229,16 @@ def podcast_for_rick_impl(
                 return _refusal( "card_unreadable", f"The card {card_id} could not be read {failures} times in a row; its answer is unknown.", card_id=card_id )
         elif answer.get( "state" ) == "responded":
             verdict = _verdict( answer )
-            if verdict == "default": return { "status": "default_used", "card_id": card_id }
+            if verdict == "default": return _start_or_settle( card_id, api_base_url, api_key, actor, request_fn )
             if verdict == "no":      return { "status": "declined", "card_id": card_id }
             return _start( card_id, api_base_url, api_key, actor, request_fn )
+        elif answer.get( "state" ) == "expired":
+            break
         else:
             failures = 0
         sleep_fn( POLL_INTERVAL_SECONDS )
-    return { "status": "expired", "card_id": card_id }
+    # The wait is over unanswered: a card whose own default is yes starts now (Rick's ruling); the server decides.
+    return _start_or_settle( card_id, api_base_url, api_key, actor, request_fn )
 
 
 def _start( card_id, api_base_url, api_key, actor, request_fn ):

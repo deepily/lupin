@@ -145,10 +145,28 @@ def test_a_neither_is_a_decline_not_a_yes( repos ):
     assert run( server, repos )[ "status" ] == "declined" and server.starts() == []
 
 
-def test_a_timed_out_default_never_calls_start_even_when_it_says_yes( repos ):
-    server = Server( ASK(), [ ANSWER( "yes", source="timeout_default" ) ] )
+def test_a_yes_with_a_typed_comment_is_a_yes( repos ):
+    # Rick's yes of 2026-10-24 arrived as "yes [comment: …]" and was read as a no.
+    server = Server( ASK(), [ ANSWER( "yes [comment: go ahead, but hurry]" ) ], start={ "job_id": "j9" } )
+    assert run( server, repos ) == { "status": "started", "job_id": "j9", "card_id": "c1" }
+    assert len( server.starts() ) == 1
+
+
+def test_a_no_with_a_typed_comment_is_still_a_no( repos ):
+    server = Server( ASK(), [ ANSWER( "no [comment: yes, later]" ) ] )
+    assert run( server, repos )[ "status" ] == "declined" and server.starts() == []
+
+
+def test_a_timed_out_default_asks_the_server_once_and_starts_on_its_word( repos ):
+    server = Server( ASK(), [ ANSWER( "yes", source="timeout_default" ) ], start={ "job_id": "j7" } )
+    assert run( server, repos ) == { "status": "started", "job_id": "j7", "card_id": "c1" }
+    assert len( server.starts() ) == 1
+
+
+def test_a_timed_out_default_the_server_refuses_reads_as_default_used( repos ):
+    server = Server( ASK(), [ ANSWER( "no", source="timeout_default" ) ], start=refusal( 403, "default_answer" ) )
     assert run( server, repos ) == { "status": "default_used", "card_id": "c1" }
-    assert server.starts() == []
+    assert len( server.starts() ) == 1
 
 
 def test_an_answer_with_no_value_dict_is_a_decline( repos ):
@@ -156,16 +174,36 @@ def test_an_answer_with_no_value_dict_is_a_decline( repos ):
     assert run( server, repos )[ "status" ] == "declined" and server.starts() == []
 
 
-def test_an_unanswered_card_expires_at_the_servers_expiry( repos ):
-    server = Server( ASK( minutes=1 ), [ PENDING ] )
+def test_an_unanswered_card_asks_the_server_once_at_the_servers_expiry( repos ):
+    server = Server( ASK( minutes=1 ), [ PENDING ], start=refusal( 403, "not_answered" ) )
     assert run( server, repos ) == { "status": "expired", "card_id": "c1" }
-    assert server.now >= START + timedelta( minutes=1 ) and server.starts() == []
+    assert server.now >= START + timedelta( minutes=1 ) and len( server.starts() ) == 1
+
+
+def test_an_unanswered_card_whose_default_is_yes_starts_at_expiry( repos ):
+    server = Server( ASK( minutes=1 ), [ PENDING ], start={ "job_id": "j5" } )
+    assert run( server, repos ) == { "status": "started", "job_id": "j5", "card_id": "c1" }
+    assert server.now >= START + timedelta( minutes=1 )
+
+
+def test_a_card_the_sweep_has_expired_stops_polling_and_asks_the_server( repos ):
+    expired = { "state": "expired", "response_value": None, "responded_at": None }
+    server = Server( ASK(), [ expired ], start={ "job_id": "j4" } )
+    assert run( server, repos )[ "status" ] == "started"
+    assert len( server.polled() ) == 1 and server.now == START
+
+
+def test_another_refusal_at_expiry_is_passed_through( repos ):
+    server = Server( ASK( minutes=1 ), [ PENDING ], start=refusal( 403, "too_old" ) )
+    out = run( server, repos )
+    assert out[ "reason" ] == "too_old" and out[ "stage" ] == "start"
 
 
 def test_a_zone_less_expiry_is_read_as_utc( repos ):
     zoneless = ( START + timedelta( minutes=1 ) ).replace( tzinfo=None ).isoformat()
-    server = Server( ASK( expires_at=zoneless ), [ PENDING ] )
+    server = Server( ASK( expires_at=zoneless ), [ PENDING ], start=refusal( 403, "not_answered" ) )
     assert run( server, repos )[ "status" ] == "expired"
+    assert server.now >= START + timedelta( minutes=1 )
 
 
 def test_five_unreadable_polls_in_a_row_give_up_and_name_the_card( repos ):

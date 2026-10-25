@@ -117,11 +117,11 @@ def test_a_seat_asking_makes_one_card_the_server_wrote_and_pushes_it( world ):
         "asked_by_session": SESSION_ID,
     }
     assert card.recipient_id == OPERATOR_ID and card.response_requested is True
-    assert card.response_type == "yes_no" and card.response_default == "no" and card.priority == "high"
-    assert card.timeout_seconds == 900 and card.expires_at == datetime( 2026, 10, 8, 21, 15, tzinfo=timezone.utc )
+    assert card.response_type == "yes_no" and card.response_default == "yes" and card.timeout_seconds == pp.ASK_TIMEOUT_SECONDS == 60 and card.priority == "high"
+    assert card.expires_at == datetime( 2026, 10, 8, 21, 1, tzinfo=timezone.utc )
     assert card.sender_id == f"claude.code@cosa.deepily.ai#{SESSION_ID}"
     assert answer.json() == { "card_id": str( card.id ), "name": "summary.md", "size": path.stat().st_size, "sha256": digest,
-                              "asked_by": f"Maya ({SESSION_ID})", "expires_at": "2026-10-08T21:15:00+00:00", "pushed": True }
+                              "asked_by": f"Maya ({SESSION_ID})", "expires_at": "2026-10-08T21:01:00+00:00", "pushed": True }
 
 
 def test_the_push_carries_the_same_card_and_only_a_human_may_answer_it( world ):
@@ -130,8 +130,8 @@ def test_the_push_carries_the_same_card_and_only_a_human_may_answer_it( world ):
     pushed, card = world[ "queue" ].pushed[ 0 ], world[ "cards" ].created[ 0 ]
     assert pushed[ "id" ] == str( card.id ) and pushed[ "user_id" ] == str( OPERATOR_ID )
     assert pushed[ "payload" ] == card.payload and pushed[ "human_only" ] is True
-    assert pushed[ "response_requested" ] is True and pushed[ "response_default" ] == "no"
-    assert pushed[ "timeout_seconds" ] == 900 and pushed[ "message" ] == card.message and pushed[ "abstract" ] == card.abstract
+    assert pushed[ "response_requested" ] is True and pushed[ "response_default" ] == "yes" and pushed[ "timeout_seconds" ] == 60
+    assert pushed[ "message" ] == card.message and pushed[ "abstract" ] == card.abstract
 
 
 def test_the_card_shows_the_file_its_size_and_who_will_start_it( world ):
@@ -140,7 +140,7 @@ def test_the_card_shows_the_file_its_size_and_who_will_start_it( world ):
     card = world[ "cards" ].created[ 0 ]
     assert "summary.md" in card.message and f"{path.stat().st_size} bytes" in card.message and "Maya" in card.message
     assert "`demo/io/tmp/summary.md`" in card.abstract and "will be started by: Maya" in card.abstract
-    assert "SHA-256" in card.abstract and card.abstract.rstrip().endswith( pp.promotion_gate.UNANSWERED_MEANS )
+    assert "SHA-256" in card.abstract and card.abstract.rstrip().endswith( pp.UNANSWERED_MEANS ) and "silence is a yes" in card.abstract
     assert str( path.parent ) not in card.message + card.abstract and "/" not in card.message
 
 

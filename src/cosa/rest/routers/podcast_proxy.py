@@ -76,7 +76,7 @@ def ask_for_a_podcast(
           viewer_refused, wrong_kind, too_large, credential, unreadable) when the check refuses the file, and the message names the path
         - 404 no_operator when the operator's account is not found
         - 409 waiting_card, with card_id beside the code, when a card for this file and these bytes still waits for an answer
-        - otherwise inserts one card whose `payload` is `proxy.card_payload( ... )`, whose default answer is "no",
+        - otherwise inserts one card whose `payload` is `proxy.card_payload( ... )`, whose default answer is "yes" after `proxy.ASK_TIMEOUT_SECONDS` (Rick's ruling),
           and returns { card_id, name, size, sha256, asked_by, expires_at, pushed }
         - the card is pushed only after the insert has committed, so an answer cannot arrive for a card the table lacks
     """
@@ -99,7 +99,6 @@ def ask_for_a_podcast(
     asker      = proxy.asker_label( session_id, persona.get( "name" ) if persona is not None else None )
     ask_payload = proxy.card_payload( facts, asker, proxy.binding_id( session_id, seat ) )
     question, abstract = proxy.card_text( ask_payload )
-    age        = proxy.max_age_seconds()
     now        = datetime.now( timezone.utc )
     with get_db() as session:
         cards   = NotificationRepository( session )
@@ -108,7 +107,7 @@ def ask_for_a_podcast(
             raise HTTPException( status_code=409, detail={ **proxy.refusal_detail( "waiting_card", f"A podcast card for this file is already waiting for an answer: {waiting.id}. Use it, or let it expire." ), "card_id": str( waiting.id ) } )
         # The card files beside the asking seat's own cards: its sender id comes from its bridge, and its persona rides along.
         sender_id  = seat.get( "sender_id" ) or promotion_gate.promotion_ask_sender_id( session_id )
-        expires_at = now + timedelta( seconds=age )
+        expires_at = now + timedelta( seconds=proxy.ASK_TIMEOUT_SECONDS )
         card = cards.create_notification(
             sender_id          = sender_id,
             sender_persona     = persona.get( "name" ) if persona is not None else None,
@@ -121,8 +120,8 @@ def ask_for_a_podcast(
             abstract           = abstract,
             response_requested = True,
             response_type      = "yes_no",
-            response_default   = "no",
-            timeout_seconds    = age,
+            response_default   = proxy.RESPONSE_DEFAULT,
+            timeout_seconds    = proxy.ASK_TIMEOUT_SECONDS,
             expires_at         = expires_at,
             payload            = ask_payload,
         )
@@ -142,8 +141,8 @@ def ask_for_a_podcast(
             title              = "Make a podcast",
             response_requested = True,
             response_type      = "yes_no",
-            response_default   = "no",
-            timeout_seconds    = age,
+            response_default   = proxy.RESPONSE_DEFAULT,
+            timeout_seconds    = proxy.ASK_TIMEOUT_SECONDS,
             human_only         = True,
             sender_id          = sender_id,
             voice_persona      = persona,
