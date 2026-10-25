@@ -37,4 +37,4 @@ The helpers at the top of `reuse_tools.py` fix what one Jev question is and how 
 - `ReuseError` carries a name and detail. Callers get it back as an error dict, never as a verdict.
 - `ReuseContext` holds the root, the data directory and the injected parts: transport, sweeper, candidate stage and policy. It raises `BAD_BUDGET` for a call budget that is not a whole number in range.
 - `context_from_environment` builds one for the git toplevel and excludes no module. A directory that is not a repository is used as it is, and the tools then answer `NOT_LUPIN_TREE`.
-- `LUPIN_REUSE_DATA_DIR` and `LUPIN_REUSE_OUT_DIR` relocate the data directory and the generated index. The budget variable above the cap is refused, not clamped.
+- `LUPIN_REUSE_DATA_DIR` and `LUPIN_REUSE_OUT_DIR` relocate the data directory and the generated index. A `LUPIN_REUSE_JEV_CALL_BUDGET` above the cap is refused, not clamped.
