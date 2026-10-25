@@ -8,11 +8,12 @@ import json
 import pathlib
 
 import pytest
-from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
+from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ThinkingBlock, ToolUseBlock
 
 from cosa.repo.doc_lint import model_transport as mt
 from lupin_mcp.reuse_needset import agent_probe as ap
 from lupin_mcp.reuse_needset import errors as er
+from tests.helpers import probe_recapture as rc
 from tests.helpers import sdk_stream_capture as cap
 
 SHORTLIST = [ { "id": "pkg.a.f", "file": "pkg/a.py", "p": 0.9, "text": "SECRET SUMMARY" }, { "id": "pkg.b.g", "file": "pkg/b.py", "p": 0.4, "text": "OTHER SUMMARY" } ]
@@ -181,3 +182,20 @@ def test_encode_and_decode_round_trip_the_real_stream_and_a_hand_built_one():
     assert cap.encode( messages ) == doc[ "messages" ] and cap.decode( cap.encode( messages ) ) == messages
     built = [ assistant( TextBlock( text="t" ), read( "/t/a.py", limit=3 ) ), done() ]
     assert cap.decode( cap.encode( built ) ) == built and cap.decode( { "a": [ 1, "x" ] } ) == { "a": [ 1, "x" ] } and cap.encode( 5 ) == 5
+
+
+def test_the_recapture_writes_the_fixture_shape_from_a_stream_with_paths_scrubbed_and_billing_dropped(tmp_path):
+    doc, messages = captured()
+    class RateLimitEvent: pass
+    noisy = [ messages[ 0 ], RateLimitEvent(), assistant( ThinkingBlock( thinking="t", signature="SIGBLOB" ) ), *messages[ 1: ] ]
+
+    async def query( prompt, options ):
+        for m in noisy: yield m
+
+    out  = tmp_path / "f.json"
+    made = rc.main( [ str( out ), "/some/tree", doc[ "model" ] ], "/home/me", query_fn=query )
+    assert made == json.loads( out.read_text() ) and made[ "root" ] == "/root" and made[ "prompt_version" ] == ap.prompt_version()
+    assert [ m[ "_class" ] for m in made[ "messages" ] ] == [ m[ "_class" ] for m in doc[ "messages" ] ]
+    assert "SIGBLOB" not in out.read_text() and made[ "stripped" ] == doc[ "stripped" ] and made[ "messages" ] == doc[ "messages" ]
+    assert rc.scrub( "/some/tree/a /home/me/b", "/some/tree", "/home/me" ) == "/root/a /home/user/b" and rc.keep( assistant( TextBlock( text="x" ) ) ) and rc.keep( done() )
+    assert not rc.keep( assistant( ThinkingBlock( thinking="t", signature="s" ) ) ) and rc.keep( assistant() )
