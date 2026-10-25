@@ -31,6 +31,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[fleet-cap-census-and-admission]] — how the fleet cap is resolved, who counts as a manager, and the reservation that keeps two launches from taking the last seat. `lupin_mcp` (fleet_size_cap, fleet_cap_admission)
 - [[memento-slots-claims-and-audit]] — where a seat's memento must live, how a path is checked against its slots, and how a false merge claim is refuted. `lupin_mcp` (memento_slot, memento_repo_root, memento_merge_claim, memento_slot_audit)
 - [[respin-credit-and-reap-branch-check]] — the credit that lets a one-for-one re-spin through skeleton crew, and the reap check that names a seat's unmerged commits. `lupin_mcp` (respin_credit, reap_branch)
+- [[reap-memento-checks]] — how a reap asks each seat for a memento, proves it is usable and reports the seats that lack one. `lupin_mcp` (reap_memento)
 
 ## Auth, data and platform
 
