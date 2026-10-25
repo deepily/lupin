@@ -132,10 +132,10 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[system-admin-and-stats]] — the small routers that report on the server, steer it, and map clean URLs to pages. `cosa.rest.routers` (system, mode, stats, multiplexer_config, pages, websocket_admin)
 - [[symbol-index]] — the list of every Python, JavaScript, TypeScript and Dart definition in a tree, each with a content pin that wiki pages quote. `cosa.repo.symindex` (build, py_index, spec, paths, wiki_lint)
 - [[reuse-search-tools]] — the four MCP tools that ask whether a new definition already exists, reading the symbol index and the wiki. `lupin_mcp` (cosa_voice_mcp, reuse_tools, reuse_call_log_middleware), `cosa.repo.symindex` (verdict)
-- [[reuse-tools-request-and-context]] — reuse_tools request hashing, receipt ids, language check, call budget and the context built from the environment
-- [[reuse-tools-transport-and-screening]] — reuse_tools screening of what is sent, the live Jev transport, refusal breaker, cache and token and attempt counts
-- [[reuse-tools-index-and-receipts]] — reuse_tools page scope, the frozen index snapshot, receipt storage and loading, and the path screen
-- [[reuse-tools-question-entry-points]] — reuse_tools check_exists, sweep, unstored ask, fetch_similar, read_capability and replay entry points
+- [[reuse-tools-request-and-context]] — reuse_tools request hashing, receipt ids, language check, call budget and the context built from the environment. `lupin_mcp` (reuse_tools)
+- [[reuse-tools-transport-and-screening]] — reuse_tools screening of what is sent, the live Jev transport, refusal breaker, cache and token and attempt counts. `lupin_mcp` (reuse_tools)
+- [[reuse-tools-index-and-receipts]] — reuse_tools page scope, the frozen index snapshot, receipt storage and loading, and the path screen. `lupin_mcp` (reuse_tools)
+- [[reuse-tools-question-entry-points]] — reuse_tools check_exists, sweep, unstored ask, fetch_similar, read_capability and replay entry points. `lupin_mcp` (reuse_tools)
 - [[reuse-packed-requests]] — the packed and two-question Jev request: its body, answer reading, cache keys and the size split. `lupin_mcp` (reuse_pack, reuse_pair, reuse_pair_request, reuse_pair_fake)
 - [[reuse-token-ceiling-and-spend-ledger]] — the per-run token ceiling and the account spend ledger that bound live Jev runs. `lupin_mcp` (reuse_ceiling, reuse_ledger)
 - [[reuse-flip-rate-measure]] — the flip-rate test: one need asked again and again, and the needs whose answer changes. `lupin_mcp` (reuse_flip, reuse_flip_run)
@@ -144,26 +144,26 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-need-check-and-stage-client]] — the mechanical check of need sentences, and the client of the resident candidate search. `lupin_mcp` (reuse_need_check, reuse_candidates)
 - [[reuse-exit-review-gates-and-verdict-fit]] — the exit gate on reviewer rulings, the reuse review gating flag, and the verdict threshold receipt. `lupin_mcp` (reuse_exit_gate, reuse_review_gate, reuse_verdict_fit)
 - [[reuse-record-search]] — the `record_search` MCP tool: a fixed-string search of the tree for the nearest existing definitions, recorded under a search id. `lupin_mcp` (cosa_voice_mcp, reuse_search)
-- [[reuse-search-terms-and-grep]] — reuse_search term derivation, the fixed-string git grep, the freshness check and the receipt and entry text sources
-- [[reuse-need-redaction]] — the need redactor that blanks emails, URLs, IPs, paths and secrets before Jev sees a need, and the known-route list it keeps
-- [[reuse-real-stage-check]] — the command that ranks five seeded targets with the real candidate stage and a negative control
-- [[reuse-stage-one-probe-plan]] — stage-one probe choice, neighbour lists and the six position packs, written once
-- [[reuse-stage-one-runner]] — the stage-one run-sheet command, its stand-in and live modes, and refusals
-- [[reuse-stage-one-arm-driver]] — the stage-one measurement driver: arms, run names, attempts, the stage budget and the canary
-- [[reuse-stage-one-analysis-arms]] — stage-one analysis: arm status, lost entries, grouping and the noise floor
-- [[reuse-stage-one-analysis-passes]] — stage-one analysis: the three passes, pack-size decision, stop rules and canary check
-- [[reuse-stage-one-analysis-pages]] — stage-one analysis: page arms, other boundaries and the old-shape comparison
-- [[reuse-stage-one-analysis-report]] — stage-one analysis: request and cost figures, the built report and its command
-- [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection
-- [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows
-- [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it
-- [[reuse-stage-two-fit-and-report]] — the stage-two threshold fit on the fit half, its check-half reading and the printed report
-- [[reuse-fresh-needs-run]] — the fresh-needs confirmation through the candidate stage: asks, estimate, guards and spending steps
-- [[reuse-fresh-needs-figures]] — the fresh-needs report: agreement with the full sweep, false reuse and tokens per need
-- [[reuse-fresh-needs-sample]] — the seeded full-sweep sample of fresh needs and the hash stamp every result carries
-- [[reuse-fresh-needs-driver]] — the fresh-needs confirmation driver: estimate, steps, sweep and command line
+- [[reuse-search-terms-and-grep]] — reuse_search term derivation, the fixed-string git grep, the freshness check and the receipt and entry text sources. `lupin_mcp` (reuse_search)
+- [[reuse-need-redaction]] — the need redactor that blanks emails, URLs, IPs, paths and secrets before Jev sees a need, and the known-route list it keeps. `lupin_mcp` (reuse_redact)
+- [[reuse-real-stage-check]] — the command that ranks five seeded targets with the real candidate stage and a negative control. `lupin_mcp` (reuse_real_stage_check)
+- [[reuse-stage-one-probe-plan]] — stage-one probe choice, neighbour lists and the six position packs, written once. `lupin_mcp` (reuse_stage1_probe)
+- [[reuse-stage-one-runner]] — the stage-one run-sheet command, its stand-in and live modes, and refusals. `lupin_mcp` (reuse_stage1_run)
+- [[reuse-stage-one-arm-driver]] — the stage-one measurement driver: arms, run names, attempts, the stage budget and the canary. `lupin_mcp` (reuse_stage1)
+- [[reuse-stage-one-analysis-arms]] — stage-one analysis: arm status, lost entries, grouping and the noise floor. `lupin_mcp` (reuse_stage1_analysis)
+- [[reuse-stage-one-analysis-passes]] — stage-one analysis: the three passes, pack-size decision, stop rules and canary check. `lupin_mcp` (reuse_stage1_analysis)
+- [[reuse-stage-one-analysis-pages]] — stage-one analysis: page arms, other boundaries and the old-shape comparison. `lupin_mcp` (reuse_stage1_analysis)
+- [[reuse-stage-one-analysis-report]] — stage-one analysis: request and cost figures, the built report and its command. `lupin_mcp` (reuse_stage1_analysis)
+- [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection. `lupin_mcp` (reuse_stage2_negatives)
+- [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows. `lupin_mcp` (reuse_stage2_run)
+- [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it. `lupin_mcp` (reuse_stage2_fit)
+- [[reuse-stage-two-fit-and-report]] — the stage-two threshold fit on the fit half, its check-half reading and the printed report. `lupin_mcp` (reuse_stage2_fit)
+- [[reuse-fresh-needs-run]] — the fresh-needs confirmation through the candidate stage: asks, estimate, guards and spending steps. `lupin_mcp` (reuse_phase5_stage)
+- [[reuse-fresh-needs-figures]] — the fresh-needs report: agreement with the full sweep, false reuse and tokens per need. `lupin_mcp` (reuse_phase5_stage)
+- [[reuse-fresh-needs-sample]] — the seeded full-sweep sample of fresh needs and the hash stamp every result carries. `lupin_mcp` (reuse_phase5_run)
+- [[reuse-fresh-needs-driver]] — the fresh-needs confirmation driver: estimate, steps, sweep and command line. `lupin_mcp` (reuse_phase5_run)
 - [[mcp-task-store-tools]] — the ten MCP tools a session uses to read and write the task store over HTTP. `lupin_mcp` (task_store_tools, cosa_voice_mcp)
-- [[mcp-task-store-impls]] — the eight task-store tool implementations: create, correlate, reassign, amend, request, unpark ask, get and query
+- [[mcp-task-store-impls]] — the eight task-store tool implementations: create, correlate, reassign, amend, request, unpark ask, get and query. `lupin_mcp` (task_store_tools)
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
 - [[mcp-commons-ask-async]] — the polling-mode question post behind the `commons_ask_async` tool. `lupin_mcp` (commons_ask)
 - [[mcp-commons-archiver]] — the rotation of aged commons entries into daily archive files. `lupin_mcp` (commons_archival)
