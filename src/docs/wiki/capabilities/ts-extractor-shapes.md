@@ -18,12 +18,12 @@ pins:
   - src.cosa.repo.symindex.ts_extract.shapes@d73680aafc
 ---
 # TypeScript extractor: function shapes
-The second mode of `ts_extract.js` lists every function-like node of a file with its syntax kinds, for the duplicate checker. Records are on [[ts-extractor-records]].
+The second mode of `ts_extract.js` lists the named function-like nodes of a file with their syntax kinds, for the duplicate checker. A public-only request also drops nested and hidden ones. Records are on [[ts-extractor-records]].
 - `isPrivate` is true for a private or protected member, or one with a hash-private name. `isHiddenFn` adds a function held in a private or protected class property.
 - `isFnLike` is true for functions, methods, constructors, accessors, arrow functions and function expressions.
 - `fnName` is the name a function-like node answers to, or null for an anonymous callback. Such a callback is still walked, never reported.
 - `countFnLike` counts every function-like node of a file, anonymous and nested ones included.
-- `kindName` gives a node's syntax kind name, with all literals folded into one kind. `preorder` collects the kinds of a subtree, leaving out doc comments and modifiers.
+- `kindName` gives a node's syntax kind name. Numeric, string, bigint, plain template and regular expression literals fold into one kind. `preorder` collects the kinds of a subtree, leaving out doc comments and modifiers.
 - `calleeName` is the identifier called, or the member name of `a.b()`. Anything else has none. `callsOf` lists distinct callee names inside a function, at most 50.
 - `bindingNames` lists the names a parameter or variable introduces, destructuring included. `declaredIn` lists those declared inside a function, not its own name.
 - `dedentedText` is a function's source without the indentation of its first line. `bodiesOf` adds the line range, signature, text, calls, declared names and public flag.

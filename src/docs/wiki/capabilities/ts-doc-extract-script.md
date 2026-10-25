@@ -23,9 +23,9 @@ pins:
 # Script comment extractor
 `src/scripts/ts_doc_extract.mjs` extracts every comment of TypeScript and JavaScript files as JSON Lines. The compiler finds the comments, so a double slash in a string or a regular expression is never taken for one. Users are [[ts-code-and-export-scripts]].
 - `extractFile` returns a file record and the comment records in source order. A file that does not parse is read as far as the compiler recovers.
-- `main` runs it over the files in its arguments and writes the lines. It returns 2 and a usage line when the root or file list is missing.
+- `main` runs it over the files in its arguments and writes the lines. It returns 2 and a usage line when the root or file list is missing, or an option is unknown.
 - `lineBody` and `blockBody` give a comment's body without its delimiters and star margin.
-- `isDirective` is true for a type, lint, coverage or formatter directive, a region marker, a source map comment or a license block.
+- `isDirective` is true for a type, lint, coverage or formatter directive or a region marker. It also covers triple-slash references, source map comments, bang comments and license blocks.
 - `looksLikeCode` is true only when the text parses cleanly and holds a call, an assignment or a declaration.
 - `nameText`, `declName` and `symbolOf` give the name of a node, of a declaration, and of the nearest enclosing declaration.
 - `isBareToken` is true for punctuation, a keyword or the end of the file.

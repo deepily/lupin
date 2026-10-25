@@ -18,7 +18,7 @@ pins:
 ---
 # Script code token and export extractors
 Two Node scripts under `src/scripts/` that build on the comment extractor ([[ts-doc-extract-script]]).
-- `ts_code_tokens.mjs` prints a text's code tokens and its code-like comments, for the docs-only check. A double slash in a string is never taken for a comment.
+- `ts_code_tokens.mjs` prints a text's code tokens and the comments that tools read, for the docs-only check. A double slash in a string is never taken for a comment.
 - `isJavaScript` is true for a name ending in `.js`, `.mjs` or `.cjs`.
 - `signature` names a comment a tool reads. A banner or directive gives its text, and a doc block gives its tool-read words. Any other comment gives null.
 - `codeTokens` lists the leaf tokens with a line break flag, and marks each tool-read comment with the number of tokens before it.

@@ -17,4 +17,4 @@ pins:
 - `firstDocLine` is the first non-empty line of a node's last doc comment, or an empty string.
 - `fullDoc` is the whole doc comment with its tags, whitespace folded to single spaces. It is cut to the requested length and a marker added.
 - `leafTokens` lists the leaf tokens of a node and leaves out doc comment nodes. `pinOf` joins them with single spaces and keeps the first ten hex digits of the sha1.
-- `params` gives a function-like node's type parameters, parameters and return type as one signature, with whitespace folded.
+- `params` gives a function-like node's type parameters, parameters and return type as one signature. Whitespace is folded in the parameters and the return type, not in the type parameters.
