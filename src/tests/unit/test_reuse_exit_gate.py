@@ -36,10 +36,10 @@ def _search_call( session, search_id, entry=None, receipt=None, tool="record_sea
              "receipt_id": receipt, "search_id": search_id, "error": error, "args": repr( args ) }
 
 
-def _write_record( data, search_id, cands, **over ):
+def _write_record( data, search_id, cands, entry=None, receipt_id=None, **over ):
     """Ensures: writes the search record the server would write, with these candidate ids."""
     ( data / "search-records" ).mkdir( parents=True, exist_ok=True )
-    doc = { "id": search_id, "candidates": [ { "id": c } for c in cands ] }
+    doc = { "id": search_id, "entry": entry, "receipt_id": receipt_id, "candidates": [ { "id": c } for c in cands ] }
     doc.update( over )
     ( data / "search-records" / f"{search_id}.json" ).write_text( json.dumps( doc ), encoding="utf-8" )
 
@@ -262,7 +262,7 @@ def test_an_excluded_definition_shows_its_cause_and_passes_only_with_a_ruling( t
     assert row == { "id": priv, "status": "EXCLUDED_NO_RULING", "cause": "SENSITIVE_CONTENT" }       # not NO_CALL
     ( tmp_path / "again" ).mkdir()
     again = tmp_path / "again"
-    _write_record( again, SID, [ "m.near" ] )
+    _write_record( again, SID, [ "m.near" ], entry=priv )
     searched = [ f"SEARCHED {priv} :: {SID} :: m.near :: UNRELATED :: it formats" ]
     logs2, runs2 = _two_runs( again, ( ids, rev + [ _ruling( priv, "DISTINCT it reads a mailbox", "excluded" ) + f" :: search: {SID}" ] + searched ), ( [], [] ),
                               calls + [ _search_call( "a", SID, entry=priv ) ] )
@@ -332,28 +332,38 @@ def test_main_stdout_default_and_malformed_run( tmp_path, capsys ):
 def test_searches_by_symbol_keys_a_search_by_its_entry_or_by_the_symbol_of_its_fetch_similar_receipt( tmp_path ):
     rid, other = "0123456789abcdef", "fedcba9876543210"
     _write_receipt( tmp_path, rid, "fetch_similar", "m.viaReceipt" ); _write_receipt( tmp_path, other, "check_exists", "a need in words" )
-    for sid, cands in ( ( SID, [ "m.c1", "m.c2" ] ), ( SID2, [] ), ( "rs-1111111111", [ "m.c3" ] ), ( "rs-2222222222", [ "m.c4" ] ) ): _write_record( tmp_path, sid, cands )
-    recs = [ _search_call( "a", SID, entry="m.byEntry" ), _search_call( "a", SID2, receipt=rid ),
-             _search_call( "a", "rs-1111111111", receipt=other ),                                   # a check_exists receipt names no symbol
-             _search_call( "a", "rs-2222222222", entry="m.second" ), _search_call( "b", "rs-2222222222", entry="m.second" ) ]
+    _write_record( tmp_path, SID, [ "m.c1", "m.c2" ], entry="m.byEntry" ); _write_record( tmp_path, SID2, [], receipt_id=rid )
+    _write_record( tmp_path, "rs-1111111111", [ "m.c3" ], receipt_id=other )                          # a check_exists receipt names no symbol
+    _write_record( tmp_path, "rs-2222222222", [ "m.c4" ], entry="m.second" )
+    recs = [ _search_call( "a", s ) for s in ( SID, SID2, "rs-1111111111", "rs-2222222222" ) ] + [ _search_call( "b", "rs-2222222222" ) ]
     assert eg.searches_by_symbol( recs, tmp_path ) == { "m.byEntry": { SID: [ "m.c1", "m.c2" ] }, "m.viaReceipt": { SID2: [] }, "m.second": { "rs-2222222222": [ "m.c4" ] } }
 
 
+def test_a_call_log_args_field_cut_before_the_entry_does_not_hide_the_search( tmp_path ):
+    # red when: the symbol is read from the logged args, which the middleware cuts at 300 characters
+    _write_record( tmp_path, SID, [ "m.c1" ], entry="m.hidden" )
+    call = _search_call( "a", SID, entry="m.hidden" ); call[ "args" ] = repr( { "extra_terms": [ "word" * 20 ] * 4, "entry": "m.hidden" } )[ :60 ]
+    assert "m.hidden" not in call[ "args"]
+    assert eg.searches_by_symbol( [ call ], tmp_path ) == { "m.hidden": { SID: [ "m.c1" ] } }
+
+
 def test_a_logged_search_with_nothing_usable_behind_it_yields_no_search( tmp_path ):
-    _write_record( tmp_path, SID, [ "m.c1" ] )
+    _write_record( tmp_path, SID, [ "m.c1" ], entry="m.x" )
     ( tmp_path / "search-records" / f"{SID2}.json" ).write_text( "{not json", encoding="utf-8" )
     ( tmp_path / "search-records" / "rs-3333333333.json" ).write_text( "[1, 2]", encoding="utf-8" )
-    _write_record( tmp_path, "rs-4444444444", [ "m.c1" ], id="rs-5555555555" )                      # the file does not carry its own name
-    _write_record( tmp_path, "rs-6666666666", [], candidates="not a list" )
-    _write_record( tmp_path, "rs-7777777777", [ "m.keep" ] ); doc = json.loads( ( tmp_path / "search-records" / "rs-7777777777.json" ).read_text( encoding="utf-8" ) )
+    _write_record( tmp_path, "rs-4444444444", [ "m.c1" ], entry="m.x", id="rs-5555555555" )          # the file does not carry its own name
+    _write_record( tmp_path, "rs-6666666666", [], entry="m.x", candidates="not a list" )
+    _write_record( tmp_path, "rs-7777777777", [ "m.keep" ], entry="m.partial" ); doc = json.loads( ( tmp_path / "search-records" / "rs-7777777777.json" ).read_text( encoding="utf-8" ) )
     doc[ "candidates" ] += [ "text", { "no_id": 1 } ]; ( tmp_path / "search-records" / "rs-7777777777.json" ).write_text( json.dumps( doc ), encoding="utf-8" )
     _write_receipt( tmp_path, "0123456789abcdef", "fetch_similar", None )                           # a receipt whose query is not text
-    recs = [ _search_call( "a", s, entry="m.x" ) for s in ( SID2, "rs-3333333333", "rs-4444444444", "rs-6666666666", "rs-8888888888" ) ]
-    recs += [ _search_call( "a", SID, entry="m.err", error="BAD_SEARCH_KEY" ), _search_call( "a", SID, entry="m.tool", tool="fetch_similar" ),
-              _search_call( "a", "rs-short", entry="m.badid" ), _search_call( "a", None, entry="m.noid" ),
-              _search_call( "a", SID, receipt="0123456789abcdef" ),                                 # a receipt whose query is not text
-              _search_call( "a", SID, receipt="../escape" ), _search_call( "a", SID, receipt="0000000000000000" ),   # not hex, and a receipt that is not there
-              _search_call( "a", "rs-7777777777", entry="m.partial" ) ]
+    _write_receipt( tmp_path, "not-hex", "fetch_similar", "m.escaped" )                              # a readable receipt under an id that is not 16 hex characters
+    ( tmp_path / "escape.json" ).write_text( json.dumps( { "tool": "fetch_similar", "query": "m.traversed" } ), encoding="utf-8" )
+    for n, rid in enumerate( ( "0123456789abcdef", "not-hex", "../escape", "0000000000000000" ) ): _write_record( tmp_path, f"rs-{n}000000000", [ "m.c1" ], receipt_id=rid )
+    recs = [ _search_call( "a", s ) for s in ( SID2, "rs-3333333333", "rs-4444444444", "rs-6666666666", "rs-8888888888" ) ]
+    recs += [ _search_call( "a", SID, error="BAD_SEARCH_KEY" ), _search_call( "a", SID, tool="fetch_similar" ), _search_call( "a", "rs-short" ), _search_call( "a", None ) ]
+    recs += [ _search_call( "a", f"rs-{n}000000000" ) for n in range( 4 ) ]                         # a receipt with no text, a non-hex id, a traversal, a receipt that is not there
+    _write_record( tmp_path, "rs-9999999999", [ "m.c1" ] )                                          # a record that names neither an entry nor a receipt
+    recs += [ _search_call( "a", "rs-7777777777" ), _search_call( "a", "rs-9999999999" ) ]
     assert eg.searches_by_symbol( recs, tmp_path ) == { "m.partial": { "rs-7777777777": [ "m.keep" ] } }       # a malformed candidate entry is left out, the rest kept
 
 
@@ -384,6 +394,17 @@ def test_check_run_judges_a_distinct_ruling_on_its_recorded_search():
     assert _row( distinct, empty, { "m.a": { SID: { "none": { "value": None, "why": "rare terms" } } } } ) == "OK"
 
 
+def test_a_candidate_named_on_two_lines_stays_same_job_if_either_line_says_so():
+    # red when: the last line wins, so a SAME_JOB finding can be undone by a later RELATED line
+    for order in ( ( "SAME_JOB", "RELATED" ), ( "RELATED", "SAME_JOB" ) ):
+        text   = "\n".join( f"SEARCHED m.a :: {SID} :: m.c1 :: {v} :: line {n}" for n, v in enumerate( order ) )
+        parsed = eg.parse_searched( text )
+        assert parsed[ "m.a" ][ SID ][ "m.c1" ][ "value" ] == "SAME_JOB", order
+        assert _row( ( "DISTINCT it differs", "r1", SID ), { "m.a": { SID: [ "m.c1" ] } }, parsed ) == "DISTINCT_CONTRADICTED", order
+    again = eg.parse_searched( f"SEARCHED m.a :: {SID} :: m.c1 :: RELATED :: first\nSEARCHED m.a :: {SID} :: m.c1 :: UNRELATED :: second" )
+    assert again[ "m.a" ][ SID ][ "m.c1" ] == { "value": "UNRELATED", "why": "second" }
+
+
 def test_a_row_with_no_distinct_ruling_ignores_the_searches_and_one_bad_distinct_ruling_fails_the_row():
     for ruling in ( ( "DUPLICATE", "r1", None ), ( "EXTEND m.x", "r1", None ) ):
         assert _row( ruling, None, None ) == "OK" and _row( ruling, {}, {} ) == "OK", ruling
@@ -403,7 +424,7 @@ def _distinct_gate( tmp_path, tail=f" :: search: {SID}", searched=(), record=Tru
     ids, rid = _ten()
     calls  = [ _call( "a", i, rid[ i ] ) for i in ids ] + ( [ _search_call( "a", SID, entry=ids[ 0 ] ) ] if call else [] )
     review = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ 1: ] ] + [ _ruling( ids[ 0 ], "DISTINCT it reads a different format", rid[ ids[ 0 ] ] ) + tail ]
-    if record: _write_record( tmp_path, SID, list( candidates ) )
+    if record: _write_record( tmp_path, SID, list( candidates ), entry=ids[ 0 ] )
     logs, runs = _two_runs( tmp_path, ( ids, review + [ l.replace( "<sym>", ids[ 0 ] ) for l in searched ] ), ( [], [] ), calls )
     return eg.run_gate( runs, logs )
 
@@ -457,7 +478,7 @@ def test_main_reads_the_data_dir_option_and_the_review_of_the_skill_passes_the_g
     fill = lambda line, sym, sid, rid_: line.replace( "<symbol id>", sym ).replace( "<search id>", sid ).replace( "<candidate id>", "m.near" ).replace( "<why>", "it formats" ).replace( "<receipt id>", rid_ )
     review = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ 2: ] ]
     review += [ fill( distinct, ids[ 0 ], SID, rid[ ids[ 0 ] ] ), fill( search_line, ids[ 0 ], SID, "" ), fill( distinct, ids[ 1 ], SID2, rid[ ids[ 1 ] ] ), fill( none_line, ids[ 1 ], SID2, "" ) ]
-    data = tmp_path / "elsewhere"; _write_record( data, SID, [ "m.near" ] ); _write_record( data, SID2, [] )
+    data = tmp_path / "elsewhere"; _write_record( data, SID, [ "m.near" ], entry=ids[ 0 ] ); _write_record( data, SID2, [], entry=ids[ 1 ] )
     calls = [ _call( "a", i, rid[ i ] ) for i in ids ] + [ _search_call( "a", SID, entry=ids[ 0 ] ), _search_call( "a", SID2, entry=ids[ 1 ] ) ]
     logs, runs = _two_runs( tmp_path, ( ids, review ), ( [], [] ), calls )
     args = [ "--log-dir", str( logs ) ] + [ x for r in runs for x in ( "--run", f"{r[ 'diff' ]}:{r[ 'review' ]}" ) ]

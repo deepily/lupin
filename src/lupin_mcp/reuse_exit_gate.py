@@ -167,6 +167,7 @@ def parse_searched( text ):
     Ensures:
         - returns { symbol id: { search id: { candidate id: { value, why } } } } for every line in the `SEARCHED` format
         - the line `SEARCHED <symbol id> :: <search id> :: none :: <why>` gives the candidate id `none` with the value None
+        - a candidate named on two lines keeps `SAME_JOB` if either line says it, so a later line cannot undo a finding
         - other lines are ignored
     """
     out = {}
@@ -175,7 +176,7 @@ def parse_searched( text ):
         if not m: continue
         cand = out.setdefault( m.group( "id" ), {} ).setdefault( m.group( "search" ), {} )
         if m.group( "cand" ) is None: cand[ NO_CANDIDATE ] = { "value": None, "why": m.group( "none_why" ) }
-        else:                         cand[ m.group( "cand" ) ] = { "value": m.group( "value" ), "why": m.group( "why" ) }
+        elif m.group( "cand" ) not in cand or cand[ m.group( "cand" ) ][ "value" ] != "SAME_JOB": cand[ m.group( "cand" ) ] = { "value": m.group( "value" ), "why": m.group( "why" ) }
     return out
 
 
@@ -221,7 +222,8 @@ def searches_by_symbol( records, data_dir ):
     Ensures:
         - returns { symbol id: { search id: [ candidate ids ] } }
         - only `record_search` calls that logged no error and a well-formed search id count
-        - the symbol is the call's `entry` argument, else the query of the fetch_similar receipt the call names
+        - the symbol is the record's `entry`, else the query of the fetch_similar receipt the record names
+        - the call log only says that a search ran, because its args field is cut at 300 characters and can hide the entry
         - a call whose record file is missing, unreadable, or does not carry its own id yields no search
         - reads the files with plain json, so the gate needs nothing from reuse_tools
     """
@@ -229,9 +231,10 @@ def searches_by_symbol( records, data_dir ):
     for r in records:
         sid = r.get( "search_id" )
         if r.get( "tool" ) != "record_search" or r.get( "error" ) or not isinstance( sid, str ) or not SEARCH_ID_RE.match( sid ): continue
-        symbol = entry_of( r ) or _receipt_symbol( data, r.get( "receipt_id" ) )
-        doc    = _read_json( data / "search-records" / f"{sid}.json" )
-        if not symbol or doc is None or doc.get( "id" ) != sid or not isinstance( doc.get( "candidates" ), list ): continue
+        doc = _read_json( data / "search-records" / f"{sid}.json" )
+        if doc is None or doc.get( "id" ) != sid or not isinstance( doc.get( "candidates" ), list ): continue
+        symbol = doc.get( "entry" ) or _receipt_symbol( data, doc.get( "receipt_id" ) )
+        if not symbol: continue
         out.setdefault( symbol, {} )[ sid ] = [ c[ "id" ] for c in doc[ "candidates" ] if isinstance( c, dict ) and "id" in c ]
     return out
 
