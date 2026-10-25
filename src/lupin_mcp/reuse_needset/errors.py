@@ -23,6 +23,7 @@ STRIP_FAILED            = "STRIP_FAILED"
 BAD_ROUTE               = "BAD_ROUTE"
 OUTSIDE_WINDOW          = "OUTSIDE_WINDOW"
 NOT_LUPIN_TREE          = "NOT_LUPIN_TREE"
+RECEIPT_FIELD_ABSENT    = "RECEIPT_FIELD_ABSENT"
 
 
 class NeedsetError( Exception ):
