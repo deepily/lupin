@@ -11,7 +11,9 @@ import subprocess
 
 import pytest
 
-REPO     = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+import cosa.utils.util as cu
+
+REPO     = pathlib.Path( cu.get_project_root() )
 SCRIPT   = "src/scripts/measure-xdist-coverage-arms.sh"
 RESOLVER = "src/scripts/lib/resolve-venv-pytest.sh"
 
