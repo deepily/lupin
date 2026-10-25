@@ -62,14 +62,15 @@ class Model:
         return NOTHING if "plausibly need next" in prompt else SENTENCE
 
 
-def make_env( tmp_path, ask=None, seed=DRAW_SEED, smoke=False, with_none=True, name="ledger.jsonl" ):
+def make_env( tmp_path, ask=None, seed=DRAW_SEED, smoke=False, with_none=True, name="ledger.jsonl", wrap_second=None ):
     """Build a run.Env over the small world."""
     by_id, kept, ctx, twins = build_world()
     book    = draft.SharedLedger( harness_runner.Ledger( str( tmp_path / name ), binding="test" ) )
     ask     = Model() if ask is None else ask
     stage, vectors, _ = absence_world()
     second  = SecondAsker( "NEVER", field="any_does_it" )
-    none_fn = draft.make_none_drafter( stage, vectors, lambda text: [ 1.0, 0.0 ], lambda i: "does a thing", second,
+    second_call = second if wrap_second is None else wrap_second( second )
+    none_fn = draft.make_none_drafter( stage, vectors, lambda text: [ 1.0, 0.0 ], lambda i: "does a thing", second_call,
                                        harness_runner.Ledger( str( tmp_path / "second.jsonl" ), binding="test" ), "claude-opus-5-5" ) if with_none else None
     return run.Env( by_id, kept, ctx, twins, strip_fn, ask, book, draft.DRAFTER_MODEL, "max-plan", COMMIT, seed, SPLIT, "test", "2026-10-24T22:00:00-04:00",
                     none_draft_fn=none_fn, parallel=2, smoke=smoke )

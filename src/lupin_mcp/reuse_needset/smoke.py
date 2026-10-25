@@ -82,22 +82,35 @@ def kind_split( args ):
 
 
 class Timed:
-    """A drafter call that times every call and counts the ones that raise."""
+    """Times every model call and counts the ones that raise, by the label of the model."""
 
-    def __init__( self, ask, clock ):
-        """Wrap ask( system, user ) and read the time from clock()."""
-        self.ask, self.clock, self.seconds, self.errors, self.lock = ask, clock, [], 0, threading.Lock()
+    def __init__( self, clock ):
+        """Read the time from clock(); calls holds ( label, seconds, failed ) rows."""
+        self.clock, self.calls, self.lock = clock, [], threading.Lock()
 
-    def __call__( self, system, prompt ):
-        """Forward the call, recording its duration and any failure."""
-        start = self.clock()
-        try:
-            return self.ask( system, prompt )
-        except Exception:
-            with self.lock: self.errors += 1
-            raise
-        finally:
-            with self.lock: self.seconds.append( self.clock() - start )
+    def wrap( self, label, ask ):
+        """Return ask with each call timed under label; the reply or the error passes through."""
+        def timed( *args ):
+            """Forward the call, recording its duration and whether it raised."""
+            start, failed = self.clock(), True
+            try:
+                reply  = ask( *args )
+                failed = False
+                return reply
+            finally:
+                with self.lock: self.calls.append( ( label, self.clock() - start, failed ) )
+        return timed
+
+    def summary( self, label=None ):
+        """
+        Summarise the calls of one label, or of all.
+
+        Ensures:
+            - returns { calls, errors, seconds } where seconds is { mean, min, max } or None with no call
+        """
+        rows = [ c for c in self.calls if label is None or c[ 0 ] == label ]
+        secs = [ c[ 1 ] for c in rows ]
+        return { "calls": len( rows ), "errors": sum( 1 for c in rows if c[ 2 ] ), "seconds": { "mean": sum( secs ) / len( secs ), "min": min( secs ), "max": max( secs ) } if secs else None }
 
 
 def index_parts( root, index_dir ):
@@ -141,12 +154,13 @@ def candidate_parts( vectors_dir, cache_dir, client, records ):
     return vectors, stage, embed
 
 
-def assemble_env( args, ask, second_ask, client, set_at ):
+def assemble_env( args, ask, second_ask, client, set_at, timed ):
     """
     Put the index, the candidate parts and the model calls into a run.Env.
 
     Requires:
         - ask( system, user ) and second_ask( system, user ) return reply text; client is an embeddings client
+        - timed is a Timed, and both models are called through it, under the labels draft and second
 
     Ensures:
         - the env is a smoke env, with its two ledgers under args.out_dir
@@ -161,16 +175,17 @@ def assemble_env( args, ask, second_ask, client, set_at ):
     extras  = { "vector_coverage": { "eligible": len( kept ), "with_a_vector_row": len( pooled ), "vector_set_ids": len( rows ), "stage_ids": len( stage.ids ) } }
     book    = draft.SharedLedger( draft.make_ledger( out / "ledger-draft.jsonl", args.cli_path, args.server ) )
     second  = draft.SharedLedger( draft.make_ledger( out / "ledger-second.jsonl", args.cli_path, args.server ) )
+    second_timed = timed.wrap( "second", second_ask )
     describe = lambda i: f"{by_id[ i ][ 'sig' ]} — {by_id[ i ][ 'doc' ]}"
-    none_fn = draft.make_none_drafter( stage, vectors, embed, describe, lambda prompt: second_ask( SECOND_SYSTEM, prompt ), second, args.second_model )
+    none_fn = draft.make_none_drafter( stage, vectors, embed, describe, lambda prompt: second_timed( SECOND_SYSTEM, prompt ), second, args.second_model )
     ctx     = keys.KeyContext( pooled, measures, bodies, args.seed, vectors )
-    return run.Env( by_id, pooled, ctx, twins, lambda rec: strip.strip_member( rec, root ), ask, book, draft.DRAFTER_MODEL, args.server, args.source_commit,
+    return run.Env( by_id, pooled, ctx, twins, lambda rec: strip.strip_member( rec, root ), timed.wrap( "draft", ask ), book, draft.DRAFTER_MODEL, args.server, args.source_commit,
                     args.seed, kind_split( args ), args.set_by, set_at, none_draft_fn=none_fn, parallel=args.parallel, smoke=True, extras=extras )
 
 
-def live_build_env( args, set_at ):
+def live_build_env( args, set_at, timed ):
     """Build the env with the real drafter, the real second model and the real embeddings client."""
-    return assemble_env( args, draft.drafter_call(), draft.drafter_call( args.second_model ), vector_build.EndpointClient(), set_at )
+    return assemble_env( args, draft.drafter_call(), draft.drafter_call( args.second_model ), vector_build.EndpointClient(), set_at, timed )
 
 
 def smoke_report( args, timed, result, started, finished, host, extras ):
@@ -178,19 +193,19 @@ def smoke_report( args, timed, result, started, finished, host, extras ):
     Summarise one smoke run as measurements.
 
     Ensures:
-        - returns the date, host, source commit, split, seed, call count, seconds per call (mean, min, max, or None with no call) and the env's extras
+        - returns the date, host, source commit, split, seed, extras, and the calls of both models: totals, errors, seconds per call and the same for each model
         - failure_rate is the failed seeds over the seeds tried, with failed seeds listed by reason
         - says in a note that it is a measurement and not a pass bar
     """
     cells  = result[ "cells" ]
     failed = [ f for c in cells for f in c[ "failed" ] ]
     tried  = sum( len( c[ "accepted" ] ) for c in cells ) + len( failed )
-    secs   = timed.seconds
+    total  = timed.summary()
     reasons = {}
     for f in failed: reasons[ f[ "reason" ] ] = reasons.get( f[ "reason" ], 0 ) + 1
     return { "format": SMOKE_FORMAT, "smoke": True, "date": finished.isoformat(), "host": host, "source_commit": args.source_commit, "seed": args.seed,
-             "kind_split": kind_split( args ), "ts_share": args.ts_share, "needs": len( result[ "needs" ] ), "model_calls": len( secs ), "call_errors": timed.errors,
-             "seconds_per_call": { "mean": sum( secs ) / len( secs ), "min": min( secs ), "max": max( secs ) } if secs else None,
+             "kind_split": kind_split( args ), "ts_share": args.ts_share, "needs": len( result[ "needs" ] ), "model_calls": total[ "calls" ], "call_errors": total[ "errors" ],
+             "seconds_per_call": total[ "seconds" ], "by_model": { label: timed.summary( label ) for label in ( "draft", "second" ) },
              "seeds_tried": tried, "seeds_failed": len( failed ), "failure_rate": len( failed ) / tried if tried else None, "failed_by_reason": reasons,
              "elapsed_seconds": ( finished - started ).total_seconds(), "extras": extras, "note": "a measurement, not a pass bar" }
 
@@ -200,12 +215,12 @@ def main( argv=None, build_env=None, now=None, clock=time.monotonic, host=None )
     Run the smoke: refuse a live run outside the window, then draft ten needs and measure.
 
     Requires:
-        - build_env( args, set_at ) returns a run.Env; None means the live env with real models
+        - build_env( args, set_at, timed ) returns a run.Env whose model calls go through timed.wrap; None means the live env
         - now is a function returning an aware datetime, None for the system clock
 
     Ensures:
         - returns the smoke report, also written as needset-smoke.json beside the plan, drafts and draft report
-        - every need carries smoke true, and the drafter's calls are timed
+        - every need carries smoke true, and the calls of the drafter and the second model are timed apart
         - the window is checked before anything is built or called, and only for the live env
 
     Raises:
@@ -219,9 +234,9 @@ def main( argv=None, build_env=None, now=None, clock=time.monotonic, host=None )
     if live and not in_window( start ): raise er.NeedsetError( er.OUTSIDE_WINDOW, start.astimezone( EASTERN ).isoformat() )
     table = quota.plan_quota( TOTAL, MATCHED, NONE, args.ts_share, kind_split( args ) )
     pathlib.Path( args.out_dir ).mkdir( parents=True, exist_ok=True )
-    env   = ( live_build_env if live else build_env )( args, start.isoformat() )
-    timed = Timed( env.ask, clock )
-    env.ask, env.smoke = timed, True
+    timed = Timed( clock )
+    env   = ( live_build_env if live else build_env )( args, start.isoformat(), timed )
+    env.smoke = True
     result = run.run_needset( env, table, args.out_dir )
     report = smoke_report( args, timed, result, start, now(), socket.gethostname() if host is None else host, env.extras )
     ( pathlib.Path( args.out_dir ) / SMOKE_FILE ).write_text( json.dumps( report, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )

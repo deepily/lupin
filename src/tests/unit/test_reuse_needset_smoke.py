@@ -3,6 +3,7 @@ The ten-need smoke: the live window, the measurements and the real index parts.
 """
 import datetime
 import json
+import time
 
 import pytest
 
@@ -50,8 +51,8 @@ def test_a_time_without_a_zone_is_refused():
 
 
 def test_the_command_line_names_the_split_and_has_no_default_for_it():
-    a = smoke.parse_args( argv( "/o" ) )
-    assert smoke.kind_split( a ) == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and a.parallel == 3 and a.second_model == smoke.SECOND_MODEL and a.server == "max-plan"
+    a = smoke.parse_args( [ x for x in argv( "/o" ) if x not in ( "--ts-share", "0.5" ) ] )
+    assert smoke.kind_split( a ) == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and a.parallel == 3 and a.second_model == "claude-opus-5-5" and a.server == "max-plan" and a.ts_share == 0.6
     for flag in ( "--near-copy", "--work-alike", "--cross-language", "--source-commit", "--seed" ):
         cut = argv( "/o" )
         i   = cut.index( flag )
@@ -59,17 +60,22 @@ def test_the_command_line_names_the_split_and_has_no_default_for_it():
         with pytest.raises( SystemExit ): smoke.parse_args( cut )
 
 
-def test_timed_records_each_duration_and_each_failure_and_passes_the_error_on():
-    ticks = iter( [ 0.0, 1.5, 2.0, 2.25 ] )
+def test_timed_records_each_duration_and_each_failure_by_label_and_passes_the_error_on():
+    ticks = iter( [ 0.0, 1.5, 2.0, 2.25, 3.0, 4.0 ] )
 
     def ask( system, prompt ):
         if prompt == "bad": raise RuntimeError( "boom" )
         return "reply"
 
-    timed = smoke.Timed( ask, lambda: next( ticks ) )
-    assert timed( "s", "ok" ) == "reply"
-    with pytest.raises( RuntimeError ): timed( "s", "bad" )
-    assert timed.seconds == [ 1.5, 0.25 ] and timed.errors == 1
+    timed = smoke.Timed( lambda: next( ticks ) )
+    one, two = timed.wrap( "draft", ask ), timed.wrap( "second", lambda prompt: "r" )
+    assert one( "s", "ok" ) == "reply"
+    with pytest.raises( RuntimeError ): one( "s", "bad" )
+    assert two( "p" ) == "r"
+    assert timed.calls == [ ( "draft", 1.5, False ), ( "draft", 0.25, True ), ( "second", 1.0, False ) ]
+    assert timed.summary( "draft" ) == { "calls": 2, "errors": 1, "seconds": { "mean": 0.875, "min": 0.25, "max": 1.5 } }
+    assert timed.summary( "second" )[ "calls" ] == 1 and timed.summary()[ "calls" ] == 3 and timed.summary()[ "errors" ] == 1
+    assert smoke.Timed( None ).summary() == { "calls": 0, "errors": 0, "seconds": None }
 
 
 def fake_result( accepted, failed ):
@@ -78,14 +84,15 @@ def fake_result( accepted, failed ):
 
 
 def test_the_report_gives_the_rates_the_reasons_and_calls_it_a_measurement():
-    timed = smoke.Timed( None, None )
-    timed.seconds, timed.errors = [ 1.0, 3.0 ], 1
+    timed = smoke.Timed( None )
+    timed.calls = [ ( "draft", 1.0, False ), ( "draft", 3.0, True ), ( "second", 5.0, False ) ]
     args  = smoke.parse_args( argv( "/o" ) )
     rep   = smoke.smoke_report( args, timed, fake_result( 3, [ "NO_KEY", "NEED_LEAKS_KEY", "NO_KEY" ] ), at( 14, 0 ), at( 14, 5 ), "boxy", { "k": 1 } )
     assert rep[ "seeds_tried" ] == 6 and rep[ "seeds_failed" ] == 3 and rep[ "failure_rate" ] == 0.5 and rep[ "failed_by_reason" ] == { "NO_KEY": 2, "NEED_LEAKS_KEY": 1 }
-    assert rep[ "seconds_per_call" ] == { "mean": 2.0, "min": 1.0, "max": 3.0 } and rep[ "model_calls" ] == 2 and rep[ "call_errors" ] == 1 and rep[ "elapsed_seconds" ] == 300.0
+    assert rep[ "seconds_per_call" ] == { "mean": 3.0, "min": 1.0, "max": 5.0 } and rep[ "model_calls" ] == 3 and rep[ "call_errors" ] == 1 and rep[ "elapsed_seconds" ] == 300.0
     assert rep[ "host" ] == "boxy" and rep[ "source_commit" ] == COMMIT and rep[ "smoke" ] is True and rep[ "note" ] == "a measurement, not a pass bar" and rep[ "needs" ] == 3 and rep[ "extras" ] == { "k": 1 }
-    idle = smoke.smoke_report( args, smoke.Timed( None, None ), fake_result( 0, [] ), at( 14, 0 ), at( 14, 0 ), "boxy", {} )
+    assert rep[ "by_model" ] == { "draft": timed.summary( "draft" ), "second": timed.summary( "second" ) } and rep[ "by_model" ][ "second" ][ "seconds" ][ "mean" ] == 5.0
+    idle = smoke.smoke_report( args, smoke.Timed( None ), fake_result( 0, [] ), at( 14, 0 ), at( 14, 0 ), "boxy", {} )
     assert idle[ "seconds_per_call" ] is None and idle[ "failure_rate"] is None
 
 
@@ -99,9 +106,10 @@ def test_a_live_run_outside_the_window_is_refused_before_anything_is_built( tmp_
 def test_a_live_run_in_the_window_uses_the_live_env_and_writes_the_measurements( tmp_path, monkeypatch ):
     seen = []
 
-    def live( args, set_at ):
+    def live( args, set_at, timed ):
         seen.append( set_at )
-        return make_env( tmp_path / "w", name="live.jsonl" ) if ( tmp_path / "w" ).mkdir() is None else None
+        ( tmp_path / "w" ).mkdir()
+        return make_env( tmp_path / "w", ask=timed.wrap( "draft", Model() ), name="live.jsonl" )
 
     monkeypatch.setattr( smoke, "live_build_env", live )
     rep = smoke.main( argv( tmp_path / "out" ), now=lambda: at( 15, 0 ), host="h" )
@@ -110,18 +118,21 @@ def test_a_live_run_in_the_window_uses_the_live_env_and_writes_the_measurements(
 
 def test_a_smoke_run_over_a_fake_env_marks_every_need_and_writes_all_four_files( tmp_path ):
     model = Model()
-    ticks = iter( range( 1000 ) )
-    rep   = smoke.main( argv( tmp_path / "out" ), build_env=lambda a, t: make_env( tmp_path, ask=model, name="x.jsonl" ), now=lambda: at( 3, 0 ), clock=lambda: next( ticks ) * 0.5, host="h" )
+    ticks = iter( range( 10000 ) )
+    build = lambda a, t, timed: make_env( tmp_path, ask=timed.wrap( "draft", model ), name="x.jsonl", wrap_second=lambda f: timed.wrap( "second", f ) )
+    rep   = smoke.main( argv( tmp_path / "out" ), build_env=build, now=lambda: at( 3, 0 ), clock=lambda: next( ticks ) * 0.5, host="h" )
     out   = tmp_path / "out"
     needs = [ json.loads( l ) for l in ( out / "needset-drafts.jsonl" ).read_text().splitlines() ]
     assert len( needs ) == 10 == rep[ "needs" ] and all( n[ "smoke" ] is True for n in needs )
-    assert rep[ "model_calls" ] == model.calls > 0 and rep[ "seconds_per_call" ][ "mean" ] == 0.5 and rep[ "failure_rate" ] == 0.0
+    second = rep[ "by_model" ][ "second" ][ "calls" ]
+    assert rep[ "by_model" ][ "draft" ][ "calls" ] == model.calls > 0 and second > 0, "the nothing needs call the second model, and the report counts those calls"
+    assert rep[ "model_calls" ] == model.calls + second and rep[ "seconds_per_call" ][ "mean" ] == 0.5 and rep[ "failure_rate" ] == 0.0
     assert json.loads( ( out / smoke.SMOKE_FILE ).read_text() ) == rep and json.loads( ( out / "needset-draft-report.json" ).read_text() )[ "smoke" ] is True
     assert ( out / "needset-plan.json" ).is_file() and rep[ "host" ] == "h" and rep[ "kind_split" ] == { "near_copy": 2, "work_alike": 4, "cross_language": 2 }
 
 
 def test_a_split_that_does_not_add_up_is_refused_before_the_env_is_built( tmp_path ):
-    with pytest.raises( er.NeedsetError ) as e: smoke.main( argv( tmp_path / "out", near=1, work=1, cross=1 ), build_env=lambda a, t: pytest.fail( "built" ), now=lambda: at( 3, 0 ) )
+    with pytest.raises( er.NeedsetError ) as e: smoke.main( argv( tmp_path / "out", near=1, work=1, cross=1 ), build_env=lambda a, t, timed: pytest.fail( "built" ), now=lambda: at( 3, 0 ) )
     assert e.value.code == er.QUOTA_INVALID
 
 
@@ -153,7 +164,7 @@ def test_the_env_is_assembled_from_the_real_index_with_two_ledgers_and_a_smoke_f
     monkeypatch.setattr( smoke.vector_store, "load_vectors", lambda d: loaded )
     args = smoke.parse_args( argv( tmp_path / "out", extra=[ "--cli-path", "" ] ) )
     args.root = str( root )
-    env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00" )
+    env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00", smoke.Timed( time.monotonic ) )
     assert env.smoke is True and env.model_id == draft.DRAFTER_MODEL and env.source_commit == COMMIT and env.seed == 7 and env.set_at == "2026-10-24T14:00:00+00:00"
     assert env.kind_split == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and env.parallel == 3 and env.none_draft_fn is not None
     assert env.extras == { "vector_coverage": { "eligible": len( env.kept ), "with_a_vector_row": len( env.kept ), "vector_set_ids": len( ids ), "stage_ids": len( by_id ) } }
@@ -169,8 +180,8 @@ def test_the_live_env_uses_the_real_drafter_the_named_second_model_and_the_embed
     monkeypatch.setattr( smoke.vector_build, "EndpointClient", lambda: "client" )
     monkeypatch.setattr( smoke, "assemble_env", lambda *a: ( got.append( a ) or "env" ) )
     args = smoke.parse_args( argv( "/o", extra=[ "--second-model", "model-b" ] ) )
-    assert smoke.live_build_env( args, "when" ) == "env"
-    assert made == [ (), ( "model-b", ) ] and got == [ ( args, "call1", "call2", "client", "when" ) ]
+    assert smoke.live_build_env( args, "when", "timer" ) == "env"
+    assert made == [ (), ( "model-b", ) ] and got == [ ( args, "call1", "call2", "client", "when", "timer" ) ]
 
 
 def test_a_symbol_newer_than_the_vector_set_is_left_out_of_the_pool_and_counted( tmp_path, monkeypatch ):
@@ -182,7 +193,7 @@ def test_a_symbol_newer_than_the_vector_set_is_left_out_of_the_pool_and_counted(
     monkeypatch.setattr( smoke.vector_store, "load_vectors", lambda d: loaded )
     args = smoke.parse_args( argv( tmp_path / "out", extra=[ "--cli-path", "" ] ) )
     args.root = str( root )
-    env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00" )
+    env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00", smoke.Timed( time.monotonic ) )
     assert sorted( r[ "id" ] for r in env.kept ) == old and env.ctx.by_id.keys() == set( old )
     assert env.extras[ "vector_coverage" ] == { "eligible": len( kept ), "with_a_vector_row": len( old ), "vector_set_ids": len( old ), "stage_ids": len( by_id ) }
 
