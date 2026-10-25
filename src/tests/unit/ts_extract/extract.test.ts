@@ -100,6 +100,33 @@ test( "doc_full: the whole JSDoc with its tags is folded to one line", () => {
     assert.equal( by.add.doc_full, "Adds two numbers. @param x the…" );    // a named tag with a comment, an unnamed one, a named one with none: cut at 30
 } );
 
+test( "doc_full: with two JSDoc blocks before one definition the block nearest the definition is the one read", () => {
+    const out = run( { "two.ts": "/** First block. */\n/** Second block. */\nexport function f() {}\n" }, LIMITS );
+    assert.equal( out[ 0 ].doc, "Second block." );                         // doc and doc_full take the same block
+    assert.equal( out[ 0 ].doc_full, "Second block." );
+} );
+
+test( "end_line: the last line of each definition, one-line, multi-line, private and arrow", () => {
+    const src = [
+        "export function one() {}",
+        "",
+        "export function multi( a: number,",
+        "                       b: number ) {",
+        "    return a + b;",
+        "}",
+        "export class K {",
+        "    private hid() {",
+        "        return 1;",
+        "    }",
+        "}",
+        "const arrow = ( a: number ) =>",
+        "    a + 1;",
+        "",
+    ].join( "\n" );
+    const spans = Object.fromEntries( run( { "e.ts": src } ).map( ( r: any ) => [ r.name, [ r.line, r.end_line ] ] ) );
+    assert.deepEqual( spans, { one: [ 1, 1 ], multi: [ 3, 6 ], K: [ 7, 11 ], "K.hid": [ 8, 10 ], arrow: [ 12, 13 ] } );
+} );
+
 test( "doc_full: a text of exactly the limit is kept and a longer one is cut by code points", () => {
     const run1 = ( text: string, limit: number ) => run( { "e.ts": `/** ${text} */\nexport function f() {}\n` }, { doc_limit: limit, doc_marker: "…" } )[ 0 ].doc_full;
     assert.equal( run1( "abcd", 4 ), "abcd" );
