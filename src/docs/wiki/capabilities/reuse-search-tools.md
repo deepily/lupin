@@ -2,11 +2,11 @@
 capability: reuse-search-tools
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.cosa_voice_mcp.check_exists@1bf40cb540
-  - lupin_mcp.cosa_voice_mcp.fetch_similar@c954e87950
+  - lupin_mcp.cosa_voice_mcp.check_exists@d082fd8289
+  - lupin_mcp.cosa_voice_mcp.fetch_similar@265391e1a7
   - lupin_mcp.cosa_voice_mcp.read_capability@0ab23a5e6c
   - lupin_mcp.cosa_voice_mcp.replay@42a3299a59
-  - lupin_mcp.reuse_tools.prepare@daa78dd6d0
+  - lupin_mcp.reuse_tools.prepare@1ce06b4fb2
   - lupin_mcp.reuse_tools.sendable@6d563314ce
   - lupin_mcp.reuse_tools.sweep@6b56c2af23
   - lupin_mcp.reuse_tools.LiveJevTransport.post@05ba74d3cf
@@ -18,7 +18,7 @@ pins:
 Four MCP tools ask whether a new definition already exists. A fifth, `record_search`, is on [[reuse-record-search]]. They read the [[symbol-index]] and the wiki, and send short symbol descriptions to the Jev model. They never edit code, but a stale index is rebuilt first, which writes `src/docs/index`.
 
 ## The four tools
-- `check_exists( need, language )` redacts the need, then asks Jev about index entries of one language. The language is `py`, `ts`, `dart` or `all`, has no default, and a missing or unknown one answers `LANGUAGE_REQUIRED` or `LANGUAGE_INVALID` before any request. It returns a verdict, a shortlist capped at 10, the nearest entries and a receipt id. An empty need answers `EMPTY_NEED`.
+- `check_exists( need, language )` redacts the need, then asks Jev about index entries of one language. The language is `py`, `ts`, `dart` or `all`, has no default, and a missing or unknown one answers `LANGUAGE_REQUIRED` or `LANGUAGE_INVALID` before any request. It returns a verdict, a shortlist capped at 10, the nearest entries and a receipt id. With `include_tests` it also asks the test files, sweeping every record, and `fetch_similar` takes the same flag. An empty need answers `EMPTY_NEED`.
 - `fetch_similar( entry, language )` uses one indexed symbol as the need and asks about every other entry of that language. The language is required and never inferred from the entry. It returns the same shape with `uncertain` in place of a verdict.
 - Its id is looked up among all definitions, private ones included. `UNKNOWN_ENTRY` means no definition, only while the index is healthy. `EXCLUDED_SENSITIVE_CONTENT` or `EXCLUDED_PREFIX` means it may not be sent.
 - `read_capability( names )` reads `capabilities/<name>.md` and makes no Jev call. A bad or missing name is `BAD_NAME` or `NOT_FOUND` per name.

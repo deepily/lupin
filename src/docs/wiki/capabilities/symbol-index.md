@@ -3,15 +3,15 @@ capability: symbol-index
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.__main__.main@7211bf6a01
-  - cosa.repo.symindex.build.build@09e95fcde0
+  - cosa.repo.symindex.build.build@31ca151e09
   - cosa.repo.symindex.build.is_fresh@000012c2c9
-  - cosa.repo.symindex.build.ensure@2bd7e42472
+  - cosa.repo.symindex.build.ensure@2e71eb83d8
   - cosa.repo.symindex.build.environment@a85e449992
   - cosa.repo.symindex.py_index.pin@c0bd7387a7
   - cosa.repo.symindex.spec.spec_for@dcc9afbd88
   - cosa.repo.symindex.paths.default_out_dir@f298ce42ab
   - cosa.repo.symindex.wiki_lint.queue@89c508ab1c
-  - lupin_mcp.reuse_tools.prepare@daa78dd6d0
+  - lupin_mcp.reuse_tools.prepare@1ce06b4fb2
 ---
 # Symbol index
 
@@ -36,5 +36,5 @@ pins:
 ## Failures and callers
 - `build` exits 3 when any tool is missing, such as node, TypeScript or the Dart analyzer, and the index is built without it. A Python or Dart file that will not parse is listed in `unparsed` and skipped.
 - If node itself fails, `build` crashes with a traceback. `fresh` exits 1 when stale. `lint` exits 1 on a finding. `dups` reads Python and script files, private and nested ones included (`--public-only` drops them), and leaves out bodies under 25 nodes. `dups` exits 1 on a finding. With node or the compiler missing it reports Python only, names the tool in `provenance.missing_dependencies` and exits 3.
-- `reuse_tools.prepare` is the one runtime reader, through the MCP tools. It reads the searchable listing: the public and private definitions. It calls `ensure` and answers `INDEX_STALE` if that raises.
+- `reuse_tools.prepare` is the one runtime reader, through the MCP tools. It reads the searchable listing: the public and private definitions. It calls `ensure` and answers `INDEX_STALE` if that raises. With `include_tests` it also ensures a tests index in its own folder. `build` and `ensure` take an optional spec for that.
 - No INI key and no hook uses the index. The environment variables `LUPIN_REUSE_DATA_DIR` and `LUPIN_REUSE_OUT_DIR` move its folders for the reuse tools only. The CLI uses `--out`.
