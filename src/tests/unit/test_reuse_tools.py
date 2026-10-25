@@ -563,7 +563,9 @@ def test_c1_a_damaged_snapshot_is_a_named_error_never_a_raw_exception( env ):
                "bad json" : gzip.compress( b"{nope" ), "wrong shape": gzip.compress( b'[1, 2]' ),
                "no fields": gzip.compress( b'{"symbols_jsonl": 5, "l0": []}' ), "bad l0": gzip.compress( json.dumps( { "symbols_jsonl": "", "l0": "x" } ).encode() ),
                "entry not a dict": gzip.compress( json.dumps( { "symbols_jsonl": "[1]\n", "l0": [] } ).encode() ),
-               "entry without sig": gzip.compress( json.dumps( { "symbols_jsonl": json.dumps( { "id": "a", "doc": "d", "file": "f" } ) + "\n", "l0": [] } ).encode() ) }
+               "entry without sig": gzip.compress( json.dumps( { "symbols_jsonl": json.dumps( { "id": "a", "doc": "d", "file": "f", "lang": "py" } ) + "\n", "l0": [] } ).encode() ),
+               "entry without lang": gzip.compress( json.dumps( { "symbols_jsonl": json.dumps( { "id": "a", "sig": "()", "doc": "d", "file": "f" } ) + "\n", "l0": [] } ).encode() ),     # replay filters by lang, so a missing one must not reach it
+               "lang not a string": gzip.compress( json.dumps( { "symbols_jsonl": json.dumps( { "id": "a", "sig": "()", "doc": "d", "file": "f", "lang": 7 } ) + "\n", "l0": [] } ).encode() ) }
     for label, blob in damage.items():
         snap.write_bytes( blob )
         out = rt.replay_impl( r[ "receipt_id" ], c )

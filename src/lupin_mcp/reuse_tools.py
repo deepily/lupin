@@ -62,7 +62,7 @@ DEFAULT_CALL_BUDGET = CALL_BUDGET_CAP
 ARM_CAP_PERCENT    = 10                         # an arm of the measurement stage may send its entry count plus this share, rounded up
 BUDGET_VARIABLE     = "LUPIN_REUSE_JEV_CALL_BUDGET"
 NAME_RE      = re.compile( r"[\w\-]+" )
-SYMBOL_FIELDS = ( "id", "sig", "doc", "file" )
+SYMBOL_FIELDS = ( "id", "sig", "doc", "file", "lang" )
 
 PROMPT_TEMPLATE = {
     "instructions": ( "A developer plans to write new code for NEED. Judge only from CANDIDATE's signature and "
@@ -922,7 +922,7 @@ def save_snapshot( ctx, sha_, gen, l0 ):
 def load_snapshot( ctx, sha_ ):
     """
     Ensures:
-        - returns ( entries, l0 ) of the frozen index; every entry has string id, sig, doc and file
+        - returns ( entries, l0 ) of the frozen index; every entry has string id, sig, doc, file and lang
     Raises:
         - ReuseError SNAPSHOT_MISSING when absent
         - ReuseError SNAPSHOT_CORRUPT when the file is not gzip, is truncated, is not JSON of the stored
