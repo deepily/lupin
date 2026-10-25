@@ -31,9 +31,9 @@ def reader_of( values ):
     return lambda key: values.get( key )
 
 
-def sampled_need():
-    """Return the first need the sample takes, found by search so no magic string is needed."""
-    return next( f"need {n}" for n in range( 5000 ) if sa.is_sampled( f"need {n}", SET_ID ) )
+def sampled_need( *sets ):
+    """Return the first need the sample takes under every given set id."""
+    return next( f"need {n}" for n in range( 5000 ) if all( sa.is_sampled( f"need {n}", one ) for one in ( sets or ( SET_ID, ) ) ) )
 
 
 def unsampled_need():
@@ -170,9 +170,10 @@ class TestQueueLookup:
         assert rs.queue_lookup( tmp_path, receipt, DAY, reader_of( ON ) ) is None
 
     def test_a_lookup_whose_stage_failed_is_never_queued( self, tmp_path ):
-        receipt = receipt_of( sampled_need() )
+        receipt = receipt_of( sampled_need( None, SET_ID ) )       # sampled whatever the set id, so only the error guard keeps it out
         receipt[ "candidate_stage" ] = { "ids": [], "manifest_hash": None, "error": { "code": "X", "detail": "y" } }
         assert rs.queue_lookup( tmp_path, receipt, DAY, reader_of( ON ) ) is None
+        assert queue_files( tmp_path ) == [] and not ( tmp_path / "receipts" ).exists()
 
 
 class TestLiveLookupHook:
@@ -282,18 +283,22 @@ class TestContextFactory:
         seen = []
         monkeypatch.setattr( reuse_tools, "context_from_environment", lambda root: seen.append( ( root, os.environ[ reuse_tools.CEILING_VARIABLE ],
                                                                                               os.environ[ reuse_tools.RUN_NAME_VARIABLE ], os.environ[ reuse_tools.PACK_SIZE_VARIABLE ] ) ) or "ctx" )
-        monkeypatch.delenv( reuse_tools.CEILING_VARIABLE, raising=False )
+        monkeypatch.setenv( reuse_tools.CEILING_VARIABLE, "old-ceiling" )
+        monkeypatch.setenv( "SHADOW_TEST_BYSTANDER", "keep" )
+        monkeypatch.delenv( reuse_tools.RUN_NAME_VARIABLE, raising=False )
         factory = rs._context_factory( "/repo", { reuse_tools.PACK_SIZE_VARIABLE: "8" }, 1234 )
         assert factory( "run-1" ) == "ctx"
         assert seen == [ ( "/repo", "1234", "run-1", "8" ) ]
-        assert reuse_tools.CEILING_VARIABLE not in os.environ and reuse_tools.RUN_NAME_VARIABLE not in os.environ
+        assert os.environ[ reuse_tools.CEILING_VARIABLE ] == "old-ceiling" and os.environ[ "SHADOW_TEST_BYSTANDER" ] == "keep"
+        assert reuse_tools.RUN_NAME_VARIABLE not in os.environ and reuse_tools.PACK_SIZE_VARIABLE not in os.environ
 
     def test_the_environment_is_restored_when_the_context_fails( self, monkeypatch ):
         def boom( root ): raise reuse_tools.ReuseError( "BAD_SPEND_LIMIT", "x" )
         monkeypatch.setattr( reuse_tools, "context_from_environment", boom )
-        monkeypatch.delenv( reuse_tools.RUN_NAME_VARIABLE, raising=False )
+        monkeypatch.setenv( "SHADOW_TEST_BYSTANDER", "keep" )
+        monkeypatch.setenv( reuse_tools.RUN_NAME_VARIABLE, "old-run" )
         with pytest.raises( reuse_tools.ReuseError ): rs._context_factory( "/repo", { reuse_tools.PACK_SIZE_VARIABLE: "8" }, 5 )( "r" )
-        assert reuse_tools.RUN_NAME_VARIABLE not in os.environ
+        assert os.environ[ "SHADOW_TEST_BYSTANDER" ] == "keep" and os.environ[ reuse_tools.RUN_NAME_VARIABLE ] == "old-run"
 
 
 class FakeOut:
