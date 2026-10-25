@@ -298,12 +298,16 @@ class TestServe( unittest.TestCase ):
             return _serve( full, rel, scope="proj", parent_validator=lambda p: True, scope_cfg=_ini_cfg() )
 
     def test_directory_returns_json( self ):
-        """Ensures: a directory path returns a JSONResponse listing."""
+        """Ensures: a directory path returns a JSONResponse listing read through the descriptor."""
+        # Row 147ce846: the folder is opened and judged by open_pinned (exercised for real in
+        # test_docs_files_check_then_open_race.py); a fake descriptor (7) stands in for that step here.
         with patch( "cosa.rest.routers.docs_files.os.path.isdir", return_value=True ), \
-             patch( "cosa.rest.routers.docs_files.list_directory", return_value={ "k": "dir" } ), \
+             patch( "cosa.rest.routers.docs_files.open_pinned", return_value=7 ), \
+             patch( "cosa.rest.routers.docs_files.list_directory", return_value={ "k": "dir" } ) as listing, \
              patch( "cosa.rest.routers.docs_files.JSONResponse", side_effect=lambda content: content ):
             result = self._serve( full="/repo/src" )
         self.assertEqual( result, { "k": "dir" } )
+        self.assertTrue( listing.call_args.kwargs[ "abs_dir" ].endswith( "/7" ) )
 
     def test_missing_path_404( self ):
         """Ensures: a non-dir, non-file path raises 404."""
