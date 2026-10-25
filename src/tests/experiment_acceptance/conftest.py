@@ -73,10 +73,20 @@ class Account:
         """Return an Authorization header for this account."""
         return { "Authorization": f"Bearer {self.login_tokens()[ 'access_token' ]}" }
 
+    def me( self ):
+        """Return this account's record from the API."""
+        response = requests.get( f"{self.server_url}/auth/me", headers=self.bearer(), timeout=10 )
+        return response.json()
+
     def user_id( self ):
         """Return this account's system user id."""
-        response = requests.get( f"{self.server_url}/auth/me", headers=self.bearer(), timeout=10 )
-        return response.json()[ "id" ]
+        return self.me()[ "id" ]
+
+    def awaiting_response( self ):
+        """Return the raw text of the response cards still waiting for an answer."""
+        response = requests.get( f"{self.server_url}/api/notifications/awaiting-response", headers=self.bearer(), timeout=10 )
+        assert response.status_code == 200, f"awaiting-response failed: {response.status_code} {response.text}"
+        return response.text
 
     def send( self, message, sender_id="exp-sender@lupin.deepily.ai", priority="medium", **extra ):
         """Send a notification to this account as an outside sender; returns the response."""

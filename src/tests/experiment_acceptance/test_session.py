@@ -40,10 +40,16 @@ def test_a_session_survives_a_reload( signed_in, server_url ):
 
 @pytest.mark.feature( "F06" )
 def test_profile_shows_the_account_and_no_admin_section( signed_in, server_url, account ):
+    me = account.me()
     signed_in.goto( f"{server_url}/app/auth/profile" )
     expect( signed_in.get_by_role( "heading", name="Your Profile" ) ).to_be_visible()
-    expect( signed_in.get_by_text( account.email ) ).to_be_visible()
-    expect( signed_in.get_by_text( account.user_id() ) ).to_be_visible()
+    for label in ( "Email", "User ID", "Roles", "Email Verified", "Account Status" ):
+        expect( signed_in.get_by_text( label, exact=True ) ).to_be_visible()
+    expect( signed_in.get_by_text( me[ "email" ] ) ).to_be_visible()
+    expect( signed_in.get_by_text( me[ "id" ] ) ).to_be_visible()
+    for role in me[ "roles" ]: expect( signed_in.get_by_text( role.upper() ) ).to_be_visible()
+    expect( signed_in.get_by_text( "Verified" if me[ "email_verified" ] else "Not Verified", exact=True ) ).to_be_visible()
+    expect( signed_in.get_by_text( "Active" if me[ "is_active" ] else "Inactive", exact=True ) ).to_be_visible()
     expect( signed_in.get_by_role( "button", name="Change Password" ) ).to_be_visible()
     expect( signed_in.get_by_role( "button", name="Logout" ) ).to_be_visible()
     expect( signed_in.get_by_text( "ADMIN ACCESS" ) ).to_have_count( 0 )
@@ -81,7 +87,8 @@ def test_change_password_takes_effect_and_cancel_returns_to_profile( signed_in, 
     signed_in.get_by_label( "New Password", exact=True ).fill( NEW_PASSWORD )
     signed_in.get_by_label( "Confirm New Password" ).fill( NEW_PASSWORD )
     signed_in.get_by_role( "button", name="Update Password" ).click()
-    signed_in.wait_for_timeout( 3000 )
+    expect( signed_in.get_by_text( "Password updated successfully!" ) ).to_be_visible()
+    expect( signed_in ).to_have_url( re.compile( r"/app/auth/login" ), timeout=15000 )      # the page logs the user out about 2 seconds later
     new = requests.post( f"{server_url}/auth/login", json={ "email": account.email, "password": NEW_PASSWORD }, timeout=10 )
     old = requests.post( f"{server_url}/auth/login", json={ "email": account.email, "password": account.password }, timeout=10 )
     assert new.status_code == 200

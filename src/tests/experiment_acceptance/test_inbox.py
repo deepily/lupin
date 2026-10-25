@@ -1,4 +1,5 @@
 """Notifications inbox: list, live arrival, senders, deletes, answers, priority filter."""
+import re
 import threading
 
 import pytest
@@ -59,6 +60,8 @@ def test_senders_list_counts_and_filters( signed_in, server_url, account ):
     inbox = _reload_inbox( signed_in, server_url )
     senders = signed_in.get_by_role( "list", name="Senders" )
     expect( senders.get_by_text( OTHER_SENDER ) ).to_be_visible()
+    expect( senders.get_by_role( "listitem" ).filter( has_text=OTHER_SENDER ) ).to_contain_text( re.compile( r"\b1\b" ) )
+    expect( senders.get_by_role( "listitem" ).filter( has_text="exp-sender@lupin.deepily.ai" ) ).to_contain_text( re.compile( r"\b2\b" ) )
     senders.get_by_text( OTHER_SENDER ).click()
     expect( inbox.get_by_text( "from other" ) ).to_be_visible()
     expect( inbox.get_by_text( "from one a" ) ).to_have_count( 0 )
@@ -99,27 +102,32 @@ def test_delete_conversation_removes_every_notification_from_that_sender( signed
 def test_a_yes_no_question_can_be_answered_and_stays_answered( signed_in, server_url, account ):
     result = {}
     inbox  = _open_inbox( signed_in, server_url )
+    yes    = inbox.get_by_role( "button", name="Yes", exact=True )
+    no     = inbox.get_by_role( "button", name="No", exact=True )
     sender = threading.Thread( target=lambda: result.update( response=account.send( "Deploy now?", response_requested="true", response_type="yes_no", timeout_seconds=60 ) ) )
     sender.start()
     expect( inbox.get_by_text( "Deploy now?" ) ).to_be_visible( timeout=10000 )
-    inbox.get_by_role( "button", name="Yes" ).click()
+    assert "Deploy now?" in account.awaiting_response(), "an unanswered card is listed as awaiting a response"
+    yes.click()
     expect( inbox.get_by_text( "Answered: yes" ) ).to_be_visible()
-    expect( inbox.get_by_role( "button", name="Yes" ) ).to_be_disabled()
-    expect( inbox.get_by_role( "button", name="No" ) ).to_be_disabled()
+    expect( yes ).to_be_disabled()
+    expect( no ).to_be_disabled()
     sender.join( timeout=30 )
     assert "yes" in result[ "response" ].text.lower()
+    assert "Deploy now?" not in account.awaiting_response(), "an answered card is no longer awaiting"
     signed_in.reload()
     expect( _open_inbox( signed_in, server_url ).get_by_text( "Answered: yes" ) ).to_be_visible()
 
 
 @pytest.mark.feature( "F14" )
-def test_priority_filter_narrows_the_list( signed_in, server_url, account ):
+def test_priority_filter_narrows_the_list_to_each_priority( signed_in, server_url, account ):
     _open_inbox( signed_in, server_url )
-    account.send( "quiet one", priority="low" )
-    account.send( "loud one", priority="urgent" )
+    for priority in ( "low", "medium", "high", "urgent" ): account.send( f"{priority} one", priority=priority )
     inbox = _reload_inbox( signed_in, server_url )
-    signed_in.get_by_role( "combobox", name="Priority" ).select_option( label="Urgent" )
-    expect( inbox.get_by_text( "loud one" ) ).to_be_visible()
-    expect( inbox.get_by_text( "quiet one" ) ).to_have_count( 0 )
-    signed_in.get_by_role( "combobox", name="Priority" ).select_option( label="Any priority" )
-    expect( inbox.get_by_text( "quiet one" ) ).to_be_visible()
+    picker = signed_in.get_by_role( "combobox", name="Priority" )
+    for label, priority in ( ( "Low", "low" ), ( "Medium", "medium" ), ( "High", "high" ), ( "Urgent", "urgent" ) ):
+        picker.select_option( label=label )
+        expect( inbox.get_by_role( "listitem" ) ).to_have_count( 1 )
+        expect( inbox.get_by_text( f"{priority} one" ) ).to_be_visible()
+    picker.select_option( label="Any priority" )
+    expect( inbox.get_by_role( "listitem" ) ).to_have_count( 4 )

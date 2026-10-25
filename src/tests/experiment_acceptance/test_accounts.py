@@ -94,4 +94,6 @@ def test_login_refusals_show_their_messages( page, server_url, account ):
     page.get_by_label( "Password", exact=True ).fill( account.password + "x" )
     page.get_by_role( "button", name="Login" ).click()
     expect( page.get_by_text( "Invalid email or password. Please check your credentials and try again." ) ).to_be_visible()
-    assert page.url.endswith( "/app/auth/login" ) or "/app/auth/login" in page.url
+    expect( page ).to_have_url( re.compile( r"/app/auth/login" ) )
+    page.goto( f"{server_url}/app/auth/profile" )
+    expect( page ).to_have_url( re.compile( r"/app/auth/login" ), timeout=10000 )    # a refused login left no session
