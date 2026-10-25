@@ -60,7 +60,7 @@ const SYMBOLS = [
     "",
 ].join( "\n" );
 
-test( "symbols: functions, classes, accessors and typed arrows are listed, private members are not", () => {
+test( "symbols: functions, classes, accessors and typed arrows are listed, private members are listed hidden", () => {
     const out = run( { "a.ts": SYMBOLS, "b.js": "function twice( n ) { return n * 2; }\n", "c.tsx": "const view = () => <div/>;\n" } );
     const by  = Object.fromEntries( out.map( ( r: any ) => [ r.file + "#" + r.name, r ] ) );
     assert.equal( by[ "a.ts#add" ].sig, "<T extends number>(a: T, b: T): T" );
@@ -76,8 +76,40 @@ test( "symbols: functions, classes, accessors and typed arrows are listed, priva
     assert.equal( by[ "b.js#twice" ].line, 1 );
     assert.ok( by[ "c.tsx#view" ] );
     const names = out.map( ( r: any ) => r.name );
-    for ( const hidden of [ "Box.hidden", "Box.guarded", "Box.#secret", "Box.prop", "notFn", "bare", "destructured" ] ) assert.ok( !names.includes( hidden ), hidden );
+    for ( const absent of [ "Box.prop", "notFn", "bare", "destructured" ] ) assert.ok( !names.includes( absent ), absent );      // not a function
+    for ( const hidden of [ "Box.hidden", "Box.guarded", "Box.#secret" ] ) assert.equal( by[ "a.ts#" + hidden ].public, false, hidden );     // private, protected and #private: returned, hidden from the public listing
+    assert.equal( by[ "a.ts#Box.get" ].public, true );
+    assert.ok( out.filter( ( r: any ) => r.public ).length === out.length - 3 );
     assert.equal( by[ "a.ts#add" ].pin.length, 10 );
+} );
+
+const LIMITS = { doc_limit: 30, doc_marker: "…" };
+
+test( "doc_full: the whole JSDoc with its tags is folded to one line", () => {
+    const out = run( { "d.ts": [
+        "/**", " * Adds   two", " * numbers.", " * @param x the x", " * @returns the sum", " * @param y", " * @deprecated", " */",
+        "export function add( x, y ) { return x + y; }",
+        "/** @deprecated */", "export function old() {}",
+        "/** Only a description. */", "export function plain() {}",
+        "export function bare() {}", "",
+    ].join( "\n" ) }, LIMITS );
+    const by = Object.fromEntries( out.map( ( r: any ) => [ r.name, r ] ) );
+    assert.equal( by.old.doc_full, "@deprecated" );                       // tags only: no description, no tag name, no tag comment
+    assert.equal( by.plain.doc_full, "Only a description." );             // a description and no tags
+    assert.equal( by.bare.doc_full, "" );                                 // no JSDoc at all
+    assert.equal( by.add.doc_full, "Adds two numbers. @param x the…" );    // a named tag with a comment, an unnamed one, a named one with none: cut at 30
+} );
+
+test( "doc_full: a text of exactly the limit is kept and a longer one is cut by code points", () => {
+    const run1 = ( text: string, limit: number ) => run( { "e.ts": `/** ${text} */\nexport function f() {}\n` }, { doc_limit: limit, doc_marker: "…" } )[ 0 ].doc_full;
+    assert.equal( run1( "abcd", 4 ), "abcd" );
+    assert.equal( run1( "abcde", 4 ), "abcd…" );
+    assert.equal( run1( "𝔘𝔘𝔘𝔘𝔘𝔘", 4 ), "𝔘𝔘𝔘𝔘…" );                          // an astral character counts as one
+} );
+
+test( "doc_full: tags with names and comments are written out in full under a long limit", () => {
+    const full = run( { "d.ts": "/**\n * Adds.\n * @param x the x\n * @returns the sum\n * @param y\n * @deprecated\n */\nexport function add( x, y ) {}\n" }, { doc_limit: 800, doc_marker: "…" } );
+    assert.equal( full[ 0 ].doc_full, "Adds. @param x the x @returns the sum @param y @deprecated" );
 } );
 
 test( "a pin ignores comments and whitespace", () => {
