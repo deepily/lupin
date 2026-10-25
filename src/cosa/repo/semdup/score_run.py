@@ -1,10 +1,9 @@
 """Score one run directory and write its report; a run that cannot be scored is reported."""
 import argparse
-import asyncio
 import json
 import pathlib
 
-from cosa.repo.semdup import body_vectors, candidates, cluster, extract, judge
+from cosa.repo.semdup import cluster, extract, pipeline
 from cosa.repo.semdup import config as cfg_mod
 from cosa.repo.semdup import errors as err
 
@@ -87,14 +86,8 @@ def score_run( run, wiring ):
     all_defs    = new_defs + wiring[ "server_defs" ]
     report      = { **report, "definitions": { "new": len( new_defs ), "server": len( wiring[ "server_defs" ] ), "judged": len( judged ) },
                     "below_min": len( new_defs ) - len( judged ) }
-    vectors     = body_vectors.ensure_vectors( all_defs, wiring[ "client" ], wiring[ "cache_dir" ], cfg[ "body_chars" ] )[ "vectors" ]
-    pool        = candidates.build_pool( all_defs, vectors )
-    partners    = candidates.partner_map( wiring[ "structural_pairs" ]( all_defs ) )
-    rows        = candidates.candidate_rows( judged, pool, candidates.word_index( pool ), partners, cfg )
-    by_id       = { d[ "id" ]: d for d in pool[ "defs" ] }
-    cands       = { row[ "id" ]: [ by_id[ c[ "id" ] ] for c in row[ "candidates" ] ] for row in rows }
     try:
-        outcome = asyncio.run( judge.judge_run( judged, cands, wiring[ "backend" ], wiring[ "ledger" ], wiring[ "slot" ], cfg, wiring[ "scrub" ], wiring[ "parallel" ] ) )
+        outcome = pipeline.judge_all( judged, all_defs, cfg, wiring, wiring[ "slot" ] )
     except err.SemdupError as e:
         if e.code != err.BLINDNESS_BREACH: raise
         return _unscorable( report, e, {} )

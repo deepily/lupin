@@ -11,6 +11,7 @@ from cosa.repo.semdup import config as cf
 from cosa.repo.semdup import errors as err
 from cosa.repo.semdup import extract as ex
 from cosa.repo.semdup import judge as jd
+from cosa.repo.semdup import pipeline as pl
 from cosa.repo.semdup import score_run as sr
 
 SCRUB  = bl.scrub_tokens( [ "ARM-WITH" ] )
@@ -22,7 +23,11 @@ JSCPD  = { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "chosen_in": "t
 class FakeClient:
     """Embed a text as the counts of the marker words in it."""
 
+    def __init__( self ):
+        self.texts = []
+
     def embed( self, texts, content_type, role ):
+        self.texts.extend( texts )
         return [ [ float( t.count( m ) ) for m in MARKS ] + [ float( len( t ) % 7 ) ] for t in texts ]
 
     def info( self ):
@@ -36,10 +41,24 @@ class FakeBackend:
     server_label       = "max-plan"
     temperature_record = "unsettable:bounded-cc"
 
-    def __init__( self, garbage=False ):
+    def __init__( self, garbage=False, pause=0.0 ):
         self.garbage = garbage
+        self.pause   = pause
+        self.calls   = 0
+        self.now     = 0
+        self.peak    = 0
 
     async def complete( self, model, system_prompt, user_prompt ):
+        self.calls += 1
+        self.now   += 1
+        self.peak   = max( self.peak, self.now )
+        try:
+            if self.pause: await asyncio.sleep( self.pause )
+            return self.answer( user_prompt )
+        finally:
+            self.now -= 1
+
+    def answer( self, user_prompt ):
         if self.garbage: return "not json"
         blocks = { tag: body for tag, _, body in BLOCK.findall( user_prompt ) }
         mine   = set( re.findall( r"MARK[A-Z]", blocks[ "definition" ] ) )
@@ -173,6 +192,35 @@ def test_the_client_builds_flag_is_copied_when_the_result_has_it_and_absent_when
     assert sr.score_run( { **run2, "client_builds": False }, w2 )[ "client_builds" ] is False
 
 
+# ---- the shared pipeline ------------------------------------------------------------------------------------------
+
+def test_judge_all_embeds_the_definition_text_cut_at_the_frozen_length_and_runs_the_calls_in_parallel(tmp_path):
+    backend = FakeBackend( pause=0.05 )
+    run, w  = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ), ( "a2", [ "MARKB" ] ), ( "a3", [ "MARKC" ] ) ], backend=backend, parallel=3 )
+    cfg     = cf.verify_frozen( w[ "frozen_path" ], w[ "live" ] )
+    defs    = ex.extract_tree( w[ "root" ], w[ "files" ], "new" )[ "definitions" ]
+    pl.judge_all( defs, defs, cfg, w, 0 )
+    assert backend.peak == 3 and sorted( w[ "client" ].texts ) == sorted( d[ "text" ] for d in defs )
+    short = { **cfg, "body_chars": 5 }
+    pl.judge_all( defs, defs, short, { **w, "cache_dir": tmp_path / "other" }, 1 )
+    assert {t for t in w[ "client" ].texts if len( t ) == 5} != set()
+
+
+def test_judge_all_rules_each_definition_once_per_slot_and_reads_a_finished_slot_from_the_ledger(tmp_path):
+    run, w  = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ), ( "a2", [ "MARKA" ] ) ], server=[ ( "s1", [ "MARKB" ] ) ] )
+    cfg     = cf.verify_frozen( w[ "frozen_path" ], w[ "live" ] )
+    defs    = ex.extract_tree( w[ "root" ], w[ "files" ], "new" )[ "definitions" ]
+    seen    = []
+    w       = { **w, "structural_pairs": lambda given: seen.append( sorted( d[ "id" ] for d in given ) ) or [] }
+    zero    = pl.judge_all( defs, defs + w[ "server_defs" ], cfg, w, 0 )
+    assert w[ "backend" ].calls == 2 and {( v[ "id" ], v[ "slot" ] ) for v in zero[ "verdicts" ]} == { ( d[ "id" ], 0 ) for d in defs }
+    pl.judge_all( defs, defs + w[ "server_defs" ], cfg, w, 0 )
+    assert w[ "backend" ].calls == 2
+    one = pl.judge_all( defs, defs + w[ "server_defs" ], cfg, w, 1 )
+    assert w[ "backend" ].calls == 4 and {v[ "slot" ] for v in one[ "verdicts" ]} == { 1 }
+    assert seen[ 0 ] == sorted( d[ "id" ] for d in defs + w[ "server_defs" ] )
+
+
 # ---- one test per unscorable cause ----------------------------------------------------------------------------------
 
 def assert_unscorable( report, cause ):
@@ -215,7 +263,7 @@ def test_a_definition_the_judge_could_not_read_makes_the_run_unscorable_as_incom
 
 def test_another_error_from_the_judge_is_not_swallowed_into_a_report(tmp_path, monkeypatch):
     async def boom( *args, **kwargs ): raise err.SemdupError( err.JUDGE_UNREADABLE, "unexpected" )
-    monkeypatch.setattr( sr.judge, "judge_run", boom )
+    monkeypatch.setattr( pl.judge, "judge_run", boom )
     run, w = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ) ] )
     with pytest.raises( err.SemdupError ) as caught: sr.score_run( run, w )
     assert caught.value.code == err.JUDGE_UNREADABLE
