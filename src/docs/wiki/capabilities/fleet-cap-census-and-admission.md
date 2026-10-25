@@ -35,4 +35,4 @@ How many seats the fleet may hold, who counts as a manager, and the launch-time 
 - `reservation_dir` is `fleet-admissions` beside the session bridges. `read_reservations` lists the files and skips any it cannot parse.
 - `unmaterialised_reservations` drops a reservation whose bridge now exists or that is older than the TTL. `prune` deletes the files not kept, and `release` drops one for a launch that failed.
 - `admit` decides one launch: it is admitted when live seats plus reservations plus one fit the cap. `admit_under_lock` serialises that across launchers and still decides if the lock fails.
-- `main` is the command line `start-cc-with-tmux.sh` runs. It exits 0 admitted, with a warning when over the cap without `--headless`. It exits 3 when over the cap with it, or when skeleton crew is on and the launch is not a person at a terminal. It fails open.
+- `main` is the command line `start-cc-with-tmux.sh` runs. It exits 0 admitted, with a warning when over the cap without `--headless`. It exits 3 when over the cap with it. It also exits 3 when skeleton crew is on and the launch is not a person at a terminal, unless it spends a re-spin credit. It fails open.

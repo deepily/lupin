@@ -26,7 +26,7 @@ Two helpers of the reap path ([[mcp-session-spawn-and-reap]]). The credit lets a
 - Skeleton crew refuses every spawn except a re-spin. When a manager dismisses a seat and names its persona to re-spin, `mint( manager_session_id, slugs )` writes one credit per reaped persona. It skips an unsafe slug and returns the slugs written.
 - `credit_dir` is the `LUPIN_RESPIN_CREDIT_DIR` override, else a `respin-credits` folder beside the launch reservations. `find` returns the credit for that manager and persona while it is under fifteen minutes old. It returns None when absent, expired, garbled or minted in the future.
 - `spend` uses the credit once, with one atomic removal, so racing launchers cannot share it. Given a session name, it keeps a claim file instead.
-- `restore` returns a claimed credit when the launch started no session. It refuses when a live session carries that name, or a newer credit exists.
+- `restore` returns a claimed credit when the launch started no session. It refuses while the launcher is still running, when a live session carries the name, or when a newer credit exists.
 - `respin_slug( persona_preference, seed_memento, count )` returns the slug only for one named persona, a seed memento and one child. `env_value` and `parse_env_value` carry manager and slug to the launcher.
 - The credit is a record, not a lock: every seat runs as one operating-system user. It stops a manager that follows the tool, not one set on defeating it.
 

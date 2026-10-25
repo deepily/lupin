@@ -26,7 +26,7 @@ Where a seat's memento must live, how a path is checked against that, and how a 
 - A memento has two slots. Each has a per-persona pointer and a per-session record. The `io` slot holds `io/mementos/<persona>.md` and `<persona>-<sid8>.md`. The `root` slot holds `.claude-memento-<persona>.md` and `.claude-memento-<persona>-<sid8>.md`.
 - `slot_pointer_path` and `slot_record_path` build those two paths from the repo root, persona and slot. `short_sid` is the one place a session id is cut to 8 lowercase characters. `acceptable_slot_targets` returns the pointer and record path a seat may legitimately use.
 - `repo_root_owning( start )` returns the repo root whose `io/mementos/` is the canonical slot. A linked worktree resolves to the main checkout. Every degraded fallback prints a warning.
-- `slot_base_root( start, slot )` is the single answer for either slot. `resolve_repo_root` returns the root that owns this seat's memento for a slot.
+- `slot_base_root( start, slot )` is the single answer for either slot. `io` collapses a linked worktree to the main checkout, and `root` keeps the worktree as itself. `resolve_repo_root` returns the root that owns this seat's memento for a slot.
 - `verify_memento_at_any_readable_slot` proves the memento at the primary slot, then at the `io` slot. A complete, fresh file at the fallback slot passes.
 - `stray_record_clause` names up to three records this persona has under another session id. `mirror_home_clause` adds a sentence when the path is under the out-of-repo mirror home.
 - `find_merge_claims( text )` lists each negative merge claim, such as "not merged", that names a commit in the same clause, as (line, sha, line text). A line showing a live query is skipped.
