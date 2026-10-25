@@ -109,6 +109,18 @@ BREAKS_WITHOUT_VENV = {
     #     .venv      37 passed   (restore control)
     "test_doclint_gate_runner.py",
     "test_pre_push_chain.py",
+    # 3 of its 24 cases. Its `tree` fixture links PROJECT_ROOT/.venv into a scratch git
+    # tree, and the census runner it drives resolves its interpreter through
+    # resolve-venv-pytest.sh. With no venv the three tests that run the runner fail:
+    # `test_the_runner_lists_a_named_file_whole_and_a_guard_function_in_an_ordinary_file_by_node_id`,
+    # `test_the_runner_refuses_with_two_when_the_selection_cannot_read_a_file` and
+    # `test_the_runner_refuses_with_two_when_nothing_is_selected`. The other 21 never run the runner.
+    # Measured at f4033cc08 in one worktree, the `.venv` symlink added and removed, the
+    # interpreter pinned to the seat's venv so only the target moved:
+    #     no .venv   3 failed · 21 passed
+    #     .venv      24 passed
+    #     no .venv   3 failed · 21 passed   (restore control)
+    "test_census_selection_helper.py",
 }
 
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next
