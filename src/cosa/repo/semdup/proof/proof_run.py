@@ -13,7 +13,7 @@ LEDGER_FILE  = "proof-ledger.jsonl"
 SLOTS        = ( 0, 1 )
 
 
-def pair_key( a, b ):
+def label_key( a, b ):
     """Return the key of an unordered pair of definition ids."""
     return "|".join( sorted( ( a, b ) ) )
 
@@ -98,7 +98,7 @@ def append_ledger( path, entry ):
 
 def _flags( outcome, canon ):
     """Return the set of pair keys one pass flagged, in the ids the labels use."""
-    return { pair_key( canon[ a ], canon[ b ] ) for a, b in cluster.join_pairs( outcome[ "verdicts" ] ) }
+    return { label_key( canon[ a ], canon[ b ] ) for a, b in cluster.join_pairs( outcome[ "verdicts" ] ) }
 
 
 def proof_run( spec, wiring ):
@@ -129,9 +129,9 @@ def proof_run( spec, wiring ):
     failures = set( spec[ "plant_failures" ] )
     known    = {}
     for p in spec[ "planted" ]:
-        key = pair_key( p[ "rewrite" ][ "id" ], p[ "original" ][ "id" ] )
+        key = label_key( p[ "rewrite" ][ "id" ], p[ "original" ][ "id" ] )
         if key not in failures: known[ key ] = p[ "stratum" ]
-    for p in spec[ "monolith_pairs" ]: known[ pair_key( *p[ "ids" ] ) ] = f"monolith:{p[ 'source' ]}"
+    for p in spec[ "monolith_pairs" ]: known[ label_key( *p[ "ids" ] ) ] = f"monolith:{p[ 'source' ]}"
     flags    = [ _flags( outcome, pool[ "canon" ] ) - failures for outcome in passes ]
     labels   = spec[ "labels" ]
     record   = { "config_sha": cfg[ "config_sha" ], "pool": pool[ "sizes" ], "plant_failures": { "count": len( failures ), "of": len( spec[ "planted" ] ),

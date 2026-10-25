@@ -106,7 +106,7 @@ class Toy:
     def key( self, a, b ):
         """Return the pair key of two toy definitions named by their keys, from any of the groups."""
         every = { **self.o, **self.r, **self.m, **self.d }
-        return pr.pair_key( every[ a ][ "id" ], every[ b ][ "id" ] )
+        return pr.label_key( every[ a ][ "id" ], every[ b ][ "id" ] )
 
     def all_labels( self ):
         """Label every known pair and the one extra flag the toy raises."""
