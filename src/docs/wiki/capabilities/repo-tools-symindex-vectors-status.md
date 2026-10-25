@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.vector_status.read_stale_hours@6e7b2229bf
   - cosa.repo.symindex.vector_status.age_hours@7805d161b6
-  - cosa.repo.symindex.vector_status.compute@a503a6b29c
+  - cosa.repo.symindex.vector_status.compute@daf491ae55
   - cosa.repo.symindex.vector_status.stale_row@ae4ceab828
   - cosa.repo.symindex.vector_status.check@5ee57cd211
   - cosa.repo.symindex.vector_status.main@19db45d16d
