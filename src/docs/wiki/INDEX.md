@@ -48,6 +48,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Quality tooling
 
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
+- [[v2-eval-metrics-and-guards]] — the v2 eval harness's metrics, cache-threshold table and the guards that refuse an untrustworthy run. `scripts` (v2_eval)
 - [[v2-eval-corpus-and-records]] — the v2 eval harness's corpus loading, seeded sampling and readers of one answered request. `scripts` (v2_eval)
 - [[model-training]] — PEFT training, XML prompt generation and validation, quantization. `cosa.training`, `cosa.research`
 
