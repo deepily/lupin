@@ -199,3 +199,16 @@ def test_the_recapture_writes_the_fixture_shape_from_a_stream_with_paths_scrubbe
     assert "SIGBLOB" not in out.read_text() and made[ "stripped" ] == doc[ "stripped" ] and made[ "messages" ] == doc[ "messages" ]
     assert rc.scrub( "/some/tree/a /home/me/b", "/some/tree", "/home/me" ) == "/root/a /home/user/b" and rc.keep( assistant( TextBlock( text="x" ) ) ) and rc.keep( done() )
     assert not rc.keep( assistant( ThinkingBlock( thinking="t", signature="s" ) ) ) and rc.keep( assistant() )
+
+
+def test_the_recapture_scrubs_paths_inside_message_text_and_keeps_a_thinking_message_that_also_calls_a_tool( tmp_path ):
+    stream = [ assistant( TextBlock( text="read /home/me/tree/a.py then /home/me/notes" ) ), assistant( ThinkingBlock( thinking="t", signature="s" ), read( "x.py" ) ),
+               assistant( TextBlock( text=GOOD ) ), done() ]
+
+    async def query( prompt, options ):
+        for m in stream: yield m
+
+    made = rc.main( [ str( tmp_path / "f.json" ), "/home/me/tree", "m" ], "/home/me", query_fn=query )
+    text = json.dumps( made[ "messages" ] )
+    assert "/root/a.py then /home/user/notes" in text and "/home/me" not in text
+    assert [ [ b[ "_class" ] for b in m.get( "content", [] ) ] for m in made[ "messages" ] ] == [ [ "TextBlock" ], [ "ThinkingBlock", "ToolUseBlock" ], [ "TextBlock" ], [] ]
