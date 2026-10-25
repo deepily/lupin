@@ -7,10 +7,11 @@ pins:
   - cosa.repo.symindex.routes.scan_file@0e0801163e
   - cosa.repo.symindex.diff.diff_generations@3eb03df69a
   - cosa.repo.symindex.diff.diff_symbols@ec99b87165
-  - cosa.repo.symindex.dups.find_duplicates@3d7d8aa77c
+  - cosa.repo.symindex.dups.find_duplicates@aabb848260
   - cosa.repo.symindex.dups.normalised@101cc1f5bc
   - cosa.repo.symindex.dups.shingles@dfe8deda0f
-  - cosa.repo.symindex.dups.shingles_of@7f505af0ab
+  - cosa.repo.symindex.dups.shingles_of@02f5fb2a40
+  - cosa.repo.symindex.dups.jaccard@759c133f0f
 ---
 # Symbol index: routes, diff and duplicates
 
@@ -28,5 +29,5 @@ Three smaller readers over the same tree. `routes.md` comes from the first, `dif
 ## Duplicates (`dups.py`)
 - `find_duplicates( spec, paths, min_nodes=25, threshold=0.85, js_files=(), include_private=True )` returns `provenance`, `exact` and `near`. Definitions under `min_nodes` AST nodes are left out.
 - `normalised( node )` erases docstrings, names, constants and decorators; two defs of the same language with equal normalised trees are an exact group.
-- `shingles( node )` and `shingles_of( seq )` hash 5-long windows over the pre-order node-type list. A near pair is two defs whose shingle sets reach the Jaccard threshold and whose trees differ. Only pairs that share one of each definition's rarest shingles are compared, so a pair above the threshold can be missed.
+- `shingles( node )` and `shingles_of( seq )` hash 5-long windows over the pre-order node-type list; the hashes are the same in every process. `jaccard( a, b )` scores two shingle sets. A near pair is two defs whose shingle sets reach the Jaccard threshold and whose trees differ. Only pairs that share one of each definition's rarest shingles are compared, so a pair above the threshold can be missed.
 - Python and script definitions are never grouped or paired together. A repeated id is numbered `~2`, `~3`.
