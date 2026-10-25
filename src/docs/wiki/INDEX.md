@@ -48,6 +48,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Quality tooling
 
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
+- [[coverage-and-junit-scripts]] — the thread-credited coverage detector, its pytest plugin and the junit run comparison. `scripts` (detect_thread_credited_coverage, thread_attribution_plugin, e2e_junit_diff)
 - [[fleet-hygiene-scripts]] — the stale seat scan, the arbiter venv import gate and the Claude permission merge. `scripts` (stale-seat-scan, check-arbiter-venv, apply_claude_permissions)
 - [[bounce-control-scripts]] — the capture-bounce-resubmit control, the pre-bounce warning broadcaster and the compose-drift probe. `scripts` (capture-bounce-resubmit, bounce_dev_warn, compose_drift_probe)
 - [[db-setup-and-seed-scripts]] — one-off scripts that migrate, create, seed and rehearse database tables and users. `scripts` (migrate_solution_snapshots, auth_migration, create_notifications_table, seed_test_companions, seed_proxy_decisions, embedding_regen_probe)
