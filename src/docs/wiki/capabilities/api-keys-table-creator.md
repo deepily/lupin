@@ -12,6 +12,6 @@ Creates the `api_keys` table in the existing authentication database, for servic
 
 ## Functions
 - `create_api_keys_table` creates the table with its full schema, seven fields and four indexes, plus the foreign key to the users table. It needs `LUPIN_ROOT` set and the users table present. It returns true on success and false on error.
-- It raises `RuntimeError` if the database folder does not exist, and the SQLite error if creation fails.
+- Only a missing database folder raises `RuntimeError`. Any error after that, a missing users table included, is printed and the function returns false.
 - `validate_schema` verifies the table, the field count and the index count on an open connection. It returns a report holding success, the two counts and an error text.
 - `main` runs both and returns 0 on success and 1 on error.

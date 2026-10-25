@@ -14,7 +14,7 @@ Measures how long each commit waits before it lands on a target branch. It is th
 
 ## Why per commit
 - The final version measures each commit against the landing that carried it. Earlier versions used a committer date, an author date of the tip, the oldest commit or the newest commit. Each was either rewritten by a cherry-pick, confounded with stack size, or masked a stalled commit riding with fresh work.
-- Splitting a wait at "the branch finished" is unfalsifiable, because any commit made while waiting resets it. The script computes it only as an unfalsifiable term and never as evidence. What survives is the largest silent stretch, a gap that has already happened.
+- Splitting a wait at "the branch finished" is unfalsifiable, because any commit made while waiting resets it. The script's header says it was reported only as `route_side_UNFALSIFIABLE`, but the code computes no such term; the metric was dropped. The script reports only the largest silent stretch, a gap that has already happened.
 
 ## Functions
 - `parse_boot_intervals` parses `journalctl --list-boots` output into sorted start and end pairs. It returns an empty list when nothing parses, so the caller can tell no boots from boots found.
