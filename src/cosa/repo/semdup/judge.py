@@ -12,7 +12,7 @@ STAGE         = "semdup"
 ATTEMPTS      = 2
 _FENCE        = re.compile( r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL )
 
-# Draft text: Rick approves the final text before `freeze` (step C9). Any edit changes prompt_version, so the frozen file would then refuse the run.
+# Approved as written by Rick, by voice (step C9). Any edit changes prompt_version, so the frozen file would then refuse the run.
 SYSTEM_PROMPT = (
     "You compare program code. You are given one DEFINITION and a numbered set of CANDIDATES, each a function or method from a codebase "
     "in Python, TypeScript or JavaScript.\n"

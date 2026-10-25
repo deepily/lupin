@@ -9,13 +9,14 @@ import cosa.utils.util as cu
 from cosa.repo.semdup import blind as bl
 from cosa.repo.semdup import errors as err
 from cosa.repo.semdup import extract as ex
+from cosa.repo.semdup import frozen as fz
 from cosa.repo.symindex import spec as sp
 
 CLIENT_DIR = "src/lupin_app/static/js"
 # The frozen server commit of plan 7.1 does not exist yet, so the server census reads the working tree. This is the one constant to change at the freeze.
 CENSUS_SERVER_COMMIT = None
-# The arm labels come from the Phase 5 harness at the freeze. Until then the census runs without them, which is only honest while the server commit is unfrozen.
-ARM_LABELS = ()
+# The arm labels the frozen configuration scrubs; the census proves neither occurs in any definition, so a label cannot make a run unscorable.
+ARM_LABELS = fz.ARM_LABELS
 SCRUB = bl.scrub_tokens( ARM_LABELS )
 
 

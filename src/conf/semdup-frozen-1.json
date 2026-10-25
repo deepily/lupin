@@ -1,0 +1,24 @@
+{
+  "backend": "max-plan",
+  "body_chars": 10000,
+  "clone_cover": 0.5,
+  "config_sha": "68ddf525169896722948bd0768ac3f19bc1bce552d38e0d96788d66a0df8384f",
+  "fusion_head": 2,
+  "jscpd": {
+    "chosen_in": "initial-defaults",
+    "min_lines": 5,
+    "min_tokens": 50,
+    "version": "5.3.3"
+  },
+  "list_depth": 10,
+  "max_candidates": 10,
+  "min_candidates": 5,
+  "min_nodes": 25,
+  "model_id": "claude-fable-5-1",
+  "parser_sha": "8c99ce0000dc0a872df01a8027a6b6f7c7b8436b51806a74bf3f5ce236d0a468",
+  "prompt_version": "semdup-f620c8a20a",
+  "scrub_sha": "10168af546b73c05cbc60b70139f3507e56ff061dc01d3a072be4596a3b8cf84",
+  "system_prompt_sha": "2fcde3db030497e9612edfed273a516754ee680cb260ef29054bf20b61a319e7",
+  "temperature": "unsettable:bounded-cc",
+  "unscorable_policy": "worst-rank"
+}
