@@ -6,7 +6,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.DebugPanelRenderer.createDebugPanelRenderer@79dde8f346
   - src.lupin_app.static.js.multiplexer.render.FilterSettingsRenderer.FilterSettingsRendererImpl@e48240a1f5
   - src.lupin_app.static.js.multiplexer.render.FilterSettingsRenderer.createFilterSettingsRenderer@5270834c7e
-  - src.lupin_app.static.js.multiplexer.render.NavBarRenderer.NavBarRendererImpl@03beaa91d7
+  - src.lupin_app.static.js.multiplexer.render.NavBarRenderer.NavBarRendererImpl@cdee3a45cc
   - src.lupin_app.static.js.multiplexer.render.SectionToolbarRenderer.SectionToolbarRendererImpl@982af9c41e
   - src.lupin_app.static.js.multiplexer.render.SectionToolbarRenderer.createSectionToolbarRenderer@1f4acd3ff0
   - src.lupin_app.static.js.multiplexer.render.SystemStatusRenderer.statusRow@12ed402bc5

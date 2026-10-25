@@ -2,18 +2,14 @@
 capability: web-client-render-task-board-panes
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.EpicBoardRenderer.messageEl@1ac2ff8a21
   - src.lupin_app.static.js.multiplexer.render.EpicBoardRenderer.createEpicBoardRenderer@a8dffca240
   - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.readShown@2cba06ca43
   - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.writeShown@9496fa6ce3
   - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.createFinishedTasksRenderer@b3c5cc478a
   - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.buildSizeCapControls@74f4b01894
-  - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.messageEl@17dbec22c2
   - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.createFleetStatusRenderer@abb281e0d6
-  - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.messageEl@5973226f36
   - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.planButtonId@e10e89d967
   - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.createHoldingAreaRenderer@1d5f9a6644
-  - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.messageEl@1ac2ff8a21
   - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.createTaskListRenderer@f4640f460f
   - src.lupin_app.static.js.multiplexer.render.JobsPaneRenderer.JobsPaneRendererImpl@fafff4b6c6
   - src.lupin_app.static.js.multiplexer.render.JobsPaneRenderer.historyWindowLabel@9fc5b246a7
@@ -27,7 +23,7 @@ These six renderers paint the Epic Board, Finished Tasks, Fleet Status, Holding 
 - `createEpicBoardRenderer` builds the Epic Board. It reads the Task List's store and owns no timer, but its refresh button and row writes ask that store to refetch. Its count is epics, not rows; the unreachable state leaves the count untouched.
 - `createHoldingAreaRenderer` builds the Holding Area, repainting on `store_holding_area_changed`. Its count is the total of held rows across filer groups, and `—` when the store is signed out, unavailable or unreachable.
 - `HoldingAreaRenderer.planButtonId` turns a plan button's `data-filer` and `data-plan` attributes into the plan id used by approve and arm-then-confirm.
-- `messageEl` is defined separately in the Task List, Epic Board, Holding Area and Fleet modules. It returns a `<p>` whose class is the pane's message class plus a state class.
+- Each pane builds its status paragraph with the shared `messageEl` of [[web-client-render-dom-and-doc-links]], passing its own message class stem.
 - `createFleetStatusRenderer` builds the Fleet Status pane. It shows live sessions only until the offline toggle is on, grouped by manager, with sign-in and arbiter-offline states.
 - `buildSizeCapControls` builds the fleet cap slider and skeleton crew switch once. Each stays hidden until its own values arrive and re-hides on a bad payload.
 - `createFinishedTasksRenderer` builds the Finished Tasks pane from `store_finished_tasks_changed`, with pills for statuses. Only `done` is shown by default.

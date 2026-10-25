@@ -8,7 +8,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@ffe2082dc8
   - src.lupin_app.static.js.multiplexer.render.BroadcastAckTallyRenderer.BroadcastAckTallyRendererImpl@c827b16ffb
   - src.lupin_app.static.js.multiplexer.render.CommonsActivityRenderer.CommonsActivityRendererImpl@3c39de597e
-  - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.FleetStatusRendererImpl@057ae78239
+  - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.FleetStatusRendererImpl@3c6bf1a792
 ---
 # Web client: notification panes
 

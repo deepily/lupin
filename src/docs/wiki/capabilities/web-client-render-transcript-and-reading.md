@@ -16,7 +16,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.reqId@f912a21288
   - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.formatMetric@d058d31430
   - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.anyMetric@64cf0d7bf8
-  - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.QaPaneRendererImpl@4f7d28c4ef
+  - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.QaPaneRendererImpl@fe60594839
   - src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.schedulingOf@5176441fd7
   - src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.SubmitJobsPaneRendererImpl@e7c1ad06b5
 ---

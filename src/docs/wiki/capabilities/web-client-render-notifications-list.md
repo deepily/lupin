@@ -14,7 +14,6 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.restoreCardFocus@88a5ea7b84
   - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.mergeInFreshOrder@744be04ed5
   - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.sameCardInputs@2522f954c9
-  - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.cssEscape@6428b04fa5
   - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.createNotificationsListRenderer@d8eeb73627
   - src.lupin_app.static.js.multiplexer.render.NotificationsHeaderRenderer.clearConfirmMessage@92a9c1b77f
   - src.lupin_app.static.js.multiplexer.render.NotificationsHeaderRenderer.NotificationsHeaderRendererImpl@303a1aaf8e
@@ -33,7 +32,7 @@ These two renderers draw the sender cards and the section header controls of the
 - `patchCard` swaps in the fresh header, toggles the active class, updates day counts and merges in new day accordions and rows.
 - `mergeInFreshOrder` inserts missing children by `data-id-hash`, anchored on kept nodes. It never moves or removes a live child.
 - `captureCardFocus` records which element holds focus inside the cards. `restoreCardFocus` refocuses it, or its replacement, without scrolling.
-- `cssEscape` uses `CSS.escape` when present and otherwise backslash-escapes characters outside letters, digits, underscore and dash. `clearConfirmMessage` builds "Clear all N notification(s) (window)? This cannot be undone." with the plural only when N is not 1.
+- Selector ids use the shared `cssEscape` of [[web-client-render-dom-and-doc-links]]. `clearConfirmMessage` builds "Clear all N notification(s) (window)? This cannot be undone." with the plural only when N is not 1.
 - `NotificationsHeaderRendererImpl` builds the count, history panel, window picker, Clear All and bounce button. The Mine, Not Mine and All Users switch is hidden unless `isAdmin` is true when the header mounts. `createNotificationsHeaderRenderer` throws without a store.
 
 ## How the parts work together
