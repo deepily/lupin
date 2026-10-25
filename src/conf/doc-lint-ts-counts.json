@@ -78,7 +78,7 @@
     "src/lupin_app/static/js/multiplexer/render/flowRatioPanel.ts": 23,
     "src/lupin_app/static/js/multiplexer/render/historyWindowDropdown.ts": 4,
     "src/lupin_app/static/js/multiplexer/render/holdingAreaBatch.ts": 146,
-    "src/lupin_app/static/js/multiplexer/render/holdingAreaModel.ts": 95,
+    "src/lupin_app/static/js/multiplexer/render/holdingAreaModel.ts": 94,
     "src/lupin_app/static/js/multiplexer/render/html.ts": 15,
     "src/lupin_app/static/js/multiplexer/render/index.ts": 10,
     "src/lupin_app/static/js/multiplexer/render/insertTranscriptionText.ts": 7,
