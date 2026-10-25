@@ -286,3 +286,19 @@ def test_the_real_extractor_counts_the_staged_text_in_a_scratch_tree( repo, monk
     texts = { "src/a.ts": "/**\n * This is NOT fine.\n */\nexport const x = 1;\n", "src/b.ts": "/** Return the thing. */\nexport const y = 1;\n" }
     got = ts_counts.counts_for( str( repo ), texts )
     assert { p: r.count for p, r in got.items() } == { "src/a.ts": 1, "src/b.ts": 0 }
+
+
+@pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
+def test_every_ts_counts_table_row_matches_the_tracked_tree( monkeypatch ):
+    """
+    Requires:
+        - node is installed and the tree is a git checkout
+
+    Ensures:
+        - the committed doc-lint-ts-counts.json equals a census of the tracked tree, so a commit that changes a file's count without regenerating the table turns this red
+    """
+    monkeypatch.setattr( tsdoc_lint, "EXTRACTOR_REL", os.path.join( cu.get_project_root(), "src/scripts/ts_doc_extract.mjs" ) )
+    out = io.StringIO()
+    rc  = ts_counts.main( [ "--check", "--repo-root", cu.get_project_root() ], out )
+    assert rc == ts_counts.EXIT_TIGHT, out.getvalue()
+    assert "counted files walked" in out.getvalue() and " 0 problems" in out.getvalue()
