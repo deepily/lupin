@@ -94,13 +94,14 @@ def git_grep( root, term, paths ):
     Ensures:
         - returns ( path, line number ) for every hit, case-insensitive, in tracked files with their uncommitted edits and in untracked files
         - passes the arguments as a list, never through a shell, and asks about 500 paths at a time
+        - reads every path literally, so a path with a glob character in it names that path and no other
         - returns [] without starting git when paths is empty, since an empty pathspec would search the whole tree
     Raises:
         - SearchError GREP_FAILED when git exits with a code other than 0 or 1
     """
     hits = []
     for i in range( 0, len( paths ), BATCH ):
-        res = subprocess.run( [ "git", "grep", "--untracked", "--null", "-n", "-F", "-i", "-e", term, "--", *paths[ i:i + BATCH ] ],
+        res = subprocess.run( [ "git", "--literal-pathspecs", "grep", "--untracked", "--null", "-n", "-F", "-i", "-e", term, "--", *paths[ i:i + BATCH ] ],
                               cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace" )
         if res.returncode not in ( 0, 1 ): raise SearchError( "GREP_FAILED", f"git exited {res.returncode}: {res.stderr.strip()[ :200 ]}" )
         for line in res.stdout.splitlines():
@@ -240,6 +241,7 @@ def _search( receipt_id, entry, extra_terms, language, ctx ):
     if receipt_id is not None and language is not None: raise SearchError( "BAD_SEARCH_KEY", "a receipt_id search takes the language of its receipt" )
     extra = [] if extra_terms is None else extra_terms
     if not isinstance( extra, list ) or not all( isinstance( t, str ) for t in extra ): raise SearchError( "BAD_SEARCH_KEY", "extra_terms is a list of strings" )
+    if any( "\n" in t or "\0" in t for t in extra ): raise SearchError( "BAD_SEARCH_KEY", "an added term is one line of text, with no newline or NUL" )
     if entry is not None:
         bad = rt.language_error( language )
         if bad is not None: return bad

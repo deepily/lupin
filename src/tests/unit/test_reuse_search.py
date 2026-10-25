@@ -140,6 +140,7 @@ def test_git_grep_reads_working_tree_edits_and_untracked_files_case_insensitivel
     assert rs.git_grep( root, "a.b", [ "src/cosa/fresh.py" ] ) == [ ( "src/cosa/fresh.py", 1 ) ]               # the dot is not a pattern
     assert rs.git_grep( root, "-x", [ "src/cosa/fresh.py" ] ) == [ ( "src/cosa/fresh.py", 3 ) ]               # a term that looks like an option
     assert rs.git_grep( root, "nowhere", [ "src/cosa/fresh.py" ] ) == []
+    assert rs.git_grep( root, "rss", [ "src/cosa/*.py" ] ) == []                                             # a glob in a path is that path, not a pattern; the same term finds feeds.py by name above
 
 
 def test_git_grep_asks_for_the_paths_in_batches_and_never_for_an_empty_list( tree, monkeypatch ):
@@ -226,7 +227,8 @@ def test_an_entry_search_needs_a_language_and_never_returns_the_entry_itself( tr
 
 
 @pytest.mark.parametrize( "kwargs", [ {}, { "receipt_id": "0123456789abcdef", "entry": "a.b" }, { "receipt_id": "0123456789abcdef", "language": "py" },
-                                      { "entry": "a.b", "language": "py", "extra_terms": "abc" }, { "entry": "a.b", "language": "py", "extra_terms": [ 1 ] } ] )
+                                      { "entry": "a.b", "language": "py", "extra_terms": "abc" }, { "entry": "a.b", "language": "py", "extra_terms": [ 1 ] },
+                                      { "entry": "a.b", "language": "py", "extra_terms": [ "two\nlines" ] }, { "entry": "a.b", "language": "py", "extra_terms": [ "nul\0byte" ] } ] )
 def test_a_bad_key_is_named_before_anything_is_read( tree, kwargs ):
     out = search( tree, **kwargs )
     assert out[ "status" ] == "error" and out[ "error" ] == "BAD_SEARCH_KEY" and not ( tree[ 1 ] / rs.SEARCH_DIR ).exists()
@@ -312,3 +314,12 @@ def test_a_snapshot_that_no_longer_holds_the_entry_is_a_named_error_and_not_an_e
     rid = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_of( tree ), language="all" )[ "receipt_id" ]
     monkeypatch.setattr( rt, "load_snapshot", lambda ctx, sha: ( [], None ) )
     assert search( tree, rid ) == { "status": "error", "error": "UNKNOWN_ENTRY", "detail": "cosa.feeds.parse_feed" }
+
+
+def test_a_check_exists_receipt_that_names_a_definition_to_leave_out_never_returns_it( tree ):
+    # red when: the search forgets the receipt's exclude_id (the definition under review would be its own nearest candidate)
+    ctx = ctx_of( tree )
+    rid = rt.sweep_need_impl( NEED, "cosa.feeds.parse_feed", ctx, language="all" )[ "receipt_id" ]                 # the door that sets exclude_id on a check_exists receipt
+    assert rt.load_receipt( ctx, rid )[ "exclude_id" ] == "cosa.feeds.parse_feed"                          # the premise: the receipt names it
+    assert search( tree, rid )[ "candidates" ] == []
+    assert ids( search( tree, receipt_for( tree ) ) ) == [ "cosa.feeds.parse_feed" ]                         # the control: the same need without the exclusion finds it
