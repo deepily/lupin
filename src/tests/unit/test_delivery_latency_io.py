@@ -157,3 +157,15 @@ def test_main_prints_no_share_when_every_tail_episode_lies_outside_the_boot_inte
     assert "TAIL EPISODES (the real n): 1   carrying 1 commits" in out
     assert "box-up hours across tail episodes      : 0.0" in out
     assert "(n/a)" in out
+
+
+def test_a_commit_that_waited_exactly_the_tail_threshold_counts_as_tail( monkeypatch, capsys ):
+    start = dl.parse_boot_intervals( JOURNAL )[ 0 ][ 0 ]
+    just_under = [ dict( landed=start + dl.TAIL_HOURS * H - 1, times=[ start ], subject="merge a" ) ]
+    exactly    = [ dict( landed=start + dl.TAIL_HOURS * H,     times=[ start ], subject="merge a" ) ]
+
+    under_out = _run_main( monkeypatch, capsys, JOURNAL, just_under )
+    exact_out = _run_main( monkeypatch, capsys, JOURNAL, exactly )
+
+    assert "tail >=6h 0" in under_out and "TAIL EPISODES (the real n): 0" in under_out
+    assert "tail >=6h 1" in exact_out and "TAIL EPISODES (the real n): 1" in exact_out
