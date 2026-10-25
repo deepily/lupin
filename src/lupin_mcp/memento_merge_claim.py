@@ -76,7 +76,7 @@ _LIVE_QUERY_RE = re.compile( r"git\s+log\s+\S*\.\.|git\s+merge-base|git\s+branch
 # A sha introduced as the base a stack was built on is the merged part by definition;
 # "unmerged stack on top of 7ae2b708a" claims the stack, not the base.
 _BASE_BEFORE_RE = re.compile(
-    r"(?i)(?:on\s+top\s+of|based\s+on|built\s+on|branch\s+head|forked\s+from|branched\s+from|"
+    r"(?i)\b(?:on\s+top\s+of|based\s+on|built\s+on|branch\s+head|forked\s+from|branched\s+from|"
     r"rebased\s+(?:on|onto)|onto|atop|base)[\W]*$"
 )
 
