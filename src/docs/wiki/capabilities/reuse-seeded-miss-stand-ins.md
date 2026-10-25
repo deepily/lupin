@@ -21,7 +21,7 @@ pins:
 The parts of the seeded-miss end-to-end run that stand in for the real services. It seeds a miss in a throwaway repository, repairs a docstring and proves the repair by replay. The scenario is on [[reuse-seeded-miss-scenario]].
 
 ## Throwaway repository
-- `build_sandbox` writes five public functions and two capability pages under the work folder. The wrong page's index line matches the need and the right page's line does not.
+- `build_sandbox` writes four public functions and two capability pages under the work folder, with an index line for each page.
 - `write_index` writes the wiki index with the right page's line as given. `write_docstring` rewrites the missed symbol's first docstring line to hold the need's words.
 
 ## Stand-in Jev
