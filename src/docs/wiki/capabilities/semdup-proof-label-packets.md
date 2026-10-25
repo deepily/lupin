@@ -8,7 +8,8 @@ pins:
   - cosa.repo.semdup.proof.label_prep.item_id@b6a2e0ea4f
   - cosa.repo.semdup.proof.label_prep.pair_item@60e2f18d36
   - cosa.repo.semdup.proof.label_prep.prepare@f4343902d3
-  - cosa.repo.semdup.proof.label_prep.run@bf913bbfef
+  - cosa.repo.semdup.proof.label_prep.save_doc@8e644e313a
+  - cosa.repo.semdup.proof.label_prep.run@a8f6e25390
   - cosa.repo.semdup.proof.label_prep.live_wiring@7a6c7abc06
   - cosa.repo.semdup.proof.label_prep.main@63d7e5c866
 ---
@@ -29,6 +30,7 @@ The second half of `label_prep.py`: the monolith pairs, the blind items, the pac
 - The key maps each item id to its ids, which side is a, its kind and its stratum or source. A packet holds the item ids and texts only.
 
 ## Command
-- `run` plants 60 pairs, 60 percent script and 40 percent Python. It saves them to `key/planted.json` before the monolith step, so a later failure costs no model call. It then returns the packets and key path. It also returns planted and failed counts by stratum, and monolith pair counts.
+- `save_doc` writes the planted document to a temporary file and renames it. The file holds the old document or the new one, never half of either.
+- `run` plants 60 pairs, 60 percent script and 40 percent Python. A failed work-alike is replaced by a Fable pair. `top_up_alikes` then adds work-alikes, so the total can pass 60. It saves them to `key/planted.json` before the monolith step, and after each top-up wave, so a later failure costs no model call. It then returns the packets and key path. It also returns planted and failed counts by stratum, and monolith pair counts.
 - `live_wiring` builds the real definitions, the three model asks (Fable rewrites, the need-writer model, Opus work-alikes) and the shape readers.
 - `main` takes `--out` and an optional `--claude-cli-path`. It checks the frozen configuration against the live one, runs, prints JSON and returns 0. It raises `CONFIG_DRIFT` if they differ.
