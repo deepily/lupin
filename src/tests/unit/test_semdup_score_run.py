@@ -6,6 +6,7 @@ import re
 import pytest
 
 from cosa.repo.doc_lint import harness_runner as hr
+from cosa.repo.doc_lint import model_transport as mt
 from cosa.repo.semdup import blind as bl
 from cosa.repo.semdup import config as cf
 from cosa.repo.semdup import errors as err
@@ -41,8 +42,9 @@ class FakeBackend:
     server_label       = "max-plan"
     temperature_record = "unsettable:bounded-cc"
 
-    def __init__( self, garbage=False, pause=0.0 ):
+    def __init__( self, garbage=False, pause=0.0, call_error=False ):
         self.garbage = garbage
+        self.call_error = call_error
         self.pause   = pause
         self.calls   = 0
         self.now     = 0
@@ -59,6 +61,7 @@ class FakeBackend:
             self.now -= 1
 
     def answer( self, user_prompt ):
+        if self.call_error: raise mt.ModelCallError( "model call failed" )
         if self.garbage: return "not json"
         blocks = { tag: body for tag, _, body in BLOCK.findall( user_prompt ) }
         mine   = set( re.findall( r"MARK[A-Z]", blocks[ "definition" ] ) )
@@ -277,6 +280,14 @@ def test_a_definition_the_judge_could_not_read_makes_the_run_unscorable_as_incom
     report = sr.score_run( run, w )
     assert_unscorable( report, err.RUN_INCOMPLETE )
     assert [ u[ "code" ] for u in report[ "unjudged" ] ] == [ err.JUDGE_UNREADABLE, err.JUDGE_UNREADABLE ] and "2 definitions" in report[ "evidence" ][ "detail" ]
+
+
+def test_a_model_call_that_raises_makes_that_run_unscorable_by_name_and_does_not_stop_the_scorer(tmp_path):
+    run, w = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ), ( "a2", [ "MARKA" ] ) ], backend=FakeBackend( call_error=True ) )
+    report = sr.score_run( run, w )
+    assert_unscorable( report, err.RUN_INCOMPLETE )
+    assert [ u[ "code" ] for u in report[ "unjudged" ] ] == [ err.JUDGE_CALL_FAILED, err.JUDGE_CALL_FAILED ]
+    assert all( "ModelCallError: model call failed" == u[ "detail" ] and u[ "id" ].startswith( "d-" ) for u in report[ "unjudged" ] )
 
 
 def test_another_error_from_the_judge_is_not_swallowed_into_a_report(tmp_path, monkeypatch):

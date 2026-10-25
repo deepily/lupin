@@ -44,11 +44,12 @@ class FakeBackend:
     server_label       = "max-plan"
     temperature_record = "unsettable:bounded-cc"
 
-    def __init__( self, replies=None, pause=0.0, fail_on=None ):
+    def __init__( self, replies=None, pause=0.0, fail_on=None, call_error_on=None ):
         self.calls   = []
         self.replies = list( replies ) if replies is not None else None
         self.pause   = pause
         self.fail_on = fail_on
+        self.call_error_on = call_error_on
         self.now     = 0
         self.peak    = 0
 
@@ -59,6 +60,7 @@ class FakeBackend:
         try:
             if self.pause: await asyncio.sleep( self.pause )
             if self.fail_on is not None and self.fail_on in user_prompt: raise RuntimeError( f"killed on {self.fail_on}" )
+            if self.call_error_on is not None and self.call_error_on in user_prompt: raise mt.ModelCallError( f"model call failed on {self.call_error_on}" )
             if self.replies is not None: return self.replies.pop( 0 )
             return self.rule( user_prompt )
         finally:
@@ -347,6 +349,22 @@ def test_a_failure_at_parallel_three_skips_pending_keeps_finished_rows_and_raise
     rows = [ json.loads( line ) for line in open( path ) ]
     done = len( [ r for r in rows if "key" in r ] )
     assert done == 2 and len( backend.calls ) == 3                         # 0 and 2 finished beside the failing 1; 3, 4 and 5 never started
+
+
+def test_a_raised_model_call_leaves_only_its_definition_unjudged_by_name_and_a_resume_asks_it_again(tmp_path):
+    news, cands = [], {}
+    for i in range( 4 ):
+        d = definition( f"fail{i}", f"def fail{i}( x ):\n    return {i}  # SLOT{i}" )
+        news.append( d )
+        cands[ d[ "id" ] ] = [ definition( f"c{i}", f"def c{i}( y ):\n    return y", origin="server" ) ]
+    path   = str( tmp_path / "l" )
+    broken = FakeBackend( pause=0.02, call_error_on="SLOT1" )
+    out    = run( news, cands, broken, hr.Ledger( path ), parallel=3 )
+    assert len( broken.calls ) == 4 and len( out[ "verdicts" ] ) == 3
+    assert out[ "unjudged" ] == [ { "id": news[ 1 ][ "id" ], "code": err.JUDGE_CALL_FAILED, "detail": "ModelCallError: model call failed on SLOT1" } ]
+    healed = FakeBackend()
+    again  = run( news, cands, healed, hr.Ledger( path ) )
+    assert len( healed.calls ) == 1 and again[ "unjudged" ] == [] and len( again[ "verdicts" ] ) == 4
 
 
 def test_byte_equal_definitions_are_judged_one_after_another_so_a_twin_never_repeats_a_call(tmp_path):

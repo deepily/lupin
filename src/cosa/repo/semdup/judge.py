@@ -247,6 +247,8 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
           judged definition, and { id, code, detail } for each definition whose reply could not be read
         - one call per definition; a reply that cannot be read is asked for once more, and a second failure is ledgered as unreadable so a
           resume does not ask again
+        - a call that raises model_transport.ModelCallError leaves its definition unjudged with code JUDGE_CALL_FAILED and the error text, the other
+          definitions go on, and nothing is ledgered for it, so a resume asks it again; any other error still stops the run
         - a finished definition is never asked again: the ledger key holds the candidates' text, the definition's text, the prompt version, the
           model id and the slot
         - the calls run through harness_runner.run_parallel, keyed on the definition's text, so byte-equal definitions run one after another
@@ -255,7 +257,7 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
 
     Raises:
         - SemdupError BLINDNESS_BREACH if a definition or candidate or the finished prompt carries a scrub token
-        - model_transport.ModelCallError and the other transport errors, as run_parallel raises them
+        - the errors that are not a ModelCallError, as run_parallel raises them
     """
     async def judge_one( d ):
         """Judge one definition, or read its finished ruling from the ledger."""
@@ -271,7 +273,10 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
         failure = None
         for _ in range( ATTEMPTS ):
             system, user, labels = build_prompt( mine, shown, scrub )
-            reply = await backend.complete( cfg[ "model_id" ], system, user )
+            try:
+                reply = await backend.complete( cfg[ "model_id" ], system, user )
+            except model_transport.ModelCallError as e:
+                return { "unreadable": { "code": err.JUDGE_CALL_FAILED, "detail": f"{type( e ).__name__}: {e}" } }
             try:
                 rulings = parse_reply( reply, labels )
             except err.SemdupError as e:
