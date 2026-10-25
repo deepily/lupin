@@ -18,9 +18,9 @@ from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
 from tests.unit.test_reuse_candidate_route import FEEDS_ID, MANIFEST, MATH_ID
 from tests.unit.test_reuse_candidate_widening import NEAR, BAND, RankedStage
-from tests.unit.test_reuse_pack_route import PackedFake, env, no_jev_key, receipt_of      # noqa: F401  (env and no_jev_key are fixtures)
+from tests.unit.test_reuse_pack_route import PackedFake, env, no_jev_key, probs_of, receipt_of      # noqa: F401  (env and no_jev_key are fixtures)
 from tests.unit.test_reuse_page_first import HIT
-from tests.unit.test_reuse_tools import FEEDS_TEXT, NEED, Recorder, ctx_for, resp
+from tests.unit.test_reuse_tools import FEEDS_TEXT, NEED, UNREL, Recorder, ctx_for, resp
 
 REPO_ROOT = git_toplevel( pathlib.Path( __file__ ).resolve().parent )
 BOX_TS    = 'export class Box {\n    /** Public one. */\n    open(): void {}\n    /** Hidden helper. */\n    private hid(): void {}\n}\n'
@@ -34,6 +34,14 @@ class AllReuse:
 
     def post( self, body ):
         self.seen.append( body ); return resp( 0.95, 0.03, 0.02 )
+
+
+class PackedAny:
+    """Answer every candidate unrelated, whatever its text or language."""
+
+    def post_with_meta( self, body ):
+        out = { key: { "probabilities": probs_of( UNREL ) } for key in body[ "questions" ] }
+        return { "answers": out, "model": body[ "model" ], "usage": { "input_tokens": 100, "output_tokens": 20 } }, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 2 }
 
 
 def two_languages( env ):
@@ -159,13 +167,16 @@ def test_the_receipt_id_holds_language_and_include_tests_only_when_present():
 # --- the candidate stage holds every language ----------------------------------------------------------------------------------------------
 
 class MixedStage:
-    """A stand-in stage whose answer holds ids of both languages, as the real vector set does."""
+    """A stand-in stage that answers ids of both languages and records the entries it is given."""
 
     arm, K = "B1", 128
+
+    def __init__( self ): self.entries_seen = []
 
     def manifest( self ): return { "manifest_hash": MANIFEST }
 
     def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, index_manifest=None ):
+        self.entries_seen.append( sorted( e[ "id" ] for e in entries ) )
         ids = sorted( [ FEEDS_ID, MATH_ID, TS_OPEN ] )
         return { "ids": ids, "ranking": ids, "lists": { "code": { "size": 3, "head": ids } }, "manifest_hash": MANIFEST, "embed_models": { "code": "c", "prose": "p" },
                  "arm": self.arm, "K": self.K, "widened": False, "stage_key": "k" * 32, "wiki": 0, "wiki_ids": [], "ranking_hash": "r" * 64 }
@@ -190,10 +201,39 @@ def test_the_stage_ids_of_another_language_are_dropped_before_anything_is_asked_
     assert TS_OPEN in receipt_of( env, every )[ "candidate_stage" ][ "ids" ]                                # `all` filters nothing
 
 
+class RecordingRanked( RankedStage ):
+    """A ranked stage that records the entries every call is given."""
+
+    def __init__( self, **kw ):
+        super().__init__( **kw ); self.entries_seen = []
+
+    def shortlist( self, ranking_text, entries, index_sha, pages, **kw ):
+        self.entries_seen.append( sorted( e[ "id" ] for e in entries ) )
+        return super().shortlist( ranking_text, entries, index_sha, pages, **kw )
+
+
+def test_the_stage_is_given_the_whole_index_so_two_languages_of_equal_size_share_one_stage( env ):
+    # red when: shortlist() gets the language-filtered list. The stage key hashes only the count, so py (3) and ts (3) would share a key
+    # and the second language would be searched in the first one's stage. Every call must see all six entries, in the live run, the widening and the replay.
+    two_languages( env )
+    need   = "read an RSS feed [lang-key]"
+    seen   = []
+    totals = {}
+    for lang in ( "py", "ts" ):
+        stage = MixedStage()
+        r     = rt.check_exists_impl( need, packed_with( env, PackedAny(), stage ), language=lang )
+        totals[ lang ] = receipt_of( env, r )[ "candidate_stage" ][ "entries_total" ]
+        rep = rt.replay_impl( r[ "receipt_id" ], packed_with( env, PackedAny(), stage ) )
+        assert rep[ "status" ] == "ok", rep
+        seen.extend( stage.entries_seen )
+    assert totals == { "py": 3, "ts": 3 }                                                         # the collision condition: equal counts in the language asked
+    assert len( seen ) == 4 and all( len( ids ) == 6 for ids in seen ) and len( { tuple( ids ) for ids in seen } ) == 1     # live and replay, both languages: one list of all six
+
+
 def test_a_widening_drops_the_wider_sets_ids_of_another_language( env ):
     two_languages( env )
     need  = "read an RSS feed [lang-wide]"
-    stage = RankedStage( ranking=[ FEEDS_ID, TS_OPEN, MATH_ID ] )
+    stage = RecordingRanked( ranking=[ FEEDS_ID, TS_OPEN, MATH_ID ] )
     fake  = PackedFake( need, { FEEDS_TEXT: NEAR } )
     rt_wide, old = 3, rt.WIDE_K
     rt.WIDE_K = rt_wide
@@ -203,6 +243,7 @@ def test_a_widening_drops_the_wider_sets_ids_of_another_language( env ):
         rt.WIDE_K = old
     cs = receipt_of( env, r )[ "candidate_stage" ]
     assert cs[ "ids" ] == [ FEEDS_ID ] and cs[ "widened_ids" ] == [ MATH_ID ]                           # the ts id sat between them in the wide ranking
+    assert len( stage.entries_seen ) == 2 and all( len( ids ) == 6 for ids in stage.entries_seen )       # the first call and the wide call both got every language
 
 
 # --- the measurement drivers say `all` ---------------------------------------------------------------------------------------------------------

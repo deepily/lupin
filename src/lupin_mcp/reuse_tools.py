@@ -1243,20 +1243,21 @@ def _stage_in_language( stage, every, language ):
     return kept
 
 
-def _widen( ctx, client, stage, routed, need, entries, every, flags, policy, ranking_text, index_sha, exclude_id, language ):
+def _widen( ctx, client, stage, routed, need, entries, every, whole, flags, policy, ranking_text, index_sha, exclude_id, language ):
     """
     Widen a lookup whose first sweep sat near a cut-off.
 
     Ensures:
         - returns ( routed, stage, error )
         - asks the stage for WIDE_K with the first call's wiki list, so the first set is the head of the wider one
+        - gives the stage the whole list of every language, as the first call did, so one index has one stage whatever the language asked
         - drops the wider set's ids of another language, as the first set's were dropped
         - a stage that fails answers the first sweep's decision with CALL_FAILED added, and error names the failure
         - no extra entries leaves routed and stage as they were
         - otherwise the stage dict gains K, widened and widened_ids, and routed holds both sweeps
     """
     try:
-        wide = client.shortlist( ranking_text, every, index_sha, ctx.pages, exclude_id=exclude_id, K=WIDE_K, wiki_ids=stage[ "wiki_ids" ] )
+        wide = client.shortlist( ranking_text, whole, index_sha, ctx.pages, exclude_id=exclude_id, K=WIDE_K, wiki_ids=stage[ "wiki_ids" ] )
     except CandidateError as x:
         d = vd.decide( routed[ "sw" ][ "answers" ], [ e[ "id" ] for e in routed[ "deciding" ] ], routed[ "sw" ][ "failed" ], flags | { "CALL_FAILED" }, policy )
         return { **routed, "d": d }, stage, { "code": x.code, "detail": x.detail }
@@ -1334,8 +1335,9 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     need = sent
     staged = ctx.candidate_stage if tool == "check_exists" and not sweep_only and not pair else None     # fetch_similar lists neighbours, so it sweeps every entry
     need_text = need if tool == "fetch_similar" and need != query and not any( e[ "id" ] == query for e in entries ) else None     # a private definition: the snapshot cannot give its text back
+    whole   = entries                                                            # the stage holds the whole index of every language, and its key is built from this list
     entries = in_language( entries, language )                                    # after need_text: that test looks the query up among every language
-    every = entries                                                              # the stage holds the whole index, and exclude_id is left out of its answer
+    every   = entries                                                            # exclude_id is left out of the stage's answer
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
     hard = flags & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
@@ -1343,7 +1345,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     stage, stage_error, widen_error = None, None, None
     if staged is not None and entries and not hard:
         try:
-            stage = _stage_in_language( staged.shortlist( _ranking, every, sha_, ctx.pages, exclude_id=exclude_id, index_manifest=fr.index_manifest( sx_build.read_header( gen ) ) ), every, language )
+            stage = _stage_in_language( staged.shortlist( _ranking, whole, sha_, ctx.pages, exclude_id=exclude_id, index_manifest=fr.index_manifest( sx_build.read_header( gen ) ) ), every, language )
         except CandidateError as e:
             stage_error = { "code": e.code, "detail": e.detail }
             flags       = flags | { "CALL_FAILED" }
@@ -1352,7 +1354,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
         else:
             routed = _route( ctx, need, entries, flags, policy=base_policy, candidate_ids=stage[ "ids" ] if stage is not None else None )
             if stage is not None and ctx.sweeper is not None and _should_widen( routed[ "d" ] ):
-                routed, stage, widen_error = _widen( ctx, staged, stage, routed, need, entries, every, flags, base_policy, _ranking, sha_, exclude_id, language )
+                routed, stage, widen_error = _widen( ctx, staged, stage, routed, need, entries, every, whole, flags, base_policy, _ranking, sha_, exclude_id, language )
     else:
         none   = { "answers": [], "failed": [], "not_reached": [ e[ "id" ] for e in entries ], "calls": 0, "cache_hits": 0,
                    "attempts_answered": 0, "attempts_failed": 0, "failed_attempts": [] }
@@ -1578,7 +1580,7 @@ def _frozen_candidate_ids( ctx, stored, entries, left_out, language ):
 
     Requires:
         - stored is a receipt of the candidates route, with a candidate_stage block that holds no error
-        - entries are the sendable entries of the receipt's own snapshot in the receipt's language, before exclude_id was left out
+        - entries are the sendable entries of the receipt's own snapshot, every language, before exclude_id was left out
         - language is the receipt's own: the rebuilt ids lose the ones of another language, as the live run's did
 
     Ensures:
@@ -1606,7 +1608,7 @@ def _frozen_candidate_ids( ctx, stored, entries, left_out, language ):
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_FAILED", str( e ) ) from e
     wide = cs[ "widened_ids" ] if "widened_ids" in cs else []
-    fresh_ids = _stage_in_language( fresh, entries, language )[ "ids" ]
+    fresh_ids = _stage_in_language( fresh, in_language( entries, language ), language )[ "ids" ]
     if fresh_ids != sorted( cs[ "ids" ] + wide ):
         raise ReuseError( "CANDIDATES_CHANGED", f"{len( fresh_ids )} ids now, {len( cs[ 'ids' ] ) + len( wide )} recorded" )
     size = stored[ "pack_size" ]                                                  # the stage runs on a packed context only, so the receipt has both
@@ -1663,18 +1665,18 @@ def replay_impl( rid, ctx, repeat=0 ):
         if stored[ "tool" ] == "fetch_similar":
             need    = stored[ "need_text" ] if "need_text" in stored else next( ( entry_text( e ) for e in entries if e[ "id" ] == stored[ "query" ] ), stored[ "query" ] )
             entries = [ e for e in entries if e[ "id" ] != stored[ "query" ] ]
-        entries = in_language( entries, language )                                              # after the lookup above, which reads every language
+        snapshot = entries                                                                      # the candidate stage was uploaded with every entry of every language, exclude_id included
+        entries  = in_language( entries, language )                                             # after the lookup above, which reads every language
         if "need_sent" in stored: need = stored[ "need_sent" ]                      # the redacted text Jev saw; a receipt from before redaction has none
         sweep_only = "sweep_only" in stored
         left_out   = stored[ "exclude_id" ] if "exclude_id" in stored else None                  # a sweep-only receipt and a candidate receipt both name it
-        whole      = entries                                                                      # the candidate stage was uploaded with every entry, exclude_id included
         if left_out is not None: entries = [ e for e in entries if e[ "id" ] != left_out ]
         hard    = set( stored[ "flags" ] ) & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
         stage_failed = "candidate_stage" in stored and "error" in stored[ "candidate_stage" ]          # a failed stage swept nothing, so its verdict is the stored one
         if hard or not entries or stage_failed:
             fz = { "verdict": stored[ "verdict" ], "cause": stored[ "cause" ], "shortlist": stored[ "shortlist" ] }
         else:
-            ids_of_stage, wide_ids = _frozen_candidate_ids( ctx, stored, whole, left_out, language ) if "candidate_stage" in stored else ( None, [] )
+            ids_of_stage, wide_ids = _frozen_candidate_ids( ctx, stored, snapshot, left_out, language ) if "candidate_stage" in stored else ( None, [] )
             lost  = stored[ "stats" ][ "failed_attempts" ] if "failed_attempts" in stored[ "stats" ] else []         # a receipt from before the call budget lacks it
             ids   = [ i for f in lost for i in ( f[ "ids" ] if "ids" in f else [ f[ "id" ] ] ) ]              # the packed shape lists ids; the old shape names one id
             gaps  = { **{ i: "not_reached" for i in stored[ "missing" ] }, **{ i: "failed" for i in ids } }
