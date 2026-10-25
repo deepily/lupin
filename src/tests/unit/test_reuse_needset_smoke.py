@@ -103,6 +103,26 @@ def test_a_live_run_outside_the_window_is_refused_before_anything_is_built( tmp_
     assert e.value.code == er.OUTSIDE_WINDOW and not out.exists()
 
 
+@pytest.mark.parametrize( "extra", [ (), ( "--window-lifted-by", "" ), ( "--window-lifted-by", "   " ) ] )
+def test_a_blank_or_missing_lift_still_refuses_outside_the_window( tmp_path, monkeypatch, extra ):
+    monkeypatch.setattr( smoke, "live_build_env", lambda *a: pytest.fail( "the live env was built" ) )
+    with pytest.raises( er.NeedsetError ) as e: smoke.main( argv( tmp_path / "out", extra=extra ), now=lambda: at( 3, 0 ) )
+    assert e.value.code == er.OUTSIDE_WINDOW
+
+
+def test_a_named_lift_runs_outside_the_window_and_the_record_says_who( tmp_path, monkeypatch ):
+    def live( args, set_at, timed ):
+        ( tmp_path / "w" ).mkdir()
+        return make_env( tmp_path / "w", ask=timed.wrap( "draft", Model() ), name="live.jsonl" )
+
+    monkeypatch.setattr( smoke, "live_build_env", live )
+    rep = smoke.main( argv( tmp_path / "out", extra=( "--window-lifted-by", " Rick, 23:55 " ) ), now=lambda: at( 3, 0 ), host="h" )
+    assert rep[ "window_lifted_by" ] == "Rick, 23:55" and json.loads( ( tmp_path / "out" / smoke.SMOKE_FILE ).read_text() )[ "window_lifted_by" ] == "Rick, 23:55"
+    ( tmp_path / "w2" ).mkdir()
+    plain = smoke.main( argv( tmp_path / "out2" ), build_env=lambda a, s, t: make_env( tmp_path / "w2", ask=t.wrap( "draft", Model() ), name="x.jsonl" ), now=lambda: at( 3, 0 ), host="h" )
+    assert plain[ "window_lifted_by" ] is None
+
+
 def test_a_live_run_in_the_window_uses_the_live_env_and_writes_the_measurements( tmp_path, monkeypatch ):
     seen = []
 

@@ -4,6 +4,7 @@ The ten-need drafting smoke: a small live run that measures and sets no pass bar
 It takes a test-only kind split and a named commit as arguments and marks every need smoke.
 It writes the date, host, commit, seconds per call and failure rate beside the drafts.
 A live run is refused outside 10 a.m. to 1 p.m. Eastern, the window the Max plan allows.
+A named person can lift the window with --window-lifted-by; the record then carries who and when.
 """
 import argparse
 import datetime
@@ -56,6 +57,7 @@ def parse_args( argv ):
     Ensures:
         - the root, out dir, source commit, seed, vector folders and the three matched-kind counts are required
         - the kind split is whatever is passed; no default stands in for the real split
+        - window_lifted_by is None unless the caller names who lifted the window and when
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument( "--root",             required=True )
@@ -73,6 +75,7 @@ def parse_args( argv ):
     ap.add_argument( "--set-by",           default="smoke" )
     ap.add_argument( "--cli-path",         default=None )
     ap.add_argument( "--second-model",     default=SECOND_MODEL )
+    ap.add_argument( "--window-lifted-by", default=None )
     return ap.parse_args( argv )
 
 
@@ -188,6 +191,20 @@ def live_build_env( args, set_at, timed ):
     return assemble_env( args, draft.drafter_call(), draft.drafter_call( args.second_model ), vector_build.EndpointClient(), set_at, timed )
 
 
+def lifted_by( args ):
+    """
+    Return who lifted the time window, or None when nobody did.
+
+    Requires:
+        - args is the parsed command line
+
+    Ensures:
+        - returns the stripped text of --window-lifted-by; blank text counts as nobody
+    """
+    named = "" if args.window_lifted_by is None else args.window_lifted_by.strip()
+    return named if named else None
+
+
 def smoke_report( args, timed, result, started, finished, host, extras ):
     """
     Summarise one smoke run as measurements.
@@ -207,6 +224,7 @@ def smoke_report( args, timed, result, started, finished, host, extras ):
              "kind_split": kind_split( args ), "ts_share": args.ts_share, "needs": len( result[ "needs" ] ), "model_calls": total[ "calls" ], "call_errors": total[ "errors" ],
              "seconds_per_call": total[ "seconds" ], "by_model": { label: timed.summary( label ) for label in ( "draft", "second" ) },
              "seeds_tried": tried, "seeds_failed": len( failed ), "failure_rate": len( failed ) / tried if tried else None, "failed_by_reason": reasons,
+             "window_lifted_by": lifted_by( args ),
              "elapsed_seconds": ( finished - started ).total_seconds(), "extras": extras, "note": "a measurement, not a pass bar" }
 
 
@@ -222,6 +240,7 @@ def main( argv=None, build_env=None, now=None, clock=time.monotonic, host=None )
         - returns the smoke report, also written as needset-smoke.json beside the plan, drafts and draft report
         - every need carries smoke true, and the calls of the drafter and the second model are timed apart
         - the window is checked before anything is built or called, and only for the live env
+        - a live run outside the window goes ahead only when --window-lifted-by names a person and a time
 
     Raises:
         - NeedsetError OUTSIDE_WINDOW for a live run at another time
@@ -231,7 +250,7 @@ def main( argv=None, build_env=None, now=None, clock=time.monotonic, host=None )
     now   = ( lambda: datetime.datetime.now( datetime.timezone.utc ) ) if now is None else now
     live  = build_env is None
     start = now()
-    if live and not in_window( start ): raise er.NeedsetError( er.OUTSIDE_WINDOW, start.astimezone( EASTERN ).isoformat() )
+    if live and lifted_by( args ) is None and not in_window( start ): raise er.NeedsetError( er.OUTSIDE_WINDOW, start.astimezone( EASTERN ).isoformat() )
     table = quota.plan_quota( TOTAL, MATCHED, NONE, args.ts_share, kind_split( args ) )
     pathlib.Path( args.out_dir ).mkdir( parents=True, exist_ok=True )
     timed = Timed( clock )
