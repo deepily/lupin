@@ -19,7 +19,7 @@ The daily job that lints the wiki, queues the findings and exports the reuse mis
 
 ## Running it
 - `python -m cosa.repo.symindex.librarian_tick [--force] [--root R] [--misses-out P]`. The tick is off until the configuration key `wiki librarian tick enabled` is true, and an off tick exits 3 before building anything. `main` prints the run summary as JSON.
-- Exit 0: nothing due, or the run finished and nothing is held. Exit 1: the run could not finish. Exit 2: it finished and some rows sit in the pending file. Exit 3: switched off.
+- Exit 0: nothing due, or the run finished and nothing is held. Exit 1: the run could not finish. Exit 2: it finished and some rows, lupin or lupin-mobile, sit in a pending file. Exit 3: switched off.
 
 ## What `run_tick` does
 - It is due when the local hour is 10 or later and the last finished run was on another day (`due`). `--force` skips that check.
