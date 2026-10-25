@@ -150,6 +150,10 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-stage-one-probe-plan]] — stage-one probe choice, neighbour lists and the six position packs, written once
 - [[reuse-stage-one-runner]] — the stage-one run-sheet command, its stand-in and live modes, and refusals
 - [[reuse-stage-one-arm-driver]] — the stage-one measurement driver: arms, run names, attempts, the stage budget and the canary
+- [[reuse-stage-one-analysis-arms]] — stage-one analysis: arm status, lost entries, grouping and the noise floor
+- [[reuse-stage-one-analysis-passes]] — stage-one analysis: the three passes, pack-size decision, stop rules and canary check
+- [[reuse-stage-one-analysis-pages]] — stage-one analysis: page arms, other boundaries and the old-shape comparison
+- [[reuse-stage-one-analysis-report]] — stage-one analysis: request and cost figures, the built report and its command
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it
