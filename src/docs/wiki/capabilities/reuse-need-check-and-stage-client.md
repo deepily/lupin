@@ -34,5 +34,5 @@ Two pieces of the end-to-end run ([[reuse-end-to-end-run]]). The need check test
 
 ## Candidate stage client
 - `CandidateStage` is the client of the resident search for one vector set. The cosa-voice process cannot import numpy, so the search runs on the Lupin server.
-- Before a lookup it brings the live vector set up to the index and checks that the manifest hashes to itself. It uploads the entries once per index. It then asks for the shortlist by key. A failure is a named `CandidateError`, never a silent sweep.
+- Before a lookup it brings the live vector set up to the index and checks that the manifest hashes to itself. It uploads the entries once per index. It then asks for the shortlist by key. A failure is a named `CandidateError`, never a silent sweep. A failing refresher is tolerated. The lookup then answers from the set on disk and reports the state `stale`.
 - `canonical( obj )` is sorted-key JSON with no spaces after separators.

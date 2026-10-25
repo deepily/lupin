@@ -21,7 +21,7 @@ The flip-rate test asks the same need again and again and counts the needs whose
 ## Measure
 - `ask_repeat( ctx, need, member, run_index )` asks one need once as repeat number `run_index`, leaving the member out. The route is `full` (every entry) or `candidates` (the shortlist only). The question is the old `choice` or the new `provides`, which has no candidate stage.
 - `signature( result )` is the verdict and the sorted shortlist ids that must agree between repeats.
-- `flip_rate( repeats_by_need )` counts a need as flipped when any two repeats differ in signature, once however often it changes. It returns the rate, a 95% Wilson interval and a state, `inconclusive` under the minimum needs.
+- `flip_rate( repeats_by_need )` counts a need as flipped when any two repeats differ in signature, once however often it changes. It returns the rate, a 95% Wilson interval and a state. The state is `inconclusive` under the minimum needs, or when any need has fewer than five repeats.
 
 ## Driver
 - `load_flip_needs( path, expected_sha )` reads the frozen needs file. The hash must match, there must be enough needs, and no id or text repeats. Each need is `duplicate` or `distinct`, with an optional symbol to exclude.
