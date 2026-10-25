@@ -37,3 +37,9 @@ def test_claude_md_pointer_table_row_names_the_skill():
     rows = [ line for line in _read( "CLAUDE.md" ).splitlines() if line.startswith( "| Reuse review of a diff |" ) ]
     assert len( rows ) == 1
     assert SKILL in rows[ 0 ]
+
+
+def test_skill_runs_both_linters_and_the_dashboard_check_and_cites_the_standard():
+    step = _read( SKILL ).split( "6. **Run plan 1's linters**" )[ 1 ].split( "7. **Report or reject.**" )[ 0 ]
+    for needle in [ "docstring_lint --strict", "md_lint --strict", "doc_metrics dashboard check", "src/docs/docstring-standard.md" ]:
+        assert needle in step, needle

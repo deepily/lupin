@@ -105,6 +105,18 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    python -m cosa.repo.doc_lint.docstring_lint --strict --json <changed .py files>
    ```
 
+   The eight rules are in `src/docs/docstring-standard.md`; cite a rule by its number in a finding.
+   Changed markdown pages get the same treatment:
+
+   ```bash
+   python -m cosa.repo.doc_lint.md_lint --strict --json <changed .md files>
+   ```
+
+   The commit hook already blocks a mechanical finding on a staged line.
+   These runs catch what a `--no-verify` commit or a hook-less clone let through. If the diff touches swept Python, also run
+   `python -m cosa.repo.doc_lint.doc_metrics dashboard check --base 456422492f308a60dafa36325102229947c44147`
+   and report any row it says rose. You own the check the hook cannot make: whether a rewrite lost a claim.
+
    `cosa.repo.doc_lint.prose_judge` makes a model call, so it runs here and not in a commit hook.
    It has no one-call entry point: the module offers `items_from_source`, `changed_items`,
    `parse_findings` and `locate_line`, and the model call itself goes through `harness_runner`
