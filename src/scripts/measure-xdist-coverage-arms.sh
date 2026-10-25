@@ -18,8 +18,13 @@
 set -u
 TREE="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
 
+# The interpreter comes from the shared resolver, which refuses rather than fall back to a bare python3 (rows c98bce3f, fc74c1d4, 72a28255).
+PROJECT_ROOT="$TREE"
+source "$TREE/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_python || exit $?
+
 if [ "${1:-}" = "compare" ]; then
-    cd "$TREE" && "$TREE/.venv/bin/python" - "$2" "$3" <<'PY'
+    cd "$TREE" && "$VENV_PYTHON" - "$2" "$3" <<'PY'
 import sys, coverage
 def load( path ):
     cov = coverage.Coverage( data_file=path, config_file="pyproject.toml" )
