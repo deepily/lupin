@@ -358,10 +358,16 @@ def test_a_logged_search_with_nothing_usable_behind_it_yields_no_search( tmp_pat
     _write_receipt( tmp_path, "0123456789abcdef", "fetch_similar", None )                           # a receipt whose query is not text
     _write_receipt( tmp_path, "not-hex", "fetch_similar", "m.escaped" )                              # a readable receipt under an id that is not 16 hex characters
     ( tmp_path / "escape.json" ).write_text( json.dumps( { "tool": "fetch_similar", "query": "m.traversed" } ), encoding="utf-8" )
-    for n, rid in enumerate( ( "0123456789abcdef", "not-hex", "../escape", "0000000000000000" ) ): _write_record( tmp_path, f"rs-{n}000000000", [ "m.c1" ], receipt_id=rid )
+    ( tmp_path / "receipts" / "0123456789abcdef" ).mkdir()                                           # so that a path through it resolves
+    ( tmp_path / "receipts" / "escape.json" ).write_text( json.dumps( { "tool": "fetch_similar", "query": "m.traversed" } ), encoding="utf-8" )
+    ( tmp_path / "0123456789abcdef.json" ).write_text( json.dumps( { "tool": "fetch_similar", "query": "m.above" } ), encoding="utf-8" )
+    _write_receipt( tmp_path, "0123456789abcdeg", "fetch_similar", "m.nothex" )                      # sixteen characters, one of them not hex
+    _write_receipt( tmp_path, "0123456789abcde", "fetch_similar", "m.short" ); _write_receipt( tmp_path, "0123456789abcdef0", "fetch_similar", "m.long" )     # hex, one off the length
+    ids16 = ( "0123456789abcdef", "not-hex", "../escape", "0000000000000000", "0123456789abcdef/../escape", "../0123456789abcdef", "0123456789abcdeg", "0123456789abcde", "0123456789abcdef0" )
+    for n, rid in enumerate( ids16 ): _write_record( tmp_path, f"rs-{n}000000000", [ "m.c1" ], receipt_id=rid )
     recs = [ _search_call( "a", s ) for s in ( SID2, "rs-3333333333", "rs-4444444444", "rs-6666666666", "rs-8888888888" ) ]
     recs += [ _search_call( "a", SID, error="BAD_SEARCH_KEY" ), _search_call( "a", SID, tool="fetch_similar" ), _search_call( "a", "rs-short" ), _search_call( "a", None ) ]
-    recs += [ _search_call( "a", f"rs-{n}000000000" ) for n in range( 4 ) ]                         # a receipt with no text, a non-hex id, a traversal, a receipt that is not there
+    recs += [ _search_call( "a", f"rs-{n}000000000" ) for n in range( len( ids16 ) ) ]              # no text, a non-hex id, three traversals, a receipt that is not there, a non-hex letter
     _write_record( tmp_path, "rs-9999999999", [ "m.c1" ] )                                          # a record that names neither an entry nor a receipt
     recs += [ _search_call( "a", "rs-7777777777" ), _search_call( "a", "rs-9999999999" ) ]
     assert eg.searches_by_symbol( recs, tmp_path ) == { "m.partial": { "rs-7777777777": [ "m.keep" ] } }       # a malformed candidate entry is left out, the rest kept

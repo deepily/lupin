@@ -54,7 +54,7 @@ SEARCHED_RE = re.compile( r"^\s*SEARCHED\s+(?P<id>\S+)\s+::\s+(?P<search>rs-[0-9
                           r"(?:none\s+::\s+(?P<none_why>\S.*?)|(?P<cand>\S+)\s+::\s+(?P<value>SAME_JOB|RELATED|UNRELATED)\s+::\s+(?P<why>\S.*?))\s*$" )
 SEARCHED_LEAD_RE = re.compile( r"^\s*SEARCHED\b" )
 SEARCH_ID_RE  = re.compile( r"^rs-[0-9a-f]{10}$" )
-RECEIPT_ID_RE = re.compile( r"^[0-9a-f]{16}$" )
+RECEIPT_ID_RE = re.compile( r"[0-9a-f]{16}" )                  # read with fullmatch, so it has no anchors to lose
 ENTRY_RE  = re.compile( r"""['"]entry['"]\s*:\s*(['"])(?P<id>.+?)\1""" )
 
 
@@ -207,7 +207,7 @@ def _receipt_symbol( data, receipt_id ):
         - returns the receipt's query when the receipt is a readable fetch_similar receipt, else None
         - an id that is not 16 hex characters is never turned into a path
     """
-    if not isinstance( receipt_id, str ) or not RECEIPT_ID_RE.match( receipt_id ): return None
+    if not isinstance( receipt_id, str ) or not RECEIPT_ID_RE.fullmatch( receipt_id ): return None
     doc = _read_json( data / "receipts" / f"{receipt_id}.json" )
     return doc[ "query" ] if doc is not None and doc.get( "tool" ) == "fetch_similar" and isinstance( doc.get( "query" ), str ) else None
 
