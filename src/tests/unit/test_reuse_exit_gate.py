@@ -7,8 +7,14 @@ Each test writes its own per-session logs, diff and review. A definition passes 
 import io
 import json
 import pathlib
+import re
 
+import cosa.utils.util as cu
 from lupin_mcp import reuse_exit_gate as eg
+
+SKILL = pathlib.Path( cu.get_project_root() ) / ".claude" / "skills" / "reuse-reviewer" / "SKILL.md"
+SID   = "rs-0123456789"
+SID2  = "rs-abcdef0123"
 
 
 def _call( session, entry, receipt, tool="fetch_similar", error=None ):
@@ -22,6 +28,25 @@ def _write_log( d, name, records, extra=() ):
 
 def _ruling( sid, ruling, rid ):
     return f"RULING {sid} :: {ruling} :: reuse-receipt: {rid}"
+
+
+def _search_call( session, search_id, entry=None, receipt=None, tool="record_search", error=None ):
+    args = { "entry": entry } if entry is not None else { "receipt_id": receipt }
+    return { "ts": "2026-10-14T10:00:00+00:00", "tool": tool, "caller": "p " + session, "session": session,
+             "receipt_id": receipt, "search_id": search_id, "error": error, "args": repr( args ) }
+
+
+def _write_record( data, search_id, cands, **over ):
+    """Ensures: writes the search record the server would write, with these candidate ids."""
+    ( data / "search-records" ).mkdir( parents=True, exist_ok=True )
+    doc = { "id": search_id, "candidates": [ { "id": c } for c in cands ] }
+    doc.update( over )
+    ( data / "search-records" / f"{search_id}.json" ).write_text( json.dumps( doc ), encoding="utf-8" )
+
+
+def _write_receipt( data, receipt_id, tool, query ):
+    ( data / "receipts" ).mkdir( parents=True, exist_ok=True )
+    ( data / "receipts" / f"{receipt_id}.json" ).write_text( json.dumps( { "tool": tool, "query": query } ), encoding="utf-8" )
 
 
 def _two_runs( tmp_path, run_a, run_b, calls_a=(), calls_b=(), pad=True ):
@@ -87,7 +112,31 @@ def test_parse_rulings_accepts_the_three_forms_and_ignores_prose():
                        "m.e looks distinct" ] )
     got = eg.parse_rulings( text )
     assert set( got ) == { "m.a", "m.b", "m.c" }
-    assert got[ "m.c" ][ 0 ] == { "ruling": "DISTINCT it parses a different format", "receipt": "ef56" }
+    assert got[ "m.c" ][ 0 ] == { "ruling": "DISTINCT it parses a different format", "receipt": "ef56", "search": None }
+
+
+def test_a_distinct_ruling_may_end_with_the_search_it_cites_and_the_why_may_hold_a_separator():
+    line = _ruling( "m.a", "DISTINCT it reads :: not writes", "ab12" ) + f" :: search: {SID}"
+    assert eg.parse_rulings( line ) == { "m.a": [ { "ruling": "DISTINCT it reads :: not writes", "receipt": "ab12", "search": SID } ] }
+    assert eg.parse_rulings( _ruling( "m.a", "DUPLICATE", "ab12" ) + f" :: search: {SID}" )[ "m.a" ][ 0 ][ "search" ] == SID      # the parser reads it, the gate judges it
+
+
+def test_a_search_tail_with_a_malformed_id_is_an_unparsed_ruling_line_and_names_it():
+    for tail in ( "rs-xyz", "rs-0123456789a", "0123456789", "" ):
+        bad = _ruling( "m.a", "DISTINCT it differs", "ab12" ) + f" :: search: {tail}"
+        assert eg.parse_rulings( bad ) == {} and eg.unparsed_ruling_lines( "ok\n" + bad ) == [ bad.strip() ], tail
+
+
+def test_parse_searched_reads_both_forms_and_the_unparsed_report_names_the_rest():
+    text = "\n".join( [ f"SEARCHED m.a :: {SID} :: m.c1 :: RELATED :: it only formats", f"SEARCHED m.a :: {SID} :: m.c2 :: UNRELATED :: other job :: with a separator",
+                       f"SEARCHED m.b :: {SID2} :: none :: the terms were rare", "prose about SEARCHED things" ] )
+    assert eg.parse_searched( text ) == { "m.a": { SID: { "m.c1": { "value": "RELATED", "why": "it only formats" },
+                                                          "m.c2": { "value": "UNRELATED", "why": "other job :: with a separator" } } },
+                                          "m.b": { SID2: { "none": { "value": None, "why": "the terms were rare" } } } }
+    bad = [ f"SEARCHED m.a :: {SID} :: m.c1 :: MAYBE :: no", f"SEARCHED m.a :: {SID} :: m.c1 :: RELATED ::", f"SEARCHED m.a :: rs-bad :: m.c1 :: RELATED :: x",
+            f"  SEARCHED m.a :: {SID} :: none ::", "SEARCHED" ]
+    assert eg.unparsed_searched_lines( "\n".join( [ text ] + bad ) ) == [ b.strip() for b in bad ]
+    assert eg.unparsed_searched_lines( text ) == []
 
 
 def test_check_run_assigns_each_status():
@@ -212,9 +261,16 @@ def test_an_excluded_definition_shows_its_cause_and_passes_only_with_a_ruling( t
     row = [ r for r in bad[ "runs" ][ 0 ][ "rows" ] if r[ "id" ] == priv ][ 0 ]
     assert row == { "id": priv, "status": "EXCLUDED_NO_RULING", "cause": "SENSITIVE_CONTENT" }       # not NO_CALL
     ( tmp_path / "again" ).mkdir()
-    logs2, runs2 = _two_runs( tmp_path / "again", ( ids, rev + [ _ruling( priv, "DISTINCT it reads a mailbox", "excluded" ) ] ), ( [], [] ), calls )
+    again = tmp_path / "again"
+    _write_record( again, SID, [ "m.near" ] )
+    searched = [ f"SEARCHED {priv} :: {SID} :: m.near :: UNRELATED :: it formats" ]
+    logs2, runs2 = _two_runs( again, ( ids, rev + [ _ruling( priv, "DISTINCT it reads a mailbox", "excluded" ) + f" :: search: {SID}" ] + searched ), ( [], [] ),
+                              calls + [ _search_call( "a", SID, entry=priv ) ] )
     res = eg.run_gate( runs2, logs2 )
     assert res[ "passed" ] is True and res[ "runs" ][ 0 ][ "rows" ][ -1 ][ "status" ] == "EXCLUDED"
+    ( tmp_path / "bare" ).mkdir()
+    logs3, runs3 = _two_runs( tmp_path / "bare", ( ids, rev + [ _ruling( priv, "DISTINCT it reads a mailbox", "excluded" ) ] ), ( [], [] ), calls )
+    assert eg.run_gate( runs3, logs3 )[ "reasons" ] == [ f"{priv}: NO_SEARCH" ]                  # an excluded definition ruled DISTINCT needs its entry-keyed search
 
 
 def test_an_excluded_ruling_needs_the_excluded_token( tmp_path ):
@@ -271,3 +327,141 @@ def test_main_stdout_default_and_malformed_run( tmp_path, capsys ):
     assert "DIFF.json:review.md" in capsys.readouterr().err
     assert eg.main( [ "--log-dir", str( logs ) ] ) == 1
     assert json.loads( capsys.readouterr().out )[ "passed" ] is False
+
+
+def test_searches_by_symbol_keys_a_search_by_its_entry_or_by_the_symbol_of_its_fetch_similar_receipt( tmp_path ):
+    rid, other = "0123456789abcdef", "fedcba9876543210"
+    _write_receipt( tmp_path, rid, "fetch_similar", "m.viaReceipt" ); _write_receipt( tmp_path, other, "check_exists", "a need in words" )
+    for sid, cands in ( ( SID, [ "m.c1", "m.c2" ] ), ( SID2, [] ), ( "rs-1111111111", [ "m.c3" ] ), ( "rs-2222222222", [ "m.c4" ] ) ): _write_record( tmp_path, sid, cands )
+    recs = [ _search_call( "a", SID, entry="m.byEntry" ), _search_call( "a", SID2, receipt=rid ),
+             _search_call( "a", "rs-1111111111", receipt=other ),                                   # a check_exists receipt names no symbol
+             _search_call( "a", "rs-2222222222", entry="m.second" ), _search_call( "b", "rs-2222222222", entry="m.second" ) ]
+    assert eg.searches_by_symbol( recs, tmp_path ) == { "m.byEntry": { SID: [ "m.c1", "m.c2" ] }, "m.viaReceipt": { SID2: [] }, "m.second": { "rs-2222222222": [ "m.c4" ] } }
+
+
+def test_a_logged_search_with_nothing_usable_behind_it_yields_no_search( tmp_path ):
+    _write_record( tmp_path, SID, [ "m.c1" ] )
+    ( tmp_path / "search-records" / f"{SID2}.json" ).write_text( "{not json", encoding="utf-8" )
+    ( tmp_path / "search-records" / "rs-3333333333.json" ).write_text( "[1, 2]", encoding="utf-8" )
+    _write_record( tmp_path, "rs-4444444444", [ "m.c1" ], id="rs-5555555555" )                      # the file does not carry its own name
+    _write_record( tmp_path, "rs-6666666666", [], candidates="not a list" )
+    _write_record( tmp_path, "rs-7777777777", [ "m.keep" ] ); doc = json.loads( ( tmp_path / "search-records" / "rs-7777777777.json" ).read_text( encoding="utf-8" ) )
+    doc[ "candidates" ] += [ "text", { "no_id": 1 } ]; ( tmp_path / "search-records" / "rs-7777777777.json" ).write_text( json.dumps( doc ), encoding="utf-8" )
+    _write_receipt( tmp_path, "0123456789abcdef", "fetch_similar", None )                           # a receipt whose query is not text
+    recs = [ _search_call( "a", s, entry="m.x" ) for s in ( SID2, "rs-3333333333", "rs-4444444444", "rs-6666666666", "rs-8888888888" ) ]
+    recs += [ _search_call( "a", SID, entry="m.err", error="BAD_SEARCH_KEY" ), _search_call( "a", SID, entry="m.tool", tool="fetch_similar" ),
+              _search_call( "a", "rs-short", entry="m.badid" ), _search_call( "a", None, entry="m.noid" ),
+              _search_call( "a", SID, receipt="0123456789abcdef" ),                                 # a receipt whose query is not text
+              _search_call( "a", SID, receipt="../escape" ), _search_call( "a", SID, receipt="0000000000000000" ),   # not hex, and a receipt that is not there
+              _search_call( "a", "rs-7777777777", entry="m.partial" ) ]
+    assert eg.searches_by_symbol( recs, tmp_path ) == { "m.partial": { "rs-7777777777": [ "m.keep" ] } }       # a malformed candidate entry is left out, the rest kept
+
+
+def _row( ruling, searches, searched, receipts=None ):
+    """Ensures: returns the status of the symbol `m.a` ruled by ( ruling, receipt, search )."""
+    r, rid, search = ruling
+    return eg.check_run( [ "m.a" ], receipts if receipts is not None else { "m.a": { "r1" } },
+                         { "m.a": [ { "ruling": r, "receipt": rid, "search": search } ] }, None, searches, searched )[ 0 ][ "status" ]
+
+
+def test_check_run_judges_a_distinct_ruling_on_its_recorded_search():
+    distinct = ( "DISTINCT it differs", "r1", SID )
+    found    = { "m.a": { SID: [ "m.c1", "m.c2" ] } }
+    ruled    = { "m.a": { SID: { "m.c1": { "value": "RELATED", "why": "w" }, "m.c2": { "value": "UNRELATED", "why": "w" } } } }
+    assert _row( distinct, found, ruled ) == "OK"
+    assert _row( distinct, None, ruled ) == "NO_SEARCH"                                             # None fails closed
+    assert _row( distinct, {}, ruled ) == "NO_SEARCH" and _row( distinct, { "m.b": found[ "m.a" ] }, ruled ) == "NO_SEARCH"
+    assert _row( ( "DISTINCT it differs", "r1", None ), found, ruled ) == "SEARCH_NOT_CITED"
+    assert _row( ( "DISTINCT it differs", "r1", SID2 ), found, ruled ) == "SEARCH_NOT_CITED"        # a search that is not this symbol's
+    assert _row( distinct, found, None ) == "CANDIDATES_UNRULED"
+    assert _row( distinct, found, { "m.a": { SID: { "m.c1": ruled[ "m.a" ][ SID ][ "m.c1" ] } } } ) == "CANDIDATES_UNRULED"
+    assert _row( distinct, found, { "m.a": { SID2: ruled[ "m.a" ][ SID ] } } ) == "CANDIDATES_UNRULED"      # lines for another search do not count
+    same = { "m.a": { SID: { "m.c1": { "value": "RELATED", "why": "w" }, "m.c2": { "value": "SAME_JOB", "why": "w" } } } }
+    assert _row( distinct, found, same ) == "DISTINCT_CONTRADICTED"
+    empty = { "m.a": { SID: [] } }
+    assert _row( distinct, empty, None ) == "SEARCH_EMPTY_UNEXPLAINED"
+    assert _row( distinct, empty, { "m.a": { SID: { "m.c1": ruled[ "m.a" ][ SID ][ "m.c1" ] } } } ) == "SEARCH_EMPTY_UNEXPLAINED"
+    assert _row( distinct, empty, { "m.a": { SID: { "none": { "value": None, "why": "rare terms" } } } } ) == "OK"
+
+
+def test_a_row_with_no_distinct_ruling_ignores_the_searches_and_one_bad_distinct_ruling_fails_the_row():
+    for ruling in ( ( "DUPLICATE", "r1", None ), ( "EXTEND m.x", "r1", None ) ):
+        assert _row( ruling, None, None ) == "OK" and _row( ruling, {}, {} ) == "OK", ruling
+    two = [ { "ruling": "DUPLICATE", "receipt": "r1", "search": None }, { "ruling": "DISTINCT it differs", "receipt": "r1", "search": None } ]
+    assert eg.check_run( [ "m.a" ], { "m.a": { "r1" } }, { "m.a": two }, None, { "m.a": { SID: [] } }, {} )[ 0 ][ "status" ] == "SEARCH_NOT_CITED"
+    elsewhere = [ { "ruling": "DISTINCT it differs", "receipt": "zz", "search": None } ] + two[ :1 ]
+    assert eg.check_run( [ "m.a" ], { "m.a": { "r1" } }, { "m.a": elsewhere }, None, None, None )[ 0 ][ "status" ] == "OK"      # a DISTINCT ruling on a receipt that is not the symbol's is not what passed it
+
+
+def _distinct_gate( tmp_path, tail=f" :: search: {SID}", searched=(), record=True, call=True, candidates=( "m.c1", ) ):
+    """
+    Run the gate over ten definitions, the first ruled `DISTINCT`, with the evidence given.
+
+    Ensures:
+        - returns the gate result; the data folder is the parent of the call log, the gate's default
+    """
+    ids, rid = _ten()
+    calls  = [ _call( "a", i, rid[ i ] ) for i in ids ] + ( [ _search_call( "a", SID, entry=ids[ 0 ] ) ] if call else [] )
+    review = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ 1: ] ] + [ _ruling( ids[ 0 ], "DISTINCT it reads a different format", rid[ ids[ 0 ] ] ) + tail ]
+    if record: _write_record( tmp_path, SID, list( candidates ) )
+    logs, runs = _two_runs( tmp_path, ( ids, review + [ l.replace( "<sym>", ids[ 0 ] ) for l in searched ] ), ( [], [] ), calls )
+    return eg.run_gate( runs, logs )
+
+
+def test_the_gate_refuses_a_distinct_ruling_with_no_search_record_and_passes_one_that_has_it( tmp_path ):
+    rule = [ f"SEARCHED <sym> :: {SID} :: m.c1 :: RELATED :: it only formats" ]
+    for n, kwargs in enumerate( ( dict( record=False, call=False, searched=rule ), dict( record=True, call=False, searched=rule ) ) ):    # no log line; a log line is the evidence
+        ( tmp_path / f"a{n}" ).mkdir()
+        res = _distinct_gate( tmp_path / f"a{n}", **kwargs )
+        assert res[ "passed" ] is False and res[ "reasons" ] == [ "m.f0: NO_SEARCH" ], kwargs
+    ( tmp_path / "b" ).mkdir()
+    assert _distinct_gate( tmp_path / "b", record=False, call=True, searched=rule )[ "reasons" ] == [ "m.f0: NO_SEARCH" ]     # a log line whose record file is missing
+    ( tmp_path / "ok" ).mkdir()
+    ok = _distinct_gate( tmp_path / "ok", searched=rule )
+    assert ok[ "passed" ] is True and ok[ "reasons" ] == []
+    ( tmp_path / "other" ).mkdir()
+    assert _distinct_gate( tmp_path / "other", searched=[ f"SEARCHED <sym> :: {SID} :: m.c1 :: UNRELATED :: it is a formatter" ] )[ "passed" ] is True
+
+
+def test_the_gate_names_each_search_failure_of_a_distinct_ruling( tmp_path ):
+    cases = { "SEARCH_NOT_CITED": dict( tail="" ), "CANDIDATES_UNRULED": dict(),
+              "DISTINCT_CONTRADICTED": dict( searched=[ f"SEARCHED <sym> :: {SID} :: m.c1 :: SAME_JOB :: it does the job" ] ),
+              "SEARCH_EMPTY_UNEXPLAINED": dict( candidates=() ) }
+    for n, ( status, kwargs ) in enumerate( cases.items() ):
+        ( tmp_path / f"c{n}" ).mkdir()
+        res = _distinct_gate( tmp_path / f"c{n}", **kwargs )
+        assert res[ "passed" ] is False and res[ "reasons" ] == [ f"m.f0: {status}" ], status
+    ( tmp_path / "invented" ).mkdir()
+    assert _distinct_gate( tmp_path / "invented", tail=" :: search: rs-ffffffffff" )[ "reasons" ] == [ "m.f0: SEARCH_NOT_CITED" ]     # a ruling cannot cite a search that never ran
+    ( tmp_path / "empty" ).mkdir()
+    assert _distinct_gate( tmp_path / "empty", candidates=(), searched=[ f"SEARCHED <sym> :: {SID} :: none :: the terms were rare" ] )[ "passed" ] is True
+
+
+def test_an_unparsed_searched_line_fails_the_gate_and_is_named( tmp_path ):
+    rule = [ f"SEARCHED <sym> :: {SID} :: m.c1 :: RELATED :: it only formats", f"SEARCHED <sym> :: {SID} :: m.c1 :: MAYBE :: no" ]
+    res  = _distinct_gate( tmp_path, searched=rule )
+    assert res[ "passed" ] is False and len( res[ "reasons" ] ) == 1 and res[ "reasons" ][ 0 ].endswith( "unparsed SEARCHED line: SEARCHED m.f0 :: " + SID + " :: m.c1 :: MAYBE :: no" )
+
+
+def test_main_reads_the_data_dir_option_and_the_review_of_the_skill_passes_the_gate( tmp_path ):
+    """The review lines are the skill's own example blocks, filled in.
+
+    The fixture cannot be better formed than the skill.
+    """
+    text    = SKILL.read_text( encoding="utf-8" )
+    grab    = lambda lead: re.search( rf"^\s*({lead} .+)$", text, re.M ).group( 1 )
+    ids, rid = _ten()
+    search_line  = grab( "SEARCHED <symbol id> :: <search id> :: <candidate id>" ).replace( "SAME_JOB | RELATED | UNRELATED", "UNRELATED" )
+    none_line    = grab( "SEARCHED <symbol id> :: <search id> :: none" )
+    distinct     = grab( "RULING <symbol id> :: DISTINCT <why>" )
+    fill = lambda line, sym, sid, rid_: line.replace( "<symbol id>", sym ).replace( "<search id>", sid ).replace( "<candidate id>", "m.near" ).replace( "<why>", "it formats" ).replace( "<receipt id>", rid_ )
+    review = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ 2: ] ]
+    review += [ fill( distinct, ids[ 0 ], SID, rid[ ids[ 0 ] ] ), fill( search_line, ids[ 0 ], SID, "" ), fill( distinct, ids[ 1 ], SID2, rid[ ids[ 1 ] ] ), fill( none_line, ids[ 1 ], SID2, "" ) ]
+    data = tmp_path / "elsewhere"; _write_record( data, SID, [ "m.near" ] ); _write_record( data, SID2, [] )
+    calls = [ _call( "a", i, rid[ i ] ) for i in ids ] + [ _search_call( "a", SID, entry=ids[ 0 ] ), _search_call( "a", SID2, entry=ids[ 1 ] ) ]
+    logs, runs = _two_runs( tmp_path, ( ids, review ), ( [], [] ), calls )
+    args = [ "--log-dir", str( logs ) ] + [ x for r in runs for x in ( "--run", f"{r[ 'diff' ]}:{r[ 'review' ]}" ) ]
+    buf = io.StringIO()
+    assert eg.main( args + [ "--data-dir", str( data ) ], out=buf ) == 0, buf.getvalue()
+    assert json.loads( buf.getvalue() )[ "reasons" ] == []
+    assert eg.main( args, out=io.StringIO() ) == 1                                                  # the default data folder is the call log's parent: it holds no search records

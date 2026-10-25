@@ -58,7 +58,7 @@ def test_the_ruling_shape_in_the_skill_is_the_shape_the_gate_parses():
     text  = SKILL.read_text( encoding="utf-8" )
     shape = re.search( r"^\s*(RULING <symbol id> :: .+)$", text, re.M ).group( 1 )
     line  = shape.replace( "<symbol id>", "m.f" ).replace( "DUPLICATE | EXTEND <symbol> | DISTINCT <why>", "DUPLICATE" ).replace( "<receipt id>", "abc123" )
-    assert reuse_exit_gate.parse_rulings( line ) == { "m.f": [ { "ruling": "DUPLICATE", "receipt": "abc123" } ] }
+    assert reuse_exit_gate.parse_rulings( line ) == { "m.f": [ { "ruling": "DUPLICATE", "receipt": "abc123", "search": None } ] }
 
 
 def test_the_skill_asks_for_a_recorded_search_and_one_searched_line_per_candidate():
@@ -68,4 +68,4 @@ def test_the_skill_asks_for_a_recorded_search_and_one_searched_line_per_candidat
     assert "`record_search( receipt_id )`" in text and "`extra_terms`" in text and "`entry` and `language`" in text
     assert text.index( "record_search" ) < text.index( "5. **Rule**" )                 # the search comes before the ruling
     assert text.index( "SEARCHED <symbol id>" ) < text.index( "RULING <symbol id>" )   # and the ruling line stays the first RULING line of the shape
-    assert ":: search:" not in text                                                   # the trailing search id waits for the exit gate (item 1.3)
+    assert text.count( ":: search: <search id>" ) == 1                                # the DISTINCT form cites its search, and only that form does

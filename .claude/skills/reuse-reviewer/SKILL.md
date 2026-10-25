@@ -63,13 +63,25 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    ```
 
    `SAME_JOB` means the candidate already does the work, so the ruling is `DUPLICATE` or `EXTEND`.
-   Keep the `RULING` line as it is below; the exit gate does not read the search id yet.
+   When the search returns no candidate, write one line that says so, with the reason:
+
+   ```text
+   SEARCHED <symbol id> :: <search id> :: none :: <why>
+   ```
 
 5. **Rule**, one line per new definition, in the review document, in this exact shape:
 
    ```text
    RULING <symbol id> :: DUPLICATE | EXTEND <symbol> | DISTINCT <why> :: reuse-receipt: <receipt id>
    ```
+
+   A `DISTINCT` ruling also cites its search, as the last part of the line:
+
+   ```text
+   RULING <symbol id> :: DISTINCT <why> :: reuse-receipt: <receipt id> :: search: <search id>
+   ```
+
+   For a definition the tool refused to send, the receipt token is `excluded` and the search is keyed on `entry`.
 
    One ruling line per symbol, and the symbol id has no spaces or commas. The gate's pattern
    reads `\S+` for the id and `[0-9A-Za-z_-]+` for the receipt. The gate refuses a line that
@@ -84,7 +96,8 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
 
    An assertion without a receipt is challenged. The exit-gate script
    (`src/lupin_mcp/reuse_exit_gate.py`) accepts a ruling only when its receipt is one of the
-   receipts logged for that symbol's `fetch_similar` calls.
+   receipts logged for that symbol's `fetch_similar` calls. It accepts a `DISTINCT` ruling only when
+   the search it cites was logged for that symbol. Every candidate of that search needs a `SEARCHED` line, and none may be `SAME_JOB`.
 
 6. **Run plan 1's linters** on the changed `.py` files and collect their findings:
 

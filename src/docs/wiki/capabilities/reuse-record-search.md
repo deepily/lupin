@@ -18,6 +18,7 @@ The `record_search` MCP tool searches the working tree for the nearest existing 
 - It takes three to six terms from the receipt's text or the entry's text, plus any `extra_terms`. Each term is searched with `git grep` over the indexed files of that language.
 - Each hit is mapped to the indexed definition whose lines hold it. The five nearest definitions come back with a `search_id` of the form `rs-` and ten hex characters.
 - The record is written once under `search-records` in the reuse data folder. The same search on the same tree is a no-op.
+- The exit gate `lupin_mcp.reuse_exit_gate` reads these records: a `DISTINCT` ruling passes only when it cites a search logged for its symbol.
 - A hit that falls in no definition is counted in `dropped_hits`. A TypeScript JSDoc sits above its definition's first line, so a term found only there is dropped.
 
 ## Errors

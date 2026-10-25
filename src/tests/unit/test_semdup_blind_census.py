@@ -44,6 +44,13 @@ PINNED_BREACHES = frozenset( {
     ( "src/lupin_mcp/reuse_search.py", "_search" ),
     ( "src/lupin_mcp/reuse_search.py", "receipt_source" ),
     ( "src/lupin_mcp/reuse_search.py", "record_search_impl" ),
+    # Item 1.3, the exit gate (row 1afc9fee): six new definitions that name the reuse tools or the SEARCHED line.
+    ( "src/lupin_mcp/reuse_exit_gate.py", "_receipt_symbol" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "_search_status" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "parse_searched" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "run_gate" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "searches_by_symbol" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "unparsed_searched_lines" ),
 } )
 # The arm labels come from the Phase 5 harness at the freeze. Until then the census runs without them, which is only honest while the server commit is unfrozen.
 ARM_LABELS = ()
@@ -89,7 +96,7 @@ def test_the_server_breaches_are_exactly_the_pinned_ones_and_every_pinned_one_st
     found = breaches( server_definitions() )
     assert found - PINNED_BREACHES == set(), "a definition outside the pin carries a scrub token"
     assert PINNED_BREACHES - found == set(), "a pinned definition no longer breaches; shrink the pin"
-    assert len( PINNED_BREACHES ) == 23                                                    # 19 measured on 24 October, plus the four of item 1.2
+    assert len( PINNED_BREACHES ) == 29                                                    # 19 measured on 24 October, plus four of item 1.2 and six of item 1.3
 
 
 def test_each_pinned_definition_still_makes_blind_definition_raise_at_run_time():
@@ -104,7 +111,7 @@ def test_each_pinned_definition_still_makes_blind_definition_raise_at_run_time()
 def test_assert_blind_itself_raises_on_the_text_of_each_pinned_definition():
     """A prompt built from a pinned definition is refused by assert_blind itself."""
     pinned = [ d for d in server_definitions() if ( d[ "file" ], d[ "name" ] ) in PINNED_BREACHES ]
-    assert len( pinned ) == 23
+    assert len( pinned ) == 29
     for d in pinned:
         shown = "\n".join( ( d[ "file" ], d[ "name" ], d[ "sig" ], bl.strip_comment_lines( d[ "text" ], d[ "lang" ], SCRUB ) ) )
         with pytest.raises( err.SemdupError ) as caught:
