@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.semdup.proof.monolith_pairs.assemble_pairs@28fd736ff4
   - cosa.repo.semdup.proof.monolith_pairs.blob_sha@c072f42015
-  - cosa.repo.semdup.proof.monolith_pairs.candidate_pairs@b883fb5309
+  - cosa.repo.semdup.proof.monolith_pairs.candidate_pairs@1dad7fb3f1
   - cosa.repo.semdup.proof.monolith_pairs.check_pin@be440b136b
   - cosa.repo.semdup.proof.proof_run.append_ledger@6f740aa743
   - cosa.repo.semdup.proof.proof_run.build_pool@65de056c96
@@ -19,7 +19,7 @@ The proof run judges a closed pool twice, compares with the human labels and the
 - `append_ledger` adds one line to the proof ledger without touching what is there.
 - `build_pool` assembles the closed pool the proof judges. `label_key` returns the key of an unordered pair of definition ids.
 - `resolve_label` settles one pair's label from the two reviewers' booleans. It needs a ruling on a disagreement, and raises `ValueError` without one.
-- `candidate_pairs` collects candidate duplicate pairs in the monolith script from three sources, each tagged with its source.
+- `candidate_pairs` collects candidate duplicate pairs in the monolith script from three sources, each tagged with its source. With a `total`, the neighbour source takes what is left of it after the structural and nominated pairs.
 - `assemble_pairs` checks the tags and returns the list in a fixed order.
 - `blob_sha` returns a file's git blob sha, so a pair list is pinned to one version. `check_pin` refuses a monolith that is not the pinned version.
 - Planting and the bar are on [[semdup-proof-plant]].
