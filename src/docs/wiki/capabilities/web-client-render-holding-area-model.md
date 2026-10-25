@@ -12,8 +12,11 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.holdingAreaBatch.holdingPlanConfirmLabel@61b5efc470
   - src.lupin_app.static.js.multiplexer.render.holdingAreaBatch.holdingPlanArmedStatus@9cfaed28d9
   - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.holdingPlanId@3730f4bc4d
-  - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.taskFilerLabel@dcc9552946
-  - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.groupHeldRowsByFiler@9fa2629d92
+  - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.taskFilerLabel@c10b61ac5c
+  - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.groupHeldRowsByFiler@5b04cad007
+  - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.groupHeldRows@98e0e7830b
+  - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.taskAssigneeLabel@bf214f1bfd
+  - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.heldGroupId@e94914873a
   - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.planTitle@4303456a5a
   - src.lupin_app.static.js.multiplexer.render.holdingAreaModel.heldHeaderCount@210ceb37a0
 ---
@@ -32,6 +35,6 @@ The status wording of the batch buttons, and the model that groups the holding a
 ## Model (`holdingAreaModel`)
 - `holdingPlanId( filer, key )` joins the filer and the plan key with a `\u0001` separator, since two filers can hold rows under one key.
 - `taskFilerLabel( task )` is the person in `created_by`, display-cased, with a trailing session id stripped. A value with no session id is kept whole. An absent one is a dash.
-- `groupHeldRowsByFiler( tasks, keep )` groups by filer, not owner. Filers sort alphabetically, and rows sort by priority then title. A key forms a plan only with two or more of one filer's rows, unless named in `keep`.
+- `groupHeldRows( tasks, by, keep )` groups by creator, or by `owner_persona` for `assignee`; `groupHeldRowsByFiler` is its creator mode. Groups sort by label, and rows by priority then title. A key forms a plan only with two or more of a group's rows, unless named in `keep`. Each group has an identity `filer`, a `label` and a mode `by`. `taskAssigneeLabel` reads `owner_persona`, `Unassigned` when blank. `heldGroupId( by, label )` prefixes an assignee identity, so one name in both modes shares no state.
 - `planTitle( key )` drops a leading `epic:` and turns hyphens and underscores into spaces. A key that is only the prefix stays as it is.
 - `heldHeaderCount( composite )` is the count the pane's header would show, or null before the first poll, for a sentinel status or for malformed tasks.

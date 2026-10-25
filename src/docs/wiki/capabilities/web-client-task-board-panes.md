@@ -2,10 +2,10 @@
 capability: web-client-task-board-panes
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.TaskListRendererImpl@588e84c5c2
-  - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.HoldingAreaRendererImpl@229b2b620f
-  - src.lupin_app.static.js.multiplexer.render.EpicBoardRenderer.EpicBoardRendererImpl@dfd7e9e53a
-  - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.FinishedTasksRendererImpl@0cd95df941
+  - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.TaskListRendererImpl@46c6a2c625
+  - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.HoldingAreaRendererImpl@47a4aeedb5
+  - src.lupin_app.static.js.multiplexer.render.EpicBoardRenderer.EpicBoardRendererImpl@2a8d10c29c
+  - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.FinishedTasksRendererImpl@cd6bae76ea
   - src.lupin_app.static.js.multiplexer.render.taskVerbs.verbLegality@8816df8745
   - src.lupin_app.static.js.multiplexer.render.taskVerbs.transitionExtras@cbed0f71fd
   - src.lupin_app.static.js.multiplexer.render.epicBoardModel.groupTasksByEpic@c0346bfd19
@@ -21,7 +21,7 @@ Four panes show the task store: the task list, the epic board, the holding area 
 - `transitionExtras` sends the park reason as `park_reason` and other reasons as `reason`. Fixed sends the attestation "operator (multiplexer)", which the server replaces with the login identity.
 - `wont_fix` and `fixed` need two clicks. Task-list writes are optimistic and roll back on failure, and on a 202 awaiting-approval answer. A write on a row already at the target status says so in the error stripe and changes nothing.
 - Holding-area writes are not optimistic. The row changes after the refresh, and a failure or a 202 shows an error stripe.
-- `HoldingAreaRenderer` groups `not_approved` rows by filer, then plan. Batch buttons are per filer and act on the rows whose Approve is enabled; wont_fix needs one reason for all.
+- `HoldingAreaRenderer` groups `not_approved` rows by creator or assignee, then plan. A toggle picks which, and the choice is kept in `localStorage`. Batch buttons are per group and act on the rows whose Approve is enabled; wont_fix needs one reason for all.
 - Each plan has an Approve all button. Its first press arms it and opens the plan. Closing the plan disarms it; a repaint keeps it armed only while the plan holds the same rows.
 - A batch button arms on the first press and posts on the second. Rows go one at a time, every row is tried, and one refresh follows the last.
 - `EpicBoardRenderer` groups rows by a `correlation_key` starting `epic:`. `groupTasksByEpic` sends rows with no epic key to a drift group, never drops them.
