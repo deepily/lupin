@@ -29,6 +29,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[seat-lifecycle]] — spawning seats, the fleet size cap, mementos, self re-spin, reaping and worktree hygiene. `lupin_mcp` (session_spawner, fleet_size_cap, fleet_cap_*, memento_*, reap_*, self_respin_core)
 - [[fleet-cap-and-skeleton-crew-switches]] — the two configuration-file dials, fleet cap and skeleton crew: single-key reads and writes, the on/off rule and who set it. `lupin_mcp` (fleet_cap_ini_io, skeleton_crew)
 - [[fleet-cap-census-and-admission]] — how the fleet cap is resolved, who counts as a manager, and the reservation that keeps two launches from taking the last seat. `lupin_mcp` (fleet_size_cap, fleet_cap_admission)
+- [[memento-slots-claims-and-audit]] — where a seat's memento must live, how a path is checked against its slots, and how a false merge claim is refuted. `lupin_mcp` (memento_slot, memento_repo_root, memento_merge_claim, memento_slot_audit)
 
 ## Auth, data and platform
 
