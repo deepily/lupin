@@ -12,6 +12,8 @@ Tier: unit (`:7999`-discretionary per CLAUDE.md TESTING VENUES).
 Design doc: src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §5
 """
 
+import contextlib
+import io
 import os
 import tempfile
 import unittest
@@ -40,6 +42,9 @@ class _StubConfigMgr:
                 return value
             return value.split( ", " )
         return value
+
+    def get_keys( self ):
+        return list( self._values.keys() )
 
 
 class TestScopeConfig( unittest.TestCase ):
@@ -247,6 +252,35 @@ class TestBuildScopeRegistry( unittest.TestCase ):
             self.assertIn( "another_good", reg )
             self.assertNotIn( "missing", reg )
             self.assertEqual( len( reg ), 2 )
+
+    def _captured_registry_output( self, values ):
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout( buffer ):
+            reg = build_scope_registry( _StubConfigMgr( values ) )
+        return reg, buffer.getvalue()
+
+    def test_keys_for_a_scope_missing_from_external_repos_warn_and_do_not_register( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg, out = self._captured_registry_output( {
+                "external repos"                          : [ "listed" ],
+                "external repo listed path"               : tmp,
+                "external repo unlisted path"             : tmp,
+                "external repo unlisted allowed prefixes" : [ "docs/" ],
+            } )
+        self.assertEqual( sorted( reg ), [ "listed" ] )
+        self.assertIn( "WARNING: key 'external repo unlisted path' names scope 'unlisted'", out )
+        self.assertIn( "WARNING: key 'external repo unlisted allowed prefixes' names scope 'unlisted'", out )
+        self.assertEqual( out.count( "missing from `external repos`" ), 2 )
+
+    def test_listed_scope_keys_and_the_list_key_itself_do_not_warn( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg, out = self._captured_registry_output( {
+                "external repos"                       : [ "Listed" ],
+                "external repo listed path"            : tmp,
+                "external repo listed allowed prefixes": [ "src/" ],
+                "unrelated key"                        : "x",
+            } )
+        self.assertNotIn( "missing from `external repos`", out )
 
 
 if __name__ == "__main__":

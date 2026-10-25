@@ -939,6 +939,9 @@ def resolve_in_scope( scope_cfg: ScopeConfig, decoded_path: str ) -> str:
 _RESERVED_SCOPE_NAMES = ( "docs", "io" )
 
 
+_EXTERNAL_REPO_KEY_RE = re.compile( r"^external repo (\S+) " )
+
+
 def build_scope_registry( config_mgr ) -> dict:
     """
     Read `external repos` INI block and return a name → ScopeConfig dict.
@@ -950,6 +953,9 @@ def build_scope_registry( config_mgr ) -> dict:
     Ensures:
         - returns dict[str, ScopeConfig]
         - skips scopes whose name collides with built-ins (`docs`, `io`); logs warning
+        - prints a warning naming the key and the scope for every `external repo <name> …`
+          key whose <name> is absent from `external repos` (matched case-insensitively,
+          since ConfigParser lowercases keys); such a scope is not registered
         - skips scopes whose `path` value is missing or does not exist on disk;
           logs warning (so an environment without a particular repo mounted doesn't
           fail startup)
@@ -962,6 +968,12 @@ def build_scope_registry( config_mgr ) -> dict:
     """
     names = config_mgr.get( "external repos", default=[], return_type="list-string" )
     registry: dict = { }
+
+    listed = { n.strip().lower() for n in names }
+    for key in config_mgr.get_keys():
+        match = _EXTERNAL_REPO_KEY_RE.match( key )
+        if match and match.group( 1 ).lower() not in listed:
+            print( f"[scope_registry] WARNING: key {key!r} names scope {match.group( 1 )!r}, which is missing from `external repos`; the key is ignored and the scope is NOT registered" )
 
     for raw_name in names:
         name = raw_name.strip()
