@@ -7,7 +7,7 @@ import pytest
 
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import finalize
-from tests.unit.test_reuse_needset_final import build_set
+from tests.unit.test_reuse_needset_final import FROZEN, build_set
 
 DATA = pathlib.Path( __file__ ).resolve().parents[ 1 ] / "data" / "reuse_needset"
 
@@ -40,7 +40,7 @@ def test_a_pending_set_may_hold_no_set_file( tmp_path ):
 
 def test_a_final_set_is_verified_and_a_missing_file_is_red( tmp_path ):
     needs, labels = build_set()
-    finalize.finalize( needs, labels, 0.62, 7, "0123456789abcdef0123456789abcdef01234567", tmp_path )
+    finalize.finalize( needs, labels, 0.62, 7, "0123456789abcdef0123456789abcdef01234567", FROZEN, tmp_path )
     set_status( tmp_path, "final" )
     finalize.check_committed_set( tmp_path )
     ( tmp_path / finalize.FINAL_FILE ).unlink()

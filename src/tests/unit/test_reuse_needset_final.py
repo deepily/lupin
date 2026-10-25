@@ -12,6 +12,7 @@ from lupin_mcp.reuse_needset import errors as er
 COMMIT  = "0123456789abcdef0123456789abcdef01234567"
 DRAFTER = { "model": draft.DRAFTER_MODEL, "prompt_version": "v1", "server": "max-plan" }
 AGREED  = { "choice": "AS_PROPOSED", "symbols": [], "final_source": "agreed" }
+FROZEN  = { "index_manifest": "a" * 64, "symbols_sha": "b" * 40, "vector_build_info_sha": "c" * 64 }
 
 
 def checked( need, result="agree" ):
@@ -48,7 +49,7 @@ def build_set( nothing=( 60, 40 ), matched=( 180, 120 ), model_agreed_nothing=0,
 def write_set( tmp_path, kappa=0.62, **kwargs ):
     """Finalize a fixture set into tmp_path and return the manifest path."""
     needs, labels = build_set( **kwargs )
-    finalize.finalize( needs, labels, kappa, 7, COMMIT, tmp_path )
+    finalize.finalize( needs, labels, kappa, 7, COMMIT, FROZEN, tmp_path )
     return tmp_path / finalize.MANIFEST_FILE
 
 
@@ -169,15 +170,15 @@ def test_other_counts_can_be_asked_for( tmp_path ):
 def test_finalize_refuses_a_smoke_need_an_unchecked_need_a_missing_label_and_a_kappa_that_is_not_a_number( tmp_path ):
     needs, labels = build_set( nothing=( 1, 1 ), matched=( 1, 1 ) )
     smoke = dict( needs[ 2 ], smoke=True )
-    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( [ smoke ], { smoke[ "id" ]: AGREED }, 0.5, 1, COMMIT, tmp_path )
+    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( [ smoke ], { smoke[ "id" ]: AGREED }, 0.5, 1, COMMIT, FROZEN, tmp_path )
     assert e.value.code == er.BAD_NEED
     drafted = schema.new_need( "near_copy", "py", "pkg.a.f", None, [ "pkg.b.g" ], "py", "twin", "A function that adds up a list of numbers until a ceiling.", COMMIT, DRAFTER )
-    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( [ drafted ], { drafted[ "id" ]: AGREED }, 0.5, 1, COMMIT, tmp_path )
+    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( [ drafted ], { drafted[ "id" ]: AGREED }, 0.5, 1, COMMIT, FROZEN, tmp_path )
     assert e.value.code == er.BAD_NEED
-    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( needs, { k: v for k, v in list( labels.items() )[ 1: ] }, 0.5, 1, COMMIT, tmp_path )
+    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( needs, { k: v for k, v in list( labels.items() )[ 1: ] }, 0.5, 1, COMMIT, FROZEN, tmp_path )
     assert e.value.detail.startswith( "LABELS" )
     for bad in ( None, True, "0.5" ):
-        with pytest.raises( er.NeedsetError ) as e: finalize.finalize( needs, labels, bad, 1, COMMIT, tmp_path )
+        with pytest.raises( er.NeedsetError ) as e: finalize.finalize( needs, labels, bad, 1, COMMIT, FROZEN, tmp_path )
         assert e.value.detail.startswith( "KAPPA" )
 
 
@@ -200,7 +201,7 @@ def test_a_label_that_rejects_a_need_stops_the_finalize( kind, choice ):
 
 def test_finalize_refuses_a_repeated_need_id( tmp_path ):
     needs, labels = build_set( nothing=( 1, 1 ), matched=( 1, 1 ) )
-    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( needs + [ copy.deepcopy( needs[ 0 ] ) ], labels, 0.5, 1, COMMIT, tmp_path )
+    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( needs + [ copy.deepcopy( needs[ 0 ] ) ], labels, 0.5, 1, COMMIT, FROZEN, tmp_path )
     assert e.value.code == er.MANIFEST_MISMATCH and e.value.detail.startswith( "IDS" ) and needs[ 0 ][ "id" ] in e.value.detail
 
 
@@ -228,13 +229,13 @@ def test_a_manifest_that_disagrees_with_its_rows_fails_by_name( tmp_path, change
 def test_a_typed_symbol_outside_the_index_stops_the_finalize( tmp_path ):
     need = checked( schema.new_need( "near_copy", "py", "pkg.a.f", None, [ "pkg.b.g" ], "py", "twin", "A function that adds up a list of numbers until a ceiling.", COMMIT, DRAFTER ) )
     other = { need[ "id" ]: { "choice": "OTHER", "symbols": [ "pkg.c.h" ], "final_source": "rick_tiebreak" } }
-    finalize.finalize( [ need ], other, 0.5, 1, COMMIT, tmp_path, known_symbols={ "pkg.c.h", "pkg.b.g" } )
-    finalize.finalize( [ need ], other, 0.5, 1, COMMIT, tmp_path )
-    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( [ need ], other, 0.5, 1, COMMIT, tmp_path, known_symbols={ "pkg.b.g" } )
+    finalize.finalize( [ need ], other, 0.5, 1, COMMIT, FROZEN, tmp_path, known_symbols={ "pkg.c.h", "pkg.b.g" } )
+    finalize.finalize( [ need ], other, 0.5, 1, COMMIT, FROZEN, tmp_path )
+    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( [ need ], other, 0.5, 1, COMMIT, FROZEN, tmp_path, known_symbols={ "pkg.b.g" } )
     assert e.value.detail.startswith( "SYMBOLS" ) and "pkg.c.h" in e.value.detail
-    finalize.finalize( [ need ], { need[ "id" ]: AGREED }, 0.5, 1, COMMIT, tmp_path, known_symbols=set() )
+    finalize.finalize( [ need ], { need[ "id" ]: AGREED }, 0.5, 1, COMMIT, FROZEN, tmp_path, known_symbols=set() )
     unlabelled = { need[ "id" ]: { "choice": None, "symbols": None, "final_source": "model_agreed" } }
-    finalize.finalize( [ need ], unlabelled, 0.5, 1, COMMIT, tmp_path, known_symbols=set() )
+    finalize.finalize( [ need ], unlabelled, 0.5, 1, COMMIT, FROZEN, tmp_path, known_symbols=set() )
 
 
 def test_an_id_repeated_three_times_is_counted_once_among_the_unique_ids( tmp_path ):
@@ -245,3 +246,23 @@ def test_an_id_repeated_three_times_is_counted_once_among_the_unique_ids( tmp_pa
     rewrite_rows( tmp_path, lambda r: copy.deepcopy( twin ) if r[ "id" ] in nothing_ids[ 1:3 ] else r )
     name, detail = condition( path )
     assert name == "IDS" and "398 unique ids in 400 rows" in detail
+
+
+def test_the_manifest_records_the_three_frozen_hashes_and_a_set_without_them_fails_by_name( tmp_path ):
+    path = write_set( tmp_path )
+    assert { k: json.loads( path.read_text() )[ k ] for k in FROZEN } == FROZEN
+    finalize.verify_manifest( path )
+    for key in FROZEN:
+        stored = json.loads( path.read_text() )
+        del stored[ key ]
+        path.write_text( json.dumps( stored ) )
+        name, detail = condition( path )
+        assert name == "FROZEN" and key in detail
+        write_set( tmp_path )
+
+
+@pytest.mark.parametrize( "bad", [ None, "", 5 ] )
+def test_finalize_refuses_an_identity_that_lacks_a_hash_before_it_writes_anything( tmp_path, bad ):
+    needs, labels = build_set()
+    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( needs, labels, 0.5, 1, COMMIT, dict( FROZEN, symbols_sha=bad ), tmp_path )
+    assert e.value.code == er.MANIFEST_MISMATCH and e.value.detail.startswith( "FROZEN" ) and not ( tmp_path / finalize.FINAL_FILE ).exists()

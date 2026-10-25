@@ -8,7 +8,7 @@ import json
 import pathlib
 
 from lupin_mcp import reuse_need_check as nc
-from lupin_mcp.reuse_needset import draft, keys, pool, quota, schema
+from lupin_mcp.reuse_needset import draft, freeze, keys, pool, quota, schema
 from lupin_mcp.reuse_needset import errors as er
 
 SAME_JOB_SYSTEM = "You compare two code definitions. Answer with one JSON object and nothing else."
@@ -22,7 +22,7 @@ class Env:
     """Everything a run reads: records, search context, model calls and run labels."""
 
     def __init__( self, by_id, kept, ctx, twins, strip_fn, ask, ledger, model_id, server, source_commit, seed, kind_split, set_by, set_at,
-                  none_draft_fn=None, parallel=3, smoke=False, extras=None ):
+                  none_draft_fn=None, parallel=3, smoke=False, extras=None, freeze_from=None ):
         """
         Hold the inputs.
 
@@ -32,6 +32,7 @@ class Env:
             - ask( system, user ) returns reply text; ledger is a draft.SharedLedger
             - none_draft_fn is draft.make_none_drafter output, needed only when the quota asks for nothing needs
             - extras is a dict of facts about the inputs that a report prints; it is not read by the run
+            - freeze_from is ( index generation folder, vector set folder ) to freeze before the draw; None is allowed only for a smoke run
         """
         self.by_id, self.kept, self.ctx, self.twins, self.strip_fn = by_id, kept, ctx, twins, strip_fn
         self.ask, self.ledger, self.model_id, self.server       = ask, ledger, model_id, server
@@ -39,6 +40,7 @@ class Env:
         self.set_by, self.set_at, self.none_draft_fn            = set_by, set_at, none_draft_fn
         self.parallel, self.smoke                               = parallel, smoke
         self.extras                                             = {} if extras is None else extras
+        self.freeze_from                                        = freeze_from
 
 
 def cell_name( kind, lang ):
@@ -147,22 +149,30 @@ def run_needset( env, quota_table, out_dir ):
 
     Ensures:
         - the plan record is written first, with the reader the pool used, and a resume checks it is unchanged
+        - a real run then freezes the index and the vector set into out_dir/frozen, read-only, before the draw; a resume checks the copy is the same
+        - the frozen hashes are in the result and the report, and in needset-frozen.json beside the copy
         - returns { plan, census, cells, needs, report } and writes the plan, the drafts and the report files into out_dir
         - needs are in cell order, then draw order
 
     Raises:
         - NeedsetError QUOTA_UNFILLABLE from the draw or from a cell that runs out of seeds
         - NeedsetError PLAN_ALREADY_WRITTEN when another plan is on disk
+        - NeedsetError FREEZE_INCOMPLETE when a real run has no freeze_from, FROZEN_COPY_EXISTS and VECTORS_NOT_FROM_INDEX from freeze.freeze
     """
     out       = pathlib.Path( out_dir )
     plan      = quota.plan_record( env.seed, quota_table, env.kind_split, env.source_commit, pool.READER, env.set_by, env.set_at )
     write_or_check_plan( out / PLAN_FILE, plan )
+    if env.freeze_from is None:
+        if not env.smoke: raise er.NeedsetError( er.FREEZE_INCOMPLETE, "a real run needs freeze_from, the index generation and the vector set to freeze" )
+        frozen = None
+    else:
+        frozen = freeze.freeze( env.freeze_from[ 0 ], env.freeze_from[ 1 ], out / freeze.FROZEN_DIR )
     cells     = pool.cell_pool( env.kept, env.twins, set( env.by_id ) )
     drawn     = quota.draw( cells, quota_table, env.seed )
     results   = asyncio.run( draft.draft_cells( cell_specs( env, drawn, quota_table ), env.parallel ) )
     needs     = [ to_need( rec, *r[ "cell" ].split( "/" ), env ) for r in results for rec in r[ "accepted" ] ]
     report    = { "format": REPORT_FORMAT, "smoke": env.smoke, "census": quota.census( cells ), "replacements": draft.replacement_report( results ),
-                  "failed": { r[ "cell" ]: r[ "failed" ] for r in results }, "counts": { r[ "cell" ]: len( r[ "accepted" ] ) for r in results } }
+                  "failed": { r[ "cell" ]: r[ "failed" ] for r in results }, "counts": { r[ "cell" ]: len( r[ "accepted" ] ) for r in results }, "frozen": frozen }
     ( out / DRAFTS_FILE ).write_text( "".join( json.dumps( n, sort_keys=True ) + "\n" for n in needs ), encoding="utf-8" )
     ( out / REPORT_FILE ).write_text( json.dumps( report, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
-    return { "plan": plan, "census": report[ "census" ], "cells": results, "needs": needs, "report": report }
+    return { "plan": plan, "census": report[ "census" ], "cells": results, "needs": needs, "report": report, "frozen": frozen }

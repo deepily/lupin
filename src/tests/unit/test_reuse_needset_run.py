@@ -9,6 +9,7 @@ from cosa.repo.doc_lint import harness_runner
 from lupin_mcp.reuse_needset import draft, keys, pool, quota, run, schema
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset.pool import Measure
+from tests.unit.needset_freeze_helpers import pair_once
 from tests.unit.test_reuse_needset_keys import Asker as SecondAsker
 from tests.unit.test_reuse_needset_keys import Vectors, absence_world, own_shingles
 
@@ -62,8 +63,9 @@ class Model:
         return NOTHING if "plausibly need next" in prompt else SENTENCE
 
 
-def make_env( tmp_path, ask=None, seed=DRAW_SEED, smoke=False, with_none=True, name="ledger.jsonl", wrap_second=None ):
-    """Build a run.Env over the small world."""
+def make_env( tmp_path, ask=None, seed=DRAW_SEED, smoke=False, with_none=True, name="ledger.jsonl", wrap_second=None, freeze_from="built" ):
+    """Build a run.Env over the small world, freezing a real index unless freeze_from is given."""
+    if freeze_from == "built": freeze_from = pair_once( tmp_path )
     by_id, kept, ctx, twins = build_world()
     book    = draft.SharedLedger( harness_runner.Ledger( str( tmp_path / name ), binding="test" ) )
     ask     = Model() if ask is None else ask
@@ -73,7 +75,7 @@ def make_env( tmp_path, ask=None, seed=DRAW_SEED, smoke=False, with_none=True, n
     none_fn = draft.make_none_drafter( stage, vectors, lambda text: [ 1.0, 0.0 ], lambda i: "does a thing", second_call,
                                        harness_runner.Ledger( str( tmp_path / "second.jsonl" ), binding="test" ), "claude-opus-5-5" ) if with_none else None
     return run.Env( by_id, kept, ctx, twins, strip_fn, ask, book, draft.DRAFTER_MODEL, "max-plan", COMMIT, seed, SPLIT, "test", "2026-10-24T22:00:00-04:00",
-                    none_draft_fn=none_fn, parallel=2, smoke=smoke )
+                    none_draft_fn=none_fn, parallel=2, smoke=smoke, freeze_from=freeze_from )
 
 
 def table():

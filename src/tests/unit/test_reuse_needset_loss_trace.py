@@ -20,6 +20,7 @@ COMMIT  = "0123456789abcdef0123456789abcdef01234567"
 DRAFTER = { "model": draft.DRAFTER_MODEL, "prompt_version": "v1", "server": "max-plan" }
 AGREED  = { "choice": "AS_PROPOSED", "symbols": [], "final_source": "agreed" }
 ROOT    = "/tree"
+FROZEN  = { "index_manifest": "a" * 64, "symbols_sha": "b" * 40, "vector_build_info_sha": "c" * 64 }
 LT      = loss_trace
 SENTENCE = "A function that adds up a list of numbers but stops once a ceiling has been reached."
 
@@ -167,7 +168,7 @@ def make_ledger( tmp_path ): return harness_runner.Ledger( str( tmp_path / "trac
 
 
 def run_all( needs, w, ledger, model="claude-opus-5-5", parallel=3, commit="c1", sha="idx1" ):
-    return asyncio.run( LT.trace_all( needs, None, ledger, ROOT, model, commit, index_sha=sha, probe=w.probe, ask=w.ask, where=where, parallel=parallel ) )
+    return asyncio.run( LT.trace_all( needs, None, ledger, ROOT, model, commit, FROZEN, FROZEN, index_sha=sha, probe=w.probe, ask=w.ask, where=where, parallel=parallel ) )
 
 
 def test_trace_all_returns_the_records_in_order_and_a_second_run_makes_no_call( tmp_path ):
@@ -199,7 +200,7 @@ def test_a_failing_probe_stops_the_pending_needs_and_keeps_the_finished_records(
         if receipt[ "id" ] == f"r-{needs[ 4 ][ 'id' ]}": raise er.NeedsetError( er.PROBE_UNREADABLE, "boom" )
         return await real( sentence, receipt, root, model )
 
-    with pytest.raises( er.NeedsetError ) as e: asyncio.run( LT.trace_all( needs, None, ledger, ROOT, "m", "c1", index_sha="idx1", probe=failing, ask=w.ask, where=where, parallel=3 ) )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( LT.trace_all( needs, None, ledger, ROOT, "m", "c1", FROZEN, FROZEN, index_sha="idx1", probe=failing, ask=w.ask, where=where, parallel=3 ) )
     assert e.value.code == er.PROBE_UNREADABLE and sorted( w.asks ) == sorted( n[ "id" ] for n in needs[ :5 ] ) and len( ledger.entries ) == 4
     resumed = run_all( needs, w, harness_runner.Ledger( str( tmp_path / "trace.jsonl" ) ), model="m" )
     assert len( resumed ) == 8
@@ -216,7 +217,7 @@ def test_trace_all_refuses_a_smoke_need_an_unfinished_need_and_a_set_with_nothin
 def test_trace_all_builds_the_locator_from_the_index_when_none_is_given( tmp_path, monkeypatch ):
     needs, w = matched_set()
     monkeypatch.setattr( LT, "index_locator", lambda ctx: where )
-    out = asyncio.run( LT.trace_all( needs[ :1 ], "ctx", make_ledger( tmp_path ), ROOT, "m", "c1", index_sha="idx1", probe=w.probe, ask=w.ask ) )
+    out = asyncio.run( LT.trace_all( needs[ :1 ], "ctx", make_ledger( tmp_path ), ROOT, "m", "c1", FROZEN, FROZEN, index_sha="idx1", probe=w.probe, ask=w.ask ) )
     assert out[ 0 ][ "lost_at" ] == LT.FOUND
 
 
@@ -248,8 +249,8 @@ def test_the_index_sha_comes_from_the_context_when_none_is_given( tmp_path, monk
     needs, w = matched_set()
     monkeypatch.setattr( rt, "prepare", lambda ctx: ( set(), [], "from-ctx", "gen" ) )
     ledger = make_ledger( tmp_path )
-    asyncio.run( LT.trace_all( needs[ :1 ], "ctx", ledger, ROOT, "m", "c1", probe=w.probe, ask=w.ask, where=where ) )
-    asyncio.run( LT.trace_all( needs[ :1 ], "ctx", ledger, ROOT, "m", "c1", index_sha="from-ctx", probe=w.probe, ask=w.ask, where=where ) )
+    asyncio.run( LT.trace_all( needs[ :1 ], "ctx", ledger, ROOT, "m", "c1", FROZEN, FROZEN, probe=w.probe, ask=w.ask, where=where ) )
+    asyncio.run( LT.trace_all( needs[ :1 ], "ctx", ledger, ROOT, "m", "c1", FROZEN, FROZEN, index_sha="from-ctx", probe=w.probe, ask=w.ask, where=where ) )
     assert len( w.asks ) == 1
 
 
@@ -316,3 +317,10 @@ def test_the_report_prints_the_figures_before_and_after_the_confirmations( tmp_p
     md = ( tmp_path / "loss-report.md" ).read_text()
     assert "| NOT_READ | 1 | 0 |" in md and "| FOUND | 4 | 5 |" in md and f"{before[ 'miss_rate' ]:.4f}" in md and f"{after[ 'upper_bound' ]:.4f}" in md
     assert "| sampled | 2 | 1 |" in md and "checker_commit: " + COMMIT in md
+
+
+@pytest.mark.parametrize( "key, code", [ ( "index_manifest", er.INDEX_DIFFERS ), ( "symbols_sha", er.INDEX_DIFFERS ), ( "vector_build_info_sha", er.VECTORS_DIFFER ) ] )
+def test_trace_all_refuses_a_run_whose_index_or_vectors_differ_from_the_frozen_set_before_any_call( tmp_path, key, code ):
+    needs, w = matched_set()
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( LT.trace_all( needs, None, make_ledger( tmp_path ), ROOT, "m", "c1", FROZEN, dict( FROZEN, **{ key: "d" * 64 } ), index_sha="idx1", probe=w.probe, ask=w.ask, where=where ) )
+    assert e.value.code == code and key in e.value.detail and w.asks == [] and w.probes == []

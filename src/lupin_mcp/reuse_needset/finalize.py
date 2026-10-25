@@ -6,7 +6,7 @@ import pathlib
 import random
 
 from cosa.repo.labelling import items as lb
-from lupin_mcp.reuse_needset import check, schema
+from lupin_mcp.reuse_needset import check, freeze, schema
 from lupin_mcp.reuse_needset import errors as er
 
 SAMPLE_PERCENT = 15
@@ -119,28 +119,36 @@ def final_row( need, label ):
     return row
 
 
+def _frozen_hashes( holder ):
+    """Raises: NeedsetError MANIFEST_MISMATCH when a frozen hash is missing or empty."""
+    absent = [ k for k in freeze.IDENTITY_KEYS if not isinstance( holder.get( k ), str ) or not holder[ k ] ]
+    if absent: _mismatch( "FROZEN", f"no frozen hash for {absent}" )
+
+
 def file_sha256( path ):
     """Return the sha256 hex digest of a file's bytes."""
     return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
 
 
-def finalize( needs, labels, kappa, seed, source_commit, out_dir, known_symbols=None ):
+def finalize( needs, labels, kappa, seed, source_commit, frozen, out_dir, known_symbols=None ):
     """
     Write the final set and its manifest.
 
     Requires:
         - labels maps each need id to its final label; every need has one
         - kappa is the reviewers' kappa, a number
+        - frozen is freeze.identity's result for the frozen index and vector set the keys were written against
         - known_symbols is None, or the set of symbols that exist in the index
 
     Ensures:
-        - writes needset-final.jsonl, one row per need sorted by id, then needset-manifest.json holding the counts, the seed, the source commit, kappa and the sha256 of the final file
+        - writes needset-final.jsonl, one row per need sorted by id, then needset-manifest.json holding the counts, the seed, the source commit, kappa, the three frozen hashes and the sha256 of the final file
         - returns the manifest
 
     Raises:
-        - NeedsetError BAD_NEED from final_row, MANIFEST_MISMATCH for a need without a label, a repeated need id, a kappa that is not a number, or a typed symbol outside known_symbols
+        - NeedsetError BAD_NEED from final_row, MANIFEST_MISMATCH for a need without a label, a repeated need id, a kappa that is not a number, a frozen identity that lacks a hash, or a typed symbol outside known_symbols
     """
     if isinstance( kappa, bool ) or not isinstance( kappa, ( int, float ) ): _mismatch( "KAPPA", f"kappa must be a number, got {kappa!r}" )
+    _frozen_hashes( frozen )
     repeated = _repeated( n[ "id" ] for n in needs )
     if repeated: _mismatch( "IDS", f"repeated need ids: {repeated[ :5 ]}" )
     missing = sorted( n[ "id" ] for n in needs if n[ "id" ] not in labels )
@@ -151,7 +159,7 @@ def finalize( needs, labels, kappa, seed, source_commit, out_dir, known_symbols=
     rows = [ final_row( n, labels[ n[ "id" ] ] ) for n in sorted( needs, key=lambda n: n[ "id" ] ) ]
     out  = pathlib.Path( out_dir )
     ( out / FINAL_FILE ).write_text( "".join( json.dumps( r, sort_keys=True ) + "\n" for r in rows ), encoding="utf-8" )
-    manifest = { "format": MANIFEST_FORMAT, "seed": seed, "source_commit": source_commit, "kappa": kappa, "final_sha256": file_sha256( out / FINAL_FILE ),
+    manifest = { "format": MANIFEST_FORMAT, "seed": seed, "source_commit": source_commit, "kappa": kappa, **{ k: frozen[ k ] for k in freeze.IDENTITY_KEYS }, "final_sha256": file_sha256( out / FINAL_FILE ),
                  "counts": { "rows": len( rows ), "matched": sum( 1 for r in rows if r[ "kind" ] != "nothing" ), "nothing": sum( 1 for r in rows if r[ "kind" ] == "nothing" ),
                              "ts": sum( 1 for r in rows if r[ "write_lang" ] == "ts" ), "py": sum( 1 for r in rows if r[ "write_lang" ] == "py" ) } }
     ( out / MANIFEST_FILE ).write_text( json.dumps( manifest, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
@@ -172,9 +180,10 @@ def verify_manifest( path, expected=None ):
         - no need id repeats, and every row's source_commit is the manifest's
         - the manifest's counts equal the rows' counts, and the manifest holds a seed
         - the manifest's sha256 equals the final file's, and the manifest holds a kappa
+        - the manifest holds the three frozen hashes
 
     Raises:
-        - NeedsetError MANIFEST_MISMATCH starting its detail with the failed condition: files, rows, ids, smoke, kinds, langs, commit, counts, seed, human, sha or kappa, in capitals
+        - NeedsetError MANIFEST_MISMATCH starting its detail with the failed condition: files, rows, ids, smoke, kinds, langs, commit, counts, seed, human, sha, kappa or frozen, in capitals
     """
     expected = EXPECTED if expected is None else expected
     path     = pathlib.Path( path )
@@ -209,6 +218,7 @@ def verify_manifest( path, expected=None ):
             _mismatch( "HUMAN", f"{r[ 'id' ]}: a {r[ 'kind' ]} row or a disputed row needs a human final source, this one is {r[ 'final' ][ 'final_source' ]}" )
     if manifest.get( "final_sha256" ) != file_sha256( final ): _mismatch( "SHA", "the manifest's sha256 is not the final file's" )
     if isinstance( manifest.get( "kappa" ), bool ) or not isinstance( manifest.get( "kappa" ), ( int, float ) ): _mismatch( "KAPPA", "the manifest holds no kappa" )
+    _frozen_hashes( manifest )
 
 
 STATUS_FILE = "needset-status.json"

@@ -12,7 +12,7 @@ import json
 
 from cosa.repo.doc_lint import harness_report, harness_runner, model_transport
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import agent_probe, finalize
+from lupin_mcp.reuse_needset import agent_probe, finalize, freeze
 from lupin_mcp.reuse_needset import errors as er
 
 NOT_RETRIEVED      = "NOT_RETRIEVED"
@@ -166,7 +166,7 @@ def trace_version():
     return model_transport.prompt_version( "needset-trace", inspect.getsource( check_need ), inspect.getsource( classify ), agent_probe.prompt_version() )
 
 
-async def trace_all( needs, ctx, ledger, root, model, checker_commit, index_sha=None, probe=agent_probe.run_probe, ask=check_need, where=None, parallel=3 ):
+async def trace_all( needs, ctx, ledger, root, model, checker_commit, manifest, live, index_sha=None, probe=agent_probe.run_probe, ask=check_need, where=None, parallel=3 ):
     """
     Trace every need, skipping the ones the ledger holds.
 
@@ -175,6 +175,7 @@ async def trace_all( needs, ctx, ledger, root, model, checker_commit, index_sha=
         - ledger is a harness_runner.Ledger; root is a read-only tree of the source commit
         - checker_commit is the sha of the code tree whose retrieval is measured
         - index_sha is the sha of the index the checker reads; None reads it from ctx
+        - manifest is the verified need set manifest; live is freeze.identity of the index and vector set the checker reads
 
     Ensures:
         - returns the records in the order of needs
@@ -184,8 +185,10 @@ async def trace_all( needs, ctx, ledger, root, model, checker_commit, index_sha=
         - the probes run through run_parallel, so a failure stops the pending ones and the finished records stay in the ledger
 
     Raises:
+        - NeedsetError INDEX_DIFFERS, VECTORS_DIFFER or FREEZE_INCOMPLETE from freeze.require_same, before any call
         - NeedsetError BAD_NEED for a smoke need, a need that is not final, a set with no matched need, or an empty source commit, index sha or checker commit, or an index sha of none, before any call
     """
+    freeze.require_same( manifest, live, "trace_all" )
     for n in needs:
         if "smoke" in n or n[ "status" ] != "final": raise er.NeedsetError( er.BAD_NEED, f"{n[ 'id' ]}: only a final, non-smoke need is traced" )
     if not any( n[ "kind" ] != "nothing" for n in needs ): raise er.NeedsetError( er.BAD_NEED, "a trace needs at least one matched need" )
