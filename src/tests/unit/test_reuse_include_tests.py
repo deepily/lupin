@@ -20,7 +20,11 @@ def ids_of( r ): return sorted( { s[ "id" ] for s in r[ "shortlist" ] } | { s[ "
 def test_a_default_call_neither_reads_nor_sends_a_test_record( tests_env ):
     # red when: prepare() adds the test records without being asked
     fake = AllReuse()
-    r    = rt.check_exists_impl( NEED, ctx_of( tests_env, fake ), language="py" )
+    ctx  = ctx_of( tests_env, fake )
+    r    = rt.check_exists_impl( NEED, ctx, language="py" )
+    search = bd.read_header( bd.current_generation( tests_env[ 2 ] ) )[ "search_sha" ]
+    assert r[ "index_sha" ] == rt.index_sha( search, rt.l0_lines( ctx.wiki_dir ), rt.pages_digest( ctx.pages ) )         # no tests part: the sha it always was
+    assert rt.index_sha( "s", [] ) == rt.sha( "s\n" )                                  # pinned to a literal: the function adds nothing without a tests_sha
     assert HELPER_ID not in ids_of( r ) and not any( HELPER_ID in json.dumps( b ) for b in fake.seen )
     assert not ( tests_env[ 2 ] / "tests" ).exists()                                  # the tests generation is not even built
     rec = receipt_of( tests_env, r )
