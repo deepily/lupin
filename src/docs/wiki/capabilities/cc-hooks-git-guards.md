@@ -2,7 +2,7 @@
 capability: cc-hooks-git-guards
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_cli.claude_code.hooks.pre_tool_use.main@0ec609b9fd
+  - lupin_cli.claude_code.hooks.pre_tool_use.main@122392a13a
   - lupin_cli.claude_code.hooks.lib.stash_guard.stash_deny_reason@13e37ff81e
   - lupin_cli.claude_code.hooks.lib.branch_lock_guard.branch_lock_deny_reason@10ab10ceda
   - lupin_cli.claude_code.hooks.lib.kill_guard.kill_deny_reason@65a3afb943
@@ -15,7 +15,7 @@ pins:
 Five text-matching guards run on every Bash tool call and refuse or flag a risky `git` or `kill` command before it runs. `pre_tool_use.main` dispatches them. Heartbeat hooks are in [[cc-hooks-heartbeat]]; the session bridge is in [[cc-session-bridge]].
 
 ## Dispatch
-- `main` calls the guards in this order: stash, branch lock, kill, merge head, commit scope. The first deny is emitted and the hook exits; later guards do not run.
+- `main` calls the guards in this order: stash, branch lock, kill, merge head, commit scope. The first deny is emitted and the hook exits; later guards do not run. Between branch lock and kill, it records which manager spawned a worktree a worker makes by hand; that step never denies and never raises.
 - A deny is a `permissionDecision: "deny"` response carrying the reason text. Only commit scope can also allow with a notice, sent as `additionalContext`.
 - Every guard acts only on the `Bash` tool and returns "allow" on any internal error.
 - All five are on by default. The threat model is accident, not evasion: variable indirection, `eval` and similar are not caught.

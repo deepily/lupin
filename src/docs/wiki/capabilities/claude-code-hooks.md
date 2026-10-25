@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.register_session.main@f7a90a1c55
   - lupin_cli.claude_code.hooks.stop.main@9c612736e2
-  - lupin_cli.claude_code.hooks.pre_tool_use.main@0ec609b9fd
+  - lupin_cli.claude_code.hooks.pre_tool_use.main@122392a13a
   - lupin_cli.claude_code.hooks.post_tool_use.main@dcc0e51181
   - lupin_cli.claude_code.hooks.user_prompt_submit.main@ba91d0665b
   - lupin_cli.claude_code.hooks.permission_request.main@f56dbd56a6
