@@ -90,6 +90,23 @@ def tree( tmp_path, files ):
 
 # ---- jscpd ------------------------------------------------------------------------------------------------------
 
+JS_COPY = """function {name}( items, factor ) {{
+    let total = 0;
+    const scaled = [];
+    for ( const item of items ) {{
+        if ( item > 10 ) {{
+            scaled.push( item * factor );
+        }} else {{
+            scaled.push( item + factor );
+        }}
+    }}
+    for ( const s of scaled ) {{
+        total += s;
+    }}
+    return total;
+}}
+"""
+
 JSCPD_CFG = { "jscpd": { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "chosen_in": "test" } }
 
 
@@ -98,7 +115,8 @@ def nested_tree( tmp_path ):
     fixture = json.loads( ( HERE / "semdup_jscpd_fixture.json" ).read_text( encoding="utf-8" ) )
     root    = tmp_path / "nest"
     paths   = []
-    for name, text in [ ( f"client/{n}", t ) for n, t in fixture.items() ] + [ ( "other/one.ts", fixture[ "src/one.ts" ] ) ]:
+    extra   = [ ( "other/one.ts", fixture[ "src/one.ts" ] ), ( "client/lib/a.js", JS_COPY.format( name="sumUp" ) ), ( "client/lib/b.js", JS_COPY.format( name="sumDown" ) ) ]
+    for name, text in [ ( f"client/{n}", t ) for n, t in fixture.items() ] + extra:
         p = root / name
         p.parent.mkdir( parents=True, exist_ok=True )
         p.write_text( text, encoding="utf-8" )
@@ -120,9 +138,25 @@ def test_the_live_jscpd_finds_exactly_the_expected_pairs_in_a_nested_root_and_ke
     root, paths = nested_tree( tmp_path )
     inside      = named_pairs( root, paths, st.run_jscpd( root, [ "client" ], JSCPD_CFG ) )
     both        = named_pairs( root, paths, st.run_jscpd( root, [ "client", "other" ], JSCPD_CFG ) )
-    assert inside == [ ( [ "client/src/one.ts#scaleAndSum", "client/src/two.ts#scaleThenSum" ], 84 ) ]
-    assert both == [ ( [ "client/src/one.ts#scaleAndSum", "client/src/two.ts#scaleThenSum" ], 84 ),
-                     ( [ "client/src/one.ts#scaleAndSum", "other/one.ts#scaleAndSum" ], 87 ) ]
+    ts_pair = ( [ "client/src/one.ts#scaleAndSum", "client/src/two.ts#scaleThenSum" ], 84 )
+    js_pair = ( [ "client/lib/a.js#sumUp", "client/lib/b.js#sumDown" ], 72 )
+    assert inside == [ js_pair, ts_pair ]
+    assert both == [ js_pair, ts_pair, ( [ "client/src/one.ts#scaleAndSum", "other/one.ts#scaleAndSum" ], 87 ) ]
+    assert named_pairs( root, paths, st.run_jscpd( root, [ "client" ], at_tokens( 80 ) ) ) == [ ts_pair ]
+    assert named_pairs( root, paths, st.run_jscpd( root, [ "client" ], at_tokens( 90 ) ) ) == []
+
+
+def at_tokens( n ):
+    """Return the test configuration with jscpd's minimum token count set to n."""
+    return { "jscpd": { **JSCPD_CFG[ "jscpd" ], "min_tokens": n } }
+
+
+def test_run_jscpd_passes_the_frozen_thresholds_and_both_script_formats_on_the_command_line(tmp_path, monkeypatch):
+    calls = fake_jscpd( monkeypatch, tmp_path, "5.3.3", 0, True )
+    st.run_jscpd( tmp_path, [ "x" ], { "jscpd": { "version": "5.3.3", "min_tokens": 61, "min_lines": 7, "chosen_in": "t" } } )
+    cmd, kw = calls[ -1 ]
+    assert cmd[ cmd.index( "--min-tokens" ) + 1 ] == "61" and cmd[ cmd.index( "--min-lines" ) + 1 ] == "7"
+    assert cmd[ cmd.index( "--format" ) + 1 ] == "typescript,javascript" and cmd[ -1 ] == "." and kw[ "cwd" ] == str( tmp_path )
 
 
 def test_run_jscpd_names_a_missing_launcher_and_a_missing_node(tmp_path, monkeypatch):
@@ -143,11 +177,14 @@ def fake_jscpd( monkeypatch, tmp_path, version, returncode, write_report, report
     ( tmp_path / "node_modules" / ".bin" / "jscpd" ).write_text( "", encoding="utf-8" )
     monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path ) )
     monkeypatch.setattr( js_index, "find_node", lambda: "node" )
+    calls = []
     def run( cmd, **kwargs ):
+        calls.append( ( cmd, kwargs ) )
         if cmd[ -1 ] == "--version": return types.SimpleNamespace( stdout=f"jscpd {version}\n", stderr="", returncode=0 )
         if write_report: ( pathlib.Path( cmd[ cmd.index( "--output" ) + 1 ] ) / "jscpd-report.json" ).write_text( report, encoding="utf-8" )
         return types.SimpleNamespace( stdout="", stderr="boom", returncode=returncode )
     monkeypatch.setattr( st.subprocess, "run", run )
+    return calls
 
 
 def test_run_jscpd_refuses_another_installed_version(tmp_path, monkeypatch):
