@@ -154,6 +154,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-stage-one-analysis-passes]] — stage-one analysis: the three passes, pack-size decision, stop rules and canary check. `lupin_mcp` (reuse_stage1_analysis)
 - [[reuse-stage-one-analysis-pages]] — stage-one analysis: page arms, other boundaries and the old-shape comparison. `lupin_mcp` (reuse_stage1_analysis)
 - [[reuse-stage-one-analysis-report]] — stage-one analysis: request and cost figures, the built report and its command. `lupin_mcp` (reuse_stage1_analysis)
+- [[reuse-seeded-miss-stand-ins]] — the seeded-miss run's throwaway repository, stand-in Jev, stage and store. `lupin_mcp` (reuse_seeded_miss_e2e)
+- [[reuse-seeded-miss-scenario]] — the seeded-miss run: record a miss, repair a docstring and prove it by replay, dry or live. `lupin_mcp` (reuse_seeded_miss_e2e)
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection. `lupin_mcp` (reuse_stage2_negatives)
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows. `lupin_mcp` (reuse_stage2_run)
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it. `lupin_mcp` (reuse_stage2_fit)
