@@ -31,5 +31,5 @@ An `AgentBase` subclass that asks an LLM to fix code that just failed, runs the 
 
 ## How to extend
 - Use `serialize_to_json` and `restore_from_serialized_state` to save and replay an attempt. Restore rebuilds from `error_message` and `path_to_code`, so the file must still be there.
-- `restore_from_serialized_state` calls `AgentBase._restore_from_data` with the error message and code path, then the debug flags.
+- `restore_from_serialized_state` reads the file through `AgentBase._restore_from_file`, which calls `_restore_from_data`, with the error message and code path, then the debug flags.
 - The smoke test at the foot of the module writes a broken file to `path to code execution file` and needs a reachable LLM.

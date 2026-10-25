@@ -21,6 +21,6 @@ When a typed or spoken persona name matches no one mechanically, the commons ask
 
 ## The disambiguator
 - `CommonsLlmDisambiguator.disambiguate` asks the model named by `llm spec key for commons persona disambiguator`, with a timeout and a confidence floor read from the INI keys. The default floor is 0.7.
-- It returns a persona name only if it is in the active list and confident enough. A validation error, timeout, parse error or the stubbed fallback returns None.
+- It returns a persona name only if it is in the active list and confident enough. A request validation error returns None. A timeout, parse error or response validation error goes to the stubbed fallback, which returns None. Any other transport error still raises.
 - `commons llm disambiguator log decisions` switches on a printed record of each decision, for tuning the floor.
 - `configure_llm_disambiguator` installs the single disambiguator at startup, or clears it with None. `disambiguate_via_llm` calls it, and returns None with no call when none is installed.

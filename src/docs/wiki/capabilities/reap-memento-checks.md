@@ -33,7 +33,7 @@ Before a manager's reap kills a seat, these functions ask the seat for a memento
 - It also refuses a memento that says work is unmerged while naming a commit already in HEAD, when given a repo root.
 - `verify_seat_memento_at_any_readable_slot` tries the io slot, the root record, then any io record whose own header names this session. A fallback hit says so in its reason.
 - `classify_slot_presence` answers `present`, `empty` or `absent` for the bare slot. `classify_slot_owner` returns the other seat's session id when the slot holds a prior holder's memento.
-- `coordinate_mementos` runs before any kill. It asks each seat and polls the slot, and returns one status per seat. These are `verified`, `written`, `timeout_no_memento`, `prior_holder_present`, `unparseable_present`, `unproven_present`, `skipped` and `skipped_no_cwd`.
+- `coordinate_mementos` runs before any kill. It asks each seat and polls the slot, and returns one status per seat. These are `not_requested` when no memento was asked for, then `verified`, `written`, `timeout_no_memento`, `prior_holder_present`, `unparseable_present`, `unproven_present`, `skipped` and `skipped_no_cwd`.
 - `recheck_losing_seats` re-reads the disk once after the kill. A seat whose own memento is now proven is upgraded. The input is not changed.
 - `memento_alarm( outcomes )` is one sentence for the top of the reap result naming every seat killed without a usable memento. `withhold_notice` names every seat not killed, and why.
 - `describe_slot` answers whether the memento sits where the reaper reads, as `ready`, `prior_holder`, `absent` or `present_unproven`. `format_slot_report` renders it, and `main` exits 0 only on `ready`.
