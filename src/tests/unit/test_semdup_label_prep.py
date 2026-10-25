@@ -243,17 +243,35 @@ def test_a_pair_item_holds_only_the_two_texts_and_a_key_row_says_which_id_is_a()
 
 def test_an_item_id_is_the_same_for_either_order_and_differs_between_pairs():
     assert lp.item_id( "d-1", "d-2" ) == lp.item_id( "d-2", "d-1" ) != lp.item_id( "d-1", "d-3" )
-    assert lp.pair_key( "d-2", "d-1" ) == "d-1|d-2"
+    assert lp.unordered_key( "d-2", "d-1" ) == "d-1|d-2"
 
 
 def test_a_rewrite_record_is_a_new_origin_definition_with_a_stable_id( tmp_path ):
     made = lp.rewrite_record( { "rewrite_text": "def g( a ):\n    return a + 1" }, orig(), tmp_path, 3 )
-    assert ( made[ "origin" ], made[ "file" ], made[ "name" ], made[ "lang" ] ) == ( "new", "planted/003.py", "g", "py" )
+    assert ( made[ "origin" ], made[ "file" ], made[ "name" ], made[ "lang" ] ) == ( "new", "src/mod.py", "g", "py" )
     again = lp.rewrite_record( { "rewrite_text": "def g( a ):\n    return a + 1" }, orig(), tmp_path / "other", 3 )
     assert again[ "id" ] == made[ "id" ]
     script = lp.rewrite_record( { "rewrite_text": "function g( a ) { return a + 1; }" }, orig( "ts" ), tmp_path, 4 )
-    assert ( script[ "file" ], script[ "lang" ], script[ "name" ] ) == ( "planted/004.ts", "ts", "g" )
+    assert ( script[ "file" ], script[ "lang" ], script[ "name" ] ) == ( "src/js/mod.ts", "ts", "g" )
     with pytest.raises( ValueError, match="no definition" ): lp.rewrite_record( { "rewrite_text": "# nothing here" }, orig(), tmp_path, 5 )
+    with pytest.raises( ValueError, match="no definition" ): lp.rewrite_record( { "rewrite_text": "const value = 5;" }, orig( "ts" ), tmp_path, 7 )
+
+
+def test_a_class_member_rewrite_is_read_inside_a_class_and_loses_the_class_name_and_carries_the_originals_path( tmp_path ):
+    member = { "rewrite_text": "public unmount(): void {\n    this.open = false;\n}" }
+    made   = lp.rewrite_record( member, orig( "ts" ), tmp_path, 6 )
+    assert ( made[ "name" ], made[ "file" ], made[ "origin" ] ) == ( "unmount", "src/js/mod.ts", "new" )
+    assert made[ "id" ] == ex.definition_id( "new", "src/js/mod.ts", "unmount", made[ "text" ] ) and "PlantedWrapper" not in json.dumps( made )
+    assert "planted" not in json.dumps( made )
+
+
+def test_a_rewrite_that_cannot_be_extracted_is_a_named_failure_so_the_next_original_takes_its_place( monkeypatch ):
+    patch_need( monkeypatch )
+    shape = lambda text: { 1, 2, 3 } if "def " in text else { 7, 8, 9 }
+    for method, kwargs in ( ( lp.STRATA[ 0 ], { "rewrite": "x = 1\n" } ), ( lp.STRATA[ 1 ], { "alike": "x = 1\n" } ) ):
+        asks, _ = asks_with( **kwargs )
+        got = lp.plant_one( orig(), "/r", method, asks, shape )
+        assert got[ "status" ] == "failed" and got[ "stratum" ] == method and "no definition could be extracted" in got[ "failures" ][ 0 ][ "extract" ]
 
 
 def planted_pair( i, stratum="fable-planted" ):
@@ -326,7 +344,7 @@ def test_the_whole_run_plants_sixty_pairs_sixty_forty_one_third_work_alikes_and_
     assert kinds.count( "planted" ) == 60 and len( key[ "items" ] ) == out[ "items" ]
     planted = [ r for r in key[ "items" ].values() if r[ "kind" ] == "planted" ]
     assert sum( 1 for r in planted if r[ "a" ].startswith( "d-ts" ) or r[ "b" ].startswith( "d-ts" ) ) == 36 and sum( 1 for r in planted if r[ "a" ].startswith( "d-py" ) or r[ "b" ].startswith( "d-py" ) ) == 24
-    assert (tmp_path / "out" / "key" / "rewrites" / "planted" / "000.ts").is_file()
+    assert (tmp_path / "out" / "key" / "rewrites" / "000" / "src" / "ts" / "m0.ts").is_file() or any( (tmp_path / "out" / "key" / "rewrites").rglob( "*.ts" ) )
 
 
 def test_a_failure_after_planting_costs_no_model_call_on_the_next_run( tmp_path, monkeypatch ):

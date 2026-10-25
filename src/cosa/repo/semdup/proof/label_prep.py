@@ -37,6 +37,7 @@ LANG_NAMES     = { "py": "Python", "ts": "TypeScript" }
 FENCE          = re.compile( r"^```[A-Za-z]*\s*\n(.*?)\n?```\s*$", re.DOTALL )
 ALIKE_SYSTEM   = "You write one function from a short description. Reply with the function source only, in the language named, with no comments about the description."
 KEY_FILE       = "answer-key.json"
+WRAPPER        = "PlantedWrapper"
 PLANTED_FILE   = "planted.json"
 SEED           = 20261025
 REVIEWERS      = ( "rick", "reviewer-2" )
@@ -128,7 +129,7 @@ def plant_one( rec, root, method, asks, shape_of ):
 
     Ensures:
         - returns { original, stratum, rewrite_text, ... } with status "planted", or status "failed" and the failure kinds when no rewrite passed
-        - a definition need_input cannot resolve is a failure naming the reason, so the next original is tried and the run goes on
+        - a definition need_input cannot resolve, and a rewrite that cannot be extracted as a definition, are failures naming the reason, so the next original is tried and the run goes on
         - a Fable rewrite is made by plant_rewrite with the banned words; an Opus work-alike is written from the need sentence alone, never seeing the original
         - a work-alike must parse and must not have the original's shape; it is not checked for banned words because it never saw them
     """
@@ -142,13 +143,13 @@ def plant_one( rec, root, method, asks, shape_of ):
         banned = plant.banned_names( rec, need.forbidden if rec[ "lang" ] == "py" else [] )
         made   = plant.plant_rewrite( rec[ "text" ], banned, asks[ "rewrite" ], shape_of )
         if made[ "status" ] == "failed": return { **base, "status": "failed", "failures": made[ "failures" ] }
-        return { **base, "status": "planted", "rewrite_text": made[ "rewrite" ], "tries": made[ "tries" ] }
+        return checked( rec, { **base, "status": "planted", "rewrite_text": made[ "rewrite" ], "tries": made[ "tries" ] } )
     sentence = write_sentence( need, lang, asks[ "sentence" ] )
     if sentence is None: return { **base, "status": "failed", "failures": [ { "sentence": "no sentence passed the form check" } ] }
     reply    = asks[ "alike" ]( ALIKE_SYSTEM, f"Language: {LANG_NAMES[ rec[ 'lang' ] ]}\nDescription: {sentence}" )
     failed   = plant.check_rewrite( rec[ "text" ], reply, [], shape_of )
     if failed: return { **base, "status": "failed", "failures": [ failed ] }
-    return { **base, "status": "planted", "rewrite_text": reply, "tries": 1, "sentence": sentence }
+    return checked( rec, { **base, "status": "planted", "rewrite_text": reply, "tries": 1, "sentence": sentence } )
 
 
 def plant_all( originals, root, asks, shape_of, count=PLANTED_COUNT, threads=THREADS, alike_every=ALIKE_EVERY ):
@@ -219,14 +220,14 @@ def monolith_candidates( root, cfg, client, cache_dir, per_source=PER_SOURCE, no
     return { "defs": defs, "pairs": monolith_pairs.assemble_pairs( tagged ), "blob": MONOLITH_BLOB }
 
 
-def pair_key( a, b ):
+def unordered_key( a, b ):
     """Return the key of an unordered pair of definition ids, as proof_run.label_key writes it."""
     return "|".join( sorted( ( a, b ) ) )
 
 
 def item_id( a, b ):
     """Return an opaque item id for a pair that carries no source, stratum or order."""
-    return "pair-" + hashlib.sha256( pair_key( a, b ).encode( "utf-8" ) ).hexdigest()[ :10 ]
+    return "pair-" + hashlib.sha256( unordered_key( a, b ).encode( "utf-8" ) ).hexdigest()[ :10 ]
 
 
 def pair_item( first, second, seed ):
@@ -241,7 +242,7 @@ def pair_item( first, second, seed ):
         - the item holds nothing but the two texts
     """
     mine    = sorted( [ first, second ], key=lambda d: d[ "id" ] )
-    random.Random( f"{seed}|{pair_key( first[ 'id' ], second[ 'id' ] )}" ).shuffle( mine )
+    random.Random( f"{seed}|{unordered_key( first[ 'id' ], second[ 'id' ] )}" ).shuffle( mine )
     return { "item": lb_items.make_item( lb_items.SEMDUP_PAIR, item_id( first[ "id" ], second[ "id" ] ), { "a": mine[ 0 ][ "text" ], "b": mine[ 1 ][ "text" ] } ),
              "row": { "a": mine[ 0 ][ "id" ], "b": mine[ 1 ][ "id" ] } }
 
@@ -251,22 +252,49 @@ def rewrite_record( result, original, folder, number ):
     Make the definition record of a planted rewrite, new-origin, from its text.
 
     Requires:
-        - result is a planted result of plant_one; original is its original's record; folder is a writable directory; number makes the file name unique
+        - result is a planted result of plant_one; original is its original's record; folder is a writable directory; number makes the folder unique
 
     Ensures:
-        - returns the first definition extracted from the rewrite, written at planted/<number> under folder with the original's language, so its id is stable
+        - returns the first definition extracted from the rewrite, written under folder/<number> at the original's own file path, so nothing in the record says it was planted
+        - a script rewrite that does not parse alone is tried inside a class body, and the class name is taken off the definition's name
+        - the id is the one definition_id gives the new-origin record
         - raises when the extraction finds no definition
 
     Raises:
         - ValueError if no definition could be extracted from the rewrite
     """
-    suffix = ".py" if original[ "lang" ] == "py" else ".ts"
-    path   = pathlib.Path( folder ) / "planted" / f"{number:03d}{suffix}"
+    root = pathlib.Path( folder ) / f"{number:03d}"
+    path = root / original[ "file" ]
     path.parent.mkdir( parents=True, exist_ok=True )
-    path.write_text( result[ "rewrite_text" ] + "\n", encoding="utf-8" )
-    found  = extract.extract_tree( folder, [ path ], "new" )[ "definitions" ]
+    for wrapped in ( False, True ):
+        path.write_text( f"class {WRAPPER} {{\n{result[ 'rewrite_text' ]}\n}}\n" if wrapped else result[ "rewrite_text" ] + "\n", encoding="utf-8" )
+        found = extract.extract_tree( root, [ path ], "new" )[ "definitions" ]
+        if found or original[ "lang" ] == "py": break
     if not found: raise ValueError( f"no definition could be extracted from the rewrite of {original[ 'id' ]}" )
-    return found[ 0 ]
+    made = found[ 0 ]
+    if wrapped:
+        made[ "name" ] = made[ "name" ].removeprefix( f"{WRAPPER}." )
+        made[ "id" ]   = extract.definition_id( "new", made[ "file" ], made[ "name" ], made[ "text" ] )
+    return made
+
+
+def checked( original, planted ):
+    """
+    Turn a planted result into a failure when its rewrite cannot be made into a definition.
+
+    Requires:
+        - original is the definition record; planted is a planted result of plant_one
+
+    Ensures:
+        - returns planted unchanged when rewrite_record can extract a definition from it
+        - otherwise returns the same result with status "failed" and the reason, so the next original takes its place
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            rewrite_record( planted, original, tmp, 0 )
+        except ValueError as e:
+            return { "original": planted[ "original" ], "stratum": planted[ "stratum" ], "status": "failed", "failures": [ { "extract": str( e ) } ] }
+    return planted
 
 
 def prepare( planted, mono, reviewers, seed, out_dir, config_sha ):
