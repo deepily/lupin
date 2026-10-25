@@ -57,9 +57,9 @@ def generate_api_key() -> str:
         - secrets module available (Python 3.6+)
 
     Ensures:
-        - returns API key string (70 characters)
+        - returns API key string (72 characters)
         - format: ck_live_ + 64 chars base64url
-        - cryptographically secure (288 bits entropy)
+        - cryptographically secure (384 bits entropy)
 
     Returns:
         str: API key (e.g., "ck_live_9x7Kp3mN8vQ2jR5wT6yL...")

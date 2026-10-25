@@ -29,8 +29,7 @@ The metric was rebuilt four times. Read this before trusting a number:
 One decomposition is unfalsifiable, because it is V4 under a new name.
 Splitting a wait at "the branch finished", taken as the last commit in the delivery, gives a
 route-side term of `landed - max(author)`. Any commit made while waiting resets it.
-A long route wait cannot be observed. It is computed here and reported only as
-`route_side_UNFALSIFIABLE`, never as evidence.
+A long route wait cannot be observed, so this script does not compute that term.
 What survives is `largest_silent_stretch`: a gap that has already happened, which no later
 commit can erase. Section 9e's "62.0 of 84.6 box-up hours (73%)" comes from that figure.
 

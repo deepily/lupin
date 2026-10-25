@@ -50,6 +50,15 @@ class TestAPIKeyGeneration:
         assert len( api_key ) >= 70, f"API key too short: {len( api_key )} chars (expected 70+)"
         assert len( api_key ) <= 100, f"API key too long: {len( api_key )} chars (expected <=100)"
 
+    def test_the_docstring_states_the_length_and_entropy_the_code_produces( self ):
+        """The 72 characters and 384 bits in the contract are what token_urlsafe( 48 ) gives."""
+        api_key = create_service_account.generate_api_key()
+        assert len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
+        assert "(72 characters)" in create_service_account.generate_api_key.__doc__
+        assert "(384 bits entropy)" in create_service_account.generate_api_key.__doc__
+        postgres = ( Path( lupin_root ) / "src" / "scripts" / "create_service_account_postgres.py" ).read_text( encoding="utf-8" )
+        assert "(72 characters)" in postgres and "(384 bits entropy)" in postgres and "70 characters" not in postgres and "288 bits entropy" not in postgres
+
     def test_api_key_uniqueness( self ):
         """Test that multiple generated keys are unique."""
         keys = set()
