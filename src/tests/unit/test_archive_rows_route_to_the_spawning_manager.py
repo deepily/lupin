@@ -202,6 +202,16 @@ def test_a_bridge_of_a_dead_pid_is_skipped( sessions ):
     assert st.spawn_registry_manager( "arnold" ) == "mr radio"
 
 
+def test_the_pid_check_runs_inside_a_container_too( sessions, monkeypatch ):
+    import pathlib
+    import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+    real = pathlib.Path.exists
+    monkeypatch.setattr( pathlib.Path, "exists", lambda self: str( self ) == "/.dockerenv" or real( self ) )   # as in a container: host pids are not trusted
+    sessions.bridge( "mr radio", "mgr-1111", None )
+    sessions.dead_bridge( "arnold", "wrk-5555", spawned_by="mgr-1111" )
+    assert [ data[ "session_id" ] for _, data, _ in sb.iter_live_bridges() ] == [ "mgr-1111" ]
+
+
 def test_an_unspawned_or_unknown_persona_resolves_to_nobody( sessions ):
     sessions.bridge( "maria", "mgr-1111", None )
     assert st.spawn_registry_manager( "maria" ) is None and st.spawn_registry_manager( "nobody" ) is None
