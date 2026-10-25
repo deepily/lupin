@@ -9,6 +9,7 @@ pins:
   - cosa.repo.symindex.vector_refresh.cron_lines@09adf82286
   - cosa.repo.symindex.vector_refresh.main@126f014e2e
   - cosa.repo.symindex.vector_refresh.env_file_path@6220714314
+  - cosa.repo.symindex.vector_refresh.carried_env@97e4d23411
   - cosa.repo.symindex.candidate_build.run@016b238ad1
   - cosa.repo.symindex.candidate_build.BoundedJobWriter@afaf8d075a
   - cosa.repo.symindex.candidate_build.make_job_writer@6f0901398b
@@ -22,8 +23,7 @@ Keeps the stored vector set current. The staleness check is on [[repo-tools-symi
 
 ## Daily job (`vector_refresh`)
 - `python -m cosa.repo.symindex.vector_refresh [--force] [--root R]` runs once per local day from 10:00. Its switch is the key `reuse vector refresh enabled`; off exits 3.
-- `check_fresh` says the set needs no work only when four things hold. The set has build info and its recorded index manifest equals the index's. Its own manifest is readable and its engines match the server. Every sendable pin has a stored purpose line or is listed as unwritten.
-- `missing_purpose_lines` counts the distinct sendable pins with no stored line that the last build did not list as unwritten.
+- `check_fresh` says the set needs no work only when four things hold. The set has build info and its recorded index manifest equals the index's. Its own manifest is readable and its engines match the server. Every sendable pin has a stored purpose line or is listed as unwritten. `missing_purpose_lines` counts the distinct sendable pins with no stored line that the last build did not list as unwritten.
 - `run_refresh` reads the searchable entries of the index. Otherwise it calls `candidate_build.run`, twice at most, retrying only a `TimeoutError`. `last_run_date` is recorded only for a fresh set or a finished build.
 - Exits: 0 done, fresh or not due, 1 failed, 2 a named candidate error, 3 off, 4 another build holds the lock. State is `refresh-state.json` under `refresh_dir`.
 - `cron_lines` give a daily `47 10 * * *` line and an `@reboot sleep 240` line tagged `# reuse-vector-refresh`, built with the librarian's `cron_lines_for`. Each line runs the wrapper script with `REUSE_VECTOR_REFRESH_ENV` set to the credential file, which the wrapper sources. Both lines also carry `DEEPILY_DATA_DIR` and `PLANNING_IS_PROMPTING_ROOT` when the installing shell has them (`carried_env`), because cron reads no `~/.bashrc`. The wrapper script runs the job with the first Python that imports it. It tries `REUSE_VECTOR_REFRESH_PYTHON`, the checkout's `.venv`, `~/.venv-lupin-mcp`, then `python3`. When none imports it, the script exits 1 and names what it tried. `lupin-vm.sh install-refresh-cron [local|vm]` installs with all of that set from known paths. `lupin-vm.sh deploy` refreshes the VM's planning-is-prompting copy.

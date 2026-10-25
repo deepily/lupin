@@ -10,7 +10,10 @@ pins:
   - cosa.repo.symindex.spec.iter_files@fd6f9ece34
   - cosa.repo.symindex.spec.manifest@f74658b557
   - cosa.repo.symindex.spec.skipped@b19801eed4
+  - cosa.repo.symindex.spec.is_test_path@d43ece9f59
   - cosa.repo.symindex.paths.data_dir@c20448be9c
+  - cosa.repo.symindex.paths.index_readable@7cb2af5d9a
+  - cosa.repo.symindex.paths.registered_repo_names@9ff11b29de
   - cosa.repo.symindex.errors.DependencyMissing@0301641e93
 ---
 # Symbol index: which files, where output goes
@@ -31,3 +34,4 @@ pins:
 ## Output and failures
 - `data_dir( index_root )` returns the reuse-review data folder of the repository: the fleet data root of that repo plus the `reuse review data subdir` setting. A worktree resolves to its parent checkout. The folder is not created. It raises `CandidateError` `STORAGE_KEY_MISSING` when neither the INI key nor its override is set.
 - `DependencyMissing( what, detail="" )` is raised for an absent node, typescript, dart or analyzer. Its `what` attribute names the tool, and the build records it in `missing_dependencies`.
+- `index_readable( root )` is the test every `NOT_LUPIN_TREE` site shares. It is true for a lupin tree, or a registered repo with a built, published index. `registered_repo_names` reads the `external repos` list. `is_test_path` is true for a path with a `tests` folder.
