@@ -75,7 +75,9 @@ class HybridTTS {
         
         // Initialize IndexedDB if caching is enabled
         if (this.cacheEnabled) {
-            this.initializeIndexedDB().catch(err => {
+            LupinIdbKit.openStore(this.dbName, this.dbVersion, 'audioCache', 'key', ['timestamp']).then(db => {
+                this.db = db;
+            }).catch(err => {
                 console.warn('HybridTTS: IndexedDB initialization failed, using memory cache only:', err);
             });
         }
@@ -774,46 +776,12 @@ class HybridTTS {
     
     // Cache Methods
     /**
-     * Returns the SHA-256 hash of the text as a hex string for use as a cache key.
-     */
-    async generateCacheKey(text) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(text);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-    
-    /**
-     * Opens the IndexedDB database and creates the audio cache store if missing.
-     */
-    async initializeIndexedDB() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.dbVersion);
-            
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                this.db = request.result;
-                resolve();
-            };
-            
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-                if (!db.objectStoreNames.contains('audioCache')) {
-                    const store = db.createObjectStore('audioCache', { keyPath: 'key' });
-                    store.createIndex('timestamp', 'timestamp', { unique: false });
-                }
-            };
-        });
-    }
-    
-    /**
      * Finds cached audio for the text in memory or IndexedDB, or returns null.
      */
     async checkCache(text) {
         if (!this.cacheEnabled) return null;
         
-        const key = await this.generateCacheKey(text);
+        const key = await LupinIdbKit.sha256Hex(text);
         
         // Check in-memory first
         if (this.audioCache.has(key)) {
@@ -829,7 +797,7 @@ class HybridTTS {
         
         // Check IndexedDB
         if (this.db) {
-            const cached = await this.getFromIndexedDB(key);
+            const cached = await LupinIdbKit.getOne(this.db, 'audioCache', key);
             if (cached && !this.isCacheExpired(cached)) {
                 // Recreate blob URL for in-memory cache
                 cached.audioUrl = URL.createObjectURL(cached.audioBlob);
@@ -847,7 +815,7 @@ class HybridTTS {
     async saveToCache(text, audioBlob, metadata) {
         if (!this.cacheEnabled) return;
         
-        const key = await this.generateCacheKey(text);
+        const key = await LupinIdbKit.sha256Hex(text);
         const cacheEntry = {
             key,
             text,
@@ -871,20 +839,6 @@ class HybridTTS {
         
         // Manage cache size
         await this.evictOldEntries();
-    }
-    
-    /**
-     * Reads one cache entry from IndexedDB by key.
-     */
-    async getFromIndexedDB(key) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['audioCache'], 'readonly');
-            const store = transaction.objectStore('audioCache');
-            const request = store.get(key);
-            
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
     }
     
     /**

@@ -56,43 +56,13 @@ class JobCompletionCache {
     }
     
     /**
-     * Returns the SHA-256 hash of the text as a hex string, used to match identical messages.
-     */
-    async generateCacheKey(text) {
-        // Use SHA-256 hash for consistent cache keys
-        const encoder = new TextEncoder();
-        const data = encoder.encode(text);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-    
-    /**
      * Opens the IndexedDB database and creates the job messages store if it is missing.
      *
      * Resolves when the database is ready.
      */
     async initializeIndexedDB() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.dbVersion);
-            
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                this.db = request.result;
-                console.log('JobCompletionCache: IndexedDB initialized');
-                resolve();
-            };
-            
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-                if (!db.objectStoreNames.contains('jobMessages')) {
-                    const store = db.createObjectStore('jobMessages', { keyPath: 'jobId' });
-                    store.createIndex('timestamp', 'timestamp', { unique: false });
-                    store.createIndex('textHash', 'textHash', { unique: false });
-                    store.createIndex('userId', 'userId', { unique: false });
-                }
-            };
-        });
+        this.db = await LupinIdbKit.openStore(this.dbName, this.dbVersion, 'jobMessages', 'jobId', ['timestamp', 'textHash', 'userId']);
+        console.log('JobCompletionCache: IndexedDB initialized');
     }
     
     /**
@@ -104,7 +74,7 @@ class JobCompletionCache {
         if (!this.cacheEnabled) return;
         
         const ts = timestamp || new Date().toISOString();
-        const textHash = await this.generateCacheKey(text);
+        const textHash = await LupinIdbKit.sha256Hex(text);
         
         const cacheEntry = {
             jobId,
@@ -169,7 +139,7 @@ class JobCompletionCache {
         
         // Check IndexedDB
         if (this.db) {
-            const cached = await this.getFromIndexedDB(jobId);
+            const cached = await LupinIdbKit.getOne(this.db, 'jobMessages', jobId);
             if (cached && !this.isCacheExpired(cached)) {
                 // Add back to in-memory cache
                 this.messageCache.set(jobId, cached);
@@ -196,7 +166,7 @@ class JobCompletionCache {
     async getByText(text) {
         if (!this.cacheEnabled) return null;
         
-        const textHash = await this.generateCacheKey(text);
+        const textHash = await LupinIdbKit.sha256Hex(text);
         
         // Search in-memory cache
         for (const [jobId, entry] of this.messageCache) {
@@ -246,20 +216,6 @@ class JobCompletionCache {
         }
         
         console.log(`JobCompletionCache: Deleted job ${jobId}`);
-    }
-    
-    /**
-     * Reads one entry by job ID from IndexedDB and resolves with it.
-     */
-    async getFromIndexedDB(jobId) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['jobMessages'], 'readonly');
-            const store = transaction.objectStore('jobMessages');
-            const request = store.get(jobId);
-            
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
     }
     
     /**

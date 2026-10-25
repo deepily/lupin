@@ -76,34 +76,14 @@ class TTSAudioCache {
      * Returns a SHA-256 hex digest of the normalized text as the cache key.
      */
     async generateCacheKey( text ) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode( text.trim().toLowerCase() ); // Normalize text
-        const hashBuffer = await crypto.subtle.digest( 'SHA-256', data );
-        const hashArray = Array.from( new Uint8Array( hashBuffer ) );
-        return hashArray.map( b => b.toString( 16 ).padStart( 2, '0' ) ).join( '' );
+        return LupinIdbKit.sha256Hex( text.trim().toLowerCase() ); // Normalize text
     }
     
     /**
      * Opens the IndexedDB database, creating the audio store on first use.
      */
     async initializeIndexedDB() {
-        return new Promise( ( resolve, reject ) => {
-            const request = indexedDB.open( this.dbName, this.dbVersion );
-            
-            request.onerror = () => reject( request.error );
-            request.onsuccess = () => {
-                this.db = request.result;
-                resolve();
-            };
-            
-            request.onupgradeneeded = ( event ) => {
-                const db = event.target.result;
-                if ( !db.objectStoreNames.contains( 'audioCache' ) ) {
-                    const store = db.createObjectStore( 'audioCache', { keyPath: 'key' } );
-                    store.createIndex( 'timestamp', 'timestamp', { unique: false } );
-                }
-            };
-        } );
+        this.db = await LupinIdbKit.openStore( this.dbName, this.dbVersion, 'audioCache', 'key', ['timestamp'] );
     }
     
     /**
