@@ -17,8 +17,8 @@ The last row, `total`, sums every swept file on each side. It is shown and not c
 ## What was measured
 
 - Before: commit `456422492f308a60dafa36325102229947c44147`
-- Rows: 96 (83 packages, 13 loose directories), 8 new
-- Swept files: 730 before, 959 after
+- Rows: 97 (84 packages, 13 loose directories), 9 new
+- Swept files: 730 before, 971 after
 - Compared by the check: `em_dash`, `caps_words`, `section_refs`, `id_refs`, `tics`, `emphasis_glyphs`
 - Rows where a compared value rose: 0
 
@@ -93,7 +93,7 @@ src/cosa/orchestration/claude_code               | package | 3 -> 3     | 1146 -
 src/cosa/repo                                    | package | 7 -> 9     | 4663 -> 4562     | 12.4 -> 1.3  | 26.8 -> 0.0 | 0.0 -> 0.0   | 1.9 -> 0.0 | 1.5 -> 0.0 | 0.2 -> 0.0      | ok
 src/cosa/repo/branch_analyzer                    | package | 9 -> 9     | 3260 -> 3299     | 0.0 -> 0.0   | 0.6 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/repo/directory_analyzer                 | package | 6 -> 6     | 2080 -> 2038     | 0.0 -> 0.0   | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
-src/cosa/repo/doc_lint                           | package | - -> 56    | - -> 57233       | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/cosa/repo/doc_lint                           | package | - -> 56    | - -> 57238       | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/cosa/repo/git_loc_delta                      | package | 10 -> 10   | 4023 -> 3944     | 9.2 -> 2.8   | 12.9 -> 0.0 | 0.0 -> 0.0   | 1.0 -> 0.0 | 1.5 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/repo/labelling                          | package | - -> 6     | - -> 857         | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/cosa/repo/semdup                             | package | - -> 12    | - -> 5284        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
@@ -128,6 +128,7 @@ src/lupin_cli/claude_code                        | package | 1 -> 1     | 17 -> 
 src/lupin_cli/claude_code/hooks                  | package | 9 -> 9     | 11094 -> 10027   | 10.5 -> 1.5  | 29.0 -> 0.0 | 2.0 -> 0.0   | 0.8 -> 0.0 | 1.4 -> 0.0 | 2.0 -> 0.0      | ok
 src/lupin_cli/claude_code/hooks/lib              | package | 41 -> 47   | 60235 -> 60298   | 13.6 -> 1.3  | 40.1 -> 0.0 | 1.9 -> 0.0   | 1.5 -> 0.0 | 1.4 -> 0.0 | 2.9 -> 0.0      | ok
 src/lupin_cli/notifications                      | package | 6 -> 7     | 2976 -> 3693     | 1.3 -> 0.5   | 5.7 -> 0.0  | 1.0 -> 0.0   | 0.0 -> 0.0 | 1.0 -> 0.0 | 2.0 -> 0.0      | ok
+src/lupin_mcp/reuse_needset                      | package | - -> 12    | - -> 6028        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/lupin_model_server                           | package | 2 -> 2     | 846 -> 990       | 26.0 -> 17.2 | 10.6 -> 0.0 | 0.0 -> 0.0   | 1.2 -> 0.0 | 3.5 -> 0.0 | 1.2 -> 0.0      | ok
 src/migrations                                   | loose   | 1 -> 1     | 73 -> 73         | 0.0 -> 0.0   | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/migrations/versions                          | loose   | 20 -> 30   | 8394 -> 10357    | 13.2 -> 2.6  | 61.8 -> 0.0 | 2.1 -> 0.2   | 0.8 -> 0.0 | 2.0 -> 0.0 | 2.0 -> 0.0      | ok
@@ -138,5 +139,5 @@ src/scripts/dm-experiment                        | loose   | 2 -> 2     | 2385 -
 src/scripts/lib                                  | loose   | 1 -> 4     | 792 -> 1702      | 7.6 -> 0.6   | 77.0 -> 0.0 | 0.0 -> 0.0   | 2.5 -> 0.0 | 2.5 -> 0.0 | 1.3 -> 0.0      | ok
 src/scripts/loc-analysis                         | loose   | 3 -> 3     | 184 -> 366       | 10.9 -> 5.5  | 16.3 -> 0.0 | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/scripts/presentation-gate-silence-proof      | loose   | 1 -> 1     | 893 -> 844       | 15.7 -> 0.0  | 61.6 -> 0.0 | 1.1 -> 0.0   | 4.5 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | ok
-total                                            | -       | 730 -> 959 | 477587 -> 642827 | 9.5 -> 1.5   | 27.0 -> 0.0 | 1.1 -> 0.0   | 1.1 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | -
+total                                            | -       | 730 -> 971 | 477587 -> 648860 | 9.5 -> 1.5   | 27.0 -> 0.0 | 1.1 -> 0.0   | 1.1 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | -
 ```

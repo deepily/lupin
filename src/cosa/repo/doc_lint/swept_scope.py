@@ -10,6 +10,8 @@ from .cli import in_scope, tracked_files
 # Repo-relative prefixes. A directory prefix ends in a slash; a file is named in full.
 # The one entry is tool text that a model reads as its instructions.
 HELD_PREFIXES = ( "src/lupin_mcp/", )
+# Folders inside a held prefix whose files are swept all the same.
+SWEPT_EXCEPTIONS = ( "src/lupin_mcp/reuse_needset/", )
 
 
 def is_swept( path ):
@@ -20,14 +22,14 @@ def is_swept( path ):
         - path is a posix repo-relative path
 
     Ensures:
-        - True for a Python file that in_scope accepts and that starts with no held prefix
+        - True for a Python file that in_scope accepts and that starts with no held prefix, or with a swept exception
         - False for every other path
 
     Raises:
         - nothing
     """
     if not path.endswith( ".py" ) or not in_scope( path ): return False
-    return not any( path.startswith( prefix ) for prefix in HELD_PREFIXES )
+    return path.startswith( SWEPT_EXCEPTIONS ) or not any( path.startswith( prefix ) for prefix in HELD_PREFIXES )
 
 
 def swept_files( repo_root ):

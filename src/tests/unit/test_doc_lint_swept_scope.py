@@ -31,6 +31,10 @@ def _write( root, rel, text="x = 1\n" ):
     ( "docker/src/lupin_mcp/tool.py",              True ),    # the held text deeper in a path is not a prefix
     ( "src/lupin_mcp/cosa_voice_mcp.py",           False ),   # held
     ( "src/lupin_mcp/sub/deeper.py",               False ),   # held, at any depth
+    ( "src/lupin_mcp/reuse_needset/run.py",        True ),    # the one folder carved out of the held directory
+    ( "src/lupin_mcp/reuse_needset/sub/deeper.py", True ),
+    ( "src/lupin_mcp/reuse_needset_extra/x.py",    False ),   # a sibling name is not the carved-out folder
+    ( "src/lupin_mcp/reuse_needset/notes.md",      False ),
     ( "src/tests/unit/test_queue.py",              False ),   # a tests directory
     ( "src/cosa/rest/test_queue.py",               False ),   # a test file by name
     ( "src/cosa/rest/conftest.py",                 False ),
@@ -42,8 +46,9 @@ def test_is_swept_decides_each_kind_of_path( path, expected ):
     assert swept_scope.is_swept( path ) is expected
 
 
-def test_the_held_list_is_exactly_the_tool_directory():
+def test_the_held_list_is_exactly_the_tool_directory_and_one_folder_is_carved_out():
     assert swept_scope.HELD_PREFIXES == ( "src/lupin_mcp/", )
+    assert swept_scope.SWEPT_EXCEPTIONS == ( "src/lupin_mcp/reuse_needset/", )
 
 
 def test_swept_files_reads_the_git_index_and_keeps_only_swept_paths( tmp_path ):
