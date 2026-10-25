@@ -252,7 +252,7 @@ def rewrite_record( result, original, folder, number ):
     Make the definition record of a planted rewrite, new-origin, from its text.
 
     Requires:
-        - result is a planted result of plant_one; original is its original's record; folder is a writable directory; number makes the folder unique
+        - result is a planted result of plant_one; original is its original's record; folder is a writable directory, absolute or relative; number makes the folder unique
 
     Ensures:
         - returns the first definition extracted from the rewrite, written under folder/<number> at the original's own file path, so nothing in the record says it was planted
@@ -263,7 +263,7 @@ def rewrite_record( result, original, folder, number ):
     Raises:
         - ValueError if no definition could be extracted from the rewrite
     """
-    root = pathlib.Path( folder ) / f"{number:03d}"
+    root = pathlib.Path( folder ).resolve() / f"{number:03d}"
     path = root / original[ "file" ]
     path.parent.mkdir( parents=True, exist_ok=True )
     for wrapped in ( False, True ):
@@ -364,7 +364,8 @@ def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=R
         - the planted pairs are written to <out>/key/planted.json before the monolith step, and a run that finds the file reads it instead of asking the models again, so a later failure costs no model call
         - returns prepare's result plus planted and failed counts by stratum, so a short count is visible
     """
-    folder = pathlib.Path( out_dir ) / "key"
+    out_dir = pathlib.Path( out_dir ).resolve()
+    folder = out_dir / "key"
     saved  = folder / PLANTED_FILE
     if saved.exists():
         stored  = json.loads( saved.read_text( encoding="utf-8" ) )

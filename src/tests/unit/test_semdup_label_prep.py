@@ -257,6 +257,12 @@ def test_a_rewrite_record_is_a_new_origin_definition_with_a_stable_id( tmp_path 
     with pytest.raises( ValueError, match="no definition" ): lp.rewrite_record( { "rewrite_text": "const value = 5;" }, orig( "ts" ), tmp_path, 7 )
 
 
+def test_a_relative_folder_gives_the_same_record_as_an_absolute_one( tmp_path, monkeypatch ):
+    monkeypatch.chdir( tmp_path )
+    result = { "rewrite_text": "def g( a ):\n    return a + 1" }
+    assert lp.rewrite_record( result, orig(), "rel/out", 1 ) == lp.rewrite_record( result, orig(), tmp_path / "abs", 1 )
+
+
 def test_a_class_member_rewrite_is_read_inside_a_class_and_loses_the_class_name_and_carries_the_originals_path( tmp_path ):
     member = { "rewrite_text": "public unmount(): void {\n    this.open = false;\n}" }
     made   = lp.rewrite_record( member, orig( "ts" ), tmp_path, 6 )
