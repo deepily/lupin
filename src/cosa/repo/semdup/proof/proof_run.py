@@ -113,7 +113,7 @@ def proof_run( spec, wiring ):
         - verifies the frozen configuration, judges the pool in slot 0 and slot 1 with the same configuration, and writes <data>/semdup/proof/<n>.json once
         - appends one line to proof-ledger.jsonl with the config_sha and the status, for a pass and for every other result alike
         - status is "complete" with the bar figures, "incomplete" when a definition is unjudged, "labels_pending" with the pairs the reviewers still owe,
-          or "no_flags" when the checker raised none
+          "no_true_pairs" when no pair is labelled true, "no_common_pairs" when no pair is judged in both passes, or "no_flags" when the checker raised none
         - found, correct and the strata come from slot 0; agreement compares the two slots; slot 1's found count is reported beside slot 0's
         - a planted pair in plant_failures is left out of every denominator and counted, with its rate
         - the record carries the pool size
@@ -149,11 +149,16 @@ def proof_run( spec, wiring ):
                    "both": record[ "agreement" ][ "pairs_in_both" ], "agree": record[ "agreement" ][ "flag_agree" ] }
         record.update( counts=counts, found_in_slot_1=len( set( true ) & flags[ 1 ] ),
                        strata=proof_bar.stratum_rates( [ { "stratum": known[ k ], "found": k in flags[ 0 ] } for k in true ] ) )
-        try:
-            record.update( status="complete", bar=proof_bar.evaluate_bar( counts ) )
-        except err.SemdupError as e:
-            if e.code != err.NO_FLAGS: raise
-            record.update( status="no_flags", bar=None, detail=e.detail )
+        if counts[ "true_pairs" ] < 1:
+            record.update( status="no_true_pairs", bar=None )
+        elif counts[ "both" ] < 1:
+            record.update( status="no_common_pairs", bar=None )
+        else:
+            try:
+                record.update( status="complete", bar=proof_bar.evaluate_bar( counts ) )
+            except err.SemdupError as e:
+                if e.code != err.NO_FLAGS: raise
+                record.update( status="no_flags", bar=None, detail=e.detail )
     number = next_number( folder )
     record[ "proof" ] = number
     with open( folder / f"{number}.json", "x", encoding="utf-8" ) as f: json.dump( record, f, indent=2, sort_keys=True )

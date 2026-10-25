@@ -221,6 +221,25 @@ def test_a_checker_that_raises_no_flag_is_recorded_as_no_flags_and_not_as_a_pass
     assert line[ "status" ] == "no_flags" and line[ "passed" ] is None
 
 
+def test_a_run_with_no_pair_labelled_true_is_recorded_as_no_true_pairs_with_both_files_written(tmp_path):
+    toy    = Toy( tmp_path )
+    toy.spec[ "labels" ] = { k: False for k in toy.all_labels() }
+    record = pr.proof_run( toy.spec, toy.wiring )
+    assert record[ "status" ] == "no_true_pairs" and record[ "bar" ] is None and record[ "counts" ][ "true_pairs" ] == 0 and record[ "counts" ][ "flags" ] > 0
+    folder = tmp_path / "data" / "semdup" / "proof"
+    line   = json.loads( ( folder / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    assert ( folder / "1.json" ).is_file() and line[ "status" ] == "no_true_pairs" and line[ "passed" ] is None
+
+
+def test_a_run_with_no_pair_judged_in_both_passes_is_recorded_as_no_common_pairs(tmp_path, monkeypatch):
+    toy = Toy( tmp_path )
+    toy.spec[ "labels" ] = toy.all_labels()
+    real = pr.proof_bar.agreement
+    monkeypatch.setattr( pr.proof_bar, "agreement", lambda a, b: { **real( a, b ), "pairs_in_both": 0, "flag_agree": 0 } )
+    record = pr.proof_run( toy.spec, toy.wiring )
+    assert record[ "status" ] == "no_common_pairs" and record[ "bar" ] is None and ( tmp_path / "data" / "semdup" / "proof" / "1.json" ).is_file()
+
+
 def test_a_planted_pair_both_reviewers_ruled_not_equivalent_leaves_every_denominator_and_is_counted(tmp_path):
     toy    = Toy( tmp_path )
     failed = toy.key( "r1", "o1" )

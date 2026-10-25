@@ -74,6 +74,7 @@ def banned_names( rec, forbidden=() ):
         - returns names of 3 or more characters from forbidden, the declared locals, the definition's name, its class and its file stem,
           plus every word of 4 or more letters of those names, longest first and each once
         - self and cls are never banned, because a method cannot be written without them
+        - the words are listed for the rewrite prompt; check_rewrite matches whole identifiers only, so a word inside a longer identifier is asked for and not checked
         - a script definition's names come from declared, its name, class and file stem, because need_input resolves Python modules only
     """
     pieces = [ *forbidden, *rec[ "declared" ], *rec[ "name" ].split( "." ), rec[ "file" ].rsplit( "/", 1 )[ -1 ].split( "." )[ 0 ] ]

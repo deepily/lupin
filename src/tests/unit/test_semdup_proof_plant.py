@@ -32,6 +32,11 @@ def test_sixty_originals_are_exactly_thirty_six_script_and_twenty_four_python():
     assert [ d[ "id" ] for d in chosen ] == sorted( d[ "id" ] for d in chosen )
 
 
+def test_the_script_count_rounds_and_does_not_truncate():
+    chosen = pl.select_originals( pool_of( 10, 10 ), 3, 1, 25 )
+    assert sum( 1 for d in chosen if d[ "lang" ] != "py" ) == 2 and sum( 1 for d in chosen if d[ "lang" ] == "py" ) == 1
+
+
 def test_the_same_seed_gives_the_same_draw_whatever_order_the_pool_arrives_in_and_another_seed_a_different_one():
     pool     = pool_of( 80, 80 )
     shuffled = list( pool )
