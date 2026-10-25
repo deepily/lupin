@@ -20,6 +20,7 @@ import pathlib
 import re
 import sys
 
+from cosa.repo.symindex.candidates.identifier_split import split_identifier
 from lupin_mcp import reuse_tools as rt
 
 DATA_ROOT        = "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin"
@@ -40,6 +41,7 @@ RESEND_NAME      = { "member_text_run": "text_run", "twin_text_run": "text_run" 
 CHECKS           = ( "form", "identifier", "member_text_run", "twin_text_run", "sample" )
 TS_TYPE_WORDS    = frozenset( { "string", "number", "boolean", "any", "unknown", "void", "never", "object", "undefined", "null", "bigint", "symbol" } )     # type keywords, never names
 DECORATOR_NAME   = re.compile( r"@[A-Za-z_$][A-Za-z0-9_$.]*" )                                 # the @Name that opens a decorator on a parameter
+PIECE_MIN_LEN    = 4                                                              # the word length plan 5.C's banned_names uses for planted rewrites
 TS_MODIFIERS     = frozenset( { "public", "private", "protected", "readonly", "override" } )
 
 
@@ -224,6 +226,40 @@ def identifier_tokens( rec ):
     return _name_tokens( rec ) | { n.lower() for n in args }
 
 
+def name_pieces( rec ):
+    """
+    Return the lowercase words of 4 or more letters in the names of one symbol record.
+
+    Requires:
+        - rec is a symbol record with id, file and sig
+
+    Ensures:
+        - the names are the ones identifier_tokens reads, split with split_identifier, so renderFleetTable gives render, fleet, table
+        - a word shorter than PIECE_MIN_LEN is left out
+    """
+    is_ts = "lang" in rec and rec[ "lang" ] == "ts"
+    args  = _ts_argument_names( rec[ "sig" ] ) if is_ts else _argument_names( rec[ "sig" ] )
+    names = set( rec[ "id" ].split( "." ) ) | { pathlib.PurePosixPath( rec[ "file" ] ).stem } | set( args )
+    return { w for n in names for w in split_identifier( n ) if len( w ) >= PIECE_MIN_LEN }
+
+
+def need_words( need ):
+    """
+    Map each word of the need, after its opening form phrase, to the whole word as written.
+
+    Ensures:
+        - returns { word: written }, both lowercase; camel-case and underscore words are split, so my_limit_value gives limit -> my_limit_value
+        - a word written in two ways maps to the shorter, then the earlier in the alphabet
+    """
+    text    = need.strip()
+    start   = next( ( f for f in FORM_STARTS if text.lower().startswith( f ) ), "" )
+    found   = {}
+    for token in re.findall( r"[A-Za-z0-9_]+", text[ len( start ) : ] ):
+        for w in split_identifier( token ):
+            found[ w ] = min( found[ w ], token.lower(), key=lambda t: ( len( t ), t ) ) if w in found else token.lower()
+    return found
+
+
 def _name_tokens( rec ):
     """Ensures: returns the lowercase dotted id parts and file stem of one symbol record."""
     return { n.lower() for n in set( rec[ "id" ].split( "." ) ) | { pathlib.PurePosixPath( rec[ "file" ] ).stem } }
@@ -268,6 +304,8 @@ def check_need( member_id, need, index, groups ):
 
     Ensures:
         - returns a list of { "check", "detail" }, empty when the need passes the form, identifier and run checks
+        - the identifier check refuses a whole name and also a word of 4 or more letters taken from a name of the member or a twin (name_pieces)
+        - "words" names the member's own words only, so a word that comes only from a twin is never handed to the writer
         - "detail" names the offending token or run
     """
     out   = []
@@ -283,7 +321,13 @@ def check_need( member_id, need, index, groups ):
     twin_names = set().union( *[ _name_tokens( _record( index, t ) ) for t in twins ] ) - identifier_tokens( rec )
     written    = set( re.findall( r"[a-z0-9_]+", need.lower() ) )
     words      = sorted( { h if h in written else min( w for w in written if h in w.split( "_" ) ) for h in hits if h not in twin_names } )
-    if hits: out.append( { "check": "identifier", "detail": "identifier tokens: " + ", ".join( hits ), "words": words } )
+    own_pieces   = name_pieces( rec )
+    twin_pieces  = set().union( *[ name_pieces( _record( index, t ) ) for t in twins ] ) if twins else set()
+    written_as   = need_words( need )
+    piece_hits   = sorted( written_as.keys() & ( own_pieces | twin_pieces ) )
+    if hits or piece_hits:
+        detail = "; ".join( ( [ "identifier tokens: " + ", ".join( hits ) ] if hits else [] ) + ( [ "name pieces: " + ", ".join( piece_hits ) ] if piece_hits else [] ) )
+        out.append( { "check": "identifier", "detail": detail, "words": sorted( set( words ) | { written_as[ w ] for w in written_as.keys() & own_pieces } ) } )
     run = shared_run( need, entry_text_of( rec ) )
     if run: out.append( { "check": "member_text_run", "detail": f"4-word run shared with the member: {run}" } )
     for t in twins:

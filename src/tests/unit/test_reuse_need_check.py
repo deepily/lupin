@@ -72,9 +72,48 @@ def test_camel_case_names_and_star_arguments_count_whole():
     assert { "camelcasething", "chunks", "extras", "key" } <= t and "camel" not in t
 
 
-def test_a_plain_word_that_is_only_a_piece_of_an_identifier_passes():
+def test_a_word_that_is_a_piece_of_a_name_of_four_or_more_letters_fails_and_is_named():
     need = "A function that will read the items from a source and returns the number of them."
+    f    = nc.check_need( A, need, INDEX, nc.twin_groups( MANIFEST ) )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and f[ 0 ][ "detail" ] == "name pieces: items, read, source" and f[ 0 ][ "words" ] == [ "items", "read", "source" ]
+
+
+def test_a_word_of_three_letters_or_a_longer_word_that_only_contains_a_piece_passes():
+    need = "A function that goes to the url and keeps reading the sources it finds there, then counts them."
     assert nc.check_need( A, need, INDEX, nc.twin_groups( MANIFEST ) ) == []
+
+
+CAMEL = { "id": "ui.fleetView.renderFleetTable", "sig": "( rowCount, showHeader )", "doc": "", "file": "src/ui/fleet-view.ts", "lang": "ts" }
+
+
+@pytest.mark.parametrize( "need, pieces", [
+    ( "A function that draws a table with the render of every fleet row it was given.", "fleet, render, table" ),
+    ( "A function that shows the header above each row count the caller wanted to see.", "count, header" ),
+    ( "A function that lays out the view and the fleet for a screen, one line each.", "fleet, view" ),
+    ( "A function that builds a Table for the fleet from the rows it receives from callers.", "fleet, table" ) ] )
+def test_sentences_built_from_the_pieces_of_a_camel_case_name_are_refused( need, pieces ):
+    f = nc.check_need( CAMEL[ "id" ], need, { CAMEL[ "id" ]: CAMEL }, {} )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and f[ 0 ][ "detail" ] == "name pieces: " + pieces
+
+
+def test_the_opening_form_phrase_is_never_read_as_a_piece_of_a_name():
+    key = { "id": "p.that_function_class", "sig": "( x )", "doc": "", "file": "p/x.py" }
+    assert nc.check_need( key[ "id" ], "A function that reads an online news bulletin and returns the list of articles it holds.", { key[ "id" ]: key }, {} ) == []
+    f = nc.check_need( key[ "id" ], "A function that reads a class of online news bulletins and returns the list it holds.", { key[ "id" ]: key }, {} )
+    assert f[ 0 ][ "detail" ] == "name pieces: class"
+
+
+def test_a_piece_that_comes_only_from_a_twin_fails_but_is_not_handed_to_the_writer():
+    need = "A function that returns the rows it was given and counts the records it holds."
+    f    = nc.check_need( A, need, INDEX, nc.twin_groups( MANIFEST ) )
+    assert f[ 0 ][ "detail" ] == "name pieces: rows" and f[ 0 ][ "words" ] == []
+    assert nc.check_need( D, need, INDEX, nc.twin_groups( MANIFEST ) ) == []
+
+
+def test_a_piece_is_given_to_the_writer_as_the_whole_word_it_wrote():
+    got = resend_for( "A function that returns my_items_total and counts the records it holds." )
+    assert got == [ { "member": A, "failed": [ "identifier" ], "avoid_words": [ "my_items_total" ] } ]
+    assert resend_for( "A function that returns the Items it was given and counts the records it holds." )[ 0 ][ "avoid_words" ] == [ "items" ]
 
 
 def test_a_signature_that_does_not_parse_still_yields_its_words():
