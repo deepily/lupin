@@ -7,8 +7,8 @@ pins:
   - lupin_mcp.reuse_tools.RefusalBreaker@65c246e71a
   - lupin_mcp.reuse_tools.JevCache@6eba1d0642
   - lupin_mcp.reuse_tools.blank_string_defaults@7102e67f36
-  - lupin_mcp.reuse_tools.c1_hits@0b54334fb5
-  - lupin_mcp.reuse_tools.entry_text@ade9147c07
+  - lupin_mcp.reuse_tools.c1_hits@39a15437a8
+  - lupin_mcp.reuse_tools.entry_text@7972400a6e
   - lupin_mcp.reuse_tools.parse_answer@0b3dfc56c6
   - lupin_mcp.reuse_tools.usage_of@fb38c47c62
   - lupin_mcp.reuse_tools.attempt_counts@0988e9ffc3
@@ -20,8 +20,8 @@ What leaves the machine, how it is sent, and what is counted afterwards. The que
 
 ## Screening
 - `blank_string_defaults` replaces any signature default holding a quote with an ellipsis. A quoted string in an annotation is not a default and stays.
-- `c1_hits` names the patterns found in a symbol's id, signature or first docstring line: email, url, ip, path and credential. A `/app` or `/data` path counts only when it names a file.
-- `sendable` applies both. A symbol that still matches after blanking is dropped, and no module or language is excluded. `entry_text` is what Jev sees of one symbol: id, signature and first docstring line.
+- `c1_hits` names the patterns found in a symbol's id, signature and docstring lines. It also checks its purpose line when it has one. The patterns are email, url, ip, path and credential. A `/app` or `/data` path counts only when it names a file.
+- `sendable` applies both. A symbol that still matches after blanking is dropped, and no module or language is excluded. `entry_text` is what Jev sees of one symbol: id, signature and first docstring line. It adds the whole docstring and purpose line when they differ or exist. `sendable_report` also names the ids dropped under an excluded prefix.
 
 ## Transport
 - `LiveJevTransport` reads the key from the environment on each post and never stores it. Once Jev refuses the key, later posts raise with no HTTP call. A 422 refuses only its own request.

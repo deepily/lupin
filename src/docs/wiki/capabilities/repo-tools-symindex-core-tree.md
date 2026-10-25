@@ -7,9 +7,9 @@ pins:
   - cosa.repo.symindex.spec.all_files@9b1b676e82
   - cosa.repo.symindex.spec.git_toplevel@2b61563bc7
   - cosa.repo.symindex.spec.is_lupin_tree@2e91e30932
-  - cosa.repo.symindex.spec.iter_files@fd6f9ece34
+  - cosa.repo.symindex.spec.iter_files@da50f7b6a4
   - cosa.repo.symindex.spec.manifest@f74658b557
-  - cosa.repo.symindex.spec.skipped@b19801eed4
+  - cosa.repo.symindex.spec.skipped@37005c7555
   - cosa.repo.symindex.spec.is_test_path@d43ece9f59
   - cosa.repo.symindex.paths.data_dir@c20448be9c
   - cosa.repo.symindex.paths.index_readable@7cb2af5d9a
@@ -27,7 +27,8 @@ pins:
 
 ## Which files count
 - `skipped( rel_path, skip_parts )` is true when a directory part of the path is in `skip_parts`. It is also true when the name ends in `.d.ts`, `.min.js`, `.g.dart` or `.freezed.dart`. The file's own name is never matched against the directory names.
-- `iter_files( spec, roots, suffixes )` returns the sorted, de-duplicated absolute paths under `roots` with one of the suffixes that are not skipped relative to `spec.root`.
+- `skip_rule( rel_path, skip_parts )` names the rule behind a skip: the first directory part in `skip_parts`, else the matching suffix, else `None`. `skipped` is true when it names one.
+- `iter_files( spec, roots, suffixes, skipped_into=None )` returns the sorted, de-duplicated absolute paths under `roots` with one of the suffixes, leaving out skipped ones. A dict passed as `skipped_into` receives each dropped path and its rule.
 - `all_files( spec )` is the union of the Python, script (`.js`, `.mjs`, `.cjs`, `.ts`, `.tsx`) and Dart lists. `manifest` reads it. The build makes its own three `iter_files` calls, so the two populations are not tied by one shared function.
 - `manifest( spec )` is a sha1 over each indexed file's relative path, mtime in nanoseconds and size. An added, deleted, resized or touched file changes it.
 

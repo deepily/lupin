@@ -6,7 +6,7 @@ pins:
   - scripts.loc-analysis.count.ext_of@537548bc5c
   - scripts.loc-analysis.count.is_test@f4780ca7cf
   - scripts.loc-analysis.count.bucket_of@e103ef3d5d
-  - scripts.loc-analysis.count.count_python@1562f6f10c
+  - scripts.loc-analysis.count.count_python@3876b05813
   - scripts.loc-analysis.count.count_cstyle@58901150b5
   - scripts.loc-analysis.count.count_hash_style@2c2ca1eb97
   - scripts.loc-analysis.count.count_generic@0e904454cc
@@ -24,7 +24,7 @@ Counts the lines of every file that `git ls-files` reports, so ignored build out
 - Next come R&D and history documents, then other documentation, then tests. Everything left is application code and config.
 
 ## Counting
-- `count_python` tokenizes the text. Any string token that begins a logical line counts as a docstring, on every line it spans, even when code follows it, as in `"abc".upper()`. A comment token counts as a comment. If the text cannot be tokenized, it falls back to a comment-prefix count with no docstrings.
+- `count_python` tokenizes the text. A run of adjacent string tokens counts as a docstring, on every line it spans, only when the run is the whole logical statement. Code after the string, as in `"abc".upper()` or `"abc" + x`, keeps those lines as code. A comment token counts as a comment. If the text cannot be tokenized, it falls back to a comment-prefix count with no docstrings.
 - `count_cstyle` is line-based, for TypeScript, JavaScript and CSS. A block comment opening with `/**` counts as documentation, and any other comment as a comment.
 - `count_hash_style` counts lines starting with `#`, `;` or `--` as comments. `count_generic` counts only code and blank lines.
 - `main` scans every tracked file and writes the rows to the JSON file named on the command line. A file that cannot be read as UTF-8 is marked binary.

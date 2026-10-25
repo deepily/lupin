@@ -8,10 +8,10 @@ pins:
   - cosa.repo.symindex.build.ensure@2e71eb83d8
   - cosa.repo.symindex.build.environment@a85e449992
   - cosa.repo.symindex.py_index.pin@c0bd7387a7
-  - cosa.repo.symindex.spec.spec_for@dcc9afbd88
+  - cosa.repo.symindex.spec.spec_for@56fd75b4ea
   - cosa.repo.symindex.paths.default_out_dir@f298ce42ab
   - cosa.repo.symindex.wiki_lint.queue@89c508ab1c
-  - lupin_mcp.reuse_tools.prepare@1ce06b4fb2
+  - lupin_mcp.reuse_tools.prepare@793f35c0eb
 ---
 # Symbol index
 
@@ -22,7 +22,7 @@ pins:
 - A `current` link names the live folder, and an exclusive lock serializes builds. Only the newest three folders are kept.
 - Every build re-reads every file. There is no per-file cache. `is_fresh` compares a hash of each file's path, mtime and size, so a bare `touch` makes the index stale.
 - In the Lupin tree the output goes to `src/docs/index`. Any other repo writes under the fleet data root.
-- Lupin's Python roots are `cosa`, `lupin_cli`, `lupin_mcp`, `lupin_app`, `lupin_arbiter_app`, `lupin_model_server` and `scripts`. Its web root `lupin_app/static/js` holds both JavaScript and TypeScript. Tests, migrations and `rnd` are skipped.
+- Lupin's Python roots are `cosa`, `lupin_cli`, `lupin_mcp`, `lupin_app`, `lupin_arbiter_app`, `lupin_model_server` and `scripts`. Its script roots are `lupin_app/static/js`, `scripts`, `cosa/repo/symindex` and `conf`, and hold both JavaScript and TypeScript. Tests, migrations and `rnd` are skipped.
 - A Flutter tree (`pubspec.yaml` plus `lib/`, such as `lupin-mobile`) is indexed as Dart. Any other tree gets every `.py`, `.js`, `.mjs`, `.cjs`, `.ts` and `.tsx` file, minus the same skipped folders and `.d.ts` and `.min.js` files.
 
 ## Symbols and pins
@@ -36,5 +36,5 @@ pins:
 ## Failures and callers
 - `build` exits 3 when any tool is missing, such as node, TypeScript or the Dart analyzer, and the index is built without it. A Python or Dart file that will not parse is listed in `unparsed` and skipped.
 - If node itself fails, `build` crashes with a traceback. `fresh` exits 1 when stale. `lint` exits 1 on a finding. `dups` reads Python and script files, private and nested ones included (`--public-only` drops them), and leaves out bodies under 25 nodes. `dups` exits 1 on a finding. With node or the compiler missing it reports Python only, names the tool in `provenance.missing_dependencies` and exits 3.
-- `reuse_tools.prepare` is the one runtime reader, through the MCP tools. It reads the searchable listing: the public and private definitions. It calls `ensure` and answers `INDEX_STALE` if that raises. With `include_tests` it also ensures a tests index in its own folder. `build` and `ensure` take an optional spec for that.
+- `reuse_tools.prepare` is the one runtime reader, through the MCP tools. It reads the searchable listing, the public and private definitions, with any stored purpose line attached. It calls `ensure` and answers `INDEX_STALE` if that raises. With `include_tests` it also ensures a tests index in its own folder. `build` and `ensure` take an optional spec for that.
 - No INI key and no hook uses the index. The environment variables `LUPIN_REUSE_DATA_DIR` and `LUPIN_REUSE_OUT_DIR` move its folders for the reuse tools only. The CLI uses `--out`.

@@ -6,7 +6,7 @@ pins:
   - cosa.rest.routers.docs_files.upload_docs_file@ed41be996e
   - cosa.rest.routers.io_files.get_io_file@3e431b3d92
   - cosa.rest.routers._pinned_open.open_pinned@4865d9e913
-  - cosa.rest.routers._scope_registry.build_scope_registry@31e0911165
+  - cosa.rest.routers._scope_registry.build_scope_registry@0e171d72e1
   - cosa.rest.routers._scope_registry.resolve_in_scope@b5d0cf1c5e
   - cosa.rest.routers._scope_registry.credential_verdict@6392b090c3
   - cosa.rest.upload_size_guard.UploadSizeGuard@bee5e4c2a7
@@ -20,7 +20,7 @@ The doc viewer serves repo files and the `io/` folder to the browser, and lets a
 ## What it does
 - `get_docs_file` (`GET /api/docs/file`) resolves the path through one gate, then returns a file or a directory listing.
 - `get_io_file` (`GET /api/io/file`) is the older, separate door for `io/`. It accepts `.pptx`, which the docs door does not.
-- `build_scope_registry` reads the INI `external repos` block each time it is called. It skips names that collide with `docs` or `io`. The docs router calls it once and caches the result.
+- `build_scope_registry` reads the INI `external repos` block each time it is called. It skips names that collide with `docs` or `io`. It prints a warning for any `external repo <name>` key whose name is not listed, and does not register that scope. The docs router calls it once and caches the result.
 - A repo's `.docview.yml` (`DocviewManifest`) narrows what is served. `load_manifest_for_scope` reads it. A missing, oversized, unparsable or invalid manifest means the INI `allowed prefixes` apply, or a wildcard if there are none. The floor blocklist still applies.
 - `upload_docs_file` (`POST /api/docs/upload`, admin only) takes `on_conflict` of `refuse`, `replace` or `rename`. Files over 100 MB are refused.
 

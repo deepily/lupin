@@ -6,8 +6,8 @@ pins:
   - lupin_mcp.cosa_voice_mcp.fetch_similar@265391e1a7
   - lupin_mcp.cosa_voice_mcp.read_capability@0ab23a5e6c
   - lupin_mcp.cosa_voice_mcp.replay@42a3299a59
-  - lupin_mcp.reuse_tools.prepare@1ce06b4fb2
-  - lupin_mcp.reuse_tools.sendable@6d563314ce
+  - lupin_mcp.reuse_tools.prepare@793f35c0eb
+  - lupin_mcp.reuse_tools.sendable@42a71ac125
   - lupin_mcp.reuse_tools.sweep@6b56c2af23
   - lupin_mcp.reuse_tools.LiveJevTransport.post@05ba74d3cf
   - cosa.repo.symindex.verdict.decide@9e23bddf00
@@ -29,7 +29,7 @@ Four MCP tools ask whether a new definition already exists. A fifth, `record_sea
 
 ## What is sent to Jev
 - Without pack settings, each request holds the redacted need and one symbol's id, signature and first docstring line. With them, a pack holds the need once and one question per entry, on every route. Source bodies are never sent. A repeated question is answered from the cache.
-- `sendable` blanks string defaults, then drops any symbol whose id, signature or docstring line holds an email, URL, IP address, path or credential-shaped token. Dropped ids are not reported. So `NO_MATCH` means nothing matched among sendable symbols.
+- `sendable` blanks string defaults, then drops any symbol whose id, signature, docstring or purpose line holds an email, URL, IP address, path or credential-shaped token. The receipt and result name the dropped ids by reason. `NO_MATCH` means nothing matched among sendable symbols.
 - Without pack settings, a sweep runs 32 workers and tries each entry up to three times. A 429 or 529 is retried. With them, every sweep is packed, `fetch_similar`'s too. It runs 6 workers (4 to 8) and posts each pack once. Its transport sends up to four times, and also retries 408, 500, 502, 503 and 504. Each call times out at 60 seconds.
 - One call spends at most 9,000 HTTP attempts. `LUPIN_REUSE_JEV_CALL_BUDGET` can lower it; a value outside 1 to 9,000 is refused, and the tool answers `REUSE_TOOLS_UNAVAILABLE` with `BAD_BUDGET` in `detail`. Once spent, cached answers still serve and unasked entries count as `not_checked`.
 - A 401 or 403 stops later calls. Without pack settings, a 422 refuses only its own entry. With them, a 422 splits the pack in half and resends; only a one-entry pack fails an entry. Five refusals in a row stop the sweep. A pack and its halves count as one. The key comes from `JEV_API_TOASTER`.

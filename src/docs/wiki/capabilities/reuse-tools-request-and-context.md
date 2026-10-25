@@ -13,8 +13,8 @@ pins:
   - lupin_mcp.reuse_tools.write_once@2bf4318ae9
   - lupin_mcp.reuse_tools.call_budget_cap_for@ac99c25d0c
   - lupin_mcp.reuse_tools.ReuseError@d93dd15bda
-  - lupin_mcp.reuse_tools.ReuseContext@ea5878584c
-  - lupin_mcp.reuse_tools.context_from_environment@f0ef2b8cf0
+  - lupin_mcp.reuse_tools.ReuseContext@88856f7d62
+  - lupin_mcp.reuse_tools.context_from_environment@7da013e038
 ---
 # Reuse tools: request identity and context
 
@@ -35,6 +35,6 @@ The helpers at the top of `reuse_tools.py` fix what one Jev question is and how 
 
 ## Context
 - `ReuseError` carries a name and detail. Callers get it back as an error dict, never as a verdict.
-- `ReuseContext` holds the root, the data directory and the injected parts: transport, sweeper, candidate stage and policy. It raises `BAD_BUDGET` for a call budget that is not a whole number in range. It also holds `tests_gen`, set by `prepare` for a call that reads test records.
-- `context_from_environment` builds one for the git toplevel and excludes no module. A directory that is not a repository is used as it is, and the tools then answer `NOT_LUPIN_TREE`.
+- `ReuseContext` holds the root, the data directory and the injected parts: transport, sweeper, candidate stage and policy. It raises `BAD_BUDGET` for a call budget that is not a whole number in range. It also holds `tests_gen`, `dropped` and `notes`, all set by `prepare`, and a `purposes_path` for the purpose lines.
+- `context_from_environment` builds one for the git toplevel and excludes no module. A directory that is not a repository is used as it is, and the tools then answer `NOT_LUPIN_TREE`. A packed context also reads the candidate stage's purpose lines, and records whether the override variable or the default chose each folder.
 - `LUPIN_REUSE_DATA_DIR` and `LUPIN_REUSE_OUT_DIR` relocate the data directory and the generated index. A `LUPIN_REUSE_JEV_CALL_BUDGET` above the cap is refused, not clamped.

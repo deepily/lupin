@@ -5,7 +5,7 @@ pins:
   - cosa.repo.symindex.candidates.search.is_count@56a9ad94d3
   - cosa.repo.symindex.candidates.search.validate_request@8cdfd5284e
   - cosa.repo.symindex.candidates.search.cosine_ranked@1ddfdf614f
-  - cosa.repo.symindex.candidates.search.read_purposes@870095c165
+  - cosa.repo.symindex.candidates.search.read_purposes@91e8d918f1
   - cosa.repo.symindex.candidates.search.answer@3cd6eaba33
   - cosa.repo.symindex.candidates.search.answer_for_stage@726c8a568b
   - cosa.repo.symindex.candidates.search.default_loader@40bb70e85e
@@ -23,6 +23,6 @@ pins:
 
 ## Helpers
 - `cosine_ranked( ids, matrix, query )` returns `( id, score )` pairs rounded to 6 places, ties by id. A zero row or query scores 0.0.
-- `read_purposes( path )` returns `{ pin: purpose }`, the first row for a pin winning, or `{}` for None.
+- `read_purposes( path )` returns `{ pin: purpose }`, the first row for a pin winning, or `{}` for None. A last line that is not JSON, cut short by a write in progress, is skipped and appended to the optional `torn` list. A damaged earlier line still raises.
 - `default_loader( vectors_dir )` calls `vector_store.load_vectors`.
 - `main( stdin, stdout, load_vectors )` writes the answer and returns 0, or writes `{ error, detail }` and returns 2 for a `CandidateError`. Input that is not a JSON object also returns 2.

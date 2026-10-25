@@ -10,7 +10,7 @@ pins:
   - cosa.repo.symindex.vector_refresh.main@126f014e2e
   - cosa.repo.symindex.vector_refresh.env_file_path@6220714314
   - cosa.repo.symindex.vector_refresh.carried_env@97e4d23411
-  - cosa.repo.symindex.candidate_build.run@016b238ad1
+  - cosa.repo.symindex.candidate_build.run@8c0684e323
   - cosa.repo.symindex.candidate_build.BoundedJobWriter@afaf8d075a
   - cosa.repo.symindex.candidate_build.make_job_writer@6f0901398b
   - cosa.repo.symindex.candidate_build.sample_purposes@4c0e76d6e8
@@ -35,6 +35,6 @@ Keeps the stored vector set current. The staleness check is on [[repo-tools-symi
 - `BoundedJobWriter` asks a bounded Claude Code job for purposes: it writes `request-<key>.json` and submits it. It waits 1800 seconds by default for the response file. `make_job_writer` submits through `/api/v2/submit`. No file in time raises `TimeoutError`, and a malformed one raises `ValueError`.
 - `make_job_writer( root, base_url, environ )` needs the main checkout (a worktree raises `ValueError`) and the two `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` credentials, else `DEPENDENCY_MISSING`. With `index` and `out_dir` it reads that index file, hands off under `out_dir/handoff`, and a worktree root is allowed.
 - `sample_purposes` writes lines for every k-th searchable symbol, sorted by id, into a separate store. It reads the given `index` folder when one is passed.
-- `run` also takes `index`, `out_dir` and `skip_if_current`. `index` is read only, and `out_dir` holds the purpose, vector, query-cache and lock files. `skip_if_current` rereads the build info under the lock and returns `{ skipped: "current" }` when it names this index.
+- `run` also takes `purposes`, `index`, `out_dir` and `skip_if_current`. With `purposes="skip"` it never calls the writer, builds from the stored lines and lists a pin without one as unwritten. Any other value than `write` or `skip` raises `ValueError`. `index` is read only, and `out_dir` holds the purpose, vector, query-cache and lock files. `skip_if_current` rereads the build info under the lock and returns `{ skipped: "current" }` when it names this index.
 - `candidate_build.main` takes `--root`, `--batch-size`, `--sample` with `--store`, and `--index` with `--out-dir`, which come together or not at all.
 - `tree_path_refusal( index, out_dir, main_tree )` returns a sentence, or `None` when the output folder is fine. It refuses a folder that overlaps the index folder, lies outside the main checkout, or is not ignored by git inside it.

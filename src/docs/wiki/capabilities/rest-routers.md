@@ -6,7 +6,7 @@ pins:
   - cosa.rest.routers.v2_ask.install_ask_flow@b35d082dfd
   - cosa.rest.routers.v2_ask.get_ask_flow@d4e3989e83
   - cosa.rest.routers._retired_doors.refusal_detail@28e39ec43b
-  - cosa.rest.routers._scope_registry.build_scope_registry@31e0911165
+  - cosa.rest.routers._scope_registry.build_scope_registry@0e171d72e1
   - cosa.rest.routers._scope_registry.resolve_in_scope@b5d0cf1c5e
   - cosa.rest.routers._pinned_open.open_pinned@4865d9e913
   - cosa.rest.routers._dir_listing.list_directory@db3a6d0ceb
