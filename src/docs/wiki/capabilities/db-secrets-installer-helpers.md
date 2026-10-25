@@ -23,6 +23,6 @@ Installs the test login's database secret files on a new host in one command, ru
 ## Small helpers
 - `sudoers_line` renders the one line that lets a user run the installed copy with no arguments. The user must match a lower-case account pattern, and the trailing empty argument is kept, because without it sudo would allow any arguments.
 - `load_payload` imports the payload file by its path and returns the module.
-- `owner_and_mode` returns the user id, group id and permission bits of a path, following no link beyond the first stat.
+- `owner_and_mode` returns the user id, group id and permission bits of a path. It uses `os.stat`, which follows symbolic links, so a link reports its target's owner and mode.
 - `sha256_of` returns the hex sha256 of bytes.
 - `operator_of` names the account that ran sudo. It accepts a non-root account only when `SUDO_USER` agrees with `SUDO_UID`. Otherwise it refuses with 21, so a name from the environment is never trusted alone.

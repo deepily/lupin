@@ -24,7 +24,7 @@ Counts the lines of every file that `git ls-files` reports, so ignored build out
 - Next come R&D and history documents, then other documentation, then tests. Everything left is application code and config.
 
 ## Counting
-- `count_python` tokenizes the text. A string that is a whole statement counts as a docstring, and a comment token counts as a comment. If the text cannot be tokenized, it falls back to a comment-prefix count with no docstrings.
+- `count_python` tokenizes the text. Any string token that begins a logical line counts as a docstring, on every line it spans, even when code follows it, as in `"abc".upper()`. A comment token counts as a comment. If the text cannot be tokenized, it falls back to a comment-prefix count with no docstrings.
 - `count_cstyle` is line-based, for TypeScript, JavaScript and CSS. A block comment opening with `/**` counts as documentation, and any other comment as a comment.
 - `count_hash_style` counts lines starting with `#`, `;` or `--` as comments. `count_generic` counts only code and blank lines.
 - `main` scans every tracked file and writes the rows to the JSON file named on the command line. A file that cannot be read as UTF-8 is marked binary.
