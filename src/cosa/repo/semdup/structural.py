@@ -1,9 +1,70 @@
 """Structural clone pairs from jscpd (script) and dups (Python), mapped to definitions."""
 import collections
+import json
 import pathlib
+import subprocess
+import tempfile
 
-from cosa.repo.symindex import dups
+import cosa.utils.util as cu
+from cosa.repo.semdup import errors as err
+from cosa.repo.symindex import dups, js_index
 from cosa.repo.symindex.py_index import module_name
+
+
+JSCPD_TIMEOUT = 600
+JSCPD_FORMATS = "typescript,javascript"
+
+
+def _jscpd_script():
+    """
+    Find the installed jscpd launcher and the node that runs it.
+
+    Ensures:
+        - returns ( node path, launcher path )
+
+    Raises:
+        - SemdupError DEPENDENCY_MISSING if node or node_modules/.bin/jscpd is missing
+    """
+    launcher = pathlib.Path( cu.get_project_root() ) / "node_modules" / ".bin" / "jscpd"
+    if not launcher.is_file(): raise err.SemdupError( err.DEPENDENCY_MISSING, f"{launcher} is missing; install the lock with npm ci" )
+    try:
+        return js_index.find_node(), launcher
+    except js_index.DependencyMissing as exc:
+        raise err.SemdupError( err.DEPENDENCY_MISSING, str( exc ) ) from exc
+
+
+def run_jscpd( root, dirs, cfg ):
+    """
+    Run the installed jscpd over directories of a root and return its parsed JSON report.
+
+    Requires:
+        - root is a directory; dirs are folder names under it, relative to it, without a leading "./"
+        - cfg is a frozen configuration whose jscpd block names the version, min_tokens and min_lines
+
+    Ensures:
+        - jscpd scans "." from root, because it names files relative to the one folder it was given and two folders would give names that are not root-relative
+        - returns the parsed report, the same shape parse_jscpd reads, keeping only clones whose two fragments both lie under dirs
+        - the report is written to a temporary folder that is removed afterwards
+
+    Raises:
+        - SemdupError DEPENDENCY_MISSING if node or jscpd is missing, or the installed jscpd is not the frozen version
+        - SemdupError RUN_INCOMPLETE if jscpd exits non-zero or writes no report
+    """
+    node, launcher = _jscpd_script()
+    want           = cfg[ "jscpd" ][ "version" ]
+    got            = subprocess.run( [ node, str( launcher ), "--version" ], capture_output=True, text=True, timeout=JSCPD_TIMEOUT ).stdout.strip()
+    if got != f"jscpd {want}": raise err.SemdupError( err.DEPENDENCY_MISSING, f"the frozen jscpd version is {want}, the installed one says {got!r}" )
+    with tempfile.TemporaryDirectory() as out:
+        cmd = [ node, str( launcher ), "--min-tokens", str( cfg[ "jscpd" ][ "min_tokens" ] ), "--min-lines", str( cfg[ "jscpd" ][ "min_lines" ] ),
+                "--format", JSCPD_FORMATS, "--reporters", "json", "--output", out, "." ]
+        res = subprocess.run( cmd, cwd=str( root ), capture_output=True, text=True, timeout=JSCPD_TIMEOUT )
+        report = pathlib.Path( out ) / "jscpd-report.json"
+        if res.returncode != 0 or not report.is_file():
+            raise err.SemdupError( err.RUN_INCOMPLETE, f"jscpd exit {res.returncode}, report written: {report.is_file()}; {res.stderr.strip()[ -300: ]}" )
+        parsed = json.loads( report.read_text( encoding="utf-8" ) )
+    inside = lambda name: any( name.startswith( d.rstrip( "/" ) + "/" ) for d in dirs )
+    parsed[ "duplicates" ] = [ c for c in parsed[ "duplicates" ] if inside( c[ "firstFile" ][ "name" ] ) and inside( c[ "secondFile" ][ "name" ] ) ]
+    return parsed
 
 
 def _covered( fragment, by_file, cover ):

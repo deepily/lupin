@@ -1,13 +1,17 @@
 """Unit tests for semdup.structural: jscpd reports and dups pairs mapped to definitions."""
 import json
+import os
 import pathlib
+import shutil
+import types
 
 import pytest
 
 import cosa.utils.util as cu
+from cosa.repo.semdup import errors as err
 from cosa.repo.semdup import extract as ex
 from cosa.repo.semdup import structural as st
-from cosa.repo.symindex import dups
+from cosa.repo.symindex import dups, js_index
 from cosa.repo.symindex import spec as sp
 
 HERE = pathlib.Path( cu.get_project_root() ) / "src" / "tests" / "unit"
@@ -85,6 +89,86 @@ def tree( tmp_path, files ):
 
 
 # ---- jscpd ------------------------------------------------------------------------------------------------------
+
+JSCPD_CFG = { "jscpd": { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "chosen_in": "test" } }
+
+
+def nested_tree( tmp_path ):
+    """Write the fixture under client/ of a nested root and one.ts under other/; return both."""
+    fixture = json.loads( ( HERE / "semdup_jscpd_fixture.json" ).read_text( encoding="utf-8" ) )
+    root    = tmp_path / "nest"
+    paths   = []
+    for name, text in [ ( f"client/{n}", t ) for n, t in fixture.items() ] + [ ( "other/one.ts", fixture[ "src/one.ts" ] ) ]:
+        p = root / name
+        p.parent.mkdir( parents=True, exist_ok=True )
+        p.write_text( text, encoding="utf-8" )
+        paths.append( p )
+    return root, paths
+
+
+def named_pairs( root, paths, report ):
+    """Return the ( names, size ) of each pair parse_jscpd finds, as sorted 'file#name' strings."""
+    defs = ex.extract_tree( root, paths, "new" )[ "definitions" ]
+    name = { d[ "id" ]: f"{d[ 'file' ]}#{d[ 'name' ]}" for d in defs }
+    return sorted( ( sorted( name[ i ] for i in p[ "ids" ] ), p[ "size" ] ) for p in st.parse_jscpd( report, defs, 0.5 ) )
+
+
+def test_the_live_jscpd_finds_exactly_the_expected_pairs_in_a_nested_root_and_keeps_only_the_given_folders(tmp_path):
+    launcher = pathlib.Path( cu.get_project_root() ) / "node_modules" / ".bin" / "jscpd"
+    assert launcher.is_file(), f"{launcher} is missing: node_modules is linked by link-worktree-artifacts.sh, or run npm ci"
+    assert shutil.which( "node" ) is not None or os.environ.get( "LUPIN_NODE" ), "node is missing"
+    root, paths = nested_tree( tmp_path )
+    inside      = named_pairs( root, paths, st.run_jscpd( root, [ "client" ], JSCPD_CFG ) )
+    both        = named_pairs( root, paths, st.run_jscpd( root, [ "client", "other" ], JSCPD_CFG ) )
+    assert inside == [ ( [ "client/src/one.ts#scaleAndSum", "client/src/two.ts#scaleThenSum" ], 84 ) ]
+    assert both == [ ( [ "client/src/one.ts#scaleAndSum", "client/src/two.ts#scaleThenSum" ], 84 ),
+                     ( [ "client/src/one.ts#scaleAndSum", "other/one.ts#scaleAndSum" ], 87 ) ]
+
+
+def test_run_jscpd_names_a_missing_launcher_and_a_missing_node(tmp_path, monkeypatch):
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path ) )
+    with pytest.raises( err.SemdupError ) as bare: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
+    assert bare.value.code == err.DEPENDENCY_MISSING and "node_modules" in bare.value.detail
+    ( tmp_path / "node_modules" / ".bin" ).mkdir( parents=True )
+    ( tmp_path / "node_modules" / ".bin" / "jscpd" ).write_text( "", encoding="utf-8" )
+    def no_node(): raise js_index.DependencyMissing( "node", "gone" )
+    monkeypatch.setattr( js_index, "find_node", no_node )
+    with pytest.raises( err.SemdupError ) as nonode: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
+    assert nonode.value.code == err.DEPENDENCY_MISSING and "node" in nonode.value.detail
+
+
+def fake_jscpd( monkeypatch, tmp_path, version, returncode, write_report, report='{"duplicates": []}' ):
+    """Point run_jscpd at a launcher stub and a fake subprocess that answers version and scan."""
+    ( tmp_path / "node_modules" / ".bin" ).mkdir( parents=True )
+    ( tmp_path / "node_modules" / ".bin" / "jscpd" ).write_text( "", encoding="utf-8" )
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( js_index, "find_node", lambda: "node" )
+    def run( cmd, **kwargs ):
+        if cmd[ -1 ] == "--version": return types.SimpleNamespace( stdout=f"jscpd {version}\n", stderr="", returncode=0 )
+        if write_report: ( pathlib.Path( cmd[ cmd.index( "--output" ) + 1 ] ) / "jscpd-report.json" ).write_text( report, encoding="utf-8" )
+        return types.SimpleNamespace( stdout="", stderr="boom", returncode=returncode )
+    monkeypatch.setattr( st.subprocess, "run", run )
+
+
+def test_run_jscpd_refuses_another_installed_version(tmp_path, monkeypatch):
+    fake_jscpd( monkeypatch, tmp_path, "5.4.0", 0, True )
+    with pytest.raises( err.SemdupError ) as caught: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
+    assert caught.value.code == err.DEPENDENCY_MISSING and "5.3.3" in caught.value.detail and "5.4.0" in caught.value.detail
+
+
+def test_run_jscpd_keeps_a_folder_name_whole_so_a_longer_name_that_starts_with_it_is_not_kept(tmp_path, monkeypatch):
+    kept   = clone( ( "client/a.ts", 1, 9 ), ( "client/b.ts", 1, 9 ) )
+    longer = clone( ( "clientele/a.ts", 1, 9 ), ( "clientele/b.ts", 1, 9 ) )
+    fake_jscpd( monkeypatch, tmp_path, "5.3.3", 0, True, report=json.dumps( { "duplicates": [ kept, longer ] } ) )
+    assert st.run_jscpd( tmp_path, [ "client/" ], JSCPD_CFG )[ "duplicates" ] == [ kept ]
+
+
+@pytest.mark.parametrize( "returncode, write_report", [ ( 1, True ), ( 0, False ) ] )
+def test_run_jscpd_names_a_failed_run_or_a_missing_report(tmp_path, monkeypatch, returncode, write_report):
+    fake_jscpd( monkeypatch, tmp_path, "5.3.3", returncode, write_report )
+    with pytest.raises( err.SemdupError ) as caught: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
+    assert caught.value.code == err.RUN_INCOMPLETE and "boom" in caught.value.detail
+
 
 def test_the_real_jscpd_report_pairs_the_two_clone_functions_and_not_the_lookalikes(tmp_path):
     fixture = json.loads( ( HERE / "semdup_jscpd_fixture.json" ).read_text( encoding="utf-8" ) )
