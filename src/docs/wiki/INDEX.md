@@ -132,6 +132,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[system-admin-and-stats]] — the small routers that report on the server, steer it, and map clean URLs to pages. `cosa.rest.routers` (system, mode, stats, multiplexer_config, pages, websocket_admin)
 - [[symbol-index]] — the list of every Python, JavaScript, TypeScript and Dart definition in a tree, each with a content pin that wiki pages quote. `cosa.repo.symindex` (build, py_index, spec, paths, wiki_lint)
 - [[reuse-search-tools]] — the four MCP tools that ask whether a new definition already exists, reading the symbol index and the wiki. `lupin_mcp` (cosa_voice_mcp, reuse_tools, reuse_call_log_middleware), `cosa.repo.symindex` (verdict)
+- [[reuse-tools-request-and-context]] — reuse_tools request hashing, receipt ids, language check, call budget and the context built from the environment
+- [[reuse-tools-transport-and-screening]] — reuse_tools screening of what is sent, the live Jev transport, refusal breaker, cache and token and attempt counts
 - [[reuse-packed-requests]] — the packed and two-question Jev request: its body, answer reading, cache keys and the size split. `lupin_mcp` (reuse_pack, reuse_pair, reuse_pair_request, reuse_pair_fake)
 - [[reuse-token-ceiling-and-spend-ledger]] — the per-run token ceiling and the account spend ledger that bound live Jev runs. `lupin_mcp` (reuse_ceiling, reuse_ledger)
 - [[reuse-flip-rate-measure]] — the flip-rate test: one need asked again and again, and the needs whose answer changes. `lupin_mcp` (reuse_flip, reuse_flip_run)
