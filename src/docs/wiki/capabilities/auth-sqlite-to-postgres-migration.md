@@ -1,0 +1,29 @@
+---
+capability: auth-sqlite-to-postgres-migration
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pins:
+  - scripts.migrate-sqlite-to-postgres.print_banner@ab1d07319c
+  - scripts.migrate-sqlite-to-postgres.connect_sqlite@4382ed8134
+  - scripts.migrate-sqlite-to-postgres.count_sqlite_records@0583665be0
+  - scripts.migrate-sqlite-to-postgres.migrate_users@04ef9a4c3c
+  - scripts.migrate-sqlite-to-postgres.migrate_active_refresh_tokens@3093905d7e
+  - scripts.migrate-sqlite-to-postgres.migrate_api_keys@f5fb2fed66
+  - scripts.migrate-sqlite-to-postgres.migrate_recent_audit_logs@ce0fbafd12
+  - scripts.migrate-sqlite-to-postgres.run_migration@71124f67fe
+---
+# Auth migration to PostgreSQL
+
+Migrates the authentication database from the SQLite file under the long-term-memory configuration folder to the PostgreSQL `lupin_auth` database. Everything runs in one transaction, so it is all or nothing, and a dry-run mode previews it. The check that follows is on [[auth-migration-validation]].
+
+## What moves
+- `connect_sqlite` opens the SQLite file. `count_sqlite_records` counts the rows in each table before anything is written.
+- `migrate_users` moves every user. `migrate_api_keys` moves the API keys.
+- `migrate_active_refresh_tokens` moves only active refresh tokens, those that are not expired or revoked. The rest are left behind.
+- `migrate_recent_audit_logs` moves audit log entries from the last 30 days only.
+- Types are converted on the way: integers to booleans, text to UUIDs and JSON to JSONB. Foreign keys are checked.
+- Each migrate function takes a dry-run flag and returns the count it moved or would move.
+
+## Running
+- `run_migration` connects to both databases, prints the SQLite counts, then migrates users, tokens, API keys and audit logs in that order. It prints each moved count, with the filtered-from count for tokens and audit logs.
+- `print_banner` prints the formatted section banner.
+- The command takes `--dry-run` for the preview.
