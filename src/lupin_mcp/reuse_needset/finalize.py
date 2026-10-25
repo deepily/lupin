@@ -194,7 +194,7 @@ def verify_manifest( path, expected=None ):
             _mismatch( "ROWS", f"invalid row: {e.detail}" )
         if r[ "status" ] != "final" or "final" not in r: _mismatch( "ROWS", f"{r[ 'id' ]}: not a final row" )
     repeated = _repeated( r[ "id" ] for r in rows )
-    if repeated: _mismatch( "IDS", f"{len( rows ) - len( repeated )} unique ids in {len( rows )} rows; repeated: {repeated[ :5 ]}" )
+    if repeated: _mismatch( "IDS", f"{len( { r[ 'id' ] for r in rows } )} unique ids in {len( rows )} rows; repeated: {repeated[ :5 ]}" )
     got = { "matched": sum( 1 for r in rows if r[ "kind" ] != "nothing" ), "nothing": sum( 1 for r in rows if r[ "kind" ] == "nothing" ) }
     if got[ "matched" ] != expected[ "matched" ]: _mismatch( "KINDS", f"{got[ 'matched' ]} matched and {got[ 'nothing' ]} nothing, expected {expected[ 'matched' ]} and {expected[ 'nothing' ]}" )
     langs = { l: sum( 1 for r in rows if r[ "write_lang" ] == l ) for l in ( "ts", "py" ) }

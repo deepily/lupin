@@ -233,3 +233,15 @@ def test_a_typed_symbol_outside_the_index_stops_the_finalize( tmp_path ):
     with pytest.raises( er.NeedsetError ) as e: finalize.finalize( [ need ], other, 0.5, 1, COMMIT, tmp_path, known_symbols={ "pkg.b.g" } )
     assert e.value.detail.startswith( "SYMBOLS" ) and "pkg.c.h" in e.value.detail
     finalize.finalize( [ need ], { need[ "id" ]: AGREED }, 0.5, 1, COMMIT, tmp_path, known_symbols=set() )
+    unlabelled = { need[ "id" ]: { "choice": None, "symbols": None, "final_source": "model_agreed" } }
+    finalize.finalize( [ need ], unlabelled, 0.5, 1, COMMIT, tmp_path, known_symbols=set() )
+
+
+def test_an_id_repeated_three_times_is_counted_once_among_the_unique_ids( tmp_path ):
+    path = write_set( tmp_path )
+    rows = [ json.loads( l ) for l in ( tmp_path / finalize.FINAL_FILE ).read_text().splitlines() ]
+    nothing_ids = [ r[ "id" ] for r in rows if r[ "kind" ] == "nothing" and r[ "write_lang" ] == rows[ 0 ][ "write_lang" ] ]
+    twin = next( r for r in rows if r[ "id" ] == nothing_ids[ 0 ] )
+    rewrite_rows( tmp_path, lambda r: copy.deepcopy( twin ) if r[ "id" ] in nothing_ids[ 1:3 ] else r )
+    name, detail = condition( path )
+    assert name == "IDS" and "398 unique ids in 400 rows" in detail
