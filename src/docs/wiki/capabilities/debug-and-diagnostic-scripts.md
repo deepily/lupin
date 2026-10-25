@@ -16,7 +16,7 @@ pins:
 ---
 # Debug and diagnostic scripts
 Standalone diagnostics under `src/scripts/`. None needs pytest.
-- `debug_proxy_script_matcher.py` reproduces the notification proxy's script-matching call for a CRUD delete. `banner` prints a numbered step, `pass_fail` a result mark, and `instrumented_run` makes the call.
+- `debug_proxy_script_matcher.py` reproduces the notification proxy's script-matching call for a CRUD delete. `banner` prints a numbered step, `pass_fail` a result mark, and `instrumented_run` wraps the client's run to print the prompt and keep the raw response.
 - `test_queue_endpoint` in `debug_queue_endpoint.py` tests the queue endpoint to debug a 500 error.
 - `test_queue_state_monitoring_debug` replicates the queue state monitoring test that failed.
 - `test_websocket_auth_validation` and `test_basic_connection` test WebSocket authentication and a basic connection.

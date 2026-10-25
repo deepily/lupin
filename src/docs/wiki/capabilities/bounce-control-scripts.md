@@ -31,4 +31,4 @@ Scripts that guard a container bounce ([[dev-server-lifecycle]]). A bounce of th
 - `bounce_dev_warn.py` posts the pre-bounce warning and waits for each recipient to ack. Its `main` is the entry point.
 - `compose_drift_probe.py` compares a running container with the compose service that built it. A restart keeps old tmpfs, mounts and environment values.
 - `compose_tmpfs`, `compose_mounts`, `inspect_mounts` and `inspect_env` put both sides in one shape. `drifted_fields` names every compose value the container lacks.
-- `run_json` and `compose_argv` run the docker commands. `probe` makes the comparison, and `main` prints the verdict with a `RECREATE_ARG=` line per drifted value.
+- `run_json` and `compose_argv` run the docker commands. `probe` makes the comparison, and `main` prints the verdict. For tmpfs or mount drift, exit 10, it adds one `RECREATE_ARG=` line per argument of the recreate command. For environment drift, exit 11, it prints that command for a person instead.

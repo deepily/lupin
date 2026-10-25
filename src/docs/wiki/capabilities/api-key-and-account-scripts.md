@@ -17,7 +17,7 @@ pins:
 ---
 # Service account, API key and password scripts
 One-off scripts under `src/scripts/` that create accounts and keys. Each writes secrets, so run them on the owner's word.
-- `generate_api_key` makes a `ck_live_` key of 70 characters from a secure random source. `get_or_create_service_account` finds or creates the service user in Postgres.
+- `generate_api_key` makes a `ck_live_` key of 72 characters: the 8-character prefix and 64 characters from a secure random source. `get_or_create_service_account` finds or creates the service user in Postgres.
 - `store_api_key` stores the key's hash in the database. `write_key_to_file` writes the plaintext key to an environment-specific file under `src/conf/keys`.
 - `generate_model_server_key` makes a model-server key. That server has no database, so nothing is inserted.
 - `key_fingerprint` gives a stable one-way identifier for a key. The server computes it the same way.

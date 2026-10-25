@@ -20,7 +20,7 @@ Two check scripts under `src/scripts/`. Each reports and changes nothing.
 - `check_bundle_freshness.py` asks whether a rebuild would change the delivered bytes of a web bundle, by a dry-run build into a temporary directory.
 - `parse_build_script` reads a `build-*.sh` driver and extracts what reproduces its production build, so the check cannot drift from the build.
 - `BuildScriptError` is raised when a driver cannot be turned into a dry-run command. `short_sha` is the twelve-character sha256 prefix the build scripts use.
-- `discover_bundles` finds each driver that emits a manifest, newest name first. A driver without a manifest is skipped.
+- `discover_bundles` finds each driver that emits a manifest, in sorted name order. A driver without a manifest is skipped.
 - `consumers_of` lists tracked files that load a bundle's output, not those that only name it. That tells a dormant port from a live 404.
 - `current_sha` names the commit the report was taken at. `format_report` gives every bundle's name, source count and both hashes.
 - `main` returns the fresh code only when at least one bundle was judged and all were fresh.
