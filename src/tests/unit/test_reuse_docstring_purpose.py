@@ -204,3 +204,28 @@ def test_the_candidate_stage_reads_a_purpose_file_with_a_torn_last_line( world )
     path = root / "purposes.jsonl"
     path.write_text( path.read_text( encoding="utf-8" ) + TORN, encoding="utf-8" )
     assert lookup( make() )[ "ids" ]
+
+
+def test_a_context_used_for_two_calls_starts_each_with_no_notes_no_drops_and_no_tests_generation( notes_env ):
+    # red when: prepare stops resetting its per-call state, so a note, a drop or a tests generation from the first call shows in the second
+    rt.check_exists_impl( NEED, ctx_of( notes_env, AllReuse() ), language="py" )                         # builds the index, so a pin can be read
+    path = write_purposes( notes_env, [ { "pin": pin_of( notes_env, "cosa.feeds.parse_feed" ), "purpose": "reads feeds" } ] )
+    good = path.read_text( encoding="utf-8" )
+    path.write_text( good + TORN, encoding="utf-8" )
+    ctx  = ctx_of( notes_env, AllReuse(), purposes_path=path )
+    first = rt.check_exists_impl( NEED, ctx, language="py", include_tests=True )
+    assert [ n[ "note" ] for n in first[ "notes" ] ] == [ "PURPOSE_LINE_TORN" ] and ctx.dropped and ctx.tests_gen is not None
+    path.write_text( good, encoding="utf-8" )
+    ( notes_env[ 0 ] / "src" / "cosa" / "notes.py" ).unlink()                                            # nothing left to drop either
+    second = rt.check_exists_impl( NEED + " again", ctx, language="py" )
+    assert second[ "notes" ] == [] and second[ "dropped" ] == {} and ctx.tests_gen is None
+
+
+def test_a_call_that_stops_early_on_an_unreadable_tree_reports_no_drops_from_the_call_before( notes_env ):
+    # red when: prepare keeps the last call's drops across an early return
+    import shutil
+    ctx = ctx_of( notes_env, AllReuse() )
+    assert rt.check_exists_impl( NEED, ctx, language="py" )[ "dropped" ] and ctx.dropped
+    shutil.rmtree( notes_env[ 0 ] / "src" / "cosa" )
+    r = rt.check_exists_impl( NEED, ctx, language="py" )
+    assert r[ "dropped" ] == {} and ctx.dropped == {} and "NOT_LUPIN_TREE" in receipt_of( notes_env, r )[ "flags" ]

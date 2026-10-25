@@ -49,6 +49,7 @@ def test_attach_purposes_copies_only_the_records_whose_pin_has_a_line():
     a, b = { "pin": "p1", "id": "a" }, { "pin": "p2", "id": "b" }
     out  = bd.attach_purposes( [ a, b ], { "p1": "does a" } )
     assert out == [ { "pin": "p1", "id": "a", "purpose": "does a" }, b ] and out[ 1 ] is b and "purpose" not in a
+    assert [ a, b ] == [ { "pin": "p1", "id": "a" }, { "pin": "p2", "id": "b" } ]           # neither input record was changed in place
     assert bd.attach_purposes( [ a ], None ) == [ a ] and bd.attach_purposes( [ a ], {} ) == [ a ]
     assert bd.attach_purposes( [ a ], None ) is not bd.attach_purposes( [ a ], None )       # a new list each time
 
