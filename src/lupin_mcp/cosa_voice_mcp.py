@@ -44,6 +44,7 @@ if __name__ == "__main__":
 
 import anyio
 import functools
+import importlib
 import logging
 import os
 import re
@@ -4851,22 +4852,23 @@ def _reuse_unavailable( e ) -> dict:
     return { "status": "error", "error": "REUSE_TOOLS_UNAVAILABLE", "detail": f"{type( e ).__name__}: {e}" }
 
 
-def _reuse_call( impl_name, root, *args, **kw ) -> dict:
+def _reuse_call( impl_name, root, *args, module="reuse_tools", **kw ) -> dict:
     """
     Run one reuse_tools implementation for a wrapper, or say why it cannot run.
 
     Requires:
-        - impl_name names a function in lupin_mcp.reuse_tools that takes ( *args, ctx, **kw )
+        - impl_name names a function in lupin_mcp.<module>, reuse_tools unless module says otherwise, that takes ( *args, ctx, **kw )
     Ensures:
         - imports reuse_tools and builds its context for root; if either fails, returns _reuse_unavailable
-        - otherwise returns reuse_tools.<impl_name>( *args, ctx, **kw )
+        - otherwise returns <module>.<impl_name>( *args, ctx, **kw )
     """
     try:
         from lupin_mcp import reuse_tools
         ctx = reuse_tools.context_from_environment( root )
     except Exception as e:
         return _reuse_unavailable( e )
-    return getattr( reuse_tools, impl_name )( *args, ctx, **kw )
+    home = reuse_tools if module == "reuse_tools" else importlib.import_module( f"lupin_mcp.{module}" )
+    return getattr( home, impl_name )( *args, ctx, **kw )
 
 
 @mcp.tool
@@ -4922,6 +4924,27 @@ def read_capability( names: list, root: Optional[ str ] = None ) -> dict:
         root: repository root; default is the git root of the working directory
     """
     return _reuse_call( "read_capability_impl", root, names )
+
+
+@mcp.tool
+@_offloaded_tool
+def record_search( receipt_id: Optional[ str ] = None, entry: Optional[ str ] = None, extra_terms: Optional[ list ] = None,
+                   language: Optional[ str ] = None, root: Optional[ str ] = None ) -> dict:
+    """
+    Search the tree for the nearest existing code and record the search. No model call.
+
+    Run it before ruling that new code is distinct. It searches the working tree for three to six terms
+    and returns the five nearest definitions and a search_id to cite. Read each candidate's source.
+    Give exactly one of receipt_id and entry. An entry has no receipt, so it needs a language: py, ts, dart or all, with no default.
+
+    Args:
+        receipt_id: id returned by check_exists or fetch_similar
+        entry: symbol id, when there is no receipt
+        extra_terms: terms to add to the derived ones, three to six in all
+        language: for an entry search only; py, ts, dart or all
+        root: repository root; default is the git root of the working directory
+    """
+    return _reuse_call( "record_search_impl", root, receipt_id, entry, extra_terms, language, module="reuse_search" )
 
 
 @mcp.tool

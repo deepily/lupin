@@ -23,7 +23,7 @@ from tests.unit.symindex_helpers import make_lupin_repo
 from tests.unit.test_reuse_tools import ALL_TEXTS, FEEDS_TEXT, MATHX_TEXT, NEED, FakeJev, resp
 
 REPO_ROOT = git_toplevel( pathlib.Path( __file__ ).resolve().parent )
-REUSE     = ( "check_exists", "fetch_similar", "read_capability", "replay" )
+REUSE     = ( "check_exists", "fetch_similar", "read_capability", "replay", "record_search" )
 
 
 def _ctx( tmp_path ):
@@ -51,10 +51,27 @@ def _server( tmp_path, factory=None ):
     def replay( receipt_id: str ) -> dict: raise ValueError( "boom" )
 
     @m.tool
-    def get_session_info() -> dict: return { "receipt_id": "not-a-reuse-call" }
+    def record_search( receipt_id: str ) -> dict: return { "status": "ok", "receipt_id": receipt_id, "search_id": "rs-0123456789" }
+
+    @m.tool
+    def get_session_info() -> dict: return { "receipt_id": "not-a-reuse-call", "search_id": "rs-not-logged" }
 
     m.add_middleware( mw.ReuseCallLogMiddleware( identity=lambda: "rachel 36d80c49", session_id="s1", context_factory=factory or ( lambda: _ctx( tmp_path ) ) ) )
     return m
+
+
+def test_the_middleware_logs_the_search_id_of_a_recorded_search_and_adds_no_key_to_other_lines( tmp_path ):
+    # red when: the search_id is dropped (the exit gate would find no search), or every line gains the key (the old log lines would change)
+    async def go():
+        async with Client( _server( tmp_path ) ) as c:
+            await c.call_tool( "check_exists", { "need": "x" } )
+            await c.call_tool( "record_search", { "receipt_id": "abc123" } )
+            await c.call_tool( "get_session_info", {} )                         # carries a search_id of its own, and is not a reuse tool
+    asyncio.run( go() )
+    lines = _log( tmp_path )
+    assert [ l[ "tool" ] for l in lines ] == [ "check_exists", "record_search" ]
+    assert "search_id" not in lines[ 0 ]
+    assert lines[ 1 ][ "search_id" ] == "rs-0123456789" and lines[ 1 ][ "receipt_id" ] == "abc123" and lines[ 1 ][ "error" ] is None
 
 
 def test_the_middleware_logs_reuse_calls_with_receipt_error_and_caller_and_ignores_other_tools( tmp_path ):
@@ -118,7 +135,7 @@ def test_each_wrapper_delegates_to_the_impl_and_answers_with_an_error_dict_when_
     import lupin_mcp
     monkeypatch.delattr( lupin_mcp, "reuse_tools" )                                              # `from lupin_mcp import x` finds the attribute first
     monkeypatch.setitem( sys.modules, "lupin_mcp.reuse_tools", None )
-    for name, args in ( ( "check_exists", { "need": "x", "language": "all" } ), ( "fetch_similar", { "entry": "a", "language": "all" } ), ( "read_capability", { "names": [] } ), ( "replay", { "receipt_id": "r" } ) ):
+    for name, args in ( ( "check_exists", { "need": "x", "language": "all" } ), ( "fetch_similar", { "entry": "a", "language": "all" } ), ( "read_capability", { "names": [] } ), ( "replay", { "receipt_id": "r" } ), ( "record_search", { "receipt_id": "r" } ) ):
         out = asyncio.run( _run( name, args ) )
         assert out[ "error" ] == "REUSE_TOOLS_UNAVAILABLE" and "ModuleNotFoundError" in out[ "detail" ], name
     monkeypatch.undo()

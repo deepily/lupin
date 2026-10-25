@@ -126,6 +126,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[system-admin-and-stats]] — the small routers that report on the server, steer it, and map clean URLs to pages. `cosa.rest.routers` (system, mode, stats, multiplexer_config, pages, websocket_admin)
 - [[symbol-index]] — the list of every Python, JavaScript, TypeScript and Dart definition in a tree, each with a content pin that wiki pages quote. `cosa.repo.symindex` (build, py_index, spec, paths, wiki_lint)
 - [[reuse-search-tools]] — the four MCP tools that ask whether a new definition already exists, reading the symbol index and the wiki. `lupin_mcp` (cosa_voice_mcp, reuse_tools, reuse_call_log_middleware), `cosa.repo.symindex` (verdict)
+- [[reuse-record-search]] — the `record_search` MCP tool: a fixed-string search of the tree for the nearest existing definitions, recorded under a search id. `lupin_mcp` (cosa_voice_mcp, reuse_search)
 - [[mcp-task-store-tools]] — the ten MCP tools a session uses to read and write the task store over HTTP. `lupin_mcp` (task_store_tools, cosa_voice_mcp)
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
 - [[mcp-commons-ask-async]] — the polling-mode question post behind the `commons_ask_async` tool. `lupin_mcp` (commons_ask)

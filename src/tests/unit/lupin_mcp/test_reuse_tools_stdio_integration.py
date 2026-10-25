@@ -30,7 +30,7 @@ import pytest
 from tests.helpers.mcp_stdio_test_client import MCPStdioClient
 
 REPO       = pathlib.Path( __file__ ).resolve().parents[ 4 ]
-REUSE      = { "check_exists", "fetch_similar", "read_capability", "replay" }
+REUSE      = { "check_exists", "fetch_similar", "read_capability", "replay", "record_search" }
 ENTRY      = "cosa.rest.task_store_owed.park_reason_is_stale"
 RECEIPT_ID = re.compile( r"[0-9a-f]{16}" )
 
@@ -101,6 +101,7 @@ def test_each_reuse_tool_answers_over_stdio_beside_a_voice_tool( dirs ):
         similar = client.call_tool( "fetch_similar", { "entry": ENTRY, "language": "all" } )
         read   = client.call_tool( "read_capability", { "names": [ "no-such-capability" ] } )
         replay = client.call_tool( "replay", { "receipt_id": check[ "receipt_id" ] } )
+        search = client.call_tool( "record_search", { "receipt_id": check[ "receipt_id" ] } )
         after  = client.call_tool( "get_session_info", {} )
     assert before[ "project" ] == "lupin" and after[ "project" ] == "lupin", "the voice tool answered before and after the reuse calls"
     assert check[ "tool" ] == "check_exists" and RECEIPT_ID.fullmatch( check[ "receipt_id" ] )
@@ -111,6 +112,7 @@ def test_each_reuse_tool_answers_over_stdio_beside_a_voice_tool( dirs ):
     assert ENTRY not in [ r[ "id" ] for r in similar[ "shortlist" ] + similar[ "nearest" ] ], "the symbol itself is excluded by id"
     assert read[ "pages" ] == { "no-such-capability": { "error": "NOT_FOUND" } }, "an unknown slug is a named error, not an empty page"
     assert replay[ "status" ] == "ok" and replay[ "receipt_id" ] == check[ "receipt_id" ], replay
+    assert search[ "status" ] == "ok" and re.fullmatch( r"rs-[0-9a-f]{10}", search[ "search_id" ] ) and search[ "receipt_id" ] == check[ "receipt_id" ], search      # a fresh server, so the fifth tool is really mounted
     assert replay[ "stored" ][ "verdict" ] == check[ "verdict" ] and replay[ "stored" ][ "cause" ] == check[ "cause" ], "replay returns the stored result"
     assert replay[ "differences" ][ "frozen" ] == [], "a re-run against the frozen inputs reproduces the stored result"
     lines = [ json.loads( l ) for f in ( data / "call-log" ).glob( "*.jsonl" ) for l in f.read_text( encoding="utf-8" ).splitlines() ]
@@ -175,7 +177,8 @@ def test_when_the_reuse_import_raises_the_server_starts_and_a_voice_tool_answers
         voice   = client.call_tool( "get_session_info", {} )
         answers = { t: client.call_tool( t, args ) for t, args in
                     { "check_exists": { "need": "anything", "language": "all" }, "fetch_similar": { "entry": ENTRY, "language": "all" },
-                      "read_capability": { "names": [ "x" ] }, "replay": { "receipt_id": "0123456789abcdef" } }.items() }
+                      "read_capability": { "names": [ "x" ] }, "replay": { "receipt_id": "0123456789abcdef" },
+                      "record_search": { "receipt_id": "0123456789abcdef" } }.items() }
     assert REUSE <= names, "the wrappers still load, so the tools stay listed"
     assert voice[ "project" ] == "lupin", "a voice tool answers while reuse_tools cannot be imported"
     for tool, answer in answers.items():

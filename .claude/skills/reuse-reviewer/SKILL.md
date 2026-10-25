@@ -51,6 +51,20 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
 4. **Read source** only for shortlisted candidates and for any call that returned an `uncertain`
    cause. Rule on source, never on a shortlist line alone, and leave the rest of the tree unread.
 
+   **Search the tree for each `DISTINCT` you mean to rule.** The shortlist only covers the index. Call
+   `record_search( receipt_id )` with the receipt from the `fetch_similar` call. It makes no model call. It
+   searches the working tree for three to six terms and returns the five nearest definitions and a
+   `search_id`. Add terms of your own with `extra_terms`. With no receipt, pass `entry` and `language`
+   instead. Read the source of each candidate it names. Then write one line per candidate you read, in
+   the review document:
+
+   ```text
+   SEARCHED <symbol id> :: <search id> :: <candidate id> :: SAME_JOB | RELATED | UNRELATED :: <why>
+   ```
+
+   `SAME_JOB` means the candidate already does the work, so the ruling is `DUPLICATE` or `EXTEND`.
+   Keep the `RULING` line as it is below; the exit gate does not read the search id yet.
+
 5. **Rule**, one line per new definition, in the review document, in this exact shape:
 
    ```text

@@ -56,6 +56,7 @@ EXEMPT = {
     "fetch_similar"         : "reuse-wiki lookup, per its docstring (not read further)",
     "read_capability"       : "reuse-wiki page read, per its docstring (not read further)",
     "replay"                : "reuse-wiki receipt re-check, per its docstring (not read further)",
+    "record_search"         : "reuse-wiki fixed-string search of the working tree, per its docstring (not read further)",
     "commons_read"          : "read-only (docstring tag READ)",
     "commons_who"           : "read-only (docstring tag READ)",
     "dm_get"                : "read-only (docstring tag READ); whether the server marks anything delivered on read was not checked",
