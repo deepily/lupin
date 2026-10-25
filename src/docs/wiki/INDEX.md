@@ -188,6 +188,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-stage-one-analysis-report]] — stage-one analysis: request and cost figures, the built report and its command. `lupin_mcp` (reuse_stage1_analysis)
 - [[reuse-seeded-miss-stand-ins]] — the seeded-miss run's throwaway repository, stand-in Jev, stage and store. `lupin_mcp` (reuse_seeded_miss_e2e)
 - [[reuse-seeded-miss-scenario]] — the seeded-miss run: record a miss, repair a docstring and prove it by replay, dry or live. `lupin_mcp` (reuse_seeded_miss_e2e)
+- [[eval-isolation-write-target]] — the paired eval guard's errors, write target and measurement-database check. `scripts` (eval_isolation_guard)
+- [[eval-isolation-pairing]] — the paired eval guard's store allowlist, distinct-and-clean arms and leak-free corpus. `scripts` (eval_isolation_guard)
 - [[needset-records-and-quota]] — the need-set record and validator, named errors, the kind-by-language quota and the seeded draw. `lupin_mcp` (reuse_needset)
 - [[needset-seed-pool]] — which symbols may seed a need set item, their twin groups and the cell pools. `lupin_mcp` (reuse_needset)
 - [[needset-member-text]] — stripped member text for the drafter and raw bodies for search, Python and script. `lupin_mcp` (reuse_needset)
