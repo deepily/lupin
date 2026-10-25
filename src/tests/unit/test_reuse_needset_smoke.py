@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from lupin_mcp.reuse_needset import draft, smoke
+from lupin_mcp.reuse_needset import draft, run, smoke
 from lupin_mcp.reuse_needset import errors as er
 from tests.unit.test_reuse_needset_keys import Vectors
 from tests.unit.test_reuse_needset_pool import REPO_ROOT, write_tree
@@ -202,3 +202,21 @@ def test_a_tree_without_the_lupin_layout_is_refused_by_name( tmp_path ):
     ( tmp_path / "plain" ).mkdir()
     with pytest.raises( er.NeedsetError ) as e: smoke.index_parts( tmp_path / "plain", tmp_path / "idx" )
     assert e.value.code == er.NOT_LUPIN_TREE
+
+
+def test_the_assembled_env_sends_the_drafter_and_the_second_model_through_the_timer( tmp_path, monkeypatch ):
+    root = tree( tmp_path )
+    by_id, *_ = smoke.index_parts( root, tmp_path / "scan" )
+    ids  = sorted( by_id )
+    loaded = Vectors( ids, [ [ 1.0, 0.01 * n ] for n in range( len( ids ) ) ] )
+    loaded.manifest = {}
+    monkeypatch.setattr( smoke.vector_store, "load_vectors", lambda d: loaded )
+    monkeypatch.setattr( smoke.vector_store, "query_vectors", lambda text, client, cache, manifest: { "concat": [ 1.0, 0.0 ] } )
+    args = smoke.parse_args( argv( tmp_path / "out", extra=[ "--cli-path", "" ] ) )
+    args.root = str( root )
+    timed  = smoke.Timed( time.monotonic )
+    second = []
+    env    = smoke.assemble_env( args, Model(), lambda system, prompt: ( second.append( system ) or '{"any_does_it": "no"}' ), None, "when", timed )
+    got    = env.none_draft_fn( run.nothing_job( env, "src/cosa/fx/pkg/a.py", "py" ), env.ask, env.ledger )
+    assert got[ "ok" ] is True and got[ "absence" ][ "rejected" ] is False
+    assert timed.summary( "draft" )[ "calls" ] == 1 and timed.summary( "second" )[ "calls" ] == len( second ) >= 1 and set( second ) == { smoke.SECOND_SYSTEM }
