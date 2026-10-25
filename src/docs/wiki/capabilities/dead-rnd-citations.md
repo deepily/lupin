@@ -22,7 +22,7 @@ Scans the repo for `src/rnd/…` citations that no longer resolve, and reports i
 ## Corpus
 - `tracked_files` lists every file git tracks, relative to the repo root. It raises if git cannot answer, so an empty list never hides a failed call.
 - `is_archive` is true for a frozen historical record, such as the history folders and the nested R&D tree.
-- `in_corpus` skips research documents, since one citing a sibling is a record. It scans the index files by name, because an index exists to send readers somewhere. Skipping the index once hid its dead links.
+- `in_corpus` returns true for every tracked file. The earlier file-level exclusion of research documents hid dead links in an index, so `citation_instructs` now decides per citation. The index file list survives only as a positive control.
 
 ## Citations that do not count
 - `cross_repo_names` reads the sibling repo names from the `external repos` key of the config file. It puts the longest first, leaves out this repo and adds the unregistered sibling. A missing key raises `ValueError`.
