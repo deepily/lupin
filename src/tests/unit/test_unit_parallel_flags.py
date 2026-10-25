@@ -8,6 +8,7 @@ The contended-coverage finder does not take an xdist worker for a peer suite.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -141,3 +142,53 @@ def test_a_real_xdist_run_sees_no_worker_as_a_peer( tmp_path ):
     done = subprocess.run( [ sys.executable, "-m", "pytest", "-n", "2", "-p", "no:cacheprovider", "-q", str( probe ) ],
                            capture_output=True, text=True, env=env, cwd=str( tmp_path ), timeout=120 )
     assert done.returncode == 0, done.stdout[ -2000: ]
+
+
+def _sandboxed_runner( tmp_path, has_xdist ):
+    """
+    A copy of the shipped runner and its lib directory over a stub venv.
+
+    Ensures:
+        - returns the runner path; the stub pytest records any real invocation in `ran.txt`
+        - the stub python answers `import xdist` with exit 0 iff has_xdist
+    """
+    root = tmp_path / "root"
+    ( root / "src/tests" ).mkdir( parents=True )
+    shutil.copy( _RUNNER, root / "src/tests/run-unit-tests.sh" )
+    shutil.copytree( os.path.join( _PROJECT_ROOT, "src/scripts/lib" ), root / "src/scripts/lib",
+                     ignore=shutil.ignore_patterns( "__pycache__" ) )
+    venv_bin = root / ".venv/bin"
+    venv_bin.mkdir( parents=True )
+    pytest_stub = venv_bin / "pytest"
+    pytest_stub.write_text( '#!/bin/bash\n[ "$1" = "--version" ] && exit 0\necho "$@" > "%s/ran.txt"\nexit 0\n' % tmp_path )
+    python_stub = venv_bin / "python"
+    python_stub.write_text( "#!/bin/bash\nexit %d\n" % ( 0 if has_xdist else 1 ) )
+    for stub in ( pytest_stub, python_stub ): stub.chmod( 0o755 )
+    return str( root / "src/tests/run-unit-tests.sh" )
+
+
+def _run_runner( runner, args=() ):
+    env = { k: v for k, v in os.environ.items() if k not in ( "LUPIN_UNIT_WORKERS", "LUPIN_COVERAGE" ) }
+    return subprocess.run( [ "bash", runner, *args ], capture_output=True, text=True, env=env, timeout=60 )
+
+
+def test_exit_code_3_reaches_the_runners_caller_and_pytest_never_starts( tmp_path ):
+    done = _run_runner( _sandboxed_runner( tmp_path, has_xdist=False ) )
+    assert done.returncode == 3
+    assert "pytest-xdist is not importable" in done.stderr
+    assert not ( tmp_path / "ran.txt" ).exists()
+
+
+def test_the_runner_passes_n_4_to_pytest_when_xdist_is_present( tmp_path ):
+    done = _run_runner( _sandboxed_runner( tmp_path, has_xdist=True ) )
+    assert done.returncode == 0, done.stderr
+    assert "-n 4" in ( tmp_path / "ran.txt" ).read_text()
+
+
+def test_the_runner_runs_serial_with_xdist_absent_when_workers_is_zero( tmp_path ):
+    env_runner = _sandboxed_runner( tmp_path, has_xdist=False )
+    env = { k: v for k, v in os.environ.items() if k != "LUPIN_COVERAGE" }
+    env[ "LUPIN_UNIT_WORKERS" ] = "0"
+    done = subprocess.run( [ "bash", env_runner ], capture_output=True, text=True, env=env, timeout=60 )
+    assert done.returncode == 0, done.stderr
+    assert "-n" not in ( tmp_path / "ran.txt" ).read_text().split()

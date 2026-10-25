@@ -82,7 +82,7 @@ COV_FLAGS="$( coverage_opt_in_flags )" || exit $?
 # 39717 passed, and the same coverage gate answer (98.02%, 974 files, executed lines equal in
 # every file). The serial-only tests are not in this tier: `serial_bridge_guard` is deselected
 # by pytest.ini and has its own step, src/scripts/run-serial-bridge-guard.sh.
-# LUPIN_UNIT_WORKERS=0 runs serial. A user-supplied -n comes later in the line and wins.
+# LUPIN_UNIT_WORKERS=0 runs serial. A -n, --collect-only, --pdb or -p no:xdist in your own arguments suppresses the added flag, so yours stands.
 source "$PROJECT_ROOT/src/scripts/lib/unit-parallel-flags.sh"
 UNIT_PARALLEL_FLAGS="$( unit_parallel_flags "$PYTEST" "$@" )" || exit $?
 
