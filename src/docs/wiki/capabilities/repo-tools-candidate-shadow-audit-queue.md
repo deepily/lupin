@@ -19,6 +19,7 @@ Files live under the data folder: `shadow-pending/<id>.json` for queued lookups,
 
 ## Draining
 - `run_pending( data_dir, sweep_fn, today, limit=None )` takes items fewest attempts first, then oldest, then id. It sweeps each, stores a receipt and removes the queue file. It returns `audited`, `failed`, `corrupt` and `receipts`.
+- `max_tokens` caps a drain. Each sweep answer must then carry a whole-number `tokens`. The run stops before a sweep when the tokens spent plus the largest sweep seen would pass the cap. The result gains `spent_tokens` and `stopped_by`. `pass_language` calls the sweep as `( need, language )`. `lupin_mcp.reuse_shadow` sets both, reading the cap from the INI key `reuse shadow audit max tokens per drain`, which has no default.
 - A sweep that raises or answers without `verdict` or `causal_ids` leaves the item queued with its attempt count up by one. A queue file that is not valid is renamed to `<name>.corrupt` and the run goes on.
 
 ## Receipts and volume
