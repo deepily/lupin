@@ -132,6 +132,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[mcp-commons-ask-async]] — the polling-mode question post behind the `commons_ask_async` tool. `lupin_mcp` (commons_ask)
 - [[mcp-commons-archiver]] — the rotation of aged commons entries into daily archive files. `lupin_mcp` (commons_archival)
 - [[mcp-broadcast-handler]] — the listener-side parse, injection and ack of an operator broadcast. `lupin_mcp` (broadcast_handler)
+- [[mcp-server-plumbing]] — the stdout guard, outbound key, notify outbox, validation-alert cooldown, config-file lock and podcast tool body behind the cosa-voice server. `lupin_mcp` (jsonrpc_stdout, outbound_api_key, notify_outbox, validation_alert_throttle, config_write_lock, podcast_for_rick)
 - [[lupin-cli-notifications]] — the command-line clients that send a notification to the Lupin server, and the sync one that waits for the user's answer. `lupin_cli.notifications` (notify_user_sync, notify_user_async, notify_user, human_ask_containment)
 - [[lupin-cli-notification-models]] — the notification enums, stream events, response shapes, the async request and the sender-id helpers. `lupin_cli.notifications` (notification_models)
 - [[lupin-cli-notification-types]] — the plain notification type and priority enums and the server URL check. `lupin_cli.notifications` (notification_types)
