@@ -163,6 +163,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-drafting-flows]] — drafting a need for a seed, a cell and the nothing cell, with replacements. `lupin_mcp` (reuse_needset)
 - [[needset-second-check]] — the second model's check of each drafted need, its prompts, reply parser and disputes. `lupin_mcp` (reuse_needset)
 - [[needset-final-set]] — choosing the needs people label, the final set file and manifest, and their verification. `lupin_mcp` (reuse_needset)
+- [[needset-agent-probe]] — the tools-on agent that reads shortlisted candidates and rules each the same job or not. `lupin_mcp` (reuse_needset)
+- [[needset-loss-trace]] — tracing where a need's key is lost in the search pipeline, the confirmations and the report. `lupin_mcp` (reuse_needset)
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection. `lupin_mcp` (reuse_stage2_negatives)
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows. `lupin_mcp` (reuse_stage2_run)
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it. `lupin_mcp` (reuse_stage2_fit)
