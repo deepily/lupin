@@ -56,8 +56,16 @@ class TestAPIKeyGeneration:
         assert len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
         assert "(72 characters)" in create_service_account.generate_api_key.__doc__
         assert "(384 bits entropy)" in create_service_account.generate_api_key.__doc__
-        postgres = ( Path( lupin_root ) / "src" / "scripts" / "create_service_account_postgres.py" ).read_text( encoding="utf-8" )
-        assert "(72 characters)" in postgres and "(384 bits entropy)" in postgres and "70 characters" not in postgres and "288 bits entropy" not in postgres
+
+    def test_the_postgres_twin_produces_the_length_its_docstring_states( self ):
+        """Test the twin's docstring figures against the key it builds."""
+        twin_path = Path( lupin_root ) / "src" / "scripts" / "create_service_account_postgres.py"
+        twin_spec = importlib.util.spec_from_file_location( "create_service_account_postgres", twin_path )
+        twin      = importlib.util.module_from_spec( twin_spec )
+        twin_spec.loader.exec_module( twin )
+        api_key = twin.generate_api_key()
+        assert len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
+        assert "(72 characters)" in twin.generate_api_key.__doc__ and "(384 bits entropy)" in twin.generate_api_key.__doc__
 
     def test_api_key_uniqueness( self ):
         """Test that multiple generated keys are unique."""
