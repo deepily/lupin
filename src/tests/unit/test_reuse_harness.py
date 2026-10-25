@@ -9,6 +9,7 @@ import re
 
 import pytest
 
+from cosa.repo.semdup import frozen
 from lupin_mcp.reuse_harness import arms
 from lupin_mcp.reuse_harness import errors as err
 from lupin_mcp.reuse_harness import run as harness
@@ -227,11 +228,10 @@ def test_configs_do_not_share_state_with_the_base_or_each_other():
     assert arms.build_session_config( arms.ARM_WITH, "m" )[ "deny_rules" ] == []
 
 
-def test_arm_labels_are_distinct_and_not_ordinary_words():
-    """The scrub list takes these, so they cannot be 'with' or 'without'."""
-    labels = list( arms.ARM_LABELS.values() )
-    assert len( set( labels ) ) == 2 and not set( labels ) & { "with", "without" }
-    assert all( re.fullmatch( r"arm-[a-z]+", label ) for label in labels )
+def test_arm_labels_are_the_two_strings_of_the_frozen_scrub_list():
+    """The harness writes the strings the frozen configuration scrubs, so the census covers them."""
+    assert arms.ARM_LABELS == { "with" : "arm-label-with-9c41e7", "without" : "arm-label-without-9c41e7" }
+    assert tuple( arms.ARM_LABELS.values() ) == frozen.ARM_LABELS
 
 
 def test_build_session_config_refuses_an_unknown_arm_and_an_empty_model():
@@ -375,9 +375,9 @@ def test_one_verdict_record_per_slice_and_one_stop_record_each_with_the_model_se
     verdicts = [ record for record in ports.log.records if record[ "event" ] == "verdict" ]
     assert [ record[ "seat_hours" ] for record in verdicts ] == [ 1.0, 2.0, 3.0, 4.0 ]
     assert [ record[ "passing_tests" ] for record in verdicts ] == [ 1, 2, 3, 4 ]
-    assert all( record[ "model_id" ] == "claude-opus-5-5" and record[ "server_commit" ] == "abc1234" and record[ "arm_label" ] == "arm-heron" and record[ "total_tests" ] == 4
+    assert all( record[ "model_id" ] == "claude-opus-5-5" and record[ "server_commit" ] == "abc1234" and record[ "arm_label" ] == "arm-label-without-9c41e7" and record[ "total_tests" ] == 4
                 for record in verdicts )
-    assert ports.log.records[ -1 ] == { "event" : "stop", "run" : "pair01-a", "arm_label" : "arm-heron", "stop" : "all_pass", "seat_hours" : 4.0 }
+    assert ports.log.records[ -1 ] == { "event" : "stop", "run" : "pair01-a", "arm_label" : "arm-label-without-9c41e7", "stop" : "all_pass", "seat_hours" : 4.0 }
     assert len( ports.log.records ) == 5
 
 
@@ -385,7 +385,7 @@ def test_the_arm_label_in_the_log_is_the_arms_and_never_the_word_with_or_without
     """The log carries the scrub-safe label for the arm that ran."""
     ports = Ports()
     harness.run_one( spec( arm=arms.ARM_WITH ), ports )
-    assert {  record[ "arm_label" ] for record in ports.log.records } == { "arm-kestrel" }
+    assert {  record[ "arm_label" ] for record in ports.log.records } == { "arm-label-with-9c41e7" }
 
 
 # ── the per-run database and the worktree ───────────────────────────────────────────────────

@@ -22,7 +22,7 @@ pins:
 - The four surfaces are `check_exists`, `fetch_similar`, `read_capability` and the `reuse-reviewer` skill. The arm with them (`with`) denies nothing. The arm without them denies the four and nothing else, and removes `.claude/skills/reuse-reviewer` from the worktree. `build_session_config` makes both; only `arm_label`, `deny_rules` and `remove_paths` differ.
 - `record_search` is not one of the plan's four, so both arms may call it. Changing what an arm can call is Rick's decision.
 - `verify_arm` calls each surface through the session port before any work. The arm without the tools must be refused on all four, or the run stops with `SURFACE_REACHABLE`. The arm with them must reach all four, or it stops with `SURFACE_MISSING`. It asks the session, and does not read the configuration back.
-- The arm labels are `arm-kestrel` (with) and `arm-heron` (without). They are not ordinary words, because the blindness scrub list takes them.
+- The arm labels are the two strings in the frozen semdup configuration's scrub list, so the blindness census covers what the harness writes.
 
 ## Stop and logs
 - The session works in slices. Each slice is told the seat hours left under the cap and is followed by one test run, which is the verdict.

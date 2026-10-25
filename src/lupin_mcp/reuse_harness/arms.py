@@ -7,15 +7,16 @@ port to call each surface under the configuration, never by reading the configur
 """
 import copy
 
+from cosa.repo.semdup import frozen
 from lupin_mcp.reuse_harness import errors as err
 
 ARM_WITH    = "with"
 ARM_WITHOUT = "without"
 ARMS        = ( ARM_WITH, ARM_WITHOUT )
 
-# The labels the run directories and logs carry. They are not ordinary words, because plan 3 puts them in the blindness
-# scrub list (remediation plan, Phase 3 table row 8) and a scrub on "with" would fail on thousands of definitions.
-ARM_LABELS  = { ARM_WITH : "arm-kestrel", ARM_WITHOUT : "arm-heron" }
+# The labels the run directories and logs carry. They are the two strings of the frozen configuration's scrub list, so the
+# blindness census covers what this harness writes. Ordinary words would fail it on thousands of definitions.
+ARM_LABELS  = { ARM_WITH : frozen.ARM_LABELS[ 0 ], ARM_WITHOUT : frozen.ARM_LABELS[ 1 ] }
 
 # The four surfaces of plan 3, section 7.1: three tools and one skill.
 SURFACE_CHECK_EXISTS    = "check_exists"
