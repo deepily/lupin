@@ -73,6 +73,34 @@ _COUPLED_RE = re.compile(
 _LIVE_QUERY_RE = re.compile( r"git\s+log\s+\S*\.\.|git\s+merge-base|git\s+branch\s+--merged|task_query" )
 
 
+# A sha introduced as the base a stack was built on is the merged part by definition;
+# "unmerged stack on top of 7ae2b708a" claims the stack, not the base.
+_BASE_BEFORE_RE = re.compile(
+    r"(?i)(?:on\s+top\s+of|based\s+on|built\s+on|branch\s+head|forked\s+from|branched\s+from|"
+    r"rebased\s+(?:on|onto)|onto|atop|base)[\W]*$"
+)
+
+# A negation just ahead of the claim word denies it: "none holds unmerged work".
+_DENIAL_BEFORE_RE = re.compile( r"(?i)\b(?:none|no|nothing|never|zero|without)\b(?:\s+\w+){0,3}\s*$" )
+
+
+def _is_base_or_denied( line: str, match ) -> bool:
+    """
+    True when the sha in `match` is a base reference, or the claim word is denied.
+
+    Requires:
+        - match is a _COUPLED_RE match on `line`
+
+    Ensures:
+        - True when the text just before the sha ends in a base phrase
+        - True when a negation word sits within three words before the claim word
+        - False otherwise, so only a claim about the sha itself is kept
+    """
+    sha_start   = match.start( "before" ) if match.group( "before" ) else match.start( "after" )
+    claim_start = match.start() + re.search( _NEGATIVE_CLAIM, line[ match.start(): ], re.IGNORECASE ).start()
+    return bool( _BASE_BEFORE_RE.search( line[ :sha_start ].rstrip( "` " ) ) or _DENIAL_BEFORE_RE.search( line[ :claim_start ] ) )
+
+
 def default_ancestry_probe( sha: str, repo_root: str ) -> Optional[ bool ]:
     """
     Ask git whether `sha` is already an ancestor of HEAD.
@@ -113,6 +141,8 @@ def find_merge_claims( text: str ) -> List[ Tuple[ int, str, str ] ]:
 
     Ensures:
         - returns ( line_number, sha, line ) per coupled claim, 1-indexed
+        - skips a claim whose sha is a base ("on top of <sha>") or whose claim word is
+          denied ("none holds unmerged work"): only a claim about the sha itself counts
         - SKIPS a line carrying a live query — showing the command and its
           reading is the pattern being encouraged, not the one being caught
         - returns [] for text with no such claim
@@ -122,6 +152,8 @@ def find_merge_claims( text: str ) -> List[ Tuple[ int, str, str ] ]:
         if _LIVE_QUERY_RE.search( line ):
             continue
         for match in _COUPLED_RE.finditer( line ):
+            if _is_base_or_denied( line, match ):
+                continue
             sha = match.group( "before" ) or match.group( "after" )
             found.append( ( number, sha, line.strip() ) )
     return found
