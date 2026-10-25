@@ -166,8 +166,8 @@ def test_the_items_for_the_reviewers_are_built_for_alternatives_and_false_matche
 def make_ledger( tmp_path ): return harness_runner.Ledger( str( tmp_path / "trace.jsonl" ) )
 
 
-def run_all( needs, w, ledger, model="claude-opus-5-5", parallel=3 ):
-    return asyncio.run( LT.trace_all( needs, None, ledger, ROOT, model, probe=w.probe, ask=w.ask, where=where, parallel=parallel ) )
+def run_all( needs, w, ledger, model="claude-opus-5-5", parallel=3, commit="c1", sha="idx1" ):
+    return asyncio.run( LT.trace_all( needs, None, ledger, ROOT, model, commit, index_sha=sha, probe=w.probe, ask=w.ask, where=where, parallel=parallel ) )
 
 
 def test_trace_all_returns_the_records_in_order_and_a_second_run_makes_no_call( tmp_path ):
@@ -199,7 +199,7 @@ def test_a_failing_probe_stops_the_pending_needs_and_keeps_the_finished_records(
         if receipt[ "id" ] == f"r-{needs[ 4 ][ 'id' ]}": raise er.NeedsetError( er.PROBE_UNREADABLE, "boom" )
         return await real( sentence, receipt, root, model )
 
-    with pytest.raises( er.NeedsetError ) as e: asyncio.run( LT.trace_all( needs, None, ledger, ROOT, "m", probe=failing, ask=w.ask, where=where, parallel=3 ) )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( LT.trace_all( needs, None, ledger, ROOT, "m", "c1", index_sha="idx1", probe=failing, ask=w.ask, where=where, parallel=3 ) )
     assert e.value.code == er.PROBE_UNREADABLE and sorted( w.asks ) == sorted( n[ "id" ] for n in needs[ :5 ] ) and len( ledger.entries ) == 4
     resumed = run_all( needs, w, harness_runner.Ledger( str( tmp_path / "trace.jsonl" ) ), model="m" )
     assert len( resumed ) == 8
@@ -216,8 +216,41 @@ def test_trace_all_refuses_a_smoke_need_an_unfinished_need_and_a_set_with_nothin
 def test_trace_all_builds_the_locator_from_the_index_when_none_is_given( tmp_path, monkeypatch ):
     needs, w = matched_set()
     monkeypatch.setattr( LT, "index_locator", lambda ctx: where )
-    out = asyncio.run( LT.trace_all( needs[ :1 ], "ctx", make_ledger( tmp_path ), ROOT, "m", probe=w.probe, ask=w.ask ) )
+    out = asyncio.run( LT.trace_all( needs[ :1 ], "ctx", make_ledger( tmp_path ), ROOT, "m", "c1", index_sha="idx1", probe=w.probe, ask=w.ask ) )
     assert out[ 0 ][ "lost_at" ] == LT.FOUND
+
+
+def test_a_changed_checker_commit_index_sha_or_source_commit_is_a_ledger_miss( tmp_path ):
+    needs, w = matched_set()
+    ledger   = make_ledger( tmp_path )
+    run_all( needs, w, ledger )
+    run_all( needs, w, ledger )
+    assert len( w.asks ) == 8
+    run_all( needs, w, ledger, commit="c2" )
+    assert len( w.asks ) == 16
+    run_all( needs, w, ledger, sha="idx2" )
+    assert len( w.asks ) == 24
+    moved = [ dict( needs[ 0 ], source_commit="f" * 40 ) ]
+    run_all( moved, w, ledger )
+    assert len( w.asks ) == 25 and len( ledger.entries ) == 25
+
+
+def test_an_empty_checker_commit_index_sha_or_source_commit_is_refused_before_any_call( tmp_path ):
+    needs, w = matched_set()
+    for kwargs in ( { "commit": "" }, { "commit": None }, { "sha": " " } ):
+        with pytest.raises( er.NeedsetError ) as e: run_all( needs, w, make_ledger( tmp_path ), **kwargs )
+        assert e.value.code == er.BAD_NEED
+    with pytest.raises( er.NeedsetError ) as e: run_all( [ dict( needs[ 0 ], source_commit="" ) ], w, make_ledger( tmp_path ) )
+    assert e.value.code == er.BAD_NEED and "source_commit" in e.value.detail and w.asks == []
+
+
+def test_the_index_sha_comes_from_the_context_when_none_is_given( tmp_path, monkeypatch ):
+    needs, w = matched_set()
+    monkeypatch.setattr( rt, "prepare", lambda ctx: ( set(), [], "from-ctx", "gen" ) )
+    ledger = make_ledger( tmp_path )
+    asyncio.run( LT.trace_all( needs[ :1 ], "ctx", ledger, ROOT, "m", "c1", probe=w.probe, ask=w.ask, where=where ) )
+    asyncio.run( LT.trace_all( needs[ :1 ], "ctx", ledger, ROOT, "m", "c1", index_sha="from-ctx", probe=w.probe, ask=w.ask, where=where ) )
+    assert len( w.asks ) == 1
 
 
 def test_the_locator_reads_file_and_range_from_the_index_and_refuses_a_symbol_without_them( monkeypatch ):

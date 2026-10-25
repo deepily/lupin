@@ -76,6 +76,15 @@ def test_a_read_covers_a_definition_only_when_its_range_holds_every_line( offset
     assert ap.covers( call, "/t", "pkg/a.py", 10, 20 ) is expected
 
 
+@pytest.mark.parametrize( "offset, limit, expected", [
+    ( None, None, False ), ( 1, None, False ), ( 600, None, False ), ( 601, None, True ), ( 2500, None, True ), ( 2501, None, False ), ( None, 2600, True ), ( None, 2599, False ), ( 2400, 300, True ) ] )
+def test_an_unbounded_read_shows_two_thousand_lines_so_a_definition_past_that_is_not_covered( offset, limit, expected ):
+    call = { "path": "/t/big.py", "offset": offset, "limit": limit }
+    assert ap.covers( call, "/t", "big.py", 2500, 2600 ) is expected
+    assert ap.covers( { "path": "/t/big.py", "offset": None, "limit": None }, "/t", "big.py", 1, ap.DEFAULT_LIMIT ) is True
+    assert ap.covers( { "path": "/t/big.py", "offset": None, "limit": None }, "/t", "big.py", 1, ap.DEFAULT_LIMIT + 1 ) is False
+
+
 def test_a_read_of_another_file_or_a_relative_path_is_judged_by_the_file_it_names():
     assert ap.covers( { "path": "/t/pkg/b.py", "offset": None, "limit": None }, "/t", "pkg/a.py", 1, 2 ) is False
     assert ap.covers( { "path": "pkg/a.py", "offset": None, "limit": None }, "/t", "pkg/a.py", 1, 2 ) is True

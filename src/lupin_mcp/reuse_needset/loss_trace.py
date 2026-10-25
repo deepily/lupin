@@ -165,32 +165,38 @@ def trace_version():
     return model_transport.prompt_version( "needset-trace", inspect.getsource( check_need ), inspect.getsource( classify ), agent_probe.prompt_version() )
 
 
-async def trace_all( needs, ctx, ledger, root, model, probe=agent_probe.run_probe, ask=check_need, where=None, parallel=3 ):
+async def trace_all( needs, ctx, ledger, root, model, checker_commit, index_sha=None, probe=agent_probe.run_probe, ask=check_need, where=None, parallel=3 ):
     """
     Trace every need, skipping the ones the ledger holds.
 
     Requires:
         - needs are final needs and at least one is matched
         - ledger is a harness_runner.Ledger; root is a read-only tree of the source commit
+        - checker_commit is the sha of the code tree whose retrieval is measured
+        - index_sha is the sha of the index the checker reads; None reads it from ctx
 
     Ensures:
         - returns the records in the order of needs
         - a need the ledger holds is returned as stored, with no check and no probe call
-        - the key of a ledger row holds the need id, the source commit, the probe model and the trace version
+        - the key of a ledger row holds the need id, the source commit, the index sha, the checker commit, the probe model and the trace version
+        - so a retrieval fix, a rebuilt index or another source commit is a ledger miss
         - the probes run through run_parallel, so a failure stops the pending ones and the finished records stay in the ledger
 
     Raises:
-        - NeedsetError BAD_NEED for a smoke need, a need that is not final, or a set with no matched need, before any call
+        - NeedsetError BAD_NEED for a smoke need, a need that is not final, a set with no matched need, or an empty source commit, index sha or checker commit, before any call
     """
     for n in needs:
         if "smoke" in n or n[ "status" ] != "final": raise er.NeedsetError( er.BAD_NEED, f"{n[ 'id' ]}: only a final, non-smoke need is traced" )
     if not any( n[ "kind" ] != "nothing" for n in needs ): raise er.NeedsetError( er.BAD_NEED, "a trace needs at least one matched need" )
+    index_sha = rt.prepare( ctx )[ 2 ] if index_sha is None else index_sha
+    for name, value in ( ( "checker_commit", checker_commit ), ( "index_sha", index_sha ) ) + tuple( ( f"{n[ 'id' ]} source_commit", n[ "source_commit" ] ) for n in needs ):
+        if not isinstance( value, str ) or not value.strip(): raise er.NeedsetError( er.BAD_NEED, f"{name} must be a non-empty string" )
     version = trace_version()
     where   = index_locator( ctx ) if where is None else where
 
     async def one( need ):
         """Ensures: returns the stored record, or traces the need and stores the result first."""
-        key    = harness_runner.ledger_key( TRACE_STAGE, { "old": need[ "id" ], "new": need[ "source_commit" ] }, version, model, 0 )
+        key    = harness_runner.ledger_key( TRACE_STAGE, { "old": need[ "id" ], "new": "\0".join( ( need[ "source_commit" ], index_sha, checker_commit ) ) }, version, model, 0 )
         stored = ledger.get( key )
         if stored is not None: return stored
         record = await trace_need( need, ctx, probe, root, model, ask, where )

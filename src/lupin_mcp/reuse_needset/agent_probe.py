@@ -18,6 +18,7 @@ from lupin_mcp.reuse_needset import errors as er
 
 TOOLS        = [ "Read" ]
 MAX_TURNS    = 40
+DEFAULT_LIMIT = 2000        # lines the Read tool shows when the call gives no limit
 SAME_JOB     = ( "DUPLICATE", "EXTEND" )
 RULINGS      = SAME_JOB + ( "DISTINCT", )
 RULING_LINE  = re.compile( r"^RULING (\S+) :: (" + "|".join( RULINGS ) + r")\b" )
@@ -128,15 +129,16 @@ def covers( read, root, file, line, end_line ):
         - file is the symbol's path under root; line and end_line bound its definition
 
     Ensures:
-        - true when the call names that file and either gives no range or a range that holds line through end_line
+        - true when the call names that file and its range holds line through end_line
         - an offset starts at line 1; a limit counts lines from the offset
+        - a call with no limit shows DEFAULT_LIMIT lines, so an unbounded call does not show a definition past that
     """
     want = os.path.normpath( os.path.join( root, file ) )
     got  = os.path.normpath( os.path.join( root, read[ "path" ] ) )
     if want != got: return False
     first = read[ "offset" ] if read[ "offset" ] is not None else 1
-    last = None if read[ "limit" ] is None else first + read[ "limit" ] - 1
-    return first <= line and ( last is None or last >= end_line )
+    last = first + ( DEFAULT_LIMIT if read[ "limit" ] is None else read[ "limit" ] ) - 1
+    return first <= line and last >= end_line
 
 
 def probe_profile():
