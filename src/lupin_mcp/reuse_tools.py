@@ -26,6 +26,7 @@ import os
 import pathlib
 import re
 import threading
+import time
 import uuid
 import zlib
 
@@ -65,6 +66,8 @@ BUDGET_VARIABLE     = "LUPIN_REUSE_JEV_CALL_BUDGET"
 NAME_RE      = re.compile( r"[\w\-]+" )
 EXCLUDED_SENSITIVE_CONTENT = "EXCLUDED_SENSITIVE_CONTENT"   # sendable() dropped the entry: it still carried an address, path or credential
 EXCLUDED_PREFIX            = "EXCLUDED_PREFIX"              # sendable() dropped the entry: its id is under an excluded prefix
+INDEX_REFRESH_SLOW         = "INDEX_REFRESH_SLOW"           # note: from the call's start to the end of its lookup took longer than INDEX_REFRESH_BOUND_SECONDS
+INDEX_REFRESH_BOUND_SECONDS = 30                            # 30 s proposed by the plan; measured 25 Oct 2026 on dual-rtx-4090s: the index rebuild after one edited file takes 13.2 s (symbol layer only)
 PURPOSE_LINE_TORN          = "PURPOSE_LINE_TORN"            # note: the purpose file ends in a line that is still being written, so it was skipped
 DROPPED_IDS_SHOWN          = 10                             # ids of each dropped reason a result and a receipt name
 SYMBOL_FIELDS = ( "id", "sig", "doc", "file", "lang" )
@@ -236,13 +239,14 @@ class ReuseContext:
         - candidate_stage is None for a full sweep, or a lupin_mcp.reuse_candidates.CandidateStage that picks the entries a check_exists question asks
         - policy is None for the shipped decision policy, or a policy mapping; one with a band widens a candidate lookup whose first sweep is near a cut-off
         - purposes_path is None, or the purpose.jsonl whose lines prepare() adds to the entries by pin
+        - clock is a function returning seconds, time.monotonic unless a test passes its own
 
     Raises:
         - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer, or a call_budget_cap below CALL_BUDGET_CAP
     """
 
     def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET,
-                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP, run_budget=None, pair_sweeper=None, candidate_stage=None, policy=None, purposes_path=None ):
+                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP, run_budget=None, pair_sweeper=None, candidate_stage=None, policy=None, purposes_path=None, clock=time.monotonic ):
         if type( call_budget_cap ) is not int or call_budget_cap < CALL_BUDGET_CAP:
             raise ReuseError( "BAD_BUDGET", f"call budget cap must be an integer of at least {CALL_BUDGET_CAP}, got {call_budget_cap!r}" )
         if type( call_budget ) is not int or not 1 <= call_budget <= call_budget_cap:
@@ -270,6 +274,10 @@ class ReuseContext:
         self.policy           = policy
         self.purposes_path    = None if purposes_path is None else pathlib.Path( purposes_path )
         self.dropped          = {}                            # set by prepare(): the ids sendable_report dropped, by reason
+        self.clock            = clock
+        self.started          = None                          # set by prepare(): the clock reading when the call began
+        self.data_source      = "argument"                    # set by context_from_environment: what chose self.data
+        self.out_source       = "argument"                    # and what chose self.out_dir
         self.notes            = []                            # set by prepare(): what the call tells the caller besides its verdict, as { note, detail }
         self.tests_gen        = None                          # set by prepare(): the tests generation of an include_tests call, else None
 
@@ -289,6 +297,7 @@ def context_from_environment( root=None ):
         - a packed context builds its candidate stage here, so a missing storage key refuses every packed run,
           sweep-only runs included
         - a packed context reads purpose lines from the candidate stage's purpose.jsonl; the one-request path has none
+        - data_source and out_source name what chose the data and index folders: the override variable, or `default`
 
     Raises:
         - ReuseError BAD_BUDGET when that variable is not an integer from 1 to CALL_BUDGET_CAP; a budget
@@ -307,8 +316,11 @@ def context_from_environment( root=None ):
         raise ReuseError( "BAD_BUDGET", f"{BUDGET_VARIABLE} must be an integer, got {raw!r}" ) from e
     settings = _packed_settings( top )
     stage    = settings[ "candidate_stage" ] if "candidate_stage" in settings else None
-    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None, call_budget=budget,
-                         purposes_path=stage.purposes_path if stage is not None else None, **settings )
+    ctx      = ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None, call_budget=budget,
+                             purposes_path=stage.purposes_path if stage is not None else None, **settings )
+    ctx.data_source = "LUPIN_REUSE_DATA_DIR" if data else "default"
+    ctx.out_source  = "LUPIN_REUSE_OUT_DIR" if out else "default"
+    return ctx
 
 
 def _whole_number( text ):
@@ -370,12 +382,30 @@ def _candidate_stage( top ):
         raise ReuseError( "CANDIDATE_STAGE_UNCONFIGURED", str( e ) ) from e
     base_url, api_key, _prefix = EmbeddingProvider._resolve_http_target( True )
 
-    def refresher():
-        """Ensures: runs the incremental vector build for this repository under its lock."""
-        from cosa.repo.symindex import candidate_build as cb                       # imported here: it pulls in requests, which the install closure lacks
-        return cb.run( top, cb.make_job_writer( top, base_url, os.environ ), vector_build.EndpointClient(), environ=os.environ, skip_if_current=True )
+    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, arm=arm,
+                                            refresher=make_refresher( top, vector_build.EndpointClient(), os.environ ) )
 
-    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, arm=arm, refresher=refresher )
+
+def make_refresher( top, client, environ, **run_kwargs ):
+    """
+    Build the run-time refresher of a candidate stage.
+
+    Requires:
+        - top is the repository root, client has embed( texts, content_type, role ) and info()
+        - run_kwargs are further arguments for candidate_build.run, such as config and out_dir
+
+    Ensures:
+        - returns a function with no arguments that runs the incremental vector build for the repository under its lock
+        - the build embeds the rows that are new or changed and keeps the others
+        - it writes no purpose lines and never waits for the bounded job that writes them: a pin without a line is tolerated and the scheduled
+          script writes the line later
+    """
+    def refresher():
+        """Ensures: runs candidate_build.run with purposes skipped and returns its report."""
+        from cosa.repo.symindex import candidate_build as cb                       # imported here: it pulls in requests, which the install closure lacks
+        return cb.run( top, None, client, environ=environ, skip_if_current=True, purposes="skip", **run_kwargs )
+
+    return refresher
 
 
 def append_call_log( ctx, session_id, record ):
@@ -1138,6 +1168,24 @@ def unscreened_path_count( entries, routes ):
     return count
 
 
+def note_if_slow( ctx ):
+    """
+    Name a slow refresh, once per call.
+
+    Requires:
+        - ctx.started is the clock reading prepare() took when the call began, or None when this context never ran prepare
+
+    Ensures:
+        - with no start reading, nothing is noted
+        - when the time since then passes INDEX_REFRESH_BOUND_SECONDS, ctx.notes gains an INDEX_REFRESH_SLOW note with the seconds, unless it already holds one
+        - the answer is never held back or changed: the note says the index may have been late, it does not hide it
+    """
+    if ctx.started is None: return
+    seconds = ctx.clock() - ctx.started
+    if seconds > INDEX_REFRESH_BOUND_SECONDS and not any( n[ "note" ] == INDEX_REFRESH_SLOW for n in ctx.notes ):
+        ctx.notes.append( { "note": INDEX_REFRESH_SLOW, "detail": f"{seconds:.0f} s from the call's start to the end of its lookup; the bound is {INDEX_REFRESH_BOUND_SECONDS} s" } )
+
+
 def prepare( ctx, include_tests=False ):
     """
     Resolve the index and the transport for one sweep.
@@ -1151,7 +1199,8 @@ def prepare( ctx, include_tests=False ):
         - ctx.tests_gen is the tests generation of an include_tests call, else None
         - a definition whose pin has a line in ctx.purposes_path carries it as `purpose`, and the lines used are part of the index_sha
         - ctx.dropped is what sendable_report left out, by reason (empty before the index is read)
-        - ctx.notes holds { note, detail } for what the caller should know: PURPOSE_LINE_TORN when the purpose file ends in a cut-short line, which is skipped
+        - ctx.notes holds { note, detail } for what the caller should know: PURPOSE_LINE_TORN when the purpose file ends in a cut-short line, which is skipped,
+          and INDEX_REFRESH_SLOW when the call's start to its lookup's end took longer than INDEX_REFRESH_BOUND_SECONDS
         - returns ( flags, entries, sha, gen ): flags is the set of pipeline causes that hold, entries the
           index symbols to ask about, as sendable() leaves them (defaults blanked, backstop drops removed), sha the index_sha, gen the live generation or None
         - a tree that is neither lupin nor a registered repo with a built index (index_readable) gives NOT_LUPIN_TREE and no entries
@@ -1163,6 +1212,7 @@ def prepare( ctx, include_tests=False ):
     ctx.tests_gen = None
     ctx.dropped   = {}
     ctx.notes     = []
+    ctx.started   = ctx.clock()
     if not index_readable( ctx.root ): return { "NOT_LUPIN_TREE" }, [], "none", None
     spec = spec_for( ctx.root )
     try:
@@ -1193,6 +1243,7 @@ def prepare( ctx, include_tests=False ):
     sha_       = index_sha( header[ "search_sha" ] if "search_sha" in header else header[ "symbols_sha" ], l0, pages_digest( ctx.pages ), tests_sha,
                             sha( json.dumps( lines ) ) if lines else None )
     save_snapshot( ctx, sha_, gen, l0, ctx.tests_gen, purposes )
+    note_if_slow( ctx )
     return flags, entries, sha_, gen
 
 
@@ -1450,6 +1501,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
         except CandidateError as e:
             stage_error = { "code": e.code, "detail": e.detail }
             flags       = flags | { "CALL_FAILED" }
+        note_if_slow( ctx )
     if entries and not hard and stage_error is None:
         if pair: routed = _route_pair( ctx, need, entries, flags )
         else:

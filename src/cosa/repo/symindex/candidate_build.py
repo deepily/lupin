@@ -117,19 +117,23 @@ def tree_path_refusal( index, out_dir, main_tree ):
     return None
 
 
-def run( root, writer, client, screen=None, config=None, environ=None, batch_size=pl.BATCH_SIZE, built_at=None, index=None, out_dir=None, skip_if_current=False ):
+def run( root, writer, client, screen=None, config=None, environ=None, batch_size=pl.BATCH_SIZE, built_at=None, index=None, out_dir=None, skip_if_current=False, purposes="write" ):
     """
     Write the missing purpose lines and rebuild the vector set.
 
     Requires:
         - root is a lupin repository root
-        - writer takes a list of ids and returns { id: purpose }
+        - writer takes a list of ids and returns { id: purpose }, or is None when purposes is "skip"
         - client has embed( texts, content_type, role ) and info()
+        - purposes is "write" or "skip"
 
     Ensures:
         - the index is ensured, and its public entries that pass screen.sendable are the rows of the set,
           which is the list the lookup uploads as the stage, so the stage refuses no vector id as unknown
         - purpose lines are written from every public entry, and the screen's drops are reported there
+        - purposes "skip" writes none and never calls the writer: the set is built from the lines already stored, a pin without one is
+          listed in unwritten_pins, and the report's purposes is { skipped: True }; this is the run-time refresh, which must not wait
+          for the bounded job that writes lines
         - the whole run holds the build lock, so a manual build and the scheduled one cannot overlap
         - the new set carries its build info: the index manifest it was built from, built_at
           (the current UTC time when built_at is None), and the pins the writer left without a line
@@ -147,7 +151,9 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
 
     Raises:
         - CandidateError BUILD_LOCK_HELD when another build holds the lock; nothing is written
+        - ValueError when purposes is neither "write" nor "skip"
     """
+    if purposes not in ( "write", "skip" ): raise ValueError( f"purposes must be 'write' or 'skip', got {purposes!r}" )
     started   = time.monotonic()
     root      = pathlib.Path( root )
     data      = data_dir( root ) if out_dir is None else pathlib.Path( out_dir )
@@ -163,7 +169,7 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
         if held is not None and held[ "index_manifest" ] == fr.index_manifest( header ):
             return { "skipped": "current", "index_manifest": held[ "index_manifest" ], "built_at": held[ "built_at" ] }
         screen    = screen if screen is not None else pl.default_screen()
-        report    = pl.write_purpose_lines( entries, writer, purpose / "purpose.jsonl", WRITER_VERSION, screen, batch_size=batch_size )
+        report    = pl.write_purpose_lines( entries, writer, purpose / "purpose.jsonl", WRITER_VERSION, screen, batch_size=batch_size ) if purposes == "write" else { "skipped": True }
         new_dir   = live.with_name( live.name + ".new" )
         if new_dir.exists(): shutil.rmtree( new_dir )
         stored    = pl.load_lines( purpose / "purpose.jsonl" )
