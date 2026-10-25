@@ -164,6 +164,16 @@ def test_the_toy_run_gives_the_hand_computed_figures_pool_size_and_strata(tmp_pa
     assert record[ "dropped_from_pool" ] == { "count": 0, "ids": [] }
 
 
+def test_a_leaking_server_definition_is_dropped_from_both_passes_and_named_in_the_record_while_the_pool_size_stays_as_built(tmp_path):
+    toy  = Toy( tmp_path )
+    leak = toy.define( "leak", [ "check_exists" ], "server" )
+    toy.spec[ "distractors" ].append( leak )
+    toy.spec[ "labels" ] = toy.all_labels()
+    record = pr.proof_run( toy.spec, toy.wiring )
+    assert record[ "dropped_from_pool" ] == { "count": 1, "ids": [ leak[ "id" ] ] }
+    assert record[ "pool" ][ "size" ] == 15 and record[ "pool" ][ "distractors" ] == 4 and record[ "status" ] == "complete"
+
+
 def test_a_second_pass_that_changes_two_flags_lowers_agreement_to_fifty_eight_of_sixty_and_slot_one_finds_one_fewer(tmp_path):
     toy = Toy( tmp_path, backend=FakeBackend( flip="MARKA" ) )
     toy.wiring[ "backend" ].per_pass = len( pr.build_pool( toy.spec, 3 )[ "new" ] )

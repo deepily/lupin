@@ -134,7 +134,7 @@ def build_record( meta, calls, definitions, unjudged, peak_in_flight, elapsed, c
 
     Ensures:
         - seconds holds min, median and p95 of every call, whether it returned or raised
-        - raised_rate is the calls that raised over all calls, and unjudged_rate the unjudged definitions over the definitions, each as a fraction string and a number
+        - raised_rate is the calls that raised over all calls, and unjudged_rate the unjudged definitions over the definitions, each as an unreduced fraction string (raised/calls, unjudged/definitions) and a number
         - reopen_backend is True when either rate is above 5%
         - projection holds the hours client_calls would take at the measured seconds per call (elapsed over calls), and whether they fit window_hours
 
@@ -149,13 +149,13 @@ def build_record( meta, calls, definitions, unjudged, peak_in_flight, elapsed, c
         if value < 1: raise ValueError( f"{name} must be 1 or more, got {value}" )
     seconds = [ c[ "seconds" ] for c in calls ]
     raised  = sum( 1 for c in calls if not c[ "ok" ] )
-    rates   = { "raised_rate": Fraction( raised, len( calls ) ), "unjudged_rate": Fraction( unjudged, definitions ) }
+    counts  = { "raised_rate": ( raised, len( calls ) ), "unjudged_rate": ( unjudged, definitions ) }
     median  = statistics.median( seconds )
     hours   = client_calls * elapsed / len( calls ) / 3600
     return { **meta, "calls": len( calls ), "definitions": definitions, "raised": raised, "unjudged": unjudged, "peak_in_flight": peak_in_flight, "elapsed": elapsed,
              "seconds": { "min": min( seconds ), "median": median, "p95": percentile( seconds, 0.95 ) },
-             **{ name: { "fraction": f"{r.numerator}/{r.denominator}", "value": float( r ) } for name, r in rates.items() },
-             "reopen_backend": any( r > FAILURE_BAR for r in rates.values() ),
+             **{ name: { "fraction": f"{n}/{d}", "value": float( Fraction( n, d ) ) } for name, ( n, d ) in counts.items() },
+             "reopen_backend": any( Fraction( n, d ) > FAILURE_BAR for n, d in counts.values() ),
              "projection": { "client_calls": client_calls, "window_hours": window_hours, "hours": hours, "fits": hours <= window_hours } }
 
 

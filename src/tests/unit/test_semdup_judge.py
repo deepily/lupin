@@ -367,6 +367,13 @@ def test_a_raised_model_call_leaves_only_its_definition_unjudged_by_name_and_a_r
     assert len( healed.calls ) == 1 and again[ "unjudged" ] == [] and len( again[ "verdicts" ] ) == 4
 
 
+def test_a_call_budget_stop_is_not_a_failed_call_and_ends_the_run(tmp_path):
+    news, cands = world()
+    class Capped( FakeBackend ):
+        async def complete( self, model, system_prompt, user_prompt ): raise mt.CallBudgetExceeded( "the cap is spent" )
+    with pytest.raises( mt.CallBudgetExceeded, match="cap is spent" ): run( news, cands, Capped(), hr.Ledger( str( tmp_path / "l" ) ) )
+
+
 def test_byte_equal_definitions_are_judged_one_after_another_so_a_twin_never_repeats_a_call(tmp_path):
     d1   = definition( "same", "def same( x ):\n    return 1" )
     d2   = { **d1, "id": "d-twin" }

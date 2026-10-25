@@ -143,8 +143,8 @@ def test_each_rate_is_over_its_own_total_and_five_percent_exactly_does_not_reope
     over_raised   = smoke.build_record( META, rows( [ 1 ] * 18 ) + rows( [ 1, 1 ], ok=False ), 10, 0, 1, 1.0, 10, 1 )
     over_unjudged = smoke.build_record( META, rows( [ 1 ] * 40 ), 20, 2, 1, 1.0, 10, 1 )
     assert over_raised[ "reopen_backend" ] is True and over_unjudged[ "reopen_backend" ] is True
-    assert over_unjudged[ "unjudged_rate" ][ "fraction" ] == "1/10" and over_unjudged[ "raised_rate" ][ "fraction" ] == "0/1"
-    assert over_raised[ "raised_rate" ][ "fraction" ] == "1/10" and over_raised[ "unjudged_rate" ][ "fraction" ] == "0/1"
+    assert over_unjudged[ "unjudged_rate" ][ "fraction" ] == "2/20" and over_unjudged[ "raised_rate" ][ "fraction" ] == "0/40"
+    assert over_raised[ "raised_rate" ][ "fraction" ] == "2/20" and over_raised[ "unjudged_rate" ][ "fraction" ] == "0/10"
 
 
 def test_the_failure_bar_sits_between_one_in_twenty_and_three_in_fifty_five_and_all_unjudged_reopens():
@@ -153,7 +153,7 @@ def test_the_failure_bar_sits_between_one_in_twenty_and_three_in_fifty_five_and_
     every = smoke.build_record( META, rows( [ 1 ] ), 4, 4, 1, 1.0, 10, 1 )
     assert below[ "reopen_backend" ] is False and above[ "reopen_backend" ] is True
     assert above[ "unjudged_rate" ] == { "fraction": "3/55", "value": 3 / 55 }
-    assert every[ "reopen_backend" ] is True and every[ "unjudged_rate" ] == { "fraction": "1/1", "value": 1.0 }
+    assert every[ "reopen_backend" ] is True and every[ "unjudged_rate" ] == { "fraction": "4/4", "value": 1.0 }
 
 
 def test_the_projection_is_calls_times_the_measured_seconds_per_call_in_hours_and_fits_at_the_window_exactly():

@@ -76,6 +76,18 @@ def test_every_server_definition_that_carries_a_scrub_token_is_dropped_by_the_pi
         assert caught.value.code == err.BLINDNESS_BREACH
 
 
+@pytest.mark.parametrize( "file, name", [ ( "src/lupin_mcp/cosa_voice_mcp.py", "check_exists" ), ( "src/lupin_mcp/cosa_voice_mcp.py", "fetch_similar" ),
+                                        ( "src/lupin_mcp/cosa_voice_mcp.py", "read_capability" ) ] )
+def test_each_named_reuse_tool_definition_is_dropped_by_the_pipeline_and_still_raises_if_shown( file, name ):
+    """Name each tool definition, so one that stops being dropped turns this red alone."""
+    found = [ d for d in server_definitions() if d[ "file" ] == file and d[ "name" ] == name ]
+    assert len( found ) == 1
+    assert found[ 0 ][ "id" ] in bl.breaching_ids( server_definitions(), SCRUB )
+    with pytest.raises( err.SemdupError ) as caught:
+        bl.blind_definition( found[ 0 ], SCRUB )
+    assert caught.value.code == err.BLINDNESS_BREACH
+
+
 def test_the_census_cannot_be_frozen_with_an_empty_arm_label_list():
     """Once the server commit is set, the arm labels must be set too."""
     assert CENSUS_SERVER_COMMIT is None or len( ARM_LABELS ) > 0

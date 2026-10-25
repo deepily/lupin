@@ -14,7 +14,7 @@
   },
   "raised": 0,
   "raised_rate": {
-    "fraction": "0/1",
+    "fraction": "0/21",
     "value": 0.0
   },
   "reopen_backend": false,
@@ -26,7 +26,7 @@
   },
   "unjudged": 0,
   "unjudged_rate": {
-    "fraction": "0/1",
+    "fraction": "0/20",
     "value": 0.0
   }
 }

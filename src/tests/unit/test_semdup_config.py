@@ -24,9 +24,9 @@ def make( **over ):
     return cf.build_config( **{ **args, **over } )
 
 
-def test_every_error_code_is_listed_once_and_there_are_twelve():
+def test_every_error_code_is_listed_once_and_there_are_fourteen():
     named = { v for k, v in vars( err ).items() if k.isupper() and k != "CODES" }
-    assert named == err.CODES and len( err.CODES ) == 13
+    assert named == err.CODES and len( err.CODES ) == 14
     assert all( getattr( err, code ) == code for code in err.CODES )
 
 

@@ -116,7 +116,8 @@ def proof_run( spec, wiring ):
           "no_true_pairs" when no pair is labelled true, "no_common_pairs" when no pair is judged in both passes, or "no_flags" when the checker raised none
         - found, correct and the strata come from slot 0; agreement compares the two slots; slot 1's found count is reported beside slot 0's
         - a planted pair in plant_failures is left out of every denominator and counted, with its rate
-        - the record carries the pool size, and the count and ids of the server definitions left out of the candidate pool for carrying a scrub token
+        - the record carries the pool sizes as built, before any drop, and the count and ids of the server definitions left out of the candidate pool
+          for carrying a scrub token
 
     Raises:
         - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
