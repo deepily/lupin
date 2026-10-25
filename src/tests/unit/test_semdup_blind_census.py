@@ -76,16 +76,54 @@ def test_every_server_definition_that_carries_a_scrub_token_is_dropped_by_the_pi
         assert caught.value.code == err.BLINDNESS_BREACH
 
 
-@pytest.mark.parametrize( "file, name", [ ( "src/lupin_mcp/cosa_voice_mcp.py", "check_exists" ), ( "src/lupin_mcp/cosa_voice_mcp.py", "fetch_similar" ),
-                                        ( "src/lupin_mcp/cosa_voice_mcp.py", "read_capability" ) ] )
-def test_each_named_reuse_tool_definition_is_dropped_by_the_pipeline_and_still_raises_if_shown( file, name ):
-    """Name each tool definition, so one that stops being dropped turns this red alone."""
+# The 29 definitions measured as breaching when the drop was decided (row 1afc9fee). This is a floor, not an exact list: a new breach is dropped too, and
+# these must each stay dropped, so one that stops being dropped turns its own test red.
+FLOOR_DROPPED = (
+    ( "src/lupin_mcp/cosa_voice_mcp.py", "check_exists" ),
+    ( "src/lupin_mcp/cosa_voice_mcp.py", "fetch_similar" ),
+    ( "src/lupin_mcp/cosa_voice_mcp.py", "read_capability" ),
+    ( "src/lupin_mcp/cosa_voice_mcp.py", "record_search" ),
+    ( "src/lupin_mcp/fleet_cap_ini_io.py", "_key_pattern" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "_receipt_symbol" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "_search_status" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "exclusions_by_symbol" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "main" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "parse_searched" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "receipts_by_symbol" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "run_gate" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "searches_by_symbol" ),
+    ( "src/lupin_mcp/reuse_exit_gate.py", "unparsed_searched_lines" ),
+    ( "src/lupin_mcp/reuse_search.py", "_search" ),
+    ( "src/lupin_mcp/reuse_search.py", "receipt_source" ),
+    ( "src/lupin_mcp/reuse_search.py", "record_search_impl" ),
+    ( "src/lupin_mcp/reuse_seeded_miss_e2e.py", "candidate_scenario" ),
+    ( "src/lupin_mcp/reuse_tools.py", "_need_impl" ),
+    ( "src/lupin_mcp/reuse_tools.py", "_receipt_shape_ok" ),
+    ( "src/lupin_mcp/reuse_tools.py", "_run_question" ),
+    ( "src/lupin_mcp/reuse_tools.py", "check_exists_impl" ),
+    ( "src/lupin_mcp/reuse_tools.py", "fetch_similar_impl" ),
+    ( "src/lupin_mcp/reuse_tools.py", "index_sha" ),
+    ( "src/lupin_mcp/reuse_tools.py", "read_capability_impl" ),
+    ( "src/lupin_mcp/reuse_tools.py", "receipt_id" ),
+    ( "src/lupin_mcp/reuse_tools.py", "replay_impl" ),
+    ( "src/lupin_mcp/reuse_tools.py", "run_question" ),
+    ( "src/lupin_mcp/reuse_tools.py", "sweep_need_impl" ),
+)
+
+
+@pytest.mark.parametrize( "file, name", FLOOR_DROPPED )
+def test_each_floor_definition_is_dropped_by_the_pipeline_and_still_raises_if_shown( file, name ):
+    """Name each definition, so one that stops being dropped turns this red alone."""
     found = [ d for d in server_definitions() if d[ "file" ] == file and d[ "name" ] == name ]
     assert len( found ) == 1
     assert found[ 0 ][ "id" ] in bl.breaching_ids( server_definitions(), SCRUB )
     with pytest.raises( err.SemdupError ) as caught:
         bl.blind_definition( found[ 0 ], SCRUB )
     assert caught.value.code == err.BLINDNESS_BREACH
+
+
+def test_the_floor_list_names_twenty_nine_distinct_definitions():
+    assert len( FLOOR_DROPPED ) == len( set( FLOOR_DROPPED ) ) == 29
 
 
 def test_the_census_cannot_be_frozen_with_an_empty_arm_label_list():
