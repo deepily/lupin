@@ -530,3 +530,21 @@ def test_the_frozen_sample_file_holds_100_distinct_members_and_each_has_a_twin_g
 
 def test_the_production_entry_text_is_the_text_the_check_compares_against():
     assert nc.entry_text_of( INDEX[ A ] ) == rt.entry_text( INDEX[ A ] )
+
+
+def test_a_piece_of_the_file_stem_alone_is_refused():
+    key = { "id": "pkg.mod.draw", "sig": "( x )", "doc": "", "file": "pkg/table_view.py" }
+    f   = nc.check_need( key[ "id" ], "A function that puts each record of the report into a table for the page it gets.", { key[ "id" ]: key }, {} )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and f[ 0 ][ "detail" ] == "name pieces: table"
+
+
+def test_a_piece_of_a_compound_class_name_in_the_middle_of_the_id_is_refused():
+    key = { "id": "pkg.mod.FleetView.draw", "sig": "( self, x )", "doc": "", "file": "pkg/mod.py" }
+    f   = nc.check_need( key[ "id" ], "A function that lists every ship of a fleet in the order the caller asked for.", { key[ "id" ]: key }, {} )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and f[ 0 ][ "detail" ] == "name pieces: fleet"
+
+
+def test_a_word_written_two_ways_maps_to_the_shorter_and_then_the_earlier_spelling():
+    assert nc.need_words( "A function that returns my_items_total and the items it was given to the caller." )[ "items" ] == "items"
+    assert nc.need_words( "A function that returns items_a and a_items given to the caller from the store." )[ "items" ] == "a_items"
+    assert nc.need_words( "A function that returns a_items and items_a given to the caller from the store." )[ "items" ] == "a_items"

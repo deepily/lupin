@@ -306,6 +306,7 @@ def check_need( member_id, need, index, groups ):
         - returns a list of { "check", "detail" }, empty when the need passes the form, identifier and run checks
         - the identifier check refuses a whole name and also a word of 4 or more letters taken from a name of the member or a twin (name_pieces)
         - "words" names the member's own words only, so a word that comes only from a twin is never handed to the writer
+        - known gap: a piece that comes only from a twin fails with no word named, so the rewrite is told only that the identifier check failed
         - "detail" names the offending token or run
     """
     out   = []
