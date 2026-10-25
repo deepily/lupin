@@ -128,9 +128,11 @@ def count_python(text):
             else: c += 1
         return c, cm, 0, b
 
-    # find docstring tokens: a STRING token that is the whole logical statement
+    # find docstring tokens: a run of string tokens that is the whole logical statement
+    # (a bare string expression), so "abc".upper() and "abc" + x stay code
+    skip = (tokenize.NL, tokenize.COMMENT)
     prev_significant = tokenize.INDENT
-    for tok in toks:
+    for k, tok in enumerate(toks):
         ttype, tstr, start, end, _ = tok
         if ttype == tokenize.COMMENT:
             for i in range(start[0] - 1, end[0]):
@@ -139,8 +141,15 @@ def count_python(text):
             if prev_significant in (tokenize.INDENT, tokenize.DEDENT,
                                     tokenize.NEWLINE, tokenize.NL,
                                     tokenize.ENCODING):
-                for i in range(start[0] - 1, end[0]):
-                    marked[i] = "docstring"
+                run = [tok]
+                j = k + 1
+                while toks[j].type in skip or toks[j].type == tokenize.STRING:
+                    if toks[j].type == tokenize.STRING: run.append(toks[j])
+                    j += 1
+                if toks[j].type in (tokenize.NEWLINE, tokenize.ENDMARKER):
+                    for r in run:
+                        for i in range(r.start[0] - 1, r.end[0]):
+                            marked[i] = "docstring"
         if ttype not in (tokenize.NL, tokenize.COMMENT):
             prev_significant = ttype
 
