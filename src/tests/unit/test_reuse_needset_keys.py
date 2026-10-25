@@ -297,3 +297,12 @@ def test_an_absence_prompt_fences_the_capability_and_the_listed_definitions_and_
     suffix = ask.prompt.split( "<capability_" )[ 1 ].split( ">" )[ 0 ]
     assert suffix != "deadbeef" and ask.prompt.count( f"</capability_{suffix}>" ) == 1 and ask.prompt.count( f"</definitions_{suffix}>" ) == 1
     assert "[cut at" in ask.prompt and "d" * ( keys.BODY_LIMIT + 1 ) not in ask.prompt
+
+
+def test_the_fence_suffix_is_drawn_again_when_it_occurs_in_a_text( monkeypatch ):
+    draws = iter( [ "aaaaaaaa", "bbbbbbbb", "cccccccc", "dddddddd" ] )
+    monkeypatch.setattr( keys.model_transport.secrets, "token_hex", lambda n: next( draws ) )
+    same = keys.same_job_prompt( "def f(): aaaaaaaa", "def g(): pass" )
+    assert "<definition_a_bbbbbbbb>" in same and "</definition_b_bbbbbbbb>" in same and "aaaaaaaa</definition" not in same
+    absent = keys.absence_prompt( "capability cccccccc", [ "a.b: does it" ] )
+    assert "<capability_dddddddd>" in absent and "</definitions_dddddddd>" in absent
