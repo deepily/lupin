@@ -1,6 +1,7 @@
 """Unit tests for semdup.smoke: timed backend, percentiles, failure rates, record file."""
 import asyncio
 import json
+import statistics
 
 import pytest
 
@@ -90,6 +91,21 @@ def test_the_peak_in_flight_is_the_most_calls_seen_running_at_once_and_not_a_set
     assert serial.peak_in_flight == 1 and serial.in_flight == 0 and len( serial.calls ) == 3
 
 
+def test_a_smaller_overlap_after_a_larger_one_leaves_the_peak_at_the_larger():
+    wrap = smoke.TimedBackend( Gate() )
+    run_overlapping( wrap, 3 )
+    run_overlapping( wrap, 2 )
+    assert wrap.peak_in_flight == 3 and wrap.in_flight == 0
+
+
+def test_elapsed_runs_from_the_first_start_to_the_latest_end_and_is_zero_before_any_call():
+    wrap = smoke.TimedBackend( Stub(), clock=ticks( 10.0, 12.5, 20.0, 21.0 ) )
+    assert wrap.elapsed == 0
+    asyncio.run( wrap.complete( "m", "s", "u" ) )
+    asyncio.run( wrap.complete( "m", "s", "u" ) )
+    assert ( wrap.first_start, wrap.last_end, wrap.elapsed ) == ( 10.0, 21.0, 11.0 )
+
+
 def test_a_call_that_raises_leaves_nothing_in_flight_and_the_peak_stays():
     wrap    = smoke.TimedBackend( Gate( fail=True ) )
     results = run_overlapping( wrap, 2 )
@@ -108,63 +124,83 @@ def test_the_percentile_is_the_nearest_rank_of_the_sorted_values():
 # ---- build_record ------------------------------------------------------------------------------------------------
 
 def test_the_record_holds_min_median_and_p95_of_every_call_and_the_meta_unchanged():
-    record = smoke.build_record( META, rows( [ 5, 20, 1, 13, 7, 2, 19, 3, 11, 4, 18, 6, 16, 8, 9, 10, 12, 14, 15, 17 ] ), 20, 0, 2, 2000, 3 )
+    record = smoke.build_record( META, rows( [ 5, 20, 1, 13, 7, 2, 19, 3, 11, 4, 18, 6, 16, 8, 9, 10, 12, 14, 15, 17 ] ), 20, 0, 2, 1.0, 2000, 3 )
     assert record[ "seconds" ] == { "min": 1, "median": 10.5, "p95": 19 } and record[ "calls" ] == 20 and record[ "definitions" ] == 20
     assert all( record[ k ] == v for k, v in META.items() ) and record[ "peak_in_flight" ] == 2
 
 
 def test_a_failed_call_counts_in_the_timings_as_well_as_in_the_failures():
-    record = smoke.build_record( META, rows( [ 1, 2, 3 ] ) + rows( [ 100 ], ok=False ), 4, 0, 1, 10, 1 )
+    record = smoke.build_record( META, rows( [ 1, 2, 3 ] ) + rows( [ 100 ], ok=False ), 4, 0, 1, 1.0, 10, 1 )
     assert record[ "seconds" ][ "min" ] == 1 and record[ "seconds" ][ "p95" ] == 100 and record[ "raised" ] == 1
     assert record[ "raised_rate" ] == { "fraction": "1/4", "value": 0.25 }
 
 
 def test_each_rate_is_over_its_own_total_and_five_percent_exactly_does_not_reopen_the_backend():
     calls = rows( [ 1 ] * 19 ) + rows( [ 1 ], ok=False )
-    at    = smoke.build_record( META, calls, 20, 1, 1, 10, 1 )
+    at    = smoke.build_record( META, calls, 20, 1, 1, 1.0, 10, 1 )
     assert at[ "raised_rate" ][ "fraction" ] == "1/20" and at[ "unjudged_rate" ] == { "fraction": "1/20", "value": 0.05 } and at[ "reopen_backend" ] is False
-    over_raised   = smoke.build_record( META, rows( [ 1 ] * 18 ) + rows( [ 1, 1 ], ok=False ), 10, 0, 1, 10, 1 )
-    over_unjudged = smoke.build_record( META, rows( [ 1 ] * 40 ), 20, 2, 1, 10, 1 )
+    over_raised   = smoke.build_record( META, rows( [ 1 ] * 18 ) + rows( [ 1, 1 ], ok=False ), 10, 0, 1, 1.0, 10, 1 )
+    over_unjudged = smoke.build_record( META, rows( [ 1 ] * 40 ), 20, 2, 1, 1.0, 10, 1 )
     assert over_raised[ "reopen_backend" ] is True and over_unjudged[ "reopen_backend" ] is True
     assert over_unjudged[ "unjudged_rate" ][ "fraction" ] == "1/10" and over_unjudged[ "raised_rate" ][ "fraction" ] == "0/1"
     assert over_raised[ "raised_rate" ][ "fraction" ] == "1/10" and over_raised[ "unjudged_rate" ][ "fraction" ] == "0/1"
 
 
-def test_the_failure_bar_sits_between_one_in_twenty_and_two_in_thirty_three_and_all_unjudged_reopens():
-    below = smoke.build_record( META, rows( [ 1 ] * 20 ), 20, 1, 1, 10, 1 )
-    above = smoke.build_record( META, rows( [ 1 ] * 33 ), 33, 2, 1, 10, 1 )
-    every = smoke.build_record( META, rows( [ 1 ] ), 4, 4, 1, 10, 1 )
+def test_the_failure_bar_sits_between_one_in_twenty_and_three_in_fifty_five_and_all_unjudged_reopens():
+    below = smoke.build_record( META, rows( [ 1 ] * 20 ), 20, 1, 1, 1.0, 10, 1 )
+    above = smoke.build_record( META, rows( [ 1 ] * 55 ), 55, 3, 1, 1.0, 10, 1 )
+    every = smoke.build_record( META, rows( [ 1 ] ), 4, 4, 1, 1.0, 10, 1 )
     assert below[ "reopen_backend" ] is False and above[ "reopen_backend" ] is True
-    assert above[ "unjudged_rate" ] == { "fraction": "2/33", "value": 2 / 33 }
+    assert above[ "unjudged_rate" ] == { "fraction": "3/55", "value": 3 / 55 }
     assert every[ "reopen_backend" ] is True and every[ "unjudged_rate" ] == { "fraction": "1/1", "value": 1.0 }
 
 
-def test_the_projection_is_calls_times_median_over_the_peak_in_flight_in_hours_and_fits_at_the_window_exactly():
+def test_the_projection_is_calls_times_the_measured_seconds_per_call_in_hours_and_fits_at_the_window_exactly():
     calls = rows( [ 9.0 ] * 19 + [ 28.0 ] )
-    fits  = smoke.build_record( META, calls, 20, 0, 2, 2000, 2.5 )
-    miss  = smoke.build_record( META, calls, 20, 0, 2, 2000, 2.4 )
+    fits  = smoke.build_record( META, calls, 20, 0, 2, 90.0, 2000, 2.5 )
+    miss  = smoke.build_record( META, calls, 20, 0, 2, 90.0, 2000, 2.4 )
     assert fits[ "projection" ] == { "client_calls": 2000, "window_hours": 2.5, "hours": 2.5, "fits": True } and miss[ "projection" ][ "fits" ] is False
+    assert fits[ "elapsed" ] == 90.0 and fits[ "peak_in_flight" ] == 2
 
 
-@pytest.mark.parametrize( "meta, calls, definitions, unjudged, peak, client_calls, window, match", [
-    ( { **META, "extra": 1 }, rows( [ 1 ] ), 1, 0, 1, 1, 1, "meta must hold exactly" ),
-    ( { "date": "d" }, rows( [ 1 ] ), 1, 0, 1, 1, 1, "meta must hold exactly" ),
-    ( META, [], 1, 0, 1, 1, 1, "no call was timed" ),
-    ( META, rows( [ 1 ] ), 0, 0, 1, 1, 1, "unjudged must be between 0 and definitions" ),
-    ( META, rows( [ 1 ] ), 2, 3, 1, 1, 1, "unjudged must be between 0 and definitions" ),
-    ( META, rows( [ 1 ] ), 2, -1, 1, 1, 1, "unjudged must be between 0 and definitions" ),
-    ( META, rows( [ 1 ] ), 1, 0, 0, 1, 1, "peak_in_flight must be 1 or more" ),
-    ( META, rows( [ 1 ] ), 1, 0, 1, 0, 1, "client_calls must be 1 or more" ),
-    ( META, rows( [ 1 ] ), 1, 0, 1, 1, 0, "window_hours must be 1 or more" ),
+def test_a_backend_that_serialises_its_calls_projects_from_the_run_time_and_not_from_the_waits():
+    delay = 0.02
+    class Locked( Gate ):
+        lock = None
+        async def complete( self, model, system_prompt, user_prompt ):
+            async with self.lock: await asyncio.sleep( delay )
+            return "reply"
+    wrap = smoke.TimedBackend( Locked() )
+    async def go():
+        wrap.backend.lock = asyncio.Lock()
+        await asyncio.gather( *[ wrap.complete( "m", "s", "u" ) for _ in range( 6 ) ] )
+    asyncio.run( go() )
+    record = smoke.build_record( META, wrap.calls, 6, 0, wrap.peak_in_flight, wrap.elapsed, 10, 1 )
+    waits_only = 10 * statistics.median( c[ "seconds" ] for c in wrap.calls ) / wrap.peak_in_flight / 3600
+    assert record[ "peak_in_flight" ] == 6 and wrap.elapsed >= 6 * delay
+    assert record[ "projection" ][ "hours" ] == 10 * wrap.elapsed / 6 / 3600 and record[ "projection" ][ "hours" ] > waits_only
+
+
+@pytest.mark.parametrize( "meta, calls, definitions, unjudged, peak, elapsed, client_calls, window, match", [
+    ( { **META, "extra": 1 }, rows( [ 1 ] ), 1, 0, 1, 1.0, 1, 1, "meta must hold exactly" ),
+    ( { "date": "d" }, rows( [ 1 ] ), 1, 0, 1, 1.0, 1, 1, "meta must hold exactly" ),
+    ( META, [], 1, 0, 1, 1.0, 1, 1, "no call was timed" ),
+    ( META, rows( [ 1 ] ), 0, 0, 1, 1.0, 1, 1, "unjudged must be between 0 and definitions" ),
+    ( META, rows( [ 1 ] ), 2, 3, 1, 1.0, 1, 1, "unjudged must be between 0 and definitions" ),
+    ( META, rows( [ 1 ] ), 2, -1, 1, 1.0, 1, 1, "unjudged must be between 0 and definitions" ),
+    ( META, rows( [ 1 ] ), 1, 0, 0, 1.0, 1, 1, "peak_in_flight must be 1 or more" ),
+    ( META, rows( [ 1 ] ), 1, 0, 1, 0, 1, 1, "elapsed must be above 0" ),
+    ( META, rows( [ 1 ] ), 1, 0, 1, 1.0, 0, 1, "client_calls must be 1 or more" ),
+    ( META, rows( [ 1 ] ), 1, 0, 1, 1.0, 1, 0, "window_hours must be 1 or more" ),
 ] )
-def test_a_record_that_cannot_be_trusted_is_refused_by_name( meta, calls, definitions, unjudged, peak, client_calls, window, match ):
-    with pytest.raises( ValueError, match=match ): smoke.build_record( meta, calls, definitions, unjudged, peak, client_calls, window )
+def test_a_record_that_cannot_be_trusted_is_refused_by_name( meta, calls, definitions, unjudged, peak, elapsed, client_calls, window, match ):
+    with pytest.raises( ValueError, match=match ): smoke.build_record( meta, calls, definitions, unjudged, peak, elapsed, client_calls, window )
 
 
 # ---- write_record ------------------------------------------------------------------------------------------------
 
 def test_the_record_is_written_once_under_its_date_and_never_replaced(tmp_path):
-    record = smoke.build_record( META, rows( [ 1, 2 ] ), 2, 0, 1, 10, 1 )
+    record = smoke.build_record( META, rows( [ 1, 2 ] ), 2, 0, 1, 1.0, 10, 1 )
     path   = smoke.write_record( tmp_path / "data", record )
     assert path == tmp_path / "data" / "semdup" / "smoke" / "2026-10-25.json" and json.loads( path.read_text( encoding="utf-8" ) ) == record
     with pytest.raises( FileExistsError ): smoke.write_record( tmp_path / "data", record )

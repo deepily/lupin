@@ -1,4 +1,4 @@
-"""The live smoke record: seconds per call, failure rates and the peak calls in flight."""
+"""The live smoke record: seconds per call, failure rates and the measured throughput."""
 import json
 import math
 import pathlib
@@ -12,7 +12,7 @@ META_KEYS     = ( "date", "host", "repo_sha", "config_sha" )
 
 
 class TimedBackend:
-    """Wrap a judge backend, time each call it makes and count how many are in flight at once."""
+    """Wrap a judge backend, time each call it makes and the run as a whole."""
 
     def __init__( self, backend, clock=time.monotonic ):
         """
@@ -25,7 +25,7 @@ class TimedBackend:
         Ensures:
             - name, server_label and temperature_record equal the wrapped backend's
             - calls is an empty list that complete fills, one row { seconds, ok } per call
-            - in_flight and peak_in_flight are 0
+            - in_flight and peak_in_flight are 0, and first_start and last_end are None
         """
         self.backend            = backend
         self.clock              = clock
@@ -35,6 +35,8 @@ class TimedBackend:
         self.calls              = []
         self.in_flight          = 0
         self.peak_in_flight     = 0
+        self.first_start        = None
+        self.last_end           = None
 
     async def complete( self, model, system_prompt, user_prompt ):
         """
@@ -46,24 +48,39 @@ class TimedBackend:
         Ensures:
             - returns the wrapped reply unchanged
             - one row is appended to calls: ok is True when the call returned, False when it raised
-            - peak_in_flight is at least the number of calls that were running at once, this one included
+            - peak_in_flight is at least the number of calls that were waiting or running at once, this one included
+            - first_start is the clock at the first call's start and last_end the clock at the latest call's end
             - in_flight is back to what it was before the call, whether it returned or raised
 
         Raises:
             - whatever the wrapped call raises, after its row is recorded
         """
         start = self.clock()
+        if self.first_start is None: self.first_start = start
         self.in_flight     += 1
         self.peak_in_flight = max( self.peak_in_flight, self.in_flight )
+        ok = False
         try:
             reply = await self.backend.complete( model, system_prompt, user_prompt )
-        except Exception:
-            self.calls.append( { "seconds": self.clock() - start, "ok": False } )
-            raise
+            ok    = True
         finally:
+            self.last_end   = self.clock()
             self.in_flight -= 1
-        self.calls.append( { "seconds": self.clock() - start, "ok": True } )
+            self.calls.append( { "seconds": self.last_end - start, "ok": ok } )
         return reply
+
+    @property
+    def elapsed( self ):
+        """
+        Return the seconds from the first call's start to the latest call's end.
+
+        Requires:
+            - none
+
+        Ensures:
+            - returns 0 when no call has finished
+        """
+        return 0 if self.last_end is None else self.last_end - self.first_start
 
 
 def percentile( values, share ):
@@ -81,7 +98,7 @@ def percentile( values, share ):
     return ordered[ math.ceil( share * len( ordered ) ) - 1 ]
 
 
-def build_record( meta, calls, definitions, unjudged, peak_in_flight, client_calls, window_hours ):
+def build_record( meta, calls, definitions, unjudged, peak_in_flight, elapsed, client_calls, window_hours ):
     """
     Build the smoke record from the timed calls of one run.
 
@@ -89,29 +106,31 @@ def build_record( meta, calls, definitions, unjudged, peak_in_flight, client_cal
         - meta holds exactly date, host, repo_sha and config_sha
         - calls is the list TimedBackend.calls holds, with at least one row
         - definitions is the number of definitions judged and unjudged is the number whose reply could not be read
-        - peak_in_flight is TimedBackend.peak_in_flight: the most calls seen running at once, observed and not the setting asked for
+        - peak_in_flight is TimedBackend.peak_in_flight; it counts calls waiting inside a backend that serialises them, so it is information and not the concurrency
+        - elapsed is TimedBackend.elapsed: the seconds the whole run took
         - client_calls is the number of calls one client needs, and window_hours the hours a night's run may take; both are set by the caller
 
     Ensures:
         - seconds holds min, median and p95 of every call, whether it returned or raised
         - raised_rate is the calls that raised over all calls, and unjudged_rate the unjudged definitions over the definitions, each as a fraction string and a number
         - reopen_backend is True when either rate is above 5%
-        - projection holds the hours client_calls would take at the median and the peak in flight, and whether they fit window_hours
+        - projection holds the hours client_calls would take at the measured seconds per call (elapsed over calls), and whether they fit window_hours
 
     Raises:
-        - ValueError if meta has other keys, calls is empty, definitions is below 1, unjudged is outside 0 to definitions, or peak_in_flight, client_calls or window_hours is below 1
+        - ValueError if meta has other keys, calls is empty, definitions is below 1, unjudged is outside 0 to definitions, elapsed is not above 0, or peak_in_flight, client_calls or window_hours is below 1
     """
     if set( meta ) != set( META_KEYS ): raise ValueError( f"meta must hold exactly {list( META_KEYS )}, got {sorted( meta )}" )
     if not calls: raise ValueError( "no call was timed" )
     if definitions < 1 or not 0 <= unjudged <= definitions: raise ValueError( f"unjudged must be between 0 and definitions ({definitions}), got {unjudged}" )
+    if elapsed <= 0: raise ValueError( f"elapsed must be above 0, got {elapsed}" )
     for name, value in ( ( "peak_in_flight", peak_in_flight ), ( "client_calls", client_calls ), ( "window_hours", window_hours ) ):
         if value < 1: raise ValueError( f"{name} must be 1 or more, got {value}" )
     seconds = [ c[ "seconds" ] for c in calls ]
     raised  = sum( 1 for c in calls if not c[ "ok" ] )
     rates   = { "raised_rate": Fraction( raised, len( calls ) ), "unjudged_rate": Fraction( unjudged, definitions ) }
     median  = statistics.median( seconds )
-    hours   = client_calls * median / peak_in_flight / 3600
-    return { **meta, "calls": len( calls ), "definitions": definitions, "raised": raised, "unjudged": unjudged, "peak_in_flight": peak_in_flight,
+    hours   = client_calls * elapsed / len( calls ) / 3600
+    return { **meta, "calls": len( calls ), "definitions": definitions, "raised": raised, "unjudged": unjudged, "peak_in_flight": peak_in_flight, "elapsed": elapsed,
              "seconds": { "min": min( seconds ), "median": median, "p95": percentile( seconds, 0.95 ) },
              **{ name: { "fraction": f"{r.numerator}/{r.denominator}", "value": float( r ) } for name, r in rates.items() },
              "reopen_backend": any( r > FAILURE_BAR for r in rates.values() ),
