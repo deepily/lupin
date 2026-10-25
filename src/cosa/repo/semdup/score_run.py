@@ -67,6 +67,7 @@ def score_run( run, wiring ):
         - definitions under min_nodes are not judged and are counted as below_min
         - client_builds is copied into the report when the result has it
         - skipped_python lists the Python files that did not parse; they never make the run unscorable
+        - dropped_from_pool holds the count and ids of the server definitions left out of the candidate pool because they carry a scrub token
 
     Raises:
         - SemdupError CONFIG_DRIFT if the live configuration differs from the frozen one
@@ -91,7 +92,8 @@ def score_run( run, wiring ):
     except err.SemdupError as e:
         if e.code != err.BLINDNESS_BREACH: raise
         return _unscorable( report, e, {} )
-    report[ "unjudged" ] = outcome[ "unjudged" ]
+    report[ "dropped_from_pool" ] = outcome[ "dropped" ]
+    report[ "unjudged" ]          = outcome[ "unjudged" ]
     if outcome[ "unjudged" ]:
         return _unscorable( report, err.SemdupError( err.RUN_INCOMPLETE, f"{len( outcome[ 'unjudged' ] )} definitions are unjudged" ), {} )
     groups            = cluster.clusters( [ d[ "id" ] for d in all_defs ], cluster.join_pairs( outcome[ "verdicts" ] ) )

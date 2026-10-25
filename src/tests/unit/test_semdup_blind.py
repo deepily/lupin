@@ -139,3 +139,14 @@ def test_candidate_order_is_stable_under_input_reordering_and_hides_the_input_or
     assert [ b[ "id" ] for b in forward ] != [ b[ "id" ] for b in blinded ]               # not the input order
     assert [ b[ "id" ] for b in forward ] != sorted( b[ "id" ] for b in blinded )          # and not the id order: it is the sha order
     assert blinded[ 0 ] in forward and len( forward ) == 12 and forward is not blinded
+
+
+def test_breaching_ids_names_each_definition_blind_definition_refuses_in_sorted_order_and_none_of_the_clean():
+    clean = make( name="ok" )
+    leak1 = make( name="leak_a", text="def leak_a( x ):\n    return check_exists( x )" )
+    leak2 = make( name="leak_b", text="def leak_b( x ):\n    return ARM-WITH" )
+    assert bl.breaching_ids( [ leak2, clean, leak1 ], SCRUB ) == sorted( [ leak1[ "id" ], leak2[ "id" ] ] )
+    assert bl.breaching_ids( [ clean ], SCRUB ) == [] and bl.breaching_ids( [], SCRUB ) == []
+    for d in ( leak1, leak2 ):
+        with pytest.raises( err.SemdupError ) as caught: bl.blind_definition( d, SCRUB )
+        assert caught.value.code == err.BLINDNESS_BREACH

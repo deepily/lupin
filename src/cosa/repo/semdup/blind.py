@@ -138,6 +138,26 @@ def blind_definition( d, scrub ):
     return blinded
 
 
+def breaching_ids( defs, scrub ):
+    """
+    Name the definitions that blind_definition would refuse.
+
+    Requires:
+        - defs are definition records from extract; scrub is the scrub list
+
+    Ensures:
+        - returns the sorted ids of the definitions whose blinding raises, which it does only for BLINDNESS_BREACH
+        - nothing is blinded for use; this only asks the same question blind_definition answers
+    """
+    found = set()
+    for d in defs:
+        try:
+            blind_definition( d, scrub )
+        except err.SemdupError:
+            found.add( d[ "id" ] )
+    return sorted( found )
+
+
 def candidate_order( blinded ):
     """
     Order blinded definitions by the sha of their opaque ids, so position tells nothing.

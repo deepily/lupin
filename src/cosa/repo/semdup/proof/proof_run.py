@@ -116,7 +116,7 @@ def proof_run( spec, wiring ):
           "no_true_pairs" when no pair is labelled true, "no_common_pairs" when no pair is judged in both passes, or "no_flags" when the checker raised none
         - found, correct and the strata come from slot 0; agreement compares the two slots; slot 1's found count is reported beside slot 0's
         - a planted pair in plant_failures is left out of every denominator and counted, with its rate
-        - the record carries the pool size
+        - the record carries the pool size, and the count and ids of the server definitions left out of the candidate pool for carrying a scrub token
 
     Raises:
         - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
@@ -136,7 +136,7 @@ def proof_run( spec, wiring ):
     labels   = spec[ "labels" ]
     record   = { "config_sha": cfg[ "config_sha" ], "pool": pool[ "sizes" ], "plant_failures": { "count": len( failures ), "of": len( spec[ "planted" ] ),
                  "rate": len( failures ) / len( spec[ "planted" ] ) if spec[ "planted" ] else None, "pairs": sorted( failures ) },
-                 "unjudged": [ outcome[ "unjudged" ] for outcome in passes ] }
+                 "unjudged": [ outcome[ "unjudged" ] for outcome in passes ], "dropped_from_pool": passes[ 0 ][ "dropped" ] }
     owed     = sorted( ( set( known ) | flags[ 0 ] ) - set( labels ) )
     true     = sorted( k for k in known if labels.get( k ) is True )
     record[ "agreement" ] = proof_bar.agreement( passes[ 0 ][ "verdicts" ], passes[ 1 ][ "verdicts" ] )

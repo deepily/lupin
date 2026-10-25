@@ -161,6 +161,7 @@ def test_the_toy_run_gives_the_hand_computed_figures_pool_size_and_strata(tmp_pa
                                                                                                    "monolith:structural": ( 1, 1 ), "monolith:neighbour": ( 1, 1 ) }
     assert all( s[ "interval" ] is not None for s in record[ "strata" ].values() ) and record[ "found_in_slot_1" ] == 4
     assert record[ "plant_failures" ] == { "count": 0, "of": 3, "rate": 0.0, "pairs": [] }
+    assert record[ "dropped_from_pool" ] == { "count": 0, "ids": [] }
 
 
 def test_a_second_pass_that_changes_two_flags_lowers_agreement_to_fifty_eight_of_sixty_and_slot_one_finds_one_fewer(tmp_path):

@@ -254,6 +254,24 @@ def test_a_definition_carrying_a_scrub_token_is_unscorable_as_a_blindness_breach
     assert "check_exists" in report[ "evidence" ][ "detail" ]
 
 
+def test_a_server_definition_carrying_a_scrub_token_is_dropped_from_the_pool_and_counted_and_would_still_raise_if_shown(tmp_path):
+    run, w = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ) ], server=[ ( "s1", [ "MARKA" ] ) ] )
+    leak   = w[ "root" ] / "server" / "leak.py"
+    leak.write_text( function( "leak", [ "MARKA" ], 9 ).replace( "MARKA", "check_exists" ), encoding="utf-8" )
+    server = ex.extract_tree( w[ "root" ], [ leak ], "server" )[ "definitions" ]
+    w      = { **w, "server_defs": w[ "server_defs" ] + server }
+    report = sr.score_run( run, w )
+    assert report[ "status" ] == "scored" and report[ "dropped_from_pool" ] == { "count": 1, "ids": [ server[ 0 ][ "id" ] ] }
+    assert not any( "check_exists" in t for t in w[ "client" ].texts )
+    with pytest.raises( err.SemdupError ) as caught: bl.blind_definition( server[ 0 ], SCRUB )
+    assert caught.value.code == err.BLINDNESS_BREACH
+
+
+def test_a_run_with_no_leaking_server_definition_reports_an_empty_drop(tmp_path):
+    run, w = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ) ], server=[ ( "s1", [ "MARKA" ] ) ] )
+    assert sr.score_run( run, w )[ "dropped_from_pool" ] == { "count": 0, "ids": [] }
+
+
 def test_a_definition_the_judge_could_not_read_makes_the_run_unscorable_as_incomplete(tmp_path):
     run, w = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ), ( "a2", [ "MARKA" ] ) ], backend=FakeBackend( garbage=True ) )
     report = sr.score_run( run, w )
