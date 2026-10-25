@@ -127,6 +127,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[worktree-lifecycle]] — how git worktrees are made for each spawned seat and each BFE or TFE job. Teardown, the reaper and the janitor remove them. `cosa.agents.shared` (seat_teardown, worktree_reaper, worktree_refusal_ledger, worktree_straggler_tickets), `cosa.utils` (seat_worktree, worktree_artifacts)
 - [[small-agents-core]] — seven small agents that answer one voice or text request each, inline on the queue's consumer thread. `cosa.agents` (calculator), `cosa.rest.v2`, `cosa.utils.util_code_runner`
 - [[mcp-session-spawn-and-reap]] — the four MCP tools a manager seat uses to start, list and end Claude Code seats. `lupin_mcp` (session_spawner, reap_memento, self_respin_core)
+- [[self-respin-memento-and-clear]] — the memento proof, wake prompt, guarded clear and the stale-observer warnings of a self re-spin. `lupin_mcp` (self_respin_core)
 - [[self-respin-identity-and-ask]] — how a seat resolves its own identity and pressure, asks to re-spin and decides to go. `lupin_mcp` (self_respin_core)
 - [[mcp-spawner-helpers]] — the spawner's identity, config, prompt, command and alarm helpers, and the idle reap. `lupin_mcp` (session_spawner)
 - [[session-transcript-console]] — showing another seat's transcript as display blocks: a REST backlog plus a live WebSocket tail, admin accounts only. `cosa.rest` (cc_transcript_mapper, cc_transcript_tailer), `cosa.rest.routers` (cc_transcript, websocket)
