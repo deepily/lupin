@@ -48,6 +48,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Quality tooling
 
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
+- [[schema-and-claims-check-scripts]] — the model versus database schema parity check, the schema head check and the dead-claims grep for design documents. `scripts` (check_schema_parity, check_schema_at_head, check_dead_claims)
 - [[bundle-and-bridge-check-scripts]] — the web bundle freshness gate and the sweep for tests that read live bridge state unpinned. `scripts` (check_bundle_freshness, bridge_pin_sweep)
 - [[board-and-doc-scan-scripts]] — the epic-key and prose task-reference board scans and the API table row repair. `scripts` (scan-epic-key-drift, scan-prose-task-refs, fix_api_md_tables)
 - [[vertex-guard-scripts]] — the Vertex logging verification runner and the publisher config write guard. `scripts` (verify_vertex_logging, vertex_publisher_config_guard)
