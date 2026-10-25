@@ -24,7 +24,7 @@ def test_register_creates_an_account_that_can_log_in( page, server_url ):
     expect( page.get_by_role( "heading", name="Create Your Account" ) ).to_be_visible()
     _fill_register( page, email, PASSWORD, PASSWORD )
     expect( page.get_by_text( "Account created successfully! Redirecting to login..." ) ).to_be_visible()
-    page.wait_for_url( re.compile( r"/app/auth/login" ), timeout=10000 )
+    expect( page ).to_have_url( re.compile( r"/app/auth/login" ), timeout=10000 )
     response = requests.post( f"{server_url}/auth/login", json={ "email": email, "password": PASSWORD }, timeout=10 )
     assert response.status_code == 200
 
@@ -64,7 +64,7 @@ def test_login_goes_to_app_by_default_and_to_redirect_when_given( page, server_u
     page.get_by_label( "Email Address" ).fill( account.email )
     page.get_by_label( "Password", exact=True ).fill( account.password )
     page.get_by_role( "button", name="Login" ).click()
-    page.wait_for_url( f"{server_url}/app", timeout=10000 )
+    expect( page ).to_have_url( f"{server_url}/app", timeout=10000 )
 
 
 @pytest.mark.feature( "F03" )
@@ -73,7 +73,7 @@ def test_login_follows_a_redirect_that_starts_with_app( page, server_url, accoun
     page.get_by_label( "Email Address" ).fill( account.email )
     page.get_by_label( "Password", exact=True ).fill( account.password )
     page.get_by_role( "button", name="Login" ).click()
-    page.wait_for_url( f"{server_url}/app/auth/profile", timeout=10000 )
+    expect( page ).to_have_url( f"{server_url}/app/auth/profile", timeout=10000 )
 
 
 @pytest.mark.feature( "F03" )
@@ -82,7 +82,7 @@ def test_login_ignores_a_redirect_outside_app( page, server_url, account ):
     page.get_by_label( "Email Address" ).fill( account.email )
     page.get_by_label( "Password", exact=True ).fill( account.password )
     page.get_by_role( "button", name="Login" ).click()
-    page.wait_for_url( f"{server_url}/app", timeout=10000 )
+    expect( page ).to_have_url( f"{server_url}/app", timeout=10000 )
 
 
 @pytest.mark.feature( "F04" )

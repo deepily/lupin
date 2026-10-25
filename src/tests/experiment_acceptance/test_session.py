@@ -19,16 +19,16 @@ def _log_in_on_login_page( page, account ):
 @pytest.mark.feature( "F05" )
 def test_a_visitor_without_a_session_is_sent_to_login_and_back( page, server_url, account ):
     page.goto( f"{server_url}/app/auth/profile" )
-    page.wait_for_url( re.compile( r"/app/auth/login\?.*redirect=" ), timeout=10000 )
+    expect( page ).to_have_url( re.compile( r"/app/auth/login\?.*redirect=" ), timeout=10000 )
     assert "redirect=" in page.url and "profile" in page.url
     _log_in_on_login_page( page, account )
-    page.wait_for_url( f"{server_url}/app/auth/profile", timeout=10000 )
+    expect( page ).to_have_url( f"{server_url}/app/auth/profile", timeout=10000 )
 
 
 @pytest.mark.feature( "F05" )
 def test_notifications_page_also_requires_a_session( page, server_url ):
     page.goto( f"{server_url}/app/notifications" )
-    page.wait_for_url( re.compile( r"/app/auth/login" ), timeout=10000 )
+    expect( page ).to_have_url( re.compile( r"/app/auth/login" ), timeout=10000 )
 
 
 @pytest.mark.feature( "F05" )
@@ -75,7 +75,7 @@ def test_change_password_refusals( signed_in, server_url, account ):
 def test_change_password_takes_effect_and_cancel_returns_to_profile( signed_in, server_url, account ):
     signed_in.goto( f"{server_url}/app/auth/change-password" )
     signed_in.get_by_role( "button", name="Cancel" ).click()
-    signed_in.wait_for_url( f"{server_url}/app/auth/profile", timeout=10000 )
+    expect( signed_in ).to_have_url( f"{server_url}/app/auth/profile", timeout=10000 )
     signed_in.get_by_role( "button", name="Change Password" ).click()
     signed_in.get_by_label( "Current Password" ).fill( account.password )
     signed_in.get_by_label( "New Password", exact=True ).fill( NEW_PASSWORD )
@@ -92,6 +92,6 @@ def test_change_password_takes_effect_and_cancel_returns_to_profile( signed_in, 
 def test_logout_ends_the_session( signed_in, server_url ):
     signed_in.goto( f"{server_url}/app/auth/profile" )
     signed_in.get_by_role( "button", name="Logout" ).click()
-    signed_in.wait_for_url( re.compile( r"/app/auth/login" ), timeout=10000 )
+    expect( signed_in ).to_have_url( re.compile( r"/app/auth/login" ), timeout=10000 )
     signed_in.goto( f"{server_url}/app/auth/profile" )
-    signed_in.wait_for_url( re.compile( r"/app/auth/login" ), timeout=10000 )
+    expect( signed_in ).to_have_url( re.compile( r"/app/auth/login" ), timeout=10000 )
