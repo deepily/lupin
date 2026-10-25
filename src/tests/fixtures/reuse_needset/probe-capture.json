@@ -105,29 +105,6 @@
    "uuid": "00000000-0000-0000-0000-000000000000"
   },
   {
-   "_class": "RateLimitEvent",
-   "rate_limit_info": {
-    "_class": "RateLimitInfo",
-    "overage_disabled_reason": "out_of_credits",
-    "overage_resets_at": null,
-    "overage_status": "rejected",
-    "rate_limit_type": "five_hour",
-    "raw": {
-     "isUsingOverage": false,
-     "overageDisabledReason": "out_of_credits",
-     "overageStatus": "rejected",
-     "rateLimitType": "five_hour",
-     "resetsAt": 1792914600,
-     "status": "allowed"
-    },
-    "resets_at": 1792914600,
-    "status": "allowed",
-    "utilization": null
-   },
-   "session_id": "00000000-0000-0000-0000-000000000000",
-   "uuid": "00000000-0000-0000-0000-000000000000"
-  },
-  {
    "_class": "UserMessage",
    "content": [
     {
@@ -147,36 +124,6 @@
      "totalLines": 268
     },
     "type": "text"
-   },
-   "uuid": "00000000-0000-0000-0000-000000000000"
-  },
-  {
-   "_class": "AssistantMessage",
-   "content": [
-    {
-     "_class": "ThinkingBlock",
-     "signature": "CAQSjgkKEAgTGAI4AUIIdGhpbmtpbmcSDPHo4edDpIEpYT0WWhoMzwPUvm3sB5DPCdODIjAaUMI+YtwohNLmzNFJfag2IOOlfy/Wu7LRWJDPgdvofBlHo+kFCU1MP2UiqMrLlAsqqwg+vj2gTS0zNE6kFBy3b3wTy9STaxXWxjYRZt3D1g2AHul0JRp8oMSqQrQWYbF40ewnRfOfaP7OBH1Kp36yKYsI9AN8vCyp1OxcaPWMbsvECRfHxMI5PO1/nzZBAomNjD1AlB9UgqCCVCOb9H9KajVqQlkPDLnza2dC07Qd19uixGaCqdbIHTQUtbndITaAKaVsuxBqiHY8KeMN6XmTgvaJ34kjGxKXe8ND60DGAV178wJoNz7VeLVpdxhk1pOA/O8cFm1yJ16JjIUMY/IkGW6KYzryspCY40CDxeJ4QL5xmWYw7wpiW9u2u+0IJJ6a/2mroXkwwZsHOQmk1UWwQTh2bV4tu963sPLT2mJG1GDEP9LnoUehE+v9CRVydV6d32GvdiheuqATlvgoBJyXOMyKiCooetRAEk/NLqaa5klMcTkg0NM/3h9Yi4JdLDfFnaUmrvt/RQx+vDW/29MRK+hiStzpmr5YUZTLMloSY3H+Fq0TSE1SRAPnRGhd42LpytGmVPEwX9N4UqMNAqvk97n8isrCHsWEYFo4wILVwLpNCK3GJxTz94OxtXHDLisvzhfLJy+1WAq+GZmUcuS3eNMANHtBIKX5BNd0tnkewpO5ZHkKPG6JsVgEjamjuZlbc2Z7/3x3Sd2r6ahSm2cFd9wY85M4UXlfy3viZE90wjSEo6Dv+QgrL8sPwZqpHCM0/GYUjrKIKRFh1XWSKLCX+rjsNhdna0yRAQ3ZFQR6gIMhWqyEdJ9g2qlq3jLFsi4YaIQ4mYbnoyh1PR/Jcx46dsr2a6Olkdgis+jJVhYwEFSAxASLVwRlhPFYnOaTgXqDx8btcNTOF4PySUBBFHGa7OsISKmknPCTVbLtxzucQfUvp+OZMbYGwE9MI1h5BSfq1hz3CEdo0HJoUDqbgScHVEpmZtJxwJq2bKbsh7B1kUTQQDV06Gkk7MiNy1s1uri1a3Xovj4KFl/5ayMNzxDMWqCXCYaPp71Af2FuFX1VNY2zCUHiLoCv6OmDZYL0dX1NH71jfXgTAiIGzACvmHAPu3FKVXpVvvkvB4+gTTdu93ymetXk+EsFd+SsNX4BsMRVZoW86oLKsLo09oGmVUQkdEZJMRHUUNDhQ2/RYsLKaUveaSdsKjgg4ifywJuD4hgklJwj1L1afeh1XjOKi/qSqIRiWZKK/0v6H2knKVjobKh5+8YhR9CXEARuANuDMrwZwG9vNT/ghqPFBNcuU7tGFWu4DKhVgJ8IzdOiomvx+DMrJX75apA3IHBlNTQQWY55YdIftgrnPocFBJmdT/OrZB2gXeEe6kVqiAIDATwBk+Tn0e3Z73RNDyrUxsibbo+RqSmjmNWmL56fzpQLpNpUGgavWKcAaV22RtFc0cFTfnaGWvmlDeKywE3I8k1QnWsOVZalgVVAL/MgMLeKgRgB",
-     "thinking": ""
-    }
-   ],
-   "error": null,
-   "message_id": "msg_011CgNJ9m3WanXfUHqksMnLQ",
-   "model": "claude-haiku-5-5",
-   "parent_tool_use_id": null,
-   "session_id": "00000000-0000-0000-0000-000000000000",
-   "stop_reason": null,
-   "usage": {
-    "cache_creation": {
-     "ephemeral_1h_input_tokens": 5763,
-     "ephemeral_5m_input_tokens": 0
-    },
-    "cache_creation_input_tokens": 5763,
-    "cache_read_input_tokens": 1628,
-    "inference_geo": "global",
-    "input_tokens": 2,
-    "output_tokens": 2,
-    "service_tier": "standard",
-    "speed": "standard"
    },
    "uuid": "00000000-0000-0000-0000-000000000000"
   },
@@ -274,5 +221,6 @@
   ],
   "verdict": "REUSE"
  },
- "root": "/root"
+ "root": "/root",
+ "stripped": "RateLimitEvent and the thinking-only message were removed: they carry billing state and a signature, and no test reads them"
 }

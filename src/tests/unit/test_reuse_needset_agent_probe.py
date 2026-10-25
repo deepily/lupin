@@ -151,7 +151,7 @@ def replay( messages ):
 
 def test_the_capture_is_one_real_read_only_run_in_the_order_the_cli_sent_it():
     doc, messages = captured()
-    assert [ type( m ).__name__ for m in messages ] == [ "SystemMessage", "AssistantMessage", "RateLimitEvent", "UserMessage", "AssistantMessage", "AssistantMessage", "ResultMessage" ]
+    assert [ type( m ).__name__ for m in messages ] == [ "SystemMessage", "AssistantMessage", "UserMessage", "AssistantMessage", "ResultMessage" ]
     assert messages[ 0 ].data[ "tools" ] == [ "Read" ] and messages[ 0 ].data[ "model" ] == doc[ "model" ] and doc[ "root" ] == "/root"
 
 
