@@ -22,6 +22,7 @@ SEED_NOT_VECTORISED     = "SEED_NOT_VECTORISED"
 STRIP_FAILED            = "STRIP_FAILED"
 BAD_ROUTE               = "BAD_ROUTE"
 OUTSIDE_WINDOW          = "OUTSIDE_WINDOW"
+NOT_LUPIN_TREE          = "NOT_LUPIN_TREE"
 
 
 class NeedsetError( Exception ):

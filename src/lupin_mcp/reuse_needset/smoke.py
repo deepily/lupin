@@ -109,16 +109,19 @@ def index_parts( root, index_dir ):
 
     Ensures:
         - returns ( by_id, kept, measures, twins, bodies ) with by_id holding every searchable record
-        - twin ids carry the same prefix the index gives, so they match the index's ids
+        - twin ids are the index's own ids, which carry no prefix in the lupin tree
+    Raises:
+        - NeedsetError NOT_LUPIN_TREE when root lacks the lupin layout
     """
     root    = pathlib.Path( root )
+    if not build.is_lupin_tree( root ): raise er.NeedsetError( er.NOT_LUPIN_TREE, f"{root}: the strip step resolves ids of the lupin layout only" )
     built   = build.build( root, index_dir )
     records, _reader = pool.read_pool_symbols( built[ "gen_dir" ] )
     measures = pool.measure( root, records )
     kept, _dropped = pool.eligible( records, measures )
     spec    = sp.spec_for( root )
     found   = dups.find_duplicates( spec, sp.iter_files( spec, spec.py_roots, { ".py" } ), js_files=sp.iter_files( spec, spec.js_roots, set( sp.SCRIPT_SUFFIXES ) ) )
-    twins   = pool.twin_map( found, prefix="" if build.is_lupin_tree( spec.root ) else f"{spec.name}:" )
+    twins   = pool.twin_map( found )
     return { r[ "id" ]: r for r in records }, kept, measures, twins, strip.bodies_for( kept, root )
 
 
@@ -155,7 +158,7 @@ def assemble_env( args, ask, second_ask, client, set_at ):
     vectors, stage, embed = candidate_parts( args.vectors_dir, args.query_cache_dir, client, list( by_id.values() ) )
     rows    = set( vectors.ids )
     pooled  = [ r for r in kept if r[ "id" ] in rows ]
-    extras  = { "vector_coverage": { "eligible": len( kept ), "with_a_vector_row": len( pooled ), "vector_set_ids": len( rows ) } }
+    extras  = { "vector_coverage": { "eligible": len( kept ), "with_a_vector_row": len( pooled ), "vector_set_ids": len( rows ), "stage_ids": len( stage.ids ) } }
     book    = draft.SharedLedger( draft.make_ledger( out / "ledger-draft.jsonl", args.cli_path, args.server ) )
     second  = draft.SharedLedger( draft.make_ledger( out / "ledger-second.jsonl", args.cli_path, args.server ) )
     describe = lambda i: f"{by_id[ i ][ 'sig' ]} — {by_id[ i ][ 'doc' ]}"

@@ -156,7 +156,7 @@ def test_the_env_is_assembled_from_the_real_index_with_two_ledgers_and_a_smoke_f
     env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00" )
     assert env.smoke is True and env.model_id == draft.DRAFTER_MODEL and env.source_commit == COMMIT and env.seed == 7 and env.set_at == "2026-10-24T14:00:00+00:00"
     assert env.kind_split == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and env.parallel == 3 and env.none_draft_fn is not None
-    assert env.extras == { "vector_coverage": { "eligible": len( env.kept ), "with_a_vector_row": len( env.kept ), "vector_set_ids": len( ids ) } }
+    assert env.extras == { "vector_coverage": { "eligible": len( env.kept ), "with_a_vector_row": len( env.kept ), "vector_set_ids": len( ids ), "stage_ids": len( by_id ) } }
     assert ( tmp_path / "out" ).is_dir()
     seed = "cosa.fx.pkg.a.twin_a"
     job  = __import__( "lupin_mcp.reuse_needset.run", fromlist=[ "run" ] ).near_copy_job( env, seed, "py" )
@@ -184,4 +184,10 @@ def test_a_symbol_newer_than_the_vector_set_is_left_out_of_the_pool_and_counted(
     args.root = str( root )
     env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00" )
     assert sorted( r[ "id" ] for r in env.kept ) == old and env.ctx.by_id.keys() == set( old )
-    assert env.extras[ "vector_coverage" ] == { "eligible": len( kept ), "with_a_vector_row": len( old ), "vector_set_ids": len( old ) }
+    assert env.extras[ "vector_coverage" ] == { "eligible": len( kept ), "with_a_vector_row": len( old ), "vector_set_ids": len( old ), "stage_ids": len( by_id ) }
+
+
+def test_a_tree_without_the_lupin_layout_is_refused_by_name( tmp_path ):
+    ( tmp_path / "plain" ).mkdir()
+    with pytest.raises( er.NeedsetError ) as e: smoke.index_parts( tmp_path / "plain", tmp_path / "idx" )
+    assert e.value.code == er.NOT_LUPIN_TREE
