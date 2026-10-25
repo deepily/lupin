@@ -137,6 +137,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-flip-rate-measure]] — the flip-rate test: one need asked again and again, and the needs whose answer changes. `lupin_mcp` (reuse_flip, reuse_flip_run)
 - [[reuse-band-fit-run]] — the driver that measures how far Jev's per-entry overlap moves between repeats and fits the uncertain band. `lupin_mcp` (reuse_band_fit_run)
 - [[reuse-end-to-end-run]] — the end-to-end run: frozen inputs, one search read against its twins, the figures, and the runner with its canary. `lupin_mcp` (reuse_e2e, reuse_e2e_run)
+- [[reuse-need-check-and-stage-client]] — the mechanical check of need sentences, and the client of the resident candidate search. `lupin_mcp` (reuse_need_check, reuse_candidates)
 - [[reuse-record-search]] — the `record_search` MCP tool: a fixed-string search of the tree for the nearest existing definitions, recorded under a search id. `lupin_mcp` (cosa_voice_mcp, reuse_search)
 - [[mcp-task-store-tools]] — the ten MCP tools a session uses to read and write the task store over HTTP. `lupin_mcp` (task_store_tools, cosa_voice_mcp)
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
