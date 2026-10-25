@@ -48,6 +48,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Quality tooling
 
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
+- [[dm-experiment-schedule]] — the DM-verbosity pilot's seeded, reproducible two-arm hourly schedule and its generator. `scripts` (dm-experiment generate_schedule)
 - [[dm-experiment-arm-reports]] — the DM-verbosity pilot's co-primary results, order effect, secondary metrics and plain-text reports. `scripts` (dm-experiment analyze_arms)
 - [[dm-experiment-arm-rows-and-pairs]] — the DM-verbosity pilot analysis: eligible rows, excess words per clock hour and the matched-pair randomization test. `scripts` (dm-experiment analyze_arms)
 - [[v2-eval-run-and-report]] — the v2 eval harness's HTTP client, the two passes, the early record dump and the report. `scripts` (v2_eval)
