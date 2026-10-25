@@ -44,6 +44,12 @@ def test_a_total_caps_neighbour_at_zero_when_the_other_sources_already_fill_it_a
     assert [ p[ "source" ] for p in free ].count( "neighbour" ) == 2
 
 
+def test_a_total_below_the_structural_pairs_leaves_the_neighbour_source_empty_and_never_counts_backwards():
+    defs = defs_of( "a", "b", "c", "d", "e" )
+    out  = mp.candidate_pairs( defs, [ clone( "a", "b", 90 ), clone( "c", "d", 80 ) ], VECTORS, [], per_source=5, total=1 )
+    assert [ p[ "source" ] for p in out ] == [ "structural", "structural" ]
+
+
 def test_the_neighbour_source_skips_pairs_the_structural_list_already_holds_and_goes_on_to_the_next_closest():
     defs = defs_of( "a", "b", "c", "d" )
     out  = mp.candidate_pairs( defs, [ clone( "a", "b", 90 ), clone( "c", "d", 80 ) ], VECTORS, [], per_source=1 )

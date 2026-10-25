@@ -371,3 +371,11 @@ def test_script_clones_refuses_an_id_dups_names_that_the_definitions_do_not_hold
     root, spec, path, defs = script_tree( tmp_path, SHAPE_A.format( name="one" ) )
     monkeypatch.setattr( dups, "find_duplicates", lambda *a, **k: { "exact": [ [ "client/m.js#one", "client/m.js#ghost" ] ], "near": [] } )
     with pytest.raises( ValueError, match="ghost" ): st.script_clones( spec, [ path ], defs, 25 )
+
+
+def test_script_clones_asks_dups_only_for_definitions_of_the_given_node_minimum(tmp_path):
+    text = "function one( v ) { return v + 1; }\nfunction two( v ) { return v + 2; }\n"
+    root, spec, path, defs = script_tree( tmp_path, text )
+    assert min( d[ "nodes" ] for d in defs ) < 25
+    assert st.script_clones( spec, [ path ], defs, 25 ) == []
+    assert len( st.script_clones( spec, [ path ], defs, 5 ) ) == 1

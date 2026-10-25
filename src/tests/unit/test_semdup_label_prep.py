@@ -278,6 +278,34 @@ def test_monolith_candidates_takes_structural_pairs_from_jscpd_and_dups_and_fill
     assert len( { tuple( n ) for n, _ in pairs } ) == 5
 
 
+BLOCK = "".join( f"    const item{i} = items.map( x => x + {i} ).filter( x => x > {i} ).reduce( ( a, b ) => a + b, {i} );\n" for i in range( 9 ) )
+# xray and yankee share a long identical block and end in different shapes: jscpd pairs them, dups does not. The two tiny functions share a shape below the node minimum.
+JSCPD_ONLY_TEXT = ( "function xray( items ) {\n" + BLOCK + "    switch ( items.length ) {\n        case 1: return 'one';\n        case 2: return 'two';\n        default: return 'many';\n    }\n}\n"
+                    + "function yankee( items ) {\n" + BLOCK + "    try {\n        while ( items.length > 0 ) { items.pop(); }\n    } catch ( e ) {\n        return [ e ];\n    }\n    return items;\n}\n"
+                    + "function tiny() { return 1; }\nfunction tinier() { return 2; }\n" + SWITCH_TEXT.format( name="fifth" ) )
+
+
+def test_a_pair_only_jscpd_sees_is_kept_as_structural_and_a_pair_below_the_node_minimum_is_not_asked_of_dups( tmp_path, monkeypatch ):
+    root = monolith_root( tmp_path, monkeypatch, JSCPD_ONLY_TEXT )
+    tmp, defs = lp.monolith_definitions( root, 25 )
+    with tmp:
+        spec  = lp.sp.spec_for( tmp.name )
+        files = [ pathlib.Path( tmp.name ) / lp.MONOLITH_FILE ]
+        assert lp.structural.script_clones( spec, files, defs, 25 ) == []                  # dups does not pair xray and yankee
+        assert lp.structural.script_clones( spec, files, ex.extract_tree( tmp.name, files, "server" )[ "definitions" ], 5 ) != []         # but it does pair the tiny two when the minimum is 5
+    got = lp.monolith_candidates( root, CFG, FakeEmbed(), tmp_path / "vec", per_source=30, total=3 )         # a minimum of 5 here would make dups name a tiny definition this tree left out
+    assert ( [ "xray", "yankee" ], "structural" ) in named( got )
+
+
+def test_the_monolith_list_is_sixty_long_by_default_with_thirty_from_each_automatic_source( tmp_path, monkeypatch ):
+    root = monolith_root( tmp_path, monkeypatch, MONOLITH_TEXT )
+    seen = []
+    real = lp.monolith_pairs.candidate_pairs
+    monkeypatch.setattr( lp.monolith_pairs, "candidate_pairs", lambda *a: seen.append( a[ 4: ] ) or real( *a ) )
+    lp.monolith_candidates( root, CFG, FakeEmbed(), tmp_path / "vec" )
+    assert seen == [ ( 30, 60 ) ] and ( lp.PER_SOURCE, lp.MONOLITH_TOTAL ) == ( 30, 60 )
+
+
 def test_monolith_candidates_stops_at_its_total_and_adds_nominated_pairs_on_top_of_the_quota( tmp_path, monkeypatch ):
     root = monolith_root( tmp_path, monkeypatch, MONOLITH_TEXT )
     ids  = { d[ "name" ]: d[ "id" ] for d in lp.monolith_definitions( root, 25 )[ 1 ] }

@@ -25,6 +25,6 @@ The score is surplus copies per 100 passing acceptance tests. The configuration 
 - `build_config` builds the dict that holds every constant of a run, and `config_sha` takes its sha over every field except its own.
 - `freeze` writes the configuration once and returns its sha. `is_empty` says whether a decision field is still unset.
 - `verify_frozen` checks the frozen file against its own sha and against what this run would use.
-- `frozen_path` is `src/conf/semdup-frozen-1.json` under the project root. `live_config` builds the configuration from the decided values in `frozen.py`, the judge's prompt parts and the scrub list of the tool tokens and arm labels.
+- `frozen_path` is `src/conf/semdup-frozen-2.json` under the project root. `live_config` builds the configuration from the decided values in `frozen.py`, the judge's prompt parts and the scrub list of the tool tokens and arm labels.
 - `frozen.main` freezes `live_config` once and prints the path and sha. It raises `CONFIG_ALREADY_FROZEN` when the file exists.
 - Inputs come from [[semdup-judge-and-pipeline]].
