@@ -183,7 +183,7 @@ async def trace_all( needs, ctx, ledger, root, model, checker_commit, index_sha=
         - the probes run through run_parallel, so a failure stops the pending ones and the finished records stay in the ledger
 
     Raises:
-        - NeedsetError BAD_NEED for a smoke need, a need that is not final, a set with no matched need, or an empty source commit, index sha or checker commit, before any call
+        - NeedsetError BAD_NEED for a smoke need, a need that is not final, a set with no matched need, or an empty source commit, index sha or checker commit, or an index sha of none, before any call
     """
     for n in needs:
         if "smoke" in n or n[ "status" ] != "final": raise er.NeedsetError( er.BAD_NEED, f"{n[ 'id' ]}: only a final, non-smoke need is traced" )
@@ -191,6 +191,7 @@ async def trace_all( needs, ctx, ledger, root, model, checker_commit, index_sha=
     index_sha = rt.prepare( ctx )[ 2 ] if index_sha is None else index_sha
     for name, value in ( ( "checker_commit", checker_commit ), ( "index_sha", index_sha ) ) + tuple( ( f"{n[ 'id' ]} source_commit", n[ "source_commit" ] ) for n in needs ):
         if not isinstance( value, str ) or not value.strip(): raise er.NeedsetError( er.BAD_NEED, f"{name} must be a non-empty string" )
+    if index_sha.strip().lower() == "none": raise er.NeedsetError( er.BAD_NEED, "index_sha must name a built index, not the placeholder none" )
     version = trace_version()
     where   = index_locator( ctx ) if where is None else where
 

@@ -237,7 +237,7 @@ def test_a_changed_checker_commit_index_sha_or_source_commit_is_a_ledger_miss( t
 
 def test_an_empty_checker_commit_index_sha_or_source_commit_is_refused_before_any_call( tmp_path ):
     needs, w = matched_set()
-    for kwargs in ( { "commit": "" }, { "commit": None }, { "sha": " " } ):
+    for kwargs in ( { "commit": "" }, { "commit": None }, { "sha": " " }, { "sha": "none" }, { "sha": " None " } ):
         with pytest.raises( er.NeedsetError ) as e: run_all( needs, w, make_ledger( tmp_path ), **kwargs )
         assert e.value.code == er.BAD_NEED
     with pytest.raises( er.NeedsetError ) as e: run_all( [ dict( needs[ 0 ], source_commit="" ) ], w, make_ledger( tmp_path ) )
