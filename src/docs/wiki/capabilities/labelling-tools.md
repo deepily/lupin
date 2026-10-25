@@ -20,9 +20,9 @@ pins:
 # Blind labelling tools
 Two human reviewers label items without seeing the model's verdict or each other's label. The same format serves the need-set labelling and the duplicate checker.
 - `make_item` builds an item, a need with its proposed key or a pair of definitions, and `validate_item` checks one against the `labelling-item-1` format.
-- `export_packets` writes one blind packet per reviewer at the path `packet_path` gives. `blind_form` strips an item to what a reviewer may see.
+- `export_packets` writes one blind packet per reviewer at the path `packet_path` gives. `blind_form` validates an item and returns only its id, type and payload. It raises `PACKET_LEAK` naming any extra field, and strips nothing.
 - `seeded_order` orders the items for the next reviewer, and `read_labels` reads back the labels one reviewer sent.
 - `paired` joins two reviewers' labels by item. `cohen_kappa` and `agreement_report` measure how far they agree.
 - `differs` says whether two labels of one item disagree on the choice or the symbols. `disputes` lists the items the reviewers did not settle.
 - `resolve` gives every item its final label. `LabellingError` carries a stable code for each failure.
-- The package imports neither the reuse checker nor the need-set tools. [[semdup-proof-run]] uses it too.
+- The package imports neither the reuse checker nor the need-set tools. No `semdup` module imports it yet.

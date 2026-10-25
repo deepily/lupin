@@ -18,7 +18,7 @@ The proof run judges a closed pool twice, compares with the human labels and the
 - `proof_run` runs the proof once and keeps its record. `next_number` returns the number of the next record in the folder, counting from 1.
 - `append_ledger` adds one line to the proof ledger without touching what is there.
 - `build_pool` assembles the closed pool the proof judges. `label_key` returns the key of an unordered pair of definition ids.
-- `resolve_label` settles one pair's label from the two reviewers ([[labelling-tools]]).
+- `resolve_label` settles one pair's label from the two reviewers' booleans. It needs a ruling on a disagreement, and raises `ValueError` without one.
 - `candidate_pairs` collects candidate duplicate pairs in the monolith script from three sources, each tagged with its source.
 - `assemble_pairs` checks the tags and returns the list in a fixed order.
 - `blob_sha` returns a file's git blob sha, so a pair list is pinned to one version. `check_pin` refuses a monolith that is not the pinned version.
