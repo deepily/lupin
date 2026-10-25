@@ -17,6 +17,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.auth.jwt.jwtEmail@49e0308e6c
   - src.lupin_app.static.js.multiplexer.auth.jwt.jwtRoles@ca1e63045d
   - src.lupin_app.static.js.multiplexer.auth.jwt.jwtSub@d72e3eaf04
+  - src.lupin_app.static.js.multiplexer.auth.jwt.stringClaim@5e2930b45b
 ---
 # Web client auth and API client
 
@@ -26,4 +27,4 @@ Token handling, the sign-in guard and the API client of the multiplexer page. [[
 - `ApiClient.ts`. `ApiError`: The error thrown when the server answers with a non-2xx status. `ApiClientImpl`: Sends authenticated JSON requests to the server's API with a timeout. `createApiClient`: Build the API client for one base URL and auth manager.
 - `AuthManager.ts`. `NavigatorLockManager`: Lock manager backed by the browser's navigator.locks, shared across tabs. `ChainMutexLockManager`: A lock manager for places without `navigator.locks`, such as tests. `AuthManagerImpl`: The `AuthManager` behind `createAuthManager`. `createAuthManager`: Build an auth manager.
 - `authGuard.ts`. `redirectToLoginIfUnauthenticated`: Send a visitor with no stored access token to the login page, then report whether it did. `logout`: Clear the stored tokens and go to the login page, with no `?redirect=`.
-- `jwt.ts`. `decodeSegment`: Decodes one base64url segment to a UTF-8 string. `decodeJwtClaims`: Read the claims object from a JWT's payload segment, or return null if it is malformed. `jwtExpiryMs`: The token's `exp` claim in milliseconds since the epoch. `jwtEmail`: The token's `email` claim, or null when it is missing, empty or the token is malformed. `jwtRoles`: The string entries of the token's `roles` claim. `jwtSub`: The token's `sub` claim, which holds the user id.
+- `jwt.ts`. `decodeSegment`: Decodes one base64url segment to a UTF-8 string. `decodeJwtClaims`: Read the claims object from a JWT's payload segment, or return null if it is malformed. `jwtExpiryMs`: The token's `exp` claim in milliseconds since the epoch. `jwtEmail`: The token's `email` claim, or null when it is missing, empty or the token is malformed. `jwtRoles`: The string entries of the token's `roles` claim. `jwtSub`: The token's `sub` claim, which holds the user id. `stringClaim`: A non-empty string claim, `email` or `sub`, or null when it is missing, empty or not a string.
