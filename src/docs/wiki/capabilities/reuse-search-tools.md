@@ -11,7 +11,7 @@ pins:
   - lupin_mcp.reuse_tools.sweep@6b56c2af23
   - lupin_mcp.reuse_tools.LiveJevTransport.post@05ba74d3cf
   - cosa.repo.symindex.verdict.decide@9e23bddf00
-  - lupin_mcp.reuse_call_log_middleware.ReuseCallLogMiddleware.on_call_tool@40f231fdab
+  - lupin_mcp.reuse_call_log_middleware.ReuseCallLogMiddleware@f56d5fddbb
 ---
 # Reuse search tools
 
