@@ -11,6 +11,8 @@ These tests drive its --list mode on the tracked tree, which prints the selectio
 import os
 import subprocess
 
+import pytest
+
 import cosa.utils.util as cu
 
 PROJECT_ROOT = cu.get_project_root()
@@ -24,8 +26,11 @@ BY_NAME      = "src/tests/unit/test_reuse_needset_census.py"
 
 
 def listing():
-    """Return the lines the runner selects, run on the tracked tree."""
-    done = subprocess.run( [ "bash", RUNNER, "--list" ], capture_output=True, text=True, timeout=120, cwd=PROJECT_ROOT )
+    """Return the lines the runner selects; a runner that ignores --list fails in 30 seconds."""
+    try:
+        done = subprocess.run( [ "bash", RUNNER, "--list" ], capture_output=True, text=True, timeout=30, cwd=PROJECT_ROOT )
+    except subprocess.TimeoutExpired:
+        pytest.fail( "the runner did not stop at --list" )
     assert done.returncode == 0, done.stdout + done.stderr
     return done.stdout.splitlines()
 

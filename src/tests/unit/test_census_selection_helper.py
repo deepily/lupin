@@ -49,6 +49,15 @@ except ImportError:
 finally:
     def test_every_guard_in_a_finally(): pass
 
+with scratch():
+    def test_every_guard_in_a_with(): pass
+
+for _ in ():
+    def test_every_guard_in_a_for(): pass
+
+while False:
+    def test_every_guard_in_a_while(): pass
+
 
 def test_outer():
     def test_every_nested_in_a_function(): pass
@@ -64,6 +73,8 @@ def test_every_module_level_guard(): pass
     ( "src/tests/unit/deploy/test_x_pins.py",            True ),
     ( "src/tests/unit/test_x_pinned_y.py",               True ),
     ( "src/tests/unit/test_a_pin.py",                    True ),
+    ( "src/tests/unit/test_xpins.py",                    True ),      # pins without a _pin before it
+    ( "src/tests/unit/test_foopinned.py",                True ),      # pinned without a _pin before it
     ( "src/tests/unit/test_ordinary.py",                 False ),
     ( "src/tests/unit/test_every.py",                    False ),     # the rule asks for test_every_, with its underscore
     ( "src/tests/unit/helper_census.py",                 False ),     # not a test_ file
@@ -77,7 +88,7 @@ def test_guard_ids_lists_each_test_every_function_through_classes_and_compound_s
     ids = cs.guard_ids( "t.py", SOURCE )
     assert ids == [ "t.py::test_every_module_level_guard", "t.py::test_every_async_guard", "t.py::TestHolder::test_every_method_guard",
                     "t.py::TestHolder::TestInner::test_every_inner_guard", "t.py::test_every_guard_under_an_if", "t.py::test_every_guard_under_an_else", "t.py::test_every_guard_in_a_handler",
-                    "t.py::test_every_guard_in_a_finally" ]
+                    "t.py::test_every_guard_in_a_finally", "t.py::test_every_guard_in_a_with", "t.py::test_every_guard_in_a_for", "t.py::test_every_guard_in_a_while" ]
 
 
 def test_guard_ids_of_a_file_with_none_is_empty_and_a_syntax_warning_is_not_printed():
@@ -150,7 +161,11 @@ def add( tree, rel, text ):
 
 
 def runner( tree, *args ):
-    done = subprocess.run( [ "bash", str( tree / "src" / "tests" / "run-census-guards.sh" ), *args ], capture_output=True, text=True, timeout=120 )
+    """Run the runner copy; one that does not stop at --list fails in 30 seconds."""
+    try:
+        done = subprocess.run( [ "bash", str( tree / "src" / "tests" / "run-census-guards.sh" ), *args ], capture_output=True, text=True, timeout=30 )
+    except subprocess.TimeoutExpired:
+        pytest.fail( "the runner did not stop at --list" )
     return done.returncode, done.stdout, done.stderr
 
 
