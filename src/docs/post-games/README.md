@@ -10,6 +10,7 @@ File naming: `yyyy.mm.dd-<slug>-post-game.md`. Frontmatter names the manager. Th
 
 | Date | Retro | Manager | Tier | Tags |
 |---|---|---|---|---|
+| 25 Oct 2026 | [Plan 1, ratchet and handover](v0.2.2/2026.10.25-plan-1-phase-7-ratchet-post-game.md) | Mr. Radio 🦉 | lite | plan-close · census-first · two-of-four-items-already-met |
 | 19 Oct 2026 | [Cheech's reuse-refresh and wiki-rollup day](v0.2.2/2026.10.19-cheech-reuse-refresh-and-wiki-rollup-post-game.md) | Cheech 🌿 | lite | manager-solo · classifier-blocked-landing · cherry-pick-range-order · host-layout-gaps · plan-looked-done · missing-phase-row · jargon-titles · long-user-ask-timeouts |
 | 19 Oct 2026 | [Mr. Radio's twin-refactor crew](v0.2.2/2026.10.19-mr-radio-twin-refactor-crew-post-game.md) | Mr. Radio 🦉 | full | crew-run · overnight · five-batches · no-roundtable · duplicate-of-a-landed-helper · widened-guard-stayed-green · unreviewed-commit-found-at-landing · long-idle-seats-unreachable · reaped-without-memento · status-notify-buried-a-gate |
 | 15 Oct 2026 | [Mr. Radio's overnight and day crews](v0.2.2/2026.10.15-mr-radio-overnight-and-day-crews-post-game.md) | Mr. Radio 🦉 | full | crew-run · overnight · across-three-respins · no-roundtable · review-ran-only-changed-files · old-row-already-fixed · rebase-onto-moved-main · condensed-dm-lost-addressing · archived-branch-already-landed |
