@@ -19,7 +19,7 @@ Pure functions behind the reuse check's verdict. `decide`, the overlap rule, is 
 ## The provides rule
 - `malformed_reason_provides( provides, coverage )` checks a Noul number in [0, 1] and four Score probabilities keyed `0` to `3`. Each is in [0, 1], and they sum to 1 within 0.02. It reports the number's fault first.
 - `decide_provides( answers, expected_ids, failed_ids, flags )` returns the same keys as `decide`. Defaults: threshold 0.5, reuse 0.7, floor 0.3, coverage 0.5, shortlist 10.
-- `REUSE` when an entry has provides at or above 0.7 and no gap cause holds. `EXTEND` when no entry reaches 0.7 and one has provides from 0.3 up to 0.7 and coverage (levels 2 and 3) at or above 0.5. `LOW_CONFIDENCE` holds when neither applies and an entry sits in the provides band or has coverage at or above 0.5. That answers `UNCERTAIN_READ_SOURCE`. A complete sweep with no entry at the floor holds `NO_MATCH` alone, and answers the same verdict.
+- `REUSE` when an entry has provides at or above 0.7 and no gap cause holds. `EXTEND` when no entry reaches 0.7 and one has provides from 0.3 up to 0.7 and coverage (levels 2 and 3) at or above 0.5. `LOW_CONFIDENCE` holds when neither applies and an entry sits in the provides band or has coverage at or above 0.5. That answers `UNCERTAIN_READ_SOURCE`. When neither rule is met and no other cause holds, `NO_MATCH` holds alone and the verdict is the same.
 - Malformed, duplicate or unknown-id answers are reported as `MALFORMED_ANSWER` and never half used. Failed or unaccounted calls, and a sweep with no answers, give `CALL_FAILED`, so an empty sweep is never `NO_MATCH`.
 - Any flag outside the four pipeline flags raises `ValueError`.
 
