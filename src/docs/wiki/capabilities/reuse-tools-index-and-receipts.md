@@ -8,8 +8,8 @@ pins:
   - lupin_mcp.reuse_tools.page_candidates@e79a42cea6
   - lupin_mcp.reuse_tools.pages_digest@482ad52b6b
   - lupin_mcp.reuse_tools.l0_lines@c26117957c
-  - lupin_mcp.reuse_tools.index_sha@e9746cfc07
-  - lupin_mcp.reuse_tools.save_snapshot@019eb72d4d
+  - lupin_mcp.reuse_tools.index_sha@8ba0304f41
+  - lupin_mcp.reuse_tools.save_snapshot@904c9675b2
   - lupin_mcp.reuse_tools.load_snapshot@e6cb174f8c
   - lupin_mcp.reuse_tools.store_receipt@158c25f8a3
   - lupin_mcp.reuse_tools.load_receipt@2b70d7341f
@@ -26,8 +26,8 @@ How a reuse question finds its pages, freezes the index it judged, and stores th
 - `page_candidates` returns one entry per index bullet whose page exists and pins at least one indexed symbol. The scope adds the file of each pin the line does not already cover. A line the egress screen would drop is left out.
 
 ## Index and snapshot
-- `l0_lines` returns the wiki index lines. `index_sha` hashes the symbols, those lines and the page pins; every receipt records it. `pages_digest` hashes each page's slug and scope.
-- `save_snapshot` stores the searchable listing a call judged, public and private, compressed and written once. It is not filtered by language; the receipt's language is applied again at replay.
+- `l0_lines` returns the wiki index lines. `index_sha` hashes the symbols, those lines and the page pins, plus the tests hash when test records are read. Every receipt records it. `pages_digest` hashes each page's slug and scope.
+- `save_snapshot` stores the searchable listing a call judged, public and private, compressed and written once. A call that read test records stores them after the others. It is not filtered by language; the receipt's language is applied again at replay.
 - `load_snapshot` returns the entries and index lines. It raises `SNAPSHOT_MISSING` for no file and `SNAPSHOT_CORRUPT` for a damaged one or an entry short of its fields.
 
 ## Receipts
