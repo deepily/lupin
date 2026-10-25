@@ -10,13 +10,23 @@ from tests.unit.symindex_helpers import make_lupin_repo, make_repo
 
 def test_a_lupin_tree_reads_the_widened_script_roots_that_exist( tmp_path ):
     root = make_lupin_repo( tmp_path )
-    assert sp.LUPIN_JS_DIRS == ( "src/lupin_app/static/js", "src/scripts", "src/cosa/repo/symindex", "src/conf" )
-    assert sp.spec_for( root ).js_roots == ()                                          # none of the four exists in the fixture
+    assert sp.LUPIN_JS_DIRS == ( "src/lupin_app/static/js", "src/scripts", "src/cosa/repo/symindex", "src/conf", "src/lupin_app/static/html" )
+    assert sp.spec_for( root ).js_roots == ()                                          # none of the five exists in the fixture
     for d in ( "src/scripts", "src/conf" ): ( root / d ).mkdir( parents=True )
     ( root / "src" / "scripts" / "tool.mjs" ).write_text( "export function tool() { return 1; }\n", encoding="utf-8" )
     spec = sp.spec_for( root )
     assert [ p.relative_to( root.resolve() ).as_posix() for p in spec.js_roots ] == [ "src/scripts", "src/conf" ]
     assert "tool.mjs" in [ p.name for p in sp.all_files( spec ) ]
+
+
+def test_a_lupin_tree_indexes_a_classic_page_script_under_static_html( tmp_path ):
+    root = make_lupin_repo( tmp_path )
+    page = root / "src" / "lupin_app" / "static" / "html" / "auth" / "js"
+    page.mkdir( parents=True )
+    ( page / "auth.js" ).write_text( "function login() { return 1; }\n", encoding="utf-8" )
+    spec = sp.spec_for( root )
+    assert [ p.relative_to( root.resolve() ).as_posix() for p in spec.js_roots ] == [ "src/lupin_app/static/html" ]
+    assert "auth.js" in [ p.name for p in sp.all_files( spec ) ]
 
 
 def test_skip_rule_names_the_directory_or_the_suffix_and_skipped_follows_it():

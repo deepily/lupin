@@ -10,7 +10,7 @@ import pathlib
 import subprocess
 
 LUPIN_PY_PACKAGES = ( "cosa", "lupin_cli", "lupin_mcp", "lupin_app", "lupin_arbiter_app", "lupin_model_server", "scripts" )
-LUPIN_JS_DIRS     = ( "src/lupin_app/static/js", "src/scripts", "src/cosa/repo/symindex", "src/conf" )          # the script roots of a lupin tree; test_script_files_census names what is left out
+LUPIN_JS_DIRS     = ( "src/lupin_app/static/js", "src/scripts", "src/cosa/repo/symindex", "src/conf", "src/lupin_app/static/html" )          # the script roots of a lupin tree; test_script_files_census names what is left out
 SKIP_PARTS        = frozenset( { "tests", "migrations", ".venv", "vendor", "node_modules", "rnd", "__pycache__", ".git" } )
 DART_SKIP_PARTS   = frozenset( { "generated", ".dart_tool", "build" } )
 SKIP_SUFFIXES     = ( ".d.ts", ".min.js", ".g.dart", ".freezed.dart" )
@@ -90,7 +90,7 @@ def spec_for( root ):
     Build the IndexSpec for a repository root.
 
     Ensures:
-        - a lupin tree indexes the lupin packages and the script roots of LUPIN_JS_DIRS (the web client's js directory, src/scripts, the index's own extractors and src/conf)
+        - a lupin tree indexes the lupin packages and the script roots of LUPIN_JS_DIRS (the web client's js directory, src/scripts, the index's own extractors, src/conf and the admin and auth page scripts under static/html)
         - a Flutter tree (pubspec.yaml + lib/) indexes lib/ as Dart
         - any other tree indexes every Python, JavaScript and TypeScript file under the root
     """
