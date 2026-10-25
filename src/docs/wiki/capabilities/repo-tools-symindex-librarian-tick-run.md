@@ -2,7 +2,8 @@
 capability: repo-tools-symindex-librarian-tick-run
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.symindex.librarian_tick.run_tick@ef6c8b8836
+  - cosa.repo.symindex.librarian_tick.run_tick@8aff424b3a
+  - cosa.repo.symindex.librarian_tick.run_mobile@59bfbe1b4b
   - cosa.repo.symindex.librarian_tick.due@da2c1edfb5
   - cosa.repo.symindex.librarian_tick.read_state@dcc7be473b
   - cosa.repo.symindex.librarian_tick.write_state@4ba0748bb6
@@ -10,7 +11,7 @@ pins:
   - cosa.repo.symindex.librarian_tick.LiveStore@e974357b6b
   - cosa.repo.symindex.librarian_tick.notify_owner@56aee637b7
   - cosa.repo.symindex.librarian_tick.data_dir@1dc90370b7
-  - cosa.repo.symindex.librarian_tick.main@574ecf78b7
+  - cosa.repo.symindex.librarian_tick.main@0351f4d1dd
 ---
 # Wiki librarian tick: one run
 
@@ -24,9 +25,11 @@ The daily job that lints the wiki, queues the findings and exports the reuse mis
 - It is due when the local hour is 10 or later and the last finished run was on another day (`due`). `--force` skips that check.
 - It refuses with exit 1 when the wiki has no capability page or the index holds no symbols. An empty lint read would clear every open rollup.
 - Otherwise it ensures the index, lints, calls `librarian.sync` with the index header's `symbols_sha`, reads every row including done and dropped, and writes the misses file. The state file gets today's date only after the sync and the miss export both finished.
+- A `mobile` callable, if given, runs after the lupin export. If it fails, the tick exits 1 and leaves the state as it was, so the next tick runs both corpora again.
 - A vector status check, if given, puts its stale flag and reasons in the summary. An `OSError` or `ValueError` from it is logged and does not fail the tick.
 
 ## Files and helpers
+- `run_mobile` lints the lupin-mobile wiki against its Dart index and syncs its rollups under their own key. It refuses a wiki with no capability page or an index with no symbols. Nothing is written inside the mobile repo.
 - `data_dir` is `<fleet data root>/reuse-review/librarian`. It holds `tick-state.json`, `pending.jsonl`, `librarian.log` and `misses.jsonl`.
 - `read_state` returns an empty dict for an absent or unreadable file. `write_state` writes by temporary name and rename. `make_logger` appends stamped lines and drops one it cannot write.
 - `LiveStore` is the adapter over the task-store client. Its reads follow pages of 500 and fail on a truncated read; `query` also reads held rows, `query_all` adds done and dropped ones. Creates are stamped with the actor `wiki-librarian tick`.

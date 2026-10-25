@@ -5,7 +5,8 @@ pins:
   - cosa.repo.symindex.librarian_tick.read_value@648038d6db
   - cosa.repo.symindex.librarian_tick.read_create_cap@07366a14f6
   - cosa.repo.symindex.librarian_tick.read_enabled@48426a4325
-  - cosa.repo.symindex.librarian_tick.read_persona@49b37e40f0
+  - cosa.repo.symindex.librarian_tick.read_persona@bfb1570e2a
+  - cosa.repo.symindex.librarian_tick.read_mobile_corpus@3e5c46846d
   - cosa.repo.symindex.librarian_tick.cron_lines_for@f736281e58
   - cosa.repo.symindex.librarian_tick.cron_lines@ab28a46f8d
   - cosa.repo.symindex.librarian_tick.merge_lines@029adb24e5
@@ -22,7 +23,8 @@ How the tick ([[repo-tools-symindex-librarian-tick-run]]) reads its settings and
 - `read_value( key, reader=None, errors=None )` reads one key from the configuration file fresh. It returns None for an absent or unreadable key, appends a read failure's message to `errors` and never raises.
 - `read_enabled` is true only for `true`, `1`, `yes` or `on` in any case. Anything else, including an unreadable file, is false.
 - `read_create_cap` takes `WIKI_LIBRARIAN_MAX_CREATES` from the environment when it is a positive integer, then the key `wiki librarian max creates per tick`, then 10.
-- `read_persona` returns the stripped value or `cheech`. The keys are `wiki librarian owner persona` and `wiki librarian accountable manager`.
+- `read_persona( key, reader, default )` returns the stripped value or the default, `cheech` unless given. The keys are `wiki librarian owner persona` and `wiki librarian accountable manager`.
+- `read_mobile_corpus` reads the lupin-mobile settings. A blank `wiki librarian mobile repo root` defaults to the `lupin-mobile` folder beside the checkout, and a missing folder returns None. The owner defaults to `tiffany`.
 
 ## Cron lines
 - `cron_lines( root, python, log_path )` returns a daily line at `17 10 * * *` and an `@reboot sleep 120 &&` line. Each ends with the tag `# wiki-librarian-tick`.
