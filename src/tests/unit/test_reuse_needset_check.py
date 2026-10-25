@@ -58,14 +58,14 @@ def test_a_reply_with_the_two_fields_and_a_one_line_note_is_read( text ):
 @pytest.mark.parametrize( "text", [ None, "", "agree", "agree because it adds", reply() + " thanks", "yes: " + reply(), json.dumps( [ "agree" ] ), json.dumps( { "result": "agree" } ),
                                     json.dumps( { "result": "agree", "note": "ok", "extra": 1 } ), json.dumps( { "result": "maybe", "note": "ok" } ),
                                     json.dumps( { "result": "agree", "note": "" } ), json.dumps( { "result": "agree", "note": "  " } ), json.dumps( { "result": "agree", "note": 5 } ),
-                                    json.dumps( { "result": "agree", "note": "two\nlines" } ), json.dumps( { "result": "agree", "note": "x" * ( check.NOTE_LIMIT + 1 ) } ) ] )
+                                    json.dumps( { "result": "agree", "note": "two\nlines" } ), json.dumps( { "result": "agree", "note": "x" * 301 } ) ] )
 def test_any_other_reply_is_unreadable( text ):
     assert check.parse_check( text ) is None
 
 
 def test_a_note_is_trimmed_and_may_be_as_long_as_the_limit():
     assert check.parse_check( json.dumps( { "result": "agree", "note": "  fine  " } ) )[ "note" ] == "fine"
-    assert check.parse_check( json.dumps( { "result": "agree", "note": "x" * check.NOTE_LIMIT } ) ) is not None
+    assert check.parse_check( json.dumps( { "result": "agree", "note": "x" * 300 } ) ) is not None and check.NOTE_LIMIT == 300 and check.CHECK_STAGE == "check"
 
 
 def test_the_matched_prompt_puts_the_need_and_the_keys_between_tags_and_cuts_a_long_key():
@@ -103,7 +103,7 @@ def test_the_mechanical_findings_given_are_kept_on_the_check( tmp_path ):
     assert got[ "check" ][ "mechanical" ] == [ "twin_text_run" ]
 
 
-@pytest.mark.parametrize( "model, drafter_model", [ ( draft.DRAFTER_MODEL, draft.DRAFTER_MODEL ), ( "claude-haiku-5-5", "claude-haiku-5-5" ) ] )
+@pytest.mark.parametrize( "model, drafter_model", [ ( draft.DRAFTER_MODEL, draft.DRAFTER_MODEL ), ( "claude-haiku-5-5", "claude-haiku-5-5" ), ( draft.DRAFTER_MODEL, "claude-haiku-5-5" ) ] )
 def test_the_checker_may_not_be_the_drafter_and_nothing_is_asked_first( tmp_path, model, drafter_model ):
     ask = Asker( [ reply() ] )
     with pytest.raises( er.NeedsetError ) as e:
@@ -192,3 +192,21 @@ def test_the_parallel_count_sets_how_many_needs_are_checked_at_once( tmp_path ):
         peak[ 0 ] = 0
         asyncio.run( check.check_needs( needs, ask, draft.SharedLedger( ledger( tmp_path, name ) ), CHECKER, lambda n: { "key_texts": [ "x" ] }, parallel ) )
         assert peak[ 0 ] == parallel
+
+
+def test_the_tag_suffix_is_never_one_that_the_need_or_the_material_contains( monkeypatch ):
+    draws = iter( [ "aaaaaaaa", "bbbbbbbb", "cccccccc", "dddddddd" ] )
+    monkeypatch.setattr( check.model_transport.secrets, "token_hex", lambda n: next( draws ) )
+    matched_prompt = check.matched_prompt( "a need that mentions aaaaaaaa", [ "def key(): pass" ] )
+    assert "<need_bbbbbbbb>" in matched_prompt and "aaaaaaaa</need" not in matched_prompt
+    none_prompt = check.none_check_prompt( "a need that mentions cccccccc", [ "pkg.a.f() — Adds." ] )
+    assert "<need_dddddddd>" in none_prompt
+    draws = iter( [ "eeeeeeee", "ffffffff" ] )
+    monkeypatch.setattr( check.model_transport.secrets, "token_hex", lambda n: next( draws ) )
+    assert "<hits_ffffffff>" in check.none_check_prompt( "plain need", [ "a hit that mentions eeeeeeee" ] )
+
+
+def test_a_hit_line_over_the_body_limit_is_cut_in_the_nothing_prompt():
+    long = "z" * ( check.keys.BODY_LIMIT + 40 )
+    prompt = check.none_check_prompt( SENTENCE, [ long ] )
+    assert long not in prompt and "[cut at" in prompt
