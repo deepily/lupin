@@ -10,6 +10,7 @@ pins:
   - cosa.rest.routers.speakerphone.set_speakerphone_endpoint@28d19bf3e7
   - lupin_mcp.persona_normalization.canonical_persona_key@2d2cdf3a9b
   - lupin_mcp.persona_normalization.normalize_for_match@49bc823e64
+  - lupin_mcp.persona_normalization.persona_slug@b783b12a6b
   - lupin_mcp.commons_persona_matcher.match_persona@62e4b1e574
   - lupin_mcp.commons_llm_disambiguator.CommonsLlmDisambiguator.disambiguate@015c52a9b8
 ---
