@@ -351,7 +351,7 @@ def test_the_policy_word_names_the_band_state():
 def spy_policies( monkeypatch ):
     """Record the policy each lookup and replay context carries, then run the real code."""
     seen, real_need, real_replay = [], rt._need_impl, rt.replay_impl
-    monkeypatch.setattr( rt, "_need_impl", lambda need, ex, ctx, *a: ( seen.append( ( "lookup", ctx.policy ) ), real_need( need, ex, ctx, *a ) )[ 1 ] )
+    monkeypatch.setattr( rt, "_need_impl", lambda need, ex, ctx, *a, **kw: ( seen.append( ( "lookup", ctx.policy ) ), real_need( need, ex, ctx, *a, **kw ) )[ 1 ] )
     monkeypatch.setattr( rt, "replay_impl", lambda rid, ctx, repeat=0: ( seen.append( ( "replay", ctx.policy ) ), real_replay( rid, ctx, repeat=repeat ) )[ 1 ] )
     return seen
 

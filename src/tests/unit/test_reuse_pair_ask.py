@@ -22,7 +22,7 @@ def pair_ctx( env, **kw ): return packed_ctx( env, fake.PairFake( entries_of( en
 
 def test_a_free_text_sweep_in_the_new_question_leaves_the_member_out_and_names_the_question( env ):
     ctx = pair_ctx( env )
-    out = rt.sweep_need_impl( NEED, "cosa.mathx.add", ctx, question="provides" )
+    out = rt.sweep_need_impl( NEED, "cosa.mathx.add", ctx, question="provides", language="all" )
     rec = receipt_of( env, out )
     assert out[ "status" ] == "ok" and rec[ "question" ] == "provides" and rec[ "sweep_only" ] is True and rec[ "exclude_id" ] == "cosa.mathx.add"
     assert "cosa.mathx.add" not in [ i for r in rec[ "requests" ] for i in r[ "ids" ] ] and out[ "verdict" ] == "REUSE"
@@ -30,7 +30,7 @@ def test_a_free_text_sweep_in_the_new_question_leaves_the_member_out_and_names_t
 
 def test_the_old_free_text_sweep_is_unchanged_by_the_new_argument( env ):
     from tests.unit.test_reuse_pack_route import PackedFake
-    out = rt.sweep_need_impl( NEED, "cosa.mathx.add", packed_ctx( env, PackedFake( NEED ) ) )
+    out = rt.sweep_need_impl( NEED, "cosa.mathx.add", packed_ctx( env, PackedFake( NEED ) ), language="all" )
     assert "question" not in receipt_of( env, out )
 
 

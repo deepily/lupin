@@ -97,25 +97,25 @@ def N( tag ): return f"{NEED} [{tag}]"
 
 def test_reuse_extend_and_new_verdicts_and_the_request_shape( env ):
     fake = FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) }, need=N( "reuse" ) )
-    r = rt.check_exists_impl( N( "reuse" ), ctx_for( env, fake ) )
+    r = rt.check_exists_impl( N( "reuse" ), ctx_for( env, fake ), language="all" )
     assert ( r[ "status" ], r[ "verdict" ], r[ "cause" ] ) == ( "ok", "REUSE", None )
     assert [ s[ "id" ] for s in r[ "shortlist" ] ] == [ "cosa.feeds.parse_feed" ] and r[ "shortlist" ][ 0 ][ "text" ] == FEEDS_TEXT
     assert fake.unexpected == [] and len( fake.seen ) == 3 and r[ "stats" ][ "calls" ] == 3
-    ext = rt.check_exists_impl( N( "extend" ), ctx_for( env, FakeJev( { FEEDS_TEXT: resp( 0.02, 0.93, 0.05 ) }, need=N( "extend" ) ) ) )
+    ext = rt.check_exists_impl( N( "extend" ), ctx_for( env, FakeJev( { FEEDS_TEXT: resp( 0.02, 0.93, 0.05 ) }, need=N( "extend" ) ) ), language="all" )
     assert ext[ "verdict" ] == "EXTEND"
-    new = rt.check_exists_impl( N( "new" ), ctx_for( env, FakeJev( need=N( "new" ) ) ) )
+    new = rt.check_exists_impl( N( "new" ), ctx_for( env, FakeJev( need=N( "new" ) ) ), language="all" )
     assert ( new[ "verdict" ], new[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "NO_MATCH" ) and new[ "shortlist" ] == [] and len( new[ "nearest" ] ) == 3    # NO_MATCH still names what to read
 
 
 def test_a_client_that_builds_the_request_wrongly_fails_instead_of_getting_an_answer( env ):
     wrong = FakeJev( instr="a different instruction" )                                              # the fake expects another body
-    r = rt.check_exists_impl( NEED, ctx_for( env, wrong ) )
+    r = rt.check_exists_impl( NEED, ctx_for( env, wrong ), language="all" )
     assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "CALL_FAILED" ) and len( wrong.unexpected ) == 3 * ( rt.RETRIES + 1 )
 
 
 def _uncertain( env, tag, answers=None, **kw ):
     need = N( tag )
-    return rt.check_exists_impl( need, ctx_for( env, FakeJev( answers, need=need ), **kw ) )
+    return rt.check_exists_impl( need, ctx_for( env, FakeJev( answers, need=need ), **kw ), language="all" )
 
 
 def test_each_uncertain_path_asserts_its_cause_not_only_the_verdict( env, tmp_path, monkeypatch ):
@@ -125,24 +125,24 @@ def test_each_uncertain_path_asserts_its_cause_not_only_the_verdict( env, tmp_pa
     assert r[ "cause" ] == "MALFORMED_ANSWER" and r[ "malformed" ] == [ { "id": "cosa.feeds.parse_feed", "reason": "sum_not_one" } ]
     assert _uncertain( env, "shape", { FEEDS_TEXT: { "unexpected": "shape" } } )[ "malformed" ][ 0 ][ "reason" ] == "not_a_mapping"      # response without the expected keys
     half = FakeJev( need=N( "half" ) ); half.table.pop( next( iter( half.table ) ) )
-    assert rt.check_exists_impl( N( "half" ), ctx_for( env, half ) )[ "cause" ] == "CALL_FAILED"
+    assert rt.check_exists_impl( N( "half" ), ctx_for( env, half ), language="all" )[ "cause" ] == "CALL_FAILED"
     nokey = ctx_for( env, None )
-    r = rt.check_exists_impl( N( "nokey" ), nokey )
+    r = rt.check_exists_impl( N( "nokey" ), nokey, language="all" )
     assert r[ "cause" ] == "KEY_UNREADABLE" and r[ "shortlist" ] == [] and r[ "stats" ][ "calls" ] == 0
     bare = tmp_path / "bare"; bare.mkdir()
-    r = rt.check_exists_impl( NEED, rt.ReuseContext( bare, tmp_path / "d2", transport=FakeJev() ) )
+    r = rt.check_exists_impl( NEED, rt.ReuseContext( bare, tmp_path / "d2", transport=FakeJev() ), language="all" )
     assert r[ "cause" ] == "NOT_LUPIN_TREE" and r[ "stats" ][ "entries" ] == 0
     monkeypatch.setattr( rt.sx_build, "ensure", lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "cannot build" ) ) )
-    assert rt.check_exists_impl( N( "stale" ), ctx_for( env, FakeJev( need=N( "stale" ) ) ) )[ "cause" ] == "INDEX_STALE"
+    assert rt.check_exists_impl( N( "stale" ), ctx_for( env, FakeJev( need=N( "stale" ) ) ), language="all" )[ "cause" ] == "INDEX_STALE"
 
 
 def test_an_incomplete_receipt_never_shadows_the_complete_one_for_the_same_question( env, tmp_path ):
     need    = N( "shadow" )
-    broken  = rt.check_exists_impl( need, ctx_for( env, None ) )
-    healthy = rt.check_exists_impl( need, ctx_for( env, FakeJev( need=need ) ) )
+    broken  = rt.check_exists_impl( need, ctx_for( env, None ), language="all" )
+    healthy = rt.check_exists_impl( need, ctx_for( env, FakeJev( need=need ) ), language="all" )
     assert broken[ "cause" ] == "KEY_UNREADABLE" and ( healthy[ "cause" ], healthy[ "verdict" ] ) == ( "NO_MATCH", "UNCERTAIN_READ_SOURCE" )
     assert broken[ "receipt_id" ] != healthy[ "receipt_id" ]
-    assert rt.check_exists_impl( need, ctx_for( env, None ) )[ "receipt_id" ] == broken[ "receipt_id" ]
+    assert rt.check_exists_impl( need, ctx_for( env, None ), language="all" )[ "receipt_id" ] == broken[ "receipt_id" ]
 
 
 def test_a_missing_index_tool_is_dependency_missing_and_the_sweep_still_runs( env, monkeypatch ):
@@ -150,19 +150,19 @@ def test_a_missing_index_tool_is_dependency_missing_and_the_sweep_still_runs( en
     ( root / "src" / "lupin_app" / "static" / "js" ).mkdir( parents=True ); ( root / "src" / "lupin_app" / "static" / "js" / "a.js" ).write_text( "function f() {}\n", encoding="utf-8" )
     monkeypatch.setattr( sx_build, "find_node", lambda: ( _ for _ in () ).throw( sx_build.DependencyMissing( "node" ) ) )
     fake = FakeJev()
-    r = rt.check_exists_impl( NEED, ctx_for( env, fake ) )
+    r = rt.check_exists_impl( NEED, ctx_for( env, fake ), language="all" )
     assert r[ "cause" ] == "DEPENDENCY_MISSING" and len( fake.seen ) == 3
 
 
 def test_the_receipt_id_changes_with_every_input_including_the_prompt_template( env ):
-    base = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )[ "receipt_id" ]
-    assert base == rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )[ "receipt_id" ]
+    base = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ), language="all" )[ "receipt_id" ]
+    assert base == rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ), language="all" )[ "receipt_id" ]
     other_tpl = dict( rt.PROMPT_TEMPLATE, instructions="A changed prompt." )
-    changed   = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( instr="A changed prompt." ), template=other_tpl ) )[ "receipt_id" ]
+    changed   = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( instr="A changed prompt." ), template=other_tpl ), language="all" )[ "receipt_id" ]
     assert changed != base                                                                           # B1: a new prompt is a new receipt, never a stale answer
-    other_model = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( model="jev-1.14.0" ), model="jev-1.14.0" ) )[ "receipt_id" ]
+    other_model = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( model="jev-1.14.0" ), model="jev-1.14.0" ), language="all" )[ "receipt_id" ]
     assert other_model not in ( base, changed )
-    assert rt.check_exists_impl( "some other need", ctx_for( env, FakeJev( need="some other need" ) ) )[ "receipt_id" ] != base
+    assert rt.check_exists_impl( "some other need", ctx_for( env, FakeJev( need="some other need" ) ), language="all" )[ "receipt_id" ] != base
     base_id = rt.receipt_id( "check_exists", NEED, "abc", "m", rt.vd.POLICY, "t" )
     assert rt.receipt_id( "check_exists", NEED, "abc", "m", { **rt.vd.POLICY, "threshold": 0.6 }, "t" ) != base_id
     assert rt.receipt_id( "fetch_similar", NEED, "abc", "m", rt.vd.POLICY, "t" ) != base_id
@@ -171,22 +171,22 @@ def test_the_receipt_id_changes_with_every_input_including_the_prompt_template( 
 
 
 def test_an_l0_edit_changes_index_sha_and_so_the_receipt( env ):
-    a = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )
+    a = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ), language="all" )
     wiki = env[ 0 ] / "src" / "docs" / "wiki"; wiki.mkdir( parents=True )
     ( wiki / "INDEX.md" ).write_text( "- [[feeds]] parse feeds\n", encoding="utf-8" )
-    b = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )
+    b = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ), language="all" )
     assert a[ "index_sha" ] != b[ "index_sha" ] and a[ "receipt_id" ] != b[ "receipt_id" ]
     ( wiki / "INDEX.md" ).write_text( "- [[feeds]] parse feeds better\n", encoding="utf-8" )
-    assert rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )[ "index_sha" ] not in ( a[ "index_sha" ], b[ "index_sha" ] )
+    assert rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ), language="all" )[ "index_sha" ] not in ( a[ "index_sha" ], b[ "index_sha" ] )
 
 
 def test_a_receipt_is_immutable_shared_and_holds_no_callers_or_times( env ):
-    first = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )
+    first = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ), language="all" )
     path  = env[ 1 ] / "receipts" / f"{first[ 'receipt_id' ]}.json"
     before = path.read_bytes()
     class Boom:
         def post( self, body ): raise AssertionError( "cache must answer" )
-    second = rt.check_exists_impl( NEED, ctx_for( env, Boom() ) )
+    second = rt.check_exists_impl( NEED, ctx_for( env, Boom() ), language="all" )
     assert second[ "receipt_id" ] == first[ "receipt_id" ]
     assert second[ "stats" ] == first[ "stats" ] and second[ "stats" ][ "calls" ] == 3            # the caller reads the stored receipt, not this run's counters
     assert path.read_bytes() == before and len( receipts( env ) ) == 1
@@ -216,14 +216,14 @@ def test_write_once_keeps_the_first_writer_and_reports_it( tmp_path ):
 
 def test_fetch_similar_excludes_the_symbol_itself_and_reports_its_uncertainty( env ):
     fake = FakeJev( need=FEEDS_TEXT, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
-    r = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake ) )
+    r = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake ), language="all" )
     assert r[ "status" ] == "ok" and "verdict" not in r and r[ "uncertain" ] is None
     assert [ s[ "id" ] for s in r[ "shortlist" ] ] == [ "cosa.mathx.add" ] and len( fake.seen ) == 2     # itself is never asked about
     assert all( s[ "candidate" ] != FEEDS_TEXT for s in ( b[ "state" ] for b in fake.seen ) )
-    assert rt.fetch_similar_impl( "cosa.nope", ctx_for( env, FakeJev() ) ) == { "status": "error", "error": "UNKNOWN_ENTRY", "entry": "cosa.nope" }
-    nokey = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, None ) )
+    assert rt.fetch_similar_impl( "cosa.nope", ctx_for( env, FakeJev() ), language="all" ) == { "status": "error", "error": "UNKNOWN_ENTRY", "entry": "cosa.nope" }
+    nokey = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, None ), language="all" )
     assert nokey[ "uncertain" ] == "KEY_UNREADABLE" and nokey[ "shortlist" ] == [] and nokey[ "receipt_id" ] != r[ "receipt_id" ]
-    stale = rt.fetch_similar_impl( "cosa.feeds.parse_feed", rt.ReuseContext( env[ 1 ], env[ 1 ] / "d", transport=FakeJev() ) )     # a directory that is not a lupin tree
+    stale = rt.fetch_similar_impl( "cosa.feeds.parse_feed", rt.ReuseContext( env[ 1 ], env[ 1 ] / "d", transport=FakeJev() ), language="all" )     # a directory that is not a lupin tree
     assert stale[ "uncertain" ] == "NOT_LUPIN_TREE"
 
 
@@ -236,7 +236,7 @@ def test_fetch_similar_resolves_a_private_definition_against_the_whole_index( en
     _add_module( env, "priv", 'def _helper( x ):\n    """Normalise one value."""\n    return x\n' )
     text = "cosa.priv._helper(x) — Normalise one value."
     fake = FakeJev( need=text, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
-    r    = rt.fetch_similar_impl( "cosa.priv._helper", ctx_for( env, fake ) )
+    r    = rt.fetch_similar_impl( "cosa.priv._helper", ctx_for( env, fake ), language="all" )
     assert r[ "status" ] == "ok" and [ s[ "id" ] for s in r[ "shortlist" ] ] == [ "cosa.mathx.add" ]
     assert fake.unexpected == [] and all( b[ "state" ][ "need" ] == text for b in fake.seen )
 
@@ -246,7 +246,7 @@ def test_a_private_definition_is_in_the_snapshot_so_its_receipt_replays_without_
     _add_module( env, "priv", 'def _helper( x ):\n    """Normalise one value."""\n    return x\n' )
     fake = FakeJev( need="cosa.priv._helper(x) — Normalise one value.", answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
     ctx  = ctx_for( env, fake )
-    f    = rt.fetch_similar_impl( "cosa.priv._helper", ctx )
+    f    = rt.fetch_similar_impl( "cosa.priv._helper", ctx, language="all" )
     rep  = rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )
     assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] }
     assert "need_text" not in rep[ "stored" ] and [ s[ "id" ] for s in rep[ "frozen" ][ "shortlist" ] ] == [ "cosa.mathx.add" ]
@@ -264,7 +264,7 @@ def test_replay_of_a_nested_definition_receipt_is_deterministic_and_tamper_evide
     text  = f"{entry}(y) — Normalise one value."
     fake  = FakeJev( need=text, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
     ctx   = ctx_for( env, fake )
-    f     = rt.fetch_similar_impl( entry, ctx )
+    f     = rt.fetch_similar_impl( entry, ctx, language="all" )
     rep   = rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )
     assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] }
     assert rep[ "stored" ][ "need_text" ] == text and [ s[ "id" ] for s in rep[ "frozen" ][ "shortlist" ] ] == [ "cosa.mathx.add" ]
@@ -273,18 +273,18 @@ def test_replay_of_a_nested_definition_receipt_is_deterministic_and_tamper_evide
     doc[ "need_text" ] = f"{entry}(y) — Something else."
     path.write_text( json.dumps( doc ), encoding="utf-8" )
     assert rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )[ "error" ] == "RECEIPT_ID_MISMATCH"
-    again = rt.fetch_similar_impl( "cosa.mathx.add", ctx_for( env, FakeJev( need=MATHX_TEXT ) ) )
+    again = rt.fetch_similar_impl( "cosa.mathx.add", ctx_for( env, FakeJev( need=MATHX_TEXT ) ), language="all" )
     assert "need_text" not in rt.load_receipt( ctx_for( env, None ), again[ "receipt_id" ] )      # a public receipt keeps its old shape
 
 
 def test_fetch_similar_names_the_cause_when_a_definition_may_not_be_sent( env ):
     # red when: a refused definition answers UNKNOWN_ENTRY (the gate would then read it as NO_CALL)
     _add_module( env, "leaky", 'def _mail( x ):\n    """Mail ops@example.com when done."""\n    return x\n' )
-    leak = rt.fetch_similar_impl( "cosa.leaky._mail", ctx_for( env, FakeJev() ) )
+    leak = rt.fetch_similar_impl( "cosa.leaky._mail", ctx_for( env, FakeJev() ), language="all" )
     assert ( leak[ "status" ], leak[ "error" ], leak[ "entry" ], leak[ "detail" ] ) == ( "error", "EXCLUDED_SENSITIVE_CONTENT", "cosa.leaky._mail", "email" )
     assert "receipt_id" not in leak
     fake = FakeJev()
-    held = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake, exclude_prefixes=( "cosa.feeds", ) ) )
+    held = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake, exclude_prefixes=( "cosa.feeds", ) ), language="all" )
     assert held == { "status": "error", "error": "EXCLUDED_PREFIX", "entry": "cosa.feeds.parse_feed", "detail": "the id is under an excluded prefix" }
     assert fake.seen == []
 
@@ -305,13 +305,13 @@ def test_read_capability_pages_errors_and_receipt( env ):
 
 def test_empty_need_is_refused_without_a_receipt( env ):
     for bad in ( "", "   ", None, 5 ):
-        assert rt.check_exists_impl( bad, ctx_for( env, FakeJev() ) ) == { "status": "error", "error": "EMPTY_NEED" }
+        assert rt.check_exists_impl( bad, ctx_for( env, FakeJev() ), language="all" ) == { "status": "error", "error": "EMPTY_NEED" }
     assert receipts( env ) == []
 
 
 def test_replay_frozen_is_deterministic_and_head_notices_a_change( env ):
     fake = FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) } )
-    r    = rt.check_exists_impl( NEED, ctx_for( env, fake ) )
+    r    = rt.check_exists_impl( NEED, ctx_for( env, fake ), language="all" )
     rep  = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) } ) ) )
     assert rep[ "status" ] == "ok" and rep[ "stored" ][ "id" ] == r[ "receipt_id" ]
     assert rep[ "frozen" ][ "verdict" ] == "REUSE" and rep[ "differences" ] == { "frozen": [], "head": [] }
@@ -334,13 +334,13 @@ def test_replay_frozen_is_deterministic_and_head_notices_a_change( env ):
 
 def test_replay_of_fetch_similar_uses_the_frozen_snapshot( env ):
     fake = FakeJev( need=FEEDS_TEXT, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
-    r = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake ) )
+    r = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake ), language="all" )
     rep = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, FakeJev( need=FEEDS_TEXT, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } ) ) )
     assert rep[ "frozen" ][ "shortlist" ][ 0 ][ "id" ] == "cosa.mathx.add" and rep[ "differences" ] == { "frozen": [], "head": [] }
 
 
 def test_replay_of_an_unfinished_receipt_reproduces_it_without_calls( env, tmp_path ):
-    r = rt.check_exists_impl( NEED, ctx_for( env, None ) )
+    r = rt.check_exists_impl( NEED, ctx_for( env, None ), language="all" )
     assert r[ "cause" ] == "KEY_UNREADABLE"
     rep = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, None ) )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "cause" ] == "KEY_UNREADABLE" and rep[ "differences" ][ "frozen" ] == []
@@ -348,7 +348,7 @@ def test_replay_of_an_unfinished_receipt_reproduces_it_without_calls( env, tmp_p
 
 def test_exclusions_remove_entries_before_anything_is_sent( env ):
     fake = FakeJev()
-    r = rt.check_exists_impl( NEED, ctx_for( env, fake, exclude_prefixes=( "lupin_mcp.", ) ) )
+    r = rt.check_exists_impl( NEED, ctx_for( env, fake, exclude_prefixes=( "lupin_mcp.", ) ), language="all" )
     sent = [ b[ "state" ][ "candidate" ] for b in fake.seen ]
     assert SERVE_TEXT not in sent and FEEDS_TEXT in sent and r[ "stats" ][ "entries" ] == 2
     rep = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, FakeJev(), exclude_prefixes=( "lupin_mcp.", ) ) )
@@ -358,7 +358,7 @@ def test_exclusions_remove_entries_before_anything_is_sent( env ):
 # --- the replay gate: (i) byte-equal after a restart, (ii) the id recomputes, (iii) damage is a named error -------------------
 
 def test_gate_i_a_stored_result_is_byte_equal_after_a_process_restart( env ):
-    r    = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) } ) ) )
+    r    = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) } ) ), language="all" )
     path = env[ 1 ] / "receipts" / f"{r[ 'receipt_id' ]}.json"
     code = ( "import sys, pathlib, hashlib; from lupin_mcp import reuse_tools as rt; "
              "ctx = rt.ReuseContext( sys.argv[1], sys.argv[2] ); rec = rt.load_receipt( ctx, sys.argv[3] ); "
@@ -370,12 +370,12 @@ def test_gate_i_a_stored_result_is_byte_equal_after_a_process_restart( env ):
 
 
 def test_gate_ii_the_id_recomputes_from_the_stored_inputs_and_an_edited_input_is_named( env ):
-    r  = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )
+    r  = rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ), language="all" )
     c  = ctx_for( env, FakeJev() )
     st = rt.load_receipt( c, r[ "receipt_id" ] )
-    assert rt.receipt_id( st[ "tool" ], st[ "query" ], st[ "index_sha" ], st[ "model" ], st[ "policy" ], st[ "prompt_template_hash" ], causes=st[ "causes" ] ) == r[ "receipt_id" ]
+    assert rt.receipt_id( st[ "tool" ], st[ "query" ], st[ "index_sha" ], st[ "model" ], st[ "policy" ], st[ "prompt_template_hash" ], causes=st[ "causes" ], language=st[ "language" ] ) == r[ "receipt_id" ]
     path = env[ 1 ] / "receipts" / f"{r[ 'receipt_id' ]}.json"
-    for field, value in ( ( "query", "tampered" ), ( "model", "jev-9" ), ( "index_sha", "0" * 40 ), ( "prompt_template_hash", "x" ) ):
+    for field, value in ( ( "query", "tampered" ), ( "model", "jev-9" ), ( "index_sha", "0" * 40 ), ( "prompt_template_hash", "x" ), ( "language", "py" ) ):
         doc = json.loads( path.read_text( encoding="utf-8" ) ); doc[ field ] = value
         path.write_text( json.dumps( doc ), encoding="utf-8" )
         assert rt.replay_impl( r[ "receipt_id" ], c )[ "error" ] == "RECEIPT_ID_MISMATCH", field
@@ -389,7 +389,7 @@ def test_gate_ii_the_id_recomputes_from_the_stored_inputs_and_an_edited_input_is
 def test_gate_iii_a_corrupt_or_missing_input_is_a_named_error_never_a_verdict( env ):
     fake = FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) } )
     c    = ctx_for( env, fake )
-    r    = rt.check_exists_impl( NEED, c )
+    r    = rt.check_exists_impl( NEED, c, language="all" )
     rid  = r[ "receipt_id" ]
     cache_files = sorted( ( env[ 1 ] / "jev-cache" ).rglob( "*.json" ) )
     assert len( cache_files ) == 3
@@ -421,14 +421,14 @@ def test_gate_iii_a_corrupt_or_missing_input_is_a_named_error_never_a_verdict( e
 
 def test_a_corrupt_cache_entry_makes_check_exists_answer_with_a_named_error( env ):
     c = ctx_for( env, FakeJev() )
-    rt.check_exists_impl( NEED, c )
+    rt.check_exists_impl( NEED, c, language="all" )
     victim = sorted( ( env[ 1 ] / "jev-cache" ).rglob( "*.json" ) )[ 0 ]; victim.write_text( "{", encoding="utf-8" )
-    out = rt.check_exists_impl( NEED, c )
+    out = rt.check_exists_impl( NEED, c, language="all" )
     assert out[ "status" ] == "error" and out[ "error" ] == "CACHE_CORRUPT"
-    rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, FakeJev( need=FEEDS_TEXT ) ) )
+    rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, FakeJev( need=FEEDS_TEXT ) ), language="all" )
     hit = [ p for p in sorted( ( env[ 1 ] / "jev-cache" ).rglob( "*.json" ) ) if p != victim ]
     hit[ -1 ].write_text( "{", encoding="utf-8" )
-    f = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, FakeJev( need=FEEDS_TEXT ) ) )
+    f = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, FakeJev( need=FEEDS_TEXT ) ), language="all" )
     assert f[ "status" ] == "error" and f[ "error" ] == "CACHE_CORRUPT"
 
 
@@ -457,7 +457,7 @@ def test_a_session_id_with_path_characters_is_refused( tmp_path ):
 def test_two_servers_writing_receipts_at_once_leave_one_complete_receipt( env ):
     ctx = multiprocessing.get_context( "fork" )
     def writer():
-        rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ) )
+        rt.check_exists_impl( NEED, ctx_for( env, FakeJev() ), language="all" )
     procs = [ ctx.Process( target=writer ) for _ in range( 3 ) ]
     for p in procs: p.start()
     for p in procs: p.join(); assert p.exitcode == 0
@@ -494,11 +494,11 @@ def live_post( replies, seen=None ):
 def test_a_server_without_the_key_variable_reports_key_unreadable_and_makes_no_call( env, monkeypatch ):
     seen = []
     monkeypatch.setattr( jev_transport, "_post", lambda *a: seen.append( a ) )
-    r = rt.check_exists_impl( N( "nokey" ), ctx_for( env, None ) )
+    r = rt.check_exists_impl( N( "nokey" ), ctx_for( env, None ), language="all" )
     assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "KEY_UNREADABLE" ) and r[ "shortlist" ] == []
     assert r[ "stats" ][ "calls" ] == 0 and seen == []
     monkeypatch.setenv( jev_transport.KEY_VARIABLE, "" )                                           # an empty variable is a missing one
-    assert rt.check_exists_impl( N( "empty" ), ctx_for( env, None ) )[ "cause" ] == "KEY_UNREADABLE" and seen == []
+    assert rt.check_exists_impl( N( "empty" ), ctx_for( env, None ), language="all" )[ "cause" ] == "KEY_UNREADABLE" and seen == []
 
 
 def test_with_the_variable_set_the_live_transport_is_used_through_the_one_http_path( env, monkeypatch ):
@@ -510,7 +510,7 @@ def test_with_the_variable_set_the_live_transport_is_used_through_the_one_http_p
         return 200, json.dumps( fake.post( json.loads( body ) ) )
     monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-value" )
     monkeypatch.setattr( jev_transport, "_post", door )
-    r = rt.check_exists_impl( need, ctx_for( env, None ) )
+    r = rt.check_exists_impl( need, ctx_for( env, None ), language="all" )
     assert ( r[ "verdict" ], r[ "cause" ] ) == ( "REUSE", None ) and fake.unexpected == []
     assert len( seen ) == 3 and all( u == jev_transport.URL and h[ "Authorization" ] == "Bearer fake-key-value" for u, h in seen )
     assert "fake-key-value" not in json.dumps( r )                                                 # the key never reaches a receipt
@@ -532,7 +532,7 @@ def test_a_refused_key_stops_all_later_http_calls_and_every_entry_becomes_call_f
     seen = []
     monkeypatch.setenv( jev_transport.KEY_VARIABLE, "wrong" )
     monkeypatch.setattr( jev_transport, "_post", live_post( [ ( 401, "no" ) ], seen ) )
-    r = rt.check_exists_impl( N( "refused" ), ctx_for( env, None ) )
+    r = rt.check_exists_impl( N( "refused" ), ctx_for( env, None ), language="all" )
     assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "CALL_FAILED" )
     assert 1 <= len( seen ) <= rt.WORKERS                                                          # bounded by calls already in flight, never entries x retries
     t = rt.LiveJevTransport( post_fn=live_post( [ ( 401, "no" ) ], seen ), environ={ jev_transport.KEY_VARIABLE: "k" } )
@@ -551,7 +551,7 @@ def test_the_dead_key_file_path_is_gone():
 
 def _healthy( env, answers=None, need=NEED, **kw ):
     c = ctx_for( env, FakeJev( answers or { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) }, need=need, **kw ) )
-    r = rt.check_exists_impl( need, c )
+    r = rt.check_exists_impl( need, c, language="all" )
     return c, r, env[ 1 ] / "receipts" / f"{r[ 'receipt_id' ]}.json"
 
 
@@ -622,7 +622,7 @@ def test_c2b_a_failing_call_is_retried_exactly_twice_and_a_transient_failure_rec
 def test_c2c_frozen_replay_uses_the_stored_template_and_model_not_the_current_ones( env ):
     other_tpl = dict( rt.PROMPT_TEMPLATE, instructions="A changed prompt." )
     c1  = ctx_for( env, FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) }, instr="A changed prompt.", model="jev-1.14.0" ), template=other_tpl, model="jev-1.14.0" )
-    r   = rt.check_exists_impl( NEED, c1 )
+    r   = rt.check_exists_impl( NEED, c1, language="all" )
     assert r[ "verdict" ] == "REUSE"
     now = ctx_for( env, FakeJev() )                                                                  # the current context has the default template and model
     rep = rt.replay_impl( r[ "receipt_id" ], now )
@@ -739,7 +739,7 @@ def test_the_production_context_excludes_no_module_and_sends_no_string_default( 
     # red when: sendable() is not applied in prepare() (arm A) or blank_string_defaults() is dropped from sendable() (arm B)
     ctx = _production_ctx( env, tmp_path, monkeypatch )
     assert ctx.exclude_prefixes == ()                                                           # empty by ruling
-    r = rt.check_exists_impl( NEED, ctx )
+    r = rt.check_exists_impl( NEED, ctx, language="all" )
     assert r[ "status" ] == "ok" and r[ "stats" ][ "entries" ] == 4                            # nothing excluded: cfg.connect plus the three
     text = _bodies_text( ctx )
     assert "cosa.cfg.connect(host=…, token_name=…, retries=3) — Open a connection." in [ b[ "state" ][ "candidate" ] for b in ctx.transport.seen ]
@@ -751,7 +751,7 @@ def test_fetch_similar_and_its_replay_send_no_string_default_either( env, tmp_pa
     # red when: the need of fetch_similar is built from an unblanked entry (arm C), or replay_impl() skips sendable() (arm D:
     # the frozen re-run then asks for a body that was never cached and answers CACHE_MISSING)
     ctx = _production_ctx( env, tmp_path, monkeypatch )
-    f   = rt.fetch_similar_impl( "cosa.cfg.connect", ctx )
+    f   = rt.fetch_similar_impl( "cosa.cfg.connect", ctx, language="all" )
     assert f[ "status" ] == "ok"
     rep = rt.replay_impl( f[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] }
@@ -839,7 +839,7 @@ def test_the_backstop_drops_before_the_sweep_so_the_dropped_symbol_never_reaches
     orig = rt.sx_build.read_searchable
     monkeypatch.setattr( rt.sx_build, "read_searchable", lambda gen, tests=False: orig( gen, tests ) + [ _rec( "cosa.leak.fn", doc="Reads /home/someone/.cfg" ) ] )
     fake = Recorder()
-    r = rt.check_exists_impl( NEED, ctx_for( env, fake ) )
+    r = rt.check_exists_impl( NEED, ctx_for( env, fake ), language="all" )
     assert r[ "stats" ][ "entries" ] == 3 and not any( "leak" in rt.canonical( b ) for b in fake.seen )
 
 
@@ -850,7 +850,7 @@ def test_typescript_and_javascript_entries_are_sent_with_their_defaults_blanked(
     orig = rt.sx_build.read_searchable
     monkeypatch.setattr( rt.sx_build, "read_searchable", lambda gen, tests=False: orig( gen, tests ) + [ ts, js ] )
     fake = Recorder()
-    r = rt.check_exists_impl( NEED, ctx_for( env, fake ) )
+    r = rt.check_exists_impl( NEED, ctx_for( env, fake ), language="all" )
     sent = [ b[ "state" ][ "candidate" ] for b in fake.seen ]
     assert r[ "stats" ][ "entries" ] == 5
     assert 'src.lupin_app.static.ts.log.say(message: string, type: LogType =…): void — Write one log line.' in sent
@@ -891,7 +891,7 @@ def test_a_refused_sweep_returns_a_verdict_and_receipt_that_never_carry_the_key(
     sentinel = "sentinel-key-4d2b8e6a90"
     monkeypatch.setenv( jev_transport.KEY_VARIABLE, sentinel )
     monkeypatch.setattr( jev_transport, "_post", live_post( [ ( 401, "no" ) ] ) )
-    r = rt.check_exists_impl( N( "leak" ), ctx_for( env, None ) )
+    r = rt.check_exists_impl( N( "leak" ), ctx_for( env, None ), language="all" )
     assert r[ "cause" ] == "CALL_FAILED"
     stored = "".join( p.read_text( encoding="utf-8" ) for p in receipts( env ) )
     out, err = capsys.readouterr()
@@ -926,7 +926,7 @@ def test_a_receipt_written_from_a_worktree_is_readable_from_main( tmp_path, monk
     assert ctx_seat.root == seat and ctx_main.root == main and ctx_seat.out_dir != ctx_main.out_dir    # two index roots...
     assert ctx_seat.data == ctx_main.data == tmp_path / "fleet" / "lupin" / "reuse-review"            # ...one data root
     ctx_seat.transport = FakeJev()
-    r = rt.check_exists_impl( NEED, ctx_seat )
+    r = rt.check_exists_impl( NEED, ctx_seat, language="all" )
     assert r[ "status" ] == "ok" and ( ctx_seat.data / "receipts" / f"{r[ 'receipt_id' ]}.json" ).exists()
     assert not list( seat.rglob( "receipts" ) )                                                         # nothing was written inside the worktree
     again = rt.load_receipt( ctx_main, r[ "receipt_id" ] )                                              # main reads the seat's receipt
@@ -935,7 +935,7 @@ def test_a_receipt_written_from_a_worktree_is_readable_from_main( tmp_path, monk
 
 def test_a_receipt_stored_before_no_new_replays_to_new_and_its_head_now_says_no_match( env ):
     old = { k: v for k, v in vd.POLICY.items() if k != "no_new" }                                  # the policy such a receipt carries
-    r   = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( need=NEED ), policy=old ) )
+    r   = rt.check_exists_impl( NEED, ctx_for( env, FakeJev( need=NEED ), policy=old ), language="all" )
     assert r[ "verdict" ] == "NEW"
     rep = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, FakeJev( need=NEED ) ) )
     assert rep[ "frozen" ][ "verdict" ] == "NEW" and rep[ "differences" ][ "frozen" ] == []
@@ -946,7 +946,7 @@ def test_a_receipt_stored_before_no_new_replays_to_new_and_its_head_now_says_no_
 def test_a_receipt_whose_snapshot_records_have_no_scope_key_still_replays( env ):
     # red when: load_snapshot or replay starts to require the `scope` key an old snapshot does not have
     fake = FakeJev( need=FEEDS_TEXT, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
-    f    = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake ) )
+    f    = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake ), language="all" )
     snap = sorted( ( env[ 1 ] / "snapshots" ).glob( "*.json.gz" ) )
     assert len( snap ) == 1
     doc  = json.loads( gzip.decompress( snap[ 0 ].read_bytes() ).decode( "utf-8" ) )
@@ -968,7 +968,7 @@ def test_the_index_sha_comes_from_search_sha_and_falls_back_to_symbols_sha_for_a
             monkeypatch.setattr( rt.sx_build, "read_header", lambda gen: { k: v for k, v in orig( gen ).items() if k != "search_sha" } )
         data_dir = env[ 1 ] / label
         ctx = rt.ReuseContext( env[ 0 ], data_dir, out_dir=env[ 2 ], transport=FakeJev( need=N( label ) ) )
-        rt.check_exists_impl( N( label ), ctx )
+        rt.check_exists_impl( N( label ), ctx, language="all" )
         names.append( [ p.name for p in ( data_dir / "snapshots" ).glob( "*.json.gz" ) ] )
     assert len( names[ 0 ] ) == len( names[ 1 ] ) == 1 and names[ 0 ] != names[ 1 ]
 
@@ -982,9 +982,9 @@ def test_a_private_typescript_member_is_askable_by_id_and_is_a_candidate_for_oth
     ( js / "box.ts" ).write_text( BOX_TS, encoding="utf-8" )
     hid = "src.lupin_app.static.js.box.Box.hid"
     own = Recorder()
-    r   = rt.fetch_similar_impl( hid, ctx_for( env, own ) )
+    r   = rt.fetch_similar_impl( hid, ctx_for( env, own ), language="all" )
     assert r[ "status" ] == "ok" and not any( b[ "state" ][ "candidate" ].startswith( hid ) for b in own.seen )      # resolved, and never asked about itself
     assert any( b[ "state" ][ "candidate" ].startswith( "src.lupin_app.static.js.box.Box.open" ) for b in own.seen )
     other = Recorder()
-    rt.fetch_similar_impl( "cosa.mathx.add", ctx_for( env, other ) )
+    rt.fetch_similar_impl( "cosa.mathx.add", ctx_for( env, other ), language="all" )
     assert any( b[ "state" ][ "candidate" ].startswith( hid ) for b in other.seen )                                # the private member is a candidate for another entry

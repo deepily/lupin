@@ -25,7 +25,7 @@ def test_a_stored_page_route_receipt_with_no_exclusion_replays_as_before( env ):
     write_wiki( env[ 0 ] )
     need = "no exclusion [plain]"
     ctx  = ctx_of( env, PageFake( need ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     assert "exclude_id" not in receipt_of( env, r ) and rt.replay_impl( r[ "receipt_id" ], ctx )[ "differences" ][ "frozen" ] == []
 
 

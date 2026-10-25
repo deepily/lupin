@@ -155,7 +155,7 @@ def test_a_context_with_no_candidate_stage_is_refused_by_the_gate_scenario( tmp_
 
 def test_a_failed_seed_ask_is_reported( tmp_path, monkeypatch ):
     ctx, root, lib, store = scenario_parts( tmp_path, sm.StandInJev() )
-    monkeypatch.setattr( rt, "check_exists_impl", lambda need, c: { "status": "error", "error": "NO" } )
+    monkeypatch.setattr( rt, "check_exists_impl", lambda need, c, language: { "status": "error", "error": "NO" } )
     assert sm.candidate_scenario( ctx, root, lib, store, 5 )[ "reason" ] == "seed ask failed: NO"
 
 

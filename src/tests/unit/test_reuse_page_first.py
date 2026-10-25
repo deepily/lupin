@@ -81,7 +81,7 @@ def write_wiki( root, index_lines=None, pins=None, pages=( "feeds-page", "math-p
 
 def run( env, need, fake, **kw ):
     root, data, out = env
-    return rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=fake, **kw ) )
+    return rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=fake, **kw ), language="all" )
 
 
 def receipt_of( env, r ): return json.loads( next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) ).read_text( encoding="utf-8" ) )
@@ -171,7 +171,7 @@ def test_the_index_sha_follows_which_pages_can_be_asked( env ):
 def test_replay_frozen_treats_a_receipt_with_no_route_as_a_plain_sweep( env ):
     need = "replay an old receipt [old]"
     ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( need ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     path = next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) )
     old  = json.loads( path.read_text( encoding="utf-8" ) )
     for key in ( "route", "pages", "page_prompt_template" ): del old[ key ]                                   # the shape before page-first
@@ -196,7 +196,7 @@ def test_a_receipt_with_a_failed_call_replays_to_the_same_uncertain_verdict( env
     write_wiki( env[ 0 ] )
     need = "something unrelated [failedcall]"
     ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FailsOnServe( need, { FEEDS_PAGE: CHOSEN } ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     assert r[ "cause" ] == "CALL_FAILED" and r[ "stats" ][ "failed" ] == 1
     rep = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
@@ -206,7 +206,7 @@ def test_fetch_similar_sweeps_every_entry_and_never_asks_a_page( env ):
     write_wiki( env[ 0 ] )
     fake = PageFake( FEEDS_TEXT )                                                                              # the symbol's own text is the need
     ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=fake )
-    r    = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx )
+    r    = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx, language="all" )
     assert r[ "status" ] == "ok" and receipt_of( env, r )[ "route" ] == "full" and receipt_of( env, r )[ "pages" ] is None
     assert sorted( fake.seen ) == sorted( [ MATHX_TEXT, SERVE_TEXT ] ) and fake.unexpected == []
 
@@ -216,8 +216,8 @@ def test_a_failed_call_receipt_still_replays_to_uncertain_after_a_later_run_answ
     write_wiki( env[ 0 ] )
     need = "something unrelated [failedfill]"
     root, data, out = env
-    bad  = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=FailsOnServe( need, { FEEDS_PAGE: CHOSEN } ) ) )
-    good = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=PageFake( need, { FEEDS_PAGE: CHOSEN } ) ) )          # the same call now succeeds
+    bad  = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=FailsOnServe( need, { FEEDS_PAGE: CHOSEN } ) ), language="all" )
+    good = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=PageFake( need, { FEEDS_PAGE: CHOSEN } ) ), language="all" )          # the same call now succeeds
     assert bad[ "cause" ] == "CALL_FAILED" and good[ "verdict" ] == "UNCERTAIN_READ_SOURCE"
     rep = rt.replay_impl( bad[ "receipt_id" ], rt.ReuseContext( root, data, out_dir=out ) )
     assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
@@ -226,7 +226,7 @@ def test_a_failed_call_receipt_still_replays_to_uncertain_after_a_later_run_answ
 def test_a_fetch_similar_receipt_replays( env ):
     write_wiki( env[ 0 ] )
     ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( FEEDS_TEXT ) )
-    r   = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx )
+    r   = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx, language="all" )
     rep = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "stored" ][ "route" ] == "full" and rep[ "differences" ][ "frozen" ] == []
 
@@ -236,7 +236,7 @@ def test_a_receipt_with_malformed_answers_replays_to_the_same_verdict( env ):
     bad  = { "answers": { "fit": { "probabilities": { "reuse": 1, "extend": 1, "unrelated": 1 } } } }
     need = "something unrelated [malformedreplay]"
     ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( need, { FEEDS_PAGE: CHOSEN }, { FEEDS_TEXT: bad } ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     assert r[ "cause" ] == "MALFORMED_ANSWER"
     rep  = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "frozen" ][ "cause" ] == "MALFORMED_ANSWER" and rep[ "differences" ][ "frozen" ] == []

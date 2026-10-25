@@ -110,21 +110,21 @@ def test_each_wrapper_delegates_to_the_impl_and_answers_with_an_error_dict_when_
     root = make_lupin_repo( tmp_path )
     fake = FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) } )
     monkeypatch.setattr( rt, "context_from_environment", lambda r=None: rt.ReuseContext( root, tmp_path / "data", out_dir=tmp_path / "out", transport=fake ) )
-    got = asyncio.run( _run( "check_exists", { "need": NEED } ) )
+    got = asyncio.run( _run( "check_exists", { "need": NEED, "language": "all" } ) )
     assert got[ "verdict" ] == "REUSE" and got[ "receipt_id" ]
-    assert asyncio.run( _run( "fetch_similar", { "entry": "cosa.nope" } ) )[ "error" ] == "UNKNOWN_ENTRY"
+    assert asyncio.run( _run( "fetch_similar", { "entry": "cosa.nope", "language": "all" } ) )[ "error" ] == "UNKNOWN_ENTRY"
     assert asyncio.run( _run( "read_capability", { "names": [ "x" ] } ) )[ "pages" ] == { "x": { "error": "NOT_FOUND" } }
     assert asyncio.run( _run( "replay", { "receipt_id": got[ "receipt_id" ] } ) )[ "status" ] == "ok"
     import lupin_mcp
     monkeypatch.delattr( lupin_mcp, "reuse_tools" )                                              # `from lupin_mcp import x` finds the attribute first
     monkeypatch.setitem( sys.modules, "lupin_mcp.reuse_tools", None )
-    for name, args in ( ( "check_exists", { "need": "x" } ), ( "fetch_similar", { "entry": "a" } ), ( "read_capability", { "names": [] } ), ( "replay", { "receipt_id": "r" } ) ):
+    for name, args in ( ( "check_exists", { "need": "x", "language": "all" } ), ( "fetch_similar", { "entry": "a", "language": "all" } ), ( "read_capability", { "names": [] } ), ( "replay", { "receipt_id": "r" } ) ):
         out = asyncio.run( _run( name, args ) )
         assert out[ "error" ] == "REUSE_TOOLS_UNAVAILABLE" and "ModuleNotFoundError" in out[ "detail" ], name
     monkeypatch.undo()
     assert lupin_mcp.reuse_tools is rt
     monkeypatch.setattr( rt, "context_from_environment", lambda r=None: ( _ for _ in () ).throw( RuntimeError( "no ctx" ) ) )
-    assert asyncio.run( _run( "check_exists", { "need": "x" } ) )[ "error" ] == "REUSE_TOOLS_UNAVAILABLE"
+    assert asyncio.run( _run( "check_exists", { "need": "x", "language": "all" } ) )[ "error" ] == "REUSE_TOOLS_UNAVAILABLE"
 
 
 def test_a_slow_reuse_call_does_not_starve_the_event_loop( tmp_path, monkeypatch ):
@@ -141,7 +141,7 @@ def test_a_slow_reuse_call_does_not_starve_the_event_loop( tmp_path, monkeypatch
             while not stop.is_set():
                 beats[ "n" ] += 1; await asyncio.sleep( 0.02 )
         h = asyncio.create_task( heart() ); await asyncio.sleep( 0 ); before = beats[ "n" ]
-        try: await _run( "check_exists", { "need": NEED } )
+        try: await _run( "check_exists", { "need": NEED, "language": "all" } )
         finally: stop.set(); await h
         return beats[ "n" ] - before
     assert asyncio.run( go() ) >= 8                                                              # a blocked loop would count 0
@@ -155,7 +155,7 @@ async def go():
     tools = await cvm.mcp.get_tools()
     print( "TOOLS", sorted( n for n in ( "check_exists", "fetch_similar", "read_capability", "replay", "get_session_info" ) if n in tools ) )
     print( "MW", [ type( m ).__name__ for m in cvm.mcp.middleware ] )
-    t = await cvm.mcp.get_tool( "check_exists" ); print( "REUSE", ( await t.run( { "need": "x" } ) ).structured_content[ "error" ] )
+    t = await cvm.mcp.get_tool( "check_exists" ); print( "REUSE", ( await t.run( { "need": "x", "language": "all" } ) ).structured_content[ "error" ] )
     g = await cvm.mcp.get_tool( "get_session_info" ); print( "VOICE", ( await g.run( {} ) ).structured_content[ "project" ] )
 asyncio.run( go() )
 '''
@@ -201,9 +201,9 @@ def test_stdio_session_calls_each_reuse_tool_alongside_a_voice_tool( tmp_path ):
             return f[ "result" ][ "structuredContent" ]
         listed = _rpc( proc, { "jsonrpc": "2.0", "id": 2, "method": "tools/list" }, 2 )[ "result" ][ "tools" ]
         assert set( REUSE ) <= { t[ "name" ] for t in listed } and "get_session_info" in { t[ "name" ] for t in listed }
-        first = call( 3, "check_exists", { "need": NEED, "root": str( root ) } )
+        first = call( 3, "check_exists", { "need": NEED, "language": "all", "root": str( root ) } )
         assert ( first[ "verdict" ], first[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "KEY_UNREADABLE" ) and first[ "receipt_id" ]
-        sim = call( 4, "fetch_similar", { "entry": "cosa.feeds.parse_feed", "root": str( root ) } )
+        sim = call( 4, "fetch_similar", { "entry": "cosa.feeds.parse_feed", "language": "all", "root": str( root ) } )
         assert sim[ "uncertain" ] == "KEY_UNREADABLE" and sim[ "receipt_id" ] != first[ "receipt_id" ]
         cap = call( 5, "read_capability", { "names": [ "none" ], "root": str( root ) } )
         assert cap[ "pages" ] == { "none": { "error": "NOT_FOUND" } }

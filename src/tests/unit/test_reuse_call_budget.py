@@ -134,7 +134,7 @@ def test_a_send_without_a_budget_is_unchanged():
 
 def test_a_sweep_stops_at_the_budget_and_reports_the_rest_as_not_checked( env, monkeypatch ):
     seen = counting_door( monkeypatch )
-    r = rt.check_exists_impl( NEED, make_ctx( env, call_budget=2 ) )
+    r = rt.check_exists_impl( NEED, make_ctx( env, call_budget=2 ), language="all" )
     assert len( seen ) == 2
     assert r[ "stats" ][ "attempts" ] == 2 and r[ "stats" ][ "call_budget" ] == 2
     assert r[ "stats" ][ "not_checked" ] == 1 and len( r[ "missing" ] ) == 1
@@ -143,17 +143,17 @@ def test_a_sweep_stops_at_the_budget_and_reports_the_rest_as_not_checked( env, m
 def test_an_unreached_entry_is_never_reported_as_new( env, monkeypatch ):
     """An entry left unasked makes the verdict uncertain; the control run with room says new."""
     counting_door( monkeypatch )
-    cut = rt.check_exists_impl( NEED, make_ctx( env, call_budget=2 ) )
+    cut = rt.check_exists_impl( NEED, make_ctx( env, call_budget=2 ), language="all" )
     assert ( cut[ "verdict" ], cut[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "CALL_FAILED" )
     assert cut[ "shortlist" ] == []
-    full = rt.check_exists_impl( NEED + " [control]", make_ctx( env, call_budget=100 ) )
+    full = rt.check_exists_impl( NEED + " [control]", make_ctx( env, call_budget=100 ), language="all" )
     assert full[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and full[ "stats" ][ "not_checked" ] == 0
 
 
 def test_when_every_call_fails_and_retries_the_attempts_still_stop_at_the_budget( env, monkeypatch ):
     """Without a budget this is 36 HTTP calls for three entries; with one it stops at the limit."""
     seen = counting_door( monkeypatch, status=429 )
-    r = rt.check_exists_impl( NEED, make_ctx( env, call_budget=5 ) )
+    r = rt.check_exists_impl( NEED, make_ctx( env, call_budget=5 ), language="all" )
     assert len( seen ) == 5
     assert r[ "stats" ][ "attempts" ] == 5
     assert r[ "verdict" ] == "UNCERTAIN_READ_SOURCE"
@@ -161,10 +161,10 @@ def test_when_every_call_fails_and_retries_the_attempts_still_stop_at_the_budget
 
 def test_cache_hits_cost_nothing_and_are_still_served_after_the_budget_is_spent( env, monkeypatch ):
     counting_door( monkeypatch )
-    first = rt.check_exists_impl( NEED, make_ctx( env, call_budget=100 ) )
+    first = rt.check_exists_impl( NEED, make_ctx( env, call_budget=100 ), language="all" )
     assert first[ "stats" ][ "attempts" ] == 3
     seen = counting_door( monkeypatch )
-    again = rt.run_question( make_ctx( env, call_budget=1 ), "check_exists", NEED, NEED, write=False )      # not stored: the same inputs would return the first receipt
+    again = rt.run_question( make_ctx( env, call_budget=1 ), "check_exists", NEED, NEED, write=False, language="all" )      # not stored: the same inputs would return the first receipt
     assert seen == [] and again[ "stats" ][ "attempts" ] == 0 and again[ "stats" ][ "cache_hits" ] == 3
     assert again[ "verdict" ] == "UNCERTAIN_READ_SOURCE"
 
@@ -194,7 +194,7 @@ def test_a_live_transport_without_a_budget_reports_zero_attempts_and_is_not_limi
     """A context builds a budget only for its own transport; an injected one is left alone."""
     seen = counting_door( monkeypatch )
     transport = rt.LiveJevTransport()
-    r = rt.check_exists_impl( NEED, make_ctx( env, transport=transport, call_budget=1 ) )
+    r = rt.check_exists_impl( NEED, make_ctx( env, transport=transport, call_budget=1 ), language="all" )
     assert len( seen ) == 3 and r[ "stats" ][ "attempts" ] == 0 and r[ "stats" ][ "not_checked" ] == 0
 
 
@@ -222,7 +222,7 @@ def test_the_tally_counts_one_threads_attempts_apart_from_the_others():
 
 def test_when_every_call_fails_each_entry_is_either_failed_with_its_attempts_or_not_checked( env, monkeypatch ):
     seen = counting_door( monkeypatch, status=429 )
-    r = rt.check_exists_impl( NEED, make_ctx( env, call_budget=5 ) )
+    r = rt.check_exists_impl( NEED, make_ctx( env, call_budget=5 ), language="all" )
     s = r[ "stats" ]
     reconciled( s )
     assert s[ "attempts" ] == len( seen ) == 5 and s[ "answered" ] == 0 and s[ "attempts_answered" ] == 0
@@ -238,7 +238,7 @@ def test_a_mix_of_answered_cut_off_and_never_reached_reconciles( env, monkeypatc
         seen.append( body )
         return ( 200, json.dumps( UNRELATED ) ) if len( seen ) == 1 else ( 429, "busy" )
     monkeypatch.setattr( jev_transport, "_post", door )
-    r = rt.check_exists_impl( NEED, make_ctx( env, call_budget=3 ) )
+    r = rt.check_exists_impl( NEED, make_ctx( env, call_budget=3 ), language="all" )
     s = r[ "stats" ]
     reconciled( s )
     assert ( s[ "entries" ], s[ "answered" ], s[ "failed" ], s[ "not_checked" ] ) == ( 3, 1, 1, 1 )
@@ -255,13 +255,13 @@ def test_a_retry_that_succeeds_counts_its_attempts_against_the_answered_entry( e
         return ( 429, "busy" ) if len( seen ) % 2 == 1 else ( 200, json.dumps( UNRELATED ) )     # every entry: one busy, then an answer
     monkeypatch.setattr( rt, "WORKERS", 1 )
     monkeypatch.setattr( jev_transport, "_post", door )
-    s = rt.check_exists_impl( NEED, make_ctx( env, call_budget=100 ) )[ "stats" ]
+    s = rt.check_exists_impl( NEED, make_ctx( env, call_budget=100 ), language="all" )[ "stats" ]
     reconciled( s )
     assert ( s[ "answered" ], s[ "failed" ], s[ "not_checked" ] ) == ( 3, 0, 0 ) and s[ "attempts_answered" ] == 6 == s[ "attempts" ]
 
 
 def test_a_sweep_that_never_ran_reports_every_entry_as_not_checked( env, monkeypatch ):
     monkeypatch.delenv( jev_transport.KEY_VARIABLE )
-    s = rt.check_exists_impl( NEED, make_ctx( env ) )[ "stats" ]                                    # no key transport: KEY_UNREADABLE
+    s = rt.check_exists_impl( NEED, make_ctx( env ), language="all" )[ "stats" ]                                    # no key transport: KEY_UNREADABLE
     reconciled( s )
     assert ( s[ "answered" ], s[ "failed" ], s[ "not_checked" ], s[ "attempts" ] ) == ( 0, 0, s[ "entries" ], 0 ) and s[ "entries" ] > 0

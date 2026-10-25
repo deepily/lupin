@@ -314,17 +314,17 @@ def run_full( env, items, twins, ceiling_tokens, spec=None ):
 
 def ask_old( ctx, item ):
     """Ensures: returns the public result of the old question's full sweep, the member left out."""
-    return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx )
+    return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx, language="all" )
 
 
 def ask_new( ctx, item ):
     """Ensures: returns the public result of the new question's full sweep, the member left out."""
-    return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx, question="provides" )
+    return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx, question="provides", language="all" )
 
 
 def ask_candidates( ctx, item ):
     """Ensures: returns the old question's result through the candidate stage, member left out."""
-    return rt.unstored_need_impl( item[ "need" ], item[ "member" ], ctx, candidates=True )
+    return rt.unstored_need_impl( item[ "need" ], item[ "member" ], ctx, candidates=True, language="all" )
 
 
 NEW_ASK = ask_new                                           # the new question's ask; set to None and "new" is refused

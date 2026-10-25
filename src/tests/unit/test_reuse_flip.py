@@ -64,7 +64,7 @@ def test_a_repeat_stores_no_receipt_so_the_next_repeat_cannot_read_it( env ):
 def test_the_ordinary_ask_cannot_see_a_flip_which_is_why_repeats_are_keyed_apart( env ):
     fake = FlippingFake( NEED )
     ctx  = packed_ctx( env, fake )
-    a, b = ( rt.sweep_need_impl( NEED, "cosa.mathx.add", ctx ) for _ in range( 2 ) )
+    a, b = ( rt.sweep_need_impl( NEED, "cosa.mathx.add", ctx, language="all" ) for _ in range( 2 ) )
     assert a[ "receipt_id" ] == b[ "receipt_id" ] and a[ "verdict" ] == b[ "verdict" ] and fake.calls == 1      # the control: one request, one receipt, no flip to find
 
 
@@ -197,7 +197,7 @@ def test_a_repeat_of_the_new_question_is_asked_again_and_the_same_repeat_is_not(
 
 def test_a_repeat_of_the_new_question_never_meets_the_production_answers( env ):
     ctx = pair_ctx( env )
-    rt.sweep_need_impl( PAIR_NEED, "cosa.mathx.add", ctx, question="provides" )                # the ordinary ask caches by the plain key
+    rt.sweep_need_impl( PAIR_NEED, "cosa.mathx.add", ctx, question="provides", language="all" )                # the ordinary ask caches by the plain key
     sent = len( ctx.transport.bodies )
     rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, question="provides" )
     assert len( ctx.transport.bodies ) == 2 * sent
@@ -227,7 +227,7 @@ def test_the_context_has_no_pair_sweeper_unless_it_is_given_one( env ):
 
 def test_the_unstored_ask_with_no_question_sends_the_three_way_question_and_stores_nothing( env ):
     fake = PackedFake( NEED )
-    out  = rt.unstored_need_impl( NEED, "cosa.mathx.add", packed_ctx( env, fake ) )
+    out  = rt.unstored_need_impl( NEED, "cosa.mathx.add", packed_ctx( env, fake ), language="all" )
     types = { q.get( "type" ) for body in fake.bodies for q in body[ "questions" ].values() }
     assert out[ "status" ] == "ok" and fake.bodies and types == { "choice" }                     # no Noul or Score question was sent
     assert not ( env[ 1 ] / "receipts" ).exists()

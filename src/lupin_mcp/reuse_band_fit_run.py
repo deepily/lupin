@@ -169,7 +169,7 @@ def make_asks( stage, sink, repeats=REPEATS, pinned=None, policy=None ):
     """
     def lookup( ctx, item ):
         check_manifest( stage, pinned )
-        result = rt._need_impl( item[ "need" ], item[ "exclude" ], packed_context( ctx, stage, policy ), "choice", False, True )
+        result = rt._need_impl( item[ "need" ], item[ "exclude" ], packed_context( ctx, stage, policy ), "choice", False, True, language="all" )
         if result[ "status" ] == "ok": sink.rids[ item[ "member" ] ] = result[ "receipt_id" ]
         return result
 

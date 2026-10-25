@@ -14,7 +14,7 @@ def made( env, need ):
     write_wiki( env[ 0 ] )
     fake = PackedFake( need, { FEEDS_PAGE: CHOSEN, FEEDS_TEXT: HIT } )
     ctx  = packed_ctx( env, fake )
-    return fake, ctx, rt.check_exists_impl( need, ctx )
+    return fake, ctx, rt.check_exists_impl( need, ctx, language="all" )
 
 
 def test_repeat_zero_is_the_old_replay_and_sends_nothing( env ):
@@ -57,7 +57,7 @@ def test_a_repeat_needs_a_packed_context( env ):
     from tests.unit.test_reuse_tools import FakeJev
     need = "read an RSS feed [unpacked]"
     ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=need ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     got  = rt.replay_impl( r[ "receipt_id" ], ctx, repeat=1 )
     assert got[ "status" ] == "error" and got[ "error" ] == "REPEAT_NEEDS_PACKED_CONTEXT"
 
@@ -108,7 +108,7 @@ def test_a_replay_repeat_does_not_read_a_flip_repeat_s_cached_answer( env ):
     need = "read an RSS feed [separate-keys]"
     fake = PackedFake( need, { FEEDS_TEXT: HIT } )
     ctx  = packed_ctx( env, fake )
-    r    = rt.check_exists_impl( need, ctx )                                            # no wiki: a full sweep
+    r    = rt.check_exists_impl( need, ctx, language="all" )                                            # no wiki: a full sweep
     fake.answers.clear()
     entries = rt.prepare( ctx )[ 1 ]
     reuse_flip.repeat_sweeper( ctx.pack_size, 6, 1 )( ctx, need, entries )              # a measurement draw 1, cached under its own keys

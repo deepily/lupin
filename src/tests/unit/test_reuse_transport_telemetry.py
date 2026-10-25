@@ -193,7 +193,7 @@ def test_the_receipt_summarises_every_live_response( env ):
     need = N( "receipt" )
     fake = FakeJev( { FEEDS_TEXT: with_usage( UNREL, 448, 42 ), MATHX_TEXT: with_usage( UNREL ), SERVE_TEXT: with_usage( UNREL, model="jev-1.14.0" ) }, need=need )
     t    = iter( range( 0, 1000 ) )
-    r    = rt.check_exists_impl( need, live( fake, env, clock_fn=lambda: next( t ) / 1000 ) )               # every attempt reads 1 ms
+    r    = rt.check_exists_impl( need, live( fake, env, clock_fn=lambda: next( t ) / 1000 ), language="all" )               # every attempt reads 1 ms
     tr   = r[ "stats" ][ "transport" ]
     assert tr[ "responses" ] == 3 and tr[ "models" ] == { "jev-1.13.0": 2, "jev-1.14.0": 1 }
     assert tr[ "statuses" ] == { "200": 3 } and tr[ "attempts" ] == { "1": 3 } and tr[ "attempts_total" ] == 3
@@ -207,7 +207,7 @@ def test_a_retry_that_waited_is_visible_on_the_receipt( env ):
     def post( url, headers, body, timeout ):
         if state.pop( "first", False ): return 429, "slow", { "Retry-After": "4" }
         return 200, json.dumps( fake.post( json.loads( body ) ) )
-    tr = rt.check_exists_impl( need, live( fake, env, door=post ) )[ "stats" ][ "transport" ]
+    tr = rt.check_exists_impl( need, live( fake, env, door=post ), language="all" )[ "stats" ][ "transport" ]
     assert tr[ "responses" ] == 3 and tr[ "attempts" ] == { "1": 2, "2": 1 } and tr[ "attempts_total" ] == 4
     assert ( tr[ "retry_after_seen" ], tr[ "retry_after_max" ] ) == ( 1, 4.0 )
 
@@ -216,17 +216,17 @@ def test_a_cache_hit_adds_no_response_and_a_fake_transport_reports_none( env ):
     need = N( "hit" )
     fake = FakeJev( { FEEDS_TEXT: with_usage( UNREL ) }, need=need )
     ctx  = live( fake, env )
-    rt.check_exists_impl( need, ctx )
-    again = rt.run_question( ctx, "check_exists", need, need, write=False )["stats"]["transport"]
+    rt.check_exists_impl( need, ctx, language="all" )
+    again = rt.run_question( ctx, "check_exists", need, need, write=False, language="all" )["stats"]["transport"]
     assert again[ "responses" ] == 0 and again[ "latency_ms" ] is None
-    plain = rt.check_exists_impl( N( "plain" ), rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=N( "plain" ) ) ) )
+    plain = rt.check_exists_impl( N( "plain" ), rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=N( "plain" ) ) ), language="all" )
     assert plain[ "stats" ][ "transport" ][ "responses" ] == 0                                                   # a fake has no post_with_meta
 
 
 def test_a_response_with_no_model_is_counted_under_none_and_a_non_object_too( env ):
     need = N( "nomodel" )
     fake = FakeJev( { FEEDS_TEXT: UNREL, MATHX_TEXT: with_usage( UNREL ) }, need=need )
-    tr   = rt.check_exists_impl( need, live( fake, env ) )[ "stats" ][ "transport" ]
+    tr   = rt.check_exists_impl( need, live( fake, env ), language="all" )[ "stats" ][ "transport" ]
     assert tr[ "models" ] == { "None": 2, "jev-1.13.0": 1 }
     assert rt.transport_summary( [ call( 1, model=[ "x" ] ) ] )[ "models" ] == { "['x']": 1 }                 # counted by its text, never dropped
 
@@ -240,14 +240,14 @@ def test_a_response_lost_to_a_failed_cache_write_is_still_summarised( env, monke
         if not flaky: flaky.append( key ); raise OSError( "disk full" )
         return real( self, key, response )
     monkeypatch.setattr( rt.JevCache, "put", put )
-    assert rt.check_exists_impl( need, live( fake, env ) )[ "stats" ][ "transport" ][ "responses" ] == 4
+    assert rt.check_exists_impl( need, live( fake, env ), language="all" )[ "stats" ][ "transport" ][ "responses" ] == 4
 
 
 def test_a_receipt_stored_before_the_summary_still_replays( env ):
     need = N( "old" )
     fake = FakeJev( { FEEDS_TEXT: with_usage( { "answers": { "fit": { "probabilities": { "reuse": 0.95, "extend": 0.03, "unrelated": 0.02 } } } } ) }, need=need )
     ctx  = live( fake, env )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     path = env[ 1 ] / "receipts" / f"{r[ 'receipt_id' ]}.json"
     old  = json.loads( path.read_text( encoding="utf-8" ) )
     del old[ "stats" ][ "transport" ]

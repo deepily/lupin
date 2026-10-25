@@ -4851,27 +4851,27 @@ def _reuse_unavailable( e ) -> dict:
     return { "status": "error", "error": "REUSE_TOOLS_UNAVAILABLE", "detail": f"{type( e ).__name__}: {e}" }
 
 
-def _reuse_call( impl_name, root, *args ) -> dict:
+def _reuse_call( impl_name, root, *args, **kw ) -> dict:
     """
     Run one reuse_tools implementation for a wrapper, or say why it cannot run.
 
     Requires:
-        - impl_name names a function in lupin_mcp.reuse_tools that takes ( *args, ctx )
+        - impl_name names a function in lupin_mcp.reuse_tools that takes ( *args, ctx, **kw )
     Ensures:
         - imports reuse_tools and builds its context for root; if either fails, returns _reuse_unavailable
-        - otherwise returns reuse_tools.<impl_name>( *args, ctx )
+        - otherwise returns reuse_tools.<impl_name>( *args, ctx, **kw )
     """
     try:
         from lupin_mcp import reuse_tools
         ctx = reuse_tools.context_from_environment( root )
     except Exception as e:
         return _reuse_unavailable( e )
-    return getattr( reuse_tools, impl_name )( *args, ctx )
+    return getattr( reuse_tools, impl_name )( *args, ctx, **kw )
 
 
 @mcp.tool
 @_offloaded_tool
-def check_exists( need: str, root: Optional[ str ] = None ) -> dict:
+def check_exists( need: str, language: Optional[ str ] = None, root: Optional[ str ] = None ) -> dict:
     """
     Should this be built? Gives a verdict and the existing symbols that may do it.
 
@@ -4880,27 +4880,35 @@ def check_exists( need: str, root: Optional[ str ] = None ) -> dict:
     always carries a `cause`; it means read the source of the shortlist and nearest entries, and is
     never a guess. The cause NO_MATCH (nothing relevant found) does not rule the need distinct: read the nearest entries first.
 
+    The language argument is mandatory: py, ts, dart, or all. The search covers that language only,
+    and all is the explicit choice to look across languages. A call without it answers LANGUAGE_REQUIRED.
+
     Args:
         need: what the new code would do
+        language: py, ts, dart or all (required; there is no default)
         root: repository root to check; default is the git root of the working directory
     """
-    return _reuse_call( "check_exists_impl", root, need )
+    return _reuse_call( "check_exists_impl", root, need, language=language )
 
 
 @mcp.tool
 @_offloaded_tool
-def fetch_similar( entry: str, root: Optional[ str ] = None ) -> dict:
+def fetch_similar( entry: str, language: Optional[ str ] = None, root: Optional[ str ] = None ) -> dict:
     """
     What does this symbol resemble? Returns the shortlist of similar existing symbols and a receipt_id.
 
     Use it on each new definition in a diff. `entry` is the symbol id as listed in the index, for
     example "cosa.rest.task_store_owed.park_reason_is_stale". The symbol itself is excluded.
 
+    The language argument is mandatory: py, ts, dart, or all. It is never inferred from the entry,
+    so a language other than the entry's own is a deliberate cross-language look. A call without it answers LANGUAGE_REQUIRED.
+
     Args:
         entry: symbol id
+        language: py, ts, dart or all (required; there is no default)
         root: repository root; default is the git root of the working directory
     """
-    return _reuse_call( "fetch_similar_impl", root, entry )
+    return _reuse_call( "fetch_similar_impl", root, entry, language=language )
 
 
 @mcp.tool

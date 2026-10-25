@@ -70,7 +70,7 @@ def receipt_of( env, r ): return json.loads( next( ( env[ 1 ] / "receipts" ).glo
 def test_a_full_sweep_goes_out_as_one_packed_request_and_decides_like_the_old_path( env ):
     need = "read an RSS feed [full]"
     fake = PackedFake( need, { FEEDS_TEXT: HIT } )
-    r    = rt.check_exists_impl( need, packed_ctx( env, fake ) )
+    r    = rt.check_exists_impl( need, packed_ctx( env, fake ), language="all" )
     assert ( r[ "status" ], r[ "verdict" ] ) == ( "ok", "REUSE" ) and fake.unexpected == []
     assert fake.sizes() == [ 3 ] and [ s[ "id" ] for s in r[ "shortlist" ] ] == [ "cosa.feeds.parse_feed" ]
     assert r[ "stats" ][ "requests" ] == 1 and r[ "stats" ][ "attempts" ] == 1 and r[ "stats" ][ "route" ] == "full"
@@ -78,7 +78,7 @@ def test_a_full_sweep_goes_out_as_one_packed_request_and_decides_like_the_old_pa
 
 def test_the_packed_receipt_names_its_shape_its_tool_version_its_pack_size_and_its_requests( env ):
     need = "read an RSS feed [receipt]"
-    r    = rt.check_exists_impl( need, packed_ctx( env, PackedFake( need ), size=2 ) )
+    r    = rt.check_exists_impl( need, packed_ctx( env, PackedFake( need ), size=2 ), language="all" )
     rec  = receipt_of( env, r )
     assert rec[ "tool_version" ] == "2" and rec[ "request_shape" ] == "packed-choice-1" and rec[ "pack_size" ] == 2
     assert [ q[ "stage" ] for q in rec[ "requests" ] ] == [ "all", "all" ] and [ q[ "size" ] for q in rec[ "requests" ] ] == [ 2, 1 ]
@@ -88,7 +88,7 @@ def test_the_packed_receipt_names_its_shape_its_tool_version_its_pack_size_and_i
 def test_the_old_path_receipt_keeps_version_one_and_has_no_shape( env ):
     from tests.unit.test_reuse_tools import FakeJev
     need = "read an RSS feed [old]"
-    r    = rt.check_exists_impl( need, rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=need ) ) )
+    r    = rt.check_exists_impl( need, rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=need ) ), language="all" )
     rec  = receipt_of( env, r )
     assert rec[ "tool_version" ] == "1" and "request_shape" not in rec and "requests" not in rec
 
@@ -96,8 +96,8 @@ def test_the_old_path_receipt_keeps_version_one_and_has_no_shape( env ):
 def test_one_question_gets_a_different_receipt_id_on_each_path( env ):
     from tests.unit.test_reuse_tools import FakeJev
     need = "read an RSS feed [ids]"
-    old  = rt.check_exists_impl( need, rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=need ) ) )
-    new  = rt.check_exists_impl( need, packed_ctx( env, PackedFake( need ) ) )
+    old  = rt.check_exists_impl( need, rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=need ) ), language="all" )
+    new  = rt.check_exists_impl( need, packed_ctx( env, PackedFake( need ) ), language="all" )
     assert old[ "receipt_id" ] != new[ "receipt_id" ]
 
 
@@ -112,7 +112,7 @@ def test_replay_frozen_reproduces_a_packed_receipt_from_the_cache_with_no_transp
     write_wiki( env[ 0 ] )
     need = "read an RSS feed [replay]"
     ctx  = packed_ctx( env, PackedFake( need, { FEEDS_PAGE: CHOSEN, FEEDS_TEXT: HIT } ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     rep  = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == r[ "verdict" ] == "REUSE" and rep[ "differences" ][ "frozen" ] == []
 
@@ -120,10 +120,10 @@ def test_replay_frozen_reproduces_a_packed_receipt_from_the_cache_with_no_transp
 def test_a_packed_receipt_with_an_unanswered_entry_replays_to_the_same_uncertain_verdict_after_the_cache_fills( env ):
     need = "read an RSS feed [gap]"
     ctx  = packed_ctx( env, PackedFake( need, omit=[ MATHX_TEXT ] ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     assert r[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and r[ "cause" ] == "CALL_FAILED" and r[ "stats" ][ "failed" ] == 1
     assert receipt_of( env, r )[ "stats" ][ "failed_attempts" ][ 0 ][ "ids" ] == [ "cosa.mathx.add" ]
-    rt.check_exists_impl( need, packed_ctx( env, PackedFake( need ) ) )                  # a later run answers the missing entry and fills the cache
+    rt.check_exists_impl( need, packed_ctx( env, PackedFake( need ) ), language="all" )                  # a later run answers the missing entry and fills the cache
     rep = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == r[ "verdict" ] and rep[ "differences" ][ "frozen" ] == []
 
@@ -132,7 +132,7 @@ def test_replay_reads_a_failed_attempts_entry_in_the_old_shape_too( env ):
     from tests.unit.test_reuse_tools import FakeJev
     need = "read an RSS feed [old-gap]"
     ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=need ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     path = next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) )
     rec  = json.loads( path.read_text( encoding="utf-8" ) )
     rec[ "stats" ][ "failed_attempts" ] = [ { "id": "cosa.mathx.add", "attempts": 3 } ]
@@ -144,7 +144,7 @@ def test_replay_reads_a_failed_attempts_entry_in_the_old_shape_too( env ):
 def test_load_receipt_accepts_versions_one_and_two_and_refuses_a_version_whose_id_does_not_recompute( env ):
     need = "read an RSS feed [versions]"
     ctx  = packed_ctx( env, PackedFake( need ) )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     assert rt.load_receipt( ctx, r[ "receipt_id" ] )[ "tool_version" ] == "2"
     path = next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) )
     rec  = json.loads( path.read_text( encoding="utf-8" ) )
@@ -209,7 +209,7 @@ def test_a_run_the_account_cannot_afford_is_refused_before_any_http( monkeypatch
     led = rl.AccountLedger.create( tmp_path / "ledger.jsonl", limit_tokens=50_000_000, by="t", why="fixture" )
     ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10,
                            token_ceiling=71_000_000, run_name="stage1-a", ledger=led )
-    r = rt.check_exists_impl( "read an RSS feed", ctx )
+    r = rt.check_exists_impl( "read an RSS feed", ctx, language="all" )
     assert r[ "status" ] == "error" and r[ "error" ] == "SPEND_LEDGER" and posts == []
 
 
@@ -228,7 +228,7 @@ def test_a_single_use_context_closes_its_run_in_the_ledger_when_the_question_end
     ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10,
                             token_ceiling=71_000_000, run_name="stage1-a", ledger=led, single_use=True )
     monkeypatch.setattr( jt, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( PackedFake( need ).post_with_meta( json.loads( body ) )[ 0 ] ) ) )
-    r = rt.check_exists_impl( need, ctx )
+    r = rt.check_exists_impl( need, ctx, language="all" )
     assert r[ "status" ] == "ok" and led.total() == 120      # one request, 100 in and 20 out; the closed run counts at what it spent
 
 
@@ -237,7 +237,7 @@ def test_a_packed_context_built_by_hand_without_a_ceiling_or_ledger_is_refused_b
     posts = []
     monkeypatch.setattr( jt, "_post", lambda *a: posts.append( a ) )
     ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10 )
-    r = rt.check_exists_impl( "read an RSS feed", ctx )
+    r = rt.check_exists_impl( "read an RSS feed", ctx, language="all" )
     assert r[ "status" ] == "error" and r[ "error" ] == "BAD_SPEND_LIMIT" and posts == []
 
 
@@ -253,7 +253,7 @@ def test_a_context_that_is_not_single_use_leaves_its_run_open_at_the_ceiling( mo
     ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10,
                             token_ceiling=71_000_000, run_name="stage1-a", ledger=led, single_use=False )
     monkeypatch.setattr( jt, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( PackedFake( need ).post_with_meta( json.loads( body ) )[ 0 ] ) ) )
-    assert rt.check_exists_impl( need, ctx )[ "status" ] == "ok" and led.total() == 71_000_000
+    assert rt.check_exists_impl( need, ctx, language="all" )[ "status" ] == "ok" and led.total() == 71_000_000
 
 
 def test_the_ledger_path_variable_names_the_ledger_and_without_it_the_fleet_path_is_used( monkeypatch, env, tmp_path ):
@@ -276,7 +276,7 @@ def test_a_packed_context_with_a_ceiling_and_a_run_name_but_no_ledger_is_refused
     monkeypatch.setattr( jt, "_post", lambda *a: posts.append( a ) )
     ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10,
                            token_ceiling=1_000_000, run_name="r", ledger=None )
-    r = rt.check_exists_impl( "read an RSS feed", ctx )
+    r = rt.check_exists_impl( "read an RSS feed", ctx, language="all" )
     assert r[ "status" ] == "error" and r[ "error" ] == "BAD_SPEND_LIMIT" and posts == []
 
 
@@ -288,5 +288,5 @@ def test_a_run_name_the_ledger_already_holds_is_refused_as_a_ledger_error_not_a_
     led.begin_run( "stage1-a", 10 )
     ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10,
                            token_ceiling=1_000_000, run_name="stage1-a", ledger=led )
-    r = rt.check_exists_impl( "read an RSS feed", ctx )
+    r = rt.check_exists_impl( "read an RSS feed", ctx, language="all" )
     assert r[ "status" ] == "error" and r[ "error" ] == "SPEND_LEDGER" and posts == []

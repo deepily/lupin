@@ -13,7 +13,8 @@ from tests.unit.test_reuse_tools import FEEDS_TEXT, FakeJev
 from tests.unit.test_reuse_page_first import HIT
 
 NEED    = "read an RSS feed [pin]"
-PINNED  = { "packed": "db99d078ad9ffe612a9e33ab20c476cfa99d26da", "old": "b661799dbcd432ece5afa9c1c8f2a9b5788d105b" }      # re-taken when the receipt's index_sha began to derive from search_sha (step S3); first taken at db8e910eb, before unit 5
+BEFORE_LANGUAGE = { "packed": "db99d078ad9ffe612a9e33ab20c476cfa99d26da", "old": "b661799dbcd432ece5afa9c1c8f2a9b5788d105b" }      # taken when index_sha began to derive from search_sha (step S3); first taken at db8e910eb, before unit 5
+PINNED          = { "packed": "b61a9d067d908b76a7957160425b24ef3b28565b", "old": "2e85e70a4bba8a48b1bf8d370c71c322602a0bd3" }      # re-taken when the receipt gained its `language` field (step 1.4)
 
 
 @pytest.fixture( autouse=True )
@@ -30,11 +31,23 @@ def policy_at_the_pinned_cut( monkeypatch ):
 def receipt_sha( rec ): return rt.sha( rt.canonical( rec ), 40 )
 
 
+def without_language( rec ):
+    """Return the receipt as it was before the language field was added."""
+    old = { k: v for k, v in rec.items() if k != "language" }
+    old[ "id" ] = rt.receipt_id( rec[ "tool" ], rec[ "query" ], rec[ "index_sha" ], rec[ "model" ], rec[ "policy" ], rec[ "prompt_template_hash" ], rec[ "causes" ],
+                                 rec[ "tool_version" ], rec[ "request_shape" ] if "request_shape" in rec else None )
+    return old
+
+
 def test_the_packed_choice_receipt_is_the_one_pinned_before_the_new_question( env ):
-    r = rt.check_exists_impl( NEED, packed_ctx( env, PackedFake( NEED, { FEEDS_TEXT: HIT } ) ) )
-    assert receipt_sha( receipt_of( env, r ) ) == PINNED[ "packed" ]
+    r = rt.check_exists_impl( NEED, packed_ctx( env, PackedFake( NEED, { FEEDS_TEXT: HIT } ) ), language="all" )
+    rec = receipt_of( env, r )
+    assert receipt_sha( rec ) == PINNED[ "packed" ]
+    assert receipt_sha( without_language( rec ) ) == BEFORE_LANGUAGE[ "packed" ]               # the language key and the id it feeds are the whole difference
 
 
 def test_the_old_path_receipt_is_the_one_pinned_before_the_new_question( env ):
-    r = rt.check_exists_impl( NEED, rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=NEED ) ) )
-    assert receipt_sha( receipt_of( env, r ) ) == PINNED[ "old" ]
+    r = rt.check_exists_impl( NEED, rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FakeJev( need=NEED ) ), language="all" )
+    rec = receipt_of( env, r )
+    assert receipt_sha( rec ) == PINNED[ "old" ]
+    assert receipt_sha( without_language( rec ) ) == BEFORE_LANGUAGE[ "old" ]                  # the language key and the id it feeds are the whole difference

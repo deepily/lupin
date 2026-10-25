@@ -62,7 +62,7 @@ def test_usage_of_reads_two_whole_numbers_and_nothing_else( response, expected )
 def test_live_answers_are_summed_input_and_output_separately( env ):
     need = N( "sum" )
     fake = FakeJev( { FEEDS_TEXT: U( UNREL, 448, 42 ), MATHX_TEXT: U( UNREL, 100, 10 ), SERVE_TEXT: U( UNREL, 7, 3 ) }, need=need )
-    r    = rt.check_exists_impl( need, ctx_for( env, fake ) )
+    r    = rt.check_exists_impl( need, ctx_for( env, fake ), language="all" )
     assert r[ "stats" ][ "calls" ] == 3 and tokens( r[ "stats" ] ) == ( 555, 55, 0 )
     assert [ s[ "tokens_in" ] for s in r[ "stats" ][ "stages" ] ] == [ 555 ] and r[ "stats" ][ "stages" ][ 0 ][ "tokens_out" ] == 55
 
@@ -71,8 +71,8 @@ def test_a_cache_hit_counts_as_zero_and_is_not_a_missing_usage( env ):
     need = N( "hits" )
     fake = FakeJev( { FEEDS_TEXT: U( UNREL, 448, 42 ), MATHX_TEXT: U( UNREL, 100, 10 ), SERVE_TEXT: U( UNREL, 7, 3 ) }, need=need )
     ctx  = ctx_for( env, fake )
-    first = rt.check_exists_impl( need, ctx )
-    again = rt.run_question( ctx, "check_exists", need, need, write=False )                 # the same question, every answer cached
+    first = rt.check_exists_impl( need, ctx, language="all" )
+    again = rt.run_question( ctx, "check_exists", need, need, write=False, language="all" )                 # the same question, every answer cached
     assert first[ "stats" ][ "calls" ] == 3 and tokens( first[ "stats" ] ) == ( 555, 55, 0 )
     assert ( again[ "stats" ][ "calls" ], again[ "stats" ][ "cache_hits" ] ) == ( 0, 3 ) and tokens( again[ "stats" ] ) == ( 0, 0, 0 )
     assert len( fake.seen ) == 3                                                           # nothing was sent the second time
@@ -82,7 +82,7 @@ def test_a_live_answer_without_usable_usage_adds_nothing_and_is_counted( env ):
     need = N( "missing" )
     bad  = { **UNREL, "usage": { "input_tokens": "many", "output_tokens": 5 } }
     fake = FakeJev( { FEEDS_TEXT: U( UNREL, 448, 42 ), MATHX_TEXT: UNREL, SERVE_TEXT: bad }, need=need )
-    r    = rt.check_exists_impl( need, ctx_for( env, fake ) )
+    r    = rt.check_exists_impl( need, ctx_for( env, fake ), language="all" )
     assert r[ "stats" ][ "calls" ] == 3 and tokens( r[ "stats" ] ) == ( 448, 42, 2 )
 
 
@@ -90,14 +90,14 @@ def test_a_failed_call_has_no_response_to_read_and_is_not_a_missing_usage( env )
     need = N( "failed" )
     fake = FakeJev( { FEEDS_TEXT: U( UNREL, 448, 42 ), MATHX_TEXT: U( UNREL, 100, 10 ) }, need=need )
     fake.table.pop( key_of( literal_body( need, SERVE_TEXT ) ) )                              # the third text is never answered
-    r    = rt.check_exists_impl( need, ctx_for( env, fake ) )
+    r    = rt.check_exists_impl( need, ctx_for( env, fake ), language="all" )
     assert r[ "stats" ][ "failed" ] == 1 and r[ "stats" ][ "calls" ] == 2
     assert tokens( r[ "stats" ] ) == ( 548, 52, 0 )
 
 
 
 def test_a_question_that_asks_nothing_reports_zero_tokens( env ):
-    r = rt.check_exists_impl( N( "nokey" ), ctx_for( env, None ) )                         # no transport and no key: nothing is asked
+    r = rt.check_exists_impl( N( "nokey" ), ctx_for( env, None ), language="all" )                         # no transport and no key: nothing is asked
     assert r[ "cause" ] == "KEY_UNREADABLE" and tokens( r[ "stats" ] ) == ( 0, 0, 0 )
 
 
@@ -105,7 +105,7 @@ def test_a_frozen_sweep_reports_zero_tokens( env ):
     need = N( "frozen" )
     fake = FakeJev( { FEEDS_TEXT: U( UNREL, 448, 42 ) }, need=need )
     ctx  = ctx_for( env, fake )
-    rt.check_exists_impl( need, ctx )
+    rt.check_exists_impl( need, ctx, language="all" )
     entries = [ { "id": "cosa.feeds.parse_feed", "sig": "(url)", "doc": "Parse an RSS feed into Article objects.", "file": "src/cosa/feeds.py", "lang": "py" } ]
     sw = rt.sweep( ctx, need, entries, frozen=True )
     assert ( sw[ "tokens_in" ], sw[ "tokens_out" ], sw[ "usage_missing" ], sw[ "cache_hits" ] ) == ( 0, 0, 0, 1 )
@@ -115,7 +115,7 @@ def test_a_receipt_stored_before_the_tally_still_replays( env ):
     need = N( "old" )
     fake = FakeJev( { FEEDS_TEXT: U( resp( 0.95, 0.03, 0.02 ), 448, 42 ) }, need=need )
     ctx  = ctx_for( env, fake )
-    r    = rt.check_exists_impl( need, ctx )
+    r    = rt.check_exists_impl( need, ctx, language="all" )
     path = env[ 1 ] / "receipts" / f"{r[ 'receipt_id' ]}.json"
     old  = json.loads( path.read_text( encoding="utf-8" ) )
     for key in ( "tokens_in", "tokens_out", "usage_missing" ):
@@ -129,7 +129,7 @@ def test_a_receipt_stored_before_the_tally_still_replays( env ):
 
 def test_the_caller_facing_result_carries_the_tokens( env ):
     need = N( "public" )
-    r    = rt.check_exists_impl( need, ctx_for( env, FakeJev( { FEEDS_TEXT: U( UNREL, 448, 42 ) }, need=need ) ) )
+    r    = rt.check_exists_impl( need, ctx_for( env, FakeJev( { FEEDS_TEXT: U( UNREL, 448, 42 ) }, need=need ) ), language="all" )
     assert set( r[ "stats" ] ) >= { "tokens_in", "tokens_out", "usage_missing" }
 
 
@@ -143,7 +143,7 @@ def test_a_response_whose_cache_write_failed_still_counts_its_tokens_when_the_ca
         return real( self, key, response )
 
     monkeypatch.setattr( rt.JevCache, "put", flaky )
-    r = rt.check_exists_impl( need, ctx_for( env, fake ) )
+    r = rt.check_exists_impl( need, ctx_for( env, fake ), language="all" )
     assert len( fake.seen ) == 4 and r[ "stats" ][ "calls" ] == 3 and r[ "stats" ][ "failed" ] == 0       # one entry was asked twice
     first = next( t for t in ( FEEDS_TEXT, MATHX_TEXT, SERVE_TEXT ) if key_of( literal_body( need, t ) ) == failed_once[ 0 ] )
     extra = { FEEDS_TEXT: ( 448, 42 ), MATHX_TEXT: ( 100, 10 ), SERVE_TEXT: ( 7, 3 ) }[ first ]
@@ -157,6 +157,6 @@ def test_responses_that_never_reached_the_cache_count_their_tokens_when_the_entr
     def broken( self, key, response ): raise OSError( "disk full" )
 
     monkeypatch.setattr( rt.JevCache, "put", broken )
-    r = rt.check_exists_impl( need, ctx_for( env, fake ) )
+    r = rt.check_exists_impl( need, ctx_for( env, fake ), language="all" )
     assert r[ "stats" ][ "failed" ] == 3 and len( fake.seen ) == 3 * ( rt.RETRIES + 1 )
     assert tokens( r[ "stats" ] ) == ( 555 * ( rt.RETRIES + 1 ), 55 * ( rt.RETRIES + 1 ), 0 )              # Jev answered every attempt

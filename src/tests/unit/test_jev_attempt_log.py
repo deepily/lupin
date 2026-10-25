@@ -183,7 +183,7 @@ def test_a_server_error_runs_from_500_to_599_apart_from_529():
 
 
 def test_the_receipt_stats_carry_the_attempt_counts( env ):      # noqa: F811
-    r = rt.check_exists_impl( N( "ok" ), ctx_over( env, Door( [ 429, 200 ] ) ) )
+    r = rt.check_exists_impl( N( "ok" ), ctx_over( env, Door( [ 429, 200 ] ) ), language="all" )
     counts = r[ "stats" ][ "attempt_counts" ]
     assert counts[ "requests" ] == r[ "stats" ][ "calls" ] and counts[ "n429" ] == 1 and counts[ "attempts" ] == counts[ "requests" ] + 1
 

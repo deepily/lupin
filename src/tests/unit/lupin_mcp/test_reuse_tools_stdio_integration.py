@@ -97,8 +97,8 @@ def test_each_reuse_tool_answers_over_stdio_beside_a_voice_tool( dirs ):
     data, _ = dirs
     with started( server_env( *dirs ) ) as client:
         before = client.call_tool( "get_session_info", {} )
-        check  = client.call_tool( "check_exists", { "need": "mark a task row stale when its park reason is old" } )
-        similar = client.call_tool( "fetch_similar", { "entry": ENTRY } )
+        check  = client.call_tool( "check_exists", { "need": "mark a task row stale when its park reason is old", "language": "all" } )
+        similar = client.call_tool( "fetch_similar", { "entry": ENTRY, "language": "all" } )
         read   = client.call_tool( "read_capability", { "names": [ "no-such-capability" ] } )
         replay = client.call_tool( "replay", { "receipt_id": check[ "receipt_id" ] } )
         after  = client.call_tool( "get_session_info", {} )
@@ -121,7 +121,7 @@ def test_each_reuse_tool_answers_over_stdio_beside_a_voice_tool( dirs ):
 
 def test_a_receipt_is_byte_equal_after_the_server_restarts( dirs ):
     data, _ = dirs
-    need = { "need": "wrap a dictionary so a missing key raises a named error" }
+    need = { "need": "wrap a dictionary so a missing key raises a named error", "language": "all" }
     with started( server_env( *dirs ) ) as first:
         one = first.call_tool( "check_exists", need )
     files = sorted( p for p in data.rglob( f"{one[ 'receipt_id' ]}*" ) if p.is_file() )
@@ -174,7 +174,7 @@ def test_when_the_reuse_import_raises_the_server_starts_and_a_voice_tool_answers
         names   = { t[ "name" ] for t in client.list_tools() }
         voice   = client.call_tool( "get_session_info", {} )
         answers = { t: client.call_tool( t, args ) for t, args in
-                    { "check_exists": { "need": "anything" }, "fetch_similar": { "entry": ENTRY },
+                    { "check_exists": { "need": "anything", "language": "all" }, "fetch_similar": { "entry": ENTRY, "language": "all" },
                       "read_capability": { "names": [ "x" ] }, "replay": { "receipt_id": "0123456789abcdef" } }.items() }
     assert REUSE <= names, "the wrappers still load, so the tools stay listed"
     assert voice[ "project" ] == "lupin", "a voice tool answers while reuse_tools cannot be imported"
@@ -188,7 +188,7 @@ def test_when_the_call_log_middleware_import_raises_the_server_says_so_and_still
     env = server_env( *dirs, extra_pythonpath=shim_dir( tmp_path, { "lupin_mcp.reuse_call_log_middleware" } ) )
     with started( env ) as client:
         voice = client.call_tool( "get_session_info", {} )
-        check = client.call_tool( "check_exists", { "need": "something to look up" } )
+        check = client.call_tool( "check_exists", { "need": "something to look up", "language": "all" } )
     assert voice[ "project" ] == "lupin" and check[ "tool" ] == "check_exists", "both families still answer without the middleware"
     assert "reuse call-log middleware not mounted" in client.stderr_text, "the failure is reported on stderr, not silent"
 
@@ -268,7 +268,7 @@ def test_a_slow_reuse_call_does_not_starve_a_voice_tool( tmp_path ):
     env = server_env( tmp_path / "data", tmp_path / "out" )
     with OverlappingClient( env=env, cwd=str( REPO ), timeout_seconds=180.0 ) as client:
         client.initialize()
-        slow = client.send_call( "check_exists", { "need": "a need that makes the server build its index first" } )
+        slow = client.send_call( "check_exists", { "need": "a need that makes the server build its index first", "language": "all" } )
         time.sleep( 1.0 )                                                     # let the server start the build
         probes = []                                                           # ( latency, reuse call still in flight )
         for _ in range( PROBES ):

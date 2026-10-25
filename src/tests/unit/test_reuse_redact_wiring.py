@@ -98,7 +98,7 @@ def stored( env, r ): return json.loads( ( env[ 1 ] / "receipts" / f"{r[ 'receip
 @pytest.mark.parametrize( "make_ctx", [ plain_ctx, packed_ctx ] )
 def test_a_need_reaches_jev_redacted_with_the_known_route_kept( env, make_ctx ):
     fake = Recording()
-    r    = rt.check_exists_impl( RAW_NEED, make_ctx( env, fake ) )
+    r    = rt.check_exists_impl( RAW_NEED, make_ctx( env, fake ), language="all" )
     assert r[ "status" ] == "ok" and fake.bodies
     assert fake.needs() == { SENT_NEED }
     assert not any( token in fake.sent() for token in RAW_TOKENS )
@@ -112,7 +112,7 @@ def test_a_need_reaches_jev_redacted_with_the_known_route_kept( env, make_ctx ):
 def test_an_index_with_no_route_list_redacts_every_absolute_path_and_says_so( env, monkeypatch ):
     monkeypatch.setattr( rt, "known_routes_of", lambda gen: ( (), "none" ) )
     fake = Recording()
-    r    = rt.check_exists_impl( RAW_NEED, plain_ctx( env, fake ) )
+    r    = rt.check_exists_impl( RAW_NEED, plain_ctx( env, fake ), language="all" )
     assert fake.needs() == { SENT_NEED_NO_ROUTES }
     assert stored( env, r )[ "routes_source" ] == "none"
 
@@ -120,15 +120,15 @@ def test_an_index_with_no_route_list_redacts_every_absolute_path_and_says_so( en
 def test_a_need_the_redactor_leaves_alone_keeps_the_receipt_it_had_before( env ):
     need = "read an RSS feed [clean]"
     fake = Recording()
-    r    = rt.check_exists_impl( need, plain_ctx( env, fake ) )
+    r    = rt.check_exists_impl( need, plain_ctx( env, fake ), language="all" )
     rec  = stored( env, r )
     assert fake.needs() == { need } and rec[ "query" ] == need
     assert "need_redactions" not in rec and "need_sent" not in rec and "routes_source" not in rec
     assert r[ "need_redactions" ] == []
 
 
-@pytest.mark.parametrize( "call", [ lambda c: rt.sweep_need_impl( RAW_NEED, None, c ),
-                                    lambda c: rt.unstored_need_impl( RAW_NEED, None, c ), lambda c: rt.unstored_need_impl( RAW_NEED, None, c, candidates=True ) ] )
+@pytest.mark.parametrize( "call", [ lambda c: rt.sweep_need_impl( RAW_NEED, None, c, language="all" ),
+                                    lambda c: rt.unstored_need_impl( RAW_NEED, None, c, language="all" ), lambda c: rt.unstored_need_impl( RAW_NEED, None, c, candidates=True, language="all" ) ] )
 def test_every_entry_that_takes_a_free_text_need_redacts_it( env, call ):
     fake = Recording()
     r    = call( plain_ctx( env, fake ) )
@@ -138,7 +138,7 @@ def test_every_entry_that_takes_a_free_text_need_redacts_it( env, call ):
 
 def test_the_pair_question_redacts_the_need_too( env ):
     fake = Recording()
-    r    = rt.unstored_need_impl( RAW_NEED, None, packed_ctx( env, fake ), question="provides" )
+    r    = rt.unstored_need_impl( RAW_NEED, None, packed_ctx( env, fake ), question="provides", language="all" )
     assert r[ "status" ] in ( "ok", "error" ) and fake.bodies
     assert not any( t in fake.sent() for t in RAW_TOKENS )
 
@@ -146,7 +146,7 @@ def test_the_pair_question_redacts_the_need_too( env ):
 def test_fetch_similar_redacts_the_text_of_the_entry_it_sends_as_a_need( env_with_where ):
     env  = env_with_where
     fake = Recording()
-    r    = rt.fetch_similar_impl( "cosa.paths.where", plain_ctx( env, fake ) )
+    r    = rt.fetch_similar_impl( "cosa.paths.where", plain_ctx( env, fake ), language="all" )
     assert r[ "status" ] == "ok"
     assert fake.needs() == { "cosa.paths.where() — Reads [path]." }
     assert "/projects/acme/secret.py" not in json.dumps( [ b[ "state" ][ "need" ] for b in fake.bodies ] )
@@ -158,10 +158,10 @@ def test_a_replay_of_a_redacted_receipt_reads_the_cache_it_wrote( env_with_where
     env  = env_with_where
     fake = Recording()
     ctx  = packed_ctx( env, fake )
-    r    = rt.check_exists_impl( RAW_NEED, ctx )
+    r    = rt.check_exists_impl( RAW_NEED, ctx, language="all" )
     rep  = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] }
-    f    = rt.fetch_similar_impl( "cosa.paths.where", plain_ctx( env, Recording() ) )
+    f    = rt.fetch_similar_impl( "cosa.paths.where", plain_ctx( env, Recording() ), language="all" )
     rep2 = rt.replay_impl( f[ "receipt_id" ], plain_ctx( env, Recording() ) )
     assert rep2[ "status" ] == "ok" and rep2[ "differences" ][ "frozen" ] == []
 
@@ -178,13 +178,13 @@ def test_known_routes_come_from_the_generation_and_default_to_none( env, tmp_pat
 
 def test_an_entry_with_a_path_outside_sendables_roots_is_counted_and_reported( env_with_where ):
     env = env_with_where
-    r   = rt.check_exists_impl( RAW_NEED, packed_ctx( env, Recording() ) )
+    r   = rt.check_exists_impl( RAW_NEED, packed_ctx( env, Recording() ), language="all" )
     assert r[ "unscreened_entry_paths" ] == 1
     assert stored( env, r )[ "unscreened_entry_paths" ] == 1
 
 
 def test_a_clean_index_reports_zero_and_its_receipt_has_no_such_key( env ):
-    r = rt.check_exists_impl( RAW_NEED, packed_ctx( env, Recording() ) )
+    r = rt.check_exists_impl( RAW_NEED, packed_ctx( env, Recording() ), language="all" )
     assert r[ "unscreened_entry_paths" ] == 0
     assert "unscreened_entry_paths" not in stored( env, r )
 

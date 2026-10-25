@@ -85,7 +85,7 @@ def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT, route=
     repeat         = copy.copy( ctx )
     repeat.sweeper = repeat_sweeper( ctx.pack_size, workers, run_index )
     if question == "provides": repeat.pair_sweeper = repeat_pair_sweeper( ctx.pack_size, workers, run_index )
-    return rt.unstored_need_impl( need, member, repeat, candidates=route == "candidates", question=question )
+    return rt.unstored_need_impl( need, member, repeat, candidates=route == "candidates", question=question, language="all" )
 
 
 def signature( result ):

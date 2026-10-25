@@ -31,8 +31,8 @@ def make_wide_repo( base ):
     return root
 
 
-def ask_old( ctx, item ): return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx )
-def ask_new( ctx, item ): return rt.sweep_need_impl( item[ "need" ] + " (new question)", item[ "member" ], ctx )
+def ask_old( ctx, item ): return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx, language="all" )
+def ask_new( ctx, item ): return rt.sweep_need_impl( item[ "need" ] + " (new question)", item[ "member" ], ctx, language="all" )
 
 
 class Env:

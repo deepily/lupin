@@ -28,7 +28,7 @@ def entries_of( env ):
 def pair_run( env, need=NEED, tool="check_exists", exclude_id=None, **fake_kw ):
     client = fake.PairFake( entries_of( env ), **fake_kw )
     ctx    = packed_ctx( env, client )
-    return client, ctx, rt.run_question( ctx, tool, need, need, exclude_id=exclude_id, question="provides" )
+    return client, ctx, rt.run_question( ctx, tool, need, need, exclude_id=exclude_id, question="provides", language="all" )
 
 
 def test_a_matching_entry_is_reused_on_the_new_question_and_the_receipt_says_which_question_it_was( env ):
@@ -44,7 +44,7 @@ def test_the_receipt_id_differs_from_the_three_way_receipt_of_the_same_question_
     from tests.unit.test_reuse_pack_route import PackedFake
     _, _, pair = pair_run( env )
     ctx        = packed_ctx( env, PackedFake( NEED ) )
-    choice     = rt.run_question( ctx, "check_exists", NEED, NEED )
+    choice     = rt.run_question( ctx, "check_exists", NEED, NEED, language="all" )
     assert pair[ "id" ] != choice[ "id" ] and "question" not in choice
 
 
@@ -71,14 +71,14 @@ def test_an_entry_with_a_wrong_answer_is_a_gap_so_the_verdict_is_uncertain_and_n
 def test_a_question_with_no_entry_to_ask_about_is_uncertain_on_its_pipeline_flag( env, tmp_path ):
     bare = tmp_path / "bare"; bare.mkdir()
     ctx  = rt.ReuseContext( bare, tmp_path / "d2", transport=fake.PairFake( [] ), sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10 )
-    rec  = rt.run_question( ctx, "check_exists", NEED, NEED, question="provides" )
+    rec  = rt.run_question( ctx, "check_exists", NEED, NEED, question="provides", language="all" )
     assert rec[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rec[ "cause" ] == "NOT_LUPIN_TREE" and rec[ "route" ] == "none" and rec[ "stats" ][ "calls" ] == 0
 
 
 def test_the_new_question_needs_the_packed_path_and_sends_nothing_without_it( env ):
     client = fake.PairFake( entries_of( env ) )
     ctx    = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=client )
-    with pytest.raises( rt.ReuseError ) as e: rt.run_question( ctx, "check_exists", NEED, NEED, question="provides" )
+    with pytest.raises( rt.ReuseError ) as e: rt.run_question( ctx, "check_exists", NEED, NEED, question="provides", language="all" )
     assert e.value.name == "PAIR_NEEDS_PACKED" and client.bodies == []
 
 
@@ -89,7 +89,7 @@ def test_an_unknown_question_is_refused( env ):
 
 def pair_run_unknown( env ):
     ctx = packed_ctx( env, fake.PairFake( entries_of( env ) ) )
-    return rt.run_question( ctx, "check_exists", NEED, NEED, question="other" )
+    return rt.run_question( ctx, "check_exists", NEED, NEED, question="other", language="all" )
 
 
 def test_replay_of_a_pair_receipt_reproduces_its_verdict_from_the_cache_and_at_head( env ):

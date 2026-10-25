@@ -100,13 +100,13 @@ def test_after_the_first_answer_posts_run_in_parallel_again( env ):
 def test_the_receipt_says_why_the_run_stopped( env, monkeypatch ):
     monkeypatch.setattr( rt, "BREAKER_422", 2, raising=False )
     need = N( "stop" )
-    r    = rt.check_exists_impl( need, ctx_over( env, Door( [ 422 ] ) ) )
+    r    = rt.check_exists_impl( need, ctx_over( env, Door( [ 422 ] ) ), language="all" )
     assert r[ "stats" ][ "stopped_by" ] == "consecutive_422" and r[ "stats" ][ "refused_422" ] == 2
     assert r[ "stats" ][ "failed" ] == 2 and r[ "stats" ][ "not_checked" ] == 1
 
 
 def test_a_receipt_with_no_refusal_reports_none_and_zero( env ):
-    r = rt.check_exists_impl( N( "ok" ), ctx_over( env, Door( [ 200 ] ) ) )
+    r = rt.check_exists_impl( N( "ok" ), ctx_over( env, Door( [ 200 ] ) ), language="all" )
     assert r[ "stats" ][ "stopped_by" ] is None and r[ "stats" ][ "refused_422" ] == 0
 
 

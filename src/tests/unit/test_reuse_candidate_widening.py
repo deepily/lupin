@@ -68,7 +68,7 @@ def test_a_first_sweep_near_the_cutoff_asks_the_extra_entries_in_packs_of_their_
     need  = "read an RSS feed [wide-1]"
     stage = RankedStage()
     fake  = PackedFake( need, { FEEDS_TEXT: NEAR } )
-    r     = rt.check_exists_impl( need, ctx_with( env, fake, stage ) )
+    r     = rt.check_exists_impl( need, ctx_with( env, fake, stage ), language="all" )
     rec   = receipt_of( env, r )
     assert [ c[ "K" ] for c in stage.calls ] == [ 1, 3 ] and stage.calls[ 1 ][ "wiki_ids" ] == [ "w1" ]       # the wide call holds the first call's wiki list
     assert ids_by_stage( rec ) == { "candidates": [ FEEDS_ID ], "widened": sorted( [ MATH_ID, SERVE_ID ] ) }
@@ -81,7 +81,7 @@ def test_a_first_sweep_near_the_cutoff_asks_the_extra_entries_in_packs_of_their_
 def test_with_no_band_in_the_policy_nothing_widens( env ):
     need  = "read an RSS feed [wide-off]"
     stage = RankedStage()
-    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=NO_BAND ) )
+    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=NO_BAND ), language="all" )
     rec   = receipt_of( env, r )
     assert [ c[ "K" ] for c in stage.calls ] == [ 1 ] and rec[ "candidate_stage" ][ "widened" ] is False and "widened_ids" in rec[ "candidate_stage" ]
     assert rec[ "candidate_stage" ][ "widened_ids" ] == [] and r[ "widened" ] is False and rec[ "policy" ] == NO_BAND
@@ -90,14 +90,14 @@ def test_with_no_band_in_the_policy_nothing_widens( env ):
 def test_the_shipped_policy_has_no_band_so_a_context_with_no_policy_never_widens_a_near_answer( env ):
     need  = "read an RSS feed [wide-shipped]"
     stage = RankedStage()
-    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=None ) )
+    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=None ), language="all" )
     assert "band" not in vd.POLICY and [ c[ "K" ] for c in stage.calls ] == [ 1 ] and r[ "widened" ] is False
 
 
 def test_an_answer_far_from_every_cutoff_does_not_widen( env ):
     need  = "read an RSS feed [wide-far]"
     stage = RankedStage()
-    rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: resp( 0.02, 0.03, 0.95 ) } ), stage ) )
+    rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: resp( 0.02, 0.03, 0.95 ) } ), stage ), language="all" )
     assert [ c[ "K" ] for c in stage.calls ] == [ 1 ]
 
 
@@ -105,14 +105,14 @@ def test_a_cause_beyond_low_confidence_and_near_cutoff_does_not_widen( env ):
     need  = "read an RSS feed [wide-other-cause]"
     stage = RankedStage()
     fake  = PackedFake( need, { FEEDS_TEXT: NEAR }, omit=[ FEEDS_TEXT ] )                   # the one asked entry is left out of the response: CALL_FAILED holds
-    r     = rt.check_exists_impl( need, ctx_with( env, fake, stage ) )
+    r     = rt.check_exists_impl( need, ctx_with( env, fake, stage ), language="all" )
     assert "CALL_FAILED" in r[ "causes" ] and [ c[ "K" ] for c in stage.calls ] == [ 1 ]
 
 
 def test_no_extra_entries_leaves_the_lookup_as_it_was( env ):
     need  = "read an RSS feed [wide-none]"
     stage = RankedStage( ranking=[ FEEDS_ID ] )                                             # the index holds one id the stage ranks: K 3 adds nothing
-    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage ) )
+    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage ), language="all" )
     rec   = receipt_of( env, r )
     assert [ c[ "K" ] for c in stage.calls ] == [ 1, 3 ] and rec[ "candidate_stage" ][ "widened" ] is False and ids_by_stage( rec ) == { "candidates": [ FEEDS_ID ] }
 
@@ -120,7 +120,7 @@ def test_no_extra_entries_leaves_the_lookup_as_it_was( env ):
 def test_a_stage_that_fails_the_wide_call_adds_call_failed_and_keeps_the_first_sweep( env ):
     need  = "read an RSS feed [wide-fail]"
     stage = RankedStage( fail_wide=True )
-    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage ) )
+    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage ), language="all" )
     rec   = receipt_of( env, r )
     assert r[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and "CALL_FAILED" in r[ "causes" ] and rec[ "route" ] == "candidates"
     assert rec[ "candidate_stage" ][ "widen_error" ] == { "code": "CANDIDATE_SEARCH_FAILED", "detail": "stand-in failure" } and rec[ "candidate_stage" ][ "widened" ] is False
@@ -132,16 +132,16 @@ def test_an_unpacked_context_never_widens( env ):
     stage = RankedStage()
     root, data, out = env
     ctx   = rt.ReuseContext( root, data, out_dir=out, transport=FakeJev( { FEEDS_TEXT: NEAR }, need=need ), candidate_stage=stage, policy=BAND )
-    r     = rt.check_exists_impl( need, ctx )
+    r     = rt.check_exists_impl( need, ctx, language="all" )
     assert r[ "status" ] == "ok" and [ c[ "K" ] for c in stage.calls ] == [ 1 ] and r[ "widened" ] is False
 
 
 def test_a_judged_entry_is_not_sent_again_when_the_run_widens( env ):
     need  = "read an RSS feed [wide-warm]"
     stage = RankedStage()
-    rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=NO_BAND ) )         # warm: only the first set is cached
+    rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=NO_BAND ), language="all" )         # warm: only the first set is cached
     fake  = PackedFake( need, { FEEDS_TEXT: NEAR } )
-    rt.check_exists_impl( need, ctx_with( env, fake, RankedStage() ) )
+    rt.check_exists_impl( need, ctx_with( env, fake, RankedStage() ), language="all" )
     sent  = [ q[ "instructions" ] for b in fake.bodies for q in b[ "questions" ].values() ]
     assert len( fake.bodies ) == 1 and not any( FEEDS_TEXT in text for text in sent ) and len( sent ) == 2
 
@@ -149,8 +149,8 @@ def test_a_judged_entry_is_not_sent_again_when_the_run_widens( env ):
 def test_the_warm_run_of_a_widened_lookup_sends_nothing_and_records_the_same_two_pack_sets( env ):
     need = "read an RSS feed [wide-cold-warm]"
     cold_fake, warm_fake = PackedFake( need, { FEEDS_TEXT: NEAR } ), PackedFake( need, { FEEDS_TEXT: NEAR } )
-    cold = rt.run_question( ctx_with( env, cold_fake, RankedStage() ), "check_exists", need, need, write=False )
-    warm = rt.run_question( ctx_with( env, warm_fake, RankedStage() ), "check_exists", need, need, write=False )
+    cold = rt.run_question( ctx_with( env, cold_fake, RankedStage() ), "check_exists", need, need, write=False, language="all" )
+    warm = rt.run_question( ctx_with( env, warm_fake, RankedStage() ), "check_exists", need, need, write=False, language="all" )
     assert len( cold_fake.bodies ) == 2 and warm_fake.bodies == []
     assert ids_by_stage( cold ) == { "candidates": [ FEEDS_ID ], "widened": sorted( [ MATH_ID, SERVE_ID ] ) } and ids_by_stage( warm ) == {}       # a fully cached pack has no request row
     for k in ( "ids", "widened_ids", "K", "widened" ): assert warm[ "candidate_stage" ][ k ] == cold[ "candidate_stage" ][ k ]               # the two sets are the receipt's own, cache or not
@@ -160,7 +160,7 @@ def test_a_replay_follows_the_recorded_k_and_both_pack_sets_and_never_decides_ag
     need  = "read an RSS feed [wide-replay]"
     stage = RankedStage()
     ctx   = ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage )
-    r     = rt.check_exists_impl( need, ctx )
+    r     = rt.check_exists_impl( need, ctx, language="all" )
     stage.calls.clear()
     out   = rt.replay_impl( r[ "receipt_id" ], ctx )
     frozen_calls = [ c for c in stage.calls if c[ "cache_only" ] ]
@@ -173,7 +173,7 @@ def test_a_replay_of_a_widened_receipt_names_changed_ids_and_changed_packs( env 
     need  = "read an RSS feed [wide-replay-refuse]"
     stage = RankedStage()
     ctx   = ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, size=1 )
-    r     = rt.check_exists_impl( need, ctx )
+    r     = rt.check_exists_impl( need, ctx, language="all" )
     path  = next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) )
     saved = path.read_text( encoding="utf-8" )
     rec   = json.loads( saved )
@@ -189,8 +189,8 @@ def test_a_replay_of_a_widened_receipt_names_changed_ids_and_changed_packs( env 
 
 def test_the_receipt_id_of_a_widened_run_differs_from_an_unwidened_one_of_the_same_need( env ):
     need = "read an RSS feed [wide-id]"
-    a    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=NO_BAND ) )
-    b    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage() ) )
+    a    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=NO_BAND ), language="all" )
+    b    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage() ), language="all" )
     assert a[ "receipt_id" ] != b[ "receipt_id" ] and rt._candidate_of( receipt_of( env, b )[ "candidate_stage" ] )[ "widened_ids" ] != ""
 
 
@@ -202,7 +202,7 @@ def test_the_rule_widens_on_near_cutoff_with_low_confidence_only():
 def test_the_wide_call_leaves_out_the_same_entry_as_the_first_call( env ):
     need  = "read an RSS feed [wide-exclude]"
     stage = RankedStage()
-    rec   = rt.run_question( ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage ), "check_exists", need, need, exclude_id=SERVE_ID, write=False )
+    rec   = rt.run_question( ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage ), "check_exists", need, need, exclude_id=SERVE_ID, write=False, language="all" )
     assert [ ( c[ "K" ], c[ "exclude_id" ] ) for c in stage.calls ] == [ ( 1, SERVE_ID ), ( 3, SERVE_ID ) ]
     assert rec[ "candidate_stage" ][ "widened_ids" ] == [ MATH_ID ]
 
@@ -211,7 +211,7 @@ def test_a_replay_decides_over_the_widened_entries_too( env ):
     need  = "read an RSS feed [wide-replay-verdict]"
     stage = RankedStage()
     ctx   = ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR, rt_math_text(): resp( 0.9, 0.05, 0.05 ) } ), stage )
-    r     = rt.check_exists_impl( need, ctx )
+    r     = rt.check_exists_impl( need, ctx, language="all" )
     out   = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert r[ "widened" ] is True and MATH_ID in [ e[ "id" ] for e in r[ "shortlist" ] ]                 # the widened entry is on the shortlist
     assert [ e[ "id" ] for e in out[ "frozen" ][ "shortlist" ] ] == [ e[ "id" ] for e in r[ "shortlist" ] ] and out[ "differences" ][ "frozen" ] == []
@@ -228,7 +228,7 @@ def test_the_shipped_wide_size_is_512():
 
 def test_an_empty_widened_ids_adds_no_key_to_the_candidate_block( env ):
     need = "read an RSS feed [wide-empty-key]"
-    r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=NO_BAND ) )
+    r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=NO_BAND ), language="all" )
     cs   = receipt_of( env, r )[ "candidate_stage" ]
     assert cs[ "widened_ids" ] == [] and "widened_ids" not in rt._candidate_of( cs )           # so no unwidened receipt id moves
 

@@ -321,7 +321,7 @@ def candidate_scenario( ctx, root, librarian, store, runs ):
           docstring line returned `REPAIRED` with no hit before and every run a hit after
         - the second check takes new draws, so it does not read the first check's cached answers
     """
-    seed   = rt.check_exists_impl( NEED_MISS, ctx )
+    seed   = rt.check_exists_impl( NEED_MISS, ctx, language="all" )
     report = { "need": NEED_MISS, "symbol": SYMBOL_MISS, "status": seed[ "status" ], "ok": False }
     if seed[ "status" ] != "ok": return { **report, "reason": f"seed ask failed: {seed.get( 'error' )}" }
     rid = seed[ "receipt_id" ]

@@ -34,8 +34,8 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    tree for a twin with a fixed-string search. Rule with the token `unindexed`, as the
    **Rule** step below describes.
 
-2. **Ask the index, one definition at a time.** Call `fetch_similar( entry )` with the symbol
-   id exactly as `diff.json` lists it. Keep the `receipt_id` it returns. Pair it with the symbol you asked about, never with the position of the reply. Parallel calls do not come back in the order they were sent. Run 3 of the W-F crew run matched three receipts to the wrong symbols this way, and the gate answered `WRONG_RECEIPT`. `UNKNOWN_ENTRY` means
+2. **Ask the index, one definition at a time.** Call `fetch_similar( entry, language )` with the symbol
+   id exactly as `diff.json` lists it. Pass `language` too: `py`, `ts` or `dart`, the definition's own. The call refuses without it (`LANGUAGE_REQUIRED`). Use `all` only for a deliberate look across languages. Keep the `receipt_id` it returns. Pair it with the symbol you asked about, never with the position of the reply. Parallel calls do not come back in the order they were sent. Run 3 of the W-F crew run matched three receipts to the wrong symbols this way, and the gate answered `WRONG_RECEIPT`. `UNKNOWN_ENTRY` means
    the id is in no definition of the head index, so copy it again from `diff.json`. `_private`
    and nested ids are looked up like public ones.
 

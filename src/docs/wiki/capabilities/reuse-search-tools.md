@@ -18,8 +18,8 @@ pins:
 Four MCP tools ask whether a new definition already exists. They read the [[symbol-index]] and the wiki, and send short symbol descriptions to the Jev model. They never edit code, but a stale index is rebuilt first, which writes `src/docs/index`.
 
 ## The four tools
-- `check_exists( need )` redacts the need, then asks Jev about index entries. It returns a verdict, a shortlist capped at 10, the nearest entries and a receipt id. An empty need answers `EMPTY_NEED`.
-- `fetch_similar( entry )` uses one indexed symbol as the need and asks about every other entry. It returns the same shape with `uncertain` in place of a verdict.
+- `check_exists( need, language )` redacts the need, then asks Jev about index entries of one language. The language is `py`, `ts`, `dart` or `all`, has no default, and a missing or unknown one answers `LANGUAGE_REQUIRED` or `LANGUAGE_INVALID` before any request. It returns a verdict, a shortlist capped at 10, the nearest entries and a receipt id. An empty need answers `EMPTY_NEED`.
+- `fetch_similar( entry, language )` uses one indexed symbol as the need and asks about every other entry of that language. The language is required and never inferred from the entry. It returns the same shape with `uncertain` in place of a verdict.
 - Its id is looked up among all definitions, private ones included. `UNKNOWN_ENTRY` means no definition, only while the index is healthy. `EXCLUDED_SENSITIVE_CONTENT` or `EXCLUDED_PREFIX` means it may not be sent.
 - `read_capability( names )` reads `capabilities/<name>.md` and makes no Jev call. A bad or missing name is `BAD_NAME` or `NOT_FOUND` per name.
 - `replay( receipt_id )` re-runs a receipt on cached answers only, then at the current tree, and returns both results and the differences. A receipt of the removed page route answers `ROUTE_RETIRED`.

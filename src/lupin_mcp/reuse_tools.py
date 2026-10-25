@@ -44,6 +44,7 @@ TOOL_VERSION = "1"                                              # receipts of th
 PACKED_TOOL_VERSION = "2"                                       # receipts of the packed path; both load until the old path is removed
 TOOL_VERSIONS = ( TOOL_VERSION, PACKED_TOOL_VERSION )
 QUESTIONS     = ( "choice", "provides" )                         # the three-way Choice, or the Noul and Score question
+LANGUAGES     = ( "py", "ts", "dart", "all" )                    # the `lang` of an index record, or `all` for a search across languages
 WIDE_K         = 512                                              # the shortlist size of a widened lookup, against the stage's own 128
 WIDEN_CAUSES   = ( "NEAR_CUTOFF", "LOW_CONFIDENCE" )                  # a first sweep widens when NEAR_CUTOFF holds and no cause beyond these does
 RETIRED_ROUTES = ( "pages", "pages_then_full" )                  # the page route was removed; a receipt of it stays readable and replays to ROUTE_RETIRED
@@ -124,7 +125,31 @@ def request_hash( body ):
     return sha( canonical( body ) )
 
 
-def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(), tool_version=None, request_shape=None, sweep_only=False, exclude_id=None, need_text=None, candidate=None ):
+def language_error( language ):
+    """
+    Check the language argument of a search.
+
+    Ensures:
+        - returns None when language is py, ts, dart or all
+        - returns { status: error, error: LANGUAGE_REQUIRED, ... } for None, and { ..., error: LANGUAGE_INVALID, ... } for any other value
+        - both errors list the valid choices, so the caller can correct the call without another look
+    """
+    if language is None: return { "status": "error", "error": "LANGUAGE_REQUIRED", "detail": "language is required", "choices": list( LANGUAGES ) }
+    if language not in LANGUAGES: return { "status": "error", "error": "LANGUAGE_INVALID", "detail": f"{language!r} is not a language", "choices": list( LANGUAGES ) }
+    return None
+
+
+def in_language( entries, language ):
+    """
+    Keep the entries of one language.
+
+    Ensures:
+        - returns the entries whose `lang` is language, in their order; `all` returns them all
+    """
+    return list( entries ) if language == "all" else [ e for e in entries if e[ "lang" ] == language ]
+
+
+def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(), tool_version=None, request_shape=None, sweep_only=False, exclude_id=None, need_text=None, candidate=None, language=None, include_tests=None ):
     """
     Ensures:
         - returns 16 hex characters identifying one question against one set of inputs
@@ -140,6 +165,7 @@ def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(),
         - a question carrying need_text (a fetch_similar of a definition the public snapshot does not hold) has it in the id
         - a question that ran the candidate stage carries its manifest hash, K and a hash of its shortlist ids, so a different stage
           or a different shortlist is a different receipt
+        - a question that names a language, or asks for test records, carries it, so the same need under py and under ts is two receipts
         - any other question's id is unchanged
     """
     fields = { "tool": tool, "tool_version": TOOL_VERSION if tool_version is None else tool_version, "query": query, "index_sha": index_sha,
@@ -149,6 +175,8 @@ def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(),
     elif tool == "check_exists" and exclude_id is not None: fields[ "exclude_id" ] = exclude_id
     if need_text is not None: fields[ "need_text" ] = need_text
     if candidate is not None: fields[ "candidate" ] = candidate
+    if language is not None: fields[ "language" ] = language
+    if include_tests is not None: fields[ "include_tests" ] = include_tests
     return sha( canonical( fields ), 16 )
 
 
@@ -962,7 +990,9 @@ def load_receipt( ctx, rid ):
                             r[ "tool_version" ], r[ "request_shape" ] if "request_shape" in r else None,
                             "sweep_only" in r, r[ "exclude_id" ] if "exclude_id" in r else None,
                             r[ "need_text" ] if "need_text" in r else None,
-                            _candidate_of( r[ "candidate_stage" ] ) if "candidate_stage" in r else None ) if ok else None
+                            _candidate_of( r[ "candidate_stage" ] ) if "candidate_stage" in r else None,
+                            r[ "language" ] if "language" in r else None,
+                            r[ "include_tests" ] if "include_tests" in r else None ) if ok else None
     except ( ValueError, KeyError, TypeError, OSError ) as e:
         raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: {e}" ) from e
     if not ok: raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: wrong field types" )
@@ -1111,7 +1141,7 @@ def _route( ctx, need, entries, flags, frozen=False, template=None, model=None, 
              "stages": [ _stage( name, sw, len( asked ) ) ], "plan": None, "sweeps": [ sw ] }
 
 
-def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None, sweep_only=False, question="choice" ):
+def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None, sweep_only=False, question="choice", *, language ):
     """
     Run one sweep-based question end to end and store its receipt.
 
@@ -1121,7 +1151,7 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
         - sweep_only turns the candidate stage off for a check_exists question, so every entry is asked
     """
     try:
-        return _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only, question )
+        return _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only, question, language=language )
     finally:
         _finish( ctx )
 
@@ -1198,13 +1228,29 @@ def _widened_route( ctx, first, need, entries, flags, extra_ids, frozen=False, t
              "plan": None, "sweeps": first[ "sweeps" ] + [ sw2 ] }
 
 
-def _widen( ctx, client, stage, routed, need, entries, every, flags, policy, ranking_text, index_sha, exclude_id ):
+def _stage_in_language( stage, every, language ):
+    """
+    Drop the stage ids that are not among the entries of the question's language.
+
+    Ensures:
+        - returns the stage unchanged for language `all`
+        - otherwise returns a copy whose ids, and its ranking when it has one, hold only ids of `every`, in their order
+    """
+    if language == "all": return stage
+    known = { e[ "id" ] for e in every }
+    kept  = { **stage, "ids": [ i for i in stage[ "ids" ] if i in known ] }
+    if "ranking" in stage: kept[ "ranking" ] = [ i for i in stage[ "ranking" ] if i in known ]
+    return kept
+
+
+def _widen( ctx, client, stage, routed, need, entries, every, flags, policy, ranking_text, index_sha, exclude_id, language ):
     """
     Widen a lookup whose first sweep sat near a cut-off.
 
     Ensures:
         - returns ( routed, stage, error )
         - asks the stage for WIDE_K with the first call's wiki list, so the first set is the head of the wider one
+        - drops the wider set's ids of another language, as the first set's were dropped
         - a stage that fails answers the first sweep's decision with CALL_FAILED added, and error names the failure
         - no extra entries leaves routed and stage as they were
         - otherwise the stage dict gains K, widened and widened_ids, and routed holds both sweeps
@@ -1215,7 +1261,7 @@ def _widen( ctx, client, stage, routed, need, entries, every, flags, policy, ran
         d = vd.decide( routed[ "sw" ][ "answers" ], [ e[ "id" ] for e in routed[ "deciding" ] ], routed[ "sw" ][ "failed" ], flags | { "CALL_FAILED" }, policy )
         return { **routed, "d": d }, stage, { "code": x.code, "detail": x.detail }
     first = set( stage[ "ids" ] )
-    extra = [ i for i in wide[ "ids" ] if i not in first ]
+    extra = [ i for i in _stage_in_language( wide, every, language )[ "ids" ] if i not in first ]
     if not extra: return routed, stage, None
     return _widened_route( ctx, routed, need, entries, flags, extra, policy=policy ), { **stage, "K": wide[ "K" ], "widened": True, "widened_ids": extra }, None
 
@@ -1248,7 +1294,7 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
     return out
 
 
-def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only=False, question="choice" ):
+def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only=False, question="choice", *, language ):
     """
     Run one sweep-based question end to end and store its receipt.
 
@@ -1269,11 +1315,15 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
         - a failed candidate stage answers UNCERTAIN_READ_SOURCE with cause CALL_FAILED and no sweep; the receipt's candidate_stage.error names it
         - question "provides" asks the Noul and Score pair on the packed path: one sweep of every entry, no candidate stage,
           the receipt names the question and carries its policy, template and shape
+        - only entries of `language` are asked (`all` asks every language), and the receipt names the language and holds it in its id
+        - the candidate stage holds every language, so the stage ids of another language are dropped from the shortlist, and from a widening, before anything is asked
     Raises:
         - ReuseError BAD_QUESTION for a question other than choice or provides
+        - ReuseError BAD_LANGUAGE for a language that language_error refuses
         - ReuseError PAIR_NEEDS_PACKED for the pair question on a context with no packed path, before anything is sent
     """
     if question not in QUESTIONS: raise ReuseError( "BAD_QUESTION", f"question must be one of {QUESTIONS}, got {question!r}" )
+    if language_error( language ) is not None: raise ReuseError( "BAD_LANGUAGE", f"language must be one of {LANGUAGES}, got {language!r}" )
     pair = question == "provides"
     if pair and ( ctx.sweeper is None or ctx.pack_size is None ): raise ReuseError( "PAIR_NEEDS_PACKED", "the provides question is asked on the packed path only" )
     flags, entries, sha_, gen = prepared if prepared is not None else prepare( ctx )
@@ -1284,6 +1334,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     need = sent
     staged = ctx.candidate_stage if tool == "check_exists" and not sweep_only and not pair else None     # fetch_similar lists neighbours, so it sweeps every entry
     need_text = need if tool == "fetch_similar" and need != query and not any( e[ "id" ] == query for e in entries ) else None     # a private definition: the snapshot cannot give its text back
+    entries = in_language( entries, language )                                    # after need_text: that test looks the query up among every language
     every = entries                                                              # the stage holds the whole index, and exclude_id is left out of its answer
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
@@ -1292,7 +1343,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     stage, stage_error, widen_error = None, None, None
     if staged is not None and entries and not hard:
         try:
-            stage = staged.shortlist( _ranking, every, sha_, ctx.pages, exclude_id=exclude_id, index_manifest=fr.index_manifest( sx_build.read_header( gen ) ) )
+            stage = _stage_in_language( staged.shortlist( _ranking, every, sha_, ctx.pages, exclude_id=exclude_id, index_manifest=fr.index_manifest( sx_build.read_header( gen ) ) ), every, language )
         except CandidateError as e:
             stage_error = { "code": e.code, "detail": e.detail }
             flags       = flags | { "CALL_FAILED" }
@@ -1301,7 +1352,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
         else:
             routed = _route( ctx, need, entries, flags, policy=base_policy, candidate_ids=stage[ "ids" ] if stage is not None else None )
             if stage is not None and ctx.sweeper is not None and _should_widen( routed[ "d" ] ):
-                routed, stage, widen_error = _widen( ctx, staged, stage, routed, need, entries, every, flags, base_policy, _ranking, sha_, exclude_id )
+                routed, stage, widen_error = _widen( ctx, staged, stage, routed, need, entries, every, flags, base_policy, _ranking, sha_, exclude_id, language )
     else:
         none   = { "answers": [], "failed": [], "not_reached": [ e[ "id" ] for e in entries ], "calls": 0, "cache_hits": 0,
                    "attempts_answered": 0, "attempts_failed": 0, "failed_attempts": [] }
@@ -1316,8 +1367,8 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     version       = PACKED_TOOL_VERSION if packed else TOOL_VERSION
     cstage        = _candidate_receipt( stage, stage_error, staged, _ranking, redactions, len( entries ), routed, widen_error ) if staged is not None and entries and not hard else None
     rec = { "id": receipt_id( tool, query, sha_, ctx.model, policy, template_hash, d[ "causes" ], version, shape if packed else None, sweep_only, exclude_id, need_text,
-                              _candidate_of( cstage ) if cstage is not None else None ),
-            "tool": tool, "tool_version": version, "query": query, "index_sha": sha_, "model": ctx.model,
+                              _candidate_of( cstage ) if cstage is not None else None, language ),
+            "tool": tool, "tool_version": version, "query": query, "index_sha": sha_, "model": ctx.model, "language": language,
             "policy": policy, "prompt_template_hash": template_hash, "prompt_template": template,
             "page_prompt_template": None, "route": routed[ "route" ], "pages": None,          # both keys stay, as None, so a receipt keeps the shape it had when the page route existed
             "flags": sorted( flags ), "verdict": d[ "verdict" ], "cause": d[ "cause" ], "causes": d[ "causes" ],
@@ -1374,24 +1425,28 @@ def _public( receipt, extra=None ):
     return out
 
 
-def check_exists_impl( need, ctx ):
+def check_exists_impl( need, ctx, language=None ):
     """
     Should this be built? Sweep the index with Jev and apply the decision table.
 
     Requires:
         - need is a non-empty description of the capability
+        - language is py, ts, dart or all: the search covers that language, and `all` is the opt-in to every language
     Ensures:
         - returns { status, receipt_id, verdict, cause, causes, shortlist, nearest, ... }
+        - a missing language returns error LANGUAGE_REQUIRED and an unknown one LANGUAGE_INVALID, each listing the choices, before any request
         - verdict is `REUSE`, `EXTEND` or `UNCERTAIN_READ_SOURCE` (a receipt stored before the retirement of `NEW` may still say `NEW`); an uncertain verdict always carries a cause, `NO_MATCH` when nothing relevant was found
     """
     if not isinstance( need, str ) or not need.strip(): return { "status": "error", "error": "EMPTY_NEED" }
+    bad = language_error( language )
+    if bad is not None: return bad
     try:
-        return _public( run_question( ctx, "check_exists", need.strip(), need.strip() ) )
+        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), language=language ) )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
 
 
-def sweep_need_impl( need, exclude_id, ctx, question="choice" ):
+def sweep_need_impl( need, exclude_id, ctx, question="choice", *, language ):
     """
     Sweep every entry for a free-text need, with the candidate stage off.
 
@@ -1403,11 +1458,12 @@ def sweep_need_impl( need, exclude_id, ctx, question="choice" ):
         - every sendable entry but exclude_id is asked
         - an exclude_id that is not in the index returns { status: error, error: UNKNOWN_ENTRY, entry } before any request
         - question is passed to run_question, so "provides" asks the Noul and Score pair
+        - language is required, as a keyword with no default: a measurement driver says `all` at its call site, so its numbers do not move
     """
-    return _need_impl( need, exclude_id, ctx, question, True )
+    return _need_impl( need, exclude_id, ctx, question, True, language=language )
 
 
-def unstored_need_impl( need, exclude_id, ctx, candidates=False, question="choice" ):
+def unstored_need_impl( need, exclude_id, ctx, candidates=False, question="choice", *, language ):
     """
     Ask a free-text need and store no receipt.
 
@@ -1419,29 +1475,35 @@ def unstored_need_impl( need, exclude_id, ctx, candidates=False, question="choic
         - a second ask of the same need is therefore not handed the first ask's receipt, which a stored receipt would be
         - every entry is asked, as in sweep_need_impl, unless candidates is true, which puts the candidate stage on
         - question "provides" asks the Noul and Score pair, which has no candidate stage, so candidates is ignored for it
+        - language is required, as a keyword with no default
     """
-    return _need_impl( need, exclude_id, ctx, question, not candidates, False )
+    return _need_impl( need, exclude_id, ctx, question, not candidates, False, language=language )
 
 
-def _need_impl( need, exclude_id, ctx, question, sweep_only, write=True ):
-    """Ensures: returns one need's public result with exclude_id left out."""
+def _need_impl( need, exclude_id, ctx, question, sweep_only, write=True, *, language ):
+    """Ensures: returns one need's public result, or the language error before any request."""
     if not isinstance( need, str ) or not need.strip(): return { "status": "error", "error": "EMPTY_NEED" }
+    bad = language_error( language )
+    if bad is not None: return bad
     try:
         prepared = prepare( ctx )
         if exclude_id is not None and not any( e[ "id" ] == exclude_id for e in prepared[ 1 ] ) and not prepared[ 0 ] & { "NOT_LUPIN_TREE", "INDEX_STALE" }:
             return { "status": "error", "error": "UNKNOWN_ENTRY", "entry": exclude_id }
-        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=sweep_only, question=question, write=write ) )
+        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=sweep_only, question=question, write=write, language=language ) )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
 
 
-def fetch_similar_impl( entry, ctx ):
+def fetch_similar_impl( entry, ctx, language=None ):
     """
     What does this symbol resemble? The shortlist for an indexed symbol, excluding itself by id.
 
     Requires:
         - entry is a symbol id of the index, public or private
+        - language is py, ts, dart or all, stated by the caller and never inferred from the entry
+        - a language other than the entry's own is a cross-language look
     Ensures:
+        - a missing language returns error LANGUAGE_REQUIRED and an unknown one LANGUAGE_INVALID, each listing the choices, before any request
         - returns { status, receipt_id, shortlist, nearest, uncertain } where uncertain is the cause
           that obliges the caller to read the source, or None
         - the entry is looked up among every definition, `_private` and nested ones included
@@ -1449,6 +1511,8 @@ def fetch_similar_impl( entry, ctx ):
           with error EXCLUDED_PREFIX or EXCLUDED_SENSITIVE_CONTENT, and no receipt
         - an id that is in no healthy index returns { status: error, error: UNKNOWN_ENTRY } and no receipt
     """
+    bad = language_error( language )
+    if bad is not None: return bad
     prepared = prepare( ctx )
     flags, gen = prepared[ 0 ], prepared[ 3 ]
     hit      = next( ( r for r in sx_build.read_symbols( gen, all_symbols=True ) if r[ "id" ] == entry ), None ) if gen else None
@@ -1462,7 +1526,7 @@ def fetch_similar_impl( entry, ctx ):
                      "detail": ", ".join( patterns ) if dropped else "the id is under an excluded prefix" }
         hit = kept[ 0 ]
     try:
-        rec = run_question( ctx, "fetch_similar", entry, entry_text( hit ) if hit else entry, exclude_id=entry, prepared=prepared )
+        rec = run_question( ctx, "fetch_similar", entry, entry_text( hit ) if hit else entry, exclude_id=entry, prepared=prepared, language=language )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
     out = _public( rec, { "uncertain": rec[ "cause" ] } )
@@ -1508,13 +1572,14 @@ def _differences( stored, fresh ):
     return diffs
 
 
-def _frozen_candidate_ids( ctx, stored, entries, left_out ):
+def _frozen_candidate_ids( ctx, stored, entries, left_out, language ):
     """
     Rebuild a receipt's shortlist from the cache and check it against the receipt.
 
     Requires:
         - stored is a receipt of the candidates route, with a candidate_stage block that holds no error
-        - entries are the sendable entries of the receipt's own snapshot, before exclude_id was left out
+        - entries are the sendable entries of the receipt's own snapshot in the receipt's language, before exclude_id was left out
+        - language is the receipt's own: the rebuilt ids lose the ones of another language, as the live run's did
 
     Ensures:
         - returns ( ids, widened_ids ) as the receipt recorded them, when the vector set on disk is the one it names, the cached
@@ -1541,8 +1606,9 @@ def _frozen_candidate_ids( ctx, stored, entries, left_out ):
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_FAILED", str( e ) ) from e
     wide = cs[ "widened_ids" ] if "widened_ids" in cs else []
-    if fresh[ "ids" ] != sorted( cs[ "ids" ] + wide ):
-        raise ReuseError( "CANDIDATES_CHANGED", f"{len( fresh[ 'ids' ] )} ids now, {len( cs[ 'ids' ] ) + len( wide )} recorded" )
+    fresh_ids = _stage_in_language( fresh, entries, language )[ "ids" ]
+    if fresh_ids != sorted( cs[ "ids" ] + wide ):
+        raise ReuseError( "CANDIDATES_CHANGED", f"{len( fresh_ids )} ids now, {len( cs[ 'ids' ] ) + len( wide )} recorded" )
     size = stored[ "pack_size" ]                                                  # the stage runs on a packed context only, so the receipt has both
     cuts = { name: { tuple( ids[ i:i + size ] ) for i in range( 0, len( ids ), size ) } for name, ids in ( ( "candidates", cs[ "ids" ] ), ( "widened", wide ) ) }
     for row in stored[ "requests" ]:
@@ -1593,9 +1659,11 @@ def replay_impl( rid, ctx, repeat=0 ):
         entries, _ = load_snapshot( ctx, stored[ "index_sha" ] )
         entries, _ = sendable( entries, ctx.exclude_prefixes )
         need       = stored[ "query" ]
+        language   = stored[ "language" ] if "language" in stored else "all"                  # a receipt from before the language argument searched every language
         if stored[ "tool" ] == "fetch_similar":
             need    = stored[ "need_text" ] if "need_text" in stored else next( ( entry_text( e ) for e in entries if e[ "id" ] == stored[ "query" ] ), stored[ "query" ] )
             entries = [ e for e in entries if e[ "id" ] != stored[ "query" ] ]
+        entries = in_language( entries, language )                                              # after the lookup above, which reads every language
         if "need_sent" in stored: need = stored[ "need_sent" ]                      # the redacted text Jev saw; a receipt from before redaction has none
         sweep_only = "sweep_only" in stored
         left_out   = stored[ "exclude_id" ] if "exclude_id" in stored else None                  # a sweep-only receipt and a candidate receipt both name it
@@ -1606,7 +1674,7 @@ def replay_impl( rid, ctx, repeat=0 ):
         if hard or not entries or stage_failed:
             fz = { "verdict": stored[ "verdict" ], "cause": stored[ "cause" ], "shortlist": stored[ "shortlist" ] }
         else:
-            ids_of_stage, wide_ids = _frozen_candidate_ids( ctx, stored, whole, left_out ) if "candidate_stage" in stored else ( None, [] )
+            ids_of_stage, wide_ids = _frozen_candidate_ids( ctx, stored, whole, left_out, language ) if "candidate_stage" in stored else ( None, [] )
             lost  = stored[ "stats" ][ "failed_attempts" ] if "failed_attempts" in stored[ "stats" ] else []         # a receipt from before the call budget lacks it
             ids   = [ i for f in lost for i in ( f[ "ids" ] if "ids" in f else [ f[ "id" ] ] ) ]              # the packed shape lists ids; the old shape names one id
             gaps  = { **{ i: "not_reached" for i in stored[ "missing" ] }, **{ i: "failed" for i in ids } }
@@ -1632,7 +1700,7 @@ def replay_impl( rid, ctx, repeat=0 ):
             head_ctx        = copy.copy( ctx )
             head_ctx.sweeper = reuse_flip.replay_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
             if question == "provides": head_ctx.pair_sweeper = reuse_flip.replay_pair_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
-        head    = run_question( head_ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question )
+        head    = run_question( head_ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question, language=language )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail, "receipt_id": rid }
     return { "status": "ok", "receipt_id": rid, "stored": stored, "frozen": fz,
