@@ -222,6 +222,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[secret-scanners]] — the pre-commit gate for added credential values and the inventory sweep of a tree, ref or history. `scripts` (pre-commit-secret-scan, secret_scan)
 - [[heartbeat-event-tools]] — archiving offline heartbeat event files and tailing the hook event stream. `scripts` (purge-offline-heartbeat-events, watch-hook-events)
 - [[eval-provenance-and-commons-migration]] — the eval provenance stamp and the commons entry-separator migration. `scripts` (eval_provenance, migrate-commons-entry-separator)
+- [[one-shot-operator-scripts]] — the clock-hold plugin, test-database initializer, bounded-billing probe, phase-one smoke and heartbeat-arbiter runner. `scripts` (clock_hold_plugin, init_test_database, probe_cc_bounded_billing, run-heartbeat-arbiter, tfe_to_cc_phase1_smoke)
 - [[needset-records-and-quota]] — the need-set record and validator, named errors, the kind-by-language quota and the seeded draw. `lupin_mcp` (reuse_needset)
 - [[needset-seed-pool]] — which symbols may seed a need set item, their twin groups and the cell pools. `lupin_mcp` (reuse_needset)
 - [[needset-member-text]] — stripped member text for the drafter and raw bodies for search, Python and script. `lupin_mcp` (reuse_needset)
