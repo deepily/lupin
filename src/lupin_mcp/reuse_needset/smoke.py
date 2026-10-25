@@ -240,7 +240,7 @@ def main( argv=None, build_env=None, now=None, clock=time.monotonic, host=None )
         - returns the smoke report, also written as needset-smoke.json beside the plan, drafts and draft report
         - every need carries smoke true, and the calls of the drafter and the second model are timed apart
         - the window is checked before anything is built or called, and only for the live env
-        - a live run outside the window goes ahead only when --window-lifted-by names a person and a time
+        - a live run outside the window goes ahead only when --window-lifted-by names a person
 
     Raises:
         - NeedsetError OUTSIDE_WINDOW for a live run at another time
