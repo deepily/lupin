@@ -1,0 +1,278 @@
+{
+ "messages": [
+  {
+   "_class": "SystemMessage",
+   "data": {
+    "agents": [
+     "general-purpose",
+     "statusline-setup",
+     "Explore",
+     "Plan"
+    ],
+    "apiKeySource": "none",
+    "claude_code_version": "2.1.92",
+    "cwd": "/root",
+    "fast_mode_state": "off",
+    "mcp_servers": [],
+    "model": "claude-haiku-5-5",
+    "output_style": "default",
+    "permissionMode": "default",
+    "plugins": [
+     {
+      "name": "frontend-design",
+      "path": "/home/user/.claude/plugins/marketplaces/claude-plugins-official/plugins/frontend-design",
+      "source": "frontend-design@claude-plugins-official"
+     },
+     {
+      "name": "typesafe",
+      "path": "/home/user/.claude/plugins/marketplaces/typesafe-ai/",
+      "source": "typesafe@typesafe-ai"
+     }
+    ],
+    "session_id": "00000000-0000-0000-0000-000000000000",
+    "skills": [
+     "update-config",
+     "debug",
+     "simplify",
+     "batch",
+     "loop",
+     "schedule",
+     "claude-api",
+     "schedule-tests",
+     "mermaid-diagrams",
+     "interactive-requirements-elicitation",
+     "testing-development",
+     "cosa-voice-notifications",
+     "codebase-analysis",
+     "brevity-mandate",
+     "plan-serialization",
+     "push-to-completion",
+     "server-lifecycle",
+     "last-call",
+     "plan-post-game",
+     "websocket-development",
+     "spin-up-swe-team",
+     "reuse-reviewer",
+     "guided-decision-walkthrough",
+     "agentic-voice-workflow",
+     "nested-repo-management",
+     "push-to-completion",
+     "testing-patterns",
+     "frontend-design:frontend-design",
+     "typesafe:typesafe-ai"
+    ],
+    "slash_commands": [],
+    "subtype": "init",
+    "tools": [
+     "Read"
+    ],
+    "type": "system",
+    "uuid": "00000000-0000-0000-0000-000000000000"
+   },
+   "subtype": "init"
+  },
+  {
+   "_class": "AssistantMessage",
+   "content": [
+    {
+     "_class": "ToolUseBlock",
+     "id": "toolu_01A52Bc8g42HqCXBWSqRMiUH",
+     "input": {
+      "file_path": "src/lupin_mcp/reuse_needset/smoke.py"
+     },
+     "name": "Read"
+    }
+   ],
+   "error": null,
+   "message_id": "msg_011CgNJ9gSwzAhA8awxsrHfj",
+   "model": "claude-haiku-5-5",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-0000-0000-000000000000",
+   "stop_reason": null,
+   "usage": {
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 1628,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 1628,
+    "cache_read_input_tokens": 0,
+    "inference_geo": "global",
+    "input_tokens": 4,
+    "output_tokens": 20,
+    "service_tier": "standard",
+    "speed": "standard"
+   },
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+   "_class": "RateLimitEvent",
+   "rate_limit_info": {
+    "_class": "RateLimitInfo",
+    "overage_disabled_reason": "out_of_credits",
+    "overage_resets_at": null,
+    "overage_status": "rejected",
+    "rate_limit_type": "five_hour",
+    "raw": {
+     "isUsingOverage": false,
+     "overageDisabledReason": "out_of_credits",
+     "overageStatus": "rejected",
+     "rateLimitType": "five_hour",
+     "resetsAt": 1792914600,
+     "status": "allowed"
+    },
+    "resets_at": 1792914600,
+    "status": "allowed",
+    "utilization": null
+   },
+   "session_id": "00000000-0000-0000-0000-000000000000",
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+   "_class": "UserMessage",
+   "content": [
+    {
+     "_class": "ToolResultBlock",
+     "content": "1\t\"\"\"\n2\tThe ten-need drafting smoke: a small live run that measures and sets no pass bar.\n3\t\n4\tIt takes a test-only kind split and a named commit as arguments and marks every need smoke.\n5\tIt writes the date, host, commit, seconds per call and failure rate beside the drafts.\n6\tA live run is refused outside 10 a.m. to 1 p.m. Eastern, the window the Max plan allows.\n7\tA named person can lift the window with --window-lifted-by; the record then carries who and when.\n8\t\"\"\"\n9\timport argparse\n10\timport datetime\n11\timport json\n12\timport pathlib\n13\timport socket\n14\timport sys\n15\timport threading\n16\timport time\n17\timport zoneinfo\n18\t\n19\tfrom cosa.repo.symindex import build, dups, spec as sp\n20\tfrom cosa.repo.symindex.candidates import candidate_stage, vector_build, vector_store\n21\tfrom lupin_mcp.reuse_needset import draft, keys, pool, quota, run, strip\n22\tfrom lupin_mcp.reuse_needset import errors as er\n23\t\n24\tEASTERN      = zoneinfo.ZoneInfo( \"America/New_York\" )\n25\tWINDOW_START = 10\n26\tWINDOW_END   = 13\n27\tTOTAL        = 10\n28\tMATCHED      = 8\n29\tNONE         = 2\n30\tSECOND_MODEL = \"claude-opus-5-5\"\n31\tSECOND_SYSTEM = \"You answer with one JSON object and nothing else.\"\n32\tSMOKE_FILE   = \"needset-smoke.json\"\n33\tSMOKE_FORMAT = \"needset-smoke-1\"\n34\t\n35\t\n36\tdef in_window( now ):\n37\t    \"\"\"\n38\t    Say whether a moment falls in the hours a live model run is allowed.\n39\t\n40\t    Requires:\n41\t        - now is a timezone-aware datetime\n42\t\n43\t    Ensures:\n44\t        - True from 10:00 up to, not including, 13:00 Eastern time, on any day\n45\t\n46\t    Raises:\n47\t        - ValueError when now has no timezone\n48\t    \"\"\"\n49\t    if now.tzinfo is None: raise ValueError( \"now must carry a timezone\" )\n50\t    return WINDOW_START <= now.astimezone( EASTERN ).hour < WINDOW_END\n51\t\n52\t\n53\tdef parse_args( argv ):\n54\t    \"\"\"\n55\t    Read the command line.\n56\t\n57\t    Ensures:\n58\t        - the root, out dir, source commit, seed, vector folders and the three matched-kind counts are required\n59\t        - the kind split is whatever is passed; no default stands in for the real split\n60\t        - window_lifted_by is None unless the caller names who lifted the window and when\n61\t    \"\"\"\n62\t    ap = argparse.ArgumentParser( description=__doc__ )\n63\t    ap.add_argument( \"--root\",             required=True )\n64\t    ap.add_argument( \"--out-dir\",          required=True )\n65\t    ap.add_argument( \"--source-commit\",    required=True )\n66\t    ap.add_argument( \"--seed\",             required=True, type=int )\n67\t    ap.add_argument( \"--vectors-dir\",      required=True )\n68\t    ap.add_argument( \"--query-cache-dir\",  required=True )\n69\t    ap.add_argument( \"--near-copy\",        required=True, type=int )\n70\t    ap.add_argument( \"--work-alike\",       required=True, type=int )\n71\t    ap.add_argument( \"--cross-language\",   required=True, type=int )\n72\t    ap.add_argument( \"--ts-share\",         type=float, default=0.6 )\n73\t    ap.add_argument( \"--parallel\",         type=int, default=3 )\n74\t    ap.add_argument( \"--server\",           default=\"max-plan\" )\n75\t    ap.add_argument( \"--set-by\",           default=\"smoke\" )\n76\t    ap.add_argument( \"--cli-path\",         default=None )\n77\t    ap.add_argument( \"--second-model\",     default=SECOND_MODEL )\n78\t    ap.add_argument( \"--window-lifted-by\", default=None )\n79\t    return ap.parse_args( argv )\n80\t\n81\t\n82\tdef kind_split( args ):\n83\t    \"\"\"Return the matched-kind split the arguments name.\"\"\"\n84\t    return { \"near_copy\": args.near_copy, \"work_alike\": args.work_alike, \"cross_language\": args.cross_language }\n85\t\n86\t\n87\tclass Timed:\n88\t    \"\"\"Times every model call and counts the ones that raise, by the label of the model.\"\"\"\n89\t\n90\t    def __init__( self, clock ):\n91\t        \"\"\"Read the time from clock(); calls holds ( label, seconds, failed ) rows.\"\"\"\n92\t        self.clock, self.calls, self.lock = clock, [], threading.Lock()\n93\t\n94\t    def wrap( self, label, ask ):\n95\t        \"\"\"Return ask with each call timed under label; the reply or the error passes through.\"\"\"\n96\t        def timed( *args ):\n97\t            \"\"\"Forward the call, recording its duration and whether it raised.\"\"\"\n98\t            start, failed = self.clock(), True\n99\t            try:\n100\t                reply  = ask( *args )\n101\t                failed = False\n102\t                return reply\n103\t            finally:\n104\t                with self.lock: self.calls.append( ( label, self.clock() - start, failed ) )\n105\t        return timed\n106\t\n107\t    def summary( self, label=None ):\n108\t        \"\"\"\n109\t        Summarise the calls of one label, or of all.\n110\t\n111\t        Ensures:\n112\t            - returns { calls, errors, seconds } where seconds is { mean, min, max } or None with no call\n113\t        \"\"\"\n114\t        rows = [ c for c in self.calls if label is None or c[ 0 ] == label ]\n115\t        secs = [ c[ 1 ] for c in rows ]\n116\t        return { \"calls\": len( rows ), \"errors\": sum( 1 for c in rows if c[ 2 ] ), \"seconds\": { \"mean\": sum( secs ) / len( secs ), \"min\": min( secs ), \"max\": max( secs ) } if secs else None }\n117\t\n118\t\n119\tdef index_parts( root, index_dir ):\n120\t    \"\"\"\n121\t    Build the index of a tree and everything the run reads from it.\n122\t\n123\t    Requires:\n124\t        - root is a repository root and index_dir a folder to publish the index in\n125\t\n126\t    Ensures:\n127\t        - returns ( by_id, kept, measures, twins, bodies ) with by_id holding every searchable record\n128\t        - twin ids are the index's own ids, which carry no prefix in the lupin tree\n129\t    Raises:\n130\t        - NeedsetError NOT_LUPIN_TREE when root lacks the lupin layout\n131\t    \"\"\"\n132\t    root    = pathlib.Path( root )\n133\t    if not build.is_lupin_tree( root ): raise er.NeedsetError( er.NOT_LUPIN_TREE, f\"{root}: the strip step resolves ids of the lupin layout only\" )\n134\t    built   = build.build( root, index_dir )\n135\t    records, _reader = pool.read_pool_symbols( built[ \"gen_dir\" ] )\n136\t    measures = pool.measure( root, records )\n137\t    kept, _dropped = pool.eligible( records, measures )\n138\t    spec    = sp.spec_for( root )\n139\t    found   = dups.find_duplicates( spec, sp.iter_files( spec, spec.py_roots, { \".py\" } ), js_files=sp.iter_files( spec, spec.js_roots, set( sp.SCRIPT_SUFFIXES ) ) )\n140\t    twins   = pool.twin_map( found )\n141\t    return { r[ \"id\" ]: r for r in records }, kept, measures, twins, strip.bodies_for( kept, root )\n142\t\n143\t\n144\tdef candidate_parts( vectors_dir, cache_dir, client, records ):\n145\t    \"\"\"\n146\t    Load the live vector set and build the word stage and the query embedder.\n147\t\n148\t    Requires:\n149\t        - vectors_dir holds a sealed vector set; client has embed( texts, content_type, role ) and info()\n150\t\n151\t    Ensures:\n152\t        - returns ( vectors, stage, embed ) where embed( text ) is the concat query vector of that text\n153\t    \"\"\"\n154\t    vectors = vector_store.load_vectors( vectors_dir )\n155\t    stage   = candidate_stage.build_stage( records )\n156\t    embed   = lambda text: vector_store.query_vectors( text, client, cache_dir, vectors.manifest )[ \"concat\" ]\n157\t    return vectors, stage, embed\n158\t\n159\t\n160\tdef assemble_env( args, ask, second_ask, client, set_at, timed ):\n161\t    \"\"\"\n162\t    Put the index, the candidate parts and the model calls into a run.Env.\n163\t\n164\t    Requires:\n165\t        - ask( system, user ) and second_ask( system, user ) return reply text; client is an embeddings client\n166\t        - timed is a Timed, and both models are called through it, under the labels draft and second\n167\t\n168\t    Ensures:\n169\t        - the env is a smoke env, with its two ledgers under args.out_dir\n170\t        - the seed pool is the eligible symbols that have a row in the vector set, and the counts are kept in env.extras\n171\t        - a symbol newer than the vector set is left out, so the smoke measures; the real draw needs a fresh vector set\n172\t    \"\"\"\n173\t    root, out = pathlib.Path( args.root ), pathlib.Path( args.out_dir )\n174\t    by_id, kept, measures, twins, bodies = index_parts( root, out / \"index\" )\n175\t    vectors, stage, embed = candidate_parts( args.vectors_dir, args.query_cache_dir, client, list( by_id.values() ) )\n176\t    rows    = set( vectors.ids )\n177\t    pooled  = [ r for r in kept if r[ \"id\" ] in rows ]\n178\t    extras  = { \"vector_coverage\": { \"eligible\": len( kept ), \"with_a_vector_row\": len( pooled ), \"vector_set_ids\": len( rows ), \"stage_ids\": len( stage.ids ) } }\n179\t    book    = draft.SharedLedger( draft.make_ledger( out / \"ledger-draft.jsonl\", args.cli_path, args.server ) )\n180\t    second  = draft.SharedLedger( draft.make_ledger( out / \"ledger-second.jsonl\", args.cli_path, args.server ) )\n181\t    second_timed = timed.wrap( \"second\", second_ask )\n182\t    describe = lambda i: f\"{by_id[ i ][ 'sig' ]} \u2014 {by_id[ i ][ 'doc' ]}\"\n183\t    none_fn = draft.make_none_drafter( stage, vectors, embed, describe, lambda prompt: second_timed( SECOND_SYSTEM, prompt ), second, args.second_model )\n184\t    ctx     = keys.KeyContext( pooled, measures, bodies, args.seed, vectors )\n185\t    return run.Env( by_id, pooled, ctx, twins, lambda rec: strip.strip_member( rec, root ), timed.wrap( \"draft\", ask ), book, draft.DRAFTER_MODEL, args.server, args.source_commit,\n186\t                    args.seed, kind_split( args ), args.set_by, set_at, none_draft_fn=none_fn, parallel=args.parallel, smoke=True, extras=extras )\n187\t\n188\t\n189\tdef live_build_env( args, set_at, timed ):\n190\t    \"\"\"Build the env with the real drafter, the real second model and the real embeddings client.\"\"\"\n191\t    return assemble_env( args, draft.drafter_call(), draft.drafter_call( args.second_model ), vector_build.EndpointClient(), set_at, timed )\n192\t\n193\t\n194\tdef lifted_by( args ):\n195\t    \"\"\"\n196\t    Return who lifted the time window, or None when nobody did.\n197\t\n198\t    Requires:\n199\t        - args is the parsed command line\n200\t\n201\t    Ensures:\n202\t        - returns the stripped text of --window-lifted-by; blank text counts as nobody\n203\t    \"\"\"\n204\t    named = \"\" if args.window_lifted_by is None else args.window_lifted_by.strip()\n205\t    return named if named else None\n206\t\n207\t\n208\tdef smoke_report( args, timed, result, started, finished, host, extras ):\n209\t    \"\"\"\n210\t    Summarise one smoke run as measurements.\n211\t\n212\t    Ensures:\n213\t        - returns the date, host, source commit, split, seed, extras, and the calls of both models: totals, errors, seconds per call and the same for each model\n214\t        - failure_rate is the failed seeds over the seeds tried, with failed seeds listed by reason\n215\t        - says in a note that it is a measurement and not a pass bar\n216\t    \"\"\"\n217\t    cells  = result[ \"cells\" ]\n218\t    failed = [ f for c in cells for f in c[ \"failed\" ] ]\n219\t    tried  = sum( len( c[ \"accepted\" ] ) for c in cells ) + len( failed )\n220\t    total  = timed.summary()\n221\t    reasons = {}\n222\t    for f in failed: reasons[ f[ \"reason\" ] ] = reasons.get( f[ \"reason\" ], 0 ) + 1\n223\t    return { \"format\": SMOKE_FORMAT, \"smoke\": True, \"date\": finished.isoformat(), \"host\": host, \"source_commit\": args.source_commit, \"seed\": args.seed,\n224\t             \"kind_split\": kind_split( args ), \"ts_share\": args.ts_share, \"needs\": len( result[ \"needs\" ] ), \"model_calls\": total[ \"calls\" ], \"call_errors\": total[ \"errors\" ],\n225\t             \"seconds_per_call\": total[ \"seconds\" ], \"by_model\": { label: timed.summary( label ) for label in ( \"draft\", \"second\" ) },\n226\t             \"seeds_tried\": tried, \"seeds_failed\": len( failed ), \"failure_rate\": len( failed ) / tried if tried else None, \"failed_by_reason\": reasons,\n227\t             \"window_lifted_by\": lifted_by( args ),\n228\t             \"elapsed_seconds\": ( finished - started ).total_seconds(), \"extras\": extras, \"note\": \"a measurement, not a pass bar\" }\n229\t\n230\t\n231\tdef main( argv=None, build_env=None, now=None, clock=time.monotonic, host=None ):\n232\t    \"\"\"\n233\t    Run the smoke: refuse a live run outside the window, then draft ten needs and measure.\n234\t\n235\t    Requires:\n236\t        - build_env( args, set_at, timed ) returns a run.Env whose model calls go through timed.wrap; None means the live env\n237\t        - now is a function returning an aware datetime, None for the system clock\n238\t\n239\t    Ensures:\n240\t        - returns the smoke report, also written as needset-smoke.json beside the plan, drafts and draft report\n241\t        - every need carries smoke true, and the calls of the drafter and the second model are timed apart\n242\t        - the window is checked before anything is built or called, and only for the live env\n243\t        - a live run outside the window goes ahead only when --window-lifted-by names a person\n244\t\n245\t    Raises:\n246\t        - NeedsetError OUTSIDE_WINDOW for a live run at another time\n247\t        - NeedsetError KIND_SPLIT_UNSET or QUOTA_INVALID from the split the arguments name\n248\t    \"\"\"\n249\t    args  = parse_args( argv )\n250\t    now   = ( lambda: datetime.datetime.now( datetime.timezone.utc ) ) if now is None else now\n251\t    live  = build_env is None\n252\t    start = now()\n253\t    if live and lifted_by( args ) is None and not in_window( start ): raise er.NeedsetError( er.OUTSIDE_WINDOW, start.astimezone( EASTERN ).isoformat() )\n254\t    table = quota.plan_quota( TOTAL, MATCHED, NONE, args.ts_share, kind_split( args ) )\n255\t    pathlib.Path( args.out_dir ).mkdir( parents=True, exist_ok=True )\n256\t    timed = Timed( clock )\n257\t    env   = ( live_build_env if live else build_env )( args, start.isoformat(), timed )\n258\t    env.smoke = True\n259\t    result = run.run_needset( env, table, args.out_dir )\n260\t    report = smoke_report( args, timed, result, start, now(), socket.gethostname() if host is None else host, env.extras )\n261\t    ( pathlib.Path( args.out_dir ) / SMOKE_FILE ).write_text( json.dumps( report, sort_keys=True, indent=4 ) + \"\\n\", encoding=\"utf-8\" )\n262\t    return report\n263\t\n264\t\n265\tif __name__ == \"__main__\":\n266\t    print( json.dumps( main(), indent=4 ) )\n267\t    sys.exit( 0 )\n268\t",
+     "is_error": null,
+     "tool_use_id": "toolu_01A52Bc8g42HqCXBWSqRMiUH"
+    }
+   ],
+   "parent_tool_use_id": null,
+   "tool_use_result": {
+    "file": {
+     "content": "\"\"\"\nThe ten-need drafting smoke: a small live run that measures and sets no pass bar.\n\nIt takes a test-only kind split and a named commit as arguments and marks every need smoke.\nIt writes the date, host, commit, seconds per call and failure rate beside the drafts.\nA live run is refused outside 10 a.m. to 1 p.m. Eastern, the window the Max plan allows.\nA named person can lift the window with --window-lifted-by; the record then carries who and when.\n\"\"\"\nimport argparse\nimport datetime\nimport json\nimport pathlib\nimport socket\nimport sys\nimport threading\nimport time\nimport zoneinfo\n\nfrom cosa.repo.symindex import build, dups, spec as sp\nfrom cosa.repo.symindex.candidates import candidate_stage, vector_build, vector_store\nfrom lupin_mcp.reuse_needset import draft, keys, pool, quota, run, strip\nfrom lupin_mcp.reuse_needset import errors as er\n\nEASTERN      = zoneinfo.ZoneInfo( \"America/New_York\" )\nWINDOW_START = 10\nWINDOW_END   = 13\nTOTAL        = 10\nMATCHED      = 8\nNONE         = 2\nSECOND_MODEL = \"claude-opus-5-5\"\nSECOND_SYSTEM = \"You answer with one JSON object and nothing else.\"\nSMOKE_FILE   = \"needset-smoke.json\"\nSMOKE_FORMAT = \"needset-smoke-1\"\n\n\ndef in_window( now ):\n    \"\"\"\n    Say whether a moment falls in the hours a live model run is allowed.\n\n    Requires:\n        - now is a timezone-aware datetime\n\n    Ensures:\n        - True from 10:00 up to, not including, 13:00 Eastern time, on any day\n\n    Raises:\n        - ValueError when now has no timezone\n    \"\"\"\n    if now.tzinfo is None: raise ValueError( \"now must carry a timezone\" )\n    return WINDOW_START <= now.astimezone( EASTERN ).hour < WINDOW_END\n\n\ndef parse_args( argv ):\n    \"\"\"\n    Read the command line.\n\n    Ensures:\n        - the root, out dir, source commit, seed, vector folders and the three matched-kind counts are required\n        - the kind split is whatever is passed; no default stands in for the real split\n        - window_lifted_by is None unless the caller names who lifted the window and when\n    \"\"\"\n    ap = argparse.ArgumentParser( description=__doc__ )\n    ap.add_argument( \"--root\",             required=True )\n    ap.add_argument( \"--out-dir\",          required=True )\n    ap.add_argument( \"--source-commit\",    required=True )\n    ap.add_argument( \"--seed\",             required=True, type=int )\n    ap.add_argument( \"--vectors-dir\",      required=True )\n    ap.add_argument( \"--query-cache-dir\",  required=True )\n    ap.add_argument( \"--near-copy\",        required=True, type=int )\n    ap.add_argument( \"--work-alike\",       required=True, type=int )\n    ap.add_argument( \"--cross-language\",   required=True, type=int )\n    ap.add_argument( \"--ts-share\",         type=float, default=0.6 )\n    ap.add_argument( \"--parallel\",         type=int, default=3 )\n    ap.add_argument( \"--server\",           default=\"max-plan\" )\n    ap.add_argument( \"--set-by\",           default=\"smoke\" )\n    ap.add_argument( \"--cli-path\",         default=None )\n    ap.add_argument( \"--second-model\",     default=SECOND_MODEL )\n    ap.add_argument( \"--window-lifted-by\", default=None )\n    return ap.parse_args( argv )\n\n\ndef kind_split( args ):\n    \"\"\"Return the matched-kind split the arguments name.\"\"\"\n    return { \"near_copy\": args.near_copy, \"work_alike\": args.work_alike, \"cross_language\": args.cross_language }\n\n\nclass Timed:\n    \"\"\"Times every model call and counts the ones that raise, by the label of the model.\"\"\"\n\n    def __init__( self, clock ):\n        \"\"\"Read the time from clock(); calls holds ( label, seconds, failed ) rows.\"\"\"\n        self.clock, self.calls, self.lock = clock, [], threading.Lock()\n\n    def wrap( self, label, ask ):\n        \"\"\"Return ask with each call timed under label; the reply or the error passes through.\"\"\"\n        def timed( *args ):\n            \"\"\"Forward the call, recording its duration and whether it raised.\"\"\"\n            start, failed = self.clock(), True\n            try:\n                reply  = ask( *args )\n                failed = False\n                return reply\n            finally:\n                with self.lock: self.calls.append( ( label, self.clock() - start, failed ) )\n        return timed\n\n    def summary( self, label=None ):\n        \"\"\"\n        Summarise the calls of one label, or of all.\n\n        Ensures:\n            - returns { calls, errors, seconds } where seconds is { mean, min, max } or None with no call\n        \"\"\"\n        rows = [ c for c in self.calls if label is None or c[ 0 ] == label ]\n        secs = [ c[ 1 ] for c in rows ]\n        return { \"calls\": len( rows ), \"errors\": sum( 1 for c in rows if c[ 2 ] ), \"seconds\": { \"mean\": sum( secs ) / len( secs ), \"min\": min( secs ), \"max\": max( secs ) } if secs else None }\n\n\ndef index_parts( root, index_dir ):\n    \"\"\"\n    Build the index of a tree and everything the run reads from it.\n\n    Requires:\n        - root is a repository root and index_dir a folder to publish the index in\n\n    Ensures:\n        - returns ( by_id, kept, measures, twins, bodies ) with by_id holding every searchable record\n        - twin ids are the index's own ids, which carry no prefix in the lupin tree\n    Raises:\n        - NeedsetError NOT_LUPIN_TREE when root lacks the lupin layout\n    \"\"\"\n    root    = pathlib.Path( root )\n    if not build.is_lupin_tree( root ): raise er.NeedsetError( er.NOT_LUPIN_TREE, f\"{root}: the strip step resolves ids of the lupin layout only\" )\n    built   = build.build( root, index_dir )\n    records, _reader = pool.read_pool_symbols( built[ \"gen_dir\" ] )\n    measures = pool.measure( root, records )\n    kept, _dropped = pool.eligible( records, measures )\n    spec    = sp.spec_for( root )\n    found   = dups.find_duplicates( spec, sp.iter_files( spec, spec.py_roots, { \".py\" } ), js_files=sp.iter_files( spec, spec.js_roots, set( sp.SCRIPT_SUFFIXES ) ) )\n    twins   = pool.twin_map( found )\n    return { r[ \"id\" ]: r for r in records }, kept, measures, twins, strip.bodies_for( kept, root )\n\n\ndef candidate_parts( vectors_dir, cache_dir, client, records ):\n    \"\"\"\n    Load the live vector set and build the word stage and the query embedder.\n\n    Requires:\n        - vectors_dir holds a sealed vector set; client has embed( texts, content_type, role ) and info()\n\n    Ensures:\n        - returns ( vectors, stage, embed ) where embed( text ) is the concat query vector of that text\n    \"\"\"\n    vectors = vector_store.load_vectors( vectors_dir )\n    stage   = candidate_stage.build_stage( records )\n    embed   = lambda text: vector_store.query_vectors( text, client, cache_dir, vectors.manifest )[ \"concat\" ]\n    return vectors, stage, embed\n\n\ndef assemble_env( args, ask, second_ask, client, set_at, timed ):\n    \"\"\"\n    Put the index, the candidate parts and the model calls into a run.Env.\n\n    Requires:\n        - ask( system, user ) and second_ask( system, user ) return reply text; client is an embeddings client\n        - timed is a Timed, and both models are called through it, under the labels draft and second\n\n    Ensures:\n        - the env is a smoke env, with its two ledgers under args.out_dir\n        - the seed pool is the eligible symbols that have a row in the vector set, and the counts are kept in env.extras\n        - a symbol newer than the vector set is left out, so the smoke measures; the real draw needs a fresh vector set\n    \"\"\"\n    root, out = pathlib.Path( args.root ), pathlib.Path( args.out_dir )\n    by_id, kept, measures, twins, bodies = index_parts( root, out / \"index\" )\n    vectors, stage, embed = candidate_parts( args.vectors_dir, args.query_cache_dir, client, list( by_id.values() ) )\n    rows    = set( vectors.ids )\n    pooled  = [ r for r in kept if r[ \"id\" ] in rows ]\n    extras  = { \"vector_coverage\": { \"eligible\": len( kept ), \"with_a_vector_row\": len( pooled ), \"vector_set_ids\": len( rows ), \"stage_ids\": len( stage.ids ) } }\n    book    = draft.SharedLedger( draft.make_ledger( out / \"ledger-draft.jsonl\", args.cli_path, args.server ) )\n    second  = draft.SharedLedger( draft.make_ledger( out / \"ledger-second.jsonl\", args.cli_path, args.server ) )\n    second_timed = timed.wrap( \"second\", second_ask )\n    describe = lambda i: f\"{by_id[ i ][ 'sig' ]} \u2014 {by_id[ i ][ 'doc' ]}\"\n    none_fn = draft.make_none_drafter( stage, vectors, embed, describe, lambda prompt: second_timed( SECOND_SYSTEM, prompt ), second, args.second_model )\n    ctx     = keys.KeyContext( pooled, measures, bodies, args.seed, vectors )\n    return run.Env( by_id, pooled, ctx, twins, lambda rec: strip.strip_member( rec, root ), timed.wrap( \"draft\", ask ), book, draft.DRAFTER_MODEL, args.server, args.source_commit,\n                    args.seed, kind_split( args ), args.set_by, set_at, none_draft_fn=none_fn, parallel=args.parallel, smoke=True, extras=extras )\n\n\ndef live_build_env( args, set_at, timed ):\n    \"\"\"Build the env with the real drafter, the real second model and the real embeddings client.\"\"\"\n    return assemble_env( args, draft.drafter_call(), draft.drafter_call( args.second_model ), vector_build.EndpointClient(), set_at, timed )\n\n\ndef lifted_by( args ):\n    \"\"\"\n    Return who lifted the time window, or None when nobody did.\n\n    Requires:\n        - args is the parsed command line\n\n    Ensures:\n        - returns the stripped text of --window-lifted-by; blank text counts as nobody\n    \"\"\"\n    named = \"\" if args.window_lifted_by is None else args.window_lifted_by.strip()\n    return named if named else None\n\n\ndef smoke_report( args, timed, result, started, finished, host, extras ):\n    \"\"\"\n    Summarise one smoke run as measurements.\n\n    Ensures:\n        - returns the date, host, source commit, split, seed, extras, and the calls of both models: totals, errors, seconds per call and the same for each model\n        - failure_rate is the failed seeds over the seeds tried, with failed seeds listed by reason\n        - says in a note that it is a measurement and not a pass bar\n    \"\"\"\n    cells  = result[ \"cells\" ]\n    failed = [ f for c in cells for f in c[ \"failed\" ] ]\n    tried  = sum( len( c[ \"accepted\" ] ) for c in cells ) + len( failed )\n    total  = timed.summary()\n    reasons = {}\n    for f in failed: reasons[ f[ \"reason\" ] ] = reasons.get( f[ \"reason\" ], 0 ) + 1\n    return { \"format\": SMOKE_FORMAT, \"smoke\": True, \"date\": finished.isoformat(), \"host\": host, \"source_commit\": args.source_commit, \"seed\": args.seed,\n             \"kind_split\": kind_split( args ), \"ts_share\": args.ts_share, \"needs\": len( result[ \"needs\" ] ), \"model_calls\": total[ \"calls\" ], \"call_errors\": total[ \"errors\" ],\n             \"seconds_per_call\": total[ \"seconds\" ], \"by_model\": { label: timed.summary( label ) for label in ( \"draft\", \"second\" ) },\n             \"seeds_tried\": tried, \"seeds_failed\": len( failed ), \"failure_rate\": len( failed ) / tried if tried else None, \"failed_by_reason\": reasons,\n             \"window_lifted_by\": lifted_by( args ),\n             \"elapsed_seconds\": ( finished - started ).total_seconds(), \"extras\": extras, \"note\": \"a measurement, not a pass bar\" }\n\n\ndef main( argv=None, build_env=None, now=None, clock=time.monotonic, host=None ):\n    \"\"\"\n    Run the smoke: refuse a live run outside the window, then draft ten needs and measure.\n\n    Requires:\n        - build_env( args, set_at, timed ) returns a run.Env whose model calls go through timed.wrap; None means the live env\n        - now is a function returning an aware datetime, None for the system clock\n\n    Ensures:\n        - returns the smoke report, also written as needset-smoke.json beside the plan, drafts and draft report\n        - every need carries smoke true, and the calls of the drafter and the second model are timed apart\n        - the window is checked before anything is built or called, and only for the live env\n        - a live run outside the window goes ahead only when --window-lifted-by names a person\n\n    Raises:\n        - NeedsetError OUTSIDE_WINDOW for a live run at another time\n        - NeedsetError KIND_SPLIT_UNSET or QUOTA_INVALID from the split the arguments name\n    \"\"\"\n    args  = parse_args( argv )\n    now   = ( lambda: datetime.datetime.now( datetime.timezone.utc ) ) if now is None else now\n    live  = build_env is None\n    start = now()\n    if live and lifted_by( args ) is None and not in_window( start ): raise er.NeedsetError( er.OUTSIDE_WINDOW, start.astimezone( EASTERN ).isoformat() )\n    table = quota.plan_quota( TOTAL, MATCHED, NONE, args.ts_share, kind_split( args ) )\n    pathlib.Path( args.out_dir ).mkdir( parents=True, exist_ok=True )\n    timed = Timed( clock )\n    env   = ( live_build_env if live else build_env )( args, start.isoformat(), timed )\n    env.smoke = True\n    result = run.run_needset( env, table, args.out_dir )\n    report = smoke_report( args, timed, result, start, now(), socket.gethostname() if host is None else host, env.extras )\n    ( pathlib.Path( args.out_dir ) / SMOKE_FILE ).write_text( json.dumps( report, sort_keys=True, indent=4 ) + \"\\n\", encoding=\"utf-8\" )\n    return report\n\n\nif __name__ == \"__main__\":\n    print( json.dumps( main(), indent=4 ) )\n    sys.exit( 0 )\n",
+     "filePath": "src/lupin_mcp/reuse_needset/smoke.py",
+     "numLines": 268,
+     "startLine": 1,
+     "totalLines": 268
+    },
+    "type": "text"
+   },
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+   "_class": "AssistantMessage",
+   "content": [
+    {
+     "_class": "ThinkingBlock",
+     "signature": "CAQSjgkKEAgTGAI4AUIIdGhpbmtpbmcSDPHo4edDpIEpYT0WWhoMzwPUvm3sB5DPCdODIjAaUMI+YtwohNLmzNFJfag2IOOlfy/Wu7LRWJDPgdvofBlHo+kFCU1MP2UiqMrLlAsqqwg+vj2gTS0zNE6kFBy3b3wTy9STaxXWxjYRZt3D1g2AHul0JRp8oMSqQrQWYbF40ewnRfOfaP7OBH1Kp36yKYsI9AN8vCyp1OxcaPWMbsvECRfHxMI5PO1/nzZBAomNjD1AlB9UgqCCVCOb9H9KajVqQlkPDLnza2dC07Qd19uixGaCqdbIHTQUtbndITaAKaVsuxBqiHY8KeMN6XmTgvaJ34kjGxKXe8ND60DGAV178wJoNz7VeLVpdxhk1pOA/O8cFm1yJ16JjIUMY/IkGW6KYzryspCY40CDxeJ4QL5xmWYw7wpiW9u2u+0IJJ6a/2mroXkwwZsHOQmk1UWwQTh2bV4tu963sPLT2mJG1GDEP9LnoUehE+v9CRVydV6d32GvdiheuqATlvgoBJyXOMyKiCooetRAEk/NLqaa5klMcTkg0NM/3h9Yi4JdLDfFnaUmrvt/RQx+vDW/29MRK+hiStzpmr5YUZTLMloSY3H+Fq0TSE1SRAPnRGhd42LpytGmVPEwX9N4UqMNAqvk97n8isrCHsWEYFo4wILVwLpNCK3GJxTz94OxtXHDLisvzhfLJy+1WAq+GZmUcuS3eNMANHtBIKX5BNd0tnkewpO5ZHkKPG6JsVgEjamjuZlbc2Z7/3x3Sd2r6ahSm2cFd9wY85M4UXlfy3viZE90wjSEo6Dv+QgrL8sPwZqpHCM0/GYUjrKIKRFh1XWSKLCX+rjsNhdna0yRAQ3ZFQR6gIMhWqyEdJ9g2qlq3jLFsi4YaIQ4mYbnoyh1PR/Jcx46dsr2a6Olkdgis+jJVhYwEFSAxASLVwRlhPFYnOaTgXqDx8btcNTOF4PySUBBFHGa7OsISKmknPCTVbLtxzucQfUvp+OZMbYGwE9MI1h5BSfq1hz3CEdo0HJoUDqbgScHVEpmZtJxwJq2bKbsh7B1kUTQQDV06Gkk7MiNy1s1uri1a3Xovj4KFl/5ayMNzxDMWqCXCYaPp71Af2FuFX1VNY2zCUHiLoCv6OmDZYL0dX1NH71jfXgTAiIGzACvmHAPu3FKVXpVvvkvB4+gTTdu93ymetXk+EsFd+SsNX4BsMRVZoW86oLKsLo09oGmVUQkdEZJMRHUUNDhQ2/RYsLKaUveaSdsKjgg4ifywJuD4hgklJwj1L1afeh1XjOKi/qSqIRiWZKK/0v6H2knKVjobKh5+8YhR9CXEARuANuDMrwZwG9vNT/ghqPFBNcuU7tGFWu4DKhVgJ8IzdOiomvx+DMrJX75apA3IHBlNTQQWY55YdIftgrnPocFBJmdT/OrZB2gXeEe6kVqiAIDATwBk+Tn0e3Z73RNDyrUxsibbo+RqSmjmNWmL56fzpQLpNpUGgavWKcAaV22RtFc0cFTfnaGWvmlDeKywE3I8k1QnWsOVZalgVVAL/MgMLeKgRgB",
+     "thinking": ""
+    }
+   ],
+   "error": null,
+   "message_id": "msg_011CgNJ9m3WanXfUHqksMnLQ",
+   "model": "claude-haiku-5-5",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-0000-0000-000000000000",
+   "stop_reason": null,
+   "usage": {
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 5763,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 5763,
+    "cache_read_input_tokens": 1628,
+    "inference_geo": "global",
+    "input_tokens": 2,
+    "output_tokens": 2,
+    "service_tier": "standard",
+    "speed": "standard"
+   },
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+   "_class": "AssistantMessage",
+   "content": [
+    {
+     "_class": "TextBlock",
+     "text": "RULING lupin_mcp.reuse_needset.smoke.in_window :: DUPLICATE\nRULING lupin_mcp.reuse_needset.smoke.lifted_by :: DISTINCT"
+    }
+   ],
+   "error": null,
+   "message_id": "msg_011CgNJ9m3WanXfUHqksMnLQ",
+   "model": "claude-haiku-5-5",
+   "parent_tool_use_id": null,
+   "session_id": "00000000-0000-0000-0000-000000000000",
+   "stop_reason": null,
+   "usage": {
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 5763,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 5763,
+    "cache_read_input_tokens": 1628,
+    "inference_geo": "global",
+    "input_tokens": 2,
+    "output_tokens": 2,
+    "service_tier": "standard",
+    "speed": "standard"
+   },
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+   "_class": "ResultMessage",
+   "duration_api_ms": 3005,
+   "duration_ms": 3022,
+   "errors": null,
+   "is_error": false,
+   "model_usage": {
+    "claude-haiku-5-5": {
+     "cacheCreationInputTokens": 7391,
+     "cacheReadInputTokens": 1628,
+     "contextWindow": 200000,
+     "costUSD": 0.05556275,
+     "inputTokens": 6,
+     "maxOutputTokens": 32000,
+     "outputTokens": 341,
+     "webSearchRequests": 0
+    }
+   },
+   "num_turns": 2,
+   "permission_denials": [],
+   "result": "RULING lupin_mcp.reuse_needset.smoke.in_window :: DUPLICATE\nRULING lupin_mcp.reuse_needset.smoke.lifted_by :: DISTINCT",
+   "session_id": "00000000-0000-0000-0000-000000000000",
+   "stop_reason": "end_turn",
+   "structured_output": null,
+   "subtype": "success",
+   "total_cost_usd": 0.05556275,
+   "usage": {
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 7391,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 7391,
+    "cache_read_input_tokens": 1628,
+    "inference_geo": "",
+    "input_tokens": 6,
+    "iterations": [],
+    "output_tokens": 341,
+    "server_tool_use": {
+     "web_fetch_requests": 0,
+     "web_search_requests": 0
+    },
+    "service_tier": "standard",
+    "speed": "standard"
+   },
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  }
+ ],
+ "model": "claude-haiku-5-5",
+ "need": "Say whether a moment falls inside a fixed daily window of hours in the Eastern time zone.",
+ "prompt_version": "needset-probe-03aea0dcc5",
+ "result": {
+  "shortlist": [
+   {
+    "file": "src/lupin_mcp/reuse_needset/smoke.py",
+    "id": "lupin_mcp.reuse_needset.smoke.in_window",
+    "p": 0.9
+   },
+   {
+    "file": "src/lupin_mcp/reuse_needset/smoke.py",
+    "id": "lupin_mcp.reuse_needset.smoke.lifted_by",
+    "p": 0.3
+   }
+  ],
+  "verdict": "REUSE"
+ },
+ "root": "/root"
+}

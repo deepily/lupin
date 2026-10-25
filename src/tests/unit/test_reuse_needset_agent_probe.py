@@ -1,9 +1,11 @@
 """
 The tools-on probe: its prompt, its options, its reading of a stream and its rulings.
 
-The streams here are built in the test from the SDK's own message classes. The captured stream of one real run replaces them in the 10 a.m. window.
+Most streams here are built in the test from the SDK's own message classes. One test group replays the stream captured from a real run of the agent.
 """
 import asyncio
+import json
+import pathlib
 
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
@@ -11,6 +13,7 @@ from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUse
 from cosa.repo.doc_lint import model_transport as mt
 from lupin_mcp.reuse_needset import agent_probe as ap
 from lupin_mcp.reuse_needset import errors as er
+from tests.helpers import sdk_stream_capture as cap
 
 SHORTLIST = [ { "id": "pkg.a.f", "file": "pkg/a.py", "p": 0.9, "text": "SECRET SUMMARY" }, { "id": "pkg.b.g", "file": "pkg/b.py", "p": 0.4, "text": "OTHER SUMMARY" } ]
 RESULT    = { "shortlist": SHORTLIST, "verdict": "REUSE" }
@@ -127,3 +130,54 @@ def test_an_unreadable_reply_is_asked_once_more_with_the_same_prompt_and_then_re
 def test_an_error_result_and_a_stream_with_no_result_raise_runtime_errors():
     with pytest.raises( RuntimeError ): asyncio.run( ap.run_probe( "n", RESULT, "/t", "m", query_fn=stream_of( [ done( error=True ) ] ) ) )
     with pytest.raises( RuntimeError, match="no result message" ): asyncio.run( ap.run_probe( "n", RESULT, "/t", "m", query_fn=stream_of( [ assistant( TextBlock( text=GOOD ) ) ] ) ) )
+
+
+CAPTURE_PATH = pathlib.Path( __file__ ).resolve().parent.parent / "fixtures" / "reuse_needset" / "probe-capture.json"
+
+
+def captured():
+    """Return the capture document and its messages rebuilt as SDK messages."""
+    doc = json.loads( CAPTURE_PATH.read_text( encoding="utf-8" ) )
+    return doc, cap.decode( doc[ "messages" ] )
+
+
+def replay( messages ):
+    """Return a query function that plays the captured messages once."""
+    async def query( prompt, options ):
+        for m in messages: yield m
+
+    return query
+
+
+def test_the_capture_is_one_real_read_only_run_in_the_order_the_cli_sent_it():
+    doc, messages = captured()
+    assert [ type( m ).__name__ for m in messages ] == [ "SystemMessage", "AssistantMessage", "RateLimitEvent", "UserMessage", "AssistantMessage", "AssistantMessage", "ResultMessage" ]
+    assert messages[ 0 ].data[ "tools" ] == [ "Read" ] and messages[ 0 ].data[ "model" ] == doc[ "model" ] and doc[ "root" ] == "/root"
+
+
+def test_the_capture_was_made_with_the_prompt_the_probe_sends_now():
+    doc, _ = captured()
+    assert doc[ "prompt_version" ] == ap.prompt_version(), "the probe's instruction, tools or turn limit changed: capture the stream again"
+    assert doc[ "need" ] in ap.build_prompt( doc[ "need" ], doc[ "result" ] )
+
+
+def test_the_real_stream_gives_one_ruling_per_candidate_and_one_whole_file_read():
+    doc, messages = captured()
+    out = asyncio.run( ap.run_probe( doc[ "need" ], doc[ "result" ], doc[ "root" ], doc[ "model" ], query_fn=replay( messages ) ) )
+    assert out[ "rulings" ] == { "lupin_mcp.reuse_needset.smoke.in_window": "DUPLICATE", "lupin_mcp.reuse_needset.smoke.lifted_by": "DISTINCT" }
+    assert out[ "reads" ] == [ { "path": "src/lupin_mcp/reuse_needset/smoke.py", "offset": None, "limit": None } ] == ap.read_files( messages )
+    assert [ t[ "type" ] for t in out[ "transcript" ] ][ 0 ] == "tool_use" and out[ "reply" ] == ap.reply_text( messages ) and out[ "reply" ].startswith( "RULING lupin_mcp" )
+
+
+def test_a_relative_read_from_the_real_stream_covers_a_definition_in_the_file_it_names():
+    doc, messages = captured()
+    read = ap.read_files( messages )[ 0 ]
+    assert ap.covers( read, doc[ "root" ], "src/lupin_mcp/reuse_needset/smoke.py", 36, 50 ) is True
+    assert ap.covers( read, doc[ "root" ], "src/lupin_mcp/reuse_needset/draft.py", 1, 2 ) is False
+
+
+def test_encode_and_decode_round_trip_the_real_stream_and_a_hand_built_one():
+    doc, messages = captured()
+    assert cap.encode( messages ) == doc[ "messages" ] and cap.decode( cap.encode( messages ) ) == messages
+    built = [ assistant( TextBlock( text="t" ), read( "/t/a.py", limit=3 ) ), done() ]
+    assert cap.decode( cap.encode( built ) ) == built and cap.decode( { "a": [ 1, "x" ] } ) == { "a": [ 1, "x" ] } and cap.encode( 5 ) == 5
