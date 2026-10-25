@@ -5,6 +5,7 @@ One generation directory holds every generated file, and a `current` symlink nam
 generation, replaced with os.replace. A reader therefore never sees one new file beside one
 old file, and never sees a half-written index. Rebuilds run under an flock.
 """
+import collections
 import fcntl
 import hashlib
 import json
@@ -115,7 +116,8 @@ def collect( spec ):
     Extract every symbol and route under spec.
 
     Ensures:
-        - returns a dict { symbols, all_symbols, routes, missing, unparsed, pin_algorithm }
+        - returns a dict { symbols, all_symbols, routes, missing, unparsed, skipped_files, pin_algorithm }
+        - skipped_files counts the files of an indexed suffix that a skip rule left out, per rule (a directory name or a file suffix)
         - all_symbols holds every definition; symbols holds the public ones; ids match in both
         - a missing tool (node, typescript, the Dart extractor) is listed in `missing`,
           its symbols are absent, and the rest of the index is still built
@@ -123,17 +125,18 @@ def collect( spec ):
     """
     recs, unparsed = [], []
     algo, missing  = environment( spec )
-    py_files       = iter_files( spec, spec.py_roots, { ".py" } )
+    drops          = {}
+    py_files       = iter_files( spec, spec.py_roots, { ".py" }, drops )
     for p in py_files:
         try:
             found = extract_python( spec, p, include_all=True )
         except ( SyntaxError, UnicodeDecodeError ):
             unparsed.append( p.relative_to( spec.root ).as_posix() ); continue
         recs.extend( found )
-    js_files = iter_files( spec, spec.js_roots, set( SCRIPT_SUFFIXES ) )
+    js_files = iter_files( spec, spec.js_roots, set( SCRIPT_SUFFIXES ), drops )
     if js_files and "node" not in missing and "typescript" not in missing:
         recs.extend( extract_js( spec.root, js_files ) )
-    dart_files = iter_files( spec, spec.dart_roots, { ".dart" } )
+    dart_files = iter_files( spec, spec.dart_roots, { ".dart" }, drops )
     if dart_files and not any( m in missing for m in ( "dart", "analyzer", "dart_extractor" ) ):
         from cosa.repo.symindex import dart_extractor
         from cosa.repo.symindex.paths import data_dir
@@ -154,6 +157,7 @@ def collect( spec ):
              "routes"      : routes_mod.resolve( per_file ),
              "missing"     : sorted( set( missing ) ),
              "unparsed"    : unparsed,
+             "skipped_files": dict( sorted( collections.Counter( drops.values() ).items() ) ),
              "pin_algorithm": algo }
 
 
@@ -245,6 +249,7 @@ def _write_generation( tmp, spec, data, man ):
         - tmp is an empty directory
     Ensures:
         - writes symbols.md, routes.md, symbols.jsonl, symbols-all.jsonl and header.json, all utf-8
+        - the header holds skipped_files, the per-rule count of files a skip rule left out, beside unparsed
         - search_sha covers the records of spec.scopes (public and private when the spec names none), so the tests spec's header holds the tests' own hash
         - returns the header dict
     """
@@ -258,7 +263,7 @@ def _write_generation( tmp, spec, data, man ):
                    "search_sha"   : search_sha( searchable ),
                    "pin_algorithm": data[ "pin_algorithm" ],
                    "counts"       : { "symbols": len( data[ "symbols" ] ), "searchable": len( searchable ), "all": len( data[ "all_symbols" ] ), "routes": len( data[ "routes" ] ) },
-                   "missing_dependencies": data[ "missing" ], "unparsed": data[ "unparsed" ] }
+                   "missing_dependencies": data[ "missing" ], "unparsed": data[ "unparsed" ], "skipped_files": data[ "skipped_files" ] }
     files[ "header.json" ] = json.dumps( header, indent=2, sort_keys=True ) + "\n"
     for name, text in files.items():
         ( tmp / name ).write_text( text, encoding="utf-8" )
@@ -363,9 +368,25 @@ def read_searchable( gen, tests=False ):
     return [ r for r in read_symbols( gen, all_symbols=True ) if r[ "scope" ] in scopes ]
 
 
-def searchable_jsonl( gen, tests=False ):
-    """Ensures: returns read_searchable( gen, tests ) as the jsonl text a generation file holds."""
-    return _jsonl( read_searchable( gen, tests ) )
+def attach_purposes( records, purposes ):
+    """
+    Add each record's stored purpose line to it.
+
+    Requires:
+        - records are index records with a pin
+        - purposes is { pin: purpose line }, or None
+
+    Ensures:
+        - returns a new list; a record whose pin has a line is a copy carrying it as `purpose`, any other record is the same object
+        - no record is changed in place
+    """
+    if not purposes: return list( records )
+    return [ { **r, "purpose": purposes[ r[ "pin" ] ] } if r[ "pin" ] in purposes else r for r in records ]
+
+
+def searchable_jsonl( gen, tests=False, purposes=None ):
+    """Ensures: returns read_searchable( gen, tests ), with the purposes attached, as jsonl text."""
+    return _jsonl( attach_purposes( read_searchable( gen, tests ), purposes ) )
 
 
 def is_fresh( spec, out_dir ):

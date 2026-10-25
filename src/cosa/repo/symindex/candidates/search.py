@@ -108,19 +108,32 @@ def cosine_ranked( ids, matrix, query ):
     return sorted( pairs, key=lambda p: ( -p[ 1 ], p[ 0 ] ) )
 
 
-def read_purposes( path ):
+def read_purposes( path, torn=None ):
     """
     Read the stored purpose lines.
 
     Requires:
         - path is a purpose.jsonl file of { pin, purpose } rows, or None
+        - torn is None, or a list the call appends to
 
     Ensures:
         - returns { pin: purpose }, empty when path is None
         - the first row stored for a pin wins, as the writer's own reader does
+        - a last line that is not JSON, cut short because the file is being written, is skipped and appended to torn as its text
+        - a line that is not JSON and is not the last one is a damaged file and still raises
+
+    Raises:
+        - ValueError (json.JSONDecodeError) for a damaged line before the last
     """
     if path is None: return {}
-    rows = [ json.loads( line ) for line in pathlib.Path( path ).read_text( encoding="utf-8" ).splitlines() if line ]
+    lines = [ line for line in pathlib.Path( path ).read_text( encoding="utf-8" ).splitlines() if line ]
+    rows  = []
+    for n, line in enumerate( lines ):
+        try:
+            rows.append( json.loads( line ) )
+        except ValueError:
+            if n != len( lines ) - 1: raise
+            if torn is not None: torn.append( line )
     purposes = {}
     for row in rows: purposes.setdefault( row[ "pin" ], row[ "purpose" ] )
     return purposes

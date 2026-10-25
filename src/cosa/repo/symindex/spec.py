@@ -10,7 +10,7 @@ import pathlib
 import subprocess
 
 LUPIN_PY_PACKAGES = ( "cosa", "lupin_cli", "lupin_mcp", "lupin_app", "lupin_arbiter_app", "lupin_model_server", "scripts" )
-LUPIN_JS_DIR      = "src/lupin_app/static/js"
+LUPIN_JS_DIRS     = ( "src/lupin_app/static/js", "src/scripts", "src/cosa/repo/symindex", "src/conf" )          # the script roots of a lupin tree; test_script_files_census names what is left out
 SKIP_PARTS        = frozenset( { "tests", "migrations", ".venv", "vendor", "node_modules", "rnd", "__pycache__", ".git" } )
 DART_SKIP_PARTS   = frozenset( { "generated", ".dart_tool", "build" } )
 SKIP_SUFFIXES     = ( ".d.ts", ".min.js", ".g.dart", ".freezed.dart" )
@@ -90,7 +90,7 @@ def spec_for( root ):
     Build the IndexSpec for a repository root.
 
     Ensures:
-        - a lupin tree indexes the lupin packages and the web client's js directory
+        - a lupin tree indexes the lupin packages and the script roots of LUPIN_JS_DIRS (the web client's js directory, src/scripts, the index's own extractors and src/conf)
         - a Flutter tree (pubspec.yaml + lib/) indexes lib/ as Dart
         - any other tree indexes every Python, JavaScript and TypeScript file under the root
     """
@@ -98,7 +98,7 @@ def spec_for( root ):
     skip = set( SKIP_PARTS )
     if is_lupin_tree( root ):
         py  = [ root / "src" / p for p in LUPIN_PY_PACKAGES ]
-        js  = [ root / LUPIN_JS_DIR ]
+        js  = [ root / d for d in LUPIN_JS_DIRS ]
         return IndexSpec( root, root.name, [ p for p in py if p.is_dir() ], [ p for p in js if p.is_dir() ], [], root / "src", skip )
     if ( root / "pubspec.yaml" ).is_file() and ( root / "lib" ).is_dir():
         return IndexSpec( root, root.name, [], [], [ root / "lib" ], root, skip | DART_SKIP_PARTS )
@@ -133,33 +133,55 @@ def is_test_path( rel_path ):
     return "tests" in pathlib.PurePosixPath( rel_path ).parts[ :-1 ]
 
 
+def skip_rule( rel_path, skip_parts ):
+    """
+    Name the rule that excludes a relative path from the index.
+
+    Ensures:
+        - returns the first directory component of the path that is in skip_parts
+        - otherwise the SKIP_SUFFIXES entry the file name ends with
+        - otherwise None: the path is not skipped
+        - the file name itself is never matched against skip_parts
+    """
+    rel  = pathlib.PurePosixPath( rel_path )
+    part = next( ( p for p in rel.parts[ :-1 ] if p in skip_parts ), None )
+    if part is not None: return part
+    return next( ( s for s in SKIP_SUFFIXES if rel.name.endswith( s ) ), None )
+
+
 def skipped( rel_path, skip_parts ):
     """
     Say whether a relative path is excluded from the index.
 
     Ensures:
-        - True iff a directory component of the relative path is in skip_parts
+        - True iff skip_rule names a rule for it: a directory component in skip_parts, or a SKIP_SUFFIXES ending
         - the file name itself is never matched, only checked against SKIP_SUFFIXES
     """
-    rel = pathlib.PurePosixPath( rel_path )
-    if any( part in skip_parts for part in rel.parts[ :-1 ] ): return True
-    return rel.name.endswith( SKIP_SUFFIXES )
+    return skip_rule( rel_path, skip_parts ) is not None
 
 
-def iter_files( spec, roots, suffixes ):
+def iter_files( spec, roots, suffixes, skipped_into=None ):
     """
     List the indexable files under some roots.
+
+    Requires:
+        - skipped_into is None, or a dict the call fills with { relative path: rule } for each file it drops
 
     Ensures:
         - returns a sorted list of absolute paths under `roots` with one of `suffixes`
         - a path is dropped when it would be skipped relative to spec.root
         - each path appears once even when roots overlap
+        - a dropped file with one of `suffixes` is recorded in skipped_into under the rule that dropped it, once
     """
     seen = set()
     for base in roots:
         for p in base.rglob( "*" ):
             if p.suffix not in suffixes or not p.is_file(): continue
-            if skipped( p.relative_to( spec.root ).as_posix(), spec.skip_parts ): continue
+            rel  = p.relative_to( spec.root ).as_posix()
+            rule = skip_rule( rel, spec.skip_parts )
+            if rule is not None:
+                if skipped_into is not None: skipped_into[ rel ] = rule
+                continue
             seen.add( p )
     return sorted( seen )
 

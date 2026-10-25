@@ -137,7 +137,7 @@ def _git_files( pattern ):
 ALLOWED_READ_SYMBOLS = ( "src/cosa/repo/symindex/build.py", "src/cosa/repo/symindex/wiki_lint.py", "src/cosa/repo/symindex/diff.py" )
 
 
-ID_LOOKUP_READERS = ( "src/lupin_mcp/reuse_tools.py", "src/lupin_mcp/reuse_needset/loss_trace.py" )     # the fetch_similar entry lookup, and the loss trace's seed lookup
+ID_LOOKUP_READERS = ( "src/lupin_mcp/reuse_tools.py", )     # the fetch_similar entry lookup
 
 
 def _stray_calls( lines ):

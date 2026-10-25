@@ -26,7 +26,7 @@ def test_the_tests_spec_of_a_lupin_tree_reads_the_existing_test_roots_and_publis
     with_tests( root )
     ( root / "src" / "cosa" / "tests" ).mkdir()
     spec = sp.tests_spec( root )
-    assert [ p.relative_to( root.resolve() ).as_posix() for p in spec.py_roots ] == list( sp.TESTS_DIRS ) and spec.js_roots == spec.py_roots
+    assert [ p.relative_to( root.resolve() ).as_posix() for p in spec.py_roots ] == [ "src/tests", "src/cosa/tests" ] and spec.js_roots == spec.py_roots       # the literal pair, not the constant
     assert spec.scopes == ( "test", ) and spec.module_base == root.resolve() / "src" and spec.dart_roots == ()
     assert "tests" not in spec.skip_parts and spec.skip_parts == sp.SKIP_PARTS - { "tests" }
     assert sp.spec_for( root ).scopes is None and "tests" in sp.spec_for( root ).skip_parts       # the main spec keeps skipping tests
@@ -93,4 +93,5 @@ def test_a_build_with_no_spec_writes_the_bytes_it_wrote_before_the_change( tmp_p
         assert ( gen / name ).read_bytes() == ( GOLDEN / name ).read_bytes(), name
     head = bd.read_header( gen )
     for key in ( "manifest", "pin_algorithm", "index_root" ): head.pop( key )
+    assert head.pop( "skipped_files" ) == { "node_modules": 1, "tests": 1 }          # the one key 1.7 added: pkg/tests/test_skip.py and node_modules/dep/x.js
     assert head == json.loads( ( GOLDEN / "header-content.json" ).read_text( encoding="utf-8" ) )

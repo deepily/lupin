@@ -38,6 +38,7 @@ from cosa.repo.symindex.paths import index_readable
 from cosa.repo.symindex.spec import NotARepo, git_toplevel, spec_for, tests_spec
 from cosa.repo.symindex.candidates import freshness as fr
 from cosa.repo.symindex.candidates.errors import CandidateError
+from cosa.repo.symindex.candidates.search import read_purposes
 from lupin_mcp import reuse_redact
 
 TOOL_VERSION = "1"                                              # receipts of the one-request-per-entry path
@@ -62,6 +63,10 @@ DEFAULT_CALL_BUDGET = CALL_BUDGET_CAP
 ARM_CAP_PERCENT    = 10                         # an arm of the measurement stage may send its entry count plus this share, rounded up
 BUDGET_VARIABLE     = "LUPIN_REUSE_JEV_CALL_BUDGET"
 NAME_RE      = re.compile( r"[\w\-]+" )
+EXCLUDED_SENSITIVE_CONTENT = "EXCLUDED_SENSITIVE_CONTENT"   # sendable() dropped the entry: it still carried an address, path or credential
+EXCLUDED_PREFIX            = "EXCLUDED_PREFIX"              # sendable() dropped the entry: its id is under an excluded prefix
+PURPOSE_LINE_TORN          = "PURPOSE_LINE_TORN"            # note: the purpose file ends in a line that is still being written, so it was skipped
+DROPPED_IDS_SHOWN          = 10                             # ids of each dropped reason a result and a receipt name
 SYMBOL_FIELDS = ( "id", "sig", "doc", "file", "lang" )
 
 PROMPT_TEMPLATE = {
@@ -230,13 +235,14 @@ class ReuseContext:
         - pair_sweeper is None for the pair question's own candidate-keyed packed sweeper, or a function with sweep's signature that replaces it
         - candidate_stage is None for a full sweep, or a lupin_mcp.reuse_candidates.CandidateStage that picks the entries a check_exists question asks
         - policy is None for the shipped decision policy, or a policy mapping; one with a band widens a candidate lookup whose first sweep is near a cut-off
+        - purposes_path is None, or the purpose.jsonl whose lines prepare() adds to the entries by pin
 
     Raises:
         - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer, or a call_budget_cap below CALL_BUDGET_CAP
     """
 
     def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET,
-                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP, run_budget=None, pair_sweeper=None, candidate_stage=None, policy=None ):
+                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP, run_budget=None, pair_sweeper=None, candidate_stage=None, policy=None, purposes_path=None ):
         if type( call_budget_cap ) is not int or call_budget_cap < CALL_BUDGET_CAP:
             raise ReuseError( "BAD_BUDGET", f"call budget cap must be an integer of at least {CALL_BUDGET_CAP}, got {call_budget_cap!r}" )
         if type( call_budget ) is not int or not 1 <= call_budget <= call_budget_cap:
@@ -262,6 +268,9 @@ class ReuseContext:
         self.pair_sweeper     = pair_sweeper
         self.candidate_stage  = candidate_stage
         self.policy           = policy
+        self.purposes_path    = None if purposes_path is None else pathlib.Path( purposes_path )
+        self.dropped          = {}                            # set by prepare(): the ids sendable_report dropped, by reason
+        self.notes            = []                            # set by prepare(): what the call tells the caller besides its verdict, as { note, detail }
         self.tests_gen        = None                          # set by prepare(): the tests generation of an include_tests call, else None
 
 
@@ -279,6 +288,7 @@ def context_from_environment( root=None ):
         - LUPIN_REUSE_JEV_CALL_BUDGET sets the call budget; unset or empty means DEFAULT_CALL_BUDGET
         - a packed context builds its candidate stage here, so a missing storage key refuses every packed run,
           sweep-only runs included
+        - a packed context reads purpose lines from the candidate stage's purpose.jsonl; the one-request path has none
 
     Raises:
         - ReuseError BAD_BUDGET when that variable is not an integer from 1 to CALL_BUDGET_CAP; a budget
@@ -295,7 +305,10 @@ def context_from_environment( root=None ):
         budget = int( raw ) if raw else DEFAULT_CALL_BUDGET
     except ValueError as e:
         raise ReuseError( "BAD_BUDGET", f"{BUDGET_VARIABLE} must be an integer, got {raw!r}" ) from e
-    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None, call_budget=budget, **_packed_settings( top ) )
+    settings = _packed_settings( top )
+    stage    = settings[ "candidate_stage" ] if "candidate_stage" in settings else None
+    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None, call_budget=budget,
+                         purposes_path=stage.purposes_path if stage is not None else None, **settings )
 
 
 def _whole_number( text ):
@@ -590,37 +603,81 @@ def _is_mount_file( path ):
 
 
 def c1_hits( rec ):
-    """Ensures: returns the sorted names of the C1 patterns (email, url, ip, path, credential; a /app or /data path counts only when it names a file) found in the symbol's id, signature or first docstring line."""
-    text = "\n".join( [ rec[ "id" ], rec[ "sig" ], rec[ "doc" ] ] )
+    """
+    Find what a symbol would carry out of the machine.
+
+    Ensures:
+        - returns the sorted names of the sensitive patterns (email, url, ip, path, credential; a /app or /data path counts only when it names a file)
+          found in the symbol's id, signature, first docstring line, and its whole docstring and purpose line when it has them
+    """
+    text = "\n".join( [ rec[ "id" ], rec[ "sig" ], rec[ "doc" ] ] + [ rec[ k ] for k in ( "doc_full", "purpose" ) if k in rec ] )
     hits = { name for name, rx in C1_PATTERNS.items() if rx.search( text ) }
     if any( _is_mount_file( m.group( 0 ) ) for m in APP_DATA.finditer( text ) ): hits.add( "path" )
     return sorted( hits )
 
 
-def sendable( entries, exclude_prefixes=() ):
+def sendable_report( entries, exclude_prefixes=() ):
     """
-    The one place that decides what of the index may leave the machine (Rick's ruling, 2026-10-03).
+    The one place that decides what of the index may leave the machine, with every drop named.
 
     Ensures:
         - returns ( kept, dropped ): kept are copies of the entries with string defaults blanked, in
-          input order; dropped are the ids that still carried an email, URL, IP address, absolute path
-          or credential-shaped token after blanking
+          input order; dropped maps EXCLUDED_SENSITIVE_CONTENT to the ids that still carried an email, URL, IP address,
+          absolute path or credential-shaped token after blanking (in the id, signature, docstring or purpose line),
+          and EXCLUDED_PREFIX to the ids under an excluded prefix; both keys are always present
         - every language in the index is kept; no module is excluded unless exclude_prefixes names it,
           and that list is empty by ruling
         - an entry whose signature holds no string default is returned equal to its input
     """
-    kept, dropped = [], []
+    kept, dropped = [], { EXCLUDED_SENSITIVE_CONTENT: [], EXCLUDED_PREFIX: [] }
     for r in entries:
-        if r[ "id" ].startswith( tuple( exclude_prefixes ) ): continue
+        if r[ "id" ].startswith( tuple( exclude_prefixes ) ): dropped[ EXCLUDED_PREFIX ].append( r[ "id" ] ); continue
         c = { **r, "sig": blank_string_defaults( r[ "sig" ] ) }
-        if c1_hits( c ): dropped.append( r[ "id" ] )
+        if c1_hits( c ): dropped[ EXCLUDED_SENSITIVE_CONTENT ].append( r[ "id" ] )
         else: kept.append( c )
     return kept, dropped
 
 
+def sendable( entries, exclude_prefixes=() ):
+    """
+    Screen entries as sendable_report does; name only those dropped for sensitive content.
+
+    Ensures:
+        - returns ( kept, dropped ): kept is sendable_report's, dropped the ids it lists under EXCLUDED_SENSITIVE_CONTENT
+        - an entry under an excluded prefix is in neither list
+    """
+    kept, dropped = sendable_report( entries, exclude_prefixes )
+    return kept, dropped[ EXCLUDED_SENSITIVE_CONTENT ]
+
+
+def dropped_view( dropped ):
+    """
+    Shape the dropped ids of one call for a result and a receipt.
+
+    Requires:
+        - dropped is the mapping sendable_report returns
+
+    Ensures:
+        - returns { reason: { count, first_ids } } for each reason with at least one id, first_ids the first DROPPED_IDS_SHOWN of them
+        - returns {} when nothing was dropped, so a clean call writes nothing
+    """
+    return { k: { "count": len( ids ), "first_ids": ids[ :DROPPED_IDS_SHOWN ] } for k, ids in dropped.items() if ids }
+
+
 def entry_text( rec ):
-    """Ensures: returns what Jev sees of one symbol: its id, signature and first docstring line."""
-    return f"{rec[ 'id' ]}{rec[ 'sig' ]} — {rec[ 'doc' ]}"
+    """
+    Build what Jev sees of one symbol.
+
+    Ensures:
+        - returns the id, signature and first docstring line
+        - a record whose doc_full is non-empty and differs from its first line appends the whole docstring, and one with a non-empty purpose appends its purpose line
+        - a one-line docstring therefore reads as it always did, and its cached answers stay warm
+        - a record with neither key, such as one from a snapshot written before they existed, gives the text it always gave
+    """
+    text = f"{rec[ 'id' ]}{rec[ 'sig' ]} — {rec[ 'doc' ]}"
+    if "doc_full" in rec and rec[ "doc_full" ] and rec[ "doc_full" ] != rec[ "doc" ]: text += f" | {rec[ 'doc_full' ]}"
+    if "purpose" in rec and rec[ "purpose" ]: text += f" | purpose: {rec[ 'purpose' ]}"
+    return text
 
 
 def parse_answer( response ):
@@ -902,28 +959,31 @@ def l0_lines( wiki_dir ):
     return p.read_text( encoding="utf-8" ).splitlines() if p.exists() else []
 
 
-def index_sha( symbols_sha, l0, pins="", tests_sha=None ):
+def index_sha( symbols_sha, l0, pins="", tests_sha=None, purposes_sha=None ):
     """
     Hash what check_exists reads.
 
     Ensures:
         - returns the sha1 over what check_exists reads: symbols, index lines, page pins
         - a tests_sha, when given, is part of it, so a call that reads test records is never the receipt of one that does not
-        - with no tests_sha the value is the one this function has always returned
+        - a purposes_sha, when given, is part of it too: a purpose line is part of what the judge reads, and a pin that gains one keeps its search_sha
+        - with neither the value is the one this function has always returned
     """
-    return sha( symbols_sha + "\n" + "\n".join( l0 ) + ( "\n" + pins if pins else "" ) + ( "\ntests:" + tests_sha if tests_sha is not None else "" ) )
+    return sha( symbols_sha + "\n" + "\n".join( l0 ) + ( "\n" + pins if pins else "" ) + ( "\ntests:" + tests_sha if tests_sha is not None else "" )
+                + ( "\npurposes:" + purposes_sha if purposes_sha is not None else "" ) )
 
 
-def save_snapshot( ctx, sha_, gen, l0, tests_gen=None ):
+def save_snapshot( ctx, sha_, gen, l0, tests_gen=None, purposes=None ):
     """
     Store the definitions and index lines an index_sha names, compressed, once.
 
     Ensures:
         - the definitions are the searchable listing a call judged (public and private), not the public file
         - a call that read test records also stores them, after the others, so its receipt replays against the set it judged
+        - a definition whose pin has a purpose line stores it as `purpose`, so the replay rebuilds the text the judge read
         - they are not filtered by language: the language is on the receipt and applied again at replay
     """
-    text = sx_build.searchable_jsonl( gen ) + ( sx_build.searchable_jsonl( tests_gen, tests=True ) if tests_gen is not None else "" )
+    text = sx_build.searchable_jsonl( gen, purposes=purposes ) + ( sx_build.searchable_jsonl( tests_gen, tests=True ) if tests_gen is not None else "" )
     blob = gzip.compress( canonical( { "symbols_jsonl": text, "l0": l0 } ).encode( "utf-8" ), mtime=0 )
     write_once( ctx.data / "snapshots" / f"{sha_}.json.gz", blob )
 
@@ -1089,6 +1149,9 @@ def prepare( ctx, include_tests=False ):
         - an include_tests call adds those records to the entries, mixes the tests generation's hash into the index_sha, saves them in the
           snapshot, and gives a live transport the attempt limit for the searchable-plus-test count; a default call changes in none of these
         - ctx.tests_gen is the tests generation of an include_tests call, else None
+        - a definition whose pin has a line in ctx.purposes_path carries it as `purpose`, and the lines used are part of the index_sha
+        - ctx.dropped is what sendable_report left out, by reason (empty before the index is read)
+        - ctx.notes holds { note, detail } for what the caller should know: PURPOSE_LINE_TORN when the purpose file ends in a cut-short line, which is skipped
         - returns ( flags, entries, sha, gen ): flags is the set of pipeline causes that hold, entries the
           index symbols to ask about, as sendable() leaves them (defaults blanked, backstop drops removed), sha the index_sha, gen the live generation or None
         - a tree that is neither lupin nor a registered repo with a built index (index_readable) gives NOT_LUPIN_TREE and no entries
@@ -1098,6 +1161,8 @@ def prepare( ctx, include_tests=False ):
     """
     flags = set()
     ctx.tests_gen = None
+    ctx.dropped   = {}
+    ctx.notes     = []
     if not index_readable( ctx.root ): return { "NOT_LUPIN_TREE" }, [], "none", None
     spec = spec_for( ctx.root )
     try:
@@ -1116,13 +1181,18 @@ def prepare( ctx, include_tests=False ):
     if ctx.transport is None:
         if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=_live_budget( ctx, attempts ), transient=ctx.sweeper is not None )
         else: flags.add( "KEY_UNREADABLE" )
-    symbols    = sx_build.read_searchable( gen )
+    torn       = []
+    purposes   = read_purposes( ctx.purposes_path, torn ) if ctx.purposes_path is not None and ctx.purposes_path.is_file() else {}
+    if torn: ctx.notes.append( { "note": PURPOSE_LINE_TORN, "detail": f"the last line of {ctx.purposes_path.name} is cut short and was skipped: {torn[ 0 ][ :60 ]!r}" } )
+    symbols    = sx_build.attach_purposes( sx_build.read_searchable( gen ), purposes )
     tests      = sx_build.read_searchable( ctx.tests_gen, tests=True ) if ctx.tests_gen is not None else []
-    entries, _ = sendable( symbols + tests, ctx.exclude_prefixes )
+    entries, ctx.dropped = sendable_report( symbols + tests, ctx.exclude_prefixes )
     l0         = l0_lines( ctx.wiki_dir )
     ctx.pages  = page_candidates( ctx.wiki_dir, [ s for s in symbols if s[ "scope" ] == "public" ] )
-    sha_       = index_sha( header[ "search_sha" ] if "search_sha" in header else header[ "symbols_sha" ], l0, pages_digest( ctx.pages ), tests_sha )
-    save_snapshot( ctx, sha_, gen, l0, ctx.tests_gen )
+    lines      = sorted( ( s[ "pin" ], s[ "purpose" ] ) for s in symbols if "purpose" in s )
+    sha_       = index_sha( header[ "search_sha" ] if "search_sha" in header else header[ "symbols_sha" ], l0, pages_digest( ctx.pages ), tests_sha,
+                            sha( json.dumps( lines ) ) if lines else None )
+    save_snapshot( ctx, sha_, gen, l0, ctx.tests_gen, purposes )
     return flags, entries, sha_, gen
 
 
@@ -1420,6 +1490,9 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
     if redactions: rec[ "need_redactions" ], rec[ "routes_source" ], rec[ "need_sent" ] = redactions, routes_source, need     # only when the redactor changed the need, so an untouched need keeps its pinned receipt bytes
     unscreened = unscreened_path_count( entries, routes )
+    dropped = dropped_view( ctx.dropped )
+    if ctx.notes: rec[ "notes" ] = list( ctx.notes )                             # written only when there is one, so a clean call keeps its pinned receipt bytes
+    if dropped: rec[ "dropped" ] = dropped                                       # written only when something was dropped, so a clean call keeps its pinned receipt bytes
     if unscreened: rec[ "unscreened_entry_paths" ] = unscreened                  # the plan's K14 count; written only when nonzero, so a clean index keeps its pinned receipt bytes
     if sweep_only: rec[ "sweep_only" ], rec[ "exclude_id" ] = True, exclude_id
     elif tool == "check_exists" and exclude_id is not None: rec[ "exclude_id" ] = exclude_id
@@ -1452,6 +1525,8 @@ def _public( receipt, extra=None ):
     out.update( { k: receipt[ k ] for k in keep } )
     out[ "need_redactions" ] = receipt[ "need_redactions" ] if "need_redactions" in receipt else []
     out[ "unscreened_entry_paths" ] = receipt[ "unscreened_entry_paths" ] if "unscreened_entry_paths" in receipt else 0
+    out[ "dropped" ] = receipt[ "dropped" ] if "dropped" in receipt else {}
+    out[ "notes" ]   = receipt[ "notes" ] if "notes" in receipt else []
     counts = receipt[ "candidate_stage" ] if "candidate_stage" in receipt else None
     for k in ( "entries_total", "entries_asked", "entries_not_asked" ): out[ k ] = counts[ k ] if counts is not None else None
     out[ "widened" ] = counts[ "widened" ] if counts is not None else None
