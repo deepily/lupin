@@ -253,6 +253,22 @@ def test_the_second_model_must_not_be_the_drafter( tmp_path ):
     assert e.value.code == er.CHECKER_EQUALS_DRAFTER
 
 
+def test_the_second_model_must_not_be_the_model_drafting_now_and_nothing_is_asked_first( tmp_path ):
+    fn, second = none_drafter( tmp_path )
+    asker = Asker( [ NONE_GOOD ] )
+    with pytest.raises( er.NeedsetError ) as e: fn( none_job(), asker, ledger( tmp_path ), model_id="claude-opus-5-5" )
+    assert e.value.code == er.CHECKER_EQUALS_DRAFTER and asker.prompts == [] and second.calls == 0
+
+
+def test_an_edit_to_the_nothing_prompt_or_its_rewrite_note_is_a_new_prompt_version( monkeypatch ):
+    first = draft.prompt_version()
+    monkeypatch.setattr( draft, "none_prompt", lambda lines: "changed" )
+    second = draft.prompt_version()
+    assert second != first
+    monkeypatch.setattr( draft, "none_note", lambda kinds: "changed" )
+    assert draft.prompt_version() not in ( first, second )
+
+
 def test_a_cell_can_be_drafted_with_another_draft_function( tmp_path ):
     seen = []
 
@@ -272,6 +288,44 @@ def test_a_shared_ledger_keeps_every_write_from_many_threads( tmp_path ):
     for t in work: t.join()
     reread = harness_runner.Ledger( book.ledger.path, binding="test" )
     assert len( reread.entries ) == 320 and book.get( "k3-7" ) == 7 and book.get( "missing" ) is None
+
+
+def test_the_shared_ledger_holds_its_lock_for_every_read_and_write( tmp_path ):
+    held = []
+
+    class Spy:
+        """A ledger that records whether the wrapper's lock was held at each call."""
+        def get( self, key ): return held.append( ( "get", book.lock.locked() ) )
+        def put( self, key, value ): held.append( ( "put", book.lock.locked() ) )
+
+    book = draft.SharedLedger( Spy() )
+    book.get( "k" )
+    book.put( "k", 1 )
+    assert held == [ ( "get", True ), ( "put", True ) ] and not book.lock.locked()
+
+
+def test_cells_with_the_same_name_run_one_after_another_and_other_cells_run_together( tmp_path ):
+    import asyncio, threading, time
+    live, peak, lock = {}, { "same": 0, "all": 0 }, threading.Lock()
+
+    def ask( system, prompt ):
+        with lock:
+            live[ prompt ] = True
+            peak[ "all" ] = max( peak[ "all" ], len( live ) )
+        time.sleep( 0.05 )
+        with lock: live.pop( prompt )
+        return GOOD
+
+    book = draft.SharedLedger( ledger( tmp_path ) )
+
+    def specs( cells, tag ):
+        return [ dict( cell=c, wanted=1, order=[ f"{tag}{n}" ], make_job=lambda s: job( seed=dict( SEED, id=f"pkg.mod.{s}" ), text=f"T{s}" ), ask=ask, ledger=book ) for n, c in enumerate( cells ) ]
+
+    asyncio.run( draft.draft_cells( specs( [ "same", "same", "same" ], "x" ), 3 ) )
+    assert peak[ "all" ] == 1, "three specs of one cell never overlap"
+    peak[ "all" ] = 0
+    asyncio.run( draft.draft_cells( specs( [ "a", "b", "c" ], "y" ), 3 ) )
+    assert peak[ "all" ] > 1, "specs of different cells do overlap"
 
 
 def test_cells_are_drafted_in_parallel_and_returned_in_the_order_given( tmp_path ):

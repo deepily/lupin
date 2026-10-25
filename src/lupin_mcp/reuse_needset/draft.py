@@ -39,9 +39,10 @@ def prompt_version():
     Name the prompt the drafter sends, so a change to it is a different version.
 
     Ensures:
-        - returns model_transport.prompt_version over the system template, the prompt builder's source and the reply parser's source
+        - returns model_transport.prompt_version over the system template, the sources of the two prompt builders, the rewrite note and the reply parser
     """
-    return model_transport.prompt_version( "needset-draft", need_writer.SYSTEM_TEMPLATE, inspect.getsource( need_writer.build_prompt ), inspect.getsource( parse_reply ) )
+    return model_transport.prompt_version( "needset-draft", need_writer.SYSTEM_TEMPLATE, inspect.getsource( need_writer.build_prompt ), inspect.getsource( parse_reply ),
+                                           inspect.getsource( none_prompt ), inspect.getsource( none_note ) )
 
 
 def make_ledger( path, cli_path, server_label ):
@@ -240,6 +241,11 @@ def none_prompt( lines ):
              + model_transport.wrap( "symbols", suffix, listed ) + "\n" )
 
 
+def none_note( kinds ):
+    """Return the rewrite request for the nothing prompt, naming failure kinds only."""
+    return f"\nYour previous sentence was rejected. Failure kinds: {', '.join( kinds )}. Write a different sentence."
+
+
 def draft_none( job, ask, ledger, model_id=DRAFTER_MODEL ):
     """
     Draft a nothing-exists need from the symbol list of one file.
@@ -273,7 +279,7 @@ def draft_none( job, ask, ledger, model_id=DRAFTER_MODEL ):
             record.update( ok=True, need=sentence, reason=None )
             return record
         record[ "history" ].append( { "try": attempt, "failures": kinds, "words": [] } )
-        note = f"\nYour previous sentence was rejected. Failure kinds: {', '.join( kinds )}. Write a different sentence."
+        note = none_note( kinds )
     return record
 
 
@@ -296,7 +302,8 @@ def make_none_drafter( stage, vectors, embed, describe, second_ask, second_ledge
     if second_model == DRAFTER_MODEL: raise er.NeedsetError( er.CHECKER_EQUALS_DRAFTER, second_model )
 
     def draft_fn( job, ask, ledger, model_id=DRAFTER_MODEL ):
-        """Draft one nothing need and rule on its absence."""
+        """Draft one nothing need and rule on its absence; the checker may not be the drafter."""
+        if second_model == model_id: raise er.NeedsetError( er.CHECKER_EQUALS_DRAFTER, second_model )
         record = draft_none( job, ask, ledger, model_id )
         if not record[ "ok" ]: return record
         evidence = keys.absence_evidence( record[ "need" ], stage, vectors, embed( record[ "need" ] ) )
