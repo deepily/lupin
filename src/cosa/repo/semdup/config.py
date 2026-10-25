@@ -165,25 +165,3 @@ def verify_frozen( path, live ):
     differing = sorted( key for key in set( frozen ) | set( live ) if key != ELIDED_FIELD and frozen.get( key ) != live.get( key ) )
     if differing: raise err.SemdupError( err.CONFIG_DRIFT, f"live values differ from the frozen file in: {', '.join( differing )}" )
     return frozen
-
-
-def aggregate_runs( reports, cfg ):
-    """
-    Hand the run reports to the unscorable-run policy, refusing when none is named.
-
-    Requires:
-        - reports is a list of run reports, each with a "run" id; an unscorable one has status "unscorable"
-        - cfg is a configuration dict
-
-    Ensures:
-        - never drops, zero-fills or excludes a run
-        - returns { "reports", "unscorable", "policy" }: the reports as given, the run ids of the unscorable ones in
-          input order, and the policy name from cfg, for the stop rule of the scoring phase to apply
-
-    Raises:
-        - SemdupError POLICY_UNDECIDED if any report is unscorable while unscorable_policy is empty (parking item P5)
-    """
-    unscorable = [ report[ "run" ] for report in reports if report.get( "status" ) == "unscorable" ]
-    if unscorable and is_empty( cfg[ "unscorable_policy" ] ):
-        raise err.SemdupError( err.POLICY_UNDECIDED, f"runs {', '.join( unscorable )} are unscorable and no policy is named (parking item P5)" )
-    return { "reports": list( reports ), "unscorable": unscorable, "policy": cfg[ "unscorable_policy" ] }

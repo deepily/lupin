@@ -26,7 +26,7 @@ def make( **over ):
 
 def test_every_error_code_is_listed_once_and_there_are_twelve():
     named = { v for k, v in vars( err ).items() if k.isupper() and k != "CODES" }
-    assert named == err.CODES and len( err.CODES ) == 12
+    assert named == err.CODES and len( err.CODES ) == 13
     assert all( getattr( err, code ) == code for code in err.CODES )
 
 
@@ -221,23 +221,3 @@ def test_a_frozen_file_edited_by_hand_fails_its_own_sha(tmp_path):
 def test_verify_frozen_with_no_file_raises_rather_than_passing(tmp_path):
     with pytest.raises( FileNotFoundError ):
         cf.verify_frozen( str( tmp_path / "missing.json" ), make() )
-
-
-def test_aggregate_runs_refuses_an_unscorable_run_when_no_policy_is_named():
-    reports = [ { "run": "r1", "score_per_100": 2.0 }, { "run": "r2", "status": "unscorable", "cause": "NO_PASSING_TESTS" } ]
-    for empty in ( None, "", " " ):
-        with pytest.raises( err.SemdupError, match="r2" ) as caught:
-            cf.aggregate_runs( reports, make( unscorable_policy=empty ) )
-        assert caught.value.code == err.POLICY_UNDECIDED
-
-
-def test_aggregate_runs_over_only_scorable_reports_needs_no_policy():
-    reports = [ { "run": "r1" }, { "run": "r2", "status": "scored" } ]
-    assert cf.aggregate_runs( reports, make( unscorable_policy=None ) ) == { "reports": reports, "unscorable": [], "policy": None }
-
-
-def test_aggregate_runs_with_a_policy_keeps_every_report_and_names_the_unscorable_ones_in_order():
-    reports = [ { "run": "r3", "status": "unscorable" }, { "run": "r1" }, { "run": "r2", "status": "unscorable" } ]
-    out = cf.aggregate_runs( reports, make() )
-    assert out == { "reports": reports, "unscorable": [ "r3", "r2" ], "policy": "worst-rank" }
-    assert out[ "reports" ] is not reports
