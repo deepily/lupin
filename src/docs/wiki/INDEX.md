@@ -48,6 +48,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Quality tooling
 
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
+- [[dump-solution-cache-learn-back]] — the solution cache dump tool's check that the emptied cache learns again, with polling, login and receipts. `scripts` (dump_solution_cache)
 - [[dump-solution-cache-dump]] — the solution cache dump tool's scope flags, backup, counted delete transaction and empty check. `scripts` (dump_solution_cache)
 - [[dm-experiment-schedule]] — the DM-verbosity pilot's seeded, reproducible two-arm hourly schedule and its generator. `scripts` (dm-experiment generate_schedule)
 - [[dm-experiment-arm-reports]] — the DM-verbosity pilot's co-primary results, order effect, secondary metrics and plain-text reports. `scripts` (dm-experiment analyze_arms)
