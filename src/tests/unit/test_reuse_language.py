@@ -330,7 +330,7 @@ def tracked_sources():
 
 def test_every_caller_of_a_search_entry_point_in_src_says_which_language():
     found, missing = callers_without_language( tracked_sources() )
-    assert len( found ) == 15, found                                                  # the denominator, counted 24 October: 7 inside reuse_tools, 2 wrappers, 3 + 1 + 1 + 1 in the drivers
+    assert len( found ) == 16, found                                                  # the denominator, counted 25 October: 7 inside reuse_tools, 2 wrappers, 3 + 1 + 1 + 1 in the drivers, 1 in the loss trace
     assert missing == []
 
 

@@ -75,9 +75,10 @@ def index_locator( ctx ):
 
     Ensures:
         - returns where( symbol id ) giving { file, line, end_line }
+        - the symbols are the searchable ones (public and private), the same set a search ranks, so a shortlisted id is always found
         - where raises NeedsetError RECEIPT_FIELD_ABSENT for a symbol the index lacks or one with no end_line
     """
-    by_id = { r[ "id" ]: r for r in rt.sx_build.read_symbols( rt.prepare( ctx )[ 3 ], all_symbols=True ) }
+    by_id = { r[ "id" ]: r for r in rt.sx_build.read_searchable( rt.prepare( ctx )[ 3 ] ) }
 
     def where( symbol_id ):
         """Ensures: returns the symbol's location from the index."""
