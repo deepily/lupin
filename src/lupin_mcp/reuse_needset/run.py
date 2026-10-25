@@ -84,6 +84,11 @@ def nothing_job( env, file, lang ):
     return { "seed": file, "lines": lines, "write_lang": lang, "meta": { "route": None, "key_source": None, "key_lang": None } }
 
 
+def route_table( env, kind, lang, order ):
+    """Return { seed id: route } for a work-alike cell, half and half over its draw order."""
+    return keys.assign_routes( order, f"{env.seed}|{kind}|{lang}" )
+
+
 def job_maker( env, kind, lang, order ):
     """
     Return the make_job function of one cell.
@@ -94,7 +99,7 @@ def job_maker( env, kind, lang, order ):
     """
     if kind == "near_copy": return lambda seed_id: near_copy_job( env, seed_id, lang )
     if kind == quota.NONE_KIND: return lambda file: nothing_job( env, file, lang )
-    routes = keys.assign_routes( order, f"{env.seed}|{kind}|{lang}" )
+    routes = route_table( env, kind, lang, order )
     return lambda seed_id: routed_job( env, kind, seed_id, lang, routes[ seed_id ] )
 
 

@@ -6,14 +6,14 @@ import json
 import pytest
 
 from cosa.repo.doc_lint import harness_runner
-from lupin_mcp.reuse_needset import draft, keys, quota, run, schema
+from lupin_mcp.reuse_needset import draft, keys, pool, quota, run, schema
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset.pool import Measure
 from tests.unit.test_reuse_needset_keys import Asker as SecondAsker
 from tests.unit.test_reuse_needset_keys import Vectors, absence_world, own_shingles
 
 DRAW_SEED = 20260615
-SPLIT     = { "near_copy": 2, "work_alike": 2, "cross_language": 2 }
+SPLIT     = { "near_copy": 4, "work_alike": 4, "cross_language": 2 }
 SENTENCE  = "A function that adds up a list of numbers but stops once a ceiling has been reached."
 NOTHING   = "A function that checks whether two files hold the same rows in a different order."
 COMMIT    = "0123456789abcdef0123456789abcdef01234567"
@@ -49,15 +49,16 @@ def strip_fn( rec ):
 class Model:
     """A fake drafter with one ruling for every same-job question and a fixed sentence per draft."""
 
-    def __init__( self, same="yes" ):
-        """Remember the same-job ruling and start the counters."""
-        self.same, self.calls, self.systems = same, 0, []
+    def __init__( self, same="yes", leak=None ):
+        """Remember the same-job ruling and an optional ( marker, sentence ) draft."""
+        self.same, self.leak, self.calls, self.systems = same, leak, 0, []
 
     def __call__( self, system, prompt ):
         """Answer a ruling, a nothing draft or a draft."""
         self.calls += 1
         self.systems.append( system )
         if '"same_job"' in prompt: return json.dumps( { "same_job": self.same } )
+        if self.leak is not None and self.leak[ 0 ] in prompt: return self.leak[ 1 ]
         return NOTHING if "plausibly need next" in prompt else SENTENCE
 
 
@@ -75,8 +76,8 @@ def make_env( tmp_path, ask=None, seed=DRAW_SEED, smoke=False, with_none=True, n
 
 
 def table():
-    """Return the 8-need quota used by the run tests."""
-    return quota.plan_quota( 8, 6, 2, 0.5, SPLIT )
+    """Return the 12-need quota used by the run tests: cells of one and of two needs."""
+    return quota.plan_quota( 12, 10, 2, 0.5, SPLIT )
 
 
 def test_a_plan_is_written_once_and_a_resume_with_the_same_plan_is_accepted( tmp_path ):
@@ -145,7 +146,7 @@ def test_a_whole_run_writes_the_plan_the_drafts_and_the_report_and_fills_every_c
     env    = make_env( tmp_path )
     got    = run.run_needset( env, table(), tmp_path )
     needs  = got[ "needs" ]
-    assert len( needs ) == 8 and all( n[ "status" ] == "drafted" and "smoke" not in n for n in needs )
+    assert len( needs ) == 12 == sum( n for row in table().values() for n in row.values() ) and all( n[ "status" ] == "drafted" and "smoke" not in n for n in needs )
     counts = {}
     for n in needs: counts[ ( n[ "kind" ], n[ "write_lang" ] ) ] = counts.get( ( n[ "kind" ], n[ "write_lang" ] ), 0 ) + 1
     assert counts == { ( k, l ): table()[ k ][ l ] for k in quota.ALL_KINDS for l in quota.LANGS if table()[ k ][ l ] }
@@ -160,7 +161,7 @@ def test_a_whole_run_writes_the_plan_the_drafts_and_the_report_and_fills_every_c
     assert drafts == needs
     report = json.loads( ( tmp_path / run.REPORT_FILE ).read_text() )
     assert report == got[ "report" ] and report[ "format" ] == run.REPORT_FORMAT and report[ "smoke" ] is False
-    assert report[ "counts" ] == { "cross_language/py": 1, "cross_language/ts": 1, "near_copy/py": 1, "near_copy/ts": 1, "nothing/py": 1, "nothing/ts": 1, "work_alike/py": 1, "work_alike/ts": 1 }
+    assert report[ "counts" ] == { f"{k}/{l}": table()[ k ][ l ] for k in quota.ALL_KINDS for l in quota.LANGS if table()[ k ][ l ] } and max( report[ "counts" ].values() ) == 2
     assert report[ "census" ][ "near_copy" ] == { "ts": 4, "py": 4 } and set( report[ "replacements" ] ) == set( report[ "counts" ] )
 
 
@@ -182,6 +183,46 @@ def test_a_smoke_run_marks_every_need_and_the_report( tmp_path ):
 
 def test_a_quota_without_nothing_needs_needs_no_nothing_drafter_and_a_zero_cell_is_skipped( tmp_path ):
     env = make_env( tmp_path, with_none=False )
-    got = run.run_needset( env, quota.plan_quota( 6, 6, 0, 0.5, SPLIT ), tmp_path )
-    assert len( got[ "needs" ] ) == 6 and not any( n[ "kind" ] == "nothing" for n in got[ "needs" ] )
+    got = run.run_needset( env, quota.plan_quota( 10, 10, 0, 0.5, SPLIT ), tmp_path )
+    assert len( got[ "needs" ] ) == 10 and not any( n[ "kind" ] == "nothing" for n in got[ "needs" ] )
     assert "nothing/py" not in got[ "report" ][ "counts" ]
+
+
+def test_a_primary_that_fails_three_checks_is_replaced_by_the_next_seed_and_counted( tmp_path ):
+    probe  = make_env( tmp_path )
+    cells  = pool.cell_pool( probe.kept, probe.twins, set( probe.by_id ) )
+    drawn  = quota.draw( cells, table(), DRAW_SEED )
+    first  = drawn[ ( "near_copy", "py" ) ][ "primary" ][ 0 ]
+    name   = first.split( "." )[ -1 ]
+    leak   = ( f"word_of_{first.replace( '.', '_' )}", f"A function that adds up a list of numbers for {name} but stops once a ceiling has been reached." )
+    env    = make_env( tmp_path, ask=Model( leak=leak ), name="leak.jsonl" )
+    ( tmp_path / "leak" ).mkdir()
+    got    = run.run_needset( env, table(), tmp_path / "leak" )
+    cell   = next( c for c in got[ "cells" ] if c[ "cell" ] == "near_copy/py" )
+    assert cell[ "original" ] == drawn[ ( "near_copy", "py" ) ][ "primary" ] and first in cell[ "original" ] and first not in cell[ "final" ]
+    assert len( cell[ "final" ] ) == 2 and cell[ "replacements" ] == { er.NEED_LEAKS_KEY: 1 } and [ f[ "seed" ] for f in cell[ "failed" ] ] == [ first ]
+    assert len( got[ "needs" ] ) == 12 and got[ "report" ][ "replacements" ][ "near_copy/py" ][ "total" ] == 1
+
+
+def test_routes_depend_on_the_draw_seed_the_kind_and_the_language_of_the_cell( tmp_path ):
+    env   = make_env( tmp_path )
+    order = [ f"pkg.alpha.pyfn{n}" for n in range( 6 ) ]
+
+    def routes( kind, lang, e=env ): return "".join( run.route_table( e, kind, lang, order )[ s ][ 0 ] for s in order )
+
+    assert routes( "work_alike", "py" ) == "vvsssv" and routes( "work_alike", "ts" ) == "vssvsv" and routes( "cross_language", "py" ) == "vsvssv"
+    assert routes( "work_alike", "py", make_env( tmp_path, seed=DRAW_SEED + 1, name="other.jsonl" ) ) != "vvsssv"
+
+
+def test_a_nothing_job_leaves_out_the_symbols_of_the_other_language_in_the_same_file( tmp_path ):
+    env = make_env( tmp_path )
+    env.kept.append( make_record( "pkg.alpha.tsintruder", "pkg/alpha.py", "ts" ) )
+    assert not any( "tsintruder" in l for l in run.nothing_job( env, "pkg/alpha.py", "py" )[ "lines" ] )
+    assert [ l for l in run.nothing_job( env, "pkg/alpha.py", "ts" )[ "lines" ] ] == [ f"pkg.alpha.tsintruder(x) — Does the job of pkg.alpha.tsintruder." ]
+
+
+def test_the_key_language_of_a_near_copy_is_the_language_of_its_twin( tmp_path ):
+    env = make_env( tmp_path )
+    env.twins[ "pkg.alpha.pyfn4" ], env.twins[ "web.alpha.tsfn4" ] = [ "web.alpha.tsfn4" ], [ "pkg.alpha.pyfn4" ]
+    assert run.near_copy_job( env, "pkg.alpha.pyfn4", "py" )[ "meta" ][ "key_lang" ] == "ts"
+    assert run.near_copy_job( env, "web.alpha.tsfn4", "ts" )[ "meta" ][ "key_lang" ] == "py"
