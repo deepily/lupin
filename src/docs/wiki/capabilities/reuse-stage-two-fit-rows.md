@@ -19,7 +19,7 @@ The row handling and policy scoring behind the threshold fit. Fitting and report
 ## Rows
 - `twin_map_from_manifest` maps each id to the ids it shares an exact or near cluster with. An id is never its own twin.
 - `rows_from_old` turns the old run's rows into labelled-run rows. Provides, coverage and score are `None`, and a candidate is labelled true when it is a twin.
-- `check_rows` raises `ValueError` naming the row and key when a key is missing or a score is outside 0 to 1.
+- `check_rows` raises `ValueError` naming the row and key when a key is missing, or when provides, coverage or p_overlap is outside 0 to 1. Score is not range-checked.
 - `split_rows` cuts rows into a fit half and a check half by member. A member the split does not know raises `ValueError`.
 - `usable` is true when the run answered the pair and the answer was readable.
 

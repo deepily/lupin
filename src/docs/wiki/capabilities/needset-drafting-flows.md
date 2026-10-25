@@ -13,7 +13,7 @@ pins:
 ---
 # Need set: drafting flows
 
-Drafts one sentence per seed, leak-checked, rewritten up to three times, else replaced by the next seed. The calls and checks are on [[needset-drafter-plumbing]].
+Drafts one sentence per seed, leak-checked, with at most three sentences checked (the first and two rewrites), else replaced by the next seed. The calls and checks are on [[needset-drafter-plumbing]].
 
 ## One seed
 - `draft_need` drafts the sentence for one seed. At most three sentences are checked, and an unreadable reply is asked again once with the same prompt.
