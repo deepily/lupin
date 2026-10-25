@@ -87,8 +87,10 @@ def _submit_new_password( page, server_url, account ):
 
 
 @pytest.mark.feature( "F07" )
-def test_cancel_on_change_password_returns_to_the_profile( signed_in, server_url ):
-    signed_in.goto( f"{server_url}/app/auth/change-password" )
+def test_the_profile_opens_change_password_and_cancel_returns_to_the_profile( signed_in, server_url ):
+    signed_in.goto( f"{server_url}/app/auth/profile" )
+    signed_in.get_by_role( "button", name="Change Password" ).click()
+    expect( signed_in ).to_have_url( f"{server_url}/app/auth/change-password", timeout=10000 )
     signed_in.get_by_role( "button", name="Cancel" ).click()
     expect( signed_in ).to_have_url( f"{server_url}/app/auth/profile", timeout=10000 )
 
