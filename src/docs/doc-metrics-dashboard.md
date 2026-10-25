@@ -18,7 +18,7 @@ The last row, `total`, sums every swept file on each side. It is shown and not c
 
 - Before: commit `456422492f308a60dafa36325102229947c44147`
 - Rows: 97 (84 packages, 13 loose directories), 9 new
-- Swept files: 730 before, 974 after
+- Swept files: 730 before, 979 after
 - Compared by the check: `em_dash`, `caps_words`, `section_refs`, `id_refs`, `tics`, `emphasis_glyphs`
 - Rows where a compared value rose: 0
 
@@ -73,7 +73,7 @@ src/cosa/agents/presentation_generator           | package | 11 -> 11   | 6608 -
 src/cosa/agents/presentation_generator/prompts   | package | 10 -> 10   | 1772 -> 1812     | 1.1 -> 0.6   | 2.8 -> 0.0  | 0.0 -> 0.0   | 0.6 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/agents/presentation_generator/renderers | package | 10 -> 10   | 3028 -> 3053     | 6.6 -> 4.9   | 2.0 -> 0.0  | 0.0 -> 0.0   | 0.3 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/agents/runtime_argument_expeditor       | package | 5 -> 5     | 4667 -> 4578     | 6.4 -> 1.1   | 12.0 -> 0.0 | 0.4 -> 0.0   | 3.0 -> 0.0 | 0.6 -> 0.0 | 0.4 -> 0.0      | ok
-src/cosa/agents/shared                           | package | 8 -> 15    | 4248 -> 10147    | 11.3 -> 2.7  | 15.3 -> 0.0 | 0.7 -> 0.1   | 0.5 -> 0.0 | 0.7 -> 0.0 | 0.0 -> 0.0      | ok
+src/cosa/agents/shared                           | package | 8 -> 15    | 4248 -> 10221    | 11.3 -> 2.6  | 15.3 -> 0.0 | 0.7 -> 0.1   | 0.5 -> 0.0 | 0.7 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/agents/swe_team                         | package | 14 -> 14   | 5153 -> 5306     | 0.8 -> 0.6   | 2.1 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/agents/swe_team/proxy                   | package | 5 -> 5     | 1490 -> 1525     | 2.0 -> 2.0   | 3.4 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/agents/test_fix_expediter               | package | 11 -> 11   | 5285 -> 5190     | 7.8 -> 2.5   | 4.2 -> 0.0  | 0.4 -> 0.0   | 0.4 -> 0.0 | 0.2 -> 0.0 | 0.0 -> 0.0      | ok
@@ -95,11 +95,11 @@ src/cosa/repo/branch_analyzer                    | package | 9 -> 9     | 3260 -
 src/cosa/repo/directory_analyzer                 | package | 6 -> 6     | 2080 -> 2038     | 0.0 -> 0.0   | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/repo/doc_lint                           | package | - -> 56    | - -> 57238       | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/cosa/repo/git_loc_delta                      | package | 10 -> 10   | 4023 -> 3944     | 9.2 -> 2.8   | 12.9 -> 0.0 | 0.0 -> 0.0   | 1.0 -> 0.0 | 1.5 -> 0.0 | 0.0 -> 0.0      | ok
-src/cosa/repo/labelling                          | package | - -> 6     | - -> 857         | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
-src/cosa/repo/semdup                             | package | - -> 13    | - -> 6037        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
-src/cosa/repo/semdup/proof                       | package | - -> 5     | - -> 1804        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
-src/cosa/repo/symindex                           | package | - -> 26    | - -> 14851       | - -> 0.1     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
-src/cosa/repo/symindex/candidates                | package | - -> 19    | - -> 9215        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/cosa/repo/labelling                          | package | - -> 7     | - -> 1408        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/cosa/repo/semdup                             | package | - -> 14    | - -> 6167        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/cosa/repo/semdup/proof                       | package | - -> 6     | - -> 3209        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/cosa/repo/symindex                           | package | - -> 26    | - -> 15128       | - -> 0.1     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/cosa/repo/symindex/candidates                | package | - -> 19    | - -> 9279        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/cosa/research                                | package | 1 -> 1     | 11 -> 11         | 90.9 -> 90.9 | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/research/phi4_flash_lite_study          | package | 7 -> 7     | 7543 -> 6485     | 11.4 -> 3.1  | 43.1 -> 0.0 | 0.9 -> 0.0   | 0.1 -> 0.0 | 1.3 -> 0.0 | 2.9 -> 0.0      | ok
 src/cosa/rest                                    | package | 57 -> 75   | 52571 -> 77741   | 9.6 -> 2.7   | 29.6 -> 0.0 | 0.8 -> 0.0   | 1.1 -> 0.0 | 1.2 -> 0.0 | 0.9 -> 0.0      | ok
@@ -108,7 +108,7 @@ src/cosa/rest/db                                 | package | 6 -> 6     | 5893 -
 src/cosa/rest/db/repositories                    | package | 23 -> 26   | 15377 -> 16587   | 9.5 -> 1.3   | 29.3 -> 0.0 | 1.1 -> 0.0   | 0.6 -> 0.0 | 1.0 -> 0.0 | 0.6 -> 0.0      | ok
 src/cosa/rest/dependencies                       | package | 2 -> 2     | 228 -> 213       | 0.0 -> 0.0   | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 4.4 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/rest/middleware                         | package | 2 -> 3     | 549 -> 1317      | 5.5 -> 0.8   | 9.1 -> 0.0  | 0.0 -> 0.0   | 1.8 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
-src/cosa/rest/routers                            | package | 39 -> 44   | 39237 -> 52690   | 9.1 -> 1.7   | 23.9 -> 0.0 | 0.9 -> 0.0   | 1.0 -> 0.0 | 0.7 -> 0.0 | 0.7 -> 0.0      | ok
+src/cosa/rest/routers                            | package | 39 -> 44   | 39237 -> 52724   | 9.1 -> 1.7   | 23.9 -> 0.0 | 0.9 -> 0.0   | 1.0 -> 0.0 | 0.7 -> 0.0 | 0.7 -> 0.0      | ok
 src/cosa/rest/services                           | package | 1 -> 1     | 3 -> 3           | 0.0 -> 0.0   | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/rest/v2                                 | package | 9 -> 13    | 9822 -> 11217    | 13.5 -> 0.7  | 31.9 -> 0.0 | 3.7 -> 0.0   | 1.0 -> 0.0 | 1.6 -> 0.0 | 0.2 -> 0.0      | ok
 src/cosa/tools                                   | package | 4 -> 3     | 739 -> 563       | 5.4 -> 5.3   | 9.5 -> 0.0  | 0.0 -> 0.0   | 1.4 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
@@ -128,10 +128,10 @@ src/lupin_cli/claude_code                        | package | 1 -> 1     | 17 -> 
 src/lupin_cli/claude_code/hooks                  | package | 9 -> 9     | 11094 -> 10027   | 10.5 -> 1.5  | 29.0 -> 0.0 | 2.0 -> 0.0   | 0.8 -> 0.0 | 1.4 -> 0.0 | 2.0 -> 0.0      | ok
 src/lupin_cli/claude_code/hooks/lib              | package | 41 -> 47   | 60235 -> 60306   | 13.6 -> 1.3  | 40.1 -> 0.0 | 1.9 -> 0.0   | 1.5 -> 0.0 | 1.4 -> 0.0 | 2.9 -> 0.0      | ok
 src/lupin_cli/notifications                      | package | 6 -> 7     | 2976 -> 3693     | 1.3 -> 0.5   | 5.7 -> 0.0  | 1.0 -> 0.0   | 0.0 -> 0.0 | 1.0 -> 0.0 | 2.0 -> 0.0      | ok
-src/lupin_mcp/reuse_needset                      | package | - -> 14    | - -> 7812        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/lupin_mcp/reuse_needset                      | package | - -> 16    | - -> 9174        | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/lupin_model_server                           | package | 2 -> 2     | 846 -> 990       | 26.0 -> 17.2 | 10.6 -> 0.0 | 0.0 -> 0.0   | 1.2 -> 0.0 | 3.5 -> 0.0 | 1.2 -> 0.0      | ok
 src/migrations                                   | loose   | 1 -> 1     | 73 -> 73         | 0.0 -> 0.0   | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
-src/migrations/versions                          | loose   | 20 -> 30   | 8394 -> 10357    | 13.2 -> 2.6  | 61.8 -> 0.0 | 2.1 -> 0.2   | 0.8 -> 0.0 | 2.0 -> 0.0 | 2.0 -> 0.0      | ok
+src/migrations/versions                          | loose   | 20 -> 30   | 8394 -> 10355    | 13.2 -> 2.6  | 61.8 -> 0.0 | 2.1 -> 0.1   | 0.8 -> 0.0 | 2.0 -> 0.0 | 2.0 -> 0.0      | ok
 src/scripts                                      | loose   | 57 -> 74   | 32644 -> 44361   | 10.6 -> 2.1  | 39.7 -> 0.0 | 1.2 -> 0.0   | 1.9 -> 0.0 | 1.4 -> 0.0 | 1.7 -> 0.0      | ok
 src/scripts/auth_migration                       | loose   | 3 -> 2     | 260 -> 227       | 0.0 -> 0.0   | 3.8 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/scripts/debug                                | loose   | 6 -> 6     | 239 -> 246       | 16.7 -> 16.3 | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
@@ -139,5 +139,5 @@ src/scripts/dm-experiment                        | loose   | 2 -> 2     | 2385 -
 src/scripts/lib                                  | loose   | 1 -> 4     | 792 -> 1702      | 7.6 -> 0.6   | 77.0 -> 0.0 | 0.0 -> 0.0   | 2.5 -> 0.0 | 2.5 -> 0.0 | 1.3 -> 0.0      | ok
 src/scripts/loc-analysis                         | loose   | 3 -> 3     | 184 -> 366       | 10.9 -> 5.5  | 16.3 -> 0.0 | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/scripts/presentation-gate-silence-proof      | loose   | 1 -> 1     | 893 -> 844       | 15.7 -> 0.0  | 61.6 -> 0.0 | 1.1 -> 0.0   | 4.5 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | ok
-total                                            | -       | 730 -> 974 | 477587 -> 651877 | 9.5 -> 1.5   | 27.0 -> 0.0 | 1.1 -> 0.0   | 1.1 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | -
+total                                            | -       | 730 -> 979 | 477587 -> 655772 | 9.5 -> 1.5   | 27.0 -> 0.0 | 1.1 -> 0.0   | 1.1 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | -
 ```
