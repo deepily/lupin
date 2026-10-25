@@ -7,8 +7,8 @@ pins:
   - lupin_mcp.reuse_needset.finalize.need_item@b8b759cff3
   - lupin_mcp.reuse_needset.finalize.final_row@d9103e0e5d
   - lupin_mcp.reuse_needset.finalize.file_sha256@263a4ccc40
-  - lupin_mcp.reuse_needset.finalize.finalize@afcb930662
-  - lupin_mcp.reuse_needset.finalize.verify_manifest@2fc6acc481
+  - lupin_mcp.reuse_needset.finalize.finalize@1a05cab254
+  - lupin_mcp.reuse_needset.finalize.verify_manifest@6b67a39046
   - lupin_mcp.reuse_needset.finalize.check_committed_set@cd3f2fd00f
 ---
 # Need set: labelling choice and final set
@@ -25,7 +25,7 @@ Chooses the needs people label, builds the final set and verifies its manifest. 
 - `final_row` joins a checked need with its final label. A matched need labelled with other symbols takes the reviewers' symbols as its key, with the version raised by one.
 - A nothing need is confirmed by the proposal as it stands. A label that rejects the need raises `MANIFEST_MISMATCH`.
 - `file_sha256` returns the sha256 of a file's bytes.
-- `finalize` writes the final file, one row per need sorted by id, then the manifest. The manifest holds the counts, seed, source commit, kappa and the final file's hash.
+- `finalize` writes the final file, one row per need sorted by id, then the manifest. It takes the frozen identity of [[needset-freeze]]. The manifest holds the counts, seed, source commit, kappa, the three frozen hashes and the final file's hash.
 - `verify_manifest` checks a finished set against the required shape: 400 rows, 300 matched, 100 nothing, 240 TypeScript and 160 Python.
-- Every nothing and disputed row needs a human final source. No row is a smoke row, no id repeats, and the hash and kappa must be present.
+- Every nothing and disputed row needs a human final source. No row is a smoke row, no id repeats, and the hash, kappa and the three frozen hashes must be present.
 - `check_committed_set` reads the status file. A pending set with a set file, or a final set that fails verification, raises `MANIFEST_MISMATCH`.

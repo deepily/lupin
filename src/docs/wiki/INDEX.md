@@ -252,6 +252,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-final-set]] — choosing the needs people label, the final set file and manifest, and their verification. `lupin_mcp` (reuse_needset)
 - [[needset-agent-probe]] — the tools-on agent that reads shortlisted candidates and rules each the same job or not. `lupin_mcp` (reuse_needset)
 - [[needset-loss-trace]] — tracing where a need's key is lost in the search pipeline, the confirmations and the report. `lupin_mcp` (reuse_needset)
+- [[needset-freeze]] — the hashes that name the index and vectors of a need set, the read-only copy and the check before a run. `lupin_mcp.reuse_needset` (freeze)
+- [[needset-revalidation]] — the day-before check of a frozen need set against a newer index: broken keys, new twin candidates and the refreeze. `lupin_mcp.reuse_needset` (revalidate)
 - [[needset-key-neighbours]] — finding a seed's twins and neighbours by the vector and sampled routes. `lupin_mcp` (reuse_needset)
 - [[needset-key-rulings]] — same-job rulings on neighbours and the absence check for a nothing need. `lupin_mcp` (reuse_needset)
 - [[needset-drafting-run]] — running the need-set drafting: jobs per seed, parallel cells, the plan and the report. `lupin_mcp` (reuse_needset)

@@ -12,6 +12,9 @@ pins:
   - cosa.repo.semdup.config.freeze@1550c03141
   - cosa.repo.semdup.config.is_empty@b14a97293d
   - cosa.repo.semdup.config.verify_frozen@d2018d2ceb
+  - cosa.repo.semdup.frozen.frozen_path@737ab8ab6a
+  - cosa.repo.semdup.frozen.live_config@34e3da1146
+  - cosa.repo.semdup.frozen.main@2f6a095f7f
 ---
 # Duplicate checker: clusters and frozen config
 The score is surplus copies per 100 passing acceptance tests. The configuration that fixes every constant of a run is written once.
@@ -22,4 +25,6 @@ The score is surplus copies per 100 passing acceptance tests. The configuration 
 - `build_config` builds the dict that holds every constant of a run, and `config_sha` takes its sha over every field except its own.
 - `freeze` writes the configuration once and returns its sha. `is_empty` says whether a decision field is still unset.
 - `verify_frozen` checks the frozen file against its own sha and against what this run would use.
+- `frozen_path` is `src/conf/semdup-frozen-1.json` under the project root. `live_config` builds the configuration from the decided values in `frozen.py`, the judge's prompt parts and the scrub list of the tool tokens and arm labels.
+- `frozen.main` freezes `live_config` once and prints the path and sha. It raises `CONFIG_ALREADY_FROZEN` when the file exists.
 - Inputs come from [[semdup-judge-and-pipeline]].

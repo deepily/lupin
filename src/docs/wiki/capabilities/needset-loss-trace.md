@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.reuse_needset.loss_trace.classify@ef032f3b45
   - lupin_mcp.reuse_needset.loss_trace.trace_need@a2aa83da21
   - lupin_mcp.reuse_needset.loss_trace.trace_version@36c418760c
-  - lupin_mcp.reuse_needset.loss_trace.trace_all@dc02e38341
+  - lupin_mcp.reuse_needset.loss_trace.trace_all@35441a6794
   - lupin_mcp.reuse_needset.loss_trace.extend_key@b6e8c993a7
   - lupin_mcp.reuse_needset.loss_trace.retrace@c9ad589de6
   - lupin_mcp.reuse_needset.loss_trace.confirmation_items@91778eb0ec
@@ -27,7 +27,7 @@ Finds where, in the search pipeline, a need's key gets lost. Each need goes thro
 - A nothing need gets `FALSE_MATCH` if the checker ended with reuse or extend or the probe ruled a symbol the same job, else `CORRECT_NO_MATCH`.
 - `trace_need` traces one need. The probe runs only when its rulings can change the answer.
 - `trace_version` names the trace, so a changed checker call, classifier or probe prompt is a ledger miss.
-- `trace_all` traces every need and skips those the ledger holds. The ledger key holds the need, source commit, index hash, checker commit, probe model and trace version.
+- `trace_all` first checks the manifest against the live index and vectors, and raises `INDEX_DIFFERS`, `VECTORS_DIFFER` or `FREEZE_INCOMPLETE` before any call ([[needset-freeze]]). It then traces every need and skips those the ledger holds. The ledger key holds the need, source commit, index hash, checker commit, probe model and trace version.
 
 ## Confirmation and report
 - `extend_key` adds reviewer-confirmed alternatives to a need's key, sorted, with the version raised by one. The need's id stays the same.

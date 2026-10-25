@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.session_spawner.spawn_sessions@b171adfb7f
   - lupin_mcp.session_spawner.default_fleet_gate@2ee57b8598
-  - lupin_mcp.session_spawner.dismiss_sessions@cd11f1dcb5
+  - lupin_mcp.session_spawner.dismiss_sessions@9c1f2ed21e
   - lupin_mcp.session_spawner.list_spawned_sessions@47ba7c5ac6
   - lupin_mcp.reap_memento.seats_to_withhold@253ba85cda
   - lupin_mcp.self_respin_core.perform_self_respin@7b69144c56
@@ -22,7 +22,7 @@ A manager seat starts, lists and ends Claude Code seats through four MCP tools s
 - `seed_memento` is appended to the brief as text; the spawner never opens it. A truthy seed on a real spawn also arms a wake watch.
 
 ## Reap
-- `dismiss_sessions` with no names reaps everything in this manager's manifest. Explicit names are not checked against the manifest.
+- `dismiss_sessions` with no names reaps everything in this manager's manifest. Explicit names are not checked against the manifest. Its `seat_trees` entries hold counts and a capped sample of the ignored files, not the full lists.
 - With `write_memento` on, the reap DMs seats whose memento is not yet verified and polls for one before killing anything. Seats whose bridge lacks a persona, session or cwd, or that have no bridge, are skipped. They are still killed and named in `memento_alarm`.
 - Verified means the byte floor is met and the header parses. The header names that seat's session on its first 8 characters. `written_at` is aware, not in the future and in the window. A memento claiming work unmerged for a commit already in HEAD is `unproven_present`. That verdict comes only after the ask and poll time out. Mtime is ignored.
 - `seats_to_withhold` keeps a seat alive on `prior_holder_present`, `unparseable_present` or `timeout_no_memento`. `unproven_present` is killed with a warning.
