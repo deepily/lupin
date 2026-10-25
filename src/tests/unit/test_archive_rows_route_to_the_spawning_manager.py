@@ -131,16 +131,7 @@ def _live_bridge( persona, session_id, spawned_by=None, tmux=None, frozen=None, 
     return bridge
 
 
-def _live_pids():
-    """Return the pids of this process and its ancestors.
-
-    Each is alive, and each names one bridge file.
-    """
-    pids, pid = [], os.getpid()
-    while pid > 1 and len( pids ) < 8:
-        pids.append( pid )
-        with open( f"/proc/{pid}/stat" ) as f: pid = int( f.read().rsplit( ")", 1 )[ 1 ].split()[ 1 ] )
-    return pids + [ 1 ]
+FAKE_PIDS = tuple( range( 910001, 910009 ) )     # no real process: a run's parents differ with how it was launched, and pid 1 cannot be signalled
 
 
 @pytest.fixture
@@ -152,11 +143,17 @@ def sessions( tmp_path, monkeypatch ):
     monkeypatch.setattr( sb, "SESSION_DIR", folder )
     monkeypatch.setattr( mr, "SESSION_DIR", folder )
     monkeypatch.setitem( mr.resolve_manager.__kwdefaults__, "session_dir", folder )
+    live = set()
+    monkeypatch.setattr( sb, "_can_trust_host_pids", lambda: True )                        # the pid check runs, whatever the launch
+    monkeypatch.setattr( sb, "_is_pid_alive", lambda pid: pid in live )                    # a bridge of a dead pid is skipped
     class Folder:
-        path, pids = folder, iter( _live_pids() )                                              # a bridge of a dead pid is skipped
-        def bridge( self, *a, **kw ):
+        path, pids = folder, iter( FAKE_PIDS )
+        def _write( self, *a, **kw ):
             data = _live_bridge( *a, pid=next( self.pids ), **kw )
             ( folder / f"cc-{data[ 'cc_pid' ]}.json" ).write_text( json.dumps( data ) )
+            return data[ "cc_pid" ]
+        def bridge( self, *a, **kw ): live.add( self._write( *a, **kw ) )
+        def dead_bridge( self, *a, **kw ): self._write( *a, **kw )
         def manifest( self, manager_session_id, *session_names ):
             ( folder / f"spawned-{manager_session_id}.json" ).write_text( json.dumps( [ { "session_name": n, "status": "spawned" } for n in session_names ] ) )
     return Folder()
@@ -187,6 +184,22 @@ def test_two_live_workers_of_one_persona_under_different_managers_resolve_to_nob
     sessions.bridge( "arnold", "wrk-2222", spawned_by="mgr-1111" )
     sessions.bridge( "arnold", "wrk-5555", spawned_by="mgr-4444" )
     assert st.spawn_registry_manager( "arnold" ) is None
+
+
+def test_the_lookup_does_not_depend_on_how_the_run_was_launched( sessions, monkeypatch ):
+    def refuse( pid, sig ): raise PermissionError( pid )
+    monkeypatch.setattr( os, "kill", refuse )                                            # as for pid 1, or any parent another user owns
+    sessions.bridge( "mr radio", "mgr-1111", None )
+    sessions.bridge( "arnold", "wrk-2222", spawned_by="mgr-1111" )
+    assert st.spawn_registry_manager( "arnold" ) == "mr radio"
+
+
+def test_a_bridge_of_a_dead_pid_is_skipped( sessions ):
+    sessions.bridge( "mr radio", "mgr-1111", None )
+    sessions.bridge( "tiberius", "mgr-4444", None )
+    sessions.bridge( "arnold", "wrk-2222", spawned_by="mgr-1111" )
+    sessions.dead_bridge( "arnold", "wrk-5555", spawned_by="mgr-4444" )
+    assert st.spawn_registry_manager( "arnold" ) == "mr radio"
 
 
 def test_an_unspawned_or_unknown_persona_resolves_to_nobody( sessions ):
