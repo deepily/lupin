@@ -179,9 +179,10 @@ def main():
         total_silent += up
         if end == d[ "landed" ]: ends_at_landing += 1
 
+    share = f"{100 * total_silent / total_up:.0f}%" if total_up > 0 else "n/a"
     print( f"  box-up hours across tail episodes      : {total_up:.1f}" )
     print( f"  of which ONE silent stretch per episode: {total_silent:.1f} "
-           f"({100 * total_silent / total_up:.0f}%)   <- §9e's 62.0 of 84.6" )
+           f"({share})   <- §9e's 62.0 of 84.6" )
     print( f"  episodes whose silence ENDS AT THE LANDING: {ends_at_landing}/{len( tail_dels )}"
            f"   <- the unambiguous 'finished and waiting' cases" )
     print( "\n⚠️  'box up' is an available-action WINDOW, never evidence that a person failed to act." )

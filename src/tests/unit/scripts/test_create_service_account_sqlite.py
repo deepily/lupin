@@ -106,7 +106,7 @@ def test_the_src_path_is_inserted_at_the_front_when_it_is_absent( tmp_path, monk
 
 def test_an_src_path_already_present_is_not_inserted_twice( monkeypatch ):
     monkeypatch.setattr( sys, "path", list( sys.path ) )
-    here = os.path.join( os.environ[ "LUPIN_ROOT" ], "src" )
+    here = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
     if here not in sys.path:
         sys.path.insert( 0, here )
     before = sys.path.count( here )

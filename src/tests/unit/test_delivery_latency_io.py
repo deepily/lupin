@@ -134,3 +134,26 @@ def test_main_reports_the_tail_episodes_and_which_end_at_the_landing( monkeypatc
     assert "(90%)" in out
     assert "episodes whose silence ENDS AT THE LANDING: 1/2" in out
     assert "never evidence that a person failed to act" in out
+
+
+def test_main_prints_no_share_when_there_is_no_tail_episode( monkeypatch, capsys ):
+    start = dl.parse_boot_intervals( JOURNAL )[ 0 ][ 0 ]
+    deliveries = [ dict( landed=start + 1 * H, times=[ start ], subject="merge a" ) ]
+
+    out = _run_main( monkeypatch, capsys, JOURNAL, deliveries )
+
+    assert "TAIL EPISODES (the real n): 0   carrying 0 commits" in out
+    assert "box-up hours across tail episodes      : 0.0" in out
+    assert "(n/a)" in out
+    assert "episodes whose silence ENDS AT THE LANDING: 0/0" in out
+
+
+def test_main_prints_no_share_when_every_tail_episode_lies_outside_the_boot_intervals( monkeypatch, capsys ):
+    end = dl.parse_boot_intervals( JOURNAL )[ 0 ][ 1 ]
+    deliveries = [ dict( landed=end + 20 * H, times=[ end + 1 * H ], subject="merge a" ) ]
+
+    out = _run_main( monkeypatch, capsys, JOURNAL, deliveries )
+
+    assert "TAIL EPISODES (the real n): 1   carrying 1 commits" in out
+    assert "box-up hours across tail episodes      : 0.0" in out
+    assert "(n/a)" in out
