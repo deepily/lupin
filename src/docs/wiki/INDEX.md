@@ -32,6 +32,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[memento-slots-claims-and-audit]] — where a seat's memento must live, how a path is checked against its slots, and how a false merge claim is refuted. `lupin_mcp` (memento_slot, memento_repo_root, memento_merge_claim, memento_slot_audit)
 - [[respin-credit-and-reap-branch-check]] — the credit that lets a one-for-one re-spin through skeleton crew, and the reap check that names a seat's unmerged commits. `lupin_mcp` (respin_credit, reap_branch)
 - [[reap-memento-checks]] — how a reap asks each seat for a memento, proves it is usable and reports the seats that lack one. `lupin_mcp` (reap_memento)
+- [[mcp-tool-index]] — a map of the cosa-voice server's tools to the pages that describe them. `lupin_mcp` (cosa_voice_mcp)
 
 ## Auth, data and platform
 
