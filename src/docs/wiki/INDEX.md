@@ -48,6 +48,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Quality tooling
 
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
+- [[bounce-control-scripts]] — the capture-bounce-resubmit control, the pre-bounce warning broadcaster and the compose-drift probe. `scripts` (capture-bounce-resubmit, bounce_dev_warn, compose_drift_probe)
 - [[db-setup-and-seed-scripts]] — one-off scripts that migrate, create, seed and rehearse database tables and users. `scripts` (migrate_solution_snapshots, auth_migration, create_notifications_table, seed_test_companions, seed_proxy_decisions, embedding_regen_probe)
 - [[api-key-and-account-scripts]] — the service account, model-server key, admin test account and password reset scripts. `scripts` (create_service_account_postgres, mint-model-server-api-key, create_admin_test_account, reset_user_password)
 - [[lupin-config-cli]] — the lupin-config tool: init, show, list, add, use, test and migrate for the per-user environment config. `scripts` (lupin_config)
