@@ -27,6 +27,8 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[heartbeat-arbiter]] — fleet liveness: the arbiter loop, watchdogs, escalation, context-pressure, health watcher and the poker job. `cosa.agents` (heartbeat_arbiter, heartbeat_poker_job, heartbeat_poker_commons_gateway), `lupin_arbiter_app`, `cosa.rest` (follow_through_escalation_watcher, commons_*_watcher)
 - [[claude-code-hooks]] — the session-start, stop, pre/post tool and prompt hooks, heartbeat events and the session bridge. `lupin_cli.claude_code.hooks`
 - [[seat-lifecycle]] — spawning seats, the fleet size cap, mementos, self re-spin, reaping and worktree hygiene. `lupin_mcp` (session_spawner, fleet_size_cap, fleet_cap_*, memento_*, reap_*, self_respin_core)
+- [[fleet-cap-and-skeleton-crew-switches]] — the two configuration-file dials, fleet cap and skeleton crew: single-key reads and writes, the on/off rule and who set it. `lupin_mcp` (fleet_cap_ini_io, skeleton_crew)
+- [[fleet-cap-census-and-admission]] — how the fleet cap is resolved, who counts as a manager, and the reservation that keeps two launches from taking the last seat. `lupin_mcp` (fleet_size_cap, fleet_cap_admission)
 
 ## Auth, data and platform
 
