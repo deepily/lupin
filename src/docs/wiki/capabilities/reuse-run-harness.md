@@ -2,7 +2,7 @@
 capability: reuse-run-harness
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_harness.arms.build_session_config@86784284a0
+  - lupin_mcp.reuse_harness.arms.build_session_config@5288cd90e4
   - lupin_mcp.reuse_harness.arms.verify_arm@25226f86a8
   - lupin_mcp.reuse_harness.errors.HarnessError@4673bfbe26
   - lupin_mcp.reuse_harness.run.run_one@e7fedaca3b
@@ -19,8 +19,8 @@ pins:
 - Its own server container and throwaway database. `db_name` and `container_name` derive both names from the run id, so two runs never share one. A server that hands back other names fails `DB_NOT_OWN`. A database that already holds rows fails `DB_NOT_FRESH`. The server and database are stopped on every exit, including a failure.
 
 ## The arm switch
-- The four surfaces are `check_exists`, `fetch_similar`, `read_capability` and the `reuse-reviewer` skill. The arm with them (`with`) denies nothing. The arm without them denies the four, plus `record_search`, and removes `.claude/skills/reuse-reviewer` from the worktree. `build_session_config` makes both; only `arm_label`, `deny_rules` and `remove_paths` differ.
-- `record_search` is not one of the plan's four. It is denied because it only logs a search made by `check_exists` and its name is a string in the scrub list.
+- The four surfaces are `check_exists`, `fetch_similar`, `read_capability` and the `reuse-reviewer` skill. The arm with them (`with`) denies nothing. The arm without them denies the four and nothing else, and removes `.claude/skills/reuse-reviewer` from the worktree. `build_session_config` makes both; only `arm_label`, `deny_rules` and `remove_paths` differ.
+- `record_search` is not one of the plan's four, so both arms may call it. Changing what an arm can call is Rick's decision.
 - `verify_arm` calls each surface through the session port before any work. The arm without the tools must be refused on all four, or the run stops with `SURFACE_REACHABLE`. The arm with them must reach all four, or it stops with `SURFACE_MISSING`. It asks the session, and does not read the configuration back.
 - The arm labels are `arm-kestrel` (with) and `arm-heron` (without). They are not ordinary words, because the blindness scrub list takes them.
 

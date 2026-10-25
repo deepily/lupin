@@ -31,9 +31,7 @@ DENY_RULES  = {
     SURFACE_READ_CAPABILITY : "mcp__cosa-voice__read_capability",
     SURFACE_REVIEWER        : "Skill(reuse-reviewer)",
 }
-# Not one of the four: record_search only logs a search made by check_exists, so the arm without them has nothing to log.
-# It is denied as well, because the tool name is one of the strings the scrub list holds.
-COMPANION_DENY_RULES = ( "mcp__cosa-voice__record_search", )
+# record_search is not one of the four, so neither arm denies it. Changing what an arm can call is Rick's decision (plan 3, section 7.1).
 # The skill folder is removed from the worktree of the arm without it, so its description is not in the skill menu either.
 SKILL_PATH  = ".claude/skills/reuse-reviewer"
 
@@ -55,7 +53,7 @@ def build_session_config( arm, model_id ):
     Ensures:
         - the result holds model, arm_label, deny_rules and remove_paths besides every key of BASE_CONFIG
         - for the with arm, deny_rules and remove_paths are empty
-        - for the without arm, deny_rules holds the rule of each of the four surfaces and of the companion tool, and remove_paths holds SKILL_PATH
+        - for the without arm, deny_rules holds the rule of each of the four surfaces and no other, and remove_paths holds SKILL_PATH
         - every other key is equal between the arms for one model_id
         - the result shares nothing with BASE_CONFIG
 
@@ -68,7 +66,7 @@ def build_session_config( arm, model_id ):
     config = copy.deepcopy( BASE_CONFIG )
     config.update( { "model" : model_id, "arm_label" : ARM_LABELS[ arm ], "deny_rules" : [], "remove_paths" : [] } )
     if arm == ARM_WITHOUT:
-        config[ "deny_rules" ]   = [ DENY_RULES[ surface ] for surface in SURFACES ] + list( COMPANION_DENY_RULES )
+        config[ "deny_rules" ]   = [ DENY_RULES[ surface ] for surface in SURFACES ]
         config[ "remove_paths" ] = [ SKILL_PATH ]
     return config
 

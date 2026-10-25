@@ -210,11 +210,11 @@ def test_the_arms_differ_in_the_surface_keys_and_nothing_else():
     assert with_[ "model" ] == without[ "model" ] == "m"
 
 
-def test_the_without_arm_denies_the_four_surfaces_and_the_companion_tool_and_removes_the_skill_folder():
-    """The deny list is the four rules, then record_search; the skill folder is removed."""
+def test_the_without_arm_denies_exactly_the_four_surfaces_and_removes_the_skill_folder():
+    """The deny list is the four rules and nothing else; the skill folder is removed."""
     config = arms.build_session_config( arms.ARM_WITHOUT, "m" )
     assert config[ "deny_rules" ] == [ "mcp__cosa-voice__check_exists", "mcp__cosa-voice__fetch_similar", "mcp__cosa-voice__read_capability",
-                                        "Skill(reuse-reviewer)", "mcp__cosa-voice__record_search" ]
+                                        "Skill(reuse-reviewer)" ]
     assert config[ "remove_paths" ] == [ ".claude/skills/reuse-reviewer" ]
 
 
