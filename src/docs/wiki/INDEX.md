@@ -149,6 +149,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-real-stage-check]] — the command that ranks five seeded targets with the real candidate stage and a negative control
 - [[reuse-stage-one-probe-plan]] — stage-one probe choice, neighbour lists and the six position packs, written once
 - [[reuse-stage-one-runner]] — the stage-one run-sheet command, its stand-in and live modes, and refusals
+- [[reuse-stage-one-arm-driver]] — the stage-one measurement driver: arms, run names, attempts, the stage budget and the canary
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it
