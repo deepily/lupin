@@ -1,11 +1,13 @@
 """
 The ten-need smoke: the live window, the measurements and the real index parts.
 """
+import asyncio
 import datetime
 import json
 import time
 
 import pytest
+from claude_agent_sdk import AssistantMessage, TextBlock
 
 from lupin_mcp.reuse_needset import draft, run, smoke
 from lupin_mcp.reuse_needset import errors as er
@@ -199,9 +201,42 @@ def test_the_live_env_uses_the_real_drafter_the_named_second_model_and_the_embed
     monkeypatch.setattr( smoke.draft, "drafter_call", lambda *a: ( made.append( a ) or f"call{len( made )}" ) )
     monkeypatch.setattr( smoke.vector_build, "EndpointClient", lambda: "client" )
     monkeypatch.setattr( smoke, "assemble_env", lambda *a: ( got.append( a ) or "env" ) )
+    monkeypatch.setattr( smoke.model_transport, "configure", lambda **k: None )
     args = smoke.parse_args( argv( "/o", extra=[ "--second-model", "model-b" ] ) )
     assert smoke.live_build_env( args, "when", "timer" ) == "env"
     assert made == [ (), ( "model-b", ) ] and got == [ ( args, "call1", "call2", "client", "when", "timer" ) ]
+
+
+def test_the_cli_path_argument_is_the_binary_the_next_model_call_invokes( tmp_path, monkeypatch ):
+    cli = tmp_path / "claude-new"
+    cli.write_text( "#!/bin/sh\n", encoding="utf-8" )
+    cli.chmod( 0o755 )
+    monkeypatch.setattr( smoke.model_transport, "CLI_PATH", None )
+    monkeypatch.setattr( smoke.model_transport, "CWD", None )
+    monkeypatch.setattr( smoke.draft, "drafter_call", lambda *a: "call" )
+    monkeypatch.setattr( smoke.vector_build, "EndpointClient", lambda: "client" )
+    monkeypatch.setattr( smoke, "assemble_env", lambda *a: "env" )
+    args = smoke.parse_args( argv( tmp_path / "out", extra=[ "--cli-path", str( cli ) ] ) )
+    assert smoke.live_build_env( args, "when", "timer" ) == "env"
+    seen = []
+
+    async def query_fn( prompt, options ):
+        seen.append( options.cli_path )
+        yield AssistantMessage( content=[ TextBlock( "ok" ) ], model=options.model )
+
+    asyncio.run( smoke.model_transport.complete( "m", "s", "u", query_fn=query_fn ) )
+    assert seen == [ str( cli ) ]                                      # the path the ledger is labelled with is the path invoked
+
+
+def test_no_cli_path_leaves_the_sdk_binary_and_a_bad_one_is_refused_before_any_call( tmp_path, monkeypatch ):
+    monkeypatch.setattr( smoke.model_transport, "CLI_PATH", "/stale" )
+    monkeypatch.setattr( smoke.model_transport, "CWD", None )
+    monkeypatch.setattr( smoke, "assemble_env", lambda *a: "env" )
+    monkeypatch.setattr( smoke.draft, "drafter_call", lambda *a: "call" )
+    monkeypatch.setattr( smoke.vector_build, "EndpointClient", lambda: "client" )
+    assert smoke.live_build_env( smoke.parse_args( argv( tmp_path ) ), "w", "t" ) == "env" and smoke.model_transport.CLI_PATH is None
+    bad = smoke.parse_args( argv( tmp_path, extra=[ "--cli-path", str( tmp_path / "missing" ) ] ) )
+    with pytest.raises( ValueError, match="not an executable file" ): smoke.live_build_env( bad, "w", "t" )
 
 
 def test_a_symbol_newer_than_the_vector_set_is_left_out_of_the_pool_and_counted( tmp_path, monkeypatch ):

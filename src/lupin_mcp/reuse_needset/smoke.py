@@ -16,6 +16,7 @@ import threading
 import time
 import zoneinfo
 
+from cosa.repo.doc_lint import model_transport
 from cosa.repo.symindex import build, dups, spec as sp
 from cosa.repo.symindex.candidates import candidate_stage, vector_build, vector_store
 from lupin_mcp.reuse_needset import draft, keys, pool, quota, run, strip
@@ -187,7 +188,19 @@ def assemble_env( args, ask, second_ask, client, set_at, timed ):
 
 
 def live_build_env( args, set_at, timed ):
-    """Build the env with the real drafter, the real second model and the real embeddings client."""
+    """
+    Build the env with the real drafter, the real second model and the real embeddings client.
+
+    Requires:
+        - args.cli_path is None (the SDK's own binary) or the path of an executable file
+
+    Ensures:
+        - model_transport is configured with args.cli_path before either model call is made, so the binary the ledgers name is the binary that runs
+
+    Raises:
+        - ValueError if args.cli_path is given and is not an executable file
+    """
+    model_transport.configure( cli_path=args.cli_path )
     return assemble_env( args, draft.drafter_call(), draft.drafter_call( args.second_model ), vector_build.EndpointClient(), set_at, timed )
 
 
