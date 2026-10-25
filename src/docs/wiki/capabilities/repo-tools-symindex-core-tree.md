@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.spec.IndexSpec@f7b067cb99
   - cosa.repo.symindex.spec.NotARepo@51835f1312
-  - cosa.repo.symindex.spec.all_files@6cadb09869
+  - cosa.repo.symindex.spec.all_files@9b1b676e82
   - cosa.repo.symindex.spec.git_toplevel@2b61563bc7
   - cosa.repo.symindex.spec.is_lupin_tree@2e91e30932
   - cosa.repo.symindex.spec.iter_files@fd6f9ece34
@@ -25,7 +25,7 @@ pins:
 ## Which files count
 - `skipped( rel_path, skip_parts )` is true when a directory part of the path is in `skip_parts`. It is also true when the name ends in `.d.ts`, `.min.js`, `.g.dart` or `.freezed.dart`. The file's own name is never matched against the directory names.
 - `iter_files( spec, roots, suffixes )` returns the sorted, de-duplicated absolute paths under `roots` with one of the suffixes that are not skipped relative to `spec.root`.
-- `all_files( spec )` is the union of the Python, JavaScript and TypeScript, and Dart lists. `manifest` reads it. The build makes its own three `iter_files` calls, so the two populations are not tied by one shared function.
+- `all_files( spec )` is the union of the Python, script (`.js`, `.mjs`, `.cjs`, `.ts`, `.tsx`) and Dart lists. `manifest` reads it. The build makes its own three `iter_files` calls, so the two populations are not tied by one shared function.
 - `manifest( spec )` is a sha1 over each indexed file's relative path, mtime in nanoseconds and size. An added, deleted, resized or touched file changes it.
 
 ## Output and failures

@@ -5,7 +5,7 @@ pins:
   - cosa.repo.symindex.verdict.malformed_reason@1f1669771a
   - cosa.repo.symindex.verdict.call_facts@0611654fde
   - cosa.repo.symindex.verdict.malformed_reason_provides@3187133a79
-  - cosa.repo.symindex.verdict.decide_provides@90efdb662e
+  - cosa.repo.symindex.verdict.decide_provides@2955e362d5
   - cosa.repo.symindex.labelled_set.check_band@89d0f8f884
 ---
 # Verdict helpers and the provides rule

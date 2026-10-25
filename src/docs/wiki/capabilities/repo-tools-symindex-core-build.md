@@ -2,7 +2,7 @@
 capability: repo-tools-symindex-core-build
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.symindex.build.collect@5204c9d557
+  - cosa.repo.symindex.build.collect@95f708f0cf
   - cosa.repo.symindex.build.current_generation@c4c2cc7c10
   - cosa.repo.symindex.build.logic_version@f2bdda5b60
   - cosa.repo.symindex.build.read_header@cc7751000e
@@ -17,6 +17,7 @@ Companion to [[symbol-index]], which covers the CLI, `build`, `ensure` and `is_f
 - `collect( spec )` extracts every Python, JavaScript, TypeScript and Dart symbol of one tree and returns a dict: `symbols` (public), `all_symbols`, `routes`, `missing`, `unparsed`, `pin_algorithm`. It publishes nothing; on a Dart tree it refreshes the scratch project under the data folder.
 - A tool that is not installed goes into `missing` and its symbols are left out; the rest is still built. A Python file that fails to parse or decode, or a Dart file the analyzer reports errors in, goes into `unparsed`.
 - Each record gets a unique id. It is `<module>.<name>` for Python and the dotted file path plus name otherwise. A tree other than lupin adds a `<repo>:` prefix, and a repeat gets `#2`, `#3`.
+- Each record also gets a `scope`: `test` under a tests folder, else `public`, `nested` or `private`.
 - The pin is the first 10 hex of a sha1 over `pin_text`, unless the extractor already supplied `pin`.
 
 ## The pin algorithm string

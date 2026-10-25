@@ -5,7 +5,7 @@ pins:
   - cosa.repo.symindex.repair_check.run_repair_check@b9599d9ad4
   - cosa.repo.symindex.repair_check.RepairResult@12a520890d
   - cosa.repo.symindex.repair_check.ReplayFailed@5f5ab22845
-  - cosa.repo.symindex.repair_check.read_head@73f0c1d6e9
+  - cosa.repo.symindex.repair_check.read_head@a8c02123d1
   - cosa.repo.symindex.repair_check.replayer_over@279c738e89
 ---
 # Repair check
@@ -21,5 +21,5 @@ Replays a missed reuse receipt several times before and after a summary rewrite,
 - `CALL_FAILED`: a replay raised `ReplayFailed`.
 
 ## Wiring to the replay tool
-- `read_head( result )` takes the replay tool's result dict and returns `Replayed( ids, index_sha )` from its HEAD shortlist. An error result, a missing head, or a head uncertain for any cause but `LOW_CONFIDENCE` raises `ReplayFailed`.
+- `read_head( result )` takes the replay tool's result dict and returns `Replayed( ids, index_sha )` from its HEAD shortlist. An error result, a missing head, or a head uncertain for any cause but `LOW_CONFIDENCE` or `NO_MATCH` raises `ReplayFailed`. A `NO_MATCH` head returns its empty shortlist.
 - `replayer_over( replay_tool, first_repeat=1 )` returns the `replay( receipt_id )` callable. The k-th call passes `repeat = first_repeat + k - 1`, so every replay is its own draw. Pass a higher base to re-check a receipt with new draws, since the same base reads the first check's cached answers.
