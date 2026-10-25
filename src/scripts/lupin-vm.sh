@@ -1380,8 +1380,15 @@ $RCMD_TM"
         require_project
         IR_WHERE="${1:-local}"
         case "$IR_WHERE" in local|vm) ;; *) die "install-refresh-cron takes local or vm, not '$IR_WHERE'" ;; esac
+        IR_PREP=""
         if [ "$IR_WHERE" = vm ]; then
             IR_ROOT="$VM_ROOT"; IR_DATA="$VM_DEEPILY_DATA_DIR"; IR_PIP="$VM_PIP_ROOT"
+            # The purpose-line hand-off folder sits inside the checkout, which the container user (uid 1001) owns, so
+            # the ssh user that cron runs as cannot create it (Permission denied on the first build, 2026-10-25).
+            # Create it owned by 1001 with this user's group, group-writable and setgid, so both sides can write.
+            IR_PREP="HANDOFF=\"\$( sed -n 's/^reuse candidate purpose handoff subdir *= *//p' src/conf/lupin-app.ini | head -1 )\"
+[ -n \"\$HANDOFF\" ] || { echo 'ERROR: src/conf/lupin-app.ini has no reuse candidate purpose handoff subdir'; exit 1; }
+sudo install -d -m 2775 -o 1001 -g \"\$( id -g )\" \"$IR_ROOT/\$HANDOFF\""
         else
             IR_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
             IR_DATA="${DEEPILY_DATA_DIR:-}"; IR_PIP="${PLANNING_IS_PROMPTING_ROOT:-}"
@@ -1392,6 +1399,7 @@ $RCMD_TM"
 export LUPIN_ROOT='$IR_ROOT' DEEPILY_DATA_DIR='$IR_DATA' PLANNING_IS_PROMPTING_ROOT='$IR_PIP'
 [ -r \"\$HOME/.lupin/reuse-vector-refresh.env\" ] || echo \"WARN: \$HOME/.lupin/reuse-vector-refresh.env is missing, so the refresh cannot log in; run lupin-vm.sh push-test-mock-login $IR_WHERE\"
 cd '$IR_ROOT'
+$IR_PREP
 bash src/scripts/reuse-vector-refresh.sh --install
 bash src/scripts/reuse-vector-refresh.sh --status"
         if [ "$DRY_RUN" -eq 1 ]; then

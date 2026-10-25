@@ -42,6 +42,37 @@ def test_local_refuses_naming_the_missing_variable():
     assert two.returncode == 1 and "needs PLANNING_IS_PROMPTING_ROOT" in two.stderr
 
 
+def test_the_vm_install_creates_the_handoff_folder_for_both_users_before_installing():
+    text = vm( "install-refresh-cron", "vm" ).stderr + vm( "install-refresh-cron", "vm" ).stdout
+    create = 'sudo install -d -m 2775 -o 1001 -g "$( id -g )" "/mnt/lupin-data/lupin/$HANDOFF"'
+    assert create in text and "reuse candidate purpose handoff subdir" in text
+    assert text.index( create ) < text.index( "reuse-vector-refresh.sh --install" )
+
+
+def test_the_handoff_step_reads_the_real_ini_key_and_refuses_when_it_is_absent( tmp_path ):
+    # Run the printed lines in a scratch checkout with sudo stubbed, once with the key and once without.
+    printed = vm( "install-refresh-cron", "vm" ).stdout
+    lines   = [ l.strip() for l in printed.splitlines() if "HANDOFF" in l ]
+    assert len( lines ) == 3
+    script  = "\n".join( lines )
+    ( tmp_path / "bin" ).mkdir()
+    ( tmp_path / "bin" / "sudo" ).write_text( '#!/bin/bash\necho "SUDO $*"\n' )
+    ( tmp_path / "bin" / "sudo" ).chmod( 0o755 )
+    ( tmp_path / "src" / "conf" ).mkdir( parents=True )
+    env = { "PATH": f"{tmp_path / 'bin'}:{os.environ[ 'PATH' ]}" }
+    ( tmp_path / "src" / "conf" / "lupin-app.ini" ).write_text( "reuse candidate purpose handoff subdir          = io/reuse-candidate-purpose\n" )
+    ok = subprocess.run( [ "bash", "-c", script ], cwd=tmp_path, capture_output=True, text=True, env=env )
+    assert ok.returncode == 0 and "-o 1001" in ok.stdout and "/mnt/lupin-data/lupin/io/reuse-candidate-purpose" in ok.stdout
+    ( tmp_path / "src" / "conf" / "lupin-app.ini" ).write_text( "other = 1\n" )
+    bad = subprocess.run( [ "bash", "-c", script ], cwd=tmp_path, capture_output=True, text=True, env=env )
+    assert bad.returncode == 1 and "has no reuse candidate purpose handoff subdir" in bad.stdout and "SUDO" not in bad.stdout
+
+
+def test_the_local_install_does_not_touch_the_handoff_folder():
+    done = vm( "install-refresh-cron", "local", env={ "DEEPILY_DATA_DIR": "/d", "PLANNING_IS_PROMPTING_ROOT": "/p" } )
+    assert "sudo install" not in done.stdout + done.stderr
+
+
 def test_a_host_other_than_local_or_vm_is_refused():
     done = vm( "install-refresh-cron", "mars" )
     assert done.returncode == 1 and "takes local or vm, not 'mars'" in done.stderr
