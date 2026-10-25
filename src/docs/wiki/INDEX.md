@@ -131,6 +131,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[doc-viewer]] — serving repo files and the `io/` folder to the browser by `path=<project>/<rel>`, and admin upload into them. `cosa.rest.routers` (docs_files, io_files, _scope_registry), `cosa.rest` (upload_size_guard), `cosa.config` (docview_manifest)
 - [[system-admin-and-stats]] — the small routers that report on the server, steer it, and map clean URLs to pages. `cosa.rest.routers` (system, mode, stats, multiplexer_config, pages, websocket_admin)
 - [[symbol-index]] — the list of every Python, JavaScript, TypeScript and Dart definition in a tree, each with a content pin that wiki pages quote. `cosa.repo.symindex` (build, py_index, spec, paths, wiki_lint)
+- [[semdup-proof-plant]] — planted rewrites of originals and the pure functions that test the proof's bar. `cosa.repo.semdup.proof` (plant, proof_bar)
 - [[semdup-clusters-and-config]] — duplicate clusters, the surplus-per-100-tests score and the frozen run configuration. `cosa.repo.semdup` (cluster, config)
 - [[semdup-judge-and-pipeline]] — the blind ledgered judge, its two backends, the judging pipeline, run scoring and the live smoke record. `cosa.repo.semdup` (judge, pipeline, score_run, smoke)
 - [[semdup-candidates]] — body embeddings, clone pairs and the three ranked lists fused into each definition's candidates. `cosa.repo.semdup` (body_vectors, candidates, structural)
