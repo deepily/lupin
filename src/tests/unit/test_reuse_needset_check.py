@@ -173,3 +173,22 @@ def test_needs_are_checked_in_parallel_and_returned_in_the_order_given( tmp_path
     assert asyncio.run( check.check_needs( [], ask, book, CHECKER, lambda n: {}, 1 ) ) == []
     with pytest.raises( er.NeedsetError ) as e: asyncio.run( check.check_needs( needs[ :1 ], ask, book, draft.DRAFTER_MODEL, lambda n: { "key_texts": [ "x" ] }, 1 ) )
     assert e.value.code == er.CHECKER_EQUALS_DRAFTER
+
+
+def test_the_parallel_count_sets_how_many_needs_are_checked_at_once( tmp_path ):
+    import threading, time
+    live, peak, lock = [ 0 ], [ 0 ], threading.Lock()
+
+    def ask( prompt ):
+        with lock:
+            live[ 0 ] += 1
+            peak[ 0 ] = max( peak[ 0 ], live[ 0 ] )
+        time.sleep( 0.05 )
+        with lock: live[ 0 ] -= 1
+        return reply()
+
+    needs = [ matched( seed=f"pkg.a.p{n}", need=SENTENCE.replace( "numbers", f"values{n}" ) ) for n in range( 4 ) ]
+    for parallel, name in ( ( 1, "one.jsonl" ), ( 2, "two.jsonl" ) ):
+        peak[ 0 ] = 0
+        asyncio.run( check.check_needs( needs, ask, draft.SharedLedger( ledger( tmp_path, name ) ), CHECKER, lambda n: { "key_texts": [ "x" ] }, parallel ) )
+        assert peak[ 0 ] == parallel
