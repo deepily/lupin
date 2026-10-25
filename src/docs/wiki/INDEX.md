@@ -167,6 +167,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-loss-trace]] — tracing where a need's key is lost in the search pipeline, the confirmations and the report. `lupin_mcp` (reuse_needset)
 - [[needset-key-neighbours]] — finding a seed's twins and neighbours by the vector and sampled routes. `lupin_mcp` (reuse_needset)
 - [[needset-key-rulings]] — same-job rulings on neighbours and the absence check for a nothing need. `lupin_mcp` (reuse_needset)
+- [[needset-drafting-run]] — running the need-set drafting: jobs per seed, parallel cells, the plan and the report. `lupin_mcp` (reuse_needset)
+- [[needset-smoke-run]] — the ten-need drafting smoke: time window, environment assembly and the measurement report. `lupin_mcp` (reuse_needset)
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection. `lupin_mcp` (reuse_stage2_negatives)
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows. `lupin_mcp` (reuse_stage2_run)
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it. `lupin_mcp` (reuse_stage2_fit)
