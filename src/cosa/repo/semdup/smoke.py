@@ -6,6 +6,8 @@ import statistics
 import time
 from fractions import Fraction
 
+from cosa.repo.doc_lint import model_transport
+
 FAILURE_BAR   = Fraction( 5, 100 )
 SMOKE_FOLDER  = ( "semdup", "smoke" )
 META_KEYS     = ( "date", "host", "repo_sha", "config_sha" )
@@ -81,6 +83,26 @@ class TimedBackend:
             - returns 0 when no call has finished
         """
         return 0 if self.last_end is None else self.last_end - self.first_start
+
+
+def configure_cli( cli_path, cwd=None ):
+    """
+    Point later model calls at a Claude Code binary and return its version.
+
+    The SDK's bundled binary (2.1.92 when this was measured) refuses the pinned model, so a live run must name the installed binary.
+
+    Requires:
+        - cli_path is the path of an executable Claude Code binary; cwd is None or an existing directory
+
+    Ensures:
+        - model_transport uses cli_path for this process from now on
+        - returns the first line of the binary's --version output, for judge.ledger_binding
+
+    Raises:
+        - ValueError if cli_path is not an executable file or cwd is not a directory
+    """
+    model_transport.configure( cli_path=cli_path, cwd=cwd )
+    return model_transport.cli_version( cli_path )
 
 
 def percentile( values, share ):

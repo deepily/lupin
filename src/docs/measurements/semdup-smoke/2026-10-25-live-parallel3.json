@@ -1,0 +1,32 @@
+{
+  "calls": 21,
+  "config_sha": "5dee22918906b71c6ef1dac2c533868d6f1f3be9fb2f54ad9ccbfd2a0792bf8d",
+  "date": "2026-10-25-live-parallel3",
+  "definitions": 20,
+  "elapsed": 99.50268462399981,
+  "host": "dual-rtx-4090s",
+  "peak_in_flight": 3,
+  "projection": {
+    "client_calls": 2000,
+    "fits": true,
+    "hours": 2.6323461540740687,
+    "window_hours": 3
+  },
+  "raised": 0,
+  "raised_rate": {
+    "fraction": "0/1",
+    "value": 0.0
+  },
+  "reopen_backend": false,
+  "repo_sha": "22f9901964542b4ac347749eb34d76b938d4b0e3",
+  "seconds": {
+    "median": 12.290647842004546,
+    "min": 8.26425314899825,
+    "p95": 23.49182900699816
+  },
+  "unjudged": 0,
+  "unjudged_rate": {
+    "fraction": "0/1",
+    "value": 0.0
+  }
+}

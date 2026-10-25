@@ -5,6 +5,7 @@ import statistics
 
 import pytest
 
+from cosa.repo.doc_lint import model_transport
 from cosa.repo.semdup import smoke
 
 META = { "date": "2026-10-25", "host": "box", "repo_sha": "abc", "config_sha": "def" }
@@ -205,3 +206,20 @@ def test_the_record_is_written_once_under_its_date_and_never_replaced(tmp_path):
     assert path == tmp_path / "data" / "semdup" / "smoke" / "2026-10-25.json" and json.loads( path.read_text( encoding="utf-8" ) ) == record
     with pytest.raises( FileExistsError ): smoke.write_record( tmp_path / "data", record )
     assert json.loads( path.read_text( encoding="utf-8" ) ) == record
+
+
+# ---- configure_cli -----------------------------------------------------------------------------------------------
+
+def test_configure_cli_points_model_transport_at_the_binary_and_returns_its_version(tmp_path):
+    binary = tmp_path / "claude"
+    binary.write_text( "#!/bin/sh\necho '9.8.7 (Claude Code)'\n", encoding="utf-8" )
+    binary.chmod( 0o755 )
+    try:
+        assert smoke.configure_cli( str( binary ), cwd=str( tmp_path ) ) == "9.8.7 (Claude Code)"
+        assert model_transport.CLI_PATH == str( binary ) and model_transport.CWD == str( tmp_path )
+    finally:
+        model_transport.configure()
+
+
+def test_configure_cli_refuses_a_path_that_is_not_an_executable_file(tmp_path):
+    with pytest.raises( ValueError, match="not an executable file" ): smoke.configure_cli( str( tmp_path / "missing" ) )
