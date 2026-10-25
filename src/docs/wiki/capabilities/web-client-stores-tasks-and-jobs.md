@@ -2,19 +2,19 @@
 capability: web-client-stores-tasks-and-jobs
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.stores.FinishedTasksStore.FinishedTasksStoreImpl@4a23036965
+  - src.lupin_app.static.js.multiplexer.stores.FinishedTasksStore.FinishedTasksStoreImpl@90497cbb14
   - src.lupin_app.static.js.multiplexer.stores.FinishedTasksStore.describeFailure@9af781738c
   - src.lupin_app.static.js.multiplexer.stores.FinishedTasksStore.createFinishedTasksStore@7af05b7439
   - src.lupin_app.static.js.multiplexer.stores.HoldingAreaStore.awaitingApproval@e705b50bce
   - src.lupin_app.static.js.multiplexer.stores.HoldingAreaStore.holdingRefusalMessage@6e41206dfc
-  - src.lupin_app.static.js.multiplexer.stores.HoldingAreaStore.HoldingAreaStoreImpl@247e2ac0fe
+  - src.lupin_app.static.js.multiplexer.stores.HoldingAreaStore.HoldingAreaStoreImpl@2274a04569
   - src.lupin_app.static.js.multiplexer.stores.HoldingAreaStore.createHoldingAreaStore@24100b1b81
   - src.lupin_app.static.js.multiplexer.stores.JobStore.mapServerStateToStatus@32af852f5e
   - src.lupin_app.static.js.multiplexer.stores.JobStore.JobStoreImpl@ab0a7a9e82
   - src.lupin_app.static.js.multiplexer.stores.JobStore.createJobStore@2813e361cd
   - src.lupin_app.static.js.multiplexer.stores.TaskListStore.AwaitingHumanApprovalError@422bee653c
   - src.lupin_app.static.js.multiplexer.stores.TaskListStore.awaitingApproval@37c5a42215
-  - src.lupin_app.static.js.multiplexer.stores.TaskListStore.TaskListStoreImpl@d33bd14695
+  - src.lupin_app.static.js.multiplexer.stores.TaskListStore.TaskListStoreImpl@995bf0a6fd
   - src.lupin_app.static.js.multiplexer.stores.TaskListStore.NOOP_MUTATION@1dea27fe33
   - src.lupin_app.static.js.multiplexer.stores.TaskListStore.createTaskListStore@e8b9d2e800
   - src.lupin_app.static.js.multiplexer.stores.TaskRequestStore.TaskRequestStoreImpl@b23bfa9314

@@ -7,12 +7,12 @@ pins:
   - src.lupin_app.static.js.multiplexer.stores.CommonsStore.createCommonsStore@227609516e
   - src.lupin_app.static.js.multiplexer.stores.EpicStoriesStore.EpicStoriesStoreImpl@467c93d4c6
   - src.lupin_app.static.js.multiplexer.stores.EpicStoriesStore.createEpicStoriesStore@2b0e5c47d8
-  - src.lupin_app.static.js.multiplexer.stores.FleetStatusStore.FleetStatusStoreImpl@cd7ec820c8
+  - src.lupin_app.static.js.multiplexer.stores.FleetStatusStore.FleetStatusStoreImpl@db8122026e
   - src.lupin_app.static.js.multiplexer.stores.FleetStatusStore.serverDetail@f18b0dc420
   - src.lupin_app.static.js.multiplexer.stores.FleetStatusStore.createFleetStatusStore@8832254f92
   - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.statusOf@7bef36254f
   - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.refusalText@14d4588c8e
-  - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.FlowRatioStoreImpl@917d594c91
+  - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.FlowRatioStoreImpl@558eac8d4b
   - src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.createFlowRatioStore@cf9eb930f8
   - src.lupin_app.static.js.multiplexer.stores.SubmitJobsStore.SubmitJobsStoreImpl@10f6a6f23d
   - src.lupin_app.static.js.multiplexer.stores.SubmitJobsStore.scheduledAtOf@7144b81980

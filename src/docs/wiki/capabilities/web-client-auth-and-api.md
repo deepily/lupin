@@ -7,16 +7,16 @@ pins:
   - src.lupin_app.static.js.multiplexer.api.ApiClient.createApiClient@4f1f7bc1d9
   - src.lupin_app.static.js.multiplexer.auth.AuthManager.NavigatorLockManager@bd5768cc4b
   - src.lupin_app.static.js.multiplexer.auth.AuthManager.ChainMutexLockManager@afbbea57f7
-  - src.lupin_app.static.js.multiplexer.auth.AuthManager.AuthManagerImpl@b77bd08789
+  - src.lupin_app.static.js.multiplexer.auth.AuthManager.AuthManagerImpl@aea243a7bf
   - src.lupin_app.static.js.multiplexer.auth.AuthManager.createAuthManager@749069b081
   - src.lupin_app.static.js.multiplexer.auth.authGuard.redirectToLoginIfUnauthenticated@1ddc391b9e
   - src.lupin_app.static.js.multiplexer.auth.authGuard.logout@8f764b7039
   - src.lupin_app.static.js.multiplexer.auth.jwt.decodeSegment@b78f940cc2
   - src.lupin_app.static.js.multiplexer.auth.jwt.decodeJwtClaims@adca17e1ea
   - src.lupin_app.static.js.multiplexer.auth.jwt.jwtExpiryMs@28e52b0efd
-  - src.lupin_app.static.js.multiplexer.auth.jwt.jwtEmail@396a0b4882
+  - src.lupin_app.static.js.multiplexer.auth.jwt.jwtEmail@49e0308e6c
   - src.lupin_app.static.js.multiplexer.auth.jwt.jwtRoles@ca1e63045d
-  - src.lupin_app.static.js.multiplexer.auth.jwt.jwtSub@d560516623
+  - src.lupin_app.static.js.multiplexer.auth.jwt.jwtSub@d72e3eaf04
 ---
 # Web client auth and API client
 
