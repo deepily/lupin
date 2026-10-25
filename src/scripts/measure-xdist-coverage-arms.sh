@@ -49,7 +49,7 @@ stamp() { date '+%F %T'; }
 
 others() {  # pytest processes whose cwd is not this tree
     local n=0 pid
-    for pid in $( ps -eo pid=,comm=,args= | awk '$2 ~ /^python/ && $0 ~ / -m pytest/ {print $1}' ); do
+    for pid in $( ps -eo pid=,comm=,args= | awk '$2=="pytest" || ($2 ~ /^python/ && $0 ~ / -m pytest/) {print $1}' ); do
         case "$( readlink /proc/$pid/cwd 2>/dev/null )" in "$TREE"*) ;; *) n=$(( n + 1 )) ;; esac
     done
     echo $n
