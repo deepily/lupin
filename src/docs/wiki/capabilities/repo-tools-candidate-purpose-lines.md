@@ -7,6 +7,7 @@ pins:
   - cosa.repo.symindex.candidates.purpose_lines.load_lines@0b7ddaec71
   - cosa.repo.symindex.candidates.purpose_lines.judge_purpose@3442c440e7
   - cosa.repo.symindex.candidates.purpose_lines.write_purpose_lines@49caa2c5e0
+  - cosa.repo.symindex.build.attach_purposes@da4aa766c8
 ---
 # Candidate purpose lines
 
@@ -21,3 +22,4 @@ A purpose line is one sentence that says what an index entry is for. The writer 
 - `write_purpose_lines( entries, writer, store_path, writer_version, screen, batch_size=25 )` sends only entries that pass the sendable screen and have no stored line. The writer receives ids only, never source text. It returns `written`, `kept`, `dropped_screen`, `dropped_output` and `missing`. Stored rows are never rewritten; a changed pin gets a new row.
 - `judge_purpose( purpose, hits )` returns None for an acceptable line, else `not_text`, `empty`, `too_long` (over 25 words) or `screen:<kinds>`. The verb start is not checked. A rejected line is listed, never stored.
 - `default_screen()` returns the index's own `sendable` and `c1_hits` from `lupin_mcp.reuse_tools`, imported on first use.
+- `attach_purposes` adds each record's stored purpose line to a copy of it, keyed by pin. A record with no line comes back as the same object, and none is changed in place.

@@ -15,6 +15,7 @@ pins:
   - cosa.repo.semdup.extract.extract_python@0fae25e2f4
   - cosa.repo.semdup.extract.extract_script@3ada0672cc
   - cosa.repo.semdup.extract.extract_tree@e9eefcff81
+  - cosa.repo.semdup.blind.breaching_ids@1f7886bb36
 ---
 # Duplicate checker: blinding and extraction
 The semantic duplicate checker counts surplus copies a run wrote. This page covers what goes in: every definition, and the blinding of what the judge sees.
@@ -24,5 +25,6 @@ The semantic duplicate checker counts surplus copies a run wrote. This page cove
 - `blind_definition` returns what the judge may see of a definition. `opaque_id` replaces its id with `x-` and ten hex digits.
 - `scrub_tokens` builds the list of reuse-tool tokens and arm labels. `strip_comment_lines` removes comment lines that hold one.
 - `assert_blind` refuses text that still carries a scrub token. `relative_path` drops a worktree prefix.
+- `breaching_ids` names the definitions that `blind_definition` would refuse, as sorted ids. It blinds nothing for use.
 - `candidate_order` orders blinded definitions by the sha of their opaque ids, so position tells nothing.
 - `SemdupError` names every failure by a code, so a caller never reads a message. See [[semdup-candidates]] and [[semdup-judge-and-pipeline]].

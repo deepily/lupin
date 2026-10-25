@@ -17,6 +17,7 @@ pins:
   - cosa.repo.semdup.smoke.build_record@c8e0ef1c23
   - cosa.repo.semdup.smoke.percentile@eb31d21753
   - cosa.repo.semdup.smoke.write_record@1932406a34
+  - cosa.repo.semdup.smoke.configure_cli@7e271974b4
 ---
 # Duplicate checker: judge and scoring
 The judge makes one blind, ledgered model call per new definition and rules on each of its candidates.
@@ -28,3 +29,4 @@ The judge makes one blind, ledgered model call per new definition and rules on e
 - `score_run` scores one run's client. `aggregate_runs` hands the reports to the named unscorable-run policy and refuses when none is named.
 - `main` scores the run directory named on the command line and writes its report there.
 - `TimedBackend` wraps a backend and times each call. `build_record` and `write_record` keep the live smoke record, and `percentile` is nearest-rank.
+- `configure_cli` in `smoke.py` points later model calls at a named Claude Code binary. It returns the first line of the binary's version output, which `ledger_binding` takes, and raises `ValueError` for a path that is not an executable file.
