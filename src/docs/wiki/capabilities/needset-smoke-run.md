@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_needset.smoke.index_parts@da503efe90
   - lupin_mcp.reuse_needset.smoke.candidate_parts@307e96b916
   - lupin_mcp.reuse_needset.smoke.assemble_env@bbe8b4d00c
-  - lupin_mcp.reuse_needset.smoke.live_build_env@25bbb09542
+  - lupin_mcp.reuse_needset.smoke.live_build_env@6d415d4343
   - lupin_mcp.reuse_needset.smoke.lifted_by@33e224265f
   - lupin_mcp.reuse_needset.smoke.smoke_report@c5864ce9f2
   - lupin_mcp.reuse_needset.smoke.main@3aa90d0e32
@@ -31,7 +31,8 @@ A small live run of ten needs that measures and sets no pass bar. It takes a tes
 - `index_parts` builds the index of a tree and everything the run reads from it. A root without the lupin layout raises `NOT_LUPIN_TREE`.
 - `candidate_parts` loads the live vector set and builds the word stage and the query embedder.
 - `assemble_env` puts the index, the candidate parts and the model calls into a run environment. The seed pool is the eligible symbols with a row in the vector set. A symbol newer than the vector set is left out.
-- `live_build_env` builds the environment with the real drafter, second model and embeddings client.
+- `live_build_env` first points `model_transport` at the `--cli-path` binary, or the SDK's own when none is given. The binary the ledgers name is then the one that runs.
+- A path that is not an executable file raises `ValueError`. The environment is then built with the real drafter, second model and embeddings client.
 - `Timed` times every model call and counts the ones that raise, by the model's label.
 
 ## Report
