@@ -100,6 +100,17 @@ def test_a_retry_names_the_own_word_the_last_sentence_used_and_how_long_it_was()
     assert 'the word "fit"' not in users[ 0 ]
 
 
+def test_a_retry_after_a_too_short_sentence_says_how_many_words_it_had():
+    need  = need_input.NeedInput( member_id="m", kind="function", text="def NAME(): pass", forbidden=[ "fit" ] )
+    users = []
+    replies = iter( [ "A function that adds numbers.", SENTENCE ] )
+    def ask( system, user ):
+        users.append( user )
+        return next( replies )
+    assert lp.write_sentence( need, "py", ask )[ 0 ] == SENTENCE
+    assert "Your last sentence had 5 words" in users[ 1 ] and "Say a little more" in users[ 1 ] and "had" not in users[ 0 ]
+
+
 def test_top_up_saves_after_every_wave_so_a_later_error_loses_nothing( tmp_path, monkeypatch ):
     pools = { "script": [ synthetic( "ts", i ) for i in range( 4 ) ], "python": [] }
     doc   = doc_of( 10, 8, [], [] )
