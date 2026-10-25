@@ -19,12 +19,14 @@ import concurrent.futures
 import copy
 import fnmatch
 import gzip
+import datetime
 import hashlib
 import json
 import math
 import os
 import pathlib
 import re
+import sys
 import threading
 import time
 import uuid
@@ -1604,9 +1606,26 @@ def check_exists_impl( need, ctx, language=None, include_tests=False ):
     bad = language_error( language )
     if bad is not None: return bad
     try:
-        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), language=language, include_tests=include_tests ) )
+        receipt = run_question( ctx, "check_exists", need.strip(), need.strip(), language=language, include_tests=include_tests )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
+    _queue_shadow_audit( ctx, receipt )
+    return _public( receipt )
+
+
+def _queue_shadow_audit( ctx, receipt ):
+    """
+    Offer a served lookup to the shadow audit queue.
+
+    Ensures:
+        - nothing happens while the INI key `reuse shadow audit enabled` is not true
+        - a queue failure is printed to stderr and never changes or fails the lookup's answer
+    """
+    from lupin_mcp import reuse_shadow                                          # imported here: the audit reads the INI file, and a lookup with the audit off needs none of it
+    try:
+        reuse_shadow.queue_lookup( ctx.data, receipt, datetime.date.today().isoformat() )
+    except ( CandidateError, OSError ) as e:
+        print( f"shadow audit queue failed: {e}", file=sys.stderr )
 
 
 def sweep_need_impl( need, exclude_id, ctx, question="choice", *, language ):

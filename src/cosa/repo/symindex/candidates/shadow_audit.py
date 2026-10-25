@@ -293,7 +293,7 @@ def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, t
     return key
 
 
-def run_pending( data_dir, sweep_fn, today, limit=None ):
+def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_language=False ):
     """
     Drain the audit queue through the full-sweep transport.
 
@@ -310,6 +310,11 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
         - a sweep answer that lacks verdict or causal_ids counts as a failure of that item, like a raised error
         - a temporary file of a write in progress is never read
         - at most limit items are taken, fewest attempts first, then oldest queued date, then queue id
+        - with pass_language the sweep is called as sweep_fn( need, language ), else as sweep_fn( need )
+        - with max_tokens, each sweep answer must carry a whole-number tokens count (a sweep without one fails like a raised error), and the run
+          stops before a sweep when the tokens spent so far plus the largest sweep seen would pass max_tokens; the rest stay queued
+        - with max_tokens the result also holds spent_tokens and stopped_by, "ceiling" when the run stopped for that reason, else None
+        - without max_tokens the result keeps its four keys
     """
     queued, corrupt = [], 0
     for path in sorted( p for p in _folder( data_dir, "shadow-pending" ).glob( "*.json" ) if not p.name.startswith( TEMP_PREFIX ) ):
@@ -322,12 +327,17 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
         queued.append( ( item, path ) )
     queued.sort( key=lambda pair: ( pair[ 0 ][ "attempts" ], pair[ 0 ][ "queued_on" ], pair[ 0 ][ "id" ] ) )
     if limit is not None: queued = queued[ :limit ]
-    receipts, failed = [], 0
+    receipts, failed, spent, biggest, stopped = [], 0, 0, 0, None
     for item, path in queued:
+        if max_tokens is not None and spent + max( biggest, 1 ) > max_tokens:
+            stopped = "ceiling"
+            break
         try:
             held = _folder( data_dir, "receipts" ) / f"shadow-{_receipt_id( need_hash( item[ 'need' ] ), item[ 'generation' ], item[ 'index_sha' ] )}.json"
             if held.exists(): _read_receipt_file( held )                       # a damaged receipt file fails the item before any sweep is spent
-            sweep   = sweep_fn( item[ "need" ] )
+            sweep   = sweep_fn( item[ "need" ], item[ "language" ] ) if pass_language else sweep_fn( item[ "need" ] )
+            tokens  = sweep[ "tokens" ] if max_tokens is not None else 0
+            if type( tokens ) is not int or tokens < 0: raise ValueError( f"tokens {tokens!r}" )
             receipt = audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ], item[ "live" ], sweep, today )
             stored  = store_receipt( data_dir, receipt )
         except Exception:                      # a transport failure, a malformed answer or a damaged receipt file leaves the item queued, behind the fresh ones
@@ -338,7 +348,10 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
             continue
         receipts.append( stored )
         os.remove( path )
-    return { "audited": len( receipts ), "failed": failed, "corrupt": corrupt, "receipts": receipts }
+        spent, biggest = spent + tokens, max( biggest, tokens )
+    out = { "audited": len( receipts ), "failed": failed, "corrupt": corrupt, "receipts": receipts }
+    if max_tokens is not None: out.update( spent_tokens=spent, stopped_by=stopped )
+    return out
 
 
 def daily_volume( data_dir ):
