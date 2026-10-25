@@ -77,17 +77,31 @@ def test_change_password_refusals( signed_in, server_url, account ):
     expect( signed_in.get_by_text( "Password does not meet requirements. Please check the list below." ) ).to_be_visible()
 
 
+def _submit_new_password( page, server_url, account ):
+    """Fill the change-password form with the account's password and NEW_PASSWORD, and submit it."""
+    page.goto( f"{server_url}/app/auth/change-password" )
+    page.get_by_label( "Current Password" ).fill( account.password )
+    page.get_by_label( "New Password", exact=True ).fill( NEW_PASSWORD )
+    page.get_by_label( "Confirm New Password" ).fill( NEW_PASSWORD )
+    page.get_by_role( "button", name="Update Password" ).click()
+
+
 @pytest.mark.feature( "F07" )
-def test_change_password_takes_effect_and_cancel_returns_to_profile( signed_in, server_url, account ):
+def test_cancel_on_change_password_returns_to_the_profile( signed_in, server_url ):
     signed_in.goto( f"{server_url}/app/auth/change-password" )
     signed_in.get_by_role( "button", name="Cancel" ).click()
     expect( signed_in ).to_have_url( f"{server_url}/app/auth/profile", timeout=10000 )
-    signed_in.get_by_role( "button", name="Change Password" ).click()
-    signed_in.get_by_label( "Current Password" ).fill( account.password )
-    signed_in.get_by_label( "New Password", exact=True ).fill( NEW_PASSWORD )
-    signed_in.get_by_label( "Confirm New Password" ).fill( NEW_PASSWORD )
-    signed_in.get_by_role( "button", name="Update Password" ).click()
+
+
+@pytest.mark.feature( "F07" )
+def test_change_password_says_it_succeeded( signed_in, server_url, account ):
+    _submit_new_password( signed_in, server_url, account )
     expect( signed_in.get_by_text( "Password updated successfully!" ) ).to_be_visible()
+
+
+@pytest.mark.feature( "F07" )
+def test_change_password_logs_the_user_out_and_only_the_new_password_works( signed_in, server_url, account ):
+    _submit_new_password( signed_in, server_url, account )
     expect( signed_in ).to_have_url( re.compile( r"/app/auth/login" ), timeout=15000 )      # the page logs the user out about 2 seconds later
     new = requests.post( f"{server_url}/auth/login", json={ "email": account.email, "password": NEW_PASSWORD }, timeout=10 )
     old = requests.post( f"{server_url}/auth/login", json={ "email": account.email, "password": account.password }, timeout=10 )
