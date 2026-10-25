@@ -373,7 +373,7 @@ def save_doc( path, doc ):
     tmp.replace( path )
 
 
-def top_up_alikes( doc, pools, root, wiring, folder, count=PLANTED_COUNT, threads=THREADS, waves=TOP_UP_WAVES ):
+def top_up_alikes( doc, pools, root, wiring, folder, count=PLANTED_COUNT, threads=THREADS, waves=TOP_UP_WAVES, save=None ):
     """
     Add Opus work-alikes until each language group holds its share.
 
@@ -384,6 +384,7 @@ def top_up_alikes( doc, pools, root, wiring, folder, count=PLANTED_COUNT, thread
         - each group (script, Python) is brought to its share of count divided by ALIKE_EVERY, from originals that failed as work-alikes once (retried once) first and then from originals not yet tried
         - at most waves rounds per group, each asking only for the places still open; a group that runs out of originals or waves stays short and the shortfall is in the result
         - the added pairs are appended to doc[ "planted" ], numbered on from the pairs already there, and every failed try is appended to doc[ "failed" ]
+        - save, when given, is called with no argument after every wave, so a model error in a later wave loses nothing already planted
         - returns the number of pairs added
     """
     by_id, added = { d[ "id" ]: d for d in [ *pools[ "script" ], *pools[ "python" ] ] }, 0
@@ -406,6 +407,7 @@ def top_up_alikes( doc, pools, root, wiring, folder, count=PLANTED_COUNT, thread
                         continue
                     doc[ "planted" ].append( { "original": by_id[ r[ "original" ] ], "rewrite": rewrite_record( r, by_id[ r[ "original" ] ], folder, len( doc[ "planted" ] ) ), "stratum": r[ "stratum" ] } )
                     added += 1
+                if save is not None: save()
     return added
 
 
@@ -437,7 +439,7 @@ def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=R
                                  for i, r in enumerate( [ *made[ 0 ][ "planted" ], *made[ 1 ][ "planted" ] ] ) ],
                     "failed": [ r for m in made for r in m[ "failed" ] ] }
         save_doc( saved, doc )
-    if top_up_alikes( doc, pools, root, wiring, folder / "rewrites", count ): save_doc( saved, doc )
+    top_up_alikes( doc, pools, root, wiring, folder / "rewrites", count, save=lambda: save_doc( saved, doc ) )
     mono    = monolith_candidates( root, cfg, wiring[ "client" ], wiring[ "cache_dir" ] )
     out     = prepare( doc[ "planted" ], mono, reviewers, seed, out_dir, cfg[ "config_sha" ] )
     return { **out, "planted": { s: sum( 1 for p in doc[ "planted" ] if p[ "stratum" ] == s ) for s in STRATA }, "failed": len( doc[ "failed" ] ),

@@ -81,6 +81,37 @@ def test_the_need_for_a_python_definition_comes_from_need_input_and_a_script_one
     assert lp._need_for( { **rec, "name": "plain" }, "/r" ).kind == "function"
 
 
+def test_a_script_need_leaves_short_local_names_alone_so_a_sentence_can_use_the_words_a_and_b():
+    rec  = { "lang": "ts", "id": "d-1", "name": "pick", "declared": [ "a", "b", "xs", "items" ], "text": "pick( a, b, xs, items ) { return a + b + xs + items; }" }
+    need = lp._need_for( rec, "/r" )
+    assert need.forbidden == [ "pick", "items" ] and "a" not in need.forbidden and "b" not in need.forbidden and "xs" not in need.forbidden
+    assert need.text == "NAME( a, b, xs, ARG1 ) { return a + b + xs + ARG1; }"
+
+
+def test_a_retry_names_the_own_word_the_last_sentence_used_and_how_long_it_was():
+    need  = need_input.NeedInput( member_id="m", kind="function", text="def NAME(): pass", forbidden=[ "fit" ] )
+    users = []
+    replies = iter( [ "A function that returns the fit of the given rows into a number.", SENTENCE ] )
+    def ask( system, user ):
+        users.append( user )
+        return next( replies )
+    assert lp.write_sentence( need, "py", ask )[ 0 ] == SENTENCE
+    assert 'the word "fit" is a name in the original code' in users[ 1 ] and "own_identifier" in users[ 1 ]
+    assert 'the word "fit"' not in users[ 0 ]
+
+
+def test_top_up_saves_after_every_wave_so_a_later_error_loses_nothing( tmp_path, monkeypatch ):
+    pools = { "script": [ synthetic( "ts", i ) for i in range( 4 ) ], "python": [] }
+    doc   = doc_of( 10, 8, [], [] )
+    seen  = []
+    def fake_one( rec, root, method, asks, shape_of ):
+        if rec[ "id" ] == "d-ts-000": return { "original": rec[ "id" ], "stratum": method, "status": "failed", "failures": [] }
+        return { "original": rec[ "id" ], "stratum": method, "status": "planted", "rewrite_text": TS_TEXT, "tries": 1 }
+    monkeypatch.setattr( lp, "plant_one", fake_one )
+    lp.top_up_alikes( doc, pools, "/r", { "asks": {}, "shape_of": { "py": None, "ts": None } }, tmp_path, count=60, threads=1, save=lambda: seen.append( len( doc[ "planted" ] ) ) )
+    assert len( seen ) >= 2 and seen == sorted( seen ) and seen[ 0 ] < seen[ -1 ]
+
+
 def test_write_sentence_retries_with_the_failure_kinds_and_gives_up_after_three_tries():
     need  = need_input.NeedInput( member_id="m", kind="function", text="def NAME(): pass", forbidden=[ "fit" ] )
     users = []
@@ -441,7 +472,10 @@ def test_a_resumed_run_tops_up_the_work_alikes_saves_the_document_and_then_asks_
                "client": FakeEmbed(), "cache_dir": tmp_path / "vec" }
     class Broken:
         def info( self ): raise RuntimeError( "no key" )
+    real_top_up = lp.top_up_alikes
+    monkeypatch.setattr( lp, "top_up_alikes", lambda *a, **k: 0 )                  # the first run stops before any top-up, as a crash would
     with pytest.raises( RuntimeError, match="no key" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, { **wiring, "client": Broken() }, seed=3 )
+    monkeypatch.setattr( lp, "top_up_alikes", real_top_up )
     saved = tmp_path / "out" / "key" / lp.PLANTED_FILE
     first = json.loads( saved.read_text( encoding="utf-8" ) )
     assert not any( p[ "stratum" ] == "opus-work-alike" for p in first[ "planted" ] ) and len( first[ "failed" ] ) > 0
