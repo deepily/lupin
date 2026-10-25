@@ -1667,7 +1667,7 @@ def dismiss_sessions(
         - SEAT TEARDOWN (row 129cc96b, P3): when `seat_teardown_fn` is provided it runs
           AFTER the kill, once per REAPED seat (never a withheld one), as
           seat_teardown_fn( session_name, cwd ) with the cwd captured before the bridge
-          was unlinked. `seat_trees` maps each seat to its outcome and
+          was unlinked. `seat_trees` maps each seat to its outcome, with the long lists cut to a count and a capped sample, and
           `seat_tree_notice` is the TOP-LEVEL line naming every tree kept for work in it
           (uncommitted, unmerged, data files) — None when there is none. FAIL-SAFE: a
           raising teardown is recorded as that seat's outcome and never breaks the reap
@@ -2025,7 +2025,7 @@ def dismiss_sessions(
         # the top of a result. None when every reaped seat's work is already on the line.
         "branch_alarm"       : reap_branch.branch_alarm( branch_outcomes ),
         "branch_outcomes"    : branch_outcomes,
-        "seat_trees"         : seat_trees,
+        "seat_trees"         : { name: seat_teardown.summarise_outcome( outcome ) for name, outcome in seat_trees.items() },
         "seat_tree_notice"   : seat_teardown.teardown_notice( seat_trees ),
         "withhold_notice"    : reap_memento.withhold_notice( withheld ),
         "memento_outcomes"   : memento_outcomes,

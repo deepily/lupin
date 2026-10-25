@@ -42,6 +42,9 @@ from cosa.agents.shared.worktree_reaper import (
 NOT_A_SEAT_TREE = ( "no_tree", "not_a_worktree", "not_registered", "main_worktree",
                     "not_a_seat_tree", "not_this_seats_tree" )
 
+# A reap result lists at most this many paths per list; the count says how many there were.
+SAMPLE_LIMIT = 10
+
 DEFAULT_WAIT_SECONDS = 10.0
 POLL_SECONDS         = 0.5
 
@@ -212,6 +215,29 @@ def _detached_verdict( tree: str, main_root: str, target: str, run: Callable ) -
     if not sha[ "success" ] or not sha[ "stdout" ]:
         return { "verdict": "failed", "commits_ahead": None, "error": f"rev-parse HEAD failed: {sha[ 'stderr' ]}" }
     return merge_verdict( main_root, sha[ "stdout" ], target, run )
+
+
+def summarise_outcome( outcome ):
+    """
+    A retire_seat_worktree result with its long lists cut to a count and a capped sample.
+
+    Requires:
+        - outcome is a retire_seat_worktree result, or the string a raising teardown became
+
+    Ensures:
+        - ignored_blockers and errors, when present, become <key>_count and <key>_sample
+          (the first SAMPLE_LIMIT entries), so the result stays small however many files the tree holds
+        - every other key is kept as it was; the input is not modified
+        - a non-dict outcome is returned unchanged
+    """
+    if not isinstance( outcome, dict ):
+        return outcome
+    summary = { k: v for k, v in outcome.items() if k not in ( "ignored_blockers", "errors" ) }
+    for key in ( "ignored_blockers", "errors" ):
+        if key in outcome:
+            summary[ f"{key}_count" ]  = len( outcome[ key ] )
+            summary[ f"{key}_sample" ] = list( outcome[ key ][ :SAMPLE_LIMIT ] )
+    return summary
 
 
 def teardown_notice( outcomes: dict ) -> Optional[ str ]:
