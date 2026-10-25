@@ -1,6 +1,7 @@
 """Census guard: no module under semdup/ imports the reuse tools it is built to measure."""
 import ast
 import pathlib
+import subprocess
 
 import pytest
 
@@ -28,14 +29,23 @@ def forbidden_imports( source, package="cosa.repo.semdup" ):
     return sorted( { n for n in imported_names( source, package ) for f in FORBIDDEN if n == f or n.startswith( f + "." ) } )
 
 
+def tracked_modules():
+    """List the Python files git tracks under semdup/, as paths."""
+    out = subprocess.run( [ "git", "ls-files", "--", "src/cosa/repo/semdup" ], cwd=cu.get_project_root(), capture_output=True, text=True, check=True ).stdout.split()
+    return [ pathlib.Path( cu.get_project_root() ) / f for f in out if f.endswith( ".py" ) ]
+
+
 def semdup_modules():
-    """List the Python modules under semdup/, with their package name."""
-    return [ ( path, ".".join( path.relative_to( SEMDUP.parent.parent.parent ).with_suffix( "" ).parts[ :-1 ] ) ) for path in sorted( SEMDUP.rglob( "*.py" ) ) ]
+    """List the Python modules under semdup/, tracked or not, with their package name."""
+    paths = sorted( set( tracked_modules() ) | set( SEMDUP.rglob( "*.py" ) ) )
+    return [ ( path, ".".join( path.relative_to( SEMDUP.parent.parent.parent ).with_suffix( "" ).parts[ :-1 ] ) ) for path in paths ]
 
 
-def test_the_population_is_every_module_of_the_package_and_includes_the_ones_that_could_slip():
-    names = { path.name for path, _ in semdup_modules() }
-    assert len( names ) >= 10 and { "judge.py", "candidates.py", "score_run.py", "structural.py" } <= names
+def test_the_population_is_every_tracked_module_of_the_package_and_includes_the_ones_that_could_slip():
+    scanned = { path for path, _ in semdup_modules() }
+    names   = { path.name for path in scanned }
+    assert set( tracked_modules() ) <= scanned and len( tracked_modules() ) >= 10
+    assert { "judge.py", "candidates.py", "score_run.py", "structural.py", "__init__.py" } <= names
 
 
 def test_no_module_under_semdup_imports_lupin_mcp_the_verdict_module_or_the_search_module():
@@ -69,6 +79,16 @@ def test_the_guard_flags_each_way_of_importing_a_forbidden_module(line, hits):
 ] )
 def test_the_guard_leaves_the_allowed_reuse_and_lookalike_names_alone(line):
     assert forbidden_imports( line + "\n" ) == []
+
+
+@pytest.mark.parametrize( "source", [
+    "def f():\n    from lupin_mcp import reuse_tools\n",
+    "try:\n    import cosa.repo.symindex.verdict\nexcept ImportError:\n    pass\n",
+    "class K:\n    def m( self ):\n        if True:\n            from cosa.repo.symindex.candidates import search\n",
+    "def f():\n    def g():\n        import lupin_mcp\n",
+] )
+def test_the_guard_finds_an_import_inside_a_function_a_try_or_a_method(source):
+    assert forbidden_imports( source ) != []
 
 
 def test_a_planted_forbidden_import_in_a_copy_of_a_real_module_is_caught():
