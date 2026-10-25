@@ -324,3 +324,40 @@ def test_the_gate_runs_after_freshness_not_before():
     )
     assert usable is False
     assert "stale" in reason
+
+
+# ---------------------------------------------------------------------------
+# The claim's key, not any sha on the line (row 4160d748)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "line", [
+    "## Unmerged stack on top of 7ae2b708a",
+    "## My unmerged stack (on branch head 09644c845 when built)",
+    "...rachel-base (d0bd4f604). ... none holds unmerged work.",
+] )
+def test_a_merged_base_or_a_denied_claim_is_not_a_claim_about_that_sha( line ):
+    """The row's three lines: the sha is a base, or the line says nothing is unmerged."""
+    assert find_merge_claims( line ) == [], line
+
+
+@pytest.mark.parametrize( "line", [
+    "## Unmerged stack based on 7ae2b708a",
+    "unmerged work built on 7ae2b708a",
+    "## Unmerged: forked from 7ae2b708a",
+] )
+def test_other_base_phrasings_clear_the_sha( line ):
+    assert find_merge_claims( line ) == [], line
+
+
+@pytest.mark.parametrize( "line", [
+    "nothing else is pending, but 7ae2b708a is unmerged",
+    "No, wait: 7ae2b708a is unmerged",
+] )
+def test_a_negation_clears_only_a_claim_it_precedes_in_the_clause( line ):
+    assert [ sha for _, sha, _ in find_merge_claims( line ) ] == [ "7ae2b708a" ], line
+
+
+def test_a_sha_that_is_the_claims_subject_is_still_found_beside_a_base_sha():
+    """A line may name a merged base and also an unmerged tip; the tip is still a claim."""
+    found = find_merge_claims( "Unmerged on top of 7ae2b708a: `f2ee98cf` is unmerged" )
+    assert [ sha for _, sha, _ in found ] == [ "f2ee98cf" ]
