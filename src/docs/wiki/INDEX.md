@@ -48,6 +48,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Quality tooling
 
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
+- [[ts-code-and-export-scripts]] — the code token printer for the docs-only check and the exported symbol lister with its doc comment pairing. `scripts` (ts_code_tokens, ts_export_extract)
 - [[ts-doc-extract-script]] — the comment extractor for TypeScript and JavaScript files: ranges, owners, tags, directives and the JSON Lines records. `scripts` (ts_doc_extract)
 - [[ts-extractor-shapes]] — the Node extractor's function walk: privacy rules, names, calls, declared names and body text. `cosa.repo.symindex` (ts_extract)
 - [[ts-extractor-records]] — how the Node extractor makes one index record: parse mode, signature, doc lines and the content pin. `cosa.repo.symindex` (ts_extract)
