@@ -22,7 +22,7 @@ The labelled-pair driver. It asks both questions about each member's candidates 
 
 ## Asking
 - `ask_old_pairs` asks the old three-way question about the member's candidates only. Each row holds the overlap probability, the malformed reason and whether the candidate went unasked.
-- `ask_new_pairs` asks the pair question the same way. Each row holds provides, coverage and score. The pair question is wired to `reuse_pack.pair_ask`, and `DriverRefused` is raised only if that hook is unset.
+- `ask_new_pairs` asks the pair question the same way. Each row holds provides, coverage and score. The pair question is wired to `reuse_pack.pair_ask`, and `DriverRefused` is raised only when `NEW_PAIR_ASK` is `None`.
 - Both results are engine-shaped, with a shortlist cut at 0.5 and the nearest rows by rank.
 
 ## Rows

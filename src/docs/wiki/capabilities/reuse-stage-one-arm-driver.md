@@ -32,5 +32,5 @@ Runs each arm of the stage-one measurement as its own ledger run and writes a re
 - `DriverRefused` means a step was refused before spending: no ledger run opened and no name used. `KeyMissing` is the same refusal for a live transport with no key.
 
 ## Canary
-- `run_canary` sends the first ten entries as one request and writes a report with `approved` empty. It records each stop number that was crossed: output per entry over the limit, usage over the reserve, a refusal or a model mismatch.
+- `run_canary` sends the first ten entries as one request and writes a report with `approved` empty. It records each of seven stop numbers that was crossed. They are output per entry over the limit, usage over the reserve, a refusal and usage missing. The others are a model mismatch, nothing measured and an incomplete arm.
 - `approve_canary` records who approved and why. A canary that tripped raises `CanaryTripped` and is never approved. Every arm but the first single run and the canary raises `CanaryNotApproved` until its question's canary is approved.
