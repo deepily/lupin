@@ -81,6 +81,15 @@ def _mismatch( condition, detail ):
     raise er.NeedsetError( er.MANIFEST_MISMATCH, f"{condition}: {detail}" )
 
 
+def _repeated( ids ):
+    """Return the ids that occur more than once, sorted."""
+    seen, again = set(), set()
+    for i in ids:
+        if i in seen: again.add( i )
+        seen.add( i )
+    return sorted( again )
+
+
 def final_row( need, label ):
     """
     Join a checked need with its final label.
@@ -115,24 +124,30 @@ def file_sha256( path ):
     return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
 
 
-def finalize( needs, labels, kappa, seed, source_commit, out_dir ):
+def finalize( needs, labels, kappa, seed, source_commit, out_dir, known_symbols=None ):
     """
     Write the final set and its manifest.
 
     Requires:
         - labels maps each need id to its final label; every need has one
         - kappa is the reviewers' kappa, a number
+        - known_symbols is None, or the set of symbols that exist in the index
 
     Ensures:
         - writes needset-final.jsonl, one row per need sorted by id, then needset-manifest.json holding the counts, the seed, the source commit, kappa and the sha256 of the final file
         - returns the manifest
 
     Raises:
-        - NeedsetError BAD_NEED from final_row, MANIFEST_MISMATCH for a need without a label or a kappa that is not a number
+        - NeedsetError BAD_NEED from final_row, MANIFEST_MISMATCH for a need without a label, a repeated need id, a kappa that is not a number, or a typed symbol outside known_symbols
     """
     if isinstance( kappa, bool ) or not isinstance( kappa, ( int, float ) ): _mismatch( "KAPPA", f"kappa must be a number, got {kappa!r}" )
+    repeated = _repeated( n[ "id" ] for n in needs )
+    if repeated: _mismatch( "IDS", f"repeated need ids: {repeated[ :5 ]}" )
     missing = sorted( n[ "id" ] for n in needs if n[ "id" ] not in labels )
     if missing: _mismatch( "LABELS", f"needs without a final label: {missing[ :5 ]}" )
+    if known_symbols is not None:
+        unknown = sorted( { s for n in needs if labels[ n[ "id" ] ][ "choice" ] == "OTHER" for s in labels[ n[ "id" ] ][ "symbols" ] } - set( known_symbols ) )
+        if unknown: _mismatch( "SYMBOLS", f"typed symbols that are not in the index: {unknown[ :5 ]}" )
     rows = [ final_row( n, labels[ n[ "id" ] ] ) for n in sorted( needs, key=lambda n: n[ "id" ] ) ]
     out  = pathlib.Path( out_dir )
     ( out / FINAL_FILE ).write_text( "".join( json.dumps( r, sort_keys=True ) + "\n" for r in rows ), encoding="utf-8" )
@@ -154,10 +169,12 @@ def verify_manifest( path, expected=None ):
         - returns None when the row count, the matched and nothing counts and the ts and py counts equal expected (400, 300, 100, 240, 160 by default)
         - every row is a valid final need, so a matched row has a key and a nothing row has none
         - every nothing row and every disputed row has a human final_source, and no row is a smoke row
+        - no need id repeats, and every row's source_commit is the manifest's
+        - the manifest's counts equal the rows' counts, and the manifest holds a seed
         - the manifest's sha256 equals the final file's, and the manifest holds a kappa
 
     Raises:
-        - NeedsetError MANIFEST_MISMATCH starting its detail with the failed condition: files, rows, smoke, kinds, langs, human, sha or kappa, in capitals
+        - NeedsetError MANIFEST_MISMATCH starting its detail with the failed condition: files, rows, ids, smoke, kinds, langs, commit, counts, seed, human, sha or kappa, in capitals
     """
     expected = EXPECTED if expected is None else expected
     path     = pathlib.Path( path )
@@ -176,10 +193,17 @@ def verify_manifest( path, expected=None ):
         except er.NeedsetError as e:
             _mismatch( "ROWS", f"invalid row: {e.detail}" )
         if r[ "status" ] != "final" or "final" not in r: _mismatch( "ROWS", f"{r[ 'id' ]}: not a final row" )
+    repeated = _repeated( r[ "id" ] for r in rows )
+    if repeated: _mismatch( "IDS", f"{len( rows ) - len( repeated )} unique ids in {len( rows )} rows; repeated: {repeated[ :5 ]}" )
     got = { "matched": sum( 1 for r in rows if r[ "kind" ] != "nothing" ), "nothing": sum( 1 for r in rows if r[ "kind" ] == "nothing" ) }
     if got[ "matched" ] != expected[ "matched" ]: _mismatch( "KINDS", f"{got[ 'matched' ]} matched and {got[ 'nothing' ]} nothing, expected {expected[ 'matched' ]} and {expected[ 'nothing' ]}" )
     langs = { l: sum( 1 for r in rows if r[ "write_lang" ] == l ) for l in ( "ts", "py" ) }
     if langs[ "ts" ] != expected[ "ts" ]: _mismatch( "LANGS", f"{langs[ 'ts' ]} ts and {langs[ 'py' ]} py, expected {expected[ 'ts' ]} and {expected[ 'py' ]}" )
+    if manifest.get( "counts" ) != { "rows": len( rows ), "matched": got[ "matched" ], "nothing": got[ "nothing" ], "ts": langs[ "ts" ], "py": langs[ "py" ] }:
+        _mismatch( "COUNTS", f"the manifest's counts {manifest.get( 'counts' )} are not the rows' counts" )
+    wrong = [ r[ "id" ] for r in rows if r[ "source_commit" ] != manifest.get( "source_commit" ) ]
+    if wrong or not manifest.get( "source_commit" ): _mismatch( "COMMIT", f"{len( wrong )} rows carry a source_commit other than the manifest's {manifest.get( 'source_commit' )!r}" )
+    if manifest.get( "seed" ) is None: _mismatch( "SEED", "the manifest holds no seed" )
     for r in rows:
         if ( r[ "kind" ] == "nothing" or check.disputed( r ) ) and r[ "final" ][ "final_source" ] not in HUMAN_SOURCES:
             _mismatch( "HUMAN", f"{r[ 'id' ]}: a {r[ 'kind' ]} row or a disputed row needs a human final source, this one is {r[ 'final' ][ 'final_source' ]}" )

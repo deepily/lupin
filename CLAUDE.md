@@ -509,7 +509,7 @@ summary counts the swept files plus one for the second step. `Failed: 1` is one 
 the page check alone, and `Errors:` is the number of findings. Stale numbers on the page pass with a
 warning line that names the command to regenerate it.
 The swept scope is every tracked `.py` file the documentation standard covers, except the held
-`src/lupin_mcp/`; `src/cosa/repo/doc_lint/swept_scope.py` decides it. Exit 2 or 3 means the gate could not check, which is
+`src/lupin_mcp/`, which carves out `src/lupin_mcp/reuse_needset/`; `src/cosa/repo/doc_lint/swept_scope.py` decides it. Exit 2 or 3 means the gate could not check, which is
 not a pass. `src/scripts/pre-push-chain.sh` runs the first step only, on the tip of a pushed ref.
 
 > The heading above and the HTML comment above are machine-read; neither is styling. `test_bridge_dir_guard.py` looks for the exact line `## PR merge requirements`, on a line of its own. `test_typescript_suite_gate.py` parses the `merge-pyramid-suites` marker and compares its set to `ALL_SUITE_COMPONENTS` in `src/cosa/agents/test_suite/job.py`. It then checks the paragraph beneath the marker names every one. Rewording the heading or dropping the marker reddens the unit tier. The marker is a set, not a sequence. The shell array runs integration before e2e, while the documented pyramid holds integration back as the final gate. That ordering difference is deliberate.

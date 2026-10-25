@@ -63,6 +63,11 @@ def test_the_same_needs_and_seed_give_the_same_list_and_another_seed_another_sam
     assert [ g for g in finalize.select_for_labelling( needs, 12 ) if g[ "reason" ] == "sample" ] != [ g for g in one if g[ "reason" ] == "sample" ]
 
 
+def test_the_sample_for_one_seed_is_these_ids():
+    got = finalize.select_for_labelling( pile(), 11 )
+    assert [ g[ "id" ] for g in got if g[ "reason" ] == "sample" ] == [ "n-0502350ad6", "n-8c19a21adc", "n-c84823c57b" ]
+
+
 def test_an_unchecked_need_and_a_smoke_need_are_refused():
     drafted = schema.new_need( "near_copy", "py", "pkg.a.f", None, [ "pkg.b.g" ], "py", "twin", SENTENCE, COMMIT, DRAFTER )
     with pytest.raises( er.NeedsetError ) as e: finalize.select_for_labelling( [ drafted ], 1 )

@@ -196,3 +196,40 @@ def test_a_label_that_rejects_a_need_stops_the_finalize( kind, choice ):
              if kind == "matched" else checked( schema.new_need( "nothing", "py", None, None, [], None, None, "A function that renames files in a folder to lower case.", COMMIT, DRAFTER ) ) )
     with pytest.raises( er.NeedsetError ) as e: finalize.final_row( need, { "choice": choice, "symbols": [ "x.y" ] if choice == "OTHER" else [], "final_source": "agreed" } )
     assert e.value.detail.startswith( "REJECTED" )
+
+
+def test_finalize_refuses_a_repeated_need_id( tmp_path ):
+    needs, labels = build_set( nothing=( 1, 1 ), matched=( 1, 1 ) )
+    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( needs + [ copy.deepcopy( needs[ 0 ] ) ], labels, 0.5, 1, COMMIT, tmp_path )
+    assert e.value.code == er.MANIFEST_MISMATCH and e.value.detail.startswith( "IDS" ) and needs[ 0 ][ "id" ] in e.value.detail
+
+
+def test_a_copied_row_with_the_sha_in_step_fails_as_a_repeated_id( tmp_path ):
+    path = write_set( tmp_path )
+    rows = [ json.loads( l ) for l in ( tmp_path / finalize.FINAL_FILE ).read_text().splitlines() ]
+    twin = next( r for r in rows if r[ "kind" ] == "nothing" )
+    nth  = [ r[ "id" ] for r in rows if r[ "kind" ] == "nothing" and r[ "write_lang" ] == twin[ "write_lang" ] ][ 1 ]
+    rewrite_rows( tmp_path, lambda r: copy.deepcopy( twin ) if r[ "id" ] == nth else r )
+    name, detail = condition( path )
+    assert name == "IDS" and "399 unique ids in 400 rows" in detail
+
+
+@pytest.mark.parametrize( "change, name", [
+    ( lambda m: m[ "counts" ].update( rows=1 ), "COUNTS" ), ( lambda m: m[ "counts" ].update( ts=239, py=161 ), "COUNTS" ), ( lambda m: m.pop( "counts" ), "COUNTS" ),
+    ( lambda m: m.update( source_commit="nope" ), "COMMIT" ), ( lambda m: m.pop( "source_commit" ), "COMMIT" ), ( lambda m: m.update( seed=None ), "SEED" ), ( lambda m: m.pop( "seed" ), "SEED" ) ] )
+def test_a_manifest_that_disagrees_with_its_rows_fails_by_name( tmp_path, change, name ):
+    path = write_set( tmp_path )
+    data = json.loads( path.read_text() )
+    change( data )
+    path.write_text( json.dumps( data ), encoding="utf-8" )
+    assert condition( path )[ 0 ] == name
+
+
+def test_a_typed_symbol_outside_the_index_stops_the_finalize( tmp_path ):
+    need = checked( schema.new_need( "near_copy", "py", "pkg.a.f", None, [ "pkg.b.g" ], "py", "twin", "A function that adds up a list of numbers until a ceiling.", COMMIT, DRAFTER ) )
+    other = { need[ "id" ]: { "choice": "OTHER", "symbols": [ "pkg.c.h" ], "final_source": "rick_tiebreak" } }
+    finalize.finalize( [ need ], other, 0.5, 1, COMMIT, tmp_path, known_symbols={ "pkg.c.h", "pkg.b.g" } )
+    finalize.finalize( [ need ], other, 0.5, 1, COMMIT, tmp_path )
+    with pytest.raises( er.NeedsetError ) as e: finalize.finalize( [ need ], other, 0.5, 1, COMMIT, tmp_path, known_symbols={ "pkg.b.g" } )
+    assert e.value.detail.startswith( "SYMBOLS" ) and "pkg.c.h" in e.value.detail
+    finalize.finalize( [ need ], { need[ "id" ]: AGREED }, 0.5, 1, COMMIT, tmp_path, known_symbols=set() )
