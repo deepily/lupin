@@ -576,3 +576,12 @@ def test_main_defaults_to_the_real_sdk_reply( src_root, tmp_path, monkeypatch ):
     monkeypatch.setattr( nw, "sdk_query", _fake_sdk( messages, [] ) )
     code = nw.main( [ "--sample", _sample_file( tmp_path ), "--src-root", src_root, "--out", str( tmp_path / "o" ), "--limit", "1" ] )
     assert code == 0
+
+
+def test_prompt_names_the_language_of_the_text_and_defaults_to_python( src_root ):
+    need = _input( src_root )
+    assert "text of a Python function" in nw.build_prompt( need ) and nw.build_prompt( need ) == nw.build_prompt( need, write_lang="py" )
+    assert "text of a TypeScript function" in nw.build_prompt( need, write_lang="ts" )
+    assert "Python code" in nw.SYSTEM_PROMPT and nw.system_prompt( "ts" ).startswith( "You describe what a piece of TypeScript code does" )
+    for call in ( lambda: nw.build_prompt( need, write_lang="dart" ), lambda: nw.system_prompt( "dart" ) ):
+        with pytest.raises( ValueError, match="write_lang 'dart'" ): call()

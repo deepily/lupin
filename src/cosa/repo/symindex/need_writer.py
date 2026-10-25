@@ -32,11 +32,32 @@ OPENERS          = { "function": "A function that ", "method": "A method that ",
 BARE_WORD        = re.compile( r"[a-z]+" )
 PLACEHOLDER      = re.compile( r"\b(NAME|CLASS|MODULE|ARG\d+|ATTR\d+)\b" )
 SENTENCE_BREAK   = re.compile( r"[.?!]\s+\S" )
-SYSTEM_PROMPT    = (
-    "You describe what a piece of Python code does, for someone who will search a code base for "
+LANG_NAMES       = { "py": "Python", "ts": "TypeScript" }
+SYSTEM_TEMPLATE  = (
+    "You describe what a piece of {language} code does, for someone who will search a code base for "
     "something that does the same job. You never name or guess names. You answer with one sentence "
     "and nothing else."
 )
+
+
+def system_prompt( write_lang="py" ):
+    """
+    Build the system prompt for a source language.
+
+    Requires:
+        - write_lang is a key of LANG_NAMES
+
+    Ensures:
+        - returns the writer's system prompt naming that language
+
+    Raises:
+        - ValueError when write_lang is not a known language
+    """
+    if write_lang not in LANG_NAMES: raise ValueError( f"write_lang {write_lang!r} is not one of {sorted( LANG_NAMES )}" )
+    return SYSTEM_TEMPLATE.format( language=LANG_NAMES[ write_lang ] )
+
+
+SYSTEM_PROMPT    = system_prompt()
 
 
 @dataclass
@@ -162,12 +183,13 @@ def check_form( sentence, need ):
     return sorted( kinds )
 
 
-def build_prompt( need, failures=None, own_words=None, last_words=None, avoid_words=None ):
+def build_prompt( need, failures=None, own_words=None, last_words=None, avoid_words=None, write_lang="py" ):
     """
     Build the user prompt for one member.
 
     Ensures:
         - holds the stripped text and the form rules
+        - names the language of the text from write_lang; the default py gives the prompt this function has always built
         - when failures is given, ends with a note naming only the kinds of failure
         - own_words, when given, are named in that note; each must be one of the member's own names
         - avoid_words, when given, are each named as a word not to use; they come from the checker's
@@ -178,13 +200,15 @@ def build_prompt( need, failures=None, own_words=None, last_words=None, avoid_wo
     Raises:
         - ValueError when an own word is not one of the member's own names
         - ValueError when an avoid word is not a bare lower-case word
+        - ValueError when write_lang is not a known language
     """
+    if write_lang not in LANG_NAMES: raise ValueError( f"write_lang {write_lang!r} is not one of {sorted( LANG_NAMES )}" )
     for word in avoid_words or []:
         if not BARE_WORD.fullmatch( word ): raise ValueError( f"avoid word {word!r} is not a bare lower-case word" )
     foreign = [ word for word in ( own_words or [] ) if word not in need.forbidden ]
     if foreign: raise ValueError( f"{foreign[ 0 ]} is not one of the member's own names" )
     prompt = (
-        f"Below is the text of a Python {need.kind} with its names replaced by stand-ins "
+        f"Below is the text of a {LANG_NAMES[ write_lang ]} {need.kind} with its names replaced by stand-ins "
         "(NAME, CLASS, MODULE, ARG1, ARG2, ATTR1 and so on). Do not use the stand-ins, and do not "
         "invent names.\n\n"
         f"Write one sentence that begins \"{OPENERS[ need.kind ]}\" and says what it does and what it returns, "
