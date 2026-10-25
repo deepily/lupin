@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs the census and pin guards of the unit tier, the ones that go red when NEW code lands.
 #
-# Usage: src/tests/run-census-guards.sh      (about 40 s on 2026-10-09; no server, no network)
+# Usage: src/tests/run-census-guards.sh      (about 2 min on 2026-10-25, 37 files and 337 functions; no server, no network)
 #
 # Run it before asking for review, as well as the tests of the files you changed. A census guard
 # counts something in the whole tree, so it can fail on a commit that touches none of its files
