@@ -245,12 +245,14 @@ def _write_generation( tmp, spec, data, man ):
         - tmp is an empty directory
     Ensures:
         - writes symbols.md, routes.md, symbols.jsonl, symbols-all.jsonl and header.json, all utf-8
+        - search_sha covers the records of spec.scopes (public and private when the spec names none), so the tests spec's header holds the tests' own hash
         - returns the header dict
     """
     symbols_md = "\n".join( symbol_line( r ) for r in data[ "symbols" ] ) + "\n"
     files      = { "symbols.md": symbols_md, "routes.md": "\n".join( data[ "routes" ] ) + "\n",
                    "symbols.jsonl": _jsonl( data[ "symbols" ] ), "symbols-all.jsonl": _jsonl( data[ "all_symbols" ] ) }
-    searchable = [ r for r in data[ "all_symbols" ] if r[ "scope" ] in SEARCH_SCOPES ]
+    scopes     = SEARCH_SCOPES if spec.scopes is None else spec.scopes
+    searchable = [ r for r in data[ "all_symbols" ] if r[ "scope" ] in scopes ]
     header     = { "index_root"   : str( spec.root ), "repo": spec.name, "manifest": man,
                    "symbols_sha"  : hashlib.sha1( symbols_md.encode( "utf-8" ) ).hexdigest(),
                    "search_sha"   : search_sha( searchable ),
@@ -263,12 +265,13 @@ def _write_generation( tmp, spec, data, man ):
     return header
 
 
-def build( root=None, out_dir=None ):
+def build( root=None, out_dir=None, spec=None ):
     """
     Build the index for a repository and publish it atomically.
 
     Requires:
         - root is a repository root (default: the git toplevel of the current directory)
+        - spec is None for the repository's own index spec, or an IndexSpec such as spec.tests_spec( root ) with its own out_dir
     Ensures:
         - out_dir/current points at a complete generation for the tree as it is now
         - a generation that already exists for the same manifest, pin algorithm and missing-tool list is kept
@@ -278,7 +281,7 @@ def build( root=None, out_dir=None ):
         - returns { "gen_dir": Path, "header": dict }
     """
     from cosa.repo.symindex.spec import git_toplevel
-    spec = spec_for( git_toplevel() if root is None else root )
+    if spec is None: spec = spec_for( git_toplevel() if root is None else root )
     out  = pathlib.Path( out_dir ) if out_dir is not None else default_out_dir( spec.root )
     out.mkdir( parents=True, exist_ok=True )
     with open( out / ".build.lock", "w" ) as lock:
@@ -382,15 +385,17 @@ def is_fresh( spec, out_dir ):
     return head[ "manifest" ] == manifest( spec ) and head[ "pin_algorithm" ] == algo and head[ "missing_dependencies" ] == missing
 
 
-def ensure( root=None, out_dir=None ):
+def ensure( root=None, out_dir=None, spec=None ):
     """
     Return the live generation, building it first when it is missing or stale.
 
+    Requires:
+        - spec is None for the repository's own index spec, or an IndexSpec with its own out_dir (the tests spec publishes to its own folder)
     Ensures:
         - returns the live generation Path, building it first when the index is missing or stale
     """
     from cosa.repo.symindex.spec import git_toplevel
-    spec = spec_for( git_toplevel() if root is None else root )
+    if spec is None: spec = spec_for( git_toplevel() if root is None else root )
     out  = pathlib.Path( out_dir ) if out_dir is not None else default_out_dir( spec.root )
-    if not is_fresh( spec, out ): return build( spec.root, out )[ "gen_dir" ]
+    if not is_fresh( spec, out ): return build( spec.root, out, spec )[ "gen_dir" ]
     return current_generation( out )

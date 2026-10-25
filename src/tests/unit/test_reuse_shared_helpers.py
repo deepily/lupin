@@ -38,21 +38,23 @@ class TestReuseCall:
         answer = cvm._reuse_call( "check_exists_impl", None, "need" )
         assert answer["error"] == "REUSE_TOOLS_UNAVAILABLE" and answer["detail"].startswith( "ModuleNotFoundError" )
 
-    @pytest.mark.parametrize( "tool, impl, arg_name, arg, extra", [
-        ( "check_exists",    "check_exists_impl",    "need",       "a need",     { "language": "py" } ),
-        ( "fetch_similar",   "fetch_similar_impl",   "entry",      "some.entry", { "language": "ts" } ),
-        ( "read_capability", "read_capability_impl", "names",      [ "page" ],   {} ),
-        ( "replay",          "replay_impl",          "receipt_id", "abc123",     {} ),
+    @pytest.mark.parametrize( "tool, impl, arg_name, arg, given, sent", [
+        ( "check_exists",    "check_exists_impl",    "need",       "a need",     { "language": "py" },                          { "language": "py", "include_tests": False } ),
+        ( "check_exists",    "check_exists_impl",    "need",       "a need",     { "language": "py", "include_tests": True },   { "language": "py", "include_tests": True } ),
+        ( "fetch_similar",   "fetch_similar_impl",   "entry",      "some.entry", { "language": "ts" },                          { "language": "ts", "include_tests": False } ),
+        ( "fetch_similar",   "fetch_similar_impl",   "entry",      "some.entry", { "language": "ts", "include_tests": True },   { "language": "ts", "include_tests": True } ),
+        ( "read_capability", "read_capability_impl", "names",      [ "page" ],   {},                                            {} ),
+        ( "replay",          "replay_impl",          "receipt_id", "abc123",     {},                                            {} ),
     ] )
-    def test_each_wrapper_sends_its_own_impl_root_and_first_argument( self, tool, impl, arg_name, arg, extra ):
-        # the two search wrappers also send the language they were given, as a keyword; the other two take none
+    def test_each_wrapper_sends_its_own_impl_root_and_first_argument( self, tool, impl, arg_name, arg, given, sent ):
+        # the two search wrappers also send the language and include_tests they were given (false when not given), as keywords; the other two take none
         async def run():
             registered = await cvm.mcp.get_tool( tool )
-            return await registered.run( { arg_name: arg, "root": "/r", **extra } )
+            return await registered.run( { arg_name: arg, "root": "/r", **given } )
         with patch.object( cvm, "_reuse_call", return_value={ "answer": tool } ) as call:
             result = asyncio.run( run() )
         assert result.structured_content == { "answer": tool }
-        call.assert_called_once_with( impl, "/r", arg, **extra )
+        call.assert_called_once_with( impl, "/r", arg, **sent )
 
 
 class TestSweeperFactory:

@@ -15,6 +15,7 @@ SKIP_PARTS        = frozenset( { "tests", "migrations", ".venv", "vendor", "node
 DART_SKIP_PARTS   = frozenset( { "generated", ".dart_tool", "build" } )
 SKIP_SUFFIXES     = ( ".d.ts", ".min.js", ".g.dart", ".freezed.dart" )
 SCRIPT_SUFFIXES   = ( ".js", ".mjs", ".cjs", ".ts", ".tsx" )          # what a script file is, for every reader of the index
+TESTS_DIRS        = ( "src/tests", "src/cosa/tests" )                  # where the tests spec reads: neither is under any LUPIN_PY_PACKAGES root
 SUFFIX_LANG       = { ".py": "py", ".js": "ts", ".mjs": "ts", ".cjs": "ts", ".ts": "ts", ".tsx": "ts", ".dart": "dart" }          # the `lang` of a record, by suffix
 
 
@@ -33,13 +34,14 @@ class IndexSpec:
         - module_base is the directory dotted Python module names are taken relative to
     """
 
-    def __init__( self, root, name, py_roots, js_roots, dart_roots, module_base, skip_parts ):
+    def __init__( self, root, name, py_roots, js_roots, dart_roots, module_base, skip_parts, scopes=None ):
         """
         Store the index spec fields, converted to Path, tuples and a frozenset.
 
         Requires:
             - py_roots, js_roots and dart_roots are iterables of directories
             - skip_parts is an iterable of directory names to leave out
+            - scopes is None for the build's own search scopes, or a tuple of record scopes this spec publishes as searchable
 
         Ensures:
             - root and module_base are pathlib.Path; the three root sets are tuples; skip_parts is a frozenset
@@ -52,6 +54,7 @@ class IndexSpec:
         self.dart_roots  = tuple( dart_roots )
         self.module_base = pathlib.Path( module_base )
         self.skip_parts  = frozenset( skip_parts )
+        self.scopes      = None if scopes is None else tuple( scopes )
 
 
 def git_toplevel( start=None ):
@@ -100,6 +103,23 @@ def spec_for( root ):
     if ( root / "pubspec.yaml" ).is_file() and ( root / "lib" ).is_dir():
         return IndexSpec( root, root.name, [], [], [ root / "lib" ], root, skip | DART_SKIP_PARTS )
     return IndexSpec( root, root.name, [ root ], [ root ], [], root, skip )
+
+
+def tests_spec( root ):
+    """
+    Build the IndexSpec of a repository's test files.
+
+    Ensures:
+        - a lupin tree reads Python and script files under src/tests and src/cosa/tests, whichever exist
+        - any other tree reads a `tests` or `src/tests` directory when it has one, and nothing otherwise
+        - skip_parts is the main set less `tests`, so a test file is indexed here and nowhere else
+        - the spec publishes the scope `test` as its searchable scope
+    """
+    root  = pathlib.Path( root ).resolve()
+    names = TESTS_DIRS if is_lupin_tree( root ) else ( "tests", "src/tests" )
+    dirs  = [ root / n for n in names if ( root / n ).is_dir() ]
+    base  = root / "src" if is_lupin_tree( root ) else root
+    return IndexSpec( root, root.name, dirs, dirs, [], base, set( SKIP_PARTS ) - { "tests" }, scopes=( "test", ) )
 
 
 def is_test_path( rel_path ):

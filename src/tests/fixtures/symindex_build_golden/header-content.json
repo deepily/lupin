@@ -1,0 +1,13 @@
+{
+  "counts": {
+    "all": 35,
+    "routes": 3,
+    "searchable": 34,
+    "symbols": 28
+  },
+  "missing_dependencies": [],
+  "repo": "repo",
+  "search_sha": "2bee646753c937c28e923b9498f7bef0d7c405e1",
+  "symbols_sha": "227be0bbaf30d64bc1b3115db60354fe63af6425",
+  "unparsed": []
+}

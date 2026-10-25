@@ -35,7 +35,7 @@ from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex import wiki_lint as wl
 from cosa.repo.symindex.paths import data_dir, default_out_dir
 from cosa.repo.symindex.paths import index_readable
-from cosa.repo.symindex.spec import NotARepo, git_toplevel, spec_for
+from cosa.repo.symindex.spec import NotARepo, git_toplevel, spec_for, tests_spec
 from cosa.repo.symindex.candidates import freshness as fr
 from cosa.repo.symindex.candidates.errors import CandidateError
 from lupin_mcp import reuse_redact
@@ -262,6 +262,7 @@ class ReuseContext:
         self.pair_sweeper     = pair_sweeper
         self.candidate_stage  = candidate_stage
         self.policy           = policy
+        self.tests_gen        = None                          # set by prepare(): the tests generation of an include_tests call, else None
 
 
 def context_from_environment( root=None ):
@@ -901,20 +902,28 @@ def l0_lines( wiki_dir ):
     return p.read_text( encoding="utf-8" ).splitlines() if p.exists() else []
 
 
-def index_sha( symbols_sha, l0, pins="" ):
-    """Ensures: returns the sha1 over what check_exists reads: symbols, index lines, page pins."""
-    return sha( symbols_sha + "\n" + "\n".join( l0 ) + ( "\n" + pins if pins else "" ) )
+def index_sha( symbols_sha, l0, pins="", tests_sha=None ):
+    """
+    Hash what check_exists reads.
+
+    Ensures:
+        - returns the sha1 over what check_exists reads: symbols, index lines, page pins
+        - a tests_sha, when given, is part of it, so a call that reads test records is never the receipt of one that does not
+        - with no tests_sha the value is the one this function has always returned
+    """
+    return sha( symbols_sha + "\n" + "\n".join( l0 ) + ( "\n" + pins if pins else "" ) + ( "\ntests:" + tests_sha if tests_sha is not None else "" ) )
 
 
-def save_snapshot( ctx, sha_, gen, l0 ):
+def save_snapshot( ctx, sha_, gen, l0, tests_gen=None ):
     """
     Store the definitions and index lines an index_sha names, compressed, once.
 
     Ensures:
         - the definitions are the searchable listing a call judged (public and private), not the public file
+        - a call that read test records also stores them, after the others, so its receipt replays against the set it judged
         - they are not filtered by language: the language is on the receipt and applied again at replay
     """
-    text = sx_build.searchable_jsonl( gen )
+    text = sx_build.searchable_jsonl( gen ) + ( sx_build.searchable_jsonl( tests_gen, tests=True ) if tests_gen is not None else "" )
     blob = gzip.compress( canonical( { "symbols_jsonl": text, "l0": l0 } ).encode( "utf-8" ), mtime=0 )
     write_once( ctx.data / "snapshots" / f"{sha_}.json.gz", blob )
 
@@ -1001,9 +1010,12 @@ def load_receipt( ctx, rid ):
     return r
 
 
-def _live_budget( ctx ):
+def _live_budget( ctx, attempts=None ):
     """
     Build the budget of a live transport.
+
+    Requires:
+        - attempts is None for the context's own call budget, or the attempt limit a call computed for itself
 
     Ensures:
         - the old path gets the attempt cap alone
@@ -1012,12 +1024,13 @@ def _live_budget( ctx ):
         - ReuseError BAD_SPEND_LIMIT when a packed context has no ceiling, run name or ledger
         - ReuseError SPEND_LEDGER when the ledger is unreadable, refuses the run, or already holds the run name
     """
-    if ctx.sweeper is None: return jev_transport.CallBudget( ctx.call_budget )
+    attempts = ctx.call_budget if attempts is None else attempts
+    if ctx.sweeper is None: return jev_transport.CallBudget( attempts )
     from lupin_mcp import reuse_ceiling, reuse_ledger                          # imported here: both import this module
     if ctx.token_ceiling is None or not ctx.run_name or ctx.ledger is None:
         raise ReuseError( "BAD_SPEND_LIMIT", "a packed live run needs a token ceiling, a run name and a ledger" )
     try:
-        return reuse_ceiling.TokenBudget( ctx.call_budget, ctx.token_ceiling, ledger=ctx.ledger, run=ctx.run_name )
+        return reuse_ceiling.TokenBudget( attempts, ctx.token_ceiling, ledger=ctx.ledger, run=ctx.run_name )
     except ( reuse_ledger.AccountLimitReached, reuse_ledger.LedgerUnreadable, ValueError ) as e:
         raise ReuseError( "SPEND_LEDGER", str( e ) ) from e
 
@@ -1065,11 +1078,17 @@ def unscreened_path_count( entries, routes ):
     return count
 
 
-def prepare( ctx ):
+def prepare( ctx, include_tests=False ):
     """
     Resolve the index and the transport for one sweep.
 
+    Requires:
+        - include_tests is true to add the test records of the tests generation, which is built here when missing or stale
+
     Ensures:
+        - an include_tests call adds those records to the entries, mixes the tests generation's hash into the index_sha, saves them in the
+          snapshot, and gives a live transport the attempt limit for the searchable-plus-test count; a default call changes in none of these
+        - ctx.tests_gen is the tests generation of an include_tests call, else None
         - returns ( flags, entries, sha, gen ): flags is the set of pipeline causes that hold, entries the
           index symbols to ask about, as sendable() leaves them (defaults blanked, backstop drops removed), sha the index_sha, gen the live generation or None
         - a tree that is neither lupin nor a registered repo with a built index (index_readable) gives NOT_LUPIN_TREE and no entries
@@ -1078,23 +1097,32 @@ def prepare( ctx ):
         - no transport and no JEV_API_TOASTER in the environment gives KEY_UNREADABLE; the entries are still returned
     """
     flags = set()
+    ctx.tests_gen = None
     if not index_readable( ctx.root ): return { "NOT_LUPIN_TREE" }, [], "none", None
     spec = spec_for( ctx.root )
     try:
         gen = sx_build.ensure( ctx.root, ctx.out_dir )
+        if include_tests: ctx.tests_gen = sx_build.ensure( ctx.root, ctx.out_dir / "tests", tests_spec( ctx.root ) )
     except Exception:                                                        # a build that cannot finish leaves the index stale
         return { "INDEX_STALE" }, [], "none", None
-    header = sx_build.read_header( gen )
+    header    = sx_build.read_header( gen )
+    attempts  = ctx.call_budget
+    tests_sha = None
+    if ctx.tests_gen is not None:
+        theader   = sx_build.read_header( ctx.tests_gen )
+        tests_sha = theader[ "search_sha" ]
+        attempts  = max( attempts, call_budget_cap_for( header[ "counts" ][ "searchable" ] + theader[ "counts" ][ "searchable" ] ) )
     if header[ "missing_dependencies" ]: flags.add( "DEPENDENCY_MISSING" )
     if ctx.transport is None:
-        if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=_live_budget( ctx ), transient=ctx.sweeper is not None )
+        if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=_live_budget( ctx, attempts ), transient=ctx.sweeper is not None )
         else: flags.add( "KEY_UNREADABLE" )
     symbols    = sx_build.read_searchable( gen )
-    entries, _ = sendable( symbols, ctx.exclude_prefixes )
+    tests      = sx_build.read_searchable( ctx.tests_gen, tests=True ) if ctx.tests_gen is not None else []
+    entries, _ = sendable( symbols + tests, ctx.exclude_prefixes )
     l0         = l0_lines( ctx.wiki_dir )
     ctx.pages  = page_candidates( ctx.wiki_dir, [ s for s in symbols if s[ "scope" ] == "public" ] )
-    sha_       = index_sha( header[ "search_sha" ] if "search_sha" in header else header[ "symbols_sha" ], l0, pages_digest( ctx.pages ) )
-    save_snapshot( ctx, sha_, gen, l0 )
+    sha_       = index_sha( header[ "search_sha" ] if "search_sha" in header else header[ "symbols_sha" ], l0, pages_digest( ctx.pages ), tests_sha )
+    save_snapshot( ctx, sha_, gen, l0, ctx.tests_gen )
     return flags, entries, sha_, gen
 
 
@@ -1141,7 +1169,7 @@ def _route( ctx, need, entries, flags, frozen=False, template=None, model=None, 
              "stages": [ _stage( name, sw, len( asked ) ) ], "plan": None, "sweeps": [ sw ] }
 
 
-def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None, sweep_only=False, question="choice", *, language ):
+def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None, sweep_only=False, question="choice", *, language, include_tests=False ):
     """
     Run one sweep-based question end to end and store its receipt.
 
@@ -1151,7 +1179,7 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
         - sweep_only turns the candidate stage off for a check_exists question, so every entry is asked
     """
     try:
-        return _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only, question, language=language )
+        return _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only, question, language=language, include_tests=include_tests )
     finally:
         _finish( ctx )
 
@@ -1295,7 +1323,7 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
     return out
 
 
-def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only=False, question="choice", *, language ):
+def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only=False, question="choice", *, language, include_tests=False ):
     """
     Run one sweep-based question end to end and store its receipt.
 
@@ -1318,6 +1346,8 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
           the receipt names the question and carries its policy, template and shape
         - only entries of `language` are asked (`all` asks every language), and the receipt names the language and holds it in its id
         - the candidate stage holds every language, so the stage ids of another language are dropped from the shortlist, and from a widening, before anything is asked
+        - include_tests asks the test records too: the vector set holds none, so the question takes the sweep-only route and the receipt records
+          sweep_only and include_tests, the second in its id; a default call writes neither key
     Raises:
         - ReuseError BAD_QUESTION for a question other than choice or provides
         - ReuseError BAD_LANGUAGE for a language that language_error refuses
@@ -1327,7 +1357,8 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if language_error( language ) is not None: raise ReuseError( "BAD_LANGUAGE", f"language must be one of {LANGUAGES}, got {language!r}" )
     pair = question == "provides"
     if pair and ( ctx.sweeper is None or ctx.pack_size is None ): raise ReuseError( "PAIR_NEEDS_PACKED", "the provides question is asked on the packed path only" )
-    flags, entries, sha_, gen = prepared if prepared is not None else prepare( ctx )
+    if include_tests: sweep_only = True                                         # no vector holds a test record, so the stage cannot propose one
+    flags, entries, sha_, gen = prepared if prepared is not None else prepare( ctx, include_tests )
     routes, routes_source = known_routes_of( gen )
     sent, _ranking, redactions = reuse_redact.redact_need( need, routes )         # the need is redacted before anything is asked
     if tool == "check_exists" and query == need: query = sent
@@ -1369,7 +1400,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     version       = PACKED_TOOL_VERSION if packed else TOOL_VERSION
     cstage        = _candidate_receipt( stage, stage_error, staged, _ranking, redactions, len( entries ), routed, widen_error ) if staged is not None and entries and not hard else None
     rec = { "id": receipt_id( tool, query, sha_, ctx.model, policy, template_hash, d[ "causes" ], version, shape if packed else None, sweep_only, exclude_id, need_text,
-                              _candidate_of( cstage ) if cstage is not None else None, language ),
+                              _candidate_of( cstage ) if cstage is not None else None, language, True if include_tests else None ),
             "tool": tool, "tool_version": version, "query": query, "index_sha": sha_, "model": ctx.model, "language": language,
             "policy": policy, "prompt_template_hash": template_hash, "prompt_template": template,
             "page_prompt_template": None, "route": routed[ "route" ], "pages": None,          # both keys stay, as None, so a receipt keeps the shape it had when the page route existed
@@ -1392,6 +1423,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if unscreened: rec[ "unscreened_entry_paths" ] = unscreened                  # the plan's K14 count; written only when nonzero, so a clean index keeps its pinned receipt bytes
     if sweep_only: rec[ "sweep_only" ], rec[ "exclude_id" ] = True, exclude_id
     elif tool == "check_exists" and exclude_id is not None: rec[ "exclude_id" ] = exclude_id
+    if include_tests: rec[ "include_tests" ] = True
     if need_text is not None: rec[ "need_text" ] = need_text
     if cstage is not None: rec[ "candidate_stage" ] = cstage
     if packed:
@@ -1427,15 +1459,17 @@ def _public( receipt, extra=None ):
     return out
 
 
-def check_exists_impl( need, ctx, language=None ):
+def check_exists_impl( need, ctx, language=None, include_tests=False ):
     """
     Should this be built? Sweep the index with Jev and apply the decision table.
 
     Requires:
         - need is a non-empty description of the capability
         - language is py, ts, dart or all: the search covers that language, and `all` is the opt-in to every language
+        - include_tests is true to ask the test files too; a default call never reads or sends a test record
     Ensures:
         - returns { status, receipt_id, verdict, cause, causes, shortlist, nearest, ... }
+        - an include_tests call sweeps every searchable and test record (no candidate stage) and its receipt says so
         - a missing language returns error LANGUAGE_REQUIRED and an unknown one LANGUAGE_INVALID, each listing the choices, before any request
         - verdict is `REUSE`, `EXTEND` or `UNCERTAIN_READ_SOURCE` (a receipt stored before the retirement of `NEW` may still say `NEW`); an uncertain verdict always carries a cause, `NO_MATCH` when nothing relevant was found
     """
@@ -1443,7 +1477,7 @@ def check_exists_impl( need, ctx, language=None ):
     bad = language_error( language )
     if bad is not None: return bad
     try:
-        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), language=language ) )
+        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), language=language, include_tests=include_tests ) )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
 
@@ -1496,7 +1530,7 @@ def _need_impl( need, exclude_id, ctx, question, sweep_only, write=True, *, lang
         return { "status": "error", "error": e.name, "detail": e.detail }
 
 
-def fetch_similar_impl( entry, ctx, language=None ):
+def fetch_similar_impl( entry, ctx, language=None, include_tests=False ):
     """
     What does this symbol resemble? The shortlist for an indexed symbol, excluding itself by id.
 
@@ -1504,6 +1538,7 @@ def fetch_similar_impl( entry, ctx, language=None ):
         - entry is a symbol id of the index, public or private
         - language is py, ts, dart or all, stated by the caller and never inferred from the entry
         - a language other than the entry's own is a cross-language look
+        - include_tests is true to look among the test files too, and to accept a test definition as the entry
     Ensures:
         - a missing language returns error LANGUAGE_REQUIRED and an unknown one LANGUAGE_INVALID, each listing the choices, before any request
         - returns { status, receipt_id, shortlist, nearest, uncertain } where uncertain is the cause
@@ -1515,9 +1550,10 @@ def fetch_similar_impl( entry, ctx, language=None ):
     """
     bad = language_error( language )
     if bad is not None: return bad
-    prepared = prepare( ctx )
+    prepared = prepare( ctx, include_tests )
     flags, gen = prepared[ 0 ], prepared[ 3 ]
-    hit      = next( ( r for r in sx_build.read_symbols( gen, all_symbols=True ) if r[ "id" ] == entry ), None ) if gen else None
+    known    = ( sx_build.read_symbols( gen, all_symbols=True ) + ( sx_build.read_symbols( ctx.tests_gen, all_symbols=True ) if ctx.tests_gen is not None else [] ) ) if gen else []
+    hit      = next( ( r for r in known if r[ "id" ] == entry ), None )
     if hit is None and not flags & { "NOT_LUPIN_TREE", "INDEX_STALE" }:
         return { "status": "error", "error": "UNKNOWN_ENTRY", "entry": entry }
     if hit is not None:
@@ -1528,7 +1564,7 @@ def fetch_similar_impl( entry, ctx, language=None ):
                      "detail": ", ".join( patterns ) if dropped else "the id is under an excluded prefix" }
         hit = kept[ 0 ]
     try:
-        rec = run_question( ctx, "fetch_similar", entry, entry_text( hit ) if hit else entry, exclude_id=entry, prepared=prepared, language=language )
+        rec = run_question( ctx, "fetch_similar", entry, entry_text( hit ) if hit else entry, exclude_id=entry, prepared=prepared, language=language, include_tests=include_tests )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
     out = _public( rec, { "uncertain": rec[ "cause" ] } )
@@ -1702,7 +1738,8 @@ def replay_impl( rid, ctx, repeat=0 ):
             head_ctx        = copy.copy( ctx )
             head_ctx.sweeper = reuse_flip.replay_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
             if question == "provides": head_ctx.pair_sweeper = reuse_flip.replay_pair_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
-        head    = run_question( head_ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question, language=language )
+        head    = run_question( head_ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question, language=language,
+                                include_tests="include_tests" in stored )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail, "receipt_id": rid }
     return { "status": "ok", "receipt_id": rid, "stored": stored, "frozen": fz,

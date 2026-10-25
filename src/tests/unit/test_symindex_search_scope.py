@@ -137,13 +137,16 @@ def _git_files( pattern ):
 ALLOWED_READ_SYMBOLS = ( "src/cosa/repo/symindex/build.py", "src/cosa/repo/symindex/wiki_lint.py", "src/cosa/repo/symindex/diff.py" )
 
 
+ID_LOOKUP_READERS = ( "src/lupin_mcp/reuse_tools.py", "src/lupin_mcp/reuse_needset/loss_trace.py" )     # the fetch_similar entry lookup, and the loss trace's seed lookup
+
+
 def _stray_calls( lines ):
     keep = []
     for l in lines:
         path, _, rest = l.split( ":", 2 )
         if path.startswith( "src/tests/" ) or path in ALLOWED_READ_SYMBOLS: continue
         if "def read_symbols" in rest or "read_searchable" in rest: continue
-        if "all_symbols=True" in rest and path == "src/lupin_mcp/reuse_tools.py": continue      # the fetch_similar lookup
+        if "all_symbols=True" in rest and path in ID_LOOKUP_READERS: continue                   # an id lookup among every definition, not a search
         keep.append( l )
     return keep
 

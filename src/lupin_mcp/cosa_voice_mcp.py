@@ -4872,7 +4872,7 @@ def _reuse_call( impl_name, root, *args, module="reuse_tools", **kw ) -> dict:
 
 @mcp.tool
 @_offloaded_tool
-def check_exists( need: str, language: Optional[ str ] = None, root: Optional[ str ] = None ) -> dict:
+def check_exists( need: str, language: Optional[ str ] = None, root: Optional[ str ] = None, include_tests: bool = False ) -> dict:
     """
     Should this be built? Gives a verdict and the existing symbols that may do it.
 
@@ -4888,13 +4888,14 @@ def check_exists( need: str, language: Optional[ str ] = None, root: Optional[ s
         need: what the new code would do
         language: py, ts, dart or all (required; there is no default)
         root: repository root to check; default is the git root of the working directory
+        include_tests: also ask the test files (default false); the call then sweeps every record, so it is slower and dearer
     """
-    return _reuse_call( "check_exists_impl", root, need, language=language )
+    return _reuse_call( "check_exists_impl", root, need, language=language, include_tests=include_tests )
 
 
 @mcp.tool
 @_offloaded_tool
-def fetch_similar( entry: str, language: Optional[ str ] = None, root: Optional[ str ] = None ) -> dict:
+def fetch_similar( entry: str, language: Optional[ str ] = None, root: Optional[ str ] = None, include_tests: bool = False ) -> dict:
     """
     What does this symbol resemble? Returns the shortlist of similar existing symbols and a receipt_id.
 
@@ -4908,8 +4909,9 @@ def fetch_similar( entry: str, language: Optional[ str ] = None, root: Optional[
         entry: symbol id
         language: py, ts, dart or all (required; there is no default)
         root: repository root; default is the git root of the working directory
+        include_tests: also look among the test files (default false), and accept a test definition as the entry
     """
-    return _reuse_call( "fetch_similar_impl", root, entry, language=language )
+    return _reuse_call( "fetch_similar_impl", root, entry, language=language, include_tests=include_tests )
 
 
 @mcp.tool
