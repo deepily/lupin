@@ -179,7 +179,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 | Interactive proxy | :8000 (scheduled) | `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` | mutates state |
 | Presentation regression | :8000 (scheduled) | `./src/tests/run-presentation-regression.sh --bg` | real LLM spend; `--include-opus` / `--all` variants |
 
-**Before you ask for review**: run `src/tests/run-census-guards.sh` beside the tests of the files you changed. A census guard counts something across the whole tree, so new code can turn it red while none of its files changed. The set is chosen by file name (`test_every_*`, `*census*`, `*_pin*`, `*pins*`, `*pinned*`), so name a new census guard to match.
+**Before you ask for review**: run `src/tests/run-census-guards.sh` beside the tests of the files you changed. A census guard counts something across the whole tree, so new code can turn it red while none of its files changed. The set is chosen two ways. A file named `test_every_*`, `*census*`, `*_pin*`, `*pins*` or `*pinned*` runs whole. In any other tracked unit file, each `test_every_*` function runs by node id. So name a new census guard to match one of those.
 
 **`--bg` mandate**: integration, E2E UI, and presentation regression exceed the 10-min Bash timeout — always launch with `--bg` from Claude Code; monitor the matching `/tmp/*-latest.log`. PID-file overlap guards prevent concurrent runs.
 

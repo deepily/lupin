@@ -22,7 +22,7 @@ The runner scripts, probes and checkers used to run test tiers and to ask narrow
 - `run-typecheck-gate.sh`, `run-stylelint-gate.sh` and `run-doclint-gate.sh` are the cheap gates; see [[doc-lint-gate]].
 ## Coverage, census and mutation
 - `run-coverage-gate.sh` checks the total against `fail_under` and checks the frame holds every file it claims. Exit 1 is a breach; 2, 3, 4 and 6 mean no trustworthy number.
-- `run-census-guards.sh` runs the unit-tier guards picked by file name, needs no server, and exits 2 if the match finds nothing.
+- `run-census-guards.sh` runs the unit-tier guards, needs no server, and exits 2 if the selection finds nothing or cannot read a file. A file picked by name runs whole; in any other file each `test_every_*` function runs by node id. `--list` prints the selection and runs nothing.
 - `detect_thread_credited_coverage.py`, `find_interchangeable_assertions.py` and `bridge_pin_sweep.py` are report-only triage aids over tests.
 - `falsify.py` mutates one named function, runs a suite, and restores the file. Exit 0 means a test went red, 1 none did, 2 the mutation was refused.
 - `MockAgenticJob` and `build_plain_mock_job` in `src/cosa/agents/test_harness/` simulate a long agentic job without model calls.

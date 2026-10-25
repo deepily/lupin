@@ -105,13 +105,13 @@ def assert_every_declared_test_is_collected( request, path ):
         - path is the calling test file's __file__
 
     Ensures:
-        - SKIPS when the session was filtered (-k / --last-failed), because a
-          deliberate subset is not a defect
+        - SKIPS when the session was filtered (-k / --last-failed / a node id
+          on the command line), because a deliberate subset is not a defect
         - otherwise raises AssertionError naming every orphaned test
     """
     config = request.config
-    if config.getoption( "-k", default="" ) or config.getoption( "--last-failed", default=False ):
-        pytest.skip( "session is filtered (-k/--last-failed); a deliberate subset is not a defect" )
+    if config.getoption( "-k", default="" ) or config.getoption( "--last-failed", default=False ) or any( "::" in str( arg ) for arg in config.args ):
+        pytest.skip( "session is filtered (-k/--last-failed/node id); a deliberate subset is not a defect" )
 
     declared  = declared_test_names( path )
     collected = collected_test_names( request, path )

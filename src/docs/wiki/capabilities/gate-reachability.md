@@ -33,6 +33,6 @@ A census of the test tree. It finds test files that no gate runner can reach, so
 ## How it is used
 - `test_gate_reachability_census.py` runs the unreferenced, zero-collect and stale-entry checks in the unit tier. Its ledger is `src/tests/unit/gate-reachability-allowlist.json`.
 - Each ledger entry names a file someone chose not to gate, with a dated reason, and the file must be tracked.
-- `src/tests/run-census-guards.sh` picks the test up by its name. Run it before review, since new test files can turn it red.
+- `src/tests/run-census-guards.sh` picks a test file up by its name, and a `test_every_*` function in any file by its own name. Run it before review, since new test files can turn it red.
 - Nothing calls `find_stub_bodied_tests`. `test_stub_bodied_test_detector.py` tests its vacuity check only.
 - A new test directory is gated by naming it in a runner script that `SUITE_SCRIPTS` reaches.
