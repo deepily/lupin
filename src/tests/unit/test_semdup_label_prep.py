@@ -88,10 +88,10 @@ def test_write_sentence_retries_with_the_failure_kinds_and_gives_up_after_three_
     def ask( system, user ):
         users.append( user )
         return next( replies )
-    assert lp.write_sentence( need, "py", ask ) == SENTENCE
+    assert lp.write_sentence( need, "py", ask ) == ( SENTENCE, [ [ "opener", "word_count" ] ] )
     assert "word_count" in users[ 1 ] and "word_count" not in users[ 0 ]
     calls = []
-    assert lp.write_sentence( need, "py", lambda s, u: calls.append( u ) or "Adds things." ) is None and len( calls ) == 3
+    assert lp.write_sentence( need, "py", lambda s, u: calls.append( u ) or "Adds things." ) == ( None, [ [ "opener", "word_count" ] ] * 3 ) and len( calls ) == 3
 
 
 # ---- planting ---------------------------------------------------------------------------------------------------
@@ -148,7 +148,7 @@ def test_a_work_alike_fails_when_no_sentence_passes_or_the_reply_is_unparsable_o
     patch_need( monkeypatch )
     asks, _ = asks_with( sentence="Adds." )
     assert lp.plant_one( orig(), "/r", lp.STRATA[ 1 ], asks, plant.python_shape ) == {
-        "original": "d-1", "stratum": "opus-work-alike", "status": "failed", "failures": [ { "sentence": "no sentence passed the form check" } ] }
+        "original": "d-1", "stratum": "opus-work-alike", "status": "failed", "failures": [ { "sentence": [ [ "opener", "word_count" ] ] * 3 } ] }
     asks, _ = asks_with( alike="def g( :\n" )
     assert lp.plant_one( orig(), "/r", lp.STRATA[ 1 ], asks, plant.python_shape )[ "failures" ] == [ { "unparsable": True } ]
     asks, _ = asks_with( alike=PY_FIT.replace( "fit", "other" ) )
@@ -371,6 +371,90 @@ def test_a_failure_after_planting_costs_no_model_call_on_the_next_run( tmp_path,
     assert used >= 60 and ( tmp_path / "out" / "key" / lp.PLANTED_FILE ).is_file() and not ( tmp_path / "out" / "key" / lp.KEY_FILE ).exists()
     out = lp.run( tmp_path / "repo", tmp_path / "out", CFG, { **wiring, "client": FakeEmbed() }, seed=3 )
     assert len( calls ) == used and out[ "planted" ] == { "fable-planted": 40, "opus-work-alike": 20 } and out[ "failed" ] == 0
+
+
+PY_TEXT = "def g( a ):\n    for b in a:\n        if b:\n            a = a + [ b ]\n    return a\n"
+TS_TEXT = "function g( a ) { for ( const b of a ) { if ( b ) { a.push( b ); } } return a; }"
+
+
+def doc_of( have_ts, have_py, failed_ts, failed_py ):
+    """Build a planted document with some work-alikes and some failed originals."""
+    planted = [ { "original": synthetic( "ts", 900 + i ), "rewrite": {}, "stratum": "opus-work-alike" } for i in range( have_ts ) ]
+    planted += [ { "original": synthetic( "py", 900 + i ), "rewrite": {}, "stratum": "opus-work-alike" } for i in range( have_py ) ]
+    planted += [ { "original": synthetic( "ts", 800 ), "rewrite": {}, "stratum": "fable-planted" } ]
+    failed = [ { "original": f"d-ts-{i:03d}", "stratum": "opus-work-alike", "status": "failed", "failures": [] } for i in failed_ts ]
+    failed += [ { "original": f"d-py-{i:03d}", "stratum": "opus-work-alike", "status": "failed", "failures": [] } for i in failed_py ]
+    return { "planted": planted, "failed": failed }
+
+
+def test_top_up_retries_failed_work_alikes_first_then_fresh_originals_until_each_share_is_full( tmp_path, monkeypatch ):
+    pools = { "script": [ synthetic( "ts", i ) for i in range( 8 ) ], "python": [ synthetic( "py", i ) for i in range( 8 ) ] }
+    doc   = doc_of( 10, 5, [ 0, 1 ], [ 0, 1, 2 ] )
+    asked = []
+    def fake_one( rec, root, method, asks, shape_of ):
+        asked.append( rec[ "id" ] )
+        if rec[ "id" ] in ( "d-ts-000", "d-py-001" ): return { "original": rec[ "id" ], "stratum": method, "status": "failed", "failures": [ { "again": True } ] }
+        return { "original": rec[ "id" ], "stratum": method, "status": "planted", "rewrite_text": TS_TEXT if rec[ "lang" ] != "py" else PY_TEXT, "tries": 1 }
+    monkeypatch.setattr( lp, "plant_one", fake_one )
+    wiring = { "asks": {}, "shape_of": { "py": None, "ts": None } }
+    added  = lp.top_up_alikes( doc, pools, "/r", wiring, tmp_path, count=60, threads=1 )
+    assert added == 5 and asked == [ "d-ts-000", "d-ts-001", "d-ts-002", "d-py-000", "d-py-001", "d-py-002", "d-py-003" ]     # failed ones first, a second failure is not tried a third time
+    opus = lambda lang: sum( 1 for p in doc[ "planted" ] if p[ "stratum" ] == "opus-work-alike" and ( p[ "original" ][ "lang" ] == "py" ) == ( lang == "py" ) )
+    assert ( opus( "ts" ), opus( "py" ) ) == ( 12, 8 )
+    assert doc[ "planted" ][ -1 ][ "rewrite" ][ "origin" ] == "new" and (tmp_path / f"{len( doc[ 'planted' ] ) - 1:03d}").is_dir()
+    assert sum( 1 for f in doc[ "failed" ] if f.get( "failures" ) == [ { "again": True } ] ) >= 2
+
+
+def test_top_up_stops_after_its_waves_when_a_group_cannot_be_filled_and_does_nothing_when_it_is_full( tmp_path, monkeypatch ):
+    pools = { "script": [ synthetic( "ts", i ) for i in range( 3 ) ], "python": [] }
+    monkeypatch.setattr( lp, "plant_one", lambda rec, root, method, asks, shape_of: { "original": rec[ "id" ], "stratum": method, "status": "failed", "failures": [] } )
+    doc   = doc_of( 10, 8, [], [] )
+    assert lp.top_up_alikes( doc, pools, "/r", { "asks": {}, "shape_of": { "py": None, "ts": None } }, tmp_path, count=60, threads=1, waves=2 ) == 0
+    assert len( doc[ "failed" ] ) == 4                      # two places open: two fresh originals, then each of those once more, and no third try
+    full = doc_of( 12, 8, [], [] )
+    assert lp.top_up_alikes( full, pools, "/r", { "asks": {}, "shape_of": { "py": None, "ts": None } }, tmp_path, count=60 ) == 0 and full[ "failed" ] == []
+
+
+def test_the_planted_document_is_replaced_whole_and_leaves_no_temporary_file( tmp_path ):
+    path = tmp_path / "key" / "planted.json"
+    lp.save_doc( path, { "planted": [], "failed": [ 1 ] } )
+    lp.save_doc( path, { "planted": [ 1 ], "failed": [] } )
+    assert json.loads( path.read_text( encoding="utf-8" ) ) == { "planted": [ 1 ], "failed": [] } and sorted( p.name for p in path.parent.iterdir() ) == [ "planted.json" ]
+
+
+def test_a_resumed_run_tops_up_the_work_alikes_saves_the_document_and_then_asks_the_models_nothing( tmp_path, monkeypatch ):
+    root = monolith_root( tmp_path / "repo", monkeypatch, MONOLITH_TEXT )
+    monkeypatch.setattr( plant, "python_need", lambda r, rt: need_input.NeedInput( member_id="m", kind="function", text="def NAME(): pass", forbidden=[ "fn" ] ) )
+    state = { "sentence": "Adds.", "calls": 0 }
+    def sentence( system, user ):
+        state[ "calls" ] += 1
+        return state[ "sentence" ]
+    def rewrite( system, user ):
+        state[ "calls" ] += 1
+        return PY_TEXT if "def " in user else TS_TEXT
+    def alike( system, user ):
+        state[ "calls" ] += 1
+        return PY_TEXT if "Python" in user else TS_TEXT
+    wiring = { "server_defs": [ synthetic( "py", i ) for i in range( 100 ) ], "client_defs": [ synthetic( "ts", i ) for i in range( 100 ) ],
+               "asks": { "rewrite": rewrite, "sentence": sentence, "alike": alike },
+               "shape_of": { "py": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9}, "ts": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9} },
+               "client": FakeEmbed(), "cache_dir": tmp_path / "vec" }
+    class Broken:
+        def info( self ): raise RuntimeError( "no key" )
+    with pytest.raises( RuntimeError, match="no key" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, { **wiring, "client": Broken() }, seed=3 )
+    saved = tmp_path / "out" / "key" / lp.PLANTED_FILE
+    first = json.loads( saved.read_text( encoding="utf-8" ) )
+    assert not any( p[ "stratum" ] == "opus-work-alike" for p in first[ "planted" ] ) and len( first[ "failed" ] ) > 0
+    state[ "sentence" ] = SENTENCE
+    out  = lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3 )
+    assert out[ "planted" ][ "opus-work-alike" ] == 20 and out[ "planted" ][ "fable-planted" ] == len( first[ "planted" ] )
+    assert json.loads( saved.read_text( encoding="utf-8" ) )[ "planted" ][ :len( first[ "planted" ] ) ] == first[ "planted" ]
+    used = state[ "calls" ]
+    again = tmp_path / "out2"
+    ( again / "key" ).mkdir( parents=True )
+    ( again / "key" / lp.PLANTED_FILE ).write_text( saved.read_text( encoding="utf-8" ), encoding="utf-8" )
+    lp.run( tmp_path / "repo", again, CFG, wiring, seed=3 )
+    assert state[ "calls" ] == used
 
 
 # ---- the wiring and the command ---------------------------------------------------------------------------------

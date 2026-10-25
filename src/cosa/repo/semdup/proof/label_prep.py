@@ -1,6 +1,7 @@
 """Label preparation for the proof: planted and monolith pairs, blind packets, answer key."""
 import argparse
 import asyncio
+import collections
 import concurrent.futures
 import hashlib
 import json
@@ -28,6 +29,7 @@ CLIENT_DIR     = "src/lupin_app/static/js"
 PLANTED_COUNT  = 60
 ALIKE_EVERY    = 3
 PER_SOURCE     = 30
+TOP_UP_WAVES   = 6
 THREADS        = 6
 STRATA         = ( "fable-planted", "opus-work-alike" )
 REWRITE_MODEL  = "claude-fable-5-1"
@@ -95,7 +97,8 @@ def script_shape( text ):
 def _need_for( rec, root ):
     """Return the stripped need input for a definition, by need_input or strip_names."""
     if rec[ "lang" ] == "py": return plant.python_need( rec, root )
-    text, names = plant.strip_names( rec[ "text" ], rec[ "declared" ], rec[ "name" ].split( "." )[ -1 ] )
+    declared    = [ n for n in rec[ "declared" ] if len( n ) >= need_input.MIN_NAME_LEN and n not in need_input.KEEP_NAMES ]
+    text, names = plant.strip_names( rec[ "text" ], declared, rec[ "name" ].split( "." )[ -1 ] )
     kind        = "method" if "." in rec[ "name" ] and "<locals>" not in rec[ "name" ] else "function"
     return need_input.NeedInput( member_id=rec[ "id" ], kind=kind, text=text, forbidden=names )
 
@@ -108,15 +111,17 @@ def write_sentence( need, lang, ask ):
         - need is a NeedInput; lang is "py" or "ts"; ask takes ( system prompt, user prompt ) and returns the reply text
 
     Ensures:
-        - returns the first sentence for which need_writer.check_form finds no failure
-        - returns None after need_writer.MAX_ATTEMPTS tries, each retry naming the last failure kinds
+        - returns ( sentence, tried ): the first sentence for which need_writer.check_form finds no failure, or None after need_writer.MAX_ATTEMPTS tries
+        - tried lists the failure kinds of each rejected try; each retry names the last failure kinds, the own names the last sentence used and its length
     """
-    failures = None
+    failures, tried, own, words = None, [], None, None
     for _ in range( need_writer.MAX_ATTEMPTS ):
-        sentence = need_writer.extract_sentence( ask( need_writer.system_prompt( lang ), need_writer.build_prompt( need, failures=failures, write_lang=lang ) ) )
+        sentence = need_writer.extract_sentence( ask( need_writer.system_prompt( lang ), need_writer.build_prompt( need, failures=failures, own_words=own, last_words=words, write_lang=lang ) ) )
         failures = need_writer.check_form( sentence, need )
-        if not failures: return sentence
-    return None
+        if not failures: return sentence, tried
+        tried.append( failures )
+        own, words = need_writer.own_words_found( sentence, need ), len( sentence.split() )
+    return None, tried
 
 
 def plant_one( rec, root, method, asks, shape_of ):
@@ -144,8 +149,8 @@ def plant_one( rec, root, method, asks, shape_of ):
         made   = plant.plant_rewrite( rec[ "text" ], banned, asks[ "rewrite" ], shape_of )
         if made[ "status" ] == "failed": return { **base, "status": "failed", "failures": made[ "failures" ] }
         return checked( rec, { **base, "status": "planted", "rewrite_text": made[ "rewrite" ], "tries": made[ "tries" ] } )
-    sentence = write_sentence( need, lang, asks[ "sentence" ] )
-    if sentence is None: return { **base, "status": "failed", "failures": [ { "sentence": "no sentence passed the form check" } ] }
+    sentence, tried = write_sentence( need, lang, asks[ "sentence" ] )
+    if sentence is None: return { **base, "status": "failed", "failures": [ { "sentence": tried } ] }
     reply    = asks[ "alike" ]( ALIKE_SYSTEM, f"Language: {LANG_NAMES[ rec[ 'lang' ] ]}\nDescription: {sentence}" )
     failed   = plant.check_rewrite( rec[ "text" ], reply, [], shape_of )
     if failed: return { **base, "status": "failed", "failures": [ failed ] }
@@ -351,6 +356,59 @@ def select_pools( server_defs, client_defs, cfg, seed, count=PLANTED_COUNT ):
     return { "script": [ d for d in drawn if d[ "lang" ] != "py" ], "python": [ d for d in drawn if d[ "lang" ] == "py" ] }
 
 
+def save_doc( path, doc ):
+    """
+    Write the planted document whole, replacing a previous version in one step.
+
+    Requires:
+        - doc is a JSON-serialisable dict; path's folder exists or can be made
+
+    Ensures:
+        - the file holds the new document or the old one, never half of either
+    """
+    path = pathlib.Path( path )
+    path.parent.mkdir( parents=True, exist_ok=True )
+    tmp  = path.with_name( path.name + ".tmp" )
+    tmp.write_text( json.dumps( doc, indent=2, sort_keys=True ), encoding="utf-8" )
+    tmp.replace( path )
+
+
+def top_up_alikes( doc, pools, root, wiring, folder, count=PLANTED_COUNT, threads=THREADS, waves=TOP_UP_WAVES ):
+    """
+    Add Opus work-alikes until each language group holds its share.
+
+    Requires:
+        - doc is { planted, failed } as run saves it; pools are select_pools' lists; folder is the rewrites folder
+
+    Ensures:
+        - each group (script, Python) is brought to its share of count divided by ALIKE_EVERY, from originals that failed as work-alikes once (retried once) first and then from originals not yet tried
+        - at most waves rounds per group, each asking only for the places still open; a group that runs out of originals or waves stays short and the shortfall is in the result
+        - the added pairs are appended to doc[ "planted" ], numbered on from the pairs already there, and every failed try is appended to doc[ "failed" ]
+        - returns the number of pairs added
+    """
+    by_id, added = { d[ "id" ]: d for d in [ *pools[ "script" ], *pools[ "python" ] ] }, 0
+    share        = round( count * plant.SCRIPT_SHARE )
+    groups       = ( ( "script", lambda lang: lang != "py", share // ALIKE_EVERY ), ( "python", lambda lang: lang == "py", ( count - share ) // ALIKE_EVERY ) )
+    with concurrent.futures.ThreadPoolExecutor( max_workers=threads ) as pool:
+        for name, member, quota in groups:
+            for _ in range( waves ):
+                have = sum( 1 for p in doc[ "planted" ] if p[ "stratum" ] == STRATA[ 1 ] and member( p[ "original" ][ "lang" ] ) )
+                used = { p[ "original" ][ "id" ] for p in doc[ "planted" ] }
+                tries = collections.Counter( f[ "original" ] for f in doc[ "failed" ] if f[ "stratum" ] == STRATA[ 1 ] )
+                again = [ i for i in tries if tries[ i ] == 1 and i in by_id and member( by_id[ i ][ "lang" ] ) and i not in used ]
+                fresh = [ d[ "id" ] for d in pools[ name ] if d[ "id" ] not in used and d[ "id" ] not in { f[ "original" ] for f in doc[ "failed" ] } ]
+                wave  = list( dict.fromkeys( again + fresh ) )[ : max( quota - have, 0 ) ]
+                if not wave: break
+                shape = wiring[ "shape_of" ][ "py" if name == "python" else "ts" ]
+                for r in [ job.result() for job in [ pool.submit( plant_one, by_id[ i ], root, STRATA[ 1 ], wiring[ "asks" ], shape ) for i in wave ] ]:
+                    if r[ "status" ] == "failed":
+                        doc[ "failed" ].append( r )
+                        continue
+                    doc[ "planted" ].append( { "original": by_id[ r[ "original" ] ], "rewrite": rewrite_record( r, by_id[ r[ "original" ] ], folder, len( doc[ "planted" ] ) ), "stratum": r[ "stratum" ] } )
+                    added += 1
+    return added
+
+
 def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=REVIEWERS ):
     """
     Plant the pairs, collect the monolith pairs and write the packets and key.
@@ -361,28 +419,28 @@ def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=R
 
     Ensures:
         - plants count pairs, 60% script and 40% Python, one third of each share as Opus work-alikes, each rewrite extracted to a new-origin record
+        - a work-alike that fails is replaced by a Fable pair, and top_up_alikes then adds work-alikes until the third is reached, so the total can pass count
         - the planted pairs are written to <out>/key/planted.json before the monolith step, and a run that finds the file reads it instead of asking the models again, so a later failure costs no model call
         - returns prepare's result plus planted and failed counts by stratum, so a short count is visible
     """
     out_dir = pathlib.Path( out_dir ).resolve()
-    folder = out_dir / "key"
-    saved  = folder / PLANTED_FILE
+    folder  = out_dir / "key"
+    saved   = folder / PLANTED_FILE
+    pools   = select_pools( wiring[ "server_defs" ], wiring[ "client_defs" ], cfg, seed, count )
     if saved.exists():
-        stored  = json.loads( saved.read_text( encoding="utf-8" ) )
-        planted, failed = stored[ "planted" ], stored[ "failed" ]
+        doc = json.loads( saved.read_text( encoding="utf-8" ) )
     else:
-        pools   = select_pools( wiring[ "server_defs" ], wiring[ "client_defs" ], cfg, seed, count )
         want    = round( count * plant.SCRIPT_SHARE )
         made    = [ plant_all( pools[ "script" ], root, wiring[ "asks" ], wiring[ "shape_of" ][ "ts" ], want ), plant_all( pools[ "python" ], root, wiring[ "asks" ], wiring[ "shape_of" ][ "py" ], count - want ) ]
         by_id   = { d[ "id" ]: d for d in [ *pools[ "script" ], *pools[ "python" ] ] }
-        planted = [ { "original": by_id[ r[ "original" ] ], "rewrite": rewrite_record( r, by_id[ r[ "original" ] ], folder / "rewrites", i ), "stratum": r[ "stratum" ] }
-                    for i, r in enumerate( [ *made[ 0 ][ "planted" ], *made[ 1 ][ "planted" ] ] ) ]
-        failed  = [ r for m in made for r in m[ "failed" ] ]
-        folder.mkdir( parents=True, exist_ok=True )
-        with open( saved, "x", encoding="utf-8" ) as f: json.dump( { "planted": planted, "failed": failed }, f, indent=2, sort_keys=True )
-    mono   = monolith_candidates( root, cfg, wiring[ "client" ], wiring[ "cache_dir" ] )
-    out    = prepare( planted, mono, reviewers, seed, out_dir, cfg[ "config_sha" ] )
-    return { **out, "planted": { s: sum( 1 for p in planted if p[ "stratum" ] == s ) for s in STRATA }, "failed": len( failed ),
+        doc     = { "planted": [ { "original": by_id[ r[ "original" ] ], "rewrite": rewrite_record( r, by_id[ r[ "original" ] ], folder / "rewrites", i ), "stratum": r[ "stratum" ] }
+                                 for i, r in enumerate( [ *made[ 0 ][ "planted" ], *made[ 1 ][ "planted" ] ] ) ],
+                    "failed": [ r for m in made for r in m[ "failed" ] ] }
+        save_doc( saved, doc )
+    if top_up_alikes( doc, pools, root, wiring, folder / "rewrites", count ): save_doc( saved, doc )
+    mono    = monolith_candidates( root, cfg, wiring[ "client" ], wiring[ "cache_dir" ] )
+    out     = prepare( doc[ "planted" ], mono, reviewers, seed, out_dir, cfg[ "config_sha" ] )
+    return { **out, "planted": { s: sum( 1 for p in doc[ "planted" ] if p[ "stratum" ] == s ) for s in STRATA }, "failed": len( doc[ "failed" ] ),
              "monolith": { src: sum( 1 for p in mono[ "pairs" ] if p[ "source" ] == src ) for src in monolith_pairs.SOURCES } }
 
 
