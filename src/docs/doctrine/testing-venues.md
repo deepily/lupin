@@ -147,3 +147,14 @@ Suites that qualify:
   tests took about 8s in one run (2026-10-08, at b9d89658f); with docker hidden three skip and one passes (0.2s).
   Re-time it rather than trusting those figures. It is not in `docker_smoke`'s list, so a skip there is not yet a failure.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
+
+## The unit tier runs in parallel
+
+`src/tests/run-unit-tests.sh` adds `-n 4` (pytest-xdist) through `src/scripts/lib/unit-parallel-flags.sh`.
+Measured at `7fafa7762` with peers running pytest in both arms: serial took 3171s and `-n 4` took 857s.
+Both passed 39717 tests, and the coverage gate answered 98.02% over 974 files either way.
+The cosa tier showed no gain (293s serial, 303s with `-n 4`), so it stays serial.
+`LUPIN_UNIT_WORKERS=0` runs serial, and a `-n` you pass yourself wins.
+`--collect-only` and `--pdb` get no `-n`.
+The runner exits 3 rather than run serial without xdist.
+The serial bridge guard (`src/scripts/run-serial-bridge-guard.sh`) is deselected from the unit tier by `pytest.ini` and stays its own step.

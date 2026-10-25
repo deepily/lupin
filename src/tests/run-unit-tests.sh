@@ -77,6 +77,15 @@ echo "run-unit-tests.sh: using pytest at $PYTEST" >&2
 source "$PROJECT_ROOT/src/scripts/lib/coverage-opt-in.sh"
 COV_FLAGS="$( coverage_opt_in_flags )" || exit $?
 
+# Parallel lane (row c8d4b539, Rick 2026-10-15: "Measure, then wire"). Measured 2026-10-25 at
+# 7fafa7762, peers running pytest during both arms: serial 3171s, `-n 4` 857s (3.7x), the same
+# 39717 passed, and the same coverage gate answer (98.02%, 974 files, executed lines equal in
+# every file). The serial-only tests are not in this tier: `serial_bridge_guard` is deselected
+# by pytest.ini and has its own step, src/scripts/run-serial-bridge-guard.sh.
+# LUPIN_UNIT_WORKERS=0 runs serial. A user-supplied -n comes later in the line and wins.
+source "$PROJECT_ROOT/src/scripts/lib/unit-parallel-flags.sh"
+UNIT_PARALLEL_FLAGS="$( unit_parallel_flags "$PYTEST" "$@" )" || exit $?
+
 source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
 # The parity oracle is not under src/tests/unit/, so it is named here FILE BY FILE
 # rather than by directory. Naming the directory would sweep in ten siblings that
@@ -87,5 +96,5 @@ source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
 # decision. Row 1c815df5.
 PARITY_ORACLE_UNIT="src/tests/parity_oracle/test_tier0.py"
 
-run_pytest_with_diagnosis "$PYTEST" src/tests/unit/ $PARITY_ORACLE_UNIT $COV_FLAGS "$@"
+run_pytest_with_diagnosis "$PYTEST" src/tests/unit/ $PARITY_ORACLE_UNIT $COV_FLAGS $UNIT_PARALLEL_FLAGS "$@"
 exit $?

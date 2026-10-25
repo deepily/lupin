@@ -25,3 +25,4 @@ pytest-timeout==2.4.0                # Arms @pytest.mark.timeout (row 61ef0e0d);
 # Install both files for complete development environment:
 #   pip install -r src/cosa/requirements.txt
 #   pip install -r requirements-test.txt
+pytest-xdist==3.8.0                 # Parallel unit lane, -n 4 (row c8d4b539); run-unit-tests.sh refuses without it

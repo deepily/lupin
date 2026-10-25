@@ -169,7 +169,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 | Suite | Venue | Command | Rules that matter |
 |---|---|---|---|
-| Unit | :7999 | `pytest src/tests/unit/` | |
+| Unit | :7999 | `src/tests/run-unit-tests.sh` (runs `-n 4`; `pytest src/tests/unit/` for a bare serial run) | `LUPIN_UNIT_WORKERS=0` runs serial; the runner exits 3 when pytest-xdist is missing; the serial bridge guard is its own step (row 10) |
 | TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` | runs under c8 at 100% inside the memory-capped `jstest.slice` cgroup, so `test_types: ["all"]` is safe; an `RC=124` is a hang on leaked transports, not memory |
 | Docker smoke | :7999 (host only) | `./src/tests/run-docker-smoke-gate.sh` | any skip, error or missing file is a failure; not offered inside a container |
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks, non-destructive; `src/tests/smoke/` files are heterogeneous, route each by the rubric in the "Testing venues" section above |

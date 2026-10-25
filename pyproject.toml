@@ -142,6 +142,8 @@ dev = [
   # subprocess / two-session shapes — precisely the shape that hangs, which is
   # what a cap defends against.
   "pytest-timeout==2.4.0",
+  # The parallel unit lane, `-n 4` (row c8d4b539). src/scripts/lib/unit-parallel-flags.sh refuses without it.
+  "pytest-xdist==3.8.0",
   # Docstring layout rules for the v0.2.2 documentation standard (plan 1 Phase 1, ruling B7).
   # Pinned exactly: the rule set below was measured against 0.12.1 and a new release can add D codes.
   "ruff==0.12.1",
