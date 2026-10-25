@@ -6,7 +6,7 @@ pins:
   - cosa.agents.runnable_code.RunnableCode@a166b37df7
   - cosa.agents.calendaring_agent.CalendaringAgent@19a2dd1103
   - cosa.agents.date_and_time_agent.DateAndTimeAgent@c61bf1ab7b
-  - cosa.agents.todo_list_agent.TodoListAgent@84c6d4a954
+  - cosa.agents.todo_list_agent.TodoListAgent@061888918c
   - cosa.agents.confirmation_dialog.ConfirmationDialogue@4ea86e3503
   - cosa.agents.receptionist_agent.fit_fragments_to_budget@d6aadcd96d
   - cosa.agents.two_word_id_generator.singleton@2da640dc1e

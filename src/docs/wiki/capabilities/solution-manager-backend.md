@@ -13,7 +13,7 @@ pins:
   - cosa.memory.two_tier_question_search.pg_similarity_search@0574a1359f
   - cosa.memory.two_tier_question_search.update_canonical_synonyms@0c89bbc823
   - cosa.memory.input_and_output_table.InputAndOutputTable@435742516d
-  - cosa.memory.query_log_table.QueryLogTable@cebc583dcf
+  - cosa.memory.query_log_table.QueryLogTable@a12e28a77c
 ---
 # Solution manager backend
 

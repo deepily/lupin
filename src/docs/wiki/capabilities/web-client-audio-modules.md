@@ -3,7 +3,7 @@ capability: web-client-audio-modules
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.audio-recorder.AudioRecorder@bca1865f32
-  - src.lupin_app.static.js.hybrid-tts.HybridTTS@706943cb41
+  - src.lupin_app.static.js.hybrid-tts.HybridTTS@5a058b6b08
   - src.lupin_app.static.js.job-completion-cache.JobCompletionCache@1d14a266a4
   - src.lupin_app.static.js.multiplexer.audio.JobCompletionCache.defaultIndexedDBFactory@35f7dec4df
   - src.lupin_app.static.js.multiplexer.audio.JobCompletionCache.JobCompletionCache@afd7858617

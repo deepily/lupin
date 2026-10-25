@@ -2,11 +2,11 @@
 capability: iterative-debugging-agent
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent@96db06ff52
+  - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent@cc6cc3c51e
   - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.run_prompts@af2bd69ea5
   - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.is_code_runnable@9bc0fdfb4e
   - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.was_successfully_debugged@3c9965d4d0
-  - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.restore_from_serialized_state@32b37c4ed1
+  - cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.restore_from_serialized_state@47a76f095b
   - cosa.agents.agent_base.AgentBase.run_code@5d9d45ccfb
   - cosa.agents.agent_base.AgentBase.run_prompt@090b82fe89
   - cosa.agents.io_models.xml_models.IterativeDebuggingMinimalistResponse@0c621af2fb
