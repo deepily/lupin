@@ -25,7 +25,7 @@ The judge makes one blind, ledgered model call per new definition and rules on e
 - `parse_reply` parses a reply strictly into one verdict per label. `judge_run` judges each definition once and resumes from the ledger. A model call that raises `ModelCallError` leaves its definition unjudged as `JUDGE_CALL_FAILED`, is not ledgered, and the other definitions go on.
 - `ledger_binding` names what a ledger is bound to, so another binary or server is refused.
 - `MaxPlanBackend` uses bounded Claude Code, which has no temperature setting. `WorkServerBackend` uses Rick's work server and passes temperature 0.
-- `judge_all` drops server definitions that carry a scrub token, then embeds the pool, picks each definition's candidates and judges them once. `breaching_ids` finds those definitions. It returns the count and ids dropped. The scorer and the proof both call it.
+- `judge_all` drops server definitions that carry a scrub token, then embeds the pool, picks each definition's candidates and judges them once. `breaching_ids` finds those definitions and returns only their sorted ids, with no count. `judge_all` returns the count and ids under `dropped`. The scorer and the proof both call `judge_all`.
 - `score_run` scores one run's client and reports the dropped definitions as `dropped_from_pool`. `aggregate_runs` hands the reports to the named unscorable-run policy and refuses when none is named.
 - `main` scores the run directory named on the command line and writes its report there.
 - `TimedBackend` wraps a backend and times each call. `build_record` and `write_record` keep the live smoke record, with each rate as an unreduced fraction string. `percentile` is nearest-rank.
