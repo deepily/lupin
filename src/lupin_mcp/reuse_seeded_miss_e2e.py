@@ -1,7 +1,7 @@
 """
 The seeded-miss end-to-end run: seed a miss, repair a docstring, prove it by replay.
 
-A throwaway repository holds five public functions and two capability pages.
+A throwaway repository holds four public functions and two capability pages.
 The question is "list the episodes of a podcast".
 The lookup runs the candidate stage and then Jev, and the symbol's own docstring does not match the need, so it is missed.
 The stage here is a stand-in that returns every entry, as the real one does when the index is smaller than K.
@@ -212,7 +212,7 @@ def build_sandbox( work ):
 
     Ensures:
         - returns the repository root
-        - the wrong page's line matches the need and the right page's line does not
+        - each page has an index line; neither line shares a word with the need
     """
     root = pathlib.Path( work ) / "sandbox"
     for rel, text in FILES.items():
