@@ -254,13 +254,13 @@ def test_the_index_sha_comes_from_the_context_when_none_is_given( tmp_path, monk
 
 
 def test_the_locator_reads_file_and_range_from_the_index_and_refuses_a_symbol_without_them( monkeypatch, tmp_path ):
-    index = [ { "id": "a.f", "file": "a.py", "line": 3, "end_line": 9, "scope": "public" }, { "id": "a.g", "file": "a.py", "line": 12, "scope": "private" },
+    index = [ { "id": "a.f", "file": "a.py", "line": 3, "end_line": 9, "scope": "public" }, { "id": "a.g", "file": "a.py", "line": 12, "end_line": 15, "scope": "private" }, { "id": "a.h", "file": "a.py", "line": 20, "scope": "public" },
               { "id": "a.t", "file": "t.py", "line": 1, "end_line": 2, "scope": "test" } ]
     ( tmp_path / "symbols-all.jsonl" ).write_text( "".join( json.dumps( r ) + "\n" for r in index ), encoding="utf-8" )
     monkeypatch.setattr( rt, "prepare", lambda ctx: ( set(), [], "sha", str( tmp_path ) ) )
     loc = LT.index_locator( None )
-    assert loc( "a.f" ) == { "file": "a.py", "line": 3, "end_line": 9 }
-    for bad in ( "a.g", "a.t", "nope" ):                  # no end_line, a test-scope symbol a search never ranks, and an id the index lacks
+    assert loc( "a.f" ) == { "file": "a.py", "line": 3, "end_line": 9 } and loc( "a.g" ) == { "file": "a.py", "line": 12, "end_line": 15 }
+    for bad in ( "a.h", "a.t", "nope" ):                  # no end_line, a test-scope symbol a search never ranks, and an id the index lacks
         with pytest.raises( er.NeedsetError ) as e: loc( bad )
         assert e.value.code == er.RECEIPT_FIELD_ABSENT and bad in e.value.detail
 
