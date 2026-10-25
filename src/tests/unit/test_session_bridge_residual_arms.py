@@ -162,3 +162,18 @@ def test_buffer_and_listener_files_are_never_matched_by_their_tmux_session( sess
 
     assert sb.find_session_by_tmux( "work" ) is None
     assert sb.find_session_by_tmux( "other" )[ "marker" ] == "real"
+
+
+# ---------------------------------------------------------------- find_dead_sessions
+
+def test_buffer_and_listener_files_never_make_a_candidate_dead( sessions, monkeypatch ):
+    """The decoys carry a dead cc_pid and the candidate id. Skipping them leaves it alive."""
+    monkeypatch.setattr( sb, "_can_trust_host_pids", lambda: True )
+    _write( sessions / "cc-91-buffer.json",   { "session_id": "cand-buffer-0001",   "cc_pid": DEAD_PID } )
+    _write( sessions / "cc-92-listener.json", { "session_id": "cand-listener-0002", "cc_pid": DEAD_PID } )
+    candidates = [ "cand-buffer-0001", "cand-listener-0002" ]
+
+    assert sb.find_dead_sessions( candidates ) == set()
+
+    _write( sessions / f"cc-{DEAD_PID}.json", { "session_id": "cand-buffer-0001" } )
+    assert sb.find_dead_sessions( candidates ) == { "cand-buffer-0001" }
