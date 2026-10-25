@@ -25,7 +25,7 @@ def test_the_decided_values_are_the_rulings_of_2026_10_25():
     cfg = fz.live_config()
     assert ( cfg[ "backend" ], cfg[ "temperature" ], cfg[ "unscorable_policy" ] ) == ( "max-plan", "unsettable:bounded-cc", "worst-rank" )
     assert cfg[ "model_id" ] == "claude-fable-5-1" and cfg[ "body_chars" ] == 10000
-    assert cfg[ "jscpd" ] == { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "chosen_in": "initial-defaults" }
+    assert cfg[ "jscpd" ] == { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "label-prep-max-size" }
     assert cfg[ "backend" ] == judge.MaxPlanBackend().name and cfg[ "temperature" ] == judge.MaxPlanBackend().temperature_record
 
 
@@ -43,7 +43,7 @@ def test_live_configuration_is_the_same_on_every_call():
 
 def test_frozen_path_is_under_the_project_root_conf_folder(monkeypatch, tmp_path):
     monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
-    assert fz.frozen_path() == f"{tmp_path}/src/conf/semdup-frozen-1.json"
+    assert fz.frozen_path() == f"{tmp_path}/src/conf/semdup-frozen-2.json"
 
 
 def test_main_freezes_to_the_given_path_prints_the_sha_and_refuses_a_second_freeze(tmp_path, capsys):
@@ -59,7 +59,7 @@ def test_main_freezes_to_the_given_path_prints_the_sha_and_refuses_a_second_free
 def test_main_without_a_path_writes_to_the_frozen_path(monkeypatch, tmp_path):
     monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
     assert fz.main( [] ) == 0
-    assert ( tmp_path / "src" / "conf" / "semdup-frozen-1.json" ).is_file()
+    assert ( tmp_path / "src" / "conf" / "semdup-frozen-2.json" ).is_file()
 
 
 def test_the_committed_frozen_file_is_the_live_configuration():

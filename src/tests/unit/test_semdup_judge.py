@@ -100,9 +100,9 @@ def test_the_system_prompt_names_the_four_words_and_treats_tagged_text_as_data()
 def test_prompt_parts_feed_the_prompt_version_and_a_change_to_the_parser_changes_it():
     system, template, parser = jd.prompt_parts()
     assert system == jd.SYSTEM_PROMPT and template == jd.USER_TEMPLATE and parser.startswith( "def parse_reply(" )
-    base = cf.build_config( "max-plan", 0, "p", system, template, parser, SCRUB, 100, { "version": "5", "min_tokens": 50, "min_lines": 5, "chosen_in": "default" } )
+    base = cf.build_config( "max-plan", 0, "p", system, template, parser, SCRUB, 100, { "version": "5", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "default" } )
     assert base[ "prompt_version" ] == mt.prompt_version( "semdup", system, template, parser )
-    assert cf.build_config( "max-plan", 0, "p", system, template, parser + "# edit", SCRUB, 100, { "version": "5", "min_tokens": 50, "min_lines": 5, "chosen_in": "default" } )[ "prompt_version" ] != base[ "prompt_version" ]
+    assert cf.build_config( "max-plan", 0, "p", system, template, parser + "# edit", SCRUB, 100, { "version": "5", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "default" } )[ "prompt_version" ] != base[ "prompt_version" ]
 
 
 def test_the_prompt_holds_the_definition_and_each_candidate_under_labels_with_one_random_suffix_and_nothing_that_names_an_arm_or_origin():

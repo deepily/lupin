@@ -16,7 +16,7 @@ MIN_CANDIDATES = 5
 LIST_DEPTH     = 10
 FUSION_HEAD    = 2
 CLONE_COVER    = 0.5
-JSCPD_KEYS     = ( "version", "min_tokens", "min_lines", "chosen_in" )
+JSCPD_KEYS     = ( "version", "min_tokens", "min_lines", "max_size", "chosen_in" )
 ELIDED_FIELD   = "config_sha"
 
 
@@ -72,7 +72,7 @@ def build_config( backend, temperature, unscorable_policy, system_prompt, user_t
         - system_prompt, user_template and parser_source are the judge's prompt texts and the source of its parser
         - scrub is the list of blindness tokens
         - body_chars is the cut applied to a body before it is embedded
-        - jscpd is a dict with the four keys version, min_tokens, min_lines and chosen_in
+        - jscpd is a dict with the five keys version, min_tokens, min_lines, max_size and chosen_in
 
     Ensures:
         - returns a dict holding model_id, the three decisions, prompt_version, the prompt, parser and scrub shas, the

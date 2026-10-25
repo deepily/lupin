@@ -234,14 +234,18 @@ def monolith_root( tmp_path, monkeypatch, text ):
     return tmp_path
 
 
-MONOLITH_TEXT = js_function( "first", [ "alpha", "beta", "gamma" ] ) + js_function( "second", [ "alpha", "beta", "gamma" ] ) + js_function( "third", [ "delta", "items", "total" ] ) + "function tiny() { return 1; }\n"
+LOOP_TEXT = "function {name}( {arg} ) {{\n    try {{\n        while ( {arg}.length > 0 ) {{\n            {arg}.pop();\n            if ( {arg}.length === 3 ) {{ break; }}\n        }}\n    }} catch ( {err} ) {{\n        return [ {err}, {arg} ];\n    }}\n    return {arg};\n}}\n"
+SWITCH_TEXT = "function {name}( kind ) {{\n    switch ( kind ) {{\n        case 1: return \"one\";\n        case 2: return \"two\";\n        case 3: return \"three\";\n        default: {{ const label = String( kind ); return label.toUpperCase() + label.length; }}\n    }}\n}}\n"
+# first and second are copies (jscpd and dups both see them); third and fourth share a shape under other identifiers (only dups sees them); fifth has its own shape.
+MONOLITH_TEXT = ( js_function( "first", [ "alpha", "beta", "gamma" ] ) + js_function( "second", [ "alpha", "beta", "gamma" ] ) + LOOP_TEXT.format( name="third", arg="queue", err="failure" )
+                  + LOOP_TEXT.format( name="fourth", arg="stack", err="problem" ) + SWITCH_TEXT.format( name="fifth" ) + "function tiny() { return 1; }\n" )
 
 
 def test_the_monolith_is_read_from_a_copy_of_the_pinned_bytes_and_small_definitions_are_left_out( tmp_path, monkeypatch ):
     root = monolith_root( tmp_path, monkeypatch, MONOLITH_TEXT )
     tmp, defs = lp.monolith_definitions( root, 25 )
     with tmp:
-        assert sorted( d[ "name" ] for d in defs ) == [ "first", "second", "third" ]
+        assert sorted( d[ "name" ] for d in defs ) == [ "fifth", "first", "fourth", "second", "third" ]
         assert all( d[ "file" ] == lp.MONOLITH_FILE and d[ "origin" ] == "server" for d in defs )
         assert pathlib.Path( tmp.name, lp.MONOLITH_FILE ).read_text( encoding="utf-8" ) == MONOLITH_TEXT
     in_repo = { d[ "id" ] for d in ex.extract_tree( root, [ root / lp.MONOLITH_FILE ], "server" )[ "definitions" ] if d[ "nodes" ] >= 25 }
@@ -254,15 +258,34 @@ def test_a_monolith_that_is_not_the_pinned_blob_is_refused( tmp_path, monkeypatc
     with pytest.raises( ValueError, match="pinned" ): lp.monolith_definitions( root, 25 )
 
 
-def test_monolith_candidates_tags_the_jscpd_clone_structural_and_the_closest_unlinked_pair_neighbour( tmp_path, monkeypatch ):
-    root = monolith_root( tmp_path, monkeypatch, MONOLITH_TEXT )
-    got  = lp.monolith_candidates( root, CFG, FakeEmbed(), tmp_path / "vec", per_source=1 )
+def named( got ):
+    """Return each pair as ( sorted names, source )."""
     names = { d[ "id" ]: d[ "name" ] for d in got[ "defs" ] }
-    seen  = [ ( sorted( names[ i ] for i in p[ "ids" ] ), p[ "source" ] ) for p in got[ "pairs" ] ]
-    assert seen[ 0 ] == ( [ "first", "second" ], "structural" ) and seen[ 1 ][ 1 ] == "neighbour" and len( seen ) == 2
-    assert got[ "blob" ] == lp.MONOLITH_BLOB
-    nominated = lp.monolith_candidates( root, CFG, FakeEmbed(), tmp_path / "vec", per_source=1, nominated=[ [ sorted( names, key=names.get )[ 0 ], sorted( names, key=names.get )[ 2 ] ] ] )
-    assert [ p[ "source" ] for p in nominated[ "pairs" ] ][ -1 ] == "nominated"
+    return [ ( sorted( names[ i ] for i in p[ "ids" ] ), p[ "source" ] ) for p in got[ "pairs" ] ]
+
+
+def test_monolith_candidates_takes_structural_pairs_from_jscpd_and_dups_and_fills_to_the_total_with_neighbours( tmp_path, monkeypatch ):
+    root = monolith_root( tmp_path, monkeypatch, MONOLITH_TEXT )
+    tmp, defs = lp.monolith_definitions( root, 25 )
+    with tmp: seen_by_jscpd = lp.structural.parse_jscpd( lp.structural.run_jscpd( tmp.name, [ lp.CLIENT_DIR ], CFG ), defs, 0.5 )
+    names = { d[ "id" ]: d[ "name" ] for d in defs }
+    assert [ sorted( names[ i ] for i in p[ "ids" ] ) for p in seen_by_jscpd ] == [ [ "first", "second" ] ]          # jscpd alone does not see third and fourth
+    got   = lp.monolith_candidates( root, CFG, FakeEmbed(), tmp_path / "vec", per_source=30, total=5 )
+    pairs = named( got )
+    structural = [ n for n, source in pairs if source == "structural" ]
+    assert [ "first", "second" ] in structural and [ "fourth", "third" ] in structural          # the second is dups only
+    assert len( pairs ) == 5 and sum( 1 for _, source in pairs if source == "neighbour" ) == 5 - len( structural ) and got[ "blob" ] == lp.MONOLITH_BLOB
+    assert len( { tuple( n ) for n, _ in pairs } ) == 5
+
+
+def test_monolith_candidates_stops_at_its_total_and_adds_nominated_pairs_on_top_of_the_quota( tmp_path, monkeypatch ):
+    root = monolith_root( tmp_path, monkeypatch, MONOLITH_TEXT )
+    ids  = { d[ "name" ]: d[ "id" ] for d in lp.monolith_definitions( root, 25 )[ 1 ] }
+    small = lp.monolith_candidates( root, CFG, FakeEmbed(), tmp_path / "vec", per_source=30, total=3 )
+    assert len( small[ "pairs" ] ) == 3
+    nominated = lp.monolith_candidates( root, CFG, FakeEmbed(), tmp_path / "vec", per_source=30, nominated=[ [ ids[ "first" ], ids[ "fifth" ] ] ], total=4 )
+    kinds = [ p[ "source" ] for p in nominated[ "pairs" ] ]
+    assert kinds.count( "nominated" ) == 1 and len( kinds ) == 4
 
 
 # ---- items, packets and the key ---------------------------------------------------------------------------------

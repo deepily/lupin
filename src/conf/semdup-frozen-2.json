@@ -2,10 +2,11 @@
   "backend": "max-plan",
   "body_chars": 10000,
   "clone_cover": 0.5,
-  "config_sha": "68ddf525169896722948bd0768ac3f19bc1bce552d38e0d96788d66a0df8384f",
+  "config_sha": "2e01f93f76adffe969521449ce435248f61624d3aa8390231d739740a9ddcd91",
   "fusion_head": 2,
   "jscpd": {
-    "chosen_in": "initial-defaults",
+    "chosen_in": "label-prep-max-size",
+    "max_size": "5mb",
     "min_lines": 5,
     "min_tokens": 50,
     "version": "5.3.3"

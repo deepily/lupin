@@ -29,6 +29,21 @@ def test_each_source_contributes_its_own_pairs_with_its_own_tag():
     assert out == [ { "ids": [ "a", "b" ], "source": "structural" }, { "ids": [ "c", "d" ], "source": "neighbour" }, { "ids": [ "a", "c" ], "source": "nominated" } ]
 
 
+def test_with_a_total_the_neighbour_source_takes_what_is_left_after_structural_and_nominated_pairs():
+    defs = defs_of( "a", "b", "c", "d", "e" )
+    out  = mp.candidate_pairs( defs, [ clone( "a", "b", 90 ) ], VECTORS, [ [ "a", "c" ] ], per_source=5, total=5 )
+    kinds = [ p[ "source" ] for p in out ]
+    assert kinds.count( "structural" ) == 1 and kinds.count( "nominated" ) == 1 and kinds.count( "neighbour" ) == 3 and len( out ) == 5
+
+
+def test_a_total_caps_neighbour_at_zero_when_the_other_sources_already_fill_it_and_none_means_per_source():
+    defs = defs_of( "a", "b", "c", "d", "e" )
+    full = mp.candidate_pairs( defs, [ clone( "a", "b", 90 ), clone( "c", "d", 80 ) ], VECTORS, [], per_source=5, total=2 )
+    assert [ p[ "source" ] for p in full ] == [ "structural", "structural" ]
+    free = mp.candidate_pairs( defs, [ clone( "a", "b", 90 ) ], VECTORS, [], per_source=2 )
+    assert [ p[ "source" ] for p in free ].count( "neighbour" ) == 2
+
+
 def test_the_neighbour_source_skips_pairs_the_structural_list_already_holds_and_goes_on_to_the_next_closest():
     defs = defs_of( "a", "b", "c", "d" )
     out  = mp.candidate_pairs( defs, [ clone( "a", "b", 90 ), clone( "c", "d", 80 ) ], VECTORS, [], per_source=1 )

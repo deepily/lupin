@@ -47,7 +47,7 @@ def _neighbours( defs, vectors ):
     return sorted( pairs, key=lambda p: ( -p[ 0 ], p[ 1 ], p[ 2 ] ) )
 
 
-def candidate_pairs( defs, structural, vectors, nominated, per_source ):
+def candidate_pairs( defs, structural, vectors, nominated, per_source, total=None ):
     """
     Collect candidate pairs from the three sources.
 
@@ -55,11 +55,12 @@ def candidate_pairs( defs, structural, vectors, nominated, per_source ):
         - defs are the monolith's definition records; vectors maps each id to its vector
         - structural is a list of clone pairs { ids, size, source } from structural.clone_pairs
         - nominated is the list of [ a, b ] id pairs a person named, or empty; per_source is the most pairs taken from each source
+        - total is None, or the size the list is to reach: the neighbour source then takes what is left of it after the structural and nominated pairs
 
     Ensures:
         - returns { ids, source } records with ids sorted and source one of the three source names, each pair once
         - structural: the largest clones whose two definitions are both in defs
-        - neighbour: the most similar pairs by cosine that structural does not list, so a pair is never tagged by a source that is already the structural list
+        - neighbour: the most similar pairs by cosine that structural does not list, so a pair is never tagged by a source that is already the structural list; with total, as many as bring the list to total, never fewer than none
         - nominated: every pair a person named, whatever its similarity
         - a pair found by more than one source keeps the first source in the order structural, neighbour, nominated
 
@@ -73,7 +74,8 @@ def candidate_pairs( defs, structural, vectors, nominated, per_source ):
     for pair in found[ :per_source ]: taken.setdefault( pair, "structural" )
     linked = set( found )
     close  = [ ( a, b ) for _, a, b in _neighbours( defs, vectors ) if ( a, b ) not in linked ]
-    for pair in close[ :per_source ]: taken.setdefault( pair, "neighbour" )
+    room   = per_source if total is None else max( total - len( taken ) - len( { tuple( sorted( n ) ) for n in nominated } ), 0 )
+    for pair in close[ :room ]: taken.setdefault( pair, "neighbour" )
     for a, b in nominated:
         if a == b or a not in ids or b not in ids: raise ValueError( f"nominated pair {a}, {b} is not two distinct definitions of the monolith" )
         taken.setdefault( tuple( sorted( ( a, b ) ) ), "nominated" )

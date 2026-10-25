@@ -4,7 +4,7 @@ import argparse
 import cosa.utils.util as cu
 from cosa.repo.semdup import blind, config, judge
 
-FROZEN_RELATIVE   = "/src/conf/semdup-frozen-1.json"
+FROZEN_RELATIVE   = "/src/conf/semdup-frozen-2.json"
 # P4, provisional: row dc71467c re-asks before the experiments. A change here is a new frozen file and a proof rerun.
 BACKEND           = judge.MaxPlanBackend.name
 TEMPERATURE       = judge.MaxPlanBackend.temperature_record
@@ -14,8 +14,9 @@ UNSCORABLE_POLICY = "worst-rank"
 ARM_LABELS        = ( "arm-label-with-9c41e7", "arm-label-without-9c41e7" )
 # Cheech's go: 10,000 characters cut 0.88% of the 10,158 pool definitions of 25 nodes or more (p50 938, p90 3,131, p99 9,166, max 70,712).
 BODY_CHARS        = 10000
-# jscpd's own defaults, as plan C4 says; chosen_in names the proof run that changes them.
-JSCPD             = { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "chosen_in": "initial-defaults" }
+# jscpd's own defaults, as plan C4 says, except max_size: its default of 100 kb skips the 1.4 MB monolith without a word (label prep, row 6e821290).
+# chosen_in names the run that set the values.
+JSCPD             = { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "label-prep-max-size" }
 
 
 def frozen_path():

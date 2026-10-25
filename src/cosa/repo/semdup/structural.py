@@ -39,7 +39,7 @@ def run_jscpd( root, dirs, cfg ):
 
     Requires:
         - root is a directory; dirs are folder names under it, relative to it, without a leading "./"
-        - cfg is a frozen configuration whose jscpd block names the version, min_tokens and min_lines
+        - cfg is a frozen configuration whose jscpd block names the version, min_tokens, min_lines and max_size (jscpd skips any larger file without a word)
 
     Ensures:
         - jscpd scans "." from root, because it names files relative to the one folder it was given and two folders would give names that are not root-relative
@@ -55,7 +55,7 @@ def run_jscpd( root, dirs, cfg ):
     got            = subprocess.run( [ node, str( launcher ), "--version" ], capture_output=True, text=True, timeout=JSCPD_TIMEOUT ).stdout.strip()
     if got != f"jscpd {want}": raise err.SemdupError( err.DEPENDENCY_MISSING, f"the frozen jscpd version is {want}, the installed one says {got!r}" )
     with tempfile.TemporaryDirectory() as out:
-        cmd = [ node, str( launcher ), "--min-tokens", str( cfg[ "jscpd" ][ "min_tokens" ] ), "--min-lines", str( cfg[ "jscpd" ][ "min_lines" ] ),
+        cmd = [ node, str( launcher ), "--min-tokens", str( cfg[ "jscpd" ][ "min_tokens" ] ), "--min-lines", str( cfg[ "jscpd" ][ "min_lines" ] ), "--max-size", cfg[ "jscpd" ][ "max_size" ],
                 "--format", JSCPD_FORMATS, "--reporters", "json", "--output", out, "." ]
         res = subprocess.run( cmd, cwd=str( root ), capture_output=True, text=True, timeout=JSCPD_TIMEOUT )
         report = pathlib.Path( out ) / "jscpd-report.json"
@@ -141,27 +141,23 @@ def _dups_keys( spec, paths, defs ):
     return keys
 
 
-def python_clones( spec, paths, defs, min_nodes, threshold=dups.DEFAULT_THRESH ):
+def _map_pairs( found, keys, defs, source ):
     """
-    Map the exact and near pairs of dups.find_duplicates onto definitions.
+    Map the exact and near pairs dups found onto definitions.
 
     Requires:
-        - spec is the IndexSpec of the root; paths are the Python files in the order extract_tree read them
-        - defs are the Python definitions extract_tree returned for those files, in its order
-        - min_nodes is the frozen minimum; threshold is the near-pair Jaccard cut, the dups default unless given
+        - found is dups.find_duplicates' result; keys maps each dups id to a definition id; defs are the definitions the keys name; source is the tag the pairs carry
 
     Ensures:
-        - returns pairs { ids, size, source }, ids sorted, source "dups", ordered by size and then ids
+        - returns pairs { ids, size, source }, ids sorted, ordered by size and then ids
         - an exact clone has similarity 1.0; a near clone carries the Jaccard dups found
         - size is the similarity times the node count of the smaller definition, rounded, so it grows with the code shared
         - a group of three exact clones gives all three pairs
 
     Raises:
-        - ValueError if a file of defs is not among the paths, or dups names a definition this package does not have
+        - ValueError if dups names a definition that keys does not hold
     """
-    keys  = _dups_keys( spec, paths, defs )
     nodes = { d[ "id" ]: d[ "nodes" ] for d in defs }
-    found = dups.find_duplicates( spec, [ pathlib.Path( p ) for p in paths ], min_nodes=min_nodes, threshold=threshold )
     sims  = {}
     for group in found[ "exact" ]:
         for i, a in enumerate( group ):
@@ -172,8 +168,66 @@ def python_clones( spec, paths, defs, min_nodes, threshold=dups.DEFAULT_THRESH )
         for name in ( a, b ):
             if name not in keys: raise ValueError( f"dups reported {name}, which is not a definition of the given files" )
         ids = tuple( sorted( ( keys[ a ], keys[ b ] ) ) )
-        pairs[ ids ] = { "ids": list( ids ), "size": round( sim * min( nodes[ ids[ 0 ] ], nodes[ ids[ 1 ] ] ) ), "source": "dups" }
+        pairs[ ids ] = { "ids": list( ids ), "size": round( sim * min( nodes[ ids[ 0 ] ], nodes[ ids[ 1 ] ] ) ), "source": source }
     return sorted( pairs.values(), key=lambda p: ( -p[ "size" ], p[ "ids" ] ) )
+
+
+def python_clones( spec, paths, defs, min_nodes, threshold=dups.DEFAULT_THRESH ):
+    """
+    Map the exact and near pairs of dups.find_duplicates onto Python definitions.
+
+    Requires:
+        - spec is the IndexSpec of the root; paths are the Python files in the order extract_tree read them
+        - defs are the Python definitions extract_tree returned for those files, in its order
+        - min_nodes is the frozen minimum; threshold is the near-pair Jaccard cut, the dups default unless given
+
+    Ensures:
+        - returns the pairs _map_pairs gives, with source "dups"
+
+    Raises:
+        - ValueError if a file of defs is not among the paths, or dups names a definition this package does not have
+    """
+    keys  = _dups_keys( spec, paths, defs )
+    found = dups.find_duplicates( spec, [ pathlib.Path( p ) for p in paths ], min_nodes=min_nodes, threshold=threshold )
+    return _map_pairs( found, keys, defs, "dups" )
+
+
+def _script_keys( defs ):
+    """
+    Map the ids dups gives a script definition to the definition ids of this package.
+
+    Requires:
+        - defs are script definitions in the order extract_tree read them
+
+    Ensures:
+        - returns { "<file>#<name>": id }, numbering a repeated key "~2", "~3" as dups does
+    """
+    keys, seen = {}, collections.Counter()
+    for d in defs:
+        key = f"{d[ 'file' ]}#{d[ 'name' ]}"
+        seen[ key ] += 1
+        keys[ key if seen[ key ] == 1 else f"{key}~{seen[ key ]}" ] = d[ "id" ]
+    return keys
+
+
+def script_clones( spec, files, defs, min_nodes, threshold=dups.DEFAULT_THRESH ):
+    """
+    Map the exact and near pairs dups finds among script files onto their definitions.
+
+    Requires:
+        - spec is the IndexSpec of the root the files lie under; files are the script files in the order extract_tree read them
+        - defs are the script definitions extract_tree returned for those files, in its order
+        - min_nodes is the frozen minimum; threshold is the near-pair Jaccard cut, the dups default unless given
+
+    Ensures:
+        - returns the pairs _map_pairs gives, with source "dups"
+        - script definitions are paired with script definitions only, as dups does
+
+    Raises:
+        - ValueError if dups names a definition this package does not have
+    """
+    found = dups.find_duplicates( spec, [], min_nodes=min_nodes, threshold=threshold, js_files=[ pathlib.Path( f ) for f in files ] )
+    return _map_pairs( found, _script_keys( defs ), defs, "dups" )
 
 
 def clone_pairs( *pair_lists ):

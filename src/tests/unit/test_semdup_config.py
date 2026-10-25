@@ -14,7 +14,7 @@ PROMPT  = "You rule on whether two functions do the same job."
 USER    = "Definition: {definition}\nCandidates: {candidates}"
 PARSER  = "def parse_reply( text, labels ): return json.loads( text )"
 SCRUB   = [ "check_exists", "fetch_similar", "SEARCHED" ]
-JSCPD   = { "version": "4.0.5", "min_tokens": 50, "min_lines": 5, "chosen_in": "default" }
+JSCPD   = { "version": "4.0.5", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "default" }
 DECIDED = { "backend": "max-plan", "temperature": "unsettable:bounded-cc", "unscorable_policy": "worst-rank" }
 
 

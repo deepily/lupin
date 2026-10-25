@@ -16,7 +16,7 @@ from cosa.repo.semdup.proof import proof_run as pr
 SCRUB = bl.scrub_tokens( [ "ARM-WITH" ] )
 MARKS = [ "MARKA", "MARKB", "MARKC", "MARKD", "MARKE", "MARKF", "MARKG", "MARKH", "MARKX", "MARKY", "MARKZ" ]
 BLOCK = re.compile( r"<(definition|candidate_c\d+)_([0-9a-f]{8})>\n(.*?)\n</\1_\2>", re.DOTALL )
-JSCPD = { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "chosen_in": "test" }
+JSCPD = { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "test" }
 
 
 class FakeClient:

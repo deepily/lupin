@@ -107,7 +107,7 @@ JS_COPY = """function {name}( items, factor ) {{
 }}
 """
 
-JSCPD_CFG = { "jscpd": { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "chosen_in": "test" } }
+JSCPD_CFG = { "jscpd": { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "test" } }
 
 
 def nested_tree( tmp_path ):
@@ -153,10 +153,22 @@ def at_tokens( n ):
 
 def test_run_jscpd_passes_the_frozen_thresholds_and_both_script_formats_on_the_command_line(tmp_path, monkeypatch):
     calls = fake_jscpd( monkeypatch, tmp_path, "5.3.3", 0, True )
-    st.run_jscpd( tmp_path, [ "x" ], { "jscpd": { "version": "5.3.3", "min_tokens": 61, "min_lines": 7, "chosen_in": "t" } } )
+    st.run_jscpd( tmp_path, [ "x" ], { "jscpd": { "version": "5.3.3", "min_tokens": 61, "min_lines": 7, "max_size": "7mb", "chosen_in": "t" } } )
     cmd, kw = calls[ -1 ]
-    assert cmd[ cmd.index( "--min-tokens" ) + 1 ] == "61" and cmd[ cmd.index( "--min-lines" ) + 1 ] == "7"
+    assert cmd[ cmd.index( "--min-tokens" ) + 1 ] == "61" and cmd[ cmd.index( "--min-lines" ) + 1 ] == "7" and cmd[ cmd.index( "--max-size" ) + 1 ] == "7mb"
     assert cmd[ cmd.index( "--format" ) + 1 ] == "typescript,javascript" and cmd[ -1 ] == "." and kw[ "cwd" ] == str( tmp_path )
+
+
+def test_a_file_over_jscpds_default_size_is_skipped_without_a_word_unless_the_frozen_max_size_allows_it(tmp_path):
+    """The monolith is 1.4 MB and jscpd skips files over 100 kb, reporting no clone and no error."""
+    body = JS_COPY.format( name="sumUp" ) + "\n" + JS_COPY.format( name="sumDown" ) + "\n" + "// padding line to pass the default size limit of jscpd\n" * 3000
+    path = tmp_path / "client" / "big.js"
+    path.parent.mkdir( parents=True )
+    path.write_text( body, encoding="utf-8" )
+    assert path.stat().st_size > 100 * 1024
+    allowed = st.run_jscpd( tmp_path, [ "client" ], JSCPD_CFG )
+    default = st.run_jscpd( tmp_path, [ "client" ], { "jscpd": { **JSCPD_CFG[ "jscpd" ], "max_size": "100kb" } } )
+    assert len( allowed[ "duplicates" ] ) >= 1 and default[ "duplicates" ] == []
 
 
 def test_run_jscpd_names_a_missing_launcher_and_a_missing_node(tmp_path, monkeypatch):
@@ -322,3 +334,40 @@ def test_clone_pairs_merges_sources_keeps_the_larger_size_and_orders_by_size_the
     merged = st.clone_pairs( script, python )
     assert [ ( p[ "ids" ], p[ "size" ], p[ "source" ] ) for p in merged ] == [ ( [ "a", "b" ], 95, "dups" ), ( [ "c", "d" ], 40, "jscpd" ), ( [ "e", "f" ], 40, "dups" ) ]
     assert st.clone_pairs() == [] and st.clone_pairs( [] , [] ) == []
+
+
+# ---- script_clones --------------------------------------------------------------------------------------------
+
+SHAPE_A = "function {name}( items ) {{\n    const out = items.map( x => x + 1 ).filter( x => x > 2 );\n    let total = 0;\n    for ( const o of out ) {{\n        if ( o > 3 ) {{ total += o; }}\n    }}\n    return total;\n}}\n"
+SHAPE_B = "function {name}( items ) {{\n    try {{\n        while ( items.length > 0 ) {{\n            items.pop();\n            if ( items.length === 3 ) {{ break; }}\n        }}\n    }} catch ( e ) {{\n        return [ e, items ];\n    }}\n    return items;\n}}\n"
+
+
+def script_tree( tmp_path, text ):
+    """Write one script file and return ( root, spec, file, definitions )."""
+    root = tmp_path / "tree"
+    path = root / "client" / "m.js"
+    path.parent.mkdir( parents=True )
+    path.write_text( text, encoding="utf-8" )
+    return root, sp.spec_for( root ), path, ex.extract_tree( root, [ path ], "server" )[ "definitions" ]
+
+
+def test_script_clones_pairs_definitions_of_one_shape_under_the_dups_source_and_leaves_a_different_shape_alone(tmp_path):
+    root, spec, path, defs = script_tree( tmp_path, SHAPE_A.format( name="one" ) + SHAPE_A.format( name="two" ) + SHAPE_B.format( name="other" ) )
+    by_name = { d[ "name" ]: d[ "id" ] for d in defs }
+    got     = st.script_clones( spec, [ path ], defs, 25 )
+    assert [ ( p[ "ids" ], p[ "source" ] ) for p in got ] == [ ( sorted( [ by_name[ "one" ], by_name[ "two" ] ] ), "dups" ) ] and got[ 0 ][ "size" ] > 0
+    assert by_name[ "other" ] not in got[ 0 ][ "ids" ]
+
+
+def test_script_clones_numbers_a_repeated_name_as_dups_does_so_the_second_copy_is_not_lost(tmp_path):
+    root, spec, path, defs = script_tree( tmp_path, SHAPE_A.format( name="same" ) + SHAPE_A.format( name="same" ).replace( "o > 3", "o > 4" ) )
+    assert [ d[ "name" ] for d in defs ] == [ "same", "same" ]
+    keys = st._script_keys( defs )
+    assert list( keys ) == [ "client/m.js#same", "client/m.js#same~2" ] and list( keys.values() ) == [ d[ "id" ] for d in defs ]
+    assert [ p[ "ids" ] for p in st.script_clones( spec, [ path ], defs, 25 ) ] == [ sorted( d[ "id" ] for d in defs ) ]
+
+
+def test_script_clones_refuses_an_id_dups_names_that_the_definitions_do_not_hold(tmp_path, monkeypatch):
+    root, spec, path, defs = script_tree( tmp_path, SHAPE_A.format( name="one" ) )
+    monkeypatch.setattr( dups, "find_duplicates", lambda *a, **k: { "exact": [ [ "client/m.js#one", "client/m.js#ghost" ] ], "near": [] } )
+    with pytest.raises( ValueError, match="ghost" ): st.script_clones( spec, [ path ], defs, 25 )

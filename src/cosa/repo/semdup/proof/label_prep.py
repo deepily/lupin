@@ -29,6 +29,7 @@ CLIENT_DIR     = "src/lupin_app/static/js"
 PLANTED_COUNT  = 60
 ALIKE_EVERY    = 3
 PER_SOURCE     = 30
+MONOLITH_TOTAL = 60
 TOP_UP_WAVES   = 6
 THREADS        = 6
 STRATA         = ( "fable-planted", "opus-work-alike" )
@@ -205,23 +206,24 @@ def monolith_definitions( root, min_nodes ):
     return tmp, [ d for d in report[ "definitions" ] if d[ "nodes" ] >= min_nodes ]
 
 
-def monolith_candidates( root, cfg, client, cache_dir, per_source=PER_SOURCE, nominated=() ):
+def monolith_candidates( root, cfg, client, cache_dir, per_source=PER_SOURCE, nominated=(), total=MONOLITH_TOTAL ):
     """
     Build the tagged candidate pairs of the monolith from its two automatic sources.
 
     Requires:
-        - cfg is the frozen configuration; client embeds bodies (body_vectors.ensure_vectors); nominated is empty unless a person named pairs
+        - cfg is the frozen configuration; client embeds bodies (body_vectors.ensure_vectors); nominated is empty unless a person named pairs; total is the size the list is to reach
 
     Ensures:
-        - returns { defs, pairs, blob }: the monolith's definitions, up to per_source pairs from each source tagged structural and neighbour (and the nominated ones), and the pinned blob sha
-        - the structural source is jscpd over a copy of the pinned file
+        - returns { defs, pairs, blob }: the monolith's definitions, the structural pairs (up to per_source), the neighbour pairs that bring the list to total, and the nominated ones, and the pinned blob sha
+        - the structural source is jscpd and dups.find_duplicates over a copy of the pinned file, merged by structural.clone_pairs; their sizes are on different scales, which only orders them
     """
     tmp, defs = monolith_definitions( root, cfg[ "min_nodes" ] )
     with tmp:
         report = structural.run_jscpd( tmp.name, [ CLIENT_DIR ], cfg )
-    pairs   = structural.parse_jscpd( report, defs, cfg[ "clone_cover" ] )
+        found  = structural.script_clones( sp.spec_for( tmp.name ), [ pathlib.Path( tmp.name ) / MONOLITH_FILE ], defs, cfg[ "min_nodes" ] )
+    pairs   = structural.clone_pairs( structural.parse_jscpd( report, defs, cfg[ "clone_cover" ] ), found )
     vectors = body_vectors.ensure_vectors( defs, client, cache_dir, cfg[ "body_chars" ] )[ "vectors" ]
-    tagged  = monolith_pairs.candidate_pairs( defs, pairs, vectors, [ list( n ) for n in nominated ], per_source )
+    tagged  = monolith_pairs.candidate_pairs( defs, pairs, vectors, [ list( n ) for n in nominated ], per_source, total )
     return { "defs": defs, "pairs": monolith_pairs.assemble_pairs( tagged ), "blob": MONOLITH_BLOB }
 
 
