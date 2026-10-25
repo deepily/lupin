@@ -3,7 +3,7 @@ Which deletion ticket an admit request may pledge (the Sword of Damocles rule).
 
 A manager asking the owner to admit one row must name one ticket of their own to delete,
 one for one. The rule is switchable at runtime (`sword_of_damocles_active`).
-Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md.
+Plan: the R&D write-up "sword of damocles enforcement plan".
 
 These rules are not in `task_request_lifecycle`, because that module must never accept a
 ticket or a row (`test_nothing_in_this_module_can_touch_a_ticket`). A denial routed through
@@ -23,7 +23,7 @@ def refusal_for_pledge( move, switch_on, target_id, pledge_id, pledge_row, reque
 
     With the switch on, an admit request must pass the id of a ticket that belongs to the
     requester. A demote needs no pledge. The typed actor name is whatever the caller sends, so only the session
-    bridge can say who the requester is. Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md.
+    bridge can say who the requester is. Plan: the R&D write-up "sword of damocles enforcement plan".
 
     Requires:
         - move is the requested move; switch_on is `get_sword_of_damocles_active()`

@@ -1,7 +1,7 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Operator-state capture/restore — parity row A-1a.
 //
-// THE SPECIFICATION IS src/rnd/v0.2.1/2026.09.15-operator-state-preservation-spec.md,
+// THE SPECIFICATION IS the R&D write-up "operator state preservation spec",
 // not this header. Ported from legacy `_captureOperatorState` / `_restoreOperatorState`
 // / `_operatorInputKey` / `_operatorInputByKey` (notifications.js).
 //

@@ -271,7 +271,7 @@ if [ "$SPAN_VERDICT" != "unmoved" ]; then
 fi
 
 # 🔴 THE FLOOR MUST BE THE ONE THE BRANCH COMMITTED (Maya's working-tree-artifact audit,
-# src/rnd/v0.2.1/2026.08.30-working-tree-artifact-gate-audit.md — the coverage gate's own row).
+# the R&D write-up "working tree artifact gate audit" — the coverage gate's own row).
 # The tell ABOVE is a print, not a check: measured 2026-08-30 at sha 908414ad, lowering
 # pyproject's fail_under from 92 to 0 in the working tree turned a 0.84% measurement into
 # "COVERAGE GATE PASSED", exit 0 — and the tell dutifully printed tracked-dirty=1 while it

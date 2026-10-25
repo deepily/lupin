@@ -12,7 +12,7 @@ Measured 2026-09-01 with one probe in two environments:
       under run-integration-tests.sh -> lupin_db_test
 
 The runner exports `config_block_id=Lupin:+Testing`; that is the whole difference.
-Write-up: src/rnd/v0.2.1/2026.09.01-txn-session-binds-dev-db-under-fleet-concurrency.md
+Write-up: the R&D write-up "txn session binds dev db under fleet concurrency"
 
 WHY THE PREDICATE IS TESTED HERE RATHER THAN IN SITU. The guard lives inside a
 session fixture that needs a live server, and `:7999` runs the Development block, so

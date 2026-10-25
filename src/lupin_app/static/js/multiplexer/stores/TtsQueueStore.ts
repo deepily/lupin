@@ -72,7 +72,7 @@ import type {
 // Parity A-1c3 — the queue survives a reload (legacy saveTTSQueueState /
 // restoreTTSQueueState, notifications.js:23045-23147, key
 // `notifications_tts_queue` at :209). Spec ruling 3: StorageService, injected
-// `| null` (src/rnd/v0.2.1/2026.09.15-operator-state-preservation-spec.md §8).
+// `| null` (the R&D write-up "operator state preservation spec" §8).
 //
 // POLARITY: the payload is `{ pending, focusModeActive, focusModeNotificationId }`.
 // `pending` holds the items still WAITING to be spoken, in order. The item that

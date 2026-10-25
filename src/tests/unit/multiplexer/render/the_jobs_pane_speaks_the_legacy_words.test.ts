@@ -1,8 +1,8 @@
 // THE JOBS PANE SPEAKS THE LEGACY CLIENT'S WORDS — parity A-2 #10, row 0ef31897.
 //
-// Build plan src/rnd/v0.2.1/2026.09.15-multiplexer-parity-build-plan.md §1 A-2 row 10;
+// Build plan the R&D write-up "multiplexer parity build plan" §1 A-2 row 10;
 // the audit is Phase 2 A12 (B9d, B10, Q2, Q5) in
-// src/rnd/v0.2.1/2026.09.15-multiplexer-vs-legacy-runtime-disparities.md.
+// the R&D write-up "multiplexer vs legacy runtime disparities".
 // "Buckets start collapsed" is struck (§3 R2) and is not tested here.
 //
 // The legacy client is the lead. Each block below cites the legacy code it copies,

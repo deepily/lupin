@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Guard for `src/scripts/delivery_latency.py` — the instrument behind §9–§9e of
-`src/rnd/v0.2.1/2026.09.05-no-worker-facing-delivery-route.md`.
+the R&D write-up "no worker facing delivery route".
 
 WHY THE PURE FUNCTIONS AND NOT THE CLI. The three functions here are the whole measurement;
 everything else is `git` and `journalctl` I/O. A test that shelled out to those would be

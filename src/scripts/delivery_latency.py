@@ -3,7 +3,7 @@
 Measure how long each commit waits before it lands on a target branch.
 
 The instrument behind sections 9 to 9e of
-`src/rnd/v0.2.1/2026.09.05-no-worker-facing-delivery-route.md`.
+the R&D write-up "no worker facing delivery route".
 Every figure there came from a throwaway probe. A number whose only artifact lives in `/tmp`
 cannot be re-derived, and this subject is measurements that were wrong four times.
 

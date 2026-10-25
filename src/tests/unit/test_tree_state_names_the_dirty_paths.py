@@ -5,7 +5,7 @@ The incident this closes: `src/conf/epic-stories.json` carried 24 uncommitted li
 through TWO unit tiers, `tracked-dirty=1` printed on both runs, and nobody read it
 (CLAUDE.md:755-756). An unnamed count is the easiest thing in a log to wave at.
 
-Design: src/rnd/v0.2.1/2026.09.03-tree-state-gap-2-name-the-dirty-paths.md
+Design: the R&D write-up "tree state gap 2 name the dirty paths"
 """
 import importlib.util
 import os

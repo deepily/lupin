@@ -9,7 +9,7 @@ without it. If CPython ever changes its invalidation scheme, the controls go red
 so out loud rather than quietly guarding nothing.
 
 Row `d18ce9ef`. Measurement and remedy pricing:
-`src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+the R&D write-up "stale pyc defeats mutation testing".
 """
 
 import os

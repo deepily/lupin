@@ -7,7 +7,7 @@ Managers ask Rick to move a row, and only Rick answers.
 **Sword of Damocles**: while `sword_of_damocles_active` is on, an admit must pledge one live ticket the requester owns.
 Rick's approval drops the pledge in the same transaction as the admit.
 Ownership is checked against the persona the server resolves (approver account, else the session bridge), never the typed actor.
-Plan: `src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md`. Full schemas: `/docs`.
+Plan: the R&D write-up "sword of damocles enforcement plan". Full schemas: `/docs`.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|

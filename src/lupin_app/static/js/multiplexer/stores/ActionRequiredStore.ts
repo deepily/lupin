@@ -169,7 +169,7 @@ export const FREEZE_TRANSPORT = "QueueTransport";
 // ---------------------------------------------------------------------------
 // Parity A-1c2 — the prompts survive a reload (legacy saveActionRequiredState /
 // restoreActionRequiredState, key `notifications_action_required`). Spec rulings 2 and 3,
-// src/rnd/v0.2.1/2026.09.15-operator-state-preservation-spec.md.
+// the R&D write-up "operator state preservation spec".
 //
 // POLARITY: the payload is `{ prompts }` — every card still OWED an answer (isActionRequiredLive),
 // in queue order, so the first is the active card. A card absent from the list is finished.
