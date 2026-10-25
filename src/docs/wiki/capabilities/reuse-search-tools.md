@@ -2,20 +2,20 @@
 capability: reuse-search-tools
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.cosa_voice_mcp.check_exists@5bbf00b3d4
-  - lupin_mcp.cosa_voice_mcp.fetch_similar@32876a143b
-  - lupin_mcp.cosa_voice_mcp.read_capability@9cbb0f24b2
-  - lupin_mcp.cosa_voice_mcp.replay@ccfe9d03f8
-  - lupin_mcp.reuse_tools.prepare@cb63b067e8
+  - lupin_mcp.cosa_voice_mcp.check_exists@1bf40cb540
+  - lupin_mcp.cosa_voice_mcp.fetch_similar@c954e87950
+  - lupin_mcp.cosa_voice_mcp.read_capability@0ab23a5e6c
+  - lupin_mcp.cosa_voice_mcp.replay@42a3299a59
+  - lupin_mcp.reuse_tools.prepare@daa78dd6d0
   - lupin_mcp.reuse_tools.sendable@6d563314ce
   - lupin_mcp.reuse_tools.sweep@6b56c2af23
   - lupin_mcp.reuse_tools.LiveJevTransport.post@05ba74d3cf
-  - cosa.repo.symindex.verdict.decide@22df0ebc3b
-  - lupin_mcp.reuse_call_log_middleware.ReuseCallLogMiddleware.on_call_tool@729af9d8d7
+  - cosa.repo.symindex.verdict.decide@9e23bddf00
+  - lupin_mcp.reuse_call_log_middleware.ReuseCallLogMiddleware.on_call_tool@40f231fdab
 ---
 # Reuse search tools
 
-Four MCP tools ask whether a new definition already exists. They read the [[symbol-index]] and the wiki, and send short symbol descriptions to the Jev model. They never edit code, but a stale index is rebuilt first, which writes `src/docs/index`.
+Four MCP tools ask whether a new definition already exists. A fifth, `record_search`, is on [[reuse-record-search]]. They read the [[symbol-index]] and the wiki, and send short symbol descriptions to the Jev model. They never edit code, but a stale index is rebuilt first, which writes `src/docs/index`.
 
 ## The four tools
 - `check_exists( need, language )` redacts the need, then asks Jev about index entries of one language. The language is `py`, `ts`, `dart` or `all`, has no default, and a missing or unknown one answers `LANGUAGE_REQUIRED` or `LANGUAGE_INVALID` before any request. It returns a verdict, a shortlist capped at 10, the nearest entries and a receipt id. An empty need answers `EMPTY_NEED`.
@@ -23,8 +23,8 @@ Four MCP tools ask whether a new definition already exists. They read the [[symb
 - Its id is looked up among all definitions, private ones included. `UNKNOWN_ENTRY` means no definition, only while the index is healthy. `EXCLUDED_SENSITIVE_CONTENT` or `EXCLUDED_PREFIX` means it may not be sent.
 - `read_capability( names )` reads `capabilities/<name>.md` and makes no Jev call. A bad or missing name is `BAD_NAME` or `NOT_FOUND` per name.
 - `replay( receipt_id )` re-runs a receipt on cached answers only, then at the current tree, and returns both results and the differences. A receipt of the removed page route answers `ROUTE_RETIRED`.
-- Receipts, snapshots, Jev cache entries and the per-session call log live under the fleet data root's reuse-review folder, never overwritten. `LUPIN_REUSE_DATA_DIR` moves them. A call-log middleware appends one line per tool call and never fails the call.
-- Without pack settings, `check_exists` sends one request per sendable entry, route `full`. With `LUPIN_REUSE_JEV_PACK_SIZE`, `LUPIN_REUSE_JEV_TOKEN_CEILING` and `LUPIN_REUSE_JEV_RUN_NAME` set, requests are packed and the [[candidate-stage]] picks the entries, route `candidates`.
+- Receipts, snapshots, Jev cache entries and the per-session call log live under the fleet data root's reuse-review folder, never overwritten. `LUPIN_REUSE_DATA_DIR` moves them. A call-log middleware appends one line per call of these tools and of `record_search`, with the `search_id` when there is one. It never fails the call.
+- Without pack settings, `check_exists` sends one request per sendable entry, route `full`. With `LUPIN_REUSE_JEV_PACK_SIZE`, `LUPIN_REUSE_JEV_TOKEN_CEILING` and `LUPIN_REUSE_JEV_RUN_NAME` set, requests are packed and the [[candidate-stage]] picks the entries, route `candidates`. The stage always holds every language, and the language filter applies to its ids afterwards.
 - A candidate stage that fails on its first call answers `UNCERTAIN_READ_SOURCE` with `CALL_FAILED` in its causes and asks nothing. The `cause` field is the first cause in the fixed order, so `DEPENDENCY_MISSING` outranks it. A policy with a band can widen the shortlist to 512; the shipped policy has none (Rick ruled the band off). If the widening call fails, the first sweep's decision stands with `CALL_FAILED` added and `widen_error` set.
 
 ## What is sent to Jev
