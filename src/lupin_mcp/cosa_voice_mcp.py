@@ -1844,8 +1844,7 @@ def _notify_send(
 
     # Assign the idempotency key HERE (before send) so a durable-outbox retry
     # reuses the SAME key → the server de-dups a maybe-already-delivered message.
-    if request.idempotency_key is None:
-        request = request.model_copy( update={ "idempotency_key": str( _uuid.uuid4() ) } )
+    request = _with_idempotency_key( request )
 
     # Drain-first ordering: if a backlog already exists for this session, queue
     # behind it instead of sending live (preserves FIFO order during a degraded

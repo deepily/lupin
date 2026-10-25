@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Four wired tools with no `<tool>_impl` symbol, driven under a guessed identity.
+Five wired tools with no `<tool>_impl` symbol, driven under a guessed identity.
 
 The two speakerphone tools flip the resolved session's conversation mode and displace the session
 that holds it. `request_persona` allocates a voice for the resolved session. `spawn_sessions` launches
-real sessions parented to the resolved manager. Every identity-bearing tool refuses a guessed identity.
+real sessions parented to the resolved manager, and `dismiss_sessions` reaps them. Every identity-bearing tool refuses a guessed identity.
 
 The guard file proves each refusal is the first statement. This file drives the assembled tools and
 asserts what that check cannot: a refused call never reaches the body's first seam.
@@ -29,6 +29,7 @@ CASES = [
     ( "disable_speakerphone", "_flip_speakerphone",  { } ),
     ( "request_persona",      "_request_persona",    { } ),
     ( "spawn_sessions",       "_wait_for_sender_id", { "count": 1, "task_prompt": "x" } ),
+    ( "dismiss_sessions",     "_wait_for_sender_id", { } ),
 ]
 IDS = [ case[ 0 ] for case in CASES ]
 
