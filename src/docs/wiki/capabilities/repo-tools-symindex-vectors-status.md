@@ -21,7 +21,7 @@ Says whether the stored vector set is stale, and files one store row when it is.
 ## How it decides
 - `read_stale_hours` reads the key `reuse vector stale hours` and falls back to 36 when it is absent, unparsable or not above zero.
 - `age_hours( built_at, now )` returns the age rounded to two places, or None when the time has no offset.
-- `compute` reads the set's build info, the published index, the stored purpose lines and the job's state file. It is stale when the set has no build info, its time cannot be read, or it is older than the limit. It is also stale when the index changed since the build and the daily job has already run today. It names every reason that held.
+- `compute` reads the set's build info, the published index and its searchable entries, the stored purpose lines and the job's state file. It is stale when the set has no build info, its time cannot be read, or it is older than the limit. It is also stale when the index changed since the build and the daily job has already run today. It names every reason that held.
 - An index that is not published leaves its fields None and never counts against the set.
 
 ## Filing the row
