@@ -227,7 +227,7 @@ def test_the_stage_is_given_the_whole_index_so_two_languages_of_equal_size_share
         assert rep[ "status" ] == "ok", rep
         seen.extend( stage.entries_seen )
     assert totals == { "py": 3, "ts": 3 }                                                         # the collision condition: equal counts in the language asked
-    assert len( seen ) == 4 and all( len( ids ) == 6 for ids in seen ) and len( { tuple( ids ) for ids in seen } ) == 1     # live and replay, both languages: one list of all six
+    assert len( seen ) == 6 and all( len( ids ) == 6 for ids in seen ) and len( { tuple( ids ) for ids in seen } ) == 1     # per language the live call and the replay's two re-runs, frozen and head: one list of all six
 
 
 def test_a_widening_drops_the_wider_sets_ids_of_another_language( env ):
