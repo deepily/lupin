@@ -1,6 +1,6 @@
 ---
 capability: swe-team-roles
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.swe_team.agent_definitions.AgentRole@4ceafe38df
   - cosa.agents.swe_team.agent_definitions.get_agent_roles@de2e1e74ca

@@ -1,6 +1,6 @@
 ---
 capability: app-startup-tasks-and-asset-tools
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_app.main.load_stt_model@0d41c8f438
   - lupin_app.main.clock_loop@22b2251fc5

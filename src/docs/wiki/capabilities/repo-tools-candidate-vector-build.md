@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-vector-build
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.vector_build.EndpointClient@5098542e92
   - cosa.repo.symindex.candidates.vector_build.entry_texts@f1e5053a5e

@@ -1,6 +1,6 @@
 ---
 capability: podcast-mock-clients
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.mock_clients.MockCostEstimate@a6f03bb687
   - cosa.agents.podcast_generator.mock_clients.MockPodcastAPIClient@27c188cf47

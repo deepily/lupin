@@ -1,6 +1,6 @@
 ---
 capability: cc-hook-memento-verify-tick
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.memento_verify_tick.fleet_repo_roots@dfc5e1bc5b
   - lupin_cli.claude_code.hooks.lib.memento_verify_tick.verify_tick_line@8c80060c89

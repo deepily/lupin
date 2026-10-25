@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-poke-mute-and-fcm-pause
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.fcm.RegisterTokenRequest@1511eb3889
   - cosa.rest.routers.fcm.UnregisterTokenRequest@4faa4595c6

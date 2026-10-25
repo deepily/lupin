@@ -1,6 +1,6 @@
 ---
 capability: rest-core-podcast-door
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.podcast_proxy.DoorRefusal@3ecda4611b
   - cosa.rest.podcast_proxy.refusal_detail@799cdd1eb5

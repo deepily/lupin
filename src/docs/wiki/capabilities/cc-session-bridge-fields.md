@@ -1,6 +1,6 @@
 ---
 capability: cc-session-bridge-fields
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone@89e0092636
   - lupin_cli.claude_code.hooks.lib.session_bridge.set_speakerphone@0201ca8b58

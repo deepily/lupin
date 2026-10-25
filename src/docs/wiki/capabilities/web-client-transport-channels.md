@@ -1,6 +1,6 @@
 ---
 capability: web-client-transport-channels
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.transport.AudioTransport.defaultBinaryHandler@1b17489297
   - src.lupin_app.static.js.multiplexer.transport.AudioTransport.createAudioTransport@71562ebc1e

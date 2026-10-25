@@ -1,6 +1,6 @@
 ---
 capability: rest-services-task-owed-predicates
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_store_owed.is_owed@319c7ddeea
   - cosa.rest.task_store_owed.owed_clause@87b78da66f

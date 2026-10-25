@@ -1,6 +1,6 @@
 ---
 capability: bounded-retry-policy
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.bounded_retry.RetryPolicy@bbe64819b2
   - cosa.utils.bounded_retry.RetryPolicy.error_is_retryable@dbba3f6d70

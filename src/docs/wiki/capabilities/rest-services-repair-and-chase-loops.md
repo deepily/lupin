@@ -1,6 +1,6 @@
 ---
 capability: rest-services-repair-and-chase-loops
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.repair_attempt_tracker.RepairAttempt@2e9e777bc8
   - cosa.rest.repair_attempt_tracker.RepairChain@7bf9706fc6

@@ -1,6 +1,6 @@
 ---
 capability: cc-hook-common-core
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.hook_common.read_hook_input@a6ac4c963d
   - lupin_cli.claude_code.hooks.lib.hook_common.log_to_stream@42257bf060

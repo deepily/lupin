@@ -1,6 +1,6 @@
 ---
 capability: web-client-nav-and-diagnostics
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.diagnostic.boot.createBrowserDeps@5a806f7c47
   - src.lupin_app.static.js.diagnostic.boot.wireDiagnostic@b7a1f6d4c3

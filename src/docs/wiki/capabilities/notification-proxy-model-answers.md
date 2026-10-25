@@ -1,6 +1,6 @@
 ---
 capability: notification-proxy-model-answers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.notification_proxy.xml_models.BatchScriptMatcherResponse@6b34503626
   - cosa.agents.notification_proxy.xml_models.ScriptMatcherResponse@655ee3d7ce

@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-core-routes-diff-dups
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.routes.resolve@0cd5fe056b
   - cosa.repo.symindex.routes.route_decorators@a7ab915c88

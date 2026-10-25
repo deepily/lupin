@@ -1,6 +1,6 @@
 ---
 capability: deep-research-voice-interface
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research.cosa_interface.reset_dispatch_context@906fca2640
   - cosa.agents.utils.agent_notification_dispatcher.make_interface_functions@326b64aaa7

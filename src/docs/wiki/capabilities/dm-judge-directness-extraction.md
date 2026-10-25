@@ -1,6 +1,6 @@
 ---
 capability: dm-judge-directness-extraction
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.dm_quality_judge.xml_models_v2.DmDirectnessExtraction@70f07cf59b
   - cosa.agents.dm_quality_judge.xml_models_v2.ExtractionError@59af7dd17b

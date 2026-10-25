@@ -1,6 +1,6 @@
 ---
 capability: agent-voice-io-functions
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.utils.voice_io.set_cli_mode@b71a621301
   - cosa.agents.utils.voice_io.is_cli_mode@934e25ab77

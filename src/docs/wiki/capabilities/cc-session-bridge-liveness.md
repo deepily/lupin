@@ -1,6 +1,6 @@
 ---
 capability: cc-session-bridge-liveness
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_dead_sessions@ad6c28e5f2
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_bridge_mtime@681d5820fe

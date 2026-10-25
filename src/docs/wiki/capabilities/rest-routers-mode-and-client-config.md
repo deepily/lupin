@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-mode-and-client-config
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.cc_transcript.get_cc_transcript_roster@fceea4c65a
   - cosa.rest.routers.mode.ModeSetRequest@43e172d201

@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-peer-queue-watch
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.peer.PeerQueueResponse@d7d9fa7fcd
   - cosa.rest.routers.peer.WatchStartRequest@c1b519b855

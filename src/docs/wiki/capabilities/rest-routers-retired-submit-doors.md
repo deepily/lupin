@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-retired-submit-doors
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.bug_fix_expediter.submit_bug_fix@975d1c6694
   - cosa.rest.routers.claude_code_queue.submit_claude_code_to_queue@0cb72e8ab6

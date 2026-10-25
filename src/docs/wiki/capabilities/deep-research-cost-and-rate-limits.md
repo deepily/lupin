@@ -1,6 +1,6 @@
 ---
 capability: deep-research-cost-and-rate-limits
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research.api_client.APIResponse@bbb8ee2be9
   - cosa.agents.deep_research.cost_tracker.ModelTier@b06f0e8725

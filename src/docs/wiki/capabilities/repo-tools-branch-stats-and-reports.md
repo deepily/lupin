@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-branch-stats-and-reports
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.branch_analyzer.statistics_collector.StatisticsCollector@0fa052f565
   - cosa.repo.branch_analyzer.report_formatter.BaseReportFormatter@7f4c9eebb3

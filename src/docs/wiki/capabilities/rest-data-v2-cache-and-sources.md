@@ -1,6 +1,6 @@
 ---
 capability: rest-data-v2-cache-and-sources
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.v2.cache.V2Cache@d502acc688
   - cosa.rest.v2.trace.StageTrace@b0560e06c6

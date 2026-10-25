@@ -1,6 +1,6 @@
 ---
 capability: deep-research-cli
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research.cli.check_prerequisites@2d40de3f5f
   - cosa.agents.deep_research.cli.main@edd62ebf2e

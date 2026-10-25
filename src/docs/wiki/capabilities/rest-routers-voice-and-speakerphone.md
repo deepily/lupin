@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-voice-and-speakerphone
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.speakerphone.get_notification_queue@419a0b0054
   - cosa.rest.routers.speakerphone.SpeakerphoneBody@0f990c653f

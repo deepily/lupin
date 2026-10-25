@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-respin-boot-receipts
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.respin_wake_check.classify_memento_slot@c9ad07f2fd
   - cosa.agents.heartbeat_arbiter.respin_wake_check.receipt_path@3b080463ed

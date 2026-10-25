@@ -1,6 +1,6 @@
 ---
 capability: rest-core-auth-audit-and-models
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.auth_audit.log_auth_event@6d91da1c80
   - cosa.rest.auth_audit.get_user_audit_log@c8a9f7de6e

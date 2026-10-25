@@ -1,6 +1,6 @@
 ---
 capability: worktree-venv-and-drift-disclosure
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.worktree_venv.provision_worktree_venv@ff626c8b91
   - cosa.utils.seat_worktree.drift_disclosure@315fb664e8

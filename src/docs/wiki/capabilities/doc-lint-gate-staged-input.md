@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-gate-staged-input
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.gate.git_toplevel@b5ba72423f
   - cosa.repo.doc_lint.gate.staged_entries@5c4fd4e89b

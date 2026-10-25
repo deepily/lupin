@@ -1,6 +1,6 @@
 ---
 capability: cc-git-guard-envelopes
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.branch_lock_guard.configured_hooks_dirs@037a3c1155
   - lupin_cli.claude_code.hooks.lib.branch_lock_guard.build_branch_lock_deny_response@e7b1c204c7

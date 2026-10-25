@@ -1,6 +1,6 @@
 ---
 capability: podcast-script-state
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.orchestrator.build_auto_continue_disclosure@2417ee8502
   - cosa.agents.podcast_generator.state.ContentAnalysis@866c21b049

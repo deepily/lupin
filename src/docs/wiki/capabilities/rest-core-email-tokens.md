@@ -1,6 +1,6 @@
 ---
 capability: rest-core-email-tokens
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.email_service.send_verification_email@e9e929e1c5
   - cosa.rest.email_service.send_password_reset_email@bf983803c1

@@ -1,6 +1,6 @@
 ---
 capability: speech-to-text-routing
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.memory.speech_to_text_provider.SpeechToTextProvider@7e666d2675
   - cosa.memory.speech_to_text_provider.SpeechToTextProvider.transcribe@0a0b07b325

@@ -1,6 +1,6 @@
 ---
 capability: arbiter-fleet-loop-factories
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_arbiter_app.fleet_arbiter_loop.build_fleet_arbiter_job_factory@5d4ae8b319
   - lupin_arbiter_app.fleet_arbiter_loop.janitor_repo_roots@4682ca2158

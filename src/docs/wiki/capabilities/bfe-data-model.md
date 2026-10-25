@@ -1,6 +1,6 @@
 ---
 capability: bfe-data-model
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig@0beab1fb7a
   - cosa.agents.bug_fix_expediter.dead_job_packager.package_dead_job@d7b747b6e5

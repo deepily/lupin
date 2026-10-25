@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-fleet-view
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.fleet_data_model.build_fleet_view@9ec632a963
   - cosa.agents.heartbeat_arbiter.fleet_render.build_snapshot@af0d3bd2bc

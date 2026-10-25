@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-arms-wiring
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.arms.build_arm_stages@0924c8dc22
   - cosa.repo.symindex.candidates.arms.lists_for_arm@5925f024a7

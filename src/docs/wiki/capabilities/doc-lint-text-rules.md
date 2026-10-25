@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-text-rules
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.text_rules.line_of_offset@925672db9f
   - cosa.repo.doc_lint.text_rules.summary_findings@3622c7c291

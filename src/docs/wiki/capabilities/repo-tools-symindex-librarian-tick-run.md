@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-librarian-tick-run
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.librarian_tick.run_tick@ef6c8b8836
   - cosa.repo.symindex.librarian_tick.due@da2c1edfb5

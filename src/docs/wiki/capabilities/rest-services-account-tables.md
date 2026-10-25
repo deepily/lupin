@@ -1,6 +1,6 @@
 ---
 capability: rest-services-account-tables
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.postgres_models.User@00f55ae964
   - cosa.rest.postgres_models.RefreshToken@1f89810270

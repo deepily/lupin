@@ -1,6 +1,6 @@
 ---
 capability: rest-services-approval-gate-decisions
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_approval_settings.requested_move@eedd37097c
   - cosa.rest.task_approval_settings.move_for_ticket@c53631b8bb

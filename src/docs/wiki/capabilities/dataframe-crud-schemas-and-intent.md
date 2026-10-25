@@ -1,6 +1,6 @@
 ---
 capability: dataframe-crud-schemas-and-intent
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.crud_for_dataframes.schemas.get_schema@4c2233901a
   - cosa.crud_for_dataframes.schemas.get_columns@6cb78d9d12

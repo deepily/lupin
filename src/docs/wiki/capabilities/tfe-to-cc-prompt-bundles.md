@@ -1,6 +1,6 @@
 ---
 capability: tfe-to-cc-prompt-bundles
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.tfe_to_cc.prompts.bundle_phase1.build_diagnosis_bundle_prompt@4f0ca8fc85
   - cosa.agents.tfe_to_cc.prompts.bundle_phase3.build_fix_bundle_prompt@1d8aff2497

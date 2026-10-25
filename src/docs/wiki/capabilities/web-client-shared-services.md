@@ -1,6 +1,6 @@
 ---
 capability: web-client-shared-services
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.shared.EventBus.EventBusImpl@5f463260ea
   - src.lupin_app.static.js.multiplexer.shared.EventBus.createEventBusForTesting@e28a0a5730

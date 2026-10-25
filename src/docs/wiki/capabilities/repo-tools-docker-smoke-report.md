@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-docker-smoke-report
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.docker_smoke_report.summarize@eb1b551546
   - cosa.repo.docker_smoke_report.render@0aacf1efc4

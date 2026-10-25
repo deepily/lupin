@@ -1,6 +1,6 @@
 ---
 capability: cc-stale-buffer-janitor
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.stale_buffer_janitor.parse_hash_from_buffer_name@9b48501e3b
   - lupin_cli.claude_code.hooks.lib.stale_buffer_janitor.parse_listener_hashes@47e39c7a53

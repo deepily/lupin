@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-vector-freshness
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.freshness.index_manifest@10c4b1733b
   - cosa.repo.symindex.candidates.freshness.utc_now@469c33c8eb

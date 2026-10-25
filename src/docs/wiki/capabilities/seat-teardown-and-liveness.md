@@ -1,6 +1,6 @@
 ---
 capability: seat-teardown-and-liveness
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.seat_teardown.main@47b8bf9ed8
   - cosa.agents.shared.seat_teardown.teardown_notice@6a91f637ac

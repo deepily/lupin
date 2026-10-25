@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-arms-run-inputs
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.arm_run.real_env@18a45ad171
   - cosa.repo.symindex.candidates.arm_run.sha256_of@684acd39fd

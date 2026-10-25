@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-labelled-run
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.labelled_set.build@f93b5b43f5
   - cosa.repo.symindex.stage2_split.twin_groups@15e2e5985c

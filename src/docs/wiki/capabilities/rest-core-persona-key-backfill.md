@@ -1,6 +1,6 @@
 ---
 capability: rest-core-persona-key-backfill
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.persona_key_backfill.scan_stragglers@37ee3fc2e4
   - cosa.rest.persona_key_backfill.backfill_persona_keys@fba490fa2d

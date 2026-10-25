@@ -1,6 +1,6 @@
 ---
 capability: cc-hold-verb-and-acked-ledger
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold_io.cmd_write@eba6941075
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold_io.cmd_read@5229311156

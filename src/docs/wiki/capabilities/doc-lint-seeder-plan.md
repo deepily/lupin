@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-seeder-plan
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.labelled_set_seeder.Shortfall@9322d98720
   - cosa.repo.doc_lint.labelled_set_seeder.pick@eab6e5a276

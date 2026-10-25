@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-speech-tts-streaming
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.speech.get_tts_audio@a601cde028
   - cosa.rest.routers.speech.get_tts_audio_elevenlabs@a261b96ea0

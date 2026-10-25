@@ -1,6 +1,6 @@
 ---
 capability: cc-hook-credentials
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.hook_credentials.get_hook_credentials@a5bb126f2f
   - lupin_cli.claude_code.hooks.lib.hook_credentials.get_owner_credentials@b747d06683

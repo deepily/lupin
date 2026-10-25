@@ -1,6 +1,6 @@
 ---
 capability: orphan-bridge-reaper
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.orphan_bridge_reaper.reconcile_orphan_bridges@52cfdd2ffe
 ---

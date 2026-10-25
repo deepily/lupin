@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-stage-and-resident
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.candidate_stage.Stage@d96b26286b
   - cosa.repo.symindex.candidates.candidate_stage.build_stage@a4a5349bd4

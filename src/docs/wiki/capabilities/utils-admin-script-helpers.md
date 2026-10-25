@@ -1,6 +1,6 @@
 ---
 capability: utils-admin-script-helpers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.admin_script_helpers.run_create_script@7de41643d5
   - cosa.utils.admin_script_helpers.validate_table@3ed9c85bf4

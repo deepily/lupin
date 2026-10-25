@@ -1,6 +1,6 @@
 ---
 capability: rest-core-mobile-push
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.fcm_push_pause.PushPauseController@fcc21accc2
   - cosa.rest.fcm_push_pause.init_controller@c1f94e208c

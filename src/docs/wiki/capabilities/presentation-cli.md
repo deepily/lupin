@@ -1,6 +1,6 @@
 ---
 capability: presentation-cli
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.presentation_generator.__main__.main@403b5ac1b0
   - cosa.agents.presentation_generator.__main__.run_all_smoke_tests@0aec798dbc

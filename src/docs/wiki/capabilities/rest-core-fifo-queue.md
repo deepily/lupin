@@ -1,6 +1,6 @@
 ---
 capability: rest-core-fifo-queue
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.fifo_queue.FifoQueue@a61ada1e1a
   - cosa.rest.job_state.assert_valid_transition@3b51d5f458

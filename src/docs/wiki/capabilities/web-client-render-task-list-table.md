@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-task-list-table
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.rowSchema.rowWidth@d9f22271e0
   - src.lupin_app.static.js.multiplexer.render.rowSchema.rowFieldLabel@3691affc7f

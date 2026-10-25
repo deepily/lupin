@@ -1,6 +1,6 @@
 ---
 capability: swe-team-state-and-task-files
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.swe_team.state.DelegationResult@0cde500df0
   - cosa.agents.swe_team.state.JobSubState@03141c2a87

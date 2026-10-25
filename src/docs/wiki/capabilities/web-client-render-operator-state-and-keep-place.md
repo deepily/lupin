@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-operator-state-and-keep-place
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.operatorState.whichClass@ed6c67164c
   - src.lupin_app.static.js.multiplexer.render.operatorState.operatorInputKey@c806901c65

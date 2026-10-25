@@ -1,6 +1,6 @@
 ---
 capability: prediction-accuracy-comparators
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.prediction_engine.accuracy_comparators.compare_yes_no@1241d5a0c1
   - cosa.agents.prediction_engine.accuracy_comparators.compare_multiple_choice_single@0871984ffc

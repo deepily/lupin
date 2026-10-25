@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-support-modules
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.caps_fix.code_identifiers@8f22aa6efc
   - cosa.repo.doc_lint.caps_fix.lower_line@dac385db5a

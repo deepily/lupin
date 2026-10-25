@@ -1,6 +1,6 @@
 ---
 capability: rest-core-auth-roles
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.auth_middleware.get_current_user@079e1de175
   - cosa.rest.auth_middleware.get_current_user_optional@659250aea8

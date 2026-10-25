@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-request-auth-guards
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.middleware.api_key_auth.validate_api_key@7a69c46a05
   - cosa.rest.middleware.api_key_auth.require_api_key_or_jwt@a10d46872a

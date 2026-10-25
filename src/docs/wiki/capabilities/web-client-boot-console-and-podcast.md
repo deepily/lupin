@@ -1,6 +1,6 @@
 ---
 capability: web-client-boot-console-and-podcast
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.boot.phase6cSenderSort@82c0265faf
   - src.lupin_app.static.js.multiplexer.boot.pickRandom@62e50e5d1a

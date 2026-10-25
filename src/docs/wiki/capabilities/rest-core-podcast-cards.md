@@ -1,6 +1,6 @@
 ---
 capability: rest-core-podcast-cards
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.podcast_proxy.StartRefusal@26f44c9ab4
   - cosa.rest.podcast_proxy.start_refusal@4eb858d8de

@@ -1,6 +1,6 @@
 ---
 capability: dm-tutor-sentences
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.dm_tutor.sentences.prose_lines@a2c9e1a5d2
   - cosa.agents.dm_tutor.sentences.count_sentences@673af1d0fc

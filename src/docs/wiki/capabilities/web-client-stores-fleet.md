@@ -1,6 +1,6 @@
 ---
 capability: web-client-stores-fleet
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.stores.CommonsStore.defaultFilter@fcb14971a9
   - src.lupin_app.static.js.multiplexer.stores.CommonsStore.CommonsStoreImpl@cdd213101e

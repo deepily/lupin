@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-loc-cli-entrypoints
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.cli_common.add_common_output_args@fc38a5427c
   - cosa.repo.run_branch_analyzer.create_parser@e46ef2e7d1

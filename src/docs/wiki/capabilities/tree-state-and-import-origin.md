@@ -1,6 +1,6 @@
 ---
 capability: tree-state-and-import-origin
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.tree_state.bundle_hash@fae856f310
   - cosa.utils.tree_state.capture_start_bundle@cc164cd5d5

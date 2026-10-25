@@ -1,6 +1,6 @@
 ---
 capability: arbiter-live-notify
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_arbiter_app.arbiter_live_notify.build_notify_request@6b690f1bb8
   - lupin_arbiter_app.arbiter_live_notify.parse_notify_outcome@af1b027bc1

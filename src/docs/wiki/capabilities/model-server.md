@@ -1,6 +1,6 @@
 ---
 capability: model-server
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_model_server.main.lifespan@0393cbf19b
   - lupin_model_server.main.require_api_key@6fa99107ab

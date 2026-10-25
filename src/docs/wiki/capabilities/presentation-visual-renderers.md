@@ -1,6 +1,6 @@
 ---
 capability: presentation-visual-renderers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.presentation_generator.renderers.visual_registry.VisualRenderer@bc1d480c23
   - cosa.agents.presentation_generator.renderers.visual_registry.VisualRendererRegistry@36a7db9119

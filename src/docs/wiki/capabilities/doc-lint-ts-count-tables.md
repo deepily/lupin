@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-ts-count-tables
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.ts_counts.counted_paths@d758a4cd25
   - cosa.repo.doc_lint.ts_counts.extract@a93351acac

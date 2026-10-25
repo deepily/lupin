@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-core-build
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.build.collect@5204c9d557
   - cosa.repo.symindex.build.current_generation@c4c2cc7c10

@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-arms-metrics
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.arm_metrics.recall_at_k@14ab826db5
   - cosa.repo.symindex.candidates.arm_metrics.t1_table@59e96e3f66

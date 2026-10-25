@@ -1,6 +1,6 @@
 ---
 capability: cc-task-store-map-mirror-drain
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.task_store_map.map_path@67710a2871
   - lupin_cli.claude_code.hooks.lib.task_store_map.map_key@440c3ed013

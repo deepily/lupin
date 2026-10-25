@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-range-gate-epoch
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.range_gate.parse_blocking_epoch@3166c7d9ef
   - cosa.repo.doc_lint.range_gate.read_blocking_epoch@67185e29f8

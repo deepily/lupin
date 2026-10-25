@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-notification-sender-conversations
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.notifications.get_senders_with_activity@40749619a5
   - cosa.rest.routers.notifications.get_visible_senders@aa352ff76d

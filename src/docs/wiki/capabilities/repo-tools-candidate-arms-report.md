@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-arms-report
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.arm_report.count_redactable@ebeb7e374b
   - cosa.repo.symindex.candidates.arm_report.percent@f39092c4de

@@ -1,6 +1,6 @@
 ---
 capability: rest-core-managed-bounce
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.managed_bounce_broadcast.format_dirty_clause@e8cd016e27
   - cosa.rest.managed_bounce_broadcast.boot_counter_path@ede01fca03

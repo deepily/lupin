@@ -1,6 +1,6 @@
 ---
 capability: presentation-deck-model
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.presentation_generator.deck_verdict.DeckVerdict@498721a677
   - cosa.agents.presentation_generator.renderers.marp_text_renderer.MarpTextRenderer@f029f1e4f4

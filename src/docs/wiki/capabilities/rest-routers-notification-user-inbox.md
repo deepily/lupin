@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-notification-user-inbox
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.notifications.get_user_notifications@830e4a6281
   - cosa.rest.routers.notifications.get_next_notification@feb899a9a5

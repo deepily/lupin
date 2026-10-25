@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-metrics-dashboard
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.doc_metrics.swept_at@70b3c2017a
   - cosa.repo.doc_lint.doc_metrics.dashboard_rows@6272cb6687

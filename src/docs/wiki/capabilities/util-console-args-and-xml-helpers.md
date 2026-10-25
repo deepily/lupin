@@ -1,6 +1,6 @@
 ---
 capability: util-console-args-and-xml-helpers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.util.add_to_path@515434116b
   - cosa.utils.util.generate_domain_names@5bc45fc92c

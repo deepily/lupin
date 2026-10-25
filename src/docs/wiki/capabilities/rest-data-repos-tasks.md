@@ -1,6 +1,6 @@
 ---
 capability: rest-data-repos-tasks
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.db.repositories.task_repository.TaskRepository@07eade4779
   - cosa.rest.db.repositories.approval_setting_repository.ApprovalSettingRepository@8a1babb9aa

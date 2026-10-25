@@ -1,6 +1,6 @@
 ---
 capability: cc-hook-common-voice
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.hook_common.get_buffer_path@a60aa36be7
   - lupin_cli.claude_code.hooks.lib.hook_common.drain_voice_buffer@90ae279139

@@ -1,6 +1,6 @@
 ---
 capability: rest-core-auth-bearer
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.auth.HTTPBearerWith401@d23afa58b9
   - cosa.rest.auth.TokenExpiredException@b1744385ae

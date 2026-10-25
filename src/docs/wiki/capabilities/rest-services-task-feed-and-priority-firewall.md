@@ -1,6 +1,6 @@
 ---
 capability: rest-services-task-feed-and-priority-firewall
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_store_change_notifier.set_sink@8a5e68c3b0
   - cosa.rest.task_store_change_notifier.get_sink@471f115381

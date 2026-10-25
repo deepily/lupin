@@ -1,6 +1,6 @@
 ---
 capability: presentation-prompts
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.presentation_generator.prompts.d2.get_d2_prompt@fe20572f4a
   - cosa.agents.presentation_generator.prompts.elaboration.get_elaboration_prompt@6f1eeedadc

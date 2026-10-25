@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-seeder-candidates
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.labelled_set_seeder.phrase_units@553a6194ec
   - cosa.repo.doc_lint.labelled_set_seeder.repair@74e9d818f8

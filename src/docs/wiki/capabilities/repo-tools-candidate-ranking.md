@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-ranking
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.bm25.Bm25Index@3bad2da693
   - cosa.repo.symindex.candidates.bm25.build_bm25@9906a03583

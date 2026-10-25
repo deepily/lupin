@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-docs-only-diff
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.docs_only_diff.directive_difference@4c79fa4cff
   - cosa.repo.doc_lint.docs_only_diff.first_difference@647af613e9

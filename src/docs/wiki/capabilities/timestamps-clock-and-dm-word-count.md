@@ -1,6 +1,6 @@
 ---
 capability: timestamps-clock-and-dm-word-count
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.edt_timestamp.format_edt_timestamp@1fbba38f75
   - cosa.utils.edt_timestamp.format_outreach_ts@3334fdcfcc

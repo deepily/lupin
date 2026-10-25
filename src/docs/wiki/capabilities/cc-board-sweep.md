@@ -1,6 +1,6 @@
 ---
 capability: cc-board-sweep
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.board_sweep.persona_slug@eee8948a0d
   - lupin_cli.claude_code.hooks.lib.board_sweep.ledger_path@288c519f7c

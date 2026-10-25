@@ -1,6 +1,6 @@
 ---
 capability: embedding-engine-info
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.memory.embedding_provider.embedding_dimensions@d9850234a6
   - cosa.memory.embedding_provider.EmbeddingProvider.describe_engines@03211386fd

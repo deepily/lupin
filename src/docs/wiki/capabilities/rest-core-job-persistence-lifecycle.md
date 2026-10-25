@@ -1,6 +1,6 @@
 ---
 capability: rest-core-job-persistence-lifecycle
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.job_persistence.is_agentic_job_type@bc8b85c8ae
   - cosa.rest.job_persistence.persist_job_created_from_metadata@5f170025d1

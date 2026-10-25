@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-system-and-session
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.system.SimilarityConfirmationRequest@0ebcb9efaa
   - cosa.rest.routers.system.SimilarityConfirmationResponse@a7adc21687

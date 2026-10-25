@@ -1,6 +1,6 @@
 ---
 capability: web-client-stores-transcripts-and-history
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptRoster.parseSenderId@8bf7e6db55
   - src.lupin_app.static.js.multiplexer.stores.SessionTranscriptRoster.resolveTranscriptSeat@dd4fb987d3

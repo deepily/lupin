@@ -1,6 +1,6 @@
 ---
 capability: vertex-monitoring-oracle
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.vertex_monitoring_oracle.MonitoringOracle@54bf31b135
   - cosa.utils.vertex_monitoring_oracle.MonitoringOracle.await_canary@48409865ce

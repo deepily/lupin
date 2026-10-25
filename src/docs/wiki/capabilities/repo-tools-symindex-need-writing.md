@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-need-writing
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.need_writer.Reply@cd90278f37
   - cosa.repo.symindex.need_writer.sdk_reply@3b0fcd9905

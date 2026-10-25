@@ -1,6 +1,6 @@
 ---
 capability: embedding-caches-and-pool
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.memory.embedding_cache_table.EmbeddingCacheTable@7a070dd8ac
   - cosa.memory.question_embeddings_table.QuestionEmbeddingsTable@ec010ba0f0

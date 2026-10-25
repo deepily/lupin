@@ -1,6 +1,6 @@
 ---
 capability: rest-services-promotion-cards-and-deadlines
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_promotion_gate.promotion_ask_text@889551c42c
   - cosa.rest.task_promotion_gate.promotion_ask_sender_id@363bce682e

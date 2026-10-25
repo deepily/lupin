@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-poker
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.heartbeat_poker_job.HeartbeatPokerJob@0b6e68006b
   - cosa.agents.heartbeat_poker_job.RecipientSpec@0ff47d7734

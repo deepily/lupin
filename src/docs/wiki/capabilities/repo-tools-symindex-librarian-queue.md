@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-librarian-queue
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.librarian_queue.finding_package@1124d49614
   - cosa.repo.symindex.librarian_queue.group_by_package@5db6e7f9bd

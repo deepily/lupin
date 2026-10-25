@@ -1,6 +1,6 @@
 ---
 capability: seat-lifecycle
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.session_spawner.spawn_sessions@b171adfb7f
   - lupin_mcp.fleet_size_cap.refusal_for_spawn@fcde12d493

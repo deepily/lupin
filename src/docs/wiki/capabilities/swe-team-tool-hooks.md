@@ -1,6 +1,6 @@
 ---
 capability: swe-team-tool-hooks
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.swe_team.hooks.build_can_use_tool@5a365b9fd6
   - cosa.agents.swe_team.hooks.notification_hook@69b8c7a3f2

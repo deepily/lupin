@@ -1,6 +1,6 @@
 ---
 capability: util-code-runner-and-dataframe
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.util_code_runner.initialize_code_response_dict@093e39df41
   - cosa.utils.util_code_runner.assemble_and_run_solution@88a30dccaf

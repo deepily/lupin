@@ -1,6 +1,6 @@
 ---
 capability: rest-services-promotion-gate-ask
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_promotion_gate.get_ask_timeout_seconds@5e43dd74e5
   - cosa.rest.task_promotion_gate.get_asynchronous_enabled@22c54357cb

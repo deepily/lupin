@@ -1,6 +1,6 @@
 ---
 capability: cc-hook-deny-envelopes
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.kill_guard.build_kill_deny_response@2292ba1570
   - lupin_cli.claude_code.hooks.lib.merge_head_guard.build_merge_head_deny_response@9c5ad372ef

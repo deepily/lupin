@@ -1,6 +1,6 @@
 ---
 capability: swe-team-notifications
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.swe_team.cosa_interface.ask_confirmation@24a6c17bf4
   - cosa.agents.swe_team.cosa_interface.get_feedback@08e962bb98

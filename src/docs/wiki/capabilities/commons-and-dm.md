@@ -1,6 +1,6 @@
 ---
 capability: commons-and-dm
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.dm.execute_dm_send@cbaf166922
   - cosa.rest.routers.dm.execute_dm_list@abb50bbea6

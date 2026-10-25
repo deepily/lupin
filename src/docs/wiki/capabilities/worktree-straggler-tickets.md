@@ -1,6 +1,6 @@
 ---
 capability: worktree-straggler-tickets
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.worktree_straggler_tickets.RepositoryStragglerStore@a073439dbc
   - cosa.agents.shared.worktree_straggler_tickets.compose_archive_row@cf144d864e

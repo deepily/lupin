@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-markdown-comments-and-tools
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.md_lint.blank_fences@90b46154af
   - cosa.repo.doc_lint.md_lint.blank_non_prose@7e3671f614

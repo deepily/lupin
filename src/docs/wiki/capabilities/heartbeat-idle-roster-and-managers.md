@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-idle-roster-and-managers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.idle_roster.build_roster@f5c5f5d63a
   - cosa.agents.heartbeat_arbiter.idle_roster.classify_idle@8fc0fd18ad

@@ -1,6 +1,6 @@
 ---
 capability: spend-ceiling-prices-and-report-redaction
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.secret_redaction.redact_longrepr@f47df8a366
   - cosa.utils.vertex_spend_ceiling.ModelPrice@b4d17905d4

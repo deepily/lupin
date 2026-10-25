@@ -1,6 +1,6 @@
 ---
 capability: worktree-lifecycle
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.seat_worktree.provision_seat_worktree@eed42d08b9
   - cosa.utils.worktree_artifacts.provision_worktree_artifacts@fd62ae8430

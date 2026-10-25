@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-notification-helpers-and-catch-up
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.notifications.get_notification_queue@419a0b0054
   - cosa.rest.routers.notifications.get_websocket_manager@5c65f1b7d1

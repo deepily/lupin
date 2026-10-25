@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-v2-ask-bodies
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.v2_ask.AskRequest@b89f692c16
   - cosa.rest.routers.v2_ask.SubmitRequest@e655ec54f9

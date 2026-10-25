@@ -1,6 +1,6 @@
 ---
 capability: test-and-eval-scripts
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.test_harness.mock_job.MockAgenticJob@bce2eb7919
   - cosa.agents.test_harness.mock_submit.build_plain_mock_job@23b298c517

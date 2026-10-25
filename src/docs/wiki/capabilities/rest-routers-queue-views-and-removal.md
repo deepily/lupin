@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-queue-views-and-removal
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.queues.get_todo_queue@9bc801466a
   - cosa.rest.routers.queues.get_running_queue@f682d441a0

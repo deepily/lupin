@@ -1,6 +1,6 @@
 ---
 capability: coverage-frame-and-visual-failures
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.coverage_frame.coverage_can_see@9727cdce59
   - cosa.utils.coverage_frame.is_omitted@6519b2bb6f

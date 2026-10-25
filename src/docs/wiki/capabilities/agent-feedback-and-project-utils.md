@@ -1,6 +1,6 @@
 ---
 capability: agent-feedback-and-project-utils
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.utils.feedback_analysis.is_approval@078cb0e352
   - cosa.agents.utils.feedback_analysis.is_rejection@6273d54251

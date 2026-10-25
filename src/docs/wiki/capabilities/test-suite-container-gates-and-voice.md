@@ -1,6 +1,6 @@
 ---
 capability: test-suite-container-gates-and-voice
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.test_suite.job.running_in_container@2ce99374e9
   - cosa.agents.test_suite.job.container_refusal@4b1bef40d6

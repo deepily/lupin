@@ -1,6 +1,6 @@
 ---
 capability: cc-task-store-client-and-spool
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.task_store_client.read_api_key@6b300c3e0c
   - lupin_cli.claude_code.hooks.lib.task_store_client.create_task@fa5ccfb844

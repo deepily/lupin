@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-job-control-and-history
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.queues.cancel_job@0b35accfde
   - cosa.rest.routers.queues.send_job_message@5d42595342

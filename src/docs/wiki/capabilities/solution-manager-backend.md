@@ -1,6 +1,6 @@
 ---
 capability: solution-manager-backend
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.memory.postgres_solution_manager.PostgresSolutionManager@c3a5f3f131
   - cosa.memory.solution_manager_factory.SolutionSnapshotManagerFactory@75ad062323

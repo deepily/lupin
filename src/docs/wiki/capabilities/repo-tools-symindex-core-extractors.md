@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-core-extractors
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.extractor_contract.validate_record@c6244fad7b
   - cosa.repo.symindex.py_index.extract_python@bb7bf1b82c

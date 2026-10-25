@@ -1,6 +1,6 @@
 ---
 capability: model-training
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.training.peft_trainer.PeftTrainer@310aeed65a
   - cosa.training.xml_coordinator.XmlCoordinator@a32705732a

@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-need-input
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.need_input.NeedInput@78c2e084eb
   - cosa.repo.symindex.need_input.resolve_member@dbd1b1e65e

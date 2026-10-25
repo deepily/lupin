@@ -1,6 +1,6 @@
 ---
 capability: rest-services-fleet-tables
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.postgres_models.Notification@74eecfa097
   - cosa.rest.postgres_models.ProxyDecision@08b7b65095

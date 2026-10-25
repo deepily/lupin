@@ -1,6 +1,6 @@
 ---
 capability: rest-services-test-run-guards
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.pytest_args_policy.PytestArgsRejected@c0efc34408
   - cosa.rest.pytest_args_policy.parse_and_validate@0650014a67

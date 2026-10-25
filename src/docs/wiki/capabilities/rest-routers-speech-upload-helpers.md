@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-speech-upload-helpers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.speech.resolve_stt_upload_dir@9a8009f92b
   - cosa.rest.routers.speech.audio_suffix_from_filename@ba6c1f1632

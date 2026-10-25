@@ -1,6 +1,6 @@
 ---
 capability: rest-services-queue-helpers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.queue_auth.authorize_queue_filter@d4f4dcdaac
   - cosa.rest.queue_extensions.UserJobTracker@c79e4d3f25

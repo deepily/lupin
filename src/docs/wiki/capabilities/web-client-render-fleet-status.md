@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-fleet-status
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.fleetModel.fleetLabelOf@8fe6f54f2e
   - src.lupin_app.static.js.multiplexer.render.fleetModel.fleetLivenessTooltip@9828e5c86f

@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-context-pressure
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.context_pressure.ContextPressure@c8381af519
   - cosa.agents.heartbeat_arbiter.context_pressure.Liveness@ab2f83de76

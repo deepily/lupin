@@ -1,6 +1,6 @@
 ---
 capability: rest-data-repos-auth
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.db.repositories.api_key_repository.ApiKeyRepository@b1d197b73d
   - cosa.rest.db.repositories.auth_audit_log_repository.AuthAuditLogRepository@8e0e1e780b

@@ -1,6 +1,6 @@
 ---
 capability: claude-process-memory-watch
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.cc_memory_watch.AlertTracker@5387cbd10b
   - cosa.utils.cc_memory_watch.Sample@8794f22739

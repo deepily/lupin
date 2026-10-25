@@ -1,6 +1,6 @@
 ---
 capability: rest-services-task-board-audits
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_store_prose_refs.strip_amendment_stamps@5b196bbdf9
   - cosa.rest.task_store_prose_refs.extract_prose_refs@6f366edcfe

@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-action-required-and-badges
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.arProgressPercent@86000ebf24
   - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.paintProgress@9facf19afc

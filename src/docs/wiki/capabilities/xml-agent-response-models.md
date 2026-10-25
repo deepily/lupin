@@ -1,6 +1,6 @@
 ---
 capability: xml-agent-response-models
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.io_models.xml_models.ReceptionistResponse@dec4fce75e
   - cosa.agents.io_models.xml_models.CalendarResponse@8943198010

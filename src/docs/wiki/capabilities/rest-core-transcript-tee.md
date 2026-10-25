@@ -1,6 +1,6 @@
 ---
 capability: rest-core-transcript-tee
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.cc_transcript_mapper.map_record@46e3f2404a
   - cosa.rest.cc_transcript_mapper.remember_tool_name@4612076658

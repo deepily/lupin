@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-labelled-set-rejections
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.labelled_set_rules.restated_elsewhere@91cf3e905a
   - cosa.repo.doc_lint.labelled_set_rules.restated_swap@c2966d5da0

@@ -1,6 +1,6 @@
 ---
 capability: dm-quality-judge
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.dm_quality_judge.get_dm_quality_judge@b060034101
   - cosa.agents.dm_quality_judge.judge.DmQualityJudge@06245fe53c

@@ -1,6 +1,6 @@
 ---
 capability: rest-core-notification-queue
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.notification_fifo_queue.NotificationFifoQueue@0506eb4e82
   - cosa.rest.notification_fifo_queue.NotificationItem@d457b88c99

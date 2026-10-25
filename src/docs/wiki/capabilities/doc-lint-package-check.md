@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-package-check
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.package_check.keyed_docstrings@cc6219cf86
   - cosa.repo.doc_lint.package_check.match_docstrings@0ecc28f231

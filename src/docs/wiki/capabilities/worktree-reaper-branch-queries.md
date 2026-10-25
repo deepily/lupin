@@ -1,6 +1,6 @@
 ---
 capability: worktree-reaper-branch-queries
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.worktree_reaper.list_worktrees@1d9cdb7186
   - cosa.agents.shared.worktree_reaper.checked_out_branches@289bd70835

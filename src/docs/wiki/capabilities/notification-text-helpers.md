@@ -1,6 +1,6 @@
 ---
 capability: notification-text-helpers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.notification_utils.convert_open_ended_batch_for_api@926b8d101c
   - cosa.utils.notification_utils.convert_questions_for_api@8418f0b509

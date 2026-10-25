@@ -1,6 +1,6 @@
 ---
 capability: llm-model-config-and-window
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.model_registry.LlmProvider@56411fc933
   - cosa.agents.model_registry.ModelConfig@faeb4b7e74

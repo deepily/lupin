@@ -1,6 +1,6 @@
 ---
 capability: web-client-notifications-script
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.chunk-sequencer.ChunkSequencer@79c213d642
   - src.lupin_app.static.js.chunk-sequencer.runComparisonTest@8debe294c2

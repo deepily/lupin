@@ -1,6 +1,6 @@
 ---
 capability: bounded-cc-client-base
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.bounded_cc_client.BoundedCCClientBase@85d379ed23
   - cosa.agents.shared.bounded_cc_client.BoundedCCCostEstimate@4dc4f69132

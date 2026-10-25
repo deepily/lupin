@@ -1,6 +1,6 @@
 ---
 capability: expediter-worktree-scope
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.worktree_context.worktree_scope@96a8b9a478
 ---

@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-contract-diff
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.contract_diff.tokens@ecb8e3593b
   - cosa.repo.doc_lint.contract_diff.overlap@5b5793c035

@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-commons-sessions-and-history
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.commons.get_active_sessions@64c093d240
   - cosa.rest.routers.commons.project_session_response@fad8f23c7b

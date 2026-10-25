@@ -1,6 +1,6 @@
 ---
 capability: bfe-prompts-and-voice
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.bug_fix_expediter.prompts.diagnosis.build_diagnosis_prompt@5f0ee418ad
   - cosa.agents.bug_fix_expediter.prompts.proposal.build_proposal_prompt@848874336e

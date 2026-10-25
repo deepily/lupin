@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-turn-age-watchdog
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog@da480879b1
   - cosa.agents.heartbeat_arbiter.turn_age_watchdog.age_seconds@5b15a96db6

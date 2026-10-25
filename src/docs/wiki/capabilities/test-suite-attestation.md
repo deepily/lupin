@@ -1,6 +1,6 @@
 ---
 capability: test-suite-attestation
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.test_suite.attestation.artifact_root@21b494997a
   - cosa.agents.test_suite.attestation.attestation_path@19f3ef9e80

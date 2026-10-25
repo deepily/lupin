@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-page-pairs-and-loader
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.page_pairs.split_sections@15545d3927
   - cosa.repo.doc_lint.page_pairs.chunk_text@6ca6d6fef7

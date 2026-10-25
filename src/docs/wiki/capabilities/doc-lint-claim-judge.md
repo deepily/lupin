@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-claim-judge
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.claim_judge.JudgeParseError@63d3593f90
   - cosa.repo.doc_lint.claim_judge.build_prompt@16c37fa75c

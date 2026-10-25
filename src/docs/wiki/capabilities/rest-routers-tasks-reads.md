@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-tasks-reads
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.tasks.query_tasks@12321c7fa3
   - cosa.rest.routers.tasks.query_event_stream@5bc1fb024a

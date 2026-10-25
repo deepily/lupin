@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-podcast-proxy
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.podcast_proxy.AskIn@580f498a12
   - cosa.rest.routers.podcast_proxy.ask_for_a_podcast@6146da7129

@@ -1,6 +1,6 @@
 ---
 capability: cc-hooks-heartbeat-gates
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap.get_poke_count@0594829226
   - lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap.reset_poke_count@e21f91d900

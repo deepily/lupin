@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-wait-graph
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.dependency_graph.build_graph@83a8e5fa1c
   - cosa.agents.heartbeat_arbiter.dependency_graph.build_store_blocked_item_index@954977fe98

@@ -1,6 +1,6 @@
 ---
 capability: decision-proxy-presence
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.decision_proxy.user_presence.fetch_sessions@52fe969de2
   - cosa.agents.decision_proxy.user_presence.responder_presence_kwargs@a8ba4cd7cb

@@ -1,6 +1,6 @@
 ---
 capability: deep-research-narrowing-harness
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research.narrowing_harness.NarrowingHarness@ebcfc407a9
   - cosa.agents.deep_research.narrowing_harness.NarrowingResult@2ef3e57a19

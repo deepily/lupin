@@ -1,6 +1,6 @@
 ---
 capability: llm-exceptions
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.llm_exceptions.LlmConfigError@1142c4f823
   - cosa.agents.llm_exceptions.LlmAPIError@b17ec57d73

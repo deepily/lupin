@@ -1,6 +1,6 @@
 ---
 capability: lupin-cli-notification-models
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.notifications.notification_models.AsyncNotificationRequest@4617accb72
   - lupin_cli.notifications.notification_models.AsyncNotificationResponse@c12e7b3e7f

@@ -1,6 +1,6 @@
 ---
 capability: rest-services-task-refs-personas-and-ratio-gate
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_store_rules.classify_task_ref@dc1fc8e4e4
   - cosa.rest.task_store_rules.hyphenate_compact_prefix@8012462ec6

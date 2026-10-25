@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-git-loc-delta-outputs
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.git_loc_delta.csv_writer.write_csv@d80368d812
   - cosa.repo.git_loc_delta.csv_writer.write_sidecar@3f94f7e914

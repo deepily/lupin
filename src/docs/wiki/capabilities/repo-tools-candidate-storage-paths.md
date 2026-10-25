@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-storage-paths
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.storage_paths.build_config@2edbd2a3b5
   - cosa.repo.symindex.candidates.storage_paths.data_subdir@7c43fa990b

@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-dart-pool-builder
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.dart_pool_builder.read_file_list@8922bce0d8
   - cosa.repo.doc_lint.dart_pool_builder.refusal_reason@40e1595bd7

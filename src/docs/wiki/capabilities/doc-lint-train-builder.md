@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-train-builder
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.train_builder.store_rows@fd33fcac3d
   - cosa.repo.doc_lint.train_builder.persona_of@4d96f16024

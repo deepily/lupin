@@ -1,6 +1,6 @@
 ---
 capability: heartbeat-outreach-throttles
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.operator_gate_routing.digest_due@ce9f290dde
   - cosa.agents.heartbeat_arbiter.operator_gate_routing.partition_by_urgency@6bd1697f88

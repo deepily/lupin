@@ -1,6 +1,6 @@
 ---
 capability: cc-hook-manager-and-roster
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.manager_figure.resolve_implicit_manager_figure@5d723e0a20
   - lupin_cli.claude_code.hooks.lib.manager_figure.is_manager_figure@947efc9c91

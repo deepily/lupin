@@ -1,6 +1,6 @@
 ---
 capability: rest-core-job-history-queries
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.job_persistence.query_job_history@dfee7420b8
   - cosa.rest.job_persistence.get_job_by_id_hash@2509d130ed

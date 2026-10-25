@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-html-tag
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.html.getTrustedTypes@d066610da4
   - src.lupin_app.static.js.multiplexer.render.html.ensurePolicy@6a413e8768

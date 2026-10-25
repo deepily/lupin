@@ -1,6 +1,6 @@
 ---
 capability: utils-atomic-json
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.atomic_json.load_json_section@2f34252d1b
   - cosa.utils.atomic_json.write_json_atomic@eceb325e91

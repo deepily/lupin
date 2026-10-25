@@ -1,6 +1,6 @@
 ---
 capability: training-corpus-and-trainer-tools
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.training.corpus_fingerprint.collect_corpus_entries@dc4a9c45b9
   - cosa.training.corpus_fingerprint.compute_fingerprint@dbf939a463

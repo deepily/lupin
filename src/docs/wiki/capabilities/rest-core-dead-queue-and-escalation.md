@@ -1,6 +1,6 @@
 ---
 capability: rest-core-dead-queue-and-escalation
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.dead_queue_watchdog.FailureCategory@d62b2d8f59
   - cosa.rest.dead_queue_watchdog.classify_failure@92ae9ac038

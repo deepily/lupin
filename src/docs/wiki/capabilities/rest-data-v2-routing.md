@@ -1,6 +1,6 @@
 ---
 capability: rest-data-v2-routing
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.v2.registry.AgentSpec@7f4f1c235f
   - cosa.rest.v2.registry.CommandClass@560b644185

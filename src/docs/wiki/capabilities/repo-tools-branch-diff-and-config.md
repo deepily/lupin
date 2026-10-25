@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-branch-diff-and-config
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.branch_analyzer.config_loader.ConfigLoader@cd1d13eb7f
   - cosa.repo.branch_analyzer.file_classifier.FileTypeClassifier@fa1a7fc184

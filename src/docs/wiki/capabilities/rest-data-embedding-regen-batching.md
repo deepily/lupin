@@ -1,6 +1,6 @@
 ---
 capability: rest-data-embedding-regen-batching
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.db.embedding_regeneration.plan_batches@c5b3996e2c
   - cosa.rest.db.embedding_regeneration.plan_batches_by_budget@49a49b54b6

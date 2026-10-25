@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-file-door-guards
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers._pinned_open.PinnedPathGone@208df8538b
   - cosa.rest.routers._pinned_open.PinnedPathUnlinked@29d4b526ca

@@ -1,6 +1,6 @@
 ---
 capability: proxy-shared-helpers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.utils.sync_notify.build_notify_kwargs@c8ebb5f85f
   - cosa.agents.utils.proxy_agents.base_responder.print_stats_table@7a51fbcabb

@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-websocket-endpoints
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.websocket.get_websocket_manager@5c65f1b7d1
   - cosa.rest.routers.websocket.get_active_tasks@5d1e6982b5

@@ -1,6 +1,6 @@
 ---
 capability: dataframe-crud-operations
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.crud_for_dataframes.calendar_crud_agent.CalendarCrudAgent@294f366013
   - cosa.crud_for_dataframes.agent.smoke_check_schema_agent@045f6df4d8

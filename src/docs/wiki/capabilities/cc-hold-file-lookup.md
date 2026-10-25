@@ -1,6 +1,6 @@
 ---
 capability: cc-hold-file-lookup
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold.fleet_data_root@f42b2cc795
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold.hold_correct_zone@13e3360384

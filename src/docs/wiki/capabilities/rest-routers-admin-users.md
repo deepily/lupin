@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-admin-users
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.admin.get_users@c605ca0c49
   - cosa.rest.routers.admin.get_user@160ff81e6a

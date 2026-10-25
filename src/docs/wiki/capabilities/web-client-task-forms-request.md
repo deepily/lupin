@@ -1,6 +1,6 @@
 ---
 capability: web-client-task-forms-request
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.shared.arg-interview.isAnswerable@a1e8d299b8
   - src.lupin_app.static.js.shared.arg-interview.resumeBody@d374204dbf

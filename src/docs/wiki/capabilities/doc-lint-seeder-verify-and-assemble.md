@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-seeder-verify-and-assemble
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.labelled_set_seeder.read_failed_ids@fffc934d2b
   - cosa.repo.doc_lint.labelled_set_seeder.redraw_pairs@fb29b6d2f9

@@ -1,6 +1,6 @@
 ---
 capability: rest-core-admin-accounts
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.admin_service.list_users@64aba9ecb6
   - cosa.rest.admin_service.get_user_details@01daf12be7

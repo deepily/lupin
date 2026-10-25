@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-tasks-approval-and-requests
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.tasks.ManagerPullRequest@a40e662dad
   - cosa.rest.routers.tasks.ApprovalSettingsRequest@9588049be1

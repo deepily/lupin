@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-job-meta
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.jobCard.configureMetaDisplayCap@d714ac2df6
   - src.lupin_app.static.js.multiplexer.render.templates.jobCard._getMaxMetaBytesForTesting@9f43a917b7

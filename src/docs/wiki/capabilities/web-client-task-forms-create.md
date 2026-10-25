@@ -1,6 +1,6 @@
 ---
 capability: web-client-task-forms-create
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.shared.agent-select.buildAgentSelectOptions@3119d94b13
   - src.lupin_app.static.js.shared.agent-select.renderAgentSelect@6bb03b6294

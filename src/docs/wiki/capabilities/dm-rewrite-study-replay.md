@@ -1,6 +1,6 @@
 ---
 capability: dm-rewrite-study-replay
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.research.phi4_flash_lite_study.replay_harness.ArmBroken@b8ee1a8642
   - cosa.research.phi4_flash_lite_study.replay_harness.DenominatorUnset@15a528ee1e

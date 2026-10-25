@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-gate-refusals
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.gate.swept_refusal_line@0d0a268b83
   - cosa.repo.doc_lint.gate.refusal_line@b7ebfa4deb

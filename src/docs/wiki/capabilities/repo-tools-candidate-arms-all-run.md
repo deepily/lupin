@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-candidate-arms-all-run
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.arm_run.vector_source@e9b7c2f6db
   - cosa.repo.symindex.candidates.arm_run.select_fusion_constants@1cc3121e46

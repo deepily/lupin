@@ -1,6 +1,6 @@
 ---
 capability: notification-proxy-option-sentinels
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.notification_proxy.option_sentinels.encode_multi_select@09227a787f
   - cosa.agents.notification_proxy.option_sentinels.is_sentinel@f272f9abb9

@@ -1,6 +1,6 @@
 ---
 capability: dm-rewrite-study-report
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.research.phi4_flash_lite_study.label_sheet.build_items@2e346dc004
   - cosa.research.phi4_flash_lite_study.label_sheet.main@16eb01a450

@@ -1,6 +1,6 @@
 ---
 capability: db-provisioning-secret-files-and-dotenv-login
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.db_roles.build_psql_stdin@48b675941f
   - cosa.utils.db_roles.main@b322babf6f

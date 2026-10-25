@@ -1,6 +1,6 @@
 ---
 capability: question-gist-and-synonyms
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.memory.normalizer.Normalizer@d15c1d8113
   - cosa.memory.gister.Gister@3d25be9a94

@@ -1,6 +1,6 @@
 ---
 capability: json-fenced-response-helpers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.io_models.utils.json_object_recovery.strip_json_fence@708dde0a0c
   - cosa.agents.io_models.utils.json_object_recovery.parse_fenced_json@b246377d6b

@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-row-disclosure-and-new-ticket
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.rowDisclosure.renderDiscloseToggle@cd030bd498
   - src.lupin_app.static.js.multiplexer.render.templates.rowDisclosure.renderDiscloseCell@03ca621a08

@@ -1,6 +1,6 @@
 ---
 capability: web-client-transport-and-auth
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.boot.bootMultiplexer@391506c9c8
   - src.lupin_app.static.js.multiplexer.transport.QueueTransport.BaseTransportImpl@65b2a06f2b

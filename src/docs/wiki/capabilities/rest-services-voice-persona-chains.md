@@ -1,6 +1,6 @@
 ---
 capability: rest-services-voice-persona-chains
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.voice_persona_helpers.display_name_for@ce21bdcb12
   - cosa.rest.voice_persona_helpers.load_overflow_persona_from_config@5faaf4cdf4

@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-vectors-status
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.vector_status.read_stale_hours@6e7b2229bf
   - cosa.repo.symindex.vector_status.age_hours@7805d161b6

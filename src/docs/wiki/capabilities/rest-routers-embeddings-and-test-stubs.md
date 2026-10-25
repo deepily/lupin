@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-embeddings-and-test-stubs
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.embeddings.EmbedRequest@d41170c6d1
   - cosa.rest.routers.embeddings.EmbedBatchRequest@53339721db

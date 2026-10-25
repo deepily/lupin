@@ -1,6 +1,6 @@
 ---
 capability: cc-listener-and-ask
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.cc_notification_listener.read_self_rss_mb@9b99f68aad
   - lupin_cli.claude_code.hooks.lib.cc_notification_listener.read_proc_starttime@29fadc096c

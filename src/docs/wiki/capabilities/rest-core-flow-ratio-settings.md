@@ -1,6 +1,6 @@
 ---
 capability: rest-core-flow-ratio-settings
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.flow_ratio_settings.settings_override_path@ccb75150dd
   - cosa.rest.flow_ratio_settings.override_path@f6c4683cc4

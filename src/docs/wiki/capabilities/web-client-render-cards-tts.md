@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-cards-tts
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.ttsChrome.ttsHeaderMode@de2508f4cb
   - src.lupin_app.static.js.multiplexer.render.templates.ttsChrome.deriveControlState@45a32dd352

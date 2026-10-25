@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-judge-comparison-ledger
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.judge_comparison.LedgerIncomplete@a7a5f8e518
   - cosa.repo.doc_lint.judge_comparison.ReportMismatch@96b9138bd0

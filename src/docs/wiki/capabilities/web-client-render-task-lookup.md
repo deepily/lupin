@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-task-lookup
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.taskLookupBox.describeLookupFailure@c7b5ede790
   - src.lupin_app.static.js.multiplexer.render.taskLookupBox.lookupFailureState@10cf2ae2c9

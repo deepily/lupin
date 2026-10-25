@@ -1,6 +1,6 @@
 ---
 capability: llm-data-types
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.llm_data_types.MessageRole@aaf662ef6f
   - cosa.agents.llm_data_types.LlmMessage@b80df7c346

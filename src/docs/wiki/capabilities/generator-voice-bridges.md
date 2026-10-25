@@ -1,6 +1,6 @@
 ---
 capability: generator-voice-bridges
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.voice_io.reconfigure@8265f4719a
   - cosa.agents.presentation_generator.voice_io.reconfigure@8265f4719a

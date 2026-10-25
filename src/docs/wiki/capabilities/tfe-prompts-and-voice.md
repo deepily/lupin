@@ -1,6 +1,6 @@
 ---
 capability: tfe-prompts-and-voice
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.test_fix_expediter.prompts.cluster.build_cluster_prompt_stub@58de2c4b8f
   - cosa.agents.test_fix_expediter.prompts.diagnosis.build_diagnosis_prompt@d34bbdf959

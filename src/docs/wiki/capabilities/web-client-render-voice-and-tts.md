@@ -1,6 +1,6 @@
 ---
 capability: web-client-render-voice-and-tts
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.DirectTtsRenderer.directTtsTestText@86f4bcaf4a
   - src.lupin_app.static.js.multiplexer.render.DirectTtsRenderer.DirectTtsRendererImpl@64f815192e

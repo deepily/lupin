@@ -1,6 +1,6 @@
 ---
 capability: reuse-search-tools
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.cosa_voice_mcp.check_exists@5bbf00b3d4
   - lupin_mcp.cosa_voice_mcp.fetch_similar@32876a143b

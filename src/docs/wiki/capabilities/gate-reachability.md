@@ -1,6 +1,6 @@
 ---
 capability: gate-reachability
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.gate_reachability.read_suite_scripts@977ef43989
   - cosa.repo.gate_reachability.find_gate_targets@2fbf2510b3

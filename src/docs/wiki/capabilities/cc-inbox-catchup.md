@@ -1,6 +1,6 @@
 ---
 capability: cc-inbox-catchup
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.answer_catchup.reconcile_answers@32792bae1b
   - lupin_cli.claude_code.hooks.lib.answer_catchup.read_hwm@477407ca98

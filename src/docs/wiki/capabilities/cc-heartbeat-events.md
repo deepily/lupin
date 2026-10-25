@@ -1,6 +1,6 @@
 ---
 capability: cc-heartbeat-events
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.heartbeat_events.events_path@c5d5973194
   - lupin_cli.claude_code.hooks.lib.heartbeat_events.emit_outcome@510b6be01e

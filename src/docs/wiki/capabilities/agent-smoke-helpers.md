@@ -1,6 +1,6 @@
 ---
 capability: agent-smoke-helpers
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.agent_base.run_agent_smoke@90c17fe850
   - cosa.agents.utils.smoke_suite.run_import_smoke_suite@b4c8e60f89

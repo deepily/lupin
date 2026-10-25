@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-page-shells-and-stats
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.pages.page_app@b67a295465
   - cosa.rest.routers.pages.page_multiplexer@66d9f71270

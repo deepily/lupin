@@ -1,6 +1,6 @@
 ---
 capability: web-client-auth-and-api
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.api.ApiClient.ApiError@6437b0ad51
   - src.lupin_app.static.js.multiplexer.api.ApiClient.ApiClientImpl@11b9397a58

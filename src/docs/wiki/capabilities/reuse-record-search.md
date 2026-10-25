@@ -1,6 +1,6 @@
 ---
 capability: reuse-record-search
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.cosa_voice_mcp.record_search@00a510f72c
   - lupin_mcp.reuse_search.record_search_impl@962a684aa1

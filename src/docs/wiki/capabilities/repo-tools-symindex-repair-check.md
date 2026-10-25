@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-repair-check
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.repair_check.run_repair_check@b9599d9ad4
   - cosa.repo.symindex.repair_check.RepairResult@12a520890d

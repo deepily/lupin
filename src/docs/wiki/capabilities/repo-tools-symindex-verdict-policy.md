@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-symindex-verdict-policy
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.verdict.malformed_reason@1f1669771a
   - cosa.repo.symindex.verdict.call_facts@0611654fde

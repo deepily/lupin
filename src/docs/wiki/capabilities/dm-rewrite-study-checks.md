@@ -1,6 +1,6 @@
 ---
 capability: dm-rewrite-study-checks
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.research.phi4_flash_lite_study.arm_markers.ArmNotVerified@23f71b4e6a
   - cosa.research.phi4_flash_lite_study.arm_markers.assert_vertex_arm_markers@9e41d3e411

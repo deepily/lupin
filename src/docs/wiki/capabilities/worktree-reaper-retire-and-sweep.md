@@ -1,6 +1,6 @@
 ---
 capability: worktree-reaper-retire-and-sweep
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.worktree_reaper.find_ignored_blockers@3ebcc3852e
   - cosa.agents.shared.worktree_reaper.default_evacuation_root@bff6e0e00d

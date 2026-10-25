@@ -1,6 +1,6 @@
 ---
 capability: cc-bookmark-janitors
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.bookmark_janitor.BookmarkFamily@c35a3fcf89
   - lupin_cli.claude_code.hooks.lib.bookmark_janitor.family_session_fragment@b5f12821b8

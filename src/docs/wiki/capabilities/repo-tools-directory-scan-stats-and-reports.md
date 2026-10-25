@@ -1,6 +1,6 @@
 ---
 capability: repo-tools-directory-scan-stats-and-reports
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.directory_analyzer.directory_scanner.FileInfo@2dbffbe1c7
   - cosa.repo.directory_analyzer.statistics_collector.DirectoryStatisticsCollector@1bd79c4503

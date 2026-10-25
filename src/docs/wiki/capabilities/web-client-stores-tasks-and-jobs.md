@@ -1,6 +1,6 @@
 ---
 capability: web-client-stores-tasks-and-jobs
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.stores.FinishedTasksStore.FinishedTasksStoreImpl@4a23036965
   - src.lupin_app.static.js.multiplexer.stores.FinishedTasksStore.describeFailure@9af781738c

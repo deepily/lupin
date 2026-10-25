@@ -1,6 +1,6 @@
 ---
 capability: cc-session-bridge-lookup
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id@39e9635908
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id_with_source@f5070bc230

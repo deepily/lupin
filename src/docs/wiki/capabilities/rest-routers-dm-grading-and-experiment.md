@@ -1,6 +1,6 @@
 ---
 capability: rest-routers-dm-grading-and-experiment
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.dm.get_dm_quality_judgment_enabled@6c5c3e3944
   - cosa.rest.routers.dm.get_dm_feedback_arm@ef4f5baf62

@@ -1,6 +1,6 @@
 ---
 capability: vertex-env-guards
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.vertex_env.VertexEnvError@eff1c924ef
   - cosa.utils.vertex_env.assert_certifications_are_provenanced@672b4a2796

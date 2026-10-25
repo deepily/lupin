@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-dart-pairs
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.dart_pairs.block_text@cdeda10efc
   - cosa.repo.doc_lint.dart_pairs.squash@15e9cb05b8

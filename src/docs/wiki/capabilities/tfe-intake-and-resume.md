@@ -1,6 +1,6 @@
 ---
 capability: tfe-intake-and-resume
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.test_fix_expediter.config.TestFixExpediterConfig@f7f07fcd0d
   - cosa.agents.test_fix_expediter.snapshot_loader.SnapshotLoadError@b02487617a

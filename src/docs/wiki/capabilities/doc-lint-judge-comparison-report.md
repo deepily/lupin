@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-judge-comparison-report
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.doc_lint.judge_comparison.key_rows@b7dc257f87
   - cosa.repo.doc_lint.judge_comparison.groups_of@196219685c

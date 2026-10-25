@@ -1,6 +1,6 @@
 ---
 capability: mcp-commons-archiver
-pin_algorithm: py3.13.xebd695/ts5.9.3
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.commons_archival.CommonsArchiver@76efbf61f1
 ---
