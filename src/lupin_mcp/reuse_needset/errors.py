@@ -21,6 +21,7 @@ PROBE_UNREADABLE        = "PROBE_UNREADABLE"
 SEED_NOT_VECTORISED     = "SEED_NOT_VECTORISED"
 STRIP_FAILED            = "STRIP_FAILED"
 BAD_ROUTE               = "BAD_ROUTE"
+OUTSIDE_WINDOW          = "OUTSIDE_WINDOW"
 
 
 class NeedsetError( Exception ):

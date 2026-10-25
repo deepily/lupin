@@ -22,7 +22,7 @@ class Env:
     """Everything a run reads: records, search context, model calls and run labels."""
 
     def __init__( self, by_id, kept, ctx, twins, strip_fn, ask, ledger, model_id, server, source_commit, seed, kind_split, set_by, set_at,
-                  none_draft_fn=None, parallel=3, smoke=False ):
+                  none_draft_fn=None, parallel=3, smoke=False, extras=None ):
         """
         Hold the inputs.
 
@@ -31,12 +31,14 @@ class Env:
             - twins is pool.twin_map output; strip_fn( rec ) returns a strip.strip_member result
             - ask( system, user ) returns reply text; ledger is a draft.SharedLedger
             - none_draft_fn is draft.make_none_drafter output, needed only when the quota asks for nothing needs
+            - extras is a dict of facts about the inputs that a report prints; it is not read by the run
         """
         self.by_id, self.kept, self.ctx, self.twins, self.strip_fn = by_id, kept, ctx, twins, strip_fn
         self.ask, self.ledger, self.model_id, self.server       = ask, ledger, model_id, server
         self.source_commit, self.seed, self.kind_split          = source_commit, seed, kind_split
         self.set_by, self.set_at, self.none_draft_fn            = set_by, set_at, none_draft_fn
         self.parallel, self.smoke                               = parallel, smoke
+        self.extras                                             = {} if extras is None else extras
 
 
 def cell_name( kind, lang ):
