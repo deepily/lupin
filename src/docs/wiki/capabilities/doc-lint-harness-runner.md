@@ -9,7 +9,8 @@ pins:
   - cosa.repo.doc_lint.harness_runner.LedgerBindingError@6d8a2cdeba
   - cosa.repo.doc_lint.harness_runner.Ledger@a0eca379c1
   - cosa.repo.doc_lint.harness_runner.run_pair@92193538b9
-  - cosa.repo.doc_lint.harness_runner.run_all@b4e8489024
+  - cosa.repo.doc_lint.harness_runner.run_all@61fb294af7
+  - cosa.repo.doc_lint.harness_runner.run_parallel@a0ee9c393e
   - cosa.repo.doc_lint.harness_runner.summarize_calls@28eb8985a7
   - cosa.repo.doc_lint.harness_runner.unquotable_seeds@c077f275e8
   - cosa.repo.doc_lint.harness_schedule.scheduled_at@0c88e49f34
@@ -30,7 +31,7 @@ Runs the judge harness over before and after pairs with a resumable ledger. Figu
 
 ## Running
 - `check_models` refuses a judge or escalation model equal to the writer model. The extractor may equal it. `judge_skipped` returns the reason for a pair whose new text is empty.
-- `run_pair` skips every call the ledger holds and freezes each extractor list before judging. `run_all` runs pairs in input order, up to `parallel` at once, and raises the earliest failure after the pairs in flight finish.
+- `run_pair` skips every call the ledger holds and freezes each extractor list before judging. `run_all` hands the pairs to `run_parallel`. That runs any items in input order, up to `parallel` at once, and raises the earliest failure after the items in flight finish.
 - `summarize_calls` folds call records into seconds and counts per stage. `unquotable_seeds` lists seeded pairs whose span cannot itself be quoted.
 
 ## Scheduling and command line

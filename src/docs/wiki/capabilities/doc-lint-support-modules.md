@@ -16,7 +16,7 @@ pins:
   - cosa.repo.doc_lint.links.is_outside_root@519e60a957
   - cosa.repo.doc_lint.links.design_path_findings@91b3575cbd
   - cosa.repo.doc_lint.waivers.waiver_state@cbff90e81d
-  - cosa.repo.doc_lint.swept_scope.is_swept@142461ab96
+  - cosa.repo.doc_lint.swept_scope.is_swept@012a78cf4c
   - cosa.repo.doc_lint.swept_scope.swept_files@2aa338dd52
   - cosa.repo.doc_lint.word_list.configure_root@237df3584b
   - cosa.repo.doc_lint.word_list.load_words@06e082a2cf
@@ -36,5 +36,5 @@ Small helpers the [[doc-lint-gate]] and the linters share: a capitals fixer, git
 ## Links, waivers and scope
 - `markdown_link_findings` reports relative links to missing files and skips web, anchor and doc-viewer links. `design_path_findings` reports a `Design:` path that does not exist.
 - `is_outside_root` decides by shape alone, so an absolute path is never judged. `waiver_state` reads the same-line marker and returns `honoured`, `no-reason` or `none`.
-- `is_swept` is true for a Python file `in_scope` accepts outside the held prefixes. `swept_files` lists them from git, never from a disk walk.
+- `is_swept` is true for a Python file `in_scope` accepts outside the held prefixes, or inside a swept exception such as the `reuse_needset` folder. `swept_files` lists them from git, never from a disk walk.
 - `configure_root`, `load_words` and `default_words` read the word list behind the `caps` rule. An unreadable list raises, so the rule never turns off silently.
