@@ -53,7 +53,7 @@ class TestAPIKeyGeneration:
     def test_the_docstring_states_the_length_and_entropy_the_code_produces( self ):
         """The 72 characters and 384 bits in the contract are what token_urlsafe( 48 ) gives."""
         api_key = create_service_account.generate_api_key()
-        assert len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
+        assert api_key.startswith( "ck_live_" ) and len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
         assert "(72 characters)" in create_service_account.generate_api_key.__doc__
         assert "(384 bits entropy)" in create_service_account.generate_api_key.__doc__
 
@@ -64,7 +64,7 @@ class TestAPIKeyGeneration:
         twin      = importlib.util.module_from_spec( twin_spec )
         twin_spec.loader.exec_module( twin )
         api_key = twin.generate_api_key()
-        assert len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
+        assert api_key.startswith( "ck_live_" ) and len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
         assert "(72 characters)" in twin.generate_api_key.__doc__ and "(384 bits entropy)" in twin.generate_api_key.__doc__
 
     def test_api_key_uniqueness( self ):
