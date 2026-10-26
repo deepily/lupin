@@ -19,6 +19,7 @@ place and the test believes it stubbed something it did not.
 import os
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -155,17 +156,20 @@ def test_a_FRESH_pytest_subprocess_cannot_reach_the_human_ask_path():
         "        print( f'OUTCOME=OTHER_ERROR:{type(e).__name__}' ); return\n"
         "    print( 'OUTCOME=REACHED_THE_HUMAN' )\n"
     )
-    probe_path = os.path.join( root, "src", "tests", "unit", "test_zz_containment_probe.py" )
-    try:
+    # 🔴 NOT under src/tests: other xdist workers walk that tree (the gate-reachability
+    # census) and read a half-written or just-deleted probe as a barren or vanished test
+    # file (row ee912ca1). PYTEST_CURRENT_TEST, which the containment keys on, is set by
+    # pytest wherever the file sits, so the temp folder proves the same thing.
+    with tempfile.TemporaryDirectory( prefix="containment-probe-" ) as probe_dir:
+        probe_path = os.path.join( probe_dir, "test_zz_containment_probe.py" )
         with open( probe_path, "w" ) as fh: fh.write( probe )
         out = subprocess.run(
             [ os.path.join( root, ".venv", "bin", "python" ), "-m", "pytest",
               probe_path, "-q", "-s", "--no-header" ],
             capture_output=True, text=True, timeout=180,
             env={ **os.environ, "LUPIN_ROOT": root, "PYTHONPATH": os.path.join( root, "src" ) },
+            cwd=root,
         )
-    finally:
-        if os.path.exists( probe_path ): os.remove( probe_path )
 
     # A positive control FIRST: an empty or crashed probe prints no OUTCOME at all, and
     # every assertion below would then pass vacuously on a run that measured nothing.
