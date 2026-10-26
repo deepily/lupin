@@ -2000,6 +2000,7 @@ def main():
     # resolves through the one seam, so LUPIN_SESSIONS_DIR redirects it.
     session_dir  = str( sessions_dir() )
     session_file = None
+    stable_session_id = session_id or ""   # bound for the no-session_id path too; the listener spawn below reads it
     old_data     = None
     is_context_clear      = False
     previous_persona_name = None  # Set when /clear preservation fails AND old bridge had a persona; threaded into Phase 4.5 alloc
@@ -2449,7 +2450,7 @@ def main():
         send_tts( f"Hook fired: SessionStart — session {short_id}", sender_id=hook_sender_id )
 
     # ── Phase 5.5: Spawn CC Notification Listener ──────────────────────
-    listener_pid = _spawn_listener( stable_session_id, session_data if session_id else None, session_file, accepted_ids=f"{stable_session_id[:8]},{session_id[:8]}" )
+    listener_pid = _spawn_listener( stable_session_id, session_data if session_id else None, session_file, accepted_ids=f"{stable_session_id[:8]},{( session_id or '' )[:8]}" )
 
     # ── Phase 6: Log full payload ─────────────────────────────────────────
     log_payload( "session_start", payload )
