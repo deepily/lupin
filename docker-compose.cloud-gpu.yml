@@ -321,7 +321,7 @@ services:
       # (terraform/envs/test/main.tf). The client sends what this names; the
       # server hashes what Terraform mounts. If they disagree, every request 401s
       # for the instance's whole life while the boot log still reads healthy.
-      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      # Decision record: src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the key names)
       LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
 
       # NOTE: LUPIN_MODEL_SERVER_API_KEY_FILE removed (finding #7) — no code reads

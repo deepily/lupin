@@ -192,7 +192,7 @@ variable "service_account_email" {
 #
 # ⇒ Do NOT point these back at lupin-notification-api-key "to reduce secret
 #   sprawl". The sprawl is the fix.
-# src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+# Decision record: src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the model server no longer shares the notification key)
 
 variable "api_key_secret_id" {
   type        = string
