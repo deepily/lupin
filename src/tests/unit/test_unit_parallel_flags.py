@@ -42,15 +42,17 @@ def _stub_box( tmp_path, has_xdist ):
     return str( bin_dir / "pytest" )
 
 
-def _flags( pytest_path, args=(), env_workers=None ):
+def _flags( pytest_path, args=(), env_workers=None, coverage=False ):
     """
     Run unit_parallel_flags in a clean bash and return (stdout, stderr, returncode).
 
     Ensures:
         - LUPIN_UNIT_WORKERS is exactly env_workers, or absent when None
+        - LUPIN_COVERAGE is set to 1 when coverage is true, and absent otherwise
     """
-    env = { k: v for k, v in os.environ.items() if k != "LUPIN_UNIT_WORKERS" }
+    env = { k: v for k, v in os.environ.items() if k not in ( "LUPIN_UNIT_WORKERS", "LUPIN_COVERAGE" ) }
     if env_workers is not None: env[ "LUPIN_UNIT_WORKERS" ] = env_workers
+    if coverage: env[ "LUPIN_COVERAGE" ] = "1"
     done = subprocess.run(
         [ "bash", "-c", 'source "$1"; shift; unit_parallel_flags "$@"', "_", _LIB, pytest_path, *args ],
         capture_output=True, text=True, env=env, timeout=30
@@ -61,6 +63,21 @@ def _flags( pytest_path, args=(), env_workers=None ):
 def test_the_default_is_four_workers( tmp_path ):
     out, _, rc = _flags( _stub_box( tmp_path, True ) )
     assert ( out, rc ) == ( "-n 4", 0 )
+
+
+def test_coverage_on_defaults_to_two_workers( tmp_path ):
+    out, _, rc = _flags( _stub_box( tmp_path, True ), coverage=True )
+    assert ( out, rc ) == ( "-n 2", 0 )
+
+
+def test_an_explicit_worker_count_beats_the_coverage_default( tmp_path ):
+    out, _, rc = _flags( _stub_box( tmp_path, True ), env_workers="3", coverage=True )
+    assert ( out, rc ) == ( "-n 3", 0 )
+
+
+def test_an_empty_worker_count_with_coverage_on_takes_the_coverage_default( tmp_path ):
+    out, _, rc = _flags( _stub_box( tmp_path, True ), env_workers="", coverage=True )
+    assert ( out, rc ) == ( "-n 2", 0 )
 
 
 def test_the_worker_count_is_overridable( tmp_path ):

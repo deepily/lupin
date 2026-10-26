@@ -3,7 +3,7 @@
 #
 # The unit tier runs `-n 4` by default. Measured 2026-10-25 at 7fafa7762: 3.7x faster than
 # serial, with an identical coverage answer. LUPIN_UNIT_WORKERS overrides the count; 0 means
-# serial.
+# serial. With LUPIN_COVERAGE set the default is 2 workers, for the memory reason below.
 #
 # IT REFUSES RATHER THAN FALLING BACK. A box without pytest-xdist that quietly ran serial would
 # take an hour instead of a quarter of one and print nothing to say why. Exit 3 matches the
@@ -22,13 +22,20 @@
 
 UNIT_PARALLEL_DEFAULT_WORKERS=4
 
+# Under coverage each worker grows to about 2.4 GB (full serial run, measured 2026-10-26), most of it the
+# ~1.5 GB every worker pays to collect all the tests. A seat is capped at 8 GiB, so four workers get one
+# OOM-killed and its coverage data is lost. Two workers plus the master come to about 5.1 GB.
+UNIT_PARALLEL_COVERAGE_WORKERS=2
+
 unit_parallel_flags() {
     # Requires: $1 is the resolved pytest path; the remaining args are the caller's pytest args.
     #           The interpreter beside $1 is the one pytest runs under.
     # Ensures:  prints "-n <N>" when the lane applies; prints nothing when it does not;
     #           returns 3 (message on stderr) when it applies but pytest-xdist is not importable.
     local pytest_path="$1"; shift
-    local workers="${LUPIN_UNIT_WORKERS:-$UNIT_PARALLEL_DEFAULT_WORKERS}"
+    local default_workers="$UNIT_PARALLEL_DEFAULT_WORKERS"
+    [ -n "${LUPIN_COVERAGE:-}" ] && default_workers="$UNIT_PARALLEL_COVERAGE_WORKERS"
+    local workers="${LUPIN_UNIT_WORKERS:-$default_workers}"
 
     case "$workers" in
         ''|*[!0-9]*)
