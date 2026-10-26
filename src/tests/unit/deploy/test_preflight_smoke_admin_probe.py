@@ -71,3 +71,40 @@ def test_the_container_preflight_sources_and_calls_the_probe():
     text = open( SCRIPT ).read()
     assert "lib/preflight-smoke-admin-probe.sh" in text
     assert text.index( "probe_smoke_admin_credentials" ) < text.index( "# ── Summary" )
+
+
+# ── the in-container shell loop, executed ────────────────────────────────────
+
+RUNNING_DRIVER = """
+CONTAINER=c1
+run_cmd()  { "$@"; }
+say_ok()   { echo "OK: $1"; }
+say_warn() { echo "WARN: $1"; }
+remedy()   { echo "REMEDY: $1"; }
+docker() { shift 2; env -u LUPIN_TEST_ADMIN_EMAIL -u LUPIN_TEST_ADMIN_PASSWORD $CONTAINER_ENV "$@"; }
+source "$PROBE"
+probe_smoke_admin_credentials
+"""
+
+
+def _run_loop( container_env ):
+    """Run the probe with a docker stub that executes the sh -c command."""
+    env = dict( os.environ, PROBE=PROBE, CONTAINER_ENV=container_env )
+    return subprocess.run( [ "bash", "-c", RUNNING_DRIVER ], env=env, capture_output=True, text=True, timeout=30 ).stdout
+
+
+def test_the_shell_loop_reports_ok_when_both_variables_hold_a_value():
+    out = _run_loop( "LUPIN_TEST_ADMIN_EMAIL=a@b.c LUPIN_TEST_ADMIN_PASSWORD=x" )
+    assert out.startswith( "OK: smoke admin credentials are set" ) and "WARN" not in out
+
+
+def test_the_shell_loop_names_a_variable_that_is_set_but_empty():
+    out = _run_loop( "LUPIN_TEST_ADMIN_EMAIL=a@b.c LUPIN_TEST_ADMIN_PASSWORD=" )
+    assert "empty in the container: LUPIN_TEST_ADMIN_PASSWORD (" in out and "ADMIN_EMAIL" not in out.split( "REMEDY" )[ 0 ]
+
+
+def test_the_shell_loop_names_both_when_neither_is_set_and_never_prints_a_value():
+    out = _run_loop( "" )
+    assert "empty in the container: LUPIN_TEST_ADMIN_EMAIL LUPIN_TEST_ADMIN_PASSWORD (" in out
+    secret = _run_loop( "LUPIN_TEST_ADMIN_EMAIL=zzz-email-value LUPIN_TEST_ADMIN_PASSWORD=zzz-secret-value" )
+    assert "zzz-" not in secret

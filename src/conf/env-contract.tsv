@@ -97,3 +97,5 @@ GH_TOKEN	CONTAINER	operator ~/.bashrc	SECRET	OPTIONAL	`${GH_TOKEN:-}` in the LOC
 # ── test venues (dev box only) ───────────────────────────────────────────────
 LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL	HOST	operator ~/.bashrc	EMAIL	OPTIONAL	Test/proxy auth as the SAME user, so both share a WebSocket channel. Absent => "Operation cancelled" failures.
 LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD	HOST	operator ~/.bashrc	SECRET	OPTIONAL	See above.
+LUPIN_TEST_ADMIN_EMAIL	HOST	operator ~/.bashrc	EMAIL	OPTIONAL	Admin sign-in for the :8000 smoke helpers (/api/debug/websocket-state is admin-only). Forwarded into lupin-rest-test; empty => the helper fails naming both variables.
+LUPIN_TEST_ADMIN_PASSWORD	HOST	operator ~/.bashrc	SECRET	OPTIONAL	See above.
