@@ -6,6 +6,7 @@ pins:
   - lupin_mcp.cosa_voice_mcp.ask_yes_no@9b3e0b6f3e
   - lupin_mcp.cosa_voice_mcp.ask_multiple_choice@7035439097
   - lupin_mcp.cosa_voice_mcp.request_persona@e0e76c751e
+  - lupin_mcp.cosa_voice_mcp.install_sigterm_handler@0d07116470
 ---
 # cosa-voice MCP server
 
@@ -15,7 +16,7 @@ pins:
 - `notify` announces and returns at once; `converse`, `ask_yes_no`, `ask_multiple_choice` and `ask_open_ended_batch` block until the user answers or the timeout passes.
 - `get_session_info` reads project, session id, sender id, server URL, speakerphone flag, voice persona and bridge metadata. `set_session_topic` writes the topic into the session bridge file and pushes it to the UI.
 - `enable_speakerphone`, `disable_speakerphone` and `request_persona` change speakerphone and voice-persona state through the Lupin server. The two speakerphone verbs fall back to writing the bridge file when the server is unreachable or refuses the login or toggle. They also fall back when no credentials are found. `request_persona` has no fallback. Their docstrings say to call them only on a user's instruction; the function bodies check nothing of the kind.
-- Other families live in the same file. They have their own pages: commons and DM ([[mcp-commons-and-dm]]), spawn, dismiss and `self_respin` ([[mcp-session-spawn-and-reap]]), task store ([[mcp-task-store-tools]]), and reuse search ([[reuse-search-tools]]).
+- Other families live in the same file. They have their own pages: commons and DM ([[mcp-commons-and-dm]]), spawn, dismiss and `self_respin` ([[mcp-session-spawn-and-reap]]), task store ([[mcp-task-store-tools]]), and reuse search ([[reuse-search-tools]]). `install_sigterm_handler` makes SIGTERM exit the server with code 0; the `__main__` block calls it, and importing the module does not.
 
 ## How a call reaches the Lupin server
 - `notify` goes through `notify_user_async` and the asking verbs through `notify_user_sync`. Both POST to `/api/notify` on the Lupin server; the sync client streams the reply as server-sent events.
