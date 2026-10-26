@@ -46,7 +46,7 @@ def answers_health( url ):
 class Servers:
     """Starts, inspects and stops the server of each run."""
 
-    def __init__( self, databases, image, runner=commands.run_command, environ=None, login=dp.clone_login, port_free=port_is_free,
+    def __init__( self, databases, image, sender_key, runner=commands.run_command, environ=None, login=dp.clone_login, port_free=port_is_free,
                   health=answers_health, sleep=time.sleep, clock=time.monotonic, boot_timeout=BOOT_TIMEOUT ):
         """
         Remember the ports this adapter works through.
@@ -54,6 +54,7 @@ class Servers:
         Requires:
             - databases has create, drop and is_fresh
             - image names the server image, the one the test service of docker-compose.yml runs
+            - sender_key is the plaintext key the run's tests send; seed stores its hash in the run's database
             - runner( argv, env ) returns ( exit code, output ); login() returns ( user, password ) or None
 
         Ensures:
@@ -61,6 +62,7 @@ class Servers:
         """
         self.databases    = databases
         self.image        = image
+        self.sender_key   = sender_key
         self.runner       = runner
         self.environ      = os.environ if environ is None else environ
         self.login        = login
@@ -101,6 +103,18 @@ class Servers:
             for leftover in self._remove( container, name ): failure.add_note( f"cleanup also failed: {leftover}" )
             raise
         return { "url" : url, "container" : container, "db_name" : name, "port" : port }
+
+    def seed( self, handle ):
+        """
+        Give the run's database the account that owns the sender key.
+
+        Requires:
+            - the server answered health, so the database is migrated; the freshness check came first
+
+        Raises:
+            - HarnessError DB_UNAVAILABLE from the database port
+        """
+        self.databases.provision_sender_key( handle[ "db_name" ], self.sender_key )
 
     def db_is_fresh( self, handle ):
         """Say whether the run's database holds no account and no notification yet."""

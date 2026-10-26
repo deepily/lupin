@@ -8,14 +8,20 @@ vector extension, which a login that may not install extensions cannot add itsel
 """
 import os
 
+import bcrypt
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
+from sqlalchemy.orm import Session
 
 import cosa.utils.dotenv_password as dp
+from cosa.rest.postgres_models import ApiKey, User
 from lupin_mcp.reuse_harness import errors as err
 
 TEMPLATE_NAME = "lupin_template_vector"
+SENDER_EMAIL  = "exp-key-owner@lupin.deepily.ai"
+SENDER_ROLES  = [ "service_account" ]
+BCRYPT_ROUNDS = 12
 
 # A run's database counts as fresh when no account and no notification exists yet. Other tables hold rows the server seeds at boot.
 FRESH_TABLES  = ( "users", "notifications" )
@@ -48,7 +54,7 @@ def maintenance_url( environ=None, login=dp.clone_login ):
 class Databases:
     """Creates, inspects and drops the databases of runs on one Postgres server."""
 
-    def __init__( self, server_url, engine_factory=create_engine ):
+    def __init__( self, server_url, engine_factory=create_engine, session_class=Session ):
         """
         Remember the server and how to open an engine.
 
@@ -60,6 +66,7 @@ class Databases:
         """
         self.server_url     = server_url
         self.engine_factory = engine_factory
+        self.session_class  = session_class
 
     def create( self, name ):
         """
@@ -132,6 +139,37 @@ class Databases:
         finally:
             engine.dispose()
         return all( count == 0 for count in counts )
+
+    def provision_sender_key( self, name, key ):
+        """
+        Give the database an account that owns the sender key; only the key's hash is stored.
+
+        Requires:
+            - the server has migrated the database
+            - key is the plaintext key the tests send in X-API-Key
+
+        Ensures:
+            - one service account and one active api_keys row exist, so the server accepts the key
+            - the plaintext key is not stored
+            - the account is created after the freshness check, so it never counts against it
+
+        Raises:
+            - HarnessError DB_UNAVAILABLE if the tables are missing, the rows exist already or the database cannot be written
+        """
+        self._check_name( name )
+        engine = self.engine_factory( make_url( self.server_url ).set( database=name ).render_as_string( hide_password=False ) )
+        try:
+            with self.session_class( engine ) as session:
+                owner = User( email=SENDER_EMAIL, password_hash="!", roles=SENDER_ROLES, is_active=True, email_verified=True )
+                session.add( owner )
+                session.flush()
+                session.add( ApiKey( user_id=owner.id, key_hash=bcrypt.hashpw( key.encode( "utf-8" ), bcrypt.gensalt( rounds=BCRYPT_ROUNDS ) ).decode( "utf-8" ),
+                                     description="experiment sender key", is_active=True ) )
+                session.commit()
+        except ( ProgrammingError, OperationalError, IntegrityError ) as error:
+            raise err.HarnessError( err.DB_UNAVAILABLE, f"could not provision the sender key in {name}: {error.orig}" ) from error
+        finally:
+            engine.dispose()
 
     def _check_name( self, name ):
         """Refuse a name that is not a plain lowercase identifier, because it goes into SQL text."""

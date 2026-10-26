@@ -4,8 +4,9 @@ Unit tests of the run databases port.
 The engine is a recorder, so these tests pin the statements sent and the database each one is sent to.
 That a clone really appears and really disappears on Postgres is shown by the integration test beside this file.
 """
+import bcrypt
 import pytest
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 from lupin_mcp.reuse_harness import databases
 from lupin_mcp.reuse_harness import errors as err
@@ -161,3 +162,70 @@ def test_maintenance_url_defaults_to_localhost_and_the_standard_port_from_the_pr
 def test_maintenance_url_refuses_when_no_test_login_exists_rather_than_using_the_dev_login():
     with pytest.raises( err.HarnessError ) as caught: databases.maintenance_url( environ={}, login=lambda: None )
     assert caught.value.code == err.DB_UNAVAILABLE
+
+
+class FakeSession:
+    """A session that keeps added rows, gives flushed rows an id and fails commit on request."""
+
+    made = []
+
+    def __init__( self, engine ):
+        """Remember the engine and start empty."""
+        self.engine, self.added, self.committed, self.fail = engine, [], False, FakeSession.fail
+        FakeSession.made.append( self )
+
+    fail = None
+
+    def __enter__( self ):
+        """Enter the context."""
+        return self
+
+    def __exit__( self, *exc ):
+        """Leave the context without hiding an error."""
+        return False
+
+    def add( self, row ):
+        """Keep the row."""
+        self.added.append( row )
+
+    def flush( self ):
+        """Give every added row an id, as the database does."""
+        for row in self.added:
+            if getattr( row, "id", None ) is None: row.id = f"id-{len( self.added )}"
+
+    def commit( self ):
+        """Fail when told to, else mark the commit."""
+        if self.fail is not None: raise self.fail
+        self.committed = True
+
+
+def provisioner( fail=None ):
+    """Return ( Databases, log ) whose sessions are FakeSession."""
+    FakeSession.made, FakeSession.fail = [], fail
+    log = []
+    return databases.Databases( SERVER, lambda url, **options: Engine( log, url, options, [], None ), session_class=FakeSession ), log
+
+
+def test_provision_stores_a_service_account_and_only_the_bcrypt_hash_of_the_key_in_the_runs_database():
+    store, log = provisioner()
+    store.provision_sender_key( "rrun_abc123", "ck_live_plain-key" )
+    session = FakeSession.made[ 0 ]
+    owner, key = session.added
+    assert ( owner.email, owner.roles, owner.is_active, owner.email_verified ) == ( databases.SENDER_EMAIL, [ "service_account" ], True, True )
+    assert key.user_id == owner.id and key.is_active is True and "ck_live_plain-key" not in key.key_hash
+    assert bcrypt.checkpw( b"ck_live_plain-key", key.key_hash.encode( "utf-8" ) ) and not bcrypt.checkpw( b"another-key", key.key_hash.encode( "utf-8" ) )
+    assert session.committed is True and session.engine.url.endswith( "/rrun_abc123" ) and log[ -1 ][ 1 ] == "dispose"
+
+
+@pytest.mark.parametrize( "kind", [ ProgrammingError, OperationalError, IntegrityError ] )
+def test_provision_names_the_cause_when_the_database_refuses_and_disposes_the_engine( kind ):
+    store, log = provisioner( fail=kind( "stmt", {}, Exception( "boom" ) ) )
+    with pytest.raises( err.HarnessError ) as caught: store.provision_sender_key( "rrun_abc123", "k" )
+    assert caught.value.code == err.DB_UNAVAILABLE and "rrun_abc123" in caught.value.detail and "boom" in caught.value.detail
+    assert log[ -1 ][ 1 ] == "dispose"
+
+
+def test_provision_refuses_an_unsafe_name_before_connecting():
+    store, log = provisioner()
+    assert err.BAD_SPEC == pytest.raises( err.HarnessError, store.provision_sender_key, "Bad Name", "k" ).value.code
+    assert log == []

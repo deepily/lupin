@@ -11,6 +11,7 @@ Everything outside the process comes in through five ports, so the harness is pr
 - worktree.exists( path, relative ) returns a bool
 - server.start( run_id, path ) returns a handle { url, container, db_name }
 - server.db_is_fresh( handle ) returns a bool
+- server.seed( handle ) gives the run's database the account that owns the sender key, after the fresh check
 - server.stop( handle ) drops the database and the container
 - session.bind( path, handle ) ties the sessions to the run's worktree and server
 - session.probe( config, surface ) returns a bool
@@ -132,7 +133,7 @@ def run_one( spec, ports ):
         - ports has worktree, server, session, tests and log as described in the module docstring
 
     Ensures:
-        - the order is: worktree, own server and database, session bound to both, arm proof, then slices of work each followed by a verdict
+        - the order is: worktree, own server and database, sender key seeded after the fresh check, session bound to both, arm proof, then slices of work each followed by a verdict
         - the session never starts before the arm is proven and the database is the run's own and fresh
         - a slice is given the seat hours that remain under the cap
         - one log record per verdict, with the run, arm label, model id, server commit, seat hours so far and the pass count, and one stop record
@@ -151,6 +152,7 @@ def run_one( spec, ports ):
     handle   = ports.server.start( spec[ "run_id" ], path )
     try:
         _check_own_database( spec, handle, ports.server )
+        ports.server.seed( handle )
         ports.session.bind( path, handle )
         arms.verify_arm( spec[ "arm" ], config, ports.session )
         seat_hours = 0.0

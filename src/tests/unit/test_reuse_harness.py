@@ -67,6 +67,11 @@ class StubServer:
         """Say whether the database holds no rows."""
         return self.dbs[ handle[ "db_name" ] ] == []
 
+    def seed( self, handle ):
+        """Add the sender key's owner to the run's database, as the real port does."""
+        self.dbs[ handle[ "db_name" ] ].append( "sender-key-owner" )
+        self.history.append( ( "seed", handle[ "db_name" ] ) )
+
     def stop( self, handle ):
         """Drop the database."""
         self.history.append( ( "stop", handle[ "db_name" ] ) )
@@ -523,3 +528,13 @@ def test_the_session_is_bound_to_the_runs_tree_and_server_before_the_arm_is_prov
     refused = StubSession()
     with pytest.raises( err.HarnessError ): harness.run_one( spec(), Ports( session=refused, server=StubServer( preload=[ "x" ] ) ) )
     assert refused.bound is None
+
+
+def test_the_sender_key_is_seeded_after_the_fresh_check_and_before_the_session_is_bound_and_not_into_a_dirty_database():
+    server  = StubServer()
+    session = StubSession( require_bind=True )
+    harness.run_one( spec(), Ports( session=session, server=server ) )
+    assert ( "seed", harness.db_name( "pair01-a" ) ) in server.history
+    dirty = StubServer( preload=[ "x" ] )
+    with pytest.raises( err.HarnessError ): harness.run_one( spec(), Ports( server=dirty ) )
+    assert not any( entry[ 0 ] == "seed" for entry in dirty.history )

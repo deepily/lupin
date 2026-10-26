@@ -47,6 +47,11 @@ class Databases:
         """Say whether the database holds no rows."""
         return self.dbs[ name ] == []
 
+    def provision_sender_key( self, name, key ):
+        """Record that the key was given to the database, and add its owner as a row."""
+        self.history.append( ( "provision", name, key ) )
+        self.dbs[ name ].append( "owner" )
+
 
 class Docker:
     """A docker simulator that records every command and the environment it ran in."""
@@ -102,7 +107,7 @@ def make( databases=None, docker=None, healthy_after=0, port_free=lambda port: T
     clock     = Clock()
     polls     = []
     health    = lambda url: ( polls.append( url ), len( polls ) > healthy_after )[ 1 ]
-    servers   = server.Servers( databases, "lupin:test-image", runner=docker, environ=ENVIRON if environ is None else environ, login=login,
+    servers   = server.Servers( databases, "lupin:test-image", "sender-key-value", runner=docker, environ=ENVIRON if environ is None else environ, login=login,
                                 port_free=port_free, health=health, sleep=clock.sleep, clock=clock, boot_timeout=timeout )
     return servers, databases, docker
 
@@ -265,7 +270,7 @@ def test_stop_drops_the_database_when_only_the_container_removal_fails():
 
 
 def test_the_default_ports_are_the_real_ones():
-    servers = server.Servers( Databases(), "img" )
+    servers = server.Servers( Databases(), "img", "k" )
     assert ( servers.runner, servers.port_free, servers.health, servers.boot_timeout ) == ( commands.run_command, server.port_is_free, server.answers_health, server.BOOT_TIMEOUT )
     import os
     assert servers.environ is os.environ
@@ -310,3 +315,12 @@ def test_answers_health_is_false_when_nothing_listens():
         probe.bind( ( "127.0.0.1", 0 ) )
         quiet = probe.getsockname()[ 1 ]
     assert server.answers_health( f"http://127.0.0.1:{quiet}" ) is False
+
+
+def test_seed_gives_the_runs_own_database_the_sender_key_after_the_fresh_check():
+    servers, databases, _ = make()
+    handle = servers.start( "r1", "/wt/r1" )
+    assert servers.db_is_fresh( handle ) is True
+    servers.seed( handle )
+    assert databases.history[ -1 ] == ( "provision", harness.db_name( "r1" ), "sender-key-value" )
+    assert servers.db_is_fresh( handle ) is False

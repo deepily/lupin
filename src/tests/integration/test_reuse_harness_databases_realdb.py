@@ -62,3 +62,27 @@ def test_creating_a_database_that_exists_is_refused_and_names_the_database():
         assert caught.value.code == err.DB_UNAVAILABLE and name in caught.value.detail
     finally:
         store.drop( name )
+
+
+def test_the_sender_key_is_stored_hashed_and_checks_out_with_bcrypt_in_a_real_database():
+    import bcrypt
+    from cosa.rest.postgres_models import ApiKey, User
+    url   = databases.maintenance_url()
+    store = databases.Databases( url )
+    name  = f"rrun_it_{uuid.uuid4().hex[ :12 ]}"
+    store.create( name )
+    try:
+        engine = create_engine( make_url( url ).set( database=name ).render_as_string( hide_password=False ) )
+        try:
+            User.__table__.create( engine )
+            ApiKey.__table__.create( engine )
+            store.provision_sender_key( name, "ck_live_integration-key" )
+            with engine.connect() as conn:
+                owner_email, key_hash = conn.execute( text( "SELECT u.email, k.key_hash FROM users u JOIN api_keys k ON k.user_id = u.id" ) ).one()
+            assert owner_email == databases.SENDER_EMAIL and bcrypt.checkpw( b"ck_live_integration-key", key_hash.encode( "utf-8" ) )
+            with pytest.raises( err.HarnessError ) as caught: store.provision_sender_key( name, "again" )
+            assert caught.value.code == err.DB_UNAVAILABLE
+        finally:
+            engine.dispose()
+    finally:
+        store.drop( name )
