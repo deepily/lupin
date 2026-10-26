@@ -713,6 +713,10 @@ services:
       LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      # Admin sign-in for the smoke helpers (/api/debug/websocket-state is admin-only). Empty when
+      # the shell has none: the helper then fails with a message naming both variables.
+      LUPIN_TEST_ADMIN_EMAIL: ${LUPIN_TEST_ADMIN_EMAIL:-}
+      LUPIN_TEST_ADMIN_PASSWORD: ${LUPIN_TEST_ADMIN_PASSWORD:-}
       # Enables proxy-integration tests (test_swe_team_proxy etc.). Tests
       # self-abort when this is unset. The test container is dedicated to
       # automated test runs, so it should always have this on.
