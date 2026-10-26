@@ -523,3 +523,37 @@ def test_zero_roots_is_reported_DISTINCTLY_from_zero_files():
                   live_session_ids_fn = lambda: set() )
     loop._sweep_hwm_files()
     assert "fleet_arbiter_hwm_report_no_roots" in [ n for n, _ in events ]
+
+
+# ── the four arms the suite never reached ───────────────────
+
+def test_a_foreign_name_classifies_as_keep_unparseable_with_no_sid8( tmp_path ):
+    row = jan.classify_hwm_file( tmp_path / ".heartbeat-hold-abc.json", live_session_ids=[ ] )
+    assert ( row[ "verdict" ], row[ "reason" ], row[ "sid8" ] ) == ( jan.VERDICT_KEEP, jan.KEEP_UNPARSEABLE, None )
+
+
+def test_a_vanished_file_has_no_provable_age_and_is_kept( tmp_path ):
+    row = jan.classify_hwm_file( tmp_path / ".dm-inbox-hwm-gone0001.json", live_session_ids=[ ] )
+    assert ( row[ "verdict" ], row[ "reason" ], row[ "mtime_age_seconds" ] ) == ( jan.VERDICT_KEEP, jan.KEEP_NO_PROVABLE_AGE, None )
+
+
+def test_junk_entries_in_the_live_set_are_skipped_not_matched( tmp_path ):
+    assert jan._live_prefixes( [ "live0001-full-uuid", "", None, 7 ] ) == { "live0001" }
+    doomed = _write_hwm( tmp_path, "dead0001", age_days=30 )
+    pruned = jan.sweep_and_reclaim_hwm_files( base_dir=tmp_path, live_session_ids=[ None, "", "live0001" ] )
+    assert pruned == [ str( doomed ) ]
+
+
+def test_a_racing_delete_skips_that_file_and_the_rest_still_go( tmp_path, monkeypatch ):
+    first  = _write_hwm( tmp_path, "dead0001", age_days=30 )
+    second = _write_hwm( tmp_path, "dead0002", age_days=30 )
+    real_unlink = type( first ).unlink
+
+    def flaky( self, *a, **k ):
+        if self.name == first.name: raise OSError( "gone" )
+        return real_unlink( self, *a, **k )
+
+    monkeypatch.setattr( type( first ), "unlink", flaky )
+    pruned = jan.sweep_and_reclaim_hwm_files( base_dir=tmp_path, live_session_ids=[ "live0001" ] )
+    assert pruned == [ str( second ) ]
+    assert first.exists() and not second.exists()

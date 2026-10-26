@@ -733,3 +733,25 @@ class TestBufferRedirect:
         mock_forward.assert_called_once()
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "hookSpecificOutput" ][ "decision" ][ "behavior" ] == "allow"
+
+
+# ── the bootstrap and catch-all arms ────────────────────────────
+
+class TestBootstrapAndCatchAll:
+
+    def test_main_denies_with_the_error_text_when_anything_unhandled_is_raised( self, capsys ):
+        with patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input", side_effect=RuntimeError( "boom" ) ):
+            _pr.main()
+        out, err = capsys.readouterr()
+        decision = json.loads( out )[ "hookSpecificOutput" ][ "decision" ]
+        assert ( decision[ "behavior" ], decision[ "message" ] ) == ( "deny", "Hook error: boom" )
+        assert "PermissionRequest hook error: boom" in err
+
+    def test_a_module_loaded_without_src_on_the_path_puts_it_first( self, monkeypatch ):
+        import importlib.util
+        src = os.path.join( os.environ[ "LUPIN_ROOT" ], "src" )
+        monkeypatch.setattr( sys, "path", [ p for p in sys.path if p != src ] )
+        spec = importlib.util.spec_from_file_location( "permission_request_bootstrap_copy", _pr.__file__ )
+        mod  = importlib.util.module_from_spec( spec )
+        spec.loader.exec_module( mod )
+        assert sys.path[ 0 ] == src == mod._src_path
