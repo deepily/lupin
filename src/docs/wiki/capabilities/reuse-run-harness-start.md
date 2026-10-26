@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.reuse_harness.driver.image_of@292ecb1da0
   - lupin_mcp.reuse_harness.driver.run_dir_of@9fa8dc9b7c
   - lupin_mcp.reuse_harness.driver.make_key@28fd368a5d
-  - lupin_mcp.reuse_harness.driver.build_ports@cdc5642ba2
+  - lupin_mcp.reuse_harness.driver.build_ports@933be4ec24
   - lupin_mcp.reuse_harness.driver.execute@3390406653
   - lupin_mcp.reuse_harness.driver.dry_run@4b8f879f85
   - lupin_mcp.reuse_harness.driver.parse@3dec3d206b
@@ -23,6 +23,7 @@ This page covers the command and the files of a run. The run itself is described
 - A dry run cuts the tree, probes the four surfaces and removes the tree. It starts no server and no database.
 - `build_ports` makes one fresh sender key per run. The server, the tests and the session share it.
 - The image comes from `image_of`, which reads the test service of `docker-compose.yml`.
+- `--mcp-config` names the MCP servers for both arms. Without it the arm with the tools may find the reuse tools missing.
 
 ## The files
 - A run lives in `<data root>/<arm label>/<run id>/`, so no folder says which arm made it.

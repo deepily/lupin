@@ -2,7 +2,7 @@
 capability: reuse-run-harness-tests-and-session
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_harness.acceptance.Acceptance@9b5907d524
+  - lupin_mcp.reuse_harness.acceptance.Acceptance@80a0430e63
   - lupin_mcp.reuse_harness.acceptance.Acceptance.run@ffb05c068a
   - lupin_mcp.reuse_harness.session.events_of@ba73a03d6e
   - lupin_mcp.reuse_harness.session.blocks_of@e8adeb7fdd
@@ -20,10 +20,12 @@ Named gap: no real `claude` command has been started. The deny rules and the hoo
 
 ## The acceptance tests
 - `run` runs the frozen tests from the run's tree against the run's server. The URL and the sender key are in the environment.
-- Before each run it compares the tests, `src/cosa` and `src/lupin_app` with the frozen commit, tracked and untracked. A difference is `TESTS_TAMPERED`. The client folder is left out.
+- Before each run it compares the whole tree with the frozen commit: tracked, untracked and committed changes. Any change outside `src/lupin_app/static` is `TESTS_TAMPERED`.
+- A file hidden from git by an assume-unchanged or skip-worktree flag is refused. The arm's own deletions are allowed. Ignored files are not examined.
 - A test passes only if every case of it passed. A skip, an error, a missing case or an unreadable report is not a pass.
 - Pytest that did not finish is `TESTS_NOT_RUN`, never a set of failures.
-- `client_builds` is the exit code of the build command, `npm run build` by default. The generic plan names none.
+- `client_builds` is the exit code of `npm --prefix src/lupin_app/static run build`. The generic plan names none. A missing script scores false and the run goes on.
+- The brief tells the builder to keep everything it creates, `package.json` included, inside the client folder.
 
 ## The session
 - A session is a headless `claude -p` process with project hooks off. Both arms get the same MCP config.
