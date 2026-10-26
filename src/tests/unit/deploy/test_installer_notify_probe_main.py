@@ -29,9 +29,10 @@ class _Resp:
 def sender( monkeypatch ):
     """Replace the real sender; `calls` records each request it was given."""
     import lupin_cli.notifications.notify_user_async as nua
-    calls = { "reqs": [ ], "reply": _Resp( True, "queued" ) }
-    def fake( req ):
+    calls = { "reqs": [ ], "urls": [ ], "reply": _Resp( True, "queued" ) }
+    def fake( req, server_url=None ):
         calls[ "reqs" ].append( req )
+        calls[ "urls" ].append( server_url )
         if isinstance( calls[ "reply" ], Exception ): raise calls[ "reply" ]
         return calls[ "reply" ]
     monkeypatch.setattr( nua, "notify_user_async", fake )
@@ -54,7 +55,8 @@ def test_a_delivered_reply_prints_ok_and_exits_zero( sender, capsys ):
     mod = _load()
     assert mod.main( [ "probe", "http://server.example:1" ] ) == mod.EXIT_OK
     assert capsys.readouterr().out.strip() == "ok: queued"
-    assert sender[ "reqs" ][ 0 ].message == "cosa-voice bootstrapper: test notification"
+    assert sender[ "urls" ] == [ "http://server.example:1" ]
+    assert sender[ "reqs" ][ 0 ].message =="cosa-voice bootstrapper: test notification"
     assert sender[ "reqs" ][ 0 ].sender_id == "claude.code@installer.deepily.ai"
 
 

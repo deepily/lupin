@@ -56,10 +56,9 @@ def main( argv ):
             message           = "cosa-voice bootstrapper: test notification",
             notification_type = NotificationType.PROGRESS,
             priority          = NotificationPriority.LOW,
-            sender_id         = "claude.code@installer.deepily.ai",
-            server_url        = argv[ 1 ]
+            sender_id         = "claude.code@installer.deepily.ai"
         )
-        resp = notify_user_async( req )
+        resp = notify_user_async( req, server_url=argv[ 1 ] )
     except Exception as e:
         print( f"fail: {type( e ).__name__}: {e}" )
         return EXIT_FAILED
