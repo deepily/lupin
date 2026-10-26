@@ -321,3 +321,12 @@ def test_the_setting_sources_flag_carries_the_configs_sources_and_not_a_fixed_li
     sessions.probe( dict( WITH, setting_sources=[ "project" ] ), arms.SURFACE_CHECK_EXISTS )
     values = [ call[ "argv" ][ call[ "argv" ].index( "--setting-sources" ) + 1 ] for call in runner.calls ]
     assert values == [ "project,local", "project" ] and "user" not in values[ 0 ]
+
+
+def test_the_first_prompt_tells_the_builder_to_keep_everything_inside_the_client_folder():
+    from lupin_mcp.reuse_harness import worktree
+    sessions, runner = make( ( 0, PROBE_OK ) )
+    sessions.work( WITH, "/wt/run1", HANDLE, 5 )
+    prompt = runner.calls[ 0 ][ "argv" ][ 2 ]
+    assert worktree.CLIENT_ROOT in prompt and "package.json" in prompt and "A change anywhere else ends the run" in prompt
+    assert "experiment_acceptance" in prompt and "$EXPERIMENT_SERVER_URL" in prompt
