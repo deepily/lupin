@@ -42,3 +42,24 @@ def test_the_entry_point_installs_the_handler():
         assert stop.code == 0
     else:
         raise AssertionError( "the handler must exit" )
+
+
+def _main_block_calls():
+    """The names of the plain function calls in the module's `__main__` block, in source order."""
+    import ast
+    import pathlib
+    from lupin_mcp import cosa_voice_mcp as mcp_module
+    tree = ast.parse( pathlib.Path( mcp_module.__file__ ).read_text() )
+    blocks = [ n for n in tree.body if isinstance( n, ast.If ) and ast.unparse( n.test ) == "__name__ == '__main__'" ]
+    per_block = [ [ ast.unparse( c.func ) for stmt in b.body for c in ast.walk( stmt ) if isinstance( c, ast.Call ) ] for b in blocks ]
+    servers = [ calls for calls in per_block if "mcp.run" in calls ]
+    assert len( servers ) == 1, f"expected one __main__ block that runs the server, found {len( servers )}"
+    return servers[ 0 ]
+
+
+def test_the_main_block_installs_the_handler_before_the_server_runs():
+    """The __main__ block calls install_sigterm_handler, and does so before mcp.run."""
+    calls = _main_block_calls()
+    assert "install_sigterm_handler" in calls
+    assert "mcp.run" in calls
+    assert calls.index( "install_sigterm_handler" ) < calls.index( "mcp.run" )
