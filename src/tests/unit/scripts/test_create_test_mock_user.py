@@ -251,7 +251,9 @@ def test_existing_account_is_reset_in_place( wired, creds, capsys ):
         ( "mark_email_verified", 11 ),
     ]
     assert session.commits == 1
-    assert "reset" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "reset" in captured.out
+    assert _PW not in captured.out + captured.err
 
 
 def test_reset_is_idempotent_for_an_account_already_in_shape( wired, creds ):
