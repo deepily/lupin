@@ -81,8 +81,11 @@ def repo( tmp_path ):
     git_in( tmp_path, "add", "." )
     git_in( tmp_path, "commit", "-q", "-m", "frozen" )
     frozen = git_in( tmp_path, "rev-parse", "HEAD" )
-    ( tests / "test_a.py" ).write_text( "def test_later():\n    pass\n" )
-    git_in( tmp_path, "commit", "-q", "-a", "-m", "later" )
+    ( tests / "test_a.py" ).write_text( 'import pytest\n\n@pytest.mark.feature( "F01" )\ndef test_later():\n    pass\n' )
+    ( tests / "test_new.py" ).write_text( 'import pytest\n\n@pytest.mark.feature( "F02" )\ndef test_added_after_the_freeze():\n    pass\n' )
+    listing.write_text( LIST_TEXT + "| F03 | added after the freeze |\n" )
+    git_in( tmp_path, "add", "." )
+    git_in( tmp_path, "commit", "-q", "-m", "later" )
     git_in( tmp_path, "checkout", "-q", "--detach", frozen )
     ( tests / "test_b.py" ).write_text( "x = 1\n" )
     git_in( tmp_path, "add", "." )
@@ -118,6 +121,12 @@ def test_build_spec_reads_the_frozen_commit_and_not_the_tip_of_main( repo ):
                      "test_ids" : [ f"{freeze.TEST_DIR}/test_a.py::test_one", f"{freeze.TEST_DIR}/test_a.py::test_two" ] }
 
 
+def test_build_spec_at_the_freeze_ignores_a_test_file_and_a_feature_row_main_gained_later( repo ):
+    later = freeze.build_spec( repo[ "git" ], "r1", "with", "m", repo[ "frozen" ], 1 )
+    assert later[ "test_ids" ] == [ f"{freeze.TEST_DIR}/test_a.py::test_one", f"{freeze.TEST_DIR}/test_a.py::test_two" ]
+    assert "test_added_after_the_freeze" not in " ".join( later[ "test_ids" ] )
+
+
 def test_build_spec_refuses_a_commit_main_does_not_hold( repo ):
     assert code_of( lambda: freeze.build_spec( repo[ "git" ], "r1", "with", "m", repo[ "side" ], 1 ) ) == err.NOT_FROZEN
 
@@ -127,6 +136,4 @@ def test_build_spec_refuses_a_bad_arm_through_check_spec( repo ):
 
 
 def test_build_spec_refuses_a_map_that_does_not_close( repo ):
-    ( repo[ "root" ] / freeze.FEATURE_LIST ).write_text( LIST_TEXT + "| F03 | c |\n" )
-    git_in( repo[ "root" ], "commit", "-q", "-a", "-m", "third feature" )
     assert code_of( lambda: freeze.build_spec( repo[ "git" ], "r1", "with", "m", "main", 1 ) ) == err.FEATURE_MAP

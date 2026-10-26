@@ -57,19 +57,27 @@ class Worktrees:
 
         Raises:
             - HarnessError WORKTREE_EXISTS if the path is taken
-            - HarnessError WORKTREE_NOT_READY if a provisioner did not report ok, or a remove path leaves the tree
+            - HarnessError WORKTREE_NOT_READY if a provisioner did not report ok, or a remove path leaves the tree; the tree is removed first, so a retry finds the path free
             - RuntimeError from git if the commit cannot be checked out
         """
         path = os.path.join( self.repo_root, self.base_dir, run_id )
         if os.path.exists( path ): raise err.HarnessError( err.WORKTREE_EXISTS, f"{path} is taken" )
         pool_builder.run_git( self.repo_root, [ "worktree", "add", "--detach", path, commit ] )
+        try:
+            self._prepare( path, remove_paths )
+        except BaseException:
+            pool_builder.run_git( self.repo_root, [ "worktree", "remove", "--force", path ] )
+            raise
+        return path
+
+    def _prepare( self, path, remove_paths ):
+        """Provision the new tree, empty its client folder and remove the arm's paths."""
         for name, provision in ( ( "venv", self.venv ), ( "artifacts", self.artifacts ) ):
             outcome = provision( path )
             if outcome[ "status" ] != READY: raise err.HarnessError( err.WORKTREE_NOT_READY, f"{name} provisioning answered {outcome[ 'status' ]}: {outcome[ 'detail' ]}" )
         shutil.rmtree( os.path.join( path, CLIENT_ROOT ), ignore_errors=True )
         os.makedirs( os.path.join( path, CLIENT_ROOT ) )
         for relative in remove_paths: self._remove( path, relative )
-        return path
 
     def _remove( self, path, relative ):
         """Delete one path of the tree, a file or a folder; a path already absent stays absent."""

@@ -91,6 +91,7 @@ def test_create_refuses_a_remove_path_that_leaves_the_tree( repo ):
     with pytest.raises( err.HarnessError ) as caught: repo[ "trees" ].create( "run1", repo[ "frozen" ], [ "../../../outside.txt" ] )
     assert caught.value.code == err.WORKTREE_NOT_READY
     assert ( repo[ "root" ] / "outside.txt" ).read_text() == "keep"
+    assert ( repo[ "root" ] / worktree.BASE_DIR / "run1" ).exists() is False
 
 
 def test_create_refuses_a_remove_path_into_a_sibling_tree_whose_name_starts_with_its_own( repo ):
@@ -112,6 +113,8 @@ def test_create_refuses_a_tree_a_provisioner_did_not_ready( repo, which ):
     trees = worktree.Worktrees( str( repo[ "root" ] ), venv=Provisioner( "failed" if which == "venv" else "ok" ), artifacts=Provisioner( "failed" if which == "artifacts" else "ok" ) )
     with pytest.raises( err.HarnessError ) as caught: trees.create( "run1", repo[ "frozen" ], [] )
     assert caught.value.code == err.WORKTREE_NOT_READY and which in caught.value.detail and "stub failed" in caught.value.detail
+    assert os.path.exists( os.path.join( str( repo[ "root" ] ), worktree.BASE_DIR, "run1" ) ) is False
+    assert repo[ "trees" ].create( "run1", repo[ "frozen" ], [] ).endswith( "run1" )
 
 
 def test_create_refuses_a_taken_path_and_leaves_it_alone( repo ):
