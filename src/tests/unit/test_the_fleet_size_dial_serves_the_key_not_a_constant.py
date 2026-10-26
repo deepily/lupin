@@ -446,3 +446,46 @@ def test_an_unreadable_fleet_degrades_the_split_to_null_not_the_pane_to_an_error
     monkeypatch.setattr( arbiter, "_live_fleet_counts", _boom )
     response = client.get( "/api/arbiter/fleet-size-cap" )
     assert response.status_code == 200 and response.json()[ "live" ] is None
+
+
+# ── error edges of the fleet-cap handlers (row e1a36bb4, coverage) ─────────────────
+
+def test_a_census_that_raises_degrades_live_fleet_counts_to_none( monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import session_bridge
+
+    def _boom( **kw ): raise RuntimeError( "bridge dir unreadable" )
+
+    monkeypatch.setattr( session_bridge, "find_active_sessions", _boom )
+    assert arbiter._live_fleet_counts() is None
+
+
+def test_the_PUT_still_writes_the_file_when_no_configuration_manager_exists( client, monkeypatch, tmp_path ):
+    """With no manager there is no cache to refresh; the disk write is the whole effect."""
+    import cosa.rest.dependencies.config as config_dep
+    path = _pin_ini( monkeypatch, tmp_path, REAL_SHAPED_INI )
+
+    def _no_manager(): raise RuntimeError( "config not initialised" )
+
+    monkeypatch.setattr( config_dep, "get_config_manager", _no_manager )
+
+    response = client.put( "/api/arbiter/fleet-size-cap", json={ "cap": 4 } )
+
+    assert response.status_code == 200
+    assert response.json()[ "cap" ] == 4
+    assert "cc session fleet size cap                        = 4" in path.read_text( encoding="utf-8" )
+
+
+def test_a_write_the_OS_refuses_is_a_500_that_names_the_failure_and_changes_nothing( client, monkeypatch, tmp_path ):
+    from lupin_mcp import fleet_cap_ini_io
+    path = _pin_ini( monkeypatch, tmp_path, REAL_SHAPED_INI )
+    _pin_config( monkeypatch, FakeConfig( { CEILING_KEY: 18, CAP_KEY: 8 } ) )
+
+    def _full( *a, **k ): raise OSError( "disk full" )
+
+    monkeypatch.setattr( fleet_cap_ini_io, "write_int_to_disk", _full )
+
+    response = client.put( "/api/arbiter/fleet-size-cap", json={ "cap": 12 } )
+
+    assert response.status_code == 500
+    assert "could not be written" in response.json()[ "detail" ] and "disk full" in response.json()[ "detail" ]
+    assert path.read_text( encoding="utf-8" ) == REAL_SHAPED_INI
