@@ -2,9 +2,9 @@
 Keep an integration run from leaving new untracked files at the repo root.
 
 A dispatched Claude Code session run from the repo root sometimes writes its file there.
-Two helpers: neutral_working_dir picks another directory for the session, and root_litter
-lists the untracked files sitting directly in the root. The session guard in the integration
-conftest compares root_litter before and after the run and fails on any new name.
+Three helpers: neutral_working_dir picks another directory for the session. root_litter lists
+the untracked files sitting directly in the root. assert_no_new_litter fails on any new one.
+A dispatching test calls it around the dispatch, so only that window is watched.
 """
 
 import os
@@ -78,3 +78,18 @@ def new_litter( before, after ):
         - returns a sorted list
     """
     return sorted( set( after ) - set( before ) )
+
+
+def assert_no_new_litter( project_root, before, run=subprocess.run ):
+    """
+    Fail if the repo root gained an untracked file since before was taken.
+
+    Requires:
+        - before is the root_litter result taken ahead of the watched window
+
+    Ensures:
+        - returns None when nothing new appeared
+        - raises AssertionError naming each new file otherwise
+    """
+    litter = new_litter( before, root_litter( project_root, run=run ) )
+    assert not litter, "Dispatched session left untracked files in the repo root: " + ", ".join( litter )

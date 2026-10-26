@@ -36,7 +36,7 @@ from unittest import mock
 
 # Path bootstrapped by src/tests/conftest.py - cosa now importable
 import cosa.utils.util as cu
-from tests.helpers.repo_root_litter_guard import neutral_working_dir
+from tests.helpers.repo_root_litter_guard import assert_no_new_litter, neutral_working_dir, root_litter
 from cosa.orchestration import ClaudeCodeDispatcher, Task, TaskType, TaskResult
 
 
@@ -615,7 +615,9 @@ class TestDispatcherInteractive:
             working_dir=neutral_dir  # the session may write the file it is asked for
         )
 
-        result = await dispatcher.dispatch( task )
+        litter_before = root_litter( cu.get_project_root() )
+        result        = await dispatcher.dispatch( task )
+        assert_no_new_litter( cu.get_project_root(), litter_before )
 
         # Should either succeed with partial result or fail gracefully
         print( f"\nResult: success={result.success}" )

@@ -1,9 +1,11 @@
 """Unit tests for tests/helpers/repo_root_litter_guard.py."""
 
 import subprocess
+
+import pytest
 import types
 
-from tests.helpers.repo_root_litter_guard import neutral_working_dir, new_litter, root_litter, SCRATCH_CONTAINER
+from tests.helpers.repo_root_litter_guard import assert_no_new_litter, neutral_working_dir, new_litter, root_litter, SCRATCH_CONTAINER
 
 
 def _run_ok( out ):
@@ -58,12 +60,24 @@ def test_root_litter_quiet_when_git_missing_or_slow():
 
 def test_root_litter_against_a_real_repo( tmp_path ):
     subprocess.run( [ "git", "init", "-q", str( tmp_path ) ], check=True )
+    ( tmp_path / ".gitignore" ).write_text( "ignored.log\n" )
+    ( tmp_path / "ignored.log" ).write_text( "x" )
     ( tmp_path / "a.py" ).write_text( "x" )
     ( tmp_path / "sub" ).mkdir()
     ( tmp_path / "sub" / "b.py" ).write_text( "x" )
-    assert root_litter( str( tmp_path ) ) == frozenset( { "a.py" } )
+    assert root_litter( str( tmp_path ) ) == frozenset( { ".gitignore", "a.py" } )
 
 
 def test_new_litter_is_the_sorted_difference():
     assert new_litter( { "a" }, { "a", "c", "b" } ) == [ "b", "c" ]
     assert new_litter( { "a" }, { "a" } ) == []
+
+
+def test_assert_no_new_litter_passes_when_nothing_new():
+    assert assert_no_new_litter( "/r", frozenset( { "a.py" } ), run=_run_ok( "a.py\n" ) ) is None
+
+
+def test_assert_no_new_litter_names_each_new_file():
+    with pytest.raises( AssertionError ) as caught:
+        assert_no_new_litter( "/r", frozenset( { "a.py" } ), run=_run_ok( "a.py\nz.py\nb.py\n" ) )
+    assert "b.py, z.py" in str( caught.value )
