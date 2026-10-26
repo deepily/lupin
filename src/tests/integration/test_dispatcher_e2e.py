@@ -36,6 +36,7 @@ from unittest import mock
 
 # Path bootstrapped by src/tests/conftest.py - cosa now importable
 import cosa.utils.util as cu
+from tests.helpers.repo_root_litter_guard import neutral_working_dir
 from cosa.orchestration import ClaudeCodeDispatcher, Task, TaskType, TaskResult
 
 
@@ -52,6 +53,17 @@ def project_root():
         str: Path to project root from LUPIN_ROOT
     """
     return cu.get_project_root()
+
+
+@pytest.fixture( scope="module" )
+def neutral_dir( tmp_path_factory, project_root ):
+    """
+    A working directory for a dispatched session that is not the repo root.
+
+    Returns:
+        str: The scratch project if it exists, else a temp dir
+    """
+    return neutral_working_dir( project_root, tmp_path_factory.mktemp( "dispatch-cwd" ) )
 
 
 @pytest.fixture( scope="module" )
@@ -581,7 +593,7 @@ class TestDispatcherInteractive:
 
     @pytest.mark.e2e
     @pytest.mark.asyncio
-    async def test_interactive_error_handling( self, dispatcher, verify_lupin_server, verify_claude_cli ):
+    async def test_interactive_error_handling( self, dispatcher, neutral_dir, verify_lupin_server, verify_claude_cli ):
         """
         Test interactive session error handling.
 
@@ -599,7 +611,8 @@ class TestDispatcherInteractive:
             prompt="Write a 1000-line Python script that does complex calculations.",
             type=TaskType.INTERACTIVE,
             max_turns=1,  # Very low - should hit limit
-            timeout_seconds=30
+            timeout_seconds=30,
+            working_dir=neutral_dir  # the session may write the file it is asked for
         )
 
         result = await dispatcher.dispatch( task )

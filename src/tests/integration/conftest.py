@@ -46,6 +46,8 @@ from tests.helpers.file_budget import (   # noqa: E402,F401
     pytest_runtest_setup,
 )
 
+from tests.helpers.repo_root_litter_guard import new_litter, root_litter   # noqa: E402
+
 # Test server configuration — defaults to the dedicated test container (port 8000).
 # Override via LUPIN_TEST_BASE_URL env var for custom setups or Docker-internal routing.
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
@@ -186,6 +188,26 @@ def verify_test_environment():
             f"  ./src/tests/run-integration-tests.sh -v\n"
             f"{'='*60}\n"
         )
+
+
+@pytest.fixture( scope="session", autouse=True )
+def guard_repo_root_litter():
+    """
+    Fail the run when it leaves a new untracked file directly in the repo root.
+
+    Requires:
+        - LUPIN_ROOT names the repo root
+
+    Ensures:
+        - errors at session teardown, naming each new file, if the root gained one
+    """
+    import cosa.utils.util as cu
+    root   = cu.get_project_root()
+    before = root_litter( root )
+    yield
+    litter = new_litter( before, root_litter( root ) )
+    if litter:
+        pytest.fail( "Integration run left untracked files in the repo root: " + ", ".join( litter ), pytrace=False )
 
 
 @pytest.fixture( scope="function" )
