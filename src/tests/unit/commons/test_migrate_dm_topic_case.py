@@ -309,6 +309,21 @@ class TestMigrateDirectory:
         assert not canonical.exists()
         assert variant.read_text( encoding="utf-8" ) == original_content
 
+    def test_dry_run_of_a_merge_counts_it_and_touches_nothing( self, tmp_path ):
+        """A dry-run merge reports one merge and leaves every file as it was."""
+        v1 = tmp_path / "dm-Tiberius.md"
+        v2 = tmp_path / "dm-TIBERIUS.md"
+        _write_topic_file( v1, "dm-Tiberius", [ _make_entry( "2026-05-17T01:00:00+00:00", "one" ) ] )
+        _write_topic_file( v2, "dm-TIBERIUS", [ _make_entry( "2026-05-17T02:00:00+00:00", "two" ) ] )
+        before = ( v1.read_text( encoding="utf-8" ), v2.read_text( encoding="utf-8" ) )
+
+        stats = migrate_dm_topic_case.migrate_directory( tmp_path, dry_run=True )
+
+        assert stats[ "merged" ] == 1
+        assert stats[ "files_unlinked" ] == 0
+        assert not ( tmp_path / "dm-tiberius.md" ).exists()
+        assert ( v1.read_text( encoding="utf-8" ), v2.read_text( encoding="utf-8" ) ) == before
+
     def test_backup_copies_files_before_destructive_op( self, tmp_path ):
         """When `backup_root` is supplied, files are copied before rename/merge."""
         variant = tmp_path / "dm-Tiberius.md"
