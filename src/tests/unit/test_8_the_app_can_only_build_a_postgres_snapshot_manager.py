@@ -51,7 +51,7 @@ def _repo_root():
 
 
 def _main_source():
-    with open( os.path.join( _repo_root(), "src", "lupin_app", "main.py" ), errors="ignore" ) as fh:
+    with open( os.path.join( _repo_root(), "src", "lupin_app", "lifespan_steps.py" ), errors="ignore" ) as fh:
         return fh.read()
 
 
@@ -96,12 +96,12 @@ def test_any_snapshot_backend_but_postgres_is_refused_at_startup():
     """
     branch = _postgres_branch( _main_source() )
     assert branch is not None, (
-        "main.py no longer selects the snapshot manager with an `if manager_type.lower() "
+        "lifespan_steps.py no longer selects the snapshot manager with an `if manager_type.lower() "
         "== 'postgres'` test. If the selection moved, move this guard with it — do not "
         "delete it: it is the only thing asserting the queue and the brain share a store."
     )
     assert _else_raises( branch ), (
-        "the non-postgres arm of main.py's snapshot-manager selection no longer raises. "
+        "the non-postgres arm of the snapshot-manager selection in lifespan_steps.py no longer raises. "
         "Anything but a refusal there means the app can boot on a second backend, and the "
         "queue's completion write would stop being visible to the brain's cache."
     )

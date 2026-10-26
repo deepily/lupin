@@ -53,7 +53,10 @@ from lupin_app.bootstrap_helpers import ( assert_lupin_root_valid, reload_enable
                                           register_sigusr1_faulthandler )
 from cosa.rest.error_envelope import make_unhandled_exception_handler
 from lupin_app.lifespan_steps import ( record_clean_shutdown, cancel_background_task, shutdown_fcm_wake, drain_agentic_pool,
-                                       stop_consumer_thread, cancel_peer_watchers, stop_commons_watcher )
+                                       stop_consumer_thread, cancel_peer_watchers, stop_commons_watcher,
+                                       print_migration_banner, build_snapshot_manager_config, recover_interrupted_jobs,
+                                       restore_jobs_at_boot, print_all_clear_receipt, schedule_all_clear,
+                                       start_websocket_maintenance_tasks, start_notification_sweep_task )
 assert_lupin_root_valid( lupin_root )
 
 # Row abe4188d — arm `kill -USR1 <pid>` to dump every thread's Python stack to stderr.
@@ -611,43 +614,7 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     # after the fanout would see late arrivals and report a SMALLER loss than the
     # one the gate actually decided on — an under-count in the direction that
     # flatters us.
-    missed = gate[ "missing" ]
-    loss   = (
-        f" {len( missed )} session(s) had NOT rejoined and got NO all-clear "
-        f"(accepted loss, no re-fire): {missed}."
-        if missed
-        else (
-            f" all {gate[ 'roster_size' ]} session(s) on the roster had a live socket."
-            if gate[ "roster_size" ]
-            # ⚠️ An EMPTY roster is AMBIGUOUS and the gate cannot resolve it:
-            # find_active_sessions returns [] both when nobody is expected back AND
-            # when the bridge directory is missing or unreadable. Coverage is then
-            # satisfied vacuously and this fires into nobody. Say that plainly rather
-            # than reporting the flattering reading as fact (Arnold 🪨, attack #2).
-            else (
-                " ⚠️ the roster was EMPTY — either nobody was expected back, or the bridge "
-                "directory could not be read. This fire reached nobody and the gate cannot "
-                "tell those two apart."
-            )
-        )
-    )
-
-    # Fire-time receipt + reconnect curve — the instruments that tell us later
-    # whether the guessed window was right and how the fleet came back.
-    if gate[ "reason" ] == "deadline":
-        print(
-            f"[managed-bounce] ⚠️ all-clear FIRED on DEADLINE EXPIRY (boot #{boot_id}): reached "
-            f"{recipients} recipient(s) after {gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}."
-            f"{loss}",
-            file=sys.stderr,
-        )
-    else:
-        print(
-            f"[managed-bounce] all-clear FIRED (boot #{boot_id}): roster COVERED after "
-            f"{gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}; reached {recipients} recipient(s)."
-            f"{loss}",
-            file=sys.stderr,
-        )
+    print_all_clear_receipt( gate, boot_id, recipients, curve )
 
 
 async def _run_managed_bounce_all_clear( *, boot_id, boot_started, startup_began ):
@@ -726,14 +693,7 @@ async def lifespan( app: FastAPI ):
     # gate, and it is not claimed as one.
     #
     # Deliberately silent on a no-op: a line on every boot is a line nobody sees.
-    if migrate_result[ "applied" ]:
-        print(
-            f"⚠️  MIGRATION APPLIED — the database moved {migrate_result[ 'before' ] or '(unstamped)'}"
-            f" -> {migrate_result[ 'after' ]}.\n"
-            f"    On :7999 a file-save restarts the server and runs this migrate, so this may be a\n"
-            f"    schema deploy nobody decided. If you did not intend it, that is the thing to look at.",
-            file=sys.stderr,
-        )
+    print_migration_banner( migrate_result )
 
     # ORM/database drift alarm — FAIL-OPEN. Detects a mapped_column that reached
     # the tree ahead of its migration: on :7999 uvicorn runs with --reload, so the
@@ -779,40 +739,7 @@ async def lifespan( app: FastAPI ):
     # Initialize solution snapshot manager using factory pattern
     manager_type = config_mgr.get( "solution snapshots manager type", default="postgres" )
     
-    if manager_type.lower() == "postgres":
-        # The Postgres-native manager (row 5ff7b8f5, 2026-08-17). No storage location
-        # to build: the table is fixed by the ORM model and the connection comes from
-        # the DB layer, so the only key read here is the reporting-only table name.
-        #
-        # This branch is what makes `solution snapshots manager type = postgres` a
-        # legal value at STARTUP. It was added on 2026-08-17 after the else-arm below
-        # was found rejecting every value but "lancedb", which would have failed the
-        # server on its next bounce — latent, because reload is off and the running
-        # process still held the pre-flip config. The LanceDB arm that sat above this
-        # one is gone with the manager class it named (row 8098838f); it had already
-        # been building this same table-name-only config, so nothing about what runs
-        # here has changed.
-        config = {
-            "table_name" : config_mgr.get( "solution snapshots postgres table", default="solution_snapshots" )
-        }
-
-        if app_debug:
-            print( "Using Postgres+pgvector solution snapshot manager" )
-
-    else:
-        # # Use file-based backend (default)
-        # path_to_snapshots_dir_wo_root = config_mgr.get( "path to snapshots dir wo root" )
-        # path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
-        #
-        # config = {"path": path_to_snapshots}
-        #
-        # if app_debug:
-        #     print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
-        # throw value error
-        raise ValueError(
-            f"Unsupported 'solution snapshots manager type' = {manager_type!r}; "
-            "the only supported value is 'postgres'"
-        )
+    config = build_snapshot_manager_config( manager_type, config_mgr, app_debug )
     
     # Create manager using factory pattern for true swappability
     snapshot_mgr = SolutionSnapshotManagerFactory.create_manager(
@@ -905,18 +832,8 @@ async def lifespan( app: FastAPI ):
     print( "[AUTH] Using PostgreSQL authentication database" )
 
     # CJ Flow Persistence: Mark in-flight jobs as interrupted, preserve scheduled jobs
-    try:
-        counts = mark_interrupted_jobs()
-        total_interrupted = counts.get( "running", 0 ) + counts.get( "pending_interrupted", 0 )
-        preserved         = counts.get( "pending_preserved", 0 )
-        catchup           = counts.get( "pending_catchup", 0 )
-        if total_interrupted > 0 or preserved > 0 or catchup > 0:
-            print( f"[CJ-PERSIST] Startup recovery: {total_interrupted} interrupted, "
-                   f"{preserved} future-scheduled preserved, {catchup} downtime-missed caught up" )
-        else:
-            print( "[CJ-PERSIST] No interrupted or scheduled jobs found" )
-    except Exception as e:
-        print( f"[WARN] CJ Flow startup recovery failed: {e}" )
+    recover_interrupted_jobs( mark_interrupted_jobs )
+
 
     # ===================================================================
     # Inter-Session Commons — Phase 2 (user-broadcast surface)
@@ -1138,15 +1055,9 @@ async def lifespan( app: FastAPI ):
     print( "[CLOCK] Background clock task started" )
     
     # Start WebSocket maintenance tasks
-    if websocket_manager.config_mgr.get( "websocket heartbeat enabled", default=True, return_type="boolean" ):
-        print( "[WS-HEARTBEAT] Starting heartbeat task..." )
-        websocket_heartbeat_task = asyncio.create_task( websocket_heartbeat_loop() )
-        print( "[WS-HEARTBEAT] Heartbeat task started" )
-    
-    if websocket_manager.config_mgr.get( "websocket cleanup enabled", default=True, return_type="boolean" ):
-        print( "[WS-CLEANUP] Starting cleanup task..." )
-        websocket_cleanup_task = asyncio.create_task( websocket_cleanup_loop() )
-        print( "[WS-CLEANUP] Cleanup task started" )
+    websocket_heartbeat_task, websocket_cleanup_task = start_websocket_maintenance_tasks(
+        websocket_manager.config_mgr, websocket_heartbeat_loop, websocket_cleanup_loop
+    )
 
     # default=False, NOT True. A missing key must FAIL CLOSED: this sweeper is
     # the first thing in the system that can refuse a real human answer (see
@@ -1155,10 +1066,7 @@ async def lifespan( app: FastAPI ):
     # default and the shipped INI value are pinned to agree by
     # test_the_sweeper_fails_closed_when_the_key_is_absent.py — they were
     # written disagreeing, and only the guard stops them drifting again.
-    if config_mgr.get( "notification expiry sweep enabled", default=False, return_type="boolean" ):
-        print( "[NOTIFY-SWEEP] Starting orphan sweep task..." )
-        notification_sweep_task = asyncio.create_task( notification_expiry_sweep_loop() )
-        print( "[NOTIFY-SWEEP] Orphan sweep task started" )
+    notification_sweep_task = start_notification_sweep_task( config_mgr, notification_expiry_sweep_loop )
     
     # Start consumer thread for producer-consumer pattern
     print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
@@ -1181,7 +1089,7 @@ async def lifespan( app: FastAPI ):
     # Restore pre-execution jobs that survived the restart (preserved by
     # mark_interrupted_jobs): future-scheduled, downtime-catch-up, AND immediate
     # submits with no scheduled_at (row 2817b0f5 — a queued job must survive a bounce).
-    try:
+    def _restore_jobs():
         from cosa.rest.job_persistence import get_restorable_jobs, restore_pending_jobs
         from cosa.rest.agentic_job_factory import create_agentic_job
         from cosa.rest.queue_extensions import user_job_tracker
@@ -1194,8 +1102,7 @@ async def lifespan( app: FastAPI ):
             get_restorable_jobs(), create_agentic_job, ask_flow,
             register_scoped_job=user_job_tracker.register_scoped_job, debug=app_debug
         )
-    except Exception as e:
-        print( f"[WARN] Job restoration failed: {e}" )
+    restore_jobs_at_boot( _restore_jobs )
 
     # v2.2 closed-loop (B1 standing cadence): auto-submit ONE standing
     # Heartbeat-Arbiter observer into CJ Flow. Single-instance-guarded (skips if a
@@ -1238,23 +1145,10 @@ async def lifespan( app: FastAPI ):
     # NEVER blocks boot, and so the settle gate can wait for reconnecting sockets
     # while the server already accepts connections. Guarded on commons being
     # wired; any failure degrades to a log, never a failed boot.
-    if config_mgr.get( "commons enabled", default=True, return_type="boolean" ) and commons_store is not None:
-        try:
-            from cosa.rest.managed_bounce_broadcast import next_boot_id, boot_counter_path
-            # PER-SERVER counter (bug 652271f3): io/ is bind-mounted into both
-            # containers, so one shared file interleaved dev and test boots and
-            # made the number in a watched all-clear unpredictable.
-            _boot_counter_path = boot_counter_path( du.get_project_root(), _managed_bounce_server_label() )
-            _boot_id           = next_boot_id( _boot_counter_path )
-            asyncio.create_task(
-                _run_managed_bounce_all_clear(
-                    boot_id       = _boot_id,
-                    boot_started  = datetime.now().isoformat( timespec="seconds" ),
-                    startup_began = _startup_monotonic,
-                )
-            )
-        except Exception as e:  # pragma: no cover - best-effort boundary guard; never let the all-clear break boot (main.py is outside cov source=["cosa"])
-            print( f"[managed-bounce] WARN: could not schedule all-clear: {e}", file=sys.stderr )
+    schedule_all_clear(
+        config_mgr, commons_store, _managed_bounce_server_label, du.get_project_root,
+        _run_managed_bounce_all_clear, _startup_monotonic, datetime.now
+    )
 
     yield
 
