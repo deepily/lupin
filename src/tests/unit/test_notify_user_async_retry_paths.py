@@ -332,3 +332,12 @@ class TestUnsetTargetUser:
             result, post = _send( [ _reply() ], request=_request( target_user=None ) )
         assert result.success is True
         assert post.call_args.kwargs[ "params" ][ "target_user" ] == "resolved@example.com"
+
+
+class TestFinalTimeoutMessage:
+
+    @pytest.mark.parametrize( "seconds", [ 10, 30 ] )
+    def test_the_final_timeout_names_the_request_budget( self, seconds ):
+        result, _ = _send( [ requests.exceptions.Timeout() ] * 12, request=_request( timeout=seconds ) )
+        assert result.success is False
+        assert result.message == f"Server did not respond within {seconds} seconds"
