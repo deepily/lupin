@@ -561,3 +561,156 @@ def test_the_script_can_exit_0_at_all():
     rc, _err = _run_script( "--help" )
 
     assert rc == 0, f"the script cannot exit 0 even for --help (rc={rc}) — exit 2 above proves nothing"
+
+
+# ── coverage edges (row e1a36bb4) ───────────────────────────────────────────────
+# running_processes() and _container_of() read the real /proc and docker. The first is driven
+# with REAL child processes (the real producer, not a hand-written fixture of /proc); the
+# second with a stubbed cgroup + docker listing, because a container id cannot be conjured.
+
+import signal
+import sys
+import types
+
+
+def _spawn( cwd, env=None ):
+    """A real, idle python child with the given cwd, reaped by the caller."""
+    return subprocess.Popen( [ sys.executable, "-c", "import time; time.sleep(60)" ],
+                             cwd=str( cwd ), env=env )
+
+
+def _reap( *procs ):
+    for p in procs:
+        p.send_signal( signal.SIGKILL )
+        p.wait()
+
+
+def test_running_processes_reports_a_python_child_in_a_lupin_tree_with_its_lupin_root( scan, tmp_path ):
+    tree = tmp_path / "lupin-fixture-tree"
+    tree.mkdir()
+    env  = { **_base_env(), "LUPIN_ROOT": "/fixture/root" }
+    mine = _spawn( tree, env )
+    try:
+        found = { p[ "pid" ]: p for p in scan.running_processes() }
+        row   = found[ str( mine.pid ) ]
+    finally:
+        _reap( mine )
+    assert row[ "comm" ] in scan.PY_COMM
+    assert row[ "cwd" ]  == str( tree )
+    assert row[ "root" ] == "/fixture/root"
+    assert "time.sleep" in row[ "cmdline" ] and "\x00" not in row[ "cmdline" ]
+    assert abs( row[ "started" ] - time.time() ) < 120
+
+
+def test_running_processes_leaves_root_blank_when_the_env_carries_no_lupin_root( scan, tmp_path ):
+    tree = tmp_path / "lupin-fixture-tree"
+    tree.mkdir()
+    mine = _spawn( tree, _base_env() )                   # _base_env keeps only PATH/HOME/LANG
+    try:
+        row = { p[ "pid" ]: p for p in scan.running_processes() }[ str( mine.pid ) ]
+    finally:
+        _reap( mine )
+    assert row[ "root" ] == ""
+
+
+def test_running_processes_excludes_a_python_child_whose_cwd_is_not_a_lupin_tree( scan, tmp_path ):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    assert "lupin" not in str( outside ) and "cosa" not in str( outside ), "fixture path would defeat the control"
+    stranger = _spawn( outside, _base_env() )
+    insider  = _spawn( tmp_path / "lupin-in", None ) if ( tmp_path / "lupin-in" ).mkdir() is None else None
+    try:
+        pids = { p[ "pid" ] for p in scan.running_processes() }
+    finally:
+        _reap( stranger, insider )
+    assert str( insider.pid )  in pids                   # positive control: the same scan DOES see a lupin cwd
+    assert str( stranger.pid ) not in pids
+
+
+def test_running_processes_excludes_a_lupin_cwd_process_that_is_not_python( scan, tmp_path ):
+    tree = tmp_path / "lupin-fixture-tree"
+    tree.mkdir()
+    sleeper = subprocess.Popen( [ "sleep", "60" ], cwd=str( tree ) )
+    try:
+        pids = { p[ "pid" ] for p in scan.running_processes() }
+    finally:
+        _reap( sleeper )
+    assert str( sleeper.pid ) not in pids
+
+
+def test_running_processes_skips_a_pid_that_vanished_mid_scan_and_non_pid_entries( scan, monkeypatch ):
+    real = os.listdir
+    monkeypatch.setattr( scan.os, "listdir", lambda p: real( p ) + [ "999999999", "not-a-pid" ] if p == "/proc" else real( p ) )
+    pids = { p[ "pid" ] for p in scan.running_processes() }    # must not raise on the ghost pid
+    assert "999999999" not in pids and "not-a-pid" not in pids
+
+
+class _CgroupPath:
+    """A stand-in for pathlib.Path whose read_text answers a canned cgroup."""
+    def __init__( self, text ): self._text = text
+    def read_text( self ): return self._text
+
+
+def _stub_container( scan, monkeypatch, cgroup, docker_stdout=None, docker_rc=0 ):
+    monkeypatch.setattr( scan, "Path", lambda p: _CgroupPath( cgroup ) )
+    def fake_run( cmd, **kw ):
+        assert cmd[ 0 ] == "docker"
+        return types.SimpleNamespace( returncode=docker_rc, stdout=docker_stdout or "" )
+    monkeypatch.setattr( scan.subprocess, "run", fake_run )
+
+
+_CID = "a1b2c3d4e5f6" + "0" * 52
+
+
+@pytest.fixture
+def raw():
+    """The scan module with nothing stubbed; the `scan` fixture stubs _container_of out."""
+    return _load_scan()
+
+
+def test_container_of_a_vanished_pid_is_none( raw ):
+    assert raw._container_of( "999999999" ) is None
+
+
+def test_container_of_a_process_outside_docker_is_none( raw, monkeypatch ):
+    _stub_container( raw, monkeypatch, "0::/user.slice/session-1.scope\n" )
+    assert raw._container_of( "1" ) is None
+
+
+def test_container_of_an_empty_container_id_is_none( raw, monkeypatch ):
+    _stub_container( raw, monkeypatch, "0::/system.slice/docker-.scope\n" )
+    assert raw._container_of( "1" ) is None
+
+
+def test_container_of_is_none_when_docker_cannot_answer( raw, monkeypatch ):
+    _stub_container( raw, monkeypatch, f"0::/system.slice/docker-{_CID}.scope\n", docker_rc=1 )
+    assert raw._container_of( "1" ) is None
+
+
+def test_container_of_names_the_container_whose_id_prefix_matches( raw, monkeypatch ):
+    listing = f"garbled line without a tab\n{'f' * 64}\tother-container\n{_CID}\tlupin-rest-test \n"
+    _stub_container( raw, monkeypatch, f"0::/system.slice/docker-{_CID}.scope\n", listing )
+    assert raw._container_of( "1" ) == "lupin-rest-test"
+
+
+def test_container_of_is_none_when_no_listed_container_matches( raw, monkeypatch ):
+    _stub_container( raw, monkeypatch, f"0::/system.slice/docker-{_CID}.scope\n", f"{'f' * 64}\tsomeone-else\n" )
+    assert raw._container_of( "1" ) is None
+
+
+def test_safe_cgroup_returns_empty_for_a_vanished_pid_and_text_for_a_live_one( raw ):
+    assert raw._safe_cgroup( "999999999" ) == ""
+    assert raw._safe_cgroup( str( os.getpid() ) ) != ""     # positive control: it does read when it can
+
+
+def test_reachable_modules_follows_from_imports_skips_unparseable_files_and_dedupes( scan, tmp_path, monkeypatch ):
+    src = tmp_path / "src"
+    ( src / "pkg" ).mkdir( parents=True )
+    ( src / "entry.py"       ).write_text( "from pkg import sub\nimport broken, twice, twice\nimport os\n" )
+    ( src / "pkg" / "__init__.py" ).write_text( "" )
+    ( src / "pkg" / "sub.py" ).write_text( "x = 1\n" )
+    ( src / "broken.py"      ).write_text( "def broken(:\n" )
+    ( src / "twice.py"       ).write_text( "y = 2\n" )
+    monkeypatch.setattr( scan, "REPO_ROOT", tmp_path )
+    reached = scan.reachable_modules( "src/entry.py" )
+    assert reached == { "src/entry.py", "src/pkg/__init__.py", "src/pkg/sub.py", "src/broken.py", "src/twice.py" }
