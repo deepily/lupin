@@ -13,10 +13,9 @@ normalization and embedding generation stay here in the memory layer.
 
 from typing import Optional, Dict, Any
 import cosa.utils.util as du
-from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.normalizer import Normalizer
 from cosa.memory.embedding_manager import EmbeddingManager
-from cosa.memory.embedding_provider import embedding_dimensions
+from cosa.memory.embedding_provider import init_embedding_table_config
 
 
 def _vector_or_none( embedding: Optional[list[float]] ) -> Optional[list[float]]:
@@ -72,16 +71,11 @@ class CanonicalSynonymsTable:
             - ConfigurationManager errors propagated
         """
 
-        self.debug   = debug
-        self.verbose = verbose
-
         # Initialize text processors
         self._normalizer = Normalizer()
         self._embedding_manager = EmbeddingManager( debug=debug, verbose=verbose )
 
-        # Get standardized embedding dimension from config
-        self._config_mgr_local = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        self._embedding_dim = embedding_dimensions( self._config_mgr_local )
+        init_embedding_table_config( self, debug, verbose )
 
     def add_synonym( self,
                     snapshot_id: str,

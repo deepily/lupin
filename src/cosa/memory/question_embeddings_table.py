@@ -1,7 +1,6 @@
 from cosa.memory.embedding_manager import EmbeddingManager
-from cosa.memory.embedding_provider import get_embedding_provider, embedding_dimensions
+from cosa.memory.embedding_provider import get_embedding_provider, init_embedding_table_config
 
-from cosa.config.configuration_manager import ConfigurationManager
 
 
 class QuestionEmbeddingsTable():
@@ -29,14 +28,9 @@ class QuestionEmbeddingsTable():
             - ConfigurationManager errors propagated
         """
 
-        self.debug               = debug
-        self.verbose             = verbose
-        self._config_mgr         = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        init_embedding_table_config( self, debug, verbose )
         self._embedding_mgr      = EmbeddingManager( debug=debug, verbose=verbose )
         self._embedding_provider = get_embedding_provider( debug=debug, verbose=verbose )
-
-        # Get standardized embedding dimension from config
-        self._embedding_dim = embedding_dimensions( self._config_mgr )
 
     def has( self, question: str ) -> bool:
         """

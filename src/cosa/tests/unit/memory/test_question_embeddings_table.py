@@ -35,7 +35,7 @@ def _make_table( debug=False, verbose=False ):
     provider = Mock()
     provider.generate_embedding.return_value = _EMBEDDING
 
-    with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ), \
+    with patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=cfg ), \
          patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ), \
          patch( "cosa.memory.question_embeddings_table.get_embedding_provider", return_value=provider ):
         table = QuestionEmbeddingsTable( debug=debug, verbose=verbose )
@@ -64,7 +64,7 @@ class TestInitialization( unittest.TestCase ):
         cfg = Mock()
         cfg.get.side_effect = _cfg_get
 
-        with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ) as cfg_cls, \
+        with patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=cfg ) as cfg_cls, \
              patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ) as em_cls, \
              patch( "cosa.memory.question_embeddings_table.get_embedding_provider" ) as gep:
             table = QuestionEmbeddingsTable( debug=True, verbose=True )

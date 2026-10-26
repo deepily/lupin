@@ -32,7 +32,7 @@ def _make( debug=False, verbose=False ):
     normalizer.normalize.side_effect = lambda q: q.lower()
     emb = Mock()
     emb.generate_embedding.return_value = [ 0.1 ] * 768
-    with patch( "cosa.memory.canonical_synonyms_table.ConfigurationManager", return_value=cfg ), \
+    with patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=cfg ), \
          patch( "cosa.memory.canonical_synonyms_table.Normalizer", return_value=normalizer ), \
          patch( "cosa.memory.canonical_synonyms_table.EmbeddingManager", return_value=emb ):
         table = CanonicalSynonymsTable( debug=debug, verbose=verbose )

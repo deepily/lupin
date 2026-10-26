@@ -57,7 +57,7 @@ def _make( debug=False, verbose=False, async_default=False ):
     question_tbl.has.return_value = False
     provider = Mock()
     provider.generate_embedding.return_value = _EMB
-    with patch( "cosa.memory.input_and_output_table.ConfigurationManager", return_value=cfg ), \
+    with patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=cfg ), \
          patch( "cosa.memory.input_and_output_table.EmbeddingManager" ), \
          patch( "cosa.memory.input_and_output_table.get_embedding_provider", return_value=provider ), \
          patch( "cosa.memory.input_and_output_table.QuestionEmbeddingsTable", return_value=question_tbl ):

@@ -1,10 +1,9 @@
 import cosa.utils.util as du
 from cosa.memory.embedding_manager import EmbeddingManager
-from cosa.memory.embedding_provider import get_embedding_provider, embedding_dimensions
+from cosa.memory.embedding_provider import get_embedding_provider, init_embedding_table_config
 
 from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
 from cosa.memory.solution_snapshot import SolutionSnapshot as ss
-from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
 
 from threading import Lock
@@ -35,9 +34,7 @@ class InputAndOutputTable():
             - ConfigurationManager errors propagated
         """
 
-        self.debug          = debug
-        self.verbose        = verbose
-        self._config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        init_embedding_table_config( self, debug, verbose )
 
         # Bug 574fd1dc Defect 2 — async-drop accounting. The async embedding
         # path drops a row on any failure; before this, the loss was
@@ -48,9 +45,6 @@ class InputAndOutputTable():
         self._async_failure_lock = Lock()
         self._embedding_mgr      = EmbeddingManager( debug=debug, verbose=verbose )
         self._embedding_provider = get_embedding_provider( debug=debug, verbose=verbose )
-
-        # Get standardized embedding dimension from config
-        self._embedding_dim = embedding_dimensions( self._config_mgr )
 
         # The question-embedding cache table generates query/input embeddings.
         self._question_embeddings_tbl = QuestionEmbeddingsTable( debug=self.debug, verbose=self.verbose )
