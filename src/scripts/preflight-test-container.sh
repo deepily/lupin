@@ -213,6 +213,12 @@ probe_db_grants
 source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-test-secret-probe.sh"
 probe_test_login_secret
 
+# ── 9. Smoke admin credentials ───────────────────────────────────────────
+# The smoke helpers sign in as an admin; see lib/preflight-smoke-admin-probe.sh.
+# shellcheck source=lib/preflight-smoke-admin-probe.sh
+source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-smoke-admin-probe.sh"
+probe_smoke_admin_credentials
+
 # ── Summary ──────────────────────────────────────────────────────────────
 echo
 if [ "$failures" -eq 0 ]; then
