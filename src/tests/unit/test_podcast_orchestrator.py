@@ -1003,6 +1003,21 @@ class TestDoAllAsync:
         assert agent.state == OrchestratorState.COMPLETED
         assert agent._podcast_state[ "revision_count" ] == 1   # the custom-text revise counted
 
+    def test_an_empty_answer_asks_again_without_counting_a_revision( self, _silence_voice_io ):
+        agent = _agent( target_languages=[ "en" ] )
+        _wire_pipeline( agent )
+        _silence_voice_io[ "choices" ].side_effect = [
+            { "answers": { "Script Review": "" } },
+            { "answers": { "Script Review": "Approve script" } },
+        ]
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( "os.path.exists", return_value=False ):
+            _run( agent.do_all_async() )
+        assert _silence_voice_io[ "choices" ].await_count == 2
+        assert agent._podcast_state[ "revision_count" ] == 0
+        assert agent._revise_script_async.await_count == 0
+        assert agent.state == OrchestratorState.COMPLETED
+
     def test_revise_with_feedback_then_approve( self, _silence_voice_io ):
         agent = _agent( target_languages=[ "en" ] )
         _wire_pipeline( agent )
@@ -1289,6 +1304,20 @@ class TestDoAllAsync:
              patch( "os.path.exists", return_value=False ):
             assert _run( agent.do_all_async() ) is not None
 
+    def test_an_empty_translation_answer_asks_again_without_revising( self, _silence_voice_io ):
+        agent = _agent( target_languages=[ "en", "es-MX" ] )
+        _wire_pipeline( agent )
+        _silence_voice_io[ "choices" ].side_effect = [
+            { "answers": { "Script Review": "Approve script" } },
+            { "answers": { "Mexican Spanish Review": "" } },
+            { "answers": { "Mexican Spanish Review": "Approve script" } },
+        ]
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( "os.path.exists", return_value=False ):
+            assert _run( agent.do_all_async() ) is not None
+        assert _silence_voice_io[ "choices" ].await_count == 3
+        assert agent._revise_script_async.await_count == 0
+
     def test_translated_revise_then_silence_deadletters( self, _silence_voice_io ):
         # Row 936c7ef5 (site 680): explicit Revise on the translated script + silence
         # → PodcastGenerationError, NOT a silent drop back into fail-open auto-approve.
@@ -1529,6 +1558,21 @@ class TestDoAudioOnlyAsync:
         assert result is not None
         assert agent.state == OrchestratorState.COMPLETED
         assert agent._podcast_state[ "final_audio_path" ] == "/proj/io/audio.mp3"
+
+    @pytest.mark.parametrize( "auto_approved,disclosed", [ ( True, True ), ( False, False ) ] )
+    def test_the_completion_discloses_an_automatic_approval_only_when_there_was_one(
+            self, _silence_voice_io, auto_approved, disclosed ):
+        agent = _audio_agent()
+        agent._podcast_state[ "script_auto_approved" ] = auto_approved
+        _wire_audio_only( agent )
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( "os.path.exists", return_value=False ):
+            _run( agent.do_audio_only_async() )
+        abstracts = [ c.kwargs[ "abstract" ] for c in _silence_voice_io[ "notify" ].await_args_list
+                      if "**Audio Cost**" in ( c.kwargs.get( "abstract" ) or "" ) ]
+        assert len( abstracts ) == 1
+        assert ( "**Approval**: " + orch_mod.auto_approval_notice( True ) in abstracts[ 0 ] ) is disclosed
+        assert ( "**Approval**" in abstracts[ 0 ] ) is disclosed
 
     def test_partial_failure_decline_continue( self, _silence_voice_io ):
         agent = _audio_agent()
