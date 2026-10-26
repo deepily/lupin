@@ -10,7 +10,9 @@ Imports are limited to the standard library. Heavy modules are imported inside t
 that needs them, so importing this file stays cheap.
 """
 import asyncio
+import os
 import sys
+import time
 
 
 def print_migration_banner( migrate_result, stream=None ):
@@ -113,6 +115,272 @@ def restore_jobs_at_boot( restore_fn ):
     except Exception as e:
         print( f"[WARN] Job restoration failed: {e}" )
         return False
+
+
+async def probe_model_server( probe_url, timeout_seconds, get_fn, request_error, sleep_fn=asyncio.sleep, clock_fn=time.time ):
+    """
+    Wait for the model server health URL to answer 200, within a time budget.
+
+    Requires:
+        - get_fn( url, timeout= ) returns an object with status_code
+        - request_error is the exception class get_fn raises for a failed request
+        - sleep_fn is an awaitable sleep and clock_fn returns seconds
+
+    Ensures:
+        - polls once a second until a 200 answer or the deadline
+        - prints an OK line with elapsed seconds on success, a TIMEOUT line otherwise
+        - returns True on success and False on timeout
+        - a failed request counts as not ready and is retried
+    """
+    probe_start    = clock_fn()
+    probe_deadline = probe_start + timeout_seconds
+    probe_ok       = False
+    while clock_fn() < probe_deadline:
+        try:
+            _r = get_fn( probe_url, timeout=2 )
+            if _r.status_code == 200:
+                probe_ok = True
+                break
+        except request_error:
+            pass
+        await sleep_fn( 1.0 )
+    elapsed = int( clock_fn() - probe_start )
+    if probe_ok:
+        print( f"OK ({elapsed}s)" )
+    else:
+        print( f"TIMEOUT after {elapsed}s — continuing; model endpoints will 503 until reachable" )
+    return probe_ok
+
+
+async def load_local_models( config_mgr, debug, verbose, log_vram_fn, load_stt_fn, project_root, exists_fn ):
+    """
+    Load the code, prose and speech models onto this process's GPU and warm each one up.
+
+    Requires:
+        - log_vram_fn( label ) prints a memory line and load_stt_fn() is an async function returning the pipeline
+        - project_root is the project root path and exists_fn is os.path.exists
+        - cosa.memory modules are importable
+
+    Ensures:
+        - loads CodeRankEmbed, then the prose embedder, then Whisper, in that order
+        - declares this process the in-process owner of the embedding and speech singletons
+        - returns the Whisper pipeline, or None when its load fails
+        - a Whisper failure prints warnings and does not stop the other models
+        - runs the warmup transcription only when the warmup file exists
+    """
+    from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
+
+    print( "Loading CodeRankEmbed embedding engine... ", end="" )
+    code_engine = get_code_engine( debug=debug, verbose=verbose )
+    code_engine.encode_code( [ "def hello(): return 'world'" ] )
+    code_engine.encode_query( [ "How do I sort a list in Python?" ] )
+    code_engine.encode_code( [ "import os\nimport sys\n\ndef main():\n    path = os.getcwd()\n    print( path )\n    return 0" ] )
+    print( "Done!" )
+    log_vram_fn( "CodeRankEmbed" )
+
+    print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
+    prose_engine = get_prose_engine( debug=debug, verbose=verbose )
+    prose_engine.encode_query( [ "What is the meaning of life?" ] )
+    prose_engine.encode_document( [ "The quick brown fox jumps over the lazy dog. This is a longer document to exercise memory allocation patterns." ] )
+    prose_engine.encode_query( [ "Explain quantum computing in simple terms" ] )
+    print( "Done!" )
+    log_vram_fn( "Prose Embedding" )
+
+    from cosa.memory.embedding_provider import EmbeddingProvider
+    EmbeddingProvider.declare_in_process_engine_owner()
+    print( "[EmbeddingProvider] Declared in-process engine owner — local routing enabled for this FastAPI process" )
+
+    print( "Loading distill whisper engine... ", end="" )
+    try:
+        whisper_pipeline = await load_stt_fn()
+        warmup_path = project_root + "/src/conf/warmup/whisper-warmup-85s.mp3"
+        if exists_fn( warmup_path ):
+            whisper_pipeline( warmup_path, chunk_length_s=30, stride_length_s=5, return_timestamps=False )
+            print( "Done! (with warmup)" )
+        else:
+            print( "Done! (no warmup file)" )
+        from cosa.memory.speech_to_text_provider import SpeechToTextProvider
+        SpeechToTextProvider.declare_in_process_owner()
+    except Exception as e:
+        whisper_pipeline = None
+        print( "FAILED!" )
+        print( f"[WARN] Whisper STT model failed to load: {e}" )
+        print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
+    log_vram_fn( "Whisper" )
+    return whisper_pipeline
+
+
+async def load_models( config_mgr, debug, verbose, log_vram_fn, load_stt_fn, project_root, environ ):
+    """
+    Pick remote or local model serving from the INI and prepare it.
+
+    Requires:
+        - config_mgr has get( key, default=, return_type=, silent= )
+        - environ maps names to values, and LUPIN_MODEL_SERVER_URL overrides the INI url
+        - the remaining arguments are those load_local_models takes
+
+    Ensures:
+        - "speech to text provider" set to model-server (any case, padded) selects remote mode
+        - remote mode declares the speech provider remote-only, probes the model server health url and returns None
+        - any other value loads every model onto this process and returns the Whisper pipeline
+        - a probe timeout is reported and does not raise
+    """
+    provider_mode = config_mgr.get(
+        "speech to text provider", default="local", silent=True
+    ).lower().strip()
+    if provider_mode == "model-server":
+        print( "[REMOTE-MODE] Skipping eager GPU loads — routing via HTTP to lupin-model-server" )
+        from cosa.memory.speech_to_text_provider import SpeechToTextProvider
+        SpeechToTextProvider.declare_remote_only()
+
+        model_server_url = environ.get(
+            "LUPIN_MODEL_SERVER_URL",
+            config_mgr.get( "model server url", default="http://lupin-model-server:7998", silent=True )
+        )
+        probe_timeout = config_mgr.get(
+            "model server startup probe timeout seconds",
+            default=60, return_type="int", silent=True
+        )
+        probe_url = f"{model_server_url}/health"
+        print( f"[REMOTE-MODE] Probing model-server readiness at {probe_url} (budget={probe_timeout}s)... ", end="" )
+        import requests as _requests
+        await probe_model_server( probe_url, probe_timeout, _requests.get, _requests.RequestException )
+        return None
+    return await load_local_models( config_mgr, debug, verbose, log_vram_fn, load_stt_fn, project_root, os.path.exists )
+
+
+def build_commons_owner_resolver( find_sessions_fn, load_bridge_fn ):
+    """
+    Return a function that maps each live voice-persona session id to its bridge owner.
+
+    Requires:
+        - find_sessions_fn() returns ( path, session_id, persona ) tuples
+        - load_bridge_fn( path ) returns a dict, or None when the bridge cannot be read
+
+    Ensures:
+        - the returned function builds a fresh { session_id: owner_user_id or None } map on each call
+        - a bridge that cannot be read is left out of the map
+    """
+    def _commons_activity_bridge_owner_resolver():
+        """Build a fresh { session_id: owner_user_id or None } map for each tick."""
+        out = { }
+        for path, sid, _persona in find_sessions_fn():
+            bridge = load_bridge_fn( path )
+            if bridge is not None:
+                out[ sid ] = bridge.get( "owner_user_id" )
+        return out
+    return _commons_activity_bridge_owner_resolver
+
+
+def install_llm_disambiguator( configure_fn, disambiguator_cls, config_mgr ):
+    """
+    Wire the commons persona matcher to the LLM disambiguator, falling back on failure.
+
+    Requires:
+        - configure_fn( instance ) installs the disambiguator
+        - disambiguator_cls( config_mgr ) builds one
+
+    Ensures:
+        - prints a success line and returns True when both calls return
+        - prints a warning that the matcher falls back to its stub, and returns False, when either raises
+    """
+    try:
+        configure_fn( disambiguator_cls( config_mgr ) )
+        print( "[COMMONS] Phase 3 LLM disambiguator installed" )
+        return True
+    except Exception as e:
+        print( f"[COMMONS] WARN — LLM disambiguator init failed (matcher falls back to Phase 1 stub): {e}" )
+        return False
+
+
+def start_commons( state, config_mgr, notification_queue ):
+    """
+    Build the commons store, rate limiter, ack watcher and activity watcher onto state.
+
+    Requires:
+        - state has commons_store, commons_rate_limiter, commons_ack_watcher and commons_activity_watcher attributes
+        - config_mgr has get( key, default=, return_type= )
+        - notification_queue has push_notification
+        - the cosa, lupin_cli and lupin_mcp commons modules are importable
+
+    Ensures:
+        - each attribute is assigned as soon as its object exists, so a later failure leaves the earlier ones set
+        - starts the ack watcher, and the activity watcher only when both traffic-visibility switches are on
+        - the activity watcher excludes the topics named in the INI, split on commas
+        - a failed LLM disambiguator install is reported and does not stop the rest
+
+    Raises:
+        - whatever the commons constructors raise; init_commons catches it
+    """
+    from cosa.rest.commons_ack_watcher import CommonsAckWatcher
+    from cosa.rest.commons_activity_watcher import CommonsActivityWatcher
+    from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
+    from cosa.rest.routers.commons import init_commons_state, _load_bridge_fields
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
+    from lupin_mcp.commons_llm_disambiguator import CommonsLlmDisambiguator
+    from lupin_mcp.commons_persona_matcher import configure_llm_disambiguator
+    from lupin_mcp.commons_store import CommonsStore
+
+    commons_root = os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
+    state.commons_store        = CommonsStore( commons_root )
+    state.commons_rate_limiter = CommonsBroadcastRateLimiter(
+        window_seconds = config_mgr.get( "commons broadcast rate limit seconds", default=30, return_type="int" )
+    )
+    state.commons_ack_watcher  = CommonsAckWatcher(
+        store                  = state.commons_store,
+        push_notification_fn   = notification_queue.push_notification,
+        poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
+    )
+    init_commons_state(
+        store                            = state.commons_store,
+        rate_limiter                     = state.commons_rate_limiter,
+        ack_watcher                      = state.commons_ack_watcher,
+        active_session_threshold_seconds = config_mgr.get( "commons broadcast liveness threshold seconds", default=28800, return_type="int" ),
+    )
+    state.commons_ack_watcher.start()
+
+    if (
+        config_mgr.get( "commons traffic visibility enabled", default=True, return_type="boolean" )
+        and config_mgr.get( "commons traffic visibility ws push enabled", default=True, return_type="boolean" )
+    ):
+        excluded_raw     = config_mgr.get( "commons traffic visibility exclude topics", default="presence, system-events" )
+        excluded_topics  = [ t.strip() for t in excluded_raw.split( "," ) if t.strip() ]
+
+        state.commons_activity_watcher = CommonsActivityWatcher(
+            store                    = state.commons_store,
+            push_notification_fn     = notification_queue.push_notification,
+            excluded_topics          = excluded_topics,
+            bridge_owner_resolver_fn = build_commons_owner_resolver( find_active_voice_persona_sessions, _load_bridge_fields ),
+            poll_interval_seconds    = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
+        )
+        state.commons_activity_watcher.start()
+        print( f"[COMMONS] Phase 2.5/3.5 CommonsActivityWatcher started (excluded={excluded_topics})" )
+
+    install_llm_disambiguator( configure_llm_disambiguator, CommonsLlmDisambiguator, config_mgr )
+    print( f"[COMMONS] Phase 2+3 subsystem started (root={commons_root})" )
+
+
+def init_commons( state, config_mgr, notification_queue, start_fn=start_commons ):
+    """
+    Run start_commons when commons is enabled, and keep a failure from stopping boot.
+
+    Requires:
+        - state is an object with commons_store, commons_rate_limiter, commons_ack_watcher and commons_activity_watcher attributes
+        - start_fn( state, config_mgr, notification_queue ) does the real construction and assigns onto state
+        - config_mgr has get( key, default=, return_type= )
+
+    Ensures:
+        - does nothing but print a skip line when "commons enabled" is false
+        - otherwise calls start_fn, and prints a warning if it raises
+        - whatever start_fn assigned before raising stays on state
+    """
+    if config_mgr.get( "commons enabled", default=True, return_type="boolean" ):
+        try:
+            start_fn( state, config_mgr, notification_queue )
+        except Exception as e:
+            print( f"[COMMONS] WARN — Phase 2+3 init failed: {e}" )
+    else:
+        print( "[COMMONS] Disabled via `commons enabled = false` — skipping Phase 2+3 init" )
 
 
 def start_websocket_maintenance_tasks( config_mgr, heartbeat_loop_fn, cleanup_loop_fn, create_task_fn=asyncio.create_task ):
