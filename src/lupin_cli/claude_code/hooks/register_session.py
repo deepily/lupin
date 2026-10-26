@@ -2195,7 +2195,7 @@ def main():
         if not session_data.get( "voice_persona" ) and old_data and isinstance( old_data.get( "voice_persona" ), dict ):
             old_persona_dict = old_data[ "voice_persona" ]
             if isinstance( old_persona_dict.get( "display_name" ), str ):
-                previous_persona_name = old_persona_dict[ "display_name" ]
+                previous_persona_name = old_persona_dict[ "display_name" ]  # pragma: no cover -- a dict with a display_name is truthy, so the carry-forward above already kept it and this block is skipped
             try:
                 _release_project = detect_project()
             except Exception:
