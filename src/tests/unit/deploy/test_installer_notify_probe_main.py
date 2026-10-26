@@ -56,7 +56,7 @@ def test_a_delivered_reply_prints_ok_and_exits_zero( sender, capsys ):
     assert mod.main( [ "probe", "http://server.example:1" ] ) == mod.EXIT_OK
     assert capsys.readouterr().out.strip() == "ok: queued"
     assert sender[ "urls" ] == [ "http://server.example:1" ]
-    assert sender[ "reqs" ][ 0 ].message =="cosa-voice bootstrapper: test notification"
+    assert sender[ "reqs" ][ 0 ].message == "cosa-voice bootstrapper: test notification"
     assert sender[ "reqs" ][ 0 ].sender_id == "claude.code@installer.deepily.ai"
 
 

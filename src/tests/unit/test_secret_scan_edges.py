@@ -48,6 +48,12 @@ def test_a_wrapped_value_stops_at_the_first_line_not_indented_past_the_key():
     assert ( joined, spaced, end ) == ( "aa", "aa", 2 )
 
 
+def test_a_wrapped_value_stops_at_a_whitespace_only_line_even_when_indented_past_the_key():
+    """Such a line has indent past the key, so only the blank-line check ends the block."""
+    joined, spaced, end = secret_scan._gather_block( [ "k: |", "  a", "      ", "  b" ], 0 )
+    assert ( joined, spaced, end ) == ( "a", "a", 2 )
+
+
 def test_batch_read_of_no_specs_yields_nothing_and_starts_no_process( monkeypatch ):
     monkeypatch.setattr( subprocess, "Popen", lambda *a, **k: pytest.fail( "no process for no specs" ) )
     assert list( secret_scan._batch_read( [ ] ) ) == [ ]
