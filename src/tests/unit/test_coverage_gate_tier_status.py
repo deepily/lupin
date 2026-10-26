@@ -330,8 +330,11 @@ def test_a_missing_log_is_not_a_lost_worker( tmp_path ):
     assert done.stdout.strip() == "OK"
 
 
-@pytest.mark.parametrize( "status,text,fragment", [ ( 1, _CRASHED, "gw1" ), ( 0, _CRASHED, "gw1" ),
-                                                    ( 1, _NO_DATA, "failed to return coverage data" ) ] )
+@pytest.mark.parametrize( "status,text,fragment", [
+    ( 1, _CRASHED, "a worker died mid-run and its coverage data was lost (worker 'gw1' crashed while running" ),
+    ( 0, _CRASHED, "a worker died mid-run and its coverage data was lost (worker 'gw1' crashed while running" ),
+    ( 1, _NO_DATA, "pytest-cov reports a worker failed to return coverage data" )
+] )
 def test_a_tier_that_lost_a_worker_makes_the_gate_inconclusive( tmp_path, status, text, fragment ):
     """
     A tier that exits normally but lost a worker's coverage data makes the gate inconclusive.

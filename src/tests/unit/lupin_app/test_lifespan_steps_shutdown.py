@@ -177,6 +177,20 @@ def test_stop_consumer_thread_stops_a_thread_that_exits( capsys ):
     )
 
 
+def test_stop_consumer_thread_wakes_the_consumer_while_holding_the_condition():
+    """The consumer is woken once, under the lock, after the flag is cleared."""
+    queue  = _todo_queue()
+    seen   = []
+    real   = queue.condition.notify
+    def spy_notify():
+        seen.append( ( queue.consumer_running, queue.condition._is_owned() ) )
+        real()
+    queue.condition.notify = spy_notify
+    thread = types.SimpleNamespace( join=lambda timeout: None, is_alive=lambda: False )
+    steps.stop_consumer_thread( thread, queue )
+    assert seen == [ ( False, True ) ]
+
+
 def test_stop_consumer_thread_warns_about_a_thread_that_will_not_exit( capsys ):
     """A thread still alive after the join gets a warning and no success line."""
     queue  = _todo_queue()
