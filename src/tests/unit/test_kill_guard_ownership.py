@@ -14,6 +14,7 @@ Two kinds of test live here. Stubbed tests fake the /proc view and drive every v
 Driven tests start real second processes and use the real `pgrep` and the real /proc.
 They signal only processes this module started, and only by pid.
 """
+import re
 import os
 import subprocess
 import sys
@@ -182,12 +183,16 @@ def test_the_message_says_what_to_do_instead( worktree, elsewhere ):
     assert "LUPIN_ALLOW_UNSCOPED_KILL=1" in reason
 
 
-def test_the_message_lists_five_foreign_processes_and_counts_the_rest( worktree, elsewhere ):
+@pytest.mark.parametrize( "dirname", [ "other-tree", "other-805-tree" ] )
+def test_the_message_lists_five_foreign_processes_and_counts_the_rest( worktree, tmp_path, dirname ):
+    elsewhere = tmp_path / dirname
+    elsewhere.mkdir()
+    elsewhere = str( elsewhere )
     pids = list( range( 800, 808 ) )
     proc = FakeProc( ppids={ p: 1 for p in pids }, cwds={ p: elsewhere for p in pids } )
     reason = _guard( PATTERN, pids, proc, worktree )
-    assert "800" in reason and "804" in reason
-    assert "805" not in reason
+    listed = re.findall( r"^  pid (\d+)  comm=", reason, re.MULTILINE )
+    assert listed == [ str( p ) for p in range( 800, 805 ) ], "the pid lines, not the paths around them, are what is judged"
     assert "3 more" in reason
 
 
