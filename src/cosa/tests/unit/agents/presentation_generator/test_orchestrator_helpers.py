@@ -581,6 +581,24 @@ class TestOutlineAsync:
             outlines = _run( agent._outline_async( [ _section() ] ) )
         assert len( outlines ) == 1
 
+    @pytest.mark.parametrize( "target,warned", [ ( 40, True ), ( None, False ) ] )
+    def test_real_slide_count_drift_is_announced_only_for_an_explicit_target( self, _silence_voice_io, target, warned ):
+        agent = _agent()
+        agent.config.target_slide_count = target
+        agent._api_client = _mock_api_client()
+        dicts = [
+            { "number": 1, "arc_position": "opening", "type": "title", "title": "T", "visual_type": "text_only" },
+            { "number": 2, "arc_position": "closing", "type": "cta", "title": "C", "visual_type": "text_only" },
+        ]
+        with patch( f"{_OUT}.get_outline_prompt", return_value="P" ), \
+             patch( f"{_OUT}.parse_outline_response", return_value=dicts ):
+            outlines = _run( agent._outline_async( [ _section() ] ) )
+        assert len( outlines ) == 2
+        drift = [ c for c in _silence_voice_io[ "notify" ].await_args_list
+                  if c.kwargs.get( "priority" ) == "medium" ]
+        assert len( drift ) == ( 1 if warned else 0 )
+        if warned: assert drift[ 0 ].args[ 0 ] == "Slide-count drift: requested 40 slides, outline produced 2."
+
     def test_real_parse_failure_propagates( self, _silence_voice_io ):
         # D6-STRICT: parser raises (refusal/garbage) → _outline_async PROPAGATES.
         # (debug=False → exercises the non-debug arm of the fail-loud handler.)
