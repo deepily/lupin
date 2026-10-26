@@ -148,7 +148,7 @@ def write_key( key: str, path: str, force: bool = False ) -> None:
         raise FileExistsError(
             f"{path} already exists — refusing to overwrite. Re-run with --force "
             f"ONLY if you intend to rotate, and read the rotation ordering in "
-            f"src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md first: "
+            f"src/scripts/cloud-run-setup-secrets.sh first: "
             f"the model server hashes its key at BOOT, so callers must be updated "
             f"AFTER the service re-reads the new secret, never before."
         )
