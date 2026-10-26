@@ -80,7 +80,7 @@ class StubSession:
     probe() refuses by the configuration's deny rules, as the CLI does; leaky=True models a CLI that ignores them.
     """
 
-    def __init__( self, per_slice=1, hours=1.0, finish_after=None, leaky=False, blind=False ):
+    def __init__( self, per_slice=1, hours=1.0, finish_after=None, leaky=False, blind=False, require_bind=False ):
         """Set how fast the stub client gains passing tests and how many hours a slice costs."""
         self.per_slice    = per_slice
         self.hours        = hours
@@ -90,9 +90,16 @@ class StubSession:
         self.slices       = 0
         self.progress     = 0
         self.budgets      = []
+        self.bound        = None
+        self.require_bind = require_bind
+
+    def bind( self, path, handle ):
+        """Remember the worktree and server the sessions are tied to."""
+        self.bound = ( path, handle )
 
     def probe( self, config, surface ):
-        """Answer a call to the surface unless a deny rule of the config names it."""
+        """Answer a call unless a deny rule names it; with require_bind, fail before bind."""
+        assert self.bound is not None or not self.require_bind, "probe before bind"
         if self.blind: return False
         return self.leaky or arms.DENY_RULES[ surface ] not in config[ "deny_rules" ]
 
@@ -507,3 +514,12 @@ def test_the_session_is_given_the_arms_config_for_the_work():
     ports.session.work = lambda config, path, handle, remaining: ( seen.append( config ), original( config, path, handle, remaining ) )[ 1 ]
     harness.run_one( spec( arm=arms.ARM_WITHOUT ), ports )
     assert seen and all( config[ "deny_rules" ] and config[ "model" ] == "claude-opus-5-5" for config in seen )
+
+
+def test_the_session_is_bound_to_the_runs_tree_and_server_before_the_arm_is_proved_and_not_when_the_database_is_refused():
+    session = StubSession( require_bind=True )
+    harness.run_one( spec(), Ports( session=session ) )
+    assert session.bound[ 0 ] == "/wt/pair01-a" and session.bound[ 1 ][ "db_name" ] == harness.db_name( "pair01-a" )
+    refused = StubSession()
+    with pytest.raises( err.HarnessError ): harness.run_one( spec(), Ports( session=refused, server=StubServer( preload=[ "x" ] ) ) )
+    assert refused.bound is None
