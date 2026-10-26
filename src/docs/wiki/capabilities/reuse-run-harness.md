@@ -5,14 +5,14 @@ pins:
   - lupin_mcp.reuse_harness.arms.build_session_config@5288cd90e4
   - lupin_mcp.reuse_harness.arms.verify_arm@25226f86a8
   - lupin_mcp.reuse_harness.errors.HarnessError@4673bfbe26
-  - lupin_mcp.reuse_harness.run.run_one@e7fedaca3b
+  - lupin_mcp.reuse_harness.run.run_one@3479ecb2fe
   - lupin_mcp.reuse_harness.run.check_spec@63ffc99848
   - lupin_mcp.reuse_harness.run.db_name@dc02553094
   - lupin_mcp.reuse_harness.run.container_name@ecf0d7e0ca
 ---
 # Reuse run harness
 
-`run_one` runs one arm of the reuse experiment (plan 3, section 7.3) from a fresh worktree to a stop. The code exists and is proven with stub ports. No real worktree, server or session port exists yet, so nothing here has driven a live run.
+`run_one` runs one arm of the reuse experiment (plan 3, section 7.3) from a fresh worktree to a stop. The real ports exist and are proven against simulators. No live container or `claude` session has been started yet, so nothing here has driven a live run. See [[reuse-run-harness-start]].
 
 ## What a run gets
 - A worktree of the frozen server commit with an empty client folder. A run whose client folder holds anything is refused with `CLIENT_NOT_EMPTY` before a server starts.
@@ -32,7 +32,7 @@ pins:
 - The result is `{ run, passing_tests, pass_rate, client_builds, stop, seat_hours }`. The scorer reads the first three and `client_builds`.
 
 ## Inputs and ports
-- The spec holds `run_id`, `arm`, `model_id`, `server_commit`, `cap_seat_hours` and `test_ids`. `check_spec` refuses a missing key, an empty text field, a cap of zero or less, and an empty or repeated test list. The test ids come from the frozen build. The ports (`worktree`, `server`, `session`, `tests`, `log`) are listed in the module docstring of `run.py`.
+- The spec holds `run_id`, `arm`, `model_id`, `server_commit`, `cap_seat_hours` and `test_ids`. `check_spec` refuses a missing key, an empty text field, a cap of zero or less, and an empty or repeated test list. The test ids come from the frozen build. The ports (`worktree`, `server`, `session`, `tests`, `log`) are listed in the module docstring of `run.py`. The order is: tree, server and database, fresh check, sender key seeded, session bound, arm proof, slices.
 
 ## Don't
 - Don't read `with` or `without` from a log. Use the arm label.

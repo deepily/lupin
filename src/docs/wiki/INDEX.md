@@ -201,6 +201,11 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-need-redaction]] — the need redactor that blanks emails, URLs, IPs, paths and secrets before Jev sees a need, and the known-route list it keeps. `lupin_mcp` (reuse_redact)
 - [[reuse-real-stage-check]] — the command that ranks five seeded targets with the real candidate stage and a negative control. `lupin_mcp` (reuse_real_stage_check)
 - [[reuse-run-harness]] — one reuse-experiment run: the arm switch for the four surfaces, its own server and database, the seat-hour cap and the stop. `lupin_mcp.reuse_harness`
+- [[reuse-run-harness-start]] — start a reuse-experiment run or dry-run its arm: the command, the run folder, the log and the result file. `lupin_mcp.reuse_harness`
+- [[reuse-run-harness-frozen-spec]] — a run's spec from the frozen commit, and the map from tests to features. `lupin_mcp.reuse_harness`
+- [[reuse-run-harness-worktree]] — the tree a run builds in: cut at the frozen sha, client folder empty. `lupin_mcp.reuse_harness`
+- [[reuse-run-harness-server]] — a run's own server container and database, and the seeded sender key. `lupin_mcp.reuse_harness`
+- [[reuse-run-harness-tests-and-session]] — a run's acceptance tests with the tamper check, and each arm's headless session. `lupin_mcp.reuse_harness`
 - [[reuse-stage-one-probe-plan]] — stage-one probe choice, neighbour lists and the six position packs, written once. `lupin_mcp` (reuse_stage1_probe)
 - [[reuse-stage-one-runner]] — the stage-one run-sheet command, its stand-in and live modes, and refusals. `lupin_mcp` (reuse_stage1_run)
 - [[reuse-stage-one-arm-driver]] — the stage-one measurement driver: arms, run names, attempts, the stage budget and the canary. `lupin_mcp` (reuse_stage1)
