@@ -12,7 +12,7 @@ its token lifted out and restored.
 
 import unittest
 
-from cosa.agents.dm_tutor.sentences import pointer_tokens, count_sentences, is_bare_identifier, restorable_pointers
+from cosa.agents.dm_tutor.sentences import pointer_tokens, count_sentences, is_bare_identifier, restorable_pointers, is_bare_row_id, over_limit
 
 
 class TestPointerTokens( unittest.TestCase ):
@@ -258,6 +258,26 @@ class TestRestorablePointersIsNarrowerThanPointerTokens( unittest.TestCase ):
         """CONTROL. Widening the rule must not turn a claim into structure."""
         self.assertEqual( count_sentences( "Verdict.\nSupport one.\n"
                                            "The fix landed in src/a.py and src/b.py." ), 3 )
+
+
+class TestBareRowIdAndOverLimit( unittest.TestCase ):
+    """is_bare_row_id strips wrapping punctuation; over_limit compares to the limit."""
+
+    def test_a_row_id_wrapped_in_punctuation_is_bare( self ):
+        self.assertTrue( is_bare_row_id( "deadbeef" ) )
+        self.assertTrue( is_bare_row_id( "  #deadbeef,  " ) )
+
+    def test_prose_and_empty_values_are_not_bare_row_ids( self ):
+        self.assertFalse( is_bare_row_id( "deadbeef is done" ) )
+        self.assertFalse( is_bare_row_id( "" ) )
+        self.assertFalse( is_bare_row_id( None ) )
+
+    def test_over_limit_is_true_only_above_the_limit( self ):
+        text = "One claim. Two claims. Three claims. Four claims."
+        self.assertEqual( count_sentences( text ), 4 )
+        self.assertTrue( over_limit( text ) )
+        self.assertFalse( over_limit( text, limit=4 ) )
+        self.assertTrue( over_limit( text, limit=3 ) )
 
 
 if __name__ == "__main__":
