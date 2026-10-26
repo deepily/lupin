@@ -304,7 +304,7 @@ def notify_user_async(
             )
 
     # Exhausted all retries (should never reach here due to is_last_attempt logic)
-    return AsyncNotificationResponse(
+    return AsyncNotificationResponse(  # pragma: no cover -- every branch of the last attempt returns above, and all_delays always holds the immediate attempt
         success     = False,
         status      = "user_not_available",
         message     = f"User not available after {total_attempts} attempts",

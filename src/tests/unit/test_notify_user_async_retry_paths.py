@@ -302,3 +302,24 @@ class TestTheRetrySchedule:
 
     def test_a_budget_too_small_for_any_retry_yields_no_retries( self ):
         assert calculate_retry_intervals( 1 ) == []
+
+
+class TestDebugRetryNarration:
+    """With debug on, each retry arm says which failure it is retrying."""
+
+    def test_a_retryable_http_status_is_narrated( self, capsys ):
+        result, post = _send( [ _reply( status_code=503 ), _reply() ], debug=True )
+        assert result.success is True and post.call_count == 2
+        assert "HTTP 503 (attempt 1), will retry" in capsys.readouterr().err
+
+    def test_a_connection_error_is_narrated( self, capsys ):
+        import requests
+        result, post = _send( [ requests.exceptions.ConnectionError(), _reply() ], debug=True )
+        assert result.success is True and post.call_count == 2
+        assert "ConnectionError (attempt 1), will retry" in capsys.readouterr().err
+
+    def test_a_timeout_is_narrated( self, capsys ):
+        import requests
+        result, post = _send( [ requests.exceptions.Timeout(), _reply() ], debug=True )
+        assert result.success is True and post.call_count == 2
+        assert "Timeout (attempt 1), will retry" in capsys.readouterr().err
