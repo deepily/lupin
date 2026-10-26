@@ -281,7 +281,6 @@ def test_a_cell_can_be_drafted_with_another_draft_function( tmp_path ):
 
 
 def test_a_shared_ledger_keeps_every_write_from_many_threads( tmp_path ):
-    import json
     import threading
     book = draft.SharedLedger( ledger( tmp_path ) )
     work = [ threading.Thread( target=lambda n=n: [ book.put( f"k{n}-{i}", i ) for i in range( 40 ) ] ) for n in range( 8 ) ]
@@ -371,3 +370,9 @@ def test_the_shared_call_log_appends_one_sorted_json_line_per_row_from_several_t
     for t in threads: t.join()
     lines = ( tmp_path / "calls.jsonl" ).read_text().splitlines()
     assert len( lines ) == 8 and sorted( json.loads( l )[ "n" ] for l in lines ) == list( range( 8 ) ) and lines[ 0 ].startswith( '{"a": 1, "n"' )
+
+
+def test_a_call_log_that_cannot_be_written_warns_and_the_run_goes_on( tmp_path, capsys ):
+    log = draft.SharedCallLog( tmp_path / "missing-folder" / "calls.jsonl" )
+    log.add( { "n": 1 } )
+    assert "WARNING: call log" in capsys.readouterr().out and not ( tmp_path / "missing-folder" ).exists()

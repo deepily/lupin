@@ -263,6 +263,7 @@ def find_key( ctx, seed_id, route, ask, ledger, model_id, kind="work_alike", cal
         - asks about the candidates in order and stops at the first yes
         - returns { "key": id or None, "route", "asked", "source" } where asked counts the candidates ruled on
         - with calls, a candidate ruled by a live model call adds { cell, seed, other, route, source, position, asks, ruling } to it
+        - a candidate whose replies were both unreadable adds the same row with ruling None, and the error still propagates
         - a ruling read back from the ledger adds nothing, and the ledger key and value are unchanged
     """
     found  = work_alike_candidates( ctx, seed_id, route, kind )
@@ -277,9 +278,13 @@ def find_key( ctx, seed_id, route, ask, ledger, model_id, kind="work_alike", cal
     for other in found[ "ids" ]:
         asked += 1
         before = live[ 0 ]
-        ruling = confirm_same_job( counted, ledger, model_id, seed_id, ctx.bodies[ seed_id ], other, ctx.bodies[ other ] )
-        if calls is not None and live[ 0 ] > before:
-            calls.add( { "cell": cell, "seed": seed_id, "other": other, "route": route, "source": found[ "source" ][ other ], "position": asked, "asks": live[ 0 ] - before, "ruling": ruling } )
+        row    = { "cell": cell, "seed": seed_id, "other": other, "route": route, "source": found[ "source" ][ other ], "position": asked }
+        try:
+            ruling = confirm_same_job( counted, ledger, model_id, seed_id, ctx.bodies[ seed_id ], other, ctx.bodies[ other ] )
+        except er.NeedsetError:
+            if calls is not None and live[ 0 ] > before: calls.add( { **row, "asks": live[ 0 ] - before, "ruling": None } )
+            raise
+        if calls is not None and live[ 0 ] > before: calls.add( { **row, "asks": live[ 0 ] - before, "ruling": ruling } )
         if ruling == YES:
             return { "key": other, "route": route, "asked": asked, "source": found[ "source" ][ other ] }
     return { "key": None, "route": route, "asked": asked, "source": None }

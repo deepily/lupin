@@ -233,8 +233,16 @@ class SharedCallLog:
         self.lock = threading.Lock()
 
     def add( self, row ):
-        """Append one row as a sorted-key JSON line."""
-        with self.lock, open( self.path, "a", encoding="utf-8" ) as handle: handle.write( json.dumps( row, sort_keys=True ) + "\n" )
+        """
+        Append one row as a sorted-key JSON line.
+
+        Ensures:
+            - a write that fails prints a warning and returns, because the log is a diagnostic and must not stop a run
+        """
+        try:
+            with self.lock, open( self.path, "a", encoding="utf-8" ) as handle: handle.write( json.dumps( row, sort_keys=True ) + "\n" )
+        except OSError as e:
+            print( f"WARNING: call log {self.path} not written: {e}" )
 
 
 def none_prompt( lines ):

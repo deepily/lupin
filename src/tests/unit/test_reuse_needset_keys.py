@@ -240,6 +240,17 @@ def test_the_call_log_names_the_sampled_source_counts_an_asked_again_reply_and_i
     assert keys.find_key( ctx, "pkg.near.seed", keys.ROUTE_SAMPLED, quiet, ledger( tmp_path ), "model-b" )[ "key" ] == got[ "key" ], "no log is asked for and none is needed"
 
 
+def test_a_candidate_whose_replies_are_both_unreadable_is_logged_with_no_ruling_and_the_error_still_stops_the_walk( tmp_path ):
+    ctx, _ = build_world()
+    rows   = Rows()
+    ask    = Asker( "none", bad_first=2 )
+    with pytest.raises( er.NeedsetError ) as e: keys.find_key( ctx, "pkg.near.seed", keys.ROUTE_VECTOR, ask, ledger( tmp_path ), "model-a", calls=rows, cell="work_alike/py" )
+    assert e.value.code == er.UNREADABLE_REPLY and ask.calls == 2
+    assert len( rows.rows ) == 1 and rows.rows[ 0 ][ "ruling" ] is None and rows.rows[ 0 ][ "asks" ] == 2 and rows.rows[ 0 ][ "position" ] == 1
+    quiet = Asker( "none", bad_first=2 )
+    with pytest.raises( er.NeedsetError ): keys.find_key( ctx, "pkg.near.seed", keys.ROUTE_VECTOR, quiet, ledger( tmp_path ), "model-b" )
+
+
 def test_an_unreadable_reply_is_asked_again_once_and_then_named( tmp_path ):
     ctx, _ = build_world()
     once   = Asker( "none", bad_first=1 )
