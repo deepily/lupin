@@ -12,6 +12,7 @@ lookahead, `_NOT_A_BLANK_LINE`, after the command start. Three things are held h
 import random
 import re
 import signal
+import sys
 import time
 from unittest.mock import patch
 
@@ -95,10 +96,27 @@ def test_each_regex_is_linear_on_a_whitespace_run( name, shape ):
 @pytest.mark.parametrize( "name", sorted( REGEXES ) )
 def test_control_the_same_regex_without_the_lookahead_is_quadratic( name ):
     """The linear test can see the defect: without the lookahead the ratio is over the bound."""
-    regex = _without_lookahead( REGEXES[ name ] )
-    small = min( _seconds( lambda: list( regex.finditer( "\n" * 1000 ) ) ) for _ in range( 3 ) )
-    large = _seconds( lambda: list( regex.finditer( "\n" * 4000 ) ) )
-    assert large / small > 9, f"{name}: {small * 1000:.2f} ms -> {large * 1000:.2f} ms for 4x"
+    regex  = _without_lookahead( REGEXES[ name ] )
+    rounds = [ ]
+    for _ in range( 3 ):
+        small = min( _seconds( lambda: list( regex.finditer( "\n" * 1000 ) ) ) for _ in range( 3 ) )
+        large = _seconds( lambda: list( regex.finditer( "\n" * 4000 ) ) )
+        rounds.append( f"{small * 1000:.2f} ms -> {large * 1000:.2f} ms" )
+        # Load only inflates the small time and hides the defect, so one round over the bound proves it is visible.
+        if large / small > 9: return
+    assert False, f"{name}: no round over the bound for 4x: {rounds}"
+
+
+def test_control_survives_a_loaded_first_round( monkeypatch ):
+    """A first round whose small samples are slowed by 50 ms must not fail the control."""
+    real  = _seconds
+    calls = { "n": 0 }
+    def slowed_first_round( call, seconds=20 ):
+        calls[ "n" ] += 1
+        return real( call, seconds ) + ( 0.05 if calls[ "n" ] <= 3 else 0.0 )
+    monkeypatch.setattr( sys.modules[ __name__ ], "_seconds", slowed_first_round )
+    test_control_the_same_regex_without_the_lookahead_is_quadratic( "branch_lock_guard._GIT_CONFIG_RE" )
+    assert calls[ "n" ] > 4, "the control stopped after the slowed round"
 
 
 # ---------------------------------------------------------------------------
