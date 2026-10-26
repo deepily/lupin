@@ -245,6 +245,23 @@ class TestTheAskItself:
         assert "auto_submit_min_confidence_threshold" in hint
         assert "auto_submit_grace_window_seconds"     in hint
 
+    def test_a_failing_auto_submit_gate_costs_the_gate_fields_not_the_ask( self, harness, wired, monkeypatch, capsys ):
+        """A config read that raises leaves the caller's hint intact and the ask still delivered."""
+        import lupin_app.main as main_module
+
+        class _Boom:
+            def get( self, *a, **k ): raise RuntimeError( "config unreadable" )
+
+        monkeypatch.setattr( main_module, "config_mgr", _Boom() )
+
+        r = harness.client.post( _url( response_default="D",
+                                       prediction_hint_override='{"predicted_value": "yes"}' ) )
+
+        assert r.status_code == 200
+        hint = harness.queue.call_to( "push_notification" ).kwargs[ "prediction_hint" ]
+        assert hint == { "predicted_value": "yes" }
+        assert "auto-submit gate stamp error" in capsys.readouterr().out.lower().replace( "⚠️ ", "" )
+
     def test_no_override_and_a_disabled_engine_leaves_the_card_hintless( self, harness, wired ):
         """
         The other side: with the engine off and nothing supplied there is no hint at

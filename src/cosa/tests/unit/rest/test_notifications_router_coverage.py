@@ -475,6 +475,30 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
 
         stamp.assert_called_once_with( str( first_id ), "delivered" )
 
+    async def test_a_failing_delivered_stamp_on_a_retry_is_reported_and_the_retry_still_succeeds( self ):
+        N._idempotency_cache.clear()
+        first_id = uuid.uuid4()
+        mock_db  = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=first_id )
+        nq = Mock(); nq.push_notification.return_value = Mock()
+        stamp = Mock( side_effect=RuntimeError( "db down" ) )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "_update_notification_state_sync", stamp ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ) as printed:
+            await self._call(
+                Mock(), _ws_manager( is_connected=False, connection_count=0, listener_delivered=False ),
+                idempotency_key="stamp-fail-key" )
+            out = await self._call(
+                nq, _ws_manager( is_connected=True, connection_count=1 ),
+                idempotency_key="stamp-fail-key" )
+
+        self.assertEqual( out[ "status" ], "queued" )
+        stamp.assert_called_once_with( str( first_id ), "delivered" )
+        said = " ".join( str( c.args[ 0 ] ) for c in printed.call_args_list if c.args )
+        self.assertIn( "State update to 'delivered' failed (non-fatal): db down", said )
+
     async def test_caller_supplied_persist_false_is_not_stamped( self ):
         """
         Guards the over-correction: stamping must key on the REUSED id, not on
