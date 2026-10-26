@@ -256,3 +256,20 @@ def test_a_missing_command_ends_a_real_probe_in_session_start():
     sessions = session.Sessions( "k", claude="/no/such/claude", environ=dict( os.environ ) )
     sessions.bind( os.getcwd(), HANDLE )
     assert code_of( lambda: sessions.probe( WITH, arms.SURFACE_CHECK_EXISTS ) ) == err.SESSION_START
+
+
+def test_the_probe_and_the_working_session_run_in_the_same_permission_mode_with_the_same_deny_rules():
+    sessions, runner = make( ( 0, "" ) )
+    sessions.probe( WITHOUT, arms.SURFACE_CHECK_EXISTS )
+    sessions.work( WITHOUT, "/wt/run1", HANDLE, 5 )
+    probe, work = runner.calls[ 0 ][ "argv" ], runner.calls[ 1 ][ "argv" ]
+    for argv in ( probe, work ):
+        assert argv[ argv.index( "--permission-mode" ) + 1 ] == session.PERMISSION_MODE == "bypassPermissions"
+        assert argv[ argv.index( "--disallowedTools" ) + 1 ].split( "," ) == [ arms.DENY_RULES[ surface ] for surface in arms.SURFACES ]
+
+
+def test_a_chosen_permission_mode_reaches_the_probe_and_the_working_session_alike():
+    sessions, runner = make( ( 0, "" ), permission_mode="acceptEdits" )
+    sessions.probe( WITH, arms.SURFACE_CHECK_EXISTS )
+    sessions.work( WITH, "/wt/run1", HANDLE, 5 )
+    assert [ call[ "argv" ][ call[ "argv" ].index( "--permission-mode" ) + 1 ] for call in runner.calls ] == [ "acceptEdits", "acceptEdits" ]

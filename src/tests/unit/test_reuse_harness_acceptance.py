@@ -119,6 +119,12 @@ def test_the_build_verdict_follows_the_build_commands_exit_code( tree ):
     assert make( tree, Runner( report=case( "test_passes" ) ) ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) )[ "client_builds" ] is True
 
 
+def test_a_client_with_no_build_command_to_run_scores_false_and_keeps_the_test_verdicts( tree ):
+    port = acceptance.Acceptance( tree[ "commit" ], "k", tree[ "reports" ], python=sys.executable, build_command=( "/no/such/build", ) )
+    outcome = port.run( HANDLE, tree[ "path" ], ids( "test_passes" ) )
+    assert outcome[ "client_builds" ] is False and set( outcome[ "results" ] ) == set( ids( "test_passes" ) )
+
+
 def test_pytest_gets_the_servers_url_and_the_key_only_in_its_environment_and_runs_in_the_worktree( tree ):
     runner = Runner( report=case( "test_passes" ) )
     make( tree, runner ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) )
