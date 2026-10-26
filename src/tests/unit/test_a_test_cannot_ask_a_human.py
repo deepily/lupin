@@ -185,3 +185,25 @@ def test_a_FRESH_pytest_subprocess_cannot_reach_the_human_ask_path():
         f"the probe neither reached a human nor was contained — inconclusive, not green.\n"
         f"{out.stdout[ -2000: ]}"
     )
+
+
+@pytest.mark.skipif( not os.environ.get( "LUPIN_ROOT" ), reason="needs LUPIN_ROOT pinned" )
+def test_the_containment_probe_never_sits_inside_the_live_tree( monkeypatch ):
+    """
+    The containment probe is written outside the live source tree.
+
+    The census walks that tree on disk, so a probe file there can be listed and then vanish.
+    """
+    seen = []
+    real = subprocess.run
+    def spy( cmd, *args, **kwargs ):
+        seen.append( list( cmd ) )
+        return real( cmd, *args, **kwargs )
+    monkeypatch.setattr( subprocess, "run", spy )
+
+    test_a_FRESH_pytest_subprocess_cannot_reach_the_human_ask_path()
+
+    probes = [ c for c in seen[ 0 ] if c.endswith( ".py" ) ]
+    assert len( probes ) == 1, f"expected exactly one probe path in {seen[ 0 ]}"
+    live = os.path.realpath( os.path.join( os.environ[ "LUPIN_ROOT" ], "src" ) )
+    assert not os.path.realpath( probes[ 0 ] ).startswith( live + os.sep ), f"probe sits in the live tree: {probes[ 0 ]}"

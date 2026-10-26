@@ -160,12 +160,18 @@ INCONCLUSIVE_TIERS=()
 # attempted so the operator learns about both problems in one run rather than one per re-run,
 # which is the same reason the frame and floor verdicts are both printed below.
 run_tier() {
-    local label="$1" script="$2" status=0
+    local label="$1" script="$2" status=0 log
+    log="$(mktemp)"
     echo "═══ coverage gate: running $label tier ═══"
-    bash "$PROJECT_ROOT/$script" -q || status=$?
+    bash "$PROJECT_ROOT/$script" -q 2>&1 | tee "$log"
+    status=${PIPESTATUS[0]}
     if ! tier_measured "$status"; then
         INCONCLUSIVE_TIERS+=( "$label|$status|$( tier_not_measured_reason "$status" )" )
+    elif tier_lost_worker_data "$log"; then
+        # The tier ran, but a dead worker's data never arrived (row e1a36bb4).
+        INCONCLUSIVE_TIERS+=( "$label|$status|$( tier_lost_worker_reason "$log" )" )
     fi
+    rm -f "$log"
 }
 
 if [ "$RUN_TIERS" -eq 1 ]; then

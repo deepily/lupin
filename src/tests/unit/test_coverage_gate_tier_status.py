@@ -126,7 +126,7 @@ def _give_the_fake_repo_a_floor( tmp_path ):
          "commit", "-qm", "fixture floor" )
 
 
-def _fake_repo( tmp_path, unit_exit, cosa_exit ):
+def _fake_repo( tmp_path, unit_exit, cosa_exit, unit_out="" ):
     """
     A repo-shaped tree whose two tier scripts exit with the statuses we choose. The gate
     resolves PROJECT_ROOT from its own location, so a copy placed here runs against here.
@@ -135,7 +135,8 @@ def _fake_repo( tmp_path, unit_exit, cosa_exit ):
     ( tmp_path / "src/scripts/lib" ).mkdir( parents=True )
     for name, code in ( ( "run-unit-tests.sh", unit_exit ), ( "run-cosa-tests.sh", cosa_exit ) ):
         target = tmp_path / "src/tests" / name
-        target.write_text( f'#!/bin/bash\necho "stub {name} exiting {code}"\nexit {code}\n' )
+        extra  = unit_out if name == "run-unit-tests.sh" else ""
+        target.write_text( f'#!/bin/bash\necho "stub {name} exiting {code}"\ncat <<\'STUB_OUT\'\n{extra}\nSTUB_OUT\nexit {code}\n' )
         target.chmod( 0o755 )
     for lib in ( "tier-measured.sh", "resolve-venv-pytest.sh" ):
         source = f"{PROJECT_ROOT}/src/scripts/lib/{lib}"
@@ -163,8 +164,8 @@ def _fake_repo( tmp_path, unit_exit, cosa_exit ):
     return gate
 
 
-def _run_gate( tmp_path, unit_exit, cosa_exit ):
-    gate = _fake_repo( tmp_path, unit_exit, cosa_exit )
+def _run_gate( tmp_path, unit_exit, cosa_exit, unit_out="" ):
+    gate = _fake_repo( tmp_path, unit_exit, cosa_exit, unit_out )
     env  = dict( os.environ )
     env[ "COVERAGE_FILE" ] = str( tmp_path / ".coverage-stub" )
     env.pop( "LUPIN_COVERAGE", None )
@@ -293,3 +294,65 @@ def test_a_pyramid_with_no_tier_left_out_goes_on_to_the_data_check( tmp_path, va
     done  = _run_gate_in_pyramid_mode( tmp_path, **extra )
     assert "NO COVERAGE DATA TO GATE ON" in done.stdout, done.stdout
     assert "host tier" not in done.stdout
+
+
+# ── a tier that RAN but lost a worker's coverage data is not a measurement either ────────────
+
+_CRASHED = "worker 'gw1' crashed while running 'src/tests/unit/test_symindex_routes.py::test_x'"
+_NO_DATA = ( "The following workers failed to return coverage data, ensure that pytest-cov is "
+             "installed on these workers.\ngw1" )
+_FAILED  = "FAILED src/tests/unit/test_something.py::test_ordinary - AssertionError: 1 != 2"
+
+
+def _lost( log_text, tmp_path ):
+    """Ask the library whether a tier log shows a worker whose coverage data was lost."""
+    log = tmp_path / "tier.log"
+    log.write_text( log_text )
+    script = f'source "{TIER_LIB}"\nif tier_lost_worker_data "{log}"; then echo LOST; else echo OK; fi\n'
+    done = subprocess.run( [ "bash", "-c", script ], capture_output=True, text=True, timeout=30 )
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip() == "LOST"
+
+
+@pytest.mark.parametrize( "text", [ _CRASHED, _NO_DATA, "...\n" + _CRASHED + "\n...", "x\n" + _NO_DATA ] )
+def test_a_crashed_or_data_less_worker_is_recognised( tmp_path, text ):
+    assert _lost( text, tmp_path ) is True
+
+
+@pytest.mark.parametrize( "text", [ "", "5 passed in 1.2s", _FAILED, "1 failed, 40000 passed", "a worker crashed (prose)" ] )
+def test_an_ordinary_failure_or_clean_run_is_not_a_lost_worker( tmp_path, text ):
+    assert _lost( text, tmp_path ) is False
+
+
+def test_a_missing_log_is_not_a_lost_worker( tmp_path ):
+    script = f'source "{TIER_LIB}"\nif tier_lost_worker_data "{tmp_path}/absent.log"; then echo LOST; else echo OK; fi\n'
+    done = subprocess.run( [ "bash", "-c", script ], capture_output=True, text=True, timeout=30 )
+    assert done.stdout.strip() == "OK"
+
+
+@pytest.mark.parametrize( "status,text,fragment", [ ( 1, _CRASHED, "gw1" ), ( 0, _CRASHED, "gw1" ),
+                                                    ( 1, _NO_DATA, "failed to return coverage data" ) ] )
+def test_a_tier_that_lost_a_worker_makes_the_gate_inconclusive( tmp_path, status, text, fragment ):
+    """
+    A tier that exits normally but lost a worker's coverage data makes the gate inconclusive.
+
+    The tier status alone reads as measured, so the gate also reads the tier log.
+    """
+    done = _run_gate( tmp_path, status, 0, unit_out=text )
+    assert done.returncode == 2, f"expected inconclusive, got {done.returncode}: {done.stdout}"
+    assert "INCONCLUSIVE" in done.stdout
+    assert "the unit tier" in done.stdout and fragment in done.stdout
+    assert "coverage gate: floor" not in done.stdout, "it rendered a floor verdict anyway"
+
+
+def test_a_tier_with_an_ordinary_failure_still_reaches_the_data_check( tmp_path ):
+    """The control: a red test is not a lost worker, so the lost-worker rule must not over-fire."""
+    done = _run_gate( tmp_path, 1, 0, unit_out=_FAILED )
+    assert "NO COVERAGE DATA TO GATE ON" in done.stdout
+    assert "died mid-run" not in done.stdout and "failed to return" not in done.stdout.split( "stub" )[ -1 ].split( "NO COVERAGE" )[ -1 ]
+
+
+def test_both_signals_of_one_lost_worker_are_named_once_per_tier( tmp_path ):
+    done = _run_gate( tmp_path, 1, 0, unit_out=_CRASHED + "\n" + _NO_DATA )
+    assert done.returncode == 2
+    assert done.stdout.count( "the unit tier" ) == 1
