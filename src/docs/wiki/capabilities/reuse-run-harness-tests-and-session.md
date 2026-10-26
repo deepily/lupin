@@ -6,7 +6,9 @@ pins:
   - lupin_mcp.reuse_harness.acceptance.Acceptance.run@ffb05c068a
   - lupin_mcp.reuse_harness.session.events_of@ba73a03d6e
   - lupin_mcp.reuse_harness.session.blocks_of@e8adeb7fdd
-  - lupin_mcp.reuse_harness.session.surface_answered@2de239f737
+  - lupin_mcp.reuse_harness.session.init_of@2a5948dc75
+  - lupin_mcp.reuse_harness.session.surface_listed@0ce85043be
+  - lupin_mcp.reuse_harness.session.surface_answered@7a7b53f83f
   - lupin_mcp.reuse_harness.session.Sessions@cb3f9ce009
   - lupin_mcp.reuse_harness.session.Sessions.bind@8cb4a647b1
   - lupin_mcp.reuse_harness.session.Sessions.probe@3edfcd37a2
@@ -29,7 +31,9 @@ Named gap: no real `claude` command has been started. The deny rules and the hoo
 
 ## The session
 - A session is a headless `claude -p` process with project hooks off. Both arms get the same MCP config.
-- `probe` asks a short session to call one surface. `surface_answered` reads the stream. A call that was not refused is an answer.
+- `probe` starts a short session and asks it to call one surface.
+- `surface_answered` reads the init event's tool and skill lists first, so a model that declines the prompt proves nothing. A call that was not refused also counts.
+- Output with no init event, or none with a tool list, is `PROBE_BLIND`. It is never read as a denial.
 - `work` runs one slice. The first slice starts the session with the brief and later slices resume it.
 - Seat hours are the wall time times the seats. Two own stops in a row mean it has finished.
 - The builder's permission mode defaults to `bypassPermissions`. That default awaits a ruling.

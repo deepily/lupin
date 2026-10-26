@@ -62,18 +62,49 @@ def blocks_of( events, kind ):
     return found
 
 
+def init_of( events ):
+    """
+    Return the init event of a session: the one that lists the tools it offers.
+
+    Raises:
+        - HarnessError PROBE_BLIND if there is none, or it carries no tool list, because then a denied tool and a declined call look alike
+    """
+    for event in events:
+        if event.get( "type" ) == "system" and event.get( "subtype" ) == "init":
+            if isinstance( event.get( "tools" ), list ): return event
+            break
+    raise err.HarnessError( err.PROBE_BLIND, "the session output has no init event with a tool list" )
+
+
+def surface_listed( init, surface ):
+    """
+    Say whether the init event offers the surface, whatever the model did.
+
+    Ensures:
+        - a tool surface is offered when its name is in the tool list
+        - the reviewer skill is offered when the skill list or the command list names it
+    """
+    if surface != arms.SURFACE_REVIEWER: return arms.DENY_RULES[ surface ] in init[ "tools" ]
+    names = [ str( name ).split( ":" )[ -1 ].lstrip( "/" ) for name in init.get( "skills", [] ) + init.get( "slash_commands", [] ) ]
+    return surface in names
+
+
 def surface_answered( output, surface ):
     """
-    Say whether a probe session called the surface and was not refused.
+    Say whether a probe session could call the surface.
 
     Requires:
         - output is the stream-json output of a probe session
 
     Ensures:
-        - true when the session issued a call to the surface and its result is not a refusal
-        - false when no call was issued, which is what a denied tool looks like: the session never offers it
+        - true when the init event offers the surface, or the session called it and was not refused
+        - false only when the init event does not offer it and no call went through, so a model that declines a prompt proves nothing
+
+    Raises:
+        - HarnessError PROBE_BLIND if the output has no init event with a tool list
     """
     events = events_of( output )
+    if surface_listed( init_of( events ), surface ): return True
     wanted = "Skill" if surface == arms.SURFACE_REVIEWER else arms.DENY_RULES[ surface ]
     calls  = [ block for block in blocks_of( events, "tool_use" ) if block.get( "name" ) == wanted
                and ( surface != arms.SURFACE_REVIEWER or block.get( "input", {} ).get( "skill" ) == surface ) ]
