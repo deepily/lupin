@@ -191,6 +191,7 @@ def test_the_env_is_assembled_from_the_real_index_with_two_ledgers_and_a_smoke_f
     assert env.kind_split == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and env.parallel == 3 and env.none_draft_fn is not None
     assert env.extras == { "vector_coverage": { "eligible": len( env.kept ), "with_a_vector_row": len( env.kept ), "vector_set_ids": len( ids ), "stage_ids": len( by_id ) } }
     assert ( tmp_path / "out" ).is_dir()
+    assert isinstance( env.calls_log, draft.SharedCallLog ) and env.calls_log.path == tmp_path / "out" / smoke.CALLS_FILE == tmp_path / "out" / "ledger-calls.jsonl"
     seed = "cosa.fx.pkg.a.twin_a"
     job  = __import__( "lupin_mcp.reuse_needset.run", fromlist=[ "run" ] ).near_copy_job( env, seed, "py" )
     assert "cosa.fx.pkg.a.twin_b" in [ r[ "id" ] for r in job[ "keys" ] ] and "twin_a" not in job[ "stripped" ][ "text" ] and job[ "stripped" ][ "forbidden" ]

@@ -22,7 +22,7 @@ class Env:
     """Everything a run reads: records, search context, model calls and run labels."""
 
     def __init__( self, by_id, kept, ctx, twins, strip_fn, ask, ledger, model_id, server, source_commit, seed, kind_split, set_by, set_at,
-                  none_draft_fn=None, parallel=3, smoke=False, extras=None, freeze_from=None ):
+                  none_draft_fn=None, parallel=3, smoke=False, extras=None, freeze_from=None, calls_log=None ):
         """
         Hold the inputs.
 
@@ -33,6 +33,7 @@ class Env:
             - none_draft_fn is draft.make_none_drafter output, needed only when the quota asks for nothing needs
             - extras is a dict of facts about the inputs that a report prints; it is not read by the run
             - freeze_from is ( index generation folder, vector set folder ) to freeze before the draw; None is allowed only for a smoke run
+            - calls_log is None or a draft.SharedCallLog; each live same-job call is added to it with its cell, route, source and position
         """
         self.by_id, self.kept, self.ctx, self.twins, self.strip_fn = by_id, kept, ctx, twins, strip_fn
         self.ask, self.ledger, self.model_id, self.server       = ask, ledger, model_id, server
@@ -41,6 +42,7 @@ class Env:
         self.parallel, self.smoke                               = parallel, smoke
         self.extras                                             = {} if extras is None else extras
         self.freeze_from                                        = freeze_from
+        self.calls_log                                          = calls_log
 
 
 def cell_name( kind, lang ):
@@ -75,7 +77,8 @@ def near_copy_job( env, seed_id, lang ):
 
 def routed_job( env, kind, seed_id, lang, route ):
     """Build the job for a work-alike seed through its route, or None without a key."""
-    found = keys.find_key( env.ctx, seed_id, route, lambda prompt: env.ask( SAME_JOB_SYSTEM, prompt ), env.ledger, env.model_id, kind )
+    found = keys.find_key( env.ctx, seed_id, route, lambda prompt: env.ask( SAME_JOB_SYSTEM, prompt ), env.ledger, env.model_id, kind,
+                           env.calls_log, cell_name( kind, lang ) )
     if found[ "key" ] is None: return None
     seed, key = env.by_id[ seed_id ], env.by_id[ found[ "key" ] ]
     return { "seed": seed, "keys": [ key ], "stripped": env.strip_fn( seed ), "write_lang": lang,

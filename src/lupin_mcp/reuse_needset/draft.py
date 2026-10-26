@@ -6,6 +6,7 @@ Every model call goes through a ledger, so a stopped run resumes without repeati
 import asyncio
 import collections
 import inspect
+import json
 import threading
 
 from cosa.repo.doc_lint import harness_runner, model_transport
@@ -221,6 +222,19 @@ class SharedLedger:
     def put( self, key, value ):
         """Store a finished call durably."""
         with self.lock: self.ledger.put( key, value )
+
+
+class SharedCallLog:
+    """An append-only file of live same-job calls, one JSON line each, safe for several threads."""
+
+    def __init__( self, path ):
+        """Remember the file; it is created on the first line."""
+        self.path = path
+        self.lock = threading.Lock()
+
+    def add( self, row ):
+        """Append one row as a sorted-key JSON line."""
+        with self.lock, open( self.path, "a", encoding="utf-8" ) as handle: handle.write( json.dumps( row, sort_keys=True ) + "\n" )
 
 
 def none_prompt( lines ):

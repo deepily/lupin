@@ -203,6 +203,43 @@ def test_the_search_stops_at_the_first_yes_and_a_second_run_asks_nothing( tmp_pa
     assert ask.calls == 8, "another model id is another key"
 
 
+class Rows:
+    """A stand-in call log that keeps the rows it is given."""
+
+    def __init__( self ):
+        """Start with no rows."""
+        self.rows = []
+
+    def add( self, row ):
+        """Keep one row."""
+        self.rows.append( row )
+
+
+def test_each_live_call_adds_its_cell_route_source_and_position_to_the_call_log_and_a_cached_one_adds_nothing( tmp_path ):
+    ctx, _ = build_world()
+    ask    = Asker( "vecword3" )
+    book   = ledger( tmp_path )
+    rows   = Rows()
+    first  = keys.find_key( ctx, "pkg.near.seed", keys.ROUTE_VECTOR, ask, book, "model-a", calls=rows, cell="work_alike/py" )
+    assert [ r[ "position" ] for r in rows.rows ] == [ 1, 2, 3, 4 ] and [ r[ "ruling" ] for r in rows.rows ] == [ "no", "no", "no", "yes" ]
+    assert rows.rows[ 3 ] == { "cell": "work_alike/py", "seed": "pkg.near.seed", "other": first[ "key" ], "route": "vector", "source": "vector", "position": 4, "asks": 1, "ruling": "yes" }
+    assert all( r[ "cell" ] == "work_alike/py" and r[ "route" ] == "vector" and r[ "asks" ] == 1 for r in rows.rows )
+    again  = Rows()
+    keys.find_key( ctx, "pkg.near.seed", keys.ROUTE_VECTOR, ask, book, "model-a", calls=again, cell="work_alike/py" )
+    assert again.rows == [] and ask.calls == 4, "a ruling read back from the ledger is not a live call"
+
+
+def test_the_call_log_names_the_sampled_source_counts_an_asked_again_reply_and_is_optional( tmp_path ):
+    ctx, _ = build_world()
+    rows   = Rows()
+    ask    = Asker( "MARKER_TRUE_NEIGHBOUR", bad_first=1 )
+    got    = keys.find_key( ctx, "pkg.near.seed", keys.ROUTE_SAMPLED, ask, ledger( tmp_path ), "model-a", calls=rows, cell="cross_language/ts" )
+    assert rows.rows[ 0 ][ "asks" ] == 2 and rows.rows[ 0 ][ "position" ] == 1, "the first candidate was asked twice"
+    assert rows.rows[ -1 ][ "source" ] == got[ "source" ] == "bm25" and rows.rows[ -1 ][ "ruling" ] == "yes" and rows.rows[ -1 ][ "cell" ] == "cross_language/ts"
+    quiet  = Asker( "MARKER_TRUE_NEIGHBOUR" )
+    assert keys.find_key( ctx, "pkg.near.seed", keys.ROUTE_SAMPLED, quiet, ledger( tmp_path ), "model-b" )[ "key" ] == got[ "key" ], "no log is asked for and none is needed"
+
+
 def test_an_unreadable_reply_is_asked_again_once_and_then_named( tmp_path ):
     ctx, _ = build_world()
     once   = Asker( "none", bad_first=1 )

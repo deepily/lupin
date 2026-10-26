@@ -114,6 +114,17 @@ def test_a_routed_job_records_the_route_the_source_and_the_other_language_for_cr
     assert run.routed_job( refuse, "work_alike", "pkg.alpha.pyfn0", "py", keys.ROUTE_VECTOR ) is None
 
 
+def test_a_routed_job_adds_each_live_call_to_the_call_log_under_its_cell( tmp_path ):
+    env           = make_env( tmp_path )
+    env.calls_log = draft.SharedCallLog( tmp_path / "calls.jsonl" )
+    run.routed_job( env, "cross_language", "pkg.alpha.pyfn0", "py", keys.ROUTE_VECTOR )
+    rows = [ json.loads( l ) for l in ( tmp_path / "calls.jsonl" ).read_text().splitlines() ]
+    assert len( rows ) == 1 and rows[ 0 ][ "cell" ] == "cross_language/py" and rows[ 0 ][ "route" ] == "vector" and rows[ 0 ][ "seed" ] == "pkg.alpha.pyfn0" and rows[ 0 ][ "ruling" ] == "yes"
+    run.routed_job( env, "cross_language", "pkg.alpha.pyfn0", "py", keys.ROUTE_VECTOR )
+    assert len( ( tmp_path / "calls.jsonl" ).read_text().splitlines() ) == 1, "the second run reads the ledger and adds no line"
+    assert make_env( tmp_path, name="other.jsonl" ).calls_log is None
+
+
 def test_a_nothing_job_lists_the_entry_line_of_each_symbol_of_the_file_in_that_language( tmp_path ):
     env = make_env( tmp_path )
     got = run.nothing_job( env, "pkg/alpha.py", "py" )

@@ -30,6 +30,7 @@ MATCHED      = 8
 NONE         = 2
 SECOND_MODEL = "claude-opus-5-5"
 SECOND_SYSTEM = "You answer with one JSON object and nothing else."
+CALLS_FILE   = "ledger-calls.jsonl"
 SMOKE_FILE   = "needset-smoke.json"
 SMOKE_FORMAT = "needset-smoke-1"
 
@@ -184,7 +185,8 @@ def assemble_env( args, ask, second_ask, client, set_at, timed ):
     none_fn = draft.make_none_drafter( stage, vectors, embed, describe, lambda prompt: second_timed( SECOND_SYSTEM, prompt ), second, args.second_model )
     ctx     = keys.KeyContext( pooled, measures, bodies, args.seed, vectors )
     return run.Env( by_id, pooled, ctx, twins, lambda rec: strip.strip_member( rec, root ), timed.wrap( "draft", ask ), book, draft.DRAFTER_MODEL, args.server, args.source_commit,
-                    args.seed, kind_split( args ), args.set_by, set_at, none_draft_fn=none_fn, parallel=args.parallel, smoke=True, extras=extras )
+                    args.seed, kind_split( args ), args.set_by, set_at, none_draft_fn=none_fn, parallel=args.parallel, smoke=True, extras=extras,
+                    calls_log=draft.SharedCallLog( out / CALLS_FILE ) )
 
 
 def live_build_env( args, set_at, timed ):

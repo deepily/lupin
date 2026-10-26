@@ -252,19 +252,35 @@ def confirm_same_job( ask, ledger, model_id, seed_id, seed_text, other_id, other
     return ruled( ask, ledger, key, same_job_prompt( seed_text, other_text ), "same_job" )
 
 
-def find_key( ctx, seed_id, route, ask, ledger, model_id, kind="work_alike" ):
+def find_key( ctx, seed_id, route, ask, ledger, model_id, kind="work_alike", calls=None, cell=None ):
     """
     Find the neighbour that does the seed's job, if any.
+
+    Requires:
+        - calls is None or has add( row ), as draft.SharedCallLog has; cell names the kind and language, for that log
 
     Ensures:
         - asks about the candidates in order and stops at the first yes
         - returns { "key": id or None, "route", "asked", "source" } where asked counts the candidates ruled on
+        - with calls, a candidate ruled by a live model call adds { cell, seed, other, route, source, position, asks, ruling } to it
+        - a ruling read back from the ledger adds nothing, and the ledger key and value are unchanged
     """
     found  = work_alike_candidates( ctx, seed_id, route, kind )
     asked  = 0
+    live   = [ 0 ]
+
+    def counted( prompt ):
+        """Forward one prompt to ask and count it."""
+        live[ 0 ] += 1
+        return ask( prompt )
+
     for other in found[ "ids" ]:
         asked += 1
-        if confirm_same_job( ask, ledger, model_id, seed_id, ctx.bodies[ seed_id ], other, ctx.bodies[ other ] ) == YES:
+        before = live[ 0 ]
+        ruling = confirm_same_job( counted, ledger, model_id, seed_id, ctx.bodies[ seed_id ], other, ctx.bodies[ other ] )
+        if calls is not None and live[ 0 ] > before:
+            calls.add( { "cell": cell, "seed": seed_id, "other": other, "route": route, "source": found[ "source" ][ other ], "position": asked, "asks": live[ 0 ] - before, "ruling": ruling } )
+        if ruling == YES:
             return { "key": other, "route": route, "asked": asked, "source": found[ "source" ][ other ] }
     return { "key": None, "route": route, "asked": asked, "source": None }
 

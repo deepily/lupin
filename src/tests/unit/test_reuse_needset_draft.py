@@ -281,6 +281,7 @@ def test_a_cell_can_be_drafted_with_another_draft_function( tmp_path ):
 
 
 def test_a_shared_ledger_keeps_every_write_from_many_threads( tmp_path ):
+    import json
     import threading
     book = draft.SharedLedger( ledger( tmp_path ) )
     work = [ threading.Thread( target=lambda n=n: [ book.put( f"k{n}-{i}", i ) for i in range( 40 ) ] ) for n in range( 8 ) ]
@@ -359,3 +360,14 @@ def test_one_text_and_slot_with_two_prompts_are_two_questions( tmp_path ):
     assert draft.ask_ledgered( ask, book, "v", "m", "sys", "prompt one", "same text", "0.0" ) == "first answer" and len( ask.prompts ) == 2
     fenced = draft.ask_ledgered( ask, book, "v", "m", "sys", "prompt with a random suffix abc", "same text", "0.0", key_new="prompt one" )
     assert fenced == "first answer" and len( ask.prompts ) == 2, "key_new stands in for a prompt that carries a random suffix"
+
+
+def test_the_shared_call_log_appends_one_sorted_json_line_per_row_from_several_threads( tmp_path ):
+    import json
+    import threading
+    log     = draft.SharedCallLog( tmp_path / "calls.jsonl" )
+    threads = [ threading.Thread( target=log.add, args=( { "n": n, "a": 1 }, ) ) for n in range( 8 ) ]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    lines = ( tmp_path / "calls.jsonl" ).read_text().splitlines()
+    assert len( lines ) == 8 and sorted( json.loads( l )[ "n" ] for l in lines ) == list( range( 8 ) ) and lines[ 0 ].startswith( '{"a": 1, "n"' )
