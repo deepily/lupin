@@ -29,7 +29,9 @@ from pathlib import Path
 
 import pytest
 
+import cosa.utils.server_coverage as sc
 import cosa.utils.util as cu
+from tests.helpers.server_coverage_fixture import make_server_dir
 
 PROJECT_ROOT = cu.get_project_root()
 GATE         = f"{PROJECT_ROOT}/src/tests/run-coverage-gate.sh"
@@ -70,7 +72,8 @@ def _drive_the_real_gate( tmp_path, data_dir_value, lupin_root=None, drop_lupin_
     data_file = tmp_path / ".coverage-default-guard"
     env       = { **os.environ,
                   "COVERAGE_FILE"    : str( data_file ),
-                  "DEEPILY_DATA_DIR" : str( data_dir_value ) }
+                  "DEEPILY_DATA_DIR" : str( data_dir_value ),
+                  sc.DIR_ENV         : make_server_dir( tmp_path / "server-coverage" ) }
     # The whole point of this file. Inheriting it would silently retarget the gate and
     # this guard would pass while measuring the override, which is the blind axis.
     env.pop( "COVERAGE_REPORT_TXT", None )

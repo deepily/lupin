@@ -79,6 +79,13 @@ verdict() {  # verdict <output> -> the gate's own last verdict line
     echo "$1" | grep -oE 'COVERAGE GATE (PASSED|FAILED|REFUSED|INCONCLUSIVE)' | tail -1
 }
 
+# The gate folds the :8000 server's coverage of main.py in before it judges the floor (row e1a36bb4)
+# and answers exit 2 without it. This control is about the FLOOR, so give it a usable server
+# directory, built through the module's own writers for this tree's main.py.
+LUPIN_SERVER_COVERAGE_DIR="$( LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" "$PYBIN" -c \
+    "import sys; from tests.helpers.server_coverage_fixture import make_server_dir; print( make_server_dir( sys.argv[ 1 ] ) )" \
+    "$( mktemp -d /tmp/covgate-control-server-XXXXXX )" )" || { echo "could not build the server fixture"; exit 3; }
+export LUPIN_SERVER_COVERAGE_DIR
 echo "═══ generating a real, honestly-low measurement ═══"
 COVERAGE_FILE="$DATA" LUPIN_ROOT="$PWD" "$PYBIN" -m pytest \
     src/tests/unit/test_manager_figure.py -q --cov --cov-branch -p no:randomly >/dev/null 2>&1

@@ -27,4 +27,17 @@ python3 scripts/seed_test_companions.py
 # shutdown lines, lifespan shutdown never runs (bug AC6's twin, 2026-08-02). The
 # seed step above must finish first, so exec ONLY the server here.
 # ⚠️ UNVERIFIED: the LUPIN_RELOAD=1 reloader-subprocess path (reload is off here).
+# Option A for src/lupin_app/main.py (row e1a36bb4): with LUPIN_SERVER_COVERAGE=1 the server runs
+# under `coverage run`, so the gate can count the lifespan() start-up work and the __main__ block
+# that no unit test reaches. write-boot clears the previous boot's data and records main.py's
+# content hash; the data is written when the process exits, so stop the container with
+# `docker stop` (SIGTERM), never kill it. Only main.py is measured here (--include), because the
+# gate takes only main.py's arcs from this data. Unset, the line below is the unchanged start.
+if [ "${LUPIN_SERVER_COVERAGE:-}" = "1" ]; then
+    python3 -m cosa.utils.server_coverage write-boot || exit 1
+    exec python3 -m coverage run --parallel-mode --branch \
+        --data-file="$( python3 -m cosa.utils.server_coverage data-file )" \
+        --include="${LUPIN_ROOT:-/var/lupin}/src/lupin_app/main.py" \
+        -m lupin_app.main
+fi
 exec python3 -m lupin_app.main

@@ -318,6 +318,27 @@ if ! "$PYBIN" -c "import json,sys; sys.exit( 0 if json.load( open( sys.argv[1] )
     echo "COVERAGE GATE INCONCLUSIVE  (no data)"
     exit 2
 fi
+# ══ SERVER COVERAGE FOLD (row e1a36bb4, option A — Rick, 2026-10-26) ═════════════════════
+# src/lupin_app/main.py is always in the frame, and its lifespan() start-up work and __main__
+# block only run when a real server boots. The :8000 test container can run its server under
+# `coverage run` (LUPIN_SERVER_COVERAGE=1); this step adds main.py's arcs from that data to the
+# tiers' data file. Only main.py's arcs come across, so nothing is double-counted.
+# 🔴 NO USABLE SERVER DATA IS EXIT 2, NEVER 1 AND NEVER A PASS. Absent, stale (main.py's content
+# hash differs from the one the server booted on), unreadable and incomplete data all land here,
+# and the message names the scheduled :8000 run that produces it. A floor verdict over a
+# denominator that holds main.py but not its runtime would be a verdict on the missing run.
+SERVER_FOLD_OUT="$( "$PYBIN" -m cosa.utils.server_coverage fold --target "$COVERAGE_FILE" 2>&1 )"
+SERVER_FOLD_EXIT=$?
+echo "$SERVER_FOLD_OUT"
+if [ "$SERVER_FOLD_EXIT" -ne 0 ]; then
+    echo ""
+    echo "COVERAGE GATE INCONCLUSIVE — the :8000 server's coverage of src/lupin_app/main.py is not usable."
+    echo "  NOTHING HERE IS A COVERAGE VERDICT. main.py's runtime is measured only inside the test"
+    echo "  server, and that measurement is absent, stale or unreadable (the line above says which)."
+    exit 2
+fi
+# The report above was rendered from the tiers' data alone; render it again from the folded file.
+"$PYBIN" -m coverage json -o "$REPORT_JSON" >/dev/null 2>&1 || true
 FRAME_EXIT=0
 "$PYBIN" - "$REPORT_JSON" <<'PY' || FRAME_EXIT=$?
 import sys

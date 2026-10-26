@@ -371,6 +371,14 @@ KNOWN_DIVERGENT_ENV = {
                       "read 'see above' and pointed at the dev-dev entry deleted that day — "
                       "a cross-reference outlives the text it points at.)",
     },
+    "LUPIN_SERVER_COVERAGE": {
+        "dev-dev"   : "2026-10-26 TEST-ONLY BY DESIGN (row e1a36bb4, option A) — runs the :8000 "
+                      "test server under `coverage run` so the coverage gate can count "
+                      "src/lupin_app/main.py's start-up code. The dev server is not a coverage "
+                      "venue and its start script has no such branch.",
+        "cloud-gpu" : "2026-10-26 TEST-ONLY BY DESIGN (row e1a36bb4) — same reason; the cloud "
+                      "service is a deployment, never a measurement venue.",
+    },
     "LUPIN_MODEL_SERVER_API_KEY_FILE": {
         "cloud-gpu": "2026-07-26 UNCLASSIFIED — present in the other THREE services, absent "
                      "here. cloud-gpu reaches the Cloud Run model server, the same path whose "

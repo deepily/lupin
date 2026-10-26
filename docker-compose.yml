@@ -634,6 +634,9 @@ services:
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
+      # Option A for main.py (row e1a36bb4): "1" runs the server under `coverage run`. Env resolves at
+      # container CREATE, so turning it on or off needs `up -d --force-recreate lupin-rest-test`.
+      LUPIN_SERVER_COVERAGE: ${LUPIN_SERVER_COVERAGE:-}
       # Row adce3547: the JWT signing secret comes from the ENVIRONMENT and nowhere
       # else — jwt_service.py has no literal fallback. The value lives in the
       # UNTRACKED, gitignored .env beside this file, which Compose auto-loads; it is
