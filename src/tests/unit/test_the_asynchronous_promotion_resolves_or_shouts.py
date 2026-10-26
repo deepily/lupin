@@ -589,6 +589,25 @@ def test_a_row_that_moved_under_the_ask_is_SUPERSEDED_not_refused():
     assert "done" in ( ticket.refusal or "" ), "the ticket does not say what the row became"
 
 
+def test_the_apply_phase_on_a_ticket_that_was_already_resolved_returns_that_state_and_touches_nothing():
+    """The apply step re-reads the state under the lock and reports a settled ticket."""
+    item    = _item()
+    ticket  = _ticket( item_id=item.id, state=resolver.TICKET_REFUSED )
+    session = _FakeSession( tickets=[ ticket ], items=[ item ] )
+    repo    = MagicMock()
+
+    with _repo_seam( repo ):
+        got = resolver._apply_resolution(
+            ticket.id, item.id, _intent(), _allowed(),
+            db_fn=_db_fn_for( session ), now_fn=lambda: NOW,
+        )
+
+    assert got == resolver.TICKET_REFUSED
+    assert ticket.state == resolver.TICKET_REFUSED and ticket.resolved_at is None
+    assert not repo.get_by_id_for_update.called and not repo.apply_transition.called
+    assert item.status == approval.NOT_APPROVED_STATUS
+
+
 def test_a_petition_ticket_carrying_P0_raises_the_priority_in_the_same_transaction_as_the_transition():
     """Control for the refusal below: a pinned P0 is applied and the transition runs."""
     item    = _item()
