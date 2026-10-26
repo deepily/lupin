@@ -289,6 +289,15 @@ KNOWN_DIVERGENT_ENV = {
                       "fleet's real heartbeat-poke-mute.json, which the Stop hook on the host reads.",
         "cloud-gpu" : "2026-10-02 — no test server on the VM.",
     },
+    "LUPIN_TEST_ADMIN_EMAIL": {
+        "dev-dev"   : "2026-10-26 — the smoke admin sign-in is :8000-only; the smoke helpers run in the "
+                      "test container (row 4ad9c156).",
+        "cloud-gpu" : "2026-10-26 — no test server on the VM.",
+    },
+    "LUPIN_TEST_ADMIN_PASSWORD": {
+        "dev-dev"   : "2026-10-26 — see LUPIN_TEST_ADMIN_EMAIL.",
+        "cloud-gpu" : "2026-10-26 — see LUPIN_TEST_ADMIN_EMAIL.",
+    },
     "CHROME_PATH": {
         "cloud-gpu" : "2026-07-26 — same.",
     },
