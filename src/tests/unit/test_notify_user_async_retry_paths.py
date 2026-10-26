@@ -323,3 +323,12 @@ class TestDebugRetryNarration:
         result, post = _send( [ requests.exceptions.Timeout(), _reply() ], debug=True )
         assert result.success is True and post.call_count == 2
         assert "Timeout (attempt 1), will retry" in capsys.readouterr().err
+
+
+class TestUnsetTargetUser:
+
+    def test_an_unset_target_user_is_resolved_before_sending( self ):
+        with patch( "lupin_cli.notifications.notification_models.resolve_target_user", return_value="resolved@example.com" ):
+            result, post = _send( [ _reply() ], request=_request( target_user=None ) )
+        assert result.success is True
+        assert post.call_args.kwargs[ "params" ][ "target_user" ] == "resolved@example.com"
