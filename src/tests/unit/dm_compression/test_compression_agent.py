@@ -443,5 +443,50 @@ class TestPipelineFailClosed:
             assert not re.search( r"\[\[L\d+\]\]", text )
 
 
+class TestCompressorEdges:
+    """The constructor refuses a blank body, keeps a caller's question, and holds no state."""
+
+    FROZEN = "A message with [[L00]] in it, long enough to matter."
+
+    @pytest.mark.parametrize( "blank", [ "", "   \n" ] )
+    def test_a_blank_frozen_text_is_refused( self, blank ):
+        from cosa.agents.dm_compression.compressor import DmCompressionAgent
+        with pytest.raises( ValueError, match="frozen_text is empty" ):
+            DmCompressionAgent( frozen_text=blank )
+
+    def test_a_given_question_is_not_replaced_by_the_frozen_body( self ):
+        from cosa.agents.dm_compression.compressor import DmCompressionAgent
+        agent = DmCompressionAgent( frozen_text=self.FROZEN, question="my own question" )
+        assert agent.question == "my own question"
+
+    def test_the_frozen_body_stands_in_when_no_question_is_given( self ):
+        from cosa.agents.dm_compression.compressor import DmCompressionAgent
+        agent = DmCompressionAgent( frozen_text=self.FROZEN )
+        assert agent.question == self.FROZEN
+
+    def test_restoring_state_is_not_implemented( self ):
+        from cosa.agents.dm_compression.compressor import DmCompressionAgent
+        agent = DmCompressionAgent( frozen_text=self.FROZEN )
+        with pytest.raises( NotImplementedError ):
+            agent.restore_from_serialized_state( "/nowhere.json" )
+
+
+class TestDefaultAgentFactory:
+
+    def test_without_a_factory_the_pipeline_builds_the_real_agent_with_the_band_target( self ):
+        from unittest.mock import patch
+        seen = {}
+        class _Spy:
+            def __init__( self, frozen_text, band_target, debug ):
+                seen.update( frozen_text=frozen_text, band_target=band_target, debug=debug )
+            def run_prompt( self ): return { "compressed": "" }
+        with patch( "cosa.agents.dm_compression.compressor.DmCompressionAgent", _Spy ):
+            text, reason = compress_dm( TestPipelineFailClosed.BODY, band_target=0.45, debug=True )
+        assert text == TestPipelineFailClosed.BODY
+        assert reason == "model returned no compressed body"
+        assert seen[ "band_target" ] == 0.45 and seen[ "debug" ] is True
+        assert "[[L" in seen[ "frozen_text" ]
+
+
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )
