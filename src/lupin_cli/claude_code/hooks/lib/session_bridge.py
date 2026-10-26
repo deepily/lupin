@@ -266,6 +266,29 @@ def clear_cached_session_id():
     _cached_session_source = None
 
 
+def _load_bridge_object( path ):
+    """
+    Load a bridge file and require its JSON to be an object.
+
+    Requires:
+        - path is a readable file path
+
+    Ensures:
+        - Returns the parsed dict
+        - Raises json.JSONDecodeError for a file whose JSON is a list or scalar, so every
+          caller's existing parse-failure branch handles it
+
+    Raises:
+        - json.JSONDecodeError for malformed JSON or JSON that is not an object
+        - OSError if the file cannot be read
+    """
+    with open( path ) as f:
+        data = json.load( f )
+    if not isinstance( data, dict ):
+        raise json.JSONDecodeError( "bridge JSON is not an object", "", 0 )
+    return data
+
+
 def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
     """
     Find the session file for the current process's parent (Claude Code).
@@ -322,8 +345,7 @@ def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
             if file_pid is not None and not _is_pid_alive( file_pid ):
                 continue
 
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
             if data.get( "cwd", "" ) == my_cwd:
                 return ( path, SOURCE_CWD_FALLBACK )
         except ( json.JSONDecodeError, OSError ):
@@ -354,8 +376,7 @@ def _read_session_file( path: Path ) -> Optional[str]:
         str or None: Stable session ID from file
     """
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         # Prefer stable ID (survives context clears)
         return data.get( "stable_session_id", data.get( "session_id" ) )
     except ( json.JSONDecodeError, OSError ):
@@ -455,8 +476,7 @@ def resolve_stable_session_id( transient_id: str ) -> str:
     if result:
         path, _source = result
         try:
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
             stable = data.get( "stable_session_id" )
             if stable:
                 return stable
@@ -565,8 +585,7 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
         return None
     path, _source = result
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
     except ( json.JSONDecodeError, OSError, ValueError ):
         return None
     return project_from_bridge_cwd( data.get( "cwd" ) )
@@ -752,8 +771,7 @@ def get_session_metadata() -> dict:
     if result:
         session_file, resolution_source = result
         try:
-            with open( session_file ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( session_file )
             data["source"]            = "session_file"
             data["resolution_source"] = resolution_source
             data["_bridge_path"]      = str( session_file )
@@ -817,8 +835,7 @@ def find_session_by_id( session_id, exact=False, check_pid=True ):
             continue
 
         try:
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
 
             # Check all known IDs: session_ids list (preferred), plus legacy fields
             all_ids = list( data.get( "session_ids", [] ) )
@@ -913,8 +930,7 @@ def iter_live_bridges():
                 continue
 
         try:
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
 
             all_ids = list( data.get( "session_ids", [] ) )
             for field in ( "session_id", "stable_session_id" ):
@@ -1019,8 +1035,7 @@ def find_dead_sessions( candidate_ids ):
         if "buffer" in path.name or "listener" in path.name:
             continue
         try:
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
         except ( json.JSONDecodeError, OSError ):
             continue
 
@@ -1248,8 +1263,7 @@ def find_active_speakerphone_sessions( exclude_session_id=None ):
                 continue
 
         try:
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
 
             if not bool( data.get( "speakerphone_on", False ) ):
                 continue
@@ -1308,8 +1322,7 @@ def get_speakerphone( session_id ):
         return False
 
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         return bool( data.get( "speakerphone_on", _get_default_speakerphone() ) )
     except ( json.JSONDecodeError, OSError ):
         return False
@@ -1346,8 +1359,7 @@ def set_speakerphone( session_id, on ):
         return False
 
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         data[ "speakerphone_on" ] = bool( on )
         data[ "format_version" ] = BRIDGE_FORMAT_VERSION
         # Drop the v1 field if it lingers from a pre-Phase-2 bridge, to avoid
@@ -1387,8 +1399,7 @@ def set_manager_figure_implicit( session_id, flag ):
         return False
 
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         data[ MANAGER_FIGURE_BRIDGE_FIELD ] = bool( flag )
         return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
@@ -1419,8 +1430,7 @@ def get_last_autonarrated_turn_id( session_id ):
     if not path:
         return None
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         return data.get( "last_autonarrated_turn_id" )
     except ( json.JSONDecodeError, OSError ):
         return None
@@ -1454,8 +1464,7 @@ def set_last_autonarrated_turn_id( session_id, turn_id ):
     if not path:
         return False
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         data[ "last_autonarrated_turn_id" ] = str( turn_id )
         return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
@@ -1480,10 +1489,7 @@ def _get_dict_field( session_id, key ):
         return None
 
     try:
-        with open( path ) as f:
-            data = json.load( f )
-        if not isinstance( data, dict ):
-            return None
+        data = _load_bridge_object( path )
         value = data.get( key )
         if isinstance( value, dict ) and value:
             return value
@@ -1511,8 +1517,7 @@ def _set_str_field( session_id, key, value ):
     if not path:
         return False
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         data[ key ] = str( value )
         return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
@@ -1637,8 +1642,7 @@ def set_voice_persona( session_id, persona ):
         return False
 
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         data[ "voice_persona" ] = persona
         return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
@@ -1705,8 +1709,7 @@ def set_idle_detection_field( session_id, **fields ):
         return False
 
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         block = data.get( "idle_detection" )
         if not isinstance( block, dict ):
             block = { }
@@ -1744,8 +1747,7 @@ def clear_idle_waiter_pid( session_id ):
         return None
 
     try:
-        with open( path ) as f:
-            data = json.load( f )
+        data = _load_bridge_object( path )
         block = data.get( "idle_detection" )
         if not isinstance( block, dict ):
             return None
@@ -1842,8 +1844,7 @@ def prune_dead_persona_bridges():
             continue
 
         try:
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
         except ( json.JSONDecodeError, OSError ):
             continue
 
@@ -1878,8 +1879,7 @@ def _append_stale_bridge( stale_out, path, mtime_age, pid_alive ):
     """
     session_id = None
     try:
-        with open( path ) as handle:
-            data       = json.load( handle )
+        data       = _load_bridge_object( path )
         session_id = data.get( "stable_session_id" ) or data.get( "session_id" )
     except ( json.JSONDecodeError, OSError ):
         pass
@@ -1974,8 +1974,7 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
                 _append_stale_bridge( stale_out, path, mtime_age, pid_alive=True )
 
         try:
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
 
             persona     = data.get( "voice_persona" )
             has_persona = isinstance( persona, dict ) and bool( persona )
@@ -2057,8 +2056,7 @@ def find_session_by_tmux( tmux_session ):
             continue
 
         try:
-            with open( path ) as f:
-                data = json.load( f )
+            data = _load_bridge_object( path )
 
             if data.get( "tmux_session" ) == tmux_session:
                 return data
