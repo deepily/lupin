@@ -2321,7 +2321,7 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
     target = max( closed + 1, math.floor( created / allow_below ) )
     while created / target >= allow_below:                                 # not open yet
         target += 1
-    while target - 1 > closed and created / ( target - 1 ) < allow_below:  # overshot
+    while target - 1 > closed and created / ( target - 1 ) < allow_below:  # pragma: no cover - unreachable: floor() lands within one closure of the true target, so target - 1 never opens the gate
         target -= 1
     need = target - closed
     # 🔴 THE REMEDY MUST BE ONE THE CALLER CAN PERFORM (row aba30387, defect 2, maria's
