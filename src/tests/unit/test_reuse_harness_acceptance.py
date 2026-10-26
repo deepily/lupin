@@ -154,6 +154,11 @@ def test_parametrized_cases_pass_only_when_every_case_passes_whatever_their_orde
     assert make( tree, Runner( report=report ) ).run( HANDLE, tree[ "path" ], ids( "test_a" ) )[ "results" ] == { ids( "test_a" )[ 0 ] : False }
 
 
+def test_parametrized_cases_that_all_pass_make_the_test_pass_under_its_unparametrized_id( tree ):
+    outcome = make( tree, Runner( report=case( "test_a[1]" ) + case( "test_a[2]" ) ) ).run( HANDLE, tree[ "path" ], ids( "test_a" ) )
+    assert outcome[ "results" ] == { ids( "test_a" )[ 0 ] : True }
+
+
 def test_a_case_without_a_class_name_matches_no_test_and_the_tests_stay_failed( tree ):
     outcome = make( tree, Runner( report=f'<testcase name="{CLASS}"><error/></testcase>' ) ).run( HANDLE, tree[ "path" ], ids( "test_a" ) )
     assert outcome[ "results" ] == { ids( "test_a" )[ 0 ] : False }
