@@ -331,3 +331,64 @@ class TestDuplicateListenerReapRegression:
 
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
+
+
+# ── empty payload, idle-waiter failure, buffer cleanup, bootstrap ──
+
+class TestMainEdgeArms:
+
+    def test_an_empty_payload_emits_an_empty_object_and_exits_zero_before_any_side_effect( self, monkeypatch ):
+        release = _patch_main_dependencies( monkeypatch, { } )
+        with pytest.raises( SystemExit ) as exc:
+            session_end.main()
+        assert exc.value.code == 0
+        session_end.emit_json.assert_called_once_with( { } )
+        release.assert_not_called()
+        session_end.log_payload.assert_not_called()
+
+    def test_a_failing_idle_waiter_kill_is_reported_and_teardown_continues( self, monkeypatch, capsys ):
+        payload = { "session_id": TEST_SESSION_ID, "reason": "logout" }
+        _patch_main_dependencies( monkeypatch, payload )
+        monkeypatch.setattr( session_bridge, "kill_idle_waiter", MagicMock( side_effect=RuntimeError( "no bridge" ) ) )
+        session_end.main()
+        assert "idle waiter kill failed (RuntimeError: no bridge)" in capsys.readouterr().err
+        session_end._schedule_seat_teardown.assert_called_once_with( payload )
+        session_end.log_payload.assert_called_once()
+
+    def _buffer( self, monkeypatch, *, size, unlink_error=None ):
+        payload = { "session_id": TEST_SESSION_ID, "reason": "logout" }
+        _patch_main_dependencies( monkeypatch, payload )
+        buf = MagicMock()
+        buf.exists.return_value        = True
+        buf.stat.return_value.st_size  = size
+        buf.unlink.side_effect         = unlink_error
+        monkeypatch.setattr( session_end, "get_buffer_path", lambda sid: buf )
+        return buf
+
+    def test_an_empty_buffer_file_is_removed( self, monkeypatch ):
+        buf = self._buffer( monkeypatch, size=0 )
+        session_end.main()
+        buf.unlink.assert_called_once_with()
+
+    def test_a_buffer_file_with_messages_is_left_alone( self, monkeypatch ):
+        buf = self._buffer( monkeypatch, size=12 )
+        session_end.main()
+        buf.unlink.assert_not_called()
+
+    def test_a_failed_buffer_unlink_does_not_stop_the_hook( self, monkeypatch ):
+        buf = self._buffer( monkeypatch, size=0, unlink_error=OSError( "busy" ) )
+        session_end.main()
+        buf.unlink.assert_called_once_with()
+        session_end.log_payload.assert_called_once()
+
+
+class TestBootstrap:
+
+    def test_a_module_loaded_without_src_on_the_path_puts_it_first( self, monkeypatch ):
+        import importlib.util
+        src = os.path.join( os.environ[ "LUPIN_ROOT" ], "src" )
+        monkeypatch.setattr( sys, "path", [ p for p in sys.path if p != src ] )
+        spec = importlib.util.spec_from_file_location( "session_end_bootstrap_copy", session_end.__file__ )
+        mod  = importlib.util.module_from_spec( spec )
+        spec.loader.exec_module( mod )
+        assert sys.path[ 0 ] == src == mod._src_path

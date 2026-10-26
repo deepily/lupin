@@ -232,3 +232,20 @@ class TestStopListenerChecksWhatTheProcessIs:
         monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: asked.append( ( pid, marker ) ) or False )
         _stop_listener( 4242 )
         assert asked == [ ( 4242, "cc_notification_listener" ) ]
+
+
+class TestStopListenerLateRaces:
+    """the permission-error arms of the wait loop and the final SIGKILL."""
+
+    def test_losing_permission_mid_wait_stops_without_escalating( self ):
+        with patch( f"{MODULE}.os.kill", side_effect=[ None, PermissionError() ] ) as kill, \
+             patch( f"{MODULE}.time.sleep" ):
+            _stop_listener( 4242 )
+        assert [ c.args[ 1 ] for c in kill.call_args_list ] == [ signal.SIGTERM, 0 ]
+
+    def test_a_refused_final_sigkill_does_not_raise( self ):
+        calls = [ None ] * 11 + [ PermissionError() ]
+        with patch( f"{MODULE}.os.kill", side_effect=calls ) as kill, \
+             patch( f"{MODULE}.time.sleep" ):
+            _stop_listener( 4242 )
+        assert kill.call_args_list[ -1 ].args[ 1 ] == signal.SIGKILL

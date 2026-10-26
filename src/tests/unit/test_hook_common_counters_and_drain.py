@@ -271,3 +271,72 @@ class TestTheVoiceBufferDrain:
         self._fill( buffer_dir, [ { "text": "one" } ] )
         with patch( "builtins.open", side_effect=OSError( "vanished" ) ):
             assert hc.drain_voice_buffer( SID ) == []
+
+
+# ── stdin parse failure, log failure, send_tts degradation, stop block ──
+
+class TestReadHookInputAndLogFailures:
+
+    @pytest.mark.parametrize( "stdin_text", [ "", "{ not json", "   " ] )
+    def test_unparseable_stdin_reads_as_an_empty_payload( self, monkeypatch, stdin_text ):
+        import io
+        monkeypatch.setattr( "sys.stdin", io.StringIO( stdin_text ) )
+        assert hc.read_hook_input() == { }
+
+    def test_valid_stdin_is_parsed( self, monkeypatch ):
+        import io
+        monkeypatch.setattr( "sys.stdin", io.StringIO( '{"session_id": "s1"}' ) )
+        assert hc.read_hook_input() == { "session_id": "s1" }
+
+    def test_an_unwritable_log_dir_does_not_stop_the_stream_entry( self, monkeypatch ):
+        seen = [ ]
+        monkeypatch.setattr( hc, "_logs_dir", lambda: ( _ for _ in () ).throw( OSError( "ro" ) ) )
+        monkeypatch.setattr( hc, "log_to_stream", lambda name, payload, extra=None: seen.append( ( name, payload ) ) )
+        hc.log_payload( "stop", { "k": 1 } )
+        assert seen == [ ( "stop", { "k": 1 } ) ]
+
+
+class TestSendTtsDegradation:
+
+    def _send( self, *, sender_id=None, build_raises=False, notify_raises=False ):
+        sent = [ ]
+        def fake_notify( request ):
+            if notify_raises: raise RuntimeError( "server down" )
+            sent.append( request )
+        build = ( lambda: ( _ for _ in () ).throw( RuntimeError( "no bridge" ) ) ) if build_raises else ( lambda: "claude.code@lupin.deepily.ai" )
+        with patch.object( hc, "is_tts_enabled", return_value=True ), \
+             patch.object( hc, "get_target_email", return_value="u@example.com" ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.build_sender_id_for_cc", build ), \
+             patch( "lupin_cli.notifications.notify_user_async.notify_user_async", fake_notify ):
+            hc.send_tts( "hello", sender_id=sender_id )
+        return sent
+
+    def test_a_missing_sender_is_resolved_from_the_session_bridge( self ):
+        sent = self._send()
+        assert [ r.sender_id for r in sent ] == [ "claude.code@lupin.deepily.ai" ]
+
+    def test_a_bridge_failure_sends_without_a_sender( self ):
+        sent = self._send( build_raises=True )
+        assert len( sent ) == 1 and sent[ 0 ].sender_id is None
+
+    def test_an_explicit_sender_is_never_replaced( self ):
+        sent = self._send( sender_id="explicit.agent@lupin.deepily.ai" )
+        assert sent[ 0 ].sender_id == "explicit.agent@lupin.deepily.ai"
+
+    def test_a_transport_failure_is_swallowed( self ):
+        assert self._send( notify_raises=True ) == [ ]
+
+
+class TestStopBlockWithSystemMessage:
+
+    def test_the_block_carries_the_reason_and_the_full_instruction( self ):
+        assert hc.build_stop_block_with_system_message( "why", "do this" ) == \
+            { "decision": "block", "reason": "why", "systemMessage": "do this" }
+
+
+class TestDrainCleanupFailure:
+
+    def test_a_failed_temp_file_unlink_still_returns_the_messages( self, buffer_dir ):
+        ( buffer_dir / "cc-buffer-abc12345.jsonl" ).write_text( json.dumps( { "text": "kept" } ) + "\n" )
+        with patch.object( Path, "unlink", side_effect=PermissionError( "denied" ) ):
+            assert [ m[ "text" ] for m in hc.drain_voice_buffer( SID ) ] == [ "kept" ]

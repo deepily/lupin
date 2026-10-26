@@ -285,3 +285,18 @@ class TestCrossHookConsistency:
         # and when both claim owed with a count, the COUNT matches
         if owed and total_owed > 0:
             assert f"{total_owed} item" in stop_msg and f"{total_owed} item" in beacon_msg
+
+
+class TestBridgeRoleLookupFailure( _Base ):
+    """An unreadable bridge costs the role goal line, never the verdict."""
+
+    def test_an_unreadable_bridge_means_no_role_and_the_verdict_still_resolves( self ):
+        with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=dict( _SETTINGS ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True, { }, { } ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_session_metadata", side_effect=OSError( "bridge gone" ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop._heartbeat_goal_line", return_value="" ) as goal:
+            state = _resolve_owed_state( "sid", "/t.jsonl", None )
+        goal.assert_called_once_with( "sid", None )
+        assert ( state[ "outcome" ], state[ "owed" ] ) == ( OUTCOME_POKE, True )
