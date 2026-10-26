@@ -123,6 +123,19 @@ class TestCommitAndPrSingle( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( result[ "error" ], "no branch" )
         self.assertIsNone( result[ "git_strategy" ] )
 
+    async def test_l3_push_disabled_no_original_branch_skips_checkout( self ):
+        ops = make_git_ops( get_current_branch=AsyncMock( return_value=None ) )
+        gs  = GitStrategist( debug=True )
+        result = await gs.commit_and_pr_single(
+            git_ops=ops, files_changed=[ "a.py" ], commit_message="msg",
+            pr_title="t", pr_body="b", trust_level=3, notify_fn=AsyncMock(),
+            push_enabled=False,
+        )
+        self.assertEqual( result[ "git_strategy" ], "commit_only" )
+        self.assertIn( "push disabled", result[ "error" ] )
+        ops.commit_and_push.assert_not_called()
+        ops.checkout_branch.assert_not_called()
+
     async def test_l3_push_fail_checks_out_original( self ):
         ops = make_git_ops()
         ops.commit_and_push = AsyncMock( return_value={ "success": False, "error": "push denied" } )
