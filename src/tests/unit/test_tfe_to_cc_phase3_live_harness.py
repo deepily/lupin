@@ -206,6 +206,29 @@ def test_parse_stream_summarises_a_realistic_event_stream( harness, tmp_path ):
     assert summary[ "raw_event_count" ] == 9
 
 
+REAL_INIT_EVENT = Path( __file__ ).resolve().parent.parent / "fixtures" / "reuse_harness" / "real-init-event-claude-2.1.310.json"
+
+
+def test_parse_stream_reads_model_and_key_source_from_a_real_captured_init_event( harness, tmp_path ):
+    """
+    A real `system/init` event from claude 2.1.310, written as one stream line.
+
+    Only this event is real. The assistant and result events elsewhere in this file stay
+    hand-written, because a full stream capture needs a model call and none is on disk.
+    """
+    event = json.loads( REAL_INIT_EVENT.read_text() )
+    assert event[ "type" ] == "system" and event[ "subtype" ] == "init"
+    path = tmp_path / "s.jsonl"
+    path.write_text( json.dumps( event ) + "\n" )
+
+    summary = harness._parse_stream( path )
+
+    assert summary[ "model" ] == event[ "model" ] == "claude-haiku-5-5"
+    assert summary[ "api_key_source" ] == event[ "apiKeySource" ] == "<scrubbed>"
+    assert summary[ "raw_event_count" ] == 1 and summary[ "parse_errors" ] == 0
+    assert summary[ "result" ] is None and summary[ "tool_use_count" ] == 0
+
+
 def test_parse_stream_of_an_empty_file_is_all_zero( harness, tmp_path ):
     path = tmp_path / "s.jsonl"
     path.write_text( "" )
