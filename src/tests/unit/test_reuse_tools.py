@@ -1015,3 +1015,18 @@ def test_context_from_environment_refuses_a_missing_data_override( tmp_path, mon
     assert e.value.name == "BAD_DATA_DIR" and str( tmp_path / "nope" ) in e.value.detail
     ( tmp_path / "nope" ).mkdir()                                                                 # control: the same value is accepted once the directory exists
     assert rt.context_from_environment( root ).data == tmp_path / "nope"
+
+
+def test_context_from_environment_refuses_a_relative_override_that_exists( tmp_path, monkeypatch ):
+    root = make_lupin_repo( tmp_path )
+    ( tmp_path / "Using" ).mkdir(); monkeypatch.chdir( tmp_path )
+    monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", "Using" )                                         # a directory, so only the absolute check can refuse it
+    with pytest.raises( rt.ReuseError ) as e: rt.context_from_environment( root )
+    assert e.value.name == "BAD_DATA_DIR" and "LUPIN_REUSE_DATA_DIR" in e.value.detail
+
+
+def test_an_empty_data_override_means_the_default_directory( tmp_path, monkeypatch ):
+    root = make_lupin_repo( tmp_path )
+    monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", "" ); monkeypatch.setattr( rt, "data_dir", lambda top: tmp_path / "fleet" )
+    c = rt.context_from_environment( root )
+    assert c.data == tmp_path / "fleet" and c.data_source == "default"

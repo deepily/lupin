@@ -341,11 +341,11 @@ def test_the_sendable_ids_are_the_entries_the_sweep_sends_and_a_tree_it_cannot_r
 
 
 @pytest.mark.parametrize( "flag", [ "NOT_LUPIN_TREE", "INDEX_STALE" ] )
-def test_each_unreadable_index_flag_makes_the_sendable_ids_none_even_with_entries_listed( monkeypatch, flag ):
+def test_each_unreadable_index_flag_makes_the_sendable_ids_none_even_with_entries_listed( monkeypatch, tmp_path, flag ):
     monkeypatch.setattr( frun.rt, "prepare", lambda ctx: ( { flag }, [ { "id": "x" } ], "sha", None ) )
-    assert frun.sendable_ids( "r", "d" ) is None
+    assert frun.sendable_ids( "r", str( tmp_path / "d" ) ) is None
     monkeypatch.setattr( frun.rt, "prepare", lambda ctx: ( { "KEY_UNREADABLE" }, [ { "id": "x" } ], "sha", None ) )
-    assert frun.sendable_ids( "r", "d" ) == { "x" }
+    assert frun.sendable_ids( "r", str( tmp_path / "d" ) ) == { "x" }
 
 
 def test_the_stale_excludes_name_a_need_in_file_order_and_never_one_without_an_excluded_symbol():
