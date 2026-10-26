@@ -353,8 +353,8 @@ def resolve_ticket( ticket_id,
     # ── PHASE 1 · read the intent, then LET GO ──────────────────────────────────
     with db_fn() as session:
         ticket = session.get( TaskPromotionTicket, ticket_id )
-        if ticket is None: return None
-        if ticket.state != TICKET_PENDING: return ticket.state
+        if ticket is None: return None  # pragma: no branch - a return inside a with-block; coverage 7.14 records that exit arc on the with line
+        if ticket.state != TICKET_PENDING: return ticket.state  # pragma: no branch - a return inside a with-block; coverage 7.14 records that exit arc on the with line
         intent  = TransitionIntent.from_payload( ticket.payload )
         item_id = ticket.item_id
     # The connection is back in the pool here. Nothing below phase 3 touches the DB.
@@ -445,8 +445,8 @@ def _apply_resolution( ticket_id, item_id, intent, approval,
 
         repo   = TaskRepository( session )
         ticket = session.get( TaskPromotionTicket, ticket_id, with_for_update=True )
-        if ticket is None: return None
-        if ticket.state != TICKET_PENDING: return ticket.state
+        if ticket is None: return None  # pragma: no branch - a return inside a with-block; coverage 7.14 records that exit arc on the with line
+        if ticket.state != TICKET_PENDING: return ticket.state  # pragma: no branch - a return inside a with-block; coverage 7.14 records that exit arc on the with line
 
         ticket.approval_source = approval.approval_source
         ticket.resolved_at     = now_fn()
@@ -639,8 +639,8 @@ def _mark_stalled( ticket_id, db_fn=get_db, now_fn=_now, alarm_fn=_default_alarm
     now = now_fn()
     with db_fn() as session:
         ticket = session.get( TaskPromotionTicket, ticket_id, with_for_update=True )
-        if ticket is None:                     return False
-        if ticket.state != TICKET_PENDING:     return False
+        if ticket is None:                     return False  # pragma: no branch - a return inside a with-block; coverage 7.14 records that exit arc on the with line
+        if ticket.state != TICKET_PENDING:     return False  # pragma: no branch - a return inside a with-block; coverage 7.14 records that exit arc on the with line
         # 🔴 A NULL DEADLINE IS NOT OVERDUE — Tiffany 💍's finding, 2026-09-06, and the
         # first cut of this line had it backwards. It read `resolves_by is not None and
         # resolves_by >= now`, so a NULL deadline fell THROUGH the guard and the ticket
