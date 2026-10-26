@@ -323,6 +323,45 @@ async def test_REGRESSION_a_run_without_a_document_asks_nothing_and_researches_e
     assert harness.researched == [ t[ "topic" ] for t in _FOUR_TOPICS ]
 
 
+_NOTHING_TICKED = "No topics were ticked, so the research is cancelled and nothing was spent."
+
+
+@pytest.mark.asyncio
+async def test_ticking_no_theme_on_a_document_run_cancels_with_the_document_message( harness ):
+    themes = [
+        { "name": "Past",   "description": "p", "subquery_indices": [ 0, 1 ] },
+        { "name": "Future", "description": "f", "subquery_indices": [ 2, 3 ] },
+    ]
+    harness.dispatcher( returns=_tick( "Themes", [] ) )
+    result, _ = await harness.run( _FOUR_TOPICS, themes, no_confirm=True, confirm_topics=True )
+    assert result is None
+    assert harness.researched == []
+    assert _NOTHING_TICKED in harness.notices
+    assert "No themes selected. Research cancelled at your request." not in harness.notices
+
+
+@pytest.mark.asyncio
+async def test_ticking_no_topic_after_the_theme_step_cancels_with_the_document_message( harness ):
+    one_theme = [ { "name": "All", "description": "d", "subquery_indices": [ 0, 1, 2, 3 ] } ]
+    harness.dispatcher( returns=_tick( "Topics", [] ) )
+    result, _ = await harness.run( _FOUR_TOPICS, one_theme, no_confirm=True, confirm_topics=True )
+    assert result is None
+    assert harness.researched == []
+    assert _NOTHING_TICKED in harness.notices
+    assert "No topics selected. Research cancelled at your request." not in harness.notices
+
+
+@pytest.mark.asyncio
+async def test_a_failed_tick_box_ask_on_a_short_document_plan_cancels_without_research( harness ):
+    """A transport failure is not silence: the ask reports it and the run stops before any spend."""
+    harness.dispatcher( raises=RuntimeError( "bridge down" ) )
+    result, _ = await harness.run( _FOUR_TOPICS[ :2 ], no_confirm=True, confirm_topics=True )
+    assert result is None
+    assert harness.researched == []
+    assert _NOTHING_TICKED not in harness.notices
+    assert len( harness.asks ) == 1, "the ask was made once and not retried"
+
+
 # =============================================================================
 # The import hazard found while building this
 # =============================================================================
