@@ -32,6 +32,7 @@ from cosa.agents.dm_compression.freeze import (
     resolve_spans,
     segment_clauses,
     count_verify_literals,
+    count_all_literals,
     OPEN_DELIM,
     CLOSE_DELIM,
     HARD_KINDS,
@@ -805,6 +806,103 @@ class TestClauseSegmentation:
     def test_clause_spans_tile_the_text_exactly( self, text ):
         spans = segment_clauses( text )
         assert "".join( text[ s:e ] for s, e in spans ) == text
+
+
+def _freeze_module():
+    import sys
+    return sys.modules[ "cosa.agents.dm_compression.freeze" ]
+
+
+class TestFreezeEdges:
+    """The small refusals, fallbacks and warnings the larger suites walk past."""
+
+    def test_tokens_lists_every_placeholder_in_order( self, frozen ):
+        assert len( frozen.tokens ) == len( frozen.placeholders ) > 0
+        positions = [ frozen.frozen_text.index( t ) for t in frozen.tokens ]
+        assert positions == sorted( positions )
+
+    def test_an_unknown_tier_is_refused_when_extracting( self ):
+        with pytest.raises( ValueError, match="tier must be" ):
+            extract_spans( SAMPLE, tier="SOFT" )
+
+    def test_the_hard_tier_leaves_soft_spans_out( self ):
+        text = 'He said "keep it" and sent twelve rows to src/x.py'
+        assert any( s.kind == "QUOTE" for s in extract_spans( text, tier="HARD+SOFT" ) )
+        hard = extract_spans( text, tier="HARD" )
+        assert hard and all( s.tier == "HARD" for s in hard )
+
+    def test_a_pattern_that_matches_nothing_yields_no_span( self, monkeypatch ):
+        import re
+        monkeypatch.setattr( _freeze_module(), "_PATTERNS", [ ( "EMPTY", "HARD", re.compile( r"x*" ) ) ] )
+        assert extract_spans( "abc" ) == []
+
+    def test_an_empty_text_is_one_empty_clause( self ):
+        assert segment_clauses( "" ) == ( ( 0, 0 ), )
+
+    @pytest.mark.parametrize( "ratio", [ 0, -0.1, 1.5 ] )
+    def test_a_frozen_ratio_outside_zero_to_one_is_refused( self, ratio ):
+        with pytest.raises( ValueError, match="max_frozen_ratio" ):
+            freeze( SAMPLE, max_frozen_ratio=ratio )
+
+    def test_a_position_past_the_last_clause_belongs_to_the_last_clause( self ):
+        assert _freeze_module()._clause_of( 99, ( ( 0, 3 ), ( 3, 6 ) ) ) == 1
+        assert _freeze_module()._clause_of( 1, ( ( 0, 3 ), ( 3, 6 ) ) ) == 0
+
+    def test_a_namespace_that_collides_with_the_text_is_skipped( self, monkeypatch ):
+        """Ensures: the second candidate slice is used when the first already occurs in the text."""
+        class _Digest:
+            def hexdigest( self ): return "0123456789abcdef" * 4
+        class _Hashlib:
+            @staticmethod
+            def sha256( _data ): return _Digest()
+        monkeypatch.setattr( _freeze_module(), "hashlib", _Hashlib )
+        assert _freeze_module()._derive_namespace( "plain text" ) == ""
+        assert _freeze_module()._derive_namespace( "has [[0123_ in it" ) == "4567_"
+
+
+class TestCountAllLiterals:
+
+    def test_the_longest_enclosing_literal_wins_over_its_prefix( self ):
+        counts = count_all_literals( "Edit lupin-app.ini:1398 and lupin-app.ini:1398 now." )
+        assert counts[ "lupin-app.ini:1398" ] == 2
+        assert "lupin-app.ini" not in counts
+
+    def test_placeholders_contribute_nothing( self ):
+        frozen = freeze( SAMPLE )
+        assert not any( t in count_all_literals( frozen.frozen_text, frozen.namespace ) for t in frozen.tokens )
+
+    def test_verify_tier_literals_are_counted_too( self ):
+        assert count_all_literals( "see gate 2 on port 8000" )[ "gate 2" ] == 1
+
+
+class TestValidateAndRestoreEdges:
+
+    def test_text_welded_to_the_left_of_a_token_fails_boundary_integrity( self, frozen ):
+        placeholder = next( p for p in frozen.placeholders if not p.left_adjacent )
+        mutated     = frozen.frozen_text.replace( placeholder.token, "x" + placeholder.token )
+        result      = validate( mutated, frozen )
+
+        assert not result.ok
+        assert any( "left neighbour" in d for d in _violations_of( result, "boundary_integrity" ) )
+
+    def test_an_invented_token_is_a_violation_but_not_a_clause_move( self, frozen ):
+        text   = frozen.frozen_text
+        result = validate( text[ :-1 ] + " [[L99]]" + text[ -1: ], frozen )
+
+        assert not result.ok
+        assert not [ w for w in result.warnings if w[ 0 ] == "clause_confinement_unavailable" ]
+
+    def test_restoring_an_unknown_token_names_it( self, frozen ):
+        with pytest.raises( ValueError, match="unknown placeholder" ):
+            restore( "see [[L99]]", frozen, strict=False )
+
+    def test_a_restore_failure_after_a_clean_verdict_delivers_the_original( self, frozen, monkeypatch ):
+        from cosa.agents.dm_compression.freeze import ValidationResult
+        monkeypatch.setattr( _freeze_module(), "validate", lambda rewritten, msg: ValidationResult() )
+        text, reason = compress_or_original( "see [[L99]]", frozen )
+
+        assert text == SAMPLE
+        assert reason.startswith( "restore failed: unknown placeholder" )
 
 
 if __name__ == "__main__":
