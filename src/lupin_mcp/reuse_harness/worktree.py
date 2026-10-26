@@ -33,9 +33,10 @@ class Worktrees:
             - venv and artifacts take a path and return a dict with a status, as the provisioners in cosa.utils do
 
         Ensures:
+            - repo_root is kept as an absolute path, so every tree path returned is absolute
             - nothing is created yet
         """
-        self.repo_root = repo_root
+        self.repo_root = os.path.abspath( repo_root )
         self.base_dir  = base_dir
         self.venv      = venv
         self.artifacts = artifacts

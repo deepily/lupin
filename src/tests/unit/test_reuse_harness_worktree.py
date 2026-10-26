@@ -131,3 +131,9 @@ def test_the_default_provisioners_are_the_shared_ones():
     from cosa.utils.worktree_venv import provision_worktree_venv
     trees = worktree.Worktrees( "/x" )
     assert ( trees.venv, trees.artifacts ) == ( provision_worktree_venv, provision_worktree_artifacts )
+
+
+def test_a_relative_repo_root_still_gives_an_absolute_tree_path( repo, monkeypatch ):
+    monkeypatch.chdir( repo[ "root" ] )
+    path = worktree.Worktrees( ".", venv=repo[ "venv" ], artifacts=repo[ "artifacts" ] ).create( "run1", repo[ "frozen" ], [] )
+    assert path == os.path.join( os.path.realpath( repo[ "root" ] ), worktree.BASE_DIR, "run1" )
