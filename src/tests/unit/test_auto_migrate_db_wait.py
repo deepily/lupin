@@ -141,3 +141,31 @@ class TestWaitForDatabase:
 
 def _always_refused():
     raise OSError( "Connection refused" )
+
+
+class TestRunMigrationsReportsTheWait:
+
+    def test_an_unreachable_database_is_reported_once_per_retry_then_the_run_proceeds( self, monkeypatch, capsys ):
+        import cosa.rest.db.auto_migrate as am
+
+        calls = []
+        def _inspect( url ):
+            calls.append( url )
+            if len( calls ) == 1: raise ConnectionError( "proxy not up" )
+            return ( True, True )
+
+        monkeypatch.setattr( am, "resolve_database_url", lambda u=None: "postgresql://x/y" )
+        monkeypatch.setattr( am, "build_alembic_config", lambda database_url=None: object() )
+        monkeypatch.setattr( am, "_inspect_db_state", _inspect )
+        monkeypatch.setattr( am, "_read_current_revision", lambda url: "rev1" )
+        monkeypatch.setattr( am.command, "upgrade", lambda config, target: None )
+        monkeypatch.setattr( "time.sleep", lambda s: None )
+
+        result = am.run_migrations_to_head()
+
+        out = capsys.readouterr().out
+        assert out.count( "[auto-migrate] database not reachable" ) == 1
+        assert "(attempt 1): ConnectionError — retrying in" in out
+        assert len( calls ) == 2
+        assert result == { "before": "rev1", "after": "rev1", "applied": False, "bootstrapped": False }
+
