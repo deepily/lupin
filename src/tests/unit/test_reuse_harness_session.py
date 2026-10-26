@@ -330,3 +330,25 @@ def test_the_first_prompt_tells_the_builder_to_keep_everything_inside_the_client
     prompt = runner.calls[ 0 ][ "argv" ][ 2 ]
     assert worktree.CLIENT_ROOT in prompt and "package.json" in prompt and "A change anywhere else ends the run" in prompt
     assert "experiment_acceptance" in prompt and "$EXPERIMENT_SERVER_URL" in prompt
+
+
+REAL_INIT = json.load( open( os.path.join( os.path.dirname( __file__ ), "..", "fixtures", "reuse_harness", "real-init-event-claude-2.1.310.json" ) ) )
+
+
+def test_the_captured_real_init_event_has_the_fields_the_probe_reads_and_shows_a_denied_tool_leaving_the_tool_list():
+    """Captured from claude 2.1.310 with --disallowedTools "Bash,Skill(reuse-reviewer)"."""
+    assert ( REAL_INIT[ "type" ], REAL_INIT[ "subtype" ] ) == ( "system", "init" ) and isinstance( REAL_INIT[ "tools" ], list )
+    assert "Bash" not in REAL_INIT[ "tools" ] and "Read" in REAL_INIT[ "tools" ]
+    assert session.init_of( session.events_of( json.dumps( REAL_INIT ) ) ) == REAL_INIT
+
+
+def test_the_real_init_event_lists_the_reviewer_skill_though_its_deny_rule_was_set_so_the_folder_removal_is_what_hides_it():
+    assert "reuse-reviewer" in REAL_INIT[ "skills" ] and "reuse-reviewer" in REAL_INIT[ "slash_commands" ]
+    assert session.surface_listed( REAL_INIT, arms.SURFACE_REVIEWER ) is True
+    assert session.surface_answered( json.dumps( REAL_INIT ), arms.SURFACE_REVIEWER ) is True
+
+
+def test_the_real_init_event_offers_no_reuse_tool_because_that_environment_had_no_cosa_voice():
+    for surface in arms.SURFACES[ :3 ]:
+        assert session.surface_listed( REAL_INIT, surface ) is False
+        assert session.surface_answered( json.dumps( REAL_INIT ), surface ) is False

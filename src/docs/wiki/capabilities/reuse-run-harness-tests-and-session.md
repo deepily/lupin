@@ -32,7 +32,7 @@ Named gap: no real `claude` command has been started. The deny rules and the hoo
 ## The session
 - A session is a headless `claude -p` process with project hooks off. Both arms get the same MCP config.
 - `probe` starts a short session and asks it to call one surface.
-- `surface_answered` reads the init event's tool and skill lists first, so a model that declines the prompt proves nothing. A call that was not refused also counts.
+- `surface_answered` reads the init event's tool and skill lists first, so a model that declines the prompt proves nothing. A call that was not refused also counts. A denied tool leaves the tool list. A denied skill stays in the skill list (measured on claude 2.1.310). Only the folder removal hides the reviewer.
 - Output with no init event, or none with a tool list, is `PROBE_BLIND`. It is never read as a denial.
 - `work` runs one slice. The first slice starts the session with the brief and later slices resume it.
 - Seat hours are the wall time times the seats. Two own stops in a row mean it has finished.
