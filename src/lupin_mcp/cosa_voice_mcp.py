@@ -407,7 +407,18 @@ def _handle_sigterm( signum, frame ):
     sys.exit( 0 )
 
 
-signal.signal( signal.SIGTERM, _handle_sigterm )
+def install_sigterm_handler():
+    """
+    Make SIGTERM exit the server cleanly.
+
+    Requires:
+        - the caller is the server entry point, in the main thread
+
+    Ensures:
+        - SIGTERM runs _handle_sigterm, which exits with code 0
+        - importing this module does not call it, so a test process keeps its own handler
+    """
+    signal.signal( signal.SIGTERM, _handle_sigterm )
 
 # ============================================================================
 # Initialize at module load
@@ -4980,6 +4991,7 @@ if __name__ == "__main__":
     # exactly as it always has. See the flag's definition for why this is not an
     # environment check, and for what a future console_scripts entry point owes.
     _IS_MCP_SERVER = True
+    install_sigterm_handler()
     # PHASE 2 STARTS HERE AND NOWHERE ELSE (row `87ae7234`). Importing this module
     # must not start a poll loop that credits coverage to no test.
     _start_bridge_watch()
