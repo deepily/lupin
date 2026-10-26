@@ -137,3 +137,28 @@ def reload_enabled( env_value, is_prod_or_test ):
     """
     opted_in = ( env_value or "" ).strip().lower() in ( "1", "true", "yes" )
     return opted_in and not is_prod_or_test
+
+
+def reload_kwargs( enabled ):
+    """
+    Return the uvicorn keyword arguments that arm auto-reload, or an empty dict.
+
+    Requires:
+        - enabled is a bool, normally the result of reload_enabled
+
+    Ensures:
+        - returns {} when enabled is false
+        - otherwise returns reload=True and a reload_dirs whitelist of the runtime packages
+        - the whitelist leaves out tests, R&D notes, docs, history and migrations
+    """
+    if not enabled:
+        return { }
+    return {
+        "reload"      : True,
+        "reload_dirs" : [
+            "lupin_app", "lib", "lupin_cli", "lupin_mcp",
+            "cosa/agents", "cosa/config", "cosa/crud_for_dataframes", "cosa/io",
+            "cosa/memory", "cosa/orchestration", "cosa/repo", "cosa/rest",
+            "cosa/tools", "cosa/training", "cosa/utils",
+        ],
+    }

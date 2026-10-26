@@ -51,7 +51,7 @@ if src_path not in sys.path:
 # valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
 # instead of cryptically later at config load. (No defensive fallback.)
 from lupin_app.bootstrap_helpers import ( assert_lupin_root_valid, reload_enabled as _reload_enabled,
-                                          register_sigusr1_faulthandler )
+                                          register_sigusr1_faulthandler, reload_kwargs as _reload_kwargs )
 from cosa.rest.error_envelope import make_unhandled_exception_handler
 from lupin_app.lifespan_steps import ( record_clean_shutdown, cancel_background_task, shutdown_fcm_wake, drain_agentic_pool,
                                        stop_consumer_thread, cancel_peer_watchers, stop_commons_watcher,
@@ -254,6 +254,23 @@ notification_sweep_task = None
 #         thread.start()
 #         print( f"[SPEECH] Started speech emission thread for: '{msg}' (user: {user_id})" )
 #     return sync_emit_speech
+
+
+def _invalidate_snapshot_mgr():
+    """
+    Reload the solution snapshots when the cache registry flushes, if the manager is built.
+
+    Requires:
+        - the module global snapshot_mgr is None before boot finishes, or a manager with reload()
+
+    Ensures:
+        - calls snapshot_mgr.reload() and prints one line when the manager exists
+        - does nothing when it does not
+    """
+    if snapshot_mgr is not None:
+        print( "Reloading solution snapshots..." )
+        snapshot_mgr.reload()
+
 
 
 async def clock_loop():
@@ -755,10 +772,6 @@ async def lifespan( app: FastAPI ):
     # with the rest of the cache_registry. Mirrors the per-instance .reload()
     # call previously inlined in routers/system.py:/api/init.
     from cosa.config.cache_registry import register_invalidator
-    def _invalidate_snapshot_mgr():
-        if snapshot_mgr is not None:
-            print( "Reloading solution snapshots..." )
-            snapshot_mgr.reload()
     register_invalidator( "snapshot_mgr", _invalidate_snapshot_mgr )
 
     # Initialize queues with websocket manager
@@ -1274,16 +1287,7 @@ if __name__ == "__main__":
     # by default, that trap is easy to hit: reload-having-been-live has trained
     # everyone that source edits are served live; they are not until you bounce.
     reload_enabled = _reload_enabled( os.environ.get( "LUPIN_RELOAD" ), is_production_or_test )
-    reload_kwargs = {}
-    if reload_enabled:
-        reload_kwargs[ "reload" ]      = True
-        reload_kwargs[ "reload_dirs" ] = [
-            "lupin_app", "lib", "lupin_cli", "lupin_mcp",
-            # cosa RUNTIME subpackages only — NOT cosa/tests, cosa/rnd, cosa/docs, cosa/history
-            "cosa/agents", "cosa/config", "cosa/crud_for_dataframes", "cosa/io",
-            "cosa/memory", "cosa/orchestration", "cosa/repo", "cosa/rest",
-            "cosa/tools", "cosa/training", "cosa/utils",
-        ]
+    reload_kwargs  = _reload_kwargs( reload_enabled )
 
     uvicorn.run(
         "lupin_app.main:app",
