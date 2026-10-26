@@ -318,6 +318,16 @@ class TestOnAgenticComplete( _RFQBase ):
 # ── _transition_to_done ─────────────────────────────────────────────────────
 class TestTransitionToDone( _RFQBase ):
 
+    def test_done_is_a_no_op_when_the_job_already_went_terminal( self ):
+        for debug in ( True, False ):
+            with self.subTest( debug=debug ):
+                rq = self.build( **{ "app debug": debug } )
+                job = _AgenticFake( id_hash="d9", brake_terminal_claimed=True ); self._enqueue( rq, job )
+                rq._transition_to_done( job, "late duplicate" )
+                self.emit.assert_not_called()
+                rq.jobs_done_queue.push.assert_not_called()
+                self.assertIn( "d9", rq.queue_dict )
+
     def test_done_happy_path_with_duration( self ):
         rq = self.build(); job = _AgenticFake( id_hash="d1" ); self._enqueue( rq, job )
         with patch( "cosa.rest.test_suite_completion_watchdog.get_watchdog" ) as gw:
@@ -357,6 +367,16 @@ class TestTransitionToDone( _RFQBase ):
 # ── _transition_to_stalled ──────────────────────────────────────────────────
 class TestTransitionToStalled( _RFQBase ):
 
+    def test_stalled_is_a_no_op_when_the_job_already_went_terminal( self ):
+        for debug in ( True, False ):
+            with self.subTest( debug=debug ):
+                rq = self.build( **{ "app debug": debug } )
+                job = _AgenticFake( id_hash="s9", brake_terminal_claimed=True ); self._enqueue( rq, job )
+                rq._transition_to_stalled( job, "late" )
+                self.emit.assert_not_called()
+                rq.jobs_done_queue.push.assert_not_called()
+                self.assertIn( "s9", rq.queue_dict )
+
     def test_stalled_happy( self ):
         rq = self.build(); job = _AgenticFake( id_hash="s1" ); self._enqueue( rq, job )
         rq._transition_to_stalled( job, "out" )
@@ -377,6 +397,16 @@ class TestTransitionToStalled( _RFQBase ):
 
 # ── _transition_to_dead ─────────────────────────────────────────────────────
 class TestTransitionToDead( _RFQBase ):
+
+    def test_dead_is_a_no_op_when_the_job_already_went_terminal( self ):
+        rq = self.build( **{ "app debug": True } )
+        job = _AgenticFake( id_hash="x9", brake_terminal_claimed=True, error=None ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_dead( job, "second report" )
+        rq.jobs_dead_queue.push.assert_not_called()
+        ev.assert_not_called()
+        self.assertIsNone( job.error )
+        self.assertIn( "x9", rq.queue_dict )
 
     def test_dead_string_cause( self ):
         rq = self.build(); job = _AgenticFake( id_hash="x1", error=None ); self._enqueue( rq, job )
@@ -982,6 +1012,19 @@ class TestProcessJob( _RFQBase ):
         rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, snap ) ]
         rq._process_job( _AgentBaseFake() )
         rq._format_cached_result.assert_called_once()
+
+    def test_an_exact_hit_whose_second_gate_declines_runs_the_agent( self ):
+        """The serve can decline mid-way; nothing user-visible happened, so the agent runs instead."""
+        rq = self.build()
+        rq._format_cached_result = MagicMock( return_value=None )
+        rq._handle_base_agent    = MagicMock( return_value="ran" )
+        snap = _SnapFake( run_date="2026", answer_is_correct=True )
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, snap ) ]
+
+        rq._process_job( _AgentBaseFake() )
+
+        rq._format_cached_result.assert_called_once()
+        rq._handle_base_agent.assert_called_once()
 
     def test_a_near_match_is_no_longer_accepted_without_asking( self ):
         """
