@@ -60,6 +60,11 @@ def _patch_repo():
 class TestInitialization( unittest.TestCase ):
     """__init__ wires config + deps and opens no connection of its own."""
 
+    def test_debug_and_verbose_land_on_their_own_attributes( self ):
+        table, _ = _make_table( debug=True, verbose=False )
+        self.assertIs( table.debug, True )
+        self.assertIs( table.verbose, False )
+
     def test_init_wires_dependencies( self ):
         cfg = Mock()
         cfg.get.side_effect = _cfg_get

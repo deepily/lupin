@@ -83,6 +83,11 @@ def _patch_repo():
 class TestInit( unittest.TestCase ):
     """__init__ — config, failure accounting, question-embedding cache; opens nothing."""
 
+    def test_debug_and_verbose_land_on_their_own_attributes( self ):
+        table, _, _ = _make( debug=True, verbose=False )
+        self.assertIs( table.debug, True )
+        self.assertIs( table.verbose, False )
+
     def test_wires_dependencies( self ):
         table, question_tbl, provider = _make( debug=True, verbose=True )
         self.assertEqual( table._embedding_dim, 768 )
