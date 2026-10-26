@@ -81,6 +81,7 @@ def no_jev_key( monkeypatch ):
 @pytest.fixture
 def env( tmp_path ):
     root = make_lupin_repo( tmp_path )
+    ( tmp_path / "data" ).mkdir()                                                                 # an LUPIN_REUSE_DATA_DIR override must name an existing directory
     return root, tmp_path / "data", tmp_path / "out"
 
 
@@ -469,6 +470,7 @@ def test_two_servers_writing_receipts_at_once_leave_one_complete_receipt( env ):
 def test_context_from_environment_honours_the_relocation_variables( tmp_path, monkeypatch ):
     root = make_lupin_repo( tmp_path )
     monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
+    ( tmp_path / "d" ).mkdir()
     monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", str( tmp_path / "d" ) ); monkeypatch.setenv( "LUPIN_REUSE_OUT_DIR", str( tmp_path / "o" ) )
     c = rt.context_from_environment( root )
     assert c.data == tmp_path / "d" and c.out_dir == tmp_path / "o" and c.root == root
@@ -990,3 +992,26 @@ def test_a_private_typescript_member_is_askable_by_id_and_is_a_candidate_for_oth
     other = Recorder()
     rt.fetch_similar_impl( "cosa.mathx.add", ctx_for( env, other ), language="all" )
     assert any( b[ "state" ][ "candidate" ].startswith( hid ) for b in other.seen )                                # the private member is a candidate for another entry
+
+
+def test_reuse_context_refuses_a_relative_data_directory( tmp_path ):
+    with pytest.raises( rt.ReuseError ) as e: rt.ReuseContext( tmp_path, "Using" )
+    assert e.value.name == "BAD_DATA_DIR" and "'Using'" in e.value.detail
+    assert rt.ReuseContext( tmp_path, tmp_path / "d" ).data == tmp_path / "d"                    # control: an absolute path is accepted
+
+
+@pytest.mark.parametrize( "value", [ "Using", "snapshots/x" ] )
+def test_context_from_environment_refuses_a_relative_data_override( tmp_path, monkeypatch, value ):
+    root = make_lupin_repo( tmp_path )
+    monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", value )
+    with pytest.raises( rt.ReuseError ) as e: rt.context_from_environment( root )
+    assert e.value.name == "BAD_DATA_DIR" and "LUPIN_REUSE_DATA_DIR" in e.value.detail and repr( value ) in e.value.detail
+
+
+def test_context_from_environment_refuses_a_missing_data_override( tmp_path, monkeypatch ):
+    root = make_lupin_repo( tmp_path )
+    monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", str( tmp_path / "nope" ) )
+    with pytest.raises( rt.ReuseError ) as e: rt.context_from_environment( root )
+    assert e.value.name == "BAD_DATA_DIR" and str( tmp_path / "nope" ) in e.value.detail
+    ( tmp_path / "nope" ).mkdir()                                                                 # control: the same value is accepted once the directory exists
+    assert rt.context_from_environment( root ).data == tmp_path / "nope"

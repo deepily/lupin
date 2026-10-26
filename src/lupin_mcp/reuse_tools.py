@@ -245,6 +245,7 @@ class ReuseContext:
 
     Raises:
         - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer, or a call_budget_cap below CALL_BUDGET_CAP
+        - ReuseError BAD_DATA_DIR for a data path that is not absolute, because a relative one writes under whatever directory the process started in
     """
 
     def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET,
@@ -253,6 +254,8 @@ class ReuseContext:
             raise ReuseError( "BAD_BUDGET", f"call budget cap must be an integer of at least {CALL_BUDGET_CAP}, got {call_budget_cap!r}" )
         if type( call_budget ) is not int or not 1 <= call_budget <= call_budget_cap:
             raise ReuseError( "BAD_BUDGET", f"call budget must be an integer from 1 to {call_budget_cap}, got {call_budget!r}" )
+        if not pathlib.Path( data ).is_absolute():
+            raise ReuseError( "BAD_DATA_DIR", f"data directory must be an absolute path, got {str( data )!r}" )
         self.call_budget      = call_budget
         self.pages            = []                            # set by prepare(): the capability pages Stage A may ask about
         self.root             = pathlib.Path( root )
@@ -304,6 +307,9 @@ def context_from_environment( root=None ):
     Raises:
         - ReuseError BAD_BUDGET when that variable is not an integer from 1 to CALL_BUDGET_CAP; a budget
           above the cap is refused, never clamped
+        - ReuseError BAD_DATA_DIR when LUPIN_REUSE_DATA_DIR is set to a path that is relative or is not an
+          existing directory, naming the variable and the value (the value "Using" once made a
+          snapshot land in <cwd>/Using/snapshots)
     """
     try:
         top = pathlib.Path( root ) if root else git_toplevel()
@@ -312,6 +318,8 @@ def context_from_environment( root=None ):
     data = os.environ.get( "LUPIN_REUSE_DATA_DIR" )
     out  = os.environ.get( "LUPIN_REUSE_OUT_DIR" )
     raw  = os.environ.get( BUDGET_VARIABLE )
+    if data and ( not pathlib.Path( data ).is_absolute() or not pathlib.Path( data ).is_dir() ):
+        raise ReuseError( "BAD_DATA_DIR", f"LUPIN_REUSE_DATA_DIR must name an existing absolute directory, got {data!r}" )
     try:
         budget = int( raw ) if raw else DEFAULT_CALL_BUDGET
     except ValueError as e:

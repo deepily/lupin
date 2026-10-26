@@ -52,6 +52,7 @@ class WireClient( MCPStdioClient ):
 def server_env( data, out, extra_pythonpath=None ):
     """Ensures: returns the environment of a spawned cosa-voice with the reuse data and index relocated."""
     env = { k: v for k, v in os.environ.items() if k != "JEV_API_TOASTER" }
+    pathlib.Path( data ).mkdir( parents=True, exist_ok=True )                                    # the data override must name an existing directory
     node_bins = sorted( pathlib.Path.home().glob( ".nvm/versions/node/*/bin" ) )
     path = os.pathsep.join( [ str( b ) for b in node_bins ] + [ env.get( "PATH", "" ) ] )
     pp   = os.pathsep.join( [ p for p in ( extra_pythonpath, str( REPO / "src" ) ) if p ] )

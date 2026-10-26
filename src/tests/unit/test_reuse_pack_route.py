@@ -56,6 +56,7 @@ def no_jev_key( monkeypatch ):
 @pytest.fixture
 def env( tmp_path ):
     root = make_lupin_repo( tmp_path )
+    ( tmp_path / "data" ).mkdir()                                                                 # an LUPIN_REUSE_DATA_DIR override must name an existing directory
     return root, tmp_path / "data", tmp_path / "out"
 
 

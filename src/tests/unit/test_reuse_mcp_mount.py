@@ -207,6 +207,7 @@ def _rpc( proc, msg, want_id, timeout=90 ):
 
 def test_stdio_session_calls_each_reuse_tool_alongside_a_voice_tool( tmp_path ):
     root = make_lupin_repo( tmp_path )
+    ( tmp_path / "data" ).mkdir()
     env  = { **{ k: v for k, v in os.environ.items() if k != "JEV_API_TOASTER" }, "PYTHONPATH": str( REPO_ROOT / "src" ), "LUPIN_ROOT": str( REPO_ROOT ),
              "LUPIN_REUSE_DATA_DIR": str( tmp_path / "data" ), "LUPIN_REUSE_OUT_DIR": str( tmp_path / "out" ) }
     proc = subprocess.Popen( [ sys.executable, "-m", "lupin_mcp.cosa_voice_mcp" ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env, cwd=str( REPO_ROOT ) )

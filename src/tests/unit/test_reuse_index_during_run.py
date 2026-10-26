@@ -201,6 +201,7 @@ def test_the_context_from_the_environment_reports_what_chose_its_folders( tmp_pa
     monkeypatch.setattr( rt, "data_dir", lambda top: tmp_path / "fleet" )
     d = rt.context_from_environment( root )
     assert ( d.data_source, d.out_source, d.data ) == ( "default", "default", tmp_path / "fleet" )
+    ( tmp_path / "mine" ).mkdir()
     monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", str( tmp_path / "mine" ) ); monkeypatch.setenv( "LUPIN_REUSE_OUT_DIR", str( tmp_path / "out" ) )
     s = rt.context_from_environment( root )
     assert ( s.data_source, s.out_source, s.data, s.out_dir ) == ( "LUPIN_REUSE_DATA_DIR", "LUPIN_REUSE_OUT_DIR", tmp_path / "mine", tmp_path / "out" )
