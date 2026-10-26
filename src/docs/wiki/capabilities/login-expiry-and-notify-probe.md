@@ -5,7 +5,7 @@ pins:
   - scripts.lib.claude_login_expiry.classify@7b615fecde
   - scripts.lib.claude_login_expiry.main@041b48268c
   - scripts.lib.installer_notify_probe.classify@9e0922ccf4
-  - scripts.lib.installer_notify_probe.main@055c8e8847
+  - scripts.lib.installer_notify_probe.main@ee6df01217
 ---
 # Login expiry and notify probe
 
