@@ -95,6 +95,20 @@ The TestSuiteJob will then return a cancelled result dict.
 
 ---
 
+### The coverage gate answers exit 2 about the server's coverage of main.py
+
+The gate folds the `:8000` server's coverage of `src/lupin_app/main.py` into its data. Exit 2 with a `[server-coverage]` line means that data is absent, stale or unreadable. The line gives the reason (`no-data`, `no-boot`, `bad-boot`, `stale`, `unreadable`, `empty`, `main-missing` or `no-arcs`).
+
+To produce the data:
+
+1. Check `:8000` is idle with `PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`.
+2. Recreate the container with the flag: `LUPIN_SERVER_COVERAGE=1 docker compose up -d --force-recreate lupin-rest-test`.
+3. Submit a suite through `/api/v2/submit`.
+4. Stop the container with `docker stop`. A kill writes no data.
+5. Re-run the gate on the host.
+
+The data is stale when `main.py`'s content hash differs from the one recorded at boot. A commit that leaves `main.py` alone does not make it stale. See [[server-coverage-fold]].
+
 ## Related Documentation
 
 - **[Test Fix Expediter Guide](../test-fix-expediter-guide.md)** — TFE consumes remediation snapshots produced here

@@ -319,7 +319,9 @@ omit   = [
 # this run supports.
 #
 # WHERE THE REMAINING 960 ARE: lupin_app 367 (its runtime is the :8000 tiers — the
-# ratified fold-in, §3c, is not done yet), cosa 334, lupin_cli 255, lupin_mcp 4.
+# fold-in, §3c, is src/cosa/utils/server_coverage.py: since 2026-10-26 the gate folds the
+# test server's coverage of main.py in, and answers exit 2 when that data is absent or stale),
+# cosa 334, lupin_cli 255, lupin_mcp 4.
 # ── RE-BASED 98 -> 92 on 2026-08-29 (row e2099400; Rick ruled: include src/scripts
 #    and re-base the floor to the measured truth). NOT a lowered standard — the FRAME
 #    got bigger, so the same tests now answer a harder question.

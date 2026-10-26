@@ -334,6 +334,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[checked-hash-bytecode]] — checked-hash pyc write control, pyc census and mode ledger. `cosa.utils` (checked_hash_pyc)
 - [[unit-network-guard-and-collection-diagnosis]] — outbound-dial guard for unit tests and the pytest collection-failure diagnosis. `cosa.utils` (unit_network_guard, pytest_collection_diagnosis)
 - [[coverage-frame-and-visual-failures]] — coverage config against disk check, and the per-run folder for visual snapshot failures. `cosa.utils` (coverage_frame, visual_failures)
+- [[server-coverage-fold]] — folds the :8000 test server's coverage of main.py into the coverage gate; absent or stale data is exit 2. `cosa.utils` (server_coverage)
 - [[coverage-contention-guard]] — detects another running suite before a coverage run. `cosa.utils` (coverage_contention)
 - [[worktree-venv-and-drift-disclosure]] — worktree venv provisioning verdicts, the drift sentence, and artifact-outcome parsing. `cosa.utils` (worktree_venv, seat_worktree, worktree_artifacts)
 - [[db-grants-matrix-and-startup-check]] — the role and privilege matrix for the dev and test databases, the read-only grants check and the boot-time alarm. `cosa.utils` (db_grants)
