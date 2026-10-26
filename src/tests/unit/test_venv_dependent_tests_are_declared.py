@@ -173,6 +173,16 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "suite. Measured BOTH ways at 7aa064187 in one worktree, the `.venv` symlink moved aside "
         "and restored between the runs, the interpreter pinned to the main checkout so only the "
         "target moved: 12 passed with a `.venv`, 12 passed without, 12 passed with again.",
+    "test_reuse_harness_acceptance.py":
+        "the one `os.path.join( tree[ \"path\" ], \".venv\", \"bin\", \"python\" )` (the "
+        "pytest-environment test) is the argv the test EXPECTS the adapter to build for a "
+        "throwaway git repo in tmp_path. The adapter is handed a recording Runner there, so "
+        "nothing is executed; the two cases that run a real pytest pass `python=sys.executable`. "
+        "The path is a property of the fixture tree, never of the tree running the suite. "
+        "Measured BOTH ways at 9d978cb0a in this worktree, the `.venv` symlink moved aside and "
+        "restored between the arms with `readlink` read before and after, the interpreter "
+        "pinned to the main checkout so only the target moved: 39 passed with a `.venv`, "
+        "39 passed without, 39 passed with again.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "
