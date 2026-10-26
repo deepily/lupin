@@ -340,3 +340,26 @@ class TestDrainCleanupFailure:
         ( buffer_dir / "cc-buffer-abc12345.jsonl" ).write_text( json.dumps( { "text": "kept" } ) + "\n" )
         with patch.object( Path, "unlink", side_effect=PermissionError( "denied" ) ):
             assert [ m[ "text" ] for m in hc.drain_voice_buffer( SID ) ] == [ "kept" ]
+
+
+class TestStreamEntryAndProgressGroup:
+
+    def test_a_non_dict_payload_is_logged_without_event_fields( self, tmp_path, monkeypatch ):
+        monkeypatch.setattr( hc, "_logs_dir", lambda: tmp_path )
+        hc.log_to_stream( "stop", "raw text", extra={ "phase": "x" } )
+        entry = json.loads( ( tmp_path / "hook-events.jsonl" ).read_text().splitlines()[ -1 ] )
+        assert ( entry[ "hook" ], entry[ "phase" ] ) == ( "stop", "x" )
+        assert "event" not in entry and "session_id" not in entry and "tool" not in entry
+
+    def test_a_dict_payload_adds_event_session_and_tool( self, tmp_path, monkeypatch ):
+        monkeypatch.setattr( hc, "_logs_dir", lambda: tmp_path )
+        hc.log_to_stream( "pre", { "hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "" } )
+        entry = json.loads( ( tmp_path / "hook-events.jsonl" ).read_text().splitlines()[ -1 ] )
+        assert ( entry[ "event" ], entry[ "tool" ] ) == ( "PreToolUse", "Bash" )
+
+    def test_the_progress_group_id_uses_the_first_eight_characters( self ):
+        assert hc.build_progress_group_id( "pt", "6c54ecc2-aaaa-bbbb" ) == "pt-6c54ecc2"
+
+    def test_an_empty_session_id_falls_back_to_zeros( self ):
+        assert hc.build_progress_group_id( "pu", "" ) == "pu-00000000"
+        assert hc.build_progress_group_id( "pu", None ) == "pu-00000000"
