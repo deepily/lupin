@@ -16,6 +16,7 @@ pins:
 
 ## What it does
 - With `LUPIN_SERVER_COVERAGE=1`, `src/scripts/run-fastapi-lupin-test.sh` runs `write-boot` and then starts the server under `coverage run --parallel-mode --branch`, measuring only `main.py`.
+- The start script passes `--rcfile=src/conf/coverage-server.rc`, which sets `sigterm = true`. `docker stop` sends SIGTERM, and without that setting no data file is written.
 - `write_boot( directory, main_py )` clears the previous boot's data and records `main_py_hash` in `boot.json`.
 - `blob_hash( path )` returns the same value as `git hash-object`, computed without git.
 - `server_dir( root )` is `io/coverage/server` under the root, or `LUPIN_SERVER_COVERAGE_DIR` when set.

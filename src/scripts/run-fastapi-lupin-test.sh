@@ -31,11 +31,14 @@ python3 scripts/seed_test_companions.py
 # under `coverage run`, so the gate can count the lifespan() start-up work and the __main__ block
 # that no unit test reaches. write-boot clears the previous boot's data and records main.py's
 # content hash; the data is written when the process exits, so stop the container with
-# `docker stop` (SIGTERM), never kill it. Only main.py is measured here (--include), because the
-# gate takes only main.py's arcs from this data. Unset, the line below is the unchanged start.
+# `docker stop` (SIGTERM), never kill it. The rcfile's sigterm = true is what saves the data on that
+# SIGTERM (measured 2026-10-26: without it the data
+# file never appears). Only main.py is measured here (--include), because the gate takes only
+# main.py's arcs from this data. Unset, the line below is the unchanged start.
 if [ "${LUPIN_SERVER_COVERAGE:-}" = "1" ]; then
     python3 -m cosa.utils.server_coverage write-boot || exit 1
     exec python3 -m coverage run --parallel-mode --branch \
+        --rcfile="${LUPIN_ROOT:-/var/lupin}/src/conf/coverage-server.rc" \
         --data-file="$( python3 -m cosa.utils.server_coverage data-file )" \
         --include="${LUPIN_ROOT:-/var/lupin}/src/lupin_app/main.py" \
         -m lupin_app.main

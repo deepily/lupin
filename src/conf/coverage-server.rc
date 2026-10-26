@@ -1,0 +1,6 @@
+# Coverage settings for the :8000 server run (LUPIN_SERVER_COVERAGE=1, row e1a36bb4).
+# `docker stop` sends SIGTERM; uvicorn finishes its shutdown, then re-raises the signal, so the
+# process dies by the default SIGTERM action and coverage's atexit save never runs. sigterm = true
+# saves the data on SIGTERM. Without it io/coverage/server/ holds only boot.json.
+[run]
+sigterm = true
