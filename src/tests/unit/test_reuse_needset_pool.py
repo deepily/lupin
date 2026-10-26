@@ -285,6 +285,7 @@ def test_the_screen_looks_only_at_the_top_neighbours_and_an_empty_target_pool_pa
     kept, measures, vectors = screen_world()
     short = pool.partner_screen( kept, measures, vectors, 0.0, 0.5, "concat", top=1 )
     assert "p.a1" not in short[ ( "work_alike", "py" ) ], "the seed itself and its lookalike fill the two nearest places"
+    assert "p.a2" in short[ ( "work_alike", "py" ) ], "top=1 reads the seed and one neighbour, so a2 finds its partner at the second place"
     py_only = [ r for r in kept if r[ "lang" ] == "py" ]
     assert pool.partner_screen( py_only, measures, vectors, 0.0, 0.5, "concat" )[ ( "cross_language", "py" ) ] == []
 
@@ -299,3 +300,22 @@ def test_a_cell_pool_with_a_screen_keeps_only_the_passed_seeds_of_the_two_screen
     assert ( "work_alike", "ts" ) not in cells and cells[ ( "cross_language", "ts" ) ] == [ "w.a" ]
     assert cells[ ( "near_copy", "py" ) ] == [ "p.one", "p.two" ], "near_copy and nothing are not screened"
     assert pool.cell_pool( kept, twins, ids ) == pool.cell_pool( kept, twins, ids, None )
+
+
+def pair_world( second ):
+    """Return ( kept, measures, vectors ) for two unlike py symbols; y gets the vector."""
+    kept     = [ rec( "p.x", "pkg/p.py", "x" ), rec( "p.y", "pkg/p.py", "y" ) ]
+    measures = { "p.x": pool.Measure( 40, frozenset( { 1, 2 } ) ), "p.y": pool.Measure( 40, frozenset( { 3, 4 } ) ) }
+    return kept, measures, Vecs( { "p.x": [ 1.0, 0.0 ], "p.y": second } )
+
+
+def test_a_seed_whose_partner_scores_exactly_the_floor_passes():
+    kept, measures, vectors = pair_world( [ 0.0, 1.0 ] )
+    assert pool.partner_screen( kept, measures, vectors, 0.0, 0.5, "concat" )[ ( "work_alike", "py" ) ] == [ "p.x", "p.y" ], "orthogonal unit vectors score exactly 0.0"
+    assert pool.partner_screen( kept, measures, vectors, 0.001, 0.5, "concat" )[ ( "work_alike", "py" ) ] == []
+
+
+def test_a_zero_vector_scores_zero_with_every_partner_instead_of_not_a_number():
+    kept, measures, vectors = pair_world( [ 0.0, 0.0 ] )
+    got = pool.partner_screen( kept, measures, vectors, 0.0, 0.5, "concat" )
+    assert got[ ( "work_alike", "py" ) ] == [ "p.x", "p.y" ], "a zero row has cosine 0.0, which reaches a floor of 0.0; a not-a-number never compares true"

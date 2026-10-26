@@ -199,6 +199,19 @@ def test_the_env_is_assembled_from_the_real_index_with_two_ledgers_and_a_smoke_f
     assert "cosa.fx.pkg.a.twin_b" in [ r[ "id" ] for r in job[ "keys" ] ] and "twin_a" not in job[ "stripped" ][ "text" ] and job[ "stripped" ][ "forbidden" ]
 
 
+def test_the_partner_floor_on_the_command_line_reaches_the_env_it_is_the_only_switch_for_the_screen( tmp_path, monkeypatch ):
+    root = tree( tmp_path )
+    by_id, *_ = smoke.index_parts( root, tmp_path / "scan" )
+    ids  = sorted( by_id )
+    loaded = Vectors( ids, [ [ 1.0, 0.01 * n ] for n in range( len( ids ) ) ] )
+    loaded.manifest = {}
+    monkeypatch.setattr( smoke.vector_store, "load_vectors", lambda d: loaded )
+    args = smoke.parse_args( argv( tmp_path / "out", extra=[ "--cli-path", "", "--partner-floor", "0.79" ] ) )
+    args.root = str( root )
+    env  = smoke.assemble_env( args, Model(), Model(), None, "2026-10-24T14:00:00+00:00", smoke.Timed( time.monotonic ) )
+    assert env.screen_floor == 0.79
+
+
 def test_the_live_env_uses_the_real_drafter_the_named_second_model_and_the_embeddings_client( monkeypatch ):
     made, got = [], []
     monkeypatch.setattr( smoke.draft, "drafter_call", lambda *a: ( made.append( a ) or f"call{len( made )}" ) )

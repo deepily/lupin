@@ -136,6 +136,18 @@ def test_a_run_with_a_screen_floor_records_it_in_the_plan_and_the_report_and_dra
     assert plain[ "report" ][ "screen" ] is None and "screen_floor" not in plain[ "plan" ]
 
 
+def test_a_floor_that_drops_a_seed_leaves_the_report_census_before_the_screen_larger_than_after( tmp_path ):
+    env              = make_env( tmp_path )
+    outlier          = "pkg.alpha.pyfn5"
+    env.ctx.vectors.matrices[ "concat" ][ env.ctx.rows[ outlier ] ] = [ 0.0, 0.0, 1.0 ]
+    env.screen_floor = 0.5
+    got              = run.run_needset( env, table(), tmp_path )
+    before, after    = got[ "report" ][ "screen" ][ "before" ], got[ "report" ][ "census" ]
+    assert before == quota.census( pool.cell_pool( env.kept, env.twins, set( env.by_id ) ) )
+    for kind in ( "work_alike", "cross_language" ): assert before[ kind ][ "py" ] == after[ kind ][ "py" ] + 1 and before[ kind ][ "ts" ] == after[ kind ][ "ts" ]
+    assert before[ "near_copy" ] == after[ "near_copy" ] and not any( outlier in r[ "final" ] for r in got[ "cells" ] )
+
+
 def test_a_floor_no_seed_reaches_leaves_the_matched_cells_with_no_seeds_and_the_draw_names_the_cell( tmp_path ):
     env              = make_env( tmp_path )
     env.screen_floor = 1.5
