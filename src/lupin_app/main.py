@@ -52,6 +52,8 @@ if src_path not in sys.path:
 from lupin_app.bootstrap_helpers import ( assert_lupin_root_valid, reload_enabled as _reload_enabled,
                                           register_sigusr1_faulthandler )
 from cosa.rest.error_envelope import make_unhandled_exception_handler
+from lupin_app.lifespan_steps import ( record_clean_shutdown, cancel_background_task, shutdown_fcm_wake, drain_agentic_pool,
+                                       stop_consumer_thread, cancel_peer_watchers, stop_commons_watcher )
 assert_lupin_root_valid( lupin_root )
 
 # Row abe4188d — arm `kill -USR1 <pid>` to dump every thread's Python stack to stderr.
@@ -1282,53 +1284,15 @@ async def lifespan( app: FastAPI ):
         print( f"[managed-bounce] WARN: shutdown warning emit failed: {e}", file=sys.stderr )
 
     # Clean-shutdown marker: exact last-available stamp (the 60s heartbeat covers hard kills)
-    try:
-        record_server_available()
-        print( "[CJ-PERSIST] Recorded clean-shutdown last-available marker" )
-    except Exception as e:
-        print( f"[WARN] shutdown last-available marker failed: {e}" )
+    record_clean_shutdown( record_server_available )
     
     # Cancel and cleanup background clock task
-    if clock_task:
-        print( "[CLOCK] Cancelling background clock task..." )
-        clock_task.cancel()
-        try:
-            await clock_task
-        except asyncio.CancelledError:
-            print( "[CLOCK] Background clock task cancelled successfully" )
-        except Exception as e:
-            print( f"[CLOCK] Error during clock task shutdown: {e}" )
-    
-    # Cancel and cleanup WebSocket maintenance tasks
-    if websocket_heartbeat_task:
-        print( "[WS-HEARTBEAT] Cancelling heartbeat task..." )
-        websocket_heartbeat_task.cancel()
-        try:
-            await websocket_heartbeat_task
-        except asyncio.CancelledError:
-            print( "[WS-HEARTBEAT] Heartbeat task cancelled successfully" )
-        except Exception as e:
-            print( f"[WS-HEARTBEAT] Error during heartbeat task shutdown: {e}" )
-    
-    if websocket_cleanup_task:
-        print( "[WS-CLEANUP] Cancelling cleanup task..." )
-        websocket_cleanup_task.cancel()
-        try:
-            await websocket_cleanup_task
-        except asyncio.CancelledError:
-            print( "[WS-CLEANUP] Cleanup task cancelled successfully" )
-        except Exception as e:
-            print( f"[WS-CLEANUP] Error during cleanup task shutdown: {e}" )
+    await cancel_background_task( clock_task, "CLOCK", "background clock task", "Background clock task", "clock task" )
 
-    if notification_sweep_task:
-        print( "[NOTIFY-SWEEP] Cancelling orphan sweep task..." )
-        notification_sweep_task.cancel()
-        try:
-            await notification_sweep_task
-        except asyncio.CancelledError:
-            print( "[NOTIFY-SWEEP] Orphan sweep task cancelled successfully" )
-        except Exception as e:
-            print( f"[NOTIFY-SWEEP] Error during sweep task shutdown: {e}" )
+    # Cancel and cleanup WebSocket maintenance tasks
+    await cancel_background_task( websocket_heartbeat_task, "WS-HEARTBEAT", "heartbeat task", "Heartbeat task", "heartbeat task" )
+    await cancel_background_task( websocket_cleanup_task, "WS-CLEANUP", "cleanup task", "Cleanup task", "cleanup task" )
+    await cancel_background_task( notification_sweep_task, "NOTIFY-SWEEP", "orphan sweep task", "Orphan sweep task", "sweep task" )
     
     # Row ed76b897: cancel any pending TRAILING wake. A notify that lands inside a
     # debounce window arms a timer for the window's close, and at shutdown that
@@ -1342,62 +1306,23 @@ async def lifespan( app: FastAPI ):
     except Exception as e:  # pragma: no cover - best-effort boundary guard; must never block shutdown (main.py is outside cov source=["cosa"])
         print( f"[FCM-PAUSE] Error during pause-controller shutdown (continuing): {e}" )
 
-    if fcm_wake_service is not None:
-        try:
-            fcm_wake_service.shutdown()
-            print( "[FCM-WAKE] Pending trailing wakes cancelled" )
-        except Exception as e:
-            print( f"[FCM-WAKE] Error during wake-service shutdown (continuing): {e}" )
+    shutdown_fcm_wake( fcm_wake_service )
 
     # Phase 2 (CJ Flow async multi-lane): drain agentic pool BEFORE consumer stops
     # and BEFORE HTTP socket closes. In-flight pool workers need the WebSocket
     # channel alive long enough to emit their final job_state_transition events
     # as they finish (or are dead-lettered on timeout).
-    if jobs_run_queue is not None and hasattr( jobs_run_queue, "shutdown_pool" ):
-        try:
-            print( "[AGENTIC-POOL] Draining agentic pool before consumer stop..." )
-            jobs_run_queue.shutdown_pool( wait=True, timeout=30.0 )
-        except Exception as e:
-            print( f"[AGENTIC-POOL] Error during pool drain (continuing): {e}" )
+    drain_agentic_pool( jobs_run_queue )
 
     # Shutdown consumer thread
-    if consumer_thread:
-        print( "[CONSUMER] Stopping todo-producer-run-consumer thread..." )
-        with jobs_todo_queue.condition:
-            jobs_todo_queue.consumer_running = False
-            jobs_todo_queue.condition.notify()
-
-        # Wait for consumer thread to finish
-        consumer_thread.join( timeout=5.0 )
-        if consumer_thread.is_alive():
-            print( "[CONSUMER] Warning: Consumer thread did not exit cleanly" )
-        else:
-            print( "[CONSUMER] Todo-producer-run-consumer thread stopped successfully" )
+    stop_consumer_thread( consumer_thread, jobs_todo_queue )
     
     # Cancel any active peer-queue watchers
-    try:
-        print( "[PEER-WATCH] Cancelling active peer-queue watchers..." )
-        await peer.cancel_all_watchers_on_shutdown()
-        print( "[PEER-WATCH] Peer-queue watchers cancelled" )
-    except Exception as e:
-        print( f"[PEER-WATCH] Error cancelling watchers: {e}" )
+    await cancel_peer_watchers( peer.cancel_all_watchers_on_shutdown )
 
-    # Stop the commons ack watcher daemon (Phase 2)
-    if commons_activity_watcher is not None:
-        try:
-            print( "[COMMONS] Stopping CommonsActivityWatcher daemon..." )
-            commons_activity_watcher.stop( join_timeout=3.0 )
-            print( "[COMMONS] CommonsActivityWatcher stopped" )
-        except Exception as e:
-            print( f"[COMMONS] WARN — CommonsActivityWatcher shutdown failed: {e}" )
-
-    if commons_ack_watcher is not None:
-        try:
-            print( "[COMMONS] Stopping CommonsAckWatcher daemon..." )
-            commons_ack_watcher.stop( join_timeout=3.0 )
-            print( "[COMMONS] CommonsAckWatcher stopped" )
-        except Exception as e:
-            print( f"[COMMONS] Error stopping watcher: {e}" )
+    # Stop the commons watcher daemons (Phase 2)
+    stop_commons_watcher( commons_activity_watcher, "CommonsActivityWatcher", "WARN — CommonsActivityWatcher shutdown failed" )
+    stop_commons_watcher( commons_ack_watcher, "CommonsAckWatcher", "Error stopping watcher" )
 
 
     # Add any other cleanup code here if needed
