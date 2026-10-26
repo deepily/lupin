@@ -273,3 +273,11 @@ def test_a_chosen_permission_mode_reaches_the_probe_and_the_working_session_alik
     sessions.probe( WITH, arms.SURFACE_CHECK_EXISTS )
     sessions.work( WITH, "/wt/run1", HANDLE, 5 )
     assert [ call[ "argv" ][ call[ "argv" ].index( "--permission-mode" ) + 1 ] for call in runner.calls ] == [ "acceptEdits", "acceptEdits" ]
+
+
+def test_the_setting_sources_flag_carries_the_configs_sources_and_not_a_fixed_list():
+    sessions, runner = make( ( 0, "" ) )
+    sessions.probe( WITH, arms.SURFACE_CHECK_EXISTS )
+    sessions.probe( dict( WITH, setting_sources=[ "project" ] ), arms.SURFACE_CHECK_EXISTS )
+    values = [ call[ "argv" ][ call[ "argv" ].index( "--setting-sources" ) + 1 ] for call in runner.calls ]
+    assert values == [ "project,local", "project" ] and "user" not in values[ 0 ]

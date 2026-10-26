@@ -23,7 +23,8 @@ TAIL            = 20
 PERMISSION_MODE = "bypassPermissions"
 SETTINGS        = json.dumps( { "disableAllHooks" : True } )
 BRIEF           = ("Read src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.25-experiment-build-task-generic-plan.md and build what it describes. "
-                   "Run the acceptance tests in src/tests/experiment_acceptance against the server at $EXPERIMENT_SERVER_URL until every one passes.")
+                   "Run the acceptance tests in src/tests/experiment_acceptance against the server at $EXPERIMENT_SERVER_URL until every one passes. "
+                   "Put everything you create inside src/lupin_app/static, including package.json and tsconfig.json with a build script. A change anywhere else ends the run.")
 RESUME_PROMPT   = "Continue. Run the acceptance tests again and keep going until every one passes."
 PROBE_PROMPTS   = {
     arms.SURFACE_CHECK_EXISTS    : "Call the tool mcp__cosa-voice__check_exists once, about a function that parses an ISO date. Then stop.",

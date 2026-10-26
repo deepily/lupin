@@ -4,7 +4,8 @@ The test port of the run harness: run the frozen acceptance tests against a run'
 Each test gets a verdict.
 
 The tests run from the run's worktree, so a run that edits them or the server would be graded by its own changes.
-Before every test run the frozen paths are compared with the frozen commit, and any difference refuses the run.
+Before every test run the whole tree is compared with the frozen commit.
+Any change outside the client folder refuses the run, so no file pytest reads can be edited.
 The verdict of a test is read from the junit file pytest writes, one entry per test id, and a skip is not a pass.
 """
 import os
@@ -16,9 +17,8 @@ from lupin_mcp.reuse_harness import errors as err
 from lupin_mcp.reuse_harness.freeze import TEST_DIR
 from lupin_mcp.reuse_harness.worktree import CLIENT_ROOT
 
-# What a run may not change: the tests it is graded by and the server it builds against (plan 3, section 7.2, ground rule 2).
-FROZEN_PATHS  = ( TEST_DIR, "src/cosa", "src/lupin_app", ":(exclude)" + CLIENT_ROOT )
-BUILD_COMMAND = ( "npm", "run", "build" )
+# A run may change the client folder and nothing else (plan 3, section 7.2, ground rule 2). The rule is the whole tree, not a list of files.
+BUILD_COMMAND = ( "npm", "--prefix", CLIENT_ROOT, "run", "build" )
 TEST_TIMEOUT  = 3600
 BUILD_TIMEOUT = 600
 TAIL          = 20
@@ -27,7 +27,7 @@ TAIL          = 20
 class Acceptance:
     """Runs the acceptance tests of one run."""
 
-    def __init__( self, commit, notify_api_key, report_dir, runner=commands.run_command, build_command=BUILD_COMMAND, python=None, environ=None ):
+    def __init__( self, commit, notify_api_key, report_dir, runner=commands.run_command, build_command=BUILD_COMMAND, python=None, environ=None, removed=() ):
         """
         Remember what a test run needs.
 
@@ -35,6 +35,7 @@ class Acceptance:
             - commit is the full frozen sha the run's worktree was cut from
             - notify_api_key is the key the run's server accepts from the sender side of the tests
             - report_dir exists and is outside the worktree
+            - removed are the paths the arm's worktree was cut without; deleting them is not tampering
             - runner( argv, env=, cwd=, timeout= ) returns ( exit code, output )
 
         Ensures:
@@ -45,6 +46,7 @@ class Acceptance:
         self.report_dir     = report_dir
         self.runner         = runner
         self.build_command  = list( build_command )
+        self.removed        = tuple( removed )
         self.python         = python
         self.environ        = os.environ if environ is None else environ
         self.calls          = 0
@@ -79,10 +81,22 @@ class Acceptance:
         return { "results" : results, "client_builds" : built == 0 }
 
     def _check_untouched( self, path ):
-        """Refuse a worktree whose frozen paths differ from the frozen commit, tracked or untracked."""
-        changed = pool_builder.run_git( path, [ "diff", "--name-only", self.commit, "--", *FROZEN_PATHS ] ).decode( "utf-8" ).split()
-        added   = pool_builder.run_git( path, [ "ls-files", "--others", "--exclude-standard", "--", *FROZEN_PATHS ] ).decode( "utf-8" ).split()
-        if changed or added: raise err.HarnessError( err.TESTS_TAMPERED, f"frozen paths differ from {self.commit}: {sorted( changed + added )}" )
+        """Refuse a tree that differs from the frozen commit outside the client folder."""
+        hidden  = [ line[ 2: ] for line in pool_builder.run_git( path, [ "ls-files", "-v" ] ).decode( "utf-8" ).splitlines() if line[ 0 ] != "H" ]
+        changes = [ line.split( "\t", 1 ) for line in pool_builder.run_git( path, [ "diff", "--name-status", "--no-renames", self.commit ] ).decode( "utf-8" ).splitlines() ]
+        added   = pool_builder.run_git( path, [ "ls-files", "--others", "--exclude-standard" ] ).decode( "utf-8" ).splitlines()
+        changed = [ name for status, name in changes if not self._allowed( status, name ) ]
+        added   = [ name for name in added if not self._in_client( name ) ]
+        if hidden: raise err.HarnessError( err.TESTS_TAMPERED, f"files hidden from git by an assume-unchanged or skip-worktree flag: {sorted( hidden )[ :TAIL ]}" )
+        if changed or added: raise err.HarnessError( err.TESTS_TAMPERED, f"paths outside {CLIENT_ROOT} differ from {self.commit}: {sorted( changed + added )[ :TAIL ]}" )
+
+    def _in_client( self, name ):
+        """Say whether a path is in the client folder."""
+        return name.startswith( CLIENT_ROOT + "/" )
+
+    def _allowed( self, status, name ):
+        """Say whether a change is the client folder's, or the deletion of a path the arm removed."""
+        return self._in_client( name ) or ( status == "D" and any( name == gone or name.startswith( gone + "/" ) for gone in self.removed ) )
 
     def _read( self, report, test_ids ):
         """Read a junit report into one verdict per test id."""

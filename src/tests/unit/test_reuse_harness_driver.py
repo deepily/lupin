@@ -107,7 +107,8 @@ def wire( repo, spec, session_stub, tmp_path ):
         server   = server.Servers( databases, "lupin:img", "ck_live_key", runner=docker, environ={ "JWT_SECRET_KEY" : "s" }, login=lambda: ( "u", "p" ), port_free=lambda port: True,
                                    health=lambda url: True, sleep=clock.sleep, clock=clock ),
         session  = session_stub,
-        tests    = acceptance.Acceptance( repo[ "commit" ], "ck_live_key", os.path.join( run_dir, "reports" ), runner=runner, environ={} ),
+        tests    = acceptance.Acceptance( repo[ "commit" ], "ck_live_key", os.path.join( run_dir, "reports" ), runner=runner, environ={},
+                                          removed=arms.build_session_config( spec[ "arm" ], spec[ "model_id" ] )[ "remove_paths" ] ),
         log      = log.RunLog( run_dir ) )
     return ports, docker, databases, run_dir
 
@@ -293,3 +294,15 @@ def test_the_module_entry_point_exits_with_the_drivers_code( monkeypatch ):
     monkeypatch.setattr( driver, "main", lambda argv: 7 )
     with pytest.raises( SystemExit ) as caught: runpy.run_module( "lupin_mcp.reuse_harness", run_name="__main__" )
     assert caught.value.code == 7
+
+
+def test_the_exit_codes_are_the_literals_a_caller_scripts_against():
+    assert ( driver.EXIT_DONE, driver.EXIT_REFUSED ) == ( 0, 2 ) and driver.EXIT_DONE != driver.EXIT_REFUSED
+
+
+@pytest.mark.parametrize( "arm, removed", [ ( arms.ARM_WITH, () ), ( arms.ARM_WITHOUT, ( arms.SKILL_PATH, ) ) ] )
+def test_build_ports_tells_the_test_port_which_paths_the_arm_removed( repo, monkeypatch, arm, removed ):
+    monkeypatch.setenv( "LUPIN_TEST_DB_USER", "tester" )
+    monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD", "pw" )
+    ports = driver.build_ports( make_spec( repo, arm=arm ), str( repo[ "root" ] ), str( repo[ "data" ] ), "i", environ={ "JWT_SECRET_KEY" : "k" } )
+    assert ports.tests.removed == removed

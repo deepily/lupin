@@ -87,7 +87,8 @@ def build_ports( spec, repo_root, data_root, image, mcp_config=None, environ=Non
         worktree = worktree.Worktrees( repo_root ),
         server   = server.Servers( databases.Databases( databases.maintenance_url() ), image, key, environ=environ ),
         session  = session.Sessions( key, mcp_config=mcp_config, environ=environ ),
-        tests    = acceptance.Acceptance( spec[ "server_commit" ], key, os.path.join( run_dir, "reports" ), environ=environ ),
+        tests    = acceptance.Acceptance( spec[ "server_commit" ], key, os.path.join( run_dir, "reports" ), environ=environ,
+                                          removed=arms.build_session_config( spec[ "arm" ], spec[ "model_id" ] )[ "remove_paths" ] ),
         log      = log.RunLog( run_dir ) )
 
 

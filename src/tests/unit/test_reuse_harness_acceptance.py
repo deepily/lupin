@@ -13,6 +13,7 @@ import pytest
 from lupin_mcp.reuse_harness import acceptance
 from lupin_mcp.reuse_harness import commands
 from lupin_mcp.reuse_harness import errors as err
+from lupin_mcp.reuse_harness.arms import SKILL_PATH as SKILL
 from lupin_mcp.reuse_harness.freeze import TEST_DIR
 from lupin_mcp.reuse_harness.worktree import CLIENT_ROOT
 
@@ -53,7 +54,8 @@ def git_in( root, *args ):
 def tree( tmp_path ):
     """Build a repository of frozen tests, a server file and an old client page."""
     git_in( tmp_path, "init", "-q", "-b", "main" )
-    for relative, text in { f"{TEST_DIR}/test_x.py" : REAL_TESTS, "src/cosa/server.py" : "x = 1\n", f"{CLIENT_ROOT}/old.html" : "old" }.items():
+    for relative, text in { f"{TEST_DIR}/test_x.py" : REAL_TESTS, "src/cosa/server.py" : "x = 1\n", f"{CLIENT_ROOT}/old.html" : "old", "pytest.ini" : "[pytest]\n",
+                            "pyproject.toml" : "[tool.x]\n", "src/tests/conftest.py" : "", f"{SKILL}/SKILL.md" : "skill", "README.md" : "readme\n" }.items():
         ( tmp_path / relative ).parent.mkdir( parents=True, exist_ok=True )
         ( tmp_path / relative ).write_text( text )
     git_in( tmp_path, "add", "." )
@@ -139,7 +141,7 @@ def test_the_build_runs_in_the_worktree_with_the_build_timeout_and_the_chosen_co
     runner = Runner( report=case( "test_passes" ) )
     make( tree, runner, build_command=[ "make", "client" ] ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) )
     assert ( runner.calls[ 1 ][ "argv" ], runner.calls[ 1 ][ "cwd" ], runner.calls[ 1 ][ "timeout" ] ) == ( [ "make", "client" ], tree[ "path" ], acceptance.BUILD_TIMEOUT )
-    assert make( tree, runner ).build_command == [ "npm", "run", "build" ]
+    assert make( tree, runner ).build_command == [ "npm", "--prefix", CLIENT_ROOT, "run", "build" ]
 
 
 def test_each_call_keeps_its_own_report( tree ):
@@ -191,27 +193,101 @@ def test_an_unreadable_report_is_refused_not_read_as_all_failed( tree ):
     assert len( runner.calls ) == 1
 
 
-def test_a_clean_tree_is_accepted_even_when_the_run_built_files_in_the_client_folder( tree ):
+def test_a_clean_tree_is_accepted_even_when_the_run_built_files_anywhere_in_the_client_folder( tree ):
     ( tree[ "root" ] / CLIENT_ROOT / "old.html" ).write_text( "rewritten by the run" )
     ( tree[ "root" ] / CLIENT_ROOT / "login.html" ).write_text( "built by the run" )
-    ( tree[ "root" ] / "client" ).mkdir()
-    ( tree[ "root" ] / "client" / "app.ts" ).write_text( "export {}" )
+    ( tree[ "root" ] / CLIENT_ROOT / "src" ).mkdir()
+    ( tree[ "root" ] / CLIENT_ROOT / "src" / "app.ts" ).write_text( "export {}" )
+    ( tree[ "root" ] / CLIENT_ROOT / "package.json" ).write_text( "{}" )
     assert make( tree, Runner( report=case( "test_passes" ) ) ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) )[ "results" ] == { ids( "test_passes" )[ 0 ] : True }
 
 
+def append( relative ):
+    """Return an edit that appends a line to a tracked file."""
+    return lambda root: ( root / relative ).write_text( ( root / relative ).read_text() + "# edited by the run\n" )
+
+
+def commit_edit( root ):
+    """Edit the frozen test file and commit it, as a session that commits its work does."""
+    ( root / TEST_FILE ).write_text( "def test_passes():\n    assert True\n" )
+    git_in( root, "commit", "-q", "-a", "-m", "the run's own commit" )
+
+
+def hide( flag ):
+    """Return an edit that changes a tracked file and then hides the change from git with a flag."""
+    def edit( root ):
+        ( root / "src/cosa/server.py" ).write_text( "x = 2\n" )
+        git_in( root, "update-index", flag, "src/cosa/server.py" )
+    return edit
+
+
+TEST_FILE = f"{TEST_DIR}/test_x.py"
+
+
 @pytest.mark.parametrize( "edit", [
-    lambda root: ( root / TEST_DIR / "test_x.py" ).write_text( "def test_passes():\n    assert True\n" ),
+    append( TEST_FILE ),
     lambda root: ( root / TEST_DIR / "test_added.py" ).write_text( "def test_new():\n    pass\n" ),
-    lambda root: ( root / TEST_DIR / "test_x.py" ).unlink(),
-    lambda root: ( root / "src/cosa/server.py" ).write_text( "x = 2\n" ),
+    lambda root: ( root / TEST_FILE ).unlink(),
+    append( "src/cosa/server.py" ),
     lambda root: ( root / "src/lupin_app/main_extra.py" ).write_text( "y = 1\n" ),
-] )
-def test_a_run_that_changed_the_tests_or_the_server_is_refused_before_pytest_runs( tree, edit ):
+    append( "pytest.ini" ),
+    append( "pyproject.toml" ),
+    append( "src/tests/conftest.py" ),
+    append( "README.md" ),
+    lambda root: ( root / "client" ).mkdir() or ( root / "client" / "app.ts" ).write_text( "export {}" ),
+    lambda root: ( root / ( CLIENT_ROOT + "-extra" ) ).mkdir() or ( root / ( CLIENT_ROOT + "-extra" ) / "app.js" ).write_text( "x" ),
+    commit_edit,
+    hide( "--assume-unchanged" ),
+    hide( "--skip-worktree" ),
+], ids=[ "test-edit", "test-added", "test-deleted", "server-edit", "server-added", "pytest-ini", "pyproject", "conftest", "readme", "source-outside-client", "client-name-prefix", "committed-edit", "assume-unchanged", "skip-worktree" ] )
+def test_a_run_that_changed_anything_outside_the_client_folder_is_refused_before_pytest_runs( tree, edit ):
     edit( tree[ "root" ] )
     runner = Runner( report=case( "test_passes" ) )
     with pytest.raises( err.HarnessError ) as caught: make( tree, runner ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) )
-    assert caught.value.code == err.TESTS_TAMPERED and tree[ "commit" ] in caught.value.detail
+    assert caught.value.code == err.TESTS_TAMPERED and ( tree[ "commit" ] in caught.value.detail or "hidden from git" in caught.value.detail )
     assert runner.calls == []
+
+
+def test_a_flag_that_hides_a_file_from_git_is_named_even_when_the_file_was_not_edited( tree ):
+    git_in( tree[ "root" ], "update-index", "--assume-unchanged", "README.md" )
+    with pytest.raises( err.HarnessError ) as caught: make( tree, Runner( report=case( "test_passes" ) ) ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) )
+    assert caught.value.code == err.TESTS_TAMPERED and "README.md" in caught.value.detail
+
+
+def test_deleting_the_path_the_arm_removed_on_purpose_is_not_tampering_but_only_when_the_arm_removed_it( tree ):
+    import shutil
+    shutil.rmtree( tree[ "root" ] / SKILL )
+    allowed = make( tree, Runner( report=case( "test_passes" ) ), removed=( SKILL, ) )
+    assert allowed.run( HANDLE, tree[ "path" ], ids( "test_passes" ) )[ "results" ] == { ids( "test_passes" )[ 0 ] : True }
+    assert code_of( lambda: make( tree, Runner( report=case( "test_passes" ) ) ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) ) ) == err.TESTS_TAMPERED
+
+
+def test_a_removed_path_may_be_deleted_but_not_edited_or_put_back( tree ):
+    skill = tree[ "root" ] / SKILL / "SKILL.md"
+    skill.write_text( "edited" )
+    assert code_of( lambda: make( tree, Runner( report=case( "test_passes" ) ), removed=( SKILL, ) ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) ) ) == err.TESTS_TAMPERED
+    git_in( tree[ "root" ], "checkout", "--", SKILL )
+    ( tree[ "root" ] / SKILL / "NEW.md" ).write_text( "put back" )
+    assert code_of( lambda: make( tree, Runner( report=case( "test_passes" ) ), removed=( SKILL, ) ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) ) ) == err.TESTS_TAMPERED
+
+
+def test_a_removed_path_does_not_excuse_a_sibling_whose_name_starts_with_it( tree ):
+    sibling = tree[ "root" ] / ( SKILL + "-extra" )
+    sibling.mkdir( parents=True )
+    ( sibling / "x.md" ).write_text( "x" )
+    git_in( tree[ "root" ], "add", "." )
+    git_in( tree[ "root" ], "commit", "-q", "-m", "sibling" )
+    commit = git_in( tree[ "root" ], "rev-parse", "HEAD" )
+    import shutil
+    shutil.rmtree( sibling )
+    port = acceptance.Acceptance( commit, "k", tree[ "reports" ], runner=Runner( report=case( "test_passes" ) ), removed=( SKILL, ) )
+    assert code_of( lambda: port.run( HANDLE, tree[ "path" ], ids( "test_passes" ) ) ) == err.TESTS_TAMPERED
+
+
+def test_a_long_list_of_changed_paths_is_cut_to_the_first_twenty_in_the_message( tree ):
+    for number in range( 30 ): ( tree[ "root" ] / f"stray-{number:02d}.txt" ).write_text( "x" )
+    with pytest.raises( err.HarnessError ) as caught: make( tree, Runner( report=case( "test_passes" ) ) ).run( HANDLE, tree[ "path" ], ids( "test_passes" ) )
+    assert "stray-19.txt" in caught.value.detail and "stray-20.txt" not in caught.value.detail
 
 
 def test_the_default_runner_environment_and_interpreter_are_the_real_ones( tree ):
