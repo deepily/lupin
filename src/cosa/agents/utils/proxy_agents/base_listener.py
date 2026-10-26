@@ -383,5 +383,5 @@ class BaseWebSocketListener:
                     log_msg = f"{self.LOG_PREFIX} Error handling message: {e}"
                     if hasattr( self, '_log' ):
                         self._log( log_msg )
-                    else:
+                    else:  # pragma: no cover -- _log is a method of this class, so hasattr is always true
                         print( log_msg )
