@@ -112,7 +112,7 @@ services:
       # The CLIENT reads this same var name (embedding_provider._http_api_key,
       # speech_to_text_provider._model_server_api_key) so the two ends cannot
       # drift by editing one of them.
-      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      # Decision record: src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the key names)
       LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # GPU 0 pin (per memory rule feedback_lupin_models_always_gpu_0) — torch
       # sees only the device at index 0; the underlying device may be physical
@@ -377,7 +377,7 @@ services:
       # this one is a single mounted secret, identical on every host and
       # shipped to all of them. Sharing them caused a 38h 100% 401 on
       # /embeddings/generate plus an unreported one on /transcribe.
-      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      # Decision record: src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the key names)
       LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # Model-server carve-out env vars (2026-05-16). Until Phase 3.6 lifespan
       # switch lands and `speech to text provider = model-server` in INI, these
@@ -701,7 +701,7 @@ services:
       # this one is a single mounted secret, identical on every host and
       # shipped to all of them. Sharing them caused a 38h 100% 401 on
       # /embeddings/generate plus an unreported one on /transcribe.
-      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      # Decision record: src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the key names)
       LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
       # Model-server carve-out env vars (2026-05-16). Dormant until Phase 3.6
       # lifespan switch + INI flip to `speech to text provider = model-server`.
