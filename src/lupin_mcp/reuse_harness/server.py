@@ -8,12 +8,12 @@ fails after the database exists, the database and the container are removed, and
 import hashlib
 import os
 import socket
-import subprocess
 import time
 import urllib.error
 import urllib.request
 
 import cosa.utils.dotenv_password as dp
+from lupin_mcp.reuse_harness import commands
 from lupin_mcp.reuse_harness import errors as err
 from lupin_mcp.reuse_harness import run as harness
 
@@ -28,24 +28,6 @@ MOUNT_AT        = "/var/lupin"
 PASSED_THROUGH  = ( "JWT_SECRET_KEY", )
 LOGIN_VARIABLES = ( "DB_USER", "DB_PASSWORD" )
 COMMAND         = "cd /var/lupin/src && exec python3 -m lupin_app.main"
-
-
-def run_command( argv, env=None ):
-    """
-    Run one command and return its exit code and its output.
-
-    Requires:
-        - argv is a non-empty list of strings
-
-    Ensures:
-        - returns ( exit code, standard output and error joined as text )
-        - a command that cannot start is reported as exit code 127, never raised
-    """
-    try:
-        done = subprocess.run( argv, capture_output=True, text=True, env=env, timeout=300 )
-    except ( OSError, subprocess.SubprocessError ) as error:
-        return 127, f"{type( error ).__name__}: {error}"
-    return done.returncode, ( done.stdout + done.stderr ).strip()
 
 
 def port_is_free( port ):
@@ -64,7 +46,7 @@ def answers_health( url ):
 class Servers:
     """Starts, inspects and stops the server of each run."""
 
-    def __init__( self, databases, image, runner=run_command, environ=None, login=dp.clone_login, port_free=port_is_free,
+    def __init__( self, databases, image, runner=commands.run_command, environ=None, login=dp.clone_login, port_free=port_is_free,
                   health=answers_health, sleep=time.sleep, clock=time.monotonic, boot_timeout=BOOT_TIMEOUT ):
         """
         Remember the ports this adapter works through.

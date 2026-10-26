@@ -12,6 +12,7 @@ import threading
 
 import pytest
 
+from lupin_mcp.reuse_harness import commands
 from lupin_mcp.reuse_harness import errors as err
 from lupin_mcp.reuse_harness import run as harness
 from lupin_mcp.reuse_harness import server
@@ -265,24 +266,9 @@ def test_stop_drops_the_database_when_only_the_container_removal_fails():
 
 def test_the_default_ports_are_the_real_ones():
     servers = server.Servers( Databases(), "img" )
-    assert ( servers.runner, servers.port_free, servers.health, servers.boot_timeout ) == ( server.run_command, server.port_is_free, server.answers_health, server.BOOT_TIMEOUT )
+    assert ( servers.runner, servers.port_free, servers.health, servers.boot_timeout ) == ( commands.run_command, server.port_is_free, server.answers_health, server.BOOT_TIMEOUT )
     import os
     assert servers.environ is os.environ
-
-
-def test_run_command_returns_the_exit_code_and_both_output_streams():
-    code, output = server.run_command( [ sys.executable, "-c", "import sys; print( 'out' ); print( 'err', file=sys.stderr ); sys.exit( 3 )" ] )
-    assert code == 3 and output == "out\nerr"
-
-
-def test_run_command_passes_the_given_environment():
-    code, output = server.run_command( [ sys.executable, "-c", "import os; print( os.environ[ 'HARNESS_PROBE' ] )" ], env={ "HARNESS_PROBE" : "seen" } )
-    assert ( code, output ) == ( 0, "seen" )
-
-
-def test_run_command_reports_a_command_that_cannot_start_as_127():
-    code, output = server.run_command( [ "/no/such/binary" ] )
-    assert code == 127 and "FileNotFoundError" in output
 
 
 def test_port_is_free_tells_a_listening_port_from_a_quiet_one():
