@@ -564,3 +564,47 @@ class TestQueryOwed:
         bad_settings = { "api_base_url": "http://host:notaport", "timeout_seconds": 3.0 }
         assert tc.query_owed( bad_settings, "k", "p" ) == ( False, 0, { } )
         assert conn_seq[ "requests" ] == [ ] and conn_seq[ "closed" ] == 0
+
+
+class TestQueryOwedBreakdowns:
+    """`query_owed_breakdowns`: one request, four values, the fail-safe contract of `query_owed`."""
+
+    def _body( self, **extra ):
+        return FakeHTTPResponse( 200, json.dumps( { "count": 3, "breakdown": { "queued": 3 },
+                                                    "priority_breakdown": { "P1": 2, "P2": 1 }, **extra } ) )
+
+    def test_a_good_read_returns_all_four_values_over_one_request( self, conn_seq ):
+        conn_seq[ "outcomes" ] = [ self._body() ]
+        got = tc.query_owed_breakdowns( SETTINGS, "k", "krishna", project="lupin", timeout=2.5 )
+        assert got == ( True, 3, { "queued": 3 }, { "P1": 2, "P2": 1 } )
+        _m, path, headers = conn_seq[ "requests" ][ 0 ]
+        assert "owner_persona=krishna" in path and "project=lupin" in path and "owed_only=true" in path
+        assert headers == { "X-API-Key": "k" }
+        assert ( len( conn_seq[ "requests" ] ), conn_seq[ "closed" ], conn_seq[ "ctor" ][ 0 ][ "timeout" ] ) == ( 1, 1, 2.5 )
+
+    def test_no_project_means_no_project_filter_and_the_default_timeout_applies( self, conn_seq ):
+        conn_seq[ "outcomes" ] = [ self._body() ]
+        tc.query_owed_breakdowns( SETTINGS, "k", "krishna" )
+        assert "project=" not in conn_seq[ "requests" ][ 0 ][ 1 ]
+        assert conn_seq[ "ctor" ][ 0 ][ "timeout" ] == tc.DEFAULT_OWED_TIMEOUT_SECONDS
+
+    def test_a_missing_priority_breakdown_degrades_to_empty_but_the_read_still_succeeds( self, conn_seq ):
+        conn_seq[ "outcomes" ] = [ _count_resp( 4, breakdown={ "queued": 4 } ) ]
+        assert tc.query_owed_breakdowns( SETTINGS, "k", "p" ) == ( True, 4, { "queued": 4 }, { } )
+
+    @pytest.mark.parametrize( "outcome", [
+        ConnectionRefusedError( "refused" ),
+        FakeHTTPResponse( 500, '{"detail": "boom"}' ),
+        FakeHTTPResponse( 200, "not json" ),
+        FakeHTTPResponse( 200, "[1, 2]" ),
+        FakeHTTPResponse( 200, '{"count": true}' ),
+        FakeHTTPResponse( 200, '{"breakdown": {}}' ),
+    ], ids=[ "transport", "http-500", "bad-json", "not-a-dict", "bool-count", "missing-count" ] )
+    def test_every_unreadable_answer_is_not_ok_and_the_socket_is_still_closed( self, conn_seq, outcome ):
+        conn_seq[ "outcomes" ] = [ outcome ]
+        assert tc.query_owed_breakdowns( SETTINGS, "k", "p" ) == ( False, 0, { }, { } )
+        assert conn_seq[ "closed" ] == 1
+
+    def test_an_unopenable_connection_is_not_ok( self, monkeypatch ):
+        monkeypatch.setattr( tc, "_open_owed_connection", lambda base, timeout: None )
+        assert tc.query_owed_breakdowns( SETTINGS, "k", "p" ) == ( False, 0, { }, { } )
