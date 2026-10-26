@@ -37,6 +37,18 @@ def _load_module():
 rob = _load_module()
 
 
+def test_loading_with_src_off_sys_path_puts_it_back_at_the_front( monkeypatch ):
+    # The bootstrap guard: when the script's own src dir is not importable it must be
+    # inserted at index 0 (not appended), or the sessions_dir import below it fails.
+    src = str( Path( cu.get_project_root() ) / "src" )
+    monkeypatch.setattr( "sys.path", [ p for p in __import__( "sys" ).path if p != src ] )
+    fresh = _load_module()
+    import sys
+    assert sys.path[ 0 ] == src
+    assert sys.path.count( src ) == 1
+    assert fresh.sessions_dir is not None
+
+
 NOW = 1_000_000.0
 
 
