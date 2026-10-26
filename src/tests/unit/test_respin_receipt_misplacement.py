@@ -212,6 +212,24 @@ def test_a_missing_base_dir_yields_nothing_rather_than_raising():
     assert rwc.find_misplaced_receipts( None, persona="Sam" ) == []
 
 
+def test_an_unresolvable_base_dir_yields_nothing_rather_than_raising():
+    assert rwc.find_misplaced_receipts( 12345, persona="Sam" ) == []
+
+
+def test_an_injected_glob_replaces_the_filesystem_walk( zone ):
+    _write( str( zone[ "sibling" ] ), "sidB" )
+    seen = []
+    def _glob( root ):
+        seen.append( root )
+        return []
+    assert rwc.find_misplaced_receipts( str( zone[ "correct" ] ), persona="Sam", glob_fn=_glob ) == []
+    assert seen == [ zone[ "correct" ].resolve().parent ]
+
+    only = str( zone[ "sibling" ] / f"{rwc.RECEIPT_PREFIX}sidB.json" )
+    hits = rwc.find_misplaced_receipts( str( zone[ "correct" ] ), persona="Sam", glob_fn=lambda root: [ only ] )
+    assert [ h[ "path" ] for h in hits ] == [ only ]
+
+
 # ---------------------------------------------------------------------------
 # THE DISCRIMINATING PAIR — the reason any of this exists.
 # ---------------------------------------------------------------------------
