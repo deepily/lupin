@@ -185,6 +185,13 @@ def test_the_plan_record_carries_seed_table_split_commit_reader_and_who_set_it(t
     assert json.loads( path.read_text( encoding="utf-8" ) ) == record
 
 
+def test_the_plan_record_holds_the_screen_floor_only_when_a_screen_is_used():
+    table = quota.plan_quota( 400, 300, 100, 0.6, EXAMPLE )
+    plain = quota.plan_record( 1, table, EXAMPLE, "abc123", "read_searchable", "rick", "2026-10-25T09:00:00-04:00" )
+    floor = quota.plan_record( 1, table, EXAMPLE, "abc123", "read_searchable", "rick", "2026-10-25T09:00:00-04:00", 0.79 )
+    assert "screen_floor" not in plain and floor[ "screen_floor" ] == 0.79 and { k: v for k, v in floor.items() if k != "screen_floor" } == plain
+
+
 def test_the_plan_is_written_once_and_a_second_write_leaves_the_first_untouched(tmp_path):
     path = tmp_path / "plan.json"
     quota.write_plan( path, { "seed": 1 } )

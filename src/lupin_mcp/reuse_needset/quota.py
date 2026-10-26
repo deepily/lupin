@@ -151,7 +151,7 @@ def draw( pool, quota, seed ):
     return drawn
 
 
-def plan_record( seed, quota, kind_split, source_commit, pool_reader, set_by, set_at ):
+def plan_record( seed, quota, kind_split, source_commit, pool_reader, set_by, set_at, screen_floor=None ):
     """
     Build the plan record that is written before the first draft is requested.
 
@@ -161,6 +161,7 @@ def plan_record( seed, quota, kind_split, source_commit, pool_reader, set_by, se
 
     Ensures:
         - returns { format, seed, quota, kind_split, source_commit, pool_reader, kind_split_set_by, kind_split_set_at }
+        - holds screen_floor too when one is given, because the screen changes the draw; a plan without a screen is the record it always was
         - the quota keys are strings "kind/lang" so the record is JSON
 
     Raises:
@@ -168,8 +169,10 @@ def plan_record( seed, quota, kind_split, source_commit, pool_reader, set_by, se
     """
     if pool_reader != pool.READER: _invalid( f"pool_reader {pool_reader!r} is not the pool's reader {pool.READER!r}" )
     flat = { f"{kind}/{lang}": n for kind, row in quota.items() for lang, n in row.items() }
-    return { "format": PLAN_FORMAT, "seed": seed, "quota": flat, "kind_split": dict( kind_split ), "source_commit": source_commit,
-             "pool_reader": pool_reader, "kind_split_set_by": set_by, "kind_split_set_at": set_at }
+    record = { "format": PLAN_FORMAT, "seed": seed, "quota": flat, "kind_split": dict( kind_split ), "source_commit": source_commit,
+               "pool_reader": pool_reader, "kind_split_set_by": set_by, "kind_split_set_at": set_at }
+    if screen_floor is not None: record[ "screen_floor" ] = screen_floor
+    return record
 
 
 def write_plan( path, record ):

@@ -60,6 +60,7 @@ def parse_args( argv ):
         - the root, out dir, source commit, seed, vector folders and the three matched-kind counts are required
         - the kind split is whatever is passed; no default stands in for the real split
         - window_lifted_by is None unless the caller names who lifted the window and when
+        - partner_floor is None, for no screen, unless the caller names the cosine a seed's nearest candidate must reach
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument( "--root",             required=True )
@@ -73,6 +74,7 @@ def parse_args( argv ):
     ap.add_argument( "--cross-language",   required=True, type=int )
     ap.add_argument( "--ts-share",         type=float, default=0.6 )
     ap.add_argument( "--parallel",         type=int, default=3 )
+    ap.add_argument( "--partner-floor",    type=float, default=None )
     ap.add_argument( "--server",           default="max-plan" )
     ap.add_argument( "--set-by",           default="smoke" )
     ap.add_argument( "--cli-path",         default=None )
@@ -186,7 +188,7 @@ def assemble_env( args, ask, second_ask, client, set_at, timed ):
     ctx     = keys.KeyContext( pooled, measures, bodies, args.seed, vectors )
     return run.Env( by_id, pooled, ctx, twins, lambda rec: strip.strip_member( rec, root ), timed.wrap( "draft", ask ), book, draft.DRAFTER_MODEL, args.server, args.source_commit,
                     args.seed, kind_split( args ), args.set_by, set_at, none_draft_fn=none_fn, parallel=args.parallel, smoke=True, extras=extras,
-                    calls_log=draft.SharedCallLog( out / CALLS_FILE ) )
+                    calls_log=draft.SharedCallLog( out / CALLS_FILE ), screen_floor=args.partner_floor )
 
 
 def live_build_env( args, set_at, timed ):

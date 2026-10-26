@@ -53,6 +53,7 @@ def test_a_time_without_a_zone_is_refused():
 
 
 def test_the_command_line_names_the_split_and_has_no_default_for_it():
+    assert smoke.parse_args( argv( "/o" ) ).partner_floor is None and smoke.parse_args( argv( "/o", extra=[ "--partner-floor", "0.79" ] ) ).partner_floor == 0.79
     a = smoke.parse_args( [ x for x in argv( "/o" ) if x not in ( "--ts-share", "0.5" ) ] )
     assert smoke.kind_split( a ) == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and a.parallel == 3 and a.second_model == "claude-opus-5-5" and a.server == "max-plan" and a.ts_share == 0.6
     for flag in ( "--near-copy", "--work-alike", "--cross-language", "--source-commit", "--seed" ):
@@ -191,6 +192,7 @@ def test_the_env_is_assembled_from_the_real_index_with_two_ledgers_and_a_smoke_f
     assert env.kind_split == { "near_copy": 2, "work_alike": 4, "cross_language": 2 } and env.parallel == 3 and env.none_draft_fn is not None
     assert env.extras == { "vector_coverage": { "eligible": len( env.kept ), "with_a_vector_row": len( env.kept ), "vector_set_ids": len( ids ), "stage_ids": len( by_id ) } }
     assert ( tmp_path / "out" ).is_dir()
+    assert env.screen_floor is None
     assert isinstance( env.calls_log, draft.SharedCallLog ) and env.calls_log.path == tmp_path / "out" / smoke.CALLS_FILE == tmp_path / "out" / "ledger-calls.jsonl"
     seed = "cosa.fx.pkg.a.twin_a"
     job  = __import__( "lupin_mcp.reuse_needset.run", fromlist=[ "run" ] ).near_copy_job( env, seed, "py" )

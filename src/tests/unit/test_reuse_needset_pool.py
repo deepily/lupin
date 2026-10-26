@@ -3,6 +3,7 @@ The seed pool: reader, test paths, measuring, eligibility, id mapping, twin grou
 """
 import pathlib
 
+import numpy as np
 import pytest
 
 from cosa.repo.symindex import build as bd
@@ -241,3 +242,60 @@ def test_a_definition_of_exactly_min_nodes_is_kept_and_one_below_is_small():
     measures = { "a.edge": pool.Measure( 25, frozenset() ), "a.below": pool.Measure( 24, frozenset() ) }
     kept, dropped = pool.eligible( records, measures, min_nodes=25 )
     assert [ r[ "id" ] for r in kept ] == [ "a.edge" ] and dropped == { "small": 1 }
+
+
+class Vecs:
+    """A vector set stand-in with the ids and the one matrix the screen reads."""
+
+    def __init__( self, rows ):
+        """Hold the ids and a concat matrix from { id: vector }."""
+        self.ids      = list( rows )
+        self.matrices = { "concat": np.array( list( rows.values() ), dtype=np.float32 ) }
+
+
+def screen_world():
+    """Return ( kept, measures, vectors ) with a lookalike pair and a row-less symbol."""
+    kept     = [ rec( "p.a1", "pkg/p.py", "a1" ), rec( "p.a2", "pkg/p.py", "a2" ), rec( "p.a3", "pkg/p.py", "a3" ), rec( "p.norow", "pkg/p.py", "norow" ),
+                 rec( "w.t1", "web/w.ts", "t1", "ts" ), rec( "w.t2", "web/w.ts", "t2", "ts" ) ]
+    shingles = { "p.a1": { 1, 2, 3, 4 }, "p.a3": { 1, 2, 3, 4 }, "p.a2": { 5, 6, 7, 8 }, "p.norow": { 9 }, "w.t1": { 10, 11 }, "w.t2": { 12, 13 } }
+    measures = { i: pool.Measure( 40, frozenset( sh ) ) for i, sh in shingles.items() }
+    vectors  = Vecs( { "p.a1": [ 1.0, 0.0 ], "p.a2": [ 0.9, 0.436 ], "p.a3": [ 1.0, 0.01 ], "w.t1": [ 0.8, 0.6 ], "w.t2": [ 0.0, 1.0 ] } )
+    return kept, measures, vectors
+
+
+def test_a_seed_passes_the_screen_when_its_nearest_unlike_partner_reaches_the_floor():
+    kept, measures, vectors = screen_world()
+    got = pool.partner_screen( kept, measures, vectors, 0.85, 0.5, "concat" )
+    assert got[ ( "work_alike", "py" ) ] == [ "p.a1", "p.a2", "p.a3" ], "a1 passes on a2 at 0.9; its lookalike a3 at 1.0 is not the partner but a3 still passes on a2"
+    assert got[ ( "cross_language", "py" ) ] == [ "p.a2" ] and got[ ( "cross_language", "ts" ) ] == [ "w.t1" ] and got[ ( "work_alike", "ts" ) ] == []
+    high = pool.partner_screen( kept, measures, vectors, 0.95, 0.5, "concat" )
+    assert high[ ( "work_alike", "py" ) ] == [], "without the lookalike skip, a1 would pass on a3 at about 1.0"
+    open_ = pool.partner_screen( kept, measures, vectors, 0.95, 1.5, "concat" )
+    assert open_[ ( "work_alike", "py" ) ] == [ "p.a1", "p.a3" ], "a lookalike limit above 1 keeps every candidate, so a1 and a3 find each other"
+
+
+def test_the_screen_leaves_out_a_seed_with_no_vector_row():
+    kept, measures, vectors = screen_world()
+    got = pool.partner_screen( kept, measures, vectors, 0.0, 0.5, "concat" )
+    assert "p.norow" not in got[ ( "work_alike", "py" ) ] and "p.norow" not in got[ ( "cross_language", "py" ) ]
+    assert got[ ( "cross_language", "py" ) ] == [ "p.a1", "p.a2", "p.a3" ] and got[ ( "cross_language", "ts" ) ] == [ "w.t1", "w.t2" ]
+
+
+def test_the_screen_looks_only_at_the_top_neighbours_and_an_empty_target_pool_passes_nothing():
+    kept, measures, vectors = screen_world()
+    short = pool.partner_screen( kept, measures, vectors, 0.0, 0.5, "concat", top=1 )
+    assert "p.a1" not in short[ ( "work_alike", "py" ) ], "the seed itself and its lookalike fill the two nearest places"
+    py_only = [ r for r in kept if r[ "lang" ] == "py" ]
+    assert pool.partner_screen( py_only, measures, vectors, 0.0, 0.5, "concat" )[ ( "cross_language", "py" ) ] == []
+
+
+def test_a_cell_pool_with_a_screen_keeps_only_the_passed_seeds_of_the_two_screened_kinds():
+    kept  = [ rec( "p.one", "pkg/p.py", "one" ), rec( "p.two", "pkg/p.py", "two" ), rec( "p.three", "pkg/p.py", "three" ), rec( "w.a", "web/w.ts", "a", "ts" ) ]
+    twins = { "p.one": [ "p.two" ], "p.two": [ "p.one" ] }
+    ids   = { r[ "id" ] for r in kept }
+    screen = { ( "work_alike", "py" ): [ "p.one" ], ( "cross_language", "py" ): [ "p.three", "p.two" ], ( "work_alike", "ts" ): [], ( "cross_language", "ts" ): [ "w.a" ] }
+    cells = pool.cell_pool( kept, twins, ids, screen )
+    assert cells[ ( "work_alike", "py" ) ] == [ "p.one" ] and cells[ ( "cross_language", "py" ) ] == [ "p.three", "p.two" ]
+    assert ( "work_alike", "ts" ) not in cells and cells[ ( "cross_language", "ts" ) ] == [ "w.a" ]
+    assert cells[ ( "near_copy", "py" ) ] == [ "p.one", "p.two" ], "near_copy and nothing are not screened"
+    assert pool.cell_pool( kept, twins, ids ) == pool.cell_pool( kept, twins, ids, None )

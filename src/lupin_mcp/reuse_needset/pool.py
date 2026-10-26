@@ -18,6 +18,9 @@ READER            = "read_searchable"
 LANG_OF           = { "py": "py", "ts": "ts" }
 TEST_PARTS        = frozenset( { "tests", "test", "__tests__" } )
 NONE_MIN_SYMBOLS  = 3
+PARTNER_TOP       = 50
+SCREEN_KINDS      = ( "work_alike", "cross_language" )
+OTHER_LANG        = { "py": "ts", "ts": "py" }
 SUFFIX_RE         = re.compile( r"~(\d+)$" )
 
 
@@ -177,27 +180,66 @@ def twin_map( result, prefix="" ):
     return nc.twin_groups( dups_manifest( result, prefix ) )
 
 
-def cell_pool( kept, twins, all_ids ):
+def partner_screen( kept, measures, vectors, floor, lookalike, matrix, top=PARTNER_TOP ):
+    """
+    Keep the seeds that have a plausible partner, by the stored vectors alone.
+
+    Requires:
+        - kept comes from eligible(); measures from measure(); vectors has ids and matrices, as vector_store.load_vectors returns
+        - floor is a cosine from -1 to 1; lookalike is the shingle overlap at which keys.unlike drops a candidate; matrix names a matrix in vectors
+
+    Ensures:
+        - returns { ( kind, lang ): sorted ids } for work_alike and cross_language, with no model call and no embedding
+        - a seed passes when its nearest candidate has a cosine of at least floor; the candidate is the nearest of the top neighbours that keys.unlike would keep, in the language the cell asks about
+        - a seed with no row in vectors, and a seed with no kept candidate among its top neighbours, does not pass
+    """
+    import numpy as np
+    mat     = np.asarray( vectors.matrices[ matrix ], dtype=np.float32 )
+    norms   = np.linalg.norm( mat, axis=1, keepdims=True )
+    unit    = mat / np.where( norms > 0, norms, 1.0 )
+    row_of  = { i: n for n, i in enumerate( vectors.ids ) }
+    by_lang = { lang: [ r[ "id" ] for r in kept if LANG_OF[ r[ "lang" ] ] == lang and r[ "id" ] in row_of ] for lang in ( "py", "ts" ) }
+    passed  = { ( kind, lang ): [] for kind in SCREEN_KINDS for lang in ( "py", "ts" ) }
+    for kind in SCREEN_KINDS:
+        for lang in ( "py", "ts" ):
+            target  = lang if kind == "work_alike" else OTHER_LANG[ lang ]
+            cands   = by_lang[ target ]
+            if not cands: continue
+            block   = unit[ [ row_of[ i ] for i in cands ] ]
+            for seed in by_lang[ lang ]:
+                sims  = block @ unit[ row_of[ seed ] ]
+                order = np.argsort( -sims, kind="stable" )[ :top + 1 ]
+                for k in order:
+                    other = cands[ k ]
+                    if other == seed or dups.jaccard( measures[ seed ].shingles, measures[ other ].shingles ) >= lookalike: continue
+                    if sims[ k ] >= floor: passed[ ( kind, lang ) ].append( seed )
+                    break
+    return { cell: sorted( ids ) for cell, ids in passed.items() }
+
+
+def cell_pool( kept, twins, all_ids, screen=None ):
     """
     Build the ( kind, language ) pool that the census and the draw read.
 
     Requires:
         - kept comes from eligible(); twins from twin_map(); all_ids is the set of every id in the index
+        - screen is None or partner_screen() output
 
     Ensures:
         - near_copy: kept seeds with at least one twin that is in the index
-        - work_alike and cross_language: every kept seed of that language
+        - work_alike and cross_language: every kept seed of that language, or with screen only those the screen passed for that cell
         - nothing: the files that hold at least NONE_MIN_SYMBOLS kept symbols of that language
         - keys of the result are ( kind, lang ) and values are sorted id lists
     """
+    passing = None if screen is None else { cell: set( ids ) for cell, ids in screen.items() }
     pool    = collections.defaultdict( list )
     per_file = collections.defaultdict( list )
     for r in kept:
         lang = LANG_OF[ r[ "lang" ] ]
         mine = twins[ r[ "id" ] ] if r[ "id" ] in twins else []
         if any( t in all_ids for t in mine ): pool[ ( "near_copy", lang ) ].append( r[ "id" ] )
-        pool[ ( "work_alike", lang ) ].append( r[ "id" ] )
-        pool[ ( "cross_language", lang ) ].append( r[ "id" ] )
+        for kind in SCREEN_KINDS:
+            if passing is None or r[ "id" ] in passing[ ( kind, lang ) ]: pool[ ( kind, lang ) ].append( r[ "id" ] )
         per_file[ ( lang, r[ "file" ] ) ].append( r[ "id" ] )
     for ( lang, file ), ids in per_file.items():
         if len( ids ) >= NONE_MIN_SYMBOLS: pool[ ( "nothing", lang ) ].append( file )

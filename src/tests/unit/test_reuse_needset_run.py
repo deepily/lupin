@@ -125,6 +125,24 @@ def test_a_routed_job_adds_each_live_call_to_the_call_log_under_its_cell( tmp_pa
     assert make_env( tmp_path, name="other.jsonl" ).calls_log is None
 
 
+def test_a_run_with_a_screen_floor_records_it_in_the_plan_and_the_report_and_draws_only_passed_seeds( tmp_path ):
+    env              = make_env( tmp_path )
+    env.screen_floor = 0.0
+    got              = run.run_needset( env, table(), tmp_path )
+    assert got[ "plan" ][ "screen_floor" ] == 0.0 and got[ "report" ][ "screen" ][ "floor" ] == 0.0
+    assert got[ "report" ][ "screen" ][ "before" ] == got[ "report" ][ "census" ], "a floor that passes every seed leaves the census as it was"
+    ( tmp_path / "plain" ).mkdir()
+    plain = run.run_needset( make_env( tmp_path, name="plain.jsonl", freeze_from=None, smoke=True ), table(), tmp_path / "plain" )
+    assert plain[ "report" ][ "screen" ] is None and "screen_floor" not in plain[ "plan" ]
+
+
+def test_a_floor_no_seed_reaches_leaves_the_matched_cells_with_no_seeds_and_the_draw_names_the_cell( tmp_path ):
+    env              = make_env( tmp_path )
+    env.screen_floor = 1.5
+    with pytest.raises( er.NeedsetError ) as e: run.run_needset( env, table(), tmp_path )
+    assert e.value.code == er.QUOTA_UNFILLABLE and "cell cross_language" in str( e.value )
+
+
 def test_a_nothing_job_lists_the_entry_line_of_each_symbol_of_the_file_in_that_language( tmp_path ):
     env = make_env( tmp_path )
     got = run.nothing_job( env, "pkg/alpha.py", "py" )
