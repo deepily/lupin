@@ -608,6 +608,16 @@ def test_the_chosen_pages_are_the_floor_and_the_cap_of_the_tool_itself():
     assert len( r[ "chosen_single1" ] ) == an.MAX_PAGES
 
 
+def test_choose_pages_skips_a_malformed_answer_and_a_page_under_the_floor_and_keeps_the_rest():
+    from cosa.repo.symindex import verdict as vd
+    answers = [ { "id": "bad",   "probabilities": { "reuse": 0.9, "extend": 0.9, "unrelated": 0.9 } },      # sums to 2.7: malformed
+                { "id": "low",   "probabilities": _probs( 0.1 ) },
+                { "id": "good",  "probabilities": _probs( 0.8 ) },
+                { "id": "edge",  "probabilities": _probs( vd.POLICY[ "floor" ] ) } ]
+    assert vd.malformed_reason( answers[ 0 ][ "probabilities" ], vd.POLICY ) == "sum_not_one"
+    assert [ c[ "slug" ] for c in an._choose_pages( answers, vd.POLICY ) ] == [ "good", "edge" ]
+
+
 def test_the_page_arm_is_inconclusive_or_invalid_with_its_arms_and_absent_questions_are_skipped():
     recs = _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } ); recs[ 2 ][ "failed" ] = [ "p1" ]
     assert an.analyze_pages( an.read_stage( recs ) )[ 1 ][ "state" ] == "inconclusive"
