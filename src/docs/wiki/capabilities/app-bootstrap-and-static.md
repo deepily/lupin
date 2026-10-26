@@ -2,11 +2,12 @@
 capability: app-bootstrap-and-static
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_app.main.lifespan@e1b4d097a3
+  - lupin_app.main.lifespan@6276857232
   - lupin_app.main.add_security_headers@d838bf9587
   - lupin_app.bootstrap_helpers.assert_lupin_root_valid@d54a4c870a
   - lupin_app.bootstrap_helpers.register_sigusr1_faulthandler@fafd1bc4ad
   - lupin_app.bootstrap_helpers.reload_enabled@f782f9421f
+  - lupin_app.bootstrap_helpers.reload_kwargs@1812598e6c
   - lupin_app.versioned_static.VersionedStaticFiles@b25f754164
   - lupin_app.asset_tokens.content_token@5f8206fef6
   - lupin_app.asset_tokens.verify@5b42cd938c
@@ -34,6 +35,6 @@ pins:
 - No server code imports `asset_tokens`. Unit tests import it, and one failure message tells the author to run `--stamp`.
 
 ## Reload
-- `reload_enabled` is true only when `LUPIN_RELOAD` is `1`, `true` or `yes` and `LUPIN_ENV` is not `production`, `test` or `testing`.
+- `reload_enabled` is true only when `LUPIN_RELOAD` is `1`, `true` or `yes` and `LUPIN_ENV` is not `production`, `test` or `testing`. `reload_kwargs` turns that into the uvicorn arguments: `reload=True` and a runtime-package `reload_dirs` list, or `{}`.
 - `docker-compose.yml` sets `LUPIN_ENV` to `development` for `:7999` and `testing` for `:8000`, and sets no `LUPIN_RELOAD`. A `.py` change needs a bounce.
 - The environment is read when the container is created, so changing `LUPIN_RELOAD` needs a recreate and not a restart.
