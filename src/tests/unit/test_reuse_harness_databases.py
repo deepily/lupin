@@ -91,7 +91,7 @@ def test_create_names_the_database_and_the_cause_when_the_server_refuses( kind )
 def test_drop_closes_only_the_harness_roles_sessions_of_that_database_then_drops_it():
     store, log = make()
     store.drop( "rrun_abc123" )
-    assert log[ 0 ][ 2 ] == { "n" : "rrun_abc123" } and "usename = current_user" in log[ 0 ][ 1 ] and "pg_terminate_backend" in log[ 0 ][ 1 ]
+    assert log[ 0 ][ 2 ] == { "n" : "rrun_abc123" } and "usename = current_user" in log[ 0 ][ 1 ] and "pg_stat_activity" in log[ 0 ][ 1 ]
     assert [ entry[ 1 ] for entry in log[ 1: ] ] == [ "DROP DATABASE IF EXISTS rrun_abc123", "dispose" ]
 
 
