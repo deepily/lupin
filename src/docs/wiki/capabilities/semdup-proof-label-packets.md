@@ -9,7 +9,7 @@ pins:
   - cosa.repo.semdup.proof.label_prep.pair_item@60e2f18d36
   - cosa.repo.semdup.proof.label_prep.prepare@f4343902d3
   - cosa.repo.semdup.proof.label_prep.save_doc@8e644e313a
-  - cosa.repo.semdup.proof.label_prep.run@a8f6e25390
+  - cosa.repo.semdup.proof.label_prep.run@dc662b8fc6
   - cosa.repo.semdup.proof.label_prep.live_wiring@7a6c7abc06
   - cosa.repo.semdup.proof.label_prep.main@63d7e5c866
 ---
@@ -31,6 +31,6 @@ The second half of `label_prep.py`: the monolith pairs, the blind items, the pac
 
 ## Command
 - `save_doc` writes the planted document to a temporary file and renames it. The file holds the old document or the new one, never half of either.
-- `run` plants 60 pairs, 60 percent script and 40 percent Python. A failed pair is replaced by the next original in the order. `top_up_alikes` then adds work-alikes, so the total can pass 60. It saves them to `key/planted.json` before the monolith step, and after each top-up wave, so a later failure costs no model call. It then returns the packets and key path. It also returns planted and failed counts by stratum, and monolith pair counts.
+- `run` plants 60 pairs, 60 percent script and 40 percent Python. A failed pair is replaced by the next original in the order. `top_up_alikes` then adds work-alikes, so the total can pass 60. It saves them to `key/planted.json` before the monolith step, and after each top-up wave, so a later failure costs no model call. The file also records the seed, count and config hash. A run that finds a file made for other values, or for none, raises `ValueError` before any model call. It then returns the packets and key path. It also returns planted and failed counts by stratum, and monolith pair counts.
 - `live_wiring` builds the real definitions, the three model asks (Fable rewrites, the need-writer model, Opus work-alikes) and the shape readers.
 - `main` takes `--out` and an optional `--claude-cli-path`. It checks the frozen configuration against the live one, runs, prints JSON and returns 0. It raises `CONFIG_DRIFT` if they differ.

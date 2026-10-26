@@ -10,6 +10,7 @@ import pytest
 
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import packets as lb_packets
+from cosa.repo.semdup import blind
 from cosa.repo.semdup import errors as err
 from cosa.repo.semdup import extract as ex
 from cosa.repo.semdup import frozen as fz
@@ -424,6 +425,45 @@ def test_select_pools_draws_sixty_percent_script_leaves_out_scrub_token_definiti
     assert lp.select_pools( list( reversed( server ) ), list( reversed( client ) ), CFG, 11, 60 ) == got
 
 
+def test_a_definition_holding_a_frozen_arm_label_is_left_out_of_the_pools():
+    labelled = { **synthetic( "py", 500 ), "text": f"def fn_500( v ):\n    return \"{fz.ARM_LABELS[ 0 ]}\"\n" }
+    assert blind.breaching_ids( [ labelled ], blind.scrub_tokens( () ) ) == [] and blind.breaching_ids( [ labelled ], blind.scrub_tokens( fz.ARM_LABELS ) ) == [ "d-py-500" ]     # only the label makes it a breach
+    server = [ synthetic( "py", i ) for i in range( 100 ) ] + [ labelled ]
+    got    = lp.select_pools( server, [ synthetic( "ts", i ) for i in range( 100 ) ], CFG, 11, 60 )
+    assert "d-py-500" not in { d[ "id" ] for d in got[ "python" ] }
+    assert all( labelled[ "id" ] != d[ "id" ] for d in lp.select_pools( server[ :-1 ], [ synthetic( "ts", i ) for i in range( 100 ) ], CFG, 11, 60 )[ "python" ] )
+
+
+def resume_wiring( tmp_path ):
+    """Wiring whose models fail the test if they are asked anything."""
+    def never( system, user ): raise AssertionError( "a model was asked" )
+    return { "server_defs": [ synthetic( "py", i ) for i in range( 100 ) ], "client_defs": [ synthetic( "ts", i ) for i in range( 100 ) ],
+             "asks": { "rewrite": never, "sentence": never, "alike": never }, "shape_of": { "py": None, "ts": None }, "client": FakeEmbed(), "cache_dir": tmp_path / "vec" }
+
+
+@pytest.mark.parametrize( "changed", [ { "seed": 4 }, { "count": 61 }, { "config_sha": "d" * 64 } ] )
+def test_a_saved_planted_file_made_for_other_inputs_is_refused_before_any_model_call( tmp_path, changed ):
+    made  = { "seed": 3, "count": 60, "config_sha": CFG[ "config_sha" ] }
+    lp.save_doc( tmp_path / "out" / "key" / lp.PLANTED_FILE, { "planted": [], "failed": [], "inputs": made } )
+    asked = { "seed": 3, "count": 60, "cfg": CFG, **{ ( "cfg" if k == "config_sha" else k ): ( { **CFG, "config_sha": v } if k == "config_sha" else v ) for k, v in changed.items() } }
+    with pytest.raises( ValueError, match="was made for" ): lp.run( tmp_path / "repo", tmp_path / "out", asked[ "cfg" ], resume_wiring( tmp_path ), seed=asked[ "seed" ], count=asked[ "count" ] )
+
+
+def test_a_saved_planted_file_that_records_no_inputs_is_refused( tmp_path ):
+    lp.save_doc( tmp_path / "out" / "key" / lp.PLANTED_FILE, { "planted": [], "failed": [] } )
+    with pytest.raises( ValueError, match="was made for None" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, resume_wiring( tmp_path ), seed=3 )
+
+
+def test_a_relative_out_folder_gives_absolute_paths_whatever_the_working_folder( tmp_path, monkeypatch ):
+    root = monolith_root( tmp_path / "repo", monkeypatch, MONOLITH_TEXT )
+    monkeypatch.setattr( plant, "python_need", lambda r, rt: need_input.NeedInput( member_id="m", kind="function", text="def NAME(): pass", forbidden=[ "fn" ] ) )
+    wiring = { **resume_wiring( tmp_path ), "asks": { "rewrite": lambda s, u: PY_TEXT if "def " in u else TS_TEXT, "sentence": lambda s, u: SENTENCE, "alike": lambda s, u: PY_TEXT if "Python" in u else TS_TEXT },
+               "shape_of": { "py": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9}, "ts": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9} } }
+    monkeypatch.chdir( tmp_path )
+    out = lp.run( tmp_path / "repo", "rel-out", CFG, wiring, seed=3 )
+    assert out[ "key" ] == str( tmp_path / "rel-out" / "key" / lp.KEY_FILE ) and all( v.startswith( str( tmp_path / "rel-out" ) ) for v in out[ "packets" ].values() )
+
+
 def test_the_whole_run_plants_sixty_pairs_sixty_forty_one_third_work_alikes_and_writes_packets_and_key( tmp_path, monkeypatch ):
     root = monolith_root( tmp_path / "repo", monkeypatch, MONOLITH_TEXT )
     monkeypatch.setattr( plant, "python_need", lambda r, rt: need_input.NeedInput( member_id="m", kind="function", text="def NAME(): pass", forbidden=[ "fn", "zzz" ] ) )
@@ -541,6 +581,7 @@ def test_a_resumed_run_tops_up_the_work_alikes_saves_the_document_and_then_asks_
     saved = tmp_path / "out" / "key" / lp.PLANTED_FILE
     first = json.loads( saved.read_text( encoding="utf-8" ) )
     assert not any( p[ "stratum" ] == "opus-work-alike" for p in first[ "planted" ] ) and len( first[ "failed" ] ) > 0
+    assert first[ "inputs" ] == { "seed": 3, "count": 60, "config_sha": CFG[ "config_sha" ] }
     state[ "sentence" ] = SENTENCE
     out  = lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3 )
     assert out[ "planted" ][ "opus-work-alike" ] == 20 and out[ "planted" ][ "fable-planted" ] == len( first[ "planted" ] )

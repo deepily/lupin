@@ -11,7 +11,7 @@ pins:
   - cosa.repo.semdup.proof.label_prep.rewrite_record@a964a7d0bd
   - cosa.repo.semdup.proof.label_prep.top_up_alikes@0583e2db29
   - cosa.repo.semdup.proof.label_prep.checked@c0154de3ac
-  - cosa.repo.semdup.proof.label_prep.select_pools@db9488d51a
+  - cosa.repo.semdup.proof.label_prep.select_pools@b769a48afe
 ---
 # Duplicate checker proof: planting for the labelling packets
 
@@ -23,7 +23,7 @@ pins:
 - `script_shape` returns the shingle set of the first function in script source, read by the TypeScript compiler. A source that does not parse alone is tried inside a class body. It returns None when neither holds a function.
 
 ## Planting
-- `select_pools` drops definitions that carry a scrub token, and nested ones (`<locals>`). It draws twice the planted count and splits the draw into script and Python lists.
+- `select_pools` drops definitions that carry a scrub token (the tool tokens and the frozen arm labels), and nested ones (`<locals>`). It draws twice the planted count and splits the draw into script and Python lists.
 - `write_sentence` asks for the one-sentence need of a stripped definition. It returns the sentence and the failure kinds of each rejected try, or None and those kinds when the attempt limit is reached. Each retry names the last failure kinds, the own words found in the last sentence and its length.
 - `plant_one` plants one pair. A Fable rewrite goes through `plant_rewrite` with the banned words. An Opus work-alike is written from the need sentence alone. It must parse and differ in shape from the original.
 - A definition with no resolvable need, or a rewrite that fails, comes back as a `failed` result naming the cause, and the run goes on. A work-alike with no passing sentence reports the failure kinds of its tries.

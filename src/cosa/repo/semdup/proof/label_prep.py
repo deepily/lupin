@@ -348,10 +348,10 @@ def select_pools( server_defs, client_defs, cfg, seed, count=PLANTED_COUNT ):
         - server_defs and client_defs are server-origin definition records; the monolith is not among client_defs
 
     Ensures:
-        - definitions that carry a scrub token, and nested ones (named <locals>, which need_input cannot address), are left out, and the rest are drawn by plant.select_originals with the frozen minimum
+        - definitions that carry a scrub token (the tool tokens and frozen.ARM_LABELS, the list the frozen configuration scrubs), and nested ones (named <locals>, which need_input cannot address), are left out, and the rest are drawn by plant.select_originals with the frozen minimum
         - returns { script, python }: lists of originals in id order, each long enough to fill its share of count twice over
     """
-    scrub  = blind.scrub_tokens( () )
+    scrub  = blind.scrub_tokens( frozen.ARM_LABELS )
     pool   = [ *server_defs, *client_defs ]
     banned = set( blind.breaching_ids( pool, scrub ) )
     drawn  = plant.select_originals( [ d for d in pool if d[ "id" ] not in banned and "<locals>" not in d[ "name" ] ], count * 2, seed, cfg[ "min_nodes" ] )
@@ -425,21 +425,27 @@ def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=R
         - plants count pairs, 60% script and 40% Python, one third of each share as Opus work-alikes, each rewrite extracted to a new-origin record
         - a work-alike that fails is replaced by a Fable pair, and top_up_alikes then adds work-alikes until the third is reached, so the total can pass count
         - the planted pairs are written to <out>/key/planted.json before the monolith step, and a run that finds the file reads it instead of asking the models again, so a later failure costs no model call
+        - the file also records the seed, count and config_sha it was made for; a run that finds a file made for other values, or for none, raises before any model call
         - returns prepare's result plus planted and failed counts by stratum, so a short count is visible
+
+    Raises:
+        - ValueError if <out>/key/planted.json was made for a different seed, count or config_sha, or records none
     """
     out_dir = pathlib.Path( out_dir ).resolve()
     folder  = out_dir / "key"
     saved   = folder / PLANTED_FILE
     pools   = select_pools( wiring[ "server_defs" ], wiring[ "client_defs" ], cfg, seed, count )
+    inputs  = { "seed": seed, "count": count, "config_sha": cfg[ "config_sha" ] }
     if saved.exists():
         doc = json.loads( saved.read_text( encoding="utf-8" ) )
+        if doc.get( "inputs" ) != inputs: raise ValueError( f"{saved} was made for {doc.get( 'inputs' )}, not for {inputs}; use a new --out folder or remove the file to plant again" )
     else:
         want    = round( count * plant.SCRIPT_SHARE )
         made    = [ plant_all( pools[ "script" ], root, wiring[ "asks" ], wiring[ "shape_of" ][ "ts" ], want ), plant_all( pools[ "python" ], root, wiring[ "asks" ], wiring[ "shape_of" ][ "py" ], count - want ) ]
         by_id   = { d[ "id" ]: d for d in [ *pools[ "script" ], *pools[ "python" ] ] }
         doc     = { "planted": [ { "original": by_id[ r[ "original" ] ], "rewrite": rewrite_record( r, by_id[ r[ "original" ] ], folder / "rewrites", i ), "stratum": r[ "stratum" ] }
                                  for i, r in enumerate( [ *made[ 0 ][ "planted" ], *made[ 1 ][ "planted" ] ] ) ],
-                    "failed": [ r for m in made for r in m[ "failed" ] ] }
+                    "failed": [ r for m in made for r in m[ "failed" ] ], "inputs": inputs }
         save_doc( saved, doc )
     top_up_alikes( doc, pools, root, wiring, folder / "rewrites", count, save=lambda: save_doc( saved, doc ) )
     mono    = monolith_candidates( root, cfg, wiring[ "client" ], wiring[ "cache_dir" ] )
