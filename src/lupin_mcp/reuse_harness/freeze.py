@@ -97,11 +97,14 @@ def build_spec( git, run_id, arm, model_id, frozen_sha, cap_seat_hours, main_ref
         - the result passes run.check_spec
 
     Raises:
-        - HarnessError NOT_FROZEN if main_ref does not hold the commit
+        - HarnessError NOT_FROZEN if the sha names no commit, or main_ref does not hold it
         - HarnessError FEATURE_MAP for a map that does not close
         - HarnessError BAD_ARM or BAD_SPEC from check_spec
     """
-    full = git.resolve( frozen_sha )
+    try:
+        full = git.resolve( frozen_sha )
+    except RuntimeError as error:
+        raise err.HarnessError( err.NOT_FROZEN, f"{frozen_sha} names no commit: {error}" ) from error
     if not git.is_ancestor( full, main_ref ): raise err.HarnessError( err.NOT_FROZEN, f"{full} is not on {main_ref}" )
     sources = { path: git.file_at( full, path ) for path in git.list_at( full, TEST_DIR ) if path.endswith( ".py" ) }
     tests   = collect_tests( sources )

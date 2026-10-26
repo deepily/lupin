@@ -137,3 +137,8 @@ def test_build_spec_refuses_a_bad_arm_through_check_spec( repo ):
 
 def test_build_spec_refuses_a_map_that_does_not_close( repo ):
     assert code_of( lambda: freeze.build_spec( repo[ "git" ], "r1", "with", "m", "main", 1 ) ) == err.FEATURE_MAP
+
+
+def test_build_spec_refuses_a_sha_that_names_no_commit_as_not_frozen_not_as_a_git_error( repo ):
+    with pytest.raises( err.HarnessError ) as caught: freeze.build_spec( repo[ "git" ], "r1", "with", "m", "0" * 40, 1 )
+    assert caught.value.code == err.NOT_FROZEN and "names no commit" in caught.value.detail

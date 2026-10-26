@@ -86,6 +86,15 @@ class Worktrees:
         if os.path.isdir( target ): shutil.rmtree( target )
         elif os.path.exists( target ): os.remove( target )
 
+    def remove( self, path ):
+        """
+        Delete a worktree this port made, for a dry run that has nothing for the scorer to read.
+
+        Raises:
+            - RuntimeError from git if the path is not a worktree of the repository
+        """
+        pool_builder.run_git( self.repo_root, [ "worktree", "remove", "--force", path ] )
+
     def client_entries( self, path ):
         """Return the sorted names directly in the client folder of the worktree."""
         return sorted( os.listdir( os.path.join( path, CLIENT_ROOT ) ) )
