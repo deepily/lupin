@@ -542,3 +542,140 @@ def test_short_sha_matches_the_build_scripts_own_convention():
     assert mod.short_sha( b"" ) == \
         "e3b0c44298fc", "sha256 of empty input, first 12 — the build script's convention"
     assert len( mod.short_sha( b"anything" ) ) == mod.HASH_LENGTH == 12
+
+
+# ── in-process edges (row e1a36bb4, coverage to 100%) ────────────────────────────
+# The cases above reach main() through a subprocess, which coverage never sees. These call the
+# same entry point in-process against the fixture tree by repointing PROJECT_ROOT.
+
+def _write_driver( path, body ):
+    path.write_text( "#!/usr/bin/env bash\n" + body, encoding="utf-8" )
+    return path
+
+
+_HEAD = 'ENTRY="e.ts"\nOUTDIR="out/dir"\nOUTFILE="$OUTDIR/b.js"\n'
+
+
+def test_a_driver_with_no_outfile_is_a_build_script_error( tmp_path ):
+    script = _write_driver( tmp_path / "build-x.sh", 'ENTRY="e.ts"\nOUTDIR="out/dir"\n' )
+    with pytest.raises( mod.BuildScriptError, match="OUTFILE" ):
+        mod.parse_build_script( script )
+
+
+def test_a_driver_with_no_production_esbuild_line_is_a_build_script_error( tmp_path ):
+    script = _write_driver( tmp_path / "build-x.sh", _HEAD + 'exec "$ESBUILD" \\\n  --watch\n' )
+    with pytest.raises( mod.BuildScriptError, match="no production" ):
+        mod.parse_build_script( script )
+
+
+def test_a_production_block_with_no_flags_is_a_build_script_error( tmp_path ):
+    script = _write_driver( tmp_path / "build-x.sh", _HEAD + '"$ESBUILD" \\\n  --outfile="$OUTFILE" \\\n  --log-level=warning\n' )
+    with pytest.raises( mod.BuildScriptError, match="carried no flags" ):
+        mod.parse_build_script( script )
+
+
+def test_a_flag_block_that_runs_to_end_of_file_still_returns_its_flags( tmp_path ):
+    # no blank line and no unescaped last line: the loop is exhausted, not broken out of
+    script = _write_driver( tmp_path / "build-x.sh", _HEAD + '"$ESBUILD" \\\n  --bundle \\\n  --minify \\\n' )
+    spec = mod.parse_build_script( script )
+    assert spec[ "flags" ] == [ "--bundle", "--minify" ]
+    assert spec[ "out_basename" ] == "b.js"
+
+
+def test_a_flag_block_ends_at_the_first_line_without_a_continuation( tmp_path ):
+    # `--after` follows the unescaped `--minify`, so it is NOT part of the block
+    script = _write_driver( tmp_path / "build-x.sh", _HEAD + '"$ESBUILD" \\\n  --bundle \\\n  --minify\n  --after\n' )
+    assert mod.parse_build_script( script )[ "flags" ] == [ "--bundle", "--minify" ]
+
+
+def test_a_never_built_bundle_git_cannot_answer_about_refuses( tmp_path, monkeypatch ):
+    tree = _make_tree( tmp_path )
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: None )
+    result = mod.check_bundle( tree, tree / "src" / "scripts" / "build-probe.sh", str( ESBUILD ) )
+    assert result[ "status" ] == mod.REFUSED
+    assert "git could not be asked" in result[ "reason" ]
+
+
+@pytest.mark.parametrize( "manifest_text", [ "{ not json", '{"boot.js": "x"}' ], ids=[ "bad-json", "no-hash-key" ] )
+def test_a_manifest_without_a_readable_hash_refuses( tmp_path, manifest_text ):
+    tree = _make_tree( tmp_path )
+    outdir = tree / "src" / "lupin_app" / "static" / "dist" / "probe"
+    outdir.mkdir( parents=True )
+    ( outdir / "manifest.json" ).write_text( manifest_text, encoding="utf-8" )
+    result = mod.check_bundle( tree, tree / "src" / "scripts" / "build-probe.sh", str( ESBUILD ) )
+    assert result[ "status" ] == mod.REFUSED
+    assert "carries no readable 'hash'" in result[ "reason" ]
+
+
+@needs_esbuild
+def test_a_rebuild_with_no_metafile_is_judged_with_an_unknown_source_count( tmp_path, monkeypatch ):
+    """Without esbuild's metafile the verdict stands and the source count stays None."""
+    tree = _make_tree( tmp_path )
+    _build( tree )
+    real_isfile = os.path.isfile
+    monkeypatch.setattr( mod.os.path, "isfile", lambda p: False if str( p ).endswith( "meta.json" ) else real_isfile( p ) )
+    result = mod.check_bundle( tree, tree / "src" / "scripts" / "build-probe.sh", str( ESBUILD ) )
+    assert result[ "status" ] == mod.FRESH
+    assert result[ "sources" ] is None
+
+
+def test_current_sha_reports_the_short_sha_in_a_repo_and_unknown_outside_one( tmp_path ):
+    assert mod.current_sha( REPO_ROOT ) not in ( "unknown", "" )
+    assert mod.current_sha( tmp_path ) == "unknown"
+
+
+def test_format_report_prints_a_question_mark_for_an_unknown_source_count():
+    row = { "name": "probe", "status": mod.FRESH, "sources": None, "shipped_hash": "aaa", "rebuilt_hash": "aaa", "reason": None }
+    lines = mod.format_report( "/t", [ row ], "abc123" )
+    assert any( l.strip().startswith( "probe" ) and " ? " in l for l in lines )
+
+
+def test_format_report_tells_the_reader_what_to_run_when_stale():
+    row = { "name": "probe", "status": mod.STALE, "sources": 3, "shipped_hash": "aaa", "rebuilt_hash": "bbb", "reason": None }
+    lines = mod.format_report( "/t", [ row ], "abc123" )
+    assert any( "a rebuild WOULD change the delivered bytes. Run: npm run build" in l for l in lines )
+    assert any( "SCOPE" in l for l in lines )
+
+
+def test_format_report_omits_the_scope_note_when_nothing_was_judged():
+    row = { "name": "probe", "status": mod.NOT_BUILT, "sources": None, "shipped_hash": None, "rebuilt_hash": None, "reason": "dormant" }
+    lines = mod.format_report( "/t", [ row ], "abc123" )
+    assert not any( "SCOPE" in l for l in lines )
+    assert any( "dormant" in l for l in lines )
+
+
+def test_main_refuses_when_the_tree_has_no_manifest_emitting_driver( tmp_path, monkeypatch, capsys ):
+    ( tmp_path / "src" / "scripts" ).mkdir( parents=True )
+    monkeypatch.setattr( mod, "PROJECT_ROOT", tmp_path )
+    assert mod.main( [] ) == mod.EXIT_REFUSED
+    assert "no build-*.sh driver emits a manifest.json" in capsys.readouterr().err
+
+
+@needs_esbuild
+def test_main_in_process_fresh_stale_and_quiet( tmp_path, monkeypatch, capsys ):
+    tree = _make_tree( tmp_path )
+    _build( tree )
+    monkeypatch.setattr( mod, "PROJECT_ROOT", tree )
+
+    assert mod.main( [] ) == mod.EXIT_FRESH
+    loud = capsys.readouterr().out
+    assert any( not l.strip() for l in loud.splitlines() ), "the normal report carries blank spacer lines"
+
+    assert mod.main( [ "--quiet" ] ) == mod.EXIT_FRESH
+    quiet = capsys.readouterr().out
+    assert not any( not l.strip() for l in quiet.splitlines() ), "--quiet drops every blank line"
+
+    _mutate_emitted_string( tree )
+    assert mod.main( [] ) == mod.EXIT_STALE
+    assert "STALE" in capsys.readouterr().out
+
+
+def test_main_in_process_refuses_when_a_bundle_is_refused_and_when_nothing_was_built( tmp_path, monkeypatch, capsys ):
+    tree = _make_tree( tmp_path )
+    monkeypatch.setattr( mod, "PROJECT_ROOT", tree )
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: [ "page.html" ] )
+    assert mod.main( [] ) == mod.EXIT_REFUSED                  # never built, something loads it
+
+    monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: [] )
+    assert mod.main( [] ) == mod.EXIT_REFUSED                  # never built, nobody loads it: nothing measured
+    assert "no bundle was built, so nothing was measured" in capsys.readouterr().err
