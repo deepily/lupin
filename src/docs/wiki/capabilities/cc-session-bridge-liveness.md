@@ -2,10 +2,10 @@
 capability: cc-session-bridge-liveness
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_dead_sessions@ad6c28e5f2
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_dead_sessions@ca5dff8918
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_bridge_mtime@681d5820fe
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_bridge_touch_failure_count@365d0e6864
-  - lupin_cli.claude_code.hooks.lib.session_bridge.prune_dead_persona_bridges@0f582c3bd3
+  - lupin_cli.claude_code.hooks.lib.session_bridge.prune_dead_persona_bridges@29cdc714df
   - lupin_mcp.bridge_liveness_middleware.BridgeLivenessMiddleware@9aa910aa7c
 ---
 # Claude Code session bridge liveness
@@ -23,3 +23,4 @@ Readers and cleanup that tell whether a seat is still running, based on its brid
 ## Invariants
 - The middleware has no guard of its own. It relies on `touch_bridge_mtime()` never raising. If that catch is narrowed, the middleware needs its own try block, because the stamp runs before every tool.
 - None of these raises. Death checks lean toward alive.
+- A bridge whose JSON is not an object is skipped like an unparseable one: `find_dead_sessions` does not count it, and the prune leaves it alone.

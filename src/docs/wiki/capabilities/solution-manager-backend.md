@@ -12,7 +12,7 @@ pins:
   - cosa.memory.two_tier_question_search.snapshot_to_pg_record@49cf1d5417
   - cosa.memory.two_tier_question_search.pg_similarity_search@0574a1359f
   - cosa.memory.two_tier_question_search.update_canonical_synonyms@0c89bbc823
-  - cosa.memory.input_and_output_table.InputAndOutputTable@435742516d
+  - cosa.memory.input_and_output_table.InputAndOutputTable@15fe6c8f12
   - cosa.memory.query_log_table.QueryLogTable@a12e28a77c
 ---
 # Solution manager backend
@@ -28,7 +28,7 @@ The Postgres snapshot manager, its factory and converters, and the two logging t
 - `snapshot_to_pg_record` and `pg_record_to_snapshot` convert between a snapshot and a database record. `update_canonical_synonyms` indexes a snapshot's questions in the synonyms table.
 - `PerformanceMonitor` times an operation with `start` and `stop`. `get_metrics` returns a `PerformanceMetrics`, which `to_dict` serializes.
 - `TwoTierQuestionSearch` is the read-only lookup, and `pg_hierarchical_search` is the manager's own.
-- `InputAndOutputTable` also answers `get_knn_by_input`, `get_all_io`, `get_io_stats_by_input_type` and `get_all_qnr`, each bounded by `k` or `max_rows`.
+- `InputAndOutputTable` also answers `get_knn_by_input`, `get_all_io`, `get_io_stats_by_input_type` and `get_all_qnr`, each bounded by `k` or `max_rows`. Its constructor sets `debug`, `verbose`, the config manager and the embedding dimension through the shared `init_embedding_table_config` helper.
 - `QueryLogTable` reads back with `get_recent_queries`, newest first, and `get_cache_hit_stats` for the last N days.
 
 ## Don't

@@ -6,7 +6,7 @@ pins:
   - cosa.memory.gister.Gister@3d25be9a94
   - cosa.memory.gist_normalizer.GistNormalizer@89a2f4cd02
   - cosa.memory.gist_cache_table.GistCacheTable@da02ff991f
-  - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable@aa4481ee9c
+  - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable@cc93d09eb8
   - cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository@d5abda0d75
   - cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository@f97a2a943d
   - cosa.rest.multimodal_munger.MultiModalMunger@8ed16b51bf
@@ -19,7 +19,7 @@ A spoken question is reduced three ways: the verbatim text, a normalized form, a
 - `Normalizer.normalize` expands contractions, lowercases, drops single-word fillers and punctuation, and lemmatizes nouns, verbs, adjectives and adverbs with spaCy. It keeps math operators. Sentence-ending marks are dropped, so sentence breaks leave no trace.
 - `Gister.get_gist` asks an LLM for the main intent of an utterance. `GistNormalizer.get_normalized_gist` then normalizes that gist.
 - `GistCacheTable` caches gists in Postgres. A lookup tries the verbatim question first, then the normalized one.
-- `CanonicalSynonymsTable` maps known question wordings to a snapshot. `find_exact_verbatim`, `find_exact_normalized` and `find_exact_gist` return a snapshot id or `None`.
+- `CanonicalSynonymsTable` maps known question wordings to a snapshot. `find_exact_verbatim`, `find_exact_normalized` and `find_exact_gist` return a snapshot id or `None`. Its constructor sets `debug`, `verbose`, the config manager and the embedding dimension through the shared `init_embedding_table_config` helper.
 - The two repositories hold the storage. Each table opens a short database session per call.
 - `MultiModalMunger` is a different job. It cleans a raw transcription according to its mode, such as email, Python or SQL punctuation. It does not call the gister.
 

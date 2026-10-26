@@ -6,7 +6,7 @@ pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.atomic_write_json@304ee933db
   - lupin_cli.claude_code.hooks.lib.session_bridge.canonical_persona_key@1f4c521dcb
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_path_by_id@2eb138d772
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_sessions@f77c7d857b
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_sessions@f16e8f60e0
   - lupin_cli.claude_code.hooks.lib.session_bridge.touch_bridge_mtime@6b55fa5d1b
 ---
 # Claude Code session bridge
@@ -21,7 +21,8 @@ One JSON file per running Claude Code process, named `cc-<pid>.json`, carries th
 ## Making a write safe
 - Use `atomic_write_json( path, data )` for any bridge write. It writes a temp file in the target's directory, sets mode 0660, then `os.replace`s it over the target. A reader sees a whole old or whole new document.
 - It returns `False` on `OSError`, `TypeError` or `ValueError`, prints the path and error to stderr, removes the temp file, and never raises. Check the return: a hook that ignores it fails silently apart from that stderr line.
-- The setters (`set_voice_persona`, `set_user_id`, `set_owner_user_id` and the like) read the file, change one field and write through it. They return `False` when no live bridge matches the id.
+- The setters (`set_voice_persona`, `set_user_id`, `set_owner_user_id` and the like) read the file, change one field and write through it. They return `False` when no live bridge matches the id. Readers load through `_load_bridge_object`; JSON that is not an object is a parse failure, so the bridge is skipped.
+
 
 ## Canonical persona key
 - `canonical_persona_key( name )` is the one key for matching `owner_persona` rows. It delegates to `lupin_mcp.persona_normalization`.

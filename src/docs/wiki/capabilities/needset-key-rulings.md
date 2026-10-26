@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.reuse_needset.keys.parse_choice@6511026869
   - lupin_mcp.reuse_needset.keys.ruled@f23de250e1
   - lupin_mcp.reuse_needset.keys.confirm_same_job@c4b92fefa0
-  - lupin_mcp.reuse_needset.keys.find_key@56003651cb
+  - lupin_mcp.reuse_needset.keys.find_key@128ac429d0
   - lupin_mcp.reuse_needset.keys.absence_evidence@a71903c053
   - lupin_mcp.reuse_needset.keys.absence_prompt@82067ccc29
   - lupin_mcp.reuse_needset.keys.absence_verdict@c114fc3094
@@ -23,6 +23,8 @@ Asks a model whether a neighbour does the seed's job, and whether anything does 
 - `ruled` gets one yes or no ruling, from the ledger when it was asked before. An unreadable reply is asked again once, and two unreadable raise `UNREADABLE_REPLY`.
 - `confirm_same_job` asks whether the seed and another definition do the same job.
 - `find_key` asks about the candidates in order and stops at the first yes. It returns the key or `None`, the route, how many candidates were ruled on, and their sources.
+- With `calls`, each candidate ruled by a live model call adds a row to it: cell, seed, other, route, source, position, asks and ruling. A ruling read back from the ledger adds nothing.
+- A candidate whose replies were both unreadable adds the same row with ruling `None`, and `UNREADABLE_REPLY` still propagates, so every paid call is accounted for.
 
 ## Absence
 - `absence_evidence` lists what the index's word search and vector search find for a capability, up to a given number of ids each, best first. The word list fuses the code and prose word searches as the shortlist stage does.

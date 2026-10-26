@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_needset.quota.plan_quota@be72893016
   - lupin_mcp.reuse_needset.quota.census@fa2d8eead2
   - lupin_mcp.reuse_needset.quota.draw@48b7979bcb
-  - lupin_mcp.reuse_needset.quota.plan_record@2a9ef54452
+  - lupin_mcp.reuse_needset.quota.plan_record@387d907864
   - lupin_mcp.reuse_needset.quota.write_plan@8e52103946
 ---
 # Need set: records, errors and quota plan
@@ -30,4 +30,4 @@ The need set is a diagnostic set of plain-sentence needs. Each is paired with an
 - `census` counts the distinct eligible seeds in every cell before any model call.
 - `draw` picks the seeds of every cell, with spares, from a sorted pool and a fixed seed. The same seed gives the same draw whatever order the pool lists its ids in.
 - A seed is the primary of at most one cell. A cell whose seeds cannot all be found raises `QUOTA_UNFILLABLE`.
-- `plan_record` builds the record written before the first draft is requested. `write_plan` writes it once, by hard link, so of several racing writers exactly one succeeds. A second write raises `PLAN_ALREADY_WRITTEN`.
+- `plan_record` builds the record written before the first draft is requested. It holds `screen_floor` only when one is given, because the screen changes the draw; a plan without a screen is the record it always was. `write_plan` writes it once, by hard link, so of several racing writers exactly one succeeds. A second write raises `PLAN_ALREADY_WRITTEN`.

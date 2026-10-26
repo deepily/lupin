@@ -2,20 +2,20 @@
 capability: cc-session-bridge-fields
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone@89e0092636
-  - lupin_cli.claude_code.hooks.lib.session_bridge.set_speakerphone@0201ca8b58
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_speakerphone_sessions@ab23e4fa65
+  - lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone@8a74cbad28
+  - lupin_cli.claude_code.hooks.lib.session_bridge.set_speakerphone@51c4a7977d
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_speakerphone_sessions@6e8713dc35
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_voice_persona@2ea96eeef2
-  - lupin_cli.claude_code.hooks.lib.session_bridge.set_voice_persona@68f1c8359c
+  - lupin_cli.claude_code.hooks.lib.session_bridge.set_voice_persona@88c4a5d6d7
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions@f2ca237d8f
   - lupin_cli.claude_code.hooks.lib.session_bridge.set_user_id@40d1f8340e
   - lupin_cli.claude_code.hooks.lib.session_bridge.set_owner_user_id@9f200995a8
-  - lupin_cli.claude_code.hooks.lib.session_bridge.set_manager_figure_implicit@1de85b9ad9
-  - lupin_cli.claude_code.hooks.lib.session_bridge.get_last_autonarrated_turn_id@cf58e29700
-  - lupin_cli.claude_code.hooks.lib.session_bridge.set_last_autonarrated_turn_id@65adf711a7
+  - lupin_cli.claude_code.hooks.lib.session_bridge.set_manager_figure_implicit@6b6e200d21
+  - lupin_cli.claude_code.hooks.lib.session_bridge.get_last_autonarrated_turn_id@80dc1ab892
+  - lupin_cli.claude_code.hooks.lib.session_bridge.set_last_autonarrated_turn_id@5a6f986a89
   - lupin_cli.claude_code.hooks.lib.session_bridge.get_idle_detection@1a48a892d6
-  - lupin_cli.claude_code.hooks.lib.session_bridge.set_idle_detection_field@867c4fced3
-  - lupin_cli.claude_code.hooks.lib.session_bridge.clear_idle_waiter_pid@0158f5ff52
+  - lupin_cli.claude_code.hooks.lib.session_bridge.set_idle_detection_field@23e0513162
+  - lupin_cli.claude_code.hooks.lib.session_bridge.clear_idle_waiter_pid@6bf3bb828c
   - lupin_cli.claude_code.hooks.lib.session_bridge.kill_idle_waiter@2987c05da3
 ---
 # Claude Code session bridge fields
@@ -35,3 +35,4 @@ Per-session settings kept as fields in the bridge JSON, with a getter and setter
 - Do not expect a setter to create a bridge. It returns `False` when none matches.
 ## Invariants
 - Setters preserve all other bridge fields and never raise.
+- JSON that is not an object is a parse failure here. Getters return their fallback, setters return `False`, and scanners skip the file.

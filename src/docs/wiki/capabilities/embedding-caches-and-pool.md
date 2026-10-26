@@ -3,7 +3,7 @@ capability: embedding-caches-and-pool
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.memory.embedding_cache_table.EmbeddingCacheTable@5bd0a67a5a
-  - cosa.memory.question_embeddings_table.QuestionEmbeddingsTable@ec010ba0f0
+  - cosa.memory.question_embeddings_table.QuestionEmbeddingsTable@7df7c0ec9c
   - cosa.memory.embedding_manager.EmbeddingManager@0fa9c54a97
   - cosa.memory.embedding_manager.generate_embedding@5b8776b54a
   - cosa.memory.embedding_manager.get_embedding_manager@33ae6d973f
@@ -23,7 +23,7 @@ The vector caches, the OpenAI manager, the engine accessors and the bounded pool
 
 ## What it does
 - `EmbeddingCacheTable` stores a normalized text and its vector in Postgres. `has_cached_embedding`, `get_cached_embedding` and `cache_embedding` match by exact string.
-- `QuestionEmbeddingsTable` does the same for a question. `get_embedding` returns the stored vector, or generates one on a miss without storing it. `add_embedding` appends a row.
+- `QuestionEmbeddingsTable` does the same for a question. `get_embedding` returns the stored vector, or generates one on a miss without storing it. `add_embedding` appends a row. Its constructor takes `debug`, `verbose`, the config manager and the embedding dimension from the shared `init_embedding_table_config` helper.
 - `EmbeddingManager` makes OpenAI embeddings with a cache and text normalization. `get_embedding_manager` returns its singleton, and the module-level `generate_embedding` calls it.
 - `normalize_text_for_cache` extracts the gist, and may expand numbers and symbols to words, so equivalent text shares a cache key.
 - `get_embedding_provider` returns the `EmbeddingProvider` singleton. `get_code_engine` and `get_prose_engine` return the two engine singletons.

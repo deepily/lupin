@@ -7,11 +7,11 @@ pins:
   - lupin_cli.claude_code.hooks.lib.session_bridge.wait_for_session_id@924c638322
   - lupin_cli.claude_code.hooks.lib.session_bridge.wait_for_session_id_with_source@ba5858585f
   - lupin_cli.claude_code.hooks.lib.session_bridge.clear_cached_session_id@970adedbe8
-  - lupin_cli.claude_code.hooks.lib.session_bridge.resolve_stable_session_id@9b7baf6bd4
-  - lupin_cli.claude_code.hooks.lib.session_bridge.get_session_metadata@3c6d242d49
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id@90b80fbd6d
-  - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_tmux@cf17b12fe1
-  - lupin_cli.claude_code.hooks.lib.session_bridge.iter_live_bridges@2b9bd66694
+  - lupin_cli.claude_code.hooks.lib.session_bridge.resolve_stable_session_id@f6c1e48897
+  - lupin_cli.claude_code.hooks.lib.session_bridge.get_session_metadata@ff874f3620
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id@7e5848a11d
+  - lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_tmux@67fc0e9fc8
+  - lupin_cli.claude_code.hooks.lib.session_bridge.iter_live_bridges@d8f4ef313d
   - lupin_cli.claude_code.hooks.lib.session_bridge.build_live_bridge_index@4a8bd7a59d
   - lupin_cli.claude_code.hooks.lib.session_bridge.find_in_bridge_index@41052aef07
   - lupin_cli.claude_code.hooks.lib.session_bridge.project_from_bridge_cwd@1e59bc3d38
@@ -36,3 +36,4 @@ How a hook or server finds its own session id, finds another seat's bridge, and 
 - Do not use a prefix match for an irreversible self-aimed action such as a clear. Pass `exact=True`.
 ## Invariants
 - Every function here returns a fallback value and never raises.
+- A bridge whose JSON is not an object is skipped like an unparseable one, so lookups and the index never return it. `get_session_metadata()` then returns its generated fallback id.

@@ -11,7 +11,8 @@ pins:
   - lupin_mcp.reuse_needset.pool.index_id@a769c3e70f
   - lupin_mcp.reuse_needset.pool.dups_manifest@669e7f08fc
   - lupin_mcp.reuse_needset.pool.twin_map@227d0cc962
-  - lupin_mcp.reuse_needset.pool.cell_pool@358f669749
+  - lupin_mcp.reuse_needset.pool.partner_screen@0845624054
+  - lupin_mcp.reuse_needset.pool.cell_pool@0681486d64
 ---
 # Need set: seed pool
 
@@ -31,7 +32,9 @@ Decides which index symbols may seed a need, and in which kind-by-language cell.
 - `twin_map` maps each definition to the other members of its twin group.
 
 ## Cells
-- `cell_pool` builds the pool the census and the draw read, keyed by kind and language.
+- `partner_screen` keeps a work-alike or cross-language seed only when its nearest candidate reaches a cosine floor, by the stored vectors alone. No model call and no embedding is made.
+- The candidate is the nearest of the top 50 neighbours that `keys.unlike` would keep, in the language the cell asks about. A seed with no vector row, or no kept candidate among them, does not pass. It returns sorted ids per kind and language.
+- `cell_pool` builds the pool the census and the draw read, keyed by kind and language. With a `screen` it takes only the seeds the screen passed for the work-alike and cross-language cells.
 - A near copy needs a kept seed with at least one twin in the index.
-- Work-alike and cross-language cells take every kept seed of that language.
+- Work-alike and cross-language cells take every kept seed of that language, or with a screen only the seeds it passed.
 - The `nothing` cell takes the files that hold at least three kept symbols of that language.
