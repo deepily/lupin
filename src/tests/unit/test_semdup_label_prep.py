@@ -425,13 +425,25 @@ def test_select_pools_draws_sixty_percent_script_leaves_out_scrub_token_definiti
     assert lp.select_pools( list( reversed( server ) ), list( reversed( client ) ), CFG, 11, 60 ) == got
 
 
-def test_a_definition_holding_a_frozen_arm_label_is_left_out_of_the_pools():
-    labelled = { **synthetic( "py", 500 ), "text": f"def fn_500( v ):\n    return \"{fz.ARM_LABELS[ 0 ]}\"\n" }
+def with_text( i, word ):
+    """Return a synthetic Python definition whose body holds the word."""
+    return { **synthetic( "py", i ), "text": f"def fn_{i}( v ):\n    return \"{word}\"\n" }
+
+
+@pytest.mark.parametrize( "label", fz.ARM_LABELS )
+def test_a_definition_holding_either_frozen_arm_label_is_left_out_of_the_pools( label ):
+    labelled = with_text( 500, label )
     assert blind.breaching_ids( [ labelled ], blind.scrub_tokens( () ) ) == [] and blind.breaching_ids( [ labelled ], blind.scrub_tokens( fz.ARM_LABELS ) ) == [ "d-py-500" ]     # only the label makes it a breach
-    server = [ synthetic( "py", i ) for i in range( 100 ) ] + [ labelled ]
-    got    = lp.select_pools( server, [ synthetic( "ts", i ) for i in range( 100 ) ], CFG, 11, 60 )
-    assert "d-py-500" not in { d[ "id" ] for d in got[ "python" ] }
-    assert all( labelled[ "id" ] != d[ "id" ] for d in lp.select_pools( server[ :-1 ], [ synthetic( "ts", i ) for i in range( 100 ) ], CFG, 11, 60 )[ "python" ] )
+    plain = [ synthetic( "py", i ) for i in range( 48 ) ]
+    got   = lp.select_pools( [ *plain, labelled ], [ synthetic( "ts", i ) for i in range( 72 ) ], CFG, 11, 60 )
+    assert [ d[ "id" ] for d in got[ "python" ] ] == [ d[ "id" ] for d in plain ]     # 48 are needed and 48 are clean, so the label alone decides
+
+
+def test_a_definition_holding_only_the_letter_a_stays_in_the_pools():
+    odd = with_text( 501, "a" )
+    assert blind.breaching_ids( [ odd ], blind.scrub_tokens( fz.ARM_LABELS ) ) == []
+    got = lp.select_pools( [ *[ synthetic( "py", i ) for i in range( 47 ) ], odd ], [ synthetic( "ts", i ) for i in range( 72 ) ], CFG, 11, 60 )
+    assert "d-py-501" in { d[ "id" ] for d in got[ "python" ] }     # 48 are needed and only 48 exist, so dropping it would raise
 
 
 def resume_wiring( tmp_path ):
