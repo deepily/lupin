@@ -618,6 +618,19 @@ def test_choose_pages_skips_a_malformed_answer_and_a_page_under_the_floor_and_ke
     assert [ c[ "slug" ] for c in an._choose_pages( answers, vd.POLICY ) ] == [ "good", "edge" ]
 
 
+def test_choose_pages_breaks_a_tie_by_slug_whatever_order_the_answers_arrive_in():
+    from cosa.repo.symindex import verdict as vd
+    answers = [ { "id": s, "probabilities": _probs( 0.7 ) } for s in ( "c", "a", "b" ) ]      # three equal overlaps, arriving out of slug order
+    answers.append( { "id": "top", "probabilities": _probs( 0.95 ) } )
+    assert [ c[ "slug" ] for c in an._choose_pages( answers, vd.POLICY ) ] == [ "top", "a", "b", "c" ]
+
+
+def test_choose_pages_reports_the_overlap_rounded_to_six_places_as_a_literal():
+    from cosa.repo.symindex import verdict as vd
+    answers = [ { "id": "r", "probabilities": { "reuse": 0.4234567, "extend": 0.1, "unrelated": 0.4765433 } } ]      # overlap 0.5234567 sums reuse and extend
+    assert an._choose_pages( answers, vd.POLICY ) == [ { "slug": "r", "p_overlap": 0.523457 } ]
+
+
 def test_the_page_arm_is_inconclusive_or_invalid_with_its_arms_and_absent_questions_are_skipped():
     recs = _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } ); recs[ 2 ][ "failed" ] = [ "p1" ]
     assert an.analyze_pages( an.read_stage( recs ) )[ 1 ][ "state" ] == "inconclusive"
