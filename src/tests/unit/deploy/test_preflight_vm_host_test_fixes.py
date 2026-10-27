@@ -804,3 +804,22 @@ def test_the_last_of_two_assignments_wins( venue, tmp_path ):
     assert "[OK]" in ok, ok
     fail = _compose_row_line( venue, tmp_path, "LUPIN_GCP_PROJECT_ID=proj-x\nLUPIN_GCP_PROJECT_ID=\n" )
     assert "[FAIL]" in fail, fail
+
+
+@pytest.mark.skipif( os.geteuid() == 0, reason="root reads a mode 000 file, so the case cannot be built" )
+def test_an_env_file_that_exists_but_cannot_be_read_is_not_a_pass( venue, tmp_path ):
+    # sudo -n fails (stubbed, because this box may have passwordless sudo) and the file is mode 000.
+    # Nothing here can say whether the next create is supplied, and that must block, never pass.
+    bindir = venue[ "env" ][ "PATH" ].split( ":" )[ 0 ]
+    stub   = os.path.join( bindir, "sudo" )
+    with open( stub, "w" ) as handle: handle.write( "#!/bin/bash\nexit 1\n" )
+    os.chmod( stub, 0o755 )
+    env_file = tmp_path / "cloud-gpu.env"
+    env_file.write_text( "LUPIN_GCP_PROJECT_ID=proj-x\n" ); env_file.chmod( 0o000 )
+    venue[ "env" ][ "PREFLIGHT_VM_ENVFILE" ] = str( env_file )
+    try:
+        line = _line( _run( venue ), "LUPIN_GCP_PROJECT_ID" )
+    finally:
+        env_file.chmod( 0o600 )
+    assert "[OK]" not in line, line
+    assert "[UNKN]" in line and "treated as blocking" in line, line

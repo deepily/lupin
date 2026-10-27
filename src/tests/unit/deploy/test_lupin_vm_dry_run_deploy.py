@@ -59,3 +59,18 @@ def test_a_dry_run_deploy_says_it_would_write_the_project_id_to_the_vm_env_file(
     assert "would set LUPIN_GCP_PROJECT_ID" in text, text
     assert text.index( "would set LUPIN_GCP_PROJECT_ID" ) < text.index( "PRE-deploy preflight" )
     assert seen == [ ], seen
+
+
+def test_a_failed_project_id_push_stops_the_deploy_before_anything_else_runs( gcloud_stub ):
+    # Only the push-project-id ssh command mentions the variable. Make it fail, and the deploy must
+    # exit non-zero having made that one call: no preflight, no bundle, no compose.
+    tmp_path, calls = gcloud_stub
+    ( tmp_path / "gcloud" ).write_text(
+        '#!/bin/bash\necho "$*" >> "$STUB_CALLS"\ncase "$*" in *"set -e"*LUPIN_GCP_PROJECT_ID*) exit 1 ;; esac\nexit 0\n' )
+    env  = { "PATH": f"{tmp_path}:{os.environ[ 'PATH' ]}", "STUB_CALLS": str( calls ),
+             "LUPIN_GCP_PROJECT_ID": "a-real-looking-project", "HOME": str( tmp_path ) }
+    out  = subprocess.run( [ "bash", str( SCRIPT ), "deploy" ], capture_output=True, text=True, env=env )
+    seen = calls.read_text()
+    assert out.returncode != 0, out.stdout + out.stderr
+    assert seen.count( "compute ssh" ) == 1 and "LUPIN_GCP_PROJECT_ID" in seen, seen
+    assert not any( w in seen for w in ( "preflight", "compose", "bundle", "compute scp" ) ), seen
