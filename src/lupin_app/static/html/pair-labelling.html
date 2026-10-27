@@ -22,6 +22,7 @@
         button.chosen { background: #bfdbfe; border-color: #1d4ed8; }
         button:disabled { opacity: 0.5; cursor: wait; }
         textarea { width: 340px; height: 56px; font-family: Arial, sans-serif; font-size: 14px; }
+        #marker { margin-top: 8px; font-size: 16px; font-weight: bold; }
         #status { margin-top: 8px; min-height: 20px; font-size: 14px; }
         #status.error { color: #b91c1c; font-weight: bold; }
         [hidden] { display: none !important; }
@@ -46,8 +47,11 @@
             <textarea id="note" placeholder="Note (optional)"></textarea>
             <button id="prev" type="button">← Previous</button>
             <button id="next" type="button">Next →</button>
-            <button id="resume" type="button">First unlabelled</button>
+            <button id="resume" type="button">Next unlabelled</button>
+            <label>Go to pair <input id="goto-pos" type="number" min="1" style="width:70px"></label>
+            <button id="goto" type="button">Go</button>
         </div>
+        <div id="marker"></div>
         <div id="status"></div>
     </main>
 
@@ -111,7 +115,25 @@
                 return await resp.json();
             }
 
-            function showProgress( s ) {
+            function showMarker() {
+                const l = current.label;
+                el( 'marker' ).textContent = l ? ( l.same_job ? '✔ Saved: Same job' : '✖ Saved: Not the same job' ) + ( l.unsure ? ' (unsure)' : '' ) : 'Not yet labelled';
+            }
+
+            function showSaved() {
+                const l = current.label;
+                showMarker();
+                el( 'yes' ).className = 'answer' + ( l.same_job ? ' chosen' : '' );
+                el( 'no' ).className  = 'answer' + ( !l.same_job ? ' chosen' : '' );
+                say( 'Saved: ' + ( l.same_job ? 'Same job' : 'Not the same job' ) + ( l.unsure ? ' (unsure)' : '' ) + '. Still on pair ' + ( current.position + 1 ) + '.' );
+            }
+
+            function showProgress( s, keepPair ) {
+                if ( keepPair ) {
+                    el( 'progress' ).textContent = 'Pair ' + ( current.position + 1 ) + ' of ' + current.total + ' · ' + s.labelled + ' labelled' + ( s.unsure ? ' · ' + s.unsure + ' unsure' : '' );
+                    el( 'bar-fill' ).style.width = ( 100 * s.labelled / s.total ) + '%';
+                    return;
+                }
                 el( 'progress' ).textContent = s.labelled + ' of ' + s.total + ' labelled' + ( s.unsure ? ' · ' + s.unsure + ' unsure' : '' );
                 el( 'bar-fill' ).style.width = ( 100 * s.labelled / s.total ) + '%';
             }
@@ -129,7 +151,8 @@
                 el( 'no' ).className       = 'answer' + ( item.label && !item.label.same_job ? ' chosen' : '' );
                 el( 'progress' ).textContent = 'Pair ' + ( item.position + 1 ) + ' of ' + item.total + ' · ' + item.labelled + ' labelled';
                 el( 'bar-fill' ).style.width = ( 100 * item.labelled / item.total ) + '%';
-                say( item.label ? 'Already answered; click to change it.' : '' );
+                showMarker();
+                say( item.label ? 'Saved: ' + ( item.label.same_job ? 'Same job' : 'Not the same job' ) + ( item.label.unsure ? ' (unsure)' : '' ) + '. Click to change it.' : '' );
             }
 
             async function openResume() {
@@ -151,10 +174,11 @@
                         body    : JSON.stringify( { reviewer: reviewer, item_id: current.item_id, same_job: sameJob,
                                                     unsure: el( 'unsure' ).checked, note: el( 'note' ).value } )
                     } );
-                    showProgress( s );
-                    if ( s.resume === null ) { say( 'Saved. Every pair is labelled and none is unsure. Done.' ); }
-                    else if ( s.resume === current.position ) { say( 'Saved. This is the only pair left to revisit.' ); }
-                    else { await open( s.resume ); }
+                    // A click saves and stays: moving is only ever Previous, Next or Next unlabelled.
+                    current.label     = { same_job: sameJob, unsure: el( 'unsure' ).checked, note: el( 'note' ).value };
+                    current.labelled  = s.labelled;
+                    showSaved();
+                    showProgress( s, true );
                 } catch ( e ) {
                     say( 'NOT SAVED: ' + e.message, true );
                 } finally {
@@ -168,6 +192,7 @@
                 try { await open( position ); } catch ( e ) { say( e.message, true ); }
             }
 
+            el( 'goto' ).addEventListener( 'click', () => go( parseInt( el( 'goto-pos' ).value, 10 ) - 1 ) );
             el( 'reviewer' ).textContent = 'Reviewer: ' + reviewer;
             el( 'yes' ).addEventListener( 'click', () => answer( true ) );
             el( 'no' ).addEventListener( 'click', () => answer( false ) );
@@ -178,6 +203,8 @@
                 if ( ev.target.tagName === 'TEXTAREA' || ev.ctrlKey || ev.metaKey || ev.altKey ) return;
                 if ( ev.key === '1' ) answer( true );
                 else if ( ev.key === '2' ) answer( false );
+                else if ( ev.key === 'ArrowLeft' ) go( current.position - 1 );
+                else if ( ev.key === 'ArrowRight' ) go( current.position + 1 );
             } );
 
             try { await openResume(); } catch ( e ) { say( 'Could not load: ' + e.message, true ); }

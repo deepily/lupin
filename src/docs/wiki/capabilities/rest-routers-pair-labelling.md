@@ -16,7 +16,7 @@ pins:
 The `/api/pair-labelling` door that a reviewer's browser page uses to label blind `semdup_pair` items one at a time. The label rule and file are in [[labelling-pair-labels]].
 
 ## What it does
-- `page_pair_labelling` serves the page at `/app/pair-labelling`. The page reads `?reviewer=` and defaults to rick.
+- `page_pair_labelling` serves the page at `/app/pair-labelling`. The page reads `?reviewer=` and defaults to rick. A click on an answer saves and stays on that pair. The page moves only on Previous, Next, the arrow keys, Go to pair N, or Next unlabelled. A reload opens the first unlabelled pair. A marker under the panes shows the saved answer.
 - `state` (`GET /state`) answers `{ reviewer, total, labelled, unsure, resume }`. `resume` is the first unlabelled position, else the first unsure one, else null.
 - `item` (`GET /item?position=n`) answers `{ position, total, labelled, item_id, a, b, label }`. It never sends a type or an origin.
 - `label` (`POST /label`) takes `LabelUpload`, writes the label to disk before it answers, and then answers as `state` does.

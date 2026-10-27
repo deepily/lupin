@@ -128,3 +128,26 @@ def test_every_route_refuses_a_caller_with_no_credentials( env ):
     assert bare.get( f"{URL}/item", params={ "position": 0 } ).status_code == 401
     assert bare.post( f"{URL}/label", json={ "item_id": first, "same_job": True } ).status_code == 401
     assert not ( packets / "labels-rick.jsonl" ).exists()
+
+
+def test_a_click_saves_and_stays_on_the_same_pair_and_only_the_buttons_move():
+    """Run the page script under node with a fake DOM: a click must not move the page."""
+    import pathlib, shutil, subprocess
+    if shutil.which( "node" ) is None: pytest.skip( "node is not installed" )
+    here = pathlib.Path( __file__ ).resolve()
+    page = here.parents[ 2 ] / "lupin_app" / "static" / "html" / "pair-labelling.html"
+    r = subprocess.run( [ "node", str( here.with_name( "pair_labelling_page_driver.js" ) ), str( page ) ], capture_output=True, text=True, timeout=60 )
+    assert r.returncode == 0, r.stderr
+    out = json.loads( r.stdout.strip().splitlines()[ -1 ] )
+    assert out[ "start" ].startswith( "Pair 1 of 4" )
+    assert out[ "after_yes" ][ "a" ] == "a0" and out[ "after_yes" ][ "progress" ].startswith( "Pair 1 of 4 · 1 labelled" )
+    assert "Saved: Same job" in out[ "after_yes" ][ "status" ] and "chosen" in out[ "after_yes" ][ "yes" ]
+    assert out[ "after_change" ][ "a" ] == "a0" and "Saved: Not the same job" in out[ "after_change" ][ "status" ]
+    assert "chosen" in out[ "after_change" ][ "no" ] and "chosen" not in out[ "after_change" ][ "yes" ]
+    assert out[ "after_change" ][ "progress" ].startswith( "Pair 1 of 4 · 1 labelled" )
+    assert out[ "next" ] == "a1" and out[ "prev" ][ "a" ] == "a0" and "Saved: Not the same job" in out[ "prev" ][ "status" ]
+    assert out[ "arrow_right" ] == "a1" and out[ "arrow_left" ] == "a0"
+    assert "Saved: Same job" in out[ "after_yes" ][ "marker" ]
+    assert out[ "goto" ] == { "a": "a2", "marker": "Not yet labelled" }
+    assert out[ "goto_back" ][ "a" ] == "a0" and "Saved: Not the same job" in out[ "goto_back" ][ "marker" ] and out[ "goto_out" ] == "a0"
+    assert out[ "resume" ] == "a1" and out[ "label_posts" ] == 2
