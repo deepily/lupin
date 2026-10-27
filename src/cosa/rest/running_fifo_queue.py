@@ -286,7 +286,7 @@ class RunningFifoQueue( FifoQueue ):
                 if isinstance( running_job, CrudForDataFramesAgent ):
                     # CRUD agents: skip cache — data is mutable, snapshots go stale
                     if self.debug: print( "[CACHE] Skipping cache for CRUD agent (mutable data)" )
-                    running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
+                    self._handle_base_agent( running_job, truncated_question, run_timer )
                 else:
                     # NEW: Check cache BEFORE agent execution
                     question = running_job.last_question_asked
@@ -315,16 +315,14 @@ class RunningFifoQueue( FifoQueue ):
                                 if served is None:
                                     # The second gate declined mid-serve. Nothing user-visible
                                     # has happened yet (see its comment), so the agent runs.
-                                    running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
-                                else:
-                                    running_job = served
+                                    self._handle_base_agent( running_job, truncated_question, run_timer )
                             else:
                                 # A REFUSAL, not a miss — said out loud at print level, not
                                 # behind self.debug. The user sees the cache appear to stop
                                 # working, and the only way to tell "guard refused it" from
                                 # "cache is broken" is to have written down which happened.
                                 print( f"[CACHE] REFUSED: exact hit at {score:.1f}% is unconfirmed — routing to agent (row 54589356)" )
-                                running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
+                                self._handle_base_agent( running_job, truncated_question, run_timer )
 
                         else:
                             # ── the ACCEPT-ABOVE-FLOOR branch was DELETED here (step 7b) ──
@@ -351,14 +349,14 @@ class RunningFifoQueue( FifoQueue ):
                             #
                             # Below an exact hit, this now routes to the agent.
                             print( f"[CACHE] BELOW EXACT: score {score:.1f}% — routing to agent (the flow already asked)" )
-                            running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
+                            self._handle_base_agent( running_job, truncated_question, run_timer )
                     else:
                         # CACHE MISS - Continue with normal agent execution
                         if self.debug: print( f"[CACHE] MISS: Running agent for new question" )
 
-                        running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
+                        self._handle_base_agent( running_job, truncated_question, run_timer )
             else:
-                running_job = self._handle_solution_snapshot( running_job, truncated_question, run_timer )
+                self._handle_solution_snapshot( running_job, truncated_question, run_timer )
                 
         except Exception as e:
             print( f"[RUNNING] Error processing job: {e}" )

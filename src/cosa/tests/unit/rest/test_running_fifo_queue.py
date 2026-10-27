@@ -1074,6 +1074,31 @@ class TestProcessJob( _RFQBase ):
 
         rq._format_cached_result.assert_called_once()
 
+    def test_an_exact_hit_moves_the_job_to_done_by_itself( self ):
+        """
+        Pins what `_process_job` does with a served cache hit (row 95622992): it returns
+        nothing and keeps nothing, because `_format_cached_result` is what delivers. The
+        original leaves the running queue once and ONE copy carrying the original id_hash
+        reaches the done queue. The old `running_job = served` store was never read.
+
+        RED ON MUTANT: make `_format_cached_result` skip the done push (or the delete) and
+        this fails; the agent must not run on a served hit.
+        """
+        rq = self.build()
+        rq.delete_by_id_hash = MagicMock( name="delete_by_id_hash" )
+        rq._handle_base_agent = MagicMock( name="_handle_base_agent" )
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [
+            ( 100.0, _SnapFake( id_hash="c9", run_date="2026", answer_is_correct=True, runtime_stats={ "first_run_ms": 1000 } ) )
+        ]
+        original = _AgentBaseFake( id_hash="orig9" )
+
+        self.assertIsNone( rq._process_job( original ) )
+
+        rq.delete_by_id_hash.assert_called_once_with( "orig9" )
+        rq.jobs_done_queue.push.assert_called_once()
+        self.assertEqual( rq.jobs_done_queue.push.call_args.args[ 0 ].id_hash, "orig9" )
+        rq._handle_base_agent.assert_not_called()
+
     # ── row 54589356: the READ guard on the QUEUE layer ──────────────────────────
     #
     # Rick, 2026-08-30: "Incorrect answers should never be replayed no matter where they
