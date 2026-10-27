@@ -200,7 +200,7 @@
             el( 'next' ).addEventListener( 'click', () => go( current.position + 1 ) );
             el( 'resume' ).addEventListener( 'click', () => openResume().catch( e => say( e.message, true ) ) );
             document.addEventListener( 'keydown', ev => {
-                if ( ev.target.tagName === 'TEXTAREA' || ev.ctrlKey || ev.metaKey || ev.altKey ) return;
+                if ( ev.target.tagName === 'TEXTAREA' || ev.target.tagName === 'INPUT' || ev.ctrlKey || ev.metaKey || ev.altKey ) return;
                 if ( ev.key === '1' ) answer( true );
                 else if ( ev.key === '2' ) answer( false );
                 else if ( ev.key === 'ArrowLeft' ) go( current.position - 1 );
