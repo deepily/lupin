@@ -3,7 +3,8 @@ const fs = require( "fs" );
 const html = fs.readFileSync( process.argv[ 2 ], "utf8" );
 const script = html.split( "<script>" )[ 1 ].split( "</script>" )[ 0 ];
 const els = {}, listeners = {};
-const mk = id => els[ id ] || ( els[ id ] = { id, textContent: "", className: "", value: "", checked: false, disabled: false, style: {}, scrollTop: 0, addEventListener: ( ev, fn ) => { listeners[ id + ":" + ev ] = fn; } } );
+let focus = "BODY";
+const mk = id => els[ id ] || ( els[ id ] = { blur: () => { focus = "BODY"; }, id, textContent: "", className: "", value: "", checked: false, disabled: false, style: {}, scrollTop: 0, addEventListener: ( ev, fn ) => { listeners[ id + ":" + ev ] = fn; } } );
 const docListeners = {};
 const labels = {}, pairs = [ 0, 1, 2, 3 ];
 const calls = [];
@@ -42,6 +43,9 @@ const tick = () => new Promise( r => setTimeout( r, 20 ) );
     const before = els[ "text-a" ].textContent, posts = calls.length;
     for ( const tag of [ "INPUT", "TEXTAREA" ] ) for ( const key of [ "ArrowRight", "1", "2" ] ) { docListeners.keydown( { target: { tagName: tag }, key } ); await tick(); }
     out.typing = { moved: els[ "text-a" ].textContent !== before, fetched: calls.length - posts };
+    focus = "INPUT"; if ( listeners[ "unsure:change" ] ) listeners[ "unsure:change" ](); const kept = els[ "text-a" ].textContent;   // a click on the checkbox focuses it
+    docListeners.keydown( { target: { tagName: focus }, key: "ArrowRight" } ); await tick();
+    out.after_tick = { moved: els[ "text-a" ].textContent !== kept };
     out.label_posts = calls.filter( c => c.startsWith( "POST" ) ).length;
     console.log( JSON.stringify( out ) );
 } )();

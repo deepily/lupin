@@ -192,6 +192,8 @@
                 try { await open( position ); } catch ( e ) { say( e.message, true ); }
             }
 
+            // Give the keys back to the page after a tick: a focused checkbox is an INPUT, so the key guard would swallow 1, 2 and the arrows.
+            el( 'unsure' ).addEventListener( 'change', () => el( 'unsure' ).blur() );
             el( 'goto' ).addEventListener( 'click', () => go( parseInt( el( 'goto-pos' ).value, 10 ) - 1 ) );
             el( 'reviewer' ).textContent = 'Reviewer: ' + reviewer;
             el( 'yes' ).addEventListener( 'click', () => answer( true ) );
