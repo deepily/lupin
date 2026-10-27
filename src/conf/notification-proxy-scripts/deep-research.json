@@ -10,6 +10,13 @@
             "response_types"   : [ "open_ended", "open_ended_batch" ]
         },
         {
+            "question_pattern" : "What's the research topic for the podcast?",
+            "answer"           : "quantum computing breakthroughs 2026",
+            "arg_name"         : "query",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "research_to_podcast" ]
+        },
+        {
             "question_pattern" : "Would you like to set a budget limit in dollars? Say a dollar amount, or 'no limit'.",
             "answer"           : "no limit",
             "arg_name"         : "budget",
