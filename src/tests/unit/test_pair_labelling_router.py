@@ -116,3 +116,15 @@ def test_the_page_is_served_with_revalidation_and_is_blind( env ):
     assert r.status_code == 200 and r.headers[ "cache-control" ] == "no-cache"
     page = r.text
     assert "/api/pair-labelling" in page and "item.type" not in page and "/key" not in page and "verdict" not in page
+
+
+def test_every_route_refuses_a_caller_with_no_credentials( env ):
+    _, packets = env
+    app = FastAPI()
+    app.include_router( plr.router )
+    bare = TestClient( app )
+    first = ids_of( packets )[ 0 ]
+    assert bare.get( f"{URL}/state" ).status_code == 401
+    assert bare.get( f"{URL}/item", params={ "position": 0 } ).status_code == 401
+    assert bare.post( f"{URL}/label", json={ "item_id": first, "same_job": True } ).status_code == 401
+    assert not ( packets / "labels-rick.jsonl" ).exists()

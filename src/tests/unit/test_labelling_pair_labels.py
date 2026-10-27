@@ -75,6 +75,12 @@ def test_progress_resumes_at_first_unlabelled_then_first_unsure_then_none():
     assert pl.progress( items, [ mk( n[ "item_id" ] ) for n in items ] )[ "resume" ] is None
 
 
+def test_progress_resumes_at_an_unlabelled_pair_even_when_an_unsure_one_comes_earlier():
+    items = [ { "item_id": f"p{n}" } for n in range( 3 ) ]
+    mix   = pl.progress( items, [ { "item_id": "p0", "note": "UNSURE: x" } ] )
+    assert mix == { "total": 3, "labelled": 1, "unsure": 1, "resume": 1 }
+
+
 def test_build_label_choice_note_and_limit():
     yes = pl.build_label( "p", "rick", True, False, "  fine ", CLOCK )
     assert yes == { "item_id": "p", "reviewer": "rick", "choice": "AS_PROPOSED", "symbols": [], "note": "fine", "ts": CLOCK() }
