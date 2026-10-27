@@ -806,28 +806,29 @@ PY
                 case "$regime" in
                     REQUIRED)
                         # THE WITNESS IS THE ENV FILE, NOT THE RUNNING CONTAINER. A container
-                        # that is up only proves the values it was CREATED with were supplied;
-                        # one that predates a newly-required key stays up and says nothing about
-                        # it. So ask the file the next recreate will read. The file is mode 600
-                        # and owned by the container user on the VM, so an unreadable file is
-                        # retried through `sudo -n` before it is called unreadable.
-                        pfv_env_file_supplies "$ENV_FILE" "$cname"; efrc=$?
-                        if [ "$efrc" -eq 3 ] && [ -e "$ENV_FILE" ]; then
-                            efcopy="$( mktemp )"
-                            if sudo -n cat "$ENV_FILE" > "$efcopy" 2>/dev/null; then
-                                pfv_env_file_supplies "$efcopy" "$cname"; efrc=$?
+                        # that is up only proves what it was CREATED with; one that predates a
+                        # newly-required key stays up and says nothing about it. So read the
+                        # line itself, the way C5 reads CLOUD_SQL_CONNECTION_NAME: the file is
+                        # mode 600 and owned by the container user, so a plain grep by the SSH
+                        # user reads nothing, and `sudo -n grep` is the reader. Anchored, so a
+                        # commented-out line does not count; the last assignment wins.
+                        cfile="$( basename "$ENV_FILE" )"
+                        if cline="$( sudo -n grep -E "^${cname}=" "$ENV_FILE" 2>/dev/null )" \
+                           || cline="$( grep -E "^${cname}=" "$ENV_FILE" 2>/dev/null )"; then
+                            cval="$( printf '%s\n' "$cline" | tail -1 | cut -d= -f2- )"
+                            if [ -n "$cval" ]; then
+                                report pass BLOCK "$cname supplied by $cfile, which the next container create reads   [surface: COMPOSE]"
+                            else
+                                report fail BLOCK "$cname is declared EMPTY in $cfile, which \${VAR:?} rejects exactly as it rejects unset   [surface: COMPOSE]" \
+                                              "set $cname in $cfile (contract writer: $cwriter)"
                             fi
-                            rm -f "$efcopy"
-                        fi
-                        case $efrc in
-                            0) report pass BLOCK "$cname supplied by $( basename "$ENV_FILE" ), which the next container create reads   [surface: COMPOSE]" ;;
-                            1) report fail BLOCK "$cname is declared EMPTY in $( basename "$ENV_FILE" ), which \${VAR:?} rejects exactly as it rejects unset   [surface: COMPOSE]" \
-                                          "$( pfv_contract_remedy "$cwriter" "$cname" )" ;;
-                            2) report fail BLOCK "$cname is absent from $( basename "$ENV_FILE" ); the next container create aborts on \${VAR:?}   [surface: COMPOSE]" \
-                                          "$( pfv_contract_remedy "$cwriter" "$cname" )" ;;
-                            *) report unknown BLOCK "$cname: $( basename "$ENV_FILE" ) could not be read, so nothing here can say whether the next container create is supplied   [surface: COMPOSE]" \
-                                          "$( pfv_contract_remedy "$cwriter" "$cname" )" ;;
-                        esac ;;
+                        elif [ -r "$ENV_FILE" ] || sudo -n test -r "$ENV_FILE" 2>/dev/null; then
+                            report fail BLOCK "$cname is absent from $cfile; the next container create aborts on \${VAR:?}   [surface: COMPOSE]" \
+                                          "set $cname in $cfile (contract writer: $cwriter)"
+                        else
+                            report unknown BLOCK "$cname: $cfile could not be read, so nothing here can say whether the next container create is supplied   [surface: COMPOSE]" \
+                                          "make $cfile readable to the preflight (sudo -n), then re-run"
+                        fi ;;
                     ABSENT)
                         report fail WARN "$cname declared surface=COMPOSE but $( basename "$COMPOSE_FILE" ) never references it" \
                                       "add the interpolation to $( basename "$COMPOSE_FILE" ), or correct its surface in env-contract.tsv" ;;
