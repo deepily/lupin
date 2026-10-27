@@ -583,7 +583,6 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[rest-routers-queue-views-and-removal]] — the queue reading, pool status, reset, delete, pause and resume routes. `cosa.rest.routers` (queues)
 - [[rest-routers-request-auth-guards]] — the API-key-or-JWT guard, the path and query identity owner guards and the shared id generator. `cosa.rest.middleware` (api_key_auth, path_identity), `cosa.rest.dependencies` (config)
 - [[rest-routers-retired-submit-doors]] — ten tombstone submit routes that answer 410 Gone and name the replacement door. `cosa.rest.routers` (bug_fix_expediter, claude_code_queue, deep_research_to_podcast, deep_research_to_presentation, mock_job, podcast_generator, presentation_generator, swe_team, test_suite)
-- [[rest-routers-pair-labelling]] — the `/api/pair-labelling` routes a reviewer's page uses to label blind pairs, resume and re-answer. `cosa.rest.routers` (pair_labelling)
 - [[rest-routers-pair-labelling]] — the `/api/pair-labelling` routes and page a reviewer uses to label blind pairs, resume and re-answer. `cosa.rest.routers` (pair_labelling, pages)
 - [[rest-routers-reuse-candidates-search]] — the `/api/reuse-candidates` stage upload and search routes over the resident candidate index. `cosa.rest.routers` (reuse_candidates)
 - [[rest-routers-speech-tts-streaming]] — the OpenAI and ElevenLabs text-to-speech doors and the PCM test socket, with audio returned over the audio WebSocket. `cosa.rest.routers` (speech)
