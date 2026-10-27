@@ -188,7 +188,7 @@
             }
 
             async function go( position ) {
-                if ( current === null || position < 0 || position >= current.total ) return;
+                if ( current === null || !Number.isInteger( position ) || position < 0 || position >= current.total ) return;
                 try { await open( position ); } catch ( e ) { say( e.message, true ); }
             }
 

@@ -36,6 +36,9 @@ const tick = () => new Promise( r => setTimeout( r, 20 ) );
     mk( "goto-pos" ).value = "3"; listeners[ "goto:click" ](); await tick(); out.goto = { a: els[ "text-a" ].textContent, marker: els.marker.textContent };
     mk( "goto-pos" ).value = "1"; listeners[ "goto:click" ](); await tick(); out.goto_back = { a: els[ "text-a" ].textContent, marker: els.marker.textContent };
     mk( "goto-pos" ).value = "99"; listeners[ "goto:click" ](); await tick(); out.goto_out = els[ "text-a" ].textContent;
+    const gotos = calls.length;
+    for ( const v of [ "", "abc", "0", "-1" ] ) { mk( "goto-pos" ).value = v; listeners[ "goto:click" ](); await tick(); }
+    out.bad_goto = { page: els[ "text-a" ].textContent, fetched: calls.length - gotos };
     const before = els[ "text-a" ].textContent, posts = calls.length;
     for ( const tag of [ "INPUT", "TEXTAREA" ] ) for ( const key of [ "ArrowRight", "1", "2" ] ) { docListeners.keydown( { target: { tagName: tag }, key } ); await tick(); }
     out.typing = { moved: els[ "text-a" ].textContent !== before, fetched: calls.length - posts };

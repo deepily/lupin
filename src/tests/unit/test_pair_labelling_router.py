@@ -150,5 +150,6 @@ def test_a_click_saves_and_stays_on_the_same_pair_and_only_the_buttons_move():
     assert "Saved: Same job" in out[ "after_yes" ][ "marker" ]
     assert out[ "goto" ] == { "a": "a2", "marker": "Not yet labelled" }
     assert out[ "goto_back" ][ "a" ] == "a0" and "Saved: Not the same job" in out[ "goto_back" ][ "marker" ] and out[ "goto_out" ] == "a0"
+    assert out[ "bad_goto" ] == { "page": "a0", "fetched": 0 }
     assert out[ "typing" ] == { "moved": False, "fetched": 0 }
     assert out[ "resume" ] == "a1" and out[ "label_posts" ] == 2
