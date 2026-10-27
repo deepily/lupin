@@ -58,6 +58,7 @@
 | `/app/admin/proxy-dashboard` | Trust dashboard |
 | `/app/admin/dev-tools` | Developer tools |
 | `/app/console?seat=<full cc session id>&title=<url-encoded title>` | One seat's live CC console, full-page in its own tab. Stands alone: reload- and bookmark-safe, needs no multiplexer tab. A missing or malformed `seat` (e.g. an 8-hex chip prefix) shows an error on the page. Opened by the multiplexer reading pane's bust-out while the pane shows a console. Bundle: `src/scripts/build-console.sh` (part of `npm run build`) |
+| `/app/pair-labelling?reviewer=<name>` | One reviewer's blind pair labelling: a and b side by side, one pair at a time, each answer written to disk at the click, resuming at the first unlabelled pair. Default reviewer `rick`. API: section 29 |
 
 ## 24. Multiplexer (`/api/multiplexer/*`)
 

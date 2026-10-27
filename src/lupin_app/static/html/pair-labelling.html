@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pair labelling — Lupin</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background: #f3f4f6; color: #111827; }
+        header { padding: 10px 16px; background: #1f2937; color: #f9fafb; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+        header strong { font-size: 18px; }
+        #progress { font-size: 16px; }
+        #bar { flex: 1 1 200px; height: 10px; background: #4b5563; border-radius: 5px; overflow: hidden; }
+        #bar-fill { height: 100%; width: 0; background: #34d399; }
+        main { padding: 12px 16px; }
+        #panes { display: flex; gap: 12px; }
+        .pane { flex: 1 1 0; min-width: 0; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; }
+        .pane h2 { margin: 0; padding: 6px 10px; font-size: 14px; background: #e5e7eb; border-radius: 6px 6px 0 0; }
+        .pane pre { margin: 0; padding: 10px; height: 62vh; overflow: auto; font-family: monospace; font-size: 13px; white-space: pre; }
+        #controls { margin-top: 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+        button { font-size: 16px; padding: 10px 18px; border: 1px solid #6b7280; border-radius: 6px; background: #fff; cursor: pointer; }
+        button.answer { font-weight: bold; }
+        button.chosen { background: #bfdbfe; border-color: #1d4ed8; }
+        button:disabled { opacity: 0.5; cursor: wait; }
+        textarea { width: 340px; height: 56px; font-family: Arial, sans-serif; font-size: 14px; }
+        #status { margin-top: 8px; min-height: 20px; font-size: 14px; }
+        #status.error { color: #b91c1c; font-weight: bold; }
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+    <header>
+        <strong>Same job?</strong>
+        <span id="progress">Loading…</span>
+        <div id="bar"><div id="bar-fill"></div></div>
+        <span id="reviewer"></span>
+    </header>
+    <main>
+        <div id="panes">
+            <section class="pane"><h2>A</h2><pre id="text-a"></pre></section>
+            <section class="pane"><h2>B</h2><pre id="text-b"></pre></section>
+        </div>
+        <div id="controls">
+            <button id="yes" class="answer" type="button">Same job (1)</button>
+            <button id="no" class="answer" type="button">Not the same job (2)</button>
+            <label><input id="unsure" type="checkbox"> Unsure</label>
+            <textarea id="note" placeholder="Note (optional)"></textarea>
+            <button id="prev" type="button">← Previous</button>
+            <button id="next" type="button">Next →</button>
+            <button id="resume" type="button">First unlabelled</button>
+        </div>
+        <div id="status"></div>
+    </main>
+
+    <script>
+        ( async function() {
+            const params   = new URLSearchParams( window.location.search );
+            const reviewer = params.get( 'reviewer' ) || 'rick';
+            const base     = '/api/pair-labelling';
+            const el       = id => document.getElementById( id );
+            let current    = null;
+            let busy       = false;
+
+            // Same refresh-and-retry wrapper as audio-player.html: one retry on a 401, then say so.
+            let bearer = localStorage.getItem( 'lupin_access_token' );
+
+            async function refreshAccessToken() {
+                const refreshToken = localStorage.getItem( 'lupin_refresh_token' );
+                if ( !refreshToken ) return false;
+                try {
+                    const resp = await fetch( '/auth/refresh', {
+                        method  : 'POST',
+                        headers : { 'Content-Type': 'application/json' },
+                        body    : JSON.stringify( { refresh_token: refreshToken } )
+                    } );
+                    if ( !resp.ok ) return false;
+                    const data = await resp.json();
+                    localStorage.setItem( 'lupin_access_token',  data.tokens.access_token  );
+                    localStorage.setItem( 'lupin_refresh_token', data.tokens.refresh_token );
+                    bearer = data.tokens.access_token;
+                    return true;
+                } catch ( e ) {
+                    return false;
+                }
+            }
+
+            async function authedFetch( url, init ) {
+                const withAuth = ( t ) => {
+                    const merged = Object.assign( {}, init || {} );
+                    merged.headers = Object.assign( {}, ( init && init.headers ) || {} );
+                    if ( t ) merged.headers.Authorization = 'Bearer ' + t;
+                    return merged;
+                };
+                let resp = await fetch( url, withAuth( bearer ) );
+                if ( resp.status !== 401 ) return resp;
+                if ( !( await refreshAccessToken() ) ) return resp;
+                return await fetch( url, withAuth( bearer ) );
+            }
+
+            function say( text, isError ) {
+                el( 'status' ).textContent = text;
+                el( 'status' ).className   = isError ? 'error' : '';
+            }
+
+            async function getJson( url, init ) {
+                const resp = await authedFetch( url, init );
+                if ( !resp.ok ) {
+                    let detail = resp.status + '';
+                    try { detail = ( await resp.json() ).detail || detail; } catch ( e ) { /* keep the status */ }
+                    throw new Error( detail );
+                }
+                return await resp.json();
+            }
+
+            function showProgress( s ) {
+                el( 'progress' ).textContent = s.labelled + ' of ' + s.total + ' labelled' + ( s.unsure ? ' · ' + s.unsure + ' unsure' : '' );
+                el( 'bar-fill' ).style.width = ( 100 * s.labelled / s.total ) + '%';
+            }
+
+            async function open( position ) {
+                const item = await getJson( base + '/item?reviewer=' + encodeURIComponent( reviewer ) + '&position=' + position );
+                current = item;
+                el( 'text-a' ).textContent = item.a;
+                el( 'text-b' ).textContent = item.b;
+                el( 'text-a' ).scrollTop   = 0;
+                el( 'text-b' ).scrollTop   = 0;
+                el( 'unsure' ).checked     = item.label ? item.label.unsure : false;
+                el( 'note' ).value         = item.label ? item.label.note : '';
+                el( 'yes' ).className      = 'answer' + ( item.label && item.label.same_job ? ' chosen' : '' );
+                el( 'no' ).className       = 'answer' + ( item.label && !item.label.same_job ? ' chosen' : '' );
+                el( 'progress' ).textContent = 'Pair ' + ( item.position + 1 ) + ' of ' + item.total + ' · ' + item.labelled + ' labelled';
+                el( 'bar-fill' ).style.width = ( 100 * item.labelled / item.total ) + '%';
+                say( item.label ? 'Already answered; click to change it.' : '' );
+            }
+
+            async function openResume() {
+                const s = await getJson( base + '/state?reviewer=' + encodeURIComponent( reviewer ) );
+                showProgress( s );
+                if ( s.resume === null ) { say( 'Every pair is labelled and none is unsure. Done.' ); return false; }
+                await open( s.resume );
+                return true;
+            }
+
+            async function answer( sameJob ) {
+                if ( busy || current === null ) return;
+                busy = true;
+                el( 'yes' ).disabled = el( 'no' ).disabled = true;
+                try {
+                    const s = await getJson( base + '/label', {
+                        method  : 'POST',
+                        headers : { 'Content-Type': 'application/json' },
+                        body    : JSON.stringify( { reviewer: reviewer, item_id: current.item_id, same_job: sameJob,
+                                                    unsure: el( 'unsure' ).checked, note: el( 'note' ).value } )
+                    } );
+                    showProgress( s );
+                    if ( s.resume === null ) { say( 'Saved. Every pair is labelled and none is unsure. Done.' ); }
+                    else if ( s.resume === current.position ) { say( 'Saved. This is the only pair left to revisit.' ); }
+                    else { await open( s.resume ); }
+                } catch ( e ) {
+                    say( 'NOT SAVED: ' + e.message, true );
+                } finally {
+                    busy = false;
+                    el( 'yes' ).disabled = el( 'no' ).disabled = false;
+                }
+            }
+
+            async function go( position ) {
+                if ( current === null || position < 0 || position >= current.total ) return;
+                try { await open( position ); } catch ( e ) { say( e.message, true ); }
+            }
+
+            el( 'reviewer' ).textContent = 'Reviewer: ' + reviewer;
+            el( 'yes' ).addEventListener( 'click', () => answer( true ) );
+            el( 'no' ).addEventListener( 'click', () => answer( false ) );
+            el( 'prev' ).addEventListener( 'click', () => go( current.position - 1 ) );
+            el( 'next' ).addEventListener( 'click', () => go( current.position + 1 ) );
+            el( 'resume' ).addEventListener( 'click', () => openResume().catch( e => say( e.message, true ) ) );
+            document.addEventListener( 'keydown', ev => {
+                if ( ev.target.tagName === 'TEXTAREA' || ev.ctrlKey || ev.metaKey || ev.altKey ) return;
+                if ( ev.key === '1' ) answer( true );
+                else if ( ev.key === '2' ) answer( false );
+            } );
+
+            try { await openResume(); } catch ( e ) { say( 'Could not load: ' + e.message, true ); }
+        } )();
+    </script>
+</body>
+</html>

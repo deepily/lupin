@@ -39,6 +39,7 @@ _ROUTE_TABLE = {
     "/app/docs"                  : "html/document-viewer.html",
     "/app/audio"                 : "html/audio-player.html",
     "/app/console"               : "html/console.html",
+    "/app/pair-labelling"        : "html/pair-labelling.html",
 }
 
 
@@ -172,3 +173,18 @@ async def page_console():
     the same shell. The page itself reports a missing or malformed seat.
     """
     return _serve_file( _ROUTE_TABLE[ "/app/console" ] )
+
+@router.get( "/app/pair-labelling", include_in_schema=False )
+async def page_pair_labelling():
+    """
+    Serve the pair-labelling page.
+
+    Requires:
+        - html/pair-labelling.html exists under the static directory
+
+    Ensures:
+        - Returns the page shell with the no-cache revalidation header
+
+    The page reads `?reviewer=` client-side and defaults to rick.
+    """
+    return _serve_file( _ROUTE_TABLE[ "/app/pair-labelling" ] )
