@@ -764,3 +764,29 @@ def test_hook_status_without_a_checkout_root_cannot_say_outside( tmp_path ):
     assert _hook_status( hooks, "pre-push", script ) == ( 5, f"WRONG_TARGET\t{other}" )
     r = _lib( f"pfv_git_hook_status '{hooks}' pre-push '{script}' '{tmp_path / 'inside'}'" )
     assert ( r.returncode, r.stdout.strip() ) == ( 7, f"OUTSIDE\t{other}" )
+
+
+# ── a COMPOSE-surface var is witnessed by the env file, not by a running container ──
+
+def _compose_row_line( venue, tmp_path, env_text ):
+    env_file = tmp_path / "cloud-gpu.env"
+    env_file.write_text( env_text )
+    venue[ "env" ][ "PREFLIGHT_VM_ENVFILE" ] = str( env_file )
+    return _line( _run( venue ), "LUPIN_GCP_PROJECT_ID" )
+
+
+def test_a_running_container_does_not_vouch_for_a_project_id_the_env_file_lacks( venue, tmp_path ):
+    # The fake container is running, which used to be the whole witness. It predates the key.
+    line = _compose_row_line( venue, tmp_path, "DB_USER=lupin_app\n" )
+    assert "[FAIL]" in line and "[OK]" not in line, line
+    assert "lupin-vm.sh push-project-id" in line, "the remedy must name the verb that writes the line"
+
+
+def test_an_empty_or_commented_project_id_line_is_not_supply( venue, tmp_path ):
+    line = _compose_row_line( venue, tmp_path, "#LUPIN_GCP_PROJECT_ID=proj-x\nLUPIN_GCP_PROJECT_ID=\n" )
+    assert "[FAIL]" in line, line
+
+
+def test_a_project_id_line_in_the_env_file_passes( venue, tmp_path ):
+    line = _compose_row_line( venue, tmp_path, "LUPIN_GCP_PROJECT_ID=proj-x\n" )
+    assert "[OK]" in line and "cloud-gpu.env" in line, line

@@ -781,6 +781,7 @@ PY
             [ -n "$row" ] || continue
             cname="$(    pfv_contract_field "$row" 1 )" || continue
             csurface="$( pfv_contract_field "$row" 2 )"
+            cwriter="$(  pfv_contract_field "$row" 3 )"
             cshape="$(   pfv_contract_field "$row" 4 )"
             creq="$(     pfv_contract_field "$row" 5 )"
             case "$csurface" in CONTAINER|COMPOSE) ;; *) continue ;; esac
@@ -804,12 +805,29 @@ PY
             if [ "$csurface" = "COMPOSE" ]; then
                 case "$regime" in
                     REQUIRED)
-                        if docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
-                            report pass BLOCK "$cname supplied at container CREATE — $( basename "$COMPOSE_FILE" ) interpolates it \${VAR:?}, which aborts \`up\` when unset, and $CONTAINER is running   [surface: COMPOSE]"
-                        else
-                            report unknown BLOCK "$cname: cannot witness a COMPOSE-surface var while $CONTAINER is not running" \
-                                          "start the stack, then re-run: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d"
-                        fi ;;
+                        # THE WITNESS IS THE ENV FILE, NOT THE RUNNING CONTAINER. A container
+                        # that is up only proves the values it was CREATED with were supplied;
+                        # one that predates a newly-required key stays up and says nothing about
+                        # it. So ask the file the next recreate will read. The file is mode 600
+                        # and owned by the container user on the VM, so an unreadable file is
+                        # retried through `sudo -n` before it is called unreadable.
+                        pfv_env_file_supplies "$ENV_FILE" "$cname"; efrc=$?
+                        if [ "$efrc" -eq 3 ] && [ -e "$ENV_FILE" ]; then
+                            efcopy="$( mktemp )"
+                            if sudo -n cat "$ENV_FILE" > "$efcopy" 2>/dev/null; then
+                                pfv_env_file_supplies "$efcopy" "$cname"; efrc=$?
+                            fi
+                            rm -f "$efcopy"
+                        fi
+                        case $efrc in
+                            0) report pass BLOCK "$cname supplied by $( basename "$ENV_FILE" ), which the next container create reads   [surface: COMPOSE]" ;;
+                            1) report fail BLOCK "$cname is declared EMPTY in $( basename "$ENV_FILE" ), which \${VAR:?} rejects exactly as it rejects unset   [surface: COMPOSE]" \
+                                          "$( pfv_contract_remedy "$cwriter" "$cname" )" ;;
+                            2) report fail BLOCK "$cname is absent from $( basename "$ENV_FILE" ); the next container create aborts on \${VAR:?}   [surface: COMPOSE]" \
+                                          "$( pfv_contract_remedy "$cwriter" "$cname" )" ;;
+                            *) report unknown BLOCK "$cname: $( basename "$ENV_FILE" ) could not be read, so nothing here can say whether the next container create is supplied   [surface: COMPOSE]" \
+                                          "$( pfv_contract_remedy "$cwriter" "$cname" )" ;;
+                        esac ;;
                     ABSENT)
                         report fail WARN "$cname declared surface=COMPOSE but $( basename "$COMPOSE_FILE" ) never references it" \
                                       "add the interpolation to $( basename "$COMPOSE_FILE" ), or correct its surface in env-contract.tsv" ;;

@@ -703,6 +703,14 @@ case "$SUBCMD" in
         #    the deploy; set LUPIN_SKIP_PREFLIGHT=1 to override deliberately.
         #    Running both arms is what distinguishes "the deploy broke it" from "it was
         #    already broken" — the diagnosis that cost five minutes of bisection on 07-26.
+        # 0a. The cloud-gpu compose file requires LUPIN_GCP_PROJECT_ID and the VM runs compose with
+        #     --env-file, which drops the shell's environment. A VM whose cloud-gpu.env lacks the line aborts
+        #     every compose call, the preflight's own included, so write it before anything else runs.
+        #     Fatal on failure: nothing after this can work without it (row d3550878).
+        PP_ARGS=( push-project-id )
+        [ "$DRY_RUN" -eq 1 ] && PP_ARGS=( --dry-run push-project-id )
+        bash "${BASH_SOURCE[0]}" "${PP_ARGS[@]}" \
+            || die "could not put LUPIN_GCP_PROJECT_ID in the VM's $ENV_FILE; every compose call there would abort. Fix that, then re-run."
         if [ "$DRY_RUN" -eq 1 ]; then
             # --dry-run prints and runs nothing; this step goes over IAP SSH, so it must not run.
             log "(dry-run) PRE-deploy preflight on VM: bash src/scripts/preflight-vm.sh --phase pre"

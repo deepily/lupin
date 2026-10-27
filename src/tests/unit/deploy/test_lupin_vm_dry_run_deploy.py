@@ -49,3 +49,13 @@ def test_the_skip_flag_does_not_make_a_dry_run_contact_the_vm( gcloud_stub ):
     out, seen = _dry_run_deploy( gcloud_stub, LUPIN_SKIP_PREFLIGHT="1" )
     assert out.returncode == 0, out.stderr
     assert seen == [ ], seen
+
+
+def test_a_dry_run_deploy_says_it_would_write_the_project_id_to_the_vm_env_file( gcloud_stub ):
+    # A fresh VM aborts every compose call until LUPIN_GCP_PROJECT_ID is in cloud-gpu.env, and
+    # nothing else writes it. The deploy must, before the preflight and the recreate.
+    out, seen = _dry_run_deploy( gcloud_stub )
+    text = out.stdout + out.stderr
+    assert "would set LUPIN_GCP_PROJECT_ID" in text, text
+    assert text.index( "would set LUPIN_GCP_PROJECT_ID" ) < text.index( "PRE-deploy preflight" )
+    assert seen == [ ], seen
