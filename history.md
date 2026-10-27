@@ -19,6 +19,37 @@
 - **Lesson**: my merge gate skipped `symindex lint` and left 23 orphans, which Mr. Radio caught. The memory `feedback_landing_gates_include_symindex_lint.md` already said to run it.
 - **Files**: history.md, TODO.md. Code arrived by the reviewed fast-forwards above.
 
+## 2026.10.26 day to night - Session c3f1bdfe (Mr. Radio 📻, manager; crew Maya, John, Clayton, Tiberius, Tiffany) | Coverage at 100%, :8000 smoke green, R&D frontmatter, two work-alike pilots
+
+- **Landed on the working branch.** All green and reviewed, not pushed; tip `7d69b61a8`.
+  - Coverage row `e1a36bb4` closed at 100.00% over 102,293 statements.
+    - Maya's `main.py` lifespan extraction: `60d7841d9..7df094b07`.
+    - The gate refuses when an xdist worker's data is lost: `114b7c2c0`.
+    - Two xdist workers under coverage: `7889c1444`.
+    - The cosa_voice_mcp SIGTERM handler moves into `__main__`: `a2190e2b1`, `6cbb5a9aa`, `2a073442b`.
+  - Smoke row `4ad9c156` is green: run `ts-fbbe1e47` had 496 passed and 0 failed, against 474/7/15 before.
+    - The :8000 container forwards the smoke admin login: `5e8440a33`, `c6d9d6656`, `3288b898c`, `45852fa5d`.
+    - deep-research.json gains a podcast-wording entry for research_to_podcast: `4a1fbf71e`.
+    - Rick confirmed the model host at 192.168.1.21 did not change.
+  - R&D row `3a2f726b`: the groups 12 and 13 files gain requested_by, ratified_by and provenance. The original grants stay. Commits `6c6ded0a3`, `d8c74452a`.
+  - Row `95622992`: the unread running_job stores leave `_process_job`, with an exact-hit delivery test. Commits `ffac90117`, `7d69b61a8`.
+  - Row `c586af0f`: the timing-test control, `a6b092b3f`.
+- **Closed without code**: `c37c3c07a` had already fixed `39c69b0b`. The 1.2M reap result came from this seat's own MCP subprocess. That process predates the fix, so it happened again at 22:32.
+- **Measured** on row `46105b99`, under Rick's window lift:
+  - Work-alike in Python: 0 keys in 500 calls, and 0 in 563 with earlier draws.
+  - Work-alike in TypeScript: 5 keys in 500 calls.
+  - 150 TypeScript keys would cost about 15,000 calls, and up to about 46,000 at the 95% edge.
+  - Rick picks the work-alike source after his labels.
+- **Open**:
+  - `3a2f726b`: Rick ruled to delete groups 1 to 11, 78 files. The permission classifier refused the `git rm`. Prep is in `io/mementos/maya-3a2f726b-prep/`. Chase 10-27 10:30.
+  - `d3550878`: Tiberius's Model Garden chain sits on `45852fa5d`, tip `22d37a7e7`, six commits.
+    - Claude Code in lupin-rest-cloud-gpu calls Vertex.
+    - Deploy writes LUPIN_GCP_PROJECT_ID, and the preflight reads it.
+    - All four of Tiffany's tests now exist. Her re-review is owed, then the landing and the VM deploy.
+    - The VM service account has cloud-platform scope and aiplatform.user.
+  - `527fec6e`: the podcast button on the VM waits on Rick.
+- **Files**: history.md. Code arrived by the reviewed fast-forwards above.
+
 ## 2026.10.23 evening - Session 21aa6e8a (Cheech 🌿, manager; skeleton crew, no seats) | Response to the two expert critiques of the reuse checker
 
 - **Wrote** `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.23-reuse-detection-response-to-expert-critiques.md` on Rick's voice request (row `6a259ea2`). It accepts the central critique: retire the "write new" verdict, give "not sure" a recorded search, and measure plain Claude Code first. It checks every expert claim against the code and stored data.
