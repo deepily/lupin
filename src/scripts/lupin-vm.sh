@@ -173,6 +173,10 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           DEEPILY_PROJECTS_DIR + LUPIN_CC_VENV (operator-owned CC venv) +
                           LUPIN_DEV_EMAIL (notify target-user), and
                           create ~/.lupin/config (lupin CLI) if absent. Re-run anytime. Idempotent.
+  push-project-id         put LUPIN_GCP_PROJECT_ID (from your shell) into the VM's cloud-gpu.env as the
+                          line LUPIN_GCP_PROJECT_ID=. The cloud-gpu compose file requires it and the VM
+                          runs compose with --env-file, so without it every svc verb aborts. Keeps the
+                          file's owner and mode; says written / unchanged. Recreate the container to apply.
   push-test-login         put the test role's password into the VM's cloud-gpu.env as the line
                           LUPIN_TEST_DB_PASSWORD=. Reads Secret Manager lupin-db-test-password with your
                           own gcloud login and sends the value to the VM on stdin: it is never in a
@@ -1235,6 +1239,43 @@ echo '== done — open a fresh shell (or: source ~/.bashrc) to pick up aliases +
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
                 --command "$RCMD_ENV"
+        fi
+        ;;
+
+    push-project-id)
+        # Row d3550878. docker-compose.cloud-gpu.yml requires LUPIN_GCP_PROJECT_ID, and the VM runs compose
+        # with --env-file, which drops the shell's environment. So the line must be in the VM's env file, or
+        # `config`, `ps` and every svc verb abort. The value is a project id, not a secret, so it may ride in
+        # the command string. It is checked here so the env file never gets a value it could misread.
+        require_project
+        case "$LUPIN_GCP_PROJECT_ID" in
+            *[!a-z0-9-]*) die "LUPIN_GCP_PROJECT_ID has characters a project id cannot have; use lowercase letters, digits and -" ;;
+        esac
+        PP_ENV_PATH="$VM_ROOT/$ENV_FILE"
+        read -r -d '' RCMD_PP <<PPEOF || true
+set -e
+f='$PP_ENV_PATH'
+sudo test -f "\$f" || { echo "no \$f on the VM; create it first" >&2; exit 3; }
+owner=\$(sudo stat -c '%u:%g' "\$f"); mode=\$(sudo stat -c '%a' "\$f")
+new=\$(mktemp); cur=\$(mktemp)
+trap 'rm -f "\$new" "\$cur"' EXIT
+sudo cat "\$f" > "\$cur"
+awk 'BEGIN { done = 0 }
+    index(\$0, "LUPIN_GCP_PROJECT_ID=") == 1 { if (!done) { print "LUPIN_GCP_PROJECT_ID=$LUPIN_GCP_PROJECT_ID"; done = 1 } next }
+    { print }
+    END { if (!done) print "LUPIN_GCP_PROJECT_ID=$LUPIN_GCP_PROJECT_ID" }' "\$cur" > "\$new"
+if sudo cmp -s "\$new" "\$f"; then echo "LUPIN_GCP_PROJECT_ID: unchanged"; exit 0; fi
+sudo install -o "\${owner%:*}" -g "\${owner#*:}" -m "\$mode" "\$new" "\$f"
+echo "LUPIN_GCP_PROJECT_ID: written"
+PPEOF
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would set LUPIN_GCP_PROJECT_ID in $PP_ENV_PATH on $VM_NAME. The remote command:"
+            printf '%s\n' "$RCMD_PP" | sed 's/^/    /'
+        else
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_PP"
+            log "done. The container reads the env file at create: recreate it to apply (lupin-vm.sh deploy, or svc up -d --force-recreate)."
         fi
         ;;
 

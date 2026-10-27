@@ -238,6 +238,8 @@ pfv_contract_remedy() {
             printf '%s' "MINT it on the target (push-env deliberately will NOT ship this): create_service_account_postgres.py with LUPIN_ENV=testing, then export $name by hand. A dev-box value can never validate against the VM's own database." ;;
         *operator*)
             printf '%s' "set $name by hand in the operator's ~/.bashrc on that machine (contract writer: $writer) — push-env does NOT write it" ;;
+        *push-project-id*)
+            printf '%s' "lupin-vm.sh push-project-id   # writes $name to cloud-gpu.env on the VM" ;;
         *cloud-gpu.env*)
             printf '%s' "add $name to cloud-gpu.env on the VM (git-ignored, VM-local; ship the file with: lupin-vm.sh push-unversioned)" ;;
         *compose*)
