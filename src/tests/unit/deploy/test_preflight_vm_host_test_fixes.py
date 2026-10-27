@@ -790,3 +790,17 @@ def test_an_empty_or_commented_project_id_line_is_not_supply( venue, tmp_path ):
 def test_a_project_id_line_in_the_env_file_passes( venue, tmp_path ):
     line = _compose_row_line( venue, tmp_path, "LUPIN_GCP_PROJECT_ID=proj-x\n" )
     assert "[OK]" in line and "cloud-gpu.env" in line, line
+
+
+def test_a_commented_line_after_the_real_one_does_not_hide_it( venue, tmp_path ):
+    # An unanchored grep matches the comment too, and the last match is empty.
+    line = _compose_row_line( venue, tmp_path, "LUPIN_GCP_PROJECT_ID=proj-x\n#LUPIN_GCP_PROJECT_ID=\n" )
+    assert "[OK]" in line, line
+
+
+def test_the_last_of_two_assignments_wins( venue, tmp_path ):
+    # head -1 would read the first one. Compose and a shell both take the last.
+    ok   = _compose_row_line( venue, tmp_path, "LUPIN_GCP_PROJECT_ID=\nLUPIN_GCP_PROJECT_ID=proj-x\n" )
+    assert "[OK]" in ok, ok
+    fail = _compose_row_line( venue, tmp_path, "LUPIN_GCP_PROJECT_ID=proj-x\nLUPIN_GCP_PROJECT_ID=\n" )
+    assert "[FAIL]" in fail, fail
