@@ -261,6 +261,19 @@ KNOWN_DIVERGENT_ENV = {
     "LUPIN_DM_CORPUS_DIR": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
+    "CLAUDE_CODE_USE_VERTEX": {
+        "dev-dev"   : "2026-10-26 — only the VM container calls Claude on Vertex (Rick's ruling, row "
+                      "d3550878); dev keeps the Max-plan login, which is covered by the plan.",
+        "dev-test"  : "2026-10-26 — same.",
+    },
+    "CLOUD_ML_REGION": {
+        "dev-dev"   : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
+        "dev-test"  : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
+    },
+    "ANTHROPIC_VERTEX_PROJECT_ID": {
+        "dev-dev"   : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
+        "dev-test"  : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
+    },
     "LUPIN_REUSE_REVIEW_DATA_ROOT": {
         "cloud-gpu" : "2026-10-15 — the partner of the reuse-review mount, which the VM does not take (row d3f71441).",
     },

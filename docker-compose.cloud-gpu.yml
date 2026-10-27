@@ -328,6 +328,19 @@ services:
       # it and it named the wrong key file (lupin-model-server-auth). The 3 other
       # compose files still carry the dead var (out of this remediation's scope).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Claude Code in this container calls Claude on Vertex AI Model Garden, not an Anthropic
+      # login (row d3550878, Rick's ruling 2026-10-26 "Switch to Model Garden"). Before this,
+      # every claude_code job here answered "Not logged in · Please run /login".
+      #   · region: `global` is the only certified one (cosa.utils.vertex_env; us-central1 and
+      #     us-east5 do not serve). It is Vertex's region, not LUPIN_GCP_REGION (Cloud Run).
+      #   · project: from the env file, never a literal. `:?` aborts `up` if it is missing.
+      #   · credentials: Application Default Credentials from the VM's service account through
+      #     the GCE metadata server; the account needs roles/aiplatform.user and a cloud-platform
+      #     scope. Dev services deliberately do NOT set these (the Max plan covers them).
+      # ⚠️ Env resolves at container CREATE: needs `up -d --no-deps --force-recreate lupin-rest`.
+      CLAUDE_CODE_USE_VERTEX: "1"
+      CLOUD_ML_REGION: ${LUPIN_VERTEX_REGION:-global}
+      ANTHROPIC_VERTEX_PROJECT_ID: ${LUPIN_GCP_PROJECT_ID:?set LUPIN_GCP_PROJECT_ID in the host env file (row d3550878)}
       PYTHONUNBUFFERED: "1"
       # bug b39c350d — this service bind-mounts `./src:/var/lupin/src` (line 100), so the VM's
       # on-disk `src/**/__pycache__` is shared between the container (repo root /var/lupin) and

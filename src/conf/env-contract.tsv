@@ -72,6 +72,7 @@ LUPIN_CONFIG_MGR_CLI_ARGS	CONTAINER	compose	LITERAL	REQUIRED	Chooses the INI BLO
 CLAUDE_CODE_USE_VERTEX	HOST	operator ~/.bashrc	ENUM:0|1	OPTIONAL	Only needed for direct Opus via Vertex on the VM.
 ANTHROPIC_VERTEX_PROJECT_ID	HOST	operator ~/.bashrc	LITERAL	OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1	Ranked BELOW GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT — a literal elsewhere can silently bill another project.
 CLOUD_ML_REGION	HOST	operator ~/.bashrc	ENUM:global	OPTIONAL_UNLESS:CLAUDE_CODE_USE_VERTEX=1	Opus 4.8 on Vertex is GLOBAL-ONLY. A regional value yields model-not-found, which the CC wizard mis-reports as "permission denied".
+LUPIN_VERTEX_REGION	COMPOSE	cloud-gpu.env (optional)	ENUM:global	OPTIONAL	Source of CLOUD_ML_REGION in the cloud-gpu container (row d3550878); defaults to global, the only certified region. Consumed at the compose `environment:` interpolation and never injected under this name.
 
 # ── Cloud SQL / database (VM container) ──────────────────────────────────────
 # Requirement below is COMPOSE'S OWN declaration, not a judgement call: `${VAR:?msg}`
