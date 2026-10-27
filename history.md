@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.26 day to night - Session 4dc30fb3 (Cheech 🌿, manager; crew Rachel, Chloé) | Labelling page live, Rick at 27 of 125, P6 ruled, endpoint note
+
+- **Landed on the working branch** (each passed Chloé's review and the merge gate; not pushed until tonight's session-end):
+  - Labelling page `/app/pair-labelling` (`225ea66f4`, `6ba5a520b`), with no auto-advance, Go to pair N and a saved-answer marker (`78ddf860f`, `45d41ce9c`, bug `ff1ad13a`). Rows `ea45cf15` and `ff1ad13a` are done.
+  - Proof loader `label_load.py` (`f90d4a987`), wiki pins for 23 orphans (`f954844c2`, `afcff8da7`), and the endpoint reuse note (`dbb180de7`, `ddff8842e`, row `f48c7689`).
+  - Earlier today: `4c9f940a3` (row `792509e3`) and `54f6ea8a5` (census race, row `ee912ca1`).
+- **Rulings**: P6 split 150/150/0 (row `b5955633`). The work-alike source is decided after Rick's labels (Python 0 in 563 calls, TypeScript 5 in 500; row `46105b99`). Pilot window lifted tonight. Rows `9e2d7c1d` closed and `0d675ad6` parked.
+- **Rick's labelling**: 27 of 125 saved in `io/semdup-labelling/2026.10.25-run5/packets/labels-rick.jsonl`, about 2.5 minutes a pair. Guide: `io/tmp/2026.10.26-same-job-labelling-guide.md`.
+- **Lesson**: my merge gate skipped `symindex lint` and left 23 orphans, which Mr. Radio caught. The memory `feedback_landing_gates_include_symindex_lint.md` already said to run it.
+- **Files**: history.md, TODO.md. Code arrived by the reviewed fast-forwards above.
+
 ## 2026.10.23 evening - Session 21aa6e8a (Cheech 🌿, manager; skeleton crew, no seats) | Response to the two expert critiques of the reuse checker
 
 - **Wrote** `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.23-reuse-detection-response-to-expert-critiques.md` on Rick's voice request (row `6a259ea2`). It accepts the central critique: retire the "write new" verdict, give "not sure" a recorded search, and measure plain Claude Code first. It checks every expert claim against the code and stored data.

@@ -16,6 +16,15 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-26 evening (Cheech 🌿 `4dc30fb3`, crew Rachel and Chloé)
+
+- **P6 kind split** (row `b5955633`): 150 near-copies, 150 work-alikes and 0 cross-language. The report states that cross-language is not measured, and the 0.85 work-alike floor is withdrawn.
+- **Endpoint reuse** gets its own design (row `f48c7689`). The note is `src/rnd/v0.2.2/2026.10.26-endpoint-reuse-design-note.md`, and it is not part of Plan 3's 300 needs.
+- **Work-alike source** (row `46105b99`): the pilots found 0 keys in 563 Python calls and 5 in 500 TypeScript calls. Rick decides the source after his labels, and no full draw runs before then.
+- **Pilot window**: Rick lifted the 10:00 to 13:00 live-call window for tonight's two pilots only.
+- **Same job** means a caller that wanted A's result is served by B, perhaps after a small change. Opposites such as open and close are not the same job, and names and language never count (guide `io/tmp/2026.10.26-same-job-labelling-guide.md`).
+- **Backlog**: archive the TODO.md horizon, which is 1,234 lines and was deferred at session-end.
+
 ## 📚 Decisions log 2026-10-23 evening (Cheech 🌿 `21aa6e8a`, skeleton crew, no seats)
 
 ### Rick's rulings
