@@ -156,6 +156,24 @@ def stage_pool( root, defs, rewrites ):
     return tmp, where
 
 
+def check_found( where, found, defs, min_nodes ):
+    """
+    Refuse a staged tree that lost a pool definition.
+
+    Requires:
+        - where is stage_pool's map; found is the set of ( file, line, end_line ) the staged extraction returned
+
+    Ensures:
+        - returns None when every pool definition of min_nodes nodes or more was found
+
+    Raises:
+        - ValueError naming the pool definitions of min_nodes nodes or more the staged extraction did not find, since their clones would be lost unseen
+    """
+    big  = { d[ "id" ] for d in defs if d[ "nodes" ] >= min_nodes }
+    lost = sorted( pid for k, pid in where.items() if k not in found and pid in big )
+    if lost: raise ValueError( f"{len( lost )} pool definitions were not found in the staged tree: {', '.join( lost )}" )
+
+
 def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
     """
     Find the structural clone pairs of a whole pool by staging it as one tree.
@@ -178,8 +196,7 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
         paths  = [ base / f for f in files ]
         staged = [ d for d in extract.extract_tree( tmp.name, paths, "server" )[ "definitions" ] if d[ "nodes" ] >= cfg[ "min_nodes" ] ]
         found  = { ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) for d in staged }
-        lost   = sorted( pid for k, pid in where.items() if k not in found and pid in { d[ "id" ] for d in defs if d[ "nodes" ] >= cfg[ "min_nodes" ] } )
-        if lost: raise ValueError( f"{len( lost )} pool definitions were not found in the staged tree: {', '.join( lost )}" )
+        check_found( where, found, defs, cfg[ "min_nodes" ] )
         spec   = sp.spec_for( tmp.name )
         py     = [ d for d in staged if d[ "file" ].endswith( ".py" ) ]
         js     = [ d for d in staged if d[ "file" ].endswith( extract.SCRIPT_SUFFIXES ) ]
