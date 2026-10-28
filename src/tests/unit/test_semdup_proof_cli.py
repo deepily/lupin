@@ -14,6 +14,7 @@ from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
 from cosa.repo.semdup import extract as ex
+from cosa.repo.semdup import judge as jd
 from cosa.repo.semdup.proof import label_load as ll
 from cosa.repo.semdup.proof import label_prep as lp
 from cosa.repo.semdup.proof import proof_cli as pc
@@ -303,9 +304,10 @@ def test_live_parts_wires_the_run_folder_the_pools_and_the_ledger_beside_the_pro
 
 def test_proof_ledger_makes_the_proof_folder_and_binds_the_ledger_to_the_binary( tmp_path, monkeypatch ):
     monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: "9.9" )
-    ledger = pc.proof_ledger( str( tmp_path ), "/bin/claude" )
-    folder = tmp_path.joinpath( *pr.PROOF_FOLDER )
-    assert ledger is not None and "claude_cli=/bin/claude|version=9.9" in ( folder / pc.LEDGER_NAME ).read_text( encoding="utf-8" )
+    backend = jd.MaxPlanBackend()
+    pc.proof_ledger( str( tmp_path ), "/bin/claude", backend )
+    first   = ( tmp_path.joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME ).read_text( encoding="utf-8" )
+    assert jd.ledger_binding( "claude_cli=/bin/claude|version=9.9", backend ) in first and first.count( "max-plan" ) >= 2
 
 
 # ---- main ---------------------------------------------------------------------------------------------------------
@@ -345,6 +347,14 @@ def test_main_without_two_resolved_label_files_returns_2_and_never_builds_the_pa
     assert rc == 2 and out[ "status" ] == "refused" and "1 given" in out[ "owed" ] and out[ "counts" ] == { paths[ 0 ]: 6 }
 
 
+def test_main_real_run_without_claude_cli_path_returns_2_before_building_anything( venue, capsys ):
+    paths, _ = venue.label_both()
+    def no_parts( *a ): raise AssertionError( "make_parts must not be called" )
+    rc       = pc.main( [ "--run-dir", str( venue.run_dir ), *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=no_parts, run_proof=refuse_run )
+    out      = json.loads( capsys.readouterr().out )
+    assert rc == 2 and out[ "status" ] == "refused" and "--claude-cli-path" in out[ "owed" ]
+
+
 def test_main_refuses_an_unresolved_disagreement_without_a_ruling_and_takes_it_with_one( venue, tmp_path, capsys ):
     odd      = venue.toy.key( "m1", "m5" )
     paths, _ = venue.label_both( flip=( odd, ) )
@@ -355,7 +365,7 @@ def test_main_refuses_an_unresolved_disagreement_without_a_ruling_and_takes_it_w
     def run_proof( spec, wiring ): ran.append( spec ); return { "status": "complete" }
     assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=refuse_run ) == 2
     assert "disagreements have no ruling" in json.loads( capsys.readouterr().out )[ "owed" ]
-    assert pc.main( [ *argv, "--rulings", str( ruled ) ], make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
+    assert pc.main( [ *argv, "--rulings", str( ruled ), "--claude-cli-path", "/bin/claude" ], make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     assert len( ran ) == 1 and ran[ 0 ][ "labels" ][ odd ] is True and json.loads( capsys.readouterr().out ) == { "status": "complete" }
 
 
@@ -363,7 +373,7 @@ def test_main_runs_the_proof_once_with_the_resolved_labels_when_both_reviewers_a
     paths, truth = venue.label_both()
     ran          = []
     def run_proof( spec, wiring ): ran.append( ( spec, wiring ) ); return { "status": "complete", "counts": {} }
-    rc           = pc.main( [ "--run-dir", str( venue.run_dir ), *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=lambda *a: venue.parts(), run_proof=run_proof )
+    rc           = pc.main( [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=lambda *a: venue.parts(), run_proof=run_proof )
     assert rc == 0 and len( ran ) == 1 and ran[ 0 ][ 0 ][ "labels" ] == truth and ran[ 0 ][ 0 ][ "seed" ] == 3
     assert ran[ 0 ][ 1 ][ "ledger" ] is not venue.toy.wiring[ "ledger" ] and ( venue.toy.wiring[ "data_dir" ].joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME ).is_file()
     assert json.loads( capsys.readouterr().out )[ "status" ] == "complete"
