@@ -2,8 +2,9 @@
 capability: semdup-proof-label-packets
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.semdup.proof.label_prep.monolith_definitions@58c646b082
-  - cosa.repo.semdup.proof.label_prep.monolith_candidates@d49720bbf6
+  - cosa.repo.semdup.proof.label_prep.monolith_every_definition@66a96b13cc
+  - cosa.repo.semdup.proof.label_prep.monolith_definitions@d2e7965311
+  - cosa.repo.semdup.proof.label_prep.monolith_candidates@8ede1031bb
   - cosa.repo.semdup.proof.label_prep.unordered_key@73bdda79d6
   - cosa.repo.semdup.proof.label_prep.item_id@b6a2e0ea4f
   - cosa.repo.semdup.proof.label_prep.pair_item@60e2f18d36
@@ -18,8 +19,9 @@ pins:
 The second half of `label_prep.py`: the monolith pairs, the blind items, the packets and the command. Planting is on [[semdup-proof-label-planting]]. The labelling tools are on [[labelling-tools]].
 
 ## Monolith pairs
-- `monolith_definitions( root, min_nodes )` refuses unless `notifications.js` is the pinned blob. It copies the file to a temporary tree at the same path and returns the definitions of that many nodes or more.
-- `monolith_candidates` builds candidate pairs from two sources. The structural source is jscpd and `dups` over the copy, merged, up to 30 pairs. Nearest neighbours by body vector then fill the list to 60. It returns the definitions, the pairs and the blob sha.
+- `monolith_every_definition( root )` refuses unless `notifications.js` is the pinned blob. It copies the file to a temporary tree at the same path and returns every definition, of any size.
+- `monolith_definitions( root, min_nodes )` returns those of that many nodes or more.
+- `monolith_candidates` builds candidate pairs from two sources. The structural source is jscpd and `dups` over the copy, merged, up to 30 pairs. `dups` is handed every definition, not only the large ones, because it numbers a repeated name before its own size cut. Nearest neighbours by body vector then fill the list to 60. It returns the definitions, the pairs and the blob sha.
 
 ## Blind items
 - `unordered_key( a, b )` joins two ids sorted. `item_id` hashes that key into an opaque `pair-` id, so an item says nothing about its source, stratum or order.
