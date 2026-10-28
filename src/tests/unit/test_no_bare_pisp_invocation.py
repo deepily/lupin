@@ -242,7 +242,7 @@ def test_the_corpus_rule_admits_instructions_and_excludes_records():
     assert _in_scope( "src/docs/anything.md" )
     assert _in_scope( "src/lupin_mcp/memento_slot.py" )
 
-    assert not _in_scope( "src/rnd/v0.2.0/2026.08.29-memento-header-drift-root-cause.md" )
+    assert not _in_scope( "src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.21-reuse-detection-problem-statement.md" )
     assert not _in_scope( "history/2026-08-14-to-20-history.md" )
     assert not _in_scope( "src/rnd/v0.2.0/_archive/F/mementos/2026.08.24-john-memento.md" )
     assert not _in_scope( "src/tests/unit/test_reap_memento.py" )

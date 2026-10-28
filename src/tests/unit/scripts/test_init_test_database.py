@@ -1,7 +1,7 @@
 """
 Coverage ramp for `src/scripts/init_test_database.py` — a straggler at zero on the
 coverage-gate frame (unit + cosa, one data file), claimed in
-`src/rnd/v0.2.1/2026.08.30-coverage-straggler-claim-ledger.md`.
+`2026.08.30-coverage-straggler-claim-ledger.md (deleted)`.
 
 🔴 THIS SCRIPT CREATES A DATABASE, AND THE WRONG ONE IS ONE ENVIRONMENT VARIABLE AWAY.
 `init_auth_database()` writes a real auth schema at whatever `get_auth_db_path()` resolves

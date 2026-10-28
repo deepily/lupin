@@ -37,7 +37,7 @@ below takes legacy from the SERVED page and the mux from `_walk_mux_harness`.
 Krishna 🦚 measured all three venues over ONE fixture in COMMIT `aa9851bc`,
 and they do not agree. ⚠️ That commit is in this repo but is NOT an ancestor of
 this branch, so `git show aa9851bc` resolves it while its doc
-`src/rnd/2026.09.06-live-mux-drops-the-epic-story-row.md` is NOT yet on disk here —
+`2026.09.06-live-mux-drops-the-epic-story-row.md (deleted)` is NOT yet on disk here —
 cite the commit, not the path, until the branches meet:
 
     LIVE legacy   /app/notifications?classic=1   epic:alpha story rows = 1

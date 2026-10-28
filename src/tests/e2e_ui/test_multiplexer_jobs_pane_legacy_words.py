@@ -2,7 +2,7 @@
 """
 E2E — the multiplexer jobs pane speaks the legacy client's words (parity A-2 #10, row 0ef31897).
 PARITY-CLAIM: A-2 #10
-Build plan src/rnd/v0.2.1/2026.09.15-multiplexer-parity-build-plan.md §1 A-2 row 10; audit Phase 2
+Build plan 2026.09.15-multiplexer-parity-build-plan.md (deleted) §1 A-2 row 10; audit Phase 2
 A12 (B9d, B10, Q2, Q5). The legacy code each check copies, read at 2847ea74:
 
     headings        `#queues-section` notifications.html — the five category headings

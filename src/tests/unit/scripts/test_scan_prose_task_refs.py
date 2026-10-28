@@ -1,7 +1,7 @@
 """
 Coverage ramp for `src/scripts/scan-prose-task-refs.py` — a straggler at zero on the
 coverage-gate frame (unit + cosa, one data file), claimed in
-`src/rnd/v0.2.1/2026.08.30-coverage-straggler-claim-ledger.md`.
+`2026.08.30-coverage-straggler-claim-ledger.md (deleted)`.
 
 LOAD MECHANISM: by-path `importlib.util.spec_from_file_location`. The dashed filename is not
 an identifier, and by-path load beats `runpy` for the two reasons

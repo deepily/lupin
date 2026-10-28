@@ -1,7 +1,7 @@
 """
 Coverage ramp for `src/scripts/run-heartbeat-arbiter.py` — a straggler at zero on the
 coverage-gate frame (unit + cosa, one data file), claimed in
-`src/rnd/v0.2.1/2026.08.30-coverage-straggler-claim-ledger.md`.
+`2026.08.30-coverage-straggler-claim-ledger.md (deleted)`.
 
 LOAD MECHANISM: by-path `importlib.util.spec_from_file_location`, matching the other dashed
 scripts in this directory. By-path load is what makes the module RE-loadable, which is the
