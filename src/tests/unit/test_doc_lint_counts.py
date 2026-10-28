@@ -337,10 +337,11 @@ def test_the_command_line_needs_exactly_one_mode( repo ):
         counts.main( [ "--repo-root", str( repo ) ], io.StringIO() )
 
 
-def test_every_counted_python_file_of_the_real_tree_matches_the_committed_table():
-    # The doclint gate lints the swept files only; nothing in it reads this table, so only this test sees a counted file drift.
-    root = cu.get_project_root()
-    out  = io.StringIO()
-    code = counts.main( [ "--check", "--repo-root", root ], out=out )
-    walked = int( out.getvalue().strip().splitlines()[ -1 ].split()[ 0 ] )
-    assert walked > 0 and code == counts.EXIT_TIGHT, out.getvalue()
+def test_every_counted_python_file_of_the_real_tree_is_at_or_under_its_committed_count():
+    # The doclint gate lints the swept files only; nothing in it reads this table, so only this test sees a counted file rise.
+    # The table is a ceiling: a file under its count passes, so a seat that removes a finding does not redden the tier.
+    root           = cu.get_project_root()
+    found, walked  = counts.census( root )
+    with open( f"{root}/{counts.TABLE_PATH}", encoding="utf-8" ) as handle: table = counts.parse_table( handle.read() )
+    over = sorted( f"{path}: table {table.files.get( path, 0 )}, census {n}" for path, n in found.items() if n > table.files.get( path, 0 ) )
+    assert walked > 0 and over == [], over
