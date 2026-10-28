@@ -335,3 +335,12 @@ def test_check_is_not_checked_when_the_table_is_missing_or_malformed_or_the_tree
 def test_the_command_line_needs_exactly_one_mode( repo ):
     with pytest.raises( SystemExit ):
         counts.main( [ "--repo-root", str( repo ) ], io.StringIO() )
+
+
+def test_every_counted_python_file_of_the_real_tree_matches_the_committed_table():
+    # The doclint gate lints the swept files only; nothing in it reads this table, so only this test sees a counted file drift.
+    root = cu.get_project_root()
+    out  = io.StringIO()
+    code = counts.main( [ "--check", "--repo-root", root ], out=out )
+    walked = int( out.getvalue().strip().splitlines()[ -1 ].split()[ 0 ] )
+    assert walked > 0 and code == counts.EXIT_TIGHT, out.getvalue()

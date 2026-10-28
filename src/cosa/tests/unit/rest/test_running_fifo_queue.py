@@ -1076,12 +1076,13 @@ class TestProcessJob( _RFQBase ):
 
     def test_an_exact_hit_moves_the_job_to_done_by_itself( self ):
         """
-        Pins what `_process_job` does with a served cache hit (row 95622992): it returns
-        nothing and keeps nothing, because `_format_cached_result` is what delivers. The
-        original leaves the running queue once and ONE copy carrying the original id_hash
-        reaches the done queue. The old `running_job = served` store was never read.
+        A served cache hit leaves the running queue once and reaches the done queue once.
 
-        RED ON MUTANT: make `_format_cached_result` skip the done push (or the delete) and
+        `_process_job` returns nothing and keeps nothing, because `_format_cached_result` is
+        what delivers. One copy carrying the original id_hash reaches the done queue. The old
+        `running_job = served` store was never read.
+
+        Mutant check: make `_format_cached_result` skip the done push (or the delete) and
         this fails; the agent must not run on a served hit.
         """
         rq = self.build()
