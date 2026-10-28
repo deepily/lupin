@@ -7,7 +7,7 @@ pins:
   - cosa.rest.v2.executor.QueuedExecutor@772dbd3941
   - cosa.rest.v2.executor.Outcome@9d66c5eefa
   - cosa.rest.v2.executor.Work@08666d1ed4
-  - cosa.rest.v2.flow.AskFlow@0c61303bd8
+  - cosa.rest.v2.flow.AskFlow@1afc133aa5
   - cosa.rest.v2.pending.PendingEntry@c9cdc88763
   - cosa.rest.v2.refusal.SubmitRefused@8a214915b8
 ---
