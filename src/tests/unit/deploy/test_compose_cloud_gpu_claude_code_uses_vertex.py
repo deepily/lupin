@@ -48,3 +48,17 @@ def test_the_dev_services_keep_the_max_plan_login():
     for service in ( "lupin-rest-dev", "lupin-rest-test" ):
         env = _env( "docker-compose.yml", service )
         assert "CLAUDE_CODE_USE_VERTEX" not in env, f"{service} would bill Vertex for plan-covered work"
+
+
+def test_the_cloud_gpu_service_carries_the_model_pins_from_vertex_env():
+    """The container carries every id in vertex_env.MODEL_PINS, so the sonnet alias cannot 404."""
+    env = _env( COMPOSE_FILE, SERVICE )
+    assert ve.MODEL_PINS, "vertex_env has no pins to compare against"
+    for key, value in ve.MODEL_PINS.items():
+        assert env.get( key ) == value, f"{key}: compose has {env.get( key )!r}, vertex_env has {value!r}"
+
+
+def test_the_cloud_gpu_service_sets_no_model_override_that_would_beat_a_pin():
+    env = _env( COMPOSE_FILE, SERVICE )
+    for key in ve.ASSERTABLE_MODEL_OVERRIDES:
+        assert key not in env, f"{key} overrides the pin it is meant to agree with"

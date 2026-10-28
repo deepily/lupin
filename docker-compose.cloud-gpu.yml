@@ -341,6 +341,12 @@ services:
       CLAUDE_CODE_USE_VERTEX: "1"
       CLOUD_ML_REGION: ${LUPIN_VERTEX_REGION:-global}
       ANTHROPIC_VERTEX_PROJECT_ID: ${LUPIN_GCP_PROJECT_ID:?set LUPIN_GCP_PROJECT_ID in the host env file (row d3550878)}
+      # Model pins (row 3ed25e12). Without them Claude Code's sonnet alias resolves to an id this
+      # Vertex deployment does not serve (404). The values are vertex_env.MODEL_PINS; a unit test in
+      # tests/unit/deploy fails if they drift. No ANTHROPIC_MODEL here: it would override the pins.
+      ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-4-8
+      ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-5-5
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-sonnet-5-5
       PYTHONUNBUFFERED: "1"
       # bug b39c350d — this service bind-mounts `./src:/var/lupin/src` (line 100), so the VM's
       # on-disk `src/**/__pycache__` is shared between the container (repo root /var/lupin) and

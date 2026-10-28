@@ -35,4 +35,4 @@ pins:
 
 ## Invariants
 - The guards read only the mapping they are given. A tainted tmux server blocks every launch on its socket, Max launches included.
-- The pins are `claude-opus-4-8`, `claude-sonnet-4-6` and `claude-haiku-4-5@20251001`.
+- The pins are `claude-opus-4-8`, `claude-sonnet-5-5`, and `claude-sonnet-5-5` again for the haiku slot, because no haiku id answered on Vertex. `docker-compose.cloud-gpu.yml` repeats them; a deploy unit test fails on drift.

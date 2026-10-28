@@ -328,15 +328,21 @@ VERTEX_SESSION_KEYS = (
     "ANTHROPIC_VERTEX_PROJECT_ID",
 )
 
-# Model pins. Dated snapshots use an "@" version separator on Vertex — NOT the
+# Model pins. Each id was tried once with `claude -p --model <id>` on the test VM (region global).
+# Served: claude-opus-4-8, claude-opus-5, claude-sonnet-5-5.
+# Answered 404: claude-sonnet-4-6, claude-sonnet-4-5, claude-sonnet-4-5@20250929,
+# claude-sonnet-4@20250514, claude-haiku-4-5, claude-haiku-4-5@20251001, claude-haiku-5-5,
+# claude-opus-4-5, claude-opus-4-6 and claude-opus-4-7.
+# No haiku id is served, so the haiku slot uses the served sonnet.
+# Dated snapshots use an "@" version separator on Vertex — not the
 # hyphenated first-party form. Without the pins, the `opus` alias resolves to an
 # OLDER Opus. And a pin alone is not enough: ANTHROPIC_MODEL overrides it, which
 # is why ASSERTABLE_MODEL_OVERRIDES is compared against it. A pin you can override
 # from the environment is a preference, not a pin.
 MODEL_PINS = {
     "ANTHROPIC_DEFAULT_OPUS_MODEL"   : "claude-opus-4-8",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL" : "claude-sonnet-4-6",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL"  : "claude-haiku-4-5@20251001",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL" : "claude-sonnet-5-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL"  : "claude-sonnet-5-5",
 }
 
 # P0 — THE SCRUB ATE THE FEATURE. The set a pane must be cleansed of DEPENDS ON THE PATH,
@@ -855,7 +861,7 @@ def quick_smoke_test():
     composed = compose_vertex_env( env=base )
     assert composed[ "CLOUD_ML_REGION" ]             == "global"
     assert composed[ "ANTHROPIC_VERTEX_PROJECT_ID" ] == "proj-x"
-    assert composed[ "ANTHROPIC_DEFAULT_HAIKU_MODEL" ] == "claude-haiku-4-5@20251001"
+    assert composed[ "ANTHROPIC_DEFAULT_HAIKU_MODEL" ] == "claude-sonnet-5-5"
     print( "✓ composes the happy path" )
 
     for hostile in ( "VERTEX_REGION_CLAUDE_4_8_OPUS", "GOOGLE_APPLICATION_CREDENTIALS", "ANTHROPIC_MODEL" ):

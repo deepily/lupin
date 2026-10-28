@@ -274,6 +274,18 @@ KNOWN_DIVERGENT_ENV = {
         "dev-dev"   : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
         "dev-test"  : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
     },
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": {
+        "dev-dev"   : "2026-10-28 — see CLAUDE_CODE_USE_VERTEX (row 3ed25e12).",
+        "dev-test"  : "2026-10-28 — same.",
+    },
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": {
+        "dev-dev"   : "2026-10-28 — see CLAUDE_CODE_USE_VERTEX (row 3ed25e12).",
+        "dev-test"  : "2026-10-28 — same.",
+    },
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": {
+        "dev-dev"   : "2026-10-28 — see CLAUDE_CODE_USE_VERTEX (row 3ed25e12).",
+        "dev-test"  : "2026-10-28 — same.",
+    },
     "LUPIN_REUSE_REVIEW_DATA_ROOT": {
         "cloud-gpu" : "2026-10-15 — the partner of the reuse-review mount, which the VM does not take (row d3f71441).",
     },

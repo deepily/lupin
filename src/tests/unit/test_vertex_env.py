@@ -141,8 +141,8 @@ def test_composition_is_exact():
         "CLOUD_ML_REGION"                : "global",
         "ANTHROPIC_VERTEX_PROJECT_ID"    : "proj-x",
         "ANTHROPIC_DEFAULT_OPUS_MODEL"   : "claude-opus-4-8",
-        "ANTHROPIC_DEFAULT_SONNET_MODEL" : "claude-sonnet-4-6",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL"  : "claude-haiku-4-5@20251001",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL" : "claude-sonnet-5-5",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL"  : "claude-sonnet-5-5",
     }
 
 
@@ -157,10 +157,9 @@ def test_region_comes_from_the_vertex_key_not_the_container_deploy_key():
     assert composed[ "CLOUD_ML_REGION" ] != env[ "LUPIN_GCP_REGION" ]
 
 
-def test_haiku_pin_uses_the_at_form_not_the_hyphenated_form():
-    """Dated snapshots use '@' on Vertex; the hyphenated form resolves elsewhere."""
-    assert MODEL_PINS[ "ANTHROPIC_DEFAULT_HAIKU_MODEL" ] == "claude-haiku-4-5@20251001"
-    assert "-20251001" not in MODEL_PINS[ "ANTHROPIC_DEFAULT_HAIKU_MODEL" ]
+def test_haiku_slot_rides_the_served_sonnet():
+    """No haiku id is served on Vertex, so the slot uses the served sonnet."""
+    assert MODEL_PINS[ "ANTHROPIC_DEFAULT_HAIKU_MODEL" ] == "claude-sonnet-5-5"
 
 
 def test_explicit_arguments_override_the_environment():
@@ -309,9 +308,9 @@ def test_disagreeing_model_override_refuses_to_launch():
 
 def test_agreeing_small_fast_model_is_harmless():
     composed = compose_vertex_env(
-        env={ **CLEAN_ENV, "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5@20251001" }
+        env={ **CLEAN_ENV, "ANTHROPIC_SMALL_FAST_MODEL": "claude-sonnet-5-5" }
     )
-    assert composed[ "ANTHROPIC_DEFAULT_HAIKU_MODEL" ] == "claude-haiku-4-5@20251001"
+    assert composed[ "ANTHROPIC_DEFAULT_HAIKU_MODEL" ] == "claude-sonnet-5-5"
 
 
 def test_disagreeing_small_fast_model_refuses_to_launch():
