@@ -869,6 +869,7 @@ class AskFlow:
 
         The flow writes it, so the query log keeps growing for voice traffic. It has one call site, at the terminal chokepoint. Every exit funnels through _emit, so a refusal, a needs-input park and an answered question are all logged.
         A logging failure never breaks a request. It is swallowed with a debug print, because a question must not fail over an analytics row.
+        A submit row skips the LLM gist and logs the normalized text, so the request never waits on a model.
         Two fields are left out, rather than filled with something that would read as fact:
           - embeddings: CacheLookup does not return the vectors, and v2 skips embedding on a tier-1 exact hit. Generating them to log them would re-add the cost v2 avoids.
           - cache_hits: v1's flags mean an embedding was generated and came back non-empty, which is not what v2's embed_cached reports. One fact under the other's column name is a quiet wrongness.
@@ -886,7 +887,9 @@ class AskFlow:
             self.query_log.log_query(
                 query_verbatim     = question,
                 query_normalized   = trace.fields.get( "question_normalized" ) or self.cache.normalize( stripped ),
-                query_gist         = self.cache.gist( stripped ),
+                # A command or job row holds a machine-written prompt, and the gist is an LLM call. On the
+                # test VM it never returned, so the caller timed out on a job already queued.
+                query_gist         = self.cache.gist( stripped ) if verbatim_source is None else self.cache.normalize( stripped ),
                 user_id            = user_id,
                 session_id         = websocket_id,
                 # 'voice' / 'text' / 'api' is v1's vocabulary (query_log_table.py:84) and

@@ -2531,6 +2531,30 @@ class TestEveryEntryPointLogsItsQuestion:
 
         assert log.rows[ -1 ][ "query_verbatim" ] == "agent router go to math"
 
+    def test_a_submit_never_runs_the_llm_gist_before_it_answers( self, tmp_path, notifier, monkeypatch ):
+        """
+        A command-only submit does not run the LLM gist for its query-log row.
+
+        The gist is a model call. On the test VM it never returned, so the caller timed out on a queued job.
+        The row logs the normalized command instead. Reverting to a gist call makes the extra call show.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        bare   = FakeCache()
+        f_bare = _make_flow( tmp_path, bare, FakeRouter(), FakeExpeditor(),
+                             FakeExecutor( _outcome() ), FakePending(), notifier )
+        f_bare.submit( command="agent router go to math", args={}, **_CTX )
+
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome() ), FakePending(), notifier )
+        log   = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, **_CTX )
+
+        assert cache.gist_calls == bare.gist_calls, "the query log ran an LLM gist of its own"
+        assert log.rows[ -1 ][ "query_gist" ] == "agent router go to math", "the row carries the normalized text, not nothing"
+
     def test_resume_logs_the_original_question( self, tmp_path, notifier, monkeypatch ):
         """
         The resumed turn belongs to the question that started the interview, not to
