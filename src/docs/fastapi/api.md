@@ -4837,6 +4837,94 @@ object
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/pair-labelling/state`
+
+> **Progress of one reviewer**
+
+Report progress.
+
+Ensures:
+    - answers { reviewer, total, labelled, unsure, resume }; resume is the position to open, or null when every pair is labelled and none is unsure
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| reviewer | string | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/pair-labelling/item`
+
+> **One pair**
+
+Send one pair.
+
+Ensures:
+    - answers { position, total, labelled, item_id, a, b, label }; label is null or { same_job, unsure, note }
+
+Raises:
+    - HTTPException 404 for a position outside the packet
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| position | integer | True |  |
+| reviewer | string | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/pair-labelling/label`
+
+> **Write one label**
+
+Write one label to disk before answering.
+
+Ensures:
+    - answers the progress of the reviewer after the write, as state does
+
+Raises:
+    - HTTPException 404 for a pair not in the packet; 422 for a note over the limit
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[LabelUpload](#labelupload)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ---
 
 # 📋 Components
@@ -5339,6 +5427,21 @@ partial update rather than a replace.
 | Field | Type | Description |
 |-------|------|-------------|
 | detail | array |  |
+
+
+## LabelUpload
+
+
+One answer: the pair, same job or not, whether the reviewer is unsure, and a note.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| item_id | string |  |
+| same_job | boolean |  |
+| unsure | boolean |  |
+| note | string |  |
+| reviewer | string |  |
 
 
 ## LoginRequest

@@ -13757,6 +13757,237 @@
                     }
                 }
             }
+        },
+        "/api/pair-labelling/state": {
+            "get": {
+                "tags": [
+                    "pair-labelling"
+                ],
+                "summary": "Progress of one reviewer",
+                "description": "Report progress.\n\nEnsures:\n    - answers { reviewer, total, labelled, unsure, resume }; resume is the position to open, or null when every pair is labelled and none is unsure",
+                "operationId": "state_api_pair_labelling_state_get",
+                "parameters": [
+                    {
+                        "name": "reviewer",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "rick",
+                            "title": "Reviewer"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pair-labelling/item": {
+            "get": {
+                "tags": [
+                    "pair-labelling"
+                ],
+                "summary": "One pair",
+                "description": "Send one pair.\n\nEnsures:\n    - answers { position, total, labelled, item_id, a, b, label }; label is null or { same_job, unsure, note }\n\nRaises:\n    - HTTPException 404 for a position outside the packet",
+                "operationId": "item_api_pair_labelling_item_get",
+                "parameters": [
+                    {
+                        "name": "position",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "title": "Position"
+                        }
+                    },
+                    {
+                        "name": "reviewer",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "rick",
+                            "title": "Reviewer"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pair-labelling/label": {
+            "post": {
+                "tags": [
+                    "pair-labelling"
+                ],
+                "summary": "Write one label",
+                "description": "Write one label to disk before answering.\n\nEnsures:\n    - answers the progress of the reviewer after the write, as state does\n\nRaises:\n    - HTTPException 404 for a pair not in the packet; 422 for a note over the limit",
+                "operationId": "label_api_pair_labelling_label_post",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LabelUpload"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "components": {
@@ -15103,6 +15334,40 @@
                 },
                 "type": "object",
                 "title": "HTTPValidationError"
+            },
+            "LabelUpload": {
+                "properties": {
+                    "item_id": {
+                        "type": "string",
+                        "title": "Item Id"
+                    },
+                    "same_job": {
+                        "type": "boolean",
+                        "title": "Same Job"
+                    },
+                    "unsure": {
+                        "type": "boolean",
+                        "title": "Unsure",
+                        "default": false
+                    },
+                    "note": {
+                        "type": "string",
+                        "title": "Note",
+                        "default": ""
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "title": "Reviewer",
+                        "default": "rick"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "item_id",
+                    "same_job"
+                ],
+                "title": "LabelUpload",
+                "description": "One answer: the pair, same job or not, whether the reviewer is unsure, and a note."
             },
             "LoginRequest": {
                 "properties": {
