@@ -25,6 +25,103 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **Same job** means a caller that wanted A's result is served by B, perhaps after a small change. Opposites such as open and close are not the same job, and names and language never count (guide `io/tmp/2026.10.26-same-job-labelling-guide.md`).
 - **Backlog**: archive the TODO.md horizon, which is 1,234 lines and was deferred at session-end.
 
+## 📚 Decisions log 2026-10-24 (Cheech 🌿 `4dc30fb3`, skeleton crew, no seats)
+
+### Rick's rulings on the reuse checker's nine decisions (by voice, walked one at a time)
+Context: the only job today is a remediation plan for the reuse search. The decisions come from sections 5 and 7.3 of `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.23-reuse-detection-response-to-expert-critiques.md`. That document numbers them 1 to 9. Below, "Decision 6" means number 6 in its decision tables. "Open question 3" means the third item in the section "Still open" of `io/tmp/2026.10.24-reuse-stop-rule-explainer-v2.md`.
+- **Decision 6, language**: search only the target language by default, with an explicit cross-language option ("does the Python server already provide this?").
+- **Decision 7, private methods**: add private and protected methods of indexed classes, with the class named in each entry. Nested helpers stay out.
+- **Decision 8, tests**: index test code as a separate scope, searched only for test-code needs.
+- **Decision 9, go or no-go**: Rick's with-and-without cascaded review decides.
+  - Each arm gets at least 3 runs.
+  - The "without" arm has the reuse tools removed from the MCP server.
+  - Scoring does not use Jev. It uses `dups.py`, jscpd, existing symbols called, and lines added, plus a human sample.
+- **Decision 1, retire the `NEW` label now**, and add the recorded search.
+  - The tool runs the fixed-string greps itself, with 3-6 terms built from the need and the target language's roots.
+  - The agent reads the top 5 candidates and rules on each: same job, related, or unrelated, with the reason.
+  - A write-once `record_search( receipt_id, … )` record links to the check receipt. It is refused if incomplete.
+  - The exit gate requires a search-record id for every `DISTINCT` ruling or "no prior art" label.
+  - Records later trace a missed duplicate to the step that lost it, and seed the test set.
+- **Decision 2, a two-stage test set**:
+  - The first stage has 80-120 needs. The mix is about 35% near-copies, 30% same job in different code, 20% nothing exists, and 10-15% cross-language. The mix is a design choice, not a measured frequency.
+  - The first stage is built in week 1. It runs before and after the quick fixes, and also on plain Claude Code.
+  - The second stage has about 300 independent matched needs plus 100 nothing-exists needs. It runs only if Decision 9 says continue, and it falls outside the two-week budget.
+- **Decision 3, labels**: a model drafts each answer key, and a second model checks it. **Rick alone** settles disagreements and every "nothing exists" key.
+  - **Caveat to document**: there is a single reviewer and no person-to-person agreement measure.
+  - Report the model-to-model agreement rate instead.
+- Decision 4 (stop rule) and Decision 5 (budget) were still pending. Decision 4 paused at about 13:00 for an explainer and a podcast (`io/tmp/2026.10.24-reuse-stop-rule-explainer.md`, job `pg-19e31189`).
+
+### Rick's revisions after re-reading the stop-rule explainer (about 14:00, supersede Decisions 2, 3 and 9 where they differ)
+- The duplicate count must cover TypeScript and JavaScript, not Python only. A **semantic duplicate checker** is required.
+- **Test set: 400 needs in one stage**, replacing the 80-120 first stage of Decision 2.
+  - 300 have a known match and 100 are nothing-exists.
+  - About 60% are TypeScript and JavaScript from the client the plan rewrites. The other 40% are Python.
+  - They are labelled before the runs.
+- **5 runs per arm**, up from 3 or more.
+  - **The plan is fixed**: the same plan, rerun end to end 5 times per arm.
+  - The plan rewrites the monolithic JS client into modular TypeScript. The client is `src/lupin_app/static/js/notifications.js`, with 30,101 lines.
+  - So TypeScript coverage must be 100%.
+- **A second reviewer** will be found. This supersedes the single-reviewer caveat of Decision 3.
+- Duplicates are known to exist. The original run of that plan produced heavy duplication.
+- **Scope of a duplicate** (first of three scoping rules): new code against new code in the run's output. Also new code against existing code outside the source being translated. A faithful translation is not a duplicate.
+- **Judge** (second rule): Fable 5.1, on the Max plan or Rick's work server. Use one model id and one set of settings, and record the server with each verdict.
+- **Proof bar** (third rule): it must be met before any run is scored.
+  - It uses about 60 planted rewrites and about 60 labelled monolith duplicate pairs.
+  - At least 80% must be found, and at least 80% of flags must be correct.
+  - At least 90% of verdicts must agree with themselves on a repeat run.
+  - Both reviewers label.
+- **Decision 3 revisited**: Fable drafts each answer key, and a second model checks it.
+  - Rick and the second reviewer label independently and blind.
+  - They label the disputed keys, every nothing-exists key, a random 15% of agreed keys, and the semantic checker's samples.
+  - Report Cohen's kappa. Rick breaks ties.
+- **Decision 9 starting point**, after the base-tree explainer (`io/tmp/2026.10.24-reuse-experiment-base-tree-explainer.md`):
+  - The historical plans (`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/`) were cascade-reviewed. They are **contaminated and unusable**.
+  - Every run starts from **today's server and API, frozen, with no client code**, plus a **generic plan**.
+  - Both arms do the full cascaded plan review and implementation. There is no travel back in time.
+- **Generic plan**: a fresh Fable session writes it.
+  - That session is restricted to server code, API docs, and a feature list Rick approves. The list is written from today's user-visible behaviour.
+  - The plan is at feature level, with the API surface and acceptance tests and no module layout.
+  - Rick freezes it. It is **not** cascade-reviewed beforehand. It is identical in all 10 runs.
+- **End to end**: a run ends when all of the frozen plan's acceptance tests pass, or at a fixed cap.
+  - The cap is the same for each arm. Its value is set with Decision 5.
+  - A capped run is scored as it stands.
+  - The duplicate count is reported per 100 passing acceptance tests, beside the raw count and the pass rate.
+- **Fourth weakness**: the "without" arm loses only the reuse MCP tools (check_exists, fetch_similar, read_capability) and the reuse-reviewer skill. Grep, the code, CLAUDE.md and the docs stay in both arms.
+- **New engineering item**: with no client code on day one, the reuse index must be rebuilt during each run as code lands. Today it is built once per commit.
+- **Decision 4 locked (significance alone)**: Rick's hypothesis is code quality, meaning fewer duplicate or work-alike blocks. It is not time or money.
+  - Continue if a one-sided Mann-Whitney test gives p<0.05 on surplus duplicates per 100 passing acceptance tests. With 5 runs against 5, that means at most 4 of 25 run pairs go the wrong way.
+  - Stop if p≥0.05, or if the "without" arm makes fewer than 5 duplicates over its 5 runs.
+  - Effect size and seat-hours are reported, and neither gates.
+  - No runs are added after looking.
+  - The 30% figure and the break-even formula were both rejected.
+- **Decision 5 (for now, negotiable)**: a 3-working-day cap per run. Runs go in pairs, one per arm at once. The ceiling is 10 weeks, with a checkpoint at the end of the build.
+  - **Correction from Rick**: tokens are not a constraint, because his employer sponsors unlimited tokens.
+  - Parallelism is limited by machines and the fleet cap, not by quota.
+- Next: rewrite the stop-rule explainer with every decision above (`io/tmp/2026.10.24-reuse-stop-rule-explainer-v2.md`), then the remediation plan document.
+- The second explainer is written, and podcast `pg-e98107b1` started. The open questions in its last section were walked afterwards:
+  - **Open question 1, acceptance tests**: they are black-box tests.
+    - The same restricted Fable session that writes the generic plan writes them, from the feature list.
+    - They use Playwright through the UI, with the result checked through the API.
+    - Elements are found by visible text and accessibility role, never by test ids or CSS classes.
+    - Rick freezes them together with the plan. They are identical in all runs and visible to both arms.
+  - **Open question 2, the cap**: an unscored pilot run sets it. The pilot is the "without" arm on the real harness, with no cap.
+    - The cap is 1.5 times the pilot's time to pass all tests, rounded up to whole working days. It is frozen before run 1.
+    - If the pilot has not passed in 10 working days, stop and rethink the plan's size.
+    - This replaces the 3-day guess.
+  - **Open question 4, concurrency**: run one pair at a time for now, and run more pairs at once if bandwidth allows. This is left open.
+    - Rick called the pilot "1 control treatment pilot run". So the pilot is recorded as one unscored pair, with one run per arm. The cap is taken from the slower arm.
+    - This amends Open question 2.
+  - **Open question 5, original output**: a loose sanity check only.
+    - It is scored once with the frozen semantic checker, and reported beside the ten runs.
+    - It is labelled as built from a different plan and tree. It gates nothing.
+  - All the open questions are closed. Next: the remediation plan document.
+  - **Decision 6 revised (Rick, by voice, 18:19 EDT)**: language is an explicit, required parameter with no default, because a wrong default fails silently. Cross-language search stays an explicit opt-in. The plan lists this as its third parking item.
+- **Remediation plan written** (`src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.24-reuse-detection-remediation-plan.md`).
+  - Rick wants it frozen, but first it goes through **cascaded review**. That starts with him when he returns. Do nothing until then.
+  - After the freeze, the first work is the first three items of the plan's first phase. They retire the `NEW` label, add the recorded search, and add the exit gate.
+  - **Open question 3, implementer**: Opus, pinned for all runs and the pilot. That is 5.5 for now, or whatever newer Opus exists when the runs start (Rick's daily workhorse).
+  - Aside from Rick, out of scope: if the outcome is decisive, the same tests may later be repeated on the Gemini and OpenAI model families.
+
 ## 📚 Decisions log 2026-10-23 evening (Cheech 🌿 `21aa6e8a`, skeleton crew, no seats)
 
 ### Rick's rulings
