@@ -140,7 +140,8 @@ def stage_pool( root, defs, rewrites ):
         - root is the repository root the server and monolith definitions are relative to; rewrites is as rewrite_sources gives it
 
     Ensures:
-        - returns ( TemporaryDirectory, { ( staged file, name, line ): pool id } )
+        - returns ( TemporaryDirectory, { ( staged file, line, end_line ): pool id } )
+        - the key leaves the name out: a class-member rewrite is recorded by its member name, and extraction names it Class.member
         - a rewrite and its original keep apart, because the rewrite is staged under proof-new/ and the original under tree/
         - the staged root holds no src/ folder of its own, so symindex treats it as a plain tree and names modules from it
     """
@@ -151,7 +152,7 @@ def stage_pool( root, defs, rewrites ):
         if not dst.exists():
             dst.parent.mkdir( parents=True, exist_ok=True )
             shutil.copyfile( rewrites[ d[ "id" ] ][ 1 ] if d[ "id" ] in rewrites else pathlib.Path( root ) / d[ "file" ], dst )
-        where[ ( rel, d[ "name" ], d[ "line" ] ) ] = d[ "id" ]
+        where[ ( rel, d[ "line" ], d[ "end_line" ] ) ] = d[ "id" ]
     return tmp, where
 
 
@@ -176,7 +177,7 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
         files  = sorted( { rel for rel, _, _ in where } )
         paths  = [ base / f for f in files ]
         staged = [ d for d in extract.extract_tree( tmp.name, paths, "server" )[ "definitions" ] if d[ "nodes" ] >= cfg[ "min_nodes" ] ]
-        found  = { ( d[ "file" ], d[ "name" ], d[ "line" ] ) for d in staged }
+        found  = { ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) for d in staged }
         lost   = sorted( pid for k, pid in where.items() if k not in found and pid in { d[ "id" ] for d in defs if d[ "nodes" ] >= cfg[ "min_nodes" ] } )
         if lost: raise ValueError( f"{len( lost )} pool definitions were not found in the staged tree: {', '.join( lost )}" )
         spec   = sp.spec_for( tmp.name )
@@ -187,7 +188,7 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
         merged = structural.clone_pairs( structural.parse_jscpd( jscpd( tmp.name, [ TREE_PREFIX, NEW_PREFIX ], cfg ), js, cfg[ "clone_cover" ] ),
                                          structural.python_clones( spec, py_at, py, cfg[ "min_nodes" ] ),
                                          structural.script_clones( spec, js_at, js, cfg[ "min_nodes" ] ) )
-    to_pool = { d[ "id" ]: where.get( ( d[ "file" ], d[ "name" ], d[ "line" ] ) ) for d in staged }
+    to_pool = { d[ "id" ]: where.get( ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) ) for d in staged }
     out     = []
     for p in merged:
         ids = [ to_pool[ i ] for i in p[ "ids" ] ]
