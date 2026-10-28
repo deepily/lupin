@@ -832,8 +832,20 @@ PY
                     ABSENT)
                         report fail WARN "$cname declared surface=COMPOSE but $( basename "$COMPOSE_FILE" ) never references it" \
                                       "add the interpolation to $( basename "$COMPOSE_FILE" ), or correct its surface in env-contract.tsv" ;;
+                    DEFAULTED)
+                        # ${VAR:-d} cannot abort a container create, so a contract row marked
+                        # OPTIONAL leaves nothing here to supply and nothing to assert (measured
+                        # 2026-10-28: LUPIN_VERTEX_REGION blocked a post-deploy preflight). A row
+                        # the contract calls required is a different case, and falls to the arm
+                        # below: the two files disagree and neither can say which is right.
+                        if [ "$creq" = "OPTIONAL" ]; then
+                            report pass BLOCK "$cname is defaulted by $( basename "$COMPOSE_FILE" ) and optional in the contract, so its absence cannot abort a container create   [surface: COMPOSE]"
+                            continue
+                        fi
+                        report unknown BLOCK "$cname is surface=COMPOSE but $( basename "$COMPOSE_FILE" ) treats it as $regime, not \${VAR:?} — a running container is NOT evidence it was supplied" \
+                                      "either interpolate it \${VAR:?} so absence aborts \`up\`, or correct its surface in env-contract.tsv" ;;
                     *)
-                        # DEFAULTED/LITERAL/BARE/CONFLICT/UNKNOWN: compose tolerates an
+                        # LITERAL/BARE/CONFLICT/UNKNOWN: compose tolerates an
                         # unset value, so a running container proves NOTHING about it.
                         # Never launder that into a pass.
                         report unknown BLOCK "$cname is surface=COMPOSE but $( basename "$COMPOSE_FILE" ) treats it as $regime, not \${VAR:?} — a running container is NOT evidence it was supplied" \
@@ -1100,11 +1112,15 @@ PY
     #       container runs as uid 1001 while the host owner differs, so git answers
     #       "dubious ownership" and receipt commits read as "not found" (row 31344c5f).
     #       Population = the LIVE mount table, never a hand list.
-    unsafe_mounts=""; ext_seen=0
+    #       Two populations: every external mount (what docker inspect lists), and the
+    #       git-backed subset of it (what git can be asked about). The report names both,
+    #       because a mount with no .git (planning-is-prompting) is in the first only.
+    unsafe_mounts=""; ext_seen=0; ext_total=0; not_git=""
     while IFS= read -r m; do
         [ -n "$m" ] || continue
         case "$m" in /var/external-projects/*) ;; *) continue ;; esac
-        [ -n "$( docker exec "$CONTAINER" sh -c "ls -A '$m/.git' 2>/dev/null | head -1" 2>/dev/null )" ] || continue
+        ext_total=$(( ext_total + 1 ))
+        [ -n "$( docker exec "$CONTAINER" sh -c "ls -A '$m/.git' 2>/dev/null | head -1" 2>/dev/null )" ] || { not_git="$not_git $m"; continue; }
         ext_seen=$(( ext_seen + 1 ))
         docker exec "$CONTAINER" git -C "$m" rev-parse HEAD >/dev/null 2>&1 || unsafe_mounts="$unsafe_mounts $m"
     done <<< "$running_mounts"
@@ -1112,7 +1128,11 @@ PY
         report unknown WARN "no git-backed /var/external-projects mount found to test safe.directory against" \
                       "check the external-project binds in $COMPOSE_FILE"
     elif [ -z "$unsafe_mounts" ]; then
-        report pass BLOCK "git rev-parse HEAD succeeds inside $CONTAINER for all $ext_seen external-project mounts"
+        if [ -z "$not_git" ]; then
+            report pass BLOCK "git rev-parse HEAD succeeds inside $CONTAINER for all $ext_seen external-project mounts"
+        else
+            report pass BLOCK "git rev-parse HEAD succeeds inside $CONTAINER for all $ext_seen git-backed external-project mounts ($ext_total external mounts in all; not git-backed:$not_git)"
+        fi
     else
         report fail BLOCK "git refuses these mounts inside $CONTAINER (dubious ownership):$unsafe_mounts" \
                       "durable: add GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n=safe.directory / GIT_CONFIG_VALUE_n=<mount> per mount to the lupin-rest environment in $COMPOSE_FILE, then up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT re-read env"
@@ -1245,28 +1265,41 @@ else note_skip D; fi
 if layer_runs E; then
 say_head "E. Cloud / IAM"
 
-if [ "${CLAUDE_CODE_USE_VERTEX:-}" = "1" ]; then
-    # Opus 4.8 on Vertex is GLOBAL-only. A regional value yields model-not-found,
-    # which the Claude Code wizard mis-reports as "permission denied".
-    [ "${CLOUD_ML_REGION:-}" = "global" ] \
-        && report pass WARN "CLOUD_ML_REGION=global (Opus 4.8 is global-only)" \
-        || report fail WARN "CLOUD_ML_REGION='${CLOUD_ML_REGION:-}' — Opus 4.8 on Vertex is GLOBAL-only" \
-                      "export CLOUD_ML_REGION=global in ~/.bashrc"
-    [ -n "${ANTHROPIC_VERTEX_PROJECT_ID:-}" ] \
-        && report pass WARN "ANTHROPIC_VERTEX_PROJECT_ID set" \
-        || report fail WARN "ANTHROPIC_VERTEX_PROJECT_ID unset" "export it in ~/.bashrc"
+# The witness is the CONTAINER's own environment, read from /proc/1/environ as C6 does, because
+# the container is what runs Claude Code. The ssh shell's variables describe a different process:
+# on 2026-10-28 a container with all three set was reported "Vertex not enabled here".
+e_environ="$( docker exec "$CONTAINER" sh -c "tr '\\0' '\\n' < /proc/1/environ" 2>/dev/null )"
+if [ -z "$e_environ" ]; then
+    report unknown WARN "cannot read the environment of $CONTAINER, so the Vertex region checks were not made" \
+                  "check that $CONTAINER is running and that /proc/1/environ is readable inside it"
 else
-    report pass WARN "Vertex not enabled here (CLAUDE_CODE_USE_VERTEX != 1) — skipping region checks"
-fi
+    e_vertex="$(  pfv_environ_lookup CLAUDE_CODE_USE_VERTEX       <<< "$e_environ" )" || e_vertex=""
+    e_region="$(  pfv_environ_lookup CLOUD_ML_REGION              <<< "$e_environ" )" || e_region=""
+    e_project="$( pfv_environ_lookup ANTHROPIC_VERTEX_PROJECT_ID  <<< "$e_environ" )" || e_project=""
+    if [ "$e_vertex" = "1" ]; then
+        # Opus 4.8 on Vertex is GLOBAL-only. A regional value yields model-not-found,
+        # which the Claude Code wizard mis-reports as "permission denied".
+        [ "$e_region" = "global" ] \
+            && report pass WARN "CLOUD_ML_REGION=global in $CONTAINER (Opus 4.8 is global-only)" \
+            || report fail WARN "CLOUD_ML_REGION='$e_region' in $CONTAINER — Opus 4.8 on Vertex is GLOBAL-only" \
+                          "set LUPIN_VERTEX_REGION=global in $( basename "$ENV_FILE" ) (or leave it unset), then up -d --no-deps --force-recreate $SERVICE"
+        [ -n "$e_project" ] \
+            && report pass WARN "ANTHROPIC_VERTEX_PROJECT_ID set in $CONTAINER" \
+            || report fail WARN "ANTHROPIC_VERTEX_PROJECT_ID unset in $CONTAINER" \
+                          "src/scripts/lupin-vm.sh push-project-id, then up -d --no-deps --force-recreate $SERVICE"
+    else
+        report pass WARN "Vertex not enabled in $CONTAINER (CLAUDE_CODE_USE_VERTEX != 1) — skipping region checks"
+    fi
 
-# CC 2.1.220 added VERTEX_REGION_CLAUDE_5_OPUS. An unguarded per-model override
-# silently routes a SINGLE model to another region, where it runs, bills, and logs
-# nothing. Opus is the expensive one.
-if env | grep -q '^VERTEX_REGION_CLAUDE_5_OPUS='; then
-    report fail WARN "VERTEX_REGION_CLAUDE_5_OPUS is set — a per-model override routes ONE model elsewhere, silently" \
-                  "unset VERTEX_REGION_CLAUDE_5_OPUS   # unless this is deliberate"
-else
-    report pass WARN "no per-model Vertex region override set"
+    # CC 2.1.220 added VERTEX_REGION_CLAUDE_5_OPUS. An unguarded per-model override
+    # silently routes a SINGLE model to another region, where it runs, bills, and logs
+    # nothing. Opus is the expensive one.
+    if pfv_environ_lookup VERTEX_REGION_CLAUDE_5_OPUS <<< "$e_environ" >/dev/null; then
+        report fail WARN "VERTEX_REGION_CLAUDE_5_OPUS is set in $CONTAINER — a per-model override routes ONE model elsewhere, silently" \
+                      "remove VERTEX_REGION_CLAUDE_5_OPUS from the environment of $CONTAINER   # unless this is deliberate"
+    else
+        report pass WARN "no per-model Vertex region override set in $CONTAINER"
+    fi
 fi
 else note_skip E; fi
 
