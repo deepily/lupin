@@ -80,6 +80,7 @@ def venue( world, tmp_path, monkeypatch ):
     monkeypatch.setattr( pc.frozen, "live_config", lambda: world.toy.cfg )
     monkeypatch.setattr( pc.cu, "get_project_root", lambda: str( tmp_path ) )
     monkeypatch.setattr( model_transport, "configure", lambda cli_path=None, cwd=None: None )
+    monkeypatch.setattr( model_transport, "cli_version", lambda path: "9.9" )
     return world
 
 
@@ -291,14 +292,20 @@ def test_live_parts_wires_the_run_folder_the_pools_and_the_ledger_beside_the_pro
     monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: "9.9" )
     prep    = lambda root, vectors: seen.update( vectors=vectors ) or { "client": "C", "server_defs": [ world.toy.o[ "o1" ] ], "client_defs": [ world.toy.d[ "d1" ] ] }
     mono    = lambda root, n: seen.update( n=n ) or ( Tmp(), [ world.toy.m[ "m1" ] ] )
-    parts   = pc.live_parts( tmp_path, world.run_dir, world.toy.cfg, 2, "/bin/claude", prep_wiring=prep, monolith=mono, jscpd=NO_JSCPD )
+    parts   = pc.live_parts( tmp_path, world.run_dir, world.toy.cfg, 2, prep_wiring=prep, monolith=mono, jscpd=NO_JSCPD )
     w       = parts[ "wiring" ]
     assert seen[ "cleaned" ] and seen[ "n" ] == world.toy.cfg[ "min_nodes" ] and seen[ "vectors" ] == world.run_dir / "vectors"
     assert [ d[ "name" ] for d in parts[ "distractors" ] ] == [ "o1", "d1" ] and parts[ "mono_defs" ] == [ world.toy.m[ "m1" ] ]
     assert w[ "client" ] == "C" and w[ "parallel" ] == 2 and w[ "data_dir" ] == str( tmp_path / "proj" ) + "/io" and w[ "frozen_path" ] == "frozen.json"
     assert w[ "cache_dir" ] == world.run_dir / "vectors" and w[ "clock" ]() [ 4 ] == "-"
-    folder = ( tmp_path / "proj" / "io" ).joinpath( *pr.PROOF_FOLDER )
-    assert "claude_cli=/bin/claude|version=9.9" in ( folder / pc.LEDGER_NAME ).read_text( encoding="utf-8" ) and callable( w[ "structural_pairs" ] )
+    assert callable( w[ "structural_pairs" ] ) and "ledger" not in w and not ( tmp_path / "proj" ).exists()
+
+
+def test_proof_ledger_makes_the_proof_folder_and_binds_the_ledger_to_the_binary( tmp_path, monkeypatch ):
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: "9.9" )
+    ledger = pc.proof_ledger( str( tmp_path ), "/bin/claude" )
+    folder = tmp_path.joinpath( *pr.PROOF_FOLDER )
+    assert ledger is not None and "claude_cli=/bin/claude|version=9.9" in ( folder / pc.LEDGER_NAME ).read_text( encoding="utf-8" )
 
 
 # ---- main ---------------------------------------------------------------------------------------------------------
@@ -314,6 +321,14 @@ def test_main_check_prints_the_sizes_computes_the_pairs_once_and_never_runs_the_
     assert rc == 0 and len( made ) == 1 and len( jscpd.calls ) == 1
     assert out[ "status" ] == "checked" and out[ "planted" ] == 3 and out[ "monolith_pairs" ] == 3 and out[ "owed" ] is None
     assert out[ "plant_failures" ] == 0 and out[ "config_sha" ] == venue.toy.cfg[ "config_sha" ] and out[ "pool" ][ "size" ] == 14
+
+
+def test_main_check_writes_nothing_not_even_the_proof_folder_or_the_ledger( venue, tmp_path, monkeypatch ):
+    data = tmp_path / "data"
+    def no_ledger( *a ): raise AssertionError( "--check must not make the ledger" )
+    monkeypatch.setattr( pc, "proof_ledger", no_ledger )
+    rc   = pc.main( [ "--run-dir", str( venue.run_dir ), "--check" ], make_parts=lambda *a: venue.parts(), run_proof=refuse_run )
+    assert rc == 0 and not data.exists()
 
 
 def test_main_check_without_labels_still_checks_and_reports_what_is_owed( venue, capsys ):
@@ -350,6 +365,7 @@ def test_main_runs_the_proof_once_with_the_resolved_labels_when_both_reviewers_a
     def run_proof( spec, wiring ): ran.append( ( spec, wiring ) ); return { "status": "complete", "counts": {} }
     rc           = pc.main( [ "--run-dir", str( venue.run_dir ), *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=lambda *a: venue.parts(), run_proof=run_proof )
     assert rc == 0 and len( ran ) == 1 and ran[ 0 ][ 0 ][ "labels" ] == truth and ran[ 0 ][ 0 ][ "seed" ] == 3
+    assert ran[ 0 ][ 1 ][ "ledger" ] is not venue.toy.wiring[ "ledger" ] and ( venue.toy.wiring[ "data_dir" ].joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME ).is_file()
     assert json.loads( capsys.readouterr().out )[ "status" ] == "complete"
 
 

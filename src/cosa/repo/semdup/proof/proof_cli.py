@@ -271,7 +271,7 @@ def label_state( labels_paths, key_path, rulings ):
     return { "counts": counts, "labels": labels, "failures": failures, "owed": None }
 
 
-def live_parts( root, run_dir, cfg, parallel, cli_path, prep_wiring=label_prep.live_wiring, monolith=label_prep.monolith_definitions, jscpd=structural.run_jscpd ):
+def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring, monolith=label_prep.monolith_definitions, jscpd=structural.run_jscpd ):
     """
     Build everything the proof needs from the real tree, short of the labels.
 
@@ -280,22 +280,36 @@ def live_parts( root, run_dir, cfg, parallel, cli_path, prep_wiring=label_prep.l
         - prep_wiring, monolith and jscpd are label_prep's and structural's own unless a test stands in for them
 
     Ensures:
-        - returns { run, mono_defs, distractors, wiring }; wiring holds every key judge_all and proof_run read except labels, which live in the spec
-        - the distractors are label_prep's server and client definitions; the ledger lives beside the proof records and is bound to the Claude Code binary
+        - returns { run, mono_defs, distractors, wiring }; wiring holds every key judge_all and proof_run read except labels, which live in the spec, and ledger, which proof_ledger makes on a real run
+        - the distractors are label_prep's server and client definitions
+        - writes nothing: no folder, no ledger
     """
     run       = load_run( run_dir )
     prep      = prep_wiring( root, pathlib.Path( run_dir ) / VECTORS_DIR )
     tmp, mono = monolith( root, cfg[ "min_nodes" ] )
     tmp.cleanup()
     data_dir  = cu.get_project_root() + DATA_RELATIVE
-    folder    = pathlib.Path( data_dir ).joinpath( *proof_run.PROOF_FOLDER )
-    folder.mkdir( parents=True, exist_ok=True )
-    binding   = f"claude_cli={cli_path}|version={model_transport.cli_version( cli_path )}"
     wiring    = { "client": prep[ "client" ], "cache_dir": pathlib.Path( run_dir ) / VECTORS_DIR, "scrub": blind.scrub_tokens( frozen.ARM_LABELS ),
                   "structural_pairs": structural_source( root, rewrite_sources( run_dir, run[ "planted" ] ), cfg, jscpd ), "backend": judge.MaxPlanBackend(),
-                  "ledger": harness_runner.Ledger( folder / LEDGER_NAME, binding=binding ), "parallel": parallel, "frozen_path": frozen.frozen_path(),
+                  "parallel": parallel, "frozen_path": frozen.frozen_path(),
                   "live": frozen.live_config(), "data_dir": data_dir, "clock": lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }
     return { "run": run, "mono_defs": mono, "distractors": [ *prep[ "server_defs" ], *prep[ "client_defs" ] ], "wiring": wiring }
+
+
+def proof_ledger( data_dir, cli_path ):
+    """
+    Make the proof's judge ledger, bound to the Claude Code binary.
+
+    Requires:
+        - data_dir is the data root the proof records live under; cli_path is the Claude Code binary
+
+    Ensures:
+        - creates the proof folder if it is missing, which is why only a real run calls this
+        - returns the ledger at <proof folder>/judge-ledger.jsonl
+    """
+    folder = pathlib.Path( data_dir ).joinpath( *proof_run.PROOF_FOLDER )
+    folder.mkdir( parents=True, exist_ok=True )
+    return harness_runner.Ledger( folder / LEDGER_NAME, binding=f"claude_cli={cli_path}|version={model_transport.cli_version( cli_path )}" )
 
 
 def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
@@ -309,7 +323,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
     Ensures:
         - verifies the frozen configuration first and refuses a run folder planted under another config_sha
         - with --check: builds the spec and the wiring, computes the structural pairs of the pool once, prints the sizes and the label state as JSON,
-          makes no model call and writes no proof record; returns 0
+          makes no model call and writes nothing, not even the proof folder or the ledger; returns 0
         - without --check: refuses (returns 2, after printing why) unless both reviewers' labels resolve; otherwise runs proof_run once,
           prints its record and returns 0
 
@@ -335,7 +349,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
     if not args.check and state[ "labels" ] is None:
         print( json.dumps( { "status": "refused", "owed": state[ "owed" ], "counts": state[ "counts" ] }, indent=2, sort_keys=True ) )
         return 2
-    parts   = make_parts( cu.get_project_root(), run_dir, cfg, args.parallel, args.claude_cli_path )
+    parts   = make_parts( cu.get_project_root(), run_dir, cfg, args.parallel )
     spec    = build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], state[ "labels" ] or {}, state[ "failures" ] )
     if args.check:
         pool  = proof_run.build_pool( spec, spec[ "seed" ] )
@@ -344,7 +358,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
                              "structural_pairs": len( pairs ), "labels": state[ "counts" ], "owed": state[ "owed" ], "plant_failures": len( state[ "failures" ] ),
                              "config_sha": cfg[ "config_sha" ] }, indent=2, sort_keys=True ) )
         return 0
-    record = run_proof( spec, parts[ "wiring" ] )
+    record = run_proof( spec, { **parts[ "wiring" ], "ledger": proof_ledger( parts[ "wiring" ][ "data_dir" ], args.claude_cli_path ) } )
     print( json.dumps( record, indent=2, sort_keys=True ) )
     return 0
 
