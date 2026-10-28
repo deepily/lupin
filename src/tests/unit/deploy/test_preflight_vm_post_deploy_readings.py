@@ -124,21 +124,21 @@ def test_a_defaulted_compose_key_the_contract_calls_optional_passes( venue ):
 def test_E_reads_vertex_from_the_container_when_the_ssh_shell_has_none( venue ):
     _container_env( venue, VERTEX_ON )
     out = _run( venue )
-    assert "skipping region checks" not in out, out
-    assert "[OK]" in _line( out, "CLOUD_ML_REGION=global" )
-    assert "[OK]" in _line( out, "ANTHROPIC_VERTEX_PROJECT_ID set" )
+    assert "Vertex not enabled in fake-rest" not in out, out
+    assert "[OK]" in _line( out, "CLOUD_ML_REGION=global in fake-rest" )
+    assert "[OK]" in _line( out, "ANTHROPIC_VERTEX_PROJECT_ID set in fake-rest" )
 
 
 def test_E_a_regional_value_in_the_container_warns_whatever_the_shell_says( venue ):
     venue[ "env" ][ "CLOUD_ML_REGION" ] = "global"
     _container_env( venue, "CLAUDE_CODE_USE_VERTEX=1\nCLOUD_ML_REGION=us-east5\nANTHROPIC_VERTEX_PROJECT_ID=proj-x\n" )
-    line = _line( _run( venue ), "GLOBAL-only" )
+    line = _line( _run( venue ), "in fake-rest — Opus 4.8" )
     assert "[WARN]" in line and "us-east5" in line, line
 
 
 def test_E_a_container_without_the_project_id_warns( venue ):
     _container_env( venue, "CLAUDE_CODE_USE_VERTEX=1\nCLOUD_ML_REGION=global\n" )
-    assert "[WARN]" in _line( _run( venue ), "ANTHROPIC_VERTEX_PROJECT_ID unset" )
+    assert "[WARN]" in _line( _run( venue ), "ANTHROPIC_VERTEX_PROJECT_ID unset in fake-rest" )
 
 
 def test_E_a_container_without_vertex_skips_the_region_checks_even_if_the_shell_has_it( venue ):
@@ -146,25 +146,26 @@ def test_E_a_container_without_vertex_skips_the_region_checks_even_if_the_shell_
     _container_env( venue, "SOME_OTHER=1\n" )
     out = _run( venue )
     assert "[OK]" in _line( out, "Vertex not enabled in fake-rest" )
-    assert "GLOBAL-only" not in out, out
+    assert "in fake-rest — Opus 4.8" not in out, out
+    assert "[WARN]" in _line( out, "CLOUD_ML_REGION='us-east5' in the host shell" )
 
 
 def test_E_an_unreadable_container_environment_is_not_a_pass( venue ):
     out = _run( venue )      # the fake has no /proc/1/environ to give
     line = _line( out, "cannot read the environment of fake-rest" )
     assert "[UNKN]" in line and "[OK]" not in line, line
-    assert "skipping region checks" not in out and "GLOBAL-only" not in out, out
+    assert "Vertex not enabled in fake-rest" not in out and "in fake-rest — Opus 4.8" not in out, out
 
 
 def test_E_a_per_model_region_override_in_the_container_warns( venue ):
     _container_env( venue, VERTEX_ON + "VERTEX_REGION_CLAUDE_5_OPUS=us-east5\n" )
-    assert "[WARN]" in _line( _run( venue ), "VERTEX_REGION_CLAUDE_5_OPUS is set" )
+    assert "[WARN]" in _line( _run( venue ), "VERTEX_REGION_CLAUDE_5_OPUS is set in fake-rest" )
 
 
 def test_E_no_per_model_override_in_the_container_passes_even_if_the_shell_sets_one( venue ):
     venue[ "env" ][ "VERTEX_REGION_CLAUDE_5_OPUS" ] = "us-east5"
     _container_env( venue, VERTEX_ON )
-    assert "[OK]" in _line( _run( venue ), "no per-model Vertex region override set" )
+    assert "[OK]" in _line( _run( venue ), "no per-model Vertex region override set in fake-rest" )
 
 
 # ── 3. the external-mount count names its population ─────────────────────────
@@ -179,3 +180,31 @@ def test_C10_the_count_names_the_git_backed_mounts_and_the_one_that_is_not( venu
 def test_C10_when_every_mount_is_git_backed_the_line_does_not_mention_any_other( venue ):
     line = _line( _run( venue ), "git rev-parse HEAD succeeds" )
     assert "all 3 external-project mounts" in line and "not git-backed" not in line, line
+
+
+# ── 2b. the host shell stays a witness, beside the container ─────────────────
+
+def test_E_the_host_shell_is_still_read_and_the_line_names_it( venue ):
+    venue[ "env" ].update( CLAUDE_CODE_USE_VERTEX="1", CLOUD_ML_REGION="us-east5", VERTEX_REGION_CLAUDE_5_OPUS="us-east5" )
+    venue[ "env" ].pop( "ANTHROPIC_VERTEX_PROJECT_ID", None )
+    _container_env( venue, VERTEX_ON )
+    out = _run( venue )
+    assert "[WARN]" in _line( out, "CLOUD_ML_REGION='us-east5' in the host shell" )
+    assert "[WARN]" in _line( out, "ANTHROPIC_VERTEX_PROJECT_ID unset in the host shell" )
+    assert "[WARN]" in _line( out, "VERTEX_REGION_CLAUDE_5_OPUS is set in the host shell" )
+    assert "[OK]" in _line( out, "CLOUD_ML_REGION=global in fake-rest" )
+
+
+def test_E_a_good_host_shell_passes_each_host_line( venue ):
+    venue[ "env" ].update( CLAUDE_CODE_USE_VERTEX="1", CLOUD_ML_REGION="global", ANTHROPIC_VERTEX_PROJECT_ID="proj-x" )
+    out = _run( venue )
+    assert "[OK]" in _line( out, "CLOUD_ML_REGION=global in the host shell" )
+    assert "[OK]" in _line( out, "ANTHROPIC_VERTEX_PROJECT_ID set in the host shell" )
+    assert "[OK]" in _line( out, "no per-model Vertex region override set in the host shell" )
+
+
+def test_E_a_host_shell_without_vertex_skips_only_the_host_checks( venue ):
+    _container_env( venue, VERTEX_ON )
+    out = _run( venue )
+    assert "[OK]" in _line( out, "Vertex not enabled in the host shell" )
+    assert "[OK]" in _line( out, "CLOUD_ML_REGION=global in fake-rest" )

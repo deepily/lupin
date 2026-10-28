@@ -1265,6 +1265,28 @@ else note_skip D; fi
 if layer_runs E; then
 say_head "E. Cloud / IAM"
 
+# Two witnesses, because Claude Code runs in two places: on this VM host (the ssh shell's own
+# variables, set in ~/.bashrc) and inside the container (its /proc/1/environ). Each line says which.
+if [ "${CLAUDE_CODE_USE_VERTEX:-}" = "1" ]; then
+    # Opus 4.8 on Vertex is GLOBAL-only. A regional value yields model-not-found,
+    # which the Claude Code wizard mis-reports as "permission denied".
+    [ "${CLOUD_ML_REGION:-}" = "global" ] \
+        && report pass WARN "CLOUD_ML_REGION=global in the host shell (Opus 4.8 is global-only)" \
+        || report fail WARN "CLOUD_ML_REGION='${CLOUD_ML_REGION:-}' in the host shell — Opus 4.8 on Vertex is GLOBAL-only" \
+                      "export CLOUD_ML_REGION=global in ~/.bashrc"
+    [ -n "${ANTHROPIC_VERTEX_PROJECT_ID:-}" ] \
+        && report pass WARN "ANTHROPIC_VERTEX_PROJECT_ID set in the host shell" \
+        || report fail WARN "ANTHROPIC_VERTEX_PROJECT_ID unset in the host shell" "export it in ~/.bashrc"
+else
+    report pass WARN "Vertex not enabled in the host shell (CLAUDE_CODE_USE_VERTEX != 1) — skipping host region checks"
+fi
+if env | grep -q '^VERTEX_REGION_CLAUDE_5_OPUS='; then
+    report fail WARN "VERTEX_REGION_CLAUDE_5_OPUS is set in the host shell — a per-model override routes ONE model elsewhere, silently" \
+                  "unset VERTEX_REGION_CLAUDE_5_OPUS   # unless this is deliberate"
+else
+    report pass WARN "no per-model Vertex region override set in the host shell"
+fi
+
 # The witness is the CONTAINER's own environment, read from /proc/1/environ as C6 does, because
 # the container is what runs Claude Code. The ssh shell's variables describe a different process:
 # on 2026-10-28 a container with all three set was reported "Vertex not enabled here".
