@@ -298,6 +298,18 @@ def test_a_pair_only_jscpd_sees_is_kept_as_structural_and_a_pair_below_the_node_
     assert ( [ "xray", "yankee" ], "structural" ) in named( got )
 
 
+TWIN_TEXT = "function twin( x ) {\n    return x;\n}\n" + LOOP_TEXT.format( name="twin", arg="queue", err="failure" ) + LOOP_TEXT.format( name="peer", arg="stack", err="problem" )
+
+
+def test_monolith_candidates_numbers_a_repeated_name_before_the_node_cut_so_a_large_second_twin_still_pairs( tmp_path, monkeypatch ):
+    root = monolith_root( tmp_path, monkeypatch, TWIN_TEXT )
+    tmp, defs = lp.monolith_definitions( root, 25 )
+    tmp.cleanup()
+    assert sorted( ( d[ "name" ], d[ "line" ] > 1 ) for d in defs ) == [ ( "peer", True ), ( "twin", True ) ]          # the small twin is cut, so only the second is left
+    got = lp.monolith_candidates( root, CFG, FakeEmbed(), tmp_path / "vec", per_source=30, total=1 )
+    assert ( [ "peer", "twin" ], "structural" ) in named( got )
+
+
 def test_the_monolith_list_is_sixty_long_by_default_with_thirty_from_each_automatic_source( tmp_path, monkeypatch ):
     root = monolith_root( tmp_path, monkeypatch, MONOLITH_TEXT )
     seen = []

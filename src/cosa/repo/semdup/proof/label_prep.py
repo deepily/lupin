@@ -181,16 +181,16 @@ def plant_all( originals, root, asks, shape_of, count=PLANTED_COUNT, threads=THR
     return { "planted": planted, "failed": failed }
 
 
-def monolith_definitions( root, min_nodes ):
+def monolith_every_definition( root ):
     """
-    Extract the monolith's definitions from a copy of its pinned bytes.
+    Extract every definition of the monolith, of any size, from a copy of its pinned bytes.
 
     Requires:
         - root is the repository root holding MONOLITH_FILE
 
     Ensures:
         - raises unless the file is the pinned blob; copies it to a temporary tree at the same relative path, so ids equal those of an extraction from root
-        - returns ( temporary tree path as TemporaryDirectory, definitions of min_nodes nodes or more, in extraction order )
+        - returns ( temporary tree path as TemporaryDirectory, all definitions, in extraction order )
 
     Raises:
         - ValueError if the file is not the pinned blob
@@ -203,7 +203,24 @@ def monolith_definitions( root, min_nodes ):
     shutil.copyfile( source, copy )
     report = extract.extract_tree( tmp.name, [ copy ], "server" )
     extract.completeness( report )
-    return tmp, [ d for d in report[ "definitions" ] if d[ "nodes" ] >= min_nodes ]
+    return tmp, report[ "definitions" ]
+
+
+def monolith_definitions( root, min_nodes ):
+    """
+    Extract the monolith's definitions of min_nodes nodes or more from its pinned bytes.
+
+    Requires:
+        - root is the repository root holding MONOLITH_FILE
+
+    Ensures:
+        - returns ( temporary tree path as TemporaryDirectory, definitions of min_nodes nodes or more, in extraction order ), as monolith_every_definition reads them
+
+    Raises:
+        - ValueError if the file is not the pinned blob
+    """
+    tmp, every = monolith_every_definition( root )
+    return tmp, [ d for d in every if d[ "nodes" ] >= min_nodes ]
 
 
 def monolith_candidates( root, cfg, client, cache_dir, per_source=PER_SOURCE, nominated=(), total=MONOLITH_TOTAL ):
@@ -215,12 +232,14 @@ def monolith_candidates( root, cfg, client, cache_dir, per_source=PER_SOURCE, no
 
     Ensures:
         - returns { defs, pairs, blob }: the monolith's definitions, the structural pairs (up to per_source), the neighbour pairs that bring the list to total, and the nominated ones, and the pinned blob sha
+        - dups gets every definition, not only those of min_nodes nodes or more, because it numbers a repeated name ~2 before its own cut
         - the structural source is jscpd and dups.find_duplicates over a copy of the pinned file, merged by structural.clone_pairs; their sizes are on different scales, which only orders them
     """
-    tmp, defs = monolith_definitions( root, cfg[ "min_nodes" ] )
+    tmp, every = monolith_every_definition( root )
+    defs       = [ d for d in every if d[ "nodes" ] >= cfg[ "min_nodes" ] ]
     with tmp:
         report = structural.run_jscpd( tmp.name, [ CLIENT_DIR ], cfg )
-        found  = structural.script_clones( sp.spec_for( tmp.name ), [ pathlib.Path( tmp.name ) / MONOLITH_FILE ], defs, cfg[ "min_nodes" ] )
+        found  = structural.script_clones( sp.spec_for( tmp.name ), [ pathlib.Path( tmp.name ) / MONOLITH_FILE ], every, cfg[ "min_nodes" ] )
     pairs   = structural.clone_pairs( structural.parse_jscpd( report, defs, cfg[ "clone_cover" ] ), found )
     vectors = body_vectors.ensure_vectors( defs, client, cache_dir, cfg[ "body_chars" ] )[ "vectors" ]
     tagged  = monolith_pairs.candidate_pairs( defs, pairs, vectors, [ list( n ) for n in nominated ], per_source, total )
