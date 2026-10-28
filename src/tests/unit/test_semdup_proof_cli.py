@@ -210,6 +210,29 @@ def test_staged_pairs_drops_a_clone_pair_that_touches_a_definition_the_pool_does
     assert [ p[ "ids" ] for p in pairs ] == [ sorted( [ d.orig[ "id" ], d.rewrite[ "id" ] ] ) ]
 
 
+def test_staged_pairs_numbers_a_repeated_name_before_the_node_cut_so_a_large_second_twin_still_maps( tmp_path ):
+    big    = source_of( "twin", [ "MARKA", "MARKB" ], 7 )
+    d      = Dups( tmp_path, extra="" )
+    ( d.root / "srv.py" ).write_text( "def twin( x ):\n    return x\n\n\n" + big, encoding="utf-8" )
+    orig   = [ x for x in ex.extract_tree( d.root, [ d.root / "srv.py" ], "server" )[ "definitions" ] if x[ "nodes" ] >= d.toy.cfg[ "min_nodes" ] ]
+    assert len( orig ) == 1 and orig[ 0 ][ "name" ] == "twin" and orig[ 0 ][ "line" ] > 1
+    pairs  = pc.staged_pairs( d.root, [ orig[ 0 ], d.rewrite ], d.sources, d.toy.cfg, NO_JSCPD )
+    assert [ p[ "ids" ] for p in pairs ] == [ sorted( [ orig[ 0 ][ "id" ], d.rewrite[ "id" ] ] ) ] and pairs[ 0 ][ "source" ] == "dups"
+
+
+def test_staged_pairs_numbers_a_repeated_script_name_before_the_node_cut_too( tmp_path ):
+    toy    = Toy( tmp_path )
+    root   = tmp_path / "repo"
+    root.mkdir()
+    big    = "function twin( items ) {\n    const tags = [ 'MARKA', 'MARKB' ];\n    const out = [];\n    for ( const item of items ) {\n        out.push( item * 7 );\n    }\n    return out;\n}\n"
+    ( root / "util.js" ).write_text( "function twin( x ) {\n    return x;\n}\n\n" + big, encoding="utf-8" )
+    orig   = [ x for x in ex.extract_tree( root, [ root / "util.js" ], "server" )[ "definitions" ] if x[ "nodes" ] >= toy.cfg[ "min_nodes" ] ]
+    assert len( orig ) == 1 and orig[ 0 ][ "line" ] > 1
+    new    = lp.rewrite_record( { "rewrite_text": big }, orig[ 0 ], tmp_path / "run" / "key" / "rewrites", 0 )
+    pairs  = pc.staged_pairs( root, [ orig[ 0 ], new ], pc.rewrite_sources( tmp_path / "run", [ { "original": orig[ 0 ], "rewrite": new } ] ), toy.cfg, NO_JSCPD )
+    assert [ p[ "ids" ] for p in pairs ] == [ sorted( [ orig[ 0 ][ "id" ], new[ "id" ] ] ) ]
+
+
 def test_staged_pairs_maps_a_class_wrapped_typescript_rewrite_recorded_by_its_member_name( tmp_path ):
     toy    = Toy( tmp_path )
     root   = tmp_path / "repo"

@@ -184,6 +184,7 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
 
     Ensures:
         - runs jscpd over the staged script files, and dups over the staged Python and script files, once each, and merges them with clone_pairs
+        - dups gets every staged definition, not only those of min_nodes nodes or more, because it numbers a repeated name ~2 before its own cut
         - returns those pairs with each id mapped back to its pool id; a pair touching a staged definition the pool does not hold is left out
 
     Raises:
@@ -194,18 +195,20 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
         base   = pathlib.Path( tmp.name )
         files  = sorted( { rel for rel, _, _ in where } )
         paths  = [ base / f for f in files ]
-        staged = [ d for d in extract.extract_tree( tmp.name, paths, "server" )[ "definitions" ] if d[ "nodes" ] >= cfg[ "min_nodes" ] ]
+        every  = extract.extract_tree( tmp.name, paths, "server" )[ "definitions" ]
+        staged = [ d for d in every if d[ "nodes" ] >= cfg[ "min_nodes" ] ]
         found  = { ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) for d in staged }
         check_found( where, found, defs, cfg[ "min_nodes" ] )
         spec   = sp.spec_for( tmp.name )
-        py     = [ d for d in staged if d[ "file" ].endswith( ".py" ) ]
+        py     = [ d for d in every if d[ "file" ].endswith( ".py" ) ]
         js     = [ d for d in staged if d[ "file" ].endswith( extract.SCRIPT_SUFFIXES ) ]
+        js_all = [ d for d in every if d[ "file" ].endswith( extract.SCRIPT_SUFFIXES ) ]
         py_at  = [ p for p in paths if p.name.endswith( ".py" ) ]
         js_at  = [ p for p in paths if p.name.endswith( extract.SCRIPT_SUFFIXES ) ]
         merged = structural.clone_pairs( structural.parse_jscpd( jscpd( tmp.name, [ TREE_PREFIX, NEW_PREFIX ], cfg ), js, cfg[ "clone_cover" ] ),
                                          structural.python_clones( spec, py_at, py, cfg[ "min_nodes" ] ),
-                                         structural.script_clones( spec, js_at, js, cfg[ "min_nodes" ] ) )
-    to_pool = { d[ "id" ]: where.get( ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) ) for d in staged }
+                                         structural.script_clones( spec, js_at, js_all, cfg[ "min_nodes" ] ) )
+    to_pool = { d[ "id" ]: where.get( ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) ) for d in every }
     out     = []
     for p in merged:
         ids = [ to_pool[ i ] for i in p[ "ids" ] ]
