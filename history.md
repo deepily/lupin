@@ -24,6 +24,15 @@
   - Cost note: the haiku slot uses claude-sonnet-5-5, because Vertex serves no haiku.
 - **Files**: history.md. Code arrived by the reviewed fast-forwards above.
 
+## 2026.10.28 day to night - Session bf84de97 (Cheech 🌿, manager; crew Rachel, Chloé, Krishna, all reaped) | Proof driver landed, check passes on run5, waiting on labels
+
+- **Landed on the working branch.** Each passed Chloé's review and the gates. Pushed at tonight's closing time.
+  - Proof driver `proof_cli.py` with 31 tests at 100% (`a44119e6c`, row `e8967ff9`). A real `--check` on run5 passes: pool 12,204, 65 planted, 60 monolith pairs, 1,146 structural pairs.
+  - The label-prep repeated-name fix (`7cff5b3dd`, row `1520163f`) and the regenerated API docs for the pair-labelling routes (`fee404196`, row `ae815ee2`). The 10-24 decisions log is in `472f1339f`.
+- **Rulings**: structural pairs are staged as one tree. The pilot (the remediation plan's sixth phase) waits for the proof. Rick is recruiting the second reviewer. Seats are staffed without asking.
+- **Open**: gate `f029b4b5`. Rick is at 63 of 125 labels and no second reviewer file exists yet. After that comes the proof run (row `6e821290`), and then Rick names the passing record (row `35914482`).
+- **Files**: history.md. Code arrived by the reviewed fast-forwards above.
+
 ## 2026.10.26 day to night - Session 4dc30fb3 (Cheech 🌿, manager; crew Rachel, Chloé) | Labelling page live, Rick at 27 of 125, P6 ruled, endpoint note
 
 - **Landed on the working branch** (each passed Chloé's review and the merge gate; not pushed until tonight's session-end):
