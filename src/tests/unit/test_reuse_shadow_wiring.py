@@ -129,11 +129,11 @@ class TestReadCeiling:
         with pytest.raises( CandidateError ) as caught: rs.read_ceiling( broken )
         assert caught.value.code == rs.AUDIT_CEILING_UNSET and "disk gone" in caught.value.detail
 
-    def test_the_shipped_ini_holds_the_key_blank_and_the_switch_off( self ):
+    def test_the_shipped_ini_holds_the_switch_on_and_the_ceiling_at_five_million( self ):
         import cosa.utils.util as cu
         lines = { line.split( "=", 1 )[ 0 ].strip(): line.split( "=", 1 )[ 1 ].strip() for line in open( cu.get_project_root() + "/src/conf/lupin-app.ini", encoding="utf-8" )
                   if line.startswith( "reuse shadow audit" ) }
-        assert lines == { rs.ENABLED_KEY: "false", rs.CEILING_KEY: "" }
+        assert lines == { rs.ENABLED_KEY: "true", rs.CEILING_KEY: "5000000" }
 
     def test_both_keys_are_explained_in_the_splainer_file( self ):
         import cosa.utils.util as cu
