@@ -8,6 +8,22 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.28 day to night - Session a61ed994 (Mr. Radio 🦉, manager; crew Krishna, John, Tiffany, Maya) | Test VM on Vertex Model Garden, gist fixed live, podcast cause found
+
+- **Landed on the working branch.** Each passed review and the gates; nothing pushed. Tip `80325bcf0`.
+  - Model Garden chain `be077aa77`. Rick's shadow-audit switch-on `06f6c3b77`, and its test `34756e619`.
+  - 78 R&D files deleted `0bace4db6`. Lint-count ceiling `1c95a0846`, `cfbcbd9ad`. Move-probe README deleted `8b5a499da`.
+  - Row `d3550878`: a command-only submit no longer waits on the gist (`bb60e8559`, `bbb9c873e`). The VM preflight readings are fixed (`e0d7621d3`, `fe2834ad0`). The VM gist uses Gemini Flash-Lite on Vertex, by Rick's ruling (`68b966e29`).
+  - P0 `3ed25e12`: the container pins Vertex-served model ids (`db347f3be`). The podcast prompt example escapes its break-tag quotes, and recovery repairs them (`e580eb1f4`, `80325bcf0`).
+- **VM** deployed at `34756e61` at 01:29Z. The post-deploy preflight had 0 blocking items, `claude -p` in the container answers, and the Flash-Lite gist works live.
+- **Open**:
+  - Podcast fix: not yet deployed or rerun.
+  - The first vector build was still running at 22:20.
+  - Typed asks on the VM hang on the home-LAN router LoRA. The ruling is asked of Rick on `d3550878`, re-asked at 10:32.
+  - Row `281f5223` is folded into `d3550878`; Rick can drop it.
+  - Cost note: the haiku slot uses claude-sonnet-5-5, because Vertex serves no haiku.
+- **Files**: history.md. Code arrived by the reviewed fast-forwards above.
+
 ## 2026.10.26 day to night - Session 4dc30fb3 (Cheech 🌿, manager; crew Rachel, Chloé) | Labelling page live, Rick at 27 of 125, P6 ruled, endpoint note
 
 - **Landed on the working branch** (each passed Chloé's review and the merge gate; not pushed until tonight's session-end):
