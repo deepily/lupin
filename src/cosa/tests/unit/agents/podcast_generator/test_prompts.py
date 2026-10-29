@@ -33,6 +33,7 @@ from cosa.agents.podcast_generator.prompts.script_generation import (
     get_script_revision_prompt,
     parse_analysis_response,
     parse_script_response,
+    SCRIPT_GENERATION_SYSTEM_PROMPT,
     extract_prosody_from_text,
     extract_json_object,
     lenient_json_loads,
@@ -255,6 +256,20 @@ class TestParseScriptResponse( unittest.TestCase ):
         # returning a silent "Untitled Podcast" / 0-segment fallback.
         with self.assertRaises( ValueError ):
             parse_script_response( "garbage" )
+
+
+class TestScriptPromptJsonExample( unittest.TestCase ):
+
+    def test_the_example_shows_the_break_tag_with_escaped_quotes( self ):
+        # The model copies the example. Written with a bare quote it is not valid JSON, and a
+        # model that copied it produced a script on the test VM that no parser could read.
+        line = [ l for l in SCRIPT_GENERATION_SYSTEM_PROMPT.splitlines() if l.strip().startswith( '"text":' ) ][ 0 ]
+        self.assertIn( '<break time=\\"1.0s\\"/>', line )
+
+    def test_a_script_with_bare_quotes_in_its_break_tags_is_still_read( self ):
+        body   = '{"title": "T", "segments": [{"speaker": "A", "text": "Wait. <break time="1.0s"/> Now."}]}'
+        parsed = parse_script_response( body )
+        self.assertEqual( parsed[ "segments" ][ 0 ][ "text" ], 'Wait. <break time="1.0s"/> Now.' )
 
 
 class TestExtractProsodyFromText( unittest.TestCase ):

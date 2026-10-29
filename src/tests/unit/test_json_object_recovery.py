@@ -106,6 +106,25 @@ class TestRecoverJsonObject( unittest.TestCase ):
         self.assertNotIn( "x" * 5000, joined )         # the middle is not logged
 
 
+class TestBareQuotesInBreakTags( unittest.TestCase ):
+    """A break tag copied with bare quotes inside a JSON string."""
+
+    BARE = '{"text": "Wait. <break time="1.5s"/> Now. <break time="1.0s"/> Go."}'
+
+    def test_bare_quotes_in_a_break_tag_are_recovered( self ):
+        self.assertEqual( recover_json_object( self.BARE ), { "text": 'Wait. <break time="1.5s"/> Now. <break time="1.0s"/> Go.' } )
+
+    def test_escaped_quotes_are_left_alone( self ):
+        escaped = '{"text": "Wait. <break time=\\"1.5s\\"/> Go."}'
+        self.assertEqual( recover_json_object( escaped ), { "text": 'Wait. <break time="1.5s"/> Go.' } )
+
+    def test_other_corruption_still_fails_loudly( self ):
+        self.assertIsNone( recover_json_object( '{"text": "Wait. <break time="1.5s"/> Go." "next": }' ) )
+
+    def test_an_unrelated_bare_quote_is_not_guessed_at( self ):
+        self.assertIsNone( recover_json_object( '{"text": "He said "hello" to me."}' ) )
+
+
 class TestWhitespaceGatedRecovery( unittest.TestCase ):
     """
     Regression for bug e0bb5a94 defect A: a bounded-CC podcast script completion

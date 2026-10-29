@@ -22,6 +22,7 @@ Notes:
 
 import json
 import logging
+import re
 from typing import Optional, Any
 
 logger = logging.getLogger( __name__ )
@@ -112,6 +113,25 @@ def extract_json_object( text: str ) -> Optional[ str ]:
     return None
 
 
+# A pause tag the model copied verbatim into a JSON string: <break time="1.5s"/> with the quotes
+# unescaped. Only this one tag shape is repaired; any other bare quote is left to fail loudly.
+_BARE_BREAK_TAG = re.compile( r'(<break time=)"([0-9.]+s?)"(\s*/>)' )
+
+
+def _escape_bare_break_quotes( text: str ) -> str:
+    """
+    Escape the quotes of every unescaped <break time="x.xs"/> tag in a JSON text.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns text with the quotes of each bare-quoted break tag escaped
+        - a tag whose quotes are already escaped is untouched
+    """
+    return _BARE_BREAK_TAG.sub( r'\1\\"\2\\"\3', text )
+
+
 def recover_json_object( response_content: str ) -> Optional[ Any ]:
     """
     Best-effort recovery of a JSON value from a (possibly chatty) completion.
@@ -156,6 +176,13 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
             return _loads_whitespace_tolerant( extracted )
         except json.JSONDecodeError:
             pass
+
+    # The one repair: pause tags copied with their quotes unescaped (row 3ed25e12).
+    repaired = _escape_bare_break_quotes( extracted if extracted is not None else content )
+    try:
+        return _loads_whitespace_tolerant( repaired )
+    except json.JSONDecodeError:
+        pass
 
     # Unrecoverable: log the raw body LOUDLY so it is captured permanently. Bound
     # it head+tail (the trailing prose after a code fence is the usual culprit, so

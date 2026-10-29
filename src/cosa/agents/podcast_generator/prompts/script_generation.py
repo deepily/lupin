@@ -149,14 +149,15 @@ DIALOGUE GUIDELINES:
 8. End segments with hooks that lead to next topic
 
 OUTPUT FORMAT:
-Return a JSON object with this structure:
+Return a JSON object with this structure. Inside a "text" value every double quote is
+escaped with a backslash, so a pause tag is written <break time=\\"1.5s\\"/> there.
 {
     "title": "Episode title",
     "segments": [
         {
             "speaker": "Host Name",
             "role": "curious|expert",
-            "text": "Dialogue with <break time=\"1.0s\"/> pacing markers",
+            "text": "Dialogue with <break time=\\"1.0s\\"/> pacing markers",
             "topic_reference": "which topic this covers"
         }
     ],
