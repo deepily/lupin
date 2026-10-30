@@ -82,7 +82,7 @@ DEFAULT_CHAR_BUDGET = 40_000
 MIN_CHAR_BUDGET = 5_000
 MAX_CHAR_BUDGET = 2_000_000
 
-# The hour the off-peak window CLOSES (EDT). Midnight is always the open.
+# The hour the off-peak window closes, in the configured `app timezone`. Midnight is always the open.
 #
 # WAS 9, then 11. Rick, 2026-08-17: "You can update the clock to run for as long as
 # we need it to. I am the human at the console. Nothing else will run or interfere.
@@ -434,10 +434,10 @@ def split_batch( batch: Sequence[Any] ) -> List[List[Any]]:
 
 def is_off_peak( hour_edt: int, end_hour: int = OFF_PEAK_END_HOUR ) -> bool:
     """
-    True iff an hour falls in the sanctioned batch window (midnight - end_hour EDT).
+    True iff an hour is in the batch window ( midnight to end_hour, configured zone ).
 
     Requires:
-        - hour_edt is an int hour-of-day in 0..23, EDT
+        - hour_edt is an int hour-of-day in 0..23, in the configured `app timezone`
         - end_hour is an int hour-of-day in 1..24
 
     Ensures:
@@ -446,6 +446,29 @@ def is_off_peak( hour_edt: int, end_hour: int = OFF_PEAK_END_HOUR ) -> bool:
           about the boundary never have to name it
     """
     return 0 <= hour_edt < end_hour
+
+
+def current_hour_in_configured_zone( now=None ) -> int:
+    """
+    The hour of day, 0..23, in the configured `app timezone`.
+
+    Requires:
+        - now is None or an aware datetime
+
+    Ensures:
+        - returns the hour as the configured zone reads it; never a literal zone
+
+    Raises:
+        - MissingConfigKeyError if `app timezone` is absent or blank
+        - InvalidAppTimezoneError if it is not an IANA zone name
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from cosa.config.app_timezone import get_app_timezone
+    from cosa.config.configuration_manager import ConfigurationManager
+
+    zone = ZoneInfo( get_app_timezone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) ) )
+    return ( now if now is not None else datetime.now( zone ) ).astimezone( zone ).hour
 
 
 def should_proceed( *, busy: Optional[bool], hour_edt: Optional[int],
@@ -472,7 +495,7 @@ def should_proceed( *, busy: Optional[bool], hour_edt: Optional[int],
     if busy:
         return "server is busy (jobs in flight) — refusing to add embedding load"
     if not force and hour_edt is not None and not is_off_peak( hour_edt ):
-        return ( f"hour {hour_edt:02d} EDT is outside the off-peak window "
+        return ( f"hour {hour_edt:02d} ( configured zone ) is outside the off-peak window "
                  f"(00:00-{OFF_PEAK_END_HOUR:02d}:00); pass --force to override" )
     return None
 
@@ -901,8 +924,6 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
           batch_size=DEFAULT_BATCH_SIZE, char_budget=DEFAULT_CHAR_BUDGET,
           only=None ):   # pragma: no cover - CLI/DB/HTTP boundary
     """Open a session, dispatch the subcommand, print a report. Returns exit code."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
     from cosa.rest.db.database import get_db
 
     specs = [ spec for spec in REGEN_SPECS if only is None or spec.label == only ]
@@ -927,7 +948,7 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
         if command == "fill":
             refusal = should_proceed(
                 busy     = _probe_busy(),
-                hour_edt = datetime.now( ZoneInfo( "America/New_York" ) ).hour,
+                hour_edt = current_hour_in_configured_zone(),
                 force    = force,
             )
             if refusal:

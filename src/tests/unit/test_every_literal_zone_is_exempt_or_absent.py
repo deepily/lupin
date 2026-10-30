@@ -25,7 +25,6 @@ EXEMPT = {
     "src/cosa/agents/decision_proxy/config.py"           : "FIX OWED: DEFAULT_TIMEZONE backs the `decision proxy timezone` key and ~30 constructor calls",
     "src/cosa/agents/heartbeat_arbiter/arbiter_journal.py": "LEGIT: the module's own self-test names a zone",
     "src/cosa/repo/doc_lint/harness_schedule.py"         : "LEGIT: the harness schedule window is defined as 10:00 to 13:00 Eastern",
-    "src/cosa/rest/db/embedding_regeneration.py"         : "LEGIT: the business-hours gate is defined in EDT, its parameter is named hour_edt",
     "src/cosa/utils/edt_timestamp.py"                    : "FIX OWED: None falls back to DEFAULT_TZ_NAME; dm.py passes none",
     "src/lupin_mcp/reuse_needset/smoke.py"               : "LEGIT: the smoke schedule window is defined in Eastern, like the harness",
     "src/scripts/dm-experiment/generate_schedule.py"     : "LEGIT: the experiment schedule is defined in Eastern",
