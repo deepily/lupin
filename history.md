@@ -8,6 +8,22 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.29 evening to night - Session 2b284afe (Cheech 🌿, manager; crew Tiffany, reaped) | Rick's 125 labels in, every open decision ruled, explainer for the expert, podcast parse fix landed
+
+- **Labels**: Rick labelled all 125 Set A pairs (70 same job, 55 not). Of the 20 Opus work-alikes, 9 were ruled not the same job.
+- **Rulings** (decision walkthrough; recorded in the explainer's section 9 and on rows `f029b4b5` and `46105b99`):
+  - The second reviewer labels all 125 Set A pairs blind.
+  - A third rater breaks ties on the disputed pairs only.
+  - No comment cleanup until the proof passes (`3ef167df`).
+  - Set B keeps confirm mode.
+  - Future pairs show doc comments on both sides, and reject banned names built from joined strings.
+  - Set B's work-alikes are a mix: about 90 mined from TypeScript and about 60 synthetic Python, each synthetic one checked by a person. This one is flagged for the resident expert.
+  - The run count for the experiment is withheld, to be fixed before the experiment runs.
+- **Landed on the working branch, not pushed**: podcast parse failure handling, by Tiffany (`c2bae7056`, `008fd2030`, row `0a5db694` done). An unreadable script now saves the full reply under `io/json-recovery-failures/` and retries once. Cheech's re-run: 600 unit tests and 1,535 census guards passed. It is live on :7999 after the 03:04Z bounce, and the podcast of the explainer was restarted.
+- **Docs**: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.29-proof-pairs-and-needset-labelling-explainer.md` is new, with a README link. The scratch notes in `io/tmp/` are the same-job guide and the power table for the run count.
+- **Open**: rows `e2121bc4` (the early, unofficial proof run) and `fc1658f2` (third-rater loader), approved and parked to 10:00 EDT 10-30. The blocked Plan 3 chain is re-chased to 11-02. Rick is still to name the second reviewer and the third rater.
+- **Files**: the explainer, src/rnd/README.md, history.md.
+
 ## 2026.10.28 day to night - Session a61ed994 (Mr. Radio 🦉, manager; crew Krishna, John, Tiffany, Maya) | Test VM on Vertex Model Garden, gist fixed live, podcast cause found
 
 - **Landed on the working branch.** Each passed review and the gates; nothing pushed. Tip `80325bcf0`.

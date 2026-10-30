@@ -16,6 +16,20 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-29 evening (Cheech 🌿 `2b284afe`, crew Tiffany)
+
+Set A is the 125 proof pairs; Set B is the 400-need set. Full framing: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.29-proof-pairs-and-needset-labelling-explainer.md` §9.
+
+- **Set A second reviewer**: labels all 125 blind; confirm mode dropped for Set A (row `f029b4b5`). Why: a resident expert's criticism of a 20% blind sample.
+- **Set A third rater**: breaks ties only, on the disputed pairs; a 2-to-1 majority, Rick only where no majority. Why: removes Rick's double role at a small cost. Loader work is row `fc1658f2`.
+- **Comment cleanup**: after the proof passes (row `3ef167df`). Why: the proof checks the labelled blob of notifications.js.
+- **Set B second reviewer**: confirm mode stays (30 to 40 of the picked needs blind). Why: Set B decides nothing.
+- **Future pairs**: show doc comments on both sides; reject banned names built from joined strings.
+- **Set B work-alike source**: a mix, about 90 mined TypeScript and about 60 synthetic Python. Every synthetic one is checked by a person, and the two sources are reported separately (row `46105b99`). Waits on the resident expert's review.
+- **Experiment run count**: withheld. It is fixed before the experiment runs, never after results (power table `io/tmp/2026.10.29-experiment-run-count-power-table.md`).
+- **Early unofficial proof run**: approved for the morning of 10-30 (row `e2121bc4`).
+- **Backlog, deferred again**: archive the TODO.md horizon. The file is 748 lines.
+
 ## 📚 Decisions log 2026-10-26 evening (Cheech 🌿 `4dc30fb3`, crew Rachel and Chloé)
 
 - **P6 kind split** (row `b5955633`): 150 near-copies, 150 work-alikes and 0 cross-language. The report states that cross-language is not measured, and the 0.85 work-alike floor is withdrawn.
