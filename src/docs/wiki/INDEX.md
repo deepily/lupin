@@ -180,6 +180,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[semdup-proof-label-planting]] — choosing originals and writing the planted rewrites and work-alikes for the proof's labelling packets. `cosa.repo` (semdup.proof.label_prep)
 - [[semdup-proof-label-loader]] — turns two reviewers' pair labels and the answer key into the labels `proof_run` takes. `cosa.repo.semdup.proof` (label_load)
 - [[semdup-proof-command]] — builds `proof_run`'s spec and wiring from a labelling run folder, checks or runs the proof once. `cosa.repo.semdup.proof` (proof_cli)
+- [[semdup-proof-flag-items]] — adds the flag pairs an unofficial proof run owes labels for to the labelling run, with a recoverable swap. `cosa.repo.semdup.proof` (flag_items)
 - [[semdup-proof-label-packets]] — the monolith pairs, blind items, packets, answer key and the command of the proof's label preparation. `cosa.repo` (semdup.proof.label_prep)
 - [[semdup-clusters-and-config]] — duplicate clusters, the surplus-per-100-tests score and the frozen run configuration. `cosa.repo.semdup` (cluster, config)
 - [[semdup-judge-and-pipeline]] — the blind ledgered judge, its two backends, the judging pipeline, run scoring and the live smoke record. `cosa.repo.semdup` (judge, pipeline, score_run, smoke)

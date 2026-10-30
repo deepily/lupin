@@ -16,7 +16,8 @@ pins:
   - cosa.repo.semdup.proof.proof_cli.label_state@72ae19fe77
   - cosa.repo.semdup.proof.proof_cli.live_parts@80c9d8e35a
   - cosa.repo.semdup.proof.proof_cli.proof_ledger@d0bad63c67
-  - cosa.repo.semdup.proof.proof_cli.main@62a90b8631
+  - cosa.repo.semdup.proof.proof_cli.main@26a968d594
+  - cosa.repo.semdup.proof.proof_cli.json_stdout@8fc89b4c01
 ---
 # Duplicate checker proof: the command
 
@@ -30,6 +31,9 @@ Builds `proof_run`'s spec and wiring from a labelling run folder, then checks th
 - `staged_pairs` finds the structural clone pairs of the whole pool in that tree and maps them back to pool ids. It hands dups every staged definition, because dups numbers a repeated name `~2` before the node cut. It keys a staged definition by file and line span, not name, because a class-member rewrite is recorded as `destroy` but extracted as `PlantedWrapper.destroy`. `check_found` raises if a pool definition is missing from the staged tree.
 - `structural_source` caches `staged_pairs` by the pool's ids, so the second slot stages nothing. `live_parts` wires the real tree and writes nothing; `main` is the command.
 - `proof_ledger` makes the proof folder and the judge ledger, bound with `judge.ledger_binding`. Only a real run calls it, and a real run needs `--claude-cli-path`.
+
+## Output
+- `main` prints its JSON through `json_stdout`, and banners go to stderr, so `json.loads` of stdout works. The owed flag pairs are added by [[semdup-proof-flag-items]].
 
 ## Don't
 - Don't run without `--check` first; it prints the pool, pair and label counts, makes no model call and writes nothing.

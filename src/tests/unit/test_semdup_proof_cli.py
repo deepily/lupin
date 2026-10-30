@@ -488,3 +488,12 @@ def test_main_unofficial_refuses_a_rulings_or_third_labels_file( venue, flag ):
     paths, _ = venue.label_both()
     with pytest.raises( ValueError, match="--unofficial takes one reviewer's labels only" ):
         pc.main( [ "--run-dir", str( venue.run_dir ), "--unofficial", "--labels", paths[ 0 ], flag, paths[ 1 ] ], make_parts=no_parts, run_proof=refuse_run )
+
+
+def test_main_stdout_is_the_json_alone_when_the_parts_print_a_banner( venue, capsys ):
+    def noisy( *a ):
+        print( "=== configuration banner ===" )
+        return venue.parts()
+    assert pc.main( [ "--run-dir", str( venue.run_dir ), "--check" ], make_parts=noisy, run_proof=refuse_run ) == 0
+    seen = capsys.readouterr()
+    assert json.loads( seen.out )[ "status" ] == "checked" and "configuration banner" in seen.err and "banner" not in seen.out

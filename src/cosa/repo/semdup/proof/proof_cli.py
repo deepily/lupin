@@ -4,10 +4,12 @@ The proof's command: build proof_run's inputs from a run folder, then check or r
 The spec and the wiring come from the run folder and the tree; --check stops before any model call.
 """
 import argparse
+import contextlib
 import functools
 import json
 import pathlib
 import shutil
+import sys
 import tempfile
 import time
 
@@ -338,6 +340,20 @@ def proof_ledger( data_dir, cli_path, backend, folder=proof_run.PROOF_FOLDER ):
     return harness_runner.Ledger( folder / LEDGER_NAME, binding=judge.ledger_binding( f"claude_cli={cli_path}|version={model_transport.cli_version( cli_path )}", backend ) )
 
 
+def json_stdout( body ):
+    """
+    Run a command body with stray prints sent to stderr, so stdout holds its JSON alone.
+
+    Requires:
+        - body takes one argument, the real stdout, and prints its JSON record there with file=
+
+    Ensures:
+        - returns body's result; anything else printed while it runs (configuration banners, progress) lands on stderr
+    """
+    out = sys.stdout
+    with contextlib.redirect_stdout( sys.stderr ): return body( out )
+
+
 def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
     """
     Check the proof's inputs, or run the proof once.
@@ -347,6 +363,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
           --export-third, --unofficial, --parallel, --claude-cli-path and --check
 
     Ensures:
+        - stdout holds the JSON record alone: banners and other prints go to stderr, so a caller can json.loads the whole of stdout
         - verifies the frozen configuration first and refuses a run folder planted under another config_sha
         - with --export-third <reviewer>: needs two --labels files; writes that reviewer's blind packet of the disputed items beside the others,
           prints its path and size as JSON and returns 0; makes no model call
@@ -361,6 +378,11 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
         - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
         - ValueError if the run folder was planted under another configuration, from build_spec, or for --unofficial with --rulings or --third-labels
     """
+    return json_stdout( lambda out: _main( argv, make_parts, run_proof, out ) )
+
+
+def _main( argv, make_parts, run_proof, out ):
+    """Do main's work, printing each JSON record to out."""
     parser = argparse.ArgumentParser( description="Check or run the Phase 2 semantic duplicate proof." )
     parser.add_argument( "--run-dir", required=True )
     parser.add_argument( "--labels", action="append", default=[] )
@@ -381,7 +403,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
         if len( args.labels ) != 2: raise ValueError( "--export-third needs both reviewers' --labels files" )
         items = label_load.disputed_items( *args.labels )
         path  = lb_packets.export_subset_packet( run_dir / PACKETS_DIR, items, args.export_third, load_run( run_dir )[ "seed" ] )
-        print( json.dumps( { "status": "exported", "packet": str( path ), "items": len( items ) }, indent=2, sort_keys=True ) )
+        print( json.dumps( { "status": "exported", "packet": str( path ), "items": len( items ) }, indent=2, sort_keys=True ), file=out )
         return 0
     if args.unofficial and ( args.rulings is not None or args.third_labels is not None ):
         raise ValueError( "--unofficial takes one reviewer's labels only, so --rulings and --third-labels do not apply" )
@@ -389,10 +411,10 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
     key     = run_dir / KEY_DIR / KEY_FILE
     state   = unofficial_state( args.labels, key ) if args.unofficial else label_state( args.labels, key, rulings, args.third_labels )
     if not args.check and state[ "labels" ] is None:
-        print( json.dumps( { "status": "refused", "owed": state[ "owed" ], "counts": state[ "counts" ] }, indent=2, sort_keys=True ) )
+        print( json.dumps( { "status": "refused", "owed": state[ "owed" ], "counts": state[ "counts" ] }, indent=2, sort_keys=True ), file=out )
         return 2
     if not args.check and args.claude_cli_path is None:
-        print( json.dumps( { "status": "refused", "owed": "a real run needs --claude-cli-path, because the ledger is bound to that binary", "counts": state[ "counts" ] }, indent=2, sort_keys=True ) )
+        print( json.dumps( { "status": "refused", "owed": "a real run needs --claude-cli-path, because the ledger is bound to that binary", "counts": state[ "counts" ] }, indent=2, sort_keys=True ), file=out )
         return 2
     parts   = make_parts( cu.get_project_root(), run_dir, cfg, args.parallel )
     spec    = build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], state[ "labels" ] or {}, state[ "failures" ] )
@@ -401,12 +423,12 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
         pairs = parts[ "wiring" ][ "structural_pairs" ]( pool[ "defs" ] )
         print( json.dumps( { "status": "checked", "pool": pool[ "sizes" ], "planted": len( spec[ "planted" ] ), "monolith_pairs": len( spec[ "monolith_pairs" ] ),
                              "structural_pairs": len( pairs ), "labels": state[ "counts" ], "owed": state[ "owed" ], "plant_failures": len( state[ "failures" ] ),
-                             "config_sha": cfg[ "config_sha" ] }, indent=2, sort_keys=True ) )
+                             "config_sha": cfg[ "config_sha" ] }, indent=2, sort_keys=True ), file=out )
         return 0
     folder = proof_run.UNOFFICIAL_FOLDER if args.unofficial else proof_run.PROOF_FOLDER
     run    = functools.partial( run_proof, unofficial=True ) if args.unofficial else run_proof
     record = run( spec, { **parts[ "wiring" ], "ledger": proof_ledger( parts[ "wiring" ][ "data_dir" ], args.claude_cli_path, parts[ "wiring" ][ "backend" ], folder ) } )
-    print( json.dumps( record, indent=2, sort_keys=True ) )
+    print( json.dumps( record, indent=2, sort_keys=True ), file=out )
     return 0
 
 
