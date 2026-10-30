@@ -53,14 +53,22 @@ def test_the_vm_block_picks_a_vertex_router_spec( config_under ):
     assert spec_url.startswith( "vertex://" )
 
 
-def test_the_vm_router_spec_builds_a_vertex_client( config_under ):
-    """The chosen key goes through the factory and comes out as the Vertex client."""
+def test_the_vm_router_spec_builds_a_vertex_client( config_under, monkeypatch ):
+    """The chosen key goes through the factory and comes out as the pinned Vertex client.
+
+    The model, region and generation knobs are pinned to literals. A wrong model string, a deleted
+    params key or a tiny max_tokens each turn this red.
+    """
+    monkeypatch.setenv( "LUPIN_GCP_PROJECT_ID", "test-project" )
     config = config_under( "Lupin:+Testing-GCS" )
     client = LlmClientFactory().get_client( config.get( ROUTER_KEY, default=None ) )
 
     assert isinstance( client, GeminiVertexClient )
     assert not isinstance( client, ( ChatClient, CompletionClient ) )
     assert client._client is None
+    assert client.model_name == "gemini-3.1-flash-lite"
+    assert client.location == "global"
+    assert client._gen_config_kwargs == { "temperature": 0.0, "max_output_tokens": 254, "seed": 20261030 }
 
 
 def test_the_override_sits_in_the_vm_block_itself():
