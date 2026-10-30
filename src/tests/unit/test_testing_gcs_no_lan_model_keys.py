@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""
+No model key the VM resolves names a home-LAN address.
+
+[Lupin: Testing-GCS] inherits Development, whose model specs point at 192.168.1.21, a host the GCP VM
+cannot reach. Two keys were fixed one at a time (gist, router) and the next one down hung a real job.
+This guard reads every key the block resolves. It fails on any whose value, or whose value's own value,
+is a spec URL with a private or link-local host. No config seam is mocked.
+"""
+import ipaddress
+import re
+
+import pytest
+
+from cosa.config.configuration_manager import ConfigurationManager
+from cosa.agents.gemini_vertex_client import GeminiVertexClient
+from cosa.agents.llm_client_factory import LlmClientFactory
+
+BLOCK_ID = "Lupin:+Testing-GCS"
+SCHEME   = re.compile( r"^[a-z0-9+.-]+://", re.IGNORECASE )
+
+# A vendor URL is read only for a spec written vendor:model. It may stay on the home network only while
+# vendor_users() finds no key in the block that resolves to such a spec.
+# A raw LAN URL that must stay in this block, each with the reason. Every other raw URL fails the guard.
+VENDOR_URL_KEYS = { "llm vendor url vllm": "vllm", "llm vendor url deepily": "deepily" }
+ALLOWED_RAW = {
+    "tts local url template" : "no code reads it: git grep finds it only in the INI, the splainer and "
+                               "config-key-migration-map.json (measured 2026-10-30)",
+}
+
+
+def _reset_config():
+    """Drop both singletons so no other module inherits this block's manager."""
+    ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", _reset_singleton=True )
+    LlmClientFactory._instance = None
+
+
+@pytest.fixture
+def vm_config( monkeypatch ):
+    """The real INI, loaded under the VM's block id."""
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS",
+                        "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini "
+                        f"config_block_id={BLOCK_ID}" )
+    _reset_config()
+    yield ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    monkeypatch.undo()
+    _reset_config()
+
+
+def _unroutable_host( value ):
+    """The host of a URL value when it is a LAN IP literal the VM has no route to, else None.
+
+    Loopback is left alone: 127.0.0.1 on the VM is the VM itself.
+    """
+    if not isinstance( value, str ): return None
+    body = SCHEME.sub( "", value.strip() )
+    if body == value.strip(): return None
+    host = re.split( r"[@/]", body )[ 0 ].split( ":" )[ 0 ]
+    try:
+        ip = ipaddress.ip_address( host )
+    except ValueError:
+        return None
+    return host if ( ip.is_private and not ip.is_loopback ) or ip.is_link_local else None
+
+
+def lan_keys( keys, get ):
+    """Every key whose value, or the value that value names, is an unroutable URL.
+
+    Takes the key list and a getter so the finder can be proven on a hand-built table.
+    Returns a dict of key -> ( spec key or None, host ).
+    """
+    flagged = {}
+    for key in keys:
+        value  = get( key )
+        host   = _unroutable_host( value )
+        via    = None
+        if host is None and isinstance( value, str ) and value.strip() != key:
+            host = _unroutable_host( get( value.strip() ) )
+            via  = value.strip() if host is not None else None
+        if host is not None: flagged[ key ] = ( via, host )
+    return flagged
+
+
+def test_the_guard_can_find_a_lan_key():
+    """Positive control: the finder flags what it is handed, so an empty answer means something."""
+    table = { "a key": "a/spec", "a/spec": "vllm://192.168.1.21:3001@some/model",
+              "direct": "vllm://10.0.0.5:3000@m", "ok key": "ok/spec", "ok/spec": "vertex://global@gemini-3.1-flash-lite",
+              "plain": "text", "none": None }
+
+    assert lan_keys( table, table.get ) == { "a key": ( "a/spec", "192.168.1.21" ), "a/spec": ( None, "192.168.1.21" ),
+                                             "direct": ( None, "10.0.0.5" ) }
+    assert _unroutable_host( "http://127.0.0.1:8001/x" ) is None
+    assert _unroutable_host( "vertex://global@gemini-3.1-flash-lite" ) is None
+
+
+def vendor_users( keys, get, vendor ):
+    """Every key whose value, or the value it names, is a vendor:model spec.
+
+    A vendor:model spec is the only shape that reads `llm vendor url <vendor>`; a vendor:// spec carries its own host.
+    Returns a dict of key -> the spec string.
+    """
+    prefix = re.compile( rf"^{re.escape( vendor )}:(?!//)", re.IGNORECASE )
+    users  = {}
+    for key in keys:
+        value = get( key )
+        if not isinstance( value, str ): continue
+        for spec in ( value.strip(), get( value.strip() ) ):
+            if isinstance( spec, str ) and prefix.match( spec.strip() ):
+                users[ key ] = spec.strip()
+                break
+    return users
+
+
+def _vm_lan_findings( vm_config ):
+    """Split the block's LAN hits into consumers and raw URL values.
+
+    A spec definition ( a raw hit with a <key>_params sibling ) is inherited from Development.
+    It matters only when a consumer names it, so it is dropped from the raw list. Allowed raw URLs are dropped too.
+    """
+    keys   = vm_config.get_keys()
+    found  = lan_keys( keys, lambda key: vm_config.get( key, default=None, silent=True ) )
+    consumers = { key: hit for key, hit in found.items() if hit[ 0 ] is not None }
+    raw       = { key: hit for key, hit in found.items()
+                  if hit[ 0 ] is None and f"{key}_params" not in keys and key not in ALLOWED_RAW and key not in VENDOR_URL_KEYS }
+    return consumers, raw
+
+
+def test_no_resolved_model_key_names_a_lan_address( vm_config ):
+    """No key the VM resolves names a spec that points at a host it has no route to."""
+    consumers, _ = _vm_lan_findings( vm_config )
+
+    assert not consumers, f"{len( consumers )} keys resolve to an unroutable host:\n" + "\n".join(
+        f"  {key} -> {via} @ {host}" for key, ( via, host ) in sorted( consumers.items() ) )
+
+
+def test_no_raw_url_value_names_a_lan_address( vm_config ):
+    """No plain URL value the VM resolves is on the home network unless ALLOWED_RAW says why."""
+    _, raw = _vm_lan_findings( vm_config )
+
+    assert not raw, f"{len( raw )} raw URL values are on the home network:\n" + "\n".join(
+        f"  {key} @ {host}" for key, ( _, host ) in sorted( raw.items() ) )
+
+
+def test_the_vendor_user_finder_can_find_a_user():
+    """Positive control: a vendor:model spec is found, direct or through a key; vendor:// is not."""
+    table = { "direct": "vllm:some/model", "via": "a/spec", "a/spec": "deepily:other", "own host": "vllm://10.0.0.5:3000@m",
+              "other vendor": "groq:llama", "plain": "text", "none": None }
+
+    assert vendor_users( table, table.get, "vllm" ) == { "direct": "vllm:some/model" }
+    assert vendor_users( table, table.get, "deepily" ) == { "via": "deepily:other", "a/spec": "deepily:other" }
+
+
+@pytest.mark.parametrize( "key,vendor", sorted( VENDOR_URL_KEYS.items() ) )
+def test_a_vendor_url_on_the_home_network_is_unused_in_this_block( vm_config, key, vendor ):
+    """The vendor URL stays only while no key resolved here names a spec that reads it."""
+    keys  = vm_config.get_keys()
+    users = vendor_users( keys, lambda name: vm_config.get( name, default=None, silent=True ), vendor )
+
+    assert key in keys, f"{key} no longer exists in this block: drop it from VENDOR_URL_KEYS"
+    assert not users, f"{key} is on the home network and these keys read it: {sorted( users.items() )}"
+
+
+def test_the_vm_agent_spec_is_pinned_and_every_consumer_uses_it( vm_config, monkeypatch ):
+    """The 26 former Phi-4 consumers share one pinned Gemini Flash spec.
+
+    The router/vox key takes the router spec. The model, region and knobs are literals, so a wrong model string
+    or a deleted params key turns this red.
+    """
+    monkeypatch.setenv( "LUPIN_GCP_PROJECT_ID", "test-project" )
+    keys = vm_config.get_keys()
+    get  = lambda key: vm_config.get( key, default=None, silent=True )
+    on_flash  = sorted( key for key in keys if get( key ) == "vm_agents/gemini_flash" )
+    on_router = sorted( key for key in keys if get( key ) == "agent_router/flash_lite" )
+    client    = LlmClientFactory().get_client( "vm_agents/gemini_flash" )
+
+    assert len( on_flash ) == 26
+    assert on_router == [ "llm spec key for agent router", "router and vox command model" ]
+    assert isinstance( client, GeminiVertexClient )
+    assert client.model_name == "gemini-3.5-flash"
+    assert client.location == "global"
+    assert client._gen_config_kwargs == { "temperature": 0.0, "max_output_tokens": 4096, "seed": 20261030 }
+
+
+def test_every_allowed_raw_url_is_still_a_lan_url_in_this_block( vm_config ):
+    """An allowance for a key that no longer hits is stale and must go."""
+    found = lan_keys( vm_config.get_keys(), lambda key: vm_config.get( key, default=None, silent=True ) )
+
+    assert set( ALLOWED_RAW ) <= set( found ), f"stale allowances: {sorted( set( ALLOWED_RAW ) - set( found ) )}"
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit( pytest.main( [ __file__, "-v" ] ) )
