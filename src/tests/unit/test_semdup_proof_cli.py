@@ -410,3 +410,81 @@ def test_main_refuses_a_run_folder_planted_under_another_config_sha( tmp_path, m
     def no_parts( *a ): raise AssertionError( "make_parts must not be called" )
     with pytest.raises( ValueError, match=f"planted under config not-the-frozen-sha, the frozen one is {other.toy.cfg[ 'config_sha' ]}" ):
         pc.main( [ "--run-dir", str( other.run_dir ), "--check" ], make_parts=no_parts, run_proof=refuse_run )
+
+
+# ---- the third rater ---------------------------------------------------------------------------------------------
+
+def no_parts( *a ):
+    """A make_parts stand-in that fails the test if main reaches it."""
+    raise AssertionError( "make_parts must not be called" )
+
+
+def test_main_export_third_writes_the_disputed_items_packet_and_stops_before_the_parts( venue, capsys ):
+    odd      = venue.toy.key( "m1", "m5" )
+    paths, _ = venue.label_both( flip=( odd, ) )
+    rc       = pc.main( [ "--run-dir", str( venue.run_dir ), "--export-third", "third", *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=no_parts, run_proof=refuse_run )
+    out      = json.loads( capsys.readouterr().out )
+    held     = [ json.loads( l )[ "item_id" ] for l in pk.packet_path( venue.run_dir / pc.PACKETS_DIR, "third" ).read_text().splitlines() ]
+    assert rc == 0 and out == { "status": "exported", "packet": str( pk.packet_path( venue.run_dir / pc.PACKETS_DIR, "third" ) ), "items": 1 }
+    assert held == ll.disputed_items( *paths )
+
+
+def test_main_export_third_needs_both_reviewers_labels( venue ):
+    paths, _ = venue.label_both()
+    with pytest.raises( ValueError, match="--export-third needs both reviewers' --labels files" ):
+        pc.main( [ "--run-dir", str( venue.run_dir ), "--export-third", "third", "--labels", paths[ 0 ] ], make_parts=no_parts, run_proof=refuse_run )
+
+
+def test_main_takes_the_third_raters_majority_on_a_dispute( venue, capsys ):
+    odd      = venue.toy.key( "m1", "m5" )
+    paths, _ = venue.label_both( flip=( odd, ) )
+    labels   = [ x for p in paths for x in ( "--labels", p ) ]
+    pc.main( [ "--run-dir", str( venue.run_dir ), "--export-third", "third", *labels ], make_parts=no_parts, run_proof=refuse_run )
+    packet   = pk.packet_path( venue.run_dir / pc.PACKETS_DIR, "third" )
+    item     = json.loads( packet.read_text().splitlines()[ 0 ] )[ "item_id" ]
+    pl.save_label( packet, item, False, clock=lambda: "2026-10-30T10:00:00-04:00" )
+    capsys.readouterr()
+    ran      = []
+    def run_proof( spec, wiring ): ran.append( spec ); return { "status": "complete" }
+    argv     = [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", "--third-labels", str( pl.labels_path( packet ) ), *labels ]
+    assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
+    assert len( ran ) == 1 and ran[ 0 ][ "labels" ][ odd ] is False
+
+
+# ---- the unofficial run --------------------------------------------------------------------------------------------
+
+def test_unofficial_state_takes_exactly_one_file_and_names_the_planted_pairs_it_labels_false( world ):
+    r3o3  = world.toy.key( "r3", "o3" )
+    truth = { **truth_of( world.toy ), r3o3: False }
+    answer( world.packets, world.key, "rick", truth )
+    path  = str( pl.labels_path( world.packets[ "rick" ] ) )
+    state = pc.unofficial_state( [ path ], world.key )
+    assert state == { "counts": { path: 6 }, "labels": truth, "failures": [ r3o3 ], "owed": None }
+    for given in ( [], [ path, path ] ):
+        none = pc.unofficial_state( given, world.key )
+        assert none[ "labels" ] is None and f"exactly one labels file, {len( given )} given" in none[ "owed" ]
+
+
+def test_main_unofficial_runs_on_one_file_with_its_own_ledger_and_marks_the_call( venue, capsys ):
+    paths, truth = venue.label_both()
+    ran          = []
+    def run_proof( spec, wiring, unofficial=False ): ran.append( ( spec, unofficial ) ); return { "status": "complete", "unofficial": unofficial }
+    argv         = [ "--run-dir", str( venue.run_dir ), "--unofficial", "--claude-cli-path", "/bin/claude", "--labels", paths[ 0 ] ]
+    assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
+    data         = venue.toy.wiring[ "data_dir" ]
+    assert ran == [ ( ran[ 0 ][ 0 ], True ) ] and ran[ 0 ][ 0 ][ "labels" ] == truth
+    assert ( data.joinpath( *pr.UNOFFICIAL_FOLDER ) / pc.LEDGER_NAME ).is_file() and not data.joinpath( *pr.PROOF_FOLDER ).exists()
+    assert json.loads( capsys.readouterr().out ) == { "status": "complete", "unofficial": True }
+
+
+def test_main_unofficial_with_two_files_is_refused_before_the_parts( venue, capsys ):
+    paths, _ = venue.label_both()
+    rc       = pc.main( [ "--run-dir", str( venue.run_dir ), "--unofficial", *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=no_parts, run_proof=refuse_run )
+    assert rc == 2 and "exactly one labels file, 2 given" in json.loads( capsys.readouterr().out )[ "owed" ]
+
+
+@pytest.mark.parametrize( "flag", [ "--rulings", "--third-labels" ] )
+def test_main_unofficial_refuses_a_rulings_or_third_labels_file( venue, flag ):
+    paths, _ = venue.label_both()
+    with pytest.raises( ValueError, match="--unofficial takes one reviewer's labels only" ):
+        pc.main( [ "--run-dir", str( venue.run_dir ), "--unofficial", "--labels", paths[ 0 ], flag, paths[ 1 ] ], make_parts=no_parts, run_proof=refuse_run )

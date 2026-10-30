@@ -9,6 +9,7 @@ from cosa.repo.semdup import config as cfg_mod
 from cosa.repo.semdup.proof import proof_bar
 
 PROOF_FOLDER = ( "semdup", "proof" )
+UNOFFICIAL_FOLDER = ( "semdup", "proof-unofficial" )
 LEDGER_FILE  = "proof-ledger.jsonl"
 SLOTS        = ( 0, 1 )
 
@@ -101,9 +102,11 @@ def _flags( outcome, canon ):
     return { label_key( canon[ a ], canon[ b ] ) for a, b in cluster.join_pairs( outcome[ "verdicts" ] ) }
 
 
-def proof_run( spec, wiring ):
+def proof_run( spec, wiring, unofficial=False ):
     """
     Run the proof once and keep its record, whatever the result.
+
+    An unofficial run takes one reviewer's labels, to preview the figures and list the flags outside the labelled pairs.
 
     Requires:
         - spec is as build_pool needs, plus seed, labels ( { pair key: bool } ) and plant_failures ( pair keys both reviewers ruled not equivalent )
@@ -118,6 +121,9 @@ def proof_run( spec, wiring ):
         - a planted pair in plant_failures is left out of every denominator and counted, with its rate
         - the record carries the pool sizes as built, before any drop, and the count and ids of the server definitions left out of the candidate pool
           for carrying a scrub token
+        - with unofficial: the record and the ledger line go to <data>/semdup/proof-unofficial and are marked unofficial, so they never
+          take a proof number or a ledger line of the proof; pairs owed a label do not stop it, they are listed as owed and left out of
+          the counts
 
     Raises:
         - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
@@ -125,7 +131,7 @@ def proof_run( spec, wiring ):
     cfg      = cfg_mod.verify_frozen( wiring[ "frozen_path" ], wiring[ "live" ] )
     pool     = build_pool( spec, spec[ "seed" ] )
     passes   = [ pipeline.judge_all( pool[ "new" ], pool[ "defs" ], cfg, wiring, slot ) for slot in SLOTS ]
-    folder   = pathlib.Path( wiring[ "data_dir" ] ).joinpath( *PROOF_FOLDER )
+    folder   = pathlib.Path( wiring[ "data_dir" ] ).joinpath( *( UNOFFICIAL_FOLDER if unofficial else PROOF_FOLDER ) )
     folder.mkdir( parents=True, exist_ok=True )
     failures = set( spec[ "plant_failures" ] )
     known    = {}
@@ -139,14 +145,16 @@ def proof_run( spec, wiring ):
                  "rate": len( failures ) / len( spec[ "planted" ] ) if spec[ "planted" ] else None, "pairs": sorted( failures ) },
                  "unjudged": [ outcome[ "unjudged" ] for outcome in passes ], "dropped_from_pool": passes[ 0 ][ "dropped" ] }
     owed     = sorted( ( set( known ) | flags[ 0 ] ) - set( labels ) )
+    scored   = flags[ 0 ] & set( labels )
+    if unofficial: record.update( unofficial=True, owed=owed )
     true     = sorted( k for k in known if labels.get( k ) is True )
     record[ "agreement" ] = proof_bar.agreement( passes[ 0 ][ "verdicts" ], passes[ 1 ][ "verdicts" ] )
     if any( record[ "unjudged" ] ):
         record[ "status" ] = "incomplete"
-    elif owed:
+    elif owed and not unofficial:
         record.update( status="labels_pending", owed=owed )
     else:
-        counts = { "true_pairs": len( true ), "found": len( set( true ) & flags[ 0 ] ), "flags": len( flags[ 0 ] ), "correct": sum( 1 for k in flags[ 0 ] if labels[ k ] ),
+        counts = { "true_pairs": len( true ), "found": len( set( true ) & flags[ 0 ] ), "flags": len( scored ), "correct": sum( 1 for k in scored if labels[ k ] ),
                    "both": record[ "agreement" ][ "pairs_in_both" ], "agree": record[ "agreement" ][ "flag_agree" ] }
         record.update( counts=counts, found_in_slot_1=len( set( true ) & flags[ 1 ] ),
                        strata=proof_bar.stratum_rates( [ { "stratum": known[ k ], "found": k in flags[ 0 ] } for k in true ] ) )
@@ -164,5 +172,6 @@ def proof_run( spec, wiring ):
     record[ "proof" ] = number
     with open( folder / f"{number}.json", "x", encoding="utf-8" ) as f: json.dump( record, f, indent=2, sort_keys=True )
     passed = record[ "bar" ][ "passed" ] if record[ "status" ] == "complete" else None
-    append_ledger( folder / LEDGER_FILE, { "proof": number, "config_sha": cfg[ "config_sha" ], "status": record[ "status" ], "passed": passed, "time": wiring[ "clock" ]() } )
+    append_ledger( folder / LEDGER_FILE, { "proof": number, "config_sha": cfg[ "config_sha" ], "status": record[ "status" ], "passed": passed, "time": wiring[ "clock" ](),
+                                           **( { "unofficial": True } if unofficial else {} ) } )
     return record

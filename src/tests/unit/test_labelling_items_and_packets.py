@@ -127,3 +127,34 @@ def test_a_malformed_label_is_refused_with_its_line( tmp_path, bad ):
 def test_a_file_with_two_reviewers_or_one_item_twice_is_refused( tmp_path ):
     assert code_of( pk.read_labels, write_labels( tmp_path / "a.jsonl", [ label( "n-000" ), label( "n-001", reviewer="sam" ) ] ) ) == er.BAD_LABEL
     assert code_of( pk.read_labels, write_labels( tmp_path / "b.jsonl", [ label( "n-000" ), label( "n-000", choice="NONE" ) ] ) ) == er.BAD_LABEL
+
+
+# ---- export_subset_packet ----------------------------------------------------------------------------------------
+
+def test_a_subset_packet_holds_only_the_named_items_in_an_order_no_earlier_packet_used( tmp_path ):
+    items = [ need_item( n ) for n in range( 8 ) ]
+    pk.export_packets( items, [ "rick", "sam" ], 7, tmp_path )
+    named = [ i[ "item_id" ] for i in items[ :5 ] ]
+    path  = pk.export_subset_packet( tmp_path, named, "third", 7 )
+    got   = [ json.loads( l ) for l in path.read_text().splitlines() ]
+    seen  = [ [ x for x in ( json.loads( l )[ "item_id" ] for l in pk.packet_path( tmp_path, r ).read_text().splitlines() ) if x in named ] for r in ( "rick", "sam" ) ]
+    assert path == pk.packet_path( tmp_path, "third" ) and sorted( g[ "item_id" ] for g in got ) == sorted( named )
+    assert [ g[ "item_id" ] for g in got ] not in seen and all( set( g ) == { "item_id", "type", "payload" } for g in got )
+
+
+@pytest.mark.parametrize( "named, reviewer", [ ( [], "third" ), ( [ "n-099" ], "third" ), ( [ "n-000" ], "rick" ), ( [ "n-000" ], "../x" ) ] )
+def test_a_subset_packet_refuses_no_items_an_unknown_item_and_a_used_or_bad_name( tmp_path, named, reviewer ):
+    pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path )
+    assert code_of( pk.export_subset_packet, tmp_path, named, reviewer, 7 ) == er.BAD_ITEM
+    assert not pk.packet_path( tmp_path, "third" ).exists()
+
+
+def test_a_subset_packet_needs_earlier_packets_to_draw_from( tmp_path ):
+    assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.BAD_ITEM
+
+
+def test_a_leak_found_in_the_subset_bytes_written_removes_the_packet( tmp_path, monkeypatch ):
+    pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path )
+    monkeypatch.setattr( pk, "seeded_order", lambda items, seed, taken: [ dict( i, verdict="agree" ) for i in items ] )
+    assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.PACKET_LEAK
+    assert not pk.packet_path( tmp_path, "third" ).exists()

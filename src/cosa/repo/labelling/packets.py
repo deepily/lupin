@@ -92,6 +92,44 @@ def export_packets( items, reviewers, seed, out_dir ):
     return paths
 
 
+def export_subset_packet( packet_dir, item_ids, reviewer, seed ):
+    """
+    Write one more reviewer's blind packet of some items already sent out.
+
+    A third rater's packet of the disputed items is the case it was written for.
+
+    Requires:
+        - packet_dir holds the packets export_packets wrote; item_ids are ids those packets hold; reviewer is a new name of letters, digits, _ and -
+
+    Ensures:
+        - returns the new packet's path, holding the named items in a seeded order that differs from each earlier packet's order of the same items
+        - the bytes written are read back and checked to hold the blind form only; on a leak the file is removed
+
+    Raises:
+        - LabellingError BAD_ITEM for no earlier packet, no items, an id no packet holds, a bad name, or a reviewer who already has a packet
+        - LabellingError PACKET_LEAK for a field a reviewer may not see
+    """
+    earlier = sorted( pathlib.Path( packet_dir ).glob( "packet-*.jsonl" ) )
+    if not earlier: raise er.LabellingError( er.BAD_ITEM, f"{packet_dir}: no packets to draw from" )
+    if not NAME_RE.fullmatch( reviewer ) or packet_path( packet_dir, reviewer ).exists():
+        raise er.LabellingError( er.BAD_ITEM, f"{reviewer}: needs a new name of letters, digits, _ and -" )
+    wanted = set( item_ids )
+    orders = [ [ json.loads( line ) for line in path.read_text( encoding="utf-8" ).splitlines() ] for path in earlier ]
+    by_id  = { i[ "item_id" ]: i for i in orders[ 0 ] }
+    absent = sorted( wanted - set( by_id ) )
+    if not wanted or absent: raise er.LabellingError( er.BAD_ITEM, f"items to export must be named and already sent out; not found: {', '.join( absent )}" )
+    taken  = [ [ i[ "item_id" ] for i in order if i[ "item_id" ] in wanted ] for order in orders ]
+    order  = seeded_order( [ blind_form( by_id[ i ] ) for i in sorted( wanted ) ], f"{seed}|{reviewer}", taken )
+    path   = packet_path( packet_dir, reviewer )
+    path.write_text( "".join( json.dumps( i, sort_keys=True ) + "\n" for i in order ), encoding="utf-8" )
+    try:
+        for line in path.read_text( encoding="utf-8" ).splitlines(): blind_form( json.loads( line ) )
+    except er.LabellingError:
+        path.unlink()
+        raise
+    return path
+
+
 def _bad( path, n, why ):
     """Raises: LabellingError BAD_LABEL naming the file, line and reason."""
     raise er.LabellingError( er.BAD_LABEL, f"{path}:{n}: {why}" )

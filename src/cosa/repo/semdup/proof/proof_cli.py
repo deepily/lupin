@@ -4,6 +4,7 @@ The proof's command: build proof_run's inputs from a run folder, then check or r
 The spec and the wiring come from the run folder and the tree; --check stops before any model call.
 """
 import argparse
+import functools
 import json
 import pathlib
 import shutil
@@ -12,6 +13,7 @@ import time
 
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import harness_runner, model_transport
+from cosa.repo.labelling import packets as lb_packets
 from cosa.repo.semdup import blind, extract, frozen, judge, structural
 from cosa.repo.semdup import config as cfg_mod
 from cosa.repo.semdup.proof import label_load, label_prep, proof_run
@@ -20,6 +22,7 @@ from cosa.repo.symindex import spec as sp
 KEY_DIR          = "key"
 PLANTED_FILE     = "planted.json"
 KEY_FILE         = "answer-key.json"
+PACKETS_DIR      = "packets"
 REWRITES_DIR     = "rewrites"
 VECTORS_DIR      = "vectors"
 TREE_PREFIX      = "tree"
@@ -251,12 +254,13 @@ def build_spec( run, mono_defs, distractors, labels, failures ):
              "distractors": distractors, "seed": run[ "seed" ], "labels": labels, "plant_failures": failures }
 
 
-def label_state( labels_paths, key_path, rulings ):
+def label_state( labels_paths, key_path, rulings, third_path=None ):
     """
     Read the reviewers' labels and say whether the proof can use them.
 
     Requires:
         - labels_paths is a list of zero, one or two labels files; rulings is None or { pair key: bool }
+        - third_path is None or the third rater's labels file, read only when there are two files
 
     Ensures:
         - returns { counts, labels, failures, owed }: counts per file; labels is resolved_labels' dict, or None with the reason in owed
@@ -268,10 +272,28 @@ def label_state( labels_paths, key_path, rulings ):
     if len( each ) != 2: return { "counts": counts, "labels": None, "failures": [], "owed": f"two reviewers' labels files are needed, {len( each )} given" }
     failures = plant_failures( run[ "planted" ], each[ 0 ], each[ 1 ] )
     try:
-        labels = label_load.resolved_labels( labels_paths[ 0 ], labels_paths[ 1 ], key_path, rulings )
+        labels = label_load.resolved_labels( labels_paths[ 0 ], labels_paths[ 1 ], key_path, rulings, third_path )
     except ValueError as e:
         return { "counts": counts, "labels": None, "failures": failures, "owed": str( e ) }
     return { "counts": counts, "labels": labels, "failures": failures, "owed": None }
+
+
+def unofficial_state( labels_paths, key_path ):
+    """
+    Read one reviewer's labels for an unofficial run.
+
+    Requires:
+        - labels_paths is a list of labels files; key_path is the run's answer key
+
+    Ensures:
+        - returns label_state's shape; with exactly one file, labels is that reviewer's { pair key: bool } and failures the planted pairs it labels False
+        - with any other number of files, labels is None and owed says one is needed
+    """
+    if len( labels_paths ) != 1:
+        return { "counts": {}, "labels": None, "failures": [], "owed": f"an unofficial run takes exactly one labels file, {len( labels_paths )} given" }
+    labels = label_load.pair_key_labels( labels_paths[ 0 ], key_path )
+    run    = load_run( pathlib.Path( key_path ).parent.parent )
+    return { "counts": { str( labels_paths[ 0 ] ): len( labels ) }, "labels": labels, "failures": plant_failures( run[ "planted" ], labels, labels ), "owed": None }
 
 
 def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring, monolith=label_prep.monolith_definitions, jscpd=structural.run_jscpd ):
@@ -299,18 +321,19 @@ def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring
     return { "run": run, "mono_defs": mono, "distractors": [ *prep[ "server_defs" ], *prep[ "client_defs" ] ], "wiring": wiring }
 
 
-def proof_ledger( data_dir, cli_path, backend ):
+def proof_ledger( data_dir, cli_path, backend, folder=proof_run.PROOF_FOLDER ):
     """
     Make the proof's judge ledger, bound to the Claude Code binary.
 
     Requires:
         - data_dir is the data root the proof records live under; cli_path is the Claude Code binary; backend is the judge backend
+        - folder is the record folder under data_dir, the proof's own unless an unofficial run names its own
 
     Ensures:
         - creates the proof folder if it is missing, which is why only a real run calls this
         - returns the ledger at <proof folder>/judge-ledger.jsonl, bound as judge.ledger_binding binds it: binary, version, backend and server
     """
-    folder = pathlib.Path( data_dir ).joinpath( *proof_run.PROOF_FOLDER )
+    folder = pathlib.Path( data_dir ).joinpath( *folder )
     folder.mkdir( parents=True, exist_ok=True )
     return harness_runner.Ledger( folder / LEDGER_NAME, binding=judge.ledger_binding( f"claude_cli={cli_path}|version={model_transport.cli_version( cli_path )}", backend ) )
 
@@ -320,11 +343,15 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
     Check the proof's inputs, or run the proof once.
 
     Requires:
-        - argv holds --run-dir, up to two --labels files, optionally --rulings (a JSON file of { pair key: bool }), --parallel,
-          --claude-cli-path and --check
+        - argv holds --run-dir, up to two --labels files, optionally --rulings (a JSON file of { pair key: bool }), --third-labels,
+          --export-third, --unofficial, --parallel, --claude-cli-path and --check
 
     Ensures:
         - verifies the frozen configuration first and refuses a run folder planted under another config_sha
+        - with --export-third <reviewer>: needs two --labels files; writes that reviewer's blind packet of the disputed items beside the others,
+          prints its path and size as JSON and returns 0; makes no model call
+        - with --unofficial: takes exactly one --labels file and runs proof_run unofficially, with its own judge ledger in the unofficial folder;
+          refuses --rulings and --third-labels
         - with --check: builds the spec and the wiring, computes the structural pairs of the pool once, prints the sizes and the label state as JSON,
           makes no model call and writes nothing, not even the proof folder or the ledger; returns 0
         - without --check: refuses (returns 2, after printing why) unless both reviewers' labels resolve and --claude-cli-path is given; otherwise runs proof_run once,
@@ -332,23 +359,35 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
 
     Raises:
         - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
-        - ValueError if the run folder was planted under another configuration, or from build_spec
+        - ValueError if the run folder was planted under another configuration, from build_spec, or for --unofficial with --rulings or --third-labels
     """
     parser = argparse.ArgumentParser( description="Check or run the Phase 2 semantic duplicate proof." )
     parser.add_argument( "--run-dir", required=True )
     parser.add_argument( "--labels", action="append", default=[] )
     parser.add_argument( "--rulings", default=None )
+    parser.add_argument( "--third-labels", default=None )
+    parser.add_argument( "--export-third", default=None )
     parser.add_argument( "--parallel", type=int, default=DEFAULT_PARALLEL )
     parser.add_argument( "--claude-cli-path", default=None )
     parser.add_argument( "--check", action="store_true" )
+    parser.add_argument( "--unofficial", action="store_true" )
     args    = parser.parse_args( argv )
     model_transport.configure( args.claude_cli_path )
     cfg     = cfg_mod.verify_frozen( frozen.frozen_path(), frozen.live_config() )
     run_dir = pathlib.Path( args.run_dir )
     key_sha = load_run( run_dir )[ "config_sha" ]
     if key_sha != cfg[ "config_sha" ]: raise ValueError( f"the run was planted under config {key_sha}, the frozen one is {cfg[ 'config_sha' ]}" )
+    if args.export_third is not None:
+        if len( args.labels ) != 2: raise ValueError( "--export-third needs both reviewers' --labels files" )
+        items = label_load.disputed_items( *args.labels )
+        path  = lb_packets.export_subset_packet( run_dir / PACKETS_DIR, items, args.export_third, load_run( run_dir )[ "seed" ] )
+        print( json.dumps( { "status": "exported", "packet": str( path ), "items": len( items ) }, indent=2, sort_keys=True ) )
+        return 0
+    if args.unofficial and ( args.rulings is not None or args.third_labels is not None ):
+        raise ValueError( "--unofficial takes one reviewer's labels only, so --rulings and --third-labels do not apply" )
     rulings = json.loads( pathlib.Path( args.rulings ).read_text( encoding="utf-8" ) ) if args.rulings is not None else None
-    state   = label_state( args.labels, run_dir / KEY_DIR / KEY_FILE, rulings )
+    key     = run_dir / KEY_DIR / KEY_FILE
+    state   = unofficial_state( args.labels, key ) if args.unofficial else label_state( args.labels, key, rulings, args.third_labels )
     if not args.check and state[ "labels" ] is None:
         print( json.dumps( { "status": "refused", "owed": state[ "owed" ], "counts": state[ "counts" ] }, indent=2, sort_keys=True ) )
         return 2
@@ -364,7 +403,9 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
                              "structural_pairs": len( pairs ), "labels": state[ "counts" ], "owed": state[ "owed" ], "plant_failures": len( state[ "failures" ] ),
                              "config_sha": cfg[ "config_sha" ] }, indent=2, sort_keys=True ) )
         return 0
-    record = run_proof( spec, { **parts[ "wiring" ], "ledger": proof_ledger( parts[ "wiring" ][ "data_dir" ], args.claude_cli_path, parts[ "wiring" ][ "backend" ] ) } )
+    folder = proof_run.UNOFFICIAL_FOLDER if args.unofficial else proof_run.PROOF_FOLDER
+    run    = functools.partial( run_proof, unofficial=True ) if args.unofficial else run_proof
+    record = run( spec, { **parts[ "wiring" ], "ledger": proof_ledger( parts[ "wiring" ][ "data_dir" ], args.claude_cli_path, parts[ "wiring" ][ "backend" ], folder ) } )
     print( json.dumps( record, indent=2, sort_keys=True ) )
     return 0
 

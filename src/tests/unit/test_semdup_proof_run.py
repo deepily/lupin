@@ -324,3 +324,26 @@ def test_a_proof_with_no_planted_pairs_reports_no_plant_failure_rate_and_still_j
     record = pr.proof_run( toy.spec, toy.wiring )
     assert record[ "plant_failures" ] == { "count": 0, "of": 0, "rate": None, "pairs": [] } and record[ "pool" ][ "size" ] == 8
     assert record[ "status" ] == "complete" and record[ "counts" ][ "true_pairs" ] == 2 and record[ "counts" ][ "found" ] == 2 and record[ "counts" ][ "flags" ] == 2
+
+
+# ---- the unofficial run -------------------------------------------------------------------------------------------
+
+def test_an_unofficial_run_scores_the_labelled_pairs_lists_the_extra_flag_as_owed_and_keeps_out_of_the_proof_folder(tmp_path):
+    toy    = Toy( tmp_path )
+    extra  = toy.key( "r1", "d3" )
+    toy.spec[ "labels" ] = { k: v for k, v in toy.all_labels().items() if k != extra }
+    record = pr.proof_run( toy.spec, toy.wiring, unofficial=True )
+    assert record[ "unofficial" ] is True and record[ "owed" ] == [ extra ] and record[ "status" ] == "complete"
+    assert record[ "counts" ][ "flags" ] == 4 and record[ "counts" ][ "correct" ] == 4 and record[ "counts" ][ "found" ] == 4
+    folder = tmp_path / "data" / "semdup" / "proof-unofficial"
+    line   = json.loads( ( folder / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    assert ( folder / "1.json" ).is_file() and line[ "unofficial" ] is True and not ( tmp_path / "data" / "semdup" / "proof" ).exists()
+
+
+def test_an_official_run_after_an_unofficial_one_is_still_proof_one_and_its_ledger_line_is_not_marked(tmp_path):
+    toy    = Toy( tmp_path )
+    toy.spec[ "labels" ] = toy.all_labels()
+    pr.proof_run( toy.spec, toy.wiring, unofficial=True )
+    record = pr.proof_run( toy.spec, toy.wiring )
+    line   = json.loads( ( tmp_path / "data" / "semdup" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    assert record[ "proof" ] == 1 and "unofficial" not in record and "unofficial" not in line and "owed" not in record
