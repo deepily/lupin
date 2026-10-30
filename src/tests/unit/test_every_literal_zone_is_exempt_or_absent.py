@@ -29,7 +29,6 @@ EXEMPT = {
     "src/cosa/rest/db/embedding_regeneration.py"         : "LEGIT: the business-hours gate is defined in EDT, its parameter is named hour_edt",
     "src/cosa/utils/edt_timestamp.py"                    : "FIX OWED: None falls back to DEFAULT_TZ_NAME; dm.py passes none",
     "src/lupin_app/static/js/notifications.js"           : "FIX OWED: browser fallbacks when the config fetch fails; needs the :8000 JS tier",
-    "src/lupin_cli/claude_code/hooks/lib/hook_common.py" : "FIX OWED: hooks cannot load ConfigurationManager, which prints to stdout",
     "src/lupin_mcp/reuse_needset/smoke.py"               : "LEGIT: the smoke schedule window is defined in Eastern, like the harness",
     "src/scripts/dm-experiment/generate_schedule.py"     : "LEGIT: the experiment schedule is defined in Eastern",
     "src/scripts/run-heartbeat-arbiter.py"               : "FIX OWED: a dev script passes a literal zone to the util helper",

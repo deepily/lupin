@@ -35,6 +35,8 @@ from pathlib import Path
 # Canonical path resolution via cu.get_project_root() — keeps runtime output
 # in io/ directory, consistent with existing io/log/ convention.
 import cosa.utils.util as cu
+from cosa.config.app_timezone import get_app_timezone
+from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.edt_timestamp import split_leading_stamp
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
@@ -263,22 +265,53 @@ def emit_json( data ):
     print( json.dumps( data ), flush=True )
 
 
+# One read per hook process: ConfigurationManager parses the whole INI, and a stamp is taken on every log line.
+_APP_ZONE = { "name": None, "failed": False }
+
+
+def _app_zone_name():
+    """
+    Return the configured `app timezone`, read once per process, or None if unreadable.
+
+    ConfigurationManager prints to stdout, which is the hook's return channel, so the read runs under quiet_stdout.
+
+    Ensures:
+        - Returns the IANA zone name from the resolved config block, never a code default
+        - Returns None when the key is missing, blank or invalid, and writes one line naming the cause to stderr
+        - A failed read is remembered, so stderr gets one line per process, not one per stamp
+        - Never writes to stdout; never raises
+    """
+    if _APP_ZONE[ "name" ] is not None or _APP_ZONE[ "failed" ]: return _APP_ZONE[ "name" ]
+
+    def read():
+        return get_app_timezone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", silent=True, mute_splainer=True ) )
+
+    try:
+        _APP_ZONE[ "name" ] = quiet_stdout( read )
+    except Exception as e:
+        _APP_ZONE[ "failed" ] = True
+        print( f"hook_common: cannot read the configured zone, stamping UTC: {e}", file=sys.stderr )
+    return _APP_ZONE[ "name" ]
+
+
 def get_timestamp():
     """
-    Get current `US/Eastern` timestamp in human-readable format.
+    Get the current timestamp in the configured `app timezone`, in human-readable format.
 
-    Uses the project's canonical `US/Eastern` timezone (matching the FastAPI server and
-    `cosa.utils.util`), not host-local or UTC. The conversion is explicit because the host is
+    The zone comes from the INI key `app timezone` and from nowhere else. The conversion is explicit because the host is
     often UTC; otherwise hook-event times read 4-5h ahead of what the rest of the system reports.
 
     Ensures:
-        - Returns formatted string with date, time, and milliseconds in `EST`/`EDT`
+        - Returns formatted string with date, time, and milliseconds
+        - When the zone cannot be read, returns the UTC instant ending in an explicit `+00:00`, so it is never taken for the user's zone
+        - Never raises; never writes to stdout
 
     Returns:
-        str: Formatted timestamp (e.g., "2026.06.05 @ 21:15 56,123ms")
+        str: Formatted timestamp (e.g., "2026.06.05 @ 21:15 56,123ms", or "2026.06.05 @ 21:15 56,123ms+00:00" on a failed read)
     """
-    now = cu.get_current_datetime_raw( tz_name="US/Eastern" )
-    return now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
+    zone = _app_zone_name()
+    now  = cu.get_current_datetime_raw( tz_name=zone ) if zone is not None else datetime.now( timezone.utc )
+    return now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms" + ( "" if zone is not None else "+00:00" )
 
 
 def _config_file_path():
