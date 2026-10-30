@@ -671,7 +671,10 @@ def test_read_mobile_corpus_defaults_the_owner_to_tiffany_the_manager_to_the_own
 
 
 def test_read_mobile_corpus_reads_the_ini_file_fresh( tmp_path, monkeypatch ):
+    import cosa.utils.util as cu
     from lupin_mcp import fleet_size_cap
+    ( tmp_path / "lupin" ).mkdir()
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path / "lupin" ) )  # no lupin-mobile sibling, whatever the host has
     ini = tmp_path / "lupin-app.ini"
     ini.write_text( f"[Lupin: Development]\n{lt.MOBILE_ROOT_KEY} = {MOBILE_ROOT}\n{lt.MOBILE_OWNER_KEY} = rio\n" )
     monkeypatch.setattr( fleet_size_cap, "config_file_path", lambda: str( ini ) )
