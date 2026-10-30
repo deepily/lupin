@@ -101,17 +101,23 @@ CLOUD_VENDORS      = tuple( sorted( vendor for vendor, row in LlmClientFactory.V
 # A direct value of these schemes is a service address, not a model spec. The LAN-address tests above judge its host.
 # A value that another key names is a model spec, so only CLOUD_SCHEMES is allowed there.
 SERVICE_SCHEMES    = ( "http", "https", "gs" )
-# Values that hold a colon and are not model specs, each with the reason. Every other colon value is parsed as a spec.
+# Values that hold a colon and are not model specs. Each key maps to the pattern its value must fully match and
+# the reason. A value off the pattern is parsed as a spec like any other, so a model spec planted here is flagged.
 NOT_A_SPEC = {
-    "stt device id"                                   : "a CUDA device index",
-    "local embedding device"                          : "a CUDA device index",
-    "presentation generator nano banana aspect ratio" : "an image aspect ratio",
-    "peer queue allowed hosts"                        : "a list of docker service host:port pairs",
-    "managed bounce server label"                     : "a port label",
-    "app config server name"                          : "this server's own host:port",
-    "local embedding prose query prefix"              : "a text prefix the embedder prepends",
-    "local embedding prose document prefix"           : "a text prefix the embedder prepends",
+    "stt device id"                                   : ( r"cuda:\d+",                                     "a CUDA device index" ),
+    "local embedding device"                          : ( r"cuda:\d+",                                     "a CUDA device index" ),
+    "presentation generator nano banana aspect ratio" : ( r"\d+:\d+",                                     "an image aspect ratio" ),
+    "peer queue allowed hosts"                        : ( r"lupin-rest-[a-z]+:\d+(,lupin-rest-[a-z]+:\d+)*", "docker service host:port pairs" ),
+    "managed bounce server label"                     : ( r":\d+",                                         "a port label" ),
+    "app config server name"                          : ( r"127\.0\.0\.1:\d+",                              "this server's own host:port" ),
+    "local embedding prose query prefix"              : ( r"search_query:",                               "a text prefix the embedder prepends" ),
+    "local embedding prose document prefix"           : ( r"search_document:",                            "a text prefix the embedder prepends" ),
 }
+
+
+def is_not_a_spec( key, value ):
+    """Whether a key is exempt and its value fully matches that key's pattern."""
+    return key in NOT_A_SPEC and re.fullmatch( NOT_A_SPEC[ key ][ 0 ], value.strip() ) is not None
 
 
 def is_cloud_spec( value, named=False ):
@@ -131,15 +137,16 @@ def non_cloud_consumers( keys, get ):
 
     A consumer is a key whose value, or the value of the key it names, holds a colon and no whitespace.
     Specs that nothing names ( a key with a _params sibling ) are definitions, judged only through their
-    consumers. A key listed in NOT_A_SPEC is exempt. Returns a dict of key -> ( spec key or None, spec ).
+    consumers. A key listed in NOT_A_SPEC is exempt while its value fits that key's pattern. Returns a dict of key -> ( spec key or None, spec ).
     """
     flagged = {}
     for key in keys:
         value = get( key )
-        if not isinstance( value, str ) or key in NOT_A_SPEC: continue
+        if not isinstance( value, str ): continue
         value = value.strip()
+        if is_not_a_spec( key, value ): continue
         via, spec = None, None
-        named     = get( value ) if value != key and value in keys and value not in NOT_A_SPEC else None
+        named     = get( value ) if value != key and value in keys and not is_not_a_spec( value, str( get( value ) ) ) else None
         if isinstance( named, str ) and ":" in named and not re.search( r"\s", named.strip() ):
             via, spec = value, named.strip()
         elif ":" in value and not re.search( r"\s", value ) and f"{key}_params" not in keys:
@@ -251,12 +258,24 @@ def test_a_planted_local_spec_reddens_the_cloud_allowlist_on_the_real_block( vm_
     assert { spec for _, spec in flagged.values() } == { planted_spec }
 
 
-def test_every_not_a_spec_exemption_is_still_a_colon_value_in_this_block( vm_config ):
-    """An exemption for a key that is gone or holds no colon is stale and must go."""
+@pytest.mark.parametrize( "exempt_key", sorted( NOT_A_SPEC ) )
+@pytest.mark.parametrize( "planted_spec", [ "ollama:7b-chat", "vllm://nas.local" ] )
+def test_a_planted_spec_on_an_exempt_key_reddens_the_cloud_allowlist( vm_config, exempt_key, planted_spec ):
+    """Mutant: a model spec planted on an exempt key is flagged, as the exemption is a pattern."""
+    keys    = vm_config.get_keys()
+    real    = lambda key: vm_config.get( key, default=None, silent=True )
+    planted = lambda key: planted_spec if key == exempt_key else real( key )
+
+    assert exempt_key not in non_cloud_consumers( keys, real )
+    assert non_cloud_consumers( keys, planted )[ exempt_key ] == ( None, planted_spec )
+
+
+def test_every_not_a_spec_exemption_still_fits_its_value_in_this_block( vm_config ):
+    """An exemption for a key that is gone or off its value pattern is stale and must go."""
     keys  = vm_config.get_keys()
     value = lambda key: vm_config.get( key, default=None, silent=True )
 
-    stale = sorted( key for key in NOT_A_SPEC if key not in keys or ":" not in str( value( key ) ) )
+    stale = sorted( key for key in NOT_A_SPEC if key not in keys or not is_not_a_spec( key, str( value( key ) ) ) )
 
     assert not stale, f"stale exemptions: {stale}"
 
