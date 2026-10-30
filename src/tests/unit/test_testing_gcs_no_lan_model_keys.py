@@ -98,7 +98,8 @@ def test_the_guard_can_find_a_lan_key():
 # network, and a vendor the factory does not know ( ollama ) is on neither list, so it is not allowed.
 CLOUD_SCHEMES      = ( "vertex", )
 CLOUD_VENDORS      = tuple( sorted( vendor for vendor, row in LlmClientFactory.VENDOR_CONFIG.items() if row[ "client_type" ] == "chat" ) )
-# A URL of these schemes is a service address, not a model spec. The LAN-address tests above judge its host.
+# A direct value of these schemes is a service address, not a model spec. The LAN-address tests above judge its host.
+# A value that another key names is a model spec, so only CLOUD_SCHEMES is allowed there.
 SERVICE_SCHEMES    = ( "http", "https", "gs" )
 # Values that hold a colon and are not model specs, each with the reason. Every other colon value is parsed as a spec.
 NOT_A_SPEC = {
@@ -113,14 +114,15 @@ NOT_A_SPEC = {
 }
 
 
-def is_cloud_spec( value ):
+def is_cloud_spec( value, named=False ):
     """Whether a colon-bearing value parses as a spec on a cloud scheme or a cloud vendor.
 
     A value with :// is judged by its scheme. Any other value is vendor:model, and the text before
     the first colon is the vendor. A digit after the colon changes nothing, so ollama:7b-chat is judged by ollama.
+    A named spec ( named=True ) may not take a service scheme, so http://nas.local fails there.
     """
     value = value.strip()
-    if "://" in value: return value.split( "://", 1 )[ 0 ].lower() in CLOUD_SCHEMES + SERVICE_SCHEMES
+    if "://" in value: return value.split( "://", 1 )[ 0 ].lower() in CLOUD_SCHEMES + ( () if named else SERVICE_SCHEMES )
     return value.split( ":", 1 )[ 0 ].lower() in CLOUD_VENDORS
 
 
@@ -142,7 +144,7 @@ def non_cloud_consumers( keys, get ):
             via, spec = value, named.strip()
         elif ":" in value and not re.search( r"\s", value ) and f"{key}_params" not in keys:
             spec = value
-        if spec is not None and not is_cloud_spec( spec ): flagged[ key ] = ( via, spec )
+        if spec is not None and not is_cloud_spec( spec, named=via is not None ): flagged[ key ] = ( via, spec )
     return flagged
 
 
@@ -155,7 +157,7 @@ def test_the_cloud_allowlist_finder_can_find_a_hostname_consumer():
               "stt device id": "cuda:0",
               "other scheme": "other/spec", "other/spec": "tcp://nas:1@m", "other/spec_params": "{}",
               "ok key": "ok/spec", "ok/spec": "vertex://global@gemini-3.5-flash", "ok vendor": "anthropic:claude",
-              "service": "https://api.example.com/v1",
+              "service": "https://api.example.com/v1", "http via": "http/spec", "http/spec": "http://nas.local/v1", "http/spec_params": "{}",
               "plain": "text", "none": None, "unnamed def": "vllm://nas:3000@m", "unnamed def_params": "{}" }
 
     assert non_cloud_consumers( table, table.get ) == {
@@ -165,6 +167,7 @@ def test_the_cloud_allowlist_finder_can_find_a_hostname_consumer():
         "local via"    : ( "local/spec", "ollama:llama3" ),
         "digit first"  : ( None,         "ollama:7b-chat" ),
         "host port"    : ( None,         "nas:3000" ),
+        "http via"     : ( "http/spec",  "http://nas.local/v1" ),
         "unlisted device" : ( None,      "cuda:0" ),
         "other scheme" : ( "other/spec", "tcp://nas:1@m" ) }
 
@@ -231,7 +234,7 @@ def test_a_planted_hostname_spec_reddens_the_cloud_allowlist_on_the_real_block( 
     assert not set( flagged ) & set( lan_keys( keys, planted ) ), "the IP-literal finder is blind to a hostname: that is the gap this closes"
 
 
-@pytest.mark.parametrize( "planted_spec", [ "ollama:llama3", "ollama:7b-chat", "nas:3000" ] )
+@pytest.mark.parametrize( "planted_spec", [ "ollama:llama3", "ollama:7b-chat", "nas:3000", "http://nas.local/v1" ] )
 def test_a_planted_local_spec_reddens_the_cloud_allowlist_on_the_real_block( vm_config, planted_spec ):
     """Mutant: the vm_agents spec planted as a local vendor or host:port flags its 26 consumers.
 
