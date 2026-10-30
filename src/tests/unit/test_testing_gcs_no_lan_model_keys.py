@@ -93,6 +93,62 @@ def test_the_guard_can_find_a_lan_key():
     assert _unroutable_host( "vertex://global@gemini-3.1-flash-lite" ) is None
 
 
+# The specs a Testing-GCS consumer may resolve to: a vertex:// spec, or vendor:model on a cloud vendor. Read from
+# the INI 2026-10-30: the block's specs are vertex://; llm_client_factory._load_vendor_urls lists the cloud vendors.
+# Everything else ( vllm://, vllm:, deepily:, any other scheme or hostname ) is the home network or unknown.
+CLOUD_SCHEMES = ( "vertex://", )
+CLOUD_VENDORS = ( "openai", "anthropic", "groq", "google-gla", "mistralai" )
+
+
+def _is_spec( value, keys ):
+    """Whether a value names a model spec ( scheme URL, vendor:model, or a key with _params )."""
+    if not isinstance( value, str ): return False
+    value = value.strip()
+    return bool( SCHEME.match( value ) ) or f"{value}_params" in keys or bool( re.match( r"^[a-z0-9_-]+:(?!//)", value, re.IGNORECASE ) and "/" not in value.split( ":", 1 )[ 0 ] and "." not in value.split( ":", 1 )[ 0 ] and " " not in value )
+
+
+def _is_cloud_spec( spec ):
+    """Whether a spec is a CLOUD_SCHEMES prefix or a CLOUD_VENDORS vendor:model."""
+    spec = spec.strip()
+    if spec.lower().startswith( CLOUD_SCHEMES ): return True
+    return bool( re.match( rf"^({'|'.join( CLOUD_VENDORS )}):(?!//)", spec, re.IGNORECASE ) )
+
+
+def non_cloud_consumers( keys, get ):
+    """Every consumer key whose spec is not on the cloud allowlist, whatever its host is called.
+
+    A consumer is a key whose value is a spec, or names a key that holds one. Spec definitions that nothing
+    names are not consumers: they are inherited from Development and matter only when something points at them.
+    Returns a dict of key -> ( spec key or None, spec ).
+    """
+    flagged = {}
+    for key in keys:
+        value = get( key )
+        if not isinstance( value, str ): continue
+        value = value.strip()
+        via, spec = None, None
+        named     = get( value ) if value != key and value in keys else None
+        if isinstance( named, str ) and _is_spec( named, keys ):
+            via, spec = value, named.strip()
+        elif re.match( r"^[a-z0-9_-]+:(?!//)[^\s]+$", value, re.IGNORECASE ) and re.match( r"^(vllm|deepily|openai|anthropic|groq|google-gla|mistralai):", value, re.IGNORECASE ):
+            spec = value
+        if spec is not None and not _is_cloud_spec( spec ): flagged[ key ] = ( via, spec )
+    return flagged
+
+
+def test_the_cloud_allowlist_finder_can_find_a_hostname_consumer():
+    """Positive control: a home-network HOSTNAME spec is flagged, and cloud specs are not."""
+    table = { "bad key": "bad/spec", "bad/spec": "vllm://lupin-home-box.local:3001@m",
+              "bad direct": "vllm:some/model", "other scheme": "other/spec", "other/spec": "tcp://nas:1@m",
+              "ok key": "ok/spec", "ok/spec": "vertex://global@gemini-3.5-flash", "ok vendor": "anthropic:claude",
+              "plain": "text", "none": None, "unnamed def": "vllm://nas:3000@m", "unnamed def_params": "{}" }
+
+    assert non_cloud_consumers( table, table.get ) == {
+        "bad key"      : ( "bad/spec",   "vllm://lupin-home-box.local:3001@m" ),
+        "bad direct"   : ( None,         "vllm:some/model" ),
+        "other scheme" : ( "other/spec", "tcp://nas:1@m" ) }
+
+
 def vendor_users( keys, get, vendor ):
     """Every key whose value, or the value it names, is a vendor:model spec.
 
@@ -131,6 +187,28 @@ def test_no_resolved_model_key_names_a_lan_address( vm_config ):
 
     assert not consumers, f"{len( consumers )} keys resolve to an unroutable host:\n" + "\n".join(
         f"  {key} -> {via} @ {host}" for key, ( via, host ) in sorted( consumers.items() ) )
+
+
+def test_every_testing_gcs_consumer_uses_a_cloud_spec( vm_config ):
+    """No consumer resolves to a spec outside the cloud allowlist, IP literal or not."""
+    keys = vm_config.get_keys()
+    bad  = non_cloud_consumers( keys, lambda key: vm_config.get( key, default=None, silent=True ) )
+
+    assert not bad, f"{len( bad )} consumers resolve to a non-cloud spec:\n" + "\n".join(
+        f"  {key} -> {via} = {spec}" for key, ( via, spec ) in sorted( bad.items() ) )
+
+
+def test_a_planted_hostname_spec_reddens_the_cloud_allowlist_on_the_real_block( vm_config ):
+    """Mutant: the real vm_agents spec planted on a home hostname flags its 26 consumers."""
+    keys    = vm_config.get_keys()
+    real    = lambda key: vm_config.get( key, default=None, silent=True )
+    planted = lambda key: "vllm://lupin-home-box.local:3001@m" if key == "vm_agents/gemini_flash" else real( key )
+
+    flagged = non_cloud_consumers( keys, planted )
+
+    assert sorted( flagged ) == sorted( key for key in keys if real( key ) == "vm_agents/gemini_flash" )
+    assert len( flagged ) == 26
+    assert not set( flagged ) & set( lan_keys( keys, planted ) ), "the IP-literal finder is blind to a hostname: that is the gap this closes"
 
 
 def test_no_raw_url_value_names_a_lan_address( vm_config ):
