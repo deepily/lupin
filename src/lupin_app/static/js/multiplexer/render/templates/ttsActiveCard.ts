@@ -40,6 +40,7 @@ const ACTIVE_TRUNCATE = 80;
 export function renderTtsActiveCard(
   item     : TtsQueueItem,
   handlers : TtsActiveCardHandlers,
+  appTimezone? : string,
 ): HTMLElement {
   const card = document.createElement( "div" );
   card.className = "tts-active-card";
@@ -51,7 +52,7 @@ export function renderTtsActiveCard(
 
   const timeSpan = document.createElement( "span" );
   timeSpan.className   = "message-time";
-  timeSpan.textContent = ttsCardTime( item );
+  timeSpan.textContent = ttsCardTime( item, appTimezone );
 
   const messageDiv = document.createElement( "div" );
   messageDiv.className   = "tts-message";

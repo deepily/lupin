@@ -34,6 +34,7 @@
 
 import type { AuthManager } from "../auth/AuthManager";
 import type { EventBus } from "../shared/EventBus";
+import { formatClock } from "./time";
 import type { ConnectionState, ConnectionStateChangePayload } from "../shared/types";
 import {
   renderSectionHeader,
@@ -142,6 +143,8 @@ export interface SystemStatusRendererOptions {
   reinitConfig: () => Promise<{ status?: string; message?: string }>;
   /** Test injection — where a refresh failure is reported. Defaults to the console. */
   logFn?          : ( message: string ) => void;
+  /** The server zone, read at each stamp; UTC (labelled) while it is unset. */
+  appTimezoneFn?  : () => string | undefined;
   // Test injection.
   nowDateFn?      : () => Date;
   clipboardFn?    : ( text: string ) => Promise<void>;
@@ -187,6 +190,7 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
   private readonly reinitConfig: SystemStatusRendererOptions[ "reinitConfig" ];
   private readonly logFn       : ( message: string ) => void;
   private readonly nowDateFn   : () => Date;
+  private readonly appTimezoneFn : () => string | undefined;
   private readonly clipboardFn : ( text: string ) => Promise<void>;
   private readonly setTimeoutFn   : ( cb: () => void, ms: number ) => number;
   private readonly clearTimeoutFn : ( handle: number ) => void;
@@ -223,6 +227,7 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     /* c8 ignore start */ // production-default fallbacks: the console, runtime clock, clipboard and timers; tests inject all seven.
     this.logFn           = opts.logFn           ?? ( ( m ) => console.warn( m ) );
     this.nowDateFn       = opts.nowDateFn       ?? ( () => new Date() );
+    this.appTimezoneFn   = opts.appTimezoneFn   ?? ( () => undefined );
     this.clipboardFn     = opts.clipboardFn     ?? ( ( t ) => navigator.clipboard.writeText( t ) );
     this.setTimeoutFn    = opts.setTimeoutFn    ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) as unknown as number );
     this.clearTimeoutFn  = opts.clearTimeoutFn  ?? ( ( h ) => globalThis.clearTimeout( h ) );
@@ -552,7 +557,7 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     if ( this.retryBtn !== null ) this.retryBtn.hidden = !( queue === "failed" || audio === "failed" );
 
     if ( queue === "connected" && audio === "connected" ) {
-      this.setHealth( `✓ Healthy (checked ${ this.nowDateFn().toLocaleTimeString() })`, "status-success" );
+      this.setHealth( `✓ Healthy (checked ${ formatClock( this.nowDateFn(), this.appTimezoneFn() ) })`, "status-success" );
     } else if ( queue === "failed" || audio === "failed" ) {
       this.setHealth( HEALTH_CIRCUIT, "status-error" );
     } else {

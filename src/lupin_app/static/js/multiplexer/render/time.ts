@@ -13,8 +13,70 @@
 // `formatDateKey(ts)` ports `getDateString` + `extractDateFromTimestamp` from
 // `notifications.js:10068-10074` + `:10084-10098` (D-J corrected citation).
 // `appTimezone`-awareness reuses the legacy timezone resolution path; in the
-// absence of a configured server timezone, falls back to browser-local TZ
-// (matches legacy behavior under fetchClientConfig miss).
+// absence of a configured server timezone, every formatter shows UTC and the
+// clock formatters label it UTC. The browser's own zone is never used.
+
+/**
+ * Return the zone every time display uses: the server zone, else UTC.
+ *
+ * Requires:
+ *   - `appTimezone` is an IANA zone name, or empty / null / undefined when the server sent none
+ *
+ * Ensures:
+ *   - returns `appTimezone` when it is non-empty, else "UTC"
+ */
+export function displayZone(appTimezone?: string | null): string {
+  return appTimezone || "UTC";
+}
+
+/**
+ * Return the label that marks a displayed time as UTC.
+ *
+ * Ensures:
+ *   - returns "" when a server zone is in use, else " UTC"
+ */
+export function zoneLabel(appTimezone?: string | null): string {
+  return appTimezone ? "" : " UTC";
+}
+
+/**
+ * Format the time of day of a date in the display zone, labelled when that zone is UTC.
+ *
+ * Requires:
+ *   - `date` is a valid Date; `locale` and `options` are as for `toLocaleTimeString`
+ *
+ * Ensures:
+ *   - the formatter's own `timeZone` option is always the display zone
+ */
+export function formatClock(
+  date        : Date,
+  appTimezone?: string | null,
+  locale?     : string,
+  options     : Intl.DateTimeFormatOptions = {},
+): string {
+  return date.toLocaleTimeString(locale, { ...options, timeZone: displayZone(appTimezone) }) + zoneLabel(appTimezone);
+}
+
+/**
+ * Count the whole hours since midnight in the display zone, rounded up, never below 1.
+ *
+ * Requires:
+ *   - `now` is a valid Date
+ *
+ * Ensures:
+ *   - midnight is the display zone's, not the browser's
+ */
+export function hoursSinceMidnight(now: Date, appTimezone?: string | null): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone  : displayZone(appTimezone),
+    hourCycle : "h23",
+    hour      : "numeric",
+    minute    : "numeric",
+    second    : "numeric",
+  }).formatToParts(now);
+  const part = (type: string): number => Number(parts.find((p) => p.type === type)!.value);
+  return Math.max(1, Math.ceil((part("hour") * 3600 + part("minute") * 60 + part("second") + now.getMilliseconds() / 1000) / 3600));
+}
 
 /**
  * Format a millisecond duration as `MM:SS`. Pure formatter (per D-H).
@@ -40,43 +102,27 @@ export function formatCountdown(ms: number): string {
 /**
  * Format a millisecond epoch timestamp as `HH:MM` (24-hour).
  *
- * Browser-local timezone — legacy `getLocalTimeDisplay` semantics
- * (`notifications.js:10107-10121`). Optional `appTimezone` param overrides
- * via `Intl.DateTimeFormat`.
+ * The server zone (`appTimezone`), else UTC with a trailing " UTC" label.
+ * Legacy `getLocalTimeDisplay` semantics (`notifications.js:10107-10121`).
  *
  * Requires:
  *   - `ts` is a finite ms-epoch timestamp
  *
  * Ensures:
- *   - returns 5-character zero-padded `HH:MM` string
+ *   - returns a 5-character zero-padded `HH:MM` string, plus " UTC" when no server zone is set
  *   - NaN / Infinity input → "--:--"
  */
 export function formatHM(ts: number, appTimezone?: string): string {
   if (!Number.isFinite(ts)) return "--:--";
-  const date = new Date(ts);
-  /* c8 ignore next */ // defensive: empty-string appTimezone branch — tests pass either undefined OR a real TZ string; the empty-string fallback is for legacy `appTimezone=""` config rows.
-  if (appTimezone !== undefined && appTimezone !== "") {
-    const fmt = new Intl.DateTimeFormat("en-US", {
-      hour     : "2-digit",
-      minute   : "2-digit",
-      hour12   : false,
-      timeZone : appTimezone,
-    });
-    return fmt.format(date);
-  }
-  /* c8 ignore next 3 */ // browser-local TZ fallback: tests pass appTimezone explicitly to keep timezone-independent assertions; the no-TZ path runs in production when appTimezone INI key is unset.
-  const hours   = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
+  return formatClock(new Date(ts), appTimezone, "en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 /**
  * Format a millisecond epoch timestamp as `YYYY-MM-DD` (date-accordion key).
  *
  * Ports `getDateString` + `extractDateFromTimestamp` semantics from
- * `notifications.js:10068-10098` (D-J corrected citation). When `appTimezone`
- * is provided, the date boundary follows the server-configured TZ; otherwise
- * browser-local.
+ * `notifications.js:10068-10098` (D-J corrected citation). The date boundary
+ * follows the server-configured TZ, else UTC. The key carries no label.
  *
  * Requires:
  *   - `ts` is a finite ms-epoch timestamp
@@ -88,23 +134,13 @@ export function formatHM(ts: number, appTimezone?: string): string {
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function formatDateKey(ts: number, appTimezone?: string): string {
   if (!Number.isFinite(ts)) return "----------";
-  const date = new Date(ts);
-  /* c8 ignore next */ // defensive: empty-string appTimezone branch — same rationale as formatHM.
-  if (appTimezone !== undefined && appTimezone !== "") {
-    const fmt = new Intl.DateTimeFormat("en-CA", {
-      year     : "numeric",
-      month    : "2-digit",
-      day      : "2-digit",
-      timeZone : appTimezone,
-    });
-    // en-CA emits ISO-style YYYY-MM-DD natively.
-    return fmt.format(date);
-  }
-  /* c8 ignore next 4 */ // browser-local TZ fallback: same rationale as formatHM — tests pass appTimezone explicitly; the no-TZ path is production-only.
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  // en-CA emits ISO-style YYYY-MM-DD natively.
+  return new Intl.DateTimeFormat("en-CA", {
+    year     : "numeric",
+    month    : "2-digit",
+    day      : "2-digit",
+    timeZone : displayZone(appTimezone),
+  }).format(new Date(ts));
 }
 
 /**

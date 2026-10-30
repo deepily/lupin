@@ -121,6 +121,8 @@ export interface TtsChromeRendererOptions {
    */
   requestAnimationFrameFn? : (cb: FrameRequestCallback) => number;
   cancelAnimationFrameFn?  : (handle: number) => void;
+  /** The server zone, read at each render; UTC (labelled) while it is unset. */
+  appTimezoneFn?           : () => string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +138,7 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
   private readonly raf    : (cb: FrameRequestCallback) => number;
   private readonly caf    : (handle: number) => void;
   private readonly unsubscribers: Array<() => void> = [];
+  private readonly appTimezoneFn : () => string | undefined;
 
   private root: HTMLElement | null = null;
   // Lane 0a — persistent `.section-header` bar + `.section-content` body wrapper.
@@ -156,6 +159,7 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     this.raf    = opts.requestAnimationFrameFn ?? ((cb): number => globalThis.requestAnimationFrame(cb));
     /* c8 ignore next */ // production-default fallback: globalThis.cancelAnimationFrame pairs with the RAF default above.
     this.caf    = opts.cancelAnimationFrameFn  ?? ((h): void => globalThis.cancelAnimationFrame(h));
+    this.appTimezoneFn = opts.appTimezoneFn ?? ( () => undefined );
   }
 
   /**
@@ -316,14 +320,14 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
       children.push( renderTtsActiveCard( activeItem, {
         onStop  : () => this.stores.audio.stop(),
         onDelete: ( id ) => this.stores.ttsQueue.removeById( id ),
-      } ) );
+      }, this.appTimezoneFn() ) );
     }
 
     // Pending minimized cards — 1-indexed queue positions (WP2 ttsMinimizedCard).
     pending.forEach( ( it, i ) => {
       children.push( renderTtsMinimizedCard( it, i + 1, {
         onDelete: ( id ) => this.stores.ttsQueue.removeById( id ),
-      } ) );
+      }, this.appTimezoneFn() ) );
     } );
     // Empty state (active null + pending empty) falls through to just the chrome,
     // whose idle panel shows "🔇 Nothing in the queue" when audio is idle.

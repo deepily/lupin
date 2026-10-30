@@ -22,6 +22,7 @@
 // lines (G8). That is legacy's state and styling them would be a visible change
 // from the lead — see the note in css/multiplexer/debug-panel.css.
 
+import { formatClock } from "./time";
 import {
   setDebugPanel,
   type DebugPanelSink,
@@ -59,7 +60,9 @@ export interface DebugPanelRenderer {
 /** Options for `createDebugPanelRenderer`: a clock for each line's timestamp. */
 export interface DebugPanelRendererOptions {
   /** Test injection — the clock for each line's timestamp. */
-  nowDateFn? : () => Date;
+  nowDateFn?      : () => Date;
+  /** The server zone, read at each stamp; UTC (labelled) while it is unset. */
+  appTimezoneFn?  : () => string | undefined;
 }
 
 /**
@@ -67,6 +70,7 @@ export interface DebugPanelRendererOptions {
  */
 class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
   private readonly nowDateFn : () => Date;
+  private readonly appTimezoneFn : () => string | undefined;
 
   private root        : HTMLElement | null = null;
   private logEl       : HTMLElement | null = null;
@@ -79,6 +83,7 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
   constructor( opts: DebugPanelRendererOptions ) {
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    this.appTimezoneFn = opts.appTimezoneFn ?? ( () => undefined );
   }
 
   /**
@@ -191,7 +196,7 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
   private lineEl( message: string, className: string ): HTMLElement {
     const div = document.createElement( "div" );
     div.className = className;
-    div.textContent = `[${ this.nowDateFn().toLocaleTimeString() }] ${ message }`;
+    div.textContent = `[${ formatClock( this.nowDateFn(), this.appTimezoneFn() ) }] ${ message }`;
     return div;
   }
 }

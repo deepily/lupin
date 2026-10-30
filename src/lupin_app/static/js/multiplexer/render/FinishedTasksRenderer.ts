@@ -45,6 +45,7 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { teardownScaffold } from "./dom";
+import { formatClock } from "./time";
 
 /**
  * The accordion id this pane persists its collapse under.
@@ -109,6 +110,8 @@ export interface FinishedTasksRendererOptions {
   store      : FinishedTasksStoreLike;
   /** Test injection — the clock for the "updated" stamp and relative ages. */
   nowDateFn? : () => Date;
+  /** The server zone, read at each stamp; UTC (labelled) while it is unset. */
+  appTimezoneFn? : () => string | undefined;
   /**
    * The persistence backend. Defaults to `localStorage`.
    *
@@ -162,6 +165,7 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   private readonly bus       : EventBus;
   private readonly store     : FinishedTasksStoreLike;
   private readonly nowDateFn : () => Date;
+  private readonly appTimezoneFn : () => string | undefined;
   private readonly storage   : Pick<Storage, "getItem" | "setItem"> | null;
   private readonly viewState : AccordionCollapseStore | undefined;
   private readonly unsubscribers: Array<() => void> = [];
@@ -188,6 +192,7 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
     this.viewState = opts.viewState;
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    this.appTimezoneFn = opts.appTimezoneFn ?? ( () => undefined );
     /* c8 ignore start */ // production-default fallback, and it spans three lines — `ignore next` would cover only the first. The browser's localStorage; tests pass a fake, or null for a host that has none.
     this.storage = opts.storage === undefined
       ? ( typeof globalThis.localStorage === "undefined" ? null : globalThis.localStorage )
@@ -428,7 +433,7 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   private stampUpdated(): void {
     /* c8 ignore next */ // defensive: updatedEl is set/nulled in lockstep with container, which the caller already guarded.
     if ( this.updatedEl === null ) return;
-    this.updatedEl.textContent = `updated ${ this.nowDateFn().toLocaleTimeString() }`;
+    this.updatedEl.textContent = `updated ${ formatClock( this.nowDateFn(), this.appTimezoneFn() ) }`;
   }
 }
 

@@ -93,6 +93,7 @@ function fakeStorage( seed: Record<string, string> = {}, throwOn?: "getItem" | "
 function mountPane( opts: {
   store?   : FinishedTasksStoreLike;
   storage? : Pick<Storage, "getItem" | "setItem"> | null;
+  appTimezoneFn? : () => string | undefined;
 } = {} ) {
   const root  = document.createElement( "div" );
   const bus   = createEventBusForTesting();
@@ -101,6 +102,7 @@ function mountPane( opts: {
     eventBus  : bus,
     store,
     nowDateFn : FIXED_DATE,
+    appTimezoneFn : opts.appTimezoneFn,
     storage   : opts.storage === undefined ? fakeStorage().storage : opts.storage,
   } );
   r.mount( root );
@@ -458,6 +460,18 @@ test( "the updated stamp is written on a poll and is empty before one", () => {
   poll( bus );
   assert.match( q( root, '[data-testid="multiplexer-finished-tasks-updated"]' )!.textContent ?? "", /^updated / );
   unmount();
+} );
+
+test( "the updated stamp is in the server zone, or in labelled UTC without one", () => {
+  const stampOf = ( appTimezoneFn?: () => string | undefined ) => {
+    const { root, bus, unmount } = mountPane( { appTimezoneFn } );
+    poll( bus );
+    const text = q( root, '[data-testid="multiplexer-finished-tasks-updated"]' )!.textContent ?? "";
+    unmount();
+    return text;
+  };
+  assert.equal( stampOf(), "updated 8:00:00 PM UTC" );
+  assert.equal( stampOf( () => "Asia/Tokyo" ), "updated 5:00:00 AM" );
 } );
 
 // ---------------------------------------------------------------------------

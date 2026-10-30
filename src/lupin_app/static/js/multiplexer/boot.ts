@@ -284,9 +284,16 @@ function bootMultiplexer(): void {
     DEFAULT_TTS_FRACTION,
   );
 
+  // The server zone, handed over when /api/config/client answers (see the fetch below).
+  // Everything that stamps a time reads it through a getter, so a stamp taken before the
+  // answer shows labelled UTC rather than the browser's zone.
+  const appZone: { name: string | undefined } = { name: undefined };
+  const appTimezoneFn = (): string | undefined => appZone.name;
+
   const stores = createStores({
     eventBus,
     storage,
+    appTimezoneFn,
     // Row aa13fdd7 — 0% means silent, gated inside TtsQueueStore.enqueue so every
     // automatic producer is covered by one check rather than each remembering.
     ttsLiveFraction     : readLiveTtsFraction,
@@ -341,7 +348,7 @@ function bootMultiplexer(): void {
   // the renderer always exists before the answer arrives. It is handed over when
   // it lands, and `setAppTimezone` drops the render caches so the cards actually
   // repaint. On a failed fetch nothing is handed over and the behaviour is
-  // exactly today's: browser-local.
+  // exactly today's: times show in labelled UTC.
   const ttsPreviewConfig = { enabled: false, minChars: 100 };
   // Parity B-2 J20 — the SAME fetch now also resolves the test-suite card's auto-fix
   // box. §6 item 14 called for exactly this: the seam already existed and read only
@@ -370,11 +377,19 @@ function bootMultiplexer(): void {
     .then((c) => {
       ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
       ttsPreviewConfig.minChars = c.tts_preview_min_chars || 100;
-      if (c.app_timezone) renderer.setAppTimezone(c.app_timezone);
+      if (c.app_timezone) {
+        appZone.name = c.app_timezone;
+        renderer.setAppTimezone(c.app_timezone);
+      } else {
+        console.error("multiplexer: /api/config/client carries no app_timezone, so times show in UTC");
+      }
       stores.submitJobs.setAutoFixDefault(!!c.test_fix_expediter_auto_fix_enabled);
       renderer.setTtsInteractionMode(c.tts_interaction_mode === "solo" ? "solo" : "chorus");
     })
-    .catch(() => { /* keep legacy's defaults: disabled, 100 chars, browser-local zone, chorus icons */ });
+    .catch((err) => {
+      // Keep legacy's defaults (disabled, 100 chars, chorus icons). With no app_timezone, times show in UTC.
+      console.error("multiplexer: the client config fetch failed, so app_timezone is unset and times show in UTC", err);
+    });
   wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({
     fraction : readLiveTtsFraction(),
     enabled  : ttsPreviewConfig.enabled,
@@ -613,6 +628,7 @@ function bootMultiplexer(): void {
   // (canonical AC9 order: notifications → jobs → actionRequired → ttsChrome).
   const ttsChromeRenderer = createTtsChromeRenderer({
     eventBus,
+    appTimezoneFn,
     stores : { audio: stores.audio, ttsQueue: stores.ttsQueue },   // WP4 — item queue
   });
   const ttsMountEl = document.getElementById("tts-pane");
@@ -773,7 +789,7 @@ function bootMultiplexer(): void {
     api               : apiClient,
     stores            : { sessionStrip: stores.sessionStrip, senders: stores.senders, notifications: stores.notifications },
     getEmail          : () => authManager.getCurrentUserEmail(),
-    getEffectiveHours : () => effectiveHoursForQuery(stores.notifications.historyWindow(), new Date()),
+    getEffectiveHours : () => effectiveHoursForQuery(stores.notifications.historyWindow(), new Date(), appZone.name),
     // Row 98305d96 — legacy's admin "Not Mine": only an admin in mode "others" asks the
     // server to drop notifications from their own jobs. Everyone else sends nothing extra.
     getExcludeOwnJobs : () => authManager.isCurrentUserAdmin() && stores.notifications.filterMode() === "others",
@@ -943,6 +959,7 @@ function bootMultiplexer(): void {
   // the two are independent.
   const finishedTasksRenderer = createFinishedTasksRenderer({
     eventBus,
+    appTimezoneFn,
     store : stores.finishedTasks,
     // Parity A-2 #6 — the ONE section whose collapse survives a reload, matching
     // legacy's `LUPIN_ACCORDION_PERSIST_KEYS['finished-tasks-section']`. The
@@ -1117,6 +1134,7 @@ function bootMultiplexer(): void {
   if (systemStatusMountEl === null) throw new Error("multiplexer: #system-status-pane not found");
   const systemStatusRenderer = createSystemStatusRenderer({
     eventBus,
+    appTimezoneFn,
     auth       : authManager,
     transports : { queue: transports.queue, audio: transports.audio },
     sessionIds : { queue: queueSessionId, audio: audioSessionId },
@@ -1129,7 +1147,7 @@ function bootMultiplexer(): void {
   // is markup that exists before the writers do. No store, no poll, no timer.
   const debugPaneMountEl = document.getElementById("debug-pane");
   if (debugPaneMountEl === null) throw new Error("multiplexer: #debug-pane not found");
-  const debugPanelRenderer = createDebugPanelRenderer({});
+  const debugPanelRenderer = createDebugPanelRenderer({ appTimezoneFn });
   debugPanelRenderer.mount(debugPaneMountEl);
   // Parity B-7 — Direct TTS Test. The cache-first play is the point (D4): a hit
   // plays the blob HERE, with no POST and no /ws/audio round trip; a miss is an

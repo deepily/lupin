@@ -40,6 +40,7 @@ export function renderTtsMinimizedCard(
   item     : TtsQueueItem,
   position : number,
   handlers : TtsMinimizedCardHandlers,
+  appTimezone? : string,
 ): HTMLElement {
   const card = document.createElement( "div" );
   card.className = item.notification?.action_required === true
@@ -58,7 +59,7 @@ export function renderTtsMinimizedCard(
 
   const timeSpan = document.createElement( "span" );
   timeSpan.className   = "message-time";
-  timeSpan.textContent = ttsCardTime( item );
+  timeSpan.textContent = ttsCardTime( item, appTimezone );
 
   const textDiv = document.createElement( "div" );
   textDiv.className   = "tts-text";

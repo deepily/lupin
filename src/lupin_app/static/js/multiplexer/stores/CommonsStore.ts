@@ -28,6 +28,7 @@
 // renderer owns "decide when to fetch".
 
 import type { EventBus } from "../shared/EventBus";
+import { hoursSinceMidnight } from "../render/time";
 import type { StorageService } from "../shared/StorageService";
 import type {
   CommonsActivityEntry,
@@ -128,6 +129,8 @@ export interface CommonsStoreOptions {
   storage : StorageService;
   // Test injection — production uses Date.now.
   nowFn?  : () => number;
+  // The server zone, read when the "today" window is resolved; UTC while it is unset.
+  appTimezoneFn? : () => string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +144,7 @@ class CommonsStoreImpl implements CommonsStore {
   private readonly bus     : EventBus;
   private readonly storage : StorageService;
   private readonly nowFn   : () => number;
+  private readonly appTimezoneFn : () => string | undefined;
 
   private rawEntries : CommonsActivityEntry[] = [];
   private filter     : CommonsActivityFilter;
@@ -157,6 +161,7 @@ class CommonsStoreImpl implements CommonsStore {
     this.storage = opts.storage;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn   = opts.nowFn ?? (() => Date.now());
+    this.appTimezoneFn = opts.appTimezoneFn ?? (() => undefined);
     this.filter  = this.hydrateFilter();
     this.subscribe();
   }
@@ -286,14 +291,12 @@ class CommonsStoreImpl implements CommonsStore {
 
   // Map window → `hours` query param (port of the legacy dropdown→query shape).
   //   "all"   → null  (no cutoff)
-  //   "today" → hours since local midnight (min 1)
+  //   "today" → hours since midnight in the server zone, UTC without one (min 1)
   //   "<n>"   → n
   private windowToHours(window: CommonsActivityWindow): number | null {
     if (window === "all") return null;
     if (window === "today") {
-      const now      = new Date(this.nowFn());
-      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      return Math.max(1, Math.ceil((now.getTime() - midnight) / 3_600_000));
+      return hoursSinceMidnight(new Date(this.nowFn()), this.appTimezoneFn());
     }
     return Number(window);
   }

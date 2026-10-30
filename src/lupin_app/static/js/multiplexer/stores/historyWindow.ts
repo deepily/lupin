@@ -11,6 +11,8 @@
 //
 // Parity inventory: src/rnd/2026.09.10-mux-cc-notifications-accordion-parity.md
 
+import { hoursSinceMidnight } from "../render/time";
+
 /** The storage key of the picked history window. The legacy client uses the same key. */
 export const HISTORY_WINDOW_KEY = "notifications_history_window";
 
@@ -102,18 +104,16 @@ export function serializeHistoryWindow(w: HistoryWindow): string {
  * The hours to send on a query (legacy getEffectiveHoursForQuery).
  *
  * Requires:
- *   - now is the current local time
+ *   - now is the current time
+ *   - appTimezone is the server zone, or empty / null / undefined when the server sent none
  * Ensures:
  *   - null → null (the caller omits the `hours` param entirely)
- *   - "today" → whole hours since local midnight, rounded up, never below 1
+ *   - "today" → whole hours since midnight in the server zone (UTC without one), rounded up, never below 1
  *   - a number → that number
  */
-export function effectiveHoursForQuery(w: HistoryWindow, now: Date): number | null {
+export function effectiveHoursForQuery(w: HistoryWindow, now: Date, appTimezone?: string | null): number | null {
   if (w === null) return null;
-  if (w === "today") {
-    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return Math.max(1, Math.ceil((now.getTime() - midnight.getTime()) / 3_600_000));
-  }
+  if (w === "today") return hoursSinceMidnight(now, appTimezone);
   return w;
 }
 

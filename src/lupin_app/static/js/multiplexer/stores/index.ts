@@ -166,6 +166,8 @@ export interface CreateStoresOptions {
   // `actor` (Q1). Boot wires `() => authManager.getCurrentUserEmail()`; omitted
   // in read-only test constructions (the store defaults to anonymous).
   actorProvider?      : () => string | null;
+  // The server zone, read where a store counts hours since midnight; UTC while it is unset.
+  appTimezoneFn?      : () => string | undefined;
   // Parity B-1 — the queue socket's session id, the `websocket_id` every v2 door is
   // handed. A thunk, not a string: see the construction site.
   qaSessionId?        : () => string;
@@ -240,7 +242,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // hydrates persisted layout mode + split ratio from storage at construction.
   const readingPane    = createReadingPaneStore  ({ bus: opts.eventBus, storage: opts.storage });
   // Lane D (WP3) — commons store, also order-independent of the pinned five.
-  const commons        = createCommonsStore      ({ bus: opts.eventBus, storage: opts.storage });
+  const commons        = createCommonsStore      ({ bus: opts.eventBus, storage: opts.storage, appTimezoneFn: opts.appTimezoneFn });
 
   // Lane E quartet — appended AFTER the canonical 5 (order-neutral: Missed
   // listens only to auth_success; PredictionVote + FleetStatus subscribe to no

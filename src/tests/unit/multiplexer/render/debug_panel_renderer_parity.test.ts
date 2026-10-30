@@ -53,8 +53,8 @@ before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
 } );
 
-const FIXED_CLOCK = () => new Date( "2026-09-23T20:30:07" );
-const STAMP       = FIXED_CLOCK().toLocaleTimeString();
+const FIXED_CLOCK = () => new Date( "2026-09-23T20:30:07Z" );
+const STAMP       = FIXED_CLOCK().toLocaleTimeString( undefined, { timeZone: "UTC" } ) + " UTC";
 
 let realLog   : typeof console.log;
 let realError : typeof console.error;
@@ -327,4 +327,14 @@ test( "an empty message still produces a line, stamp and all", () => {
   const { root } = mount();
   log( "" );
   assert.equal( texts( root )[ 0 ], `[${ STAMP }] ` );
+} );
+
+test( "a server zone decides the stamp and drops the UTC label", () => {
+  const root     = document.createElement( "div" );
+  const renderer = createDebugPanelRenderer( { nowDateFn: FIXED_CLOCK, appTimezoneFn: () => "Asia/Tokyo" } );
+  renderer.mount( root );
+  renderer.addDebugMessage( "hello", "info" );
+  const line = texts( root ).find( ( t ) => t.endsWith( "hello" ) )!;
+  assert.match( line, /^\[5:30:07 AM\] hello$/ );
+  renderer.unmount();
 } );

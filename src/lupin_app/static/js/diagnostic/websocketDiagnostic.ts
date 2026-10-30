@@ -760,8 +760,9 @@ export class WebSocketDiagnosticTool {
         return error instanceof Error ? error.name : "";
     }
 
+    // The page has no authenticated session, so it cannot read the server zone: it shows labelled UTC.
     private timeLabel(): string {
-        return new Date( this.deps.now() ).toLocaleTimeString();
+        return new Date( this.deps.now() ).toLocaleTimeString( undefined, { timeZone: "UTC" } ) + " UTC";
     }
     /* c8 ignore next */ // tsx phantom-branch artifact on the trailing class-close line.
 }

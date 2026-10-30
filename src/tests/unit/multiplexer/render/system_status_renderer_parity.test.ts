@@ -98,6 +98,7 @@ interface MountOpts {
   reinit?      : () => Promise<{ status?: string; message?: string }>;
   clipboardFn? : ( text: string ) => Promise<void>;
   logFn?       : ( message: string ) => void;
+  appTimezoneFn? : () => string | undefined;
 }
 
 function mountPane( opts: MountOpts = {} ) {
@@ -116,6 +117,7 @@ function mountPane( opts: MountOpts = {} ) {
     reinitConfig : opts.reinit ?? ( async () => ( { status: "success", message: "ok" } ) ),
     logFn       : opts.logFn ?? ( () => {} ),
     nowDateFn   : FIXED_DATE,
+    appTimezoneFn : opts.appTimezoneFn,
     clipboardFn : opts.clipboardFn ?? ( async ( t ) => { copied.push( t ); } ),
     setTimeoutFn   : ( cb ) => { timeouts.push( cb ); return timeouts.length; },
     clearTimeoutFn : () => {},
@@ -304,6 +306,16 @@ test( "S7: both connected → '✓ Healthy (checked …)'", () => {
   assert.equal( text( "multiplexer-ws-health-status" ), HEALTH_MONITORING, "before the first tick" );
   intervals[ 0 ]!.cb();
   assert.match( text( "multiplexer-ws-health-status" ), /^✓ Healthy \(checked .+\)$/ );
+} );
+
+test( "S7: the healthy line is stamped in the server zone, or in labelled UTC without one", () => {
+  const healthy = ( appTimezoneFn?: () => string | undefined ) => {
+    const { text, intervals } = mountPane( { queue: fakeTransport( "connected" ), audio: fakeTransport( "connected" ), appTimezoneFn } );
+    intervals[ 0 ]!.cb();
+    return text( "multiplexer-ws-health-status" );
+  };
+  assert.equal( healthy(), "✓ Healthy (checked 8:30:07 PM UTC)" );
+  assert.equal( healthy( () => "Asia/Tokyo" ), "✓ Healthy (checked 5:30:07 AM)" );
 } );
 
 test( "S7: either socket failed → the circuit message, which wins over a half-connected pair", () => {

@@ -70,16 +70,7 @@ const SOURCE = readFileSync( NOTIFICATIONS_JS, "utf8" );
 const ROOT   = resolve( HERE, "../../../.." );
 
 /** Files that still read the browser zone, each with the reason it is owed. */
-const OWED: Record<string, string> = {
-  "src/lupin_app/static/js/diagnostic/websocketDiagnostic.ts"               : "OWED: the diagnostic page stamps its log lines with the browser clock",
-  "src/lupin_app/static/js/multiplexer/render/DebugPanelRenderer.ts"        : "OWED: the debug line stamp uses the browser zone",
-  "src/lupin_app/static/js/multiplexer/render/FinishedTasksRenderer.ts"     : "OWED: the updated stamp uses the browser zone",
-  "src/lupin_app/static/js/multiplexer/render/SystemStatusRenderer.ts"      : "OWED: the health-line stamp uses the browser zone",
-  "src/lupin_app/static/js/multiplexer/render/templates/ttsCardShared.ts"   : "OWED: the TTS card fallback time uses the browser zone",
-  "src/lupin_app/static/js/multiplexer/render/time.ts"                      : "OWED: the local-time and local-date fallbacks read the browser zone",
-  "src/lupin_app/static/js/multiplexer/stores/CommonsStore.ts"               : "OWED: the since-midnight window is counted from browser-local midnight",
-  "src/lupin_app/static/js/multiplexer/stores/historyWindow.ts"              : "OWED: the since-midnight window is counted from browser-local midnight",
-};
+const OWED: Record<string, string> = {};
 
 /** Every tracked non-test .ts file under the web client, as repo-relative paths. */
 function trackedTsFiles(): string[] {
@@ -107,7 +98,7 @@ test( "the .ts scan reaches a real population of files and calls", () => {
   assert.ok( files.length >= 100, `only ${files.length} .ts files were walked` );
   assert.ok( files.includes( "src/lupin_app/static/js/multiplexer/render/fleetModel.ts" ) && files.includes( "src/lupin_app/static/js/multiplexer/render/taskListModel.ts" ) );
   const checked = files.reduce( ( n, f ) => n + scan( readFileSync( resolve( ROOT, f ), "utf8" ) ).checked, 0 );
-  assert.ok( checked >= 10, `only ${checked} calls were checked in .ts files` );
+  assert.ok( checked >= 8, `only ${checked} calls were checked in .ts files` );
 } );
 
 test( "a planted bare call in a real .ts file reddens the guard", () => {
