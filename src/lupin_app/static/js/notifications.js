@@ -1569,7 +1569,7 @@ class NotificationsUI {
 
         } catch ( error ) {
             // Fallback to hardcoded defaults if config fetch fails
-            this.error( "Failed to fetch client config, using defaults:", error );
+            this.error( "Failed to fetch client config: app_timezone is unset, so times show in UTC, and other settings use defaults:", error );
 
             // Conservative defaults (same as baseline config)
             this.TOKEN_REFRESH_CHECK_INTERVAL_MS = 10 * 60 * 1000;  // 10 minutes
@@ -1787,7 +1787,7 @@ class NotificationsUI {
         const queueOk = queueState === "CONNECTED";
         const audioOk = audioState === "CONNECTED";
         if ( queueOk && audioOk ) {
-            this.updateHealthStatus( `✓ Healthy (checked ${now.toLocaleTimeString()})`, "status-success" );
+            this.updateHealthStatus( `✓ Healthy (checked ${this._zonedTime( now )})`, "status-success" );
         } else if ( queueState === "OPEN_CIRCUIT" || audioState === "OPEN_CIRCUIT" ) {
             this.updateHealthStatus( "Circuit open — click Retry-now", "status-error" );
         } else {
@@ -8268,8 +8268,8 @@ class NotificationsUI {
         const notifType = notification.type || notification.notification_type;
         if ( notifType === 'user_initiated_message' ) {
             const ts = notification.timestamp
-                ? new Date( notification.timestamp ).toLocaleTimeString()
-                : new Date().toLocaleTimeString();
+                ? this._zonedTime( new Date( notification.timestamp ) )
+                : this._zonedTime( new Date() );
             const urgentClass = notification.priority === 'urgent' ? ' priority-urgent' : '';
             const priorityBadge = notification.priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
             const entry = document.createElement( 'div' );
@@ -8390,8 +8390,8 @@ class NotificationsUI {
         }
         if ( oldTimestampSpan ) {
             const timestamp = notification.timestamp
-                ? new Date( notification.timestamp ).toLocaleTimeString()
-                : new Date().toLocaleTimeString();
+                ? this._zonedTime( new Date( notification.timestamp ) )
+                : this._zonedTime( new Date() );
             oldTimestampSpan.textContent = timestamp;
         }
 
@@ -8489,8 +8489,8 @@ class NotificationsUI {
         entry.className = `activity-log-entry priority-${notification.priority || 'low'}`;
 
         const timestamp = notification.timestamp
-            ? new Date( notification.timestamp ).toLocaleTimeString()
-            : new Date().toLocaleTimeString();
+            ? this._zonedTime( new Date( notification.timestamp ) )
+            : this._zonedTime( new Date() );
 
         // Abstract indicator — clickable 📋 that opens the abstract tooltip
         const hasAbstract = notification.abstract && notification.abstract.trim().length > 0;
@@ -9672,7 +9672,7 @@ class NotificationsUI {
         const contentEl = document.getElementById( `interactions-content-${jobId}` );
         if ( !contentEl ) return;
 
-        const timestamp = new Date().toLocaleTimeString();
+        const timestamp = this._zonedTime( new Date() );
         const priorityBadge = priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
 
         const itemHtml = `
@@ -9891,7 +9891,7 @@ class NotificationsUI {
          */
         let timestamp = '';
         try {
-            timestamp = new Date( interaction.timestamp ).toLocaleTimeString();
+            timestamp = this._zonedTime( new Date( interaction.timestamp ) );
         } catch ( e ) {
             timestamp = interaction.timestamp || '';
         }
@@ -10634,11 +10634,11 @@ class NotificationsUI {
          *
          * Requires:
          *     - date is a Date instance
-         *     - ianaZone is an IANA zone string, or falsy for browser-local
+         *     - ianaZone is an IANA zone string, or falsy for UTC
          *
          * Ensures:
          *     - Returns a formatted time string with a short timezone name
-         *     - An invalid ianaZone never throws — degrades to browser-local
+         *     - An invalid ianaZone never throws — degrades to UTC
          *     - Pure: no DOM, no side effects
          */
         const opts = { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" };
@@ -10646,10 +10646,10 @@ class NotificationsUI {
             try {
                 return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: ianaZone } ).format( date );
             } catch ( error ) {
-                this.log( `Invalid fleet timezone "${ianaZone}", falling back to local: ${error}` );
+                this.log( `Invalid fleet timezone "${ianaZone}", falling back to UTC: ${error}` );
             }
         }
-        return new Intl.DateTimeFormat( undefined, opts ).format( date );
+        return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: "UTC" } ).format( date );
     }
 
     /**
@@ -11741,12 +11741,12 @@ class NotificationsUI {
          *
          * Requires:
          *     - iso is an ISO-8601 string, or null/undefined
-         *     - ianaZone is an IANA zone string, or null/undefined (→ browser-local)
+         *     - ianaZone is an IANA zone string, or null/undefined (→ UTC)
          *
          * Ensures:
          *     - null/absent → "—"; unparseable → "—"
          *     - a naive (tz-less) string is interpreted as UTC, not browser-local
-         *     - invalid IANA zone degrades to browser-local (never throws)
+         *     - invalid IANA zone degrades to UTC (never throws)
          *     - Pure: no DOM, no side effects
          */
         if ( !iso ) return "—";
@@ -11761,10 +11761,10 @@ class NotificationsUI {
             try {
                 return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: ianaZone } ).format( date );
             } catch ( error ) {
-                this.log( `Invalid task chase timezone "${ianaZone}", falling back to local: ${error}` );
+                this.log( `Invalid task chase timezone "${ianaZone}", falling back to UTC: ${error}` );
             }
         }
-        return new Intl.DateTimeFormat( undefined, opts ).format( date );
+        return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: "UTC" } ).format( date ) + " UTC";
     }
 
     /**
@@ -15102,7 +15102,7 @@ class NotificationsUI {
             .sort( ( a, b ) => String( b.ts || "" ).localeCompare( String( a.ts || "" ) ) );
 
         if ( els.count ) els.count.textContent = measured ? String( visible.length ) : "—";
-        if ( els.updated ) els.updated.textContent = measured ? new Date().toLocaleTimeString() : "";
+        if ( els.updated ) els.updated.textContent = measured ? this._zonedTime( new Date() ) : "";
 
         if ( !els.container ) return;
 
@@ -20586,11 +20586,8 @@ class NotificationsUI {
         if ( windowValue === "all" ) {
             // no hours param → no cutoff
         } else if ( windowValue === "today" ) {
-            // Resolve client-side: hours since local-midnight
-            const now      = new Date();
-            const midnight = new Date( now.getFullYear(), now.getMonth(), now.getDate() );
-            const hours    = Math.max( 1, Math.ceil( ( now - midnight ) / 3600000 ) );
-            params.append( "hours", String( hours ) );
+            // Resolve client-side: hours since midnight in the display zone
+            params.append( "hours", String( this._hoursSinceZoneMidnight() ) );
         } else {
             params.append( "hours", String( windowValue ) );
         }
@@ -20736,10 +20733,7 @@ class NotificationsUI {
         time.className = "commons-activity-entry-time";
         if ( entry.ts ) {
             try {
-                const d  = new Date( entry.ts );
-                const hh = String( d.getHours() ).padStart( 2, "0" );
-                const mm = String( d.getMinutes() ).padStart( 2, "0" );
-                time.textContent = `${hh}:${mm}`;
+                time.textContent = this._zonedTime( new Date( entry.ts ), "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false } );
             } catch ( _ ) {
                 time.textContent = "";
             }
@@ -22663,6 +22657,30 @@ class NotificationsUI {
     }
 
     /**
+     * Format the time of day of a date in the display zone, labelled when that zone is UTC.
+     *
+     * @param {Date} date - Instant to show
+     * @param {string|string[]} [locale] - Locale passed to the formatter
+     * @param {Object} [options] - Intl options; the display zone is added here
+     * @returns {string} Time text
+     */
+    _zonedTime( date, locale, options = {} ) {
+        return date.toLocaleTimeString( locale, { ...options, timeZone: this._displayZone() } ) + this._zoneLabel();
+    }
+
+    /**
+     * Count the hours since midnight in the display zone, at least one.
+     *
+     * @returns {number} Whole hours, rounded up
+     */
+    _hoursSinceZoneMidnight() {
+        const now   = new Date();
+        const parts = new Intl.DateTimeFormat( 'en-GB', { timeZone: this._displayZone(), hourCycle: 'h23', hour: 'numeric', minute: 'numeric', second: 'numeric' } ).formatToParts( now );
+        const at    = Object.fromEntries( parts.map( p => [ p.type, Number( p.value ) ] ) );
+        return Math.max( 1, Math.ceil( ( at.hour * 3600 + at.minute * 60 + at.second + now.getMilliseconds() / 1000 ) / 3600 ) );
+    }
+
+    /**
      * Return the label that marks a displayed time as UTC, or an empty string.
      */
     _zoneLabel() {
@@ -23128,7 +23146,7 @@ class NotificationsUI {
             timeStr = notification.time_display;
         } else {
             const timestamp = new Date( notification.timestamp || Date.now() );
-            timeStr = timestamp.toLocaleTimeString( 'en-US', {
+            timeStr = this._zonedTime( timestamp, 'en-US', {
                 hour   : '2-digit',
                 minute : '2-digit',
                 hour12 : false
@@ -23331,7 +23349,7 @@ class NotificationsUI {
                 timeStr = notification.time_display;
             } else {
                 const timestamp = new Date( notification.timestamp || Date.now() );
-                timeStr = timestamp.toLocaleTimeString( 'en-US', {
+                timeStr = this._zonedTime( timestamp, 'en-US', {
                     hour   : '2-digit',
                     minute : '2-digit',
                     hour12 : false
@@ -23498,7 +23516,7 @@ class NotificationsUI {
             time = notification.time_display;
         } else {
             const timestamp = new Date( notification.timestamp || Date.now() );
-            time = timestamp.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit' } );
+            time = this._zonedTime( timestamp, [], { hour: '2-digit', minute: '2-digit' } );
         }
 
         // Process message (remove [PREFIX] since we already show project name)
@@ -23741,9 +23759,7 @@ class NotificationsUI {
     getEffectiveHoursForQuery() {
         if ( this.historyWindowHours === null ) return null;
         if ( this.historyWindowHours === 'today' ) {
-            const now      = new Date();
-            const midnight = new Date( now.getFullYear(), now.getMonth(), now.getDate() );
-            return Math.max( 1, Math.ceil( ( now - midnight ) / 3600000 ) );
+            return this._hoursSinceZoneMidnight();
         }
         return this.historyWindowHours;
     }
@@ -23917,7 +23933,7 @@ class NotificationsUI {
         }
         
         // Format timestamp for display
-        const time = new Date( timestamp ).toLocaleTimeString();
+        const time = this._zonedTime( new Date( timestamp ) );
         
         // Create priority emoji and styling
         let priorityEmoji = "📝";
@@ -24867,7 +24883,7 @@ class NotificationsUI {
     addDebugMessage( message, type = 'info' ) {
         const debugLog = document.getElementById( 'debug-log' );
         if ( debugLog ) {
-            const timestamp = new Date().toLocaleTimeString();
+            const timestamp = this._zonedTime( new Date() );
             const debugDiv = document.createElement( 'div' );
             debugDiv.className = `debug-info ${type}`;
             debugDiv.textContent = `[${timestamp}] ${message}`;
@@ -26190,7 +26206,7 @@ class NotificationsUI {
             timeSpan.textContent = item.notification.time_display;
         } else {
             const ts = new Date( item.addedAt );
-            timeSpan.textContent = ts.toLocaleTimeString( 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false } );
+            timeSpan.textContent = this._zonedTime( ts, 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false } );
         }
 
         const messageDiv = document.createElement( 'div' );
@@ -26259,7 +26275,7 @@ class NotificationsUI {
             timeSpan.textContent = item.notification.time_display;
         } else {
             const ts = new Date( item.addedAt );
-            timeSpan.textContent = ts.toLocaleTimeString( 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false } );
+            timeSpan.textContent = this._zonedTime( ts, 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false } );
         }
 
         const textDiv = document.createElement( 'div' );

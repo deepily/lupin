@@ -42,6 +42,11 @@ type ZoneUI = Record<string, unknown> & {
   getLocalTimeDisplay: () => string;
   getLocalDateDisplay: () => string;
   getDateString: ( date: Date ) => string;
+  _zonedTime: ( date: Date, locale?: unknown, options?: object ) => string;
+  _hoursSinceZoneMidnight: () => number;
+  getEffectiveHoursForQuery: () => number | null;
+  historyWindowHours: unknown;
+  _renderCommonsEntry: ( entry: Record<string, unknown> ) => HTMLElement;
   renderJobCard: ( job: Record<string, unknown>, queueName: string ) => string;
 };
 
@@ -156,4 +161,55 @@ test( "a browser set to Tokyo does not leak its zone into a no-zone display", ()
   } finally {
     if ( saved === undefined ) delete process.env.TZ; else process.env.TZ = saved;
   }
+} );
+
+test( "an HTTP 500 from the config fetch logs an error that names app_timezone", async () => {
+  const ui     = makeUI( "Asia/Tokyo" );
+  const errors: unknown[][] = [];
+  ui.error     = ( ...args: unknown[] ) => { errors.push( args ); };
+  ui.authedFetch = async () => ( { ok: false, status: 500 } );
+  await ui.fetchClientConfig();
+  assert.equal( ui.appTimezone, null );
+  assert.ok( errors.some( e => /app_timezone/.test( String( e[ 0 ] ) ) ), "an error line must name app_timezone" );
+} );
+
+test( "_zonedTime shows the configured zone unlabelled and no-zone UTC labelled", () => {
+  const when = new Date( "2026-01-14T10:30:45Z" );
+  assert.match( makeUI( "Asia/Tokyo" )._zonedTime( when, "en-US", { hour: "2-digit", minute: "2-digit" } ), /^07:30 PM$/ );
+  assert.match( makeUI( null )._zonedTime( when, "en-US", { hour: "2-digit", minute: "2-digit" } ), /^10:30 AM UTC$/ );
+  assert.match( makeUI( null )._zonedTime( when ), / UTC$/ );
+} );
+
+test( "hours since midnight are counted in the display zone, whatever the browser zone is", () => {
+  const savedTZ = process.env.TZ;
+  const RealDate = globalThis.Date;
+  // Freeze the clock at 23:30 UTC: 23.5 h into the UTC day, 8.5 h into the Tokyo day.
+  class FrozenDate extends RealDate {
+    constructor( ...args: unknown[] ) { super( ...( args.length ? args as [] : [ "2026-01-14T23:30:00Z" ] ) ); }
+  }
+  globalThis.Date = FrozenDate as unknown as DateConstructor;
+  process.env.TZ = "America/Los_Angeles";
+  try {
+    assert.equal( makeUI( null )._hoursSinceZoneMidnight(), 24 );
+    assert.equal( makeUI( "Asia/Tokyo" )._hoursSinceZoneMidnight(), 9 );
+    const day = makeUI( "Asia/Tokyo" );
+    day.historyWindowHours = "today";
+    assert.equal( day.getEffectiveHoursForQuery(), 9 );
+    const midnightSharp = makeUI( "UTC" );
+    globalThis.Date = class extends RealDate { constructor( ...a: unknown[] ) { super( ...( a.length ? a as [] : [ "2026-01-14T00:00:00Z" ] ) ); } } as unknown as DateConstructor;
+    assert.equal( midnightSharp._hoursSinceZoneMidnight(), 1 );
+  } finally {
+    globalThis.Date = RealDate;
+    if ( savedTZ === undefined ) delete process.env.TZ; else process.env.TZ = savedTZ;
+  }
+} );
+
+test( "a commons entry time is shown in the display zone", () => {
+  const entry = { ts: "2026-01-14T10:30:45Z", topic: "t", sender: "s", body: "b", id: "1" };
+  const tokyo = makeUI( "Asia/Tokyo" );
+  const none  = makeUI( null );
+  for ( const ui of [ tokyo, none ] ) Object.assign( ui, { escapeHtml: ( t: string ) => t, formatPersonaName: ( t: string ) => t } );
+  const timeOf = ( ui: ZoneUI ) => { try { return ui._renderCommonsEntry( entry ).querySelector( ".commons-activity-entry-time" )?.textContent; } catch { return "THREW"; } };
+  assert.equal( timeOf( tokyo ), "19:30" );
+  assert.equal( timeOf( none ), "10:30 UTC" );
 } );

@@ -567,16 +567,16 @@ test( "_formatFleetTimestamp: configured IANA zone renders HH:MM:SS + short TZ",
   assert.match( out, /14:32:07/ );                  // EDT = UTC-4 in June
 } );
 
-test( "_formatFleetTimestamp: invalid zone falls back to browser-local (no throw)", () => {
+test( "_formatFleetTimestamp: invalid zone falls back to UTC (no throw)", () => {
   const ui = newUI();
   const out = ui._formatFleetTimestamp( new Date( "2026-06-09T18:32:07Z" ), "Not/AZone" );
-  assert.match( out, /^\d{2}:\d{2}:\d{2}/ );
+  assert.equal( out, "18:32:07 UTC" );
 } );
 
-test( "_formatFleetTimestamp: absent zone uses browser-local", () => {
+test( "_formatFleetTimestamp: absent zone shows UTC", () => {
   const ui = newUI();
   const out = ui._formatFleetTimestamp( new Date( "2026-06-09T18:32:07Z" ), null );
-  assert.match( out, /^\d{2}:\d{2}:\d{2}/ );
+  assert.equal( out, "18:32:07 UTC" );
 } );
 
 test( "_stampFleetStatusUpdated: no span → no-op (no throw)", () => {
