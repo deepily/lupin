@@ -371,6 +371,16 @@ class TestMainPolling:
         assert "pings_fired=0" in out
         assert "roster=3"      in out
 
+    def test_the_loop_timestamp_names_no_zone_so_the_configured_one_applies( self, mod, wired, monkeypatch ):
+        """The loop passes no tz_name, so the helper reads the configured zone."""
+        seen = []
+        monkeypatch.setattr( mod.cu, "get_current_datetime", lambda **kwargs: seen.append( kwargs ) or "00:00:00 ZZZ" )
+        _FakeArbiter.polls = 1
+
+        mod.main()
+
+        assert seen == [ { "format_str": "%H:%M:%S %Z" } ]
+
     def test_the_poll_counter_advances_rather_than_reprinting_one( self, mod, wired, capsys ):
         """The `n[ 0 ] += 1` closure. A stuck counter makes a live loop look like one poll."""
         _FakeArbiter.polls = 3

@@ -38,7 +38,7 @@ if _src_path not in sys.path:
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_via_bridge   # 6929f4ac + row 011f1f90: resilient reader (repo-root holds visible)
-import cosa.utils.util as cu   # EST timestamps (project canonical US/Eastern)
+import cosa.utils.util as cu   # timestamps in the configured `app timezone`; needs LUPIN_CONFIG_MGR_CLI_ARGS set
 
 
 class _DryGateway:
@@ -104,7 +104,7 @@ def main():
             def _wrapped():                     # per-poll summary line for the loop
                 r  = _orig()
                 n[ 0 ] += 1
-                ts = cu.get_current_datetime( tz_name="US/Eastern", format_str="%H:%M:%S %Z" )
+                ts = cu.get_current_datetime( format_str="%H:%M:%S %Z" )
                 print( f"  {ts}  poll #{n[ 0 ]}  sessions={r['sessions']}  edges={r['edges']}  "
                        f"cycles={r['cycles']}  pings_fired={r['pings_fired']}  roster={r['roster']}", flush=True )
                 return r

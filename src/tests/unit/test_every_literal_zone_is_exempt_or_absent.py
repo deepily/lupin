@@ -28,7 +28,6 @@ EXEMPT = {
     "src/cosa/utils/edt_timestamp.py"                    : "FIX OWED: None falls back to DEFAULT_TZ_NAME; dm.py passes none",
     "src/lupin_mcp/reuse_needset/smoke.py"               : "LEGIT: the smoke schedule window is defined in Eastern, like the harness",
     "src/scripts/dm-experiment/generate_schedule.py"     : "LEGIT: the experiment schedule is defined in Eastern",
-    "src/scripts/run-heartbeat-arbiter.py"               : "FIX OWED: a dev script passes a literal zone to the util helper",
 }
 
 
