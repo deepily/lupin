@@ -93,7 +93,7 @@ def test_the_census_walks_a_real_population_and_finds_the_known_literals():
     """Assert the loop will find something before it loops."""
     files, hits = _walk_tracked_sources()
     assert len( files ) > 1000, f"only {len( files )} tracked source files walked"
-    assert "src/cosa/rest/db/embedding_regeneration.py" in hits and "src/cosa/utils/edt_timestamp.py" in hits
+    assert "src/scripts/dm-experiment/generate_schedule.py" in hits and "src/cosa/utils/edt_timestamp.py" in hits
 
 
 def test_no_tracked_source_file_names_a_literal_zone_unless_it_is_exempt():
