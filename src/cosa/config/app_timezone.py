@@ -8,6 +8,7 @@ import zoneinfo
 
 APP_TIMEZONE_KEY             = "app timezone"
 ARBITER_JOURNAL_TIMEZONE_KEY = "arbiter journal local timezone"
+DECISION_PROXY_TIMEZONE_KEY  = "decision proxy timezone"
 
 
 class InvalidAppTimezoneError( ValueError ):
@@ -93,3 +94,39 @@ def read_arbiter_journal_timezone() -> str:
     """
     from cosa.config.configuration_manager import ConfigurationManager
     return get_arbiter_journal_timezone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+
+
+def get_decision_proxy_timezone( config_mgr ) -> str:
+    """
+    Read the zone the decision proxy's active hours are read in.
+
+    Requires:
+        - config_mgr is a ConfigurationManager
+
+    Ensures:
+        - Returns the IANA zone name configured under `decision proxy timezone`
+
+    Raises:
+        - MissingConfigKeyError if the key is absent or blank in the resolved block
+        - InvalidAppTimezoneError if the value is not a zone name zoneinfo knows
+    """
+    return get_zone_for_key( config_mgr, DECISION_PROXY_TIMEZONE_KEY )
+
+
+def read_decision_proxy_timezone() -> str:
+    """
+    Read the decision proxy zone from the process configuration.
+
+    Requires:
+        - LUPIN_CONFIG_MGR_CLI_ARGS names a loadable configuration
+
+    Ensures:
+        - Returns the IANA zone name configured under `decision proxy timezone`
+
+    Raises:
+        - ValueError if no configuration is loaded
+        - MissingConfigKeyError if the key is absent or blank
+        - InvalidAppTimezoneError if the value is not a zone name zoneinfo knows
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    return get_decision_proxy_timezone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )

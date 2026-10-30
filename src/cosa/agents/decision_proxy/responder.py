@@ -21,7 +21,6 @@ from cosa.agents.decision_proxy.config import (
     DEFAULT_ACTIVE_HOURS_END,
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
-    DEFAULT_TIMEZONE,
     DEFAULT_TRUST_MODE,
 )
 from cosa.agents.decision_proxy.smart_router import SmartRouter
@@ -63,7 +62,7 @@ class DecisionResponder( BaseResponder ):
         enabled             = True,
         active_hours_start  = DEFAULT_ACTIVE_HOURS_START,
         active_hours_end    = DEFAULT_ACTIVE_HOURS_END,
-        timezone            = DEFAULT_TIMEZONE,
+        timezone            = None,
         user_connected_fn   = None,
         now_fn              = None
     ):
@@ -89,7 +88,7 @@ class DecisionResponder( BaseResponder ):
                      True (permissive library default); __main__ passes the INI value.
             active_hours_start: Hour (0-23) when the human's active hours begin
             active_hours_end: Hour (0-23) when they end
-            timezone: IANA timezone the hours are read in
+            timezone: IANA timezone the hours are read in; None reads `decision proxy timezone`
             user_connected_fn: Callable returning True when the human is connected.
                      None means "not connected", so the proxy answers at any hour.
             now_fn: Callable returning the current datetime (None reads the clock)

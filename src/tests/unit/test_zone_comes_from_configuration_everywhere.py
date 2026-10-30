@@ -151,3 +151,15 @@ def test_the_arbiter_job_with_no_zone_takes_the_configured_journal_zone( monkeyp
                               notify_fn=lambda *a, **k: None, log_fn=lambda *a, **k: None )
 
     assert str( job._outreach_tz ) == "Asia/Kolkata"
+
+
+def test_the_decision_proxy_zone_reads_its_own_key():
+    from cosa.config.app_timezone import get_decision_proxy_timezone
+    stub = _Cfg( "America/Chicago" )
+
+    assert get_decision_proxy_timezone( stub ) == "America/Chicago"
+    assert stub.keys == [ "decision proxy timezone" ]
+    with pytest.raises( MissingConfigKeyError ):
+        get_decision_proxy_timezone( _Cfg( None ) )
+    with pytest.raises( InvalidAppTimezoneError ):
+        get_decision_proxy_timezone( _Cfg( "Mars/Olympus_Mons" ) )

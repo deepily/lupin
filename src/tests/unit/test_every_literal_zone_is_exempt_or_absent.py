@@ -22,7 +22,6 @@ SKIPPED = ( "/tests/", "/rnd/", "/.venv/", "/history/", "/node_modules/", "/dist
 # path -> why a literal zone is still there. FIX OWED is a fallback that must read configuration.
 # LEGIT is a zone the file means on its own account, not a stand-in for the user's zone.
 EXEMPT = {
-    "src/cosa/agents/decision_proxy/config.py"           : "FIX OWED: DEFAULT_TIMEZONE backs the `decision proxy timezone` key and ~30 constructor calls",
     "src/cosa/agents/heartbeat_arbiter/arbiter_journal.py": "LEGIT: the module's own self-test names a zone",
     "src/cosa/repo/doc_lint/harness_schedule.py"         : "LEGIT: the harness schedule window is defined as 10:00 to 13:00 Eastern",
     "src/cosa/utils/edt_timestamp.py"                    : "LEGIT: the module's own self-test names a zone",

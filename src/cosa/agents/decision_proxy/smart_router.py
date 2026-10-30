@@ -17,8 +17,8 @@ from typing import Optional
 from cosa.agents.decision_proxy.config import (
     DEFAULT_ACTIVE_HOURS_START,
     DEFAULT_ACTIVE_HOURS_END,
-    DEFAULT_TIMEZONE,
 )
+from cosa.config.app_timezone import read_decision_proxy_timezone
 
 
 class SmartRouter:
@@ -38,7 +38,7 @@ class SmartRouter:
         self,
         active_hours_start = DEFAULT_ACTIVE_HOURS_START,
         active_hours_end   = DEFAULT_ACTIVE_HOURS_END,
-        timezone           = DEFAULT_TIMEZONE,
+        timezone           = None,
         debug              = False
     ):
         """
@@ -47,12 +47,12 @@ class SmartRouter:
         Args:
             active_hours_start: Hour (0-23) when active hours begin
             active_hours_end: Hour (0-23) when active hours end
-            timezone: IANA timezone string (e.g., "America/Chicago")
+            timezone: IANA timezone string; None reads `decision proxy timezone` from configuration
             debug: Enable debug output
         """
         self.active_hours_start = active_hours_start
         self.active_hours_end   = active_hours_end
-        self.timezone           = timezone
+        self.timezone           = timezone if timezone is not None else read_decision_proxy_timezone()
         self.debug              = debug
 
     def is_active_hours( self, now=None ):

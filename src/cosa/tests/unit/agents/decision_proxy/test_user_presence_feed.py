@@ -9,6 +9,8 @@ and time are doubles.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 import cosa.agents.decision_proxy.user_presence as up
 
 HUMAN = "human-1"
@@ -103,6 +105,7 @@ def test_a_request_without_a_token_sends_no_authorization_header():
 def _config( values ):
     mgr = MagicMock()
     mgr.get.side_effect = lambda key, default=None, return_type=None: values.get( key, default )
+    mgr.get_required.side_effect = lambda key, **kw: values.get( key, "UTC" )     # tests that omit the zone are not about it
     return mgr
 
 
@@ -145,3 +148,12 @@ def test_the_ini_and_its_splainer_both_carry_the_human_user_id_key():
         assert len( lines ) == 1, name
     ini = [ l for l in open( f"{root}/src/conf/lupin-app.ini" ).read().splitlines() if l.startswith( "decision proxy human user id" ) ][ 0 ]
     assert ini.split( "=", 1 )[ 1 ].strip() == ""          # shipped empty: the proxy answers as before
+
+
+def test_the_wiring_stops_when_the_timezone_key_is_missing():
+    from cosa.config.configuration_manager import MissingConfigKeyError
+    mgr = _config( { } )
+    mgr.get_required.side_effect = MissingConfigKeyError( "decision proxy timezone", "Lupin:+Stub", None )
+
+    with pytest.raises( MissingConfigKeyError ):
+        up.responder_presence_kwargs( mgr, "h", 7999, lambda: "Bearer t", OWN )

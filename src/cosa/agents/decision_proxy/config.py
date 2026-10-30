@@ -10,6 +10,7 @@ Dependency Rule:
     This module never imports from notification_proxy or swe_team.
 """
 
+from cosa.config.app_timezone import get_decision_proxy_timezone
 from cosa.agents.utils.proxy_agents.base_config import (   # noqa: F401
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
@@ -76,7 +77,6 @@ DEFAULT_CB_RECOVERY_COOLDOWN_SECONDS   = 3600
 # Active hours (when user is typically available)
 DEFAULT_ACTIVE_HOURS_START = 9    # 09:00
 DEFAULT_ACTIVE_HOURS_END   = 22   # 22:00
-DEFAULT_TIMEZONE           = "America/Chicago"
 
 # Audit sampling rate at L4
 DEFAULT_L4_AUDIT_SAMPLE_RATE = 0.10  # 10%
@@ -177,7 +177,7 @@ def trust_proxy_config_from_config_mgr( config_mgr ):
         "enabled"                          : config_mgr.get( "decision proxy enabled",                                             default=False,                                    return_type="boolean" ),
         "active_hours_start"               : config_mgr.get( "decision proxy active hours start",                                   default=DEFAULT_ACTIVE_HOURS_START,                return_type="int" ),
         "active_hours_end"                 : config_mgr.get( "decision proxy active hours end",                                     default=DEFAULT_ACTIVE_HOURS_END,                  return_type="int" ),
-        "timezone"                         : config_mgr.get( "decision proxy timezone",                                             default=DEFAULT_TIMEZONE ),
+        "timezone"                         : get_decision_proxy_timezone( config_mgr ),
         # Count-based trust level thresholds
         "l2_threshold"                     : config_mgr.get( "swe team trust proxy l2 threshold",                                   default=DEFAULT_L2_THRESHOLD,                     return_type="int" ),
         "l3_threshold"                     : config_mgr.get( "swe team trust proxy l3 threshold",                                   default=DEFAULT_L3_THRESHOLD,                     return_type="int" ),

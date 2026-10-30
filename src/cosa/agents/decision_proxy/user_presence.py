@@ -18,8 +18,8 @@ import requests
 from cosa.agents.decision_proxy.config import (
     DEFAULT_ACTIVE_HOURS_START,
     DEFAULT_ACTIVE_HOURS_END,
-    DEFAULT_TIMEZONE,
 )
+from cosa.config.app_timezone import get_decision_proxy_timezone
 
 logger = logging.getLogger( __name__ )
 
@@ -85,7 +85,7 @@ def responder_presence_kwargs( config_mgr, host, port, authorization_fn, own_ses
     return {
         "active_hours_start" : config_mgr.get( "decision proxy active hours start", default=DEFAULT_ACTIVE_HOURS_START, return_type="int" ),
         "active_hours_end"   : config_mgr.get( "decision proxy active hours end",   default=DEFAULT_ACTIVE_HOURS_END,   return_type="int" ),
-        "timezone"           : config_mgr.get( "decision proxy timezone",           default=DEFAULT_TIMEZONE ),
+        "timezone"           : get_decision_proxy_timezone( config_mgr ),
         "user_connected_fn"  : sessions_feed(
             host, port, authorization_fn,
             config_mgr.get( "decision proxy human user id", default="" ),

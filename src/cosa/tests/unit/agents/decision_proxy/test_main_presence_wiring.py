@@ -32,6 +32,7 @@ def _drive_main( monkeypatch, fetch ):
                                 trust_mode="shadow" )
     cfg      = MagicMock()
     cfg.get.side_effect = lambda key, default=None, return_type=None: INI.get( key, default )
+    cfg.get_required.side_effect = lambda key, **kw: INI[ key ]
 
     def loader( responder, debug=False ):
         built.append( responder )

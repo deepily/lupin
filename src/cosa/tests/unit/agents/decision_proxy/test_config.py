@@ -52,6 +52,7 @@ def test_factory_falls_back_to_module_defaults():
     """
     mgr = MagicMock()
     mgr.get.side_effect = lambda key, default=None, return_type=None: default
+    mgr.get_required.return_value = "America/Chicago"
 
     out = cfg.trust_proxy_config_from_config_mgr( mgr )
 
@@ -59,7 +60,9 @@ def test_factory_falls_back_to_module_defaults():
     assert out[ "enabled" ] is False
     assert out[ "active_hours_start" ] == cfg.DEFAULT_ACTIVE_HOURS_START
     assert out[ "active_hours_end" ] == cfg.DEFAULT_ACTIVE_HOURS_END
-    assert out[ "timezone" ] == cfg.DEFAULT_TIMEZONE
+    assert out[ "timezone" ] == "America/Chicago"                     # read from the key, not from a module default
+    mgr.get_required.assert_called_once_with( "decision proxy timezone" )
+    assert not hasattr( cfg, "DEFAULT_TIMEZONE" )
     assert out[ "l2_threshold" ] == cfg.DEFAULT_L2_THRESHOLD
     assert out[ "l5_threshold" ] == cfg.DEFAULT_L5_THRESHOLD
     assert out[ "decay_half_life_days" ] == cfg.DEFAULT_DECAY_HALF_LIFE_DAYS
@@ -82,8 +85,10 @@ def test_factory_passes_through_config_values():
     """
     mgr = MagicMock()
     mgr.get.return_value = "SENTINEL"
+    mgr.get_required.return_value = "America/Chicago"      # the zone is validated, so it cannot be a sentinel
 
     out = cfg.trust_proxy_config_from_config_mgr( mgr )
 
     assert len( out ) == 36
+    assert out.pop( "timezone" ) == "America/Chicago"
     assert all( v == "SENTINEL" for v in out.values() )

@@ -13,6 +13,8 @@ import sys
 from datetime import datetime
 from unittest.mock import patch
 
+import pytest
+
 from cosa.agents.decision_proxy.smart_router import SmartRouter
 
 
@@ -110,3 +112,26 @@ def test_defer_quiet_paths_emit_no_output( capsys ):
     assert r.should_defer_to_user( _at( 12 ), user_connected=False ) is False  # not connected
     assert r.should_defer_to_user( _at( 12 ), user_connected=True ) is True    # defer
     assert capsys.readouterr().out == ""
+
+
+def test_a_router_built_with_no_zone_reads_the_configured_decision_proxy_zone( monkeypatch ):
+    class _Cfg:
+        config_block_id = "Lupin:+Stub"
+        def get_required( self, key, **_kw ):
+            assert key == "decision proxy timezone"
+            return "Asia/Kolkata"
+    monkeypatch.setattr( "cosa.config.configuration_manager.ConfigurationManager", lambda *a, **k: _Cfg() )
+
+    assert SmartRouter( 9, 22 ).timezone == "Asia/Kolkata"
+    assert SmartRouter( 9, 22, timezone="UTC" ).timezone == "UTC"            # an explicit zone wins, config unread
+
+
+def test_a_router_with_no_zone_and_no_configured_key_cannot_be_built( monkeypatch ):
+    from cosa.config.configuration_manager import MissingConfigKeyError
+    class _Cfg:
+        config_block_id = "Lupin:+Stub"
+        def get_required( self, key, **_kw ): raise MissingConfigKeyError( key, self.config_block_id, None )
+    monkeypatch.setattr( "cosa.config.configuration_manager.ConfigurationManager", lambda *a, **k: _Cfg() )
+
+    with pytest.raises( MissingConfigKeyError ):
+        SmartRouter( 9, 22 )
