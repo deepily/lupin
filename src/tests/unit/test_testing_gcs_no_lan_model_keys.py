@@ -270,6 +270,18 @@ def test_a_planted_spec_on_an_exempt_key_reddens_the_cloud_allowlist( vm_config,
     assert non_cloud_consumers( keys, planted )[ exempt_key ] == ( None, planted_spec )
 
 
+@pytest.mark.parametrize( "exempt_key", sorted( NOT_A_SPEC ) )
+def test_a_spec_appended_to_an_exempt_keys_real_value_is_flagged( vm_config, exempt_key ):
+    """Mutant: a real value plus a trailing model spec is flagged: the pattern is whole-value."""
+    keys     = vm_config.get_keys()
+    real     = lambda key: vm_config.get( key, default=None, silent=True )
+    appended = f"{real( exempt_key )},ollama:7b"
+    planted  = lambda key: appended if key == exempt_key else real( key )
+
+    assert exempt_key not in non_cloud_consumers( keys, real )
+    assert non_cloud_consumers( keys, planted )[ exempt_key ] == ( None, appended )
+
+
 def test_every_not_a_spec_exemption_still_fits_its_value_in_this_block( vm_config ):
     """An exemption for a key that is gone or off its value pattern is stale and must go."""
     keys  = vm_config.get_keys()
