@@ -21,6 +21,8 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 import cosa.utils.util as cu
+from cosa.config.app_timezone import get_app_timezone
+from cosa.config.configuration_manager import ConfigurationManager
 
 
 class ReportWriter:
@@ -28,14 +30,13 @@ class ReportWriter:
     Writes final-report markdown files to disk.
 
     Path convention:
-        `{project_root}/io/swe-team/reports/{email}/YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md`
+        `{project_root}/io/swe-team/reports/{email}/YYYY.MM.DD-at-HH:MM-{zone}-{slug}-{agent}-report.md`
 
-    The `EST` token in the filename is fixed — it reflects the user's dated-
-    filename convention. Times use America/New_York (handles `EST`/`EDT` automatically).
+    The `{zone}` token is the configured zone's abbreviation at write time.
+    The filename therefore cannot name a zone the times are not in.
     """
 
     REPORTS_DIR = "io/swe-team/reports"
-    TZ          = ZoneInfo( "America/New_York" )
 
     def __init__( self, user_email: str, debug: bool = False ):
         """
@@ -44,9 +45,14 @@ class ReportWriter:
         Args:
             user_email: User email for report directory partitioning
             debug: Enable debug output
+
+        Raises:
+            - MissingConfigKeyError if `app timezone` is absent or blank
+            - InvalidAppTimezoneError if it is not an IANA zone name
         """
         self.user_email = user_email
         self.debug      = debug
+        self.tz         = ZoneInfo( get_app_timezone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) ) )
 
     def write( self, agent: str, slug: str, title: str, body_md: str ) -> str:
         """
@@ -76,7 +82,7 @@ class ReportWriter:
         report_dir  = os.path.dirname( report_path )
         os.makedirs( report_dir, exist_ok=True )
 
-        ts_iso   = datetime.now( tz=self.TZ ).isoformat( timespec="seconds" )
+        ts_iso   = datetime.now( tz=self.tz ).isoformat( timespec="seconds" )
         body_md  = body_md or "_(report body was empty — agent produced no structured output)_"
         content  = f"# {title}\n\n**Generated**: {ts_iso}\n**Agent**: `{agent}`\n\n---\n\n{body_md}\n"
 
@@ -91,16 +97,16 @@ class ReportWriter:
         """
         Generate the report file path following the project's dated-filename convention.
 
-        Filename: `YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md`
+        Filename: `YYYY.MM.DD-at-HH:MM-{zone}-{slug}-{agent}-report.md`
 
-        The `EST` token is fixed per the project's filename convention; the actual
-        timestamp uses America/New_York (handles `EST`/`EDT` automatically).
+        The zone token is the configured zone's abbreviation at write time, so it follows
+        daylight saving and a change of the configured zone.
         """
-        now_et    = datetime.now( tz=self.TZ )
+        now_et    = datetime.now( tz=self.tz )
         date_str  = now_et.strftime( "%Y.%m.%d" )
         time_str  = now_et.strftime( "%H:%M" )
         safe_slug = self._sanitize_slug( slug )
-        filename  = f"{date_str}-at-{time_str}-EST-{safe_slug}-{agent}-report.md"
+        filename  = f"{date_str}-at-{time_str}-{now_et.strftime( '%Z' )}-{safe_slug}-{agent}-report.md"
         return os.path.join(
             cu.get_project_root(),
             self.REPORTS_DIR,
@@ -155,7 +161,7 @@ def quick_smoke_test():
                 assert os.path.exists( path )
                 assert path.endswith( "-bug_fix_expediter-report.md" )
                 assert "/io/swe-team/reports/test@test.com/" in path
-                assert "-at-" in path and "-EST-" in path
+                assert "-at-" in path and f"-{datetime.now( writer.tz ).strftime( '%Z' )}-" in path
                 content = open( path ).read()
                 assert "# BFE Smoke Test Report" in content
                 assert "**Agent**: `bug_fix_expediter`" in content
