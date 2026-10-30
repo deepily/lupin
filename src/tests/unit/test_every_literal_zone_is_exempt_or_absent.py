@@ -19,20 +19,20 @@ JS_RE   = re.compile( rf"""["'`]{REGION}/[A-Za-z0-9_+\-]+(?:/[A-Za-z0-9_+\-]+)?[
 SOURCE  = ( ".py", ".js", ".ts" )
 SKIPPED = ( "/tests/", "/rnd/", "/.venv/", "/history/", "/node_modules/", "/dist/", "/ephemera/", "/testkit/", "/test_" )
 
-# path -> why a literal zone is still there. Each entry is owed work; none is a design decision.
+# path -> why a literal zone is still there. FIX OWED is a fallback that must read configuration.
+# LEGIT is a zone the file means on its own account, not a stand-in for the user's zone.
 EXEMPT = {
-    "src/cosa/agents/decision_proxy/config.py"           : "DEFAULT_TIMEZONE is the default of `decision proxy timezone`, which has an INI value",
-    "src/cosa/agents/heartbeat_arbiter/arbiter_job.py"   : "local-time label formatter names the zone; should take the journal zone",
-    "src/cosa/agents/heartbeat_arbiter/arbiter_journal.py": "the module's own self-test names a zone",
-    "src/cosa/agents/shared/report_writer.py"            : "TZ class attribute for report timestamps",
-    "src/cosa/repo/doc_lint/harness_schedule.py"         : "ZONE of the harness schedule, a fixed project-local clock",
-    "src/cosa/rest/db/embedding_regeneration.py"         : "business-hours gate reads the hour in a literal zone",
-    "src/cosa/utils/edt_timestamp.py"                    : "DEFAULT_TZ_NAME of the EDT stamp helper, and its self-test",
-    "src/lupin_app/static/js/notifications.js"           : "browser fallbacks when the config fetch fails",
-    "src/lupin_cli/claude_code/hooks/lib/hook_common.py" : "hooks run outside the server, where no config is loaded",
-    "src/lupin_mcp/reuse_needset/smoke.py"               : "EASTERN constant of a smoke script",
-    "src/scripts/dm-experiment/generate_schedule.py"     : "TIMEZONE constant of a one-off experiment script",
-    "src/scripts/run-heartbeat-arbiter.py"               : "script passes a literal zone to the util helper",
+    "src/cosa/agents/decision_proxy/config.py"           : "FIX OWED: DEFAULT_TIMEZONE backs the `decision proxy timezone` key and ~30 constructor calls",
+    "src/cosa/agents/heartbeat_arbiter/arbiter_journal.py": "LEGIT: the module's own self-test names a zone",
+    "src/cosa/agents/shared/report_writer.py"            : "LEGIT: the report filename convention fixes Eastern ( the EST token )",
+    "src/cosa/repo/doc_lint/harness_schedule.py"         : "LEGIT: the harness schedule window is defined as 10:00 to 13:00 Eastern",
+    "src/cosa/rest/db/embedding_regeneration.py"         : "LEGIT: the business-hours gate is defined in EDT, its parameter is named hour_edt",
+    "src/cosa/utils/edt_timestamp.py"                    : "FIX OWED: None falls back to DEFAULT_TZ_NAME; dm.py passes none",
+    "src/lupin_app/static/js/notifications.js"           : "FIX OWED: browser fallbacks when the config fetch fails; needs the :8000 JS tier",
+    "src/lupin_cli/claude_code/hooks/lib/hook_common.py" : "FIX OWED: hooks cannot load ConfigurationManager, which prints to stdout",
+    "src/lupin_mcp/reuse_needset/smoke.py"               : "LEGIT: the smoke schedule window is defined in Eastern, like the harness",
+    "src/scripts/dm-experiment/generate_schedule.py"     : "LEGIT: the experiment schedule is defined in Eastern",
+    "src/scripts/run-heartbeat-arbiter.py"               : "FIX OWED: a dev script passes a literal zone to the util helper",
 }
 
 

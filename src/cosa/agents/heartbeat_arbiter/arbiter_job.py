@@ -32,7 +32,6 @@ import datetime
 import json
 import os
 import uuid
-import zoneinfo
 from typing import Callable, List, Optional, Protocol, runtime_checkable
 
 from cosa.agents.agentic_job_base import AgenticJobBase
@@ -504,9 +503,9 @@ def _fmt_minutes( seconds ):
     return f"{int( seconds ) // 60}m"
 
 
-def _fmt_eastern( dt ):
+def _fmt_local( dt, tz ):
     """
-    Rick-facing wall-clock: aware datetime → 'HH:MM EDT/EST' (America/New_York).
+    Rick-facing wall-clock: aware datetime → 'HH:MM EDT/EST' in the configured zone tz.
 
     The journal and commons speak UTC, so every human-facing advisory converts
     and labels the zone; a bare UTC time in text for the owner misleads.
@@ -518,7 +517,7 @@ def _fmt_eastern( dt ):
     if dt is None:
         return "unknown"
     try:
-        return dt.astimezone( zoneinfo.ZoneInfo( "America/New_York" ) ).strftime( "%H:%M %Z" )
+        return dt.astimezone( tz ).strftime( "%H:%M %Z" )
     except Exception:
         return "unknown"
 
@@ -4219,7 +4218,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 self._route(
                     CASE_MANAGER_STALE_ADVISORY,
                     f"MANAGER-STALE: {persona} silent {_fmt_minutes( age )} "
-                    f"(last signal {_fmt_eastern( last_seen )}, threshold "
+                    f"(last signal {_fmt_local( last_seen, self._outreach_tz )}, threshold "
                     f"{self.manager_stale_poke_threshold_seconds}s) — poking (bounded, "
                     f"≤{self.poke_max_per_episode}/episode); outreach only, no action taken.",
                     active_managers=active_managers,
@@ -4454,7 +4453,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         self._fleet_dark_escalated = True
         seen  = self._last_manager_seen
-        last  = f"{seen[ 'persona' ]} at {_fmt_eastern( seen[ 'at' ] )}" if seen else "unknown"
+        last  = f"{seen[ 'persona' ]} at {_fmt_local( seen[ 'at' ], self._outreach_tz )}" if seen else "unknown"
         decay = f"{prev}→0" if edge else "0 at startup (recent signals within lookback)"
         self._route(
             CASE_FLEET_DARK,
