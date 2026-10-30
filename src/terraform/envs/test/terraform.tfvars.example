@@ -6,3 +6,8 @@ project_id     = "REPLACE-with-your-gcp-project-id" # e.g. the sandbox project, 
 region         = "us-central1"
 environment    = "test"
 create_buckets = false # Phase-0 V4: the -test buckets already exist → reuse. Set true to provision fresh.
+
+# Direct VPC egress for the model server (read them from the live service, never infer):
+#   gcloud run services describe lupin-model-server --region us-central1 --format='value(spec.template.metadata.annotations."run.googleapis.com/network-interfaces")'
+app_vpc_self_link           = "https://www.googleapis.com/compute/v1/projects/REPLACE-project/global/networks/REPLACE-vpc"
+model_server_vpc_subnetwork = "projects/REPLACE-project/regions/us-central1/subnetworks/REPLACE-subnet"
