@@ -1505,7 +1505,8 @@ class NotificationsUI {
                 this.TOKEN_EXPIRY_THRESHOLD_SECS = config.token_expiry_threshold_secs;
                 this.TOKEN_REFRESH_DEDUP_WINDOW_MS = config.token_refresh_dedup_window_ms;
                 this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = config.websocket_heartbeat_interval_secs;
-                this.appTimezone = config.app_timezone;
+                this.appTimezone = config.app_timezone || null;
+                if ( !this.appTimezone ) this.error( "Client config carries no app_timezone: times show in UTC" );
                 this.tfeAutoFixDefault = !!config.test_fix_expediter_auto_fix_enabled;
                 this.envLabel = config.env_label || "DEVELOPMENT";
                 this.updateElement( "env-label", `[${this.envLabel}]: ` );
@@ -1575,7 +1576,7 @@ class NotificationsUI {
             this.TOKEN_EXPIRY_THRESHOLD_SECS = 5 * 60;              // 5 minutes
             this.TOKEN_REFRESH_DEDUP_WINDOW_MS = 60 * 1000;         // 60 seconds
             this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
-            this.appTimezone = 'America/New_York';                  // Default timezone
+            this.appTimezone = null;                                // No default: the zone comes from the server, so time displays show UTC
             this.tfeAutoFixDefault = false;                         // Conservative fallback
 
             // TTS preview-and-pause fallbacks — conservative: feature DISABLED
@@ -8732,8 +8733,8 @@ class NotificationsUI {
         let scheduledBadge = '';
         if ( job.scheduled_at ) {
             const schedDate = new Date( job.scheduled_at );
-            const tz = this.appTimezone || 'America/New_York';
-            const schedTimeStr = schedDate.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', timeZone: tz } );
+            const tz = this._displayZone();
+            const schedTimeStr = schedDate.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', timeZone: tz } ) + this._zoneLabel();
             const schedDateStr = schedDate.toLocaleDateString( [], { month: 'short', day: 'numeric', timeZone: tz } );
             scheduledBadge = `<span class="scheduled-badge" title="Scheduled for ${schedDate.toISOString()}">🕐 ${schedDateStr} ${schedTimeStr}</span>`;
         }
@@ -9962,10 +9963,12 @@ class NotificationsUI {
     /**
      * Formats a job timestamp as a short date and time in the app time zone.
      *
-     * Returns an empty string when the timestamp is missing and the text Invalid Date when it cannot be parsed.
+     * Returns an empty string when the timestamp is missing. Returns it unchanged when no zone is configured. Returns the text Invalid Date when it cannot be parsed.
      */
     formatJobTimestamp( timestamp ) {
         if ( !timestamp ) return '';
+        // No configured zone and no offset in the text: the instant is unknown, so show the server's own text
+        if ( !this.appTimezone && !/(Z|[+-]\d\d:?\d\d)$/.test( timestamp ) ) return timestamp;
         try {
             // Handle "2026-01-14 @ 10:30:45 EST" format
             const cleaned = timestamp.replace( ' @ ', 'T' ).replace( ' EST', '' ).replace( ' EDT', '' );
@@ -9975,8 +9978,8 @@ class NotificationsUI {
                 day      : 'numeric',
                 hour     : 'numeric',
                 minute   : '2-digit',
-                timeZone : this.appTimezone || 'America/New_York'
-            } );
+                timeZone : this._displayZone()
+            } ) + this._zoneLabel();
         } catch ( e ) {
             return timestamp;
         }
@@ -22649,11 +22652,21 @@ class NotificationsUI {
      * @returns {string} ISO date string
      */
     getDateString( timestamp ) {
-        // Use local timezone (which should match server's app_timezone)
-        const year = timestamp.getFullYear();
-        const month = String( timestamp.getMonth() + 1 ).padStart( 2, '0' );
-        const day = String( timestamp.getDate() ).padStart( 2, '0' );
-        return `${year}-${month}-${day}`;
+        return timestamp.toLocaleDateString( 'en-CA', { timeZone: this._displayZone(), year: 'numeric', month: '2-digit', day: '2-digit' } );
+    }
+
+    /**
+     * Return the zone every time display uses: the server zone, else UTC.
+     */
+    _displayZone() {
+        return this.appTimezone || 'UTC';
+    }
+
+    /**
+     * Return the label that marks a displayed time as UTC, or an empty string.
+     */
+    _zoneLabel() {
+        return this.appTimezone ? '' : ' UTC';
     }
 
     /**
@@ -22669,7 +22682,7 @@ class NotificationsUI {
             const parsed = new Date( isoTimestamp );
             if ( !isNaN( parsed.getTime() ) ) {
                 return parsed.toLocaleDateString( 'en-CA', {
-                    timeZone : this.appTimezone,
+                    timeZone : this._displayZone(),
                     year     : 'numeric',
                     month    : '2-digit',
                     day      : '2-digit'
@@ -22693,12 +22706,12 @@ class NotificationsUI {
             hour     : '2-digit',
             minute   : '2-digit',
             hour12   : false,
-            timeZone : this.appTimezone
+            timeZone : this._displayZone()
         } );
         // Extract timezone abbreviation (e.g., "EST" or "EDT")
         const tzAbbrev = now.toLocaleTimeString( 'en-US', {
             timeZoneName : 'short',
-            timeZone     : this.appTimezone
+            timeZone     : this._displayZone()
         } ).split( ' ' ).pop();
         return `${time} ${tzAbbrev}`;
     }
@@ -22714,7 +22727,7 @@ class NotificationsUI {
         const now = new Date();
         // Use en-CA locale which returns ISO format (YYYY-MM-DD)
         return now.toLocaleDateString( 'en-CA', {
-            timeZone : this.appTimezone,
+            timeZone : this._displayZone(),
             year     : 'numeric',
             month    : '2-digit',
             day      : '2-digit'

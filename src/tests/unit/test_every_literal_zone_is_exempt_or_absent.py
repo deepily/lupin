@@ -28,7 +28,6 @@ EXEMPT = {
     "src/cosa/repo/doc_lint/harness_schedule.py"         : "LEGIT: the harness schedule window is defined as 10:00 to 13:00 Eastern",
     "src/cosa/rest/db/embedding_regeneration.py"         : "LEGIT: the business-hours gate is defined in EDT, its parameter is named hour_edt",
     "src/cosa/utils/edt_timestamp.py"                    : "FIX OWED: None falls back to DEFAULT_TZ_NAME; dm.py passes none",
-    "src/lupin_app/static/js/notifications.js"           : "FIX OWED: browser fallbacks when the config fetch fails; needs the :8000 JS tier",
     "src/lupin_mcp/reuse_needset/smoke.py"               : "LEGIT: the smoke schedule window is defined in Eastern, like the harness",
     "src/scripts/dm-experiment/generate_schedule.py"     : "LEGIT: the experiment schedule is defined in Eastern",
     "src/scripts/run-heartbeat-arbiter.py"               : "FIX OWED: a dev script passes a literal zone to the util helper",
@@ -98,7 +97,7 @@ def test_the_census_walks_a_real_population_and_finds_the_known_literals():
     """Assert the loop will find something before it loops."""
     files, hits = _walk_tracked_sources()
     assert len( files ) > 1000, f"only {len( files )} tracked source files walked"
-    assert "src/lupin_app/static/js/notifications.js" in hits and "src/cosa/utils/edt_timestamp.py" in hits
+    assert "src/cosa/rest/db/embedding_regeneration.py" in hits and "src/cosa/utils/edt_timestamp.py" in hits
 
 
 def test_no_tracked_source_file_names_a_literal_zone_unless_it_is_exempt():
