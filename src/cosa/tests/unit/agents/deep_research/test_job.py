@@ -68,11 +68,13 @@ def execute_env(
 
     cfg = MagicMock()
     cfg.get.side_effect = lambda key, default=None: values.get( key, default )
+    cfg.get_required.return_value = "America/New_York"
 
     gister = MagicMock()
     gister.get_gist.return_value = gist
 
     mock_config = MagicMock()
+    mock_config.get_required.return_value = "America/New_York"
 
     tracker = MagicMock()
     tracker.get_summary.return_value = make_summary()

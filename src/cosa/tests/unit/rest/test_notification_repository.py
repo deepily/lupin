@@ -8,9 +8,9 @@ update_state (not-found / delivered / responded / other), update_response,
 get_pending_for_recipient, get_expired_notifications, mark_expired
 (not-found / with-default / without-default), count_by_sender, count_by_job_ids
 (empty / populated-with-missing-ids), delete_by_sender,
-get_sender_conversations_by_date (anchor arcs / include_hidden / tz-fallback /
+get_sender_conversations_by_date (anchor arcs / include_hidden / passed zone /
 date grouping), soft_delete_by_date (good tz / tz-fallback),
-get_sender_date_summaries (state arcs / include_hidden / tz-fallback),
+get_sender_date_summaries (state arcs / include_hidden / passed zone),
 get_sender_last_activities_visible (include_hidden / exclude None / exclude
 truthy / exclude empty / new_count-None), get_active_conversation (found /
 none), bulk_delete_by_user (hours arcs / exclude arcs), and
@@ -20,6 +20,7 @@ All DB access is boundary-mocked via a self-returning fluent query mock. ZERO DB
 """
 
 import unittest
+import zoneinfo
 import uuid
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
@@ -228,7 +229,7 @@ class TestDeleteBySender( _NRBase ):
 class TestGetSenderConversationsByDate( _NRBase ):
     def test_anchor_none_no_activity_returns_empty( self ):
         self.session.query.return_value = _fq( scalar=None )
-        self.assertEqual( self.repo.get_sender_conversations_by_date( "s", _RID ), {} )
+        self.assertEqual( self.repo.get_sender_conversations_by_date( "s", _RID, timezone_name="America/New_York" ), {} )
 
     def test_anchor_given_include_hidden_groups_by_date( self ):
         base = datetime( 2026, 1, 2, 10, 0, tzinfo=timezone.utc )
@@ -239,35 +240,42 @@ class TestGetSenderConversationsByDate( _NRBase ):
         ]
         self.session.query.return_value = _fq( rows=notifs )
         out = self.repo.get_sender_conversations_by_date(
-            "s", _RID, anchor=base + timedelta( hours=2 ), include_hidden=True
+            "s", _RID, anchor=base + timedelta( hours=2 ), include_hidden=True, timezone_name="America/New_York"
         )
         keys = list( out.keys() )
         self.assertEqual( keys, sorted( keys, reverse=True ) )   # newest-first
         self.assertEqual( sum( len( v ) for v in out.values() ), 3 )
 
-    def test_anchor_none_found_with_tz_fallback( self ):
-        anchor = datetime( 2026, 1, 2, tzinfo=timezone.utc )
+    def test_anchor_none_found_groups_in_the_passed_zone( self ):
+        anchor = datetime( 2026, 1, 2, 3, tzinfo=timezone.utc )
         notifs = [ _row( created_at=anchor ) ]
         self.session.query.return_value = _fq( rows=notifs, scalar=anchor )
-        out = self.repo.get_sender_conversations_by_date(
-            "s", _RID, timezone_name="Not/AZone"   # invalid → fallback to America/New_York
-        )
-        self.assertEqual( sum( len( v ) for v in out.values() ), 1 )
+        out = self.repo.get_sender_conversations_by_date( "s", _RID, timezone_name="America/Los_Angeles" )
+        self.assertEqual( list( out.keys() ), [ "2026-01-01" ] )
+
+    def test_an_invalid_zone_raises_instead_of_falling_back( self ):
+        anchor = datetime( 2026, 1, 2, tzinfo=timezone.utc )
+        self.session.query.return_value = _fq( rows=[ _row( created_at=anchor ) ], scalar=anchor )
+        with self.assertRaises( zoneinfo.ZoneInfoNotFoundError ):
+            self.repo.get_sender_conversations_by_date( "s", _RID, timezone_name="Not/AZone" )
+
+    def test_no_zone_is_a_type_error( self ):
+        with self.assertRaises( TypeError ):
+            self.repo.get_sender_conversations_by_date( "s", _RID )
 
 
 class TestSoftDeleteByDate( _NRBase ):
     def test_good_timezone_returns_update_count( self ):
         self.session.query.return_value = _fq( update=2 )
         self.assertEqual(
-            self.repo.soft_delete_by_date( "s", _RID, "2026-01-01" ), 2
+            self.repo.soft_delete_by_date( "s", _RID, "2026-01-01", timezone_name="America/New_York" ), 2
         )
         self.session.flush.assert_called_once_with()
 
-    def test_bad_timezone_falls_back( self ):
+    def test_bad_timezone_raises( self ):
         self.session.query.return_value = _fq( update=0 )
-        self.assertEqual(
-            self.repo.soft_delete_by_date( "s", _RID, "2026-01-01", timezone_name="Not/AZone" ), 0
-        )
+        with self.assertRaises( zoneinfo.ZoneInfoNotFoundError ):
+            self.repo.soft_delete_by_date( "s", _RID, "2026-01-01", timezone_name="Not/AZone" )
 
 
 class TestGetSenderDateSummaries( _NRBase ):
@@ -278,18 +286,23 @@ class TestGetSenderDateSummaries( _NRBase ):
             _row( created_at=base + timedelta( hours=1 ), state="delivered" ),  # same date, not new
         ]
         self.session.query.return_value = _fq( rows=notifs )
-        out = self.repo.get_sender_date_summaries( "s", _RID )
+        out = self.repo.get_sender_date_summaries( "s", _RID, timezone_name="America/New_York" )
         self.assertEqual( len( out ), 1 )
         self.assertEqual( out[ 0 ][ "count" ], 2 )
         self.assertEqual( out[ 0 ][ "new_count" ], 1 )
 
-    def test_include_hidden_and_tz_fallback_new_date( self ):
+    def test_include_hidden_and_new_date( self ):
         notifs = [ _row( created_at=datetime( 2026, 1, 3, tzinfo=timezone.utc ), state="queued" ) ]
         self.session.query.return_value = _fq( rows=notifs )
         out = self.repo.get_sender_date_summaries(
-            "s", _RID, include_hidden=True, timezone_name="Not/AZone"
+            "s", _RID, include_hidden=True, timezone_name="America/New_York"
         )
         self.assertEqual( out[ 0 ][ "new_count" ], 1 )
+
+    def test_bad_timezone_raises( self ):
+        self.session.query.return_value = _fq( rows=[] )
+        with self.assertRaises( zoneinfo.ZoneInfoNotFoundError ):
+            self.repo.get_sender_date_summaries( "s", _RID, timezone_name="Not/AZone" )
 
 
 class TestGetSenderLastActivitiesVisible( _NRBase ):
@@ -398,10 +411,10 @@ class TestTheConversationReadsExcludeAckRows( _NRBase ):
                     parts.append( str( arg ) )
         return " ".join( parts )
 
-    def _assert_excluded( self, fn, *args ):
+    def _assert_excluded( self, fn, *args, **kwargs ):
         q = _fq( rows=[], scalar=None, first=None )
         self.session.query.return_value = q
-        fn( *args )
+        fn( *args, **kwargs )
         rendered = self._rendered( q )
         assert NotificationRepository.BROADCAST_ACK_TYPE in rendered, rendered
         assert "NOT IN" in rendered.upper(), rendered
@@ -410,10 +423,10 @@ class TestTheConversationReadsExcludeAckRows( _NRBase ):
         self._assert_excluded( self.repo.get_sender_conversation, "s1", _RID )
 
     def test_the_conversation_by_date_window_excludes_the_ack_type( self ):
-        self._assert_excluded( self.repo.get_sender_conversations_by_date, "s1", _RID )
+        self._assert_excluded( self.repo.get_sender_conversations_by_date, "s1", _RID, timezone_name="America/New_York" )
 
     def test_the_date_summaries_exclude_the_ack_type( self ):
-        self._assert_excluded( self.repo.get_sender_date_summaries, "s1", _RID )
+        self._assert_excluded( self.repo.get_sender_date_summaries, "s1", _RID, timezone_name="America/New_York" )
 
     def test_the_active_conversation_pick_excludes_the_ack_type( self ):
         self._assert_excluded( self.repo.get_active_conversation, _RID )

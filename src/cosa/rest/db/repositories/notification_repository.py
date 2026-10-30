@@ -931,7 +931,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         anchor: Optional[datetime] = None,
         window_hours: int = 168,  # Default 7 days
         include_hidden: bool = False,
-        timezone_name: str = "America/New_York"
+        *,
+        timezone_name: str
     ) -> Dict[str, List[Notification]]:
         """
         Load conversation grouped by date (ISO format).
@@ -942,7 +943,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             - anchor: Reference timestamp (defaults to sender's last activity)
             - window_hours: Hours before anchor to include (default: 168 = 7 days)
             - include_hidden: Whether to include hidden notifications (default: False)
-            - timezone_name: IANA timezone for date grouping (default: America/New_York)
+            - timezone_name: IANA timezone for date grouping, required: the caller passes the configured zone
 
         Ensures:
             - Returns dict of date_string -> list of notifications
@@ -997,10 +998,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         notifications = query.order_by( Notification.created_at.asc() ).all()
 
         # Group by date in specified timezone
-        try:
-            tz = zoneinfo.ZoneInfo( timezone_name )
-        except Exception:
-            tz = zoneinfo.ZoneInfo( "America/New_York" )  # Fallback
+        tz = zoneinfo.ZoneInfo( timezone_name )
 
         date_groups: Dict[str, List[Notification]] = {}
         for notif in notifications:
@@ -1020,7 +1018,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         sender_id: str,
         recipient_id: uuid.UUID,
         date_string: str,
-        timezone_name: str = "America/New_York"
+        *,
+        timezone_name: str
     ) -> int:
         """
         Soft delete all notifications for a sender on a specific date.
@@ -1052,10 +1051,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         import zoneinfo
         from datetime import date
 
-        try:
-            tz = zoneinfo.ZoneInfo( timezone_name )
-        except Exception:
-            tz = zoneinfo.ZoneInfo( "America/New_York" )  # Fallback
+        tz = zoneinfo.ZoneInfo( timezone_name )
 
         # Parse date string and create timezone-aware boundaries
         target_date = date.fromisoformat( date_string )
@@ -1079,7 +1075,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         sender_id: str,
         recipient_id: uuid.UUID,
         include_hidden: bool = False,
-        timezone_name: str = "America/New_York"
+        *,
+        timezone_name: str
     ) -> List[Dict]:
         """
         Get date-grouped summaries for a sender with counts.
@@ -1106,10 +1103,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         """
         import zoneinfo
 
-        try:
-            tz = zoneinfo.ZoneInfo( timezone_name )
-        except Exception:
-            tz = zoneinfo.ZoneInfo( "America/New_York" )  # Fallback
+        tz = zoneinfo.ZoneInfo( timezone_name )
 
         # Build query
         query = self.session.query( Notification ).filter(

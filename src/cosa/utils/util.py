@@ -56,7 +56,29 @@ def add_to_path(path: str, idx: int = None) -> None:
         print(f"Path [{path}] already in sys.path")
 
 
-def get_current_datetime_raw(tz_name: str = "US/Eastern", days_offset: int = 0) -> dt:
+def _resolve_tz_name( tz_name: Optional[str] ) -> str:
+    """
+    Return tz_name, or the configured `app timezone` when tz_name is None.
+
+    Requires:
+        - tz_name is None or an IANA zone name
+
+    Ensures:
+        - Returns tz_name unchanged when given
+        - Otherwise returns the zone from configuration, never a code default
+
+    Raises:
+        - MissingConfigKeyError if tz_name is None and the key is absent or blank
+        - InvalidAppTimezoneError if tz_name is None and the configured value is not a zone
+        - ValueError if tz_name is None and no configuration is loaded
+    """
+    if tz_name is not None: return tz_name
+    from cosa.config.app_timezone import get_app_timezone
+    from cosa.config.configuration_manager import ConfigurationManager
+    return get_app_timezone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+
+
+def get_current_datetime_raw(tz_name: Optional[str] = None, days_offset: int = 0) -> dt:
     """
     Get a datetime object for the current time in a specified timezone with optional offset.
     
@@ -69,7 +91,7 @@ def get_current_datetime_raw(tz_name: str = "US/Eastern", days_offset: int = 0) 
         - The datetime is offset by the specified number of days from the current time
         
     Args:
-        tz_name: The name of the timezone (default: "US/Eastern")
+        tz_name: The name of the timezone; None reads the configured `app timezone`
         days_offset: Number of days to offset from current time (default: 0)
         
     Returns:
@@ -84,13 +106,13 @@ def get_current_datetime_raw(tz_name: str = "US/Eastern", days_offset: int = 0) 
     now = dt.now( pytz.UTC )
     delta = td( days=days_offset )
     now = now + delta
-    tz = pytz.timezone( tz_name )
+    tz = pytz.timezone( _resolve_tz_name( tz_name ) )
     tz_date = now.astimezone( tz )
 
     return tz_date
 
 
-def get_current_datetime(tz_name: str = "US/Eastern", format_str: str = '%Y-%m-%d @ %H:%M:%S %Z') -> str:
+def get_current_datetime(tz_name: Optional[str] = None, format_str: str = '%Y-%m-%d @ %H:%M:%S %Z') -> str:
     """
     Get a formatted string of the current date and time in the specified timezone.
     
@@ -104,7 +126,7 @@ def get_current_datetime(tz_name: str = "US/Eastern", format_str: str = '%Y-%m-%
         - Microsecond format: "YYYY-MM-DD @ HH:MM:SS.ffffff TZ"
         
     Args:
-        tz_name: The name of the timezone (default: "US/Eastern")
+        tz_name: The name of the timezone; None reads the configured `app timezone`
         format_str: strftime format string (default: '%Y-%m-%d @ %H:%M:%S %Z')
         
     Returns:
@@ -118,7 +140,7 @@ def get_current_datetime(tz_name: str = "US/Eastern", format_str: str = '%Y-%m-%
     return tz_date.strftime(format_str)
 
 
-def get_current_datetime_iso( tz_name: str = "US/Eastern" ) -> str:
+def get_current_datetime_iso( tz_name: Optional[str] = None ) -> str:
     """
     Get an ISO 8601 formatted datetime string with timezone offset.
 
@@ -134,7 +156,7 @@ def get_current_datetime_iso( tz_name: str = "US/Eastern" ) -> str:
         - Consistent with the system's Eastern timezone convention
 
     Args:
-        tz_name: The name of the timezone (default: "US/Eastern")
+        tz_name: The name of the timezone; None reads the configured `app timezone`
 
     Returns:
         An ISO 8601 formatted datetime string with timezone offset
@@ -145,7 +167,7 @@ def get_current_datetime_iso( tz_name: str = "US/Eastern" ) -> str:
     return get_current_datetime_raw( tz_name ).isoformat()
 
 
-def get_current_date(tz_name: str = "US/Eastern", return_prose: bool = False, offset: int = 0) -> str:
+def get_current_date(tz_name: Optional[str] = None, return_prose: bool = False, offset: int = 0) -> str:
     """
     Get the current date in the specified timezone with optional formatting.
     
@@ -159,7 +181,7 @@ def get_current_date(tz_name: str = "US/Eastern", return_prose: bool = False, of
         - The date is offset by the specified number of days from current date
         
     Args:
-        tz_name: The name of the timezone (default: "US/Eastern")
+        tz_name: The name of the timezone; None reads the configured `app timezone`
         return_prose: Whether to return the date in prose format (default: False)
             If True, returns format: "Monday, January 01, 2021"
             If False, returns format: "2021-01-01"
@@ -179,7 +201,7 @@ def get_current_date(tz_name: str = "US/Eastern", return_prose: bool = False, of
         return tz_date.strftime("%Y-%m-%d")
 
 
-def get_current_time(tz_name: str = "US/Eastern", include_timezone: bool = True, format: str = "%H:%M:%S") -> str:
+def get_current_time(tz_name: Optional[str] = None, include_timezone: bool = True, format: str = "%H:%M:%S") -> str:
     """
     Get the current time in a specified timezone with optional timezone information.
     
@@ -193,7 +215,7 @@ def get_current_time(tz_name: str = "US/Eastern", include_timezone: bool = True,
         - Includes timezone abbreviation if include_timezone is True
         
     Args:
-        tz_name: The name of the timezone (default: "US/Eastern")
+        tz_name: The name of the timezone; None reads the configured `app timezone`
         include_timezone: Whether to include timezone information (default: True)
         format: The format string for time formatting (default: "%H:%M:%S")
         

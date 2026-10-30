@@ -331,6 +331,7 @@ def assemble_app(
     )
     from cosa.agents.heartbeat_arbiter.turn_age_watchdog import TurnAgeWatchdog
     from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
+    from cosa.config.app_timezone import get_arbiter_journal_timezone
     # Relocated 2026-06-11 (fleet-roster reserve-from-random): the roster
     # reader lives with its env-var siblings in voice_persona_helpers now
     # that the allocation corridor is its second consumer.
@@ -343,7 +344,7 @@ def assemble_app(
     # pre-design, every fleet-arbiter event wore the health watcher's loop label
     # because ONE health-watcher default was passed everywhere (the §1.4 lie).
     # An injected log_fn (test seam) still overrides all of them.
-    tz_name = cfg.get( "arbiter journal local timezone", default="America/New_York" ) or "America/New_York"
+    tz_name = get_arbiter_journal_timezone( cfg )
     if log_fn is None:
         wiring_log_fn  = make_log_fn( loop="app_wiring",              tz_name=tz_name )
         arbiter_log_fn = make_log_fn( loop="fleet_arbiter",           tz_name=tz_name )

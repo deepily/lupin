@@ -184,7 +184,7 @@ class TestTheAnswerMarkWaitsForTheConsumer( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "NotificationRepository", return_value=repo ), \
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
-                 _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) ) ), \
+                 _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ), get_required=Mock( return_value="America/New_York" ) ) ) ), \
                  patch( "builtins.print" ):
                 await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },

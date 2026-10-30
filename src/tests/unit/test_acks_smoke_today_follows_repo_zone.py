@@ -1,7 +1,7 @@
 """
 The acks smoke test builds "today" in the repository method's zone, not the process zone.
 
-The method hides a day by its date in America/New_York. A test that builds the date in
+The method hides a day by its date in the zone the caller passes. A test that builds the date in
 the process zone disagrees from 20:00 to midnight Eastern, when UTC is already tomorrow.
 """
 
@@ -32,9 +32,10 @@ def test_today_is_the_repo_zone_date_whatever_the_process_zone( process_zone ):
     assert _today_in_repo_zone( _LATE_EVENING_UTC ) == "2026-10-07"
 
 
-def test_the_helper_reads_the_zone_from_the_method_signature():
-    default = inspect.signature( NotificationRepository.soft_delete_by_date ).parameters[ "timezone_name" ].default
-    assert default == "America/New_York"
+def test_the_method_has_no_zone_default_so_the_caller_must_pass_one():
+    parameter = inspect.signature( NotificationRepository.soft_delete_by_date ).parameters[ "timezone_name" ]
+    assert parameter.default is inspect.Parameter.empty
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_the_process_zone_date_would_have_been_wrong_under_utc( monkeypatch ):

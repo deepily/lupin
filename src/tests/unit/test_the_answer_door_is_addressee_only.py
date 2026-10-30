@@ -113,7 +113,7 @@ def world():
     """
     who = { "key": ADDRESSEE, "token": ADDRESSEE }
     holder = {}
-    main   = Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) )
+    main   = Mock( config_mgr=Mock( get=Mock( return_value=300 ), get_required=Mock( return_value="America/New_York" ) ) )
 
     def put( row ):
         holder[ "store" ] = Store( row )

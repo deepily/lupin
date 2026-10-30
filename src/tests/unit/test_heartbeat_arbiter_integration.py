@@ -244,6 +244,8 @@ class TestGroupPCLoopClosure:
         Proves the two independently-built halves interoperate on disk — the one
         thing neither side's unit tests can show (each mocks the other half).
         """
+        # The temp project has no INI, so the job's timestamp zone is pinned here; the zone is not under test.
+        monkeypatch.setattr( "cosa.utils.util._resolve_tz_name", lambda tz_name: "America/New_York" )
         # producer harness (real leaves, isolated roots). The settings mock carries
         # the FULL key set the loader returns — incl. count_inbound_questions_as_owed
         # (default False) which stop.py reads at the inbound-owed gate (else KeyError).

@@ -106,7 +106,7 @@ def store():
     repo = Mock()
     repo.get_by_id.return_value       = notif
     repo.update_response.return_value = True
-    main = Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) )
+    main = Mock( config_mgr=Mock( get=Mock( return_value=300 ), get_required=Mock( return_value="America/New_York" ) ) )
     with patch.object( N, "get_db", _ctx_db() ), \
          patch.object( N, "NotificationRepository", return_value=repo ), \
          patch.dict( sys.modules, _fake_main( main ) ), \

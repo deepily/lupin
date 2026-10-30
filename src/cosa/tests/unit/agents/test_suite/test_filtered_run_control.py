@@ -72,8 +72,13 @@ class _FakeProcess:
 
 class _FakeConfigMgr:
     """ConfigurationManager double returning an empty extra-args string."""
+    config_block_id = "Lupin:+Stub"
+
     def get( self, key, default="", return_type="string" ):
         return ""
+
+    def get_required( self, key, **_kwargs ):
+        return "America/New_York"
 
 
 @pytest.fixture( autouse=True )

@@ -41,7 +41,6 @@ mutates nothing that outlives the test, needs no monopoly, runs in seconds, and 
 rather than fails when Postgres is unreachable.
 """
 
-import inspect
 import os
 import uuid
 from zoneinfo import ZoneInfo
@@ -69,6 +68,8 @@ _SESSION_ID   = "f19a8996-2fdc-425d-82bc-0e99f3cd8db2"
 # conversation reads are keyed by sender_id, so the query has to be asked about THIS one.
 _ACK_SENDER   = "claude.code@unknown.deepily.ai#f19a8996"
 _REAL_SENDER  = "claude.code@lupin.deepily.ai#deadbeef"
+# The repository methods take the zone from the caller. This test names its own.
+_ZONE         = "America/New_York"
 
 
 def _today_in_repo_zone( now_utc ):
@@ -79,11 +80,10 @@ def _today_in_repo_zone( now_utc ):
         - now_utc is a timezone-aware datetime
 
     Ensures:
-        - the zone is the method's own default, so this follows the method
+        - the zone is the one the calls below pass, as the method has no default
         - the process zone is never consulted
     """
-    zone = inspect.signature( NotificationRepository.soft_delete_by_date ).parameters[ "timezone_name" ].default
-    return now_utc.astimezone( ZoneInfo( zone ) ).strftime( "%Y-%m-%d" )
+    return now_utc.astimezone( ZoneInfo( _ZONE ) ).strftime( "%Y-%m-%d" )
 
 
 def _server_url():
@@ -213,7 +213,7 @@ class TestASavedAckIsNotAConversation:
         _save_one_ack( recipient, db )
         session = db()
         try:
-            groups = NotificationRepository( session ).get_sender_conversations_by_date( _ACK_SENDER, recipient )
+            groups = NotificationRepository( session ).get_sender_conversations_by_date( _ACK_SENDER, recipient, timezone_name=_ZONE )
         finally:
             session.close()
         # `get_sender_conversations_by_date` returns a DICT of date -> rows. The first
@@ -227,7 +227,7 @@ class TestASavedAckIsNotAConversation:
         _save_one_ack( recipient, db )
         session = db()
         try:
-            summaries = NotificationRepository( session ).get_sender_date_summaries( _ACK_SENDER, recipient )
+            summaries = NotificationRepository( session ).get_sender_date_summaries( _ACK_SENDER, recipient, timezone_name=_ZONE )
         finally:
             session.close()
         assert summaries == [], f"an ack must not create a date summary, got {summaries!r}"
@@ -272,7 +272,7 @@ class TestTheExclusionIsNARROWAndNotAGeneralBlackout:
         session = db()
         try:
             repo = self._save_ordinary( session, recipient )
-            summaries = repo.get_sender_date_summaries( _REAL_SENDER, recipient )
+            summaries = repo.get_sender_date_summaries( _REAL_SENDER, recipient, timezone_name=_ZONE )
             assert len( summaries ) == 1 and summaries[ 0 ][ "count" ] == 1
         finally:
             session.close()
@@ -379,7 +379,7 @@ class TestTheStructurALLYImmunePathsAreMeasuredNotAssumed:
         try:
             repo   = NotificationRepository( session )
             today  = _today_in_repo_zone( _dt.datetime.now( _dt.timezone.utc ) )
-            hidden = repo.soft_delete_by_date( _ACK_SENDER, recipient, today )
+            hidden = repo.soft_delete_by_date( _ACK_SENDER, recipient, today, timezone_name=_ZONE )
             session.commit()
             assert hidden == 1, (
                 f"a write path MUST be able to reach an ack, or the user can never clear "
@@ -452,7 +452,7 @@ class TestTheWINDOWQueryExcludesItToo:
         session = db()
         try:
             rows = NotificationRepository( session ).get_sender_conversation(
-                _ACK_SENDER, recipient, anchor=self._anchor() )
+                _ACK_SENDER, recipient, anchor=self._anchor(), timezone_name=_ZONE )
         finally:
             session.close()
         assert rows == [], (
@@ -465,7 +465,7 @@ class TestTheWINDOWQueryExcludesItToo:
         session = db()
         try:
             groups = NotificationRepository( session ).get_sender_conversations_by_date(
-                _ACK_SENDER, recipient, anchor=self._anchor() )
+                _ACK_SENDER, recipient, anchor=self._anchor(), timezone_name=_ZONE )
         finally:
             session.close()
         assert not groups, (
@@ -491,7 +491,7 @@ class TestTheWINDOWQueryExcludesItToo:
             assert len( rows ) == 1, (
                 f"CONTROL FAILED — this anchor/window returns nothing at all, so the two "
                 f"empty answers above proved nothing. Got {rows!r}" )
-            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, anchor=anchor )
+            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, anchor=anchor, timezone_name=_ZONE )
             assert groups, "CONTROL FAILED — the anchored date read is empty for a real message too"
         finally:
             session.close()
@@ -649,7 +649,7 @@ class TestTheANCHORLookupClauseDoesWorkToo:
         session = db()
         try:
             repo, old, _ = self._one_sender_with_both( session, recipient, real_age_days=10 )
-            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, window_hours=168 )
+            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, window_hours=168, timezone_name=_ZONE )
             found  = [ n.id for rows in groups.values() for n in rows ]
             assert found == [ old.id ], (
                 f"the ack dragged the anchor forward and the real message fell out of the "

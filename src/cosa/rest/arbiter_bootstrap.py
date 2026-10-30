@@ -65,6 +65,7 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_operator_gates_fn
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_via_bridge
+    from cosa.config.app_timezone import get_arbiter_journal_timezone
 
     poll_seconds      = int( config_mgr.get( "arbiter poll seconds", default=60, return_type="int" ) )
     manager_on_duty   = config_mgr.get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty"
@@ -82,8 +83,8 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     # enabled, also routes operator gates by urgency — urgent interrupt / normal digest).
     operator_digest_cadence = int( config_mgr.get( "arbiter operator gate digest cadence seconds", default=1800, return_type="int" ) )
     # Item B (2026.06.24): outreach-timestamp tz — REUSE the existing arbiter-journal
-    # tz key (one tz owner; default America/New_York, DST-aware EDT/EST).
-    local_timezone = config_mgr.get( "arbiter journal local timezone", default="America/New_York" ) or "America/New_York"
+    # tz key (one tz owner, DST-aware; no code default, a missing key stops the arbiter).
+    local_timezone = get_arbiter_journal_timezone( config_mgr )
     # Item C (2026.06.24): trailing-window outreach throttle (N msgs / Y min,
     # PER-RECIPIENT, routine shoulder-taps only). Both runtime-tunable; <=0 disables.
     throttle_max    = int( config_mgr.get( "arbiter outreach throttle max messages", default=5, return_type="int" ) )

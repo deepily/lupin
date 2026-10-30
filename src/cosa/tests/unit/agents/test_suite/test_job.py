@@ -105,8 +105,13 @@ class _FakeConfigMgr:
     def __init__( self, extra="" ):
         self._extra = extra
 
+    config_block_id = "Lupin:+Stub"
+
     def get( self, key, default="", return_type="string" ):
         return self._extra
+
+    def get_required( self, key, **_kwargs ):
+        return "America/New_York"
 
 
 @pytest.fixture
@@ -882,6 +887,7 @@ def test_run_suite_ini_read_failure_is_nonfatal( monkeypatch, no_real_log, capsy
     def _boom( *a, **k ):
         raise RuntimeError( "ini unavailable" )
     monkeypatch.setattr( cfg, "ConfigurationManager", _boom )
+    monkeypatch.setattr( "cosa.utils.util._resolve_tz_name", lambda tz_name: "America/New_York" )   # this test is about the extra args, not the zone
     monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
     monkeypatch.setattr( job_mod.subprocess, "Popen",
                          lambda *a, **k: _FakeProcess( lines=[ "x\n" ], returncode=0 ) )

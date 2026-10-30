@@ -284,6 +284,8 @@ def test_start_spawns_the_daemon_when_either_gate_is_on( tmp_path, overrides, ex
 def _assemble( monkeypatch, **flags ):
     import lupin_arbiter_app.app as app_module
     class Cfg:
+        config_block_id = "Lupin:+Stub"
+        def get_required( self, key, **_kw ): return "America/New_York"
         def get( self, key, default=None, return_type="string" ):
             if key in ( "arbiter health watch enabled", "arbiter context watch enabled" ): return False
             return flags.get( key, default )
@@ -342,6 +344,8 @@ def test_the_default_runner_shells_out_and_returns_code_and_stdout( monkeypatch 
 def test_the_arbiter_wires_the_check_and_the_dm_hop_into_the_observer( monkeypatch ):
     import lupin_arbiter_app.app as app_module
     class Cfg:
+        config_block_id = "Lupin:+Stub"
+        def get_required( self, key, **_kw ): return "America/New_York"
         def get( self, key, default=None, return_type="string" ):
             if key in ( "arbiter health watch enabled", "arbiter context watch enabled" ): return False
             if key == "arbiter self respin observer enabled": return True
