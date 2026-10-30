@@ -436,7 +436,7 @@ export function taskPriorityClass( priority: string | null | undefined ): string
 /**
  * Format an ISO-8601 next-chase timestamp as "MM-DD HH:MM" in the given IANA
  * zone (DST-aware via Intl). Null/absent → "—"; unparseable → "—"; invalid
- * zone → browser-local. Pure (never throws).
+ * zone → UTC, labelled UTC. Pure (never throws).
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (try/catch default-param interplay).
 export function formatChaseTime( iso: string | null | undefined, ianaZone: string | null | undefined ): string {
@@ -454,10 +454,10 @@ export function formatChaseTime( iso: string | null | undefined, ianaZone: strin
     try {
       return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: ianaZone } ).format( date );
     } catch {
-      // Invalid IANA zone — degrade to browser-local (never throw).
+      // Invalid IANA zone — degrade to UTC (never throw).
     }
   }
-  return new Intl.DateTimeFormat( undefined, opts ).format( date );
+  return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: "UTC" } ).format( date ) + " UTC";
 }
 
 // ---------------------------------------------------------------------------

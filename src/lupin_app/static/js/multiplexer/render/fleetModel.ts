@@ -271,7 +271,7 @@ export function fleetHeatClass( pct: number | null | undefined ): string {
 
 /**
  * Format a Date as "HH:MM:SS TZ" in the configured IANA zone via
- * Intl.DateTimeFormat (DST-aware). Invalid/absent zone → browser-local. Pure.
+ * Intl.DateTimeFormat (DST-aware). Invalid/absent zone → UTC (the short zone name says so). Pure.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (try/catch default-param interplay).
 export function formatFleetTimestamp( date: Date, ianaZone: string | null | undefined ): string {
@@ -286,8 +286,8 @@ export function formatFleetTimestamp( date: Date, ianaZone: string | null | unde
     try {
       return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: ianaZone } ).format( date );
     } catch {
-      // Invalid IANA zone — degrade to browser-local (never throw).
+      // Invalid IANA zone — degrade to UTC (never throw).
     }
   }
-  return new Intl.DateTimeFormat( undefined, opts ).format( date );
+  return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: "UTC" } ).format( date );
 }

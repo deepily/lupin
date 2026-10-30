@@ -1,9 +1,11 @@
-// Every time formatting call in notifications.js names its zone (row 43286adc).
+// Every time formatting call in the web client names its zone (row 43286adc).
 //
 // A bare toLocaleTimeString() or getHours() answers in the browser's zone, which is the defect the
 // server-zone-or-labelled-UTC rule exists to remove. This guard reads the source and fails on:
 //   · toLocale{Time,Date,}String and Intl.DateTimeFormat calls whose arguments do not contain `timeZone`;
 //   · the host-zone getters getHours, getMinutes, getDate, getDay, getMonth, getFullYear, getTimezoneOffset.
+// It reads notifications.js and every tracked non-test .ts file under src/lupin_app/static/js. A .ts file that
+// still reads the browser zone must be on the owed list with a reason, and an owed file with no finding left fails as stale.
 // It states its denominator (how many calls it checked) and proves itself on a planted site.
 //
 // Run via:
@@ -12,6 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -64,10 +67,54 @@ function scan( rawSource: string ): { checked: number; findings: Finding[] } {
 }
 
 const SOURCE = readFileSync( NOTIFICATIONS_JS, "utf8" );
+const ROOT   = resolve( HERE, "../../../.." );
+
+/** Files that still read the browser zone, each with the reason it is owed. */
+const OWED: Record<string, string> = {
+  "src/lupin_app/static/js/diagnostic/websocketDiagnostic.ts"               : "OWED: the diagnostic page stamps its log lines with the browser clock",
+  "src/lupin_app/static/js/multiplexer/render/DebugPanelRenderer.ts"        : "OWED: the debug line stamp uses the browser zone",
+  "src/lupin_app/static/js/multiplexer/render/FinishedTasksRenderer.ts"     : "OWED: the updated stamp uses the browser zone",
+  "src/lupin_app/static/js/multiplexer/render/SystemStatusRenderer.ts"      : "OWED: the health-line stamp uses the browser zone",
+  "src/lupin_app/static/js/multiplexer/render/templates/ttsCardShared.ts"   : "OWED: the TTS card fallback time uses the browser zone",
+  "src/lupin_app/static/js/multiplexer/render/time.ts"                      : "OWED: the local-time and local-date fallbacks read the browser zone",
+  "src/lupin_app/static/js/multiplexer/stores/CommonsStore.ts"               : "OWED: the since-midnight window is counted from browser-local midnight",
+  "src/lupin_app/static/js/multiplexer/stores/historyWindow.ts"              : "OWED: the since-midnight window is counted from browser-local midnight",
+};
+
+/** Every tracked non-test .ts file under the web client, as repo-relative paths. */
+function trackedTsFiles(): string[] {
+  const out = execFileSync( "git", [ "ls-files", "--", "src/lupin_app/static/js/*.ts" ], { cwd: ROOT, encoding: "utf8" } );
+  return out.split( "\n" ).filter( f => f && !f.endsWith( ".test.ts" ) && !f.endsWith( ".d.ts" ) );
+}
 
 test( "no time formatting in notifications.js answers in the browser's zone", () => {
   const { findings } = scan( SOURCE );
   assert.deepEqual( findings, [], `time formatting without an explicit timeZone:\n${findings.map( f => `  line ${f.line}: ${f.text}` ).join( "\n" )}` );
+} );
+
+test( "no tracked .ts file reads the browser zone unless it is owed", () => {
+  const bad = trackedTsFiles().filter( f => !( f in OWED ) ).flatMap( f => scan( readFileSync( resolve( ROOT, f ), "utf8" ) ).findings.map( x => `${f}:${x.line}: ${x.text}` ) );
+  assert.deepEqual( bad, [], `time formatting without an explicit timeZone:\n  ${bad.join( "\n  " )}` );
+} );
+
+test( "every owed .ts file still has a finding, so the list cannot go stale", () => {
+  const stale = Object.keys( OWED ).filter( f => scan( readFileSync( resolve( ROOT, f ), "utf8" ) ).findings.length === 0 );
+  assert.deepEqual( stale, [] );
+} );
+
+test( "the .ts scan reaches a real population of files and calls", () => {
+  const files = trackedTsFiles();
+  assert.ok( files.length >= 100, `only ${files.length} .ts files were walked` );
+  assert.ok( files.includes( "src/lupin_app/static/js/multiplexer/render/fleetModel.ts" ) && files.includes( "src/lupin_app/static/js/multiplexer/render/taskListModel.ts" ) );
+  const checked = files.reduce( ( n, f ) => n + scan( readFileSync( resolve( ROOT, f ), "utf8" ) ).checked, 0 );
+  assert.ok( checked >= 10, `only ${checked} calls were checked in .ts files` );
+} );
+
+test( "a planted bare call in a real .ts file reddens the guard", () => {
+  const file    = readFileSync( resolve( ROOT, "src/lupin_app/static/js/multiplexer/render/fleetModel.ts" ), "utf8" );
+  const planted = file.replace( "return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: \"UTC\" } ).format( date );", "return new Intl.DateTimeFormat( undefined, opts ).format( date );" );
+  assert.notEqual( planted, file, "the planting anchor must match" );
+  assert.equal( scan( planted ).findings.length, 1 );
 } );
 
 test( "the scan reaches a real population of formatting calls", () => {
