@@ -317,11 +317,13 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
     try:
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         code_file_path = config_mgr.get( "path to code execution file" )
+        user_zone      = config_mgr.get( "app timezone", default="America/New_York" )
     except ValueError as e:
         # We're likely in a test environment without the environment variable set
         du.print_banner( f"ConfigurationManager error: {str(e)}", expletive=True, chunk="🤔" )
         print("Using fallback code execution file path for testing")
         code_file_path = "/io/code_execution.py"
+        user_zone      = "America/New_York"
         
     code_path = du.get_project_root() + code_file_path
 
@@ -356,11 +358,16 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
     # directory it always had, without the parent ever changing its own.
     run_cwd = du.get_project_root() + "/io"
 
+    # The child reads the user's clock, never the host's ( Rick's "configured user zone" ruling ).
+    # The VM sits in us-central1 and answered "12:25 PM" in Central.
+    # A bare datetime.now() in generated code follows TZ, so the zone goes into the child's env.
+    child_env = { **os.environ, "TZ": user_zone }
+
     if debug: print( "Code runner executing [{}]... ".format( code_path ), end="" )
 
     # ¡OJO! Hardcoded value of python runtime... Make this runtime configurable
     try:
-        results = run( [ python_runtime, code_path ], stdout=PIPE, stderr=PIPE, universal_newlines=True, timeout=60, cwd=run_cwd )
+        results = run( [ python_runtime, code_path ], stdout=PIPE, stderr=PIPE, universal_newlines=True, timeout=60, cwd=run_cwd, env=child_env )
     except subprocess.TimeoutExpired as e:
         
         du.print_stack_trace( e, explanation="subprocess.TimeExpired calling run(...)", caller="assemble_and_run_solution" )
