@@ -22,6 +22,9 @@ class TestNotificationItemDirection( unittest.TestCase ):
     """NotificationItem direction + DM fields: defaults, explicit values, to_dict 1:1."""
 
     def setUp( self ):
+        tz_patch = patch( "cosa.rest.notification_fifo_queue.get_app_timezone", return_value="America/New_York" )
+        tz_patch.start()
+        self.addCleanup( tz_patch.stop )
         from cosa.rest.notification_fifo_queue import NotificationItem
         self.NotificationItem = NotificationItem
 
@@ -79,6 +82,9 @@ class TestPushNotificationForwardsDirection( unittest.TestCase ):
     """NotificationFifoQueue.push_notification forwards direction + DM fields."""
 
     def setUp( self ):
+        tz_patch = patch( "cosa.rest.notification_fifo_queue.get_app_timezone", return_value="America/New_York" )
+        tz_patch.start()
+        self.addCleanup( tz_patch.stop )
         self._io_tbl_patch = patch( "cosa.rest.notification_fifo_queue.InputAndOutputTable" )
         self._io_tbl_patch.start().return_value = MagicMock()
         from cosa.rest.notification_fifo_queue import NotificationFifoQueue

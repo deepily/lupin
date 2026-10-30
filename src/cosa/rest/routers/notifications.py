@@ -20,6 +20,7 @@ import uuid
 import re
 
 # Import dependencies and services
+from cosa.config.app_timezone import get_app_timezone
 from ..notification_fifo_queue import NotificationFifoQueue, NOTIFICATION_PRIORITIES
 from ..websocket_manager import WebSocketManager
 from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt, authenticated_account_email
@@ -429,68 +430,47 @@ def get_websocket_manager():
 
 def get_local_timestamp():
     """
-    Get timezone-aware timestamp using configured timezone from ConfigurationManager.
-    
+    Get timezone-aware timestamp using the configured timezone from ConfigurationManager.
+
     Requires:
         - lupin_app.main module is available
         - config_mgr and app_debug are accessible
-        - zoneinfo module is available
-        
+
     Ensures:
-        - Returns ISO format timestamp with timezone information
-        - Uses configured timezone or defaults to America/New_York
-        - Falls back to UTC if timezone configuration is invalid
+        - Returns ISO format timestamp with timezone information in the configured zone
         - Provides debug output if app_debug is enabled
-        
+
     Raises:
-        - None (handles all exceptions with fallback to UTC)
+        - MissingConfigKeyError if `app timezone` is absent or blank
+        - InvalidAppTimezoneError if `app timezone` is not an IANA zone name
     """
     import lupin_app.main as main_module
-    config_mgr = main_module.config_mgr
-    app_debug = main_module.app_debug
-    
-    # Get timezone from config, default to America/New_York (East Coast)
-    timezone_name = config_mgr.get("app timezone", default="America/New_York")
-    
-    
-    try:
-        # Create timezone-aware datetime
-        tz = zoneinfo.ZoneInfo(timezone_name)
-        local_time = datetime.now(tz)
-        result = local_time.isoformat()
+    timezone_name = get_app_timezone( main_module.config_mgr )
+
+    if main_module.app_debug: print( f"[TIMEZONE] Using configured timezone '{timezone_name}'" )
+
+    return datetime.now( zoneinfo.ZoneInfo( timezone_name ) ).isoformat()
 
 
-        return result
-    except Exception as e:
-        # Fallback to UTC if timezone is invalid
-        if app_debug: print(f"[TIMEZONE] Warning: Invalid timezone '{timezone_name}', falling back to UTC: {e}")
-        return datetime.now().isoformat()
-
-
-def _local_now_text( fmt, fallback_fmt ):
+def _local_now_text( fmt ):
     """
     Format the current time in the app timezone.
 
     Requires:
         - lupin_app.main module is available
         - config_mgr is accessible
-        - fmt and fallback_fmt are strftime formats
+        - fmt is a strftime format
 
     Ensures:
         - Returns datetime.now( configured zone ) formatted with fmt
-        - Uses the "app timezone" key, defaulting to America/New_York
-        - Falls back to the server's local time formatted with fallback_fmt when the zone is invalid
+
+    Raises:
+        - MissingConfigKeyError if `app timezone` is absent or blank
+        - InvalidAppTimezoneError if `app timezone` is not an IANA zone name
     """
     import lupin_app.main as main_module
-    config_mgr = main_module.config_mgr
 
-    timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
-
-    try:
-        tz = zoneinfo.ZoneInfo( timezone_name )
-        return datetime.now( tz ).strftime( fmt )
-    except Exception:
-        return datetime.now().strftime( fallback_fmt )
+    return datetime.now( zoneinfo.ZoneInfo( get_app_timezone( main_module.config_mgr ) ) ).strftime( fmt )
 
 
 def get_formatted_time_display():
@@ -504,11 +484,10 @@ def get_formatted_time_display():
 
     Ensures:
         - Returns formatted time string like "17:45 EST"
-        - Uses configured timezone or defaults to America/New_York
-        - Falls back to simple time format if timezone configuration is invalid
+        - Uses the configured timezone; a missing or invalid zone raises
 
     """
-    return _local_now_text( '%H:%M %Z', '%H:%M' )
+    return _local_now_text( '%H:%M %Z' )
 
 
 def get_formatted_date_display():
@@ -524,11 +503,10 @@ def get_formatted_date_display():
 
     Ensures:
         - Returns formatted date string like "2026-01-08"
-        - Uses configured timezone or defaults to America/New_York
-        - Falls back to local date if timezone configuration is invalid
+        - Uses the configured timezone; a missing or invalid zone raises
 
     """
-    return _local_now_text( '%Y-%m-%d', '%Y-%m-%d' )
+    return _local_now_text( '%Y-%m-%d' )
 
 
 def resolve_sender_id( explicit_sender_id: Optional[str], message: str ) -> str:
@@ -3152,7 +3130,7 @@ async def get_sender_conversation(
 
         # Get timezone from configuration for consistent timestamp serialization
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
+        timezone_name = get_app_timezone( config_mgr )
         tz = zoneinfo.ZoneInfo( timezone_name )
 
         # Helper to convert timestamp to local timezone before serialization
@@ -3355,7 +3333,7 @@ async def get_sender_conversation_by_date(
 
         # Get timezone from configuration
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
+        timezone_name = get_app_timezone( config_mgr )
         tz = zoneinfo.ZoneInfo( timezone_name )
 
         # Helper to convert timestamp to local timezone before serialization
@@ -3481,7 +3459,7 @@ async def soft_delete_by_date( sender_id: str, user_email: str, date_string: str
 
         # Get timezone from configuration
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
+        timezone_name = get_app_timezone( config_mgr )
 
         with get_db() as session:
             repo = NotificationRepository( session )
@@ -3563,7 +3541,7 @@ async def get_sender_date_summaries(
 
         # Get timezone from configuration
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
+        timezone_name = get_app_timezone( config_mgr )
 
         with get_db() as session:
             repo = NotificationRepository( session )

@@ -12,6 +12,8 @@ import unittest
 from unittest.mock import patch
 
 import cosa.utils.util_code_runner as ucr
+from cosa.config.app_timezone import InvalidAppTimezoneError
+from cosa.config.configuration_manager import MissingConfigKeyError
 
 
 class _StubConfig:
@@ -20,8 +22,13 @@ class _StubConfig:
     def __init__( self, zone="America/New_York" ):
         self.zone = zone
 
+    config_block_id = "Lupin:+Stub"
+
     def get( self, key, **kwargs ):
-        return { "path to code execution file": "/io/code.py", "app timezone": self.zone }[ key ]
+        return { "path to code execution file": "/io/code.py" }[ key ]
+
+    def get_required( self, key, **kwargs ):
+        return { "app timezone": self.zone }[ key ]
 
 
 # A bare local-clock read: its answer is whatever zone the child process runs in.
@@ -48,11 +55,24 @@ class TestChildRunsInConfiguredZone( unittest.TestCase ):
         result = self._run( "America/Chicago", configured_zone="America/Los_Angeles" )
         self.assertIn( result[ "output" ], ( "PST", "PDT" ) )
 
-    def test_fallback_without_configuration_is_eastern( self ):
+    def test_without_configuration_the_run_is_refused( self ):
         with tempfile.TemporaryDirectory() as root, \
-             patch.dict( os.environ, { "TZ": "America/Chicago" } ), \
              patch( "cosa.config.configuration_manager.ConfigurationManager", side_effect=ValueError( "no env var" ) ), \
              patch( "cosa.utils.util.get_project_root", return_value=root ):
+            with self.assertRaises( ValueError ) as raised:
+                ucr.assemble_and_run_solution( BARE_CLOCK_CODE, EXAMPLE )
+        self.assertIn( "app timezone", str( raised.exception ) )
+
+    def test_a_missing_zone_key_stops_the_run( self ):
+        stub = _StubConfig()
+        stub.get_required = lambda key, **kwargs: (_ for _ in () ).throw( MissingConfigKeyError( key, "Lupin:+Stub", None ) )
+        with tempfile.TemporaryDirectory() as root, \
+             patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=stub ), \
+             patch( "cosa.utils.util.get_project_root", return_value=root ):
             os.makedirs( root + "/io" )
-            result = ucr.assemble_and_run_solution( BARE_CLOCK_CODE, EXAMPLE )
-        self.assertIn( result[ "output" ], ( "EST", "EDT" ) )
+            with self.assertRaises( MissingConfigKeyError ):
+                ucr.assemble_and_run_solution( BARE_CLOCK_CODE, EXAMPLE )
+
+    def test_an_invalid_zone_stops_the_run( self ):
+        with self.assertRaises( InvalidAppTimezoneError ):
+            self._run( "America/Chicago", configured_zone="Not/AZone" )

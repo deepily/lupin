@@ -1,4 +1,5 @@
 from cosa.agents.agent_base import AgentBase, run_agent_smoke
+from cosa.config.app_timezone import get_app_timezone
 
 class DateAndTimeAgent( AgentBase ):
     """
@@ -31,7 +32,7 @@ class DateAndTimeAgent( AgentBase ):
         # generated code reads the RIGHT clock — same `app timezone` key the notification
         # queue and the arbiter journal already read. A named zone, never a fixed offset:
         # an offset is wrong for half the year, which is exactly the bug this closes.
-        self.timezone = self.config_mgr.get( "app timezone", default="America/New_York" )
+        self.timezone = get_app_timezone( self.config_mgr )
         self.prompt   = self.prompt_template.format( question=self.question, timezone=self.timezone )
         self.xml_response_tag_names   = [ "thoughts", "brainstorm", "evaluation", "code", "example", "returns", "explanation" ]
     

@@ -312,19 +312,23 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
         solution_code = response_dict[ "code" ]
         
     from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.config.app_timezone import get_app_timezone
     
     # Get the code execution file path, with a fallback for test environments
     try:
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         code_file_path = config_mgr.get( "path to code execution file" )
-        user_zone      = config_mgr.get( "app timezone", default="America/New_York" )
     except ValueError as e:
         # We're likely in a test environment without the environment variable set
         du.print_banner( f"ConfigurationManager error: {str(e)}", expletive=True, chunk="🤔" )
         print("Using fallback code execution file path for testing")
         code_file_path = "/io/code_execution.py"
-        user_zone      = "America/New_York"
-        
+        config_mgr     = None
+
+    # The zone has no test-environment fallback: without configuration there is no user zone to run in.
+    if config_mgr is None: raise ValueError( "Cannot read [app timezone]: no configuration is loaded" )
+    user_zone = get_app_timezone( config_mgr )
+
     code_path = du.get_project_root() + code_file_path
 
     # 🔴 ONE FILE PER INVOCATION — row 7b9094d8, Rick's ruling 2026-08-19 ("fix the race only").

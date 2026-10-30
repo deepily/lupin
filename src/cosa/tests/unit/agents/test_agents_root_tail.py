@@ -45,8 +45,8 @@ def _stub_config_mgr():
     incomplete. Keyed rather than blanket so the other tail agents sharing this stub keep
     getting their own declared defaults.
     """
-    return Mock( get=Mock( side_effect=lambda key, *a, **kw:
-                           _STUB_TIMEZONE if key == "app timezone" else kw.get( "default" ) ) )
+    return Mock( get=Mock( side_effect=lambda key, *a, **kw: kw.get( "default" ) ),
+                 get_required=Mock( side_effect=lambda key, *a, **kw: _STUB_TIMEZONE if key == "app timezone" else None ) )
 
 
 def _seed_init( self, *args, **kwargs ):

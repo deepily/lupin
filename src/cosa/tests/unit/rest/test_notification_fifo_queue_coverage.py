@@ -42,6 +42,7 @@ def _patch_fastapi_main( app_debug=True, tz="America/New_York" ):
     key (the gotcha that passes in isolation but fails under suite ordering)."""
     cfg          = MagicMock()
     cfg.get.return_value = tz
+    cfg.get_required.return_value = tz
     main         = MagicMock()
     main.config_mgr = cfg
     main.app_debug  = app_debug
@@ -57,12 +58,16 @@ class _Base( unittest.TestCase ):
         self._io_patch     = patch( "cosa.rest.notification_fifo_queue.InputAndOutputTable" )
         self._io_cls       = self._io_patch.start()
         self._io_cls.return_value = MagicMock()
+        # NotificationItem reads the configured zone with no fallback, so every test needs a configured main
+        self._main_patch   = _patch_fastapi_main( app_debug=False )
+        self._main_patch.start()
         from cosa.rest.notification_fifo_queue import NotificationFifoQueue, NotificationItem
         self.NFQ  = NotificationFifoQueue
         self.NI   = NotificationItem
         self.ws   = MagicMock()
 
     def tearDown( self ):
+        self._main_patch.stop()
         self._io_patch.stop()
 
 

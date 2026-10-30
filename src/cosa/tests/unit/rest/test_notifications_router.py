@@ -807,6 +807,7 @@ class TestNotificationsRouter( unittest.TestCase ):
         """
         mock_config_mgr = Mock()
         mock_config_mgr.get.return_value = "America/New_York"
+        mock_config_mgr.get_required.return_value = "America/New_York"
         
         mock_main_module = Mock()
         mock_main_module.config_mgr = mock_config_mgr
@@ -826,7 +827,7 @@ class TestNotificationsRouter( unittest.TestCase ):
             result = get_local_timestamp()
             
             # Verify config lookup
-            mock_config_mgr.get.assert_called_once_with( "app timezone", default="America/New_York" )
+            mock_config_mgr.get_required.assert_called_once_with( "app timezone" )
             
             # Verify timezone creation
             mock_zoneinfo.ZoneInfo.assert_called_once_with( "America/New_York" )
@@ -836,45 +837,28 @@ class TestNotificationsRouter( unittest.TestCase ):
             
             self.assertEqual( result, self.test_timestamp )
     
-    def test_get_local_timestamp_fallback_to_utc( self ):
+    def test_get_local_timestamp_with_an_invalid_zone_raises( self ):
         """
-        Test local timestamp generation with timezone fallback.
-        
+        Test local timestamp generation with an invalid configured zone.
+
         Ensures:
-            - Falls back to UTC when timezone is invalid
-            - Logs warning message
-            - Returns valid timestamp
+            - Raises InvalidAppTimezoneError naming the key
+            - Returns no timestamp from the host clock
         """
+        from cosa.config.app_timezone import InvalidAppTimezoneError
+
         mock_config_mgr = Mock()
-        mock_config_mgr.get.return_value = "Invalid/Timezone"
-        
+        mock_config_mgr.get_required.return_value = "Invalid/Timezone"
+
         mock_main_module = Mock()
         mock_main_module.config_mgr = mock_config_mgr
         mock_main_module.app_debug = True
-        
-        with _patch_fastapi_main( mock_main_module ), \
-             patch( 'cosa.rest.routers.notifications.datetime' ) as mock_datetime, \
-             patch( 'cosa.rest.routers.notifications.zoneinfo' ) as mock_zoneinfo, \
-             patch( 'builtins.print' ) as mock_print:
 
-            # Make zoneinfo raise exception
-            mock_zoneinfo.ZoneInfo.side_effect = Exception( "Unknown timezone" )
-            
-            mock_utc_datetime = Mock()
-            mock_utc_datetime.isoformat.return_value = "2025-08-05T17:00:00.000000"
-            mock_datetime.now.return_value = mock_utc_datetime
-            
-            result = get_local_timestamp()
-            
-            # Verify fallback timestamp returned
-            self.assertEqual( result, "2025-08-05T17:00:00.000000" )
-            
-            # Verify warning logged
-            mock_print.assert_called()
-            print_args = [call[0][0] for call in mock_print.call_args_list]
-            warning_logged = any( "falling back to UTC" in arg for arg in print_args )
-            self.assertTrue( warning_logged )
-    
+        with _patch_fastapi_main( mock_main_module ), self.assertRaises( InvalidAppTimezoneError ) as raised:
+            get_local_timestamp()
+
+        self.assertIn( "app timezone", str( raised.exception ) )
+
     def test_router_configuration( self ):
         """
         Test router configuration and metadata.

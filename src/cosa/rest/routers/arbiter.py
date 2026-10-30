@@ -38,6 +38,7 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
+from cosa.config.app_timezone import get_app_timezone
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest import arbiter_snapshot_store as snapshot_store
@@ -173,7 +174,7 @@ async def get_fleet_state(
             "fleet_arbiter"  : None,
         }
     if isinstance( result, dict ):
-        result[ "app_timezone" ] = config_mgr.get( "app timezone", default="America/New_York" )
+        result[ "app_timezone" ] = get_app_timezone( config_mgr )
     return result
 
 

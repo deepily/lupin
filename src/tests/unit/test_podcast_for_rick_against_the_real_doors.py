@@ -150,7 +150,7 @@ def world( monkeypatch, tmp_path ):
     monkeypatch.setattr( door, "find_session_by_id", lambda sid, check_pid=True: seats.get( sid ) )
     CLOCK[ "now" ] = NOW
     monkeypatch.setattr( door, "datetime", type( "Clock", ( ), { "now": staticmethod( lambda tz=None: CLOCK[ "now" ] ) } ) )
-    monkeypatch.setitem( sys.modules, "lupin_app.main", types.SimpleNamespace( config_mgr=types.SimpleNamespace( get=lambda key, default=None, return_type=None: default ) ) )
+    monkeypatch.setitem( sys.modules, "lupin_app.main", types.SimpleNamespace( config_mgr=types.SimpleNamespace( get=lambda key, default=None, return_type=None: default, get_required=lambda key, **kw: "America/New_York" ), app_debug=False ) )
     monkeypatch.setattr( door, "copy_directory", lambda: str( tmp_path / "copies" ) )
     monkeypatch.setattr( pp, "max_age_seconds", lambda config_mgr=None: 900 )
     monkeypatch.setattr( gate, "approver_persona_for_account", lambda email: { RICK: "rick" }.get( email ) )

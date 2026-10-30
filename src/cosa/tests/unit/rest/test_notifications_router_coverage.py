@@ -33,6 +33,7 @@ from unittest.mock import Mock, MagicMock, AsyncMock, patch
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
+from cosa.config.app_timezone import InvalidAppTimezoneError
 import cosa.rest.routers.notifications as N
 from cosa.rest.routers.notifications import (
     _voice_persona_for_sender_id, get_formatted_time_display, get_formatted_date_display,
@@ -173,7 +174,7 @@ class TestTimeDateDisplay( unittest.TestCase ):
     """Coverage for get_formatted_time_display / get_formatted_date_display."""
 
     def _main( self, tz_name ):
-        cfg = Mock(); cfg.get.return_value = tz_name
+        cfg = Mock(); cfg.get.return_value = tz_name; cfg.get_required.return_value = tz_name
         m = Mock(); m.config_mgr = cfg
         return m
 
@@ -182,28 +183,25 @@ class TestTimeDateDisplay( unittest.TestCase ):
             out = get_formatted_time_display()
         self.assertRegex( out, r"^\d{2}:\d{2}" )
 
-    def test_time_display_fallback( self ):
-        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ):
-            out = get_formatted_time_display()
-        self.assertRegex( out, r"^\d{2}:\d{2}$" )
+    def test_time_display_with_a_bogus_zone_raises( self ):
+        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ), self.assertRaises( InvalidAppTimezoneError ):
+            get_formatted_time_display()
 
     def test_date_display_success( self ):
         with _patch_fastapi_main( self._main( "America/New_York" ) ):
             out = get_formatted_date_display()
         self.assertRegex( out, r"^\d{4}-\d{2}-\d{2}$" )
 
-    def test_date_display_fallback( self ):
-        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ):
-            out = get_formatted_date_display()
-        self.assertRegex( out, r"^\d{4}-\d{2}-\d{2}$" )
+    def test_date_display_with_a_bogus_zone_raises( self ):
+        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ), self.assertRaises( InvalidAppTimezoneError ):
+            get_formatted_date_display()
 
-    def test_local_now_text_uses_fmt_in_zone_and_fallback_fmt_outside_it( self ):
+    def test_local_now_text_uses_fmt_in_the_configured_zone_and_raises_outside_it( self ):
         from cosa.rest.routers.notifications import _local_now_text
         with _patch_fastapi_main( self._main( "UTC" ) ):
-            self.assertRegex( _local_now_text( "%H:%M %Z", "%H:%M" ), r"^\d{2}:\d{2} UTC$" )
-        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ):
-            self.assertRegex( _local_now_text( "%H:%M %Z", "%H:%M" ), r"^\d{2}:\d{2}$" )
-            self.assertRegex( _local_now_text( "%H:%M %Z", "%Y" ), r"^\d{4}$" )
+            self.assertRegex( _local_now_text( "%H:%M %Z" ), r"^\d{2}:\d{2} UTC$" )
+        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ), self.assertRaises( InvalidAppTimezoneError ):
+            _local_now_text( "%H:%M %Z" )
 
     def test_time_display_in_zone_carries_the_zone_abbreviation( self ):
         with _patch_fastapi_main( self._main( "UTC" ) ):
@@ -1182,12 +1180,12 @@ class TestSenderHistoryEndpoints( unittest.IsolatedAsyncioTestCase ):
     EMAIL = "ricardo.felipe.ruiz@gmail.com"
 
     def _cfg_main( self, tz="America/New_York" ):
-        cfg = Mock(); cfg.get.return_value = tz
+        cfg = Mock(); cfg.get.return_value = tz; cfg.get_required.return_value = tz
         m = Mock(); m.config_mgr = cfg
         return m
 
     def _patch_cfgmgr( self, tz="America/New_York" ):
-        cfg = Mock(); cfg.get.return_value = tz
+        cfg = Mock(); cfg.get.return_value = tz; cfg.get_required.return_value = tz
         return patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg )
 
     # ---- bulk_delete_notifications ----

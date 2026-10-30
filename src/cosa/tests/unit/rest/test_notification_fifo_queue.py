@@ -30,6 +30,10 @@ class TestNotificationFifoQueueMarkPlayedEmission( unittest.TestCase ):
     """
 
     def setUp( self ):
+        # The configured zone is read with no fallback; these tests are not about the zone.
+        tz_patch = patch( "cosa.rest.notification_fifo_queue.get_app_timezone", return_value="America/New_York" )
+        tz_patch.start()
+        self.addCleanup( tz_patch.stop )
         # Patch InputAndOutputTable so queue construction doesn't hit DB layers.
         self._io_tbl_patch = patch( "cosa.rest.notification_fifo_queue.InputAndOutputTable" )
         self._mock_io_tbl_cls = self._io_tbl_patch.start()
@@ -158,6 +162,10 @@ class TestNotificationFifoQueuePushLocking( unittest.TestCase ):
     """
 
     def setUp( self ):
+        # The configured zone is read with no fallback; these tests are not about the zone.
+        tz_patch = patch( "cosa.rest.notification_fifo_queue.get_app_timezone", return_value="America/New_York" )
+        tz_patch.start()
+        self.addCleanup( tz_patch.stop )
         self._io_tbl_patch = patch( "cosa.rest.notification_fifo_queue.InputAndOutputTable" )
         self._mock_io_tbl_cls = self._io_tbl_patch.start()
         self._mock_io_tbl_cls.return_value = MagicMock()
@@ -242,6 +250,10 @@ class TestHumanOnlyRidesToDict( unittest.TestCase ):
     """
 
     def setUp( self ):
+        # The configured zone is read with no fallback; these tests are not about the zone.
+        tz_patch = patch( "cosa.rest.notification_fifo_queue.get_app_timezone", return_value="America/New_York" )
+        tz_patch.start()
+        self.addCleanup( tz_patch.stop )
         # Patch InputAndOutputTable so construction never touches the DB/io layer.
         self._io_tbl_patch = patch( "cosa.rest.notification_fifo_queue.InputAndOutputTable" )
         self._io_tbl_patch.start()

@@ -1,3 +1,4 @@
+from cosa.config.app_timezone import get_app_timezone
 from cosa.rest.fifo_queue import FifoQueue
 from cosa.memory.input_and_output_table import InputAndOutputTable
 import cosa.utils.util as du
@@ -164,50 +165,32 @@ class NotificationItem:
         self.thread_id      = thread_id
 
     def _get_local_timestamp( self ) -> str:
-        """Get timezone-aware timestamp using configured timezone from ConfigurationManager"""
-        try:
-            # Import here to avoid circular imports
-            import lupin_app.main as main_module
-            config_mgr = main_module.config_mgr
-            app_debug = main_module.app_debug
+        """Get a timezone-aware timestamp in the configured zone; a missing or invalid zone raises."""
+        # Import here to avoid circular imports
+        import lupin_app.main as main_module
+        config_mgr = main_module.config_mgr
+        app_debug  = main_module.app_debug
 
-            # Get timezone from config, default to America/New_York (East Coast)
-            timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
+        timezone_name = get_app_timezone( config_mgr )
 
-            if app_debug: print( f"[TIMEZONE-DEBUG] NotificationItem using timezone: {timezone_name}" )
+        if app_debug: print( f"[TIMEZONE-DEBUG] NotificationItem using timezone: {timezone_name}" )
 
-            # Use existing util function for timezone-aware datetime, then convert to ISO format
-            tz_date = du.get_current_datetime_raw( tz_name=timezone_name )
-            result = tz_date.isoformat()
+        # Use existing util function for timezone-aware datetime, then convert to ISO format
+        result = du.get_current_datetime_raw( tz_name=timezone_name ).isoformat()
 
-            if app_debug: print( f"[TIMEZONE-DEBUG] NotificationItem timestamp: {result}" )
+        if app_debug: print( f"[TIMEZONE-DEBUG] NotificationItem timestamp: {result}" )
 
-            return result
-        except Exception as e:
-            # Fallback to UTC if configuration or timezone is invalid
-            print( f"[TIMEZONE] Warning: NotificationItem falling back to UTC: {e}" )
-            from datetime import timezone
-            return datetime.now( timezone.utc ).isoformat()
+        return result
 
     def _get_time_display( self ) -> str:
         """Get formatted time with timezone abbreviation (e.g., '14:30 EST') for UI display."""
-        try:
-            # Import here to avoid circular imports
-            import lupin_app.main as main_module
-            config_mgr = main_module.config_mgr
+        # Import here to avoid circular imports
+        import lupin_app.main as main_module
 
-            # Get timezone from config
-            timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
+        timezone_name = get_app_timezone( main_module.config_mgr )
 
-            # Get current time in configured timezone
-            tz_date = du.get_current_datetime_raw( tz_name=timezone_name )
-
-            # Format as "HH:MM TZ" (e.g., "14:30 EST")
-            return tz_date.strftime( '%H:%M %Z' )
-        except Exception as e:
-            # Fallback to simple time without timezone
-            print( f"[TIMEZONE] Warning: time_display falling back to simple format: {e}" )
-            return datetime.now().strftime( '%H:%M' )
+        # Format as "HH:MM TZ" (e.g., "14:30 EST")
+        return du.get_current_datetime_raw( tz_name=timezone_name ).strftime( '%H:%M %Z' )
 
     def to_dict( self ) -> Dict[str, Any]:
         """Convert notification to dictionary for JSON serialization."""

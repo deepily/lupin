@@ -267,6 +267,13 @@ class ConfigStub:
         self.reads.append( key )
         return self._values.get( key, default )
 
+    config_block_id = "Lupin:+Harness"
+
+    def get_required( self, key, **_kwargs ):
+        """The zone key, which the code reads with no default; UTC unless a test sets one."""
+        self.reads.append( key )
+        return self._values.get( key, "UTC" )
+
 
 class _StubConfigurationManager:
     """
@@ -291,6 +298,12 @@ class _StubConfigurationManager:
         if key == "app timezone":
             return type( self ).timezone_name
         return default
+
+    config_block_id = "Lupin:+Harness"
+
+    def get_required( self, key, **_kwargs ):
+        """The zone key, which the code reads with no default."""
+        return type( self ).timezone_name
 
 
 class _DbSession:

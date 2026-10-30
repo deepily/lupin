@@ -12,6 +12,8 @@ import time
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from cosa.config.app_timezone import get_app_timezone
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -794,10 +796,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
         "websocket heartbeat interval seconds",
         default=30, return_type="int"
     )
-    app_timezone = config_mgr.get(
-        "app timezone",
-        default="America/New_York"
-    )
+    app_timezone = get_app_timezone( config_mgr )
     tfe_auto_fix_enabled = config_mgr.get(
         "test fix expediter auto fix enabled",
         default=False, return_type="boolean"

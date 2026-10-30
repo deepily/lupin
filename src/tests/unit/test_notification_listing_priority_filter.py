@@ -34,6 +34,7 @@ def real_queue():
     """A real NotificationFifoQueue, with the DB log and the timezone lookup stubbed."""
     main = MagicMock()
     main.config_mgr.get.return_value = "America/New_York"
+    main.config_mgr.get_required.return_value = "America/New_York"
     main.app_debug = False
     pkg  = MagicMock()
     pkg.main = main

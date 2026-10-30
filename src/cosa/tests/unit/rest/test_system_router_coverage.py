@@ -333,6 +333,7 @@ class TestGetClientConfig( unittest.IsolatedAsyncioTestCase ):
         cfg = Mock()
         # return the per-call default so int()/float() conversions get valid types
         cfg.get.side_effect = lambda key, default=None, return_type=None: default
+        cfg.get_required.return_value = "America/New_York"
         return cfg
 
     async def test_test_env_label( self ):

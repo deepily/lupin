@@ -21,6 +21,8 @@ import os
 
 import pytest
 
+from cosa.config.app_timezone import InvalidAppTimezoneError
+
 # Bootstrap imports
 lupin_root = os.environ.get( "LUPIN_ROOT" )
 if lupin_root:
@@ -95,14 +97,16 @@ class TestResolveSenderId:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class _Cfg:
-    """A config stand-in that answers one key and records the default it was offered."""
+    """A config stand-in that answers `app timezone` through get_required."""
+
+    config_block_id = "Lupin:+Stub"
 
     def __init__( self, value ):
         self.value = value
-        self.seen  = {}
+        self.seen  = []
 
-    def get( self, key, default=None, **_kwargs ):
-        self.seen[ key ] = default
+    def get_required( self, key, **_kwargs ):
+        self.seen.append( key )
         return self.value
 
 
@@ -139,29 +143,26 @@ class TestGetLocalTimestamp:
         out = notif.get_local_timestamp()
         assert out.endswith( "+05:30" ), out
 
-    def test_it_asks_config_for_the_timezone_with_a_new_york_default( self, config ):
+    def test_it_asks_config_for_the_timezone_and_offers_no_default( self, config ):
         cfg = config( _FIXED_ZONE )
         notif.get_local_timestamp()
-        assert cfg.seen[ "app timezone" ] == "America/New_York"
+        assert cfg.seen == [ "app timezone" ]
 
-    def test_an_invalid_timezone_falls_back_instead_of_raising( self, config ):
+    def test_an_invalid_timezone_raises_instead_of_reading_the_host_clock( self, config ):
         config( "Mars/Olympus_Mons" )
-        out = notif.get_local_timestamp()
-        # the fallback is a naive local isoformat — it must NOT carry the offset the
-        # configured path would have produced, and it must not raise.
-        assert not out.endswith( "+05:30" )
-        assert re.match( r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", out ), out
+        with pytest.raises( InvalidAppTimezoneError ):
+            notif.get_local_timestamp()
 
     def test_the_debug_line_is_printed_only_when_app_debug_is_on( self, config, capsys ):
         """
         Both sides, because a helper that always printed, or never did, satisfies
         either half alone.
         """
-        config( "Mars/Olympus_Mons", app_debug=True )
+        config( _FIXED_ZONE, app_debug=True )
         notif.get_local_timestamp()
         assert "[TIMEZONE]" in capsys.readouterr().out
 
-        config( "Mars/Olympus_Mons", app_debug=False )
+        config( _FIXED_ZONE, app_debug=False )
         notif.get_local_timestamp()
         assert "[TIMEZONE]" not in capsys.readouterr().out
 
@@ -180,15 +181,15 @@ class TestGetFormattedTimeDisplay:
         assert re.match( r"^\d{2}:\d{2} \S+$", out ), out
         assert "IST" in out, out
 
-    def test_an_invalid_timezone_falls_back_to_a_bare_time( self, config ):
+    def test_an_invalid_timezone_raises_instead_of_a_bare_time( self, config ):
         config( "Mars/Olympus_Mons" )
-        out = notif.get_formatted_time_display()
-        assert re.match( r"^\d{2}:\d{2}$", out ), out
+        with pytest.raises( InvalidAppTimezoneError ):
+            notif.get_formatted_time_display()
 
-    def test_it_asks_config_for_the_timezone_with_a_new_york_default( self, config ):
+    def test_it_asks_config_for_the_timezone_and_offers_no_default( self, config ):
         cfg = config( _FIXED_ZONE )
         notif.get_formatted_time_display()
-        assert cfg.seen[ "app timezone" ] == "America/New_York"
+        assert cfg.seen == [ "app timezone" ]
 
 
 class TestGetFormattedDateDisplay:
@@ -198,12 +199,12 @@ class TestGetFormattedDateDisplay:
         out = notif.get_formatted_date_display()
         assert isinstance( out, str ) and out.strip()
 
-    def test_an_invalid_timezone_falls_back_instead_of_raising( self, config ):
+    def test_an_invalid_timezone_raises_instead_of_falling_back( self, config ):
         config( "Mars/Olympus_Mons" )
-        out = notif.get_formatted_date_display()
-        assert isinstance( out, str ) and out.strip()
+        with pytest.raises( InvalidAppTimezoneError ):
+            notif.get_formatted_date_display()
 
-    def test_it_asks_config_for_the_timezone_with_a_new_york_default( self, config ):
+    def test_it_asks_config_for_the_timezone_and_offers_no_default( self, config ):
         cfg = config( _FIXED_ZONE )
         notif.get_formatted_date_display()
-        assert cfg.seen[ "app timezone" ] == "America/New_York"
+        assert cfg.seen == [ "app timezone" ]
