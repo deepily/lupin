@@ -18,6 +18,7 @@ pins:
   - cosa.repo.labelling.items.validate_item@683123c7d4
   - cosa.repo.labelling.packets.blind_form@9b4f75c2f2
   - cosa.repo.labelling.packets.export_packets@e1209de41a
+  - cosa.repo.labelling.packets.export_subset_packet@6c8c96f087
   - cosa.repo.labelling.packets.packet_path@fb53e6f8ac
   - cosa.repo.labelling.packets.read_labels@ab7625589b
   - cosa.repo.labelling.packets.seeded_order@7bdd443cfd
@@ -26,6 +27,7 @@ pins:
 Two human reviewers label items without seeing the model's verdict. In blind mode they never see each other's label. In confirm mode the second reviewer sees Rick's label on all but a seeded 20%. The same format serves the need-set labelling and the duplicate checker.
 - `make_item` builds an item, a need with its proposed key or a pair of definitions, and `validate_item` checks one against the `labelling-item-1` format.
 - `export_packets` writes one blind packet per reviewer at the path `packet_path` gives. `blind_form` validates an item and returns only its id, type and payload. It raises `PACKET_LEAK` naming any extra field, and strips nothing.
+- `export_subset_packet` writes one more blind packet of some items already sent out, such as a third rater's packet of the disputed items. It refuses a reviewer who already has a packet.
 - `seeded_order` orders the items for the next reviewer, and `read_labels` reads back the labels one reviewer sent.
 - `paired` joins two reviewers' labels by item. `cohen_kappa` and `agreement_report` measure how far they agree.
 - Confirm mode builds the second reviewer's packet. `blind_sample_ids` draws a seeded 20% of the items, half rounded up, and `export_confirm_packet` leaves those blind and shows Rick's label on the rest.

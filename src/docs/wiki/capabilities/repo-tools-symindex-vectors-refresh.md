@@ -11,7 +11,7 @@ pins:
   - cosa.repo.symindex.vector_refresh.env_file_path@6220714314
   - cosa.repo.symindex.vector_refresh.carried_env@97e4d23411
   - cosa.repo.symindex.candidate_build.run@8c0684e323
-  - cosa.repo.symindex.candidate_build.BoundedJobWriter@afaf8d075a
+  - cosa.repo.symindex.candidate_build.BoundedJobWriter@b575b3c567
   - cosa.repo.symindex.candidate_build.make_job_writer@6f0901398b
   - cosa.repo.symindex.candidate_build.sample_purposes@4c0e76d6e8
   - cosa.repo.symindex.candidate_build.tree_path_refusal@9a2e9a9fb4
@@ -32,7 +32,7 @@ Keeps the stored vector set current. The staleness check is on [[repo-tools-symi
 ## Build (`candidate_build`)
 - `run( root, writer, client )` ensures the index and writes purpose lines from every searchable entry, public and private. It rebuilds the vectors under the build lock and swaps the new set in by rename. Vectors of rows whose text is unchanged are reused.
 - The vector rows are only the entries that pass the screen's `sendable` check, which is the list the lookup uploads as its stage. A held lock raises `CandidateError` with code `BUILD_LOCK_HELD`, and nothing is written.
-- `BoundedJobWriter` asks a bounded Claude Code job for purposes: it writes `request-<key>.json` and submits it. It waits 1800 seconds by default for the response file. `make_job_writer` submits through `/api/v2/submit`. No file in time raises `TimeoutError`, and a malformed one raises `ValueError`.
+- `BoundedJobWriter` asks a bounded Claude Code job for purposes: it writes `request-<key>.json` and submits it. It waits 1800 seconds by default for the response file. `make_job_writer` submits through `/api/v2/submit`. No file in time raises `TimeoutError`. A reply that is not valid JSON is saved under `io/json-recovery-failures` and the job is asked once more. A second bad reply, or a reply that is not a list of purposes, raises `ValueError`.
 - `make_job_writer( root, base_url, environ )` needs the main checkout (a worktree raises `ValueError`) and the two `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` credentials, else `DEPENDENCY_MISSING`. With `index` and `out_dir` it reads that index file, hands off under `out_dir/handoff`, and a worktree root is allowed.
 - `sample_purposes` writes lines for every k-th searchable symbol, sorted by id, into a separate store. It reads the given `index` folder when one is passed.
 - `run` also takes `purposes`, `index`, `out_dir` and `skip_if_current`. With `purposes="skip"` it never calls the writer, builds from the stored lines and lists a pin without one as unwritten. Any other value than `write` or `skip` raises `ValueError`. `index` is read only, and `out_dir` holds the purpose, vector, query-cache and lock files. `skip_if_current` rereads the build info under the lock and returns `{ skipped: "current" }` when it names this index.
