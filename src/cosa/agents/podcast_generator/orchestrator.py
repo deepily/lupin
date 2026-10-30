@@ -1434,7 +1434,19 @@ class PodcastOrchestratorAgent:
             )
             self.metrics[ "api_calls" ] += 1
 
-            result = parse_script_response( response.content )
+            try:
+                result = parse_script_response( response.content, label=self.podcast_id )
+            except ValueError as first_error:
+                # One retry (row 0a5db694): a second sample usually parses. A second failure
+                # propagates to the handler below, which fails the job with the saved-file path.
+                logger.warning( f"Script parse failed, retrying once: {first_error}" )
+                await voice_io.notify( "The script came back unreadable, so I'm asking for it once more.", priority="low" )
+                response = await self.api_client.call_for_script(
+                    system_prompt = system_prompt,
+                    user_message  = user_prompt,
+                )
+                self.metrics[ "api_calls" ] += 1
+                result = parse_script_response( response.content, label=self.podcast_id )
 
             # Convert to PodcastScript
             segments = [

@@ -434,17 +434,18 @@ def parse_analysis_response( response_content: str ) -> dict:
     }
 
 
-def parse_script_response( response_content: str ) -> dict:
+def parse_script_response( response_content: str, label: str = "podcast-script" ) -> dict:
     """
     Parse the script generation response from Claude (lenient parse).
 
     Requires:
         - response_content contains a JSON script (possibly with markdown / prose)
+        - label is a short tag naming the job, used in the failure dump file name
 
     Ensures:
         - Returns dictionary with title, segments, key_topics
         - Recovers JSON embedded in surrounding prose (bounded-CC tolerant)
-        - Raises ValueError if no JSON object can be recovered; the caller
+        - Raises ValueError, naming the saved raw-response file, if no JSON object can be recovered; the caller
           (orchestrator initial-generation) dead-letters the job with an honest
           failure rather than presenting an empty script for approval
 
@@ -455,6 +456,7 @@ def parse_script_response( response_content: str ) -> dict:
 
     Args:
         response_content: Raw response from Claude
+        label: Tag for the failure dump file name, such as the podcast id
 
     Returns:
         dict: Parsed script data
@@ -462,7 +464,8 @@ def parse_script_response( response_content: str ) -> dict:
     Raises:
         ValueError: if the response contains no recoverable JSON object.
     """
-    parsed = recover_json_object( response_content )
+    dump_info = {}
+    parsed    = recover_json_object( response_content, label=label, dump_info=dump_info )
     if isinstance( parsed, dict ):
         # Validate required fields
         if "segments" not in parsed:
@@ -479,7 +482,7 @@ def parse_script_response( response_content: str ) -> dict:
     # "Untitled Podcast" to approve.
     raise ValueError(
         "Podcast script response contained no recoverable JSON object — the model "
-        "output could not be parsed into a script."
+        f"output could not be parsed into a script. Raw response saved to: {dump_info.get( 'path' )}"
     )
 
 

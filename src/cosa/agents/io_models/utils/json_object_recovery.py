@@ -22,7 +22,9 @@ Notes:
 
 import json
 import logging
+import os
 import re
+from datetime import datetime
 from typing import Optional, Any
 
 logger = logging.getLogger( __name__ )
@@ -132,16 +134,55 @@ def _escape_bare_break_quotes( text: str ) -> str:
     return _BARE_BREAK_TAG.sub( r'\1\\"\2\\"\3', text )
 
 
-def recover_json_object( response_content: str ) -> Optional[ Any ]:
+def save_raw_response( body: str, label: str ) -> Optional[ str ]:
+    """
+    Save a full model response to a dated, labelled file under io/.
+
+    Requires:
+        - body is a string
+        - label is a short, non-empty tag such as a job id
+
+    Ensures:
+        - returns the path of the file written, under <project root>/io/json-recovery-failures/<YYYY-MM-DD>/
+        - the file name is <HHMMSS-microseconds>-<label>.txt, with any character outside [A-Za-z0-9._-] in label replaced by "-"
+        - returns None, and logs the cause, if the file cannot be written
+        - never raises
+
+    Notes:
+        - io/** is gitignored, so the dump never reaches a commit.
+    """
+    import cosa.utils.util as cu
+
+    now  = datetime.now()
+    safe = re.sub( r"[^A-Za-z0-9._-]", "-", label )
+    path = f"{cu.get_project_root()}/io/json-recovery-failures/{now:%Y-%m-%d}/{now:%H%M%S-%f}-{safe}.txt"
+    try:
+        os.makedirs( os.path.dirname( path ), exist_ok=True )
+        with open( path, "w", encoding="utf-8" ) as f:
+            f.write( body )
+    except OSError as e:
+        logger.error( "[json-recovery] could not save the raw response to %s: %s", path, e )
+        return None
+
+    return path
+
+
+def recover_json_object(
+    response_content: str, label: str = "response", dump_info: Optional[ dict ] = None
+) -> Optional[ Any ]:
     """
     Best-effort recovery of a JSON value from a (possibly chatty) completion.
 
     Requires:
         - response_content is a string
+        - label is a short tag naming the caller's job, used in the dump file name
+        - dump_info is None or a dict
 
     Ensures:
         - returns the parsed JSON value, or None if nothing can be recovered
         - never raises and never substitutes a default
+        - on None, the full raw response is saved by `save_raw_response`, the path is logged
+          beside the bounded body, and the path (or None) is stored in dump_info[ "path" ] when given
 
     Notes:
         - Strategy: (1) strip a leading markdown code fence (``` or ```json) and drop
@@ -150,7 +191,10 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
         - Trailing prose after the code block would otherwise defeat last-brace recovery.
         - The failure posture belongs to the caller: Podcast's `parse_script_response`
           raises on None, and so do Presentation's four call sites.
-        - On an unrecoverable response this logs the full raw body at error level.
+        - On an unrecoverable response this logs a bounded raw body at error level.
+        - This function owns the file write because it is the one place that holds the full body at
+          the moment of failure, and every caller (Podcast and Presentation) gets the dump.
+          Callers only pass the label and, if they want the path, a dict to receive it.
         - That log changes no return value, so the malformed completion is captured
           permanently without a staged harness.
     """
@@ -195,9 +239,12 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
         body = (
             f"{body[ :half ]}\n...[{len( response_content ) - cap} chars omitted]...\n{body[ -half: ]}"
         )
+    dump_path = save_raw_response( response_content, label )
+    if dump_info is not None: dump_info[ "path" ] = dump_path
     logger.error(
-        "[json-recovery] unrecoverable JSON from model response (%d chars); bounded raw body follows:\n%s",
-        len( response_content ), body,
+        "[json-recovery] unrecoverable JSON from model response (%d chars); full raw body saved to %s; "
+        "bounded raw body follows:\n%s",
+        len( response_content ), dump_path, body,
     )
     return None
 

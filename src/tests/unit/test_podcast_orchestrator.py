@@ -604,6 +604,59 @@ class TestGenerateScript:
         assert isinstance( excinfo.value.__cause__, ValueError )
 
 
+class TestGenerateScriptRetry:
+    """One retry on an unparseable script, a low-priority note, then a loud failure."""
+
+    def _setup( self ):
+        agent = _agent()
+        agent._api_client = _mock_api_client()
+        response = MagicMock()
+        response.content     = "raw"
+        response.stop_reason = "end_turn"
+        agent._api_client.call_for_script = AsyncMock( return_value=response )
+        return agent, ContentAnalysis( main_topic="Quantum" )
+
+    def test_second_attempt_succeeds_after_one_note( self ):
+        agent, analysis = self._setup()
+        parsed = { "title": "Retried", "segments": [ { "speaker": "Nora", "role": "curious", "text": "hi" } ] }
+        notify = AsyncMock()
+        with patch.object( orch_mod, "get_dynamic_duo_description", return_value="DUO" ), \
+             patch.object( orch_mod, "get_script_generation_prompt", return_value="P" ), \
+             patch.object( orch_mod.voice_io, "notify", notify ), \
+             patch.object( orch_mod, "parse_script_response", side_effect=[ ValueError( "bad" ), parsed ] ) as parse:
+            script = _run( agent._generate_script_async( "research", analysis ) )
+        assert script.title == "Retried"
+        assert agent._api_client.call_for_script.await_count == 2
+        assert agent.metrics[ "api_calls" ] == 2
+        assert notify.await_count == 1
+        assert notify.await_args.kwargs[ "priority" ] == "low"
+        assert parse.call_args.kwargs[ "label" ] == agent.podcast_id
+
+    def test_second_failure_fails_loudly_with_the_saved_path( self ):
+        agent, analysis = self._setup()
+        err = ValueError( "no recoverable JSON object. Raw response saved to: /x/io/dump.txt" )
+        with patch.object( orch_mod, "get_dynamic_duo_description", return_value="DUO" ), \
+             patch.object( orch_mod, "get_script_generation_prompt", return_value="P" ), \
+             patch.object( orch_mod.voice_io, "notify", AsyncMock() ) as notify, \
+             patch.object( orch_mod, "parse_script_response", side_effect=[ err, err ] ):
+            with pytest.raises( PodcastGenerationError ) as excinfo:
+                _run( agent._generate_script_async( "research", analysis ) )
+        assert "/x/io/dump.txt" in str( excinfo.value )
+        assert agent._api_client.call_for_script.await_count == 2    # one retry, no more
+        assert notify.await_count == 1
+
+    def test_first_success_makes_no_retry_and_no_note( self ):
+        agent, analysis = self._setup()
+        notify = AsyncMock()
+        with patch.object( orch_mod, "get_dynamic_duo_description", return_value="DUO" ), \
+             patch.object( orch_mod, "get_script_generation_prompt", return_value="P" ), \
+             patch.object( orch_mod.voice_io, "notify", notify ), \
+             patch.object( orch_mod, "parse_script_response", return_value={ "title": "T", "segments": [] } ):
+            _run( agent._generate_script_async( "research", analysis ) )
+        assert agent._api_client.call_for_script.await_count == 1
+        assert notify.await_count == 0
+
+
 # ===========================================================================
 # _revise_script_async  (MID)
 # ===========================================================================
