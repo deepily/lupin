@@ -33,15 +33,15 @@ ROOT="${LUPIN_ROOT:-$SELF_ROOT}"
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # Pick the first Python that can import the job. A venv can exist and still lack a package the job needs
-# (the test VM's .venv has no `requests`), so "executable" is not enough: try the import.
+# (the test VM's .venv has no `requests`, and ~/.venv-lupin-mcp has no `numpy`, which the vector build imports late), so "executable" is not enough: try the import.
 PYTHON=""
 for CANDIDATE in "${REUSE_VECTOR_REFRESH_PYTHON:-}" "$ROOT/.venv/bin/python" "${HOME:-}/.venv-lupin-mcp/bin/python" "$( command -v python3 || true )"; do
     [ -n "$CANDIDATE" ] && [ -x "$CANDIDATE" ] || continue
-    if "$CANDIDATE" -c "import cosa.repo.symindex.vector_refresh" >/dev/null 2>&1; then PYTHON="$CANDIDATE"; break; fi
-    echo "reuse-vector-refresh: $CANDIDATE cannot import cosa.repo.symindex.vector_refresh; trying the next Python" >&2
+    if "$CANDIDATE" -c "import numpy, cosa.repo.symindex.vector_refresh" >/dev/null 2>&1; then PYTHON="$CANDIDATE"; break; fi
+    echo "reuse-vector-refresh: $CANDIDATE cannot import numpy and cosa.repo.symindex.vector_refresh; trying the next Python" >&2
 done
 if [ -z "$PYTHON" ]; then
-    echo "reuse-vector-refresh: no Python can import cosa.repo.symindex.vector_refresh. Tried REUSE_VECTOR_REFRESH_PYTHON, $ROOT/.venv, ${HOME:-}/.venv-lupin-mcp and python3. Set REUSE_VECTOR_REFRESH_PYTHON to one that can." >&2
+    echo "reuse-vector-refresh: no Python can import numpy and cosa.repo.symindex.vector_refresh. Tried REUSE_VECTOR_REFRESH_PYTHON, $ROOT/.venv, ${HOME:-}/.venv-lupin-mcp and python3. Set REUSE_VECTOR_REFRESH_PYTHON to one that can." >&2
     exit 1
 fi
 

@@ -1438,6 +1438,15 @@ $RCMD_TM"
             IR_PREP="HANDOFF=\"\$( sed -n 's/^reuse candidate purpose handoff subdir *= *//p' src/conf/lupin-app.ini | head -1 )\"
 [ -n \"\$HANDOFF\" ] || { echo 'ERROR: src/conf/lupin-app.ini has no reuse candidate purpose handoff subdir'; exit 1; }
 sudo install -d -m 2775 -o 1001 -g \"\$( id -g )\" \"$IR_ROOT/\$HANDOFF\""
+            # The vector build imports numpy late, and ~/.venv-lupin-mcp has none and no pip (cron runs died at
+            # vector_build.py on 2026-10-29 and 10-30). Install the pinned file with uv, else ensurepip plus pip.
+            IR_PREP="$IR_PREP
+VENVPY=\"\$HOME/.venv-lupin-mcp/bin/python\"
+if [ -x \"\$VENVPY\" ] && ! \"\$VENVPY\" -c 'import numpy' 2>/dev/null; then
+  NUMPY_REQ=\"$IR_ROOT/src/scripts/requirements-reuse-vector-refresh.txt\"
+  if [ -x \"\$HOME/.local/bin/uv\" ]; then \"\$HOME/.local/bin/uv\" pip install --python \"\$VENVPY\" -r \"\$NUMPY_REQ\"
+  else \"\$VENVPY\" -m ensurepip --upgrade && \"\$VENVPY\" -m pip install -r \"\$NUMPY_REQ\"; fi
+fi"
         else
             IR_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
             IR_DATA="${DEEPILY_DATA_DIR:-}"; IR_PIP="${PLANNING_IS_PROMPTING_ROOT:-}"

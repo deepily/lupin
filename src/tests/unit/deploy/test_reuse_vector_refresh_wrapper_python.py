@@ -32,7 +32,7 @@ def run_wrapper( tmp_path, explicit=None, venv=None, mcp=None, system=None ):
 def test_a_venv_that_cannot_import_the_job_is_skipped_for_the_next_python_that_can( tmp_path ):
     done = run_wrapper( tmp_path, venv=False, mcp=True )
     assert done.returncode == 0 and "RAN .venv-lupin-mcp" in done.stdout
-    assert ".venv/bin/python cannot import cosa.repo.symindex.vector_refresh" in done.stderr
+    assert ".venv/bin/python cannot import numpy and cosa.repo.symindex.vector_refresh" in done.stderr
 
 
 def test_the_first_python_that_can_import_the_job_wins_and_later_ones_are_never_tried( tmp_path ):
@@ -54,9 +54,23 @@ def test_the_system_python3_is_the_last_candidate( tmp_path ):
 def test_no_python_that_can_import_the_job_is_a_refusal_naming_what_was_tried_and_the_fix( tmp_path ):
     done = run_wrapper( tmp_path, venv=False, mcp=False, system=False )
     assert done.returncode == 1 and done.stdout == ""
-    assert "no Python can import cosa.repo.symindex.vector_refresh" in done.stderr and "Set REUSE_VECTOR_REFRESH_PYTHON" in done.stderr
+    assert "no Python can import numpy and cosa.repo.symindex.vector_refresh" in done.stderr and "Set REUSE_VECTOR_REFRESH_PYTHON" in done.stderr
 
 
 def test_a_host_with_no_python_at_all_is_the_same_refusal( tmp_path ):
     done = run_wrapper( tmp_path )
     assert done.returncode == 1 and "no Python can import" in done.stderr
+
+
+def test_a_venv_that_imports_the_job_but_lacks_numpy_is_skipped( tmp_path ):
+    # The test VM's ~/.venv-lupin-mcp imports the job and has no numpy, which the vector build needs late.
+    mcp = tmp_path / "home" / ".venv-lupin-mcp" / "bin" / "python"
+    mcp.parent.mkdir( parents=True )
+    mcp.write_text( '#!/bin/bash\nif [ "$1" = "-c" ]; then case "$2" in *numpy*) exit 1;; esac; exit 0; fi\necho "RAN no-numpy"\n' )
+    mcp.chmod( 0o755 )
+    bindir = tmp_path / "bin"; bindir.mkdir()
+    env = { "PATH": f"{bindir}:/usr/bin:/bin", "HOME": str( tmp_path / "home" ), "LUPIN_ROOT": str( tmp_path / "root2" ), "REUSE_VECTOR_REFRESH_PATH": f"{bindir}:/usr/bin:/bin" }
+    ( tmp_path / "root2" ).mkdir()
+    refused = subprocess.run( [ "bash", str( SCRIPT ), "--status" ], capture_output=True, text=True, env=env )
+    assert refused.returncode == 1 and "RAN" not in refused.stdout
+    assert ".venv-lupin-mcp/bin/python cannot import numpy and cosa.repo.symindex.vector_refresh" in refused.stderr

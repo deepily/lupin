@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 
+from cosa.agents.io_models.utils import json_object_recovery as jor
 from cosa.repo.doc_lint import harness_schedule
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.candidates import freshness as fr
@@ -67,26 +68,35 @@ class BoundedJobWriter:
         Ensures:
             - the job is sent the ids and file names as the container sees them, never source text
             - returns { id: purpose } for the ids the job answered
+            - a response that is not valid JSON is saved in full under io/json-recovery-failures and the job is asked once more
 
         Raises:
             - TimeoutError when no response file appears in time
-            - ValueError when the response is not a list of { id, purpose } objects
+            - ValueError when the response is not valid JSON on the second try, or is not a list of { id, purpose } objects
         """
         key      = hashlib.sha256( "\n".join( ids ).encode( "utf-8" ) ).hexdigest()[ :12 ]
         request  = self.work_dir / f"request-{key}.json"
         response = self.work_dir / f"response-{key}.json"
         self.work_dir.mkdir( parents=True, exist_ok=True )
-        if response.exists(): response.unlink()
         request.write_text( json.dumps( { "ids": ids } ), encoding="utf-8" )
         where  = f" Each id is the id field of one line of {self.index_path}, which names its file and line." if self.index_path else ""
         prompt = ( f"{pl.PROMPT_TEXT} The ids are in {self.to_container( request )}.{where} "
                    f"Write the JSON list to {self.to_container( response )}, then reply with the word done." )
-        self.submit( { "command": harness_schedule.COMMAND, "args": { "prompt": prompt, "task_type": "BOUNDED" } } )
-        deadline = self.clock() + self.timeout
-        while not response.is_file():
-            if self.clock() > deadline: raise TimeoutError( f"no response file {response} within {self.timeout} s" )
-            self.sleep( self.poll )
-        answers = json.loads( response.read_text( encoding="utf-8" ) )
+        for attempt in ( 1, 2 ):
+            if response.exists(): response.unlink()
+            self.submit( { "command": harness_schedule.COMMAND, "args": { "prompt": prompt, "task_type": "BOUNDED" } } )
+            deadline = self.clock() + self.timeout
+            while not response.is_file():
+                if self.clock() > deadline: raise TimeoutError( f"no response file {response} within {self.timeout} s" )
+                self.sleep( self.poll )
+            text = response.read_text( encoding="utf-8" )
+            try:
+                answers = json.loads( text )
+                break
+            except json.JSONDecodeError as e:
+                saved = jor.save_raw_response( text, "purpose-lines" )
+                print( f"purpose lines: attempt {attempt} wrote unparseable JSON ({e}); raw response saved to {saved}" )
+                if attempt == 2: raise ValueError( f"{response} is not valid JSON after a retry ({e}); raw response saved to {saved}" ) from e
         if not isinstance( answers, list ) or not all( isinstance( a, dict ) and "id" in a and "purpose" in a for a in answers ):
             raise ValueError( f"{response} is not a list of {{id, purpose}} objects" )
         return { a[ "id" ]: a[ "purpose" ] for a in answers }

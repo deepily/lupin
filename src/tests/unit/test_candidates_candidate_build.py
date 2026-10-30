@@ -92,6 +92,39 @@ def test_writer_times_out_when_no_response_comes( tmp_path ):
         w( [ "m.a" ] )
 
 
+def _unparseable_then( tmp_path, good, bad_text, monkeypatch, bad_times=1 ):
+    # A submit that writes bad_text bad_times times, then good; returns ( writer, calls, saved texts ).
+    import hashlib
+    key   = hashlib.sha256( b"m.a" ).hexdigest()[ :12 ]
+    calls = []
+    saved = []
+    monkeypatch.setattr( cb.jor, "save_raw_response", lambda text, label: saved.append( ( label, text ) ) or f"/dump/{len( saved )}.txt" )
+
+    def submit( payload ):
+        calls.append( payload )
+        path = tmp_path / "work" / f"response-{key}.json"
+        if len( calls ) <= bad_times: path.write_text( bad_text, encoding="utf-8" )
+        else:                          pathlib_write( path, good )
+
+    return cb.BoundedJobWriter( tmp_path / "work", submit ), calls, saved
+
+
+BAD_QUOTES = '[ { "id": "m.a", "purpose": "Return the "quoted" value." } ]'
+
+
+def test_writer_saves_an_unparseable_response_and_asks_once_more( tmp_path, monkeypatch ):
+    w, calls, saved = _unparseable_then( tmp_path, [ { "id": "m.a", "purpose": "Return a." } ], BAD_QUOTES, monkeypatch )
+    assert w( [ "m.a" ] ) == { "m.a": "Return a." }
+    assert len( calls ) == 2 and saved == [ ( "purpose-lines", BAD_QUOTES ) ]
+
+
+def test_writer_refuses_after_two_unparseable_responses_naming_the_saved_file( tmp_path, monkeypatch ):
+    w, calls, saved = _unparseable_then( tmp_path, [], BAD_QUOTES, monkeypatch, bad_times=2 )
+    with pytest.raises( ValueError, match=r"not valid JSON after a retry.*saved to /dump/2.txt" ):
+        w( [ "m.a" ] )
+    assert len( calls ) == 2 and len( saved ) == 2
+
+
 @pytest.mark.parametrize( "body", [ { "id": "m.a" }, [ { "id": "m.a" } ], [ "m.a" ] ] )
 def test_writer_refuses_a_response_that_is_not_a_list_of_id_purpose_objects( tmp_path, body ):
     import hashlib

@@ -68,6 +68,67 @@ def test_the_handoff_step_reads_the_real_ini_key_and_refuses_when_it_is_absent( 
     assert bad.returncode == 1 and "has no reuse candidate purpose handoff subdir" in bad.stdout and "SUDO" not in bad.stdout
 
 
+def _numpy_step():
+    printed = vm( "install-refresh-cron", "vm" ).stdout
+    lines   = printed.splitlines()
+    start   = next( i for i, l in enumerate( lines ) if l.strip().startswith( "VENVPY=" ) )
+    end     = next( i for i, l in enumerate( lines ) if i > start and l.strip() == "fi" )
+    return start, "\n".join( l.strip() for l in lines[ start : end + 1 ] )
+
+
+def _run_numpy_step( tmp_path, with_numpy, with_uv ):
+    """Run the printed numpy step against fake pythons; return the log of what it called."""
+    home, log = tmp_path / "home", tmp_path / "log"
+    ( home / ".venv-lupin-mcp" / "bin" ).mkdir( parents=True )
+    ( home / ".local" / "bin" ).mkdir( parents=True )
+    py = home / ".venv-lupin-mcp" / "bin" / "python"
+    py.write_text( f'#!/bin/bash\nif [ "$1" = "-c" ]; then exit {0 if with_numpy else 1}; fi\necho "PY $*" >> {log}\n' )
+    py.chmod( 0o755 )
+    if with_uv:
+        uv = home / ".local" / "bin" / "uv"
+        uv.write_text( f'#!/bin/bash\necho "UV $*" >> {log}\n' )
+        uv.chmod( 0o755 )
+    done = subprocess.run( [ "bash", "-ec", _numpy_step()[ 1 ] ], capture_output=True, text=True, env={ "HOME": str( home ), "PATH": "/usr/bin:/bin" } )
+    return done, ( log.read_text() if log.exists() else "" )
+
+
+def test_the_vm_install_puts_numpy_in_the_venv_before_installing_the_cron_lines():
+    text = vm( "install-refresh-cron", "vm" ).stdout
+    assert text.index( "requirements-reuse-vector-refresh.txt" ) < text.index( "reuse-vector-refresh.sh --install" )
+
+
+def test_the_numpy_step_uses_uv_with_the_pinned_file_when_the_venv_lacks_numpy( tmp_path ):
+    done, log = _run_numpy_step( tmp_path, with_numpy=False, with_uv=True )
+    assert done.returncode == 0 and "UV pip install --python" in log and "/mnt/lupin-data/lupin/src/scripts/requirements-reuse-vector-refresh.txt" in log
+    assert "PY -m" not in log
+
+
+def test_the_numpy_step_falls_back_to_ensurepip_and_pip_when_there_is_no_uv( tmp_path ):
+    done, log = _run_numpy_step( tmp_path, with_numpy=False, with_uv=False )
+    assert done.returncode == 0 and "PY -m ensurepip --upgrade" in log and "PY -m pip install -r /mnt/lupin-data/lupin/src/scripts/requirements-reuse-vector-refresh.txt" in log
+
+
+def test_the_numpy_step_does_nothing_when_numpy_is_already_importable( tmp_path ):
+    done, log = _run_numpy_step( tmp_path, with_numpy=True, with_uv=True )
+    assert done.returncode == 0 and log == ""
+
+
+def test_the_numpy_step_skips_a_host_with_no_venv( tmp_path ):
+    home = tmp_path / "home"; home.mkdir()
+    done = subprocess.run( [ "bash", "-ec", _numpy_step()[ 1 ] ], capture_output=True, text=True, env={ "HOME": str( home ), "PATH": "/usr/bin:/bin" } )
+    assert done.returncode == 0 and done.stdout == ""
+
+
+def test_the_pinned_requirements_file_names_numpy():
+    req = SCRIPT.parent / "requirements-reuse-vector-refresh.txt"
+    assert [ l for l in req.read_text().splitlines() if l and not l.startswith( "#" ) ] == [ "numpy>=2.0,<3" ]
+
+
+def test_the_local_install_has_no_numpy_step():
+    done = vm( "install-refresh-cron", "local", env={ "DEEPILY_DATA_DIR": "/d", "PLANNING_IS_PROMPTING_ROOT": "/p" } )
+    assert "VENVPY" not in done.stdout + done.stderr
+
+
 def test_the_local_install_does_not_touch_the_handoff_folder():
     done = vm( "install-refresh-cron", "local", env={ "DEEPILY_DATA_DIR": "/d", "PLANNING_IS_PROMPTING_ROOT": "/p" } )
     assert "sudo install" not in done.stdout + done.stderr
