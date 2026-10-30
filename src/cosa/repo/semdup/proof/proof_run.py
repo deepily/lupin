@@ -126,8 +126,14 @@ def proof_run( spec, wiring, unofficial=False ):
           the counts
 
     Raises:
+        - SemdupError LEDGER_OUTSIDE_UNOFFICIAL if unofficial and the judge ledger in wiring is not under <data>/semdup/proof-unofficial; nothing is judged or written
         - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
     """
+    if unofficial:
+        allowed = pathlib.Path( wiring[ "data_dir" ] ).joinpath( *UNOFFICIAL_FOLDER ).resolve()
+        ledger  = pathlib.Path( wiring[ "ledger" ].path ).resolve()
+        if not ledger.is_relative_to( allowed ):
+            raise err.SemdupError( err.LEDGER_OUTSIDE_UNOFFICIAL, f"an unofficial run may only write its judge ledger under {allowed}, and the ledger given is {ledger}" )
     cfg      = cfg_mod.verify_frozen( wiring[ "frozen_path" ], wiring[ "live" ] )
     pool     = build_pool( spec, spec[ "seed" ] )
     passes   = [ pipeline.judge_all( pool[ "new" ], pool[ "defs" ], cfg, wiring, slot ) for slot in SLOTS ]

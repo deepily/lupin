@@ -96,6 +96,12 @@ class Toy:
                                 { "ids": [ self.m[ "m1" ][ "id" ], self.m[ "m5" ][ "id" ] ], "source": "nominated" } ],
             "seed": 3, "plant_failures": [], "labels": {} }
 
+    def unofficial_ledger( self ):
+        """Point the wiring at a judge ledger inside the unofficial folder, as the command line does."""
+        folder = self.wiring[ "data_dir" ] / "semdup" / "proof-unofficial"
+        folder.mkdir( parents=True )
+        self.wiring[ "ledger" ] = hr.Ledger( str( folder / "judge-ledger.jsonl" ), jd.ledger_binding( "cli 1", self.wiring[ "backend" ] ) )
+
     def define( self, name, marks, origin ):
         """Write one function file and return its definition record."""
         self.count += 1
@@ -332,6 +338,7 @@ def test_an_unofficial_run_scores_the_labelled_pairs_lists_the_extra_flag_as_owe
     toy    = Toy( tmp_path )
     extra  = toy.key( "r1", "d3" )
     toy.spec[ "labels" ] = { k: v for k, v in toy.all_labels().items() if k != extra }
+    toy.unofficial_ledger()
     record = pr.proof_run( toy.spec, toy.wiring, unofficial=True )
     assert record[ "unofficial" ] is True and record[ "owed" ] == [ extra ] and record[ "status" ] == "complete"
     assert record[ "counts" ][ "flags" ] == 4 and record[ "counts" ][ "correct" ] == 4 and record[ "counts" ][ "found" ] == 4
@@ -343,7 +350,36 @@ def test_an_unofficial_run_scores_the_labelled_pairs_lists_the_extra_flag_as_owe
 def test_an_official_run_after_an_unofficial_one_is_still_proof_one_and_its_ledger_line_is_not_marked(tmp_path):
     toy    = Toy( tmp_path )
     toy.spec[ "labels" ] = toy.all_labels()
+    official = toy.wiring[ "ledger" ]
+    toy.unofficial_ledger()
     pr.proof_run( toy.spec, toy.wiring, unofficial=True )
+    toy.wiring[ "ledger" ] = official
     record = pr.proof_run( toy.spec, toy.wiring )
     line   = json.loads( ( tmp_path / "data" / "semdup" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
     assert record[ "proof" ] == 1 and "unofficial" not in record and "unofficial" not in line and "owed" not in record
+
+
+def test_an_unofficial_run_whose_judge_ledger_is_outside_the_unofficial_folder_is_refused_before_any_judge_call_or_write(tmp_path):
+    toy = Toy( tmp_path )
+    toy.spec[ "labels" ] = toy.all_labels()
+    official = tmp_path / "data" / "semdup" / "proof" / "judge-ledger.jsonl"
+    official.parent.mkdir( parents=True )
+    toy.wiring[ "ledger" ] = hr.Ledger( str( official ), jd.ledger_binding( "cli 1", toy.wiring[ "backend" ] ) )
+    before = official.read_bytes()
+    with pytest.raises( err.SemdupError ) as caught: pr.proof_run( toy.spec, toy.wiring, unofficial=True )
+    assert caught.value.code == err.LEDGER_OUTSIDE_UNOFFICIAL and str( official.resolve() ) in caught.value.detail and "proof-unofficial" in caught.value.detail
+    assert official.read_bytes() == before and not ( tmp_path / "data" / "semdup" / "proof-unofficial" ).exists() and toy.wiring[ "backend" ].calls == 0
+
+
+def test_an_unofficial_run_whose_judge_ledger_is_in_the_unofficial_folder_is_accepted(tmp_path):
+    toy = Toy( tmp_path )
+    toy.spec[ "labels" ] = toy.all_labels()
+    toy.unofficial_ledger()
+    assert pr.proof_run( toy.spec, toy.wiring, unofficial=True )[ "unofficial" ] is True
+
+
+def test_an_official_run_is_not_held_to_the_unofficial_folder_whatever_its_judge_ledger(tmp_path):
+    toy = Toy( tmp_path )
+    toy.spec[ "labels" ] = toy.all_labels()
+    record = pr.proof_run( toy.spec, toy.wiring )
+    assert record[ "proof" ] == 1 and "unofficial" not in record
