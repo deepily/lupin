@@ -40,6 +40,7 @@ from ..db.repositories.notification_repository import NotificationRepository
 # Central EDT-stamp formatter (2026-06-24): the ONE owner of Rick's bracketed
 # outreach prefix "[YYYY.MM.DD at HH:MM:SS]", shared with the arbiter ping path so a
 # reader cannot tell a DM's stamp from an arbiter ping's stamp.
+from cosa.config.app_timezone import read_arbiter_journal_timezone
 from cosa.utils.edt_timestamp import format_edt_timestamp, is_already_stamped
 # The notification queue dependency lives with the notifications router; reuse it
 # so /api/dm/send pushes onto the same FIFO queue as /api/notify.
@@ -2776,7 +2777,7 @@ def _prepare_outbound( *, body, target_session_id, build_sender_id, new_id_fn, n
     message_id   = new_id_fn()
     thread_id    = body.thread_id or message_id
     stamped_body = body.body if is_already_stamped( body.body ) else \
-        f"{format_edt_timestamp( dt=now_fn() if now_fn is not None else None )} {body.body}"
+        f"{format_edt_timestamp( dt=now_fn() if now_fn is not None else None, tz_name=read_arbiter_journal_timezone() )} {body.body}"
     return sender_id, job_id, message_id, thread_id, stamped_body
 
 

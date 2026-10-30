@@ -766,6 +766,7 @@ class TestSubmitNotificationResponse:
         # Create mock config_mgr
         mock_config_mgr = MagicMock()
         mock_config_mgr.get.return_value = 300  # Default grace period
+        mock_config_mgr.get_required.return_value = "America/New_York"
 
         # Override FastAPI dependencies. The answer door requires a credential (row
         # e20e249a); its refusal is pinned in test_the_answer_door_requires_a_credential_and_records_who.py.

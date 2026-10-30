@@ -60,6 +60,7 @@ from cosa.agents.heartbeat_arbiter.fleet_render import (
 from cosa.agents.heartbeat_arbiter.arbiter_journal import (
     make_log_fn, DELIVERED_OUTCOMES, resolve_tz, format_outreach_ts,
 )
+from cosa.config.app_timezone import read_arbiter_journal_timezone
 # Item B (§3.4/§3.5): the dm-topic slug (receipt polling reads the SAME board the
 # durable send_to wrote to) + the restart-surviving Rick re-announce ledger.
 from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
@@ -1018,10 +1019,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._pending_ledger_path        = pending_ledger_path
         # Item B (2026.06.24): resolve the outreach-stamp tz ONCE (REUSE
         # arbiter_journal.resolve_tz + the INI key `arbiter journal local timezone`;
-        # None → America/New_York, DST-aware). resolve_tz is degrade-safe (invalid
+        # None → read from configuration, no code default). resolve_tz is degrade-safe (invalid
         # name → UTC + an error string); we journal that error ONCE so a tz typo is
         # visible, never a silent UTC fallback.
-        self._outreach_tz, _tz_err = resolve_tz( local_timezone_name )
+        self._outreach_tz, _tz_err = resolve_tz( local_timezone_name if local_timezone_name is not None else read_arbiter_journal_timezone() )
         if _tz_err is not None:
             self._log_fn( "outreach_tz_invalid", detail=_tz_err )
         # Item C (2026.06.24): trailing-window outreach throttle config (N msgs / Y

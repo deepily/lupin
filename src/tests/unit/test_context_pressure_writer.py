@@ -109,6 +109,12 @@ def test_unmeasured_status_mapping():
     assert _unmeasured_status( "ACTIVE" ) == "unknown"             # ACTIVE, no assistant turn yet
 
 
+@pytest.fixture( autouse=True )
+def _journal_zone( monkeypatch ):
+    """Pin the journal zone the default log function reads at its first call."""
+    monkeypatch.setattr( "cosa.agents.heartbeat_arbiter.arbiter_journal.read_arbiter_journal_timezone", lambda: "America/New_York" )
+
+
 def test_default_log_fn_emits_one_json_line( capsys ):
     _default_log_fn( "test_event", detail="x" )
     line = json.loads( capsys.readouterr().out.strip() )

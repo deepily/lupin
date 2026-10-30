@@ -38,6 +38,12 @@ if _src_path not in sys.path:
 
 import cosa.rest.notification_fifo_queue as nfq
 
+
+@pytest.fixture( autouse=True )
+def _configured_zone( monkeypatch ):
+    """NotificationItem needs a configured zone; these tests are not about it."""
+    monkeypatch.setattr( "cosa.rest.notification_fifo_queue.get_app_timezone", lambda config_mgr: "America/New_York" )
+
 CC_SENDER  = "claude.code@lupin.deepily.ai#newbie01"
 NON_CC     = "claude.code@unknown.deepily.ai"
 MGR_BADGE  = { "icon": "🦉", "color": "#FFA000", "name": "mr radio", "initial": "M" }

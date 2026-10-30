@@ -213,6 +213,8 @@ if __name__ == "__main__":
 class _DefaultsCfg:
     """config_mgr stub: every key returns the caller's default (exercises the
     build_arbiter_job param reads with valid ctor-passing defaults)."""
+    config_block_id = "Lupin:+Stub"
+    def get_required( self, key, **_kw ): return "America/New_York"
     def get( self, key, default=None, return_type=None ):
         return default
 

@@ -72,3 +72,24 @@ def get_arbiter_journal_timezone( config_mgr ) -> str:
         - InvalidAppTimezoneError if the value is not a zone name zoneinfo knows
     """
     return get_zone_for_key( config_mgr, ARBITER_JOURNAL_TIMEZONE_KEY )
+
+
+def read_arbiter_journal_timezone() -> str:
+    """
+    Read the arbiter journal zone from the process configuration.
+
+    For callers that hold no config manager, such as a module-level log function.
+
+    Requires:
+        - LUPIN_CONFIG_MGR_CLI_ARGS names a loadable configuration
+
+    Ensures:
+        - Returns the IANA zone name configured under `arbiter journal local timezone`
+
+    Raises:
+        - ValueError if no configuration is loaded
+        - MissingConfigKeyError if the key is absent or blank
+        - InvalidAppTimezoneError if the value is not a zone name zoneinfo knows
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    return get_arbiter_journal_timezone( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )

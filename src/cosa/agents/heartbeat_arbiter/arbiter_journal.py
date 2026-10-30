@@ -20,14 +20,15 @@ import datetime
 import json
 from typing import Any, Callable, Optional
 
-# OUTREACH_TS_FORMAT + DEFAULT_TZ_NAME + resolve_tz + format_outreach_ts moved to the
+# OUTREACH_TS_FORMAT + resolve_tz + format_outreach_ts moved to the
 # neutral central module cosa.utils.edt_timestamp (2026-06-24) so the REST DM path can
 # reuse Rick's outreach stamp WITHOUT importing from this arbiter package (which would
 # be a bad dependency direction). Re-imported here and re-exported UNCHANGED → the
 # arbiter ping output stays BYTE-IDENTICAL and existing importers (arbiter_job,
 # test_arbiter_journal) keep importing these names from arbiter_journal with no change.
+from cosa.config.app_timezone import read_arbiter_journal_timezone
 from cosa.utils.edt_timestamp import (
-    DEFAULT_TZ_NAME, OUTREACH_TS_FORMAT, format_outreach_ts, resolve_tz,
+    OUTREACH_TS_FORMAT, format_outreach_ts, resolve_tz,
 )
 
 # Rick's ratified human format: "2026-06-11-at-17-28-46-(EDT)"
@@ -73,6 +74,7 @@ def make_log_fn(
         - service is a non-empty string
         - loop (if given) names the true emitting loop
         - tz_name (if given) is a tz-database name; invalid → UTC fallback
+        - tz_name None reads the configured `arbiter journal local timezone` at the first log call
         - now_fn (if given) is a 0-arg callable returning an aware UTC datetime
         - emit_fn (if given) is a 1-arg callable taking the serialized line
           (test seam; default prints flushed to stdout → systemd journal)
@@ -89,9 +91,11 @@ def make_log_fn(
     """
     now_fn  = now_fn  if now_fn  is not None else _utcnow
     emit_fn = emit_fn if emit_fn is not None else _print_line
-    tz, tz_error = resolve_tz( tz_name )
+    tz, tz_error = ( None, None ) if tz_name is None else resolve_tz( tz_name )
 
     def log_fn( event: str, **fields: Any ) -> None:
+        nonlocal tz
+        if tz is None: tz, _ = resolve_tz( read_arbiter_journal_timezone() )
         now  = now_fn()
         line : dict = {
             "ts"       : now.isoformat(),

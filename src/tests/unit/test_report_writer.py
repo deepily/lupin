@@ -3,7 +3,7 @@ Unit tests for cosa.agents.shared.report_writer.ReportWriter.
 
 Covers:
   - Slug sanitization (boundary conditions)
-  - Path shape (project_root/io/swe-team/reports/{email}/YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md)
+  - Path shape (project_root/io/swe-team/reports/{email}/YYYY.MM.DD-at-HH:MM-{zone}-{slug}-{agent}-report.md)
   - Report content (title, agent, body)
   - Empty body handling
 """
@@ -18,11 +18,21 @@ import cosa.utils.util as cu
 from cosa.agents.shared.report_writer import ReportWriter
 
 
+class _ZoneCfg:
+    """A config answering `app timezone` through get_required."""
+
+    config_block_id = "Lupin:+Stub"
+
+    def get_required( self, key, **_kwargs ):
+        return "America/New_York"
+
+
 @pytest.fixture
 def tmp_project_root( monkeypatch ):
-    """Redirect cu.get_project_root() to a tempdir for the test."""
+    """Redirect cu.get_project_root() to a tempdir and pin the writer's configured zone."""
     with tempfile.TemporaryDirectory() as tmp:
         monkeypatch.setattr( cu, "get_project_root", lambda: tmp )
+        monkeypatch.setattr( "cosa.agents.shared.report_writer.ConfigurationManager", lambda *a, **k: _ZoneCfg() )
         yield tmp
 
 
@@ -68,8 +78,8 @@ class TestWrite:
         assert os.path.exists( path )
         assert "/io/swe-team/reports/test@test.com/" in path
         filename = os.path.basename( path )
-        # YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md
-        assert re.match( r"^\d{4}\.\d{2}\.\d{2}-at-\d{2}:\d{2}-EST-dead-job-not-found-bug_fix_expediter-report\.md$", filename )
+        # YYYY.MM.DD-at-HH:MM-{zone}-{slug}-{agent}-report.md ( the configured zone's abbreviation )
+        assert re.match( r"^\d{4}\.\d{2}\.\d{2}-at-\d{2}:\d{2}-(EST|EDT)-dead-job-not-found-bug_fix_expediter-report\.md$", filename )
 
     def test_report_contains_title_agent_and_body( self, tmp_project_root ):
         writer = ReportWriter( user_email="test@test.com" )

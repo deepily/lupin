@@ -350,6 +350,8 @@ def test_factory_default_mechanism_is_tmux_and_no_seam():
 class _WakeCfg:
     """Fake cfg for assemble_app: health/context disabled (skip those loops);
     `arbiter poke wake mechanism` overridable; all else → the caller's default."""
+    config_block_id = "Lupin:+Stub"
+    def get_required( self, key, **_kw ): return "America/New_York"
     def __init__( self, mechanism="tmux" ):
         self._mechanism = mechanism
     def get( self, key, default=None, return_type="string" ):

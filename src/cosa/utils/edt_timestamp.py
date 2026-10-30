@@ -16,7 +16,7 @@ re-exports these names so its ping output stays byte-identical.
 Two public renderers differ only by bracketing:
     - format_outreach_ts( dt, tz ) -> "2026.06.24 at 18:44:09" (inner string,
       no brackets; the arbiter caller adds its own brackets in `_stamp`).
-    - format_edt_timestamp( dt=None, tz_name=None ) -> "[2026.06.24 at 18:44:09]"
+    - format_edt_timestamp( dt=None, tz_name ) -> "[2026.06.24 at 18:44:09]"
       (bracketed and self-contained; the DM chokepoint prepends it plus a space).
 
 The two are drift-locked. format_edt_timestamp( dt, tz ) + " " is identical to
@@ -36,7 +36,6 @@ from zoneinfo import ZoneInfo
 # — the human-facing leading prefix on every arbiter shoulder-tap/outreach message
 # AND (as of this milestone) every peer DM.
 OUTREACH_TS_FORMAT  = "%Y.%m.%d at %H:%M:%S"
-DEFAULT_TZ_NAME     = "America/New_York"
 
 # Timezone names already reported on stderr, so a bad name in a loop is named once and not per call.
 _WARNED_TZ_NAMES = set()
@@ -54,15 +53,19 @@ def resolve_tz( tz_name: Optional[ str ] ):
     Resolve a tz-database name to a ZoneInfo, degrade-safe.
 
     Requires:
-        - tz_name is a string tz-database name (e.g. "America/New_York") or None
+        - tz_name is a string tz-database name ( the configured zone )
 
     Ensures:
-        - returns ( ZoneInfo, None ) for a valid name (None -> DEFAULT_TZ_NAME)
+        - returns ( ZoneInfo, None ) for a valid name
         - returns ( ZoneInfo("UTC"), <error string> ) for an invalid/unknown
           name, and for any name that is not text; the caller journals the error once, and rendering falls back to UTC
-        - never raises
+
+    Raises:
+        - ValueError if tz_name is None or empty: the zone comes from configuration, never from here
     """
-    name = tz_name if tz_name else DEFAULT_TZ_NAME
+    if tz_name is None or tz_name == "":
+        raise ValueError( "tz_name is required: the zone comes from configuration, this module has no default" )
+    name = tz_name
     if not isinstance( name, str ):
         return ZoneInfo( "UTC" ), f"unknown timezone {name!r}: not text"
     try:
@@ -97,15 +100,17 @@ def format_edt_timestamp( dt: Optional[ datetime.datetime ] = None, tz_name: Opt
 
     Requires:
         - dt is an aware datetime, or None (None -> current aware UTC instant)
-        - tz_name is a tz-database name, or None (None -> DEFAULT_TZ_NAME); an
-          invalid/unknown name degrades to UTC (never raises)
+        - tz_name is a tz-database name ( the configured zone ); an invalid/unknown
+          name degrades to UTC
 
     Ensures:
         - returns "[" + format_outreach_ts( dt, resolve_tz( tz_name ) ) + "]"
           (e.g. "[2026.06.24 at 18:44:09]"); DST handled by the tz database
         - dt=None renders "now" in the resolved tz
         - an invalid tz_name renders the instant in UTC (degrade-safe) and is named once on stderr; the stamp itself carries no marker
-        - never raises
+
+    Raises:
+        - ValueError if tz_name is None or empty
     """
     if dt is None:
         dt = datetime.datetime.now( datetime.timezone.utc )
@@ -186,17 +191,17 @@ def quick_smoke_test():
     assert format_outreach_ts( jan,  tz ) == "2026.01.11 at 16:28:46"
 
     # bracketed prefix: matches the arbiter ping's "[...]" shape exactly
-    assert format_edt_timestamp( june )                    == "[2026.06.11 at 17:28:46]"
+    assert format_edt_timestamp( june, "America/New_York" ) == "[2026.06.11 at 17:28:46]"
     assert format_edt_timestamp( jan, "America/New_York" ) == "[2026.01.11 at 16:28:46]"
 
     # invalid tz → UTC fallback, never raises
     assert format_edt_timestamp( june, "Not/AZone" )       == "[2026.06.11 at 21:28:46]"
 
     # drift-lock: DM prefix + " " is visually identical to the arbiter caller's wrap
-    assert format_edt_timestamp( june ) + " " == f"[{format_outreach_ts( june, tz )}] "
+    assert format_edt_timestamp( june, "America/New_York" ) + " " == f"[{format_outreach_ts( june, tz )}] "
 
     # None dt renders "now" — just assert the bracketed shape (length + delimiters)
-    now_prefix = format_edt_timestamp()
+    now_prefix = format_edt_timestamp( tz_name="America/New_York" )
     assert now_prefix.startswith( "[" ) and now_prefix.endswith( "]" ) and " at " in now_prefix
 
     # split_leading_stamp — BOTH branches (falsifiable):
