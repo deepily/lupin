@@ -168,21 +168,22 @@ def save_raw_response( body: str, label: str ) -> Optional[ str ]:
 
 
 def recover_json_object(
-    response_content: str, label: str = "response", dump_info: Optional[ dict ] = None
+    response_content: str, label: Optional[ str ] = None, dump_info: Optional[ dict ] = None
 ) -> Optional[ Any ]:
     """
     Best-effort recovery of a JSON value from a (possibly chatty) completion.
 
     Requires:
         - response_content is a string
-        - label is a short tag naming the caller's job, used in the dump file name
+        - label is None, or a short tag naming the caller's job, used in the dump file name
         - dump_info is None or a dict
 
     Ensures:
         - returns the parsed JSON value, or None if nothing can be recovered
         - never raises and never substitutes a default
-        - on None, the full raw response is saved by `save_raw_response`, the path is logged
-          beside the bounded body, and the path (or None) is stored in dump_info[ "path" ] when given
+        - on None with a label, the full raw response is saved by `save_raw_response`, the path is
+          logged beside the bounded body, and the path (or None) is stored in dump_info[ "path" ]
+        - on None without a label, nothing is written and the log says so
 
     Notes:
         - Strategy: (1) strip a leading markdown code fence (``` or ```json) and drop
@@ -194,7 +195,8 @@ def recover_json_object(
         - On an unrecoverable response this logs a bounded raw body at error level.
         - This function owns the file write because it is the one place that holds the full body at
           the moment of failure, and every caller (Podcast and Presentation) gets the dump.
-          Callers only pass the label and, if they want the path, a dict to receive it.
+          The write is opt-in: a caller passes a label to get it, so callers that do not
+          (Presentation, and tests feeding bad input) never write into io/.
         - That log changes no return value, so the malformed completion is captured
           permanently without a staged harness.
     """
@@ -239,8 +241,8 @@ def recover_json_object(
         body = (
             f"{body[ :half ]}\n...[{len( response_content ) - cap} chars omitted]...\n{body[ -half: ]}"
         )
-    dump_path = save_raw_response( response_content, label )
-    if dump_info is not None: dump_info[ "path" ] = dump_path
+    dump_path = save_raw_response( response_content, label ) if label is not None else None
+    if label is not None and dump_info is not None: dump_info[ "path" ] = dump_path
     logger.error(
         "[json-recovery] unrecoverable JSON from model response (%d chars); full raw body saved to %s; "
         "bounded raw body follows:\n%s",

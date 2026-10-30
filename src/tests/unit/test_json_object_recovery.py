@@ -254,7 +254,15 @@ class TestRawResponseDump( unittest.TestCase ):
 
     def test_dump_info_is_optional( self ):
         with self.assertLogs( self.LOGGER, level="ERROR" ):
-            self.assertIsNone( recover_json_object( "no json" ) )
+            self.assertIsNone( recover_json_object( "no json", label="x" ) )
+
+    def test_no_label_means_no_file( self ):
+        info = {}
+        with tempfile.TemporaryDirectory() as fresh, patch( _ROOT_PATCH, return_value=fresh ):
+            with self.assertLogs( self.LOGGER, level="ERROR" ):
+                self.assertIsNone( recover_json_object( "no json", dump_info=info ) )
+            self.assertEqual( os.listdir( fresh ), [] )        # not even the io/ directory was made
+        self.assertEqual( info, {} )
 
     def test_label_is_made_filename_safe( self ):
         path = save_raw_response( "body", "a/b c" )
@@ -270,7 +278,7 @@ class TestRawResponseDump( unittest.TestCase ):
         info = {}
         with patch( "os.makedirs", side_effect=OSError( "disk full" ) ):
             with self.assertLogs( self.LOGGER, level="ERROR" ):
-                self.assertIsNone( recover_json_object( "no json", dump_info=info ) )
+                self.assertIsNone( recover_json_object( "no json", label="x", dump_info=info ) )
         self.assertIsNone( info[ "path" ] )
 
 

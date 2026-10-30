@@ -9,7 +9,8 @@ pins:
   - cosa.agents.io_models.utils.xml_parser_factory.PydanticXmlParser.parse_xml_response@e49c7ce400
   - cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor@01f5a736f5
   - cosa.agents.io_models.xml_models.CodeResponse@c81386e483
-  - cosa.agents.io_models.utils.json_object_recovery.recover_json_object@ebbcd33ef1
+  - cosa.agents.io_models.utils.json_object_recovery.recover_json_object@7c795037c9
+  - cosa.agents.io_models.utils.json_object_recovery.save_raw_response@c4033ec0f4
   - cosa.agents.io_models.utils.json_object_recovery.extract_json_object@d7acf5ea59
   - cosa.agents.io_models.utils.fuzzy_file_prefilter.prefilter_docs_map_by_keywords@ea791b6269
 ---
@@ -28,6 +29,7 @@ Agents ask a model for XML, and `BaseXMLModel` subclasses turn the reply into va
 - `from_xml` cuts text before `<?xml`, or else before `<response>`, `<result>` or `<output>` (tried in that order). It also cuts after a closing tag, trying `</response>`, `</result>` and `</output>` in that order. The cut is after the first occurrence of the first one present anywhere in the text (not the earliest closing tag). It escapes a bare `&`, keeps whitespace so code indentation survives, and raises `XMLParsingError` for bad XML and for validation failures alike.
 - `PydanticXmlParser.parse_xml_response` (reached through `XmlParserFactory.parse_agent_response`, not `from_xml`) raises `ValueError` for a routing command with no entry in its model map; there is no default model.
 - `recover_json_object` never raises. It returns `None` after logging a bounded copy of the raw body at `ERROR` (over 4,000 characters, the head and tail 2,000 each). If the text starts with a code fence it drops that line. It cuts at the last triple-backtick it finds (`rfind`), whichever fence that is. It then tries the whole text, then the last balanced `{...}`. Last it retries with the quotes of each bare `<break time="1.5s"/>` tag escaped.
+- A caller that passes `label=` also gets the full raw reply saved by `save_raw_response` to `io/json-recovery-failures/<day>/<time>-<label>.txt` (gitignored). The `ERROR` log names that path beside the bounded body, and `dump_info[ "path" ]` returns it. Without a label nothing is written. Only the podcast script parser passes one, with the podcast id. The podcast orchestrator retries script generation once when `parse_script_response` raises `ValueError`, after a low-priority progress note. A second failure raises `PodcastGenerationError` with the saved-file path in its message.
 - It repairs two things: unescaped `\n`, `\r` and `\t` inside strings, and the quotes of a bare `<break time="x.xs"/>` tag. Any other control character, bare quote or structural error stays a failure.
 
 ## How to extend
