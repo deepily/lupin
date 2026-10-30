@@ -96,55 +96,66 @@ def test_the_guard_can_find_a_lan_key():
 # The specs a Testing-GCS consumer may resolve to: a vertex:// spec, or vendor:model on a cloud vendor.
 # The cloud vendors are the factory's own chat-API rows; its completion-API rows ( vllm, deepily ) are the home
 # network, and a vendor the factory does not know ( ollama ) is on neither list, so it is not allowed.
-# Everything else ( vllm://, vllm:, deepily:, ollama:, any other scheme or hostname ) is the home network or unknown.
-CLOUD_SCHEMES = ( "vertex://", )
-CLOUD_VENDORS = tuple( sorted( vendor for vendor, row in LlmClientFactory.VENDOR_CONFIG.items() if row[ "client_type" ] == "chat" ) )
+CLOUD_SCHEMES      = ( "vertex", )
+CLOUD_VENDORS      = tuple( sorted( vendor for vendor, row in LlmClientFactory.VENDOR_CONFIG.items() if row[ "client_type" ] == "chat" ) )
+# A URL of these schemes is a service address, not a model spec. The LAN-address tests above judge its host.
+SERVICE_SCHEMES    = ( "http", "https", "gs" )
+# Values that hold a colon and are not model specs, each with the reason. Every other colon value is parsed as a spec.
+NOT_A_SPEC = {
+    "stt device id"                                   : "a CUDA device index",
+    "local embedding device"                          : "a CUDA device index",
+    "presentation generator nano banana aspect ratio" : "an image aspect ratio",
+    "peer queue allowed hosts"                        : "a list of docker service host:port pairs",
+    "managed bounce server label"                     : "a port label",
+    "app config server name"                          : "this server's own host:port",
+    "local embedding prose query prefix"              : "a text prefix the embedder prepends",
+    "local embedding prose document prefix"           : "a text prefix the embedder prepends",
+}
 
 
-def _is_spec( value, keys ):
-    """Whether a value names a model spec ( scheme URL, vendor:model, or a key with _params )."""
-    if not isinstance( value, str ): return False
+def is_cloud_spec( value ):
+    """Whether a colon-bearing value parses as a spec on a cloud scheme or a cloud vendor.
+
+    A value with :// is judged by its scheme. Any other value is vendor:model, and the text before
+    the first colon is the vendor. A digit after the colon changes nothing, so ollama:7b-chat is judged by ollama.
+    """
     value = value.strip()
-    return bool( SCHEME.match( value ) ) or f"{value}_params" in keys or bool( re.match( r"^[a-z0-9_-]+:(?!//)", value, re.IGNORECASE ) and "/" not in value.split( ":", 1 )[ 0 ] and "." not in value.split( ":", 1 )[ 0 ] and " " not in value )
-
-
-def _is_cloud_spec( spec ):
-    """Whether a spec is a CLOUD_SCHEMES prefix or a CLOUD_VENDORS vendor:model."""
-    spec = spec.strip()
-    if spec.lower().startswith( CLOUD_SCHEMES ): return True
-    return bool( re.match( rf"^({'|'.join( CLOUD_VENDORS )}):(?!//)", spec, re.IGNORECASE ) )
+    if "://" in value: return value.split( "://", 1 )[ 0 ].lower() in CLOUD_SCHEMES + SERVICE_SCHEMES
+    return value.split( ":", 1 )[ 0 ].lower() in CLOUD_VENDORS
 
 
 def non_cloud_consumers( keys, get ):
-    """Every consumer key whose spec is not on the cloud allowlist, whatever its host is called.
+    """Every consumer key whose spec does not parse as cloud, whatever its host is called.
 
-    A consumer is a key whose value is a spec, or names a key that holds one. Spec definitions that nothing
-    names are not consumers: they are inherited from Development and matter only when something points at them.
-    Returns a dict of key -> ( spec key or None, spec ).
+    A consumer is a key whose value, or the value of the key it names, holds a colon and no whitespace.
+    Specs that nothing names ( a key with a _params sibling ) are definitions, judged only through their
+    consumers. A key listed in NOT_A_SPEC is exempt. Returns a dict of key -> ( spec key or None, spec ).
     """
     flagged = {}
     for key in keys:
         value = get( key )
-        if not isinstance( value, str ): continue
+        if not isinstance( value, str ) or key in NOT_A_SPEC: continue
         value = value.strip()
         via, spec = None, None
-        named     = get( value ) if value != key and value in keys else None
-        if isinstance( named, str ) and _is_spec( named, keys ):
+        named     = get( value ) if value != key and value in keys and value not in NOT_A_SPEC else None
+        if isinstance( named, str ) and ":" in named and not re.search( r"\s", named.strip() ):
             via, spec = value, named.strip()
-        elif re.match( r"^[a-z0-9_-]+:(?![0-9/])[^\s]+$", value, re.IGNORECASE ) and f"{key}_params" not in keys:
-            # vendor:model, any vendor; a spec definition ( it has a _params sibling ) is flagged only through its consumers. A digit after the colon is a port, ratio or device index, not a model.
+        elif ":" in value and not re.search( r"\s", value ) and f"{key}_params" not in keys:
             spec = value
-        if spec is not None and not _is_cloud_spec( spec ): flagged[ key ] = ( via, spec )
+        if spec is not None and not is_cloud_spec( spec ): flagged[ key ] = ( via, spec )
     return flagged
 
 
 def test_the_cloud_allowlist_finder_can_find_a_hostname_consumer():
-    """Positive control: a home-network HOSTNAME spec is flagged, and cloud specs are not."""
-    table = { "bad key": "bad/spec", "bad/spec": "vllm://lupin-home-box.local:3001@m",
+    """Positive control: hostname, digit-first and host:port specs are flagged."""
+    table = { "bad key": "bad/spec", "bad/spec": "vllm://lupin-home-box.local:3001@m", "bad/spec_params": "{}",
               "bad direct": "vllm:some/model", "local direct": "ollama:llama3",
-              "local via": "local/spec", "local/spec": "ollama:llama3", "local/spec_params": "{}", "device": "cuda:0", "ratio": "16:9",
-              "other scheme": "other/spec", "other/spec": "tcp://nas:1@m",
+              "local via": "local/spec", "local/spec": "ollama:llama3", "local/spec_params": "{}",
+              "digit first": "ollama:7b-chat", "host port": "nas:3000", "unlisted device": "cuda:0",
+              "stt device id": "cuda:0",
+              "other scheme": "other/spec", "other/spec": "tcp://nas:1@m", "other/spec_params": "{}",
               "ok key": "ok/spec", "ok/spec": "vertex://global@gemini-3.5-flash", "ok vendor": "anthropic:claude",
+              "service": "https://api.example.com/v1",
               "plain": "text", "none": None, "unnamed def": "vllm://nas:3000@m", "unnamed def_params": "{}" }
 
     assert non_cloud_consumers( table, table.get ) == {
@@ -152,6 +163,9 @@ def test_the_cloud_allowlist_finder_can_find_a_hostname_consumer():
         "bad direct"   : ( None,         "vllm:some/model" ),
         "local direct" : ( None,         "ollama:llama3" ),
         "local via"    : ( "local/spec", "ollama:llama3" ),
+        "digit first"  : ( None,         "ollama:7b-chat" ),
+        "host port"    : ( None,         "nas:3000" ),
+        "unlisted device" : ( None,      "cuda:0" ),
         "other scheme" : ( "other/spec", "tcp://nas:1@m" ) }
 
 
@@ -217,20 +231,31 @@ def test_a_planted_hostname_spec_reddens_the_cloud_allowlist_on_the_real_block( 
     assert not set( flagged ) & set( lan_keys( keys, planted ) ), "the IP-literal finder is blind to a hostname: that is the gap this closes"
 
 
-def test_a_planted_ollama_spec_reddens_the_cloud_allowlist_on_the_real_block( vm_config ):
-    """Mutant: the real vm_agents spec planted as a direct ollama: spec flags its 26 consumers.
+@pytest.mark.parametrize( "planted_spec", [ "ollama:llama3", "ollama:7b-chat", "nas:3000" ] )
+def test_a_planted_local_spec_reddens_the_cloud_allowlist_on_the_real_block( vm_config, planted_spec ):
+    """Mutant: the vm_agents spec planted as a local vendor or host:port flags its 26 consumers.
 
-    ollama is no row of the factory's VENDOR_CONFIG, so the cloud set derived from it excludes it.
+    Neither ollama nor nas is a chat row of the factory's VENDOR_CONFIG, and a digit after the colon is no exemption.
     """
     keys    = vm_config.get_keys()
     real    = lambda key: vm_config.get( key, default=None, silent=True )
-    planted = lambda key: "ollama:llama3" if key == "vm_agents/gemini_flash" else real( key )
+    planted = lambda key: planted_spec if key == "vm_agents/gemini_flash" else real( key )
 
     flagged = non_cloud_consumers( keys, planted )
 
-    assert "ollama" not in CLOUD_VENDORS
+    assert planted_spec.split( ":" )[ 0 ] not in CLOUD_VENDORS
     assert sorted( flagged ) == sorted( key for key in keys if real( key ) == "vm_agents/gemini_flash" )
-    assert { spec for _, spec in flagged.values() } == { "ollama:llama3" }
+    assert { spec for _, spec in flagged.values() } == { planted_spec }
+
+
+def test_every_not_a_spec_exemption_is_still_a_colon_value_in_this_block( vm_config ):
+    """An exemption for a key that is gone or holds no colon is stale and must go."""
+    keys  = vm_config.get_keys()
+    value = lambda key: vm_config.get( key, default=None, silent=True )
+
+    stale = sorted( key for key in NOT_A_SPEC if key not in keys or ":" not in str( value( key ) ) )
+
+    assert not stale, f"stale exemptions: {stale}"
 
 
 def test_the_cloud_vendors_are_the_factorys_chat_rows():
