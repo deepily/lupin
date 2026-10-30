@@ -11,7 +11,7 @@ pins:
   - cosa.agents.podcast_generator.prompts.script_generation.get_script_generation_prompt@bec05bfe8a
   - cosa.agents.podcast_generator.prompts.script_generation.get_script_revision_prompt@727242410f
   - cosa.agents.podcast_generator.prompts.script_generation.parse_analysis_response@224e303f42
-  - cosa.agents.podcast_generator.prompts.script_generation.parse_script_response@5e9fd06d72
+  - cosa.agents.podcast_generator.prompts.script_generation.parse_script_response@88d3adb6e3
 ---
 # Podcast prompt builders
 
@@ -23,6 +23,7 @@ The functions in `prompts/personality.py` and `prompts/script_generation.py` bui
 - `get_script_revision_prompt` embeds the current script, the user's feedback and the revision number, and asks for the same JSON format back.
 - `parse_analysis_response` recovers a JSON object leniently. When none is found it returns a default analysis with the topic "Unknown Topic".
 - `parse_script_response` returns the recovered object with `segments` and `title` filled in when missing. It raises `ValueError` when no JSON object can be recovered, so an empty script never reaches approval.
+- On that failure the full raw reply is saved under `io/json-recovery-failures/`, named by the `label` argument. The `ValueError` text gives the saved path.
 - `extract_prosody_from_text` returns the text with `*[note]*` markers removed and spaces collapsed, plus the lowercased notes.
 - `get_personality_prompt_section` renders one host's profile with the curious or expert behaviour block and up to five example phrases. `get_dynamic_duo_description` joins both hosts with an interaction-dynamics block.
 - `create_personality_from_description` picks tone, expertise and curiosity from keywords in a free-text description.
