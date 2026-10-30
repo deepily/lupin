@@ -224,7 +224,7 @@ class Librarian:
     """
 
     def __init__( self, store, pending_path, log, notify=None, project="lupin", owner="cheech", manager="cheech", priority="P5", max_creates=None,
-                  correlation_key=CORRELATION_KEY, rollup_prefix=ROLLUP_PREFIX ):
+                  correlation_key=CORRELATION_KEY, rollup_prefix=ROLLUP_PREFIX ):  # gitleaks:allow  correlation_key default is a constant name, not a secret
         """
         Keep the store, the pending path and the row settings.
 
