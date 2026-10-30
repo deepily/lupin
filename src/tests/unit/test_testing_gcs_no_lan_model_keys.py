@@ -93,11 +93,12 @@ def test_the_guard_can_find_a_lan_key():
     assert _unroutable_host( "vertex://global@gemini-3.1-flash-lite" ) is None
 
 
-# The specs a Testing-GCS consumer may resolve to: a vertex:// spec, or vendor:model on a cloud vendor. Read from
-# the INI 2026-10-30: the block's specs are vertex://; llm_client_factory._load_vendor_urls lists the cloud vendors.
-# Everything else ( vllm://, vllm:, deepily:, any other scheme or hostname ) is the home network or unknown.
+# The specs a Testing-GCS consumer may resolve to: a vertex:// spec, or vendor:model on a cloud vendor.
+# The cloud vendors are the factory's own chat-API rows; its completion-API rows ( vllm, deepily ) are the home
+# network, and a vendor the factory does not know ( ollama ) is on neither list, so it is not allowed.
+# Everything else ( vllm://, vllm:, deepily:, ollama:, any other scheme or hostname ) is the home network or unknown.
 CLOUD_SCHEMES = ( "vertex://", )
-CLOUD_VENDORS = ( "openai", "anthropic", "groq", "google-gla", "mistralai" )
+CLOUD_VENDORS = tuple( sorted( vendor for vendor, row in LlmClientFactory.VENDOR_CONFIG.items() if row[ "client_type" ] == "chat" ) )
 
 
 def _is_spec( value, keys ):
@@ -130,7 +131,8 @@ def non_cloud_consumers( keys, get ):
         named     = get( value ) if value != key and value in keys else None
         if isinstance( named, str ) and _is_spec( named, keys ):
             via, spec = value, named.strip()
-        elif re.match( r"^[a-z0-9_-]+:(?!//)[^\s]+$", value, re.IGNORECASE ) and re.match( r"^(vllm|deepily|openai|anthropic|groq|google-gla|mistralai):", value, re.IGNORECASE ):
+        elif re.match( r"^[a-z0-9_-]+:(?![0-9/])[^\s]+$", value, re.IGNORECASE ) and f"{key}_params" not in keys:
+            # vendor:model, any vendor; a spec definition ( it has a _params sibling ) is flagged only through its consumers. A digit after the colon is a port, ratio or device index, not a model.
             spec = value
         if spec is not None and not _is_cloud_spec( spec ): flagged[ key ] = ( via, spec )
     return flagged
@@ -139,13 +141,17 @@ def non_cloud_consumers( keys, get ):
 def test_the_cloud_allowlist_finder_can_find_a_hostname_consumer():
     """Positive control: a home-network HOSTNAME spec is flagged, and cloud specs are not."""
     table = { "bad key": "bad/spec", "bad/spec": "vllm://lupin-home-box.local:3001@m",
-              "bad direct": "vllm:some/model", "other scheme": "other/spec", "other/spec": "tcp://nas:1@m",
+              "bad direct": "vllm:some/model", "local direct": "ollama:llama3",
+              "local via": "local/spec", "local/spec": "ollama:llama3", "local/spec_params": "{}", "device": "cuda:0", "ratio": "16:9",
+              "other scheme": "other/spec", "other/spec": "tcp://nas:1@m",
               "ok key": "ok/spec", "ok/spec": "vertex://global@gemini-3.5-flash", "ok vendor": "anthropic:claude",
               "plain": "text", "none": None, "unnamed def": "vllm://nas:3000@m", "unnamed def_params": "{}" }
 
     assert non_cloud_consumers( table, table.get ) == {
         "bad key"      : ( "bad/spec",   "vllm://lupin-home-box.local:3001@m" ),
         "bad direct"   : ( None,         "vllm:some/model" ),
+        "local direct" : ( None,         "ollama:llama3" ),
+        "local via"    : ( "local/spec", "ollama:llama3" ),
         "other scheme" : ( "other/spec", "tcp://nas:1@m" ) }
 
 
@@ -209,6 +215,27 @@ def test_a_planted_hostname_spec_reddens_the_cloud_allowlist_on_the_real_block( 
     assert sorted( flagged ) == sorted( key for key in keys if real( key ) == "vm_agents/gemini_flash" )
     assert len( flagged ) == 26
     assert not set( flagged ) & set( lan_keys( keys, planted ) ), "the IP-literal finder is blind to a hostname: that is the gap this closes"
+
+
+def test_a_planted_ollama_spec_reddens_the_cloud_allowlist_on_the_real_block( vm_config ):
+    """Mutant: the real vm_agents spec planted as a direct ollama: spec flags its 26 consumers.
+
+    ollama is no row of the factory's VENDOR_CONFIG, so the cloud set derived from it excludes it.
+    """
+    keys    = vm_config.get_keys()
+    real    = lambda key: vm_config.get( key, default=None, silent=True )
+    planted = lambda key: "ollama:llama3" if key == "vm_agents/gemini_flash" else real( key )
+
+    flagged = non_cloud_consumers( keys, planted )
+
+    assert "ollama" not in CLOUD_VENDORS
+    assert sorted( flagged ) == sorted( key for key in keys if real( key ) == "vm_agents/gemini_flash" )
+    assert { spec for _, spec in flagged.values() } == { "ollama:llama3" }
+
+
+def test_the_cloud_vendors_are_the_factorys_chat_rows():
+    """Pin the derived set to a literal, so a new local row cannot slip in as cloud."""
+    assert CLOUD_VENDORS == ( "anthropic", "google-gla", "groq", "mistralai", "openai" )
 
 
 def test_no_raw_url_value_names_a_lan_address( vm_config ):
