@@ -4,7 +4,8 @@
 // server-zone-or-labelled-UTC rule exists to remove. This guard reads the source and fails on:
 //   · toLocale{Time,Date,}String and Intl.DateTimeFormat calls whose arguments do not contain `timeZone`;
 //   · the host-zone getters getHours, getMinutes, getDate, getDay, getMonth, getFullYear, getTimezoneOffset.
-// It reads notifications.js and every tracked non-test .ts file under src/lupin_app/static/js. A .ts file that
+// It reads every tracked .ts file under src/lupin_app/static/js and every tracked .js and .html file under
+// src/lupin_app/static (the mobile test build, dist and minified files are left out). A .ts file that
 // still reads the browser zone must be on the owed list with a reason, and an owed file with no finding left fails as stale.
 // It states its denominator (how many calls it checked) and proves itself on a planted site.
 //
@@ -13,7 +14,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -24,7 +25,7 @@ const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notificati
 const FORMAT_CALL  = /(?:\.toLocale(?:Time|Date)?String|\bIntl\.DateTimeFormat)\s*\(/g;
 const HOST_GETTER  = /\.(?:getHours|getMinutes|getDate|getDay|getMonth|getFullYear|getTimezoneOffset)\s*\(/g;
 // Number formatting, not time formatting: the one call that carries no date.
-const NUMBER_CALLS = [ "tokens.toLocaleString()" ];
+const NUMBER_CALLS = [ "tokens.toLocaleString()", "data.total_replays.toLocaleString()" ];
 
 type Finding = { line: number; text: string };
 
@@ -106,6 +107,52 @@ test( "a planted bare call in a real .ts file reddens the guard", () => {
   const planted = file.replace( "return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: \"UTC\" } ).format( date );", "return new Intl.DateTimeFormat( undefined, opts ).format( date );" );
   assert.notEqual( planted, file, "the planting anchor must match" );
   assert.equal( scan( planted ).findings.length, 1 );
+} );
+
+const STATIC = "src/lupin_app/static";
+
+/** Every tracked .js and .html file the web client serves, as repo-relative paths. */
+function trackedPageFiles(): string[] {
+  const out = execFileSync( "git", [ "ls-files", "--", `${STATIC}/*.js`, `${STATIC}/*.html` ], { cwd: ROOT, encoding: "utf8" } );
+  return out.split( "\n" ).filter( f => f && !f.includes( "/lupin-mobile-test/" ) && !f.includes( "/dist/" ) && !f.endsWith( ".min.js" ) );
+}
+
+test( "no tracked .js or .html page reads the browser zone", () => {
+  const bad = trackedPageFiles().flatMap( f => scan( readFileSync( resolve( ROOT, f ), "utf8" ) ).findings.map( x => `${f}:${x.line}: ${x.text}` ) );
+  assert.deepEqual( bad, [], `time formatting without an explicit timeZone:\n  ${bad.join( "\n  " )}` );
+} );
+
+test( "the .js and .html scan reaches a real population of files", () => {
+  const files = trackedPageFiles();
+  assert.ok( files.length >= 55, `only ${files.length} .js and .html files were walked` );
+  for ( const known of [ `${STATIC}/js/notifications.js`, `${STATIC}/js/chunk-sequencer.js`, `${STATIC}/html/document-viewer.html`, `${STATIC}/html/admin/js/peer-queue-watch.js` ] ) {
+    assert.ok( files.includes( known ), `${known} was not walked` );
+  }
+} );
+
+test( "a planted bare call in a real admin page script reddens the guard", () => {
+  const file    = readFileSync( resolve( ROOT, `${STATIC}/html/admin/js/peer-queue-watch.js` ), "utf8" );
+  const planted = file.replace( "LupinAppZone.time( new Date() )", "new Date().toLocaleTimeString()" );
+  assert.notEqual( planted, file, "the planting anchor must match" );
+  assert.equal( scan( planted ).findings.length, 1 );
+} );
+
+test( "every page that uses LupinAppZone loads app-zone.js first", () => {
+  const pages = trackedPageFiles().filter( f => f.endsWith( ".html" ) );
+  let users   = 0;
+  for ( const page of pages ) {
+    const html    = readFileSync( resolve( ROOT, page ), "utf8" );
+    const scripts = [ ...html.matchAll( /<script[^>]*\ssrc="([^"]+)"/g ) ].map( m => m[ 1 ]! );
+    const usesAt  = scripts.findIndex( src => src.startsWith( "/static/" ) && src !== "/static/js/app-zone.js"
+                                         && existsSync( resolve( ROOT, "src/lupin_app", src.slice( 1 ) ) )   // built bundles are not tracked
+                                         && readFileSync( resolve( ROOT, "src/lupin_app", src.slice( 1 ) ), "utf8" ).includes( "LupinAppZone." ) );
+    if ( usesAt < 0 && !html.includes( "LupinAppZone." ) ) continue;
+    users++;
+    const loadAt = scripts.indexOf( "/static/js/app-zone.js" );
+    assert.ok( loadAt >= 0, `${page} uses LupinAppZone but does not load app-zone.js` );
+    if ( usesAt >= 0 ) assert.ok( loadAt < usesAt, `${page} loads app-zone.js after a script that uses it` );
+  }
+  assert.ok( users >= 8, `only ${users} pages were found using LupinAppZone` );
 } );
 
 test( "the scan reaches a real population of formatting calls", () => {

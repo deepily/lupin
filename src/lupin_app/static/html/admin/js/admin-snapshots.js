@@ -33,6 +33,7 @@ class AdminSnapshotsDashboard {
     async init() {
         // Check authentication
         await this.setupAuthentication();
+        await LupinAppZone.load();
 
         // Setup event listeners
         this.setupEventListeners();
@@ -336,7 +337,7 @@ class AdminSnapshotsDashboard {
 
     formatDate( dateString ) {
         const date = new Date( dateString );
-        return date.toLocaleString();
+        return LupinAppZone.dateTime( date );
     }
 
     updateResultsCount( total, query ) {

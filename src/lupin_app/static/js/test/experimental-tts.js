@@ -548,7 +548,7 @@ class ExperimentalProgressiveTTS {
         
         const indicator = document.createElement('div');
         indicator.className = 'chunk-indicator';
-        indicator.title = `Chunk ${this.chunksReceived} - ${new Date().toLocaleTimeString()}`;
+        indicator.title = `Chunk ${this.chunksReceived} - ${LupinAppZone.time( new Date() )}`;
         
         chunksDisplay.appendChild(indicator);
         
@@ -853,7 +853,7 @@ class ExperimentalProgressiveTTS {
     log(message, type = 'info') {
         if (!this.logElement) return;
         
-        const timestamp = new Date().toLocaleTimeString();
+        const timestamp = LupinAppZone.time( new Date() );
         const logEntry = document.createElement('div');
         
         logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> <span class="${type}">${message}</span>`;

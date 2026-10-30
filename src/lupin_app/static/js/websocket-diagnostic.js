@@ -518,7 +518,7 @@ class WebSocketDiagnosticTool {
         const entry = document.createElement('div');
         entry.className = `chunk-entry ${type}`;
         entry.innerHTML = `
-            <span>${new Date().toLocaleTimeString()}</span>
+            <span>${LupinAppZone.time( new Date() )}</span>
             <span>${message}</span>
         `;
         timeline.appendChild(entry);
@@ -564,7 +564,7 @@ class WebSocketDiagnosticTool {
     log(message, type = 'info') {
         if (!this.logElement) return;
         
-        const timestamp = new Date().toLocaleTimeString();
+        const timestamp = LupinAppZone.time( new Date() );
         const logEntry = document.createElement('div');
         
         logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> <span class="${type}">${message}</span>`;

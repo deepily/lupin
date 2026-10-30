@@ -1303,9 +1303,9 @@
             // result non-negative — JavaScript's % returns the sign of the
             // dividend, so a bare ( offset - minute ) % period goes negative for
             // most of every hour.
-            const minutes = next.getMinutes();
+            const minutes = next.getUTCMinutes();
             const forward = ( ( ( offsetMin - minutes ) % periodMin ) + periodMin ) % periodMin;
-            next.setMinutes( minutes + forward );
+            next.setUTCMinutes( minutes + forward );
 
             let delayMs = next.getTime() - now.getTime();
             if ( delayMs < AUTOREFRESH_MIN_LEAD_MS ) delayMs += periodMin * 60 * 1000;

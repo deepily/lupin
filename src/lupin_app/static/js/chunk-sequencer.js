@@ -549,7 +549,7 @@ class ChunkSequencer {
         const indicator = document.createElement('div');
         indicator.className = `chunk-indicator chunk-${type}`;
         indicator.textContent = sequence.toString();
-        indicator.title = `${type.charAt(0).toUpperCase() + type.slice(1)} chunk ${sequence} - ${new Date().toLocaleTimeString()}`;
+        indicator.title = `${type.charAt(0).toUpperCase() + type.slice(1)} chunk ${sequence} - ${LupinAppZone.time( new Date() )}`;
         
         display.appendChild(indicator);
         display.scrollTop = display.scrollHeight;
@@ -674,7 +674,7 @@ class ChunkSequencer {
     log(message, type = 'info') {
         if (!this.logElement) return;
         
-        const timestamp = new Date().toLocaleTimeString();
+        const timestamp = LupinAppZone.time( new Date() );
         const logEntry = document.createElement('div');
         
         logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> <span class="${type}">${message}</span>`;
@@ -800,7 +800,7 @@ function clearLogs() {
     if (logElement) {
         logElement.innerHTML = '';
         logElement.innerHTML = `
-            <span class="timestamp">[${new Date().toLocaleTimeString()}]</span> <span class="info">Console cleared</span>
+            <span class="timestamp">[${LupinAppZone.time( new Date() )}]</span> <span class="info">Console cleared</span>
             <span class="timestamp">[Info]</span> <span class="info">Ready for new tests</span>
         `;
     }

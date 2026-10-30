@@ -87,7 +87,7 @@
     // ========================================================================
     function log( msg, klass ) {
         const el = qs().log;
-        const ts = new Date().toLocaleTimeString();
+        const ts = LupinAppZone.time( new Date() );
         const entry = document.createElement( 'div' );
         entry.className = 'pqw-log-entry' + ( klass ? ' ' + klass : '' );
         entry.textContent = `[${ts}] ${msg}`;
@@ -132,7 +132,7 @@
         el.runVal.textContent   = ( s.last_run  === null || s.last_run  === undefined ) ? '—' : String( s.last_run );
         el.todoVal.textContent  = ( s.last_todo === null || s.last_todo === undefined ) ? '—' : String( s.last_todo );
         el.zeroVal.textContent  = String( s.consecutive_zero || 0 );
-        el.lastPoll.textContent = s.last_poll_at ? new Date( s.last_poll_at ).toLocaleTimeString() : '—';
+        el.lastPoll.textContent = s.last_poll_at ? LupinAppZone.time( new Date( s.last_poll_at ) ) : '—';
 
         const drained = s.last_run === 0 && ( s.signal !== 'run+todo' || s.last_todo === 0 );
         if ( drained ) {
@@ -156,7 +156,7 @@
         // Detect drain transition (first time we see drained_at)
         if ( s.drained_at && s.drained_at !== lastDrainedAt ) {
             lastDrainedAt = s.drained_at;
-            log( `DRAIN: ${s.host} drained at ${new Date( s.drained_at ).toLocaleTimeString()} — voice notification dispatched by backend`, 'drain' );
+            log( `DRAIN: ${s.host} drained at ${LupinAppZone.time( new Date( s.drained_at ) )} — voice notification dispatched by backend`, 'drain' );
         }
     }
 
@@ -255,6 +255,8 @@
         if ( typeof requireAdmin === 'function' ) {
             try { await requireAdmin(); } catch ( e ) { /* auth.js handles redirect */ }
         }
+
+        await LupinAppZone.load();
 
         log( 'Widget initialized. Backend will fire voice notification on drain.' );
         startStatusPolling();
