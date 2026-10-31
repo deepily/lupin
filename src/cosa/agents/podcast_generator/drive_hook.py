@@ -49,6 +49,21 @@ def resolve_source_path( path ):
     return path if path.startswith( "/" ) else cu.get_project_root() + "/" + path
 
 
+def _load_config():
+    """
+    Load the PodcastConfig from the INI. Used by callers that do not already hold one.
+
+    Ensures:
+        - returns a PodcastConfig
+
+    Raises:
+        - whatever the configuration manager raises, which the hook contains
+    """
+    from cosa.agents.podcast_generator.config import PodcastConfig
+    from cosa.config.configuration_manager import ConfigurationManager
+    return PodcastConfig.from_config( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+
+
 def _make_publisher( config ):
     """
     Build the real DrivePublisher from the config.
@@ -100,16 +115,19 @@ def _publish_sync( audio_by_lang, script_by_lang, source_path, job_folder_name, 
     return publisher.publish_job( job_folder_name, _collect_files( audio_by_lang, script_by_lang, source_path, config ) )
 
 
-async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, job_folder_name, config ):
+async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, job_folder_name=None, config=None ):
     """
     Upload a finished podcast to Google Drive when publishing is on, and never fail the job.
 
     Requires:
         - audio_by_lang and script_by_lang map language to an absolute file path
-        - source_path is the resolved absolute path of the source document, not a relative job argument
-        - config carries the five drive_* fields and publish_to_google_drive
+        - source_path is the source document's path, absolute or relative to the project root, or None
+        - job_folder_name is the Drive subfolder name, or None to build <timestamp>-<topic> from source_path
+        - config carries the five drive_* fields and publish_to_google_drive, or None to load it from the INI
 
     Ensures:
+        - everything runs inside one boundary: loading the config, resolving the path and naming the
+          folder can fail without failing the job
         - flag off: returns the empty result and imports no Google module
         - success: "language_links" maps each language with an uploaded mp3 to its Drive link, and
           "extra_lines" carries one "**Drive folder**" line
@@ -118,10 +136,13 @@ async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, 
         - "folder_link" is the job folder's link, or None
     """
     result = { "language_links": {}, "extra_lines": [], "folder_link": None }
-    if not config.publish_to_google_drive: return result
 
     try:
-        published = await asyncio.to_thread( _publish_sync, audio_by_lang, script_by_lang, source_path, job_folder_name, config )
+        if config is None: config = _load_config()
+        if not config.publish_to_google_drive: return result
+        source_path     = resolve_source_path( source_path )
+        job_folder_name = job_folder_name or make_job_folder_name( source_path or "podcast" )
+        published       = await asyncio.to_thread( _publish_sync, audio_by_lang, script_by_lang, source_path, job_folder_name, config )
     except Exception as e:  # noqa: BLE001 - the podcast is already made; any upload failure (Drive, network, disk, bad token file) must not fail the job
         result[ "extra_lines" ].append( f"**Drive**: upload failed ({type( e ).__name__}: {e})" )
         return result

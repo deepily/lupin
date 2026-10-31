@@ -306,14 +306,11 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 if l not in ordered_langs:
                     ordered_langs.append( l )
 
-            # Optional Google Drive copy (flag off = no-op and no Google import). The source document
-            # is the generated research report, resolved against the project root.
-            from cosa.agents.podcast_generator.config import PodcastConfig
-            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive, make_job_folder_name, resolve_source_path
-            from cosa.config.configuration_manager import ConfigurationManager
-            pg_config   = PodcastConfig.from_config( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ), debug=self.debug )
-            source_path = resolve_source_path( result.research_path )
-            drive       = await publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, make_job_folder_name( source_path or "podcast" ), pg_config )
+            # Optional Google Drive copy (flag off = no-op and no Google import). The source document is
+            # the generated research report; the hook loads the config and resolves the path inside its
+            # own boundary, so a config error here cannot fail the job.
+            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive
+            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path )
             if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
 
             per_language_lines = []

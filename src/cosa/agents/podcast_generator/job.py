@@ -330,8 +330,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
 
             # Optional Google Drive copy (flag off = no-op and no Google import). full_path is the
             # resolved source document path computed above, never the possibly-relative research_path.
-            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive, make_job_folder_name
-            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, full_path, make_job_folder_name( full_path ), config )
+            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive
+            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, full_path, config=config )
             if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
 
             # Build cost summary

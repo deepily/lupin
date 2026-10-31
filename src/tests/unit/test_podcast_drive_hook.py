@@ -5,6 +5,7 @@ No real Google call is made: the hook's publisher factory is replaced with a fak
 what it was asked to upload.
 """
 
+import contextlib
 import os
 import pathlib
 import re
@@ -191,6 +192,40 @@ class TestFailure:
         assert got[ "extra_lines" ] == [ "**Drive**: upload failed (OSError: token unreadable)" ]
 
 
+class TestBoundary:
+    """Config loading, path resolving and folder naming sit inside the hook's catch-all."""
+
+    @pytest.mark.asyncio
+    async def test_without_a_config_it_loads_one_and_names_the_folder_from_the_resolved_source( self, files, fake, monkeypatch ):
+        monkeypatch.setattr( drive_hook.cu, "get_project_root", lambda: os.path.dirname( files[ "source.md" ] ) )
+        monkeypatch.setattr( drive_hook, "_load_config", lambda: _config() )
+        got = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, "source.md" )
+        folder, sent = fake.calls[ 0 ]
+        assert re.fullmatch( r"\d{4}-\d{2}-\d{2}-\d{6}-source", folder )
+        assert ( files[ "source.md" ], "text/markdown" ) in sent  # the relative name was resolved against the project root
+        assert got[ "folder_link" ] is not None
+
+    @pytest.mark.asyncio
+    async def test_no_source_and_no_folder_name_falls_back_to_the_word_podcast( self, files, fake ):
+        await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, config=_config() )
+        assert fake.calls[ 0 ][ 0 ].endswith( "-podcast" )
+
+    @pytest.mark.asyncio
+    async def test_a_given_folder_name_is_used_as_is( self, files, fake ):
+        await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, "mine", _config() )
+        assert fake.calls[ 0 ][ 0 ] == "mine"
+
+    @pytest.mark.asyncio
+    async def test_a_config_that_cannot_load_becomes_the_failure_line( self, files, monkeypatch ):
+        def broken(): raise ValueError( "ini unreadable" )
+        monkeypatch.setattr( drive_hook, "_load_config", broken )
+        got = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, "source.md" )
+        assert got == { "language_links": {}, "folder_link": None, "extra_lines": [ "**Drive**: upload failed (ValueError: ini unreadable)" ] }
+
+    def test_load_config_reads_the_real_ini( self ):
+        assert drive_hook._load_config().publish_to_google_drive is False
+
+
 class TestHelpers:
 
     def test_job_folder_name_is_timestamp_then_clean_topic( self ):
@@ -303,12 +338,11 @@ class TestPodcastGeneratorJobUsesTheHook:
         monkeypatch.setattr( "cosa.utils.util.get_project_root", lambda: "/var/lupin" )
         hook = AsyncMock( return_value=_hook_result() )
         await _run_pg( _pg_job(), hook )
-        audio, script, source, folder, config = hook.call_args.args
+        audio, script, source = hook.call_args.args
         assert audio  == { "en": "/var/lupin/io/podcasts/u/en.mp3" }
         assert script == { "en": "/var/lupin/io/podcasts/u/en.md" }
         assert source == "/var/lupin/io/deep-research/u@x.com/research.md"
-        assert re.fullmatch( r"\d{4}-\d{2}-\d{2}-\d{6}-research", folder )
-        assert isinstance( config, PodcastConfig )
+        assert isinstance( hook.call_args.kwargs[ "config" ], PodcastConfig )
 
     @pytest.mark.asyncio
     async def test_success_adds_links_folder_line_and_artifact( self, monkeypatch ):
@@ -360,12 +394,12 @@ async def _run_drp( job, hook, research_path="io/deep-research/u@x.com/report.md
         dr_cost=1.0, pg_cost=1.0, total_cost=2.0 )
     agent = MagicMock()
     agent.run_async = AsyncMock( return_value=result )
+    hook_patch = patch( "cosa.agents.podcast_generator.drive_hook.publish_podcast_to_drive", hook ) if hook is not None else contextlib.nullcontext()
     with patch( "cosa.agents.deep_research.voice_io.notify", new_callable=AsyncMock ) as notify, \
          patch( "cosa.agents.deep_research.voice_io.set_job_id" ), \
          patch( "cosa.agents.deep_research.voice_io.clear_job_id" ), \
          patch( "cosa.agents.deep_research.cosa_interface" ), \
-         patch( "cosa.agents.podcast_generator.drive_hook.publish_podcast_to_drive", hook ), \
-         patch( "cosa.agents.podcast_generator.config.PodcastConfig.from_config", return_value=PodcastConfig() ), \
+         hook_patch, \
          patch.object( type( job ), "_make_agent", return_value=agent ):
         await job._execute()
     return next( c.kwargs[ "abstract" ] for c in notify.call_args_list if c.kwargs.get( "abstract" ) and "Research → Podcast Complete" in c.kwargs[ "abstract" ] )
@@ -374,16 +408,30 @@ async def _run_drp( job, hook, research_path="io/deep-research/u@x.com/report.md
 class TestDeepResearchToPodcastJobUsesTheHook:
 
     @pytest.mark.asyncio
-    async def test_calls_the_hook_with_the_resolved_research_report( self, monkeypatch ):
+    async def test_a_config_error_in_the_real_hook_does_not_fail_the_job( self ):
+        """No stub: the real hook runs and PodcastConfig.from_config raises."""
+        job = _drp_job()
+        with patch( "cosa.agents.podcast_generator.config.PodcastConfig.from_config", side_effect=ValueError( "ini unreadable" ) ):
+            abstract = await _run_drp( job, None )
+        assert "**Drive**: upload failed (ValueError: ini unreadable)" in abstract
+        assert "Research → Podcast Complete" in abstract and "drive_folder_link" not in job.artifacts
+
+    @pytest.mark.asyncio
+    async def test_publishing_off_through_the_real_hook_adds_nothing( self ):
+        job      = _drp_job()
+        abstract = await _run_drp( job, None )
+        assert "Drive" not in abstract and "drive_folder_link" not in job.artifacts
+
+    @pytest.mark.asyncio
+    async def test_calls_the_hook_with_the_research_report_path( self, monkeypatch ):
         monkeypatch.setattr( "cosa.utils.util.get_project_root", lambda: "/var/lupin" )
         hook = AsyncMock( return_value=_hook_result() )
         await _run_drp( _drp_job(), hook )
-        audio, script, source, folder, config = hook.call_args.args
+        audio, script, source = hook.call_args.args
         assert audio  == { "en": "/var/lupin/io/podcasts/u/en.mp3" }
         assert script == { "en": "/var/lupin/io/podcasts/u/en.md" }
-        assert source == "/var/lupin/io/deep-research/u@x.com/report.md"
-        assert re.fullmatch( r"\d{4}-\d{2}-\d{2}-\d{6}-report", folder )
-        assert isinstance( config, PodcastConfig )
+        assert source == "io/deep-research/u@x.com/report.md"  # unresolved: the hook resolves it inside its boundary
+        assert hook.call_args.kwargs == {}
 
     @pytest.mark.asyncio
     async def test_no_research_path_still_calls_the_hook_with_no_source( self, monkeypatch ):
@@ -391,7 +439,6 @@ class TestDeepResearchToPodcastJobUsesTheHook:
         hook = AsyncMock( return_value=_hook_result() )
         await _run_drp( _drp_job(), hook, research_path=None )
         assert hook.call_args.args[ 2 ] is None
-        assert re.fullmatch( r"\d{4}-\d{2}-\d{2}-\d{6}-podcast", hook.call_args.args[ 3 ] )
 
     @pytest.mark.asyncio
     async def test_success_adds_links_folder_line_and_artifact( self, monkeypatch ):
