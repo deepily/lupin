@@ -6,7 +6,7 @@ pins:
   - cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterConsumerJob@715b2b6bdf
   - cosa.agents.heartbeat_arbiter.arbiter_routing.tier_for@810e74e825
   - cosa.rest.arbiter_bootstrap.submit_arbiter_if_enabled@23da8f20f5
-  - cosa.rest.routers.arbiter.get_fleet_state@08546cb60d
+  - cosa.rest.routers.arbiter.get_fleet_state@10c8ded44d
   - cosa.rest.routers.arbiter.get_context_pressure@76c4b0c5de
   - cosa.rest.routers.arbiter.put_fleet_size_cap@328e788dfb
   - lupin_arbiter_app.fleet_arbiter_loop.make_follow_through_watcher_factory@f8105d8a1d
@@ -34,7 +34,7 @@ The arbiter polls the fleet's heartbeat events and tells Rick or the managers wh
 - `get_context_pressure` reports `over_budget` when the last prompt exceeds the budget line: half of a 1,000,000 token window or any unlisted size, three quarters of 200,000.
 
 ## REST routes
-- The `/api/arbiter` reads accept an API key or a JWT. The two writes, `put_fleet_size_cap` and `put_skeleton_crew`, need an admin login and refuse an API key alone with 403. `get_fleet_state` and `get_context_pressure` pull the app's `/state` and answer `unreachable` when that fails.
+- The `/api/arbiter` reads accept an API key or a JWT. The two writes, `put_fleet_size_cap` and `put_skeleton_crew`, need an admin login and refuse an API key alone with 403. `get_fleet_state` and `get_context_pressure` pull the app's `/state` and answer `unreachable` when that fails. `get_fleet_state` also adds a top-level `app_timezone` field from the INI key `app timezone`, and leaves it out of the unreachable answer.
 - Nothing calls the `fleet-snapshot` pair. Its GET answers `awaiting`, and the app keeps its snapshot locally.
 - `put_fleet_size_cap` needs an admin login, refuses a cap above the maximum with 422 and writes the INI file. It ships at 14 with a maximum of 18, and the spawner reads it.
 - `put_poke_mute`, under `/api/heartbeat`, needs an admin login and refuses API keys. It mutes the Stop-hook poke, not the arbiter. Its answer, and the GET beside it, carry `source`: `file`, `skeleton_crew`, `both` or `none`, because skeleton crew mutes the poke too.

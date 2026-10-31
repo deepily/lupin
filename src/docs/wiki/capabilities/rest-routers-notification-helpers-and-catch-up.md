@@ -4,9 +4,9 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.notifications.get_notification_queue@419a0b0054
   - cosa.rest.routers.notifications.get_websocket_manager@5c65f1b7d1
-  - cosa.rest.routers.notifications.get_local_timestamp@41b941186c
-  - cosa.rest.routers.notifications.get_formatted_time_display@015516485d
-  - cosa.rest.routers.notifications.get_formatted_date_display@7b9acad9ef
+  - cosa.rest.routers.notifications.get_local_timestamp@a19b9ea314
+  - cosa.rest.routers.notifications.get_formatted_time_display@858ac1ccdf
+  - cosa.rest.routers.notifications.get_formatted_date_display@4e7ea8de57
   - cosa.rest.routers.notifications.resolve_sender_id@da26ad8ca8
   - cosa.rest.routers.notifications.get_undelivered_notifications@5da1b0c642
   - cosa.rest.routers.notifications.get_awaiting_response_notifications@056633c87d
@@ -21,7 +21,7 @@ Helpers and the catch-up routes of `routers/notifications.py`, all under `/api`.
 
 ## What it does
 - `get_notification_queue` and `get_websocket_manager` fetch the queue and the socket manager from `lupin_app.main`.
-- `get_local_timestamp`, `get_formatted_time_display` and `get_formatted_date_display` read the INI key `app timezone` (default `America/New_York`). They give an ISO stamp, `HH:MM TZ` and `YYYY-MM-DD`. A bad zone falls back to the server's local time, without the zone name.
+- `get_local_timestamp`, `get_formatted_time_display` and `get_formatted_date_display` read the INI key `app timezone`. They give an ISO stamp, `HH:MM TZ` and `YYYY-MM-DD`. There is no default and no fallback: an absent key raises `MissingConfigKeyError` and an unknown zone raises `InvalidAppTimezoneError`.
 - `resolve_sender_id` picks the explicit sender id, else `claude.code@<prefix>.deepily.ai` from a leading `[PREFIX]` of capital letters in the message, else `claude.code@unknown.deepily.ai`.
 - `get_undelivered_notifications` answers `GET /api/notifications/undelivered` with rows in state created or queued, oldest first, within the age cap (INI `notification undelivered max age hours`, default 24). It is 400 if the caller's id is not a UUID. `dismiss_undelivered_notifications` hides them with `POST /notifications/undelivered/dismiss`, keeps their state and returns `dismissed_count`.
 - `get_awaiting_response_notifications` answers `GET /notifications/awaiting-response` with unanswered, unexpired cards, each with `voice_persona`, `suppress_ding` true and, when it has an expiry, `timeout_seconds` recomputed from it. Hidden cards are left out. It marks nothing.

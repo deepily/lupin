@@ -3,7 +3,7 @@ capability: rest-core-arbiter-bootstrap
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.arbiter_bootstrap.arbiter_already_present@0ff460895d
-  - cosa.rest.arbiter_bootstrap.build_arbiter_job@9bba03ca0a
+  - cosa.rest.arbiter_bootstrap.build_arbiter_job@168681ae60
   - cosa.rest.arbiter_bootstrap.submit_arbiter_if_absent@19f1a2d89f
   - cosa.rest.arbiter_snapshot_store.set_snapshot@22069518e0
   - cosa.rest.arbiter_snapshot_store.get_snapshot@216b6f51ea
@@ -16,7 +16,7 @@ Three small pieces the dev server holds for the heartbeat arbiter and for answer
 
 ## Startup job
 - `arbiter_already_present( todo_queue, run_queue )` is true when either queue holds a job whose `JOB_TYPE` is the arbiter job's. A queue without `queue_list` counts as empty.
-- `build_arbiter_job( config_mgr )` builds the standing `ArbiterConsumerJob` from config and the file-backed commons gateway, with built-in defaults for absent keys.
+- `build_arbiter_job( config_mgr )` builds the standing `ArbiterConsumerJob` from config and the file-backed commons gateway, with built-in defaults for absent keys, except the journal zone. That comes from `arbiter journal local timezone`, and an absent key stops the build.
 - `submit_arbiter_if_absent( todo_queue, run_queue, config_mgr, ask_flow=... )` submits one through the v2 ask flow unless one is present. A failure is logged and swallowed, so the arbiter never blocks server boot.
 - `submit_arbiter_if_enabled` wraps that behind the `arbiter in-process bootstrap enabled` flag, so the standalone arbiter and the in-process one never both act. The flag defaults true, and a value that is not true or false reads as false.
 

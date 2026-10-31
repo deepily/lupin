@@ -4,11 +4,11 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.notifications.get_senders_with_activity@40749619a5
   - cosa.rest.routers.notifications.get_visible_senders@aa352ff76d
-  - cosa.rest.routers.notifications.get_sender_conversation@838be26b31
+  - cosa.rest.routers.notifications.get_sender_conversation@4c90ccfeae
   - cosa.rest.routers.notifications.delete_sender_conversation@932f8418da
-  - cosa.rest.routers.notifications.get_sender_conversation_by_date@77ad3d6c13
-  - cosa.rest.routers.notifications.get_sender_date_summaries@a368c5c612
-  - cosa.rest.routers.notifications.soft_delete_by_date@3503e51410
+  - cosa.rest.routers.notifications.get_sender_conversation_by_date@258dcde0cc
+  - cosa.rest.routers.notifications.get_sender_date_summaries@32cc8c0120
+  - cosa.rest.routers.notifications.soft_delete_by_date@a45ffe5b5e
   - cosa.rest.routers.notifications.get_active_conversation@33a12fa49e
   - cosa.rest.routers.notifications.get_project_sessions@ddc95465c6
   - cosa.rest.routers.notifications.generate_session_gist@8d19a7a2a1

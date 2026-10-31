@@ -3,7 +3,7 @@ capability: rest-core-notification-queue
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.notification_fifo_queue.NotificationFifoQueue@0506eb4e82
-  - cosa.rest.notification_fifo_queue.NotificationItem@d457b88c99
+  - cosa.rest.notification_fifo_queue.NotificationItem@d4a6229a16
   - cosa.rest.notify_rate_limiter.NotifyRateLimiter@27cc2b948d
   - cosa.rest.notification_expiry_sweeper.find_sweepable_ids@81e2e07cbd
 ---
@@ -12,7 +12,7 @@ pins:
 The queue that holds notifications, the per-sender limit on sending them, and the read-only half of the expiry sweeper. Routing and delivery are on [[notification-delivery]].
 
 ## Queue
-- `NotificationItem` is the light record kept in the queue; `to_dict` returns a dict for JSON, with a fresh `time_display`.
+- `NotificationItem` is the light record kept in the queue; `to_dict` returns a dict for JSON, with a fresh `time_display`. Its time stamps use the INI key `app timezone`; an absent or invalid zone raises and no longer falls back to UTC.
 - `NotificationFifoQueue` extends `FifoQueue`. `push_notification` builds an item, inserts it by priority, logs it to the input-and-output table and announces it. Every enqueue first runs the mobile wake check, then emits only when a manager is wired and emission is on. `urgent` and `high` go ahead of lower priorities, after any already queued.
 - The event goes to the item's user, or to all clients without a `user_id`. With a `job_id` it also goes to the session `cc-listener-<job_id>`.
 - `mark_played( notification_id )` records the play and its count, and returns `False` for an unknown id. `get_next_unplayed( user_id )` returns the first unplayed one, for all users when the id is `None`.

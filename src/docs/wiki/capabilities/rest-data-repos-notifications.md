@@ -2,7 +2,7 @@
 capability: rest-data-repos-notifications
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.db.repositories.notification_repository.NotificationRepository@3fd00bac37
+  - cosa.rest.db.repositories.notification_repository.NotificationRepository@8a74500c17
   - cosa.rest.db.repositories.fcm_token_repository.FcmTokenRepository@396b382c23
   - cosa.rest.db.repositories.podcast_proxy_spent_repository.PodcastProxySpentRepository@85541c6c22
 ---
@@ -18,7 +18,7 @@ Three repositories hold what a notification needs after it is sent: the notifica
 - `find_live_unpark_card` and `find_live_podcast_card` find the newest card still waiting for an answer.
 - `FcmTokenRepository.upsert_token` is one `INSERT .. ON CONFLICT (token) DO UPDATE`, so a re-registration refreshes the row. `get_tokens_for_user` returns every token string of a user, and `delete_token` returns whether a row went.
 - `PodcastProxySpentRepository.claim` adds a row for a card id and returns `False` when one exists. `release` takes it back. `record_job` sets the job id on the row, `is_spent` and `get` read it.
-- `NotificationRepository.delete_by_sender` hard-deletes every row from one sender to one recipient. `bulk_delete_by_user` hard-deletes a recipient's rows, optionally only the last N hours. `soft_delete_by_date` hides one local day.
+- `NotificationRepository.delete_by_sender` hard-deletes every row from one sender to one recipient. `bulk_delete_by_user` hard-deletes a recipient's rows, optionally only the last N hours. `soft_delete_by_date` hides one local day. The date queries now require a `timezone_name` keyword, the configured zone, and an unknown name raises.
 
 ## Don't
 - Don't pass `expected_state=None` to `mark_expired` where a human answer may be arriving. With a state it refuses to overwrite a row that moved on, and returns `None`.
