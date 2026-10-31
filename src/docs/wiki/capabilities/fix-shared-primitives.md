@@ -9,7 +9,7 @@ pins:
   - cosa.agents.shared.git_strategist.GitStrategist.commit_and_pr_single@736ee613a2
   - cosa.agents.shared.git_strategist.GitStrategist.commit_and_pr_multi@2faed2d084
   - cosa.agents.shared.plan_writer.PlanWriter.write_plan@7642a07cc3
-  - cosa.agents.shared.report_writer.ReportWriter.write@14bbc03bbd
+  - cosa.agents.shared.report_writer.ReportWriter.write@a665de39e7
 ---
 # Shared fix primitives
 
@@ -35,4 +35,4 @@ Both [[fix-expediter-bfe]] and [[fix-expediter-tfe]] use these: a coder and test
 
 ## Plan and report files
 - `PlanWriter.write_plan` writes under `io/swe-team/plans/<user email>/`, named `<date>-<slug>-plan.md`.
-- `ReportWriter.write` writes under `io/swe-team/reports/<user email>/`. The name has a fixed `EST` token, while the time itself is America/New_York.
+- `ReportWriter.write` writes under `io/swe-team/reports/<user email>/`. The name carries the configured zone's abbreviation at write time, so it follows daylight saving. A missing or invalid `app timezone` key raises when the writer is built.

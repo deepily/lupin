@@ -6,7 +6,7 @@ pins:
   - cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterGateway@1a80108b53
   - cosa.agents.heartbeat_arbiter.arbiter_job.owed_class_suppresses@359d8e594d
   - cosa.agents.heartbeat_arbiter.arbiter_journal.format_ts_local@c57a944303
-  - cosa.agents.heartbeat_arbiter.arbiter_journal.make_log_fn@b2119361f0
+  - cosa.agents.heartbeat_arbiter.arbiter_journal.make_log_fn@1f70a5cd0a
   - cosa.agents.heartbeat_arbiter.arbiter_state.FleetEventAccumulator@b962a7eb44
   - cosa.agents.heartbeat_arbiter.arbiter_state.PingLedger@46765982a6
   - cosa.agents.heartbeat_arbiter.events_tail.load_offsets@10d03b41c8
@@ -26,6 +26,7 @@ The small parts under [[heartbeat-arbiter]]: the commons seam, the journal line 
 - `post` stamps `arbiter-surface`. `read` only observes. `dm_topic_for` builds `dm-` plus the accent-stripped persona slug, so "María" and "Maria" share one topic.
 - `owed_class_suppresses` is true only for the blocked-on-user and done classes. Anything else, including unknown, does not suppress an escalation.
 - `make_log_fn` returns a logger that prints one JSON object per event with `ts`, `ts_local`, `service`, optional `loop` and the fields. `format_ts_local` renders the local stamp.
+- With no zone name given, the logger reads the INI key `arbiter journal local timezone` at its first line. There is no code default, so an absent key raises.
 - A bad time zone name journals one `journal_tz_invalid` line and falls back to UTC.
 - `FleetEventAccumulator` keeps a bounded tail of event records per session across polls. `PingLedger` remembers the last ping per edge and drops edges that are no longer active.
 - `tail_session_file` reads only new complete lines from a byte offset. A shrunk file restarts at zero. `tail_fleet_events` does that for every session file.

@@ -2,12 +2,12 @@
 capability: decision-proxy
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.responder.DecisionResponder@a2777c346e
+  - cosa.agents.decision_proxy.responder.DecisionResponder@9fd5fb16e3
   - cosa.agents.decision_proxy.trust_tracker.TrustTracker@4b186feb3f
   - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@827f2e8cf0
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker@ed1b3c7973
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker.check@37ecd22e31
-  - cosa.agents.decision_proxy.smart_router.SmartRouter@dcc377b703
+  - cosa.agents.decision_proxy.smart_router.SmartRouter@6734207a13
   - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy@014671267f
   - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy.gate@fb75c7f680
 ---
@@ -37,4 +37,4 @@ The decision proxy answers questions that ask for a response, on the user's beha
 - A trip starts a cooldown. Under the default count model it also demotes the category; the `beta` and `blr` models read lifetime totals that a trip leaves alone. After the cooldown, the breaker stops reporting a trip, but `check` reads the same lifetime counters, so a category still over the threshold trips again.
 
 ## Smart router
-- `DecisionResponder` asks `SmartRouter` before posting an automatic answer. In active hours, with the named human connected, it posts nothing and records a defer. The feed is `user_presence.sessions_feed`; a failing feed reads as not connected. The SWE orchestrator does not consult the router.
+- `DecisionResponder` asks `SmartRouter` before posting an automatic answer. In active hours, with the named human connected, it posts nothing and records a defer. The feed is `user_presence.sessions_feed`; a failing feed reads as not connected. The SWE orchestrator does not consult the router. Router and responder take the zone for the active hours from `decision proxy timezone` when none is passed. An absent key raises.

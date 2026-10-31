@@ -3,7 +3,7 @@ capability: fix-run-outputs-and-guards
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.shared.plan_writer.PlanWriter@2eff79209a
-  - cosa.agents.shared.report_writer.ReportWriter@9542d98865
+  - cosa.agents.shared.report_writer.ReportWriter@2273a656f3
   - cosa.agents.shared.resume_guard.resume_covers@54f618ac21
   - cosa.agents.shared.sdk_error_result.error_result_text@670be3458c
   - cosa.agents.shared.sdk_error_result.login_hint@ae2c20cf15

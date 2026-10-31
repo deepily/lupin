@@ -3,7 +3,7 @@ capability: decision-proxy-presence
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.decision_proxy.user_presence.fetch_sessions@52fe969de2
-  - cosa.agents.decision_proxy.user_presence.responder_presence_kwargs@a8ba4cd7cb
+  - cosa.agents.decision_proxy.user_presence.responder_presence_kwargs@d14d6c8746
   - cosa.agents.decision_proxy.user_presence.sessions_feed@2d0c45ac81
   - cosa.agents.decision_proxy.user_presence.user_connected_or_default@a7f6689e5c
 ---
@@ -18,7 +18,7 @@ The proxy asks whether the named human is connected before it answers for them. 
 - An answer is reused for `ttl_seconds` (10 by default). A failed fetch is not cached.
 - `fetch_sessions` does one GET with a 5 second timeout, raises on an HTTP error and returns the JSON.
 - `user_connected_or_default` returns the feed's answer as a bool. If the feed raises, it logs a warning and returns `FEED_FAILURE_MEANS_CONNECTED`, which is `False`.
-- `responder_presence_kwargs` reads the active hours, the timezone and `decision proxy human user id` from the INI. It returns the keyword arguments the responder takes, including the feed.
+- `responder_presence_kwargs` reads the active hours, the timezone and `decision proxy human user id` from the INI. The timezone has no code default: an absent `decision proxy timezone` key raises. It returns the keyword arguments the responder takes, including the feed.
 
 ## Don't
 - Don't read a failed feed as the human being away by accident. The constant is a ruling: when presence is unknown, the proxy acts as before.
