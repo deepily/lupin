@@ -620,3 +620,21 @@ test( "wireDiagnostic: globals no-op before DOMContentLoaded, delegate after", a
     target.clearDiagnosticLogs!();
     assert.deepEqual( calls, [ "init", "start", "stop", "clear" ] );
 } );
+
+// ===========================================================================
+// The time label is labelled UTC, never the browser zone (row 43286adc)
+// ===========================================================================
+
+test( "the log timestamp is the UTC clock with a UTC label, whatever the browser zone is", async () => {
+    const saved = process.env.TZ;
+    process.env.TZ = "Asia/Tokyo";
+    try {
+        const { tool, ctrl } = await initedTool();
+        ctrl.clock.t = Date.UTC( 2026, 0, 14, 23, 30, 45 );   // 08:30:45 the next morning in Tokyo
+        tool.log( "stamped", "info" );
+        const entry = Array.from( document.querySelectorAll( "#diagnostic-console > div" ) ).find( e => e.textContent!.includes( "stamped" ) )!;
+        assert.equal( entry.querySelector( ".timestamp" )!.textContent, "[11:30:45 PM UTC]" );
+    } finally {
+        if ( saved === undefined ) delete process.env.TZ; else process.env.TZ = saved;
+    }
+} );

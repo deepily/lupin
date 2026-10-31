@@ -85,3 +85,14 @@ test( "a second load forgets the first zone when the second answer has none", as
   await zone.load();
   assert.equal( zone.zone(), "UTC" );
 } );
+
+test( "a load that fails after a good one forgets the good zone", async () => {
+  let fail = false;
+  const { zone } = loadScript( async () => { if ( fail ) throw new Error( "HTTP 500" ); return { app_timezone: "Asia/Tokyo" }; } );
+  await zone.load();
+  assert.equal( zone.zone(), "Asia/Tokyo" );
+  fail = true;
+  await zone.load();
+  assert.equal( zone.zone(), "UTC" );
+  assert.equal( zone.label(), " UTC" );
+} );
