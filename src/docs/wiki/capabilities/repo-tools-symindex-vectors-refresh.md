@@ -11,7 +11,7 @@ pins:
   - cosa.repo.symindex.vector_refresh.env_file_path@6220714314
   - cosa.repo.symindex.vector_refresh.carried_env@97e4d23411
   - cosa.repo.symindex.candidate_build.run@8c0684e323
-  - cosa.repo.symindex.candidate_build.BoundedJobWriter@b575b3c567
+  - cosa.repo.symindex.candidate_build.BoundedJobWriter@04050e8f9a
   - cosa.repo.symindex.candidate_build.make_job_writer@6f0901398b
   - cosa.repo.symindex.candidate_build.sample_purposes@4c0e76d6e8
   - cosa.repo.symindex.candidate_build.tree_path_refusal@9a2e9a9fb4

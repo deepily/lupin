@@ -40,6 +40,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[solution-memory]] — solution snapshots, embeddings, canonical synonyms and snapshot managers. `cosa.memory`, `cosa.rest.db.repositories` (solution_snapshot, embedding_cache, question_embedding, canonical_synonym), `lupin_model_server`
 - [[rest-routers]] — the FastAPI routers and the v2 submit surface. `cosa.rest.routers`, `cosa.rest.v2`, `lupin_app` (main, bootstrap_helpers, asset_tokens, versioned_static)
 - [[configuration]] — INI configuration, the config cache registry and the doc-viewer manifest. `cosa.config`
+- [[app-timezone-readers]] — the one reader of the three INI time zone keys, with no default: a missing or unknown zone raises. `cosa.config` (app_timezone)
 - [[shared-utilities]] — path and project-root helpers, memory watch, Vertex logging, checked-hash bytecode. `cosa.utils`, `cosa.tools`
 - [[utils-admin-script-helpers]] — the banner runner, table-shape check and key-file writer shared by the one-off admin scripts. `cosa.utils` (admin_script_helpers)
 - [[utils-atomic-json]] — the whole-file atomic JSON write and the never-raising section read. `cosa.utils` (atomic_json)

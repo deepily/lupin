@@ -9,6 +9,7 @@ pins:
   - cosa.repo.symindex.candidates.storage_paths.main_checkout@5967b0a20d
   - cosa.repo.symindex.candidates.storage_paths.handoff_dir@0c6e18e1da
   - cosa.repo.symindex.candidates.storage_paths.container_path@d87be61ec8
+  - cosa.repo.symindex.candidates.storage_paths.purpose_label@8981cc9f26
   - cosa.repo.symindex.candidates.storage_paths.shortlist_arm@70d5d06fa0
 ---
 # Candidate storage paths
@@ -23,6 +24,8 @@ Every location of the candidate stage comes from an INI key, and an environment 
 ## Directories
 - `candidate_dir( name, data_directory )` takes `vectors`, `query_cache` or `purpose`. An INI value is relative to `data_directory`; an override must be absolute.
 - `search_interpreter()` returns the path that runs the search process and raises `DEPENDENCY_MISSING` when the key is absent or the file is not there.
+
+- `purpose_label( config=None, environ=None )` returns the last component of the purpose-lines folder, to tag a saved raw response. It raises `STORAGE_KEY_MISSING` when neither source is set.
 
 ## Handoff to a container
 - `main_checkout( root )` resolves a worktree to its parent checkout, which the containers mount.
