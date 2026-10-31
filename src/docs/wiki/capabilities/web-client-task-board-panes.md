@@ -5,7 +5,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.TaskListRendererImpl@46c6a2c625
   - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.HoldingAreaRendererImpl@47a4aeedb5
   - src.lupin_app.static.js.multiplexer.render.EpicBoardRenderer.EpicBoardRendererImpl@2a8d10c29c
-  - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.FinishedTasksRendererImpl@cd6bae76ea
+  - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.FinishedTasksRendererImpl@4a94e873fb
   - src.lupin_app.static.js.multiplexer.render.taskVerbs.verbLegality@8816df8745
   - src.lupin_app.static.js.multiplexer.render.taskVerbs.transitionExtras@cbed0f71fd
   - src.lupin_app.static.js.multiplexer.render.epicBoardModel.groupTasksByEpic@c0346bfd19
@@ -26,7 +26,7 @@ Four panes show the task store: the task list, the epic board, the holding area 
 - A batch button arms on the first press and posts on the second. Rows go one at a time, every row is tried, and one refresh follows the last.
 - `EpicBoardRenderer` groups rows by a `correlation_key` starting `epic:`. `groupTasksByEpic` sends rows with no epic key to a drift group, never drops them.
 - The epic board marks rows blocked on Rick as a highlight; the rows stay under their epic. Rows sort by priority, then status, then title.
-- `FinishedTasksRenderer` reads the task event stream, not the task list, because the list has no terminal timestamp. It polls every 60 s, with a 1 to 14 day window.
+- `FinishedTasksRenderer` reads the task event stream, not the task list, because the list has no terminal timestamp. It polls every 60 s, with a 1 to 14 day window. Its `updated` time is in the server zone, else labelled UTC.
 - The holding-area header shows the flow ratio. The gate reads open only below the threshold; at the threshold it reads closed.
 - A manager's promote or demote request shows as a chip on the row. Every viewer sees Approve and Deny; the server refuses anyone but Rick.
 

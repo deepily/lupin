@@ -10,9 +10,9 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.templates.ttsChrome.renderTtsChrome@8b3f948d45
   - src.lupin_app.static.js.multiplexer.render.templates.ttsCardShared.ttsCardIcon@29d2887bde
   - src.lupin_app.static.js.multiplexer.render.templates.ttsCardShared.truncateTtsText@7a76990b12
-  - src.lupin_app.static.js.multiplexer.render.templates.ttsCardShared.ttsCardTime@aef52dafec
-  - src.lupin_app.static.js.multiplexer.render.templates.ttsActiveCard.renderTtsActiveCard@9e92cb04ae
-  - src.lupin_app.static.js.multiplexer.render.templates.ttsMinimizedCard.renderTtsMinimizedCard@39d3d92b8c
+  - src.lupin_app.static.js.multiplexer.render.templates.ttsCardShared.ttsCardTime@928d891b1b
+  - src.lupin_app.static.js.multiplexer.render.templates.ttsActiveCard.renderTtsActiveCard@669d10d239
+  - src.lupin_app.static.js.multiplexer.render.templates.ttsMinimizedCard.renderTtsMinimizedCard@8da0911dc7
   - src.lupin_app.static.js.multiplexer.render.templates.ttsPreviewSlider.renderTtsPreviewSlider@96bf9ec810
 ---
 # Speech queue templates
@@ -29,7 +29,7 @@ Builds the speech queue pane: transport controls, the card for the item being sp
 
 ## Cards and slider
 - `ttsCardIcon` returns a warning sign for action required items, else a bell. `truncateTtsText( text, max )` cuts to `max` characters ending in three dots.
-- `ttsCardTime` returns the notification's display time when set, else the enqueue time in 24-hour hours and minutes.
+- `ttsCardTime` returns the notification's display time when set, else the enqueue time in 24-hour hours and minutes, in the server zone or labelled UTC.
 - `renderTtsActiveCard( item, handlers )` shows icon, time, text cut to 80, a Stop button and a delete button. Delete calls `onDelete` with the item's id hash.
 - `renderTtsMinimizedCard( item, position, handlers )` shows position, icon, time, text cut to 50 and delete. Action required items get a priority class.
 - `renderTtsPreviewSlider( opts, handlers )` returns a `div.tts-preview-slider`. It holds a `TTS:` label, a range input from 0 to 100 in steps of 12.5, a datalist of nine stops and a value label. Each input event calls `onInput` with a float.

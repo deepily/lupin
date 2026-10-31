@@ -2,7 +2,7 @@
 capability: web-client-experimental-tts
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.test.experimental-tts.ExperimentalProgressiveTTS@fc9ce4c2d7
+  - src.lupin_app.static.js.test.experimental-tts.ExperimentalProgressiveTTS@36c88e9bf7
   - src.lupin_app.static.js.test.experimental-tts.setTestText@1a3d5905f5
   - src.lupin_app.static.js.test.experimental-tts.testProgressiveStreaming@89be7c3882
   - src.lupin_app.static.js.test.experimental-tts.stopStreaming@1752240b6e
@@ -16,4 +16,5 @@ pins:
 The experimental text-to-speech scripts kept in the static folder. [[web-client-audio-and-tts]] describes the audio that ships. No file in this group imports another; each is loaded on its own by the code that calls it.
 
 ## What it does
+- The page stamps its log lines with `LupinAppZone.time`: the server zone, or labelled UTC. It never uses the browser's zone.
 - `experimental-tts.js`. `ExperimentalProgressiveTTS`: Models a page that streams TTS audio over a WebSocket and measures latency. `setTestText`: Fills the test text box with a preset message and focuses it. `testProgressiveStreaming`: Starts the streaming test on the page's experimental TTS object, if it exists. `stopStreaming`: Stops streaming on the page's experimental TTS object, if it exists. `clearLogs`: Clears the log on the page's experimental TTS object, if it exists. `testABComparison`: Starts the Flash and Turbo comparison on the page's TTS test object. `updateCustomSettings`: Shows or hides the custom settings and sets the model for the profile. `getCurrentSettings`: Reads the model, voice and profile controls into a settings object.

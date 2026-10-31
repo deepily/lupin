@@ -2,7 +2,7 @@
 capability: admin-users-paging-and-selection
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.html.auth.admin.js.admin-users.formatDate@2320cbd68f
+  - src.lupin_app.static.html.auth.admin.js.admin-users.formatDate@6bb26dd851
   - src.lupin_app.static.html.auth.admin.js.admin-users.escapeHtml@edf11c97ec
   - src.lupin_app.static.html.auth.admin.js.admin-users.updatePagination@ac08efe32b
   - src.lupin_app.static.html.auth.admin.js.admin-users.previousPage@75473f5e2e
@@ -32,5 +32,5 @@ The paging, filter, helper and selection functions of the admin users script. Th
 - `updateBatchActionBar` shows "N user(s) selected" and the bar when anything is selected. `clearSelection` empties the set and the checkboxes.
 
 ## Helpers
-- `formatDate` gives "Just now", "N min ago", hours or days up to a week, then the locale date, and "N/A" for no value. It differs from [[admin-time-formatter]].
+- `formatDate` gives "Just now", "N min ago", hours or days up to a week, then the date in the server zone, else labelled UTC. "N/A" means no value. It differs from [[admin-time-formatter]].
 - `escapeHtml` escapes text for markup. `showElement` and `hideElement` set display by id and ignore a missing element.

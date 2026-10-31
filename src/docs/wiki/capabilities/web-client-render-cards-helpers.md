@@ -9,8 +9,12 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.markdown.renderMarkdown@17e29924fc
   - src.lupin_app.static.js.multiplexer.render.markdown.renderMarkdownInline@27700fe42c
   - src.lupin_app.static.js.multiplexer.render.time.formatCountdown@67b3864c05
-  - src.lupin_app.static.js.multiplexer.render.time.formatHM@cfb5792481
-  - src.lupin_app.static.js.multiplexer.render.time.formatDateKey@e97b0fba41
+  - src.lupin_app.static.js.multiplexer.render.time.formatHM@c9b36468e8
+  - src.lupin_app.static.js.multiplexer.render.time.displayZone@33ee41a1f6
+  - src.lupin_app.static.js.multiplexer.render.time.formatClock@427a1239bf
+  - src.lupin_app.static.js.multiplexer.render.time.hoursSinceMidnight@638fb357e7
+  - src.lupin_app.static.js.multiplexer.render.time.zoneLabel@785ba9dd26
+  - src.lupin_app.static.js.multiplexer.render.time.formatDateKey@dc1cf02e56
   - src.lupin_app.static.js.multiplexer.render.time.formatDuration@4f9ba03ddb
 ---
 # Render helpers
@@ -28,8 +32,9 @@ Small shared helpers for the multiplexer renderers: a press guard, a scroll reve
 - `postProcessAnchors` is private. It adds a new-tab target and a noopener rel to links lacking a target, but leaves in-app doc links bare.
 
 ## Time
-- `formatCountdown( ms )` returns `MM:SS`, zero-padded, and `00:00` for zero or negative input. `formatHM( ts, tz )` returns 24-hour `HH:MM`, or `--:--` for a non-finite value.
-- `formatDateKey( ts, tz )` returns a year-month-day key in the given zone, or browser-local time without one. Non-finite input gives ten dashes.
+- `formatCountdown( ms )` returns `MM:SS`, zero-padded, and `00:00` for zero or negative input. `formatHM( ts, tz )` returns 24-hour `HH:MM`, or `--:--` for a non-finite value. With no server zone it ends in the word UTC.
+- `formatDateKey( ts, tz )` returns a year-month-day key in the given zone, or UTC without one. Non-finite input gives ten dashes.
+- `displayZone` returns the server zone or `UTC`, and `zoneLabel` returns the word UTC only for the fallback. `formatClock` and `hoursSinceMidnight` use them for clock text and the `today` window.
 - `formatDuration( start, end )` returns seconds, minutes or hours text. With no end it reads the clock and prefixes "running for". Non-finite input gives `--`.
 
 Markdown output goes straight into `html` template slots, so the sanitizer is the only barrier. The time functions are pure except the running case of `formatDuration`.

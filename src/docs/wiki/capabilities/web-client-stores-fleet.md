@@ -3,7 +3,7 @@ capability: web-client-stores-fleet
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.stores.CommonsStore.defaultFilter@fcb14971a9
-  - src.lupin_app.static.js.multiplexer.stores.CommonsStore.CommonsStoreImpl@cdd213101e
+  - src.lupin_app.static.js.multiplexer.stores.CommonsStore.CommonsStoreImpl@ea437e8cd8
   - src.lupin_app.static.js.multiplexer.stores.CommonsStore.createCommonsStore@227609516e
   - src.lupin_app.static.js.multiplexer.stores.EpicStoriesStore.EpicStoriesStoreImpl@467c93d4c6
   - src.lupin_app.static.js.multiplexer.stores.EpicStoriesStore.createEpicStoriesStore@2b0e5c47d8

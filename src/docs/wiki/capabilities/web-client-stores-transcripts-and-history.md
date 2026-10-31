@@ -19,7 +19,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.stores.historyWindow.sendersVisiblePath@ad58294ebe
   - src.lupin_app.static.js.multiplexer.stores.historyWindow.parseStoredHistoryWindow@aba2246f20
   - src.lupin_app.static.js.multiplexer.stores.historyWindow.serializeHistoryWindow@eff6dc4991
-  - src.lupin_app.static.js.multiplexer.stores.historyWindow.effectiveHoursForQuery@9998acc523
+  - src.lupin_app.static.js.multiplexer.stores.historyWindow.effectiveHoursForQuery@cfe5f883d3
   - src.lupin_app.static.js.multiplexer.stores.historyWindow.historyWindowLabel@7642ceb71f
   - src.lupin_app.static.js.multiplexer.stores.responseQuestions.parseResponseQuestions@861f3de8ed
   - src.lupin_app.static.js.multiplexer.stores.responseQuestions.toOption@29eaea2bea
@@ -35,5 +35,5 @@ The session transcript store and roster, the page-load history helpers and the r
 - `StripReconnectRehydrator.ts`. `StripReconnectRehydratorImpl`: Reloads the strip's data after the queue socket reconnects. `createStripReconnectRehydrator`: Build the rehydrator.
 - `awaitingResponseHydration.ts`. `createAwaitingResponseHydration`: Build the runner.
 - `coldHistoryHydration.ts`. `ColdHistoryHydrationImpl`: Loads senders and history on page open, and again on retry or change.
-- `historyWindow.ts`. `sendersVisiblePath`: The senders-visible path for a user, with an hours window. `parseStoredHistoryWindow`: Parse the legacy client's stored window value. `serializeHistoryWindow`: Serialize a window for HISTORY_WINDOW_KEY. `effectiveHoursForQuery`: The hours to send on a query. `historyWindowLabel`: The picker's display label.
+- `historyWindow.ts`. `sendersVisiblePath`: The senders-visible path for a user, with an hours window. `parseStoredHistoryWindow`: Parse the legacy client's stored window value. `serializeHistoryWindow`: Serialize a window for HISTORY_WINDOW_KEY. `effectiveHoursForQuery`: The hours to send on a query; `today` counts from midnight in the server zone, UTC without one. `historyWindowLabel`: The picker's display label.
 - `responseQuestions.ts`. `parseResponseQuestions`: Read the questions out of a notification's `response_options`. `toOption`: Converts one raw option value into a list holding zero or one action-required options. `isRecord`: Tells whether a value is a plain object, excluding null and arrays.

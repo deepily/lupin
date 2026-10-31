@@ -2,7 +2,7 @@
 capability: admin-users-dialogs
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.html.auth.admin.js.admin-users.showUserDetails@508e68f19f
+  - src.lupin_app.static.html.auth.admin.js.admin-users.showUserDetails@b60535da6a
   - src.lupin_app.static.html.auth.admin.js.admin-users.closeUserModal@3648fc7419
   - src.lupin_app.static.html.auth.admin.js.admin-users.showRoleEditor@5e527a0d30
   - src.lupin_app.static.html.auth.admin.js.admin-users.closeRoleModal@74e5ff4288
@@ -25,7 +25,7 @@ pins:
 The detail, role, status, password and create dialogs of the admin users script. They keep the user on screen in the script variables `currentUser` and `selectedUserId`. Deletion is on [[admin-users-delete-and-confirm]].
 
 ## Details and roles
-- `showUserDetails` fetches the user and fills the detail panel: email, id, roles, verified, status, dates, audit log count and failed logins. `closeUserModal` closes it and forgets the user.
+- `showUserDetails` fetches the user and fills the detail panel: email, id, roles, verified, status, dates, audit log count and failed logins. The dates use the server zone, else labelled UTC. `closeUserModal` closes it and forgets the user.
 - `showRoleEditor` fills the role checkboxes from the user and swaps the detail panel for the editor. `closeRoleModal` brings the detail panel back.
 - `saveRoles` refuses an empty choice, sends the roles, then closes both dialogs and reloads the current page.
 

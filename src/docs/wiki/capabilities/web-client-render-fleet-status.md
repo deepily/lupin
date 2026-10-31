@@ -11,7 +11,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.fleetModel.formatConsumptionPct@58a635e2c6
   - src.lupin_app.static.js.multiplexer.render.fleetModel.fleetVerdictClass@f4c223df38
   - src.lupin_app.static.js.multiplexer.render.fleetModel.fleetHeatClass@e3d3e14074
-  - src.lupin_app.static.js.multiplexer.render.fleetModel.formatFleetTimestamp@64381b9ac6
+  - src.lupin_app.static.js.multiplexer.render.fleetModel.formatFleetTimestamp@e7a326e160
   - src.lupin_app.static.js.multiplexer.render.templates.fleetStatusTable.td@5c60588c91
   - src.lupin_app.static.js.multiplexer.render.templates.fleetStatusTable.renderFleetOfflineToggle@48da2ebf4b
   - src.lupin_app.static.js.multiplexer.render.templates.fleetStatusTable.renderFleetRow@d1e762fc9e
@@ -28,7 +28,7 @@ The model helpers and the table builders of the fleet status card: sessions grou
 - `splitFleetByLiveness( sessions )` puts a row in the offline list only when `liveness.verdict` is `offline`. Rows with no verdict stay live.
 - `formatWindowSize` gives `<n>M` for an exact million, `<n>K` for an exact thousand, else the integer, and a dash for a falsy or non-positive value. `formatConsumptionPct` gives `<pct>%`, or a dash for null.
 - `fleetVerdictClass( verdict )` keys on the first word: `live`, `quiet`, `stale` or `offline`, else `fleet-verdict-unknown`. `fleetHeatClass( pct )` is `fleet-pct-low` under 50, `fleet-pct-mid` under 80, else `fleet-pct-high`, and empty when unmeasured.
-- `formatFleetTimestamp( date, ianaZone )` formats hours, minutes, seconds and a short zone name, in the IANA zone, or browser-local when it is absent or invalid.
+- `formatFleetTimestamp( date, ianaZone )` formats hours, minutes, seconds and a short zone name, in the IANA zone, or UTC when it is absent or invalid.
 
 ## Table (`fleetStatusTable`)
 - `td( className, text )` builds one cell. `renderFleetOfflineToggle( offlineCount, showOffline, handlers )` builds a button labelled `Hide offline (N)` or `Show offline (N)` that calls `onToggle`.

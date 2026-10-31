@@ -2,7 +2,7 @@
 capability: web-client-stores
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.stores.index.createStores@d6129634bc
+  - src.lupin_app.static.js.multiplexer.stores.index.createStores@dd40f53d52
   - src.lupin_app.static.js.multiplexer.stores.NotificationStore.NotificationStoreImpl.setFilterMode@dd07fd1290
   - src.lupin_app.static.js.multiplexer.stores.TaskListStore.TaskListStoreImpl.startPolling@a4b94b8b00
   - src.lupin_app.static.js.multiplexer.stores.polling.createPushPoller@c727e62e74
@@ -21,7 +21,7 @@ The stores hold the multiplexer page's state. Each is built by a `createXStore` 
 - `QaStore` listens to the server frame `tts_job_request` in its constructor. It is built outside the pinned five, so its order is neutral.
 - Six stores poll every 60 s: fleetStatus, taskList, holdingArea, flowRatio, finishedTasks, taskRequests. `bootMultiplexer` calls `startPolling` after the panes mount.
 - `TaskListStore`, `HoldingAreaStore` and `FinishedTasksStore` share one `createPushPoller`. It runs the poll, subscribes to `task_store_changed` and calls `refreshAfterWrite`. Their `startPolling` and `stopPolling` delegate to it.
-- `resolveRuntimeDefaults` gives the Task List, Holding Area, Finished Tasks, Fleet Status and Flow Ratio stores their clock and timer defaults.
+- `resolveRuntimeDefaults` gives the Task List, Holding Area, Finished Tasks, Fleet Status and Flow Ratio stores their clock and timer defaults. `appTimezoneFn` reaches the commons store, which counts its `today` window from that zone's midnight.
 - Eight stores persist through `StorageService`: unread counts, session names, owed prompts, reading-pane layout, commons filter, view state, the broadcast card flag and the TTS queue.
 - `createColdHistoryHydration` runs the page-load history fetch with a 120 s timeout. It re-runs on the Retry event and reloads when the history window or the Mine mode changes.
 - `bothBoardsReadBack` re-reads the task list and the holding area after a promote or demote verdict. It waits for both, then re-raises the first failure.

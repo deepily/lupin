@@ -2,7 +2,7 @@
 capability: admin-snapshots-dashboard
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.html.admin.js.admin-snapshots.AdminSnapshotsDashboard@58f4cff2d1
+  - src.lupin_app.static.html.admin.js.admin-snapshots.AdminSnapshotsDashboard@3ca2d79912
   - src.lupin_app.static.html.admin.js.admin-snapshots.toggleSynonyms@9f61d7a612
   - src.lupin_app.static.html.admin.js.admin-snapshots.escapeHtml@edf11c97ec
 ---
@@ -22,7 +22,7 @@ pins:
 ## Detail and delete
 - `viewDetails` gets `/admin/snapshots/<id>` and fills the detail modal: answers, synonym pairs, runtime statistics, code and summaries. The synonym section opens collapsed, and the global `toggleSynonyms` flips it.
 - `closeDetailModal` clears the remembered id. `confirmDelete` shows the question and `deleteSnapshot` sends DELETE, drops the row and recounts. `closeDeleteModal` forgets the id.
-- `formatDate` gives the locale date string. The global `escapeHtml` escapes text for markup.
+- `formatDate` gives the date and time in the server zone, or labelled UTC when the page has none. The global `escapeHtml` escapes text for markup.
 
 ## Voice search
 - `handleSearchSTTButtonClick` stops a running recording, ignores a click while processing, and otherwise calls `startSearchVoiceInput`. Ctrl+R does the same and blocks the browser refresh.

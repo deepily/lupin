@@ -6,7 +6,7 @@ pins:
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.getDataOriginBadge@e5eecc1f3a
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.getTrustBadge@59869765f6
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.getRatificationBadge@2ae4588233
-  - src.lupin_app.static.html.auth.admin.js.proxy-ratify.showDecisionDetail@cb78cabbd2
+  - src.lupin_app.static.html.auth.admin.js.proxy-ratify.showDecisionDetail@b24143aba7
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.closeDetailModal@715cf09c10
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.modalApprove@ee3d711b5c
   - src.lupin_app.static.html.auth.admin.js.proxy-ratify.modalReject@4233876a5d
@@ -22,7 +22,7 @@ pins:
 The detail view, badges and refresh triggers of [[proxy-ratify-page]]. Row actions are on [[proxy-ratify-actions]].
 
 ## Detail view
-- `showDecisionDetail( id )` finds the loaded decision and remembers its id. It fills the modal with category, domain, source, action, trust level, confidence, sender, time, reason, question and decision value. It clears the feedback box and opens the modal. An unknown id does nothing.
+- `showDecisionDetail( id )` finds the loaded decision and remembers its id. It fills the modal with category, domain, source, action, trust level, confidence, sender, time, reason, question and decision value. The time is in the server zone, else labelled UTC. It clears the feedback box and opens the modal. An unknown id does nothing.
 - `modalApprove` and `modalReject` ratify the remembered id with the trimmed feedback text, close the modal, show a message and reload. `closeDetailModal` hides it and forgets the id.
 - A click outside any modal hides it and forgets the detail id.
 
