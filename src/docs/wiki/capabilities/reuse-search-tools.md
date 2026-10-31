@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.reuse_tools.sendable@42a71ac125
   - lupin_mcp.reuse_tools.sweep@6b56c2af23
   - lupin_mcp.reuse_tools.LiveJevTransport.post@05ba74d3cf
-  - cosa.repo.symindex.verdict.decide@9e23bddf00
+  - cosa.repo.symindex.verdict.decide@6eccda3305
   - lupin_mcp.reuse_call_log_middleware.ReuseCallLogMiddleware@f56d5fddbb
 ---
 # Reuse search tools
@@ -37,4 +37,4 @@ Four MCP tools ask whether a new definition already exists. A fifth, `record_sea
 ## The verdict
 - Any cause beats `REUSE` and `EXTEND`. The verdict is then `UNCERTAIN_READ_SOURCE`, with a cause from `NOT_LUPIN_TREE`, `INDEX_STALE`, `DEPENDENCY_MISSING`, `KEY_UNREADABLE`, `CALL_FAILED`, `MALFORMED_ANSWER`, `LOW_CONFIDENCE`, `NEAR_CUTOFF` or `NO_MATCH`.
 - `LOW_CONFIDENCE` holds when a symbol has 0.3 overlap or more and confidence under 0.9, unless a strong match (both at 0.9 or more) exists. `CALL_FAILED` holds when any call failed or any entry was never asked.
-- With no other cause, no symbol reaching 0.3 overlap holds `NO_MATCH` alone, so the reviewer reads the nearest entries. Otherwise `REUSE` means one of those symbols chose reuse, and `EXTEND` means none did. With a strong match, only the strong entries decide. A policy without `no_new` still answers `NEW`.
+- With no other cause, no symbol reaching 0.3 overlap holds `NO_MATCH` alone, so the reviewer reads the nearest entries. Otherwise `REUSE` means one of those symbols chose reuse, and `EXTEND` means none did. With a strong match, only the strong entries decide. A policy without `no_new` still answers `NEW`. The shortlist counts a Dart class and its constructor as one entry.
