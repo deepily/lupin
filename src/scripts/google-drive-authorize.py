@@ -102,5 +102,5 @@ def main():
     return 0
 
 
-if __name__ == "__main__":  # pragma: no cover - entry point; main() is covered by the unit tests
+if __name__ == "__main__":  # pragma: no cover - runs only when the file is executed as a script, never on import
     sys.exit( main() )
