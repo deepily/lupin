@@ -189,3 +189,17 @@ def test_a_re_answer_in_the_same_second_or_later_is_accepted_whatever_the_zone_o
     rows = [ label( "n-000", ts="2026-10-31T12:00:00+00:00" ), label( "n-000", choice="NONE", ts="2026-10-31T12:00:00+00:00" ),
              label( "n-000", ts="2026-10-31T08:00:01-04:00" ), label( "n-000", choice="NONE", ts="2026-10-31T12:00:02" ) ]
     assert pk.read_labels( write_labels( tmp_path / "l.jsonl", rows ) ) == [ rows[ 3 ] ]
+
+
+def test_a_repeat_whose_earlier_time_cannot_be_read_is_refused_too( tmp_path ):
+    path = write_labels( tmp_path / "l.jsonl", [ label( "n-000", ts="yesterday" ), label( "n-000", choice="NONE", ts="2026-10-31T12:00:00+00:00" ) ] )
+    with pytest.raises( er.LabellingError ) as e: pk.read_history( path )
+    assert e.value.code == er.BAD_LABEL and f"{path}:2:" in e.value.detail and "cannot be read" in e.value.detail
+
+
+def test_a_repeat_is_compared_with_the_answer_just_before_it_and_not_with_the_first( tmp_path ):
+    rows = [ label( "n-000", ts="2026-10-31T12:00:00+00:00" ), label( "n-000", choice="NONE", ts="2026-10-31T12:05:00+00:00" ),
+             label( "n-000", ts="2026-10-31T12:03:00+00:00" ) ]
+    path = write_labels( tmp_path / "l.jsonl", rows )
+    with pytest.raises( er.LabellingError ) as e: pk.read_history( path )
+    assert e.value.code == er.BAD_LABEL and f"{path}:3:" in e.value.detail and "earlier" in e.value.detail

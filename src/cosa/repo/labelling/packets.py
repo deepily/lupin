@@ -136,7 +136,7 @@ def _bad( path, n, why ):
     raise er.LabellingError( er.BAD_LABEL, f"{path}:{n}: {why}" )
 
 
-def _moment( ts ):
+def moment( ts ):
     """Return an ISO-8601 time as an aware datetime (no zone means UTC), or None if unreadable."""
     try:
         when = datetime.fromisoformat( ts )
@@ -156,7 +156,7 @@ def read_history( path ):
         - returns the labels in file order; an item answered again appears once per answer, the latest last
         - a choice is AS_PROPOSED, the other-choice or none; symbols is a non-empty list of ids exactly when the choice is the other-choice
         - a file holds one reviewer's labels
-        - an item answered again carries a time that can be read and is not earlier than the answer before it, as save_label always writes it; any other repeat is a hand edit and is refused
+        - an item answered again carries a time that can be read and is not earlier than the answer before it, as save_label always writes it; a repeat that breaks this is refused, but a hand edit with a later time still loads
 
     Raises:
         - LabellingError BAD_LABEL naming the line
@@ -176,7 +176,7 @@ def read_history( path ):
             _bad( path, n, "symbols must be a non-empty list of ids when the choice is OTHER, and empty otherwise" )
         if labels and label[ "reviewer" ] != labels[ 0 ][ "reviewer" ]: _bad( path, n, "a file holds one reviewer's labels" )
         if label[ "item_id" ] in last:
-            before, now = _moment( last[ label[ "item_id" ] ] ), _moment( label[ "ts" ] )
+            before, now = moment( last[ label[ "item_id" ] ] ), moment( label[ "ts" ] )
             if before is None or now is None: _bad( path, n, f"item {label[ 'item_id' ]} is answered again and the time of the two answers cannot be read" )
             if now < before: _bad( path, n, f"item {label[ 'item_id' ]} is answered again with a time earlier than the answer before it; save_label never writes that" )
         last[ label[ "item_id" ] ] = label[ "ts" ]

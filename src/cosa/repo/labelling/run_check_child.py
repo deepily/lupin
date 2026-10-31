@@ -129,9 +129,10 @@ def run_request( request, folder ):
         - returns { "setup_error": <type name> } when the source does not define the name
 
     Raises:
-        - RuntimeError from refuse_repository, before the source runs
+        - RuntimeError from refuse_repository, for the folder given or the current folder, before the source runs
     """
     refuse_repository( folder )
+    refuse_repository( os.getcwd() )
     space = {}
     try:
         exec( compile( request[ "source" ], "<run-check>", "exec" ), space )

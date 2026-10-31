@@ -419,3 +419,27 @@ def test_run_request_and_main_refuse_a_repository_folder_before_running_anything
     with pytest.raises( RuntimeError, match="refusing" ): child.run_request( { "source": touch, "name": "f", "cases": [ [ 1 ] ] }, str( tmp_path ) )
     with pytest.raises( RuntimeError, match="refusing" ): child.main( stdin=io.StringIO( json.dumps( { "source": touch, "name": "f", "cases": [ [ 1 ] ] } ) ), stdout=io.StringIO() )
     assert ( tmp_path / "keep.txt" ).exists() and not ( tmp_path / "ran.txt" ).exists()
+
+
+def test_refuse_repository_follows_a_symlink_and_a_dot_into_the_repository_it_really_is_in( tmp_path, monkeypatch ):
+    repo = tmp_path / "repo"
+    ( repo / "sub" ).mkdir( parents=True )
+    ( repo / ".git" ).mkdir()
+    link = tmp_path / "elsewhere"
+    link.symlink_to( repo / "sub" )
+    with pytest.raises( RuntimeError, match="refusing" ): child.refuse_repository( str( link ) )
+    monkeypatch.chdir( repo / "sub" )
+    with pytest.raises( RuntimeError, match="refusing" ): child.refuse_repository( "." )
+    with pytest.raises( RuntimeError, match="refusing" ): child.refuse_repository( "" )
+
+
+def test_run_request_also_refuses_when_the_current_folder_is_in_a_repository_though_the_given_folder_is_not( tmp_path, monkeypatch ):
+    repo = tmp_path / "repo"
+    ( repo / "sub" ).mkdir( parents=True )
+    ( repo / ".git" ).mkdir()
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    monkeypatch.chdir( repo / "sub" )
+    touch = "def f( x: int ):\n    open( 'ran.txt', 'w' ).write( 'x' )\n    return x\n"
+    with pytest.raises( RuntimeError, match="refusing" ): child.run_request( { "source": touch, "name": "f", "cases": [ [ 1 ] ] }, str( clean ) )
+    assert not ( repo / "sub" / "ran.txt" ).exists()

@@ -145,3 +145,27 @@ def test_a_failed_check_leaves_the_old_file_untouched_and_no_temp( tmp_path ):
 
 def test_read_existing_is_empty_before_the_first_label( tmp_path ):
     assert pl.read_existing( make_packet( tmp_path ) ) == []
+
+
+def test_a_clock_that_steps_back_cannot_make_save_label_write_a_file_it_then_refuses( tmp_path ):
+    path = make_packet( tmp_path )
+    item = pl.load_items( path )[ 0 ][ "item_id" ]
+    pl.save_label( path, item, True, clock=lambda: "2026-10-31T12:00:00+00:00" )
+    back = pl.save_label( path, item, False, clock=lambda: "2026-10-31T11:00:00+00:00" )
+    fwd  = pl.save_label( path, item, True, clock=lambda: "2026-10-31T13:00:00+00:00" )
+    assert back[ "ts" ] == "2026-10-31T12:00:00+00:00" and fwd[ "ts" ] == "2026-10-31T13:00:00+00:00"
+    assert [ l[ "ts" ] for l in pl.read_history( path ) ] == [ "2026-10-31T12:00:00+00:00", "2026-10-31T12:00:00+00:00", "2026-10-31T13:00:00+00:00" ]
+    assert pl.same_job_labels( pl.labels_path( path ) )[ item ] is True
+
+
+def test_a_first_answer_keeps_the_clocks_time_whatever_it_is( tmp_path ):
+    path = make_packet( tmp_path )
+    item = pl.load_items( path )[ 0 ][ "item_id" ]
+    assert pl.save_label( path, item, True, clock=lambda: "1999-01-01T00:00:00+00:00" )[ "ts" ] == "1999-01-01T00:00:00+00:00"
+
+
+def test_not_earlier_lifts_only_a_readable_earlier_time_to_the_floor():
+    assert pl.not_earlier( "2026-10-31T11:00:00+00:00", "2026-10-31T12:00:00+00:00" ) == "2026-10-31T12:00:00+00:00"
+    assert pl.not_earlier( "2026-10-31T13:00:00+00:00", "2026-10-31T12:00:00+00:00" ) == "2026-10-31T13:00:00+00:00"
+    assert pl.not_earlier( "2026-10-31T12:00:00+00:00", "2026-10-31T12:00:00+00:00" ) == "2026-10-31T12:00:00+00:00"
+    assert pl.not_earlier( "soon", "2026-10-31T12:00:00+00:00" ) == "soon" and pl.not_earlier( "2026-10-31T11:00:00+00:00", "later" ) == "2026-10-31T11:00:00+00:00"
