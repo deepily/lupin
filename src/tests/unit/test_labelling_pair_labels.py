@@ -169,3 +169,21 @@ def test_not_earlier_lifts_only_a_readable_earlier_time_to_the_floor():
     assert pl.not_earlier( "2026-10-31T13:00:00+00:00", "2026-10-31T12:00:00+00:00" ) == "2026-10-31T13:00:00+00:00"
     assert pl.not_earlier( "2026-10-31T12:00:00+00:00", "2026-10-31T12:00:00+00:00" ) == "2026-10-31T12:00:00+00:00"
     assert pl.not_earlier( "soon", "2026-10-31T12:00:00+00:00" ) == "soon" and pl.not_earlier( "2026-10-31T11:00:00+00:00", "later" ) == "2026-10-31T11:00:00+00:00"
+
+
+def test_a_stepped_back_clock_is_lifted_to_the_last_answer_of_the_item_and_not_to_its_first( tmp_path ):
+    path = make_packet( tmp_path )
+    item = pl.load_items( path )[ 0 ][ "item_id" ]
+    for ts in ( "2026-10-31T12:00:00+00:00", "2026-10-31T12:10:00+00:00" ): pl.save_label( path, item, True, clock=lambda ts=ts: ts )
+    got  = pl.save_label( path, item, False, clock=lambda: "2026-10-31T12:05:00+00:00" )
+    assert got[ "ts" ] == "2026-10-31T12:10:00+00:00"
+    assert [ l[ "ts" ] for l in pl.read_history( path ) ][ -1 ] == "2026-10-31T12:10:00+00:00"
+
+
+def test_the_first_answer_of_another_item_keeps_the_clock_time_whatever_other_items_were_stamped( tmp_path ):
+    path = make_packet( tmp_path )
+    a, b = [ i[ "item_id" ] for i in pl.load_items( path ) ][ :2 ]
+    pl.save_label( path, a, True, clock=lambda: "2026-10-31T12:10:00+00:00" )
+    got  = pl.save_label( path, b, True, clock=lambda: "2026-10-31T12:00:00+00:00" )
+    assert got[ "ts" ] == "2026-10-31T12:00:00+00:00"
+    assert { l[ "item_id" ]: l[ "ts" ] for l in pl.read_history( path ) } == { a: "2026-10-31T12:10:00+00:00", b: "2026-10-31T12:00:00+00:00" }
