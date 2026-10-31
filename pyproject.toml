@@ -35,6 +35,10 @@ dependencies = [
   # --- LLM clients / orchestration ---
   "openai>=1.50,<2",
   "google-generativeai>=0.8,<1",
+  # --- Google Drive publishing (podcast publish-to-Drive; imported lazily, only when the flag is on) ---
+  "google-api-python-client>=2,<3",
+  "google-auth>=2,<3",
+  "google-auth-oauthlib>=1,<2",
   "groq>=0.11,<1",
   "claude-agent-sdk==0.2.88",
   "fastmcp==2.14.2",

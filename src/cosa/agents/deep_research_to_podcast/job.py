@@ -306,6 +306,16 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 if l not in ordered_langs:
                     ordered_langs.append( l )
 
+            # Optional Google Drive copy (flag off = no-op and no Google import). The source document
+            # is the generated research report, resolved against the project root.
+            from cosa.agents.podcast_generator.config import PodcastConfig
+            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive, make_job_folder_name, resolve_source_path
+            from cosa.config.configuration_manager import ConfigurationManager
+            pg_config   = PodcastConfig.from_config( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ), debug=self.debug )
+            source_path = resolve_source_path( result.research_path )
+            drive       = await publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, make_job_folder_name( source_path or "podcast" ), pg_config )
+            if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
+
             per_language_lines = []
             for lang in ordered_langs:
                 label  = _LANGUAGE_NAMES.get( lang, lang )
@@ -315,6 +325,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 s_link = _script_link( s_rel )
                 if s_link: parts.append( s_link )
                 if a_rel:  parts.append( _audio_triplet( a_rel ) )
+                if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
                 if parts:
                     per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
 
@@ -323,6 +334,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             if r_rel:
                 lines.append( f"**Research Report**: [📄 View](/app/docs?path={urllib.parse.quote( r_rel )})" )
             lines.extend( per_language_lines )
+            lines.extend( drive[ "extra_lines" ] )
             lines.append( f"**Cost**: ${result.total_cost:.4f}" )
             completion_abstract = "\n".join( lines )
 

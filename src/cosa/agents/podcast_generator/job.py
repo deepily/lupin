@@ -328,6 +328,12 @@ class PodcastGeneratorJob( AgenticJobBase ):
             self.artifacts[ "audio_paths_by_language" ]  = { l: _to_rel( p ) for l, p in audio_by_lang.items() }
             self.artifacts[ "script_paths_by_language" ] = { l: _to_rel( p ) for l, p in script_by_lang.items() }
 
+            # Optional Google Drive copy (flag off = no-op and no Google import). full_path is the
+            # resolved source document path computed above, never the possibly-relative research_path.
+            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive, make_job_folder_name
+            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, full_path, make_job_folder_name( full_path ), config )
+            if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
+
             # Build cost summary
             api_cost = agent.api_client.cost_estimate.estimated_cost_usd if agent._api_client else 0.0
             self.cost_summary = {
@@ -383,6 +389,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
                 s_link = _script_link( s_rel )
                 if s_link: parts.append( s_link )
                 if a_rel:  parts.append( _audio_triplet( a_rel ) )
+                if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
                 if parts:
                     per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
 
@@ -391,6 +398,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             lines.append( f"**Segments**: {n_segments} (~{script_minutes:.1f} min)" )
             lines.append( f"**Languages**: {', '.join( languages )}" )
             lines.extend( per_language_lines )
+            lines.extend( drive[ "extra_lines" ] )
             if self.cost_summary:  # pragma: no branch - cost_summary is set unconditionally (3-key dict) earlier, so it is always truthy here; the False arc is unreachable
                 total_cost = self.cost_summary.get( "total_cost_usd", 0.0 )
                 lines.append( f"**Cost**: ${total_cost:.4f}" )
