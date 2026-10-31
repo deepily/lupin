@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.30 day to night - Session 9193d2a3 (Mr. Radio 📻, manager; crew John, Krishna, Sam, Pocholo, all reaped) | Time zone only from configuration, model server redeployed, first VM vector build
+
+- **Landed on the working branch, not pushed.** Tip `2e131d30a`, 46 commits after `9508dfa42`.
+  - Row `43286adc` (done): the time zone comes only from configuration. `cosa/config/app_timezone.py` reads it with no default, and every code fallback is removed. Web pages show the server zone or a labelled UTC time. Two census guards were added.
+  - Row `d3550878` (parked to 11:15Z 10-31): the first VM vector build finished (9581 rows). The model server image is updated to `20261030-role-document`, image only. The `"purpose-lines"` literal is fixed and `candidate_build.py` is at 100% coverage.
+  - Rows `5a8ab11c`, `2f4fd59e` and `5c3bf58e` are done: a librarian test pin, terraform matched to the live service, and the Testing-GCS LAN-model guard.
+- **Gates at the tip**: full unit 41718 passed, 0 failed. TypeScript `ts-387b7bc9` 6360 passed. Census 1549 passed. Doclint clean.
+- **Servers**: :7999 and :8001 restarted on the new code. The test VM is still at `9508dfa42`.
+- **Open for Rick**: push, the VM deploy, dropping duplicate row `f1700a8d`, and deciding row `320e0229`.
+- **Files**: history.md.
+
 ## 2026.10.29 evening to night - Session 2b284afe (Cheech 🌿, manager; crew Tiffany, reaped) | Rick's 125 labels in, every open decision ruled, explainer for the expert, podcast parse fix landed
 
 - **Labels**: Rick labelled all 125 Set A pairs (70 same job, 55 not). Of the 20 Opus work-alikes, 9 were ruled not the same job.
