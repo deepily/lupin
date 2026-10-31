@@ -14,7 +14,8 @@ STRONG_MATCH = 0.9      # the best entry's overlap and confidence must both reac
 # threshold 0.3 is the fitted cut (seed 20261014, rate 0.05): projects-data/lupin/reuse-review/negatives-2026.10.14/verdict-fit-receipt-band-0.076.json, sha256 43428afca1631f00aac4a41b8802773974166a8e0bd08acc2db11d5b34a8deb7; strong is not fitted
 # the band is off by Rick's ruling (see the row a9c46718 history): the shipped policy has no "band" key, so NEAR_CUTOFF never holds and the candidate stage never widens. Kept for the later fix: band 0.076, the 95th percentile of how far a repeat sits from its entry's mean over the 30 band-fit needs (receipt projects-data/lupin/reuse-review/e2e-results/bandfit-4-receipt.json; the receipt above records it as given, not fitted); to turn the band on, add "band": 0.076 back to the policy
 # no_new: an empty shortlist is the cause NO_MATCH and the old verdict is gone, by Rick's ruling of the remediation plan; a policy without the key, such as one stored in an old receipt, still decides and replays as it did
-POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH, "no_new": True }
+# fold_constructors: a Dart constructor and its class share one shortlist slot, under the class id and the better of their two scores, so a family of near-identical classes is not cut at half its size (row 74d0db47); a policy without the key, such as one stored in an old receipt, still cuts and replays as it did
+POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH, "no_new": True, "fold_constructors": True }
 
 CAUSES  = ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE", "NEAR_CUTOFF", "NO_MATCH" )
 BAND_DECIMALS = 6       # the distance from a cut-off is rounded to this many places before it meets the band, as the stored numbers are
@@ -65,6 +66,50 @@ def call_facts( probabilities ):
 def _is_strong( row, policy ):
     """Ensures: returns True when the row's overlap and confidence both reach policy["strong"]."""
     return row[ "p_overlap" ] >= policy[ "strong" ] and row[ "confidence" ] >= policy[ "strong" ]
+
+
+def constructor_class_id( entry_id ):
+    """
+    Name the class an index id would construct, going by the id alone.
+
+    Ensures:
+        - a Dart default constructor id ends in the class name twice (`pkg.Class.Class`) and gives `pkg.Class`
+        - a named constructor id has the class name twice before the last part (`pkg.Class.Class.fromJson`) and gives `pkg.Class`
+        - returns None for any other id
+        - an id that only looks like a constructor, such as a class `foo` in a module `foo`, is judged by the caller, which folds only when the class id is also in the pool
+    """
+    parts = entry_id.split( "." )
+    if len( parts ) >= 2 and parts[ -1 ] == parts[ -2 ]: return ".".join( parts[ :-1 ] )
+    if len( parts ) >= 3 and parts[ -2 ] == parts[ -3 ]: return ".".join( parts[ :-2 ] )
+    return None
+
+
+def _fold_constructors( rows, policy, order, causal_test=None ):
+    """
+    Merge each constructor row into the row of its class, when the policy asks.
+
+    Requires:
+        - rows are dicts with an id
+        - order sorts a list of rows best first, as _order or _provides_order do
+        - causal_test, when given, takes a row and says whether it makes the verdict
+
+    Ensures:
+        - returns rows unchanged, as the same list, when policy has no fold_constructors key
+        - otherwise a constructor whose class is also a row is removed, and the class row takes whichever of the two ranks better, with the class id
+          (when causal_test is given and exactly one of the two passes it, that one is taken, so the merged row keeps the coverage that made the verdict)
+          (an index scores a Dart constructor by its own doc and signature, so it can rank far above its class)
+        - a constructor whose class is not a row stays as it is, so nothing is lost from the view
+        - returns the merged rows ordered by order
+    """
+    if "fold_constructors" not in policy: return rows
+    by_id, merged, kept = { r[ "id" ]: r for r in rows }, {}, []
+    for r in rows:
+        cid = constructor_class_id( r[ "id" ] )
+        if cid is None or cid not in by_id: kept.append( r ); continue
+        pair          = [ merged.get( cid, by_id[ cid ] ), r ]
+        if causal_test is not None and any( causal_test( c ) for c in pair ): pair = [ c for c in pair if causal_test( c ) ]
+        merged[ cid ] = order( pair )[ 0 ]
+    return order( [ dict( merged[ r[ "id" ] ], id=r[ "id" ] ) if r[ "id" ] in merged else r for r in kept ] )
 
 
 def _order( rows ):
@@ -128,6 +173,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
           p_overlap against policy["threshold"] and policy["strong"], its confidence against policy["confidence"] when its
           p_overlap reaches policy["floor"], and its confidence against policy["strong"] when its p_overlap reaches it;
           inside means the distance, rounded to BAND_DECIMALS places, is below the band, so the edge is outside. A policy without "band" never has this cause, so it decides and replays as it did
+        - with policy["fold_constructors"], the shortlist and shortlist_total are counted on rows where each constructor is merged into its class (_fold_constructors); the verdict, nearest and doubtful are not
         - shortlist holds the relevant entries and `nearest` the best entries by p_overlap whatever
           their value, each cut to policy["shortlist"], so a `NEW` verdict still names what to read
     """
@@ -156,6 +202,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
     if doubtful and not strong: holds.add( "LOW_CONFIDENCE" )
     if "band" in policy and _near_cutoff( rows, policy ): holds.add( "NEAR_CUTOFF" )
     relevant = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "threshold" ] ]
+    listed   = [ r for r in _fold_constructors( ordered, policy, _order ) if r[ "p_overlap" ] >= policy[ "threshold" ] ]
     if "no_new" in policy and not relevant and not holds: holds.add( "NO_MATCH" )          # a complete, confident sweep that found nothing; it never rests on a failed or unsure call
     deciding = [ r for r in relevant if _is_strong( r, policy ) ] if strong else relevant
     causes   = [ c for c in CAUSES if c in holds ]
@@ -166,8 +213,8 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
     return { "verdict"         : verdict,
              "cause"           : causes[ 0 ] if causes else None,
              "causes"          : causes,
-             "shortlist"       : relevant[ :policy[ "shortlist" ] ],
-             "shortlist_total" : len( relevant ),
+             "shortlist"       : listed[ :policy[ "shortlist" ] ],
+             "shortlist_total" : len( listed ),
              "nearest"         : ordered[ :policy[ "shortlist" ] ],
              "doubtful"        : doubtful[ :policy[ "shortlist" ] ],
              "malformed"       : malformed,
@@ -176,7 +223,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
 
 LEVELS = ( "0", "1", "2", "3" )
 
-POLICY_PROVIDES = { "threshold": 0.5, "reuse": 0.7, "floor": 0.3, "coverage": 0.5, "shortlist": 10, "sum_tolerance": 0.02, "no_new": True }
+POLICY_PROVIDES = { "threshold": 0.5, "reuse": 0.7, "floor": 0.3, "coverage": 0.5, "shortlist": 10, "sum_tolerance": 0.02, "no_new": True, "fold_constructors": True }
 
 
 def _number_reason( values, low=0.0, high=1.0 ):
@@ -257,6 +304,20 @@ def _cut_shortlist( causal, pool, cap ):
     return _provides_order( causal + others[ :cap - len( causal ) ] )
 
 
+def _is_causal( row, verdict, policy ):
+    """
+    Say whether a row is one of the rows that make a reuse or extend verdict.
+
+    Ensures:
+        - returns True for a row at or above policy["reuse"] when the verdict is `REUSE`
+        - returns True for a row from policy["floor"] up to policy["reuse"] with coverage at or above policy["coverage"] when the verdict is `EXTEND`
+        - returns False for any other verdict
+    """
+    if verdict == "REUSE":  return row[ "provides" ] >= policy[ "reuse" ]
+    if verdict == "EXTEND": return policy[ "floor" ] <= row[ "provides" ] < policy[ "reuse" ] and row[ "coverage" ] >= policy[ "coverage" ]
+    return False
+
+
 def decide_provides( answers, expected_ids, failed_ids, flags, policy=None ):
     """
     Apply the Noul-and-Score decision rule to one sweep.
@@ -281,6 +342,7 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=None ):
           least one answered row and no cause
         - shortlist holds the causal rows (`REUSE` or `EXTEND` only) and every row with provides at or
           above policy["threshold"], cut to policy["shortlist"] with causal rows kept first
+        - with policy["fold_constructors"], the shortlist and shortlist_total are counted on rows where each constructor is merged into its class (_fold_constructors); the verdict, nearest and doubtful are not
 
     Raises:
         - ValueError naming the first flag, in sorted order, that is not one of the four pipeline
@@ -320,7 +382,11 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=None ):
     elif reuse:         verdict, causal = "REUSE", reuse
     elif extend:        verdict, causal = "EXTEND", extend
     else:               verdict, causal = "NEW", []
-    pool = [ r for r in ordered if r in causal or r[ "provides" ] >= policy[ "threshold" ] ]
+    pool   = [ r for r in ordered if r in causal or r[ "provides" ] >= policy[ "threshold" ] ]
+    if "fold_constructors" in policy:
+        view   = _fold_constructors( ordered, policy, _provides_order, lambda r: _is_causal( r, verdict, policy ) )
+        causal = [ r for r in view if _is_causal( r, verdict, policy ) ]
+        pool   = [ r for r in view if r in causal or r[ "provides" ] >= policy[ "threshold" ] ]
     return { "verdict"         : verdict,
              "cause"           : causes[ 0 ] if causes else None,
              "causes"          : causes,
