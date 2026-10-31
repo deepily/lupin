@@ -411,6 +411,8 @@ def _main( argv, make_parts, run_proof, out ):
         raise ValueError( "--unofficial takes one reviewer's labels only, so --rulings and --third-labels do not apply" )
     rulings = json.loads( pathlib.Path( args.rulings ).read_text( encoding="utf-8" ) ) if args.rulings is not None else None
     key     = run_dir / KEY_DIR / KEY_FILE
+    root    = cu.get_project_root()
+    prints  = label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root )
     state   = unofficial_state( args.labels, key ) if args.unofficial else label_state( args.labels, key, rulings, args.third_labels )
     if not args.check and state[ "labels" ] is None:
         print( json.dumps( { "status": "refused", "owed": state[ "owed" ], "counts": state[ "counts" ] }, indent=2, sort_keys=True ), file=out )
@@ -418,10 +420,11 @@ def _main( argv, make_parts, run_proof, out ):
     if not args.check and args.claude_cli_path is None:
         print( json.dumps( { "status": "refused", "owed": "a real run needs --claude-cli-path, because the ledger is bound to that binary", "counts": state[ "counts" ] }, indent=2, sort_keys=True ), file=out )
         return 2
-    root    = cu.get_project_root()
     parts   = make_parts( root, run_dir, cfg, args.parallel )
     spec    = build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], state[ "labels" ] or {}, state[ "failures" ],
-                          label_load.fingerprints( args.labels, args.rulings, args.third_labels, root ), label_load.unsure_pair_keys( args.labels, key ) )
+                          prints, label_load.unsure_pair_keys( args.labels, key ) )
+    if label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root ) != prints:
+        raise ValueError( "a labels, rulings or key file changed while the proof was being prepared; run it again" )
     if args.check:
         pool  = proof_run.build_pool( spec, spec[ "seed" ] )
         pairs = parts[ "wiring" ][ "structural_pairs" ]( pool[ "defs" ] )

@@ -391,7 +391,7 @@ def test_main_refuses_an_unresolved_disagreement_without_a_ruling_and_takes_it_w
     assert "disagreements have no ruling" in json.loads( capsys.readouterr().out )[ "owed" ]
     assert pc.main( [ *argv, "--rulings", str( ruled ), "--claude-cli-path", "/bin/claude" ], make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     assert len( ran ) == 1 and ran[ 0 ][ "labels" ][ odd ] is True and json.loads( capsys.readouterr().out ) == { "status": "complete" }
-    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, str( ruled ), None, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "rulings" ] is not None
+    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, str( ruled ), None, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "rulings" ] is not None
 
 
 def test_main_runs_the_proof_once_with_the_resolved_labels_when_both_reviewers_agree( venue, capsys ):
@@ -402,6 +402,16 @@ def test_main_runs_the_proof_once_with_the_resolved_labels_when_both_reviewers_a
     assert rc == 0 and len( ran ) == 1 and ran[ 0 ][ 0 ][ "labels" ] == truth and ran[ 0 ][ 0 ][ "seed" ] == 3
     assert ran[ 0 ][ 1 ][ "ledger" ] is not venue.toy.wiring[ "ledger" ] and ( venue.toy.wiring[ "data_dir" ].joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME ).is_file()
     assert json.loads( capsys.readouterr().out )[ "status" ] == "complete"
+
+
+def test_main_refuses_to_run_when_a_labels_file_changes_while_the_proof_is_being_prepared( venue ):
+    paths, _ = venue.label_both()
+    item     = pl.load_items( venue.packets[ "rick" ] )[ 0 ][ "item_id" ]
+    def parts_then_edit( *a ):
+        pl.save_label( venue.packets[ "rick" ], item, not pl.same_job_labels( paths[ 0 ] )[ item ], clock=lambda: "2026-10-31T10:00:00-04:00" )
+        return venue.parts()
+    with pytest.raises( ValueError, match="changed while the proof was being prepared" ):
+        pc.main( [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=parts_then_edit, run_proof=refuse_run )
 
 
 def test_main_refuses_a_run_folder_planted_under_another_config_sha( tmp_path, monkeypatch ):
@@ -452,7 +462,7 @@ def test_main_takes_the_third_raters_majority_on_a_dispute( venue, capsys ):
     assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     assert len( ran ) == 1 and ran[ 0 ][ "labels" ][ odd ] is False
     third    = str( pl.labels_path( packet ) )
-    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, None, third, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "third_labels" ] == ll.file_sha256( third )
+    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, None, third, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "third_labels" ] == ll.file_sha256( third )
 
 
 # ---- the unofficial run --------------------------------------------------------------------------------------------
@@ -480,7 +490,7 @@ def test_main_unofficial_runs_on_one_file_with_its_own_ledger_and_marks_the_call
     data         = venue.toy.wiring[ "data_dir" ]
     assert ran == [ ( ran[ 0 ][ 0 ], True ) ] and ran[ 0 ][ 0 ][ "labels" ] == truth
     spec         = ran[ 0 ][ 0 ]
-    assert spec[ "provenance" ] == ll.fingerprints( [ paths[ 0 ] ], None, None, cu.get_project_root() ) and len( spec[ "unsure_pairs" ] ) == 1 and spec[ "unsure_pairs" ] == ll.unsure_pair_keys( [ paths[ 0 ] ], venue.key )
+    assert spec[ "provenance" ] == ll.fingerprints( [ paths[ 0 ] ], None, None, venue.key, cu.get_project_root() ) and len( spec[ "unsure_pairs" ] ) == 1 and spec[ "unsure_pairs" ] == ll.unsure_pair_keys( [ paths[ 0 ] ], venue.key )
     assert ( data.joinpath( *pr.UNOFFICIAL_FOLDER ) / pc.LEDGER_NAME ).is_file() and not data.joinpath( *pr.PROOF_FOLDER ).exists()
     assert json.loads( capsys.readouterr().out ) == { "status": "complete", "unofficial": True }
 

@@ -112,22 +112,22 @@ def file_sha256( path ):
     return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
 
 
-def fingerprints( labels_paths, rulings_path, third_path, tree_root ):
+def fingerprints( labels_paths, rulings_path, third_path, key_path, tree_root ):
     """
     Name the exact inputs a proof run settled its labels from.
 
     Requires:
         - labels_paths is the list of reviewers' labels files used; rulings_path and third_path are None or the files used
-        - tree_root is the root of the tree the run is made from
+        - key_path is the answer key of the run; tree_root is the root of the tree the run is made from
 
     Ensures:
-        - returns { labels: { path: sha256 }, rulings: sha256 or None, third_labels: sha256 or None, tree_root }
+        - returns { labels: { path: sha256 }, rulings: sha256 or None, third_labels: sha256 or None, answer_key: sha256, tree_root }
         - the digests are of the bytes on disk now, so a later edit of a file, an appended answer included, no longer matches
     """
     return { "labels": { str( p ): file_sha256( p ) for p in labels_paths },
              "rulings": file_sha256( rulings_path ) if rulings_path is not None else None,
              "third_labels": file_sha256( third_path ) if third_path is not None else None,
-             "tree_root": str( tree_root ) }
+             "answer_key": file_sha256( key_path ), "tree_root": str( tree_root ) }
 
 
 def unsure_pair_keys( labels_paths, key_path ):

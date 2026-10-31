@@ -5,6 +5,7 @@ Packets and the key come from label_prep.prepare, the labels from the page's own
 """
 import hashlib
 import json
+import pathlib
 
 import pytest
 
@@ -174,11 +175,11 @@ def test_fingerprints_are_the_sha256_of_each_file_the_rulings_the_third_file_and
     a, b   = ( pl.labels_path( packets[ r ] ) for r in ( "rick", "second" ) )
     rul    = tmp_path / "rulings.json"
     rul.write_text( "{}", encoding="utf-8" )
-    got    = ll.fingerprints( [ a, b ], rul, a, "/the/tree" )
+    got    = ll.fingerprints( [ a, b ], rul, a, key, "/the/tree" )
     sha    = lambda path: hashlib.sha256( path.read_bytes() ).hexdigest()
-    assert got == { "labels": { str( a ): sha( a ), str( b ): sha( b ) }, "rulings": sha( rul ), "third_labels": sha( a ), "tree_root": "/the/tree" }
+    assert got == { "labels": { str( a ): sha( a ), str( b ): sha( b ) }, "rulings": sha( rul ), "third_labels": sha( a ), "answer_key": sha( pathlib.Path( key ) ), "tree_root": "/the/tree" }
     assert got[ "rulings" ] == hashlib.sha256( b"{}" ).hexdigest()
-    bare = ll.fingerprints( [ a ], None, None, tmp_path )
+    bare = ll.fingerprints( [ a ], None, None, key, tmp_path )
     assert bare[ "rulings" ] is None and bare[ "third_labels" ] is None and bare[ "tree_root" ] == str( tmp_path ) and list( bare[ "labels" ] ) == [ str( a ) ]
 
 
@@ -186,10 +187,10 @@ def test_an_appended_answer_changes_the_fingerprint_of_the_file_it_was_added_to_
     toy, packets, key = run
     for r in packets: answer( packets, key, r, truth_of( toy ) )
     a, b   = ( pl.labels_path( packets[ r ] ) for r in ( "rick", "second" ) )
-    before = ll.fingerprints( [ a, b ], None, None, "/t" )
+    before = ll.fingerprints( [ a, b ], None, None, key, "/t" )
     item   = pl.load_items( packets[ "rick" ] )[ 0 ][ "item_id" ]
     pl.save_label( packets[ "rick" ], item, not pl.same_job_labels( a )[ item ], clock=CLOCK )
-    after  = ll.fingerprints( [ a, b ], None, None, "/t" )
+    after  = ll.fingerprints( [ a, b ], None, None, key, "/t" )
     assert after[ "labels" ][ str( a ) ] != before[ "labels" ][ str( a ) ] and after[ "labels" ][ str( b ) ] == before[ "labels" ][ str( b ) ]
 
 
@@ -227,3 +228,13 @@ def test_unsure_pairs_refuse_labels_for_items_the_key_does_not_know( run, tmp_pa
     stray = tmp_path / "stray.jsonl"
     stray.write_text( json.dumps( { "item_id": "pair-nope", "reviewer": "x", "choice": "NONE", "symbols": [], "note": "", "ts": "t" } ) + "\n", encoding="utf-8" )
     with pytest.raises( ValueError, match="pair-nope" ): ll.unsure_pair_keys( [ stray ], key )
+
+
+def test_a_different_answer_key_gives_a_different_fingerprint_for_the_same_label_files( run, tmp_path ):
+    toy, packets, key = run
+    a      = pl.labels_path( packets[ "rick" ] )
+    a.write_text( "", encoding="utf-8" )
+    other  = tmp_path / "other-key.json"
+    other.write_text( pathlib.Path( key ).read_text( encoding="utf-8" ) + " ", encoding="utf-8" )
+    same   = ll.fingerprints( [ a ], None, None, key, "/t" )
+    assert ll.fingerprints( [ a ], None, None, other, "/t" )[ "answer_key" ] != same[ "answer_key" ] and same[ "answer_key" ] == ll.file_sha256( key )
