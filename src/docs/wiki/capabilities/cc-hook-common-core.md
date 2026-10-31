@@ -6,7 +6,7 @@ pins:
   - lupin_cli.claude_code.hooks.lib.hook_common.log_to_stream@42257bf060
   - lupin_cli.claude_code.hooks.lib.hook_common.log_payload@77a1f607fd
   - lupin_cli.claude_code.hooks.lib.hook_common.emit_json@52021360da
-  - lupin_cli.claude_code.hooks.lib.hook_common.get_timestamp@39a92359ce
+  - lupin_cli.claude_code.hooks.lib.hook_common.get_timestamp@a3e2659c5b
   - lupin_cli.claude_code.hooks.lib.hook_common.get_target_email@23cae205ec
   - lupin_cli.claude_code.hooks.lib.hook_common.is_tts_enabled@cd2388caa1
   - lupin_cli.claude_code.hooks.lib.hook_common.build_progress_group_id@830552c20b
@@ -27,7 +27,7 @@ pins:
 ## What it does
 - `read_hook_input` parses the JSON payload from stdin. `emit_json` writes the response to stdout.
 - `log_to_stream` appends a one-line entry to a hook events file. `log_payload` writes a timestamped payload to the logs directory.
-- `get_timestamp` returns the time in the Eastern zone. `get_target_email` resolves the notification target from the environment, then a file.
+- `get_timestamp` returns the time in the zone named by the INI key `app timezone`. When that key cannot be read it returns the UTC instant ending in `+00:00`. `get_target_email` resolves the notification target from the environment, then a file.
 - `is_tts_enabled` reads `HOOK_TTS_ENABLED`. `send_tts` sends a fire-and-forget notification.
 - `build_progress_group_id` joins a hook prefix and session id. `format_tool_summary` builds a one-line tool summary for announcements.
 - `build_stop_block` and `build_stop_block_with_system_message` build the Stop hook's decision block.
