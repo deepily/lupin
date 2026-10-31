@@ -258,16 +258,17 @@ def build_spec( run, mono_defs, distractors, labels, failures, provenance, unsur
              "provenance": provenance, "unsure_pairs": unsure_pairs }
 
 
-def label_state( labels_paths, key_path, rulings, third_path=None ):
+def label_state( labels_paths, key_path, rulings, third_path=None, supplement=None ):
     """
     Read the reviewers' labels and say whether the proof can use them.
 
     Requires:
         - labels_paths is a list of zero, one or two labels files; rulings is None or { pair key: bool }
         - third_path is None or the third rater's labels file, read only when there are two files
+        - supplement is None or as label_load.supplement_rows takes it, read only when there are two files
 
     Ensures:
-        - returns { counts, labels, failures, owed }: counts per file; labels is resolved_labels' dict, or None with the reason in owed
+        - returns { counts, labels, failures, owed }: counts per file, the supplement's files included; labels is resolved_labels' dict, or None with the reason in owed
         - failures is plant_failures' list when there are two files, else []
     """
     run      = load_run( pathlib.Path( key_path ).parent.parent )
@@ -276,7 +277,8 @@ def label_state( labels_paths, key_path, rulings, third_path=None ):
     if len( each ) != 2: return { "counts": counts, "labels": None, "failures": [], "owed": f"two reviewers' labels files are needed, {len( each )} given" }
     failures = plant_failures( run[ "planted" ], each[ 0 ], each[ 1 ] )
     try:
-        labels = label_load.resolved_labels( labels_paths[ 0 ], labels_paths[ 1 ], key_path, rulings, third_path )
+        if supplement is not None: counts.update( { str( p ): len( label_load.pair_key_labels( p, supplement[ "key" ] ) ) for p in supplement[ "labels" ] } )
+        labels = label_load.resolved_labels( labels_paths[ 0 ], labels_paths[ 1 ], key_path, rulings, third_path, supplement )
     except ValueError as e:
         return { "counts": counts, "labels": None, "failures": failures, "owed": str( e ) }
     return { "counts": counts, "labels": labels, "failures": failures, "owed": None }
@@ -298,6 +300,25 @@ def unofficial_state( labels_paths, key_path ):
     labels = label_load.pair_key_labels( labels_paths[ 0 ], key_path )
     run    = load_run( pathlib.Path( key_path ).parent.parent )
     return { "counts": { str( labels_paths[ 0 ] ): len( labels ) }, "labels": labels, "failures": plant_failures( run[ "planted" ], labels, labels ), "owed": None }
+
+
+def read_supplement( key, labels, unofficial=False ):
+    """
+    Turn the supplement arguments into the dict label_load takes.
+
+    Requires:
+        - key is None or the path of a supplement key; labels is the list of --supplement-labels files
+
+    Ensures:
+        - returns None when neither is given, else { key, labels }
+
+    Raises:
+        - ValueError if only one of the two is given, if labels is not two files, or if the run is unofficial, which takes one reviewer's labels only
+    """
+    if key is None and not labels: return None
+    if unofficial: raise ValueError( "--unofficial takes one reviewer's labels only, so --supplement-key and --supplement-labels do not apply" )
+    if key is None or len( labels ) != 2: raise ValueError( f"--supplement-key and two --supplement-labels files go together; got key {key} and {len( labels )} labels files" )
+    return { "key": key, "labels": list( labels ) }
 
 
 def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring, monolith=label_prep.monolith_definitions, jscpd=structural.run_jscpd ):
@@ -363,6 +384,8 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
     Requires:
         - argv holds --run-dir, up to two --labels files, optionally --rulings (a JSON file of { pair key: bool }), --third-labels,
           --export-third, --unofficial, --parallel, --claude-cli-path and --check
+        - --supplement-key and two --supplement-labels files name labels for pairs outside the run's key, kept in files of their own;
+          they are read, fingerprinted and checked for unsure pairs like the reviewers' labels, and the run's own labels files are never written
 
     Ensures:
         - stdout holds the JSON record alone: banners and other prints go to stderr, so a caller can json.loads the whole of stdout
@@ -378,7 +401,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
 
     Raises:
         - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
-        - ValueError if the run folder was planted under another configuration, from build_spec, or for --unofficial with --rulings or --third-labels
+        - ValueError if the run folder was planted under another configuration, from build_spec, from read_supplement, or for --unofficial with --rulings or --third-labels
     """
     return json_stdout( lambda out: _main( argv, make_parts, run_proof, out ) )
 
@@ -390,6 +413,8 @@ def _main( argv, make_parts, run_proof, out ):
     parser.add_argument( "--labels", action="append", default=[] )
     parser.add_argument( "--rulings", default=None )
     parser.add_argument( "--third-labels", default=None )
+    parser.add_argument( "--supplement-key", default=None )
+    parser.add_argument( "--supplement-labels", action="append", default=[] )
     parser.add_argument( "--export-third", default=None )
     parser.add_argument( "--parallel", type=int, default=DEFAULT_PARALLEL )
     parser.add_argument( "--claude-cli-path", default=None )
@@ -412,8 +437,9 @@ def _main( argv, make_parts, run_proof, out ):
     rulings = json.loads( pathlib.Path( args.rulings ).read_text( encoding="utf-8" ) ) if args.rulings is not None else None
     key     = run_dir / KEY_DIR / KEY_FILE
     root    = cu.get_project_root()
-    prints  = label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root )
-    state   = unofficial_state( args.labels, key ) if args.unofficial else label_state( args.labels, key, rulings, args.third_labels )
+    supp    = read_supplement( args.supplement_key, args.supplement_labels, args.unofficial )
+    prints  = label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root, supp )
+    state   = unofficial_state( args.labels, key ) if args.unofficial else label_state( args.labels, key, rulings, args.third_labels, supp )
     if not args.check and state[ "labels" ] is None:
         print( json.dumps( { "status": "refused", "owed": state[ "owed" ], "counts": state[ "counts" ] }, indent=2, sort_keys=True ), file=out )
         return 2
@@ -422,8 +448,8 @@ def _main( argv, make_parts, run_proof, out ):
         return 2
     parts   = make_parts( root, run_dir, cfg, args.parallel )
     spec    = build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], state[ "labels" ] or {}, state[ "failures" ],
-                          prints, label_load.unsure_pair_keys( args.labels, key ) )
-    if label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root ) != prints:
+                          prints, label_load.unsure_pair_keys( args.labels, key, supp ) )
+    if label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root, supp ) != prints:
         raise ValueError( "a labels, rulings or key file changed while the proof was being prepared; run it again" )
     if args.check:
         pool  = proof_run.build_pool( spec, spec[ "seed" ] )

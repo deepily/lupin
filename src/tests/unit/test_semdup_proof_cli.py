@@ -565,3 +565,64 @@ def test_main_stdout_is_the_json_alone_when_the_parts_print_a_banner( venue, cap
     assert pc.main( [ "--run-dir", str( venue.run_dir ), "--check" ], make_parts=noisy, run_proof=refuse_run ) == 0
     seen = capsys.readouterr()
     assert json.loads( seen.out )[ "status" ] == "checked" and "configuration banner" in seen.err and "banner" not in seen.out
+
+
+# ---- the supplement: labels for pairs outside the key, in files of their own ----------------------------------------
+
+def supplemented( world, tmp_path ):
+    """Label both packets and a two-pair supplement; return ( paths, argv, pair keys )."""
+    from tests.unit.test_semdup_proof_label_load import make_supplement
+    paths, _      = world.label_both()
+    supp, by_pair = make_supplement( world.toy, tmp_path, [ True, False ], [ True, False ] )
+    argv          = [ "--supplement-key", str( supp[ "key" ] ), *[ x for p in supp[ "labels" ] for x in ( "--supplement-labels", str( p ) ) ] ]
+    return paths, supp, argv, list( by_pair )
+
+
+def test_read_supplement_is_none_without_arguments_and_the_key_with_two_files_otherwise( world ):
+    assert pc.read_supplement( None, [] ) is None
+    assert pc.read_supplement( "k.json", [ "a", "b" ] ) == { "key": "k.json", "labels": [ "a", "b" ] }
+
+
+@pytest.mark.parametrize( "key, labels", [ ( "k.json", [] ), ( "k.json", [ "a" ] ), ( None, [ "a", "b" ] ) ] )
+def test_read_supplement_refuses_a_key_without_two_files_and_two_files_without_a_key( key, labels ):
+    with pytest.raises( ValueError, match="go together" ): pc.read_supplement( key, labels )
+
+
+def test_read_supplement_refuses_an_unofficial_run():
+    with pytest.raises( ValueError, match="--unofficial takes one reviewer's labels only" ): pc.read_supplement( "k.json", [ "a", "b" ], unofficial=True )
+
+
+def test_label_state_with_a_supplement_resolves_its_pairs_too_and_counts_its_files( world, tmp_path ):
+    paths, supp, _, keys = supplemented( world, tmp_path )
+    state                = pc.label_state( paths, world.key, None, supplement=supp )
+    assert state[ "owed" ] is None and state[ "labels" ][ keys[ 0 ] ] is True and state[ "labels" ][ keys[ 1 ] ] is False
+    assert list( state[ "counts" ].values() ) == [ 6, 6, 2, 2 ] and len( state[ "labels" ] ) == 8
+    assert pc.label_state( paths, world.key, None )[ "counts" ] == dict( list( state[ "counts" ].items() )[ :2 ] )
+
+
+def test_main_check_with_a_supplement_reads_it_and_changes_none_of_the_frozen_files( venue, tmp_path, capsys ):
+    paths, supp, argv, keys = supplemented( venue, tmp_path )
+    frozen_before           = [ pathlib.Path( p ).read_bytes() for p in paths ] + [ pathlib.Path( venue.key ).read_bytes() ]
+    rc                      = pc.main( [ "--run-dir", str( venue.run_dir ), "--check", *[ x for p in paths for x in ( "--labels", p ) ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=refuse_run )
+    out                     = json.loads( capsys.readouterr().out )
+    assert rc == 0 and out[ "owed" ] is None and sorted( out[ "labels" ].values() ) == [ 2, 2, 6, 6 ]
+    assert frozen_before == [ pathlib.Path( p ).read_bytes() for p in paths ] + [ pathlib.Path( venue.key ).read_bytes() ]
+
+
+def test_main_runs_the_proof_with_the_supplement_labels_provenance_and_unsure_pairs( venue, tmp_path, capsys ):
+    paths, supp, argv, keys = supplemented( venue, tmp_path )
+    item                    = next( iter( ll.key_rows( supp[ "key" ] ) ) )
+    pl.save_label( pk.packet_path( supp[ "labels"][ 0 ].parent, "rick-supp" ), item, True, True, "hmm", clock=lambda: "2026-10-31T19:00:00-04:00" )
+    ran                     = []
+    def run_proof( spec, wiring ): ran.append( spec ); return { "status": "complete" }
+    rc                      = pc.main( [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", *[ x for p in paths for x in ( "--labels", p ) ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=run_proof )
+    spec                    = ran[ 0 ]
+    assert rc == 0 and set( keys ) <= set( spec[ "labels" ] ) and len( spec[ "labels" ] ) == 8
+    assert spec[ "provenance" ] == ll.fingerprints( paths, None, None, venue.key, cu.get_project_root(), supp ) and "supplement" in spec[ "provenance" ]
+    assert spec[ "unsure_pairs" ] == ll.unsure_pair_keys( paths, venue.key, supp ) and len( spec[ "unsure_pairs" ] ) == 1
+
+
+def test_main_refuses_a_supplement_with_an_unofficial_run( venue, tmp_path ):
+    paths, supp, argv, keys = supplemented( venue, tmp_path )
+    with pytest.raises( ValueError, match="--unofficial takes one reviewer's labels only" ):
+        pc.main( [ "--run-dir", str( venue.run_dir ), "--unofficial", "--labels", paths[ 0 ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=refuse_run )

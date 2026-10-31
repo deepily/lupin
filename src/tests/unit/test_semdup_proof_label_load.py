@@ -250,3 +250,104 @@ def test_fingerprints_hash_files_with_the_one_shared_sha256_of_helper( run, monk
     assert got == { "labels": { str( a ): f"sha-of-{a.name}" }, "rulings": f"sha-of-{pathlib.Path( key ).name}", "third_labels": f"sha-of-{pathlib.Path( key ).name}",
                     "answer_key": f"sha-of-{pathlib.Path( key ).name}", "tree_root": "/t" }
     assert not hasattr( ll, "file_sha256" )
+
+
+# ---- the supplement: labels for pairs outside the key, kept in files of their own --------------------------------
+
+def make_supplement( toy, tmp_path, rick, second, key_name="supplement-key.json" ):
+    """
+    Build a two-pair supplement outside the toy's key, with both reviewers' labels.
+
+    rick and second are { position: bool } by pair order ( d1|d2 first, d1|d3 second ).
+    Returns ( { key, labels: [ rick's path, second's path ] }, { pair key: item id } ).
+    """
+    pairs = [ ( toy.d[ "d1" ], toy.d[ "d2" ] ), ( toy.d[ "d1" ], toy.d[ "d3" ] ) ]
+    made  = [ lp.pair_item( a, b, 3 ) for a, b in pairs ]
+    rows  = { m[ "item" ][ "item_id" ]: { **m[ "row" ], "kind": "flag", "stratum": "flag" } for m in made }
+    key   = tmp_path / key_name
+    key.write_text( json.dumps( { "items": rows } ), encoding="utf-8" )
+    packs = pk.export_packets( [ m[ "item" ] for m in made ], [ "rick-supp", "second-supp" ], 3, tmp_path / "supp-packets" )
+    for reviewer, answers in ( ( "rick-supp", rick ), ( "second-supp", second ) ):
+        for n, m in enumerate( made ): pl.save_label( packs[ reviewer ], m[ "item" ][ "item_id" ], answers[ n ], clock=CLOCK )
+    by_pair = { pr.label_key( p[ 0 ][ "id" ], p[ 1 ][ "id" ] ): m[ "item" ][ "item_id" ] for p, m in zip( pairs, made ) }
+    return { "key": key, "labels": [ pl.labels_path( packs[ r ] ) for r in ( "rick-supp", "second-supp" ) ] }, by_pair
+
+
+def labelled_run( run ):
+    """Label both packets by the toy's truth; return ( truth, first path, second path, key )."""
+    toy, packets, key = run
+    truth = truth_of( toy )
+    for r in packets: answer( packets, key, r, truth )
+    return truth, pl.labels_path( packets[ "rick" ] ), pl.labels_path( packets[ "second" ] ), key
+
+
+def test_a_supplement_adds_its_pairs_to_the_settled_labels_and_leaves_the_key_labels_as_they_were( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ True, False ] )
+    keys                      = list( by_pair )
+    got                       = ll.resolved_labels( first, second, key, supplement=supp )
+    assert got == { **truth, keys[ 0 ]: True, keys[ 1 ]: False } and len( got ) == len( truth ) + 2
+    assert ll.resolved_labels( first, second, key ) == truth
+
+
+def test_a_supplement_pair_the_two_reviewers_split_on_is_refused_until_ruled_and_a_third_file_is_not_asked_for_it( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ False, False ] )
+    split                     = list( by_pair )[ 0 ]
+    with pytest.raises( ValueError, match="1 disagreements have no ruling: " + split.replace( "|", r"\|" ) ): ll.resolved_labels( first, second, key, supplement=supp )
+    assert ll.resolved_labels( first, second, key, rulings={ split: True }, supplement=supp )[ split ] is True
+    empty = tmp_path / "labels-third.jsonl"
+    empty.write_text( "" )
+    assert ll.resolved_labels( first, second, key, rulings={ split: False }, third_path=empty, supplement=supp )[ split ] is False
+
+
+def test_a_supplement_pair_one_reviewer_has_not_labelled_is_named( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ True, False ] )
+    supp[ "labels" ][ 1 ].write_text( "", encoding="utf-8" )
+    with pytest.raises( ValueError, match="2 pairs are not labelled by both reviewers" ): ll.resolved_labels( first, second, key, supplement=supp )
+
+
+def test_a_supplement_that_repeats_a_pair_of_the_key_is_refused( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ True, False ] )
+    rows                      = ll.key_rows( key )
+    one                       = next( iter( rows.values() ) )
+    mine                      = json.loads( supp[ "key" ].read_text() )
+    mine[ "items" ][ "pair-twin" ] = { **one, "kind": "flag", "stratum": "flag" }
+    supp[ "key" ].write_text( json.dumps( mine ), encoding="utf-8" )
+    with pytest.raises( ValueError, match="supplement pairs already in the key: " + pr.label_key( one[ "a" ], one[ "b" ] ).replace( "|", r"\|" ) ):
+        ll.resolved_labels( first, second, key, supplement=supp )
+
+
+def test_a_supplement_that_reuses_an_item_id_of_the_key_is_refused( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ True, False ] )
+    shared                    = next( iter( ll.key_rows( key ) ) )
+    mine                      = json.loads( supp[ "key" ].read_text() )
+    mine[ "items" ][ shared ] = mine[ "items" ].pop( next( iter( mine[ "items" ] ) ) )
+    supp[ "key" ].write_text( json.dumps( mine ), encoding="utf-8" )
+    with pytest.raises( ValueError, match="supplement item ids already in the key: " + shared ): ll.supplement_rows( supp, key )
+
+
+def test_a_supplement_names_exactly_two_labels_files( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, _                   = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ True, False ] )
+    with pytest.raises( ValueError, match="a supplement takes two labels files, 1 given" ): ll.supplement_rows( { **supp, "labels": supp[ "labels" ][ :1 ] }, key )
+
+
+def test_fingerprints_name_the_supplement_key_and_both_its_files_and_say_nothing_without_one( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, _                   = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ True, False ] )
+    got                       = ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )
+    assert got[ "supplement" ] == { "key": arm_run.sha256_of( supp[ "key" ] ), "labels": { str( p ): arm_run.sha256_of( p ) for p in supp[ "labels" ] } }
+    assert "supplement" not in ll.fingerprints( [ first, second ], None, None, key, "/t" )
+
+
+def test_unsure_pairs_include_those_either_reviewer_marked_unsure_in_the_supplement( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ True, False ] )
+    item                      = next( iter( by_pair.values() ) )
+    pl.save_label( pk.packet_path( supp[ "labels" ][ 0 ].parent, "rick-supp" ), item, True, True, "hmm", clock=CLOCK )
+    assert ll.unsure_pair_keys( [ first, second ], key, supplement=supp ) == [ next( iter( by_pair ) ) ]
+    assert ll.unsure_pair_keys( [ first, second ], key ) == []
