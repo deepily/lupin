@@ -5,13 +5,16 @@ import json
 import pathlib
 import random
 
+from cosa.repo.labelling import call_sites as cs
 from cosa.repo.labelling import items as lb
+from cosa.repo.labelling import run_check as rc
 from lupin_mcp.reuse_needset import check, freeze, schema
 from lupin_mcp.reuse_needset import errors as er
 
 SAMPLE_PERCENT = 15
 DISPUTED       = "disputed"
 NOTHING        = "nothing"
+RUN_CHECK      = "run_check"
 SAMPLE         = "sample"
 SEMDUP_PAIR    = "semdup_pair"
 
@@ -21,15 +24,16 @@ def sample_size( n_agreed ):
     return ( SAMPLE_PERCENT * n_agreed + 50 ) // 100
 
 
-def select_for_labelling( needs, seed, semdup_items=() ):
+def select_for_labelling( needs, seed, semdup_items=(), person_check_ids=(), run_checks=None ):
     """
     Choose what the reviewers see, keeping each item's reason apart from the item.
 
     Requires:
         - needs are checked needs; semdup_items are ids of pairs the duplicate checker hands over
+        - run_checks, when given, is the { need id: run_check record } mapping; every need whose record routes to a person is selected, as person_check_ids are
 
     Ensures:
-        - returns [ { id, reason } ] in this order: every disputed need, every nothing need not already listed, a seeded 15 percent of the agreed matched needs, then the pairs
+        - returns [ { id, reason } ] in this order: every disputed need, every nothing need not already listed, every need in person_check_ids not already listed (reason run_check), a seeded 15 percent of the agreed matched needs, then the pairs
         - each group is sorted by id, and the same needs and seed give the same list
         - the sample is sample_size( agreed matched needs ) needs
 
@@ -43,28 +47,124 @@ def select_for_labelling( needs, seed, semdup_items=() ):
     listed   = { p[ "id" ] for p in picked }
     picked  += [ { "id": n[ "id" ], "reason": NOTHING } for n in sorted( needs, key=lambda n: n[ "id" ] ) if n[ "kind" ] == "nothing" and n[ "id" ] not in listed ]
     listed   = { p[ "id" ] for p in picked }
+    person   = set( person_check_ids ) | ( set() if run_checks is None else { i for i, r in run_checks.items() if r[ "route" ] == rc.PERSON_CHECK } )
+    picked  += [ { "id": n[ "id" ], "reason": RUN_CHECK } for n in sorted( needs, key=lambda n: n[ "id" ] ) if n[ "id" ] in person and n[ "id" ] not in listed ]
+    listed   = { p[ "id" ] for p in picked }
     agreed   = sorted( n[ "id" ] for n in needs if n[ "id" ] not in listed )
     chosen   = random.Random( f"{seed}|labelling" ).sample( agreed, sample_size( len( agreed ) ) )
     picked  += [ { "id": i, "reason": SAMPLE } for i in sorted( chosen ) ]
     return picked + [ { "id": i, "reason": SEMDUP_PAIR } for i in sorted( semdup_items ) ]
 
 
-def need_item( need, key_texts=None, hits=None ):
+def need_item( need, key_texts=None, hits=None, call_sites=None, run_check=None ):
     """
     Build the item a reviewer sees for a need.
 
     Requires:
         - a matched need comes with key_texts, the source of each key symbol; a nothing need with hits, the top search hit lines
+        - call_sites, when given, are up to five lines showing where the key symbol is called; run_check, when given, is the record from run_check.check_pair
 
     Ensures:
-        - returns a need_key item holding the sentence and the key sources, or the sentence, nothing_exists true and the hits
-        - the item holds no verdict, route, drafter or checker field
+        - returns a need_key item holding the sentence and the key sources (and the call sites when given), or the sentence, nothing_exists true and the hits
+        - the item holds no verdict, route, drafter, checker or run-check field
 
     Raises:
+        - NeedsetError KEY_REJECTED when run_check rejected the key, naming the reason
         - LabellingError BAD_ITEM when the material does not fit the kind
     """
-    if need[ "kind" ] == "nothing": return lb.make_item( lb.NEED_KEY, need[ "id" ], { "need": need[ "need" ], "nothing_exists": True, "hits": hits } )
-    return lb.make_item( lb.NEED_KEY, need[ "id" ], { "need": need[ "need" ], "key_sources": key_texts } )
+    if run_check is not None and run_check[ "route" ] == rc.REJECT: raise er.NeedsetError( er.KEY_REJECTED, f"{need[ 'id' ]}: the work-alike does not behave like its original: {run_check[ 'reason' ]}" )
+    payload = { "need": need[ "need" ], "nothing_exists": True, "hits": hits } if need[ "kind" ] == "nothing" else { "need": need[ "need" ], "key_sources": key_texts }
+    if call_sites is not None: payload[ "call_sites" ] = call_sites
+    return lb.make_item( lb.NEED_KEY, need[ "id" ], payload )
+
+
+def run_check_needs( needs, pairs, seed, checker=rc.check_pair ):
+    """
+    Run-check the work-alike rewrites the caller hands in.
+
+    Requires:
+        - pairs maps a need id to ( original source, rewrite source ); needs are the drafted or checked needs of the run
+
+    Ensures:
+        - returns { need id: run_check record } for each pair, in the order of pairs
+        - a need with no pair is not run-checked and has no record
+
+    Raises:
+        - NeedsetError BAD_NEED for a pair whose need id is not among the needs
+        - LabellingError SANDBOX_UNAVAILABLE from the checker when the sandbox cannot start
+    """
+    known = { n[ "id" ] for n in needs }
+    stray = [ i for i in pairs if i not in known ]
+    if stray: raise er.NeedsetError( er.BAD_NEED, f"run-check pairs for needs that are not in the run: {stray[ :5 ]}" )
+    return { i: checker( original, rewrite, seed ) for i, ( original, rewrite ) in pairs.items() }
+
+
+def screen_needs( needs, run_checks ):
+    """
+    Split needs by what the run-check ruled on their keys.
+
+    Requires:
+        - run_checks maps a need id to a run_check.check_pair record; a need with no record was not run-checked
+
+    Ensures:
+        - returns ( kept, rejected, person_check_ids ) where rejected is [ { id, reason } ] for the needs whose key was rejected, in need order
+        - kept holds every other need in its order; person_check_ids is the set of kept ids whose record routes to a person
+    """
+    kept, rejected, person = [], [], set()
+    for n in needs:
+        record = run_checks[ n[ "id" ] ] if n[ "id" ] in run_checks else None
+        if record is not None and record[ "route" ] == rc.REJECT:
+            rejected.append( { "id": n[ "id" ], "reason": record[ "reason" ] } )
+            continue
+        kept.append( n )
+        if record is not None and record[ "route" ] == rc.PERSON_CHECK: person.add( n[ "id" ] )
+    return kept, rejected, person
+
+
+def key_call_sites( need, by_id, root, files ):
+    """
+    Find where a matched need's key symbols are called.
+
+    Requires:
+        - by_id maps an index id to its record; files are tracked paths relative to root
+
+    Ensures:
+        - returns up to five lines over all the key symbols that are Python, in key order
+        - returns None when no key symbol is Python, so a TypeScript key shows no call-site claim at all
+    """
+    python = [ by_id[ i ] for i in need[ "key" ][ "symbols" ] if by_id[ i ][ "lang" ] == "py" ]
+    if not python: return None
+    sites = []
+    for rec in python:
+        room = cs.LIMIT - len( sites )
+        if room <= 0: break
+        sites += cs.find_call_sites( rec[ "name" ], rec[ "file" ], files, root, room )
+    return sites
+
+
+def labelling_items( needs, selection, source_of, hits_of, call_sites_of, run_checks ):
+    """
+    Build the items for the needs select_for_labelling picked.
+
+    Requires:
+        - selection is the list from select_for_labelling; needs hold every picked need
+        - source_of( symbol id ) returns a symbol's source; hits_of( need ) returns a nothing need's hit lines; call_sites_of( need ) returns a matched need's call sites or None
+
+    Ensures:
+        - returns one need_key item per picked need, in selection order; semdup pairs are not needs and are skipped
+        - a matched item holds the key sources and the call sites; a nothing item holds the hits
+
+    Raises:
+        - NeedsetError KEY_REJECTED for a picked need whose key the run-check rejected
+    """
+    by_id, out = { n[ "id" ]: n for n in needs }, []
+    for pick in selection:
+        if pick[ "reason" ] == SEMDUP_PAIR: continue
+        need   = by_id[ pick[ "id" ] ]
+        ruling = run_checks[ need[ "id" ] ] if need[ "id" ] in run_checks else None
+        if need[ "kind" ] == "nothing": out.append( need_item( need, hits=hits_of( need ), run_check=ruling ) )
+        else: out.append( need_item( need, key_texts=[ source_of( i ) for i in need[ "key" ][ "symbols" ] ], call_sites=call_sites_of( need ), run_check=ruling ) )
+    return out
 
 
 FINAL_FILE      = "needset-final.jsonl"

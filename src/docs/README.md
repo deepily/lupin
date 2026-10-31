@@ -23,6 +23,7 @@
 | [docstring-counted-scope.md](docstring-counted-scope.md) | The count rule for tracked Python files outside the swept scope: the table, the refusal, the one commit that may raise it | `src/cosa/repo/doc_lint/counts.py`, `gate.py` |
 | [script-doc-comment-standard.md](script-doc-comment-standard.md) | Rules for doc comments in `.ts`, `.js` and `.mjs` files: what is enforced and what is proposed | `src/cosa/repo/doc_lint/tsdoc_lint.py`, `ts_counts.py`, `ts_docs_only_diff.py` |
 | [doc-metrics-dashboard.md](doc-metrics-dashboard.md) | Generated page: docstring tokens and marker rates for each directory of swept Python, before and after the rewrite | `src/cosa/repo/doc_lint/doc_metrics.py` |
+| [labelling/set-b-worked-examples.md](labelling/set-b-worked-examples.md) | Draft sheet for Set B reviewers: five disputed Set A pairs worked through the same-job rule table (answers proposed, awaiting Rick) | `src/cosa/repo/labelling/` |
 
 ## Agentic Jobs & Recovery
 
