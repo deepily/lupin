@@ -20,7 +20,7 @@ import uuid
 import re
 
 # Import dependencies and services
-from cosa.config.app_timezone import get_app_timezone
+from cosa.config.app_timezone import get_app_timezone, process_config_mgr
 from ..notification_fifo_queue import NotificationFifoQueue, NOTIFICATION_PRIORITIES
 from ..websocket_manager import WebSocketManager
 from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt, authenticated_account_email
@@ -445,7 +445,7 @@ def get_local_timestamp():
         - InvalidAppTimezoneError if `app timezone` is not an IANA zone name
     """
     import lupin_app.main as main_module
-    timezone_name = get_app_timezone( main_module.config_mgr )
+    timezone_name = get_app_timezone( process_config_mgr( main_module.config_mgr ) )
 
     if main_module.app_debug: print( f"[TIMEZONE] Using configured timezone '{timezone_name}'" )
 
@@ -470,7 +470,7 @@ def _local_now_text( fmt ):
     """
     import lupin_app.main as main_module
 
-    return datetime.now( zoneinfo.ZoneInfo( get_app_timezone( main_module.config_mgr ) ) ).strftime( fmt )
+    return datetime.now( zoneinfo.ZoneInfo( get_app_timezone( process_config_mgr( main_module.config_mgr ) ) ) ).strftime( fmt )
 
 
 def get_formatted_time_display():

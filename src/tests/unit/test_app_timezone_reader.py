@@ -128,3 +128,32 @@ def test_a_notification_built_before_startup_gets_the_configured_zone( monkeypat
         assert item.timestamp.endswith( "+09:00" ) and item.to_dict()[ "time_display" ].endswith( "JST" )
     finally:
         ConfigurationManager.reset_for_testing()
+
+
+def _tokyo_process_config( monkeypatch, tmp_path ):
+    """Point the process configuration at a Tokyo-zone block, with the app never started."""
+    import lupin_app.main as main_module
+    ( tmp_path / "p.ini" ).write_text( "[default]\nk = 1\n\n[proc]\napp timezone = Asia/Tokyo\n" )
+    ( tmp_path / "p-splainer.ini" ).write_text( "[default]\nk = a key\napp timezone = the user zone\n" )
+    ConfigurationManager.reset_for_testing()
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_path=/p.ini splainer_path=/p-splainer.ini config_block_id=proc" )
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    monkeypatch.setattr( main_module, "config_mgr", None )
+
+
+def test_the_router_timestamp_before_startup_uses_the_configured_zone( monkeypatch, tmp_path ):
+    from cosa.rest.routers.notifications import get_local_timestamp
+    _tokyo_process_config( monkeypatch, tmp_path )
+    try:
+        assert get_local_timestamp().endswith( "+09:00" )
+    finally:
+        ConfigurationManager.reset_for_testing()
+
+
+def test_the_router_clock_text_before_startup_uses_the_configured_zone( monkeypatch, tmp_path ):
+    from cosa.rest.routers.notifications import _local_now_text
+    _tokyo_process_config( monkeypatch, tmp_path )
+    try:
+        assert _local_now_text( "%Z" ) == "JST"
+    finally:
+        ConfigurationManager.reset_for_testing()
