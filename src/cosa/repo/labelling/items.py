@@ -10,7 +10,8 @@ NEED_KEY    = "need_key"
 SEMDUP_PAIR = "semdup_pair"
 TYPES       = ( NEED_KEY, SEMDUP_PAIR )
 TOP_KEYS    = ( "item_id", "type", "payload" )
-ALLOWED     = { NEED_KEY: frozenset( { "need", "key_sources", "nothing_exists", "hits" } ), SEMDUP_PAIR: frozenset( { "a", "b" } ) }
+MAX_CALL_SITES = 5
+ALLOWED     = { NEED_KEY: frozenset( { "need", "key_sources", "nothing_exists", "hits", "call_sites" } ), SEMDUP_PAIR: frozenset( { "a", "b" } ) }
 
 
 def _fail( item, why ):
@@ -34,6 +35,7 @@ def validate_item( item ):
     Ensures:
         - returns None when valid
         - a need_key item holds a need and either a non-empty list of key sources or nothing_exists true with up to ten hits
+        - a matched need_key item may also hold call_sites, a list of up to five non-empty lines; a nothing-exists item may not
         - a semdup_pair item holds two definitions, a and b
         - extra payload fields are left for export_packets to refuse
 
@@ -56,9 +58,12 @@ def validate_item( item ):
         if sources is not None: _fail( item, "a nothing-exists item has no key sources" )
         hits = p.get( "hits" )
         if not isinstance( hits, list ) or len( hits ) > 10 or not all( _text( h ) for h in hits ): _fail( item, "a nothing-exists item needs a list of up to ten hit lines" )
+        if "call_sites" in p: _fail( item, "a nothing-exists item has no call sites" )
     else:
         if not isinstance( sources, list ) or not sources or not all( _text( s ) for s in sources ): _fail( item, "a matched item needs a non-empty list of key sources" )
         if "hits" in p or "nothing_exists" in p: _fail( item, "a matched item has no hits and no nothing_exists" )
+        sites = p.get( "call_sites", [] )
+        if not isinstance( sites, list ) or len( sites ) > MAX_CALL_SITES or not all( _text( c ) for c in sites ): _fail( item, "call_sites must be a list of up to five non-empty lines" )
 
 
 def make_item( kind, id, payload ):

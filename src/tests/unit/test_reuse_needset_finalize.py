@@ -96,3 +96,53 @@ def test_material_that_does_not_fit_the_kind_is_a_bad_item():
     for need, kwargs in ( ( matched( 1 ), {} ), ( nothing( 1 ), {} ) ):
         with pytest.raises( lbe.LabellingError ) as e: finalize.need_item( need, **kwargs )
         assert e.value.code == lbe.BAD_ITEM
+
+
+def test_a_matched_item_carries_its_call_sites_and_a_packet_accepts_them( tmp_path ):
+    from cosa.repo.labelling import packets as pk
+    sites = [ "src/a.py:3  g( 1 )", "src/b.py:9  self.g( x )" ]
+    item  = finalize.need_item( matched( 1 ), key_texts=[ "def g(): pass" ], call_sites=sites )
+    assert item[ "payload" ][ "call_sites" ] == sites
+    assert pk.blind_form( item )[ "payload" ][ "call_sites" ] == sites
+    assert "call_sites" not in finalize.need_item( matched( 1 ), key_texts=[ "def g(): pass" ] )[ "payload" ]
+
+
+def test_a_nothing_item_refuses_call_sites_and_a_matched_item_refuses_too_many_or_blank_ones():
+    with pytest.raises( lbe.LabellingError ): finalize.need_item( nothing( 1 ), hits=[ "x() — y." ], call_sites=[ "a:1  f()" ] )
+    for bad in ( [ "a:1  f()" ] * 6, [ "" ], "a:1  f()" ):
+        with pytest.raises( lbe.LabellingError ) as e: finalize.need_item( matched( 1 ), key_texts=[ "def g(): pass" ], call_sites=bad )
+        assert e.value.code == lbe.BAD_ITEM
+
+
+def run_check_record( route, reason="why" ):
+    """Return a run_check record with the given route."""
+    return { "route": route, "status": "x", "reason": reason, "cases": 8 }
+
+
+def test_a_key_the_run_check_rejected_never_becomes_an_item_and_the_reason_is_named():
+    with pytest.raises( er.NeedsetError ) as e: finalize.need_item( matched( 1 ), key_texts=[ "def g(): pass" ], run_check=run_check_record( "reject", "case 2: returned differs" ) )
+    assert e.value.code == er.KEY_REJECTED and "case 2: returned differs" in str( e.value ) and matched( 1 )[ "id" ] in str( e.value )
+
+
+def test_a_key_that_matched_or_went_to_a_person_still_becomes_an_item_with_no_run_check_field():
+    for route in ( "accept", "person_check" ):
+        item = finalize.need_item( matched( 1 ), key_texts=[ "def g(): pass" ], run_check=run_check_record( route ) )
+        assert item[ "payload" ] == { "need": SENTENCE, "key_sources": [ "def g(): pass" ] }
+
+
+def test_a_need_the_run_check_could_not_run_is_always_shown_to_a_person_after_the_nothing_group():
+    needs = pile()
+    plain = finalize.select_for_labelling( needs, 11 )
+    ids   = [ n[ "id" ] for n in needs if n[ "kind" ] != "nothing" and n[ "check" ][ "result" ] == "agree" ]
+    held  = [ i for i in ids if i not in { g[ "id" ] for g in plain if g[ "reason" ] == "sample" } ][ :2 ]
+    got   = finalize.select_for_labelling( needs, 11, person_check_ids=set( held ) )
+    assert [ g[ "id" ] for g in got if g[ "reason" ] == "run_check" ] == sorted( held ) and len( held ) == 2
+    assert [ g[ "reason" ] for g in got ].index( "run_check" ) > [ g[ "reason" ] for g in got ].index( "nothing" )
+    assert len( { g[ "id" ] for g in got } ) == len( got )
+
+
+def test_a_person_check_need_that_is_already_disputed_is_listed_once_under_its_first_reason():
+    needs = pile()
+    bad   = next( n[ "id" ] for n in needs if n[ "check" ][ "result" ] == "disagree" )
+    got   = finalize.select_for_labelling( needs, 11, person_check_ids={ bad } )
+    assert [ g[ "reason" ] for g in got if g[ "id" ] == bad ] == [ "disputed" ]

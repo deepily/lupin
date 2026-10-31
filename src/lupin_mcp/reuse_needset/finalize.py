@@ -6,12 +6,14 @@ import pathlib
 import random
 
 from cosa.repo.labelling import items as lb
+from cosa.repo.labelling import run_check as rc
 from lupin_mcp.reuse_needset import check, freeze, schema
 from lupin_mcp.reuse_needset import errors as er
 
 SAMPLE_PERCENT = 15
 DISPUTED       = "disputed"
 NOTHING        = "nothing"
+RUN_CHECK      = "run_check"
 SAMPLE         = "sample"
 SEMDUP_PAIR    = "semdup_pair"
 
@@ -21,7 +23,7 @@ def sample_size( n_agreed ):
     return ( SAMPLE_PERCENT * n_agreed + 50 ) // 100
 
 
-def select_for_labelling( needs, seed, semdup_items=() ):
+def select_for_labelling( needs, seed, semdup_items=(), person_check_ids=() ):
     """
     Choose what the reviewers see, keeping each item's reason apart from the item.
 
@@ -29,7 +31,7 @@ def select_for_labelling( needs, seed, semdup_items=() ):
         - needs are checked needs; semdup_items are ids of pairs the duplicate checker hands over
 
     Ensures:
-        - returns [ { id, reason } ] in this order: every disputed need, every nothing need not already listed, a seeded 15 percent of the agreed matched needs, then the pairs
+        - returns [ { id, reason } ] in this order: every disputed need, every nothing need not already listed, every need in person_check_ids not already listed (reason run_check), a seeded 15 percent of the agreed matched needs, then the pairs
         - each group is sorted by id, and the same needs and seed give the same list
         - the sample is sample_size( agreed matched needs ) needs
 
@@ -43,28 +45,34 @@ def select_for_labelling( needs, seed, semdup_items=() ):
     listed   = { p[ "id" ] for p in picked }
     picked  += [ { "id": n[ "id" ], "reason": NOTHING } for n in sorted( needs, key=lambda n: n[ "id" ] ) if n[ "kind" ] == "nothing" and n[ "id" ] not in listed ]
     listed   = { p[ "id" ] for p in picked }
+    picked  += [ { "id": n[ "id" ], "reason": RUN_CHECK } for n in sorted( needs, key=lambda n: n[ "id" ] ) if n[ "id" ] in person_check_ids and n[ "id" ] not in listed ]
+    listed   = { p[ "id" ] for p in picked }
     agreed   = sorted( n[ "id" ] for n in needs if n[ "id" ] not in listed )
     chosen   = random.Random( f"{seed}|labelling" ).sample( agreed, sample_size( len( agreed ) ) )
     picked  += [ { "id": i, "reason": SAMPLE } for i in sorted( chosen ) ]
     return picked + [ { "id": i, "reason": SEMDUP_PAIR } for i in sorted( semdup_items ) ]
 
 
-def need_item( need, key_texts=None, hits=None ):
+def need_item( need, key_texts=None, hits=None, call_sites=None, run_check=None ):
     """
     Build the item a reviewer sees for a need.
 
     Requires:
         - a matched need comes with key_texts, the source of each key symbol; a nothing need with hits, the top search hit lines
+        - call_sites, when given, are up to five lines showing where the key symbol is called; run_check, when given, is the record from run_check.check_pair
 
     Ensures:
-        - returns a need_key item holding the sentence and the key sources, or the sentence, nothing_exists true and the hits
-        - the item holds no verdict, route, drafter or checker field
+        - returns a need_key item holding the sentence and the key sources (and the call sites when given), or the sentence, nothing_exists true and the hits
+        - the item holds no verdict, route, drafter, checker or run-check field
 
     Raises:
+        - NeedsetError KEY_REJECTED when run_check rejected the key, naming the reason
         - LabellingError BAD_ITEM when the material does not fit the kind
     """
-    if need[ "kind" ] == "nothing": return lb.make_item( lb.NEED_KEY, need[ "id" ], { "need": need[ "need" ], "nothing_exists": True, "hits": hits } )
-    return lb.make_item( lb.NEED_KEY, need[ "id" ], { "need": need[ "need" ], "key_sources": key_texts } )
+    if run_check is not None and run_check[ "route" ] == rc.REJECT: raise er.NeedsetError( er.KEY_REJECTED, f"{need[ 'id' ]}: the work-alike does not behave like its original: {run_check[ 'reason' ]}" )
+    payload = { "need": need[ "need" ], "nothing_exists": True, "hits": hits } if need[ "kind" ] == "nothing" else { "need": need[ "need" ], "key_sources": key_texts }
+    if call_sites is not None: payload[ "call_sites" ] = call_sites
+    return lb.make_item( lb.NEED_KEY, need[ "id" ], payload )
 
 
 FINAL_FILE      = "needset-final.jsonl"
