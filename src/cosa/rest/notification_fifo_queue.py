@@ -1,4 +1,4 @@
-from cosa.config.app_timezone import get_app_timezone
+from cosa.config.app_timezone import get_app_timezone, process_config_mgr
 from cosa.rest.fifo_queue import FifoQueue
 from cosa.memory.input_and_output_table import InputAndOutputTable
 import cosa.utils.util as du
@@ -168,10 +168,9 @@ class NotificationItem:
         """Get a timezone-aware timestamp in the configured zone; a missing or invalid zone raises."""
         # Import here to avoid circular imports
         import lupin_app.main as main_module
-        config_mgr = main_module.config_mgr
         app_debug  = main_module.app_debug
 
-        timezone_name = get_app_timezone( config_mgr )
+        timezone_name = get_app_timezone( process_config_mgr( main_module.config_mgr ) )
 
         if app_debug: print( f"[TIMEZONE-DEBUG] NotificationItem using timezone: {timezone_name}" )
 
@@ -184,10 +183,9 @@ class NotificationItem:
 
     def _get_time_display( self ) -> str:
         """Get formatted time with timezone abbreviation (e.g., '14:30 EST') for UI display."""
-        # Import here to avoid circular imports
         import lupin_app.main as main_module
 
-        timezone_name = get_app_timezone( main_module.config_mgr )
+        timezone_name = get_app_timezone( process_config_mgr( main_module.config_mgr ) )
 
         # Format as "HH:MM TZ" (e.g., "14:30 EST")
         return du.get_current_datetime_raw( tz_name=timezone_name ).strftime( '%H:%M %Z' )

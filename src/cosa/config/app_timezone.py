@@ -58,6 +58,30 @@ def get_app_timezone( config_mgr ) -> str:
     return get_zone_for_key( config_mgr, APP_TIMEZONE_KEY )
 
 
+def process_config_mgr( started_config_mgr ):
+    """
+    Return the app's ConfigurationManager, loading the process configuration before startup.
+
+    `lupin_app.main.config_mgr` stays None until the app's startup runs, and a notification built in
+    a test process or a smoke block never runs it. The manager is a singleton, so inside the app both
+    routes give the same object. The zone is still read by `get_app_timezone`, from configuration only.
+
+    Requires:
+        - started_config_mgr is the app's ConfigurationManager, or None before startup
+        - when it is None, LUPIN_CONFIG_MGR_CLI_ARGS names a loadable configuration
+
+    Ensures:
+        - Returns started_config_mgr unchanged when it is not None
+        - Otherwise returns the process ConfigurationManager
+
+    Raises:
+        - ValueError if it is None and no configuration is loaded
+    """
+    if started_config_mgr is not None: return started_config_mgr
+    from cosa.config.configuration_manager import ConfigurationManager
+    return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+
+
 def get_arbiter_journal_timezone( config_mgr ) -> str:
     """
     Read the configured zone the arbiter journal and outreach timestamps use.

@@ -88,3 +88,43 @@ def test_the_reader_offers_no_default_to_the_manager():
             return "UTC"
     assert get_app_timezone( _Cfg() ) == "UTC"
     assert seen == [ ( "app timezone", {} ) ]
+
+
+def test_a_started_manager_is_returned_unchanged( configured ):
+    from cosa.config.app_timezone import process_config_mgr
+    assert process_config_mgr( configured ) is configured
+
+
+def test_before_startup_the_process_configuration_is_loaded_not_a_default( monkeypatch, tmp_path ):
+    """The app never started in this process, so main's manager is None."""
+    from cosa.config.app_timezone import get_app_timezone, process_config_mgr
+    ini = tmp_path / "p.ini"
+    ini.write_text( "[default]\nk = 1\n\n[proc]\napp timezone = Asia/Tokyo\n" )
+    spl = tmp_path / "p-splainer.ini"
+    spl.write_text( "[default]\nk = a key\napp timezone = the user zone\n" )
+    ConfigurationManager.reset_for_testing()
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_path=/p.ini splainer_path=/p-splainer.ini config_block_id=proc" )
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    try:
+        assert get_app_timezone( process_config_mgr( None ) ) == "Asia/Tokyo"
+    finally:
+        ConfigurationManager.reset_for_testing()
+
+
+def test_a_notification_built_before_startup_gets_the_configured_zone( monkeypatch, tmp_path ):
+    """Same entry as the incident: NotificationItem with lupin_app.main.config_mgr still None."""
+    import lupin_app.main as main_module
+    from cosa.rest.notification_fifo_queue import NotificationItem
+    ini = tmp_path / "p.ini"
+    ini.write_text( "[default]\nk = 1\n\n[proc]\napp timezone = Asia/Tokyo\n" )
+    spl = tmp_path / "p-splainer.ini"
+    spl.write_text( "[default]\nk = a key\napp timezone = the user zone\n" )
+    ConfigurationManager.reset_for_testing()
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", "config_path=/p.ini splainer_path=/p-splainer.ini config_block_id=proc" )
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    monkeypatch.setattr( main_module, "config_mgr", None )
+    try:
+        item = NotificationItem( message="m", type="task", priority="medium", user_id="u1" )
+        assert item.timestamp.endswith( "+09:00" ) and item.to_dict()[ "time_display" ].endswith( "JST" )
+    finally:
+        ConfigurationManager.reset_for_testing()
