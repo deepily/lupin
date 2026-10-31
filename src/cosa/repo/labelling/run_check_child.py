@@ -1,7 +1,7 @@
 """
 The child of the work-alike run-check: runs one function on given inputs and reports.
 
-It is started by run_check as `python -I <this file>` with an empty environment and a temporary working folder.
+It is started by run_check as `python -s -P <this file>` inside a bubblewrap sandbox: no network, no host files, a memory-only work folder.
 It reads one JSON request on stdin and writes one JSON answer on stdout.
 """
 import asyncio
@@ -14,8 +14,6 @@ import json
 import os
 import re
 import resource
-import socket
-import subprocess
 import sys
 
 CPU_SECONDS  = 4
@@ -26,33 +24,16 @@ ADDRESS_RE   = re.compile( r"0x[0-9a-fA-F]+" )
 
 def limit_resources():
     """
-    Cap this process's CPU time, memory and written file size.
+    Cap this process's CPU time, memory, written file size and number of processes.
 
     Ensures:
         - later allocations over MEMORY_BYTES fail, CPU time over CPU_SECONDS ends the process, and no file grows past FILE_BYTES
+        - no new process or thread can start, so a fork or exec fails
     """
     resource.setrlimit( resource.RLIMIT_CPU, ( CPU_SECONDS, CPU_SECONDS ) )
     resource.setrlimit( resource.RLIMIT_AS, ( MEMORY_BYTES, MEMORY_BYTES ) )
     resource.setrlimit( resource.RLIMIT_FSIZE, ( FILE_BYTES, FILE_BYTES ) )
-
-
-def _blocked( *args, **kwargs ):
-    """Raises: PermissionError, always; the check allows no network and no child processes."""
-    raise PermissionError( "blocked by the run-check" )
-
-
-def block_outside_world():
-    """
-    Make network and child-process calls raise PermissionError.
-
-    Ensures:
-        - socket creation, name lookup, os.system and subprocess.Popen all raise
-    """
-    socket.socket           = _blocked
-    socket.create_connection = _blocked
-    socket.getaddrinfo      = _blocked
-    os.system               = _blocked
-    subprocess.Popen        = _blocked
+    resource.setrlimit( resource.RLIMIT_NPROC, ( 0, 0 ) )
 
 
 def settle( value ):
@@ -130,7 +111,6 @@ def main( stdin=None, stdout=None ):
     """
     request = json.load( stdin or sys.stdin )
     limit_resources()
-    block_outside_world()
     json.dump( run_request( request, os.getcwd() ), stdout or sys.stdout )
     return 0
 

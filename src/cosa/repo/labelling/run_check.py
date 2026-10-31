@@ -6,12 +6,14 @@ A mismatch rejects the key. A pair the check cannot run goes to a person with th
 import ast
 import json
 import pathlib
+import os
 import random
+import shutil
 import subprocess
 import sys
-import tempfile
 import textwrap
 
+from cosa.repo.labelling import errors as er
 from cosa.repo.labelling import run_check_child
 
 ACCEPT        = "accept"
@@ -24,6 +26,9 @@ CASE_COUNT    = 8
 TIMEOUT       = 5
 CHILD_PATH    = pathlib.Path( run_check_child.__file__ )
 OUTCOME_KEYS  = ( "returned", "raised", "args_after", "stdout", "files" )
+ENVIRONMENT   = ( "NameError", "ImportError", "ModuleNotFoundError", "PermissionError" )
+WORK_FOLDER   = "/work"
+CHILD_INSIDE  = "/sandbox/run_check_child.py"
 POOLS         = {
     "int"   : [ 0, 1, -1, 7, 100 ],
     "float" : [ 0.0, 1.5, -2.25 ],
@@ -130,24 +135,46 @@ def make_cases( pools, seed, count=CASE_COUNT ):
     return first + [ [ rng.choice( p ) for p in pools ] for _ in range( count - 1 ) ]
 
 
+def sandbox_command():
+    """
+    Build the command that starts the child inside a bubblewrap sandbox.
+
+    Ensures:
+        - the sandbox has no network, no process view of the host, no host files except the read-only interpreter, system libraries and the child script, and a memory-only work folder
+        - the environment inside holds only PYTHONHASHSEED=0, so the order of a set of strings is the same in every child
+
+    Raises:
+        - LabellingError SANDBOX_UNAVAILABLE when bwrap is not installed; the check never runs unsandboxed
+    """
+    bwrap = shutil.which( "bwrap" )
+    if bwrap is None: raise er.LabellingError( er.SANDBOX_UNAVAILABLE, "bwrap is not installed; the run-check refuses to run without it" )
+    python = os.path.realpath( sys.executable )
+    return [ bwrap, "--unshare-all", "--die-with-parent", "--new-session", "--clearenv", "--setenv", "PYTHONHASHSEED", "0",
+             "--ro-bind", sys.base_prefix, sys.base_prefix, "--ro-bind", "/usr", "/usr", "--ro-bind-try", "/lib", "/lib", "--ro-bind-try", "/lib64", "/lib64",
+             "--ro-bind", str( CHILD_PATH ), CHILD_INSIDE, "--dev", "/dev", "--tmpfs", WORK_FOLDER, "--chdir", WORK_FOLDER, "--", python, "-s", "-P", CHILD_INSIDE ]
+
+
 def run_side( source, name, cases, timeout=TIMEOUT ):
     """
-    Run one definition on the cases in a child process.
+    Run one definition on the cases in a sandboxed child process.
 
     Requires:
         - source defines name; cases are lists of JSON values
 
     Ensures:
-        - the child is `python -I` with an empty environment and a new temporary working folder, limited in time, memory and file size, with network and child processes blocked
+        - the child runs under sandbox_command, limited in time, memory, file size and process count
         - returns the child's answer, { outcomes } or { setup_error }
         - returns { "failed": reason } when the child times out, dies, or prints something that is not JSON
+
+    Raises:
+        - LabellingError SANDBOX_UNAVAILABLE when bwrap is missing or cannot start the sandbox
     """
     request = json.dumps( { "source": textwrap.dedent( source ), "name": name, "cases": cases } )
-    with tempfile.TemporaryDirectory( prefix="run-check-" ) as folder:
-        try:
-            done = subprocess.run( [ sys.executable, "-I", str( CHILD_PATH ) ], input=request, capture_output=True, text=True, timeout=timeout, cwd=folder, env={} )
-        except subprocess.TimeoutExpired:
-            return { "failed": f"timed out after {timeout} s" }
+    try:
+        done = subprocess.run( sandbox_command(), input=request, capture_output=True, text=True, timeout=timeout, cwd="/", env={} )
+    except subprocess.TimeoutExpired:
+        return { "failed": f"timed out after {timeout} s" }
+    if done.stderr.startswith( "bwrap:" ): raise er.LabellingError( er.SANDBOX_UNAVAILABLE, done.stderr.strip() )
     if done.returncode != 0: return { "failed": f"the child exited with code {done.returncode}" }
     try:
         return json.loads( done.stdout )
@@ -177,6 +204,12 @@ def compare( original_out, rewrite_out ):
     return None
 
 
+def needs_environment( answer ):
+    """Return True when a child's answer shows a missing name, module or permission."""
+    if "setup_error" in answer: return answer[ "setup_error" ] in ENVIRONMENT
+    return any( o[ "raised" ] in ENVIRONMENT for o in answer[ "outcomes" ] )
+
+
 def check_pair( original, rewrite, seed, runner=run_side ):
     """
     Run an original and its work-alike on the same inputs and rule on the pair.
@@ -187,8 +220,12 @@ def check_pair( original, rewrite, seed, runner=run_side ):
     Ensures:
         - returns { route, status, reason, cases }
         - match: route accept; mismatch: route reject, reason names the first differing case and field
-        - not_runnable: route person_check, reason says why; this covers a method, a parameter the check cannot generate, source that does not define a function, an original that does not run on its own (a NameError or an import error), an original that gives different answers on two runs, and a child that timed out or died
+        - not_runnable: route person_check, reason says why; this covers a method, a parameter the check cannot generate, source that does not define a function, a child that timed out or died, an original that gives different answers on two runs, and an original that raises on every generated input
+        - a side that needs a name, module or permission it does not have (NameError, ImportError, PermissionError) goes to a person too, whichever side it is
         - the original is run twice; its two runs must agree before the rewrite is compared
+
+    Raises:
+        - LabellingError SANDBOX_UNAVAILABLE from the runner when the sandbox cannot start; no ruling is made without it
     """
     o_node, r_node = first_function( original ), first_function( rewrite )
     if o_node is None or r_node is None: return _verdict( PERSON_CHECK, NOT_RUNNABLE, "one side holds no function definition" )
@@ -198,12 +235,13 @@ def check_pair( original, rewrite, seed, runner=run_side ):
     first = runner( original, o_node.name, cases )
     if "failed" in first: return _verdict( PERSON_CHECK, NOT_RUNNABLE, f"the original {first[ 'failed' ]}" )
     if "setup_error" in first: return _verdict( PERSON_CHECK, NOT_RUNNABLE, f"the original does not load alone: {first[ 'setup_error' ]}" )
-    if any( o[ "raised" ] in ( "NameError", "ImportError", "ModuleNotFoundError", "PermissionError" ) for o in first[ "outcomes" ] ):
-        return _verdict( PERSON_CHECK, NOT_RUNNABLE, "the original needs its module, the network or a process to run" )
+    if needs_environment( first ): return _verdict( PERSON_CHECK, NOT_RUNNABLE, "the original needs its module, the network or a process to run" )
+    if all( o[ "raised" ] is not None for o in first[ "outcomes" ] ): return _verdict( PERSON_CHECK, NOT_RUNNABLE, "the original raised on every generated input, so nothing was compared" )
     again = runner( original, o_node.name, cases )
     if again != first: return _verdict( PERSON_CHECK, NOT_RUNNABLE, "the original gives different answers on two runs" )
     other = runner( rewrite, r_node.name, cases )
     if "failed" in other: return _verdict( PERSON_CHECK, NOT_RUNNABLE, f"the rewrite {other[ 'failed' ]}" )
+    if needs_environment( other ): return _verdict( PERSON_CHECK, NOT_RUNNABLE, "the rewrite needs its module, the network or a process to run" )
     if "setup_error" in other: return _verdict( REJECT, MISMATCH, f"the rewrite does not load: {other[ 'setup_error' ]}", len( cases ) )
     differs = compare( first[ "outcomes" ], other[ "outcomes" ] )
     if differs: return _verdict( REJECT, MISMATCH, differs, len( cases ) )
