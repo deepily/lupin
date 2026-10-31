@@ -414,6 +414,55 @@ def test_main_refuses_to_run_when_a_labels_file_changes_while_the_proof_is_being
         pc.main( [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=parts_then_edit, run_proof=refuse_run )
 
 
+def check_argv( venue, rulings=None ):
+    """Return the --check command line over both reviewers' labels, plus any rulings file."""
+    paths, _ = venue.label_both( flip=( venue.toy.key( "m1", "m5" ), ) )
+    argv     = [ "--run-dir", str( venue.run_dir ), "--check", *[ x for p in paths for x in ( "--labels", p ) ] ]
+    return paths, ( argv if rulings is None else [ *argv, "--rulings", str( rulings ) ] )
+
+
+def test_check_refuses_when_the_answer_key_changes_while_the_parts_are_built( venue, tmp_path ):
+    ruled = tmp_path / "rulings.json"
+    ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ), encoding="utf-8" )
+    _, argv = check_argv( venue, ruled )
+    def parts_then_edit_key( *a ):
+        venue.key.write_text( venue.key.read_text( encoding="utf-8" ) + " ", encoding="utf-8" )
+        return venue.parts()
+    with pytest.raises( ValueError, match="changed while the proof was being prepared" ): pc.main( argv, make_parts=parts_then_edit_key, run_proof=refuse_run )
+
+
+def test_check_refuses_when_the_rulings_file_changes_while_the_parts_are_built( venue, tmp_path ):
+    ruled = tmp_path / "rulings.json"
+    ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ), encoding="utf-8" )
+    _, argv = check_argv( venue, ruled )
+    def parts_then_edit_rulings( *a ):
+        ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ) + " ", encoding="utf-8" )
+        return venue.parts()
+    with pytest.raises( ValueError, match="changed while the proof was being prepared" ): pc.main( argv, make_parts=parts_then_edit_rulings, run_proof=refuse_run )
+
+
+def test_check_refuses_when_a_labels_file_changes_while_the_labels_are_read( venue, tmp_path, monkeypatch ):
+    ruled = tmp_path / "rulings.json"
+    ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ), encoding="utf-8" )
+    paths, argv = check_argv( venue, ruled )
+    item        = pl.load_items( venue.packets[ "rick" ] )[ 0 ][ "item_id" ]
+    real        = pc.label_state
+    def read_then_edit( *a, **k ):
+        state = real( *a, **k )
+        pl.save_label( venue.packets[ "rick" ], item, not pl.same_job_labels( paths[ 0 ] )[ item ], clock=lambda: "2026-10-31T10:00:00-04:00" )
+        return state
+    monkeypatch.setattr( pc, "label_state", read_then_edit )
+    with pytest.raises( ValueError, match="changed while the proof was being prepared" ): pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=refuse_run )
+
+
+def test_check_with_nothing_changing_prints_its_json_and_returns_0( venue, tmp_path, capsys ):
+    ruled = tmp_path / "rulings.json"
+    ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ), encoding="utf-8" )
+    _, argv = check_argv( venue, ruled )
+    assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=refuse_run ) == 0
+    assert json.loads( capsys.readouterr().out )[ "status" ] == "checked"
+
+
 def test_main_refuses_a_run_folder_planted_under_another_config_sha( tmp_path, monkeypatch ):
     other = World( tmp_path, config_sha="not-the-frozen-sha" )
     monkeypatch.setattr( pc.frozen, "frozen_path", lambda: other.toy.wiring[ "frozen_path" ] )
