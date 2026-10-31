@@ -32,7 +32,7 @@ Rules on a model-written work-alike by running it beside its original. The item 
 - `needs_environment` spots a missing name, module or permission and sends that side to a person. So does an original that raises on every case, differs between runs or times out.
 - `run_side` runs one definition in a child process, inside the bubblewrap command `sandbox_command` builds.
 - `run_check_child` is the code in the sandbox. `main` reads one request, `limit_resources` caps the child, `run_request` defines the function and `run_case` calls it on a copy of each input. `settle`, `folder_state` and `clear_folder` make the outcomes comparable.
-- `block_native_calls` makes `ctypes`, `_ctypes` and `cffi` fail to import, which sends that side to a person. `refuse_repository` stops `run_request` and `clear_folder` when the folder or the current folder has a `.git` at or above it.
+- `block_native_calls` makes `ctypes`, `_ctypes` and `cffi` fail to import, which sends that side to a person. `refuse_repository` stops `clear_folder` when its folder has a `.git` at or above it. `run_request` also checks the current folder.
 
 ## Don't
 - Don't call `run_check_child.main` in process from a repository folder. The guard refuses it; use a `tmp_path` folder.
