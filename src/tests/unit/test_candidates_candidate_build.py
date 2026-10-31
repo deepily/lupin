@@ -650,3 +650,18 @@ def test_the_check_runs_inside_the_lock_so_a_build_that_finished_meanwhile_is_no
 def test_run_refuses_a_purposes_mode_that_is_neither_write_nor_skip( tmp_path ):
     with pytest.raises( ValueError, match="purposes must be 'write' or 'skip', got 'both'" ):
         cb.run( tmp_path, writer=None, client=None, purposes="both" )
+
+
+def test_a_job_that_is_bad_every_time_is_asked_exactly_twice( tmp_path, monkeypatch ):
+    # The submit stops the test at the sixth call, so a loop that ran past two attempts fails here and never hangs.
+    w, calls, saved = _unparseable_then( tmp_path, [], BAD_QUOTES, monkeypatch, bad_times=10**6 )
+    inner = w.submit
+
+    def capped( payload ):
+        if len( calls ) >= 5: raise AssertionError( "the retry loop ran past 5 submits" )
+        inner( payload )
+
+    w.submit = capped
+    with pytest.raises( ValueError, match="not valid JSON after a retry" ):
+        w( [ "m.a" ] )
+    assert len( calls ) == 2 and len( saved ) == 2
