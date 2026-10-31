@@ -97,6 +97,30 @@ def append_ledger( path, entry ):
         os.fsync( f.fileno() )
 
 
+def bar_without_unsure( counts, true, flagged, labels, unsure ):
+    """
+    Work out the second bar, without the pairs a reviewer marked unsure.
+
+    It is reported beside the first bar and gates nothing.
+
+    Requires:
+        - counts is the bar's counts; true is the pair keys labelled true; flagged the pair keys slot 0 flagged
+        - labels is { pair key: bool }; unsure is the list of pair keys either reviewer marked unsure
+
+    Ensures:
+        - returns { unsure_pairs, dropped: { true_pairs, flags }, bar }: dropped counts the unsure pairs taken out of each denominator
+        - bar is evaluate_bar's result over the counts without those pairs, or None when a denominator is left empty
+        - agreement is the full run's, because a flag agreeing between two passes does not depend on a label
+    """
+    out      = set( unsure )
+    kept     = [ k for k in true if k not in out ]
+    scored   = [ k for k in flagged if k in labels and k not in out ]
+    second   = { **counts, "true_pairs": len( kept ), "found": len( set( kept ) & set( flagged ) ), "flags": len( scored ), "correct": sum( 1 for k in scored if labels[ k ] ) }
+    dropped  = { "true_pairs": len( true ) - len( kept ), "flags": counts[ "flags" ] - len( scored ) }
+    bar      = proof_bar.evaluate_bar( second ) if second[ "true_pairs" ] >= 1 and second[ "flags" ] >= 1 else None
+    return { "unsure_pairs": len( out ), "dropped": dropped, "bar": bar }
+
+
 def _flags( outcome, canon ):
     """Return the set of pair keys one pass flagged, in the ids the labels use."""
     return { label_key( canon[ a ], canon[ b ] ) for a, b in cluster.join_pairs( outcome[ "verdicts" ] ) }
@@ -109,11 +133,13 @@ def proof_run( spec, wiring, unofficial=False ):
     An unofficial run takes one reviewer's labels, to preview the figures and list the flags outside the labelled pairs.
 
     Requires:
-        - spec is as build_pool needs, plus seed, labels ( { pair key: bool } ) and plant_failures ( pair keys both reviewers ruled not equivalent )
+        - spec is as build_pool needs, plus seed, labels ( { pair key: bool } ), plant_failures ( pair keys both reviewers ruled not equivalent ), provenance and unsure_pairs
         - wiring is as pipeline.judge_all needs, plus frozen_path, live, data_dir and clock ( a callable giving the time as text )
 
     Ensures:
         - verifies the frozen configuration, judges the pool in slot 0 and slot 1 with the same configuration, and writes <data>/semdup/proof/<n>.json once
+        - the record and the ledger line carry spec[ "provenance" ], the fingerprints of the label files used and the tree root the run is made from
+        - a complete record also carries bar_without_unsure, the bar again without the pairs in spec[ "unsure_pairs" ], with the dropped counts; it gates nothing
         - appends one line to proof-ledger.jsonl with the config_sha and the status, for a pass and for every other result alike
         - status is "complete" with the bar figures, "incomplete" when a definition is unjudged, "labels_pending" with the pairs the reviewers still owe,
           "no_true_pairs" when no pair is labelled true, "no_common_pairs" when no pair is judged in both passes, or "no_flags" when the checker raised none
@@ -147,7 +173,7 @@ def proof_run( spec, wiring, unofficial=False ):
     for p in spec[ "monolith_pairs" ]: known[ label_key( *p[ "ids" ] ) ] = f"monolith:{p[ 'source' ]}"
     flags    = [ _flags( outcome, pool[ "canon" ] ) - failures for outcome in passes ]
     labels   = spec[ "labels" ]
-    record   = { "config_sha": cfg[ "config_sha" ], "pool": pool[ "sizes" ], "plant_failures": { "count": len( failures ), "of": len( spec[ "planted" ] ),
+    record   = { "config_sha": cfg[ "config_sha" ], "provenance": spec[ "provenance" ], "pool": pool[ "sizes" ], "plant_failures": { "count": len( failures ), "of": len( spec[ "planted" ] ),
                  "rate": len( failures ) / len( spec[ "planted" ] ) if spec[ "planted" ] else None, "pairs": sorted( failures ) },
                  "unjudged": [ outcome[ "unjudged" ] for outcome in passes ], "dropped_from_pool": passes[ 0 ][ "dropped" ] }
     owed     = sorted( ( set( known ) | flags[ 0 ] ) - set( labels ) )
@@ -171,6 +197,7 @@ def proof_run( spec, wiring, unofficial=False ):
         else:
             try:
                 record.update( status="complete", bar=proof_bar.evaluate_bar( counts ) )
+                record[ "bar_without_unsure" ] = bar_without_unsure( counts, true, flags[ 0 ], labels, spec[ "unsure_pairs" ] )
             except err.SemdupError as e:
                 if e.code != err.NO_FLAGS: raise
                 record.update( status="no_flags", bar=None, detail=e.detail )
@@ -178,6 +205,6 @@ def proof_run( spec, wiring, unofficial=False ):
     record[ "proof" ] = number
     with open( folder / f"{number}.json", "x", encoding="utf-8" ) as f: json.dump( record, f, indent=2, sort_keys=True )
     passed = record[ "bar" ][ "passed" ] if record[ "status" ] == "complete" else None
-    append_ledger( folder / LEDGER_FILE, { "proof": number, "config_sha": cfg[ "config_sha" ], "status": record[ "status" ], "passed": passed, "time": wiring[ "clock" ](),
+    append_ledger( folder / LEDGER_FILE, { "proof": number, "config_sha": cfg[ "config_sha" ], "provenance": spec[ "provenance" ], "status": record[ "status" ], "passed": passed, "time": wiring[ "clock" ](),
                                            **( { "unofficial": True } if unofficial else {} ) } )
     return record

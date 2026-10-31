@@ -238,22 +238,24 @@ def structural_source( root, rewrites, cfg, jscpd=structural.run_jscpd ):
     return pairs
 
 
-def build_spec( run, mono_defs, distractors, labels, failures ):
+def build_spec( run, mono_defs, distractors, labels, failures, provenance, unsure_pairs ):
     """
     Assemble the spec proof_run takes.
 
     Requires:
         - run is load_run's result; labels is { pair key: bool }; failures is plant_failures' list
+        - provenance is label_load.fingerprints' result; unsure_pairs is label_load.unsure_pair_keys' list
 
     Ensures:
-        - returns { planted, monolith_defs, monolith_pairs, distractors, seed, labels, plant_failures }, the seed being the key's
+        - returns { planted, monolith_defs, monolith_pairs, distractors, seed, labels, plant_failures, provenance, unsure_pairs }, the seed being the key's
 
     Raises:
         - ValueError from monolith_spec or check_originals
     """
     check_originals( run[ "planted" ], distractors )
     return { "planted": run[ "planted" ], "monolith_defs": mono_defs, "monolith_pairs": monolith_spec( run[ "items" ], mono_defs ),
-             "distractors": distractors, "seed": run[ "seed" ], "labels": labels, "plant_failures": failures }
+             "distractors": distractors, "seed": run[ "seed" ], "labels": labels, "plant_failures": failures,
+             "provenance": provenance, "unsure_pairs": unsure_pairs }
 
 
 def label_state( labels_paths, key_path, rulings, third_path=None ):
@@ -416,8 +418,10 @@ def _main( argv, make_parts, run_proof, out ):
     if not args.check and args.claude_cli_path is None:
         print( json.dumps( { "status": "refused", "owed": "a real run needs --claude-cli-path, because the ledger is bound to that binary", "counts": state[ "counts" ] }, indent=2, sort_keys=True ), file=out )
         return 2
-    parts   = make_parts( cu.get_project_root(), run_dir, cfg, args.parallel )
-    spec    = build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], state[ "labels" ] or {}, state[ "failures" ] )
+    root    = cu.get_project_root()
+    parts   = make_parts( root, run_dir, cfg, args.parallel )
+    spec    = build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], state[ "labels" ] or {}, state[ "failures" ],
+                          label_load.fingerprints( args.labels, args.rulings, args.third_labels, root ), label_load.unsure_pair_keys( args.labels, key ) )
     if args.check:
         pool  = proof_run.build_pool( spec, spec[ "seed" ] )
         pairs = parts[ "wiring" ][ "structural_pairs" ]( pool[ "defs" ] )

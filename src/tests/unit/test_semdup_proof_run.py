@@ -16,6 +16,7 @@ from cosa.repo.semdup.proof import proof_run as pr
 SCRUB = bl.scrub_tokens( [ "ARM-WITH" ] )
 MARKS = [ "MARKA", "MARKB", "MARKC", "MARKD", "MARKE", "MARKF", "MARKG", "MARKH", "MARKX", "MARKY", "MARKZ" ]
 BLOCK = re.compile( r"<(definition|candidate_c\d+)_([0-9a-f]{8})>\n(.*?)\n</\1_\2>", re.DOTALL )
+PROVENANCE = { "labels": { "labels-a.jsonl": "a" * 64, "labels-b.jsonl": "b" * 64 }, "rulings": None, "third_labels": "c" * 64, "tree_root": "/the/tree" }
 JSCPD = { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "max_size": "5mb", "chosen_in": "test" }
 
 
@@ -94,7 +95,7 @@ class Toy:
             "monolith_pairs": [ { "ids": [ self.m[ "m1" ][ "id" ], self.m[ "m2" ][ "id" ] ], "source": "structural" },
                                 { "ids": [ self.m[ "m3" ][ "id" ], self.m[ "m4" ][ "id" ] ], "source": "neighbour" },
                                 { "ids": [ self.m[ "m1" ][ "id" ], self.m[ "m5" ][ "id" ] ], "source": "nominated" } ],
-            "seed": 3, "plant_failures": [], "labels": {} }
+            "seed": 3, "plant_failures": [], "labels": {}, "provenance": PROVENANCE, "unsure_pairs": [] }
 
     def unofficial_ledger( self ):
         """Point the wiring at a judge ledger inside the unofficial folder, as the command line does."""
@@ -383,3 +384,85 @@ def test_an_official_run_is_not_held_to_the_unofficial_folder_whatever_its_judge
     toy.spec[ "labels" ] = toy.all_labels()
     record = pr.proof_run( toy.spec, toy.wiring )
     assert record[ "proof" ] == 1 and "unofficial" not in record
+
+
+# ---- R3: the fingerprints, and W10: the second bar --------------------------------------------------------------
+
+def test_every_record_and_ledger_line_carries_the_label_fingerprints_and_the_tree_root(tmp_path):
+    toy    = Toy( tmp_path )
+    toy.spec[ "labels" ] = toy.all_labels()
+    record = pr.proof_run( toy.spec, toy.wiring )
+    line   = json.loads( ( tmp_path / "data" / "semdup" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    assert record[ "provenance" ] == PROVENANCE and line[ "provenance" ] == PROVENANCE
+    assert line[ "provenance" ][ "labels" ][ "labels-a.jsonl" ] == "a" * 64 and line[ "provenance" ][ "tree_root" ] == "/the/tree"
+
+
+def test_a_run_that_stops_early_and_an_unofficial_run_carry_the_fingerprints_too(tmp_path):
+    ( tmp_path / "one" ).mkdir()
+    owing = Toy( tmp_path / "one" )
+    owing.spec[ "labels" ] = { owing.key( "r1", "o1" ): True }
+    assert pr.proof_run( owing.spec, owing.wiring )[ "provenance" ] == PROVENANCE
+    ( tmp_path / "two" ).mkdir()
+    other = Toy( tmp_path / "two" )
+    other.unofficial_ledger()
+    other.spec[ "labels" ] = other.all_labels()
+    record = pr.proof_run( other.spec, other.wiring, unofficial=True )
+    line   = json.loads( ( other.wiring[ "data_dir" ] / "semdup" / "proof-unofficial" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    assert record[ "provenance" ] == PROVENANCE and line[ "provenance" ] == PROVENANCE and line[ "unofficial" ] is True
+
+
+def second_bar( tmp_path, unsure, labels=None ):
+    """Run the toy with these pairs marked unsure and return ( the record, the toy )."""
+    tmp_path.mkdir( parents=True, exist_ok=True )
+    toy = Toy( tmp_path )
+    toy.spec[ "labels" ]       = labels or toy.all_labels()
+    toy.spec[ "unsure_pairs" ] = [ toy.key( *pair ) for pair in unsure ]
+    return pr.proof_run( toy.spec, toy.wiring ), toy
+
+
+def test_with_no_unsure_pair_the_second_bar_equals_the_first_and_drops_nothing(tmp_path):
+    record, _ = second_bar( tmp_path, [] )
+    second    = record[ "bar_without_unsure" ]
+    assert second[ "bar" ] == record[ "bar" ] and second[ "dropped" ] == { "true_pairs": 0, "flags": 0 } and second[ "unsure_pairs" ] == 0
+
+
+def test_an_unsure_wrong_flag_leaves_the_correct_denominator_and_lifts_correct_from_four_of_five_to_four_of_four(tmp_path):
+    record, _ = second_bar( tmp_path, [ ( "r1", "d3" ) ] )
+    second    = record[ "bar_without_unsure" ]
+    assert second[ "dropped" ] == { "true_pairs": 0, "flags": 1 } and second[ "bar" ][ "correct" ][ "fraction" ] == "1" and second[ "bar" ][ "found" ][ "fraction" ] == "4/5"
+    assert record[ "bar" ][ "correct" ][ "fraction" ] == "4/5" and record[ "counts" ][ "flags" ] == 5
+
+
+def test_an_unsure_unfound_true_pair_leaves_the_found_denominator_and_lifts_found_from_four_of_five_to_four_of_four(tmp_path):
+    record, _ = second_bar( tmp_path, [ ( "r3", "o3" ) ] )
+    second    = record[ "bar_without_unsure" ]
+    assert second[ "dropped" ] == { "true_pairs": 1, "flags": 0 } and second[ "bar" ][ "found" ][ "fraction" ] == "1" and second[ "bar" ][ "correct" ][ "fraction" ] == "4/5"
+    assert record[ "bar" ][ "found" ][ "fraction" ] == "4/5" and record[ "counts" ][ "true_pairs" ] == 5
+
+
+def test_an_unsure_found_true_pair_leaves_both_found_and_correct_and_a_pair_outside_both_drops_nothing(tmp_path):
+    record, _ = second_bar( tmp_path, [ ( "r1", "o1" ), ( "m1", "m5" ) ] )
+    second    = record[ "bar_without_unsure" ]
+    assert second[ "dropped" ] == { "true_pairs": 1, "flags": 1 } and second[ "unsure_pairs" ] == 2
+    assert ( second[ "bar" ][ "found" ][ "successes" ], second[ "bar" ][ "found" ][ "trials" ] ) == ( 3, 4 )
+    assert ( second[ "bar" ][ "correct" ][ "successes" ], second[ "bar" ][ "correct" ][ "trials" ] ) == ( 3, 4 )
+
+
+def test_the_second_bar_gates_nothing_so_the_first_bar_and_status_are_as_if_no_pair_were_unsure(tmp_path):
+    plain, _  = second_bar( tmp_path / "p", [] )
+    marked, _ = second_bar( tmp_path / "m", [ ( "r1", "d3" ), ( "r3", "o3" ) ] )
+    assert marked[ "bar" ] == plain[ "bar" ] and marked[ "status" ] == plain[ "status" ] == "complete" and marked[ "counts" ] == plain[ "counts" ]
+
+
+def test_the_second_bar_is_empty_when_every_true_pair_or_every_flag_is_unsure(tmp_path):
+    all_true, toy = second_bar( tmp_path / "t", [ ( "r1", "o1" ), ( "r2", "o2" ), ( "r3", "o3" ), ( "m1", "m2" ), ( "m3", "m4" ) ] )
+    assert all_true[ "bar_without_unsure" ][ "bar" ] is None and all_true[ "bar_without_unsure" ][ "dropped" ][ "true_pairs" ] == 5
+    all_flags, _ = second_bar( tmp_path / "f", [ ( "r1", "o1" ), ( "r2", "o2" ), ( "m1", "m2" ), ( "m3", "m4" ), ( "r1", "d3" ) ] )
+    assert all_flags[ "bar_without_unsure" ][ "bar" ] is None and all_flags[ "bar_without_unsure" ][ "dropped" ][ "flags" ] == 5
+
+
+def test_a_record_with_no_bar_has_no_second_bar(tmp_path):
+    toy = Toy( tmp_path )
+    toy.spec[ "labels" ] = { k: False for k in toy.all_labels() }
+    record = pr.proof_run( toy.spec, toy.wiring )
+    assert record[ "status" ] == "no_true_pairs" and "bar_without_unsure" not in record

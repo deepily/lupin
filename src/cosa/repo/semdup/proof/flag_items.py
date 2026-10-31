@@ -244,7 +244,7 @@ def _main( argv, make_parts, out ):
     run    = proof_cli.load_run( args.run_dir )
     if run[ "config_sha" ] != cfg[ "config_sha" ]: raise ValueError( f"the run was planted under config {run[ 'config_sha' ]}, the frozen one is {cfg[ 'config_sha' ]}" )
     parts  = make_parts( cu.get_project_root(), pathlib.Path( args.run_dir ), cfg, args.parallel )
-    spec   = proof_cli.build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], {}, [] )
+    spec   = proof_cli.build_spec( parts[ "run" ], parts[ "mono_defs" ], parts[ "distractors" ], {}, [], {}, [] )
     owed   = owed_pairs( args.record )
     staged = stage( args.run_dir, owed, label_id_defs( proof_run.build_pool( spec, spec[ "seed" ] ) ), label_prep.REVIEWERS, run[ "seed" ] )
     ( discard if args.check else swap )( staged[ "swaps" ] )

@@ -15,7 +15,7 @@ pins:
 ---
 # Duplicate checker proof: the run and monolith pairs
 The proof run judges a closed pool twice, compares with the human labels and the bar, and keeps the record whatever the result.
-- `proof_run` runs the proof once and keeps its record. An unofficial run takes one reviewer's labels and writes to its own folder, never taking a proof number. It refuses a judge ledger outside `proof-unofficial` (`LEDGER_OUTSIDE_UNOFFICIAL`) before it judges or writes anything. The record carries `dropped_from_pool`, the count and ids of server definitions left out for a scrub token. `next_number` returns the number of the next record in the folder, counting from 1.
+- `proof_run` runs the proof once and keeps its record. An unofficial run takes one reviewer's labels and writes to its own folder, never taking a proof number. It refuses a judge ledger outside `proof-unofficial` (`LEDGER_OUTSIDE_UNOFFICIAL`) before it judges or writes anything. The record carries `dropped_from_pool`, the count and ids of server definitions left out for a scrub token. The record and the ledger line carry `provenance` (the label fingerprints and the tree root). A complete record also carries `bar_without_unsure`, the bar again without the pairs either reviewer marked unsure, with the dropped counts; it gates nothing. `next_number` returns the number of the next record in the folder, counting from 1.
 - `append_ledger` adds one line to the proof ledger without touching what is there.
 - `build_pool` assembles the closed pool the proof judges. `label_key` returns the key of an unordered pair of definition ids.
 - `resolve_label` settles one pair's label from the two reviewers' booleans. It needs a ruling on a disagreement, and raises `ValueError` without one.

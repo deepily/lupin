@@ -285,7 +285,7 @@ def staged( flagged ):
     old = { r: p.read_bytes() for r, p in flagged.packets.items() }
     key = json.loads( flagged.key.read_text() )
     got = fi.stage( flagged.run_dir, flagged.owed, fi.label_id_defs( pr.build_pool( pc.build_spec( pc.load_run( flagged.run_dir ), flagged.toy.spec[ "monolith_defs" ],
-                    [ *flagged.toy.spec[ "distractors" ], *[ p[ "original" ] for p in flagged.toy.spec[ "planted" ] ] ], {}, [] ), 3 ) ), REVIEWERS, 3 )
+                    [ *flagged.toy.spec[ "distractors" ], *[ p[ "original" ] for p in flagged.toy.spec[ "planted" ] ] ], {}, [], {}, [] ), 3 ) ), REVIEWERS, 3 )
     return got, old, key
 
 
