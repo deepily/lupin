@@ -1,11 +1,11 @@
 """The proof's loader: reviewers' pair labels and the answer key in, { pair key: bool } out."""
-import hashlib
 import json
 import pathlib
 
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
 from cosa.repo.semdup.proof import proof_run
+from cosa.repo.symindex.candidates import arm_run
 
 
 def key_rows( key_path ):
@@ -107,11 +107,6 @@ def resolved_labels( first_path, second_path, key_path, rulings=None, third_path
     return { k: proof_run.resolve_label( mine[ 0 ][ k ], mine[ 1 ][ k ], calls.get( k ) ) for k in every }
 
 
-def file_sha256( path ):
-    """Ensures: returns the sha256 hex digest of the file's bytes."""
-    return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
-
-
 def fingerprints( labels_paths, rulings_path, third_path, key_path, tree_root ):
     """
     Name the exact inputs a proof run settled its labels from.
@@ -124,10 +119,10 @@ def fingerprints( labels_paths, rulings_path, third_path, key_path, tree_root ):
         - returns { labels: { path: sha256 }, rulings: sha256 or None, third_labels: sha256 or None, answer_key: sha256, tree_root }
         - the digests are of the bytes on disk now, so a later edit of a file, an appended answer included, no longer matches
     """
-    return { "labels": { str( p ): file_sha256( p ) for p in labels_paths },
-             "rulings": file_sha256( rulings_path ) if rulings_path is not None else None,
-             "third_labels": file_sha256( third_path ) if third_path is not None else None,
-             "answer_key": file_sha256( key_path ), "tree_root": str( tree_root ) }
+    return { "labels": { str( p ): arm_run.sha256_of( p ) for p in labels_paths },
+             "rulings": arm_run.sha256_of( rulings_path ) if rulings_path is not None else None,
+             "third_labels": arm_run.sha256_of( third_path ) if third_path is not None else None,
+             "answer_key": arm_run.sha256_of( key_path ), "tree_root": str( tree_root ) }
 
 
 def unsure_pair_keys( labels_paths, key_path ):

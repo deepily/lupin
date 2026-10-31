@@ -162,6 +162,12 @@ def now_text():
     return datetime.now( timezone.utc ).isoformat( timespec="seconds" )
 
 
+def not_earlier( ts, floor ):
+    """Ensures: returns floor when both times can be read and ts is earlier than floor, else ts."""
+    now, before = pk.moment( ts ), pk.moment( floor )
+    return floor if now is not None and before is not None and now < before else ts
+
+
 def save_label( packet_path, item_id, same, unsure=False, note="", clock=now_text ):
     """
     Write one label to disk, after every earlier answer, which stay in the file.
@@ -171,7 +177,8 @@ def save_label( packet_path, item_id, same, unsure=False, note="", clock=now_tex
 
     Ensures:
         - the whole labels file is written to a temp file beside it, flushed, checked with read_labels, and renamed over the old file
-        - the label goes to the end and no earlier line changes, so a re-answer adds a line and the latest answer of an item is the one that counts
+        - the label goes to the end and no earlier line changes, and its time is never earlier than that item's last answer, even if the clock stepped back
+        - a re-answer therefore adds a line, and the latest answer of an item is the one that counts
         - the labels file passes read_labels when this returns, and a failure leaves the old file as it was
         - returns the label written
 
@@ -184,7 +191,10 @@ def save_label( packet_path, item_id, same, unsure=False, note="", clock=now_tex
     path  = labels_path( packet_path )
     tmp   = path.with_name( path.name + ".tmp" )
     with _write_lock:
-        out = [ *read_history( packet_path ), label ]
+        kept  = read_history( packet_path )
+        prior = [ l[ "ts" ] for l in kept if l[ "item_id" ] == item_id ]
+        if prior: label[ "ts" ] = not_earlier( label[ "ts" ], prior[ -1 ] )
+        out = [ *kept, label ]
         try:
             with open( tmp, "w", encoding="utf-8" ) as f:
                 f.write( "".join( json.dumps( l, sort_keys=True ) + "\n" for l in out ) )
