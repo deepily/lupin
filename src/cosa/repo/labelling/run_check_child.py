@@ -12,6 +12,7 @@ import inspect
 import io
 import json
 import os
+import pathlib
 import re
 import resource
 import sys
@@ -67,8 +68,26 @@ def folder_state( folder ):
     return state
 
 
+def refuse_repository( folder ):
+    """
+    Refuse a folder that is, or sits inside, a git repository.
+
+    Ensures:
+        - raises RuntimeError when the folder or any folder above it holds a .git, file or folder; returns None otherwise
+    """
+    here = pathlib.Path( folder ).resolve()
+    for place in ( here, *here.parents ):
+        if ( place / ".git" ).exists(): raise RuntimeError( f"refusing to run or clear {folder}: {place} is a git repository" )
+
+
 def clear_folder( folder ):
-    """Remove every file under folder, leaving the folder itself."""
+    """
+    Remove every file under folder, leaving the folder itself.
+
+    Raises:
+        - RuntimeError from refuse_repository, before anything is deleted
+    """
+    refuse_repository( folder )
     for here, _, names in os.walk( folder ):
         for name in names: os.remove( os.path.join( here, name ) )
 
@@ -108,7 +127,11 @@ def run_request( request, folder ):
     Ensures:
         - returns { "outcomes": [ run_case result per case ] }
         - returns { "setup_error": <type name> } when the source does not define the name
+
+    Raises:
+        - RuntimeError from refuse_repository, before the source runs
     """
+    refuse_repository( folder )
     space = {}
     try:
         exec( compile( request[ "source" ], "<run-check>", "exec" ), space )

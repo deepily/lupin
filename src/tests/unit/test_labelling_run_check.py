@@ -380,3 +380,42 @@ def test_main_blocks_native_calls_only_when_it_is_given_the_module_table(monkeyp
     out     = io.StringIO()
     child.main( stdin=io.StringIO( json.dumps( { "source": "def f( x: int ):\n    return x\n", "name": "f", "cases": [ [ 1 ] ] } ) ), stdout=out, modules=modules )
     assert "ctypes" in modules and json.loads( out.getvalue() )[ "outcomes" ][ 0 ][ "returned" ] == "1"
+
+
+# ---- the child never clears a repository -------------------------------------------------------------------------
+
+def test_clear_folder_refuses_a_folder_that_has_a_dot_git_at_or_above_it_and_deletes_nothing( tmp_path ):
+    repo  = tmp_path / "repo"
+    inner = repo / "src" / "deep"
+    inner.mkdir( parents=True )
+    ( repo / ".git" ).mkdir()
+    for where in ( repo, inner ):
+        ( where / "keep.txt" ).write_text( "x", encoding="utf-8" )
+    for folder in ( repo, inner ):
+        with pytest.raises( RuntimeError, match="refusing" ): child.clear_folder( str( folder ) )
+    assert ( repo / "keep.txt" ).exists() and ( inner / "keep.txt" ).exists()
+
+
+def test_clear_folder_still_clears_a_folder_with_no_dot_git_above_it( tmp_path ):
+    ( tmp_path / "sub" ).mkdir()
+    ( tmp_path / "sub" / "a.txt" ).write_text( "x", encoding="utf-8" )
+    child.clear_folder( str( tmp_path ) )
+    assert not ( tmp_path / "sub" / "a.txt" ).exists()
+
+
+def test_a_worktree_style_dot_git_file_counts_too( tmp_path ):
+    ( tmp_path / ".git" ).write_text( "gitdir: /elsewhere", encoding="utf-8" )
+    ( tmp_path / "keep.txt" ).write_text( "x", encoding="utf-8" )
+    with pytest.raises( RuntimeError, match="refusing" ): child.clear_folder( str( tmp_path ) )
+    assert ( tmp_path / "keep.txt" ).exists()
+
+
+def test_run_request_and_main_refuse_a_repository_folder_before_running_anything( tmp_path, monkeypatch ):
+    ( tmp_path / ".git" ).mkdir()
+    ( tmp_path / "keep.txt" ).write_text( "x", encoding="utf-8" )
+    touch = "def f( x: int ):\n    open( 'ran.txt', 'w' ).write( 'x' )\n    return x\n"
+    monkeypatch.chdir( tmp_path )
+    monkeypatch.setattr( child, "limit_resources", lambda: None )
+    with pytest.raises( RuntimeError, match="refusing" ): child.run_request( { "source": touch, "name": "f", "cases": [ [ 1 ] ] }, str( tmp_path ) )
+    with pytest.raises( RuntimeError, match="refusing" ): child.main( stdin=io.StringIO( json.dumps( { "source": touch, "name": "f", "cases": [ [ 1 ] ] } ) ), stdout=io.StringIO() )
+    assert ( tmp_path / "keep.txt" ).exists() and not ( tmp_path / "ran.txt" ).exists()
