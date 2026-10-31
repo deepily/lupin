@@ -3,13 +3,17 @@ capability: needset-final-set
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.finalize.sample_size@7058a18b07
-  - lupin_mcp.reuse_needset.finalize.select_for_labelling@782962f2e6
-  - lupin_mcp.reuse_needset.finalize.need_item@b8b759cff3
+  - lupin_mcp.reuse_needset.finalize.select_for_labelling@264d465f76
+  - lupin_mcp.reuse_needset.finalize.need_item@e59599e35b
   - lupin_mcp.reuse_needset.finalize.final_row@d9103e0e5d
   - lupin_mcp.reuse_needset.finalize.file_sha256@263a4ccc40
   - lupin_mcp.reuse_needset.finalize.finalize@1a05cab254
   - lupin_mcp.reuse_needset.finalize.verify_manifest@6b67a39046
   - lupin_mcp.reuse_needset.finalize.check_committed_set@cd3f2fd00f
+  - lupin_mcp.reuse_needset.finalize.run_check_needs@1a51a94833
+  - lupin_mcp.reuse_needset.finalize.screen_needs@c35d3c665d
+  - lupin_mcp.reuse_needset.finalize.key_call_sites@0f40246856
+  - lupin_mcp.reuse_needset.finalize.labelling_items@9dc279d5e9
 ---
 # Need set: labelling choice and final set
 
@@ -19,7 +23,10 @@ Chooses the needs people label, builds the final set and verifies its manifest. 
 - `sample_size` is 15 percent of the agreed needs with a half rounded up, so 30 gives 5.
 - `select_for_labelling` returns each item with its reason, kept apart. The order is every disputed need, every nothing need not already listed, a seeded sample of the agreed matched needs, then the duplicate-checker pairs. Each group is sorted by id.
 - It raises `BAD_NEED` for a need that is not checked or is a smoke need.
-- `need_item` builds the item a reviewer sees. It holds the sentence and the key sources, or the sentence with nothing-exists and the hits. It holds no verdict, route, drafter or checker field.
+- A need the run-check could not run is selected too, from `run_checks` or `person_check_ids`. It comes after the nothing needs, before the sample, with the reason `run_check`.
+- `run_check_needs` runs the run-check over the rewrites the caller hands in, one record per need. `screen_needs` splits the needs into those kept, those whose key was rejected, and the ids that go to a person.
+- `key_call_sites` finds up to five places a matched need's Python key symbols are called, or nothing for a TypeScript key. `labelling_items` builds one item per picked need, skips the duplicate-checker pairs, and raises `KEY_REJECTED` when a rejected key reaches it.
+- `need_item` builds the item a reviewer sees. It holds the sentence and the key sources, or the sentence with nothing-exists and the hits. It holds no verdict, route, drafter, checker or run-check field. It may also carry the key's `call_sites`, and it raises `KEY_REJECTED` for a key the run-check rejected.
 
 ## Final set
 - `final_row` joins a checked need with its final label. A matched need labelled with other symbols takes the reviewers' symbols as its key, with the version raised by one.

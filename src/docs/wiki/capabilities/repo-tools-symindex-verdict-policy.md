@@ -5,8 +5,9 @@ pins:
   - cosa.repo.symindex.verdict.malformed_reason@1f1669771a
   - cosa.repo.symindex.verdict.call_facts@0611654fde
   - cosa.repo.symindex.verdict.malformed_reason_provides@3187133a79
-  - cosa.repo.symindex.verdict.decide_provides@2955e362d5
+  - cosa.repo.symindex.verdict.decide_provides@887db1e53f
   - cosa.repo.symindex.labelled_set.check_band@89d0f8f884
+  - cosa.repo.symindex.verdict.constructor_class_id@3fbfd6704b
 ---
 # Verdict helpers and the provides rule
 
@@ -22,6 +23,7 @@ Pure functions behind the reuse check's verdict. `decide`, the overlap rule, is 
 - `REUSE` when an entry has provides at or above 0.7 and no gap cause holds. `EXTEND` when no entry reaches 0.7 and one has provides from 0.3 up to 0.7 and coverage (levels 2 and 3) at or above 0.5. `LOW_CONFIDENCE` holds when neither applies and an entry sits in the provides band or has coverage at or above 0.5. That answers `UNCERTAIN_READ_SOURCE`. When neither rule is met and no other cause holds, `NO_MATCH` holds alone and the verdict is the same.
 - Malformed, duplicate or unknown-id answers are reported as `MALFORMED_ANSWER` and never half used. Failed or unaccounted calls, and a sweep with no answers, give `CALL_FAILED`, so an empty sweep is never `NO_MATCH`.
 - Any flag outside the four pipeline flags raises `ValueError`.
+- `constructor_class_id( id )` names the class a Dart constructor id builds, from `pkg.Class.Class` or `pkg.Class.Class.fromJson`, else None. Both rules fold a constructor into its class in the shortlist, under the class id and the better score. The verdict is not affected.
 
 ## The uncertain band
 - `check_band( band )` returns the band when it is at least 0.05 and under 0.5, and raises `ValueError` otherwise. A bool, NaN or infinity is refused.

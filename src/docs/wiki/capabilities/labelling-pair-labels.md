@@ -12,8 +12,9 @@ pins:
   - cosa.repo.labelling.pair_labels.reviewer_of@2f4fa173c2
   - cosa.repo.labelling.pair_labels.same_job@6f6b724e6e
   - cosa.repo.labelling.pair_labels.same_job_labels@c15a304dee
-  - cosa.repo.labelling.pair_labels.save_label@5b3fe0a05b
+  - cosa.repo.labelling.pair_labels.save_label@e6e3849569
   - cosa.repo.labelling.pair_labels.user_note@479896b83b
+  - cosa.repo.labelling.pair_labels.read_history@2b7ed4d12a
 ---
 # Pair labels
 

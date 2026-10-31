@@ -189,6 +189,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[semdup-blind-and-extract]] — the duplicate checker's definition extraction and the blinding of what its judge sees. `cosa.repo.semdup` (extract, blind, errors)
 - [[labelling-pair-labels]] — how a semdup pair uses the labelling choices, and the durable labels file a page writes. `cosa.repo.labelling` (pair_labels)
 - [[labelling-tools]] — blind per-reviewer packets, confirm mode (a seeded 20% blind, the rest confirmed against Rick), agreement and adjudication of human labels. `cosa.repo.labelling` (items, packets, confirm, agreement, adjudicate, errors)
+- [[labelling-run-check]] — the run-check that rules on a model-written work-alike inside a sandbox. `cosa.repo.labelling` (run_check, run_check_child)
+- [[labelling-call-sites]] — where a key symbol is called, shown beside its source in a Set B item. `cosa.repo.labelling` (call_sites)
 - [[reuse-search-tools]] — the four MCP tools that ask whether a new definition already exists, reading the symbol index and the wiki. `lupin_mcp` (cosa_voice_mcp, reuse_tools, reuse_call_log_middleware), `cosa.repo.symindex` (verdict)
 - [[reuse-tools-request-and-context]] — reuse_tools request hashing, receipt ids, language check, call budget and the context built from the environment. `lupin_mcp` (reuse_tools)
 - [[reuse-tools-transport-and-screening]] — reuse_tools screening of what is sent, the live Jev transport, refusal breaker, cache and token and attempt counts. `lupin_mcp` (reuse_tools)
