@@ -431,6 +431,7 @@ class TestTrustProxyConfigFactory:
         from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
 
         mock_mgr = MagicMock()
+        mock_mgr.get_required = MagicMock( return_value="America/Chicago" )
         mock_mgr.get = MagicMock( side_effect=lambda key, default=None, return_type="string": default )
 
         result = trust_proxy_config_from_config_mgr( mock_mgr )
@@ -467,6 +468,7 @@ class TestTrustProxyConfigFactory:
         )
 
         mock_mgr = MagicMock()
+        mock_mgr.get_required = MagicMock( return_value="America/Chicago" )
         mock_mgr.get = MagicMock( side_effect=lambda key, default=None, return_type="string": default )
 
         result = trust_proxy_config_from_config_mgr( mock_mgr )
@@ -482,6 +484,7 @@ class TestTrustProxyConfigFactory:
         from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
 
         mock_mgr = MagicMock()
+        mock_mgr.get_required = MagicMock( return_value="America/Chicago" )
         calls = {}
 
         def track_calls( key, default=None, return_type="string" ):
@@ -496,7 +499,8 @@ class TestTrustProxyConfigFactory:
         assert calls[ "decision proxy enabled" ] == "boolean"
         assert calls[ "swe team trust proxy l2 threshold" ] == "int"
         assert calls[ "swe team trust proxy circuit breaker error rate threshold" ] == "float"
-        assert calls[ "decision proxy timezone" ] == "string"
+        assert "decision proxy timezone" not in calls
+        mock_mgr.get_required.assert_called_once_with( "decision proxy timezone" )
 
 
 class TestSweProxyConfigFactory:
