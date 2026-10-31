@@ -12,9 +12,10 @@ pins:
   - cosa.repo.labelling.pair_labels.reviewer_of@2f4fa173c2
   - cosa.repo.labelling.pair_labels.same_job@6f6b724e6e
   - cosa.repo.labelling.pair_labels.same_job_labels@c15a304dee
-  - cosa.repo.labelling.pair_labels.save_label@e6e3849569
+  - cosa.repo.labelling.pair_labels.save_label@aedabee44c
   - cosa.repo.labelling.pair_labels.user_note@479896b83b
   - cosa.repo.labelling.pair_labels.read_history@2b7ed4d12a
+  - cosa.repo.labelling.pair_labels.not_earlier@cddc08f39d
 ---
 # Pair labels
 
@@ -29,7 +30,7 @@ How a `semdup_pair` uses the three labelling choices, and the store a reviewer's
 - `load_items` reads a packet for display as id, a and b only. `read_existing` reads the labels as they stand (the latest answer of each item) and `read_history` reads every answer, earlier ones included.
 - `progress` counts the labels and names the position to resume: the first unlabelled pair, else the first unsure one.
 - `build_label` makes one label line, and `now_text` gives its time.
-- `save_label` builds the whole file in a temp file, checks it, and renames it over the old one. It keeps every earlier line and adds the new answer last. A re-answer therefore adds a line, and the latest answer of an item counts.
+- `save_label` builds the whole file in a temp file, checks it, and renames it over the old one. It keeps every earlier line and adds the new answer last. A re-answer therefore adds a line, and the latest answer of an item counts. It never stamps an answer earlier than the item's last one: `not_earlier` lifts a clock that stepped back.
 
 ## Don't
 - Don't edit or delete a line of a labels file. History is the record of what a reviewer said; `read_labels` takes the latest answer per item and `read_history` keeps the rest.
