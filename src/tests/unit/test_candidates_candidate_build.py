@@ -645,3 +645,8 @@ def test_the_check_runs_inside_the_lock_so_a_build_that_finished_meanwhile_is_no
     calls = []
     got   = cb.run( world[ "root" ], answering_writer( calls ), tvb.FakeClient(), config=ConfigFor(), environ={}, skip_if_current=True )
     assert got[ "skipped" ] == "current" and got[ "built_at" ] == "2026-10-18T00:00:00+00:00" and calls == []
+
+
+def test_run_refuses_a_purposes_mode_that_is_neither_write_nor_skip( tmp_path ):
+    with pytest.raises( ValueError, match="purposes must be 'write' or 'skip', got 'both'" ):
+        cb.run( tmp_path, writer=None, client=None, purposes="both" )

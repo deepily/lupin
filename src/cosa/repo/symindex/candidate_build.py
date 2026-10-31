@@ -82,7 +82,9 @@ class BoundedJobWriter:
         where  = f" Each id is the id field of one line of {self.index_path}, which names its file and line." if self.index_path else ""
         prompt = ( f"{pl.PROMPT_TEXT} The ids are in {self.to_container( request )}.{where} "
                    f"Write the JSON list to {self.to_container( response )}, then reply with the word done." )
-        for attempt in ( 1, 2 ):
+        attempt = 0
+        while True:   # ends by the break on good JSON or the raise on the second bad one, so there is no third exit
+            attempt += 1
             if response.exists(): response.unlink()
             self.submit( { "command": harness_schedule.COMMAND, "args": { "prompt": prompt, "task_type": "BOUNDED" } } )
             deadline = self.clock() + self.timeout
