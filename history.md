@@ -8,6 +8,22 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.30 - Session d4efa51c (Cheech 🌿, manager; crew Rio and Rachel, reaped) | Opus work-alikes regraded, all 222 pairs labelled, trial runs 2 and 3, a JSON handoff for the second reviewer
+
+- **Landed and pushed** (`9508dfa42..16df2ee4c`):
+  - `c86427d5a` third-rater loader, and `2dae0d3f0` unofficial Set A run.
+  - `6f5cc04ca` podcast doc pins.
+  - `c8b3fdc6d`: an unofficial proof run refuses a judge ledger outside proof-unofficial (Rio, row `193952e1`).
+  - `16df2ee4c` six semdup wiki pages (Rachel, row `677eaa4c`).
+- **Labels**: Rick regraded the 20 Opus work-alikes blind, and 15 are now same job, against 11 before. He agreed with his first answers on 12 of 20. He then labelled the 97 new flags, so all 222 are labelled, 8 of them unsure.
+- **Trial runs** (`io/semdup/proof-unofficial/2.json`, `3.json`): run 3 uses all 222 labels.
+  - Agreement 95.3% and found 64/74 = 86.5% pass.
+  - Correct 128/171 = 74.9% fails the 0.80 bar. The 97 flags outside the built pairs were 66% real.
+- **Second reviewer handoff**: `io/semdup-labelling/2026.10.25-run5/handoff/reviewer-2-labelling.json` and its instructions; import is row `894bf578`.
+- **Board**: the archived reviewer branch was dropped as already landed (row `ef49e95e`). The rename to duplicate-check waits on the proof (row `78755a78`).
+- **Memento sweep**: 20 from 10-30 digested, all already covered by this entry and Mr. Radio's. 141 were trashed and 13 kept for live seats.
+- **Files**: history.md, TODO.md, and the labelling and run data under `io/` (not tracked).
+
 ## 2026.10.30 day to night - Session 9193d2a3 (Mr. Radio 📻, manager; crew John, Krishna, Sam, Pocholo, all reaped) | Time zone only from configuration, model server redeployed, first VM vector build
 
 - **Landed on the working branch, not pushed.** Tip `2e131d30a`, 46 commits after `9508dfa42`.

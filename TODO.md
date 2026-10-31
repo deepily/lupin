@@ -16,6 +16,14 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-30 (Cheech 🌿 `d4efa51c`, crew Rio and Rachel, reaped)
+
+- **Opus work-alikes**: regraded, not regenerated. Rick relabelled the 20 blind; the new labels replace the old ones in `labels-rick.jsonl` (backup `io/tmp/2026.10.30-labels-rick-before-redo.jsonl`). Why: faster, and Rick's rubric was clearer the second time.
+- **The 97 flags from the unofficial run**: added to the packets as ordinary pairs, with no confirmation items. Rick has labelled all 222.
+- **Second reviewer**: works from a JSON file, without the UI (`io/semdup-labelling/2026.10.25-run5/handoff/`). Import is row `894bf578`.
+- **Rename semdup to duplicate-check**: approved, to be done after the proof passes (row `78755a78`).
+- **Not ruled yet**: what to do with the 222 labels while waiting. Offered: a false-alarm breakdown (recommended), rows for the 64 confirmed duplicates, Set B sizing. Trial run 3 fails the correct bar, 128/171 = 74.9% against 0.80. Retuning the counter on Set A is ruled out, because Set A would then stop being a fair test.
+
 ## 📚 Decisions log 2026-10-29 evening (Cheech 🌿 `2b284afe`, crew Tiffany)
 
 Set A is the 125 proof pairs; Set B is the 400-need set. Full framing: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.29-proof-pairs-and-needset-labelling-explainer.md` §9.
