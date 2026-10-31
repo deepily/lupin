@@ -94,7 +94,10 @@ def test_the_verdict_nearest_and_doubtful_do_not_change_with_the_fold():
     assert ( a[ "verdict" ], a[ "causes" ], a[ "nearest" ], a[ "doubtful" ] ) == ( b[ "verdict" ], b[ "causes" ], b[ "nearest" ], b[ "doubtful" ] )
 
 
-def _pair_answers( rows ): return [ { "id": i, "provides": p, "coverage": { "0": 0.1, "1": 0.0, "2": 0.9, "3": 0.0 } } for i, p in rows ]
+def _pair_answers( rows ):
+    """Ensures: returns answers for ( id, provides[, coverage] ) rows; coverage defaults to 0.9."""
+    covs = [ r[ 2 ] if len( r ) > 2 else 0.9 for r in rows ]
+    return [ { "id": r[ 0 ], "provides": r[ 1 ], "coverage": { "0": round( 1.0 - c, 6 ), "1": 0.0, "2": c, "3": 0.0 } } for r, c in zip( rows, covs ) ]
 
 
 def _pair_question( rows, policy=None ):
@@ -132,3 +135,11 @@ def test_decide_provides_with_an_uncertain_verdict_folds_the_pool_and_has_no_cau
     answers = _pair_answers( [ ( classes[ 0 ], 0.6 ), ( ctors[ 0 ], 0.65 ) ] )
     got = vd.decide_provides( answers, [ a[ "id" ] for a in answers ], [], { "INDEX_STALE" } )
     assert got[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and [ r[ "id" ] for r in got[ "shortlist" ] ] == classes
+
+
+@pytest.mark.parametrize( "class_row, ctor_row", [ ( 0.3, 0.35 ), ( 0.4, 0.6 ) ] )
+def test_decide_provides_extend_fold_keeps_the_causal_class_over_a_better_scored_constructor( class_row, ctor_row ):
+    cls = f"{PKG}Foo"
+    got = _pair_question( [ ( cls, class_row, 0.9 ), ( f"{cls}.Foo", ctor_row, 0.1 ) ] )
+    assert got[ "verdict" ] == "EXTEND" and got[ "shortlist_total" ] == 1
+    assert [ ( r[ "id" ], r[ "provides" ], r[ "coverage" ] ) for r in got[ "shortlist" ] ] == [ ( cls, class_row, 0.9 ) ]

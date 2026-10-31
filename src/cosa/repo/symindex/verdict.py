@@ -84,17 +84,19 @@ def constructor_class_id( entry_id ):
     return None
 
 
-def _fold_constructors( rows, policy, order ):
+def _fold_constructors( rows, policy, order, causal_test=None ):
     """
     Merge each constructor row into the row of its class, when the policy asks.
 
     Requires:
         - rows are dicts with an id
         - order sorts a list of rows best first, as _order or _provides_order do
+        - causal_test, when given, takes a row and says whether it makes the verdict
 
     Ensures:
         - returns rows unchanged, as the same list, when policy has no fold_constructors key
         - otherwise a constructor whose class is also a row is removed, and the class row takes whichever of the two ranks better, with the class id
+          (when causal_test is given and exactly one of the two passes it, that one is taken, so the merged row keeps the coverage that made the verdict)
           (an index scores a Dart constructor by its own doc and signature, so it can rank far above its class)
         - a constructor whose class is not a row stays as it is, so nothing is lost from the view
         - returns the merged rows ordered by order
@@ -104,7 +106,9 @@ def _fold_constructors( rows, policy, order ):
     for r in rows:
         cid = constructor_class_id( r[ "id" ] )
         if cid is None or cid not in by_id: kept.append( r ); continue
-        merged[ cid ] = order( [ merged.get( cid, by_id[ cid ] ), r ] )[ 0 ]
+        pair          = [ merged.get( cid, by_id[ cid ] ), r ]
+        if causal_test is not None and any( causal_test( c ) for c in pair ): pair = [ c for c in pair if causal_test( c ) ]
+        merged[ cid ] = order( pair )[ 0 ]
     return order( [ dict( merged[ r[ "id" ] ], id=r[ "id" ] ) if r[ "id" ] in merged else r for r in kept ] )
 
 
@@ -380,7 +384,7 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=None ):
     else:               verdict, causal = "NEW", []
     pool   = [ r for r in ordered if r in causal or r[ "provides" ] >= policy[ "threshold" ] ]
     if "fold_constructors" in policy:
-        view   = _fold_constructors( ordered, policy, _provides_order )
+        view   = _fold_constructors( ordered, policy, _provides_order, lambda r: _is_causal( r, verdict, policy ) )
         causal = [ r for r in view if _is_causal( r, verdict, policy ) ]
         pool   = [ r for r in view if r in causal or r[ "provides" ] >= policy[ "threshold" ] ]
     return { "verdict"         : verdict,
