@@ -17,6 +17,7 @@ Turns the reviewers' pair labels and the answer key into the `{ pair key: bool }
 - `pair_key_labels` turns one reviewer's labels file into `{ pair key: bool }`, with the key written as `label_key` writes it. An unsure label counts at its leaning choice.
 - `pair_key_labels` refuses labels for an item the key does not know.
 - `resolved_labels` settles every pair from two reviewers with `resolve_label`. A third rater's file may settle each disagreement; that rater labels only the disputed pairs.
+- `fingerprints` gives the sha256 of each label file used, of the rulings file and the third file when given, and the tree root. `unsure_pair_keys` lists the pairs either reviewer's latest answer marks unsure.
 - `disputed_items` lists the items the two reviewers labelled differently. `third_votes` turns the third rater's file into votes on them, and an unsure label is a vote of `None`.
 - A sure third label outranks a ruling. An unsure one leaves the pair to the ruling, passed in as `{ pair key: bool }`.
 

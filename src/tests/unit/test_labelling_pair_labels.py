@@ -106,14 +106,23 @@ def test_save_label_writes_a_file_read_labels_accepts_and_the_loader_reads( tmp_
     assert not list( tmp_path.glob( "*.tmp" ) )
 
 
-def test_a_re_answer_replaces_the_line_in_place_and_never_duplicates( tmp_path ):
+def test_a_re_answer_adds_a_line_and_the_latest_answer_counts( tmp_path ):
     path = make_packet( tmp_path )
     ids  = [ i[ "item_id" ] for i in pl.load_items( path ) ]
     for n in ids: pl.save_label( path, n, True, clock=CLOCK )
+    before = pl.labels_path( path ).read_bytes()
     pl.save_label( path, ids[ 1 ], False, False, "changed my mind", clock=CLOCK )
+    after  = pl.labels_path( path ).read_bytes()
+    assert after.startswith( before ) and len( after.splitlines() ) == len( ids ) + 1
     labels = pk.read_labels( pl.labels_path( path ) )
     assert [ l[ "item_id" ] for l in labels ] == ids
     assert [ ( l[ "choice" ], l[ "note" ] ) for l in labels ] == [ ( "AS_PROPOSED", "" ), ( "NONE", "changed my mind" ), ( "AS_PROPOSED", "" ) ]
+    assert [ ( l[ "item_id" ], l[ "choice" ] ) for l in pl.read_history( path ) ][ -2: ] == [ ( ids[ 2 ], "AS_PROPOSED" ), ( ids[ 1 ], "NONE" ) ]
+    assert pl.same_job_labels( pl.labels_path( path ) )[ ids[ 1 ] ] is False and pl.progress( pl.load_items( path ), pl.read_existing( path ) )[ "labelled" ] == len( ids )
+
+
+def test_the_history_of_a_reviewer_with_no_file_is_empty( tmp_path ):
+    assert pl.read_history( make_packet( tmp_path ) ) == []
 
 
 def test_save_label_refuses_an_unknown_item_and_writes_nothing( tmp_path ):

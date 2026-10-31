@@ -3,7 +3,9 @@ The proof's label loader, end to end on a synthetic full label set.
 
 Packets and the key come from label_prep.prepare, the labels from the page's own writer, and the result goes into proof_run.
 """
+import hashlib
 import json
+import pathlib
 
 import pytest
 
@@ -163,3 +165,76 @@ def test_third_votes_refuses_an_item_the_key_does_not_know( disputed, tmp_path )
     stripped = tmp_path / "key.json"
     stripped.write_text( json.dumps( rows ) )
     with pytest.raises( ValueError, match="the key does not know" ): ll.third_votes( third, stripped )
+
+
+# ---- R3 fingerprints, R2 latest answer, W10 unsure pairs --------------------------------------------------------
+
+def test_fingerprints_are_the_sha256_of_each_file_the_rulings_the_third_file_and_the_tree_root( run, tmp_path ):
+    toy, packets, key = run
+    for r in packets: answer( packets, key, r, truth_of( toy ) )
+    a, b   = ( pl.labels_path( packets[ r ] ) for r in ( "rick", "second" ) )
+    rul    = tmp_path / "rulings.json"
+    rul.write_text( "{}", encoding="utf-8" )
+    got    = ll.fingerprints( [ a, b ], rul, a, key, "/the/tree" )
+    sha    = lambda path: hashlib.sha256( path.read_bytes() ).hexdigest()
+    assert got == { "labels": { str( a ): sha( a ), str( b ): sha( b ) }, "rulings": sha( rul ), "third_labels": sha( a ), "answer_key": sha( pathlib.Path( key ) ), "tree_root": "/the/tree" }
+    assert got[ "rulings" ] == hashlib.sha256( b"{}" ).hexdigest()
+    bare = ll.fingerprints( [ a ], None, None, key, tmp_path )
+    assert bare[ "rulings" ] is None and bare[ "third_labels" ] is None and bare[ "tree_root" ] == str( tmp_path ) and list( bare[ "labels" ] ) == [ str( a ) ]
+
+
+def test_an_appended_answer_changes_the_fingerprint_of_the_file_it_was_added_to_and_no_other( run ):
+    toy, packets, key = run
+    for r in packets: answer( packets, key, r, truth_of( toy ) )
+    a, b   = ( pl.labels_path( packets[ r ] ) for r in ( "rick", "second" ) )
+    before = ll.fingerprints( [ a, b ], None, None, key, "/t" )
+    item   = pl.load_items( packets[ "rick" ] )[ 0 ][ "item_id" ]
+    pl.save_label( packets[ "rick" ], item, not pl.same_job_labels( a )[ item ], clock=CLOCK )
+    after  = ll.fingerprints( [ a, b ], None, None, key, "/t" )
+    assert after[ "labels" ][ str( a ) ] != before[ "labels" ][ str( a ) ] and after[ "labels" ][ str( b ) ] == before[ "labels" ][ str( b ) ]
+
+
+def test_a_changed_answer_is_the_one_the_loader_resolves_with( run ):
+    toy, packets, key = run
+    truth = truth_of( toy )
+    for r in packets: answer( packets, key, r, truth )
+    rows  = ll.key_rows( key )
+    item  = pl.load_items( packets[ "rick" ] )[ 0 ][ "item_id" ]
+    k     = pr.label_key( rows[ item ][ "a" ], rows[ item ][ "b" ] )
+    pl.save_label( packets[ "rick" ], item, not truth[ k ], clock=CLOCK )
+    got   = ll.pair_key_labels( pl.labels_path( packets[ "rick" ] ), key )
+    assert got[ k ] is ( not truth[ k ] ) and ll.disputed_items( pl.labels_path( packets[ "rick" ] ), pl.labels_path( packets[ "second" ] ) ) == [ item ]
+
+
+def test_unsure_pairs_are_those_either_reviewer_marked_unsure_at_their_latest_answer( run ):
+    toy, packets, key = run
+    truth = truth_of( toy )
+    for r in packets: answer( packets, key, r, truth )
+    rows  = ll.key_rows( key )
+    ids   = [ i[ "item_id" ] for i in pl.load_items( packets[ "rick" ] ) ]
+    pk_of = lambda i: pr.label_key( rows[ i ][ "a" ], rows[ i ][ "b" ] )
+    both  = [ pl.labels_path( packets[ r ] ) for r in ( "rick", "second" ) ]
+    assert ll.unsure_pair_keys( both, key ) == []
+    pl.save_label( packets[ "rick" ], ids[ 0 ], truth[ pk_of( ids[ 0 ] ) ], True, "hmm", clock=CLOCK )
+    pl.save_label( packets[ "second" ], ids[ 1 ], truth[ pk_of( ids[ 1 ] ) ], True, "hmm", clock=CLOCK )
+    pl.save_label( packets[ "second" ], ids[ 2 ], truth[ pk_of( ids[ 2 ] ) ], True, "hmm", clock=CLOCK )
+    pl.save_label( packets[ "second" ], ids[ 2 ], truth[ pk_of( ids[ 2 ] ) ], False, "sure now", clock=CLOCK )
+    assert ll.unsure_pair_keys( both, key ) == sorted( [ pk_of( ids[ 0 ] ), pk_of( ids[ 1 ] ) ] )
+    assert ll.unsure_pair_keys( both[ :1 ], key ) == [ pk_of( ids[ 0 ] ) ] and ll.unsure_pair_keys( [], key ) == []
+
+
+def test_unsure_pairs_refuse_labels_for_items_the_key_does_not_know( run, tmp_path ):
+    toy, packets, key = run
+    stray = tmp_path / "stray.jsonl"
+    stray.write_text( json.dumps( { "item_id": "pair-nope", "reviewer": "x", "choice": "NONE", "symbols": [], "note": "", "ts": "t" } ) + "\n", encoding="utf-8" )
+    with pytest.raises( ValueError, match="pair-nope" ): ll.unsure_pair_keys( [ stray ], key )
+
+
+def test_a_different_answer_key_gives_a_different_fingerprint_for_the_same_label_files( run, tmp_path ):
+    toy, packets, key = run
+    a      = pl.labels_path( packets[ "rick" ] )
+    a.write_text( "", encoding="utf-8" )
+    other  = tmp_path / "other-key.json"
+    other.write_text( pathlib.Path( key ).read_text( encoding="utf-8" ) + " ", encoding="utf-8" )
+    same   = ll.fingerprints( [ a ], None, None, key, "/t" )
+    assert ll.fingerprints( [ a ], None, None, other, "/t" )[ "answer_key" ] != same[ "answer_key" ] and same[ "answer_key" ] == ll.file_sha256( key )

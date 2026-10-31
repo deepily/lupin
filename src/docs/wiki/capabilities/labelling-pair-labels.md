@@ -25,13 +25,14 @@ How a `semdup_pair` uses the three labelling choices, and the store a reviewer's
 - Unsure is not a choice. It is the leaning choice plus a note that starts `UNSURE:`. `is_unsure` tests that note and `user_note` strips the prefix.
 - `same_job` reads one label as a boolean, and `same_job_labels` reads a whole labels file as `{ item id: bool }`.
 - `reviewer_of` and `labels_path` name a packet's reviewer and the `labels-<reviewer>.jsonl` beside it.
-- `load_items` reads a packet for display as id, a and b only. `read_existing` reads the labels so far.
+- `load_items` reads a packet for display as id, a and b only. `read_existing` reads the labels as they stand (the latest answer of each item) and `read_history` reads every answer, earlier ones included.
 - `progress` counts the labels and names the position to resume: the first unlabelled pair, else the first unsure one.
 - `build_label` makes one label line, and `now_text` gives its time.
-- `save_label` builds the whole file in a temp file, checks it with `read_labels`, and renames it over the old one. A re-answer replaces that pair's line.
+- `save_label` builds the whole file in a temp file, checks it, and renames it over the old one. It keeps every earlier line and adds the new answer last. A re-answer therefore adds a line, and the latest answer of an item counts.
 
 ## Don't
-- Don't append to a labels file. `read_labels` refuses an item labelled twice.
+- Don't edit or delete a line of a labels file. History is the record of what a reviewer said; `read_labels` takes the latest answer per item and `read_history` keeps the rest.
+- Existing files load unchanged, because a file of one line per item is a history with no re-answers. No conversion was needed.
 
 ## Invariants
 - The labels file passes `read_labels` whenever `save_label` returns, and a failed write leaves the old file as it was. See [[rest-routers-pair-labelling]].

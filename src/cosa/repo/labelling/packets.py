@@ -135,22 +135,22 @@ def _bad( path, n, why ):
     raise er.LabellingError( er.BAD_LABEL, f"{path}:{n}: {why}" )
 
 
-def read_labels( path ):
+def read_history( path ):
     """
-    Read one reviewer's labels.
+    Read every line of one reviewer's labels file, the earlier answers included.
 
     Requires:
         - path holds one JSON object per line with item_id, reviewer, choice, symbols, note and ts
 
     Ensures:
-        - returns the labels in file order
+        - returns the labels in file order; an item answered again appears once per answer, the latest last
         - a choice is AS_PROPOSED, the other-choice or none; symbols is a non-empty list of ids exactly when the choice is the other-choice
-        - an item is labelled once per reviewer, and a file holds one reviewer's labels
+        - a file holds one reviewer's labels
 
     Raises:
         - LabellingError BAD_LABEL naming the line
     """
-    labels, seen = [], set()
+    labels = []
     for n, line in enumerate( pathlib.Path( path ).read_text( encoding="utf-8" ).splitlines(), 1 ):
         try:
             label = json.loads( line )
@@ -164,7 +164,36 @@ def read_labels( path ):
         if not isinstance( symbols, list ) or not all( isinstance( s, str ) and s.strip() for s in symbols ) or bool( symbols ) != ( label[ "choice" ] == OTHER ):
             _bad( path, n, "symbols must be a non-empty list of ids when the choice is OTHER, and empty otherwise" )
         if labels and label[ "reviewer" ] != labels[ 0 ][ "reviewer" ]: _bad( path, n, "a file holds one reviewer's labels" )
-        if label[ "item_id" ] in seen: _bad( path, n, f"item {label[ 'item_id' ]} is labelled twice" )
-        seen.add( label[ "item_id" ] )
         labels.append( label )
     return labels
+
+
+def latest_labels( history ):
+    """
+    Pick the answer that counts for each item.
+
+    Requires:
+        - history is read_history's list
+
+    Ensures:
+        - returns one label per item: the last one in file order, held at the place the item first appeared
+    """
+    latest = {}
+    for label in history: latest[ label[ "item_id" ] ] = label
+    return list( latest.values() )
+
+
+def read_labels( path ):
+    """
+    Read one reviewer's labels as they stand: the latest answer of each item.
+
+    Requires:
+        - path is as read_history needs
+
+    Ensures:
+        - returns latest_labels( read_history( path ) ); an item answered again counts once, at its latest answer
+
+    Raises:
+        - LabellingError BAD_LABEL naming the line, from read_history
+    """
+    return latest_labels( read_history( path ) )

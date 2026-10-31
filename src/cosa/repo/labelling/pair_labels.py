@@ -116,6 +116,12 @@ def read_existing( packet_path ):
     return pk.read_labels( path ) if path.exists() else []
 
 
+def read_history( packet_path ):
+    """Ensures: returns every answer in file order, earlier ones included, or an empty list."""
+    path = labels_path( packet_path )
+    return pk.read_history( path ) if path.exists() else []
+
+
 def progress( items, labels ):
     """
     Count what is done.
@@ -158,14 +164,14 @@ def now_text():
 
 def save_label( packet_path, item_id, same, unsure=False, note="", clock=now_text ):
     """
-    Write one label to disk, replacing the reviewer's earlier label of that item.
+    Write one label to disk, after every earlier answer, which stay in the file.
 
     Requires:
         - item_id names an item of the packet
 
     Ensures:
         - the whole labels file is written to a temp file beside it, flushed, checked with read_labels, and renamed over the old file
-        - a first label goes to the end; a re-answer keeps the line's place; no item is ever written twice
+        - the label goes to the end and no earlier line changes, so a re-answer adds a line and the latest answer of an item is the one that counts
         - the labels file passes read_labels when this returns, and a failure leaves the old file as it was
         - returns the label written
 
@@ -178,9 +184,7 @@ def save_label( packet_path, item_id, same, unsure=False, note="", clock=now_tex
     path  = labels_path( packet_path )
     tmp   = path.with_name( path.name + ".tmp" )
     with _write_lock:
-        kept = read_existing( packet_path )
-        out  = [ label if l[ "item_id" ] == item_id else l for l in kept ]
-        if all( l[ "item_id" ] != item_id for l in kept ): out.append( label )
+        out = [ *read_history( packet_path ), label ]
         try:
             with open( tmp, "w", encoding="utf-8" ) as f:
                 f.write( "".join( json.dumps( l, sort_keys=True ) + "\n" for l in out ) )

@@ -10,6 +10,7 @@ import shutil
 
 import pytest
 
+import cosa.utils.util as cu
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
@@ -133,9 +134,9 @@ def test_build_spec_carries_the_keys_seed_and_the_callers_labels_and_refuses_a_s
     run    = pc.load_run( world.run_dir )
     mono   = world.toy.spec[ "monolith_defs" ]
     dist   = [ *world.toy.spec[ "distractors" ], *[ p[ "original" ] for p in world.toy.spec[ "planted" ] ] ]
-    spec   = pc.build_spec( run, mono, dist, { "a|b": True }, [ "x" ] )
-    assert spec[ "seed" ] == 3 and spec[ "labels" ] == { "a|b": True } and spec[ "plant_failures" ] == [ "x" ] and len( spec[ "monolith_pairs" ] ) == 3
-    with pytest.raises( ValueError, match="planted originals changed" ): pc.build_spec( run, mono, world.toy.spec[ "distractors" ], {}, [] )
+    spec   = pc.build_spec( run, mono, dist, { "a|b": True }, [ "x" ], { "tree_root": "/t" }, [ "u|v" ] )
+    assert spec[ "seed" ] == 3 and spec[ "labels" ] == { "a|b": True } and spec[ "plant_failures" ] == [ "x" ] and spec[ "provenance" ] == { "tree_root": "/t" } and spec[ "unsure_pairs" ] == [ "u|v" ] and len( spec[ "monolith_pairs" ] ) == 3
+    with pytest.raises( ValueError, match="planted originals changed" ): pc.build_spec( run, mono, world.toy.spec[ "distractors" ], {}, [], {}, [] )
 
 
 # ---- rewrite_sources, staged_name, stage_pool ---------------------------------------------------------------------
@@ -390,6 +391,7 @@ def test_main_refuses_an_unresolved_disagreement_without_a_ruling_and_takes_it_w
     assert "disagreements have no ruling" in json.loads( capsys.readouterr().out )[ "owed" ]
     assert pc.main( [ *argv, "--rulings", str( ruled ), "--claude-cli-path", "/bin/claude" ], make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     assert len( ran ) == 1 and ran[ 0 ][ "labels" ][ odd ] is True and json.loads( capsys.readouterr().out ) == { "status": "complete" }
+    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, str( ruled ), None, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "rulings" ] is not None
 
 
 def test_main_runs_the_proof_once_with_the_resolved_labels_when_both_reviewers_agree( venue, capsys ):
@@ -400,6 +402,65 @@ def test_main_runs_the_proof_once_with_the_resolved_labels_when_both_reviewers_a
     assert rc == 0 and len( ran ) == 1 and ran[ 0 ][ 0 ][ "labels" ] == truth and ran[ 0 ][ 0 ][ "seed" ] == 3
     assert ran[ 0 ][ 1 ][ "ledger" ] is not venue.toy.wiring[ "ledger" ] and ( venue.toy.wiring[ "data_dir" ].joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME ).is_file()
     assert json.loads( capsys.readouterr().out )[ "status" ] == "complete"
+
+
+def test_main_refuses_to_run_when_a_labels_file_changes_while_the_proof_is_being_prepared( venue ):
+    paths, _ = venue.label_both()
+    item     = pl.load_items( venue.packets[ "rick" ] )[ 0 ][ "item_id" ]
+    def parts_then_edit( *a ):
+        pl.save_label( venue.packets[ "rick" ], item, not pl.same_job_labels( paths[ 0 ] )[ item ], clock=lambda: "2026-10-31T10:00:00-04:00" )
+        return venue.parts()
+    with pytest.raises( ValueError, match="changed while the proof was being prepared" ):
+        pc.main( [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=parts_then_edit, run_proof=refuse_run )
+
+
+def check_argv( venue, rulings=None ):
+    """Return the --check command line over both reviewers' labels, plus any rulings file."""
+    paths, _ = venue.label_both( flip=( venue.toy.key( "m1", "m5" ), ) )
+    argv     = [ "--run-dir", str( venue.run_dir ), "--check", *[ x for p in paths for x in ( "--labels", p ) ] ]
+    return paths, ( argv if rulings is None else [ *argv, "--rulings", str( rulings ) ] )
+
+
+def test_check_refuses_when_the_answer_key_changes_while_the_parts_are_built( venue, tmp_path ):
+    ruled = tmp_path / "rulings.json"
+    ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ), encoding="utf-8" )
+    _, argv = check_argv( venue, ruled )
+    def parts_then_edit_key( *a ):
+        venue.key.write_text( venue.key.read_text( encoding="utf-8" ) + " ", encoding="utf-8" )
+        return venue.parts()
+    with pytest.raises( ValueError, match="changed while the proof was being prepared" ): pc.main( argv, make_parts=parts_then_edit_key, run_proof=refuse_run )
+
+
+def test_check_refuses_when_the_rulings_file_changes_while_the_parts_are_built( venue, tmp_path ):
+    ruled = tmp_path / "rulings.json"
+    ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ), encoding="utf-8" )
+    _, argv = check_argv( venue, ruled )
+    def parts_then_edit_rulings( *a ):
+        ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ) + " ", encoding="utf-8" )
+        return venue.parts()
+    with pytest.raises( ValueError, match="changed while the proof was being prepared" ): pc.main( argv, make_parts=parts_then_edit_rulings, run_proof=refuse_run )
+
+
+def test_check_refuses_when_a_labels_file_changes_while_the_labels_are_read( venue, tmp_path, monkeypatch ):
+    ruled = tmp_path / "rulings.json"
+    ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ), encoding="utf-8" )
+    paths, argv = check_argv( venue, ruled )
+    item        = pl.load_items( venue.packets[ "rick" ] )[ 0 ][ "item_id" ]
+    real        = pc.label_state
+    def read_then_edit( *a, **k ):
+        state = real( *a, **k )
+        pl.save_label( venue.packets[ "rick" ], item, not pl.same_job_labels( paths[ 0 ] )[ item ], clock=lambda: "2026-10-31T10:00:00-04:00" )
+        return state
+    monkeypatch.setattr( pc, "label_state", read_then_edit )
+    with pytest.raises( ValueError, match="changed while the proof was being prepared" ): pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=refuse_run )
+
+
+def test_check_with_nothing_changing_prints_its_json_and_returns_0( venue, tmp_path, capsys ):
+    ruled = tmp_path / "rulings.json"
+    ruled.write_text( json.dumps( { venue.toy.key( "m1", "m5" ): True } ), encoding="utf-8" )
+    _, argv = check_argv( venue, ruled )
+    assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=refuse_run ) == 0
+    assert json.loads( capsys.readouterr().out )[ "status" ] == "checked"
 
 
 def test_main_refuses_a_run_folder_planted_under_another_config_sha( tmp_path, monkeypatch ):
@@ -449,6 +510,8 @@ def test_main_takes_the_third_raters_majority_on_a_dispute( venue, capsys ):
     argv     = [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", "--third-labels", str( pl.labels_path( packet ) ), *labels ]
     assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     assert len( ran ) == 1 and ran[ 0 ][ "labels" ][ odd ] is False
+    third    = str( pl.labels_path( packet ) )
+    assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, None, third, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "third_labels" ] == ll.file_sha256( third )
 
 
 # ---- the unofficial run --------------------------------------------------------------------------------------------
@@ -467,12 +530,16 @@ def test_unofficial_state_takes_exactly_one_file_and_names_the_planted_pairs_it_
 
 def test_main_unofficial_runs_on_one_file_with_its_own_ledger_and_marks_the_call( venue, capsys ):
     paths, truth = venue.label_both()
+    item         = pl.load_items( venue.packets[ "rick" ] )[ 0 ][ "item_id" ]
+    pl.save_label( venue.packets[ "rick" ], item, pl.same_job_labels( paths[ 0 ] )[ item ], True, "not sure", clock=lambda: "2026-10-31T10:00:00-04:00" )
     ran          = []
     def run_proof( spec, wiring, unofficial=False ): ran.append( ( spec, unofficial ) ); return { "status": "complete", "unofficial": unofficial }
     argv         = [ "--run-dir", str( venue.run_dir ), "--unofficial", "--claude-cli-path", "/bin/claude", "--labels", paths[ 0 ] ]
     assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     data         = venue.toy.wiring[ "data_dir" ]
     assert ran == [ ( ran[ 0 ][ 0 ], True ) ] and ran[ 0 ][ 0 ][ "labels" ] == truth
+    spec         = ran[ 0 ][ 0 ]
+    assert spec[ "provenance" ] == ll.fingerprints( [ paths[ 0 ] ], None, None, venue.key, cu.get_project_root() ) and len( spec[ "unsure_pairs" ] ) == 1 and spec[ "unsure_pairs" ] == ll.unsure_pair_keys( [ paths[ 0 ] ], venue.key )
     assert ( data.joinpath( *pr.UNOFFICIAL_FOLDER ) / pc.LEDGER_NAME ).is_file() and not data.joinpath( *pr.PROOF_FOLDER ).exists()
     assert json.loads( capsys.readouterr().out ) == { "status": "complete", "unofficial": True }
 

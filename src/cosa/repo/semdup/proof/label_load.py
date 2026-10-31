@@ -1,4 +1,5 @@
 """The proof's loader: reviewers' pair labels and the answer key in, { pair key: bool } out."""
+import hashlib
 import json
 import pathlib
 
@@ -104,3 +105,48 @@ def resolved_labels( first_path, second_path, key_path, rulings=None, third_path
     owed     = [ k for k in disputed if k not in calls ]
     if owed: raise ValueError( f"{len( owed )} disagreements have no ruling: {', '.join( owed )}" )
     return { k: proof_run.resolve_label( mine[ 0 ][ k ], mine[ 1 ][ k ], calls.get( k ) ) for k in every }
+
+
+def file_sha256( path ):
+    """Ensures: returns the sha256 hex digest of the file's bytes."""
+    return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
+
+
+def fingerprints( labels_paths, rulings_path, third_path, key_path, tree_root ):
+    """
+    Name the exact inputs a proof run settled its labels from.
+
+    Requires:
+        - labels_paths is the list of reviewers' labels files used; rulings_path and third_path are None or the files used
+        - key_path is the answer key of the run; tree_root is the root of the tree the run is made from
+
+    Ensures:
+        - returns { labels: { path: sha256 }, rulings: sha256 or None, third_labels: sha256 or None, answer_key: sha256, tree_root }
+        - the digests are of the bytes on disk now, so a later edit of a file, an appended answer included, no longer matches
+    """
+    return { "labels": { str( p ): file_sha256( p ) for p in labels_paths },
+             "rulings": file_sha256( rulings_path ) if rulings_path is not None else None,
+             "third_labels": file_sha256( third_path ) if third_path is not None else None,
+             "answer_key": file_sha256( key_path ), "tree_root": str( tree_root ) }
+
+
+def unsure_pair_keys( labels_paths, key_path ):
+    """
+    List the pairs any of these reviewers marked unsure, at their latest answer.
+
+    Requires:
+        - labels_paths are labels files of the reviewers, key_path the answer key of the same run
+
+    Ensures:
+        - returns the sorted pair keys, written as proof_run.label_key writes them
+
+    Raises:
+        - ValueError naming the item ids the key does not know
+    """
+    rows   = key_rows( key_path )
+    unsure = set()
+    for path in labels_paths:
+        labels = pk.read_labels( path )
+        _known( [ label[ "item_id" ] for label in labels ], rows )
+        unsure |= { proof_run.label_key( rows[ l[ "item_id" ] ][ "a" ], rows[ l[ "item_id" ] ][ "b" ] ) for l in labels if pl.is_unsure( l ) }
+    return sorted( unsure )

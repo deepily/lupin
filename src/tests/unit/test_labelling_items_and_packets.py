@@ -124,9 +124,17 @@ def test_a_malformed_label_is_refused_with_its_line( tmp_path, bad ):
     assert e.value.code == er.BAD_LABEL and f"{path}:2:" in e.value.detail
 
 
-def test_a_file_with_two_reviewers_or_one_item_twice_is_refused( tmp_path ):
-    assert code_of( pk.read_labels, write_labels( tmp_path / "a.jsonl", [ label( "n-000" ), label( "n-001", reviewer="sam" ) ] ) ) == er.BAD_LABEL
-    assert code_of( pk.read_labels, write_labels( tmp_path / "b.jsonl", [ label( "n-000" ), label( "n-000", choice="NONE" ) ] ) ) == er.BAD_LABEL
+def test_a_file_with_two_reviewers_is_refused_by_both_readers( tmp_path ):
+    path = write_labels( tmp_path / "a.jsonl", [ label( "n-000" ), label( "n-001", reviewer="sam" ) ] )
+    assert code_of( pk.read_labels, path ) == er.BAD_LABEL and code_of( pk.read_history, path ) == er.BAD_LABEL
+
+
+def test_an_item_answered_again_counts_once_at_its_latest_answer_and_the_history_keeps_every_answer( tmp_path ):
+    rows = [ label( "n-000" ), label( "n-001" ), label( "n-000", choice="NONE", note="second thought" ), label( "n-000", note="third thought" ) ]
+    path = write_labels( tmp_path / "l.jsonl", rows )
+    assert pk.read_history( path ) == rows
+    assert pk.read_labels( path ) == [ rows[ 3 ], rows[ 1 ] ]
+    assert pk.latest_labels( [] ) == []
 
 
 # ---- export_subset_packet ----------------------------------------------------------------------------------------
