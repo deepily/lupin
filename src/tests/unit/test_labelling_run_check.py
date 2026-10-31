@@ -233,7 +233,7 @@ def test_a_real_child_that_runs_too_long_is_reported_as_timed_out():
 
 
 def test_a_real_child_that_dies_is_reported():
-    assert rc.run_side( "def die( x: int ):\n    import os\n    os._exit( 3 )\n", "die", [ [ 1 ] ] ) == { "failed": "the child exited with code 3" }
+    assert rc.run_side( "def die( x: int ):\n    import os\n    os._exit( 3 )\n", "die", [ [ 1 ] ] ) == { "failed": "exited with code 3" }
 
 
 def test_a_child_that_prints_not_json_is_reported(monkeypatch):
@@ -242,7 +242,7 @@ def test_a_child_that_prints_not_json_is_reported(monkeypatch):
         stdout     = "not json"
         stderr     = ""
     monkeypatch.setattr( rc.subprocess, "run", lambda *a, **k: Done() )
-    assert rc.run_side( ADD, "add", [ [ 1, 2 ] ] ) == { "failed": "the child's answer was not JSON" }
+    assert rc.run_side( ADD, "add", [ [ 1, 2 ] ] ) == { "failed": "gave an answer that was not JSON" }
 
 
 def test_the_child_receives_the_dedented_source():
@@ -348,3 +348,35 @@ def test_an_identical_pair_using_a_set_of_strings_is_accepted_every_time():
 def test_needs_environment_reads_setup_errors_and_raised_names():
     assert rc.needs_environment( { "setup_error": "NameError" } ) and not rc.needs_environment( { "setup_error": "ZeroDivisionError" } )
     assert rc.needs_environment( { "outcomes": [ outcome(), outcome( raised="ModuleNotFoundError" ) ] } ) and not rc.needs_environment( { "outcomes": [ outcome() ] } )
+
+
+# ---- follow-ups of row d5d1f884 ----------------------------------------------------------------------------------
+
+def test_a_dying_original_is_reported_without_a_doubled_word():
+    dies = "def die( x: int ):\n    import os\n    os._exit( 3 )\n"
+    got  = rc.check_pair( dies, dies, 1 )
+    assert got[ "route" ] == rc.PERSON_CHECK and got[ "reason" ] == "the original exited with code 3"
+    assert "the original the" not in got[ "reason" ]
+
+
+def test_a_ctypes_fork_in_either_side_goes_to_a_person_and_does_not_reject():
+    forks = "def f( x: int ):\n    import ctypes\n    return ctypes.CDLL( None ).fork()\n"
+    plain = "def f( x: int ):\n    return x\n"
+    for original, rewrite, who in ( ( forks, plain, "original" ), ( plain, forks, "rewrite" ) ):
+        got = rc.check_pair( original, rewrite, 1 )
+        assert got[ "route" ] == rc.PERSON_CHECK and who in got[ "reason" ], got
+
+
+def test_block_native_calls_makes_ctypes_cffi_and_the_raw_module_refuse_to_import():
+    modules = {}
+    child.block_native_calls( modules )
+    assert set( modules ) == { "ctypes", "_ctypes", "cffi" } and all( m is None for m in modules.values() )
+
+
+def test_main_blocks_native_calls_only_when_it_is_given_the_module_table(monkeypatch, tmp_path):
+    monkeypatch.chdir( tmp_path )
+    monkeypatch.setattr( child, "limit_resources", lambda: None )
+    modules = {}
+    out     = io.StringIO()
+    child.main( stdin=io.StringIO( json.dumps( { "source": "def f( x: int ):\n    return x\n", "name": "f", "cases": [ [ 1 ] ] } ) ), stdout=out, modules=modules )
+    assert "ctypes" in modules and json.loads( out.getvalue() )[ "outcomes" ][ 0 ][ "returned" ] == "1"

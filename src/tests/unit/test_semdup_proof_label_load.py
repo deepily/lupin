@@ -11,6 +11,7 @@ import pytest
 
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
+from cosa.repo.symindex.candidates import arm_run
 from cosa.repo.semdup.proof import label_load as ll
 from cosa.repo.semdup.proof import label_prep as lp
 from cosa.repo.semdup.proof import proof_run as pr
@@ -237,4 +238,15 @@ def test_a_different_answer_key_gives_a_different_fingerprint_for_the_same_label
     other  = tmp_path / "other-key.json"
     other.write_text( pathlib.Path( key ).read_text( encoding="utf-8" ) + " ", encoding="utf-8" )
     same   = ll.fingerprints( [ a ], None, None, key, "/t" )
-    assert ll.fingerprints( [ a ], None, None, other, "/t" )[ "answer_key" ] != same[ "answer_key" ] and same[ "answer_key" ] == ll.file_sha256( key )
+    assert ll.fingerprints( [ a ], None, None, other, "/t" )[ "answer_key" ] != same[ "answer_key" ] and same[ "answer_key" ] == arm_run.sha256_of( key )
+
+
+def test_fingerprints_hash_files_with_the_one_shared_sha256_of_helper( run, monkeypatch, tmp_path ):
+    toy, packets, key = run
+    a    = pl.labels_path( packets[ "rick" ] )
+    a.write_text( "", encoding="utf-8" )
+    monkeypatch.setattr( arm_run, "sha256_of", lambda path: f"sha-of-{pathlib.Path( path ).name}" )
+    got  = ll.fingerprints( [ a ], key, key, key, "/t" )
+    assert got == { "labels": { str( a ): f"sha-of-{a.name}" }, "rulings": f"sha-of-{pathlib.Path( key ).name}", "third_labels": f"sha-of-{pathlib.Path( key ).name}",
+                    "answer_key": f"sha-of-{pathlib.Path( key ).name}", "tree_root": "/t" }
+    assert not hasattr( ll, "file_sha256" )

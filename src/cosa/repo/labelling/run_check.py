@@ -175,11 +175,11 @@ def run_side( source, name, cases, timeout=TIMEOUT ):
     except subprocess.TimeoutExpired:
         return { "failed": f"timed out after {timeout} s" }
     if done.stderr.startswith( "bwrap:" ): raise er.LabellingError( er.SANDBOX_UNAVAILABLE, done.stderr.strip() )
-    if done.returncode != 0: return { "failed": f"the child exited with code {done.returncode}" }
+    if done.returncode != 0: return { "failed": f"exited with code {done.returncode}" }
     try:
         return json.loads( done.stdout )
     except ValueError:
-        return { "failed": "the child's answer was not JSON" }
+        return { "failed": "gave an answer that was not JSON" }
 
 
 def _verdict( route, status, reason, cases=0 ):

@@ -166,3 +166,26 @@ def test_a_leak_found_in_the_subset_bytes_written_removes_the_packet( tmp_path, 
     monkeypatch.setattr( pk, "seeded_order", lambda items, seed, taken: [ dict( i, verdict="agree" ) for i in items ] )
     assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.PACKET_LEAK
     assert not pk.packet_path( tmp_path, "third" ).exists()
+
+
+# ---- a duplicate answer that save_label could not have written ---------------------------------------------------
+
+def test_an_answer_stamped_earlier_than_the_answer_it_replaces_is_refused_as_not_written_by_save_label( tmp_path ):
+    path = write_labels( tmp_path / "l.jsonl", [ label( "n-000", ts="2026-10-31T12:00:00+00:00" ), label( "n-000", choice="NONE", ts="2026-10-31T11:59:59+00:00" ) ] )
+    for read in ( pk.read_history, pk.read_labels ):
+        with pytest.raises( er.LabellingError ) as e: read( path )
+        assert e.value.code == er.BAD_LABEL and f"{path}:2:" in e.value.detail and "earlier" in e.value.detail
+
+
+def test_a_duplicate_answer_whose_time_cannot_be_read_is_refused_and_a_single_odd_time_is_not( tmp_path ):
+    odd = write_labels( tmp_path / "odd.jsonl", [ label( "n-000", ts="2026-10-31T12:00:00+00:00" ), label( "n-000", choice="NONE", ts="yesterday" ) ] )
+    with pytest.raises( er.LabellingError ) as e: pk.read_history( odd )
+    assert e.value.code == er.BAD_LABEL and f"{odd}:2:" in e.value.detail and "time" in e.value.detail
+    single = write_labels( tmp_path / "single.jsonl", [ label( "n-000", ts="yesterday" ), label( "n-001", ts="today" ) ] )
+    assert len( pk.read_history( single ) ) == 2
+
+
+def test_a_re_answer_in_the_same_second_or_later_is_accepted_whatever_the_zone_or_a_missing_one( tmp_path ):
+    rows = [ label( "n-000", ts="2026-10-31T12:00:00+00:00" ), label( "n-000", choice="NONE", ts="2026-10-31T12:00:00+00:00" ),
+             label( "n-000", ts="2026-10-31T08:00:01-04:00" ), label( "n-000", choice="NONE", ts="2026-10-31T12:00:02" ) ]
+    assert pk.read_labels( write_labels( tmp_path / "l.jsonl", rows ) ) == [ rows[ 3 ] ]

@@ -19,6 +19,7 @@ import sys
 CPU_SECONDS  = 4
 MEMORY_BYTES = 512 * 1024 * 1024
 FILE_BYTES   = 1024 * 1024
+NATIVE_MODULES = ( "ctypes", "_ctypes", "cffi" )
 ADDRESS_RE   = re.compile( r"0x[0-9a-fA-F]+" )
 
 
@@ -34,6 +35,21 @@ def limit_resources():
     resource.setrlimit( resource.RLIMIT_AS, ( MEMORY_BYTES, MEMORY_BYTES ) )
     resource.setrlimit( resource.RLIMIT_FSIZE, ( FILE_BYTES, FILE_BYTES ) )
     resource.setrlimit( resource.RLIMIT_NPROC, ( 0, 0 ) )
+
+
+def block_native_calls( modules ):
+    """
+    Make importing ctypes, its C module or cffi fail.
+
+    Native code could otherwise reach fork or exec past the process limit.
+
+    Requires:
+        - modules is the table of imported modules, sys.modules in the child
+
+    Ensures:
+        - a later import of ctypes, _ctypes or cffi raises ImportError, which run_check sends to a person
+    """
+    for name in NATIVE_MODULES: modules[ name ] = None
 
 
 def settle( value ):
@@ -102,18 +118,22 @@ def run_request( request, folder ):
     return { "outcomes": [ run_case( fn, args, folder ) for args in request[ "cases" ] ] }
 
 
-def main( stdin=None, stdout=None ):
+def main( stdin=None, stdout=None, modules=None ):
     """
     Read one request, limit the process, run it, print the answer as JSON.
+
+    Requires:
+        - modules is None, or the module table to block native calls in; only the real child passes sys.modules
 
     Ensures:
         - returns 0 after writing the answer
     """
     request = json.load( stdin or sys.stdin )
     limit_resources()
+    if modules is not None: block_native_calls( modules )
     json.dump( run_request( request, os.getcwd() ), stdout or sys.stdout )
     return 0
 
 
 if __name__ == "__main__":  # pragma: no cover -- only the child process takes this branch; main() is tested in-process and by a real child
-    sys.exit( main() )
+    sys.exit( main( modules=sys.modules ) )
