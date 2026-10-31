@@ -94,7 +94,7 @@ class BoundedJobWriter:
                 answers = json.loads( text )
                 break
             except json.JSONDecodeError as e:
-                saved = jor.save_raw_response( text, "purpose-lines" )
+                saved = jor.save_raw_response( text, sp.purpose_label() )
                 print( f"purpose lines: attempt {attempt} wrote unparseable JSON ({e}); raw response saved to {saved}" )
                 if attempt == 2: raise ValueError( f"{response} is not valid JSON after a retry ({e}); raw response saved to {saved}" ) from e
         if not isinstance( answers, list ) or not all( isinstance( a, dict ) and "id" in a and "purpose" in a for a in answers ):

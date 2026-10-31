@@ -104,6 +104,24 @@ def candidate_dir( name, data_directory, config=None, environ=None ):
     return pathlib.Path( value )
 
 
+def purpose_label( config=None, environ=None ):
+    """
+    Return the name of the purpose-lines folder, to tag a saved raw response.
+
+    Requires:
+        - config is a ConfigurationManager, or None to build one
+        - environ is a mapping, or None for os.environ
+
+    Ensures:
+        - returns the last component of the configured purpose-lines folder, from the override variable when set
+
+    Raises:
+        - CandidateError STORAGE_KEY_MISSING when neither source is set
+    """
+    value, _ = _read( "purpose", config, os.environ if environ is None else environ )
+    return pathlib.PurePath( value ).name
+
+
 def search_interpreter( config=None, environ=None ):
     """
     Return the interpreter that runs the search process.

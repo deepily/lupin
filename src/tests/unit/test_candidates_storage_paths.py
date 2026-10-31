@@ -41,6 +41,18 @@ def test_data_subdir_reads_the_ini_value():
     assert sp.data_subdir( FakeConfig( FULL ), {} ) == "rr"
 
 
+def test_purpose_label_is_the_last_component_of_the_configured_folder():
+    assert sp.purpose_label( FakeConfig( FULL ), {} ) == "pl"
+    assert sp.purpose_label( FakeConfig( { **FULL, "reuse candidate purpose lines subdir": "a/b/tag" } ), {} ) == "tag"
+
+
+def test_purpose_label_follows_the_override_variable_and_names_a_missing_key():
+    assert sp.purpose_label( FakeConfig( FULL ), { "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR": "/x/y/over" } ) == "over"
+    with pytest.raises( CandidateError ) as raised:
+        sp.purpose_label( FakeConfig( {} ), {} )
+    assert raised.value.code == STORAGE_KEY_MISSING
+
+
 def test_data_subdir_override_variable_beats_the_ini():
     assert sp.data_subdir( FakeConfig( FULL ), { "LUPIN_REUSE_REVIEW_DATA_SUBDIR": " other " } ) == "other"
 

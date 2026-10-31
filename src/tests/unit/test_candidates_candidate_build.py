@@ -99,6 +99,7 @@ def _unparseable_then( tmp_path, good, bad_text, monkeypatch, bad_times=1 ):
     calls = []
     saved = []
     monkeypatch.setattr( cb.jor, "save_raw_response", lambda text, label: saved.append( ( label, text ) ) or f"/dump/{len( saved )}.txt" )
+    monkeypatch.setattr( cb.sp, "purpose_label", lambda: "configured-purpose" )
 
     def submit( payload ):
         calls.append( payload )
@@ -115,7 +116,7 @@ BAD_QUOTES = '[ { "id": "m.a", "purpose": "Return the "quoted" value." } ]'
 def test_writer_saves_an_unparseable_response_and_asks_once_more( tmp_path, monkeypatch ):
     w, calls, saved = _unparseable_then( tmp_path, [ { "id": "m.a", "purpose": "Return a." } ], BAD_QUOTES, monkeypatch )
     assert w( [ "m.a" ] ) == { "m.a": "Return a." }
-    assert len( calls ) == 2 and saved == [ ( "purpose-lines", BAD_QUOTES ) ]
+    assert len( calls ) == 2 and saved == [ ( "configured-purpose", BAD_QUOTES ) ]
 
 
 def test_writer_refuses_after_two_unparseable_responses_naming_the_saved_file( tmp_path, monkeypatch ):
