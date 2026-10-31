@@ -196,7 +196,15 @@ class _ExecGraph:
         podcast_config.from_config.return_value = self.config_obj
         self.podcast_config = podcast_config
 
+        # The Drive hook is stubbed to its publishing-off answer: config_obj is a MagicMock whose
+        # publish flag would read as truthy, and these tests are about the job, not about Drive.
+        self.drive_hook = AsyncMock( return_value={ "language_links": {}, "extra_lines": [], "folder_link": None } )
+
         self.modules = {
+            "cosa.agents.podcast_generator.drive_hook": _make_module(
+                "cosa.agents.podcast_generator.drive_hook",
+                publish_podcast_to_drive=self.drive_hook,
+            ),
             "cosa.agents.podcast_generator": _make_module(
                 "cosa.agents.podcast_generator",
                 voice_io=self.voice_io, cosa_interface=self.cosa_interface,
@@ -432,6 +440,17 @@ class TestExecute:
             _run( job._execute() )
         # orchestrator built with the project-root-joined absolute path
         assert graph.orch_ctor.call_args.kwargs[ "research_doc_path" ] == "/proj/io/dr/report.md"
+
+    def test_drive_hook_gets_the_resolved_source_and_the_loaded_config( self ):
+        job   = _job( research_path="io/dr/report.md" )
+        graph = _ExecGraph()
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+        graph.drive_hook.assert_awaited_once()
+        assert graph.drive_hook.call_args.args[ 2 ] == "/proj/io/dr/report.md"
+        assert graph.drive_hook.call_args.kwargs == { "config": graph.config_obj }
 
     def test_missing_file_raises( self ):
         job   = _job()
