@@ -51,7 +51,7 @@ def test_decide_is_pinned_on_a_stored_case():
 
 
 def test_the_policy_is_the_one_in_the_design():
-    assert vd.POLICY_PROVIDES == { "threshold": 0.5, "reuse": 0.7, "floor": 0.3, "coverage": 0.5, "shortlist": 10, "sum_tolerance": 0.02, "no_new": True }
+    assert vd.POLICY_PROVIDES == { "threshold": 0.5, "reuse": 0.7, "floor": 0.3, "coverage": 0.5, "shortlist": 10, "sum_tolerance": 0.02, "no_new": True, "fold_constructors": True }
 
 
 def test_the_new_function_returns_exactly_the_keys_decide_returns():
