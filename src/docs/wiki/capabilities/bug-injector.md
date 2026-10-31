@@ -5,7 +5,7 @@ pins:
   - cosa.agents.bug_injector.BugInjector@670fd390e9
   - cosa.agents.bug_injector.BugInjector.run_prompt@6863e7a4d2
   - cosa.agents.bug_injector.BugInjector.restore_from_serialized_state@bf383c265e
-  - cosa.utils.util_code_runner.assemble_and_run_solution@88a30dccaf
+  - cosa.utils.util_code_runner.assemble_and_run_solution@84dbc3d3b4
   - cosa.agents.io_models.xml_models.BugInjectionResponse@e92f686130
 ---
 # Bug injector

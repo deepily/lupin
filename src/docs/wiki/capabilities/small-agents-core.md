@@ -11,7 +11,7 @@ pins:
   - cosa.agents.calculator.agent.CalculatorAgent@5d4c47e913
   - cosa.agents.calculator.agent.CalculatorAgent.run_code@0b641aec1b
   - cosa.rest.v2.flow.AskFlow.ask@57c5527ac0
-  - cosa.utils.util_code_runner.assemble_and_run_solution@88a30dccaf
+  - cosa.utils.util_code_runner.assemble_and_run_solution@84dbc3d3b4
 ---
 # Small agents core
 

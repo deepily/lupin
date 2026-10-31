@@ -3,7 +3,7 @@ capability: util-code-runner-and-dataframe
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.utils.util_code_runner.initialize_code_response_dict@093e39df41
-  - cosa.utils.util_code_runner.assemble_and_run_solution@88a30dccaf
+  - cosa.utils.util_code_runner.assemble_and_run_solution@84dbc3d3b4
   - cosa.utils.util_code_runner.test_assemble_and_run_solution@8f8e7a7e79
   - cosa.utils.util_pandas.DeepilyDataFrame@18fdea0333
   - cosa.utils.util_pandas.DeepilyDataFrame.read_csv@becff7fbd9
@@ -19,6 +19,7 @@ pins:
 - `initialize_code_response_dict()` returns `{ "return_code": -1, "output": "No code run yet" }`.
 - `assemble_and_run_solution( solution_code, example_code, path_to_df, ... )` adds imports and post-function code. It writes a uniquely named file under the configured code path and runs it with `python_runtime`.
 - The run has a 60 second timeout, and the child's working directory is `<root>/io`.
+- The child runs with `TZ` set to the INI key `app timezone`, so a bare `datetime.now()` in generated code reads the user's clock. With no configuration loaded the function raises `ValueError`, and there is no fallback zone.
 - It returns the response dict with the child's return code. Output is stripped stdout, `ERROR executing code:` plus stderr, or `No results returned`.
 - The generated file is always removed.
 - On timeout it returns output None when `return_none_on_timeout` is True, and otherwise re-raises. `inject_bugs=True` first rewrites the code with the bug injector.
