@@ -50,14 +50,14 @@
             }
 
             async function authedFetch( url, init ) {
-                const send = ( token ) => fetch( url, {
+                const withAuth = ( token ) => ( {
                     ...init,
                     headers : { ...( init.headers || {} ), ...( token ? { Authorization: "Bearer " + token } : {} ) }
                 } );
-                let resp = await send( localStorage.getItem( "lupin_access_token" ) );
+                let resp = await fetch( url, withAuth( localStorage.getItem( "lupin_access_token" ) ) );
                 if ( resp.status === 401 ) {
                     const fresh = await refreshToken();
-                    if ( fresh ) resp = await send( fresh );
+                    if ( fresh ) resp = await fetch( url, withAuth( fresh ) );
                 }
                 return resp;
             }
