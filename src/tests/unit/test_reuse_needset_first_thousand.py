@@ -566,3 +566,12 @@ def test_a_run_whose_attribution_seeds_were_all_skipped_ends_failed_through_run_
     with cap.installed(): report = asyncio.run( stages.run_stages( cap, { stages.ATTRIBUTION: one( None ), stages.YIELD: never, stages.CONTROL: never, stages.REMAINDER: never } ) )
     assert report[ "stages" ][ "attribution" ][ "status" ] == "failed" and report[ "stages" ][ "attribution" ][ "code" ] == er.ALL_SEEDS_UNREADABLE and report[ "stages" ][ "yield" ][ "status" ] == "not_run"
     assert ft.exit_status( { "live": True, "report": report } ) == 1
+
+
+def test_a_stage_with_no_listed_seeds_and_no_skips_is_not_called_all_skipped( monkeypatch ):
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: { "attribution": { "order": [] }, "yield": { "order": [] } } )
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: skipping_stage( tally, 0, { "needs": 0 } ) )
+    one, _ = ft.stage_factories( "/lists.json", parts )
+    assert asyncio.run( one( "env" )() )[ "no_final_need" ][ "unreadable_reply" ] == 0
