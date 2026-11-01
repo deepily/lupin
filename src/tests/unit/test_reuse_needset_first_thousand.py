@@ -933,7 +933,8 @@ def test_a_control_pair_is_tried_control_tries_times_and_the_drafter_is_told_so(
         return { "ok": True, "need": "n" }
 
     asyncio.run( ft.draft_control_needs( pairs()[ :2 ], lambda p: { "id": p[ "rewrite" ][ "id" ] }, None, None, draft_fn ) )
-    assert seen == [ { "max_tries": ft.CONTROL_TRIES } ] * 2 and ft.CONTROL_TRIES > draft.MAX_TRIES
+    assert ft.CONTROL_TRIES == 4 and ft.CONTROL_TRIES > draft.MAX_TRIES == 2
+    assert seen == [ { "max_tries": 4 } ] * 2
 
 
 def test_a_pair_that_never_drafts_is_handed_to_on_undrafted_and_left_out_while_the_others_go_on():

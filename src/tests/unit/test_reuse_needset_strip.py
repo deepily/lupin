@@ -132,3 +132,25 @@ def test_the_shape_mode_agrees_with_the_duplicate_finders_kinds_for_function_lik
     for d in js_index.extract_js_shapes( tmp_path, [ tmp_path / "s.ts" ] )[ "defs" ]: theirs[ d[ "name" ] ].append( d[ "kinds" ] )
     for ( name, _ ), kinds in zip( wanted, mine ): assert kinds in theirs[ name ], name
     assert len( mine ) == 5 and all( len( k ) > 3 for k in mine )
+
+
+def planted_like( rec, ident ):
+    """Return the record as the planted file writes it, under an id that is no module path."""
+    return { **rec, "id": ident }
+
+
+@pytest.mark.parametrize( "rec", [ PY_FUNCTION, PY_METHOD ], ids=[ "function", "method" ] )
+def test_a_planted_python_record_strips_and_reads_exactly_as_the_same_member_under_its_dotted_id( rec ):
+    planted = planted_like( rec, "d-114b2124d0" )
+    assert strip.dotted_id( planted ) == rec[ "id" ] and strip.module_of( planted ) == strip.module_of( rec ) and strip.src_root_of( "/r", planted ) == strip.src_root_of( "/r", rec )
+    assert strip.strip_member( planted, REPO_ROOT ) == strip.strip_member( rec, REPO_ROOT )
+    assert strip.bodies_for( [ planted ], REPO_ROOT )[ "d-114b2124d0" ] == strip.bodies_for( [ rec ], REPO_ROOT )[ rec[ "id" ] ]
+
+
+def test_the_dotted_id_of_a_python_record_is_kept_when_it_fits_its_file_and_derived_when_it_does_not():
+    assert strip.dotted_id( PY_FUNCTION ) == PY_FUNCTION[ "id" ] and strip.dotted_id( dict( PY_FUNCTION, id=PY_FUNCTION[ "id" ] + "#2" ) ) == PY_FUNCTION[ "id" ]
+    assert strip.dotted_id( planted_like( PY_FUNCTION, "d-0c4d1f3292" ) ) == "cosa.repo.symindex.dups.jaccard"
+    assert strip.dotted_id( { "id": "d-x", "file": "src/cosa/pkg/__init__.py", "name": "build", "lang": "py" } ) == "cosa.pkg.build"
+    assert strip.dotted_id( { "id": "d-x", "file": "mod.py", "name": "f", "lang": "py" } ) == "mod.f"                                  # a file at the root has no src to drop
+    assert strip.dotted_id( { "id": "other.pkg.f", "file": "src/cosa/m.py", "name": "f", "lang": "py" } ) == "cosa.m.f"                # an id for another module is not trusted
+    assert strip.dotted_id( { "id": "a.b.f#2" } ) == "a.b.f" and strip.dotted_id( { "id": "d-x", "file": "src/a.ts", "name": "f", "lang": "ts" } ) == "d-x"
