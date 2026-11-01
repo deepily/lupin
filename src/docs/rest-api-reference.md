@@ -42,6 +42,7 @@ This page is an index. The reference itself is in the parts below, in document o
 - [25a. Heartbeat Stop Poke Switch (`/api/heartbeat/*`)](rest-api-reference/06-files-websockets-pages-push.md#25a-heartbeat-stop-poke-switch-apiheartbeat)
 - [25b. Podcast Proxy (`/api/podcast-proxy/*`)](rest-api-reference/07-podcast-proxy-and-skeleton-crew.md#25b-podcast-proxy-apipodcast-proxy)
 - [25c. Skeleton Crew Switch and Fleet Cap (`/api/arbiter/*`)](rest-api-reference/07-podcast-proxy-and-skeleton-crew.md#25c-skeleton-crew-switch-and-fleet-cap-apiarbiter)
+- [25d. Podcast Drive for the Phone (`/api/podcast-drive/*`)](rest-api-reference/07-podcast-proxy-and-skeleton-crew.md#25d-podcast-drive-for-the-phone-apipodcast-drive)
 - [26. Task Store — Promote/Demote Requests (`/api/tasks/*`)](rest-api-reference/08-task-store-and-cc-transcript.md#26-task-store--promotedemote-requests-apitasks)
 - [27. CC Transcript Console (`/api/cc-transcript/*`)](rest-api-reference/08-task-store-and-cc-transcript.md#27-cc-transcript-console-apicc-transcript)
 - [28. Reuse Candidate Search (`/api/reuse-candidates/*`)](rest-api-reference/08-task-store-and-cc-transcript.md#28-reuse-candidate-search-apireuse-candidates)
@@ -59,6 +60,6 @@ This page is an index. The reference itself is in the parts below, in document o
 | [04-agents-and-expediters.md](rest-api-reference/04-agents-and-expediters.md) | routes 8 to 17b: agents, expediters, test suite |
 | [05-commons-proxy-mock-job.md](rest-api-reference/05-commons-proxy-mock-job.md) | routes 17c to 19: commons, proxy, mock job |
 | [06-files-websockets-pages-push.md](rest-api-reference/06-files-websockets-pages-push.md) | routes 20 to 25a: files, WebSockets, pages, push |
-| [07-podcast-proxy-and-skeleton-crew.md](rest-api-reference/07-podcast-proxy-and-skeleton-crew.md) | routes 25b and 25c: podcast proxy, skeleton crew switch and fleet cap |
+| [07-podcast-proxy-and-skeleton-crew.md](rest-api-reference/07-podcast-proxy-and-skeleton-crew.md) | routes 25b to 25d: podcast proxy, skeleton crew switch, fleet cap, phone Drive |
 | [08-task-store-and-cc-transcript.md](rest-api-reference/08-task-store-and-cc-transcript.md) | routes 26 to 28: task store, CC transcript, reuse candidate search |
 | [09-job-ids-and-cross-reference.md](rest-api-reference/09-job-ids-and-cross-reference.md) | job id prefixes, cross-reference, and route 29: blind pair labelling |

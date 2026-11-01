@@ -14,6 +14,7 @@ import urllib.parse
 
 _PODCAST_PREFIX_RE = re.compile( r"^\s*podcast\s*:\s*", re.IGNORECASE )
 _H1_RE             = re.compile( r"^#[ \t]+(.+?)[ \t]*$", re.MULTILINE )
+_FOLDER_STAMP_RE   = re.compile( r"^\d{4}-\d{2}-\d{2}-\d{6}-" )
 
 
 def clean_title( heading ):
@@ -35,6 +36,23 @@ def clean_title( heading ):
     return title if title else None
 
 
+def title_from_script_text( text ):
+    """
+    Read the plain title from the first "# " heading in a script's text.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns the cleaned title, or None when there is no heading
+
+    Raises:
+        - nothing
+    """
+    match = _H1_RE.search( text )
+    return clean_title( match.group( 1 ) ) if match else None
+
+
 def read_script_title( script_abs_path ):
     """
     Read the plain title from a script file's first "# " heading.
@@ -54,8 +72,25 @@ def read_script_title( script_abs_path ):
             text = handle.read()
     except OSError:
         return None
-    match = _H1_RE.search( text )
-    return clean_title( match.group( 1 ) ) if match else None
+    return title_from_script_text( text )
+
+
+def title_from_folder_name( folder_name ):
+    """
+    Make a plain title from a Drive job folder name such as "2026-11-01-184006-the-empty-net".
+
+    Requires:
+        - folder_name is a string
+
+    Ensures:
+        - the date and time stamp is removed, dashes and underscores become spaces, each word is capitalised
+        - returns the folder name unchanged when nothing is left after that
+
+    Raises:
+        - nothing
+    """
+    words = _FOLDER_STAMP_RE.sub( "", folder_name ).replace( "-", " " ).replace( "_", " " ).split()
+    return " ".join( word[ :1 ].upper() + word[ 1: ] for word in words ) or folder_name
 
 
 def source_ref( path, project_root ):

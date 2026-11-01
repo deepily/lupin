@@ -39,6 +39,7 @@ Both key files are secrets. They are never committed and never linked into workt
 | `podcast drive upload script` | `false` | also upload each language's script |
 | `podcast drive upload source document` | `true` | also upload the source document, once per job |
 | `podcast drive token path` | `/src/conf/keys/google-drive-oauth-token.json` | joined to the project root at run time |
+| `podcast drive owner email` | empty | the one Lupin user who may list and stream the folder through `/api/podcast-drive`; empty means nobody |
 
 ## Switching it off
 

@@ -46,6 +46,27 @@ class TestReadScriptTitle:
         assert pl.read_script_title( None ) is None and pl.read_script_title( "" ) is None
 
 
+class TestTitleFromScriptText:
+
+    def test_the_first_heading_without_its_label( self ):
+        assert pl.title_from_script_text( "intro\n# Podcast: The Empty Net\n## Generated: x\n" ) == "The Empty Net"
+
+    def test_no_heading_gives_none( self ):
+        assert pl.title_from_script_text( "## only a second-level heading" ) is None
+
+
+class TestTitleFromFolderName:
+
+    @pytest.mark.parametrize( "name, expected", [
+        ( "2026-11-01-184006-the-empty-net",       "The Empty Net" ),
+        ( "2026-11-01-014849-grading_your-own-exam", "Grading Your Own Exam" ),
+        ( "no-stamp-here",                          "No Stamp Here" ),
+        ( "2026-11-01-184006-",                     "2026-11-01-184006-" ),
+    ] )
+    def test_stamp_removed_and_words_capitalised( self, name, expected ):
+        assert pl.title_from_folder_name( name ) == expected
+
+
 class TestSourceRef:
 
     def test_absolute_under_io( self ):

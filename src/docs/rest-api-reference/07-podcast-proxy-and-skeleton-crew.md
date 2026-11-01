@@ -1,4 +1,4 @@
-> Part 7 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 25b and 25c: podcast proxy, skeleton crew switch and fleet cap.
+> Part 7 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 25b to 25d: podcast proxy, skeleton crew switch, fleet cap, phone Drive.
 
 ## 25b. Podcast Proxy (`/api/podcast-proxy/*`)
 
@@ -41,5 +41,16 @@ Design note: `src/rnd/v0.2.2/2026.10.10-skeleton-crew-toggle-design.md`. Full sc
 
 The file mute from 25a stays a separate lever.
 `GET /api/heartbeat/poke-mute` reports which of the two muted the poke in its `source` field.
+
+## 25d. Podcast Drive for the Phone (`/api/podcast-drive/*`)
+
+The phone lists and plays the podcasts published to the owner's Google Drive without a Google sign-in. The server reads Drive with the desktop token.
+Auth: Bearer JWT. Only the user whose login email is `podcast drive owner email` may use it. Anyone else gets 403 before any Drive call, and an empty key means nobody.
+The folder is `podcast drive folder name`, which may be a path such as `Lupin AF Mobile/Podcasts`.
+
+| Method | Path | Summary |
+|--------|------|---------|
+| GET | `/api/podcast-drive/list` | Returns `[ { job_folder, title, created_ts, files: [ { name, mime, size, drive_file_id, stream_url } ] } ]`, newest first, at most 50 jobs. `title` is the script's first heading when the folder holds a `-script.md`, else the folder name without its timestamp. A folder not yet in Drive gives `[]`. 403 not the owner; 503 Drive or the token is unavailable. |
+| GET | `/api/podcast-drive/stream/{drive_file_id}` | Streams one file in 64 KiB chunks and passes the `Range` header to Drive, so the phone can seek. Answers 200, 206 or 416 with `Content-Range`, `Content-Length` and `Accept-Ranges`. Serves only a file in a job folder directly under the configured folder; any other id is 404 and is never requested from Drive. 403 not the owner. 503 for any Drive failure that is not a 404. |
 
 ---

@@ -10,12 +10,14 @@ Setup steps and settings: src/docs/agents/podcast-generator-google-drive.md
 
 import json
 import os
+import urllib.parse
 
 import cosa.utils.util as cu
 
 SCOPES                   = [ "https://www.googleapis.com/auth/drive.file" ]
 FOLDER_MIME_TYPE         = "application/vnd.google-apps.folder"
 FOLDER_LINK_TEMPLATE     = "https://drive.google.com/drive/folders/{folder_id}"
+DRIVE_MEDIA_URL          = "https://www.googleapis.com/drive/v3/files/{file_id}"
 FOLDER_CACHE_REL_PATH    = "/src/conf/keys/google-drive-folder-id.json"
 UPLOAD_CHUNK_SIZE_BYTES  = 8 * 1024 * 1024
 
@@ -26,6 +28,15 @@ class DrivePublishError( Exception ):
 
     Raised for a missing token, a token that cannot be refreshed, and API errors. The message names
     the file or folder involved.
+    """
+
+
+class DriveNotFound( DrivePublishError ):
+    """
+    Drive answered 404: the file or folder does not exist, or this token cannot see it.
+
+    A subclass of DrivePublishError, so existing handlers still catch it. A caller that must tell
+    "not there" from "Drive is unwell" catches this one first.
     """
 
 
@@ -68,6 +79,7 @@ class DrivePublisher:
         self.folder_path       = "/".join( self.folder_levels )
         self.debug             = debug
         self.folder_cache_path = folder_cache_path if folder_cache_path is not None else cu.get_project_root() + FOLDER_CACHE_REL_PATH
+        self.creds             = None
         self.service           = service if service is not None else self._build_service()
 
     def _build_service( self ):
@@ -101,6 +113,7 @@ class DrivePublisher:
             with os.fdopen( fd, "w" ) as token_file: token_file.write( creds.to_json() )
             os.chmod( self.token_path, 0o600 )
 
+        self.creds = creds
         return build( "drive", "v3", credentials=creds, cache_discovery=False )
 
     def _call( self, what, request ):
@@ -114,11 +127,14 @@ class DrivePublisher:
             - returns the response dict
 
         Raises:
-            - DrivePublishError naming `what` and the underlying error
+            - DriveNotFound when Drive answered 404
+            - DrivePublishError naming `what` and the underlying error for any other failure
         """
         try:
             return request.execute()
         except Exception as e:
+            status = e.resp.status if hasattr( e, "resp" ) else None   # googleapiclient.errors.HttpError carries the HTTP answer in .resp
+            if status == 404: raise DriveNotFound( f"{what}: {e}" ) from e
             raise DrivePublishError( f"{what}: {e}" ) from e
 
     @staticmethod
@@ -220,19 +236,173 @@ class DrivePublisher:
         Raises:
             - DrivePublishError on an API error, naming the folder
         """
-        escaped = name.replace( "\\", "\\\\" ).replace( "'", "\\'" )
-        query   = f"name = '{escaped}' and mimeType = '{FOLDER_MIME_TYPE}' and trashed = false"
-        if parent_id is not None: query += f" and '{parent_id}' in parents"
-
-        listing = self._call( f"find folder {name}", self.service.files().list( q=query, fields="files(id)", spaces="drive" ) )
-        matches = listing.get( "files" ) or []
-        if matches: return matches[ 0 ][ "id" ]
+        found = self._find_only( name, parent_id )
+        if found is not None: return found
 
         body = { "name": name, "mimeType": FOLDER_MIME_TYPE }
         if parent_id is not None: body[ "parents" ] = [ parent_id ]
         folder_id = self._call( f"create folder {name}", self.service.files().create( body=body, fields="id" ) )[ "id" ]
         if self.debug: print( f"[DrivePublisher] created folder {name}" )
         return folder_id
+
+    def find_top_folder( self ):
+        """
+        Find the configured top folder without creating anything.
+
+        Ensures:
+            - returns the id of the last level of self.folder_path, or None when any level is absent
+            - a cached id that is still live is returned with no search
+
+        Raises:
+            - DrivePublishError on an API error
+        """
+        cached_id = self._read_cached_folder_id()
+        if cached_id is not None and self._cached_folder_is_live( cached_id ): return cached_id
+
+        folder_id = None
+        for level in self.folder_levels:
+            folder_id = self._find_only( level, folder_id )
+            if folder_id is None: return None
+        return folder_id
+
+    def _find_only( self, name, parent_id ):
+        """
+        Find one folder by exact name under a parent. Never creates.
+
+        Requires:
+            - name is a non-empty string
+            - parent_id is a Drive folder id, or None for the Drive root
+
+        Ensures:
+            - returns the first matching folder id, or None
+
+        Raises:
+            - DrivePublishError on an API error
+        """
+        escaped = name.replace( "\\", "\\\\" ).replace( "'", "\\'" )
+        query   = f"name = '{escaped}' and mimeType = '{FOLDER_MIME_TYPE}' and trashed = false"
+        if parent_id is not None: query += f" and '{parent_id}' in parents"
+        listing = self._call( f"find folder {name}", self.service.files().list( q=query, fields="files(id)", spaces="drive" ) )
+        matches = listing.get( "files" ) or []
+        return matches[ 0 ][ "id" ] if matches else None
+
+    def list_job_folders( self, top_id, limit=50 ):
+        """
+        List the job subfolders of the top folder, newest first.
+
+        Requires:
+            - top_id is a Drive folder id
+            - limit is a positive integer
+
+        Ensures:
+            - returns up to limit dicts { "id", "name", "createdTime" }, newest first
+
+        Raises:
+            - DrivePublishError on an API error
+        """
+        query   = f"'{top_id}' in parents and mimeType = '{FOLDER_MIME_TYPE}' and trashed = false"
+        listing = self._call( "list job folders", self.service.files().list(
+            q=query, fields="files(id,name,createdTime)", spaces="drive", orderBy="createdTime desc", pageSize=limit ) )
+        return listing.get( "files" ) or []
+
+    def list_folder_files( self, folder_id ):
+        """
+        List the files (not folders) inside one job folder.
+
+        Requires:
+            - folder_id is a Drive folder id
+
+        Ensures:
+            - returns dicts { "id", "name", "mimeType", "size" }; size is a string of bytes or absent
+
+        Raises:
+            - DrivePublishError on an API error
+        """
+        query   = f"'{folder_id}' in parents and mimeType != '{FOLDER_MIME_TYPE}' and trashed = false"
+        listing = self._call( f"list files in {folder_id}", self.service.files().list(
+            q=query, fields="files(id,name,mimeType,size)", spaces="drive", orderBy="name", pageSize=100 ) )
+        return listing.get( "files" ) or []
+
+    def file_inside_top_folder( self, file_id, top_id ):
+        """
+        Say whether a file sits in a job folder directly under the top folder.
+
+        Requires:
+            - file_id is any Drive file id, including one from a stranger
+            - top_id is the top folder's id
+
+        Ensures:
+            - returns { "id", "name", "mimeType", "size" } when the file is not a folder, is not trashed,
+              and its parent is a folder whose parent is top_id
+            - returns None for anything else, including an id or parent Drive answers 404 for
+
+        Raises:
+            - DrivePublishError when Drive fails any other way, so the caller can say "unavailable" and not "not found"
+        """
+        try:
+            meta = self._call( f"check file {file_id}", self.service.files().get( fileId=file_id, fields="id,name,mimeType,size,parents,trashed" ) )
+            if meta.get( "trashed" ) or meta.get( "mimeType" ) == FOLDER_MIME_TYPE: return None
+            for parent_id in meta.get( "parents" ) or []:
+                parent = self._call( f"check folder {parent_id}", self.service.files().get( fileId=parent_id, fields="id,mimeType,parents,trashed" ) )
+                if parent.get( "mimeType" ) == FOLDER_MIME_TYPE and not parent.get( "trashed" ) and top_id in ( parent.get( "parents" ) or [] ):
+                    return { key: meta[ key ] for key in ( "id", "name", "mimeType", "size" ) if key in meta }
+        except DriveNotFound:
+            return None
+        return None
+
+    def read_head( self, file_id, max_bytes=4096 ):
+        """
+        Read the first bytes of a file, for a title.
+
+        Requires:
+            - file_id is a Drive file id
+            - max_bytes is a positive integer
+
+        Ensures:
+            - returns at most max_bytes of the file as bytes
+
+        Raises:
+            - DrivePublishError on an API error
+        """
+        request = self.service.files().get_media( fileId=file_id )
+        request.headers[ "Range" ] = f"bytes=0-{max_bytes - 1}"
+        return self._call( f"read file {file_id}", request )[ :max_bytes ]
+
+    def _authorized_session( self ):
+        """
+        Build a requests session signed with the Drive token.
+
+        Ensures:
+            - returns a google.auth AuthorizedSession, which refreshes the token when it expires
+
+        Raises:
+            - DrivePublishError when the publisher was given a service and so holds no credentials
+        """
+        if self.creds is None: raise DrivePublishError( "no Drive credentials: the publisher was built with an injected service" )
+        from google.auth.transport.requests import AuthorizedSession
+        return AuthorizedSession( self.creds )
+
+    def open_media( self, file_id, range_header=None ):
+        """
+        Open a file's bytes as a streamed HTTP response, passing a Range header through.
+
+        Requires:
+            - file_id is a Drive file id the caller has already checked with file_inside_top_folder
+            - range_header is a "bytes=..." string, or None for the whole file
+
+        Ensures:
+            - returns the open streaming response (status 200, 206 or 416); the caller closes it
+
+        Raises:
+            - DrivePublishError if the request cannot be made
+        """
+        headers = { "Range": range_header } if range_header else {}
+        try:
+            return self._authorized_session().get( DRIVE_MEDIA_URL.format( file_id=urllib.parse.quote( file_id, safe="" ) ), params={ "alt": "media" }, headers=headers, stream=True, timeout=30 )
+        except DrivePublishError:
+            raise
+        except Exception as e:
+            raise DrivePublishError( f"stream file {file_id}: {e}" ) from e
 
     def upload( self, local_path, mime_type, parent_id ):
         """
