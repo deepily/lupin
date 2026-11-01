@@ -872,3 +872,54 @@ def test_a_stand_in_root_is_neither_locked_nor_unlocked( tmp_path, monkeypatch )
     monkeypatch.setattr( ft.source_at, "ensure_worktree", lambda *a: pytest.fail( "a worktree was made" ) )
     monkeypatch.setattr( ft.source_at, "unlock", lambda *a: pytest.fail( "a stand-in root was unlocked" ) )
     ft.main( [ *argv, "--live" ], deps=live_deps( sha, lambda *a: asyncio.sleep( 0, {} ) ) )
+
+
+class Replying:
+    """A stand-in for sdk_query that answers the drafter with one sentence and counts the calls."""
+
+    def __init__( self ): self.calls = 0
+
+    async def __call__( self, prompt, options ):
+        from claude_agent_sdk import AssistantMessage, TextBlock
+        self.calls += 1
+        yield AssistantMessage( content=[ TextBlock( SENTENCE ) ], model=options.model )
+
+
+def test_the_control_drafts_with_the_real_drafter_call_inside_a_running_loop_and_the_cap_files_its_calls_under_the_stage( tmp_path ):
+    from cosa.repo.doc_lint import model_transport as mt
+    transport = Replying()
+    ledger    = draft.make_ledger( str( tmp_path / "l.jsonl" ), None, "max-plan" )
+    cap       = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 100, { "control": 5 } )
+    ps        = [ real_pair( i ) for i in range( 3 ) ]
+    own_text  = lambda rec: { **strip_of( rec ), "text": f"def {rec[ 'id' ].replace( '-', '_' )}(): pass" }       # a text of its own per pair, so the ledger answers none from another's reply
+
+    async def inside_a_loop():
+        with call_cap.stage( "control" ): return await ft.draft_control_needs( ps, lambda p: ft.control_job( p, own_text ), draft.drafter_call( query_fn=transport ), ledger, draft.draft_need )
+
+    try:
+        with cap.installed(): needs = asyncio.run( inside_a_loop() )
+    finally:
+        mt.set_charge_hook( None )
+    assert needs == { p[ "rewrite" ][ "id" ]: SENTENCE for p in ps } and transport.calls == 3
+    assert cap.by_stage() == { "control": 3 }                                                                  # carried across the thread, not filed unstaged
+
+
+def test_the_real_drafter_call_still_refuses_to_run_in_a_running_loop_so_the_thread_is_what_makes_the_control_work( tmp_path ):
+    async def inline():
+        return draft.drafter_call( query_fn=Replying() )( "s", "u" )
+
+    with pytest.raises( RuntimeError, match="running event loop" ): asyncio.run( inline() )
+
+
+def test_a_stage_that_crashes_leaves_stage_reports_json_with_the_finished_stages_and_the_crash( tmp_path ):
+    async def done(): return { "found": 5 }
+
+    async def crash(): raise RuntimeError( "asyncio.run() cannot be called from a running event loop" )
+
+    async def never(): pytest.fail( "a stage after the crash ran" )
+
+    with pytest.raises( RuntimeError, match="running event loop" ): asyncio.run( ft.run_first_thousand( str( tmp_path ), done, done, crash, never ) )
+    report = json.loads( ( tmp_path / ft.REPORT_FILE ).read_text( encoding="utf-8" ) )
+    assert report[ "stages" ][ "attribution" ] == { "status": "done", "report": { "found": 5 } } and report[ "stages" ][ "yield" ][ "status" ] == "done"
+    assert report[ "stages" ][ "control" ] == { "status": "failed", "code": "RuntimeError", "detail": "asyncio.run() cannot be called from a running event loop" }
+    assert report[ "stages" ][ "remainder" ] == { "status": "not_run" } and report[ "used" ] == 0 and report[ "limit" ] == call_cap.CALL_LIMIT

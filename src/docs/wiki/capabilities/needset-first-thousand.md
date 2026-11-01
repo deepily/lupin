@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.reuse_needset.planted_pool.PlantedCandidateStage@80e5c6ec63
   - lupin_mcp.reuse_needset.first_thousand.read_latest_labels@e66a6cadd1
   - lupin_mcp.reuse_needset.first_thousand.remainder_pairs@e6db44db98
-  - lupin_mcp.reuse_needset.first_thousand.draft_control_needs@62f1f1ebb1
+  - lupin_mcp.reuse_needset.first_thousand.draft_control_needs@2335f2a8cd
   - lupin_mcp.reuse_needset.first_thousand.planted_check@f29004ed70
   - lupin_mcp.reuse_needset.first_thousand.control_ask@fa3a692e9a
   - lupin_mcp.reuse_needset.first_thousand.remainder_stage@0cf94530e9
@@ -25,7 +25,7 @@ The pieces under the control and the remainder of Set B's first 1,000 model call
 
 ## The control
 - `planted_check` asks the checker about one need over a pool that holds the planted records. It adds them to the entries the judge may be asked about and swaps the stage on a copy of the context. The seed is left out as in `check_need`.
-- `draft_control_needs` writes the need sentence of each pair, one at a time, with the drafter that writes real Set B needs. Those calls count toward the cap. A sentence that does not pass raises `CONTROL_NEED_UNDRAFTED`.
+- `draft_control_needs` writes the need sentence of each pair, one at a time, with the drafter that writes real Set B needs. Each pair drafts on a worker thread. Those calls count toward the cap, under the running stage. A sentence that does not pass raises `CONTROL_NEED_UNDRAFTED`.
 - `control_ask` builds the ask function the control stage takes, from the drafted needs and a checker.
 
 ## The remainder

@@ -310,3 +310,16 @@ def test_run_stages_keeps_a_partial_report_whole_under_the_budget_reached_status
 
     out = run( cap, all_stages( transport, **{ "yield": yielded } ) )
     assert out[ "stages" ][ "yield" ] == { "status": "budget_reached", "report": partial } and out[ "stages" ][ "control" ][ "status" ] == "done"
+
+
+def test_a_stage_that_raises_hands_the_report_so_far_to_on_raise_before_the_error_goes_on( tmp_path ):
+    cap, transport, seen = new_cap( tmp_path ), Transport(), []
+
+    async def crash():
+        raise RuntimeError( "boom" )
+
+    funcs = all_stages( transport, **{ "control": crash } )
+    with cap.installed(), pytest.raises( RuntimeError, match="boom" ): asyncio.run( stages.run_stages( cap, funcs, on_raise=seen.append ) )
+    report, = seen
+    assert [ s[ "status" ] for s in report[ "stages" ].values() ] == [ "done", "done", "failed", "not_run" ] and report[ "used" ] == 2
+    assert report[ "stages" ][ "control" ] == { "status": "failed", "code": "RuntimeError", "detail": "boom" } and report[ "stages" ][ "attribution" ][ "report" ] == { "calls": 1 }

@@ -88,7 +88,9 @@ async def draft_control_needs( pairs, make_job, ask, ledger, draft_fn ):
 
     Requires:
         - make_job( pair ) returns the job draft_fn takes; draft_fn( job, ask, ledger ) returns a record with ok and need
+        - the caller may be inside a running event loop, as the control stage is
         - every model call goes through the installed cap, so these calls count toward the 1,000
+        - each pair is drafted on a worker thread that carries the caller's context, so the call cap files its calls under the running stage and the drafter's own event loop does not meet the running one
 
     Ensures:
         - returns { rewrite id: sentence } for every pair
@@ -99,7 +101,7 @@ async def draft_control_needs( pairs, make_job, ask, ledger, draft_fn ):
     """
     needs = {}
     for p in pairs:
-        record = draft_fn( make_job( p ), ask, ledger )
+        record = await asyncio.to_thread( lambda: draft_fn( make_job( p ), ask, ledger ) )
         if not record[ "ok" ]: raise er.NeedsetError( er.CONTROL_NEED_UNDRAFTED, f"{p[ 'rewrite' ][ 'id' ]}: {record[ 'reason' ]}" )
         needs[ p[ "rewrite" ][ "id" ] ] = record[ "need" ]
     return needs
@@ -185,12 +187,17 @@ async def run_first_thousand( run_dir, stage_one, stage_two, control, remainder,
         - the cap reads its count from call-ledger.jsonl in run_dir, so a resumed run keeps the calls already spent
         - each stage keeps to its budget in stages.STAGE_BUDGETS
         - returns stages.run_stages' report, also written as stage-reports.json in run_dir
+        - when a stage raises an error that is not a NeedsetError, the report of the stages so far is written first, with that stage failed, so finished stages keep their report
         - the cap is installed for the whole run and put back when it ends
     """
     cap = call_cap.CallCap( f"{run_dir}/{CALLS_FILE}", limit, stages.STAGE_BUDGETS )
+    def write( report ):
+        """Ensures: writes the report to stage-reports.json in the run folder."""
+        with open( f"{run_dir}/{REPORT_FILE}", "w", encoding="utf-8" ) as f: f.write( json.dumps( report, sort_keys=True, indent=4 ) + "\n" )
+
     with cap.installed():
-        report = await stages.run_stages( cap, { stages.ATTRIBUTION: stage_one, stages.YIELD: stage_two, stages.CONTROL: control, stages.REMAINDER: remainder } )
-    with open( f"{run_dir}/{REPORT_FILE}", "w", encoding="utf-8" ) as f: f.write( json.dumps( report, sort_keys=True, indent=4 ) + "\n" )
+        report = await stages.run_stages( cap, { stages.ATTRIBUTION: stage_one, stages.YIELD: stage_two, stages.CONTROL: control, stages.REMAINDER: remainder }, on_raise=write )
+    write( report )
     return report
 
 
