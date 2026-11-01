@@ -198,6 +198,29 @@ class TestDeepResearchToPodcastJobCard:
             await job._execute()
         abstract = next( c.kwargs[ "abstract" ] for c in notify.call_args_list if c.kwargs.get( "abstract" ) and "Research → Podcast Complete" in c.kwargs[ "abstract" ] )
         assert "path=podcasts/u/en.mp3&script=podcasts/u/en-script.md&source=io/deep-research/u/report.md&title=The%20Empty%20Net&embed=1" in abstract
+        assert "[📝 Script](/app/audio?path=podcasts/u/en.mp3&script=podcasts/u/en-script.md&source=io/deep-research/u/report.md&title=The%20Empty%20Net&open=script)" in abstract
+
+    @pytest.mark.asyncio
+    async def test_a_script_without_audio_gets_no_script_link( self, tmp_path, monkeypatch ):
+        job = _drp_job()
+        monkeypatch.setattr( "cosa.utils.util.get_project_root", lambda: str( tmp_path ) )
+        from cosa.agents.deep_research_to_podcast.state import PipelineState
+        io = str( tmp_path ) + "/io/podcasts/u/"
+        result = SimpleNamespace(
+            state=PipelineState.COMPLETED, error=None, research_path="io/deep-research/u/report.md", research_abstract="a",
+            audio_path=None, script_path=io + "en-script.md",
+            pg_artifacts={ "audio_paths_by_language": {}, "script_paths_by_language": { "en": io + "en-script.md" } },
+            dr_cost=1.0, pg_cost=1.0, total_cost=2.0 )
+        agent = MagicMock()
+        agent.run_async = AsyncMock( return_value=result )
+        with patch( "cosa.agents.deep_research.voice_io.notify", new_callable=AsyncMock ) as notify, \
+             patch( "cosa.agents.deep_research.voice_io.set_job_id" ), \
+             patch( "cosa.agents.deep_research.voice_io.clear_job_id" ), \
+             patch( "cosa.agents.deep_research.cosa_interface" ), \
+             patch.object( type( job ), "_make_agent", return_value=agent ):
+            await job._execute()
+        abstract = next( c.kwargs[ "abstract" ] for c in notify.call_args_list if c.kwargs.get( "abstract" ) and "Research → Podcast Complete" in c.kwargs[ "abstract" ] )
+        assert "Script" not in abstract and "/app/docs?path=podcasts" not in abstract
 
 
 class TestDryRunCard:
@@ -211,3 +234,16 @@ class TestDryRunCard:
             await job._execute_dry_run( voice, MagicMock() )
         abstract = next( c.kwargs[ "abstract" ] for c in voice.notify.call_args_list if c.kwargs.get( "abstract" ) )
         assert "[▶️ Play Here](/app/audio?path=fixtures/podcast-dry-run/podcast-dry-run.mp3&embed=1)" in abstract
+
+
+class TestScriptLink:
+
+    def test_script_link_opens_the_player_page_with_open_script( self ):
+        from cosa.agents.podcast_generator.play_links import script_link
+        link = script_link( "podcasts/u/en.mp3", "podcasts/u/en-script.md", "io/r.md", "The Title" )
+        assert link == "[📝 Script](/app/audio?path=podcasts/u/en.mp3&script=podcasts/u/en-script.md&source=io/r.md&title=The%20Title&open=script)"
+
+    def test_script_link_without_audio_or_script_is_none( self ):
+        from cosa.agents.podcast_generator.play_links import script_link
+        assert script_link( None, "podcasts/u/s.md" ) is None
+        assert script_link( "podcasts/u/a.mp3", None ) is None

@@ -287,9 +287,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # Build relative paths under io/ for URL generation + UI job-card metadata.
             # Mirrors presentation_generator/job.py:301-341 — match the receiving
             # logic in cosa/rest/routers/io_files.py:88-98 (handles abs / "io/" / "/" prefixes).
-            import urllib.parse
             from cosa.agents.podcast_generator.config import LANGUAGE_NAMES
-            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, source_ref
+            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
             io_base = cu.get_project_root() + "/io/"
 
             def _to_rel( p ):
@@ -369,9 +368,6 @@ class PodcastGeneratorJob( AgenticJobBase ):
             #   - Play Here → &embed=1: floating in-place overlay (Rick's on-stage default).
             #   - Listen → no flag: opens the player as a standalone tab.
             #   - Download streams the raw mp3 with attachment disposition.
-            def _script_link( rel ):
-                return f"[📝 Script](/app/docs?path={urllib.parse.quote( rel )})" if rel else None
-
             # The original document rides the link when it lives inside the project.
             source_rel = source_ref( full_path, cu.get_project_root() )
 
@@ -382,10 +378,10 @@ class PodcastGeneratorJob( AgenticJobBase ):
                 a_rel  = _to_rel( audio_by_lang.get( lang ) )
                 s_rel  = _to_rel( script_by_lang.get( lang ) )
                 parts  = []
-                s_link = _script_link( s_rel )
+                title  = read_script_title( io_base + s_rel ) if a_rel and s_rel else None
+                s_link = script_link( a_rel, s_rel, source_rel, title )
                 if s_link: parts.append( s_link )
                 if a_rel:
-                    title = read_script_title( io_base + s_rel ) if s_rel else None
                     parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
                 if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
                 if parts:

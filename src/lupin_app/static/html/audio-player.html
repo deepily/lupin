@@ -119,6 +119,7 @@
             const embed    = params.get( 'embed' ) === '1';
             const autoplay = params.get( 'autoplay' ) === '1';
             const probe    = params.get( 'probe' ) === '1';
+            const openScript = params.get( 'open' ) === 'script';   // the card's Script link: show the script on this page
 
             // embed=1 — hide nav + tighten chrome (set synchronously, before deferred nav renders)
             if ( embed ) document.body.classList.add( 'embed' );
@@ -244,9 +245,10 @@
             }
 
             let linksHtml = '';
+            let scriptReady = false;
             if ( !embed ) {
                 const sourceInIo  = sourcePath && sourcePath.startsWith( 'io/' );
-                const scriptReady = scriptPath ? await answers( ioUrl( scriptPath ), 'HEAD' ) : false;
+                scriptReady = scriptPath ? await answers( ioUrl( scriptPath ), 'HEAD' ) : false;
                 let sourceReady   = false;
                 if ( sourcePath ) {
                     sourceReady = sourceInIo
@@ -310,6 +312,22 @@
                     win.document.title = displayTitle + ' — ' + label;
                     win.document.body.innerHTML = '<div style="max-width:860px;margin:32px auto;padding:0 24px;font:16px/1.6 system-ui,sans-serif">' + html + '</div>';
                 } )();
+            }
+            // open=script: the script is shown on this page, not in a new tab, because a tab opened with no click is blocked.
+            if ( openScript && scriptReady ) {
+                const inlineEl = document.createElement( 'div' );
+                inlineEl.id = 'audio-player-script-inline';
+                inlineEl.setAttribute( 'data-testid', 'audio-player-script-inline' );
+                inlineEl.style.cssText = 'max-width:860px;margin:24px auto;line-height:1.6';
+                target.appendChild( inlineEl );
+                try {
+                    const resp = await authedFetch( ioUrl( scriptPath ), {} );
+                    if ( !resp.ok ) throw new Error( 'HTTP ' + resp.status );
+                    inlineEl.innerHTML = DOMPurify.sanitize( marked.parse( await resp.text(), { gfm: true, breaks: true } ) );
+                } catch ( err ) {
+                    inlineEl.textContent = 'Could not load Script: ' + err.message;
+                }
+                inlineEl.scrollIntoView();
             }
             const scriptLinkEl = target.querySelector( '#audio-player-script-link' );
             if ( scriptLinkEl ) scriptLinkEl.addEventListener( 'click', () => openTextInNewTab( scriptPath, 'Script' ) );

@@ -124,3 +124,25 @@ def audio_triplet( audio_rel, script_rel=None, source_rel=None, title=None ):
         f"[🎧 Listen](/app/audio?{query}) | "
         f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
     )
+
+
+def script_link( audio_rel, script_rel=None, source_rel=None, title=None ):
+    """
+    Build the Script link for one language on a finished podcast card.
+
+    The doc viewer cannot open io/podcasts files, which are per user. So the link opens the player page
+    with open=script, and that page reads the script with the user's login and shows it on the page.
+
+    Requires:
+        - audio_rel is a path relative to io/, or None
+        - script_rel, source_rel and title are strings or None
+
+    Ensures:
+        - returns None when there is no audio or no script, because there is then no player page to open
+        - otherwise returns the markdown link to the player URL with open=script, carrying the same query as Listen
+
+    Raises:
+        - nothing
+    """
+    if not audio_rel or not script_rel: return None
+    return f"[📝 Script](/app/audio?{player_query( audio_rel, script_rel, source_rel, title )}&open=script)"

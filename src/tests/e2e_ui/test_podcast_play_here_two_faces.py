@@ -214,3 +214,30 @@ class TestPlayHereTwoFaces:
         full.locator( "audio[controls]" ).wait_for( state="attached", timeout=15000 )
         assert full.locator( ".audio-player-links" ).count() == 0
         assert full.locator( "a.audio-player-download" ).count() == 1
+
+
+class TestCardScriptLinkShowsScriptOnThePage:
+
+    def test_open_script_shows_the_script_on_the_page_without_a_new_tab( self, logged_in_page ):
+        page = logged_in_page
+        _stub_files( page )
+        page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script={SCRIPT}&source={SOURCE}&open=script" )
+        inline = page.locator( "[data-testid=audio-player-script-inline]" )
+        inline.wait_for( state="attached", timeout=15000 )
+        page.wait_for_function( "() => document.querySelector( '[data-testid=audio-player-script-inline]' ).innerText.includes( 'hello' )", timeout=10000 )
+        assert "The script says hello." in inline.inner_text()
+        assert len( page.context.pages ) == 1, "no popup is opened"
+
+    def test_without_open_script_nothing_is_shown_inline( self, logged_in_page ):
+        page = logged_in_page
+        _stub_files( page )
+        page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script={SCRIPT}" )
+        page.locator( "audio[controls]" ).wait_for( state="attached", timeout=15000 )
+        assert page.locator( "[data-testid=audio-player-script-inline]" ).count() == 0
+
+    def test_open_script_with_a_missing_script_shows_nothing_inline( self, logged_in_page ):
+        page = logged_in_page
+        _stub_files( page )
+        page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script=podcasts/u/gone-script.md&open=script" )
+        page.locator( "audio[controls]" ).wait_for( state="attached", timeout=15000 )
+        assert page.locator( "[data-testid=audio-player-script-inline]" ).count() == 0
