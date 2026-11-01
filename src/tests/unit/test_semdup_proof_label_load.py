@@ -421,3 +421,13 @@ def test_fingerprints_add_the_supplement_third_file_only_when_one_is_named( run,
     assert "third_labels" not in ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )[ "supplement" ]
     supp[ "third" ]           = supp_third( supp, by_pair, list( by_pair )[ 0 ], True )
     assert ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )[ "supplement" ][ "third_labels" ] == arm_run.sha256_of( supp[ "third" ] )
+
+
+def test_a_supplement_third_file_naming_an_item_in_neither_key_is_refused( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ False, False ] )
+    supp[ "third" ]           = supp_third( supp, by_pair, list( by_pair )[ 0 ], True )
+    line                      = json.loads( supp[ "third" ].read_text().splitlines()[ 0 ] )
+    with open( supp[ "third" ], "a" ) as f: f.write( json.dumps( { **line, "item_id": "pair-in-neither-key" } ) + "\n" )
+    with pytest.raises( ValueError, match="labels for items the key does not know: pair-in-neither-key" ):
+        ll.resolved_labels( first, second, key, supplement=supp )
