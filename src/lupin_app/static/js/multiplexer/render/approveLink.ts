@@ -87,6 +87,21 @@ export function handleApproveLinkClick( ev: Event, target: Element, sender: Appr
   return true;
 }
 
+/**
+ * The reader the 📄 link and the redraw check share, built on the api client.
+ *
+ * Requires: api.get sends a GET and resolves with the parsed body.
+ * Ensures:
+ *   - the request is `GET /api/tasks/<id>` with the id percent-encoded, as the legacy card sends it
+ *   - any failure reads as null, so the caller leaves the live link or says the read failed
+ */
+export function taskReaderFor( api: { get<T>( path: string ): Promise<T> } ): TaskReader {
+  return async ( id ) => {
+    try { return await api.get<TaskItem>( `/api/tasks/${ encodeURIComponent( id ) }` ); }
+    catch { return null; }
+  };
+}
+
 /** What a disabled, already-approved link reads. */
 export const APPROVED_TEXT = "approved ✅";
 

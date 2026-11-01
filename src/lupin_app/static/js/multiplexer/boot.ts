@@ -95,6 +95,7 @@ import { recordingManager } from "./audio/recordingManager";
 import { createQaPaneRenderer } from "./render/QaPaneRenderer";
 import { createSubmitJobsPaneRenderer } from "./render/SubmitJobsPaneRenderer";
 import { createActionRequiredMic } from "./render/actionRequiredMic";
+import { taskReaderFor } from "./render/approveLink";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
 /**
@@ -824,10 +825,7 @@ function bootMultiplexer(): void {
     approveSender : stores.holdingArea,
     // Row 192fecdf — a card's 📄 view link and the redraw check on its approve links read one row.
     // A failed read is null, which leaves the link live and the overlay saying so.
-    taskReader    : async (id) => {
-      try { return await apiClient.get<import("./render/taskListModel").TaskItem>(`/api/tasks/${encodeURIComponent(id)}`); }
-      catch { return null; }
-    },
+    taskReader    : taskReaderFor(apiClient),
   });
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
