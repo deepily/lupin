@@ -273,6 +273,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-key-rulings]] — same-job rulings on neighbours and the absence check for a nothing need. `lupin_mcp` (reuse_needset)
 - [[needset-drafting-run]] — running the need-set drafting: jobs per seed, parallel cells, the plan and the report. `lupin_mcp` (reuse_needset)
 - [[needset-smoke-run]] — the ten-need drafting smoke: environment assembly and the measurement report. `lupin_mcp` (reuse_needset)
+- [[needset-positive-control]] — the one-time control: plant the 20 synthetic pairs in memory, check the checker finds them, remove them. `lupin_mcp` (reuse_needset)
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection. `lupin_mcp` (reuse_stage2_negatives)
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows. `lupin_mcp` (reuse_stage2_run)
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it. `lupin_mcp` (reuse_stage2_fit)
