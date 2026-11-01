@@ -18,6 +18,7 @@ pins:
   - cosa.rest.routers.pages.page_docs@59137a71d0
   - cosa.rest.routers.pages.page_audio@363cb46297
   - cosa.rest.routers.pages.page_console@85476695b6
+  - cosa.rest.routers.pages.page_tasks_approve@d57a2d3dca
   - cosa.rest.routers.stats.get_snapshot_mgr@a7f7321be2
   - cosa.rest.routers.stats.get_global_time_saved_stats@05827481d5
 ---
@@ -26,10 +27,9 @@ pins:
 `routers/pages.py` maps clean `/app/*` URLs to static HTML files, and `routers/stats.py` serves the global time-saved leaderboard.
 
 ## What it does
-- Each `page_*` handler returns one static file as `text/html` with `Cache-Control: no-cache`, so a browser revalidates the page shell on every load.
-- Paths: `page_app` `/app`, `page_multiplexer` `/app/multiplexer`, `page_auth_login`, `page_auth_register`, `page_auth_profile` and `page_auth_change_password` under `/app/auth/`, `page_docs` `/app/docs`, `page_audio` `/app/audio`, `page_console` `/app/console`, `page_tasks_approve` `/app/tasks/approve`.
+- Each `page_*` handler returns one static file as `text/html` with `Cache-Control: no-cache`, so a browser revalidates the page shell on every load. None of the shells checks a credential.
+- Paths: `page_app` `/app`, `page_multiplexer` `/app/multiplexer`, `page_auth_login`, `page_auth_register`, `page_auth_profile` and `page_auth_change_password` under `/app/auth/`, `page_docs` `/app/docs`, `page_audio` `/app/audio`, `page_console` `/app/console`, `page_tasks_approve` `/app/tasks/approve`. The last is the landing page of an approve link and changes nothing on open ([[task-approve-link]]).
 - The admin shells are `page_admin` (`/app/admin`) and, under `/app/admin/`, `page_admin_users`, `page_admin_snapshots`, `page_admin_proxy_ratify`, `page_admin_proxy_dashboard`, `page_admin_dev_tools` and `page_admin_peer_queue_watch`.
-- None of them checks a credential.
 - `get_global_time_saved_stats` (`GET /api/stats/time-saved/global`) needs a signed-in user. It returns total solutions, replays, time saved, unique users and up to ten of the most replayed solutions. Only solutions with at least one replay are listed, and a question over 50 characters is cut to 50 and ends in `...`.
 - `get_snapshot_mgr` is the dependency that fetches the snapshot manager from the main module.
 
