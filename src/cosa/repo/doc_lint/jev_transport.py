@@ -27,6 +27,7 @@ JITTER          = 0.25      # each backoff wait is scaled by a factor between 1 
 RETRY_AFTER_CAP = 60.0      # the longest wait a retry-after header can ask for; a larger value is still recorded
 TIMEOUT_SECONDS = 60
 CLIENT_VERSION  = "jev_transport/py%d.%d.%d" % sys.version_info[ :3 ]     # recorded with a run; not sent to Jev
+CHARGE_HOOK     = None
 
 
 class _JevError( Exception ):
@@ -235,6 +236,30 @@ def has_key( environ=None ):
     return bool( ( os.environ if environ is None else environ ).get( KEY_VARIABLE ) )
 
 
+def set_charge_hook( hook ):
+    """
+    Name a function that sees every HTTP attempt to Jev before it is made.
+
+    Requires:
+        - hook is None or a function taking the model id of the request; it may raise to refuse the attempt
+
+    Ensures:
+        - each attempt of send_with_meta, retries included, calls the hook first, before the call budget is read
+        - a hook that raises refuses the attempt, so no HTTP is made for it
+        - set_charge_hook( None ) removes the hook
+    """
+    global CHARGE_HOOK
+    CHARGE_HOOK = hook
+
+
+def _charged( body ):
+    """Ensures: calls the charge hook, if set, with the request's model id, or "jev" for none."""
+    if CHARGE_HOOK is None: return
+    try: model = json.loads( body )[ "model" ]
+    except ( ValueError, KeyError, TypeError ): model = "jev"
+    CHARGE_HOOK( model )
+
+
 def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None, random_fn=None, clock_fn=None, transient=False ):
     """
     Send one request body to Jev and return the response text with what the transport saw.
@@ -265,6 +290,7 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
     Raises:
         - JevConfigError if the key variable is absent or empty (status None), or the server answers 401, 403 or 422 (status set)
         - JevBudgetSpent before any attempt the budget has no room for; no HTTP is made for it
+        - whatever the charge hook raises, before the attempt it refuses; no HTTP is made for it
         - JevCallError if retries run out or any other status is not 200; its status is the last HTTP status seen,
           None when the last attempt got no response
     """
@@ -280,6 +306,7 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
     last_status = None
     log       = []
     for attempt in range( MAX_ATTEMPTS ):
+        _charged( body )
         if budget is not None:
             try:
                 budget.take()
