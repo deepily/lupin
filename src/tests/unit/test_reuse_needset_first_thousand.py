@@ -422,7 +422,7 @@ def test_a_live_run_passes_the_written_lists_file_and_the_parts_to_the_stage_fac
     async def runner( run_dir, one, two, control, rem, limit ): return { "stages": [ await one(), await two() ] }
 
     monkeypatch.setattr( ft, "stage_factories", fake_factories )
-    deps = { "planted_sha": sha, "parts": lambda args, env, built, lists: "PARTS", **seed_deps(), "context": lambda root: None, "runner": runner, "ask": "ASK", "ledger": lambda args: "L",
+    deps = { "planted_sha": sha, "parts": lambda args, env, built, lists: "PARTS", **seed_deps(), "context": lambda root: types.SimpleNamespace( candidate_stage="live" ), "runner": runner, "ask": "ASK", "ledger": lambda args: "L",
              "strip_fn": strip_of, "draft_fn": "D", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed }, "control": lambda *a: ( lambda: asyncio.sleep( 0, {} ) ) }
     out  = ft.main( [ *argv, "--live" ], deps=deps )
     assert seen[ "parts" ] == "PARTS" and pathlib.Path( seen[ "path" ] ).name == stage_seeds.LISTS_FILE and pathlib.Path( seen[ "path" ] ).parent == tmp_path / "run"
@@ -431,8 +431,17 @@ def test_a_live_run_passes_the_written_lists_file_and_the_parts_to_the_stage_fac
 
 def test_a_live_run_over_other_seed_lists_stops_by_name_before_the_parts_are_built( tmp_path ):
     argv, sha = run_dir_files( tmp_path )
-    base      = { "planted_sha": sha, "context": lambda root: None, "ask": "ASK", "ledger": lambda args: "L", "strip_fn": strip_of, "draft_fn": "D", "control": lambda *a: None,
+    base      = { "planted_sha": sha, "context": lambda root: types.SimpleNamespace( candidate_stage="live" ), "ask": "ASK", "ledger": lambda args: "L", "strip_fn": strip_of, "draft_fn": "D", "control": lambda *a: None,
                   "parts": lambda args, env, built, lists: "PARTS", "factories": ( lambda env: None, lambda env: None ), "runner": lambda *a: asyncio.sleep( 0, {} ), "remainder": lambda ps, seed: {} }
     ft.main( [ *argv, "--live" ], deps={ **base, **seed_deps() } )
     with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps={ **base, **seed_deps( skip="ts-3" ), "parts": lambda *a: pytest.fail( "parts were built" ) } )
     assert e.value.code == er.PLAN_ALREADY_WRITTEN
+
+
+def test_a_live_run_over_a_context_with_no_candidate_stage_stops_by_name_before_any_file_or_call( tmp_path, monkeypatch ):
+    argv, sha = run_dir_files( tmp_path )
+    monkeypatch.setattr( ft, "write_seed_lists", lambda *a, **k: pytest.fail( "a list was written" ) )
+    deps = { "planted_sha": sha, "context": lambda root: types.SimpleNamespace( candidate_stage=None ), "ask": lambda *a: pytest.fail( "a model was called" ), "built": lambda args: pytest.fail( "the index was built" ) }
+    with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps=deps )
+    assert e.value.code == er.NO_CANDIDATE_STAGE and all( v in str( e.value ) for v in ( "LUPIN_REUSE_JEV_PACK_SIZE", "LUPIN_REUSE_JEV_TOKEN_CEILING", "LUPIN_REUSE_JEV_RUN_NAME" ) )
+    assert not ( tmp_path / "run" / "first-thousand-seeds.json" ).exists() and not ( tmp_path / "run" / ft.CALLS_FILE ).exists()

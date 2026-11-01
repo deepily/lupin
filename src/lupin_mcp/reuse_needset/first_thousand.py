@@ -388,6 +388,7 @@ def main( argv=None, deps=None ):
         - the pairs and their groups are read before anything else, so a bad input stops the run before a call
 
     Raises:
+        - NeedsetError NO_CANDIDATE_STAGE on a live run whose context has none, before the index is built or a list is written
         - NeedsetError QUOTA_UNFILLABLE from the seed draw, and PLAN_ALREADY_WRITTEN when other seed lists are already in the run folder
         - whatever the inputs raise, including CONTROL_INPUT_CHANGED
     """
@@ -397,6 +398,7 @@ def main( argv=None, deps=None ):
     shown  = plan( args, loaded )
     if not args.live: return { "live": False, "plan": shown }
     ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
+    if ctx.candidate_stage is None: raise er.NeedsetError( er.NO_CANDIDATE_STAGE, f"the context has no candidate stage; set {rt.PACK_SIZE_VARIABLE}, {rt.CEILING_VARIABLE} and {rt.RUN_NAME_VARIABLE}, which build it" )
     ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
     ledger    = deps[ "ledger" ]( args ) if "ledger" in deps else draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
     strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, args.root ) )

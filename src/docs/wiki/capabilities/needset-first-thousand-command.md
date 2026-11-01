@@ -13,7 +13,7 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.parse_args@448dccc178
   - lupin_mcp.reuse_needset.first_thousand.plan@6de27be30d
   - lupin_mcp.reuse_needset.first_thousand.load_inputs@68bde7e075
-  - lupin_mcp.reuse_needset.first_thousand.main@c0bc7cff7e
+  - lupin_mcp.reuse_needset.first_thousand.main@428e7bdaed
 ---
 # Need set: the first 1,000 calls, the command
 
@@ -28,7 +28,7 @@ The live control, the command line and the capped run. The planted pool and the 
 - `parse_args` requires the root, run folder, planted file, answer key, labels folder, seed and source commit. The cap is 1,000 unless `--limit` says otherwise. `--second-model` and `--probe-model` default to Opus.
 - `load_inputs` reads the 20 pairs and their groups for reading only. The planted file must match its recorded hash.
 - `main` without `--live` prints `plan` and contacts nothing. The plan shows the cap, the calls already spent, the groups and the flagged count.
-- `main` with `--live` builds the context, draws and writes the seed lists, builds the live parts ([[needset-stage-parts]]) and runs the four stages. A second run over other seed lists raises `PLAN_ALREADY_WRITTEN`.
+- `main` with `--live` builds the context, draws and writes the seed lists, builds the live parts ([[needset-stage-parts]]) and runs the four stages. A context with no candidate stage raises `NO_CANDIDATE_STAGE` first, naming the three variables that build it. A second run over other seed lists raises `PLAN_ALREADY_WRITTEN`.
 - `write_seed_lists` draws the 50 attribution and 100 yield seeds from the tree's index and tracked files, and writes them once. `tracked_files` is the set git lists.
 - `live_parts` builds the parts with their own ledgers in the run folder, the second model and the probe model from the arguments. `stage_factories` hands the lists file and the parts to the two stages and adds the counts of seeds that gave no final need.
 
