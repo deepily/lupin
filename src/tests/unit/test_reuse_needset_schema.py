@@ -201,3 +201,9 @@ def test_the_key_source_follows_the_kind_and_the_route():
             dict( kind="work_alike", selection_route="vector", key_source=None ) )
     for over in bad:
         with pytest.raises( er.NeedsetError, match="key.source must be one of" ): matched( **over )
+
+
+def test_a_matched_need_whose_seed_is_in_its_own_key_is_refused_by_name():
+    with pytest.raises( er.NeedsetError ) as caught: matched( key_symbols=[ "a.b.twin", "a.b.seed" ] )
+    assert caught.value.code == er.SEED_IN_KEY and "a.b.seed" in caught.value.detail
+    assert matched( key_symbols=[ "a.b.twin", "a.b.seed2" ] )[ "key" ][ "symbols" ] == [ "a.b.twin", "a.b.seed2" ]

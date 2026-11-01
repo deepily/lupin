@@ -324,3 +324,71 @@ def test_trace_all_refuses_a_run_whose_index_or_vectors_differ_from_the_frozen_s
     needs, w = matched_set()
     with pytest.raises( er.NeedsetError ) as e: asyncio.run( LT.trace_all( needs, None, make_ledger( tmp_path ), ROOT, "m", "c1", FROZEN, dict( FROZEN, **{ key: "d" * 64 } ), index_sha="idx1", probe=w.probe, ask=w.ask, where=where ) )
     assert e.value.code == code and key in e.value.detail and w.asks == [] and w.probes == []
+
+
+def evidence( asked, shortlist, read, rulings ): return { "asked": asked, "shortlist": shortlist, "read": read, "rulings": rulings, "verdict": "UNCERTAIN_READ_SOURCE" }
+
+
+def test_each_key_member_is_lost_at_its_own_first_failing_stage():
+    ev  = evidence( [ "a", "b", "c", "d" ], [ "a", "b", "c" ], [ "a", "b" ], { "a": "DUPLICATE", "b": "DISTINCT" } )
+    got = LT.classify_members( "near_copy", [ "d", "c", "b", "a", "e" ], ev )
+    assert got == { "a": LT.FOUND, "b": LT.NOT_RULED_SAME_JOB, "c": LT.NOT_READ, "d": LT.NOT_RATED_RELEVANT, "e": LT.NOT_RETRIEVED }
+    assert list( got ) == [ "a", "b", "c", "d", "e" ]
+
+
+def test_another_members_progress_never_counts_for_a_member():
+    ev = evidence( [ "a" ], [ "a" ], [ "a" ], { "a": "EXTEND" } )
+    assert LT.classify( "work_alike", [ "a", "e" ], ev )[ "lost_at" ] == LT.FOUND          # the any-member answer
+    assert LT.classify_members( "work_alike", [ "a", "e" ], ev ) == { "a": LT.FOUND, "e": LT.NOT_RETRIEVED }
+
+
+def test_a_probe_that_did_not_run_leaves_no_member_found_and_a_nothing_need_has_none():
+    assert LT.classify_members( "work_alike", [ "a" ], evidence( [ "a" ], [ "a" ], [], None ) ) == { "a": LT.NOT_READ }
+    assert LT.classify_members( "nothing", [], evidence( [], [], [], None ) ) == {}
+
+
+def test_a_traced_record_carries_its_members_and_a_retrace_scores_the_extended_key():
+    needs, w = matched_set()
+    rec      = trace( w, needs[ 6 ] )
+    assert rec[ "members" ] == { "k6": LT.NOT_RULED_SAME_JOB }
+    again = LT.retrace( rec, LT.extend_key( needs[ 6 ], [ "alt" ] ) )
+    assert again[ "members" ] == { "alt": LT.FOUND, "k6": LT.NOT_RULED_SAME_JOB } and rec[ "members" ] == { "k6": LT.NOT_RULED_SAME_JOB }
+    nothing, w2 = nothing_world()
+    assert trace( w2, nothing[ 0 ] )[ "members" ] == {}
+
+
+def test_changing_the_member_classifier_is_a_ledger_miss( monkeypatch ):
+    before = LT.trace_version()
+    def classify_members( kind, key, evidence ): return {}
+    monkeypatch.setattr( LT, "classify_members", classify_members )
+    assert LT.trace_version() != before
+
+
+def member_records():
+    def rec( kind, lang, members ): return { "kind": kind, "write_lang": lang, "members": members }
+    return [ rec( "work_alike", "py", { "a": LT.FOUND, "b": LT.NOT_RETRIEVED } ), rec( "work_alike", "ts", { "c": LT.FOUND } ),
+             rec( "near_copy", "ts", { "d": LT.NOT_READ, "e": LT.NOT_READ, "f": LT.FOUND } ), rec( "nothing", "py", {} ) ]
+
+
+def test_the_member_summary_counts_members_and_not_needs():
+    s = LT.summarize_members( member_records() )
+    assert s[ "members" ] == 6 and s[ "by_lost_at" ] == { "FOUND": 3, "NOT_READ": 2, "NOT_RETRIEVED": 1 }
+    assert s[ "by_lang" ] == { "py": { "FOUND": 1, "NOT_RETRIEVED": 1 }, "ts": { "FOUND": 2, "NOT_READ": 2 } }
+    assert s[ "misses" ] == 3 and s[ "miss_rate" ] == 0.5 and s[ "upper_bound" ] == harness_report.upper_bound( 3, 6 )
+    assert s[ "any_member_comparison_only" ] == { "needs": 3, "any_member_found": 3, "every_member_found": 1 }
+    with pytest.raises( er.NeedsetError ) as e: LT.summarize_members( [ { "kind": "nothing", "write_lang": "py", "members": {} } ] )
+    assert e.value.code == er.BAD_NEED
+
+
+def test_the_report_prints_the_member_figures_and_calls_the_any_member_counts_a_comparison( tmp_path ):
+    s = LT.summarize( records_for_summary() )
+    m = LT.summarize_members( member_records() )
+    LT.write_report( tmp_path, s, s, [], { "checker": "c1" }, members=m )
+    text = ( tmp_path / "loss-report.md" ).read_text( encoding="utf-8" )
+    assert "Per key member (the figure to quote):" in text and "| miss rate | 0.5000 |" in text
+    assert text.index( "Any-member view, a comparison only" ) < text.index( "| outcome | before | after |" )
+    assert "Comparison only, not a result: of 3 matched needs, 3 have any member found and 1 have every member found." in text
+    assert json.loads( ( tmp_path / "loss-report.json" ).read_text( encoding="utf-8" ) )[ "members" ] == m
+    LT.write_report( tmp_path, s, s, [], { "checker": "c1" } )
+    assert "members" not in json.loads( ( tmp_path / "loss-report.json" ).read_text( encoding="utf-8" ) )
+    assert "Per key member" not in ( tmp_path / "loss-report.md" ).read_text( encoding="utf-8" )

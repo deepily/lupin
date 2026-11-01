@@ -216,6 +216,23 @@ class CallBudgetExceeded( Exception ):
 
 BUDGET_LEDGER = None
 BUDGET_CAPS   = {}
+CHARGE_HOOK   = None
+
+
+def set_charge_hook( hook ):
+    """
+    Name a function that sees every model call before it is made, whatever the model.
+
+    Requires:
+        - hook is None or a function taking the model id; it may raise to refuse the call
+
+    Ensures:
+        - later calls to complete call the hook first, before the per-model cap is read
+        - a hook that raises refuses the call, so no model is contacted and nothing is charged to a per-model cap
+        - set_charge_hook( None ) removes the hook
+    """
+    global CHARGE_HOOK
+    CHARGE_HOOK = hook
 
 
 def set_budget( ledger_path, caps ):
@@ -286,6 +303,7 @@ def _charge( model ):
         - model is a non-empty model id
 
     Ensures:
+        - the charge hook, when set, sees the call first and may refuse it
         - a model with no cap is not charged
         - the count is read from the ledger under an exclusive file lock, so two processes cannot both take the last call
         - a call that would pass the cap raises CallBudgetExceeded and writes nothing
@@ -296,6 +314,7 @@ def _charge( model ):
     Raises:
         - CallBudgetExceeded when the model has used its cap
     """
+    if CHARGE_HOOK is not None: CHARGE_HOOK( model )
     cap = BUDGET_CAPS.get( model )
     if cap is None: return
     with open( BUDGET_LEDGER, "a+", encoding="utf-8" ) as f:
@@ -462,11 +481,13 @@ def _agy_call( model, prompt, timeout_seconds ):
           scratch directory each time; no other failure is tried again here
         - each wait is announced by one line on standard error, naming the model, the try and the wait
         - a wait that AGY_SLEEP reports as cut short, as AGY_WAKE does, ends the tries at once
-        - the caller's budget is not charged again: complete charges before calling this
+        - the per-model cap is not charged again: complete charges before calling this
+        - the charge hook, when set, sees every try after the first, once its wait is over, so a retried try counts as a call
 
     Raises:
         - ModelUnavailableError, a ModelCallError, naming the number of tries when every try was answered
           unavailable; ModelWaitCutShort, its subclass, saying the wait was cut short by a stop
+        - whatever the charge hook raises before a retried try, with the try not made
         - whatever _agy_call_once raises otherwise
     """
     waits = list( AGY_UNAVAILABLE_WAITS )
@@ -483,6 +504,7 @@ def _agy_call( model, prompt, timeout_seconds ):
             print( f"agy unavailable (model {model}), try {tries - len( waits ) - 1} of {tries}; waiting {wait}s", file=sys.stderr )
             if AGY_SLEEP( wait ):
                 raise ModelWaitCutShort( f"model call to {model} stopped waiting for the service, the wait was cut short by a stop after try {tries - len( waits ) - 1} of {tries}: {e}" ) from e
+            if CHARGE_HOOK is not None: CHARGE_HOOK( model )
 
 
 def _scratch_parent():

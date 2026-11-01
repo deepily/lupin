@@ -84,6 +84,7 @@ def validate_need( rec ):
     Ensures:
         - returns None when the record is valid
         - a matched kind has a seed and a non-empty key; a nothing need has neither
+        - a matched need's seed is never one of its key symbols, so the seed cannot score as its own partner
         - key.source says how the key was found: twin for near_copy, vector, bm25, directory or random for the two routed kinds, none for nothing
         - on the vector route key.source is vector; on the sampled route it is bm25, directory or random
         - selection_route is vector or sampled for the two routed kinds and None otherwise
@@ -92,6 +93,7 @@ def validate_need( rec ):
 
     Raises:
         - NeedsetError BAD_NEED naming the first violation
+        - NeedsetError SEED_IN_KEY when a matched need's seed is one of its key symbols
     """
     if not isinstance( rec, dict ): _fail( rec, "not a dict" )
     for k in TOP_KEYS:
@@ -109,6 +111,7 @@ def validate_need( rec ):
     else:
         if not _text( rec[ "seed" ] ): _fail( rec, "a matched need needs a seed" )
         if not key[ "symbols" ]: _fail( rec, "a matched need needs a non-empty key" )
+        if rec[ "seed" ] in key[ "symbols" ]: raise er.NeedsetError( er.SEED_IN_KEY, f"{rec.get( 'id', '?' )}: the seed {rec[ 'seed' ]} is in its own key" )
         if key.get( "key_lang" ) not in LANGS: _fail( rec, "key.key_lang must be py or ts" )
         wanted = ( TWIN_SOURCE, ) if rec[ "kind" ] == "near_copy" else ( ( VECTOR_SOURCE, ) if rec[ "selection_route" ] == "vector" else SAMPLED_SOURCES )
         if key.get( "source" ) not in wanted: _fail( rec, f"key.source must be one of {wanted} for this need" )
