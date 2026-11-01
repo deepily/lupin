@@ -277,12 +277,12 @@ def test_the_stage_factories_hand_the_lists_file_and_the_live_parts_to_pocholos_
             return report
         return stage
 
-    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or stage_of( { "seeds": 1 } ) )
-    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or stage_of( { "hard": 2 } ) )
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or stage_of( { "needs": 1 } ) )
+    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or stage_of( { "seeds": 1, "hard": 2 } ) )
     monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
     one, two = ft.stage_factories( "/lists.json", parts )
     counts   = { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "unreadable_reply": 0, "disputed_ids": [ "n-1" ], "skipped": [] }
-    assert asyncio.run( one( "env" )() ) == { "seeds": 1, "no_final_need": counts } and asyncio.run( two( "env" )() ) == { "hard": 2, "no_final_need": { **counts, "disputed_ids": [ "n-1" ] } }
+    assert asyncio.run( one( "env" )() ) == { "needs": 1, "no_final_need": counts } and asyncio.run( two( "env" )() ) == { "seeds": 1, "hard": 2, "no_final_need": { **counts, "disputed_ids": [ "n-1" ] } }
     assert seen == { "a": ( "/lists.json", "MN", "TF" ), "y": ( "/lists.json", "PF", "IX" ) }
 
 
@@ -294,7 +294,7 @@ def test_the_yield_report_counts_only_the_yield_seeds_and_not_the_attribution_on
         async def stage():
             tally[ reason ] += len( ids )
             tally.ids.extend( ids )
-            return {}
+            return { "needs": 1, "seeds": 1 }
         return stage
 
     monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: stage_that( "disputed", [ "n-a1", "n-a2" ] ) )
@@ -566,3 +566,58 @@ def test_a_run_whose_attribution_seeds_were_all_skipped_ends_failed_through_run_
     with cap.installed(): report = asyncio.run( stages.run_stages( cap, { stages.ATTRIBUTION: one( None ), stages.YIELD: never, stages.CONTROL: never, stages.REMAINDER: never } ) )
     assert report[ "stages" ][ "attribution" ][ "status" ] == "failed" and report[ "stages" ][ "attribution" ][ "code" ] == er.ALL_SEEDS_UNREADABLE and report[ "stages" ][ "yield" ][ "status" ] == "not_run"
     assert ft.exit_status( { "live": True, "report": report } ) == 1
+
+
+def test_a_stage_with_no_listed_seeds_and_no_skips_is_not_called_all_skipped( monkeypatch ):
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: { "attribution": { "order": [] }, "yield": { "order": [] } } )
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: skipping_stage( tally, 0, { "needs": 0 } ) )
+    one, _ = ft.stage_factories( "/lists.json", parts )
+    assert asyncio.run( one( "env" )() )[ "no_final_need" ][ "unreadable_reply" ] == 0
+
+
+def factory_with( monkeypatch, skips, attribution_report, yield_report ):
+    """Return the two factories over stages that skip the given counts and return the reports."""
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: skipping_stage( tally, skips[ 0 ], attribution_report ) )
+    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: skipping_stage( tally, skips[ 1 ], yield_report ) )
+    return ft.stage_factories( "/lists.json", parts )
+
+
+def test_a_stage_with_no_need_and_a_skipped_seed_fails_but_with_no_skipped_seed_it_stays_a_stop( monkeypatch ):
+    one, two = factory_with( monkeypatch, ( 1, 1 ), { "needs": 0, "stop": True }, { "seeds": 0, "hard": 0 } )
+    for factory, name in ( ( one, "attribution" ), ( two, "yield" ) ):
+        with pytest.raises( er.NeedsetError ) as e: asyncio.run( factory( "env" )() )
+        assert e.value.code == er.NO_NEEDS_WITH_SKIPS and name in str( e.value ) and "could have held" in str( e.value )
+    one, two = factory_with( monkeypatch, ( 0, 0 ), { "needs": 0, "stop": True }, { "seeds": 0, "hard": 0 } )
+    assert asyncio.run( one( "env" )() )[ "stop" ] is True and asyncio.run( two( "env" )() )[ "seeds" ] == 0
+
+
+def test_a_stage_with_a_need_and_a_skipped_seed_is_not_failed_for_the_skip( monkeypatch ):
+    one, two = factory_with( monkeypatch, ( 1, 2 ), { "needs": 1 }, { "seeds": 1, "hard": 0 } )
+    assert asyncio.run( one( "env" )() )[ "needs" ] == 1 and asyncio.run( two( "env" )() )[ "seeds" ] == 1
+
+
+def test_a_stage_with_no_need_and_only_disputed_or_no_partner_seeds_stays_a_stop_with_exit_zero( tmp_path, monkeypatch ):
+    cap   = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 5 )
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
+
+    async def stage():
+        tally[ "disputed" ] += 1
+        tally[ "no_partner" ] += 1
+        return { "needs": 0, "stop": True, "reason": "no seed gave a need" }
+
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: stage )
+    one, _ = ft.stage_factories( "/lists.json", parts )
+
+    async def never(): return {}
+
+    with cap.installed(): report = asyncio.run( stages.run_stages( cap, { stages.ATTRIBUTION: one( None ), stages.YIELD: never, stages.CONTROL: never, stages.REMAINDER: never } ) )
+    seen = report[ "stages" ][ "attribution" ]
+    assert seen[ "status" ] == "stopped" and seen[ "report" ][ "no_final_need" ][ "disputed" ] == 1 and seen[ "report" ][ "no_final_need" ][ "no_partner" ] == 1 and seen[ "report" ][ "no_final_need" ][ "unreadable_reply" ] == 0
+    assert ft.exit_status( { "live": True, "report": report } ) == 0

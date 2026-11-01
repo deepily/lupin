@@ -299,6 +299,9 @@ def live_parts( args, env, built, lists, build=stage_parts.build_parts ):
     return build( env, built, lists, { "second": args.second_model, "probe": args.probe_model }, env.ask, draft.drafter_call( args.second_model ), ledgers )
 
 
+NEEDS_KEY = { stages.ATTRIBUTION: "needs", stages.YIELD: "seeds" }      # the report field that counts the needs a stage found
+
+
 def stage_factories( lists_path, parts ):
     """
     Return the attribution factory and the yield factory, each taking an env.
@@ -311,9 +314,12 @@ def stage_factories( lists_path, parts ):
         - the stages are stage_seeds.attribution_stage and stage_seeds.yield_stage over that file and those parts
         - each report also carries the counts of its own seeds that gave no final need, with the disputed ids; the stage that ran first does not leak into the one after
         - a stage whose every seed was skipped for an unreadable reply raises ALL_SEEDS_UNREADABLE, so a dead model is a failure and never a finding
+        - a stage that ends with no need while any seed was skipped as unreadable raises NO_NEEDS_WITH_SKIPS, because an unread seed could have held the need
+        - a stage that ends with no need and no skipped seed is a stop, as before
 
     Raises:
         - NeedsetError ALL_SEEDS_UNREADABLE from a stage whose skipped seeds equal its listed seeds
+        - NeedsetError NO_NEEDS_WITH_SKIPS from a stage with zero needs and at least one skipped seed
     """
     def reported( stage, name ):
         """Ensures: returns the stage with the tally added to its report."""
@@ -324,6 +330,7 @@ def stage_factories( lists_path, parts ):
             counts = stage_parts.counted( parts[ "tally" ], since )
             seeds  = len( stage_seeds.load_lists( lists_path )[ name ][ "order" ] )
             if seeds and counts[ stage_parts.UNREADABLE ] == seeds: raise er.NeedsetError( er.ALL_SEEDS_UNREADABLE, f"all {seeds} {name} seeds were skipped for an unreadable reply" )
+            if report[ NEEDS_KEY[ name ] ] == 0 and counts[ stage_parts.UNREADABLE ]: raise er.NeedsetError( er.NO_NEEDS_WITH_SKIPS, f"{name} found no need and {counts[ stage_parts.UNREADABLE ]} seeds were skipped as unreadable; an unread seed could have held it" )
             return { **report, "no_final_need": counts }
         return with_counts
     return ( lambda env: reported( stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ), stages.ATTRIBUTION ),
