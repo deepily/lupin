@@ -11,7 +11,7 @@ import fcntl
 import json
 import os
 
-from cosa.repo.doc_lint import model_transport
+from cosa.repo.doc_lint import jev_transport, model_transport
 from lupin_mcp.reuse_needset import errors as er
 
 CALL_LIMIT = 1000
@@ -126,18 +126,22 @@ class CallCap:
     @contextlib.contextmanager
     def installed( self ):
         """
-        Make every complete call in the process pass through this cap.
+        Make every complete call and every Jev attempt in the process pass through this cap.
 
         Ensures:
             - inside the block each model_transport call is charged here before the model is contacted
-            - the hook that was set before comes back when the block ends, even by an error
+            - each HTTP attempt to Jev, retries included, is charged here before the request is sent
+            - both hooks that were set before come back when the block ends, even by an error
         """
-        before = model_transport.CHARGE_HOOK
+        before      = model_transport.CHARGE_HOOK
+        jev_before  = jev_transport.CHARGE_HOOK
         model_transport.set_charge_hook( self.charge )
+        jev_transport.set_charge_hook( self.charge )
         try:
             yield self
         finally:
             model_transport.set_charge_hook( before )
+            jev_transport.set_charge_hook( jev_before )
 
     def guard( self, call, model ):
         """

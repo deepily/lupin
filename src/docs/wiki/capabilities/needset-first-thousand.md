@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.reuse_needset.planted_pool.embed_rows@30d6bee774
   - lupin_mcp.reuse_needset.planted_pool.PlantedCandidateStage@80e5c6ec63
   - lupin_mcp.reuse_needset.first_thousand.read_latest_labels@e66a6cadd1
-  - lupin_mcp.reuse_needset.first_thousand.remainder_pairs@f953eb07d3
+  - lupin_mcp.reuse_needset.first_thousand.remainder_pairs@e6db44db98
   - lupin_mcp.reuse_needset.first_thousand.draft_control_needs@62f1f1ebb1
   - lupin_mcp.reuse_needset.first_thousand.planted_check@f29004ed70
   - lupin_mcp.reuse_needset.first_thousand.control_ask@fa3a692e9a
@@ -21,7 +21,7 @@ The pieces under the control and the remainder of Set B's first 1,000 model call
 - `planted_entry` turns a rewrite into the index record the search and the judge read. A real rewrite has no docstring, so its doc is empty. Its pin is a hash of its text.
 - `embed_rows` embeds the planted records through our own embedding server, with the same texts, engines and roles as the vector build. These are embedding calls, not model calls.
 - `PlantedVectors` stacks those rows under the live vector set in memory. The live set is not changed, and its manifest hash stays the live one.
-- `PlantedCandidateStage` is the candidate stage client, answering the stage upload and the search from this process. It refuses a refresher, so nothing can rebuild or write the live vector set. The control then tests both halves of the search.
+- `PlantedCandidateStage` is the candidate stage client, answering the stage upload and the search from this process. It refuses a refresher, so nothing can rebuild or write the live vector set. It writes query vectors to the cache folder it is given, which must be a scratch folder of the run and never the live cache. The control then tests both halves of the search.
 
 ## The control
 - `planted_check` asks the checker about one need over a pool that holds the planted records. It adds them to the entries the judge may be asked about and swaps the stage on a copy of the context. The seed is left out as in `check_need`.

@@ -23,6 +23,7 @@ from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, p
 from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
+QUERY_CACHE  = "query-cache"
 REPORT_FILE  = "stage-reports.json"
 NONE_CHOICE  = "NONE"
 UNSURE_NOTE  = "UNSURE"
@@ -71,8 +72,9 @@ def remainder_pairs( pairs, answer_key, first_labels, second_labels ):
         item = by_ids.get( frozenset( ( p[ "rewrite" ][ "id" ], p[ "original" ][ "id" ] ) ) )
         if item is None or item not in first_labels or item not in second_labels: raise er.NeedsetError( er.CONTROL_INPUT_CHANGED, f"pair {p[ 'rewrite' ][ 'id' ]}: no key item or label" )
         a, b  = first_labels[ item ], second_labels[ item ]
-        group = stages.DRIFTED if a[ "choice" ] == NONE_CHOICE and b[ "choice" ] == NONE_CHOICE else ( stages.UNSURE if UNSURE_NOTE in a[ "note" ] or UNSURE_NOTE in b[ "note" ] else "other" )
-        out.append( { "id": item, "group": group, "unsure_flagged": UNSURE_NOTE in a[ "note" ] or UNSURE_NOTE in b[ "note" ],
+        flag  = a[ "note" ].startswith( UNSURE_NOTE ) or b[ "note" ].startswith( UNSURE_NOTE )
+        group = stages.DRIFTED if a[ "choice" ] == NONE_CHOICE and b[ "choice" ] == NONE_CHOICE else ( stages.UNSURE if flag else "other" )
+        out.append( { "id": item, "group": group, "unsure_flagged": flag,
                       "original": p[ "original" ][ "text" ], "rewrite": p[ "rewrite" ][ "text" ] } )
     return out
 
@@ -208,28 +210,32 @@ def control_job( pair, strip_fn ):
     return { "seed": seed, "keys": [ key ], "stripped": strip_fn( seed ), "write_lang": pair[ "original" ][ "lang" ], "meta": { "control": True } }
 
 
-def planted_stage_for( live, planted_entries, embed_rows=planted_pool.embed_rows, load_vectors=vs.load_vectors ):
+def planted_stage_for( live, planted_entries, cache_dir, embed_rows=planted_pool.embed_rows, load_vectors=vs.load_vectors ):
     """
     Build the planted candidate stage from the live one's own settings.
 
     Requires:
         - live is the context's CandidateStage; planted_entries are planted_pool.planted_entry records
+        - cache_dir is a folder inside the run folder, where the query vectors of this run are cached
 
     Ensures:
         - the vectors are the live set read from disk plus the planted rows embedded now, held in memory
-        - the new stage shares the live stage's folders, client, arm, K and fusion, and has no refresher
+        - the new stage shares the live stage's vector folder, client, arm, K and fusion, and has no refresher
+        - its query cache is cache_dir, created here, so nothing of this run is written into the live data folder
     """
+    pathlib.Path( cache_dir ).mkdir( parents=True, exist_ok=True )
     base    = load_vectors( live.vectors_dir )
     planted = planted_pool.PlantedVectors( base, [ e[ "id" ] for e in planted_entries ], embed_rows( planted_entries, live.embed_client ) )
-    return planted_pool.PlantedCandidateStage( live.vectors_dir, live.query_cache_dir, live.embed_client, planted, purposes_path=live.purposes_path, K=live.K, arm=live.arm, fusion=live.fusion )
+    return planted_pool.PlantedCandidateStage( live.vectors_dir, str( cache_dir ), live.embed_client, planted, purposes_path=live.purposes_path, K=live.K, arm=live.arm, fusion=live.fusion )
 
 
-def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, prepare=rt.prepare, check=planted_check, build_stage=candidate_stage.build_stage ):
+def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, prepare=rt.prepare, check=planted_check, build_stage=candidate_stage.build_stage ):
     """
     Return the live control stage: draft the needs, then plant, ask, remove and prove.
 
     Requires:
         - ctx is a reuse context with its candidate stage on; ask is the drafter's call; ledger the drafting ledger
+        - cache_dir is the run folder's query-cache folder
         - every model call goes through the cap that the runner has installed
 
     Ensures:
@@ -241,7 +247,7 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, prepare=rt.
         """Ensures: returns the control report."""
         needs   = await draft_control_needs( pairs, lambda p: control_job( p, strip_fn ), ask, ledger, draft_fn )
         entries = [ planted_pool.planted_entry( p[ "rewrite" ] ) for p in pairs ]
-        planted = planted_stage_for( ctx.candidate_stage, entries )
+        planted = planted_stage_for( ctx.candidate_stage, entries, cache_dir )
         pool    = prepare( ctx )[ 1 ]
         asker   = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids )
         return await stage3.control_stage( pool, pairs, asker, build_stage )()
@@ -346,7 +352,7 @@ def main( argv=None, deps=None ):
     strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, args.root ) )
     draft_fn  = deps[ "draft_fn" ] if "draft_fn" in deps else draft.draft_need
     env       = types.SimpleNamespace( root=args.root, run_dir=args.run_dir, seed=args.seed, source_commit=args.source_commit, ctx=ctx, ask=ask, draft_ledger=ledger )
-    control   = ( deps[ "control" ] if "control" in deps else control_stage_live )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn )
+    control   = ( deps[ "control" ] if "control" in deps else control_stage_live )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )
     rem       = remainder_stage( loaded[ "remainder" ], args.seed, **( { "run_remainder": deps[ "remainder" ] } if "remainder" in deps else { } ) )
     runner    = deps[ "runner" ] if "runner" in deps else run_first_thousand
     report    = asyncio.run( runner( args.run_dir, factories[ 0 ]( env ), factories[ 1 ]( env ), control, rem, args.limit ) )

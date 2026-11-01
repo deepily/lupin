@@ -85,6 +85,7 @@ class PlantedCandidateStage( rc.CandidateStage ):
 
     Requires:
         - vectors_dir is the live vector set's folder, read for its manifest only
+        - query_cache_dir is a scratch folder of the run, never the live cache, because the stage writes query vectors there
         - planted is a PlantedVectors over that set
 
     Ensures:

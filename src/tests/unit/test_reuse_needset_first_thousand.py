@@ -36,11 +36,12 @@ def labelled( ps ):
     Return two label maps.
 
     Pairs 0 and 1 are drifted, 1 is also unsure, and 2 is unsure by the second reviewer only.
+    Pair 3 has none from the first reviewer alone, pair 4 from the second alone, and pair 5 mentions unsure mid-note.
     """
     one, two = {}, {}
     for i in range( len( ps ) ):
-        one[ f"pair-{i:02d}" ] = lab( f"pair-{i:02d}", "NONE" if i in ( 0, 1 ) else "AS_PROPOSED", "UNSURE: a" if i == 1 else "" )
-        two[ f"pair-{i:02d}" ] = lab( f"pair-{i:02d}", "NONE" if i in ( 0, 1 ) else "AS_PROPOSED", "UNSURE: b" if i == 2 else "" )
+        one[ f"pair-{i:02d}" ] = lab( f"pair-{i:02d}", "NONE" if i in ( 0, 1, 3 ) else "AS_PROPOSED", "UNSURE: a" if i == 1 else ( "not UNSURE here" if i == 5 else "" ) )
+        two[ f"pair-{i:02d}" ] = lab( f"pair-{i:02d}", "NONE" if i in ( 0, 1, 4 ) else "AS_PROPOSED", "UNSURE: b" if i == 2 else "" )
     return one, two
 
 
@@ -59,7 +60,8 @@ def test_the_groups_follow_the_two_reviewers_and_drifted_wins_over_unsure():
     rem       = ft.remainder_pairs( ps, key_of( ps ), one, two )
     groups    = [ r[ "group" ] for r in rem ]
     assert groups[ :4 ] == [ "drifted", "drifted", "unsure", "other" ] and groups.count( "drifted" ) == 2 and groups.count( "unsure" ) == 1
-    assert [ r[ "unsure_flagged" ] for r in rem[ :4 ] ] == [ False, True, True, False ]
+    assert [ r[ "unsure_flagged" ] for r in rem[ :6 ] ] == [ False, True, True, False, False, False ]
+    assert [ r[ "group" ] for r in rem[ 3:6 ] ] == [ "other", "other", "other" ]      # one reviewer's none is not drift; a note that merely mentions unsure is not a flag
     assert rem[ 0 ][ "original" ] == ps[ 0 ][ "original" ][ "text" ] and rem[ 0 ][ "rewrite" ] == ps[ 0 ][ "rewrite" ][ "text" ] and rem[ 5 ][ "id" ] == "pair-05"
 
 
@@ -197,7 +199,8 @@ def test_the_drafter_job_makes_a_sentence_pass_the_real_drafter_with_a_fake_mode
     assert got[ "ok" ] is True and got[ "need" ] == SENTENCE
 
 
-def test_the_planted_stage_shares_the_live_stage_settings_and_takes_no_refresher( monkeypatch ):
+def test_the_planted_stage_shares_the_live_stage_settings_but_caches_in_the_run_folder( monkeypatch, tmp_path ):
+    cache = tmp_path / "run" / "query-cache"
     live = types.SimpleNamespace( vectors_dir="/v", query_cache_dir="/q", embed_client="client", purposes_path="/p", K=9, arm="B1", fusion=None )
     seen = {}
 
@@ -206,8 +209,9 @@ def test_the_planted_stage_shares_the_live_stage_settings_and_takes_no_refresher
 
     monkeypatch.setattr( planted_pool, "PlantedCandidateStage", FakeStage )
     monkeypatch.setattr( planted_pool, "PlantedVectors", lambda base, ids, rows: ( base, ids, rows ) )
-    ft.planted_stage_for( live, [ { "id": "d-rew00" } ], embed_rows=lambda entries, client: ( "rows", client ), load_vectors=lambda folder: ( "base", folder ) )
-    assert seen[ "planted" ] == ( ( "base", "/v" ), [ "d-rew00" ], ( "rows", "client" ) ) and seen[ "vectors_dir" ] == "/v" and seen[ "cache" ] == "/q" and seen[ "client" ] == "client"
+    ft.planted_stage_for( live, [ { "id": "d-rew00" } ], cache, embed_rows=lambda entries, client: ( "rows", client ), load_vectors=lambda folder: ( "base", folder ) )
+    assert seen[ "planted" ] == ( ( "base", "/v" ), [ "d-rew00" ], ( "rows", "client" ) ) and seen[ "vectors_dir" ] == "/v" and seen[ "cache" ] == str( cache ) and seen[ "client" ] == "client"
+    assert cache.is_dir() and seen[ "cache" ] != "/q"
     assert seen[ "kw" ] == { "purposes_path": "/p", "K": 9, "arm": "B1", "fusion": None } and "refresher" not in seen[ "kw" ]
 
 
@@ -215,7 +219,7 @@ def test_the_live_control_drafts_first_then_plants_and_the_calls_are_the_drafter
     ps      = [ real_pair( i ) for i in range( 20 ) ]
     log     = []
     ctx     = types.SimpleNamespace( candidate_stage="live stage" )
-    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries: log.append( ( "stage", live, len( entries ) ) ) or "planted stage" )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: log.append( ( "stage", live, len( entries ), cache ) ) or "planted stage" )
 
     def draft_fn( job, ask, ledger ):
         log.append( ( "draft", job[ "seed" ][ "id" ] ) )
@@ -225,10 +229,10 @@ def test_the_live_control_drafts_first_then_plants_and_the_calls_are_the_drafter
         log.append( ( "check", need[ "seed" ], planted ) )
         return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ], "widened_ids": [] } }
 
-    stage = ft.control_stage_live( ctx, ps, "ask", "ledger", strip_of, draft_fn, prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )
+    stage = ft.control_stage_live( ctx, ps, "ask", "ledger", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )
     out   = asyncio.run( stage() )
     kinds = [ k[ 0 ] for k in log ]
-    assert kinds == [ "draft" ] * 20 + [ "stage" ] + [ "check" ] * 20 and log[ 20 ] == ( "stage", "live stage", 20 ) and out[ "found" ] == 20 and out[ "stop" ] is False
+    assert kinds == [ "draft" ] * 20 + [ "stage" ] + [ "check" ] * 20 and log[ 20 ] == ( "stage", "live stage", 20, "CACHE" ) and out[ "found" ] == 20 and out[ "stop" ] is False
     assert all( k[ 2 ] == "planted stage" for k in log[ 21: ] ) and [ k[ 1 ] for k in log[ 21: ] ] == [ p[ "original" ][ "id" ] for p in ps ]
 
 
@@ -310,14 +314,14 @@ def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_
 
     deps = { "planted_sha": sha, "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
              "strip_fn": strip_of, "draft_fn": "DRAFT", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed },
-             "control": lambda c, ps, ask, ledger, strip_fn, draft_fn: ( seen.update( control_args=( c, len( ps ), ask, ledger, strip_fn, draft_fn ) ) or ( lambda: asyncio.sleep( 0, { "control": True } ) ) ) }
+             "control": lambda c, ps, ask, ledger, strip_fn, draft_fn, cache: ( seen.update( control_args=( c, len( ps ), ask, ledger, strip_fn, draft_fn, cache ) ) or ( lambda: asyncio.sleep( 0, { "control": True } ) ) ) }
     out  = ft.main( [ *argv, "--live", "--limit", "9" ], deps=deps )
     env  = seen[ "a" ]
     assert out[ "live" ] is True and out[ "report" ] == { "ran": True } and seen[ "y" ] is env
     assert ( env.root, env.seed, env.source_commit, env.ctx, env.ask, env.draft_ledger ) == ( "/r", 7, "abc", ctx, "ASK", "LEDGER" ) and env.run_dir.endswith( "run" )
     assert seen[ "args" ][ 1 ] == 9 and seen[ "args" ][ 2:4 ] == ( { "name": "a" }, { "name": "y" } ) and seen[ "args" ][ 4 ] == { "control": True }
     assert seen[ "args" ][ 5 ][ "unsure_flagged" ] == { "total": 0, "resolved": 0, "of": 20, "also_drifted": 1, "text": "0 of 20, with 1 also drifted" }
-    assert seen[ "control_args" ] == ( ctx, 20, "ASK", "LEDGER", strip_of, "DRAFT" )
+    assert seen[ "control_args" ] == ( ctx, 20, "ASK", "LEDGER", strip_of, "DRAFT", f"{env.run_dir}/query-cache" )
 
 
 def test_a_live_run_without_the_stage_module_stops_by_name_before_a_context_is_built( tmp_path, monkeypatch ):

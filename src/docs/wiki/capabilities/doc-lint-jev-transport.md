@@ -12,7 +12,8 @@ pins:
   - cosa.repo.doc_lint.jev_transport.build_body@e79fc48612
   - cosa.repo.doc_lint.jev_transport.parse_answer@1930963bd0
   - cosa.repo.doc_lint.jev_transport.has_key@5b2a281554
-  - cosa.repo.doc_lint.jev_transport.send_with_meta@a908d7d8ba
+  - cosa.repo.doc_lint.jev_transport.set_charge_hook@986d84594a
+  - cosa.repo.doc_lint.jev_transport.send_with_meta@f7cdba7a41
   - cosa.repo.doc_lint.jev_transport.send@a32c309734
   - cosa.repo.doc_lint.jev_transport.ask_noul@3f4070c783
 ---
@@ -30,7 +31,10 @@ The one door the judge harness uses to reach Jev, TypeSafe's yes/no model. [[doc
 - A 429 or 529 is retried up to the attempt limit. With `transient` a timeout, a reset and the transient statuses are retried too. The wait is never shorter than the server's retry-after.
 - `retry_after_seconds` reads that header as a finite number of at least zero, else `None`. `request_ids` picks the request-id headers. `failure_kind` returns `timeout` or `connection`.
 
+## Charge hook
+- `set_charge_hook` names a function that sees every HTTP attempt before it is sent, retries included. A hook that raises refuses the attempt, and no HTTP is made for it.
+- The hook gets the request's model id, or `jev` when the body names none. The shared call cap installs it.
+
 ## Budget and errors
 - `CallBudget` caps HTTP attempts across all threads of one sweep. `take` counts one attempt or raises `JevBudgetSpent` without counting, and `used` never exceeds the limit.
-- `JevConfigError` means no key or a refused request. `JevCallError` means no usable answer after retries.
-- Both extend a private `_JevError`, which holds the message, the HTTP status and the attempt log. They are siblings, so catching one never catches the other.
+- `JevConfigError` means no key or a refused request. `JevCallError` means no usable answer after retries. Both extend a private `_JevError`, which holds the message, the HTTP status and the attempt log. They are siblings, so catching one never catches the other.

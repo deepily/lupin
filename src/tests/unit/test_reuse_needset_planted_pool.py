@@ -71,7 +71,7 @@ def test_the_planted_vectors_stack_the_rows_under_the_live_ones_and_leave_the_li
     assert all( m.shape[ 0 ] == rows_before + 1 for m in planted.matrices.values() ) and len( base.ids ) == rows_before and base.matrices[ "concat" ].shape[ 0 ] == rows_before
 
 
-def test_the_planted_stage_finds_the_rewrite_in_both_halves_and_writes_nothing_to_disk( tmp_path ):
+def test_the_planted_stage_finds_the_rewrite_in_both_halves_and_leaves_the_live_folder_alone( tmp_path ):
     stage, live, extra = planted_stage( tmp_path )
     before  = folder_digest( live )
     entries = [ *live_entries(), extra ]
@@ -79,6 +79,7 @@ def test_the_planted_stage_finds_the_rewrite_in_both_halves_and_writes_nothing_t
     assert "d-rew0" in got[ "ids" ] and "d-rew0" in got[ "lists" ][ "code" ][ "head" ]
     assert "d-rew0" in got[ "lists" ][ "vector_concat" ][ "head" ] and got[ "lists" ][ "vector_concat" ][ "size" ] == 6
     assert folder_digest( live ) == before and not [ p for p in tmp_path.rglob( "*" ) if p.name.endswith( ".tmp" ) ]
+    assert list( ( tmp_path / "qcache" ).glob( "*.json" ) ), "the query vectors are cached in the folder the stage was given, and nowhere else"
 
 
 def test_a_pool_with_no_planted_row_cannot_find_the_rewrite_and_a_ghost_vector_row_is_refused_by_name( tmp_path ):
