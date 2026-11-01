@@ -11,7 +11,7 @@ import pytest
 
 import cosa.utils.util as cu
 from cosa.repo.symindex.candidates import candidate_stage as cs
-from lupin_mcp.reuse_needset import call_cap, draft, first_thousand as ft, planted_pool, positive_control as pc, stages
+from lupin_mcp.reuse_needset import call_cap, draft, first_thousand as ft, planted_pool, positive_control as pc, stage_seeds, stages
 from lupin_mcp.reuse_needset import errors as er
 from tests.unit.test_reuse_needset_positive_control import pairs as bare_pairs, pool
 
@@ -236,16 +236,49 @@ def test_the_live_control_drafts_first_then_plants_and_the_calls_are_the_drafter
     assert all( k[ 2 ] == "planted stage" for k in log[ 21: ] ) and [ k[ 1 ] for k in log[ 21: ] ] == [ p[ "original" ][ "id" ] for p in ps ]
 
 
-def test_the_stage_modules_are_loaded_by_name_only_when_asked_and_a_missing_one_is_named():
-    mod = types.SimpleNamespace( attribution_stage="a", yield_stage="y" )
-    assert ft.load_stage_factories( "m", import_module=lambda name: mod ) == ( "a", "y" )
-    for broken in ( types.SimpleNamespace( attribution_stage="a" ), None ):
-        def importer( name, broken=broken ):
-            if broken is None: raise ImportError( "no module" )
-            return broken
+def index_records():
+    """Return 120 ts and 80 py index records."""
+    return [ { "id": f"{lang}-{i}", "lang": lang, "file": f"src/{lang}/f{i}.{lang}", "name": f"fn{i}" } for lang in ( "ts", "py" ) for i in range( 120 if lang == "ts" else 80 ) ]
 
-        with pytest.raises( er.NeedsetError ) as e: ft.load_stage_factories( "m", importer )
-        assert e.value.code == er.STAGE_NOT_WIRED
+
+def test_the_seed_lists_are_drawn_from_tracked_files_without_the_planted_originals_and_written_once( tmp_path ):
+    ps      = [ real_pair( i ) for i in range( 20 ) ]
+    rows    = index_records()
+    rows[ 0 ].update( file=ps[ 0 ][ "original" ][ "file" ], name=ps[ 0 ][ "original" ][ "name" ] )
+    calls   = []
+    tracked = { r[ "file" ] for r in rows if r[ "id" ] != "ts-1" }
+
+    def index_parts( root, index_dir ):
+        calls.append( ( root, index_dir ) )
+        return { r[ "id" ]: r for r in rows }, sorted( rows, key=lambda r: r[ "id" ] ), None, None, None
+
+    path = ft.write_seed_lists( "/r", str( tmp_path ), ps, 7, "abc", index_parts=index_parts, tracked=lambda root: tracked )
+    got  = json.loads( path.read_text( encoding="utf-8" ) )
+    drawn = { i for stage in ( "attribution", "yield" ) for i in got[ stage ][ "order" ] }
+    assert calls == [ ( "/r", f"{tmp_path}/index" ) ] and path.name == stage_seeds.LISTS_FILE and got[ "pool" ][ "excluded_planted" ] == 1
+    assert "ts-0" not in drawn and "ts-1" not in drawn and len( got[ "attribution" ][ "order" ] ) == 50 and len( got[ "yield" ][ "order" ] ) == 100
+    assert ft.write_seed_lists( "/r", str( tmp_path ), ps, 7, "abc", index_parts=index_parts, tracked=lambda root: tracked ) == path
+
+
+def test_the_tracked_files_are_what_git_lists_for_the_tree_and_a_stub_shows_the_call( monkeypatch ):
+    assert "CLAUDE.md" in ft.tracked_files( cu.get_project_root() )
+    seen = {}
+    monkeypatch.setattr( ft.subprocess, "run", lambda argv, **kw: seen.update( argv=argv ) or types.SimpleNamespace( stdout="a.py\0b/c.ts\0" ) )
+    assert ft.tracked_files( "/x" ) == { "a.py", "b/c.ts" } and seen[ "argv" ] == [ "git", "-C", "/x", "ls-files", "-z" ]
+
+
+def test_the_stage_factories_hand_the_lists_file_and_the_live_parts_to_pocholos_two_stages( monkeypatch ):
+    seen  = {}
+    parts = { "make_need": "MN", "trace_fn": "TF", "prepare_fn": "PF", "index": "IX" }
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or "A" )
+    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or "Y" )
+    one, two = ft.stage_factories( "/lists.json", parts )
+    assert one( "env" ) == "A" and two( "env" ) == "Y" and seen == { "a": ( "/lists.json", "MN", "TF" ), "y": ( "/lists.json", "PF", "IX" ) }
+
+
+def test_the_live_parts_of_stages_one_and_two_refuse_by_name_and_say_what_is_missing():
+    with pytest.raises( er.NeedsetError ) as e: ft.live_parts( None )
+    assert e.value.code == er.STAGE_NOT_WIRED and all( w in str( e.value ) for w in ( "make_need", "trace_fn", "prepare_fn", "final" ) )
 
 
 def run_dir_files( tmp_path ):
@@ -312,7 +345,7 @@ def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_
         seen[ "args" ] = ( run_dir, limit, await one(), await two(), await control(), await rem() )
         return { "ran": True }
 
-    deps = { "planted_sha": sha, "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
+    deps = { "planted_sha": sha, "parts": lambda args: "PARTS", "lists": lambda args, loaded: "LISTS", "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
              "strip_fn": strip_of, "draft_fn": "DRAFT", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed },
              "control": lambda c, ps, ask, ledger, strip_fn, draft_fn, cache: ( seen.update( control_args=( c, len( ps ), ask, ledger, strip_fn, draft_fn, cache ) ) or ( lambda: asyncio.sleep( 0, { "control": True } ) ) ) }
     out  = ft.main( [ *argv, "--live", "--limit", "9" ], deps=deps )
@@ -324,12 +357,26 @@ def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_
     assert seen[ "control_args" ] == ( ctx, 20, "ASK", "LEDGER", strip_of, "DRAFT", f"{env.run_dir}/query-cache" )
 
 
-def test_a_live_run_without_the_stage_module_stops_by_name_before_a_context_is_built( tmp_path, monkeypatch ):
+def test_a_live_run_passes_the_written_lists_and_the_parts_to_the_stage_factories( tmp_path, monkeypatch ):
     argv, sha = run_dir_files( tmp_path )
-    real      = ft.load_stage_factories
+    seen      = {}
 
-    def no_module( name ): raise ImportError( name )
+    def fake_factories( lists, parts ):
+        seen.update( lists=lists, parts=parts )
+        return ( lambda env: lambda: asyncio.sleep( 0, "one" ), lambda env: lambda: asyncio.sleep( 0, "two" ) )
 
-    monkeypatch.setattr( ft, "load_stage_factories", lambda: real( import_module=no_module ) )
+    async def runner( run_dir, one, two, control, rem, limit ): return { "stages": [ await one(), await two() ] }
+
+    monkeypatch.setattr( ft, "stage_factories", fake_factories )
+    monkeypatch.setattr( ft, "write_seed_lists", lambda root, run_dir, pairs, seed, commit: seen.update( written=( root, len( pairs ), seed, commit ) ) or "WRITTEN" )
+    deps = { "planted_sha": sha, "parts": lambda args: "PARTS", "context": lambda root: None, "runner": runner, "ask": "ASK", "ledger": lambda args: "L", "strip_fn": strip_of,
+             "draft_fn": "D", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed }, "control": lambda *a: ( lambda: asyncio.sleep( 0, {} ) ) }
+    out  = ft.main( [ *argv, "--live" ], deps=deps )
+    assert seen == { "lists": "WRITTEN", "parts": "PARTS", "written": ( "/r", 20, 7, "abc" ) } and out[ "report" ] == { "stages": [ "one", "two" ] }
+
+
+def test_a_live_run_whose_stage_parts_are_not_built_stops_by_name_before_a_context_or_a_list( tmp_path, monkeypatch ):
+    argv, sha = run_dir_files( tmp_path )
+    monkeypatch.setattr( ft, "write_seed_lists", lambda *a: pytest.fail( "a list was written" ) )
     with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps={ "planted_sha": sha, "context": lambda root: pytest.fail( "a context was built" ) } )
     assert e.value.code == er.STAGE_NOT_WIRED

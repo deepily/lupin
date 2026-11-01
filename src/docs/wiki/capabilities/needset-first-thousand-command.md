@@ -6,11 +6,14 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.control_job@da8024fd0c
   - lupin_mcp.reuse_needset.first_thousand.planted_stage_for@d5537af534
   - lupin_mcp.reuse_needset.first_thousand.control_stage_live@2553ab4a6f
-  - lupin_mcp.reuse_needset.first_thousand.load_stage_factories@4a6def5ac3
+  - lupin_mcp.reuse_needset.first_thousand.tracked_files@0eecf6442d
+  - lupin_mcp.reuse_needset.first_thousand.write_seed_lists@7e9eadb068
+  - lupin_mcp.reuse_needset.first_thousand.live_parts@22adc07ae5
+  - lupin_mcp.reuse_needset.first_thousand.stage_factories@4a1c93709b
   - lupin_mcp.reuse_needset.first_thousand.parse_args@f520014819
   - lupin_mcp.reuse_needset.first_thousand.plan@6de27be30d
   - lupin_mcp.reuse_needset.first_thousand.load_inputs@68bde7e075
-  - lupin_mcp.reuse_needset.first_thousand.main@494776fb9a
+  - lupin_mcp.reuse_needset.first_thousand.main@d64156ab31
 ---
 # Need set: the first 1,000 calls, the command
 
@@ -25,8 +28,9 @@ The live control, the command line and the capped run. The planted pool and the 
 - `parse_args` requires the root, run folder, planted file, answer key, labels folder, seed and source commit. The cap is 1,000 unless `--limit` says otherwise.
 - `load_inputs` reads the 20 pairs and their groups for reading only. The planted file must match its recorded hash.
 - `main` without `--live` prints `plan` and contacts nothing. The plan shows the cap, the calls already spent, the groups and the flagged count.
-- `main` with `--live` loads the stage factories, builds the context from the environment, and runs the four stages. A missing stage module raises `STAGE_NOT_WIRED` before any context is built.
-- `load_stage_factories` imports `attribution_stage( env )` and `yield_stage( env )` from the stage module by name, at run time.
+- `main` with `--live` gets the attribution and yield parts, builds the context, writes the seed lists, and runs the four stages. Parts that are not built raise `STAGE_NOT_WIRED` before a context is built or a list is written.
+- `write_seed_lists` draws the 50 attribution and 100 yield seeds from the tree's index and tracked files, and writes them once to the run folder. `tracked_files` is the set git lists.
+- `stage_factories` hands that file and the parts to the attribution and yield stages. `live_parts` is the part that is not built: it names `make_need`, `trace_fn` and `prepare_fn`.
 
 ## The run
 - `run_first_thousand` installs the cap over `call-ledger.jsonl` in the run folder, runs the four stages and writes `stage-reports.json`. A resumed run keeps the calls already spent.

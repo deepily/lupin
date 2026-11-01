@@ -10,16 +10,16 @@ import argparse
 import asyncio
 import copy
 import hashlib
-import importlib
 import json
 import pathlib
+import subprocess
 import types
 
 from cosa.repo.labelling import run_check
 from cosa.repo.symindex.candidates import candidate_stage
 from cosa.repo.symindex.candidates import vector_store as vs
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, stage3, stages, strip
+from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, smoke, stage3, stage_seeds, stages, strip
 from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
@@ -190,8 +190,7 @@ async def run_first_thousand( run_dir, stage_one, stage_two, control, remainder,
     return report
 
 
-STAGE_MODULE = "lupin_mcp.reuse_needset.stage_one_two"
-REQUIRED     = ( "root", "run_dir", "planted", "answer_key", "labels_dir", "seed", "source_commit" )
+REQUIRED = ( "root", "run_dir", "planted", "answer_key", "labels_dir", "seed", "source_commit" )
 
 
 def control_job( pair, strip_fn ):
@@ -254,22 +253,57 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
     return stage
 
 
-def load_stage_factories( module_name=STAGE_MODULE, import_module=importlib.import_module ):
+def tracked_files( root ):
     """
-    Load the two stage factories that Pocholo's module supplies, at run time.
-
-    Ensures:
-        - returns ( attribution_stage, yield_stage ), each taking an env and returning a zero-argument async function
-        - the module is imported only here, so this one needs it only when a live run starts
+    Return the set of files git tracks in root.
 
     Raises:
-        - NeedsetError STAGE_NOT_WIRED when the module or either factory is missing
+        - subprocess.CalledProcessError when root is not a git working tree
     """
-    try:
-        module = import_module( module_name )
-        return module.attribution_stage, module.yield_stage
-    except ( ImportError, AttributeError ) as e:
-        raise er.NeedsetError( er.STAGE_NOT_WIRED, f"{module_name} must supply attribution_stage( env ) and yield_stage( env ): {e}" ) from e
+    out = subprocess.run( [ "git", "-C", str( root ), "ls-files", "-z" ], check=True, capture_output=True, text=True )
+    return { f for f in out.stdout.split( "\0" ) if f }
+
+
+def write_seed_lists( root, run_dir, pairs, seed, source_commit, index_parts=smoke.index_parts, tracked=tracked_files ):
+    """
+    Draw the attribution and yield seed lists from the tree's index and write them out.
+
+    Requires:
+        - root is the lupin tree of the source commit; pairs are the 20 planted pairs
+
+    Ensures:
+        - only tracked files are drawn, and no planted pair's original is, by file and name
+        - the lists are written once, before any call, to the file stage_seeds.LISTS_FILE
+        - returns the path of that file
+    """
+    by_id, kept, _measures, _twins, _bodies = index_parts( root, f"{run_dir}/index" )
+    planted = stage_seeds.planted_ids( pairs, list( by_id.values() ) )
+    return stage_seeds.write_lists( run_dir, stage_seeds.draw_lists( kept, seed, planted, source_commit, tracked( root ) ) )
+
+
+def live_parts( args ):
+    """
+    Name the three live pieces of the first two stages, which are not built yet.
+
+    Raises:
+        - NeedsetError STAGE_NOT_WIRED always, before any call, naming make_need, trace_fn and prepare_fn
+    """
+    raise er.NeedsetError( er.STAGE_NOT_WIRED, "stages 1 and 2 need make_need( seed id ), trace_fn( needs ) and prepare_fn( seed id ), and trace_all takes only final needs, which a run with no labelling does not make" )
+
+
+def stage_factories( lists_path, parts ):
+    """
+    Return the attribution factory and the yield factory, each taking an env.
+
+    Requires:
+        - lists_path is the file write_seed_lists wrote
+        - parts is a mapping with make_need, trace_fn, prepare_fn and index
+
+    Ensures:
+        - the stages are stage_seeds.attribution_stage and stage_seeds.yield_stage over that file and those parts
+    """
+    return ( lambda env: stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ),
+             lambda env: stage_seeds.yield_stage( lists_path, parts[ "prepare_fn" ], parts[ "index" ] ) )
 
 
 def parse_args( argv ):
@@ -328,8 +362,8 @@ def main( argv=None, deps=None ):
     Plan the first 1,000 calls, or with --live run them.
 
     Requires:
-        - deps is None for the real parts, or a mapping that replaces any of: planted_sha, context, ask, ledger, draft_fn, strip_fn, factories, control, runner, remainder
-        - a live run needs the reuse environment variables the context reads, and the two stage factories of STAGE_MODULE
+        - deps is None for the real parts, or a mapping that replaces any of: planted_sha, context, ask, ledger, draft_fn, strip_fn, parts, lists, factories, control, runner, remainder
+        - a live run needs the reuse environment variables the context reads, and the live parts of the attribution and yield stages
 
     Ensures:
         - without --live the plan is printed and returned, and no model, vector server or context is touched
@@ -337,7 +371,7 @@ def main( argv=None, deps=None ):
         - the pairs and their groups are read before anything else, so a bad input stops the run before a call
 
     Raises:
-        - NeedsetError STAGE_NOT_WIRED on a live run when the stage module is absent
+        - NeedsetError STAGE_NOT_WIRED on a live run whose attribution and yield parts are not built, before a context is built or a list is written
         - whatever the inputs raise, including CONTROL_INPUT_CHANGED
     """
     args   = parse_args( argv )
@@ -345,12 +379,14 @@ def main( argv=None, deps=None ):
     loaded = load_inputs( args, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
     shown  = plan( args, loaded )
     if not args.live: return { "live": False, "plan": shown }
-    factories = deps[ "factories" ] if "factories" in deps else load_stage_factories()
+    parts     = ( deps[ "parts" ] if "parts" in deps else live_parts )( args )
     ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
     ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
     ledger    = deps[ "ledger" ]( args ) if "ledger" in deps else draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
     strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, args.root ) )
     draft_fn  = deps[ "draft_fn" ] if "draft_fn" in deps else draft.draft_need
+    lists     = deps[ "lists" ]( args, loaded ) if "lists" in deps else write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit )
+    factories = deps[ "factories" ] if "factories" in deps else stage_factories( lists, parts )
     env       = types.SimpleNamespace( root=args.root, run_dir=args.run_dir, seed=args.seed, source_commit=args.source_commit, ctx=ctx, ask=ask, draft_ledger=ledger )
     control   = ( deps[ "control" ] if "control" in deps else control_stage_live )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )
     rem       = remainder_stage( loaded[ "remainder" ], args.seed, **( { "run_remainder": deps[ "remainder" ] } if "remainder" in deps else { } ) )
