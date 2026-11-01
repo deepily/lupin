@@ -15,6 +15,7 @@ import pathlib
 import subprocess
 import types
 
+from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import run_check
 from cosa.repo.symindex.candidates import candidate_stage
 from cosa.repo.symindex.candidates import vector_store as vs
@@ -384,6 +385,7 @@ def main( argv=None, deps=None ):
 
     Ensures:
         - without --live the plan is printed and returned, and no model, vector server or context is touched
+        - with --live every model call, the probe's included, runs on the Claude Code binary args.cli_path names, or the SDK's own when none is given
         - with --live the four stages run under one cap in args.run_dir and the report is returned
         - the pairs and their groups are read before anything else, so a bad input stops the run before a call
 
@@ -397,6 +399,7 @@ def main( argv=None, deps=None ):
     loaded = load_inputs( args, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
     shown  = plan( args, loaded )
     if not args.live: return { "live": False, "plan": shown }
+    model_transport.configure( cli_path=args.cli_path )
     ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
     if ctx.candidate_stage is None: raise er.NeedsetError( er.NO_CANDIDATE_STAGE, f"the context has no candidate stage; set {rt.PACK_SIZE_VARIABLE}, {rt.CEILING_VARIABLE} and {rt.RUN_NAME_VARIABLE}, which build it" )
     ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
