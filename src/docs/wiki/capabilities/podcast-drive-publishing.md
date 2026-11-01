@@ -19,7 +19,7 @@ After a podcast's audio is written, both podcast jobs can copy the files to the 
 - `publish_podcast_to_drive` is the one shared hook. `PodcastGeneratorJob` ([[podcast-generation]]) and `DeepResearchToPodcastJob` ([[research-chained-pipelines]]) call it after the audio exists and before the completion notice is built.
 - It returns `language_links` (language to Drive link), `extra_lines` (notice lines) and `folder_link`. The jobs add a `☁️ Drive` link per language and store `drive_folder_link` in their artifacts.
 - With `publish_to_google_drive` off it returns the empty result and imports no Google module. The upload runs in a worker thread.
-- It never fails the job. Loading the config, resolving the path, naming the folder and the upload all sit inside one catch-all. Any error becomes one `**Drive**: upload failed (...)` line in the notice.
+- It never fails the job. Loading the config, resolving the path, naming the folder and the upload all sit inside one catch-all. An error before the upload starts, or in it as a whole, becomes one `**Drive**: upload failed (...)` line. If only some files fail, the links that uploaded are kept. The notice then gets the folder line and a second `**Drive**: upload failed (...)` line naming each failed file.
 - `make_job_folder_name` builds `<timestamp>-<topic>` from the source file's name. `resolve_source_path` joins a relative path to the project root and returns `None` for an empty one.
 - Files sent: one mp3 per language. Scripts go only if `drive_upload_script` is on. The source document goes if `drive_upload_source_document` is on (the default) and the file exists.
 
