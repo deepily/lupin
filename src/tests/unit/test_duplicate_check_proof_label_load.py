@@ -12,10 +12,10 @@ import pytest
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
 from cosa.repo.symindex.candidates import arm_run
-from cosa.repo.semdup.proof import label_load as ll
-from cosa.repo.semdup.proof import label_prep as lp
-from cosa.repo.semdup.proof import proof_run as pr
-from tests.unit.test_semdup_proof_run import Toy
+from cosa.repo.duplicate_check.proof import label_load as ll
+from cosa.repo.duplicate_check.proof import label_prep as lp
+from cosa.repo.duplicate_check.proof import proof_run as pr
+from tests.unit.test_duplicate_check_proof_run import Toy
 
 CLOCK = lambda: "2026-10-26T21:00:00+00:00"
 

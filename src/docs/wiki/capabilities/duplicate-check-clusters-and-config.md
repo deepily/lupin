@@ -1,20 +1,20 @@
 ---
-capability: semdup-clusters-and-config
+capability: duplicate-check-clusters-and-config
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.semdup.cluster.clusters@62c12e6059
-  - cosa.repo.semdup.cluster.join_pairs@322934e6a6
-  - cosa.repo.semdup.cluster.score@34b43819b0
-  - cosa.repo.semdup.cluster.sizes@2295c8d25f
-  - cosa.repo.semdup.cluster.surplus@cf21b33e57
-  - cosa.repo.semdup.config.build_config@38d0b4be75
-  - cosa.repo.semdup.config.config_sha@5878c5f4f2
-  - cosa.repo.semdup.config.freeze@1550c03141
-  - cosa.repo.semdup.config.is_empty@b14a97293d
-  - cosa.repo.semdup.config.verify_frozen@d2018d2ceb
-  - cosa.repo.semdup.frozen.frozen_path@737ab8ab6a
-  - cosa.repo.semdup.frozen.live_config@34e3da1146
-  - cosa.repo.semdup.frozen.main@2f6a095f7f
+  - cosa.repo.duplicate_check.cluster.clusters@62c12e6059
+  - cosa.repo.duplicate_check.cluster.join_pairs@322934e6a6
+  - cosa.repo.duplicate_check.cluster.score@03fd52325c
+  - cosa.repo.duplicate_check.cluster.sizes@2295c8d25f
+  - cosa.repo.duplicate_check.cluster.surplus@cf21b33e57
+  - cosa.repo.duplicate_check.config.build_config@38d0b4be75
+  - cosa.repo.duplicate_check.config.config_sha@5878c5f4f2
+  - cosa.repo.duplicate_check.config.freeze@8550134eb2
+  - cosa.repo.duplicate_check.config.is_empty@b14a97293d
+  - cosa.repo.duplicate_check.config.verify_frozen@9dad4819c9
+  - cosa.repo.duplicate_check.frozen.frozen_path@737ab8ab6a
+  - cosa.repo.duplicate_check.frozen.live_config@34e3da1146
+  - cosa.repo.duplicate_check.frozen.main@4b908edc3d
 ---
 # Duplicate checker: clusters and frozen config
 The score is surplus copies per 100 passing acceptance tests. The configuration that fixes every constant of a run is written once.
@@ -27,4 +27,4 @@ The score is surplus copies per 100 passing acceptance tests. The configuration 
 - `verify_frozen` checks the frozen file against its own sha and against what this run would use.
 - `frozen_path` is `src/conf/semdup-frozen-2.json` under the project root. `live_config` builds the configuration from the decided values in `frozen.py`, the judge's prompt parts and the scrub list of the tool tokens and arm labels.
 - `frozen.main` freezes `live_config` once and prints the path and sha. It raises `CONFIG_ALREADY_FROZEN` when the file exists.
-- Inputs come from [[semdup-judge-and-pipeline]].
+- Inputs come from [[duplicate-check-judge-and-pipeline]].

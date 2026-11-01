@@ -16,9 +16,9 @@ import cosa.utils.util as cu
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import items as lb_items
 from cosa.repo.labelling import packets as lb_packets
-from cosa.repo.semdup import blind, body_vectors, extract, frozen, structural
-from cosa.repo.semdup import config as cfg_mod
-from cosa.repo.semdup.proof import monolith_pairs, plant
+from cosa.repo.duplicate_check import blind, body_vectors, extract, frozen, structural
+from cosa.repo.duplicate_check import config as cfg_mod
+from cosa.repo.duplicate_check.proof import monolith_pairs, plant
 from cosa.repo.symindex import dups, js_index, need_input, need_writer
 from cosa.repo.symindex import spec as sp
 from cosa.repo.symindex.candidates import vector_build
@@ -269,7 +269,7 @@ def pair_item( first, second, seed ):
     """
     mine    = sorted( [ first, second ], key=lambda d: d[ "id" ] )
     random.Random( f"{seed}|{unordered_key( first[ 'id' ], second[ 'id' ] )}" ).shuffle( mine )
-    return { "item": lb_items.make_item( lb_items.SEMDUP_PAIR, item_id( first[ "id" ], second[ "id" ] ), { "a": mine[ 0 ][ "text" ], "b": mine[ 1 ][ "text" ] } ),
+    return { "item": lb_items.make_item( lb_items.DUPLICATE_PAIR, item_id( first[ "id" ], second[ "id" ] ), { "a": mine[ 0 ][ "text" ], "b": mine[ 1 ][ "text" ] } ),
              "row": { "a": mine[ 0 ][ "id" ], "b": mine[ 1 ][ "id" ] } }
 
 
@@ -505,7 +505,7 @@ def main( argv=None, make_wiring=live_wiring ):
         - returns 0
 
     Raises:
-        - SemdupError CONFIG_DRIFT if the frozen file is not the live configuration
+        - DuplicateCheckError CONFIG_DRIFT if the frozen file is not the live configuration
     """
     parser = argparse.ArgumentParser( description="Prepare the Phase 2 proof labelling packets." )
     parser.add_argument( "--out", required=True )

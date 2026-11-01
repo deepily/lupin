@@ -1,4 +1,4 @@
-"""Unit tests for semdup.judge: prompt, strict parser, backends and the ledgered run."""
+"""Unit tests for duplicate_check.judge: prompt, parser, backends and the ledgered run."""
 import asyncio
 import json
 import re
@@ -8,11 +8,11 @@ from claude_agent_sdk import AssistantMessage, TextBlock
 
 from cosa.repo.doc_lint import harness_runner as hr
 from cosa.repo.doc_lint import model_transport as mt
-from cosa.repo.semdup import blind as bl
-from cosa.repo.semdup import config as cf
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
-from cosa.repo.semdup import judge as jd
+from cosa.repo.duplicate_check import blind as bl
+from cosa.repo.duplicate_check import config as cf
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
+from cosa.repo.duplicate_check import judge as jd
 
 SCRUB = bl.scrub_tokens( [ "ARM-WITH" ] )
 CFG   = { "model_id": "claude-fable-5-1", "prompt_version": "semdup-test0001" }
@@ -136,7 +136,7 @@ def test_a_body_that_forges_a_closing_tag_cannot_end_its_block_because_the_suffi
 def test_a_prompt_made_from_a_record_that_still_carries_a_scrub_token_is_refused_by_assert_blind():
     d  = blinded( definition( "target", "def target( x ):\n    return x" ) )
     bad = { **blinded( definition( "other", "def other( x ):\n    return 1" ) ), "text": "def other( x ):\n    return check_exists( x )" }
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         jd.build_prompt( d, [ bad ], SCRUB )
     assert caught.value.code == err.BLINDNESS_BREACH and "check_exists" in caught.value.detail
 
@@ -149,7 +149,7 @@ def test_a_prompt_built_from_a_real_definition_of_the_reuse_tools_is_refused():
     assert len( found ) == 1
     d      = blinded( definition( "target", "def target( x ):\n    return x" ) )
     raw    = { "id": "x-real", "lang": found[ 0 ][ "lang" ], "file": found[ 0 ][ "file" ], "name": found[ 0 ][ "name" ], "sig": found[ 0 ][ "sig" ], "text": found[ 0 ][ "text" ] }
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         jd.build_prompt( d, [ raw ], SCRUB )
     assert caught.value.code == err.BLINDNESS_BREACH
 
@@ -196,7 +196,7 @@ def test_a_reply_inside_one_json_fence_is_accepted_with_or_without_the_json_tag(
     ( "not json at all",                                                         "not one JSON object" ),
 ] )
 def test_every_malformed_reply_is_refused_with_the_named_code( text, why ):
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         jd.parse_reply( text, LABELS )
     assert caught.value.code == err.JUDGE_UNREADABLE and why in caught.value.detail
 
@@ -394,7 +394,7 @@ def test_a_candidate_with_a_scrub_token_stops_the_run_before_any_call(tmp_path):
     news, cands = world()
     cands[ news[ 0 ][ "id" ] ][ 0 ] = definition( "leaky", "def leaky( y ):\n    return check_exists( y )", origin="server" )
     backend = FakeBackend()
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         run( news[ :1 ], cands, backend, hr.Ledger( str( tmp_path / "l" ) ) )
     assert caught.value.code == err.BLINDNESS_BREACH and backend.calls == []
 

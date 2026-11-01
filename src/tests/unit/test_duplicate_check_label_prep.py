@@ -1,5 +1,5 @@
 """
-Unit tests for semdup.proof.label_prep: planting, monolith pairs, packets, answer key.
+Unit tests for duplicate_check.proof.label_prep: planting, monolith pairs, packets, key.
 """
 import asyncio
 import json
@@ -10,13 +10,13 @@ import pytest
 
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import packets as lb_packets
-from cosa.repo.semdup import blind
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
-from cosa.repo.semdup import frozen as fz
-from cosa.repo.semdup.proof import label_prep as lp
-from cosa.repo.semdup.proof import monolith_pairs as mp
-from cosa.repo.semdup.proof import plant
+from cosa.repo.duplicate_check import blind
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
+from cosa.repo.duplicate_check import frozen as fz
+from cosa.repo.duplicate_check.proof import label_prep as lp
+from cosa.repo.duplicate_check.proof import monolith_pairs as mp
+from cosa.repo.duplicate_check.proof import plant
 from cosa.repo.symindex import need_input
 
 PY_FIT = "def fit( rows ):\n    total = 0\n    for row in rows:\n        if row > 1:\n            total = total + row * 2\n    return total\n"
@@ -664,5 +664,5 @@ def test_main_refuses_to_run_when_the_frozen_file_is_not_the_live_configuration(
     path.write_text( json.dumps( drifted ), encoding="utf-8" )
     monkeypatch.setattr( fz, "frozen_path", lambda: str( path ) )
     monkeypatch.setattr( model_transport, "configure", lambda path=None: None )
-    with pytest.raises( err.SemdupError ) as caught: lp.main( [ "--out", str( tmp_path / "o" ) ], make_wiring=lambda root, cache: None )
+    with pytest.raises( err.DuplicateCheckError ) as caught: lp.main( [ "--out", str( tmp_path / "o" ) ], make_wiring=lambda root, cache: None )
     assert caught.value.code == err.CONFIG_DRIFT

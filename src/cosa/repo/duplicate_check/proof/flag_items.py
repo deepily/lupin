@@ -1,5 +1,5 @@
 """
-Add the flag pairs an unofficial run owes labels for to the labelling run.
+Add the flag pairs a trial run owes labels for to the labelling run.
 
 The original items, key rows and packet lines are never rewritten: the new ones are appended, and the result is checked before it replaces anything.
 """
@@ -12,9 +12,9 @@ import pathlib
 import cosa.utils.util as cu
 from cosa.repo.labelling import packets as lb_packets
 from cosa.repo.labelling import pair_labels as pl
-from cosa.repo.semdup import frozen
-from cosa.repo.semdup import config as cfg_mod
-from cosa.repo.semdup.proof import label_prep, proof_cli, proof_run
+from cosa.repo.duplicate_check import frozen
+from cosa.repo.duplicate_check import config as cfg_mod
+from cosa.repo.duplicate_check.proof import label_prep, proof_cli, proof_run
 
 FLAG_KIND    = "flag"
 FLAG_STRATUM = "flag"
@@ -46,7 +46,7 @@ def label_id_defs( pool ):
 
 def owed_pairs( record_path ):
     """
-    Read the pair keys an unofficial proof record says are owed labels.
+    Read the pair keys a trial proof record says are owed labels.
 
     Requires:
         - record_path is a proof record proof_run wrote
@@ -214,10 +214,10 @@ def discard( swaps ):
 
 def main( argv=None, make_parts=proof_cli.live_parts ):
     """
-    Add the owed flag pairs of an unofficial proof record to the labelling run as new items.
+    Add the owed flag pairs of a trial proof record to the labelling run as new items.
 
     Requires:
-        - argv holds --run-dir, --record (the unofficial proof record whose owed list names the pairs), optionally --parallel and --check
+        - argv holds --run-dir, --record (the trial proof record whose owed list names the pairs), optionally --parallel and --check
 
     Ensures:
         - stdout holds one JSON record; banners go to stderr
@@ -234,7 +234,7 @@ def main( argv=None, make_parts=proof_cli.live_parts ):
 
 def _main( argv, make_parts, out ):
     """Do main's work, printing the JSON record to out."""
-    parser = argparse.ArgumentParser( description="Add the owed flag pairs of an unofficial proof record to the labelling run." )
+    parser = argparse.ArgumentParser( description="Add the owed flag pairs of a trial proof record to the labelling run." )
     parser.add_argument( "--run-dir", required=True )
     parser.add_argument( "--record", required=True )
     parser.add_argument( "--parallel", type=int, default=proof_cli.DEFAULT_PARALLEL )

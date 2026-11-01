@@ -5,8 +5,8 @@ import subprocess
 import pytest
 
 import cosa.utils.util as cu
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
 
 CLIENT_DIR = "src/lupin_app/static/js"
 EXCLUDED   = ( ".d.ts", ".min.js" )
@@ -41,6 +41,6 @@ def test_the_census_goes_red_when_one_file_does_not_parse(tmp_path):
     ( root / "broken.ts" ).write_text( "export function ( {{{\n", encoding="utf-8" )
     report = ex.extract_tree( root, [ root / "ok.ts", root / "broken.ts" ], "server" )
     assert report[ "skipped_script" ] == [ "broken.ts" ]
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         ex.completeness( report )
     assert caught.value.code == err.EXTRACT_INCOMPLETE

@@ -1,19 +1,19 @@
 ---
-capability: semdup-proof-label-loader
+capability: duplicate-check-proof-label-loader
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.semdup.proof.label_load.key_rows@18eed9d6c1
-  - cosa.repo.semdup.proof.label_load.pair_key_labels@83ea19795a
-  - cosa.repo.semdup.proof.label_load.third_votes@ce4a654a08
-  - cosa.repo.semdup.proof.label_load.disputed_items@61090437b8
-  - cosa.repo.semdup.proof.label_load.supplement_rows@dd327fdd98
-  - cosa.repo.semdup.proof.label_load.resolved_labels@ea3bbd020b
-  - cosa.repo.semdup.proof.label_load.fingerprints@fca0830aef
-  - cosa.repo.semdup.proof.label_load.unsure_pair_keys@51041bcc53
+  - cosa.repo.duplicate_check.proof.label_load.key_rows@18eed9d6c1
+  - cosa.repo.duplicate_check.proof.label_load.pair_key_labels@83ea19795a
+  - cosa.repo.duplicate_check.proof.label_load.third_votes@ce4a654a08
+  - cosa.repo.duplicate_check.proof.label_load.disputed_items@61090437b8
+  - cosa.repo.duplicate_check.proof.label_load.supplement_rows@dd327fdd98
+  - cosa.repo.duplicate_check.proof.label_load.resolved_labels@ea3bbd020b
+  - cosa.repo.duplicate_check.proof.label_load.fingerprints@fca0830aef
+  - cosa.repo.duplicate_check.proof.label_load.unsure_pair_keys@51041bcc53
 ---
 # Duplicate checker proof: the label loader
 
-Turns the reviewers' pair labels and the answer key into the `{ pair key: bool }` that `proof_run` takes. The packets and key come from [[semdup-proof-label-packets]]; the label rule is in [[labelling-pair-labels]].
+Turns the reviewers' pair labels and the answer key into the `{ pair key: bool }` that `proof_run` takes. The packets and key come from [[duplicate-check-proof-label-packets]]; the label rule is in [[labelling-pair-labels]].
 
 ## What it does
 - `key_rows` reads the item rows of the answer key.

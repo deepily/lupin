@@ -1,26 +1,26 @@
 ---
-capability: semdup-proof-flag-items
+capability: duplicate-check-proof-flag-items
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.semdup.proof.flag_items.owed_pairs@c0798914e4
-  - cosa.repo.semdup.proof.flag_items.label_id_defs@7301c7ae71
-  - cosa.repo.semdup.proof.flag_items.build_flag_items@1f03ba7ca1
-  - cosa.repo.semdup.proof.flag_items.stage@970d02a46e
-  - cosa.repo.semdup.proof.flag_items.packet_lines@330c41c3d1
-  - cosa.repo.semdup.proof.flag_items.rows_sha@533b8f3128
-  - cosa.repo.semdup.proof.flag_items.sha_of@4594631e0b
-  - cosa.repo.semdup.proof.flag_items.tail_state@f0b853c780
-  - cosa.repo.semdup.proof.flag_items.verify@1e02f0bebc
-  - cosa.repo.semdup.proof.flag_items.swap@2718ef7d21
-  - cosa.repo.semdup.proof.flag_items.discard@f2be8d9100
-  - cosa.repo.semdup.proof.flag_items.main@d2b75fb97f
+  - cosa.repo.duplicate_check.proof.flag_items.owed_pairs@c0798914e4
+  - cosa.repo.duplicate_check.proof.flag_items.label_id_defs@7301c7ae71
+  - cosa.repo.duplicate_check.proof.flag_items.build_flag_items@1f03ba7ca1
+  - cosa.repo.duplicate_check.proof.flag_items.stage@970d02a46e
+  - cosa.repo.duplicate_check.proof.flag_items.packet_lines@330c41c3d1
+  - cosa.repo.duplicate_check.proof.flag_items.rows_sha@533b8f3128
+  - cosa.repo.duplicate_check.proof.flag_items.sha_of@4594631e0b
+  - cosa.repo.duplicate_check.proof.flag_items.tail_state@f0b853c780
+  - cosa.repo.duplicate_check.proof.flag_items.verify@1e02f0bebc
+  - cosa.repo.duplicate_check.proof.flag_items.swap@2718ef7d21
+  - cosa.repo.duplicate_check.proof.flag_items.discard@f2be8d9100
+  - cosa.repo.duplicate_check.proof.flag_items.main@d2b75fb97f
 ---
 # Duplicate checker proof: the owed flag pairs
 
-An unofficial run lists in `owed` the pairs the checker flagged that no reviewer labelled. This command adds them to the labelling run as new items. It sits beside [[semdup-proof-command]], whose pool it reuses.
+A trial run lists in `owed` the pairs the checker flagged that no reviewer labelled. This command adds them to the labelling run as new items. It sits beside [[duplicate-check-proof-command]], whose pool it reuses.
 
 ## What it does
-- Run `python -m cosa.repo.semdup.proof.flag_items --run-dir <run> --record <proof-unofficial/N.json> [--check]`. `--check` stages and verifies, then removes the staged files.
+- Run `python -m cosa.repo.duplicate_check.proof.flag_items --run-dir <run> --record <proof-trial/N.json> [--check]`. `--check` stages and verifies, then removes the staged files.
 - It builds the pool as the proof does, so each item holds the definition the proof judged. A monolith side made over as new keeps its original id (`label_id_defs`).
 - Items come from `label_prep.pair_item`. Each key row has kind and stratum `flag`, which `monolith_spec` and `load_run` ignore.
 - `stage` writes `*.flags-new` copies of the key and both packets, and `verify` checks them. `packet_lines` puts the new items in one reviewer's order. Original bytes and rows must be unchanged, and new lines in blind form.

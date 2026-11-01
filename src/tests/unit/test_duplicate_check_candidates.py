@@ -1,11 +1,11 @@
-"""Unit tests for semdup.candidates: the three lists, the pool rules and the fusion."""
+"""Unit tests for duplicate_check.candidates: the three lists, the pool rules and the fusion."""
 import random
 
 import numpy as np
 import pytest
 
-from cosa.repo.semdup import candidates as cd
-from cosa.repo.semdup import config as cf
+from cosa.repo.duplicate_check import candidates as cd
+from cosa.repo.duplicate_check import config as cf
 
 VOCAB = [ "red", "green", "blue", "cyan", "pink", "gold" ]
 CFG   = { "list_depth": cf.LIST_DEPTH, "max_candidates": cf.MAX_CANDIDATES, "min_candidates": cf.MIN_CANDIDATES, "fusion_head": cf.FUSION_HEAD }

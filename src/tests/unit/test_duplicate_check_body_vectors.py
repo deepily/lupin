@@ -1,10 +1,10 @@
-"""Unit tests for semdup.body_vectors: the cut, the cache and the engine key."""
+"""Unit tests for duplicate_check.body_vectors: the cut, the cache and the engine key."""
 import json
 
 import pytest
 
-from cosa.repo.semdup import body_vectors as bv
-from cosa.repo.semdup import extract as ex
+from cosa.repo.duplicate_check import body_vectors as bv
+from cosa.repo.duplicate_check import extract as ex
 from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE
 
 VOCAB = [ "alpha", "beta", "gamma", "delta", "epsilon", "zeta" ]

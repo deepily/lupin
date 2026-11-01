@@ -45,7 +45,7 @@ def test_the_sample_is_fifteen_percent_with_a_half_rounded_up( n, expected ):
 
 def test_disputed_then_nothing_then_a_seeded_sample_then_pairs_each_sorted_by_id():
     needs = pile()
-    got   = finalize.select_for_labelling( needs, 11, semdup_items=[ "p2", "p1" ] )
+    got   = finalize.select_for_labelling( needs, 11, duplicate_items=[ "p2", "p1" ] )
     by    = lambda reason: [ g[ "id" ] for g in got if g[ "reason" ] == reason ]
     ids   = { n[ "id" ]: n for n in needs }
     assert [ g[ "reason" ] for g in got ] == [ "disputed" ] * 3 + [ "nothing" ] * 4 + [ "sample" ] * 3 + [ "semdup_pair" ] * 2

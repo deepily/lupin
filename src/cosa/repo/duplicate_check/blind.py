@@ -2,7 +2,7 @@
 import hashlib
 import re
 
-from cosa.repo.semdup import errors as err
+from cosa.repo.duplicate_check import errors as err
 
 REUSE_TOOL_TOKENS = ( "check_exists", "fetch_similar", "read_capability", "record_search", "reuse-reviewer", "reuse-receipt", "SEARCHED" )
 COMMENT_STARTS    = { "py": ( "#", ), "ts": ( "//", "/*", "*" ) }
@@ -60,11 +60,11 @@ def assert_blind( text, scrub ):
         - returns None when no token occurs in text; the match is on the exact characters and the case of the token
 
     Raises:
-        - SemdupError BLINDNESS_BREACH naming each token found, never the text around it
+        - DuplicateCheckError BLINDNESS_BREACH naming each token found, never the text around it
         - ValueError if the scrub list holds an empty token
     """
     found = [ token for token in _check_scrub( scrub ) if token in text ]
-    if found: raise err.SemdupError( err.BLINDNESS_BREACH, f"scrub tokens survive in text bound for the judge: {', '.join( found )}" )
+    if found: raise err.DuplicateCheckError( err.BLINDNESS_BREACH, f"scrub tokens survive in text bound for the judge: {', '.join( found )}" )
 
 
 def relative_path( file ):
@@ -130,7 +130,7 @@ def blind_definition( d, scrub ):
         - no field carries a scrub token
 
     Raises:
-        - SemdupError BLINDNESS_BREACH if a token survives in any field
+        - DuplicateCheckError BLINDNESS_BREACH if a token survives in any field
     """
     blinded = { "id": opaque_id( d ), "lang": d[ "lang" ], "file": relative_path( d[ "file" ] ), "name": d[ "name" ], "sig": d[ "sig" ],
                 "text": strip_comment_lines( d[ "text" ], d[ "lang" ], scrub ) }
@@ -153,7 +153,7 @@ def breaching_ids( defs, scrub ):
     for d in defs:
         try:
             blind_definition( d, scrub )
-        except err.SemdupError:
+        except err.DuplicateCheckError:
             found.add( d[ "id" ] )
     return sorted( found )
 

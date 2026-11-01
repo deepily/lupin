@@ -1,5 +1,5 @@
 """
-Unit tests for semdup.proof.flag_items, which adds the owed flag pairs as new items.
+Unit tests for duplicate_check.proof.flag_items, which adds owed flag pairs as items.
 
 The run folder is the cli tests' toy world, written by label_prep.prepare, so the packets and key are the real writers' output.
 """
@@ -10,24 +10,24 @@ import pytest
 
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
-from cosa.repo.semdup.proof import flag_items as fi
-from cosa.repo.semdup.proof import label_load as ll
-from cosa.repo.semdup.proof import label_prep as lp
-from cosa.repo.semdup.proof import proof_cli as pc
-from cosa.repo.semdup.proof import proof_run as pr
-from tests.unit.test_semdup_proof_cli import World, venue, world  # noqa: F401  (fixtures)
+from cosa.repo.duplicate_check.proof import flag_items as fi
+from cosa.repo.duplicate_check.proof import label_load as ll
+from cosa.repo.duplicate_check.proof import label_prep as lp
+from cosa.repo.duplicate_check.proof import proof_cli as pc
+from cosa.repo.duplicate_check.proof import proof_run as pr
+from tests.unit.test_duplicate_check_proof_cli import World, venue, world  # noqa: F401  (fixtures)
 
 REVIEWERS = ( "rick", "second" )
 
 
 @pytest.fixture
 def flagged( world, tmp_path, monkeypatch, venue ):  # noqa: F811
-    """The toy world with an unofficial record that owes four flag pairs."""
+    """The toy world with a trial record that owes four flag pairs."""
     monkeypatch.setattr( fi.label_prep, "REVIEWERS", REVIEWERS )
     toy   = world.toy
     owed  = sorted( toy.key( a, b ) for a, b in ( ( "m1", "d1" ), ( "m2", "d2" ), ( "m3", "d1" ), ( "m4", "d2" ) ) )
     path  = tmp_path / "1.json"
-    path.write_text( json.dumps( { "unofficial": True, "owed": owed } ), encoding="utf-8" )
+    path.write_text( json.dumps( { "trial": True, "owed": owed } ), encoding="utf-8" )
     world.record = path
     world.owed   = owed
     return world

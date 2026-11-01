@@ -1,25 +1,25 @@
 ---
-capability: semdup-candidates
+capability: duplicate-check-candidates
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.semdup.body_vectors.body_text@c765892c19
-  - cosa.repo.semdup.body_vectors.engine_tag@73eaf52263
-  - cosa.repo.semdup.body_vectors.ensure_vectors@ddb5da3eb8
-  - cosa.repo.semdup.candidates.build_pool@5aa79c432f
-  - cosa.repo.semdup.candidates.candidate_rows@e914cff432
-  - cosa.repo.semdup.candidates.candidates_for@ae0ccf4fb7
-  - cosa.repo.semdup.candidates.embedding_list@08d3a13581
-  - cosa.repo.semdup.candidates.outside_pool@c4669d0ab8
-  - cosa.repo.semdup.candidates.partner_map@4fbdce1f26
-  - cosa.repo.semdup.candidates.same_slot@f80b350738
-  - cosa.repo.semdup.candidates.structural_list@c856824456
-  - cosa.repo.semdup.candidates.word_index@89acdb2f6b
-  - cosa.repo.semdup.candidates.word_list@c4866ab787
-  - cosa.repo.semdup.structural.clone_pairs@7e597bc8a3
-  - cosa.repo.semdup.structural.parse_jscpd@d21faa33ba
-  - cosa.repo.semdup.structural.python_clones@594a21c09a
-  - cosa.repo.semdup.structural.run_jscpd@6ac0a47640
-  - cosa.repo.semdup.structural.script_clones@0706048594
+  - cosa.repo.duplicate_check.body_vectors.body_text@c765892c19
+  - cosa.repo.duplicate_check.body_vectors.engine_tag@73eaf52263
+  - cosa.repo.duplicate_check.body_vectors.ensure_vectors@ddb5da3eb8
+  - cosa.repo.duplicate_check.candidates.build_pool@5aa79c432f
+  - cosa.repo.duplicate_check.candidates.candidate_rows@e914cff432
+  - cosa.repo.duplicate_check.candidates.candidates_for@ae0ccf4fb7
+  - cosa.repo.duplicate_check.candidates.embedding_list@08d3a13581
+  - cosa.repo.duplicate_check.candidates.outside_pool@c4669d0ab8
+  - cosa.repo.duplicate_check.candidates.partner_map@4fbdce1f26
+  - cosa.repo.duplicate_check.candidates.same_slot@f80b350738
+  - cosa.repo.duplicate_check.candidates.structural_list@c856824456
+  - cosa.repo.duplicate_check.candidates.word_index@89acdb2f6b
+  - cosa.repo.duplicate_check.candidates.word_list@c4866ab787
+  - cosa.repo.duplicate_check.structural.clone_pairs@7e597bc8a3
+  - cosa.repo.duplicate_check.structural.parse_jscpd@d21faa33ba
+  - cosa.repo.duplicate_check.structural.python_clones@594a21c09a
+  - cosa.repo.duplicate_check.structural.run_jscpd@bef582c77d
+  - cosa.repo.duplicate_check.structural.script_clones@0706048594
 ---
 # Duplicate checker: candidate stage
 For each new definition, three ranked lists are joined by rank fusion into a short candidate row for the judge.

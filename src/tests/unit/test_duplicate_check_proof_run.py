@@ -1,4 +1,4 @@
-"""Unit tests for semdup.proof.proof_run: the toy pool, the record and the ledger."""
+"""Unit tests for duplicate_check.proof.proof_run: the toy pool, the record and the ledger."""
 import asyncio
 import json
 import re
@@ -6,12 +6,12 @@ import re
 import pytest
 
 from cosa.repo.doc_lint import harness_runner as hr
-from cosa.repo.semdup import blind as bl
-from cosa.repo.semdup import config as cf
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
-from cosa.repo.semdup import judge as jd
-from cosa.repo.semdup.proof import proof_run as pr
+from cosa.repo.duplicate_check import blind as bl
+from cosa.repo.duplicate_check import config as cf
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
+from cosa.repo.duplicate_check import judge as jd
+from cosa.repo.duplicate_check.proof import proof_run as pr
 
 SCRUB = bl.scrub_tokens( [ "ARM-WITH" ] )
 MARKS = [ "MARKA", "MARKB", "MARKC", "MARKD", "MARKE", "MARKF", "MARKG", "MARKH", "MARKX", "MARKY", "MARKZ" ]
@@ -97,9 +97,9 @@ class Toy:
                                 { "ids": [ self.m[ "m1" ][ "id" ], self.m[ "m5" ][ "id" ] ], "source": "nominated" } ],
             "seed": 3, "plant_failures": [], "labels": {}, "provenance": PROVENANCE, "unsure_pairs": [] }
 
-    def unofficial_ledger( self ):
-        """Point the wiring at a judge ledger inside the unofficial folder, as the command line does."""
-        folder = self.wiring[ "data_dir" ] / "semdup" / "proof-unofficial"
+    def trial_ledger( self ):
+        """Point the wiring at a judge ledger inside the trial folder, as the command line does."""
+        folder = self.wiring[ "data_dir" ] / "duplicate-check" / "proof-trial"
         folder.mkdir( parents=True )
         self.wiring[ "ledger" ] = hr.Ledger( str( folder / "judge-ledger.jsonl" ), jd.ledger_binding( "cli 1", self.wiring[ "backend" ] ) )
 
@@ -208,7 +208,7 @@ def test_a_run_owing_labels_names_the_pairs_and_keeps_its_record_with_no_bar(tmp
     assert record[ "status" ] == "labels_pending" and "bar" not in record and "counts" not in record
     assert toy.key( "r1", "d3" ) in record[ "owed" ] and toy.key( "r3", "o3" ) in record[ "owed" ] and toy.key( "r1", "o1" ) not in record[ "owed" ]
     assert record[ "owed" ] == sorted( record[ "owed" ] )
-    line = json.loads( ( tmp_path / "data" / "semdup" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    line = json.loads( ( tmp_path / "data" / "duplicate-check" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
     assert line[ "status" ] == "labels_pending" and line[ "passed" ] is None
 
 
@@ -217,7 +217,7 @@ def test_a_definition_the_judge_could_not_read_makes_the_run_incomplete_and_it_i
     toy.spec[ "labels" ] = toy.all_labels()
     record = pr.proof_run( toy.spec, toy.wiring )
     assert record[ "status" ] == "incomplete" and len( record[ "unjudged" ][ 0 ] ) == record[ "pool" ][ "new" ] and "bar" not in record
-    assert ( tmp_path / "data" / "semdup" / "proof" / "1.json" ).is_file()
+    assert ( tmp_path / "data" / "duplicate-check" / "proof" / "1.json" ).is_file()
 
 
 def test_a_definition_unreadable_only_in_the_second_pass_still_makes_the_run_incomplete(tmp_path):
@@ -235,7 +235,7 @@ def test_a_checker_that_raises_no_flag_is_recorded_as_no_flags_and_not_as_a_pass
     toy.spec[ "labels" ] = toy.all_labels()
     record = pr.proof_run( toy.spec, toy.wiring )
     assert record[ "status" ] == "no_flags" and record[ "bar" ] is None and "no flag" in record[ "detail" ] and record[ "counts" ][ "flags" ] == 0
-    line = json.loads( ( tmp_path / "data" / "semdup" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    line = json.loads( ( tmp_path / "data" / "duplicate-check" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
     assert line[ "status" ] == "no_flags" and line[ "passed" ] is None
 
 
@@ -244,7 +244,7 @@ def test_a_run_with_no_pair_labelled_true_is_recorded_as_no_true_pairs_with_both
     toy.spec[ "labels" ] = { k: False for k in toy.all_labels() }
     record = pr.proof_run( toy.spec, toy.wiring )
     assert record[ "status" ] == "no_true_pairs" and record[ "bar" ] is None and record[ "counts" ][ "true_pairs" ] == 0 and record[ "counts" ][ "flags" ] > 0
-    folder = tmp_path / "data" / "semdup" / "proof"
+    folder = tmp_path / "data" / "duplicate-check" / "proof"
     line   = json.loads( ( folder / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
     assert ( folder / "1.json" ).is_file() and line[ "status" ] == "no_true_pairs" and line[ "passed" ] is None
 
@@ -255,7 +255,7 @@ def test_a_run_with_no_pair_judged_in_both_passes_is_recorded_as_no_common_pairs
     real = pr.proof_bar.agreement
     monkeypatch.setattr( pr.proof_bar, "agreement", lambda a, b: { **real( a, b ), "pairs_in_both": 0, "flag_agree": 0 } )
     record = pr.proof_run( toy.spec, toy.wiring )
-    assert record[ "status" ] == "no_common_pairs" and record[ "bar" ] is None and ( tmp_path / "data" / "semdup" / "proof" / "1.json" ).is_file()
+    assert record[ "status" ] == "no_common_pairs" and record[ "bar" ] is None and ( tmp_path / "data" / "duplicate-check" / "proof" / "1.json" ).is_file()
 
 
 def test_a_planted_pair_both_reviewers_ruled_not_equivalent_leaves_every_denominator_and_is_counted(tmp_path):
@@ -273,7 +273,7 @@ def test_every_run_is_kept_numbered_in_order_and_the_ledger_only_ever_grows(tmp_
     toy    = Toy( tmp_path )
     toy.spec[ "labels" ] = toy.all_labels()
     first  = pr.proof_run( toy.spec, toy.wiring )
-    folder = tmp_path / "data" / "semdup" / "proof"
+    folder = tmp_path / "data" / "duplicate-check" / "proof"
     ledger = folder / pr.LEDGER_FILE
     before = ledger.read_bytes()
     second = pr.proof_run( toy.spec, toy.wiring )
@@ -288,7 +288,7 @@ def test_every_run_is_kept_numbered_in_order_and_the_ledger_only_ever_grows(tmp_
 def test_a_live_configuration_that_differs_from_the_frozen_one_stops_the_run_before_any_record(tmp_path):
     toy = Toy( tmp_path )
     toy.wiring[ "live" ] = { **toy.cfg, "body_chars": 1 }
-    with pytest.raises( err.SemdupError ) as caught: pr.proof_run( toy.spec, toy.wiring )
+    with pytest.raises( err.DuplicateCheckError ) as caught: pr.proof_run( toy.spec, toy.wiring )
     assert caught.value.code == err.CONFIG_DRIFT and not ( tmp_path / "data" ).exists()
 
 
@@ -318,10 +318,10 @@ def test_append_ledger_adds_a_line_and_never_rewrites_the_ones_before_it(tmp_pat
 def test_a_bar_error_other_than_no_flags_is_not_swallowed_into_a_record(tmp_path, monkeypatch):
     toy = Toy( tmp_path )
     toy.spec[ "labels" ] = toy.all_labels()
-    def boom( counts ): raise err.SemdupError( err.RUN_INCOMPLETE, "unexpected" )
+    def boom( counts ): raise err.DuplicateCheckError( err.RUN_INCOMPLETE, "unexpected" )
     monkeypatch.setattr( pr.proof_bar, "evaluate_bar", boom )
-    with pytest.raises( err.SemdupError ) as caught: pr.proof_run( toy.spec, toy.wiring )
-    assert caught.value.code == err.RUN_INCOMPLETE and list( ( tmp_path / "data" / "semdup" / "proof" ).glob( "*.json" ) ) == []
+    with pytest.raises( err.DuplicateCheckError ) as caught: pr.proof_run( toy.spec, toy.wiring )
+    assert caught.value.code == err.RUN_INCOMPLETE and list( ( tmp_path / "data" / "duplicate-check" / "proof" ).glob( "*.json" ) ) == []
 
 
 def test_a_proof_with_no_planted_pairs_reports_no_plant_failure_rate_and_still_judges_the_monolith(tmp_path):
@@ -333,57 +333,57 @@ def test_a_proof_with_no_planted_pairs_reports_no_plant_failure_rate_and_still_j
     assert record[ "status" ] == "complete" and record[ "counts" ][ "true_pairs" ] == 2 and record[ "counts" ][ "found" ] == 2 and record[ "counts" ][ "flags" ] == 2
 
 
-# ---- the unofficial run -------------------------------------------------------------------------------------------
+# ---- the trial run -------------------------------------------------------------------------------------------
 
-def test_an_unofficial_run_scores_the_labelled_pairs_lists_the_extra_flag_as_owed_and_keeps_out_of_the_proof_folder(tmp_path):
+def test_an_trial_run_scores_the_labelled_pairs_lists_the_extra_flag_as_owed_and_keeps_out_of_the_proof_folder(tmp_path):
     toy    = Toy( tmp_path )
     extra  = toy.key( "r1", "d3" )
     toy.spec[ "labels" ] = { k: v for k, v in toy.all_labels().items() if k != extra }
-    toy.unofficial_ledger()
-    record = pr.proof_run( toy.spec, toy.wiring, unofficial=True )
-    assert record[ "unofficial" ] is True and record[ "owed" ] == [ extra ] and record[ "status" ] == "complete"
+    toy.trial_ledger()
+    record = pr.proof_run( toy.spec, toy.wiring, trial=True )
+    assert record[ "trial" ] is True and record[ "owed" ] == [ extra ] and record[ "status" ] == "complete"
     assert record[ "counts" ][ "flags" ] == 4 and record[ "counts" ][ "correct" ] == 4 and record[ "counts" ][ "found" ] == 4
-    folder = tmp_path / "data" / "semdup" / "proof-unofficial"
+    folder = tmp_path / "data" / "duplicate-check" / "proof-trial"
     line   = json.loads( ( folder / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
-    assert ( folder / "1.json" ).is_file() and line[ "unofficial" ] is True and not ( tmp_path / "data" / "semdup" / "proof" ).exists()
+    assert ( folder / "1.json" ).is_file() and line[ "trial" ] is True and not ( tmp_path / "data" / "duplicate-check" / "proof" ).exists()
 
 
-def test_an_official_run_after_an_unofficial_one_is_still_proof_one_and_its_ledger_line_is_not_marked(tmp_path):
+def test_an_official_run_after_an_trial_one_is_still_proof_one_and_its_ledger_line_is_not_marked(tmp_path):
     toy    = Toy( tmp_path )
     toy.spec[ "labels" ] = toy.all_labels()
     official = toy.wiring[ "ledger" ]
-    toy.unofficial_ledger()
-    pr.proof_run( toy.spec, toy.wiring, unofficial=True )
+    toy.trial_ledger()
+    pr.proof_run( toy.spec, toy.wiring, trial=True )
     toy.wiring[ "ledger" ] = official
     record = pr.proof_run( toy.spec, toy.wiring )
-    line   = json.loads( ( tmp_path / "data" / "semdup" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
-    assert record[ "proof" ] == 1 and "unofficial" not in record and "unofficial" not in line and "owed" not in record
+    line   = json.loads( ( tmp_path / "data" / "duplicate-check" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    assert record[ "proof" ] == 1 and "trial" not in record and "trial" not in line and "owed" not in record
 
 
-def test_an_unofficial_run_whose_judge_ledger_is_outside_the_unofficial_folder_is_refused_before_any_judge_call_or_write(tmp_path):
+def test_an_trial_run_whose_judge_ledger_is_outside_the_trial_folder_is_refused_before_any_judge_call_or_write(tmp_path):
     toy = Toy( tmp_path )
     toy.spec[ "labels" ] = toy.all_labels()
-    official = tmp_path / "data" / "semdup" / "proof" / "judge-ledger.jsonl"
+    official = tmp_path / "data" / "duplicate-check" / "proof" / "judge-ledger.jsonl"
     official.parent.mkdir( parents=True )
     toy.wiring[ "ledger" ] = hr.Ledger( str( official ), jd.ledger_binding( "cli 1", toy.wiring[ "backend" ] ) )
     before = official.read_bytes()
-    with pytest.raises( err.SemdupError ) as caught: pr.proof_run( toy.spec, toy.wiring, unofficial=True )
-    assert caught.value.code == err.LEDGER_OUTSIDE_UNOFFICIAL and str( official.resolve() ) in caught.value.detail and "proof-unofficial" in caught.value.detail
-    assert official.read_bytes() == before and not ( tmp_path / "data" / "semdup" / "proof-unofficial" ).exists() and toy.wiring[ "backend" ].calls == 0
+    with pytest.raises( err.DuplicateCheckError ) as caught: pr.proof_run( toy.spec, toy.wiring, trial=True )
+    assert caught.value.code == err.LEDGER_OUTSIDE_TRIAL and str( official.resolve() ) in caught.value.detail and "proof-trial" in caught.value.detail
+    assert official.read_bytes() == before and not ( tmp_path / "data" / "duplicate-check" / "proof-trial" ).exists() and toy.wiring[ "backend" ].calls == 0
 
 
-def test_an_unofficial_run_whose_judge_ledger_is_in_the_unofficial_folder_is_accepted(tmp_path):
+def test_an_trial_run_whose_judge_ledger_is_in_the_trial_folder_is_accepted(tmp_path):
     toy = Toy( tmp_path )
     toy.spec[ "labels" ] = toy.all_labels()
-    toy.unofficial_ledger()
-    assert pr.proof_run( toy.spec, toy.wiring, unofficial=True )[ "unofficial" ] is True
+    toy.trial_ledger()
+    assert pr.proof_run( toy.spec, toy.wiring, trial=True )[ "trial" ] is True
 
 
-def test_an_official_run_is_not_held_to_the_unofficial_folder_whatever_its_judge_ledger(tmp_path):
+def test_an_official_run_is_not_held_to_the_trial_folder_whatever_its_judge_ledger(tmp_path):
     toy = Toy( tmp_path )
     toy.spec[ "labels" ] = toy.all_labels()
     record = pr.proof_run( toy.spec, toy.wiring )
-    assert record[ "proof" ] == 1 and "unofficial" not in record
+    assert record[ "proof" ] == 1 and "trial" not in record
 
 
 # ---- R3: the fingerprints, and W10: the second bar --------------------------------------------------------------
@@ -392,23 +392,23 @@ def test_every_record_and_ledger_line_carries_the_label_fingerprints_and_the_tre
     toy    = Toy( tmp_path )
     toy.spec[ "labels" ] = toy.all_labels()
     record = pr.proof_run( toy.spec, toy.wiring )
-    line   = json.loads( ( tmp_path / "data" / "semdup" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    line   = json.loads( ( tmp_path / "data" / "duplicate-check" / "proof" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
     assert record[ "provenance" ] == PROVENANCE and line[ "provenance" ] == PROVENANCE
     assert line[ "provenance" ][ "labels" ][ "labels-a.jsonl" ] == "a" * 64 and line[ "provenance" ][ "tree_root" ] == "/the/tree"
 
 
-def test_a_run_that_stops_early_and_an_unofficial_run_carry_the_fingerprints_too(tmp_path):
+def test_a_run_that_stops_early_and_an_trial_run_carry_the_fingerprints_too(tmp_path):
     ( tmp_path / "one" ).mkdir()
     owing = Toy( tmp_path / "one" )
     owing.spec[ "labels" ] = { owing.key( "r1", "o1" ): True }
     assert pr.proof_run( owing.spec, owing.wiring )[ "provenance" ] == PROVENANCE
     ( tmp_path / "two" ).mkdir()
     other = Toy( tmp_path / "two" )
-    other.unofficial_ledger()
+    other.trial_ledger()
     other.spec[ "labels" ] = other.all_labels()
-    record = pr.proof_run( other.spec, other.wiring, unofficial=True )
-    line   = json.loads( ( other.wiring[ "data_dir" ] / "semdup" / "proof-unofficial" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
-    assert record[ "provenance" ] == PROVENANCE and line[ "provenance" ] == PROVENANCE and line[ "unofficial" ] is True
+    record = pr.proof_run( other.spec, other.wiring, trial=True )
+    line   = json.loads( ( other.wiring[ "data_dir" ] / "duplicate-check" / "proof-trial" / pr.LEDGER_FILE ).read_text( encoding="utf-8" ).splitlines()[ 0 ] )
+    assert record[ "provenance" ] == PROVENANCE and line[ "provenance" ] == PROVENANCE and line[ "trial" ] is True
 
 
 def second_bar( tmp_path, unsure, labels=None ):

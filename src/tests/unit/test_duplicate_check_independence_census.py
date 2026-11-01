@@ -1,4 +1,4 @@
-"""Census guard: no module under semdup/ imports the reuse tools it is built to measure."""
+"""Census guard: no duplicate_check module imports the reuse tools it measures."""
 import ast
 import pathlib
 import subprocess
@@ -7,7 +7,7 @@ import pytest
 
 import cosa.utils.util as cu
 
-SEMDUP    = pathlib.Path( cu.get_project_root() ) / "src" / "cosa" / "repo" / "semdup"
+DUPLICATE_CHECK = pathlib.Path( cu.get_project_root() ) / "src" / "cosa" / "repo" / "duplicate_check"
 FORBIDDEN = ( "lupin_mcp", "cosa.repo.symindex.verdict", "cosa.repo.symindex.candidates.search" )
 
 
@@ -24,32 +24,32 @@ def imported_names( source, package ):
     return names
 
 
-def forbidden_imports( source, package="cosa.repo.semdup" ):
+def forbidden_imports( source, package="cosa.repo.duplicate_check" ):
     """Return the forbidden modules a source imports, whole names only, so lookalikes pass."""
     return sorted( { n for n in imported_names( source, package ) for f in FORBIDDEN if n == f or n.startswith( f + "." ) } )
 
 
 def tracked_modules():
-    """List the Python files git tracks under semdup/, as paths."""
-    out = subprocess.run( [ "git", "ls-files", "--", "src/cosa/repo/semdup" ], cwd=cu.get_project_root(), capture_output=True, text=True, check=True ).stdout.split()
+    """List the Python files git tracks under duplicate_check/, as paths."""
+    out = subprocess.run( [ "git", "ls-files", "--", "src/cosa/repo/duplicate_check" ], cwd=cu.get_project_root(), capture_output=True, text=True, check=True ).stdout.split()
     return [ pathlib.Path( cu.get_project_root() ) / f for f in out if f.endswith( ".py" ) ]
 
 
-def semdup_modules():
-    """List the Python modules under semdup/, tracked or not, with their package name."""
-    paths = sorted( set( tracked_modules() ) | set( SEMDUP.rglob( "*.py" ) ) )
-    return [ ( path, ".".join( path.relative_to( SEMDUP.parent.parent.parent ).with_suffix( "" ).parts[ :-1 ] ) ) for path in paths ]
+def duplicate_check_modules():
+    """List the Python modules under duplicate_check/, tracked or not, with their package name."""
+    paths = sorted( set( tracked_modules() ) | set( DUPLICATE_CHECK.rglob( "*.py" ) ) )
+    return [ ( path, ".".join( path.relative_to( DUPLICATE_CHECK.parent.parent.parent ).with_suffix( "" ).parts[ :-1 ] ) ) for path in paths ]
 
 
 def test_the_population_is_every_tracked_module_of_the_package_and_includes_the_ones_that_could_slip():
-    scanned = { path for path, _ in semdup_modules() }
+    scanned = { path for path, _ in duplicate_check_modules() }
     names   = { path.name for path in scanned }
     assert set( tracked_modules() ) <= scanned and len( tracked_modules() ) >= 10
     assert { "judge.py", "candidates.py", "score_run.py", "structural.py", "__init__.py" } <= names
 
 
-def test_no_module_under_semdup_imports_lupin_mcp_the_verdict_module_or_the_search_module():
-    found = { path.name: forbidden_imports( path.read_text( encoding="utf-8" ), package ) for path, package in semdup_modules() }
+def test_no_module_under_duplicate_check_imports_lupin_mcp_the_verdict_module_or_the_search_module():
+    found = { path.name: forbidden_imports( path.read_text( encoding="utf-8" ), package ) for path, package in duplicate_check_modules() }
     assert { name: hits for name, hits in found.items() if hits } == {}
 
 
@@ -92,6 +92,6 @@ def test_the_guard_finds_an_import_inside_a_function_a_try_or_a_method(source):
 
 
 def test_a_planted_forbidden_import_in_a_copy_of_a_real_module_is_caught():
-    source = ( SEMDUP / "config.py" ).read_text( encoding="utf-8" )
+    source = ( DUPLICATE_CHECK / "config.py" ).read_text( encoding="utf-8" )
     assert forbidden_imports( source ) == []
     assert forbidden_imports( "from lupin_mcp import reuse_tools\n" + source ) == [ "lupin_mcp", "lupin_mcp.reuse_tools" ]

@@ -2,9 +2,9 @@
 import argparse
 
 import cosa.utils.util as cu
-from cosa.repo.semdup import blind, config, judge
+from cosa.repo.duplicate_check import blind, config, judge
 
-FROZEN_RELATIVE   = "/src/conf/semdup-frozen-2.json"
+FROZEN_RELATIVE   = "/src/conf/semdup-frozen-2.json"   # kept: the passing record names this file
 # P4, provisional: row dc71467c re-asks before the experiments. A change here is a new frozen file and a proof rerun.
 BACKEND           = judge.MaxPlanBackend.name
 TEMPERATURE       = judge.MaxPlanBackend.temperature_record
@@ -52,9 +52,9 @@ def main( argv=None ):
         - returns 0
 
     Raises:
-        - SemdupError CONFIG_ALREADY_FROZEN if a file exists at the path
+        - DuplicateCheckError CONFIG_ALREADY_FROZEN if a file exists at the path
     """
-    parser = argparse.ArgumentParser( description="Freeze the semdup configuration once." )
+    parser = argparse.ArgumentParser( description="Freeze the duplicate check configuration once." )
     parser.add_argument( "--path", default=None )
     args   = parser.parse_args( argv )
     path   = args.path if args.path is not None else frozen_path()

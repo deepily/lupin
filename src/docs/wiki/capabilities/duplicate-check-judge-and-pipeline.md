@@ -1,23 +1,23 @@
 ---
-capability: semdup-judge-and-pipeline
+capability: duplicate-check-judge-and-pipeline
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.semdup.judge.MaxPlanBackend@5cd98e2615
-  - cosa.repo.semdup.judge.WorkServerBackend@b57813f170
-  - cosa.repo.semdup.judge.build_prompt@929dcbf40c
-  - cosa.repo.semdup.judge.judge_run@26c3db03ae
-  - cosa.repo.semdup.judge.ledger_binding@176c22d9f9
-  - cosa.repo.semdup.judge.parse_reply@a4690fda14
-  - cosa.repo.semdup.judge.prompt_parts@a14ac429b6
-  - cosa.repo.semdup.pipeline.judge_all@e2d3d55aaa
-  - cosa.repo.semdup.score_run.aggregate_runs@cc7ffc8e3d
-  - cosa.repo.semdup.score_run.main@a728498f59
-  - cosa.repo.semdup.score_run.score_run@02fe75bf02
-  - cosa.repo.semdup.smoke.TimedBackend@46a5b65411
-  - cosa.repo.semdup.smoke.build_record@c7117c421c
-  - cosa.repo.semdup.smoke.percentile@eb31d21753
-  - cosa.repo.semdup.smoke.write_record@1932406a34
-  - cosa.repo.semdup.smoke.configure_cli@7e271974b4
+  - cosa.repo.duplicate_check.judge.MaxPlanBackend@5cd98e2615
+  - cosa.repo.duplicate_check.judge.WorkServerBackend@b57813f170
+  - cosa.repo.duplicate_check.judge.build_prompt@929dcbf40c
+  - cosa.repo.duplicate_check.judge.judge_run@0df5519297
+  - cosa.repo.duplicate_check.judge.ledger_binding@176c22d9f9
+  - cosa.repo.duplicate_check.judge.parse_reply@a4690fda14
+  - cosa.repo.duplicate_check.judge.prompt_parts@a14ac429b6
+  - cosa.repo.duplicate_check.pipeline.judge_all@e2d3d55aaa
+  - cosa.repo.duplicate_check.score_run.aggregate_runs@3ebf5a13a3
+  - cosa.repo.duplicate_check.score_run.main@a728498f59
+  - cosa.repo.duplicate_check.score_run.score_run@cd812d42a2
+  - cosa.repo.duplicate_check.smoke.TimedBackend@46a5b65411
+  - cosa.repo.duplicate_check.smoke.build_record@c7117c421c
+  - cosa.repo.duplicate_check.smoke.percentile@eb31d21753
+  - cosa.repo.duplicate_check.smoke.write_record@1932406a34
+  - cosa.repo.duplicate_check.smoke.configure_cli@7e271974b4
 ---
 # Duplicate checker: judge and scoring
 The judge makes one blind, ledgered model call per new definition and rules on each of its candidates.

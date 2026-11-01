@@ -16,9 +16,9 @@ import time
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import harness_runner, model_transport
 from cosa.repo.labelling import packets as lb_packets
-from cosa.repo.semdup import blind, extract, frozen, judge, structural
-from cosa.repo.semdup import config as cfg_mod
-from cosa.repo.semdup.proof import label_load, label_prep, proof_run
+from cosa.repo.duplicate_check import blind, extract, frozen, judge, structural
+from cosa.repo.duplicate_check import config as cfg_mod
+from cosa.repo.duplicate_check.proof import label_load, label_prep, proof_run
 from cosa.repo.symindex import spec as sp
 
 KEY_DIR          = "key"
@@ -285,9 +285,9 @@ def label_state( labels_paths, key_path, rulings, third_path=None, supplement=No
     return { "counts": counts, "labels": labels, "failures": failures, "owed": None }
 
 
-def unofficial_state( labels_paths, key_path ):
+def trial_state( labels_paths, key_path ):
     """
-    Read one reviewer's labels for an unofficial run.
+    Read one reviewer's labels for a trial run.
 
     Requires:
         - labels_paths is a list of labels files; key_path is the run's answer key
@@ -297,13 +297,13 @@ def unofficial_state( labels_paths, key_path ):
         - with any other number of files, labels is None and owed says one is needed
     """
     if len( labels_paths ) != 1:
-        return { "counts": {}, "labels": None, "failures": [], "owed": f"an unofficial run takes exactly one labels file, {len( labels_paths )} given" }
+        return { "counts": {}, "labels": None, "failures": [], "owed": f"a trial run takes exactly one labels file, {len( labels_paths )} given" }
     labels = label_load.pair_key_labels( labels_paths[ 0 ], key_path )
     run    = load_run( pathlib.Path( key_path ).parent.parent )
     return { "counts": { str( labels_paths[ 0 ] ): len( labels ) }, "labels": labels, "failures": plant_failures( run[ "planted" ], labels, labels ), "owed": None }
 
 
-def read_supplement( key, labels, unofficial=False, third=None ):
+def read_supplement( key, labels, trial=False, third=None ):
     """
     Turn the supplement arguments into the dict label_load takes.
 
@@ -315,10 +315,10 @@ def read_supplement( key, labels, unofficial=False, third=None ):
         - returns None when neither key nor labels is given, else { key, labels }, plus third when one is given
 
     Raises:
-        - ValueError if only one of the two is given, if labels is not two files, or if the run is unofficial, which takes one reviewer's labels only
+        - ValueError if only one of the two is given, if labels is not two files, or if the run is trial, which takes one reviewer's labels only
     """
     if key is None and not labels and third is None: return None
-    if unofficial: raise ValueError( "--unofficial takes one reviewer's labels only, so --supplement-key and --supplement-labels do not apply" )
+    if trial: raise ValueError( "--trial takes one reviewer's labels only, so --supplement-key and --supplement-labels do not apply" )
     if key is None or len( labels ) != 2: raise ValueError( f"--supplement-key and two --supplement-labels files go together; got key {key} and {len( labels )} labels files" )
     return { "key": key, "labels": list( labels ), **( { "third": third } if third is not None else {} ) }
 
@@ -354,7 +354,7 @@ def proof_ledger( data_dir, cli_path, backend, folder=proof_run.PROOF_FOLDER ):
 
     Requires:
         - data_dir is the data root the proof records live under; cli_path is the Claude Code binary; backend is the judge backend
-        - folder is the record folder under data_dir, the proof's own unless an unofficial run names its own
+        - folder is the record folder under data_dir, the proof's own unless a trial run names its own
 
     Ensures:
         - creates the proof folder if it is missing, which is why only a real run calls this
@@ -385,7 +385,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
 
     Requires:
         - argv holds --run-dir, up to two --labels files, optionally --rulings (a JSON file of { pair key: bool }), --third-labels,
-          --export-third, --unofficial, --parallel, --claude-cli-path and --check
+          --export-third, --trial, --parallel, --claude-cli-path and --check
         - --supplement-key and two --supplement-labels files name labels for pairs outside the run's key, kept in files of their own;
           --supplement-third adds a third rater's file for the supplement's disputed pairs;
           they are read, fingerprinted and checked for unsure pairs like the reviewers' labels, and the run's own labels files are never written
@@ -395,7 +395,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
         - verifies the frozen configuration first and refuses a run folder planted under another config_sha
         - with --export-third <reviewer>: needs two --labels files; writes that reviewer's blind packet of the disputed items beside the others,
           prints its path and size as JSON and returns 0; makes no model call
-        - with --unofficial: takes exactly one --labels file and runs proof_run unofficially, with its own judge ledger in the unofficial folder;
+        - with --trial: takes exactly one --labels file and runs proof_run trially, with its own judge ledger in the trial folder;
           refuses --rulings and --third-labels
         - with --check: builds the spec and the wiring, computes the structural pairs of the pool once, prints the sizes and the label state as JSON,
           makes no model call and writes nothing, not even the proof folder or the ledger; returns 0
@@ -403,8 +403,8 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
           prints its record and returns 0
 
     Raises:
-        - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
-        - ValueError if the run folder was planted under another configuration, from build_spec, from read_supplement, or for --unofficial with --rulings or --third-labels
+        - DuplicateCheckError CONFIG_DRIFT if the live configuration is not the frozen one
+        - ValueError if the run folder was planted under another configuration, from build_spec, from read_supplement, or for --trial with --rulings or --third-labels
     """
     return json_stdout( lambda out: _main( argv, make_parts, run_proof, out ) )
 
@@ -423,7 +423,7 @@ def _main( argv, make_parts, run_proof, out ):
     parser.add_argument( "--parallel", type=int, default=DEFAULT_PARALLEL )
     parser.add_argument( "--claude-cli-path", default=None )
     parser.add_argument( "--check", action="store_true" )
-    parser.add_argument( "--unofficial", action="store_true" )
+    parser.add_argument( "--trial", action="store_true" )
     args    = parser.parse_args( argv )
     model_transport.configure( args.claude_cli_path )
     cfg     = cfg_mod.verify_frozen( frozen.frozen_path(), frozen.live_config() )
@@ -436,14 +436,14 @@ def _main( argv, make_parts, run_proof, out ):
         path  = lb_packets.export_subset_packet( run_dir / PACKETS_DIR, items, args.export_third, load_run( run_dir )[ "seed" ] )
         print( json.dumps( { "status": "exported", "packet": str( path ), "items": len( items ) }, indent=2, sort_keys=True ), file=out )
         return 0
-    if args.unofficial and ( args.rulings is not None or args.third_labels is not None ):
-        raise ValueError( "--unofficial takes one reviewer's labels only, so --rulings and --third-labels do not apply" )
+    if args.trial and ( args.rulings is not None or args.third_labels is not None ):
+        raise ValueError( "--trial takes one reviewer's labels only, so --rulings and --third-labels do not apply" )
     rulings = json.loads( pathlib.Path( args.rulings ).read_text( encoding="utf-8" ) ) if args.rulings is not None else None
     key     = run_dir / KEY_DIR / KEY_FILE
     root    = cu.get_project_root()
-    supp    = read_supplement( args.supplement_key, args.supplement_labels, args.unofficial, args.supplement_third )
+    supp    = read_supplement( args.supplement_key, args.supplement_labels, args.trial, args.supplement_third )
     prints  = label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root, supp )
-    state   = unofficial_state( args.labels, key ) if args.unofficial else label_state( args.labels, key, rulings, args.third_labels, supp )
+    state   = trial_state( args.labels, key ) if args.trial else label_state( args.labels, key, rulings, args.third_labels, supp )
     if not args.check and state[ "labels" ] is None:
         print( json.dumps( { "status": "refused", "owed": state[ "owed" ], "counts": state[ "counts" ] }, indent=2, sort_keys=True ), file=out )
         return 2
@@ -462,8 +462,8 @@ def _main( argv, make_parts, run_proof, out ):
                              "structural_pairs": len( pairs ), "labels": state[ "counts" ], "owed": state[ "owed" ], "plant_failures": len( state[ "failures" ] ),
                              "config_sha": cfg[ "config_sha" ] }, indent=2, sort_keys=True ), file=out )
         return 0
-    folder = proof_run.UNOFFICIAL_FOLDER if args.unofficial else proof_run.PROOF_FOLDER
-    run    = functools.partial( run_proof, unofficial=True ) if args.unofficial else run_proof
+    folder = proof_run.TRIAL_FOLDER if args.trial else proof_run.PROOF_FOLDER
+    run    = functools.partial( run_proof, trial=True ) if args.trial else run_proof
     record = run( spec, { **parts[ "wiring" ], "ledger": proof_ledger( parts[ "wiring" ][ "data_dir" ], args.claude_cli_path, parts[ "wiring" ][ "backend" ], folder ) } )
     print( json.dumps( record, indent=2, sort_keys=True ), file=out )
     return 0

@@ -1,4 +1,4 @@
-"""Unit tests for semdup.extract: Python and script definitions, accounts and refusals."""
+"""Unit tests for duplicate_check.extract: Python and script definitions and refusals."""
 import ast
 import json
 import pathlib
@@ -6,8 +6,8 @@ import pathlib
 import pytest
 
 import cosa.utils.util as cu
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
 from cosa.repo.symindex import js_index, py_index
 from cosa.repo.symindex import spec as sp
 from cosa.repo.symindex.errors import DependencyMissing
@@ -212,7 +212,7 @@ def test_a_script_file_that_does_not_parse_makes_the_extraction_incomplete_and_a
     root, paths = tree( tmp_path, { "good.js": "function a( x ) { return x; }\n", "bad.js": "function ( {{{ broken\n" } )
     report = ex.extract_tree( root, paths, "new" )
     assert report[ "skipped_script" ] == [ "bad.js" ]
-    with pytest.raises( err.SemdupError, match="bad.js did not parse" ) as caught:
+    with pytest.raises( err.DuplicateCheckError, match="bad.js did not parse" ) as caught:
         ex.completeness( report )
     assert caught.value.code == err.EXTRACT_INCOMPLETE
     root2, paths2 = tree( tmp_path / "fixed", { "good.js": "function a( x ) { return x; }\n", "bad.js": "function b( y ) { return y; }\n" } )
@@ -222,7 +222,7 @@ def test_a_script_file_that_does_not_parse_makes_the_extraction_incomplete_and_a
 def test_an_account_one_short_is_refused_and_names_the_file():
     report = { "skipped_script": [], "script_accounts": [ { "file": "ok.ts", "function_like_total": 2, "anonymous_walked": 1, "reported": 1 },
                                                        { "file": "short.ts", "function_like_total": 5, "anonymous_walked": 1, "reported": 3 } ] }
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         ex.completeness( report )
     assert caught.value.code == err.EXTRACT_INCOMPLETE and "short.ts: 3 reported + 1 anonymous != 5" in caught.value.detail and "ok.ts" not in caught.value.detail
 
@@ -235,7 +235,7 @@ def test_a_missing_compiler_is_reported_by_its_named_code(tmp_path, monkeypatch)
     def gone( *a, **k ): raise DependencyMissing( "node", "not installed" )
     monkeypatch.setattr( js_index, "extract_js_shapes", gone )
     root, paths = tree( tmp_path, { "a.ts": "function s() { return 1; }\n" } )
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         ex.extract_tree( root, paths, "new" )
     assert caught.value.code == err.DEPENDENCY_MISSING and "node is missing" in caught.value.detail
 

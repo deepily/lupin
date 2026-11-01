@@ -1,11 +1,11 @@
-"""Unit tests for semdup.proof.plant: draw, banned words, stripping and rewrite checks."""
+"""Unit tests for duplicate_check.proof.plant: draw, banned words, stripping, rewrite checks."""
 import ast
 import random
 
 import pytest
 
-from cosa.repo.semdup import extract as ex
-from cosa.repo.semdup.proof import plant as pl
+from cosa.repo.duplicate_check import extract as ex
+from cosa.repo.duplicate_check.proof import plant as pl
 from cosa.repo.symindex import dups
 from cosa.repo.symindex.need_writer import name_hits
 

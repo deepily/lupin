@@ -23,7 +23,7 @@ URL = "/api/pair-labelling"
 @pytest.fixture
 def env( tmp_path, monkeypatch ):
     """Make a packets folder for two reviewers, an unread key folder, and a client."""
-    items = [ it.make_item( it.SEMDUP_PAIR, f"pair-{n}", { "a": f"def a{n}(): pass", "b": f"def b{n}(): pass" } ) for n in range( 3 ) ]
+    items = [ it.make_item( it.DUPLICATE_PAIR, f"pair-{n}", { "a": f"def a{n}(): pass", "b": f"def b{n}(): pass" } ) for n in range( 3 ) ]
     packets = tmp_path / "packets"
     pk.export_packets( items, [ "rick", "second" ], "seed", packets )
     ( tmp_path / "key" ).mkdir()

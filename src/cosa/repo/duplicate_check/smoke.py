@@ -9,7 +9,7 @@ from fractions import Fraction
 from cosa.repo.doc_lint import model_transport
 
 FAILURE_BAR   = Fraction( 5, 100 )
-SMOKE_FOLDER  = ( "semdup", "smoke" )
+SMOKE_FOLDER  = ( "duplicate-check", "smoke" )
 META_KEYS     = ( "date", "host", "repo_sha", "config_sha" )
 
 
@@ -161,7 +161,7 @@ def build_record( meta, calls, definitions, unjudged, peak_in_flight, elapsed, c
 
 def write_record( data_dir, record ):
     """
-    Write the record to <data>/semdup/smoke/<date>.json once.
+    Write the record to <data>/duplicate-check/smoke/<date>.json once.
 
     Requires:
         - record came from build_record

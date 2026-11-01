@@ -1,9 +1,9 @@
-"""Unit tests for semdup.proof.proof_bar: bar thresholds, agreement and strata."""
+"""Unit tests for duplicate_check.proof.proof_bar: bar thresholds, agreement and strata."""
 import pytest
 
 from cosa.repo.doc_lint import harness_report
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup.proof import proof_bar as pb
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check.proof import proof_bar as pb
 
 
 def counts( true_pairs=100, found=80, flags=100, correct=80, both=100, agree=90 ):
@@ -38,7 +38,7 @@ def test_an_interval_that_reaches_below_the_bar_does_not_change_the_verdict():
 
 
 def test_no_flags_is_refused_by_name():
-    with pytest.raises( err.SemdupError ) as caught: pb.evaluate_bar( counts( flags=0, correct=0 ) )
+    with pytest.raises( err.DuplicateCheckError ) as caught: pb.evaluate_bar( counts( flags=0, correct=0 ) )
     assert caught.value.code == err.NO_FLAGS
 
 

@@ -6,10 +6,10 @@ import subprocess
 import pytest
 
 import cosa.utils.util as cu
-from cosa.repo.semdup import blind as bl
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
-from cosa.repo.semdup import frozen as fz
+from cosa.repo.duplicate_check import blind as bl
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
+from cosa.repo.duplicate_check import frozen as fz
 from cosa.repo.symindex import spec as sp
 
 CLIENT_DIR = "src/lupin_app/static/js"
@@ -26,7 +26,7 @@ def breaches( definitions ):
     for d in definitions:
         try:
             bl.blind_definition( d, SCRUB )
-        except err.SemdupError as e:
+        except err.DuplicateCheckError as e:
             assert e.code == err.BLINDNESS_BREACH
             found.add( ( d[ "file" ], d[ "name" ] ) )
     return found
@@ -68,11 +68,11 @@ def test_every_server_definition_that_carries_a_scrub_token_is_dropped_by_the_pi
     by_id       = { d[ "id" ]: d for d in definitions }
     for i in dropped:
         d = by_id[ i ]
-        with pytest.raises( err.SemdupError ) as caught:
+        with pytest.raises( err.DuplicateCheckError ) as caught:
             bl.blind_definition( d, SCRUB )
         assert caught.value.code == err.BLINDNESS_BREACH
         shown = "\n".join( ( d[ "file" ], d[ "name" ], d[ "sig" ], bl.strip_comment_lines( d[ "text" ], d[ "lang" ], SCRUB ) ) )
-        with pytest.raises( err.SemdupError ) as caught:
+        with pytest.raises( err.DuplicateCheckError ) as caught:
             bl.assert_blind( f"Definition under review:\n{shown}\nRule on every candidate.", SCRUB )
         assert caught.value.code == err.BLINDNESS_BREACH
 
@@ -118,7 +118,7 @@ def test_each_floor_definition_is_dropped_by_the_pipeline_and_still_raises_if_sh
     found = [ d for d in server_definitions() if d[ "file" ] == file and d[ "name" ] == name ]
     assert len( found ) == 1
     assert found[ 0 ][ "id" ] in bl.breaching_ids( server_definitions(), SCRUB )
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         bl.blind_definition( found[ 0 ], SCRUB )
     assert caught.value.code == err.BLINDNESS_BREACH
 

@@ -1,16 +1,16 @@
 """
-Unit tests for semdup.frozen: decided values, live config, freeze command, committed file.
+Unit tests for duplicate_check.frozen: decided values, live config, freeze, file.
 """
 import json
 
 import pytest
 
 from cosa.repo.doc_lint import model_transport
-from cosa.repo.semdup import blind
-from cosa.repo.semdup import config as cf
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import frozen as fz
-from cosa.repo.semdup import judge
+from cosa.repo.duplicate_check import blind
+from cosa.repo.duplicate_check import config as cf
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import frozen as fz
+from cosa.repo.duplicate_check import judge
 
 # Captured 2026-10-25 from the prompt Rick approved as written; a literal, so editing the prompt reddens this test.
 APPROVED_PROMPT_VERSION = "semdup-f620c8a20a"
@@ -52,7 +52,7 @@ def test_main_freezes_to_the_given_path_prints_the_sha_and_refuses_a_second_free
     out = capsys.readouterr().out
     assert f"frozen {path} config_sha={fz.live_config()[ 'config_sha' ]}" in out
     assert cf.verify_frozen( str( path ), fz.live_config() ) == fz.live_config()
-    with pytest.raises( err.SemdupError ) as caught: fz.main( [ "--path", str( path ) ] )
+    with pytest.raises( err.DuplicateCheckError ) as caught: fz.main( [ "--path", str( path ) ] )
     assert caught.value.code == err.CONFIG_ALREADY_FROZEN
 
 

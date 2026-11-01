@@ -4,12 +4,12 @@ import os
 import pathlib
 import random
 
-from cosa.repo.semdup import cluster, errors as err, extract, pipeline
-from cosa.repo.semdup import config as cfg_mod
-from cosa.repo.semdup.proof import proof_bar
+from cosa.repo.duplicate_check import cluster, errors as err, extract, pipeline
+from cosa.repo.duplicate_check import config as cfg_mod
+from cosa.repo.duplicate_check.proof import proof_bar
 
-PROOF_FOLDER = ( "semdup", "proof" )
-UNOFFICIAL_FOLDER = ( "semdup", "proof-unofficial" )
+PROOF_FOLDER = ( "duplicate-check", "proof" )
+TRIAL_FOLDER = ( "duplicate-check", "proof-trial" )
 LEDGER_FILE  = "proof-ledger.jsonl"
 SLOTS        = ( 0, 1 )
 
@@ -126,18 +126,18 @@ def _flags( outcome, canon ):
     return { label_key( canon[ a ], canon[ b ] ) for a, b in cluster.join_pairs( outcome[ "verdicts" ] ) }
 
 
-def proof_run( spec, wiring, unofficial=False ):
+def proof_run( spec, wiring, trial=False ):
     """
     Run the proof once and keep its record, whatever the result.
 
-    An unofficial run takes one reviewer's labels, to preview the figures and list the flags outside the labelled pairs.
+    A trial run takes one reviewer's labels, to preview the figures and list the flags outside the labelled pairs.
 
     Requires:
         - spec is as build_pool needs, plus seed, labels ( { pair key: bool } ), plant_failures ( pair keys both reviewers ruled not equivalent ), provenance and unsure_pairs
         - wiring is as pipeline.judge_all needs, plus frozen_path, live, data_dir and clock ( a callable giving the time as text )
 
     Ensures:
-        - verifies the frozen configuration, judges the pool in slot 0 and slot 1 with the same configuration, and writes <data>/semdup/proof/<n>.json once
+        - verifies the frozen configuration, judges the pool in slot 0 and slot 1 with the same configuration, and writes <data>/duplicate-check/proof/<n>.json once
         - the record and the ledger line carry spec[ "provenance" ], the fingerprints of the label files used and the tree root the run is made from
         - a complete record also carries bar_without_unsure, the bar again without the pairs in spec[ "unsure_pairs" ], with the dropped counts; it gates nothing
         - appends one line to proof-ledger.jsonl with the config_sha and the status, for a pass and for every other result alike
@@ -147,23 +147,23 @@ def proof_run( spec, wiring, unofficial=False ):
         - a planted pair in plant_failures is left out of every denominator and counted, with its rate
         - the record carries the pool sizes as built, before any drop, and the count and ids of the server definitions left out of the candidate pool
           for carrying a scrub token
-        - with unofficial: the record and the ledger line go to <data>/semdup/proof-unofficial and are marked unofficial, so they never
+        - with trial: the record and the ledger line go to <data>/duplicate-check/proof-trial and are marked trial, so they never
           take a proof number or a ledger line of the proof; pairs owed a label do not stop it, they are listed as owed and left out of
           the counts
 
     Raises:
-        - SemdupError LEDGER_OUTSIDE_UNOFFICIAL if unofficial and the judge ledger in wiring is not under <data>/semdup/proof-unofficial; nothing is judged or written
-        - SemdupError CONFIG_DRIFT if the live configuration is not the frozen one
+        - DuplicateCheckError LEDGER_OUTSIDE_TRIAL if trial and the judge ledger in wiring is not under <data>/duplicate-check/proof-trial; nothing is judged or written
+        - DuplicateCheckError CONFIG_DRIFT if the live configuration is not the frozen one
     """
-    if unofficial:
-        allowed = pathlib.Path( wiring[ "data_dir" ] ).joinpath( *UNOFFICIAL_FOLDER ).resolve()
+    if trial:
+        allowed = pathlib.Path( wiring[ "data_dir" ] ).joinpath( *TRIAL_FOLDER ).resolve()
         ledger  = pathlib.Path( wiring[ "ledger" ].path ).resolve()
         if not ledger.is_relative_to( allowed ):
-            raise err.SemdupError( err.LEDGER_OUTSIDE_UNOFFICIAL, f"an unofficial run may only write its judge ledger under {allowed}, and the ledger given is {ledger}" )
+            raise err.DuplicateCheckError( err.LEDGER_OUTSIDE_TRIAL, f"a trial run may only write its judge ledger under {allowed}, and the ledger given is {ledger}" )
     cfg      = cfg_mod.verify_frozen( wiring[ "frozen_path" ], wiring[ "live" ] )
     pool     = build_pool( spec, spec[ "seed" ] )
     passes   = [ pipeline.judge_all( pool[ "new" ], pool[ "defs" ], cfg, wiring, slot ) for slot in SLOTS ]
-    folder   = pathlib.Path( wiring[ "data_dir" ] ).joinpath( *( UNOFFICIAL_FOLDER if unofficial else PROOF_FOLDER ) )
+    folder   = pathlib.Path( wiring[ "data_dir" ] ).joinpath( *( TRIAL_FOLDER if trial else PROOF_FOLDER ) )
     folder.mkdir( parents=True, exist_ok=True )
     failures = set( spec[ "plant_failures" ] )
     known    = {}
@@ -178,12 +178,12 @@ def proof_run( spec, wiring, unofficial=False ):
                  "unjudged": [ outcome[ "unjudged" ] for outcome in passes ], "dropped_from_pool": passes[ 0 ][ "dropped" ] }
     owed     = sorted( ( set( known ) | flags[ 0 ] ) - set( labels ) )
     scored   = flags[ 0 ] & set( labels )
-    if unofficial: record.update( unofficial=True, owed=owed )
+    if trial: record.update( trial=True, owed=owed )
     true     = sorted( k for k in known if labels.get( k ) is True )
     record[ "agreement" ] = proof_bar.agreement( passes[ 0 ][ "verdicts" ], passes[ 1 ][ "verdicts" ] )
     if any( record[ "unjudged" ] ):
         record[ "status" ] = "incomplete"
-    elif owed and not unofficial:
+    elif owed and not trial:
         record.update( status="labels_pending", owed=owed )
     else:
         counts = { "true_pairs": len( true ), "found": len( set( true ) & flags[ 0 ] ), "flags": len( scored ), "correct": sum( 1 for k in scored if labels[ k ] ),
@@ -198,7 +198,7 @@ def proof_run( spec, wiring, unofficial=False ):
             try:
                 record.update( status="complete", bar=proof_bar.evaluate_bar( counts ) )
                 record[ "bar_without_unsure" ] = bar_without_unsure( counts, true, flags[ 0 ], labels, spec[ "unsure_pairs" ] )
-            except err.SemdupError as e:
+            except err.DuplicateCheckError as e:
                 if e.code != err.NO_FLAGS: raise
                 record.update( status="no_flags", bar=None, detail=e.detail )
     number = next_number( folder )
@@ -206,5 +206,5 @@ def proof_run( spec, wiring, unofficial=False ):
     with open( folder / f"{number}.json", "x", encoding="utf-8" ) as f: json.dump( record, f, indent=2, sort_keys=True )
     passed = record[ "bar" ][ "passed" ] if record[ "status" ] == "complete" else None
     append_ledger( folder / LEDGER_FILE, { "proof": number, "config_sha": cfg[ "config_sha" ], "provenance": spec[ "provenance" ], "status": record[ "status" ], "passed": passed, "time": wiring[ "clock" ](),
-                                           **( { "unofficial": True } if unofficial else {} ) } )
+                                           **( { "trial": True } if trial else {} ) } )
     return record

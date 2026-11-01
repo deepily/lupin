@@ -1,22 +1,22 @@
 ---
-capability: semdup-proof-label-packets
+capability: duplicate-check-proof-label-packets
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.semdup.proof.label_prep.monolith_every_definition@66a96b13cc
-  - cosa.repo.semdup.proof.label_prep.monolith_definitions@d2e7965311
-  - cosa.repo.semdup.proof.label_prep.monolith_candidates@8ede1031bb
-  - cosa.repo.semdup.proof.label_prep.unordered_key@73bdda79d6
-  - cosa.repo.semdup.proof.label_prep.item_id@b6a2e0ea4f
-  - cosa.repo.semdup.proof.label_prep.pair_item@60e2f18d36
-  - cosa.repo.semdup.proof.label_prep.prepare@f4343902d3
-  - cosa.repo.semdup.proof.label_prep.save_doc@8e644e313a
-  - cosa.repo.semdup.proof.label_prep.run@dc662b8fc6
-  - cosa.repo.semdup.proof.label_prep.live_wiring@7a6c7abc06
-  - cosa.repo.semdup.proof.label_prep.main@63d7e5c866
+  - cosa.repo.duplicate_check.proof.label_prep.monolith_every_definition@66a96b13cc
+  - cosa.repo.duplicate_check.proof.label_prep.monolith_definitions@d2e7965311
+  - cosa.repo.duplicate_check.proof.label_prep.monolith_candidates@8ede1031bb
+  - cosa.repo.duplicate_check.proof.label_prep.unordered_key@73bdda79d6
+  - cosa.repo.duplicate_check.proof.label_prep.item_id@b6a2e0ea4f
+  - cosa.repo.duplicate_check.proof.label_prep.pair_item@b3d5b13847
+  - cosa.repo.duplicate_check.proof.label_prep.prepare@f4343902d3
+  - cosa.repo.duplicate_check.proof.label_prep.save_doc@8e644e313a
+  - cosa.repo.duplicate_check.proof.label_prep.run@dc662b8fc6
+  - cosa.repo.duplicate_check.proof.label_prep.live_wiring@7a6c7abc06
+  - cosa.repo.duplicate_check.proof.label_prep.main@63d7e5c866
 ---
 # Duplicate checker proof: blind packets and the answer key
 
-The second half of `label_prep.py`: the monolith pairs, the blind items, the packets and the command. Planting is on [[semdup-proof-label-planting]]. The labelling tools are on [[labelling-tools]].
+The second half of `label_prep.py`: the monolith pairs, the blind items, the packets and the command. Planting is on [[duplicate-check-proof-label-planting]]. The labelling tools are on [[labelling-tools]].
 
 ## Monolith pairs
 - `monolith_every_definition( root )` refuses unless `notifications.js` is the pinned blob. It copies the file to a temporary tree at the same path and returns every definition, of any size.

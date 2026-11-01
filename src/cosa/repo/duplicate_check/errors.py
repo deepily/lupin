@@ -14,16 +14,16 @@ RUN_INCOMPLETE            = "RUN_INCOMPLETE"
 NO_PASSING_TESTS          = "NO_PASSING_TESTS"
 NO_FLAGS                  = "NO_FLAGS"
 BAD_PAIR_SOURCE           = "BAD_PAIR_SOURCE"
-LEDGER_OUTSIDE_UNOFFICIAL = "LEDGER_OUTSIDE_UNOFFICIAL"
+LEDGER_OUTSIDE_TRIAL = "LEDGER_OUTSIDE_TRIAL"
 
 CODES = frozenset( {
     CONFIG_DRIFT, CONFIG_ALREADY_FROZEN, CONFIG_UNDECIDED, POLICY_UNDECIDED, POLICY_UNKNOWN, EXTRACT_INCOMPLETE, DEPENDENCY_MISSING,
     BLINDNESS_BREACH, JUDGE_UNREADABLE, JUDGE_CALL_FAILED, RUN_INCOMPLETE, NO_PASSING_TESTS, NO_FLAGS, BAD_PAIR_SOURCE,
-    LEDGER_OUTSIDE_UNOFFICIAL,
+    LEDGER_OUTSIDE_TRIAL,
 } )
 
 
-class SemdupError( Exception ):
+class DuplicateCheckError( Exception ):
     """
     A failure of the duplicate checker, named by a code so a caller never reads a message.
 
@@ -53,7 +53,10 @@ class SemdupError( Exception ):
         Raises:
             - ValueError if code is not a named code
         """
-        if code not in CODES: raise ValueError( f"unknown semdup error code {code!r}" )
+        if code not in CODES: raise ValueError( f"unknown duplicate check error code {code!r}" )
         super().__init__( f"{code}: {detail}" )
         self.code   = code
         self.detail = detail
+
+
+SemdupError = DuplicateCheckError   # kept: judge.parse_reply names it, and that source is hashed into the frozen prompt version

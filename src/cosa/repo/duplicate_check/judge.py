@@ -4,11 +4,11 @@ import json
 import re
 
 from cosa.repo.doc_lint import harness_runner, model_transport
-from cosa.repo.semdup import blind, errors as err
+from cosa.repo.duplicate_check import blind, errors as err
 
 VERDICTS      = ( "duplicate", "near_duplicate", "related", "distinct" )
 FLAG_VERDICTS = ( "duplicate", "near_duplicate" )
-STAGE         = "semdup"
+STAGE         = "semdup"   # kept: the ledgers of the passing record 2.json carry this stage name
 ATTEMPTS      = 2
 _FENCE        = re.compile( r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL )
 
@@ -61,7 +61,7 @@ def build_prompt( d, cands, scrub ):
         - assert_blind has passed over the finished system and user prompts
 
     Raises:
-        - SemdupError BLINDNESS_BREACH if a scrub token is in either prompt
+        - DuplicateCheckError BLINDNESS_BREACH if a scrub token is in either prompt
     """
     labels  = [ f"c{n}" for n in range( 1, len( cands ) + 1 ) ]
     bodies  = [ _render( d ) ] + [ _render( c ) for c in cands ]
@@ -256,7 +256,7 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
         - rows come in the order of defs, and within a definition in the order the judge saw the candidates
 
     Raises:
-        - SemdupError BLINDNESS_BREACH if a definition or candidate or the finished prompt carries a scrub token
+        - DuplicateCheckError BLINDNESS_BREACH if a definition or candidate or the finished prompt carries a scrub token
         - the errors that are not a ModelCallError, as run_parallel raises them
     """
     async def judge_one( d ):
@@ -279,7 +279,7 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
                 return { "unreadable": { "code": err.JUDGE_CALL_FAILED, "detail": f"{type( e ).__name__}: {e}" } }
             try:
                 rulings = parse_reply( reply, labels )
-            except err.SemdupError as e:
+            except err.DuplicateCheckError as e:
                 failure = e
                 continue
             value = { "rulings": [ { "candidate": order[ labels.index( r[ "candidate" ] ) ], "verdict": r[ "verdict" ], "reason": r[ "reason" ] } for r in rulings ] }

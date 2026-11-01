@@ -1,5 +1,5 @@
 """
-Unit tests for semdup.proof.proof_cli: the run folder in, the spec and wiring out.
+Unit tests for duplicate_check.proof.proof_cli: run folder in, spec and wiring out.
 
 The run folder is written by label_prep.prepare, label_prep.save_doc and label_prep.rewrite_record, the labels by the page's own writer.
 Only jscpd, the model and the real tree are stood in for.
@@ -15,14 +15,14 @@ from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
 from cosa.repo.symindex.candidates import arm_run
-from cosa.repo.semdup import extract as ex
-from cosa.repo.semdup import judge as jd
-from cosa.repo.semdup.proof import label_load as ll
-from cosa.repo.semdup.proof import label_prep as lp
-from cosa.repo.semdup.proof import proof_cli as pc
-from cosa.repo.semdup.proof import proof_run as pr
-from tests.unit.test_semdup_proof_label_load import answer, truth_of
-from tests.unit.test_semdup_proof_run import Toy, source_of
+from cosa.repo.duplicate_check import extract as ex
+from cosa.repo.duplicate_check import judge as jd
+from cosa.repo.duplicate_check.proof import label_load as ll
+from cosa.repo.duplicate_check.proof import label_prep as lp
+from cosa.repo.duplicate_check.proof import proof_cli as pc
+from cosa.repo.duplicate_check.proof import proof_run as pr
+from tests.unit.test_duplicate_check_proof_label_load import answer, truth_of
+from tests.unit.test_duplicate_check_proof_run import Toy, source_of
 
 NO_JSCPD = lambda root, dirs, cfg: { "duplicates": [] }
 
@@ -515,47 +515,47 @@ def test_main_takes_the_third_raters_majority_on_a_dispute( venue, capsys ):
     assert ran[ 0 ][ "provenance" ] == ll.fingerprints( paths, None, third, venue.key, cu.get_project_root() ) and ran[ 0 ][ "provenance" ][ "third_labels" ] == arm_run.sha256_of( third )
 
 
-# ---- the unofficial run --------------------------------------------------------------------------------------------
+# ---- the trial run --------------------------------------------------------------------------------------------
 
-def test_unofficial_state_takes_exactly_one_file_and_names_the_planted_pairs_it_labels_false( world ):
+def test_trial_state_takes_exactly_one_file_and_names_the_planted_pairs_it_labels_false( world ):
     r3o3  = world.toy.key( "r3", "o3" )
     truth = { **truth_of( world.toy ), r3o3: False }
     answer( world.packets, world.key, "rick", truth )
     path  = str( pl.labels_path( world.packets[ "rick" ] ) )
-    state = pc.unofficial_state( [ path ], world.key )
+    state = pc.trial_state( [ path ], world.key )
     assert state == { "counts": { path: 6 }, "labels": truth, "failures": [ r3o3 ], "owed": None }
     for given in ( [], [ path, path ] ):
-        none = pc.unofficial_state( given, world.key )
+        none = pc.trial_state( given, world.key )
         assert none[ "labels" ] is None and f"exactly one labels file, {len( given )} given" in none[ "owed" ]
 
 
-def test_main_unofficial_runs_on_one_file_with_its_own_ledger_and_marks_the_call( venue, capsys ):
+def test_main_trial_runs_on_one_file_with_its_own_ledger_and_marks_the_call( venue, capsys ):
     paths, truth = venue.label_both()
     item         = pl.load_items( venue.packets[ "rick" ] )[ 0 ][ "item_id" ]
     pl.save_label( venue.packets[ "rick" ], item, pl.same_job_labels( paths[ 0 ] )[ item ], True, "not sure", clock=lambda: "2026-10-31T10:00:00-04:00" )
     ran          = []
-    def run_proof( spec, wiring, unofficial=False ): ran.append( ( spec, unofficial ) ); return { "status": "complete", "unofficial": unofficial }
-    argv         = [ "--run-dir", str( venue.run_dir ), "--unofficial", "--claude-cli-path", "/bin/claude", "--labels", paths[ 0 ] ]
+    def run_proof( spec, wiring, trial=False ): ran.append( ( spec, trial ) ); return { "status": "complete", "trial": trial }
+    argv         = [ "--run-dir", str( venue.run_dir ), "--trial", "--claude-cli-path", "/bin/claude", "--labels", paths[ 0 ] ]
     assert pc.main( argv, make_parts=lambda *a: venue.parts(), run_proof=run_proof ) == 0
     data         = venue.toy.wiring[ "data_dir" ]
     assert ran == [ ( ran[ 0 ][ 0 ], True ) ] and ran[ 0 ][ 0 ][ "labels" ] == truth
     spec         = ran[ 0 ][ 0 ]
     assert spec[ "provenance" ] == ll.fingerprints( [ paths[ 0 ] ], None, None, venue.key, cu.get_project_root() ) and len( spec[ "unsure_pairs" ] ) == 1 and spec[ "unsure_pairs" ] == ll.unsure_pair_keys( [ paths[ 0 ] ], venue.key )
-    assert ( data.joinpath( *pr.UNOFFICIAL_FOLDER ) / pc.LEDGER_NAME ).is_file() and not data.joinpath( *pr.PROOF_FOLDER ).exists()
-    assert json.loads( capsys.readouterr().out ) == { "status": "complete", "unofficial": True }
+    assert ( data.joinpath( *pr.TRIAL_FOLDER ) / pc.LEDGER_NAME ).is_file() and not data.joinpath( *pr.PROOF_FOLDER ).exists()
+    assert json.loads( capsys.readouterr().out ) == { "status": "complete", "trial": True }
 
 
-def test_main_unofficial_with_two_files_is_refused_before_the_parts( venue, capsys ):
+def test_main_trial_with_two_files_is_refused_before_the_parts( venue, capsys ):
     paths, _ = venue.label_both()
-    rc       = pc.main( [ "--run-dir", str( venue.run_dir ), "--unofficial", *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=no_parts, run_proof=refuse_run )
+    rc       = pc.main( [ "--run-dir", str( venue.run_dir ), "--trial", *[ x for p in paths for x in ( "--labels", p ) ] ], make_parts=no_parts, run_proof=refuse_run )
     assert rc == 2 and "exactly one labels file, 2 given" in json.loads( capsys.readouterr().out )[ "owed" ]
 
 
 @pytest.mark.parametrize( "flag", [ "--rulings", "--third-labels" ] )
-def test_main_unofficial_refuses_a_rulings_or_third_labels_file( venue, flag ):
+def test_main_trial_refuses_a_rulings_or_third_labels_file( venue, flag ):
     paths, _ = venue.label_both()
-    with pytest.raises( ValueError, match="--unofficial takes one reviewer's labels only" ):
-        pc.main( [ "--run-dir", str( venue.run_dir ), "--unofficial", "--labels", paths[ 0 ], flag, paths[ 1 ] ], make_parts=no_parts, run_proof=refuse_run )
+    with pytest.raises( ValueError, match="--trial takes one reviewer's labels only" ):
+        pc.main( [ "--run-dir", str( venue.run_dir ), "--trial", "--labels", paths[ 0 ], flag, paths[ 1 ] ], make_parts=no_parts, run_proof=refuse_run )
 
 
 def test_main_stdout_is_the_json_alone_when_the_parts_print_a_banner( venue, capsys ):
@@ -571,7 +571,7 @@ def test_main_stdout_is_the_json_alone_when_the_parts_print_a_banner( venue, cap
 
 def supplemented( world, tmp_path ):
     """Label both packets and a two-pair supplement; return ( paths, argv, pair keys )."""
-    from tests.unit.test_semdup_proof_label_load import make_supplement
+    from tests.unit.test_duplicate_check_proof_label_load import make_supplement
     paths, _      = world.label_both()
     supp, by_pair = make_supplement( world.toy, tmp_path, [ True, False ], [ True, False ] )
     argv          = [ "--supplement-key", str( supp[ "key" ] ), *[ x for p in supp[ "labels" ] for x in ( "--supplement-labels", str( p ) ) ] ]
@@ -588,8 +588,8 @@ def test_read_supplement_refuses_a_key_without_two_files_and_two_files_without_a
     with pytest.raises( ValueError, match="go together" ): pc.read_supplement( key, labels )
 
 
-def test_read_supplement_refuses_an_unofficial_run():
-    with pytest.raises( ValueError, match="--unofficial takes one reviewer's labels only" ): pc.read_supplement( "k.json", [ "a", "b" ], unofficial=True )
+def test_read_supplement_refuses_an_trial_run():
+    with pytest.raises( ValueError, match="--trial takes one reviewer's labels only" ): pc.read_supplement( "k.json", [ "a", "b" ], trial=True )
 
 
 def test_label_state_with_a_supplement_resolves_its_pairs_too_and_counts_its_files( world, tmp_path ):
@@ -622,15 +622,15 @@ def test_main_runs_the_proof_with_the_supplement_labels_provenance_and_unsure_pa
     assert spec[ "unsure_pairs" ] == ll.unsure_pair_keys( paths, venue.key, supp ) and len( spec[ "unsure_pairs" ] ) == 1
 
 
-def test_main_refuses_a_supplement_with_an_unofficial_run( venue, tmp_path ):
+def test_main_refuses_a_supplement_with_an_trial_run( venue, tmp_path ):
     paths, supp, argv, keys = supplemented( venue, tmp_path )
-    with pytest.raises( ValueError, match="--unofficial takes one reviewer's labels only" ):
-        pc.main( [ "--run-dir", str( venue.run_dir ), "--unofficial", "--labels", paths[ 0 ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=refuse_run )
+    with pytest.raises( ValueError, match="--trial takes one reviewer's labels only" ):
+        pc.main( [ "--run-dir", str( venue.run_dir ), "--trial", "--labels", paths[ 0 ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=refuse_run )
 
 
 def split_supplemented( world, tmp_path ):
     """Like supplemented, but the reviewers split on a pair and a third file settles it."""
-    from tests.unit.test_semdup_proof_label_load import make_supplement, supp_third
+    from tests.unit.test_duplicate_check_proof_label_load import make_supplement, supp_third
     paths, _      = world.label_both()
     supp, by_pair = make_supplement( world.toy, tmp_path, [ True, False ], [ False, False ] )
     split         = list( by_pair )[ 0 ]

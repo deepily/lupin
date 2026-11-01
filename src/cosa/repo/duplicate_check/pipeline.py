@@ -1,7 +1,7 @@
 """The judging pipeline both the scorer and the proof run: vectors, pool, candidates, judge."""
 import asyncio
 
-from cosa.repo.semdup import blind, body_vectors, candidates, judge
+from cosa.repo.duplicate_check import blind, body_vectors, candidates, judge
 
 
 def judge_all( judged, all_defs, cfg, wiring, slot ):
@@ -21,7 +21,7 @@ def judge_all( judged, all_defs, cfg, wiring, slot ):
         - the same inputs and slot make the same calls, so a finished call is read from the ledger
 
     Raises:
-        - SemdupError BLINDNESS_BREACH, and whatever judge_run, ensure_vectors or candidate_rows raise
+        - DuplicateCheckError BLINDNESS_BREACH, and whatever judge_run, ensure_vectors or candidate_rows raise
     """
     dropped  = blind.breaching_ids( [ d for d in all_defs if d[ "origin" ] == "server" ], wiring[ "scrub" ] )
     all_defs = [ d for d in all_defs if d[ "id" ] not in set( dropped ) ]

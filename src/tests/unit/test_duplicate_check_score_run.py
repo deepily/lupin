@@ -1,4 +1,4 @@
-"""Unit tests for semdup.score_run: worked scores, each unscorable cause and the command."""
+"""Unit tests for duplicate_check.score_run: worked scores, unscorable causes, the command."""
 import asyncio
 import json
 import re
@@ -7,13 +7,13 @@ import pytest
 
 from cosa.repo.doc_lint import harness_runner as hr
 from cosa.repo.doc_lint import model_transport as mt
-from cosa.repo.semdup import blind as bl
-from cosa.repo.semdup import config as cf
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
-from cosa.repo.semdup import judge as jd
-from cosa.repo.semdup import pipeline as pl
-from cosa.repo.semdup import score_run as sr
+from cosa.repo.duplicate_check import blind as bl
+from cosa.repo.duplicate_check import config as cf
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
+from cosa.repo.duplicate_check import judge as jd
+from cosa.repo.duplicate_check import pipeline as pl
+from cosa.repo.duplicate_check import score_run as sr
 
 SCRUB  = bl.scrub_tokens( [ "ARM-WITH" ] )
 MARKS  = [ "MARKA", "MARKB", "MARKC", "MARKD", "MARKE", "MARKF", "MARKG", "MARKH", "MARKI" ]
@@ -266,7 +266,7 @@ def test_a_server_definition_carrying_a_scrub_token_is_dropped_from_the_pool_and
     report = sr.score_run( run, w )
     assert report[ "status" ] == "scored" and report[ "dropped_from_pool" ] == { "count": 1, "ids": [ server[ 0 ][ "id" ] ] }
     assert not any( "check_exists" in t for t in w[ "client" ].texts )
-    with pytest.raises( err.SemdupError ) as caught: bl.blind_definition( server[ 0 ], SCRUB )
+    with pytest.raises( err.DuplicateCheckError ) as caught: bl.blind_definition( server[ 0 ], SCRUB )
     assert caught.value.code == err.BLINDNESS_BREACH
 
 
@@ -291,16 +291,16 @@ def test_a_model_call_that_raises_makes_that_run_unscorable_by_name_and_does_not
 
 
 def test_another_error_from_the_judge_is_not_swallowed_into_a_report(tmp_path, monkeypatch):
-    async def boom( *args, **kwargs ): raise err.SemdupError( err.JUDGE_UNREADABLE, "unexpected" )
+    async def boom( *args, **kwargs ): raise err.DuplicateCheckError( err.JUDGE_UNREADABLE, "unexpected" )
     monkeypatch.setattr( pl.judge, "judge_run", boom )
     run, w = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ) ] )
-    with pytest.raises( err.SemdupError ) as caught: sr.score_run( run, w )
+    with pytest.raises( err.DuplicateCheckError ) as caught: sr.score_run( run, w )
     assert caught.value.code == err.JUDGE_UNREADABLE
 
 
 def test_a_live_configuration_that_differs_from_the_frozen_one_raises_and_is_not_a_report(tmp_path):
     run, w = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ) ] )
-    with pytest.raises( err.SemdupError ) as caught: sr.score_run( run, { **w, "live": { **w[ "live" ], "body_chars": 1 } } )
+    with pytest.raises( err.DuplicateCheckError ) as caught: sr.score_run( run, { **w, "live": { **w[ "live" ], "body_chars": 1 } } )
     assert caught.value.code == err.CONFIG_DRIFT
 
 
@@ -345,7 +345,7 @@ def policy_cfg( policy ):
 def test_aggregate_runs_refuses_an_unscorable_run_when_no_policy_is_named():
     reports = [ { "run": "r1", "score_per_100": 2.0 }, { "run": "r2", "status": "unscorable", "cause": "NO_PASSING_TESTS" } ]
     for empty in ( None, "", " " ):
-        with pytest.raises( err.SemdupError, match="r2" ) as caught: sr.aggregate_runs( reports, policy_cfg( empty ), { "stub": print } )
+        with pytest.raises( err.DuplicateCheckError, match="r2" ) as caught: sr.aggregate_runs( reports, policy_cfg( empty ), { "stub": print } )
         assert caught.value.code == err.POLICY_UNDECIDED
 
 
@@ -370,5 +370,5 @@ def test_aggregate_runs_hands_the_reports_to_the_named_policy_and_returns_its_an
 
 def test_aggregate_runs_names_a_policy_the_registry_does_not_hold():
     reports = [ { "run": "r1", "status": "unscorable" } ]
-    with pytest.raises( err.SemdupError ) as caught: sr.aggregate_runs( reports, policy_cfg( "worst-rank" ), { "stub": print } )
+    with pytest.raises( err.DuplicateCheckError ) as caught: sr.aggregate_runs( reports, policy_cfg( "worst-rank" ), { "stub": print } )
     assert caught.value.code == err.POLICY_UNKNOWN and "worst-rank" in caught.value.detail and "stub" in caught.value.detail

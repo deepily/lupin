@@ -1,4 +1,4 @@
-"""Unit tests for semdup.structural: jscpd reports and dups pairs mapped to definitions."""
+"""Unit tests for duplicate_check.structural: jscpd reports and dups pairs, mapped."""
 import json
 import os
 import pathlib
@@ -8,9 +8,9 @@ import types
 import pytest
 
 import cosa.utils.util as cu
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
-from cosa.repo.semdup import structural as st
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
+from cosa.repo.duplicate_check import structural as st
 from cosa.repo.symindex import dups, js_index
 from cosa.repo.symindex import spec as sp
 
@@ -112,7 +112,7 @@ JSCPD_CFG = { "jscpd": { "version": "5.3.3", "min_tokens": 50, "min_lines": 5, "
 
 def nested_tree( tmp_path ):
     """Write the fixture under client/ of a nested root and one.ts under other/; return both."""
-    fixture = json.loads( ( HERE / "semdup_jscpd_fixture.json" ).read_text( encoding="utf-8" ) )
+    fixture = json.loads( ( HERE / "duplicate_check_jscpd_fixture.json" ).read_text( encoding="utf-8" ) )
     root    = tmp_path / "nest"
     paths   = []
     extra   = [ ( "other/one.ts", fixture[ "src/one.ts" ] ), ( "client/lib/a.js", JS_COPY.format( name="sumUp" ) ), ( "client/lib/b.js", JS_COPY.format( name="sumDown" ) ) ]
@@ -173,13 +173,13 @@ def test_a_file_over_jscpds_default_size_is_skipped_without_a_word_unless_the_fr
 
 def test_run_jscpd_names_a_missing_launcher_and_a_missing_node(tmp_path, monkeypatch):
     monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path ) )
-    with pytest.raises( err.SemdupError ) as bare: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
+    with pytest.raises( err.DuplicateCheckError ) as bare: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
     assert bare.value.code == err.DEPENDENCY_MISSING and "node_modules" in bare.value.detail
     ( tmp_path / "node_modules" / ".bin" ).mkdir( parents=True )
     ( tmp_path / "node_modules" / ".bin" / "jscpd" ).write_text( "", encoding="utf-8" )
     def no_node(): raise js_index.DependencyMissing( "node", "gone" )
     monkeypatch.setattr( js_index, "find_node", no_node )
-    with pytest.raises( err.SemdupError ) as nonode: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
+    with pytest.raises( err.DuplicateCheckError ) as nonode: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
     assert nonode.value.code == err.DEPENDENCY_MISSING and "node" in nonode.value.detail
 
 
@@ -201,7 +201,7 @@ def fake_jscpd( monkeypatch, tmp_path, version, returncode, write_report, report
 
 def test_run_jscpd_refuses_another_installed_version(tmp_path, monkeypatch):
     fake_jscpd( monkeypatch, tmp_path, "5.4.0", 0, True )
-    with pytest.raises( err.SemdupError ) as caught: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
+    with pytest.raises( err.DuplicateCheckError ) as caught: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
     assert caught.value.code == err.DEPENDENCY_MISSING and "5.3.3" in caught.value.detail and "5.4.0" in caught.value.detail
 
 
@@ -215,13 +215,13 @@ def test_run_jscpd_keeps_a_folder_name_whole_so_a_longer_name_that_starts_with_i
 @pytest.mark.parametrize( "returncode, write_report", [ ( 1, True ), ( 0, False ) ] )
 def test_run_jscpd_names_a_failed_run_or_a_missing_report(tmp_path, monkeypatch, returncode, write_report):
     fake_jscpd( monkeypatch, tmp_path, "5.3.3", returncode, write_report )
-    with pytest.raises( err.SemdupError ) as caught: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
+    with pytest.raises( err.DuplicateCheckError ) as caught: st.run_jscpd( tmp_path, [ "x" ], JSCPD_CFG )
     assert caught.value.code == err.RUN_INCOMPLETE and "boom" in caught.value.detail
 
 
 def test_the_real_jscpd_report_pairs_the_two_clone_functions_and_not_the_lookalikes(tmp_path):
-    fixture = json.loads( ( HERE / "semdup_jscpd_fixture.json" ).read_text( encoding="utf-8" ) )
-    report  = json.loads( ( HERE / "semdup_jscpd_report_5.3.3.json" ).read_text( encoding="utf-8" ) )
+    fixture = json.loads( ( HERE / "duplicate_check_jscpd_fixture.json" ).read_text( encoding="utf-8" ) )
+    report  = json.loads( ( HERE / "duplicate_check_jscpd_report_5.3.3.json" ).read_text( encoding="utf-8" ) )
     root    = tmp_path / "tree"
     paths   = []
     for name, text in fixture.items():

@@ -1,11 +1,11 @@
-"""Unit tests for semdup.blind: what the judge may see, and the refusal on a surviving token."""
+"""Unit tests for duplicate_check.blind: what the judge sees, and the leaked-token refusal."""
 import json
 
 import pytest
 
-from cosa.repo.semdup import blind as bl
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup import extract as ex
+from cosa.repo.duplicate_check import blind as bl
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import extract as ex
 
 SCRUB = bl.scrub_tokens( [ "ARM-WITH", "ARM-WITHOUT" ] )
 
@@ -33,7 +33,7 @@ def test_an_empty_scrub_token_is_refused_because_it_is_found_in_every_text( call
 
 @pytest.mark.parametrize( "token", bl.REUSE_TOOL_TOKENS + ( "ARM-WITH", "ARM-WITHOUT" ) )
 def test_assert_blind_refuses_each_token_and_names_it_without_quoting_the_text( token ):
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         bl.assert_blind( f"prefix secret-body {token} suffix", SCRUB )
     assert caught.value.code == err.BLINDNESS_BREACH and token in caught.value.detail and "secret-body" not in caught.value.detail
 
@@ -44,7 +44,7 @@ def test_assert_blind_passes_clean_text_and_matches_case_exactly():
 
 
 def test_assert_blind_lists_every_token_found():
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         bl.assert_blind( "check_exists then fetch_similar", SCRUB )
     assert caught.value.detail.endswith( "check_exists, fetch_similar" )
 
@@ -73,7 +73,7 @@ def test_a_script_comment_line_with_a_token_is_removed_for_each_marker( marker )
 def test_a_token_in_code_or_a_trailing_comment_is_not_removed_and_so_is_refused_later():
     text = "x = 1  # check_exists\ny = 'check_exists'"
     assert bl.strip_comment_lines( text, "py", SCRUB ) == text
-    with pytest.raises( err.SemdupError ):
+    with pytest.raises( err.DuplicateCheckError ):
         bl.blind_definition( make( text=text ), SCRUB )
 
 
@@ -115,20 +115,20 @@ def test_the_opaque_id_changes_with_path_name_or_text_but_not_with_origin_or_wor
 @pytest.mark.parametrize( "field, value", [ ( "name", "check_exists" ), ( "file", "src/fetch_similar/mod.py" ), ( "sig", "( record_search )" ),
                                             ( "text", "def helper( x ):\n    return 'reuse-reviewer'" ) ] )
 def test_a_token_in_the_name_path_signature_or_a_string_literal_is_refused( field, value ):
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         bl.blind_definition( make( **{ field: value } ), SCRUB )
     assert caught.value.code == err.BLINDNESS_BREACH
 
 
 def test_a_prompt_body_that_mentions_check_exists_in_a_string_literal_raises_and_does_not_pass():
     d = make( text="def helper( x ):\n    msg = \"call check_exists\"\n    return msg" )
-    with pytest.raises( err.SemdupError, match="check_exists" ):
+    with pytest.raises( err.DuplicateCheckError, match="check_exists" ):
         bl.blind_definition( d, SCRUB )
 
 
 def test_an_arm_label_in_a_comment_is_removed_and_in_code_is_refused():
     assert "ARM-WITH" not in bl.blind_definition( make( text="def helper( x ):\n    # run ARM-WITH\n    return 1" ), SCRUB )[ "text" ]
-    with pytest.raises( err.SemdupError, match="ARM-WITH" ):
+    with pytest.raises( err.DuplicateCheckError, match="ARM-WITH" ):
         bl.blind_definition( make( text="def helper( x ):\n    return 'ARM-WITH'" ), SCRUB )
 
 
@@ -148,5 +148,5 @@ def test_breaching_ids_names_each_definition_blind_definition_refuses_in_sorted_
     assert bl.breaching_ids( [ leak2, clean, leak1 ], SCRUB ) == sorted( [ leak1[ "id" ], leak2[ "id" ] ] )
     assert bl.breaching_ids( [ clean ], SCRUB ) == [] and bl.breaching_ids( [], SCRUB ) == []
     for d in ( leak1, leak2 ):
-        with pytest.raises( err.SemdupError ) as caught: bl.blind_definition( d, SCRUB )
+        with pytest.raises( err.DuplicateCheckError ) as caught: bl.blind_definition( d, SCRUB )
         assert caught.value.code == err.BLINDNESS_BREACH

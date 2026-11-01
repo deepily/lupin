@@ -1,8 +1,8 @@
-"""Unit tests for semdup.cluster: pair joining, clusters, surplus and score."""
+"""Unit tests for duplicate_check.cluster: pair joining, clusters, surplus and score."""
 import pytest
 
-from cosa.repo.semdup import cluster as cl
-from cosa.repo.semdup import errors as err
+from cosa.repo.duplicate_check import cluster as cl
+from cosa.repo.duplicate_check import errors as err
 
 
 def row( a, b, verdict ):
@@ -102,5 +102,5 @@ def test_the_score_is_surplus_per_one_hundred_passing_tests():
 
 @pytest.mark.parametrize( "passing", [ 0, -1 ] )
 def test_a_score_over_no_passing_tests_is_refused_by_name_with_the_raw_surplus_in_the_message(passing):
-    with pytest.raises( err.SemdupError ) as caught: cl.score( 4, passing )
+    with pytest.raises( err.DuplicateCheckError ) as caught: cl.score( 4, passing )
     assert caught.value.code == err.NO_PASSING_TESTS and "raw surplus 4" in caught.value.detail

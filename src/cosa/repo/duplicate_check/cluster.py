@@ -1,8 +1,8 @@
 """Clusters of duplicate definitions and the score per 100 passing tests."""
 import collections
 
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup.judge import FLAG_VERDICTS
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check.judge import FLAG_VERDICTS
 
 
 def join_pairs( verdicts ):
@@ -105,7 +105,7 @@ def score( surplus_count, passing ):
         - returns 100 * surplus_count / passing
 
     Raises:
-        - SemdupError NO_PASSING_TESTS if passing is below 1
+        - DuplicateCheckError NO_PASSING_TESTS if passing is below 1
     """
-    if passing < 1: raise err.SemdupError( err.NO_PASSING_TESTS, f"{passing} passing tests: a per-100 figure is undefined (raw surplus {surplus_count})" )
+    if passing < 1: raise err.DuplicateCheckError( err.NO_PASSING_TESTS, f"{passing} passing tests: a per-100 figure is undefined (raw surplus {surplus_count})" )
     return 100 * surplus_count / passing

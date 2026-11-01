@@ -1,4 +1,4 @@
-"""Unit tests for semdup.smoke: timed backend, percentiles, failure rates, record file."""
+"""Unit tests for duplicate_check.smoke: timed backend, percentiles, failure rates, record."""
 import asyncio
 import json
 import statistics
@@ -6,7 +6,7 @@ import statistics
 import pytest
 
 from cosa.repo.doc_lint import model_transport
-from cosa.repo.semdup import smoke
+from cosa.repo.duplicate_check import smoke
 
 META = { "date": "2026-10-25", "host": "box", "repo_sha": "abc", "config_sha": "def" }
 
@@ -203,7 +203,7 @@ def test_a_record_that_cannot_be_trusted_is_refused_by_name( meta, calls, defini
 def test_the_record_is_written_once_under_its_date_and_never_replaced(tmp_path):
     record = smoke.build_record( META, rows( [ 1, 2 ] ), 2, 0, 1, 1.0, 10, 1 )
     path   = smoke.write_record( tmp_path / "data", record )
-    assert path == tmp_path / "data" / "semdup" / "smoke" / "2026-10-25.json" and json.loads( path.read_text( encoding="utf-8" ) ) == record
+    assert path == tmp_path / "data" / "duplicate-check" / "smoke" / "2026-10-25.json" and json.loads( path.read_text( encoding="utf-8" ) ) == record
     with pytest.raises( FileExistsError ): smoke.write_record( tmp_path / "data", record )
     assert json.loads( path.read_text( encoding="utf-8" ) ) == record
 

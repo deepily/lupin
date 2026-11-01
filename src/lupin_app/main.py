@@ -1189,7 +1189,7 @@ app.include_router(dm.router)   # /api/dm/* — notification-native AI↔AI DM (
 app.include_router(v2_ask.router)   # /api/v2/ask — CJ Flow v2 unified ask endpoint (unit D)
 app.include_router(cc_transcript.router)   # /api/cc-transcript/* — the console-tee read-only stream (row 27760534)
 app.include_router(reuse_candidates.router)   # /api/reuse-candidates/* — the resident search of the reuse-lookup candidate stage (row d3f71441)
-app.include_router(pair_labelling.router)   # /api/pair-labelling/* — a reviewer labels a blind semdup pair packet in the browser (row ea45cf15)
+app.include_router(pair_labelling.router)   # /api/pair-labelling/* — a reviewer labels a blind duplicate-check pair packet in the browser (row ea45cf15)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

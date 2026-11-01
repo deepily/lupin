@@ -2,8 +2,8 @@
 import fractions
 
 from cosa.repo.doc_lint import harness_report
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup.judge import FLAG_VERDICTS
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check.judge import FLAG_VERDICTS
 
 FOUND_BAR     = fractions.Fraction( 4, 5 )
 CORRECT_BAR   = fractions.Fraction( 4, 5 )
@@ -31,10 +31,10 @@ def evaluate_bar( counts ):
         - passed is True only when all three pass
 
     Raises:
-        - SemdupError NO_FLAGS if the proof raised no flag, because the share of flags that are right is undefined
+        - DuplicateCheckError NO_FLAGS if the proof raised no flag, because the share of flags that are right is undefined
         - ValueError if there are no true pairs or no pair judged in both passes, or a count exceeds its total
     """
-    if counts[ "flags" ] == 0: raise err.SemdupError( err.NO_FLAGS, "the proof raised no flag, so the share of flags that are right is undefined" )
+    if counts[ "flags" ] == 0: raise err.DuplicateCheckError( err.NO_FLAGS, "the proof raised no flag, so the share of flags that are right is undefined" )
     for total, part in ( ( "true_pairs", "found" ), ( "flags", "correct" ), ( "both", "agree" ) ):
         if counts[ total ] < 1: raise ValueError( f"{total} must be 1 or more, got {counts[ total ]}" )
         if not 0 <= counts[ part ] <= counts[ total ]: raise ValueError( f"{part} must be between 0 and {total} ({counts[ total ]}), got {counts[ part ]}" )

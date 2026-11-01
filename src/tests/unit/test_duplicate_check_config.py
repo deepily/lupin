@@ -1,14 +1,16 @@
 """
-Unit tests for semdup errors and config: freeze, drift check and policy refusal.
+Unit tests for duplicate check errors and config: freeze, drift check and policy refusal.
 """
+import inspect
 import json
 import os
 
 import pytest
 
 from cosa.repo.doc_lint import model_transport
-from cosa.repo.semdup import config as cf
-from cosa.repo.semdup import errors as err
+from cosa.repo.duplicate_check import config as cf
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check import judge
 
 PROMPT  = "You rule on whether two functions do the same job."
 USER    = "Definition: {definition}\nCandidates: {candidates}"
@@ -31,13 +33,13 @@ def test_every_error_code_is_listed_once_and_there_are_fifteen():
 
 
 def test_an_error_carries_its_code_and_detail_and_prints_both():
-    e = err.SemdupError( err.NO_FLAGS, "the proof raised none" )
+    e = err.DuplicateCheckError( err.NO_FLAGS, "the proof raised none" )
     assert ( e.code, e.detail, str( e ) ) == ( "NO_FLAGS", "the proof raised none", "NO_FLAGS: the proof raised none" )
 
 
 def test_an_unknown_code_is_refused_at_construction():
-    with pytest.raises( ValueError, match="unknown semdup error code 'NOPE'" ):
-        err.SemdupError( "NOPE", "x" )
+    with pytest.raises( ValueError, match="unknown duplicate check error code 'NOPE'" ):
+        err.DuplicateCheckError( "NOPE", "x" )
 
 
 def test_build_config_holds_exactly_the_documented_fields_with_the_fixed_constants():
@@ -126,7 +128,7 @@ def test_refreezing_is_refused_and_leaves_the_first_file_untouched(tmp_path):
     path = str( tmp_path / "f.json" )
     cf.freeze( make(), path )
     before = open( path ).read()
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         cf.freeze( make( body_chars=1 ), path )
     assert caught.value.code == err.CONFIG_ALREADY_FROZEN and open( path ).read() == before
 
@@ -140,7 +142,7 @@ def test_refreezing_is_refused_and_leaves_the_first_file_untouched(tmp_path):
 ] )
 def test_freeze_refuses_an_undecided_backend_or_temperature_and_writes_nothing( tmp_path, over, named ):
     path = str( tmp_path / "new-folder" / "f.json" )
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         cf.freeze( make( **over ), path )
     assert caught.value.code == err.CONFIG_UNDECIDED and named in caught.value.detail
     assert not os.path.exists( path ) and not os.path.exists( os.path.dirname( path ) )
@@ -153,7 +155,7 @@ def test_freeze_does_not_need_the_unscorable_policy(tmp_path):
 def test_freeze_refuses_a_configuration_edited_after_it_was_built(tmp_path):
     cfg = make()
     cfg[ "max_candidates" ] = 99
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         cf.freeze( cfg, str( tmp_path / "f.json" ) )
     assert caught.value.code == err.CONFIG_DRIFT and not os.path.exists( tmp_path / "f.json" )
 
@@ -170,7 +172,7 @@ def test_each_live_field_is_compared_on_its_own_and_named_when_it_differs( tmp_p
     cf.freeze( make(), path )
     live = make()
     live[ field ] = "different" if field != "jscpd" else { **JSCPD, "min_tokens": 51 }
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         cf.verify_frozen( path, live )
     assert caught.value.code == err.CONFIG_DRIFT and field in caught.value.detail.split( ": " )[ 1 ].split( ", " )
 
@@ -179,11 +181,11 @@ def test_a_field_only_the_live_configuration_has_is_drift_and_so_is_one_only_the
     path = str( tmp_path / "f.json" )
     cf.freeze( make(), path )
     live_extra = { **make(), "added_since_freeze": 1 }
-    with pytest.raises( err.SemdupError, match="added_since_freeze" ) as caught:
+    with pytest.raises( err.DuplicateCheckError, match="added_since_freeze" ) as caught:
         cf.verify_frozen( path, live_extra )
     assert caught.value.code == err.CONFIG_DRIFT
     live_short = { key: value for key, value in make().items() if key != "body_chars" }
-    with pytest.raises( err.SemdupError, match="body_chars" ) as caught:
+    with pytest.raises( err.DuplicateCheckError, match="body_chars" ) as caught:
         cf.verify_frozen( path, live_short )
     assert caught.value.code == err.CONFIG_DRIFT
 
@@ -203,7 +205,7 @@ def test_the_stored_sha_field_is_checked_against_the_file_and_not_against_live(t
 def test_code_that_moved_since_the_freeze_is_refused( tmp_path, over ):
     path = str( tmp_path / "f.json" )
     cf.freeze( make(), path )
-    with pytest.raises( err.SemdupError ) as caught:
+    with pytest.raises( err.DuplicateCheckError ) as caught:
         cf.verify_frozen( path, make( **over ) )
     assert caught.value.code == err.CONFIG_DRIFT
 
@@ -213,7 +215,7 @@ def test_a_frozen_file_edited_by_hand_fails_its_own_sha(tmp_path):
     cf.freeze( make(), path )
     text = open( path ).read().replace( '"model_id": "claude-fable-5-1"', '"model_id": "claude-opus-5-5"' )
     open( path, "w" ).write( text )
-    with pytest.raises( err.SemdupError, match="recomputes to" ) as caught:
+    with pytest.raises( err.DuplicateCheckError, match="recomputes to" ) as caught:
         cf.verify_frozen( path, make() )
     assert caught.value.code == err.CONFIG_DRIFT
 
@@ -221,3 +223,7 @@ def test_a_frozen_file_edited_by_hand_fails_its_own_sha(tmp_path):
 def test_verify_frozen_with_no_file_raises_rather_than_passing(tmp_path):
     with pytest.raises( FileNotFoundError ):
         cf.verify_frozen( str( tmp_path / "missing.json" ), make() )
+
+
+def test_the_old_error_name_is_the_same_class_because_the_frozen_prompt_hash_reads_it():
+    assert err.SemdupError is err.DuplicateCheckError and "SemdupError" in inspect.getsource( judge.parse_reply )

@@ -3,7 +3,7 @@ import hashlib
 
 import numpy as np
 
-from cosa.repo.semdup import errors as err
+from cosa.repo.duplicate_check import errors as err
 
 SOURCES = ( "structural", "neighbour", "nominated" )
 
@@ -94,12 +94,12 @@ def assemble_pairs( tagged ):
         - every pair appears once
 
     Raises:
-        - SemdupError BAD_PAIR_SOURCE if a pair has no source tag or a tag outside the three
+        - DuplicateCheckError BAD_PAIR_SOURCE if a pair has no source tag or a tag outside the three
         - ValueError if a pair is listed twice
     """
     seen = set()
     for p in tagged:
-        if p.get( "source" ) not in SOURCES: raise err.SemdupError( err.BAD_PAIR_SOURCE, f"pair {p.get( 'ids' )} has source {p.get( 'source' )!r}, not one of {SOURCES}" )
+        if p.get( "source" ) not in SOURCES: raise err.DuplicateCheckError( err.BAD_PAIR_SOURCE, f"pair {p.get( 'ids' )} has source {p.get( 'source' )!r}, not one of {SOURCES}" )
         key = tuple( sorted( p[ "ids" ] ) )
         if key in seen: raise ValueError( f"pair {key} is listed twice" )
         seen.add( key )

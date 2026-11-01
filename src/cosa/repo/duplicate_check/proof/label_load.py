@@ -4,7 +4,7 @@ import pathlib
 
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
-from cosa.repo.semdup.proof import proof_run
+from cosa.repo.duplicate_check.proof import proof_run
 from cosa.repo.symindex.candidates import arm_run
 
 

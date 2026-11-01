@@ -5,13 +5,13 @@ One format serves the need-set labelling and the duplicate checker's labelling.
 """
 from cosa.repo.labelling import errors as er
 
-ITEM_FORMAT = "labelling-item-1"
-NEED_KEY    = "need_key"
-SEMDUP_PAIR = "semdup_pair"
-TYPES       = ( NEED_KEY, SEMDUP_PAIR )
-TOP_KEYS    = ( "item_id", "type", "payload" )
+ITEM_FORMAT    = "labelling-item-1"
+NEED_KEY       = "need_key"
+DUPLICATE_PAIR = "semdup_pair"   # the value stays: packets already written carry it
+TYPES          = ( NEED_KEY, DUPLICATE_PAIR )
+TOP_KEYS       = ( "item_id", "type", "payload" )
 MAX_CALL_SITES = 5
-ALLOWED     = { NEED_KEY: frozenset( { "need", "key_sources", "nothing_exists", "hits", "call_sites" } ), SEMDUP_PAIR: frozenset( { "a", "b" } ) }
+ALLOWED     = { NEED_KEY: frozenset( { "need", "key_sources", "nothing_exists", "hits", "call_sites" } ), DUPLICATE_PAIR: frozenset( { "a", "b" } ) }
 
 
 def _fail( item, why ):
@@ -49,7 +49,7 @@ def validate_item( item ):
     if item[ "type" ] not in TYPES: _fail( item, f"unknown type {item[ 'type' ]!r}" )
     p = item[ "payload" ]
     if not isinstance( p, dict ): _fail( item, "payload must be a dict" )
-    if item[ "type" ] == SEMDUP_PAIR:
+    if item[ "type" ] == DUPLICATE_PAIR:
         if not ( _text( p.get( "a" ) ) and _text( p.get( "b" ) ) ): _fail( item, "a semdup_pair needs two definitions, a and b" )
         return
     if not _text( p.get( "need" ) ): _fail( item, "a need_key item needs the need text" )

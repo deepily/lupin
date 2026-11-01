@@ -10,9 +10,9 @@ import re
 
 import pytest
 
-from cosa.repo.semdup import blind
-from cosa.repo.semdup import config as semdup_config
-from cosa.repo.semdup import frozen
+from cosa.repo.duplicate_check import blind
+from cosa.repo.duplicate_check import config as duplicate_check_config
+from cosa.repo.duplicate_check import frozen
 from lupin_mcp.reuse_harness import arms
 from lupin_mcp.reuse_harness import errors as err
 from lupin_mcp.reuse_harness import run as harness
@@ -253,11 +253,11 @@ def test_the_harness_labels_are_in_the_scrub_list_the_frozen_config_hashes():
     """The live and committed scrub hashes cover these labels; a drifted label changes them."""
     labels = list( arms.ARM_LABELS.values() )
     assert all( label in blind.scrub_tokens( frozen.ARM_LABELS ) for label in labels )
-    assert frozen.live_config()[ "scrub_sha" ] == semdup_config._sha( json.dumps( sorted( blind.scrub_tokens( labels ) ) ) )
+    assert frozen.live_config()[ "scrub_sha" ] == duplicate_check_config._sha( json.dumps( sorted( blind.scrub_tokens( labels ) ) ) )
     with open( frozen.frozen_path(), encoding="utf-8" ) as f: committed = json.load( f )
-    assert committed[ "scrub_sha" ] == semdup_config._sha( json.dumps( sorted( blind.scrub_tokens( labels ) ) ) )
+    assert committed[ "scrub_sha" ] == duplicate_check_config._sha( json.dumps( sorted( blind.scrub_tokens( labels ) ) ) )
     drifted = [ label + "x" for label in labels ]
-    assert frozen.live_config()[ "scrub_sha" ] != semdup_config._sha( json.dumps( sorted( blind.scrub_tokens( drifted ) ) ) )
+    assert frozen.live_config()[ "scrub_sha" ] != duplicate_check_config._sha( json.dumps( sorted( blind.scrub_tokens( drifted ) ) ) )
 
 
 def test_build_session_config_refuses_an_unknown_arm_and_an_empty_model():

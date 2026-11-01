@@ -1,11 +1,11 @@
-"""Unit tests for semdup.proof.monolith_pairs: the three sources, the pin and the tag check."""
+"""Unit tests for duplicate_check.proof.monolith_pairs: three sources, pin, tag check."""
 import hashlib
 import subprocess
 
 import pytest
 
-from cosa.repo.semdup import errors as err
-from cosa.repo.semdup.proof import monolith_pairs as mp
+from cosa.repo.duplicate_check import errors as err
+from cosa.repo.duplicate_check.proof import monolith_pairs as mp
 
 
 def defs_of( *ids ):
@@ -106,7 +106,7 @@ def test_every_tag_is_accepted_and_the_list_is_ordered_by_source_then_ids():
 
 @pytest.mark.parametrize( "pair", [ { "ids": [ "a", "b" ] }, { "ids": [ "a", "b" ], "source": None }, { "ids": [ "a", "b" ], "source": "guess" }, { "ids": [ "a", "b" ], "source": "" } ] )
 def test_a_pair_with_no_tag_or_a_tag_outside_the_three_is_refused_by_name(pair):
-    with pytest.raises( err.SemdupError ) as caught: mp.assemble_pairs( [ pair ] )
+    with pytest.raises( err.DuplicateCheckError ) as caught: mp.assemble_pairs( [ pair ] )
     assert caught.value.code == err.BAD_PAIR_SOURCE
 
 

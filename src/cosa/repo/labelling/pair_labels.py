@@ -105,7 +105,7 @@ def load_items( packet_path ):
     items = []
     for line in pathlib.Path( packet_path ).read_text( encoding="utf-8" ).splitlines():
         item = pk.blind_form( json.loads( line ) )
-        if item[ "type" ] != it.SEMDUP_PAIR: raise er.LabellingError( er.BAD_ITEM, f"{item[ 'item_id' ]}: not a semdup_pair" )
+        if item[ "type" ] != it.DUPLICATE_PAIR: raise er.LabellingError( er.BAD_ITEM, f"{item[ 'item_id' ]}: not a semdup_pair" )
         items.append( { "item_id": item[ "item_id" ], "a": item[ "payload" ][ "a" ], "b": item[ "payload" ][ "b" ] } )
     return items
 

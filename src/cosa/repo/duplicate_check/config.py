@@ -5,12 +5,12 @@ import os
 import uuid
 
 from cosa.repo.doc_lint import model_transport
-from cosa.repo.semdup import errors as err
+from cosa.repo.duplicate_check import errors as err
 from cosa.repo.symindex import dups
 from cosa.repo.symindex.candidates.vector_store import canonical
 
 MODEL_ID       = "claude-fable-5-1"
-PROMPT_NAME    = "semdup"
+PROMPT_NAME    = "semdup"   # kept: the frozen prompt version "semdup-f620c8a20a" is a hash of this name
 MAX_CANDIDATES = 10
 MIN_CANDIDATES = 5
 LIST_DEPTH     = 10
@@ -122,13 +122,13 @@ def freeze( cfg, path ):
         - returns config_sha of the written configuration
 
     Raises:
-        - SemdupError CONFIG_UNDECIDED if backend or temperature is empty, naming which
-        - SemdupError CONFIG_DRIFT if cfg was edited after build_config
-        - SemdupError CONFIG_ALREADY_FROZEN if a file exists at path
+        - DuplicateCheckError CONFIG_UNDECIDED if backend or temperature is empty, naming which
+        - DuplicateCheckError CONFIG_DRIFT if cfg was edited after build_config
+        - DuplicateCheckError CONFIG_ALREADY_FROZEN if a file exists at path
     """
     unset = [ name for name in ( "backend", "temperature" ) if is_empty( cfg[ name ] ) ]
-    if unset: raise err.SemdupError( err.CONFIG_UNDECIDED, f"{' and '.join( unset )} not decided (parking item P4)" )
-    if cfg[ ELIDED_FIELD ] != config_sha( cfg ): raise err.SemdupError( err.CONFIG_DRIFT, "the configuration was edited after build_config" )
+    if unset: raise err.DuplicateCheckError( err.CONFIG_UNDECIDED, f"{' and '.join( unset )} not decided (parking item P4)" )
+    if cfg[ ELIDED_FIELD ] != config_sha( cfg ): raise err.DuplicateCheckError( err.CONFIG_DRIFT, "the configuration was edited after build_config" )
     folder = os.path.dirname( path )
     os.makedirs( folder, exist_ok=True )
     tmp = os.path.join( folder, f".{os.path.basename( path )}.{os.getpid()}.{uuid.uuid4().hex}.tmp" )
@@ -136,7 +136,7 @@ def freeze( cfg, path ):
     try:
         os.link( tmp, path )
     except FileExistsError:
-        raise err.SemdupError( err.CONFIG_ALREADY_FROZEN, f"a frozen configuration already exists at {path}" ) from None
+        raise err.DuplicateCheckError( err.CONFIG_ALREADY_FROZEN, f"a frozen configuration already exists at {path}" ) from None
     finally:
         os.unlink( tmp )
     return cfg[ ELIDED_FIELD ]
@@ -157,11 +157,11 @@ def verify_frozen( path, live ):
 
     Raises:
         - FileNotFoundError if there is no file at path
-        - SemdupError CONFIG_DRIFT if the file was edited, or a live field differs from the frozen one
+        - DuplicateCheckError CONFIG_DRIFT if the file was edited, or a live field differs from the frozen one
     """
     with open( path, encoding="utf-8" ) as f: frozen = json.load( f )
     recomputed = config_sha( frozen )
-    if recomputed != frozen[ ELIDED_FIELD ]: raise err.SemdupError( err.CONFIG_DRIFT, f"stored sha {frozen[ ELIDED_FIELD ]} but the file recomputes to {recomputed}" )
+    if recomputed != frozen[ ELIDED_FIELD ]: raise err.DuplicateCheckError( err.CONFIG_DRIFT, f"stored sha {frozen[ ELIDED_FIELD ]} but the file recomputes to {recomputed}" )
     differing = sorted( key for key in set( frozen ) | set( live ) if key != ELIDED_FIELD and frozen.get( key ) != live.get( key ) )
-    if differing: raise err.SemdupError( err.CONFIG_DRIFT, f"live values differ from the frozen file in: {', '.join( differing )}" )
+    if differing: raise err.DuplicateCheckError( err.CONFIG_DRIFT, f"live values differ from the frozen file in: {', '.join( differing )}" )
     return frozen

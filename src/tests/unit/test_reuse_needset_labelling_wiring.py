@@ -93,7 +93,7 @@ def test_labelling_items_refuses_a_need_whose_key_was_rejected_if_the_caller_ski
     assert e.value.code == er.KEY_REJECTED
 
 
-def test_a_semdup_pair_in_the_selection_is_skipped_and_a_nothing_need_gets_its_hits( world ):
+def test_a_duplicate_pair_in_the_selection_is_skipped_and_a_nothing_need_gets_its_hits( world ):
     nothing_need = next( n for n in world[ "needs" ] if n[ "kind" ] == "nothing" )
     picked       = [ { "id": "pair-x", "reason": "semdup_pair" }, { "id": nothing_need[ "id" ], "reason": "nothing" } ]
     items        = finalize.labelling_items( world[ "needs" ], picked, world[ "source_of" ], lambda n: [ "pkg.a.f() — Adds." ], lambda n: None, {} )

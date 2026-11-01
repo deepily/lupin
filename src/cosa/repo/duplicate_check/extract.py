@@ -3,7 +3,7 @@ import ast
 import hashlib
 import pathlib
 
-from cosa.repo.semdup import errors as err
+from cosa.repo.duplicate_check import errors as err
 from cosa.repo.symindex import js_index, py_index
 from cosa.repo.symindex import spec as sp
 from cosa.repo.symindex.errors import DependencyMissing
@@ -166,14 +166,14 @@ def extract_script( root, files, origin ):
 
     Raises:
         - ValueError if origin is neither "new" nor "server"
-        - SemdupError DEPENDENCY_MISSING if node or the compiler is absent
+        - DuplicateCheckError DEPENDENCY_MISSING if node or the compiler is absent
     """
     _check_origin( origin )
     if not files: return { "definitions": [], "skipped": [], "accounts": [] }
     try:
         shapes = js_index.extract_js_shapes( root, files, bodies=True )
     except DependencyMissing as e:
-        raise err.SemdupError( err.DEPENDENCY_MISSING, str( e ) ) from e
+        raise err.DuplicateCheckError( err.DEPENDENCY_MISSING, str( e ) ) from e
     definitions = [ _record( origin, "ts", d[ "file" ], d[ "name" ], d[ "line" ], d[ "end_line" ], d[ "sig" ], d[ "text" ], d[ "calls" ], len( d[ "kinds" ] ),
                              d[ "public" ], d[ "declared" ] ) for d in shapes[ "defs" ] ]
     accounts    = [ { **a, "reported": sum( 1 for d in shapes[ "defs" ] if d[ "file" ] == a[ "file" ] ) } for a in shapes[ "scanned" ] ]
@@ -197,7 +197,7 @@ def extract_tree( root, files, origin ):
 
     Raises:
         - ValueError if origin is neither "new" nor "server", or a file is neither Python nor script
-        - SemdupError DEPENDENCY_MISSING if script files were given and node or the compiler is absent
+        - DuplicateCheckError DEPENDENCY_MISSING if script files were given and node or the compiler is absent
     """
     _check_origin( origin )
     root        = pathlib.Path( root ).resolve()
@@ -236,10 +236,10 @@ def completeness( report ):
         - skipped Python files do not count against completeness
 
     Raises:
-        - SemdupError EXTRACT_INCOMPLETE naming each skipped file and each file whose account does not close
+        - DuplicateCheckError EXTRACT_INCOMPLETE naming each skipped file and each file whose account does not close
     """
     problems = [ f"{file} did not parse" for file in report[ "skipped_script" ] ]
     for a in report[ "script_accounts" ]:
         if a[ "reported" ] + a[ "anonymous_walked" ] != a[ "function_like_total" ]:
             problems.append( f"{a[ 'file' ]}: {a[ 'reported' ]} reported + {a[ 'anonymous_walked' ]} anonymous != {a[ 'function_like_total' ]} function-like nodes" )
-    if problems: raise err.SemdupError( err.EXTRACT_INCOMPLETE, "; ".join( problems ) )
+    if problems: raise err.DuplicateCheckError( err.EXTRACT_INCOMPLETE, "; ".join( problems ) )

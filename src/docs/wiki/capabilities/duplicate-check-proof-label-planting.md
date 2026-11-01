@@ -1,21 +1,21 @@
 ---
-capability: semdup-proof-label-planting
+capability: duplicate-check-proof-label-planting
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.repo.semdup.proof.label_prep.make_ask@0076219645
-  - cosa.repo.semdup.proof.label_prep.unfence@2a3159ebb3
-  - cosa.repo.semdup.proof.label_prep.script_shape@c4d58adb38
-  - cosa.repo.semdup.proof.label_prep.write_sentence@5c3199a7f7
-  - cosa.repo.semdup.proof.label_prep.plant_one@604b42448c
-  - cosa.repo.semdup.proof.label_prep.plant_all@934ac50855
-  - cosa.repo.semdup.proof.label_prep.rewrite_record@a964a7d0bd
-  - cosa.repo.semdup.proof.label_prep.top_up_alikes@0583e2db29
-  - cosa.repo.semdup.proof.label_prep.checked@c0154de3ac
-  - cosa.repo.semdup.proof.label_prep.select_pools@b769a48afe
+  - cosa.repo.duplicate_check.proof.label_prep.make_ask@0076219645
+  - cosa.repo.duplicate_check.proof.label_prep.unfence@2a3159ebb3
+  - cosa.repo.duplicate_check.proof.label_prep.script_shape@c4d58adb38
+  - cosa.repo.duplicate_check.proof.label_prep.write_sentence@5c3199a7f7
+  - cosa.repo.duplicate_check.proof.label_prep.plant_one@604b42448c
+  - cosa.repo.duplicate_check.proof.label_prep.plant_all@934ac50855
+  - cosa.repo.duplicate_check.proof.label_prep.rewrite_record@a964a7d0bd
+  - cosa.repo.duplicate_check.proof.label_prep.top_up_alikes@0583e2db29
+  - cosa.repo.duplicate_check.proof.label_prep.checked@c0154de3ac
+  - cosa.repo.duplicate_check.proof.label_prep.select_pools@b769a48afe
 ---
 # Duplicate checker proof: planting for the labelling packets
 
-`label_prep.py` prepares the proof's blind labelling packets. This page covers the planted half: choosing originals and writing rewrites. Packets, the answer key and the command are on [[semdup-proof-label-packets]]. The planting rules are on [[semdup-proof-plant]].
+`label_prep.py` prepares the proof's blind labelling packets. This page covers the planted half: choosing originals and writing rewrites. Packets, the answer key and the command are on [[duplicate-check-proof-label-packets]]. The planting rules are on [[duplicate-check-proof-plant]].
 
 ## Model calls
 - `make_ask( complete, model )` wraps the async model call as the sync `ask( system, user )` that planting takes. It runs each call to the end and removes a code fence from the reply.
