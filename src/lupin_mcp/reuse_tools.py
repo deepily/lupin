@@ -41,6 +41,7 @@ from cosa.repo.symindex.paths import data_dir, default_out_dir
 from cosa.repo.symindex.paths import index_readable
 from cosa.repo.symindex.spec import NotARepo, git_toplevel, spec_for, tests_spec
 from cosa.repo.symindex.candidates import freshness as fr
+from lupin_mcp.reuse_needset import errors as ne
 from cosa.repo.symindex.candidates.errors import CandidateError
 from cosa.repo.symindex.candidates.search import read_purposes
 from lupin_mcp import reuse_redact
@@ -896,6 +897,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                     if e.attempt_log: attempt_logs.append( e.attempt_log )
                     if isinstance( ctx.transport, LiveJevTransport ) and ctx.transport.transient: break      # that transport already used its four sends; asking again would multiply them
                     continue
+                except ne.NeedsetError:                                   # the call cap's refusal stops the stage, and is no failed call
+                    raise
                 except Exception:                                         # any other error, such as a failed cache write, is a failed call, never a verdict
                     continue
         finally:

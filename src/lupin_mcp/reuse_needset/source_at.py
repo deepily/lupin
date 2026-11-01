@@ -1,20 +1,18 @@
 """
-The source tree of one commit, kept as plain files for a run to read.
+The source tree of one commit, as a detached worktree a run takes for its root.
 
 A live run takes hours, and the main tree moves under it as peers merge.
 A member found by line number in one version of a file cannot be stripped from another.
-So the index, the bodies and every strip read this copy and nothing else.
+So the context, the index, the strips, the trace and the probe all take this one root.
 """
-import os
 import pathlib
-import shutil
 import subprocess
-import tarfile
 
 from lupin_mcp.reuse_needset import errors as er
 
-MARKER = ".needset-source-commit"
-TOP    = "src"
+WORKTREES = ".claude/worktrees"
+PREFIX    = "needset-run-"
+SHA_CHARS = 9
 
 
 def full_sha( repo_root, commit ):
@@ -28,65 +26,62 @@ def full_sha( repo_root, commit ):
         - returns the 40-character sha of the commit
 
     Raises:
-        - NeedsetError SOURCE_EXPORT_FAILED when git does not know the commit
+        - NeedsetError SOURCE_TREE_FAILED when git does not know the commit
     """
     got = subprocess.run( [ "git", "-C", str( repo_root ), "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}" ], capture_output=True, text=True )
-    if got.returncode != 0: raise er.NeedsetError( er.SOURCE_EXPORT_FAILED, f"{repo_root}: no commit {commit!r}" )
+    if got.returncode != 0: raise er.NeedsetError( er.SOURCE_TREE_FAILED, f"{repo_root}: no commit {commit!r}" )
     return got.stdout.strip()
 
 
-def tracked_at( repo_root, commit ):
+def worktree_path( repo_root, commit ):
     """
-    List the files the commit tracks under src.
+    Name the folder a commit's worktree lives in.
+
+    Ensures:
+        - returns <repo_root>/.claude/worktrees/needset-run-<first 9 of the sha>, where the worktree rules and the janitor expect it
+    """
+    return pathlib.Path( repo_root ) / WORKTREES / f"{PREFIX}{full_sha( repo_root, commit )[ :SHA_CHARS ]}"
+
+
+def at_commit( root, sha ):
+    """
+    Say whether a tree is at a commit with no tracked file changed.
+
+    Requires:
+        - root is a git working tree; sha is a full sha
+
+    Ensures:
+        - returns True iff HEAD is the sha and no tracked file is modified or staged
+        - untracked and ignored files, such as the generated index, do not count
+    """
+    head   = subprocess.run( [ "git", "-C", str( root ), "rev-parse", "HEAD" ], capture_output=True, text=True )
+    status = subprocess.run( [ "git", "-C", str( root ), "status", "--porcelain", "--untracked-files=no" ], capture_output=True, text=True )
+    return head.returncode == 0 and head.stdout.strip() == sha and status.returncode == 0 and status.stdout.strip() == ""
+
+
+def ensure_worktree( repo_root, commit, dest=None ):
+    """
+    Return a detached worktree at the commit, making it when it is missing.
 
     Requires:
         - repo_root is a git working tree that holds the commit
+        - dest is None for worktree_path, or a path whose parent exists or can be made
 
     Ensures:
-        - returns a set of repository-relative paths, from the commit and not from the working tree or the index
+        - returns the worktree's path, at the full sha of the commit with no tracked file changed
+        - the worktree resolves to the parent checkout for the data folder and the spend ledger, which a plain copy of the files would not
+        - a worktree already there at the same commit is reused as it is
 
     Raises:
-        - NeedsetError SOURCE_EXPORT_FAILED when git cannot list the commit
+        - NeedsetError SOURCE_TREE_MISMATCH when dest exists and is at another commit or has a changed tracked file
+        - NeedsetError SOURCE_TREE_FAILED when git cannot make the worktree
     """
-    got = subprocess.run( [ "git", "-C", str( repo_root ), "ls-tree", "-r", "-z", "--name-only", full_sha( repo_root, commit ), "--", TOP ], capture_output=True, text=True )
-    if got.returncode != 0: raise er.NeedsetError( er.SOURCE_EXPORT_FAILED, f"{repo_root}: {got.stderr.strip()}" )  # pragma: no cover  reason: full_sha has just proven the commit exists, so ls-tree on it fails only in a corrupt repository
-    return { f for f in got.stdout.split( "\0" ) if f }
-
-
-def export( repo_root, commit, dest ):
-    """
-    Write the commit's src folder into dest, once.
-
-    Requires:
-        - repo_root is a git working tree that holds the commit
-        - dest is a path whose parent exists
-
-    Ensures:
-        - returns dest as a Path; dest holds src/ exactly as the commit has it, and a marker file naming the full sha
-        - a dest already exported from the same commit is reused as it is
-        - the files are built beside dest and renamed into place, so a stopped export leaves no dest for the next call to trust
-
-    Raises:
-        - NeedsetError SOURCE_EXPORT_MISMATCH when dest exists and is not an export of this commit
-        - NeedsetError SOURCE_EXPORT_FAILED when git cannot produce the archive
-    """
-    sha, dest = full_sha( repo_root, commit ), pathlib.Path( dest )
+    sha  = full_sha( repo_root, commit )
+    dest = worktree_path( repo_root, commit ) if dest is None else pathlib.Path( dest )
     if dest.exists():
-        marker = dest / MARKER
-        if marker.is_file() and marker.read_text( encoding="utf-8" ).strip() == sha: return dest
-        raise er.NeedsetError( er.SOURCE_EXPORT_MISMATCH, f"{dest} is not an export of {sha}; move it away to export again" )
-    part = dest.with_name( dest.name + ".part" )
-    if part.exists(): shutil.rmtree( part )
-    part.mkdir()
-    proc = subprocess.Popen( [ "git", "-C", str( repo_root ), "archive", "--format=tar", sha, "--", TOP ], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
-    try:
-        with tarfile.open( fileobj=proc.stdout, mode="r|" ) as tar: tar.extractall( part, filter="data" )
-    except ( tarfile.TarError, OSError ) as e:
-        proc.kill()
-        proc.wait()
-        raise er.NeedsetError( er.SOURCE_EXPORT_FAILED, f"{repo_root}: {e}" ) from e
-    err = proc.stderr.read().decode( "utf-8", "replace" ).strip()
-    if proc.wait() != 0: raise er.NeedsetError( er.SOURCE_EXPORT_FAILED, f"{repo_root}: git archive {sha}: {err}" )
-    ( part / MARKER ).write_text( sha + "\n", encoding="utf-8" )
-    os.rename( part, dest )
+        if at_commit( dest, sha ): return dest
+        raise er.NeedsetError( er.SOURCE_TREE_MISMATCH, f"{dest} is not at {sha} with its tracked files unchanged; remove it with git worktree remove to make it again" )
+    dest.parent.mkdir( parents=True, exist_ok=True )
+    got = subprocess.run( [ "git", "-C", str( repo_root ), "worktree", "add", "--detach", str( dest ), sha ], capture_output=True, text=True )
+    if got.returncode != 0: raise er.NeedsetError( er.SOURCE_TREE_FAILED, f"{repo_root}: git worktree add {sha}: {got.stderr.strip()}" )
     return dest

@@ -32,13 +32,36 @@ def test_the_packed_sweeps_worker_threads_charge_their_calls_to_the_running_stag
     assert cap.by_stage() == { "attribution": 4 } and "unstaged" not in cap.by_stage()
 
 
-def test_a_call_past_the_stages_budget_on_a_worker_thread_is_refused_by_name( tmp_path ):
+def test_the_old_sweeps_worker_threads_charge_their_calls_to_the_running_stage_too( tmp_path ):
+    cap = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 100, { "attribution": 50 } )
+    ctx = rt.ReuseContext( tmp_path, tmp_path / "data", out_dir=tmp_path / "out", transport=Charging() )
+    with cap.installed(), call_cap.stage( "attribution" ):
+        out = rt.sweep( ctx, NEED, MANY[ :6 ] )
+    assert len( out[ "answers" ] ) == 6 and cap.by_stage() == { "attribution": 6 }
+
+
+def test_a_stage_budget_refusal_on_a_worker_thread_stops_the_packed_sweep_instead_of_failing_a_request( tmp_path ):
     cap = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 100, { "attribution": 1 } )
-    with cap.installed(), call_cap.stage( "attribution" ), concurrent.futures.ThreadPoolExecutor( max_workers=2 ) as pool:
-        results = rt.map_in_context( pool, lambda n: jt._charged( json.dumps( { "model": "m" } ) ), [ 1 ] )
-        assert list( results ) == [ None ]
-        with pytest.raises( er.NeedsetError ) as e: list( rt.map_in_context( pool, lambda n: jt._charged( json.dumps( { "model": "m" } ) ), [ 2 ] ) )
+    ctx = rt.ReuseContext( tmp_path, tmp_path / "data", out_dir=tmp_path / "out", transport=Charging() )
+    with cap.installed(), call_cap.stage( "attribution" ), pytest.raises( er.NeedsetError ) as e:
+        rp.sweep_packed( ctx, NEED, MANY, 6, workers=4 )
     assert e.value.code == er.STAGE_BUDGET_REACHED and "attribution" in e.value.detail and cap.by_stage() == { "attribution": 1 }
+
+
+def test_a_stage_budget_refusal_on_a_worker_thread_stops_the_old_sweep_instead_of_failing_a_call( tmp_path ):
+    cap = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 100, { "attribution": 1 } )
+    ctx = rt.ReuseContext( tmp_path, tmp_path / "data", out_dir=tmp_path / "out", transport=Charging() )
+    with cap.installed(), call_cap.stage( "attribution" ), pytest.raises( er.NeedsetError ) as e:
+        rt.sweep( ctx, NEED, MANY[ :6 ] )
+    assert e.value.code == er.STAGE_BUDGET_REACHED and cap.by_stage() == { "attribution": 1 }
+
+
+def test_a_budget_of_zero_lets_no_call_through_on_either_path( tmp_path ):
+    for path in ( lambda ctx: rp.sweep_packed( ctx, NEED, MANY, 6, workers=4 ), lambda ctx: rt.sweep( ctx, NEED, MANY[ :6 ] ) ):
+        cap = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 100, { "attribution": 0 } )
+        ctx = rt.ReuseContext( tmp_path, tmp_path / "data", out_dir=tmp_path / "out", transport=Charging() )
+        with cap.installed(), call_cap.stage( "attribution" ), pytest.raises( er.NeedsetError ) as e: path( ctx )
+        assert e.value.code == er.STAGE_BUDGET_REACHED and cap.used() == 0
 
 
 def test_without_the_context_copy_the_same_worker_calls_would_be_filed_unstaged( tmp_path ):

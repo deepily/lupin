@@ -10,9 +10,10 @@ pins:
   - lupin_mcp.reuse_needset.strip.strip_members@da1db082ae
   - lupin_mcp.reuse_needset.strip.strip_member@af135d14ff
   - lupin_mcp.reuse_needset.strip.bodies_for@895645cb16
-  - lupin_mcp.reuse_needset.source_at.full_sha@8660da40b2
-  - lupin_mcp.reuse_needset.source_at.tracked_at@01241479bb
-  - lupin_mcp.reuse_needset.source_at.export@b835db4951
+  - lupin_mcp.reuse_needset.source_at.full_sha@a62c6baa15
+  - lupin_mcp.reuse_needset.source_at.worktree_path@c8746cca3e
+  - lupin_mcp.reuse_needset.source_at.at_commit@cecd336fdf
+  - lupin_mcp.reuse_needset.source_at.ensure_worktree@87fedcbc7d
 ---
 # Need set: member text
 
@@ -34,5 +35,5 @@ Prepares member text for the need set. The drafter gets stripped names, and sear
 - `bodies_for` returns each member's source as written, Python by the need-input lookup and script members through one node start.
 
 ## The source commit
-- `export` writes the source commit's `src` folder once under the run folder, with a marker naming the full sha. A folder from another commit raises `SOURCE_EXPORT_MISMATCH`.
-- `tracked_at` lists the commit's files under `src`, and `full_sha` resolves a commit name. A run reads the export, never the working tree, because peers change the tree during a run.
+- `ensure_worktree` makes a detached worktree at the source commit under `.claude/worktrees/needset-run-<sha>`. It reuses one already there when `at_commit` says its tracked files are unchanged, and refuses any other with `SOURCE_TREE_MISMATCH`.
+- A live run takes that worktree as its root before the context is built. So the index, strips, trace and probe cannot move when peers merge. A worktree also keeps the data folder and spend ledger of the parent checkout.

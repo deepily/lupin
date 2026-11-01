@@ -25,7 +25,6 @@ from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
 QUERY_CACHE  = "query-cache"
-SOURCE_FOLDER = "source-at-commit"
 REPORT_FILE  = "stage-reports.json"
 REJECTIONS_FILE = "ledger-rejections.jsonl"
 CONTROL_PASSES = 2
@@ -459,6 +458,8 @@ def main( argv=None, deps=None ):
 
     Raises:
         - NeedsetError NO_CLI_PATH on a live run with no --cli-path, before the context is built
+        - with --live, args.root becomes a detached worktree at the source commit before the context is built, so the context, the index, the strips, the trace and the probe all read the commit and a merge into the main tree mid-run moves none of them
+        - NeedsetError SOURCE_TREE_MISMATCH or SOURCE_TREE_FAILED when that worktree cannot be had
         - ValueError when --cli-path is not an executable file, before the index is built
         - NeedsetError NO_CANDIDATE_STAGE on a live run whose context has none, before the index is built or a list is written
         - NeedsetError QUOTA_UNFILLABLE from the seed draw, and PLAN_ALREADY_WRITTEN when other seed lists are already in the run folder
@@ -471,6 +472,7 @@ def main( argv=None, deps=None ):
     if not args.live: return { "live": False, "plan": shown }
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "a live run needs --cli-path: the SDK's bundled Claude Code is too old for the drafter's model and answers 400" )
     model_transport.configure( cli_path=args.cli_path )
+    args.root = deps[ "source_root" ]( args ) if "source_root" in deps else source_at.ensure_worktree( args.root, args.source_commit )
     ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
     close     = deps[ "close_run" ] if "close_run" in deps else rt.close_run
     try:
@@ -495,7 +497,7 @@ def live_run( args, loaded, ctx, deps ):
 
     Ensures:
         - everything that can begin the Jev spend-ledger run, the parts and the control among it, is built here, so main can close the run on any error
-        - the index, the member bodies, the strips and the tracked-file list all come from the source commit, exported once under the run folder, and never from the working tree, which peers change while the run goes on
+        - args.root is already the source commit's worktree, which main made before the context, so everything here reads the commit and not the tree peers change
     Raises:
         - NeedsetError NO_CANDIDATE_STAGE for a context with no candidate stage, before the index is built or a list is written
         - whatever the parts, the factories or the runner raise
@@ -503,12 +505,11 @@ def live_run( args, loaded, ctx, deps ):
     if ctx.candidate_stage is None: raise er.NeedsetError( er.NO_CANDIDATE_STAGE, f"the context has no candidate stage; set {rt.PACK_SIZE_VARIABLE}, {rt.CEILING_VARIABLE} and {rt.RUN_NAME_VARIABLE}, which build it" )
     ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
     ledger    = deps[ "ledger" ]( args ) if "ledger" in deps else draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
-    source    = deps[ "source_root" ]( args ) if "source_root" in deps else source_at.export( args.root, args.source_commit, f"{args.run_dir}/{SOURCE_FOLDER}" )
-    strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, source ) )
+    strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, args.root ) )
     draft_fn  = deps[ "draft_fn" ] if "draft_fn" in deps else draft.draft_need
     env       = types.SimpleNamespace( root=args.root, run_dir=args.run_dir, seed=args.seed, source_commit=args.source_commit, server=args.server, strip_fn=strip_fn, ctx=ctx, ask=ask, draft_ledger=ledger )
-    built     = deps[ "built" ]( args ) if "built" in deps else smoke.index_parts( source, f"{args.run_dir}/index" )
-    path      = write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit, built, tracked=deps[ "tracked" ] if "tracked" in deps else lambda repo: source_at.tracked_at( repo, args.source_commit ) )
+    built     = deps[ "built" ]( args ) if "built" in deps else smoke.index_parts( args.root, f"{args.run_dir}/index" )
+    path      = write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit, built, **( { "tracked": deps[ "tracked" ] } if "tracked" in deps else { } ) )
     parts     = ( deps[ "parts" ] if "parts" in deps else live_parts )( args, env, built, stage_seeds.load_lists( path ) )
     factories = deps[ "factories" ] if "factories" in deps else stage_factories( path, parts )
     control   = ( deps[ "control" ] if "control" in deps else live_control( args ) )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )

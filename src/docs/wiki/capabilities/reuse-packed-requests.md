@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.reuse_pack.candidate_key@8518e0ee7d
   - lupin_mcp.reuse_pack.pair_key@a3ca0b202d
   - lupin_mcp.reuse_pack.pack_key@15ca5d57ee
-  - lupin_mcp.reuse_pack.send_pack@df708a5669
+  - lupin_mcp.reuse_pack.send_pack@edef6faaba
   - lupin_mcp.reuse_pack.sweep_packed@b6aefb2417
   - lupin_mcp.reuse_tools.map_in_context@41719d5968
   - lupin_mcp.reuse_pack.pair_ask@270e98b674

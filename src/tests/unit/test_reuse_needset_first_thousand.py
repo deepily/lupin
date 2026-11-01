@@ -409,13 +409,13 @@ def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_
         seen[ "args" ] = ( run_dir, limit, await one(), await two(), await control(), await rem() )
         return { "ran": True }
 
-    deps = { "planted_sha": sha, "parts": lambda args, env, built, lists: seen.update( parts_args=( args.server, env.server, built, lists[ "seed" ], lists[ "sha" ] ) ) or "PARTS", **seed_deps(), "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
+    deps = { "planted_sha": sha, "source_root": lambda args: "/s", "parts": lambda args, env, built, lists: seen.update( parts_args=( args.server, env.server, built, lists[ "seed" ], lists[ "sha" ] ) ) or "PARTS", **seed_deps(), "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
              "strip_fn": strip_of, "source_root": lambda args: "/s", "draft_fn": "DRAFT", "close_run": lambda ctx: None, "remainder": lambda ps, seed: { "per_pair": [], "seed": seed },
              "control": lambda c, ps, ask, ledger, strip_fn, draft_fn, cache: ( seen.update( control_args=( c, len( ps ), ask, ledger, strip_fn, draft_fn, cache ) ) or ( lambda: asyncio.sleep( 0, { "control": True } ) ) ) }
     out  = ft.main( [ *argv, "--live", "--limit", "9" ], deps=deps )
     env  = seen[ "a" ]
     assert out[ "live" ] is True and out[ "report" ] == { "ran": True } and seen[ "y" ] is env
-    assert ( env.root, env.seed, env.source_commit, env.ctx, env.ask, env.draft_ledger ) == ( "/r", 7, "abc", ctx, "ASK", "LEDGER" ) and env.run_dir.endswith( "run" )
+    assert ( env.root, env.seed, env.source_commit, env.ctx, env.ask, env.draft_ledger ) == ( "/s", 7, "abc", ctx, "ASK", "LEDGER" ) and env.run_dir.endswith( "run" )
     assert seen[ "args" ][ 1 ] == 9 and seen[ "args" ][ 2:4 ] == ( { "name": "a" }, { "name": "y" } ) and seen[ "args" ][ 4 ] == { "control": True }
     assert seen[ "args" ][ 5 ][ "unsure_flagged" ] == { "total": 0, "resolved": 0, "of": 20, "also_drifted": 1, "text": "0 of 20, with 1 also drifted" }
     assert seen[ "control_args" ] == ( ctx, 20, "ASK", "LEDGER", strip_of, "DRAFT", f"{env.run_dir}/query-cache" )
@@ -452,7 +452,7 @@ def test_a_live_run_over_other_seed_lists_stops_by_name_before_the_parts_are_bui
 def test_a_live_run_over_a_context_with_no_candidate_stage_stops_by_name_before_any_file_or_call( tmp_path, monkeypatch ):
     argv, sha = run_dir_files( tmp_path )
     monkeypatch.setattr( ft, "write_seed_lists", lambda *a, **k: pytest.fail( "a list was written" ) )
-    deps = { "planted_sha": sha, "context": lambda root: types.SimpleNamespace( candidate_stage=None ), "ask": lambda *a: pytest.fail( "a model was called" ), "built": lambda args: pytest.fail( "the index was built" ) }
+    deps = { "planted_sha": sha, "source_root": lambda args: "/s", "context": lambda root: types.SimpleNamespace( candidate_stage=None ), "ask": lambda *a: pytest.fail( "a model was called" ), "built": lambda args: pytest.fail( "the index was built" ) }
     with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps=deps )
     assert e.value.code == er.NO_CANDIDATE_STAGE and all( v in str( e.value ) for v in ( "LUPIN_REUSE_JEV_PACK_SIZE", "LUPIN_REUSE_JEV_TOKEN_CEILING", "LUPIN_REUSE_JEV_RUN_NAME" ) )
     assert not ( tmp_path / "run" / "first-thousand-seeds.json" ).exists() and not ( tmp_path / "run" / ft.CALLS_FILE ).exists()
@@ -795,23 +795,30 @@ def test_a_finished_multi_pass_control_says_it_was_not_stopped_by_the_budget_and
     assert caught.value.code == er.CALL_CAP_REACHED
 
 
-def test_a_live_run_builds_the_index_the_strips_and_the_tracked_list_from_the_source_commit_export_and_not_the_tree( tmp_path, monkeypatch ):
+def test_a_live_run_takes_the_source_commits_worktree_as_the_one_root_for_the_context_the_index_the_strips_and_the_trace( tmp_path, monkeypatch ):
     argv, sha = run_dir_files( tmp_path )
-    seen      = { "strip": [] }
-    monkeypatch.setattr( ft.source_at, "export", lambda repo, commit, dest: seen.update( export=( repo, commit, dest ) ) or "/EXPORTED" )
-    monkeypatch.setattr( ft.source_at, "tracked_at", lambda repo, commit: seen.update( tracked=( repo, commit ) ) or { r[ "file" ] for r in BUILT[ 1 ] } )
+    seen      = { "strip": [], "context": [] }
+    monkeypatch.setattr( ft.source_at, "ensure_worktree", lambda repo, commit: seen.update( tree=( repo, commit ) ) or "/WT" )
     monkeypatch.setattr( ft.smoke, "index_parts", lambda root, index_dir: seen.update( index=( root, index_dir ) ) or BUILT )
     monkeypatch.setattr( ft.strip, "strip_member", lambda rec, root: seen[ "strip" ].append( root ) or strip_of( rec ) )
 
     def parts( args, env, built, lists ):
         env.strip_fn( BUILT[ 1 ][ 0 ] )
+        seen[ "env_root" ] = env.root
         return "PARTS"
 
-    deps = { **live_deps( sha, lambda *a: asyncio.sleep( 0, {} ) ), "parts": parts, "control": lambda *a: None }
-    for name in ( "strip_fn", "source_root", "built", "tracked" ): del deps[ name ]
+    deps = { **live_deps( sha, lambda *a: asyncio.sleep( 0, {} ) ), "parts": parts, "control": lambda *a: None,
+             "context": lambda root: seen[ "context" ].append( root ) or types.SimpleNamespace( candidate_stage="live" ) }
+    for name in ( "strip_fn", "source_root", "built" ): del deps[ name ]
     ft.main( [ *argv, "--live" ], deps=deps )
-    assert seen[ "export" ] == ( "/r", "abc", f"{tmp_path / 'run'}/{ft.SOURCE_FOLDER}" ) and seen[ "index" ] == ( "/EXPORTED", f"{tmp_path / 'run'}/index" )
-    assert seen[ "tracked" ] == ( "/r", "abc" ) and seen[ "strip" ] == [ "/EXPORTED" ]
+    assert seen[ "tree" ] == ( "/r", "abc" ) and seen[ "context" ] == [ "/WT" ] and seen[ "index" ] == ( "/WT", f"{tmp_path / 'run'}/index" )
+    assert seen[ "strip" ] == [ "/WT" ] and seen[ "env_root" ] == "/WT"
+
+
+def test_a_plan_without_live_never_makes_a_worktree( tmp_path, monkeypatch ):
+    argv, sha = run_dir_files( tmp_path )
+    monkeypatch.setattr( ft.source_at, "ensure_worktree", lambda *a: pytest.fail( "a worktree was made for a plan" ) )
+    assert ft.main( argv, deps={ "planted_sha": sha } )[ "live" ] is False
 
 
 def test_a_stage_whose_every_seed_was_unstrippable_fails_by_name_and_a_stage_with_no_need_and_an_unstrippable_seed_fails_by_name( monkeypatch ):

@@ -1,16 +1,19 @@
 """
-The source tree of one commit, exported once and read in place of the working tree.
+The source commit's worktree, a root that merges into the main tree do not move.
 """
-import io
 import subprocess
-import tarfile
 
 import pytest
 
+from cosa.repo.symindex import build
+from cosa.repo.symindex.paths import data_dir
+from cosa.repo.symindex.spec import spec_for
 from lupin_mcp.reuse_needset import errors as er, source_at, strip
 
-BEFORE = "def f( x ):\n    return x + 1\n"
-AFTER  = "# a peer added a line above\n\ndef g():\n    return 0\n\n\ndef f( x ):\n    return x + 2\n"
+OLD = "def f( x ):\n    return x + 1\n"
+NEW = "# a peer added a line above\n\ndef g():\n    return 0\n\n\ndef f( x ):\n    return x + 2\n"
+REC = { "id": "cosa.m.f", "name": "f", "file": "src/cosa/m.py", "lang": "py", "line": 1 }
+ID  = [ "-c", "user.name=t", "-c", "user.email=t@t" ]
 
 
 def git( repo, *argv ):
@@ -20,94 +23,75 @@ def git( repo, *argv ):
 
 @pytest.fixture
 def repo( tmp_path ):
-    """A repository whose commit holds the old text and whose working tree has since moved on."""
-    root = tmp_path / "repo"
+    """A lupin-shaped repository with one commit that holds the old text."""
+    root = tmp_path / "lupin"
     ( root / "src" / "cosa" ).mkdir( parents=True )
     ( root / "src" / "lupin_mcp" ).mkdir()
-    ( root / "src" / "cosa" / "m.py" ).write_text( BEFORE, encoding="utf-8" )
+    ( root / "src" / "cosa" / "m.py" ).write_text( OLD, encoding="utf-8" )
     ( root / "src" / "lupin_mcp" / "keep.py" ).write_text( "X = 1\n", encoding="utf-8" )
-    ( root / "outside.txt" ).write_text( "not under src\n", encoding="utf-8" )
     git( root, "init", "-q" )
-    git( root, "-c", "user.name=t", "-c", "user.email=t@t", "add", "." )
-    git( root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "first" )
+    git( root, *ID, "add", "." )
+    git( root, *ID, "commit", "-qm", "first" )
     return root
 
 
-def head( repo ):
-    """Return the full sha of the repository's commit."""
-    return git( repo, "rev-parse", "HEAD" )
+def move_the_main_tree( repo ):
+    """Commit a newer m.py and leave one more edit in the tree, as peers merging do."""
+    ( repo / "src" / "cosa" / "m.py" ).write_text( NEW, encoding="utf-8" )
+    git( repo, *ID, "commit", "-qam", "second" )
+    ( repo / "src" / "cosa" / "m.py" ).write_text( NEW + "# edited again\n", encoding="utf-8" )
 
 
-def test_the_export_holds_the_commits_files_even_after_the_working_tree_changed( repo, tmp_path ):
-    sha = head( repo )
-    ( repo / "src" / "cosa" / "m.py" ).write_text( AFTER, encoding="utf-8" )
-    ( repo / "src" / "cosa" / "new.py" ).write_text( "Y = 2\n", encoding="utf-8" )
-    out = source_at.export( repo, sha, tmp_path / "at" )
-    assert ( out / "src" / "cosa" / "m.py" ).read_text( encoding="utf-8" ) == BEFORE
-    assert not ( out / "src" / "cosa" / "new.py" ).exists() and not ( out / "outside.txt" ).exists()
-    assert ( out / source_at.MARKER ).read_text( encoding="utf-8" ).strip() == sha and not ( tmp_path / "at.part" ).exists()
+def test_the_worktree_is_made_at_the_commit_under_the_worktrees_folder_and_reused( repo ):
+    sha = git( repo, "rev-parse", "HEAD" )
+    wt  = source_at.ensure_worktree( repo, sha )
+    assert wt == repo / ".claude" / "worktrees" / f"needset-run-{sha[ :9 ]}" and source_at.at_commit( wt, sha )
+    assert source_at.ensure_worktree( repo, "HEAD" ) == wt
 
 
-def test_a_second_export_of_the_same_commit_reuses_the_folder_and_another_commit_is_refused( repo, tmp_path ):
-    sha = head( repo )
-    out = source_at.export( repo, sha, tmp_path / "at" )
-    ( out / "src" / "cosa" / "m.py" ).write_text( "touched\n", encoding="utf-8" )
-    assert source_at.export( repo, "HEAD", tmp_path / "at" ) == out and ( out / "src" / "cosa" / "m.py" ).read_text( encoding="utf-8" ) == "touched\n"
-    ( repo / "src" / "cosa" / "m.py" ).write_text( AFTER, encoding="utf-8" )
-    git( repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "second" )
-    with pytest.raises( er.NeedsetError ) as e: source_at.export( repo, "HEAD", tmp_path / "at" )
-    assert e.value.code == er.SOURCE_EXPORT_MISMATCH and "at" in e.value.detail
-    ( tmp_path / "plain" ).mkdir()
-    with pytest.raises( er.NeedsetError ) as e: source_at.export( repo, sha, tmp_path / "plain" )
-    assert e.value.code == er.SOURCE_EXPORT_MISMATCH
+def test_a_merge_into_the_main_tree_mid_run_moves_no_read_that_takes_the_worktree_as_its_root( repo ):
+    wt = source_at.ensure_worktree( repo, "HEAD" )
+    out = wt / "src" / "docs" / "index"
+    build.build( wt, out )
+    before = build.current_generation( out ).name
+    move_the_main_tree( repo )
+    assert "return x + 1" in strip.bodies_for( [ REC ], wt )[ "cosa.m.f" ] and "return x + 2" in strip.bodies_for( [ REC ], repo )[ "cosa.m.f" ]
+    assert "x + 1" in strip.strip_member( REC, wt )[ "text" ]
+    assert build.is_fresh( spec_for( wt ), out ) and build.current_generation( out ).name == before
+    assert not build.is_fresh( spec_for( repo ), out )                                                         # the main tree is not what that index describes
+    assert data_dir( wt ) == data_dir( repo )                                                                  # one data folder and one spend ledger, not a second set named for the folder
 
 
-def test_a_stale_partial_export_is_cleared_and_an_unknown_commit_or_missing_src_fails_by_name( repo, tmp_path ):
-    part = tmp_path / "at.part"
-    part.mkdir()
-    ( part / "junk" ).write_text( "left by a stopped export", encoding="utf-8" )
-    out = source_at.export( repo, head( repo ), tmp_path / "at" )
-    assert not ( out / "junk" ).exists() and not part.exists()
-    with pytest.raises( er.NeedsetError ) as e: source_at.export( repo, "0" * 40, tmp_path / "other" )
-    assert e.value.code == er.SOURCE_EXPORT_FAILED and not ( tmp_path / "other" ).exists()
-    bare = tmp_path / "bare"
-    bare.mkdir()
-    ( bare / "readme" ).write_text( "x", encoding="utf-8" )
-    git( bare, "init", "-q" )
-    git( bare, "-c", "user.name=t", "-c", "user.email=t@t", "add", "." )
-    git( bare, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "no src" )
-    with pytest.raises( er.NeedsetError ) as e: source_at.export( bare, head( bare ), tmp_path / "nosrc" )
-    assert e.value.code == er.SOURCE_EXPORT_FAILED and not ( tmp_path / "nosrc" ).exists()
+def test_a_worktree_at_another_commit_or_with_a_changed_tracked_file_is_refused( repo ):
+    first = git( repo, "rev-parse", "HEAD" )
+    wt    = source_at.ensure_worktree( repo, first )
+    ( wt / "src" / "cosa" / "m.py" ).write_text( "changed\n", encoding="utf-8" )
+    with pytest.raises( er.NeedsetError ) as e: source_at.ensure_worktree( repo, first )
+    assert e.value.code == er.SOURCE_TREE_MISMATCH and str( wt ) in e.value.detail
+    git( wt, "checkout", "--", "src/cosa/m.py" )
+    ( wt / "untracked.txt" ).write_text( "generated\n", encoding="utf-8" )
+    assert source_at.ensure_worktree( repo, first ) == wt                                                      # an untracked file, such as the generated index, is no change
+    ( repo / "src" / "cosa" / "m.py" ).write_text( NEW, encoding="utf-8" )
+    git( repo, *ID, "commit", "-qam", "second" )
+    second = source_at.ensure_worktree( repo, "HEAD" )
+    assert second != wt and source_at.at_commit( second, git( repo, "rev-parse", "HEAD" ) )                    # another commit gets a worktree of its own
+    with pytest.raises( er.NeedsetError ) as e: source_at.ensure_worktree( repo, "HEAD", wt )                   # and the first one is not taken for it
+    assert e.value.code == er.SOURCE_TREE_MISMATCH
+    elsewhere = repo / "not-a-worktree"
+    elsewhere.mkdir()
+    with pytest.raises( er.NeedsetError ) as e: source_at.ensure_worktree( repo, first, elsewhere )
+    assert e.value.code == er.SOURCE_TREE_MISMATCH
 
 
-def test_git_failing_after_a_readable_archive_still_refuses_and_leaves_no_folder( repo, tmp_path, monkeypatch ):
-    buf = io.BytesIO()
-    with tarfile.open( fileobj=buf, mode="w" ) as tar: pass
+def test_an_unknown_commit_and_a_failing_git_are_refused_by_name( repo, monkeypatch ):
+    with pytest.raises( er.NeedsetError ) as e: source_at.ensure_worktree( repo, "0" * 40 )
+    assert e.value.code == er.SOURCE_TREE_FAILED
+    real = subprocess.run
 
-    class Fake:
-        stdout = io.BytesIO( buf.getvalue() )
-        stderr = io.BytesIO( b"fatal: boom" )
-        def wait( self ): return 128
+    def failing( argv, **kw ):
+        if "worktree" in argv: return subprocess.CompletedProcess( argv, 128, "", "fatal: boom" )
+        return real( argv, **kw )
 
-    real = subprocess.Popen
-    monkeypatch.setattr( source_at.subprocess, "Popen", lambda argv, **k: Fake() if "archive" in argv else real( argv, **k ) )
-    with pytest.raises( er.NeedsetError ) as e: source_at.export( repo, head( repo ), tmp_path / "at" )
-    assert e.value.code == er.SOURCE_EXPORT_FAILED and "boom" in e.value.detail and not ( tmp_path / "at" ).exists()
-
-
-def test_the_tracked_list_is_the_commits_files_under_src_not_the_working_trees( repo ):
-    sha = head( repo )
-    ( repo / "src" / "cosa" / "m.py" ).unlink()
-    ( repo / "src" / "cosa" / "untracked.py" ).write_text( "Z = 3\n", encoding="utf-8" )
-    assert source_at.tracked_at( repo, sha ) == { "src/cosa/m.py", "src/lupin_mcp/keep.py" }
-    with pytest.raises( er.NeedsetError ) as e: source_at.tracked_at( repo, "nope" )
-    assert e.value.code == er.SOURCE_EXPORT_FAILED
-
-
-def test_a_strip_over_the_export_reads_the_commit_while_the_same_strip_over_the_moved_tree_reads_the_newer_file( repo, tmp_path ):
-    rec = { "id": "cosa.m.f", "name": "f", "file": "src/cosa/m.py", "lang": "py", "line": 1 }
-    ( repo / "src" / "cosa" / "m.py" ).write_text( AFTER, encoding="utf-8" )
-    out = source_at.export( repo, head( repo ), tmp_path / "at" )
-    assert "return x + 1" in strip.bodies_for( [ rec ], out )[ "cosa.m.f" ]
-    assert "return x + 2" in strip.bodies_for( [ rec ], repo )[ "cosa.m.f" ]
-    assert "x + 1" in strip.python_text( rec, out ) and strip.strip_member( rec, out )[ "kind" ]
+    monkeypatch.setattr( source_at.subprocess, "run", failing )
+    with pytest.raises( er.NeedsetError ) as e: source_at.ensure_worktree( repo, "HEAD" )
+    assert e.value.code == er.SOURCE_TREE_FAILED and "boom" in e.value.detail
