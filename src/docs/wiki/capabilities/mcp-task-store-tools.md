@@ -8,13 +8,14 @@ pins:
   - lupin_mcp.task_store_tools.task_edit_impl@a2b53fe29b
   - lupin_mcp.cosa_voice_mcp.task_transition@7c686e048b
   - lupin_mcp.cosa_voice_mcp.task_reassign@51ee36ffb6
+  - lupin_mcp.cosa_voice_mcp.task_approve_line@b0aa7b684f
 ---
 # MCP task-store tools
 
-Eleven MCP tools let a session read and write the task store over HTTP. The tools live in `cosa_voice_mcp.py`; `task_store_tools.py` holds the transport. [[task-store]] owns the rules.
+Thirteen MCP tools let a session read and write the task store over HTTP. The tools live in `cosa_voice_mcp.py`; `task_store_tools.py` holds the transport. [[task-store]] owns the rules.
 
 ## What it does
-- Write tools: `task_create`, `task_transition`, `task_correlate`, `task_reassign`, `task_amend`, `task_request`, `task_ask_unpark`, `task_edit`, `podcast_for_rick` (asks Rick, waits for his answer, starts the podcast job). Read tools: `task_query`, `task_get`, `task_promotion_status`.
+- Write tools: `task_create`, `task_transition`, `task_correlate`, `task_reassign`, `task_amend`, `task_request`, `task_ask_unpark`, `task_edit`, `podcast_for_rick` (asks Rick, waits for his answer, starts the podcast job). Read tools: `task_query`, `task_get`, `task_promotion_status`. `task_approve_line` is a read tool that writes a held row's card bullet with its approve link ([[task-approve-link]]).
 - Every call goes through `task_store_request` to `/api/tasks/...` with the outbound `X-API-Key`. A 2xx body comes back unchanged.
 - `session_spawner.py` also calls `task_transition_impl` and `task_reassign_impl` directly, bypassing the tool layer.
 
@@ -28,8 +29,7 @@ Eleven MCP tools let a session read and write the task store over HTTP. The tool
 
 ## Failure shapes
 - No readable key gives `missing_auth_header`. A connection failure or connect timeout gives `server_unreachable`.
-- A read timeout gives `server_read_timeout` with `outcome_indeterminate`. The write may have landed; do not report it as failed.
-- The timeout is 10 seconds each for connect and for read.
+- A read timeout gives `server_read_timeout` with `outcome_indeterminate`. The write may have landed; do not report it as failed. The timeout is 10 seconds each for connect and for read.
 
 ## Promotion wait
 - `task_transition` passes `asynchronous=True` by default. If the server answers `awaiting_human_approval` with a ticket, the impl polls once a second, and a failed poll is skipped. It checks its 25-second budget at the top of each loop, so it can run a little over.

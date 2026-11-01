@@ -2,7 +2,7 @@
 capability: web-client-transport-and-auth
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.boot.bootMultiplexer@c13729476f
+  - src.lupin_app.static.js.multiplexer.boot.bootMultiplexer@8c618cc27b
   - src.lupin_app.static.js.multiplexer.transport.QueueTransport.BaseTransportImpl@65b2a06f2b
   - src.lupin_app.static.js.multiplexer.transport.AudioTransport.AudioTransportImpl@fd6e89149c
   - src.lupin_app.static.js.multiplexer.transport.ConnectionStateMachine.ConnectionStateMachineImpl@87cd2fa536
@@ -15,7 +15,7 @@ pins:
 The multiplexer page opens two WebSockets, keeps a refreshable login token, and republishes every frame on one in-page event bus. `bootMultiplexer` wires it, and hands the server zone from `/api/config/client` to the renderers and stores. Without it, times show labelled UTC and the console logs an error. Stores are in [[web-client-stores]]; the server side is [[websocket-events]] and [[auth-and-accounts]].
 
 ## What it does
-- `bootMultiplexer` sends a visitor with no access token to `/app/auth/login`. Otherwise it builds the transports with `createTransports` and starts them last, queue first. It also asks `/api/notifications/awaiting-response` for response cards filed while the page was closed and adds them to the action-required store. It gives the action-required renderer the prediction vote store, which mounts the thumbs controls on a card's hint.
+- `bootMultiplexer` sends a visitor with no access token to `/app/auth/login`. Otherwise it builds the transports with `createTransports` and starts them last, queue first. It also asks `/api/notifications/awaiting-response` for response cards filed while the page was closed and adds them to the action-required store. It gives the action-required renderer the prediction vote store, which mounts the thumbs controls on a card's hint. It gives the reading pane the holding-area store as the sender behind one-click approve links ([[task-approve-link]]).
 - Each transport extends `BaseTransportImpl`. It opens `/ws/queue/<id>` or `/ws/audio/<id>` and sends `auth_request` with the access token and its fixed event list.
 - A JSON frame goes on the bus under its `type`, with the frame minus `type` and `timestamp` as payload. Binary frames go to the handler given to `AudioTransportImpl.start`.
 - `ConnectionStateMachineImpl` gives each transport its own states: connecting, connected, reconnecting, backoff, offline, failed. Backoff is full jitter up to `min(1000 * 2^n, 30000)` ms, and 20 attempts end in failed.
