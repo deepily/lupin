@@ -323,3 +323,15 @@ def test_a_stage_that_raises_hands_the_report_so_far_to_on_raise_before_the_erro
     report, = seen
     assert [ s[ "status" ] for s in report[ "stages" ].values() ] == [ "done", "done", "failed", "not_run" ] and report[ "used" ] == 2
     assert report[ "stages" ][ "control" ] == { "status": "failed", "code": "RuntimeError", "detail": "boom" } and report[ "stages" ][ "attribution" ][ "report" ] == { "calls": 1 }
+
+
+def test_a_cancelled_stage_also_hands_the_report_so_far_to_on_raise_and_the_cancel_goes_on( tmp_path ):
+    cap, transport, seen = new_cap( tmp_path ), Transport(), []
+
+    async def cancelled():
+        raise asyncio.CancelledError()
+
+    funcs = all_stages( transport, **{ "yield": cancelled } )
+    with cap.installed(), pytest.raises( asyncio.CancelledError ): asyncio.run( stages.run_stages( cap, funcs, on_raise=seen.append ) )
+    report, = seen
+    assert [ s[ "status" ] for s in report[ "stages" ].values() ] == [ "done", "failed", "not_run", "not_run" ] and report[ "stages" ][ "yield" ][ "code" ] == "CancelledError"
