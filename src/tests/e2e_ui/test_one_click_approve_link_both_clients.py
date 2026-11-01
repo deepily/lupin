@@ -233,11 +233,12 @@ def _expect_row_shown( page, row ):
 
     The card is a live action-required card, which keeps the content pane in horizontal layout,
     so the abstract 📋 itself shows in the tooltip there. No separate overlay may exist.
+    The card's own list holds every row title, so the wait is on the ticket's own facts line.
     """
     tip = page.locator( "#abstract-tooltip .abstract-tooltip-content" )
-    expect( tip ).to_contain_text( row[ "title" ], timeout=TIMEOUT_MS )
+    expect( tip ).to_contain_text( "Priority: P3", timeout=TIMEOUT_MS )
     text = tip.inner_text()
-    assert "Priority: P3" in text and "Owner: unowned" in text and "Status: not_approved" in text, text
+    assert row[ "title" ] in text and "Owner: unowned" in text and "Status: not_approved" in text, text
     assert f"E2E body {row[ 'index' ]}" in text and f"second line {row[ 'index' ]}" in text, text
     assert page.locator( "#task-body-overlay" ).count() == 0, "the 📄 link must not open a separate overlay"
 
@@ -246,9 +247,14 @@ EVIL = '<img src=x onerror="window.__pwned=1">'
 
 
 def _expect_no_injected_element( page ):
-    """The hostile body drew as text: no img element in the tooltip, and its onerror never ran."""
+    """
+    The hostile body ran nothing: no onerror attribute survives and its code never executed.
+
+    The sanitizer keeps a plain img, as it does for any abstract, and strips the handler.
+    """
     expect( page.locator( "#abstract-tooltip .abstract-tooltip-content" ) ).to_contain_text( "before", timeout=TIMEOUT_MS )
-    assert page.locator( "#abstract-tooltip img" ).count() == 0, "an img element was created"
+    assert page.locator( "#abstract-tooltip [onerror]" ).count() == 0, "an onerror attribute survived"
+    page.wait_for_timeout( 500 )
     assert page.evaluate( "() => window.__pwned" ) is None, "the onerror handler ran"
 
 
@@ -305,7 +311,7 @@ def test_one_click_approve_legacy_view_link_shows_the_row_in_place( notification
 
 
 @pytest.mark.parametrize( "horizontal", [ False, True ], ids=[ "vertical", "horizontal" ] )
-def test_one_click_approve_legacy_view_link_draws_a_hostile_body_as_text( notifications_page, held, horizontal ):
+def test_one_click_approve_legacy_view_link_draws_a_hostile_body_without_running_it( notifications_page, held, horizontal ):
     page   = notifications_page
     popups = []
     page.context.on( "page", lambda p: popups.append( p ) )
@@ -386,7 +392,7 @@ def test_one_click_approve_multiplexer_view_link_shows_the_row_in_place( logged_
 
 
 @pytest.mark.parametrize( "horizontal", [ False, True ], ids=[ "vertical", "horizontal" ] )
-def test_one_click_approve_multiplexer_view_link_draws_a_hostile_body_as_text( logged_in_page, held, horizontal ):
+def test_one_click_approve_multiplexer_view_link_draws_a_hostile_body_without_running_it( logged_in_page, held, horizontal ):
     page   = logged_in_page
     popups = []
     page.context.on( "page", lambda p: popups.append( p ) )
