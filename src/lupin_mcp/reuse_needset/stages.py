@@ -111,13 +111,14 @@ def run_remainder( pairs, seed, check_fn=run_check.check_pair ):
              "unsure": { "total": len( unsure ), "resolved": sum( 1 for p in unsure if p[ "route" ] in ( run_check.ACCEPT, run_check.REJECT ) ) } }
 
 
-async def run_stages( cap, stages ):
+async def run_stages( cap, stages, on_raise=None ):
     """
     Run the four stages in order under one cap and report each.
 
     Requires:
         - cap is a call_cap.CallCap that is installed, so model_transport calls are charged to it; its stage_limits are the budgets the stages keep to
         - stages maps each of the four stage names to async functions taking no argument and returning a report dict
+        - on_raise is None, or a function taking the report so far; it is called, then the error goes on, when a stage raises something that is not a NeedsetError
         - a report with stop true ends the run; a report may be built by attribution_report, run_yield, run_remainder or the control
 
     Ensures:
@@ -132,12 +133,19 @@ async def run_stages( cap, stages ):
     Raises:
         - NeedsetError CAP_NOT_INSTALLED when model_transport.CHARGE_HOOK is not this cap's charge, before any stage starts
         - ValueError when a stage is missing
-        - whatever a stage raises that is not a NeedsetError
+        - whatever a stage raises that is not a NeedsetError, after on_raise has been given the finished stages' reports, the stage that raised as failed with the error's class and message, and the stages after it as not_run
     """
     if model_transport.CHARGE_HOOK != cap.charge: raise er.NeedsetError( er.CAP_NOT_INSTALLED, "run_stages needs the cap installed, or model calls would go uncounted" )
     missing = [ name for name in ORDER if name not in stages ]
     if missing: raise ValueError( f"stages missing: {missing}" )
     results, halted = {}, False
+
+    def finished():
+        """Ensures: returns the report of the stages so far."""
+        spent = cap.by_stage()
+        return { "used": cap.used(), "limit": cap.limit, "by_stage": spent, "stages": { **results, **{ n: { "status": NOT_RUN } for n in ORDER if n not in results } },
+                 "over_plan": sorted( name for name, allowed in PLANNED_CALLS.items() if spent.get( name, 0 ) > allowed ) }
+
     for name in ORDER:
         if halted:
             results[ name ] = { "status": NOT_RUN }
@@ -151,6 +159,8 @@ async def run_stages( cap, stages ):
             budget          = error.code == er.STAGE_BUDGET_REACHED
             results[ name ] = { "status": BUDGET_REACHED if budget else CAP_REACHED if error.code == er.CALL_CAP_REACHED else FAILED, "code": error.code, "detail": error.detail }
             halted          = not budget
-    spent = cap.by_stage()
-    return { "used": cap.used(), "limit": cap.limit, "by_stage": spent, "stages": results,
-             "over_plan": sorted( name for name, allowed in PLANNED_CALLS.items() if spent.get( name, 0 ) > allowed ) }
+        except BaseException as error:
+            results[ name ] = { "status": FAILED, "code": type( error ).__name__, "detail": str( error ) }
+            if on_raise is not None: on_raise( finished() )
+            raise
+    return finished()
