@@ -12,7 +12,7 @@ pins:
 ---
 # MCP task-store tools
 
-Eleven MCP tools let a session read and write the task store over HTTP. The tools live in `cosa_voice_mcp.py`; `task_store_tools.py` holds the transport. [[task-store]] owns the rules.
+Thirteen MCP tools let a session read and write the task store over HTTP. The tools live in `cosa_voice_mcp.py`; `task_store_tools.py` holds the transport. [[task-store]] owns the rules.
 
 ## What it does
 - Write tools: `task_create`, `task_transition`, `task_correlate`, `task_reassign`, `task_amend`, `task_request`, `task_ask_unpark`, `task_edit`, `podcast_for_rick` (asks Rick, waits for his answer, starts the podcast job). Read tools: `task_query`, `task_get`, `task_promotion_status`. `task_approve_line` is a read tool that writes a held row's card bullet with its approve link ([[task-approve-link]]).

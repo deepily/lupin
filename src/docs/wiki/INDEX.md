@@ -289,7 +289,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-fresh-needs-figures]] — the fresh-needs report: agreement with the full sweep, false reuse and tokens per need. `lupin_mcp` (reuse_phase5_stage)
 - [[reuse-fresh-needs-sample]] — the seeded full-sweep sample of fresh needs and the hash stamp every result carries. `lupin_mcp` (reuse_phase5_run)
 - [[reuse-fresh-needs-driver]] — the fresh-needs confirmation driver: estimate, steps, sweep and command line. `lupin_mcp` (reuse_phase5_run)
-- [[mcp-task-store-tools]] — the ten MCP tools a session uses to read and write the task store over HTTP. `lupin_mcp` (task_store_tools, cosa_voice_mcp)
+- [[mcp-task-store-tools]] — the thirteen MCP tools a session uses to read and write the task store over HTTP. `lupin_mcp` (task_store_tools, cosa_voice_mcp)
 - [[mcp-task-store-impls]] — the nine task-store tool implementations: create, correlate, reassign, amend, request, unpark ask, get, query and approve line. `lupin_mcp` (task_store_tools)
 - [[task-approve-link]] — the one-click approve link in a card: the line writer and both clients' click handlers. `cosa.rest` (task_approve_link) and `src/lupin_app/static/js/multiplexer` (render)
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
