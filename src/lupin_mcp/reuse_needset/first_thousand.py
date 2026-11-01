@@ -19,7 +19,7 @@ from cosa.repo.labelling import run_check
 from cosa.repo.symindex.candidates import candidate_stage
 from cosa.repo.symindex.candidates import vector_store as vs
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, smoke, stage3, stage_seeds, stages, strip
+from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, smoke, stage3, stage_parts, stage_seeds, stages, strip
 from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
@@ -264,31 +264,38 @@ def tracked_files( root ):
     return { f for f in out.stdout.split( "\0" ) if f }
 
 
-def write_seed_lists( root, run_dir, pairs, seed, source_commit, index_parts=smoke.index_parts, tracked=tracked_files ):
+def write_seed_lists( root, run_dir, pairs, seed, source_commit, built, tracked=tracked_files ):
     """
     Draw the attribution and yield seed lists from the tree's index and write them out.
 
     Requires:
         - root is the lupin tree of the source commit; pairs are the 20 planted pairs
+        - built is smoke.index_parts' result for that tree
 
     Ensures:
         - only tracked files are drawn, and no planted pair's original is, by file and name
         - the lists are written once, before any call, to the file stage_seeds.LISTS_FILE
         - returns the path of that file
     """
-    by_id, kept, _measures, _twins, _bodies = index_parts( root, f"{run_dir}/index" )
-    planted = stage_seeds.planted_ids( pairs, list( by_id.values() ) )
+    by_id, kept = built[ 0 ], built[ 1 ]
+    planted     = stage_seeds.planted_ids( pairs, list( by_id.values() ) )
     return stage_seeds.write_lists( run_dir, stage_seeds.draw_lists( kept, seed, planted, source_commit, tracked( root ) ) )
 
 
-def live_parts( args ):
+def live_parts( args, env, built, lists, build=stage_parts.build_parts ):
     """
-    Name the three live pieces of the first two stages, which are not built yet.
+    Build the live parts of the attribution and yield stages for this run.
 
-    Raises:
-        - NeedsetError STAGE_NOT_WIRED always, before any call, naming make_need, trace_fn and prepare_fn
+    Requires:
+        - env is the run's namespace; built is smoke.index_parts' result; lists come from stage_seeds.load_lists
+
+    Ensures:
+        - the drafter writes the sentences and args.second_model checks them, each through its own ledger in the run folder
+        - the tracing ledger is ledger-trace.jsonl, and the probe runs args.probe_model
     """
-    raise er.NeedsetError( er.STAGE_NOT_WIRED, "stages 1 and 2 need make_need( seed id ), trace_fn( needs ) and prepare_fn( seed id ), and trace_all takes only final needs, which a run with no labelling does not make" )
+    make    = lambda name: draft.make_ledger( f"{args.run_dir}/{name}", args.cli_path, args.server )
+    ledgers = { "draft": draft.SharedLedger( make( "ledger-stage-draft.jsonl" ) ), "second": draft.SharedLedger( make( "ledger-stage-second.jsonl" ) ), "trace": make( "ledger-trace.jsonl" ) }
+    return build( env, built, lists, { "second": args.second_model, "probe": args.probe_model }, env.ask, draft.drafter_call( args.second_model ), ledgers )
 
 
 def stage_factories( lists_path, parts ):
@@ -297,13 +304,20 @@ def stage_factories( lists_path, parts ):
 
     Requires:
         - lists_path is the file write_seed_lists wrote
-        - parts is a mapping with make_need, trace_fn, prepare_fn and index
+        - parts is a mapping with make_need, trace_fn, prepare_fn, index and tally
 
     Ensures:
         - the stages are stage_seeds.attribution_stage and stage_seeds.yield_stage over that file and those parts
+        - each report also carries the counts of seeds that gave no final need, with the disputed ids, as stage_parts.counted reads the tally
     """
-    return ( lambda env: stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ),
-             lambda env: stage_seeds.yield_stage( lists_path, parts[ "prepare_fn" ], parts[ "index" ] ) )
+    def reported( stage ):
+        """Ensures: returns the stage with the tally added to its report."""
+        async def with_counts():
+            """Ensures: returns the stage's report plus the counts."""
+            return { **await stage(), "no_final_need": stage_parts.counted( parts[ "tally" ] ) }
+        return with_counts
+    return ( lambda env: reported( stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ) ),
+             lambda env: reported( stage_seeds.yield_stage( lists_path, parts[ "prepare_fn" ], parts[ "index" ] ) ) )
 
 
 def parse_args( argv ):
@@ -320,6 +334,8 @@ def parse_args( argv ):
     ap.add_argument( "--limit", type=int, default=call_cap.CALL_LIMIT )
     ap.add_argument( "--cli-path", default=None )
     ap.add_argument( "--server", default="max-plan" )
+    ap.add_argument( "--second-model", default=smoke.SECOND_MODEL )
+    ap.add_argument( "--probe-model", default=smoke.SECOND_MODEL )
     ap.add_argument( "--live", action="store_true" )
     return ap.parse_args( argv )
 
@@ -362,7 +378,7 @@ def main( argv=None, deps=None ):
     Plan the first 1,000 calls, or with --live run them.
 
     Requires:
-        - deps is None for the real parts, or a mapping that replaces any of: planted_sha, context, ask, ledger, draft_fn, strip_fn, parts, lists, factories, control, runner, remainder
+        - deps is None for the real parts, or a mapping that replaces any of: planted_sha, context, ask, ledger, draft_fn, strip_fn, built, tracked, parts, factories, control, runner, remainder
         - a live run needs the reuse environment variables the context reads, and the live parts of the attribution and yield stages
 
     Ensures:
@@ -371,7 +387,7 @@ def main( argv=None, deps=None ):
         - the pairs and their groups are read before anything else, so a bad input stops the run before a call
 
     Raises:
-        - NeedsetError STAGE_NOT_WIRED on a live run whose attribution and yield parts are not built, before a context is built or a list is written
+        - NeedsetError QUOTA_UNFILLABLE from the seed draw, and PLAN_ALREADY_WRITTEN when other seed lists are already in the run folder
         - whatever the inputs raise, including CONTROL_INPUT_CHANGED
     """
     args   = parse_args( argv )
@@ -379,15 +395,16 @@ def main( argv=None, deps=None ):
     loaded = load_inputs( args, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
     shown  = plan( args, loaded )
     if not args.live: return { "live": False, "plan": shown }
-    parts     = ( deps[ "parts" ] if "parts" in deps else live_parts )( args )
     ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
     ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
     ledger    = deps[ "ledger" ]( args ) if "ledger" in deps else draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
     strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, args.root ) )
     draft_fn  = deps[ "draft_fn" ] if "draft_fn" in deps else draft.draft_need
-    lists     = deps[ "lists" ]( args, loaded ) if "lists" in deps else write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit )
-    factories = deps[ "factories" ] if "factories" in deps else stage_factories( lists, parts )
-    env       = types.SimpleNamespace( root=args.root, run_dir=args.run_dir, seed=args.seed, source_commit=args.source_commit, ctx=ctx, ask=ask, draft_ledger=ledger )
+    env       = types.SimpleNamespace( root=args.root, run_dir=args.run_dir, seed=args.seed, source_commit=args.source_commit, server=args.server, strip_fn=strip_fn, ctx=ctx, ask=ask, draft_ledger=ledger )
+    built     = deps[ "built" ]( args ) if "built" in deps else smoke.index_parts( args.root, f"{args.run_dir}/index" )
+    path      = write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit, built, **( { "tracked": deps[ "tracked" ] } if "tracked" in deps else { } ) )
+    parts     = ( deps[ "parts" ] if "parts" in deps else live_parts )( args, env, built, stage_seeds.load_lists( path ) )
+    factories = deps[ "factories" ] if "factories" in deps else stage_factories( path, parts )
     control   = ( deps[ "control" ] if "control" in deps else control_stage_live )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )
     rem       = remainder_stage( loaded[ "remainder" ], args.seed, **( { "run_remainder": deps[ "remainder" ] } if "remainder" in deps else { } ) )
     runner    = deps[ "runner" ] if "runner" in deps else run_first_thousand

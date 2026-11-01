@@ -11,7 +11,7 @@ import pytest
 
 import cosa.utils.util as cu
 from cosa.repo.symindex.candidates import candidate_stage as cs
-from lupin_mcp.reuse_needset import call_cap, draft, first_thousand as ft, planted_pool, positive_control as pc, stage_seeds, stages
+from lupin_mcp.reuse_needset import call_cap, draft, first_thousand as ft, smoke, planted_pool, positive_control as pc, stage_parts, stage_seeds, stages
 from lupin_mcp.reuse_needset import errors as er
 from tests.unit.test_reuse_needset_positive_control import pairs as bare_pairs, pool
 
@@ -245,19 +245,14 @@ def test_the_seed_lists_are_drawn_from_tracked_files_without_the_planted_origina
     ps      = [ real_pair( i ) for i in range( 20 ) ]
     rows    = index_records()
     rows[ 0 ].update( file=ps[ 0 ][ "original" ][ "file" ], name=ps[ 0 ][ "original" ][ "name" ] )
-    calls   = []
     tracked = { r[ "file" ] for r in rows if r[ "id" ] != "ts-1" }
-
-    def index_parts( root, index_dir ):
-        calls.append( ( root, index_dir ) )
-        return { r[ "id" ]: r for r in rows }, sorted( rows, key=lambda r: r[ "id" ] ), None, None, None
-
-    path = ft.write_seed_lists( "/r", str( tmp_path ), ps, 7, "abc", index_parts=index_parts, tracked=lambda root: tracked )
+    built   = ( { r[ "id" ]: r for r in rows }, sorted( rows, key=lambda r: r[ "id" ] ), None, None, None )
+    path    = ft.write_seed_lists( "/r", str( tmp_path ), ps, 7, "abc", built, tracked=lambda root: tracked )
     got  = json.loads( path.read_text( encoding="utf-8" ) )
     drawn = { i for stage in ( "attribution", "yield" ) for i in got[ stage ][ "order" ] }
-    assert calls == [ ( "/r", f"{tmp_path}/index" ) ] and path.name == stage_seeds.LISTS_FILE and got[ "pool" ][ "excluded_planted" ] == 1
+    assert path.name == stage_seeds.LISTS_FILE and got[ "pool" ][ "excluded_planted" ] == 1
     assert "ts-0" not in drawn and "ts-1" not in drawn and len( got[ "attribution" ][ "order" ] ) == 50 and len( got[ "yield" ][ "order" ] ) == 100
-    assert ft.write_seed_lists( "/r", str( tmp_path ), ps, 7, "abc", index_parts=index_parts, tracked=lambda root: tracked ) == path
+    assert ft.write_seed_lists( "/r", str( tmp_path ), ps, 7, "abc", built, tracked=lambda root: tracked ) == path
 
 
 def test_the_tracked_files_are_what_git_lists_for_the_tree_and_a_stub_shows_the_call( monkeypatch ):
@@ -267,18 +262,40 @@ def test_the_tracked_files_are_what_git_lists_for_the_tree_and_a_stub_shows_the_
     assert ft.tracked_files( "/x" ) == { "a.py", "b/c.ts" } and seen[ "argv" ] == [ "git", "-C", "/x", "ls-files", "-z" ]
 
 
-def test_the_stage_factories_hand_the_lists_file_and_the_live_parts_to_pocholos_two_stages( monkeypatch ):
+def test_the_stage_factories_hand_the_lists_file_and_the_live_parts_to_pocholos_two_stages_and_add_the_counts( monkeypatch ):
     seen  = {}
-    parts = { "make_need": "MN", "trace_fn": "TF", "prepare_fn": "PF", "index": "IX" }
-    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or "A" )
-    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or "Y" )
+    tally = stage_parts.Tally()
+    tally[ "disputed" ] += 2
+    tally.ids.append( "n-1" )
+    parts = { "make_need": "MN", "trace_fn": "TF", "prepare_fn": "PF", "index": "IX", "tally": tally }
+
+    def stage_of( name, report ):
+        async def stage(): return report
+        return stage
+
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or stage_of( "a", { "seeds": 1 } ) )
+    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or stage_of( "y", { "hard": 2 } ) )
     one, two = ft.stage_factories( "/lists.json", parts )
-    assert one( "env" ) == "A" and two( "env" ) == "Y" and seen == { "a": ( "/lists.json", "MN", "TF" ), "y": ( "/lists.json", "PF", "IX" ) }
+    counts   = { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-1" ] }
+    assert asyncio.run( one( "env" )() ) == { "seeds": 1, "no_final_need": counts } and asyncio.run( two( "env" )() ) == { "hard": 2, "no_final_need": counts }
+    assert seen == { "a": ( "/lists.json", "MN", "TF" ), "y": ( "/lists.json", "PF", "IX" ) }
 
 
-def test_the_live_parts_of_stages_one_and_two_refuse_by_name_and_say_what_is_missing():
-    with pytest.raises( er.NeedsetError ) as e: ft.live_parts( None )
-    assert e.value.code == er.STAGE_NOT_WIRED and all( w in str( e.value ) for w in ( "make_need", "trace_fn", "prepare_fn", "final" ) )
+def test_the_live_parts_use_their_own_ledgers_in_the_run_folder_and_the_arguments_models( tmp_path, monkeypatch ):
+    seen = {}
+    args = types.SimpleNamespace( run_dir=str( tmp_path ), cli_path=None, server="max-plan", second_model="M2", probe_model="MP" )
+    env  = types.SimpleNamespace( ask="DRAFT-ASK" )
+    monkeypatch.setattr( draft, "drafter_call", lambda model=draft.DRAFTER_MODEL: f"ask-{model}" )
+
+    def build( env_, built, lists, models, drafter, second, ledgers ):
+        seen.update( env=env_, built=built, lists=lists, models=models, drafter=drafter, second=second, ledgers=ledgers )
+        return "PARTS"
+
+    assert ft.live_parts( args, env, "BUILT", "LISTS", build=build ) == "PARTS"
+    assert seen[ "models" ] == { "second": "M2", "probe": "MP" } and seen[ "drafter" ] == "DRAFT-ASK" and seen[ "second" ] == "ask-M2" and seen[ "built" ] == "BUILT" and seen[ "lists" ] == "LISTS"
+    paths = { k: pathlib.Path( v.ledger.path if hasattr( v, "ledger" ) else v.path ).name for k, v in seen[ "ledgers" ].items() }
+    assert paths == { "draft": "ledger-stage-draft.jsonl", "second": "ledger-stage-second.jsonl", "trace": "ledger-trace.jsonl" }
+    assert isinstance( seen[ "ledgers" ][ "draft" ], draft.SharedLedger ) and isinstance( seen[ "ledgers" ][ "second" ], draft.SharedLedger )
 
 
 def run_dir_files( tmp_path ):
@@ -303,7 +320,7 @@ def run_dir_files( tmp_path ):
 def test_the_command_line_needs_its_inputs_and_is_a_plan_unless_live_is_given():
     base = [ "--root", "/r", "--run-dir", "/d", "--planted", "p", "--answer-key", "k", "--labels-dir", "l", "--seed", "7", "--source-commit", "abc" ]
     a    = ft.parse_args( base )
-    assert a.seed == 7 and a.limit == 1000 and a.live is False and a.cli_path is None and a.server == "max-plan" and ft.parse_args( [ *base, "--live", "--limit", "5" ] ).live is True
+    assert a.seed == 7 and a.limit == 1000 and a.live is False and a.cli_path is None and a.server == "max-plan" and a.second_model == a.probe_model == smoke.SECOND_MODEL and ft.parse_args( [ *base, "--live", "--limit", "5" ] ).live is True
     with pytest.raises( SystemExit ): ft.parse_args( base[ :-2 ] )
 
 
@@ -329,6 +346,21 @@ def test_a_planted_file_with_the_wrong_hash_stops_before_anything_else( tmp_path
     assert e.value.code == er.CONTROL_INPUT_CHANGED
 
 
+def built_records():
+    """Return what smoke.index_parts returns, over 120 ts and 80 py records."""
+    rows = index_records()
+    return ( { r[ "id" ]: r for r in rows }, sorted( rows, key=lambda r: r[ "id" ] ), None, None, None )
+
+
+BUILT = built_records()
+
+
+def seed_deps( skip=None ):
+    """Return deps standing in for the index and git: every file tracked but the skipped id's."""
+    gone = { BUILT[ 0 ][ skip ][ "file" ] } if skip else set()
+    return { "built": lambda args: BUILT, "tracked": lambda root: { r[ "file" ] for r in BUILT[ 1 ] } - gone }
+
+
 def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_stages( tmp_path ):
     argv, sha = run_dir_files( tmp_path )
     seen      = {}
@@ -345,7 +377,7 @@ def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_
         seen[ "args" ] = ( run_dir, limit, await one(), await two(), await control(), await rem() )
         return { "ran": True }
 
-    deps = { "planted_sha": sha, "parts": lambda args: "PARTS", "lists": lambda args, loaded: "LISTS", "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
+    deps = { "planted_sha": sha, "parts": lambda args, env, built, lists: seen.update( parts_args=( args.server, env.server, built, lists[ "seed" ], lists[ "sha" ] ) ) or "PARTS", **seed_deps(), "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
              "strip_fn": strip_of, "draft_fn": "DRAFT", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed },
              "control": lambda c, ps, ask, ledger, strip_fn, draft_fn, cache: ( seen.update( control_args=( c, len( ps ), ask, ledger, strip_fn, draft_fn, cache ) ) or ( lambda: asyncio.sleep( 0, { "control": True } ) ) ) }
     out  = ft.main( [ *argv, "--live", "--limit", "9" ], deps=deps )
@@ -355,28 +387,31 @@ def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_
     assert seen[ "args" ][ 1 ] == 9 and seen[ "args" ][ 2:4 ] == ( { "name": "a" }, { "name": "y" } ) and seen[ "args" ][ 4 ] == { "control": True }
     assert seen[ "args" ][ 5 ][ "unsure_flagged" ] == { "total": 0, "resolved": 0, "of": 20, "also_drifted": 1, "text": "0 of 20, with 1 also drifted" }
     assert seen[ "control_args" ] == ( ctx, 20, "ASK", "LEDGER", strip_of, "DRAFT", f"{env.run_dir}/query-cache" )
+    assert seen[ "parts_args" ][ :4 ] == ( "max-plan", "max-plan", BUILT, 7 ) and len( seen[ "parts_args" ][ 4 ] ) == 64 and env.strip_fn is strip_of
 
 
-def test_a_live_run_passes_the_written_lists_and_the_parts_to_the_stage_factories( tmp_path, monkeypatch ):
+def test_a_live_run_passes_the_written_lists_file_and_the_parts_to_the_stage_factories( tmp_path, monkeypatch ):
     argv, sha = run_dir_files( tmp_path )
     seen      = {}
 
-    def fake_factories( lists, parts ):
-        seen.update( lists=lists, parts=parts )
+    def fake_factories( path, parts ):
+        seen.update( path=path, parts=parts )
         return ( lambda env: lambda: asyncio.sleep( 0, "one" ), lambda env: lambda: asyncio.sleep( 0, "two" ) )
 
     async def runner( run_dir, one, two, control, rem, limit ): return { "stages": [ await one(), await two() ] }
 
     monkeypatch.setattr( ft, "stage_factories", fake_factories )
-    monkeypatch.setattr( ft, "write_seed_lists", lambda root, run_dir, pairs, seed, commit: seen.update( written=( root, len( pairs ), seed, commit ) ) or "WRITTEN" )
-    deps = { "planted_sha": sha, "parts": lambda args: "PARTS", "context": lambda root: None, "runner": runner, "ask": "ASK", "ledger": lambda args: "L", "strip_fn": strip_of,
-             "draft_fn": "D", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed }, "control": lambda *a: ( lambda: asyncio.sleep( 0, {} ) ) }
+    deps = { "planted_sha": sha, "parts": lambda args, env, built, lists: "PARTS", **seed_deps(), "context": lambda root: None, "runner": runner, "ask": "ASK", "ledger": lambda args: "L",
+             "strip_fn": strip_of, "draft_fn": "D", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed }, "control": lambda *a: ( lambda: asyncio.sleep( 0, {} ) ) }
     out  = ft.main( [ *argv, "--live" ], deps=deps )
-    assert seen == { "lists": "WRITTEN", "parts": "PARTS", "written": ( "/r", 20, 7, "abc" ) } and out[ "report" ] == { "stages": [ "one", "two" ] }
+    assert seen[ "parts" ] == "PARTS" and pathlib.Path( seen[ "path" ] ).name == stage_seeds.LISTS_FILE and pathlib.Path( seen[ "path" ] ).parent == tmp_path / "run"
+    assert out[ "report" ] == { "stages": [ "one", "two" ] }
 
 
-def test_a_live_run_whose_stage_parts_are_not_built_stops_by_name_before_a_context_or_a_list( tmp_path, monkeypatch ):
+def test_a_live_run_over_other_seed_lists_stops_by_name_before_the_parts_are_built( tmp_path ):
     argv, sha = run_dir_files( tmp_path )
-    monkeypatch.setattr( ft, "write_seed_lists", lambda *a: pytest.fail( "a list was written" ) )
-    with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps={ "planted_sha": sha, "context": lambda root: pytest.fail( "a context was built" ) } )
-    assert e.value.code == er.STAGE_NOT_WIRED
+    base      = { "planted_sha": sha, "context": lambda root: None, "ask": "ASK", "ledger": lambda args: "L", "strip_fn": strip_of, "draft_fn": "D", "control": lambda *a: None,
+                  "parts": lambda args, env, built, lists: "PARTS", "factories": ( lambda env: None, lambda env: None ), "runner": lambda *a: asyncio.sleep( 0, {} ), "remainder": lambda ps, seed: {} }
+    ft.main( [ *argv, "--live" ], deps={ **base, **seed_deps() } )
+    with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps={ **base, **seed_deps( skip="ts-3" ), "parts": lambda *a: pytest.fail( "parts were built" ) } )
+    assert e.value.code == er.PLAN_ALREADY_WRITTEN
