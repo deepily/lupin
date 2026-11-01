@@ -459,6 +459,7 @@ def main( argv=None, deps=None ):
     Raises:
         - NeedsetError NO_CLI_PATH on a live run with no --cli-path, before the context is built
         - with --live, args.root becomes a detached worktree at the source commit before the context is built, so the context, the index, the strips, the trace and the probe all read the commit and a merge into the main tree mid-run moves none of them
+        - that worktree is locked while the run goes on and unlocked when it ends, by a result or by any error, so the janitor cannot sweep the root of a long run
         - NeedsetError SOURCE_TREE_MISMATCH or SOURCE_TREE_FAILED when that worktree cannot be had
         - ValueError when --cli-path is not an executable file, before the index is built
         - NeedsetError NO_CANDIDATE_STAGE on a live run whose context has none, before the index is built or a list is written
@@ -472,20 +473,25 @@ def main( argv=None, deps=None ):
     if not args.live: return { "live": False, "plan": shown }
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "a live run needs --cli-path: the SDK's bundled Claude Code is too old for the drafter's model and answers 400" )
     model_transport.configure( cli_path=args.cli_path )
-    args.root = deps[ "source_root" ]( args ) if "source_root" in deps else source_at.ensure_worktree( args.root, args.source_commit )
-    ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
-    close     = deps[ "close_run" ] if "close_run" in deps else rt.close_run
+    made      = "source_root" not in deps
+    repo      = args.root
+    args.root = deps[ "source_root" ]( args ) if not made else source_at.ensure_worktree( repo, args.source_commit )
     try:
-        report = live_run( args, loaded, ctx, deps )
-    except BaseException:
-        try: close( ctx )
-        except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
-        raise
-    try:
-        closed, close_error = close( ctx ), None
-    except Exception as error:
-        closed, close_error = None, repr( error )
-    return { "live": True, "plan": shown, "report": report, "closed_run": closed, "close_error": close_error }
+        ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
+        close     = deps[ "close_run" ] if "close_run" in deps else rt.close_run
+        try:
+            report = live_run( args, loaded, ctx, deps )
+        except BaseException:
+            try: close( ctx )
+            except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
+            raise
+        try:
+            closed, close_error = close( ctx ), None
+        except Exception as error:
+            closed, close_error = None, repr( error )
+        return { "live": True, "plan": shown, "report": report, "closed_run": closed, "close_error": close_error }
+    finally:
+        if made: source_at.unlock( repo, args.root )
 
 
 def live_run( args, loaded, ctx, deps ):

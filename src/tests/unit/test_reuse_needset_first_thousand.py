@@ -799,6 +799,7 @@ def test_a_live_run_takes_the_source_commits_worktree_as_the_one_root_for_the_co
     argv, sha = run_dir_files( tmp_path )
     seen      = { "strip": [], "context": [] }
     monkeypatch.setattr( ft.source_at, "ensure_worktree", lambda repo, commit: seen.update( tree=( repo, commit ) ) or "/WT" )
+    monkeypatch.setattr( ft.source_at, "unlock", lambda repo, dest: None )
     monkeypatch.setattr( ft.smoke, "index_parts", lambda root, index_dir: seen.update( index=( root, index_dir ) ) or BUILT )
     monkeypatch.setattr( ft.strip, "strip_member", lambda rec, root: seen[ "strip" ].append( root ) or strip_of( rec ) )
 
@@ -841,3 +842,33 @@ def test_a_stage_whose_every_seed_was_unstrippable_fails_by_name_and_a_stage_wit
     assert e.value.code == er.ALL_SEEDS_UNREADABLE and "attribution" in str( e.value )
     with pytest.raises( er.NeedsetError ) as e: asyncio.run( two( "env" )() )
     assert e.value.code == er.NO_NEEDS_WITH_SKIPS and "yield" in str( e.value )
+
+
+def test_the_source_worktree_is_locked_for_the_run_and_unlocked_after_a_result_and_after_any_error( tmp_path, monkeypatch ):
+    argv, sha = run_dir_files( tmp_path )
+    events    = []
+    monkeypatch.setattr( ft.source_at, "ensure_worktree", lambda repo, commit: events.append( "made+locked" ) or "/WT" )
+    monkeypatch.setattr( ft.source_at, "unlock", lambda repo, dest: events.append( f"unlock {repo} {dest}" ) )
+    deps = { **live_deps( sha, lambda *a: asyncio.sleep( 0, {} ) ) }
+    del deps[ "source_root" ]
+    ft.main( [ *argv, "--live" ], deps=deps )
+    assert events == [ "made+locked", "unlock /r /WT" ]                                                         # unlocked by the repo it was made from, not by the worktree's own path
+
+    async def failing( *a ): raise RuntimeError( "the stage runner died" )
+
+    events.clear()
+    with pytest.raises( RuntimeError ): ft.main( [ *argv, "--live" ], deps={ **deps, "runner": failing } )
+    assert events == [ "made+locked", "unlock /r /WT" ]
+    events.clear()
+
+    def no_context( root ): raise RuntimeError( "the context failed" )
+
+    with pytest.raises( RuntimeError ): ft.main( [ *argv, "--live" ], deps={ **deps, "context": no_context } )
+    assert events == [ "made+locked", "unlock /r /WT" ]
+
+
+def test_a_stand_in_root_is_neither_locked_nor_unlocked( tmp_path, monkeypatch ):
+    argv, sha = run_dir_files( tmp_path )
+    monkeypatch.setattr( ft.source_at, "ensure_worktree", lambda *a: pytest.fail( "a worktree was made" ) )
+    monkeypatch.setattr( ft.source_at, "unlock", lambda *a: pytest.fail( "a stand-in root was unlocked" ) )
+    ft.main( [ *argv, "--live" ], deps=live_deps( sha, lambda *a: asyncio.sleep( 0, {} ) ) )

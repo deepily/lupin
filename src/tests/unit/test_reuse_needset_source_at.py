@@ -95,3 +95,35 @@ def test_an_unknown_commit_and_a_failing_git_are_refused_by_name( repo, monkeypa
     monkeypatch.setattr( source_at.subprocess, "run", failing )
     with pytest.raises( er.NeedsetError ) as e: source_at.ensure_worktree( repo, "HEAD" )
     assert e.value.code == er.SOURCE_TREE_FAILED and "boom" in e.value.detail
+
+
+def locked_paths( repo ):
+    """List the worktrees git reports as locked."""
+    out, here, found = git( repo, "worktree", "list", "--porcelain" ), None, []
+    for line in out.splitlines():
+        if line.startswith( "worktree " ): here = line[ 9: ]
+        if line.startswith( "locked" ): found.append( here )
+    return found
+
+
+def test_the_worktree_is_locked_when_made_and_when_reused_and_unlock_frees_it( repo ):
+    wt = source_at.ensure_worktree( repo, "HEAD" )
+    assert locked_paths( repo ) == [ str( wt ) ]
+    assert source_at.ensure_worktree( repo, "HEAD" ) == wt and locked_paths( repo ) == [ str( wt ) ]           # locking one already locked is no error
+    source_at.unlock( repo, wt )
+    assert locked_paths( repo ) == []
+    source_at.unlock( repo, wt )                                                                                # unlocking one not locked raises nothing
+    assert source_at.ensure_worktree( repo, "HEAD" ) == wt and locked_paths( repo ) == [ str( wt ) ]           # a reused, unlocked tree is locked again
+
+
+def test_a_lock_git_refuses_for_another_reason_is_a_named_failure( repo, monkeypatch ):
+    wt   = source_at.ensure_worktree( repo, "HEAD" )
+    real = subprocess.run
+
+    def refusing( argv, **kw ):
+        if "lock" in argv: return subprocess.CompletedProcess( argv, 128, "", "fatal: no such worktree" )
+        return real( argv, **kw )
+
+    monkeypatch.setattr( source_at.subprocess, "run", refusing )
+    with pytest.raises( er.NeedsetError ) as e: source_at.lock( repo, wt )
+    assert e.value.code == er.SOURCE_TREE_FAILED and "no such worktree" in e.value.detail

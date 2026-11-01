@@ -13,6 +13,7 @@ from lupin_mcp.reuse_needset import errors as er
 WORKTREES = ".claude/worktrees"
 PREFIX    = "needset-run-"
 SHA_CHARS = 9
+LOCK_REASON = "needset run in progress"
 
 
 def full_sha( repo_root, commit ):
@@ -59,6 +60,37 @@ def at_commit( root, sha ):
     return head.returncode == 0 and head.stdout.strip() == sha and status.returncode == 0 and status.stdout.strip() == ""
 
 
+def lock( repo_root, dest ):
+    """
+    Lock a worktree so the janitor and git leave it in place.
+
+    Requires:
+        - dest is a worktree of repo_root
+
+    Ensures:
+        - the worktree is locked afterwards; one already locked stays locked
+
+    Raises:
+        - NeedsetError SOURCE_TREE_FAILED when git cannot lock it
+    """
+    got = subprocess.run( [ "git", "-C", str( repo_root ), "worktree", "lock", "--reason", LOCK_REASON, str( dest ) ], capture_output=True, text=True )
+    if got.returncode != 0 and "already locked" not in got.stderr: raise er.NeedsetError( er.SOURCE_TREE_FAILED, f"{dest}: git worktree lock: {got.stderr.strip()}" )
+
+
+def unlock( repo_root, dest ):
+    """
+    Unlock a worktree, so the janitor may sweep it once the run is over.
+
+    Requires:
+        - dest is a worktree of repo_root
+
+    Ensures:
+        - the worktree is unlocked afterwards; one that was not locked is left as it is
+        - nothing is raised, so a run that is already failing keeps its own error
+    """
+    subprocess.run( [ "git", "-C", str( repo_root ), "worktree", "unlock", str( dest ) ], capture_output=True, text=True )
+
+
 def ensure_worktree( repo_root, commit, dest=None ):
     """
     Return a detached worktree at the commit, making it when it is missing.
@@ -71,6 +103,7 @@ def ensure_worktree( repo_root, commit, dest=None ):
         - returns the worktree's path, at the full sha of the commit with no tracked file changed
         - the worktree resolves to the parent checkout for the data folder and the spend ledger, which a plain copy of the files would not
         - a worktree already there at the same commit is reused as it is
+        - the worktree is locked, because it is read-only to a long run and the janitor sweeps a tree nobody has touched for hours; the caller unlocks it with unlock when the run ends
 
     Raises:
         - NeedsetError SOURCE_TREE_MISMATCH when dest exists and is at another commit or has a changed tracked file
@@ -79,9 +112,11 @@ def ensure_worktree( repo_root, commit, dest=None ):
     sha  = full_sha( repo_root, commit )
     dest = worktree_path( repo_root, commit ) if dest is None else pathlib.Path( dest )
     if dest.exists():
-        if at_commit( dest, sha ): return dest
-        raise er.NeedsetError( er.SOURCE_TREE_MISMATCH, f"{dest} is not at {sha} with its tracked files unchanged; remove it with git worktree remove to make it again" )
+        if not at_commit( dest, sha ): raise er.NeedsetError( er.SOURCE_TREE_MISMATCH, f"{dest} is not at {sha} with its tracked files unchanged; unlock and remove it with git worktree to make it again" )
+        lock( repo_root, dest )
+        return dest
     dest.parent.mkdir( parents=True, exist_ok=True )
     got = subprocess.run( [ "git", "-C", str( repo_root ), "worktree", "add", "--detach", str( dest ), sha ], capture_output=True, text=True )
     if got.returncode != 0: raise er.NeedsetError( er.SOURCE_TREE_FAILED, f"{repo_root}: git worktree add {sha}: {got.stderr.strip()}" )
+    lock( repo_root, dest )
     return dest

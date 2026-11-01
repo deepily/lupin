@@ -15,7 +15,7 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.load_inputs@68bde7e075
   - lupin_mcp.reuse_needset.first_thousand.exit_status@d42a152d3e
   - lupin_mcp.reuse_needset.first_thousand.run_cli@2b9e55e56d
-  - lupin_mcp.reuse_needset.first_thousand.main@4aca74f687
+  - lupin_mcp.reuse_needset.first_thousand.main@de211746a7
   - lupin_mcp.reuse_needset.first_thousand.live_control@5a2bebf949
   - lupin_mcp.reuse_needset.first_thousand.live_run@c033b79f7f
 ---

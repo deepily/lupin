@@ -13,7 +13,9 @@ pins:
   - lupin_mcp.reuse_needset.source_at.full_sha@a62c6baa15
   - lupin_mcp.reuse_needset.source_at.worktree_path@c8746cca3e
   - lupin_mcp.reuse_needset.source_at.at_commit@cecd336fdf
-  - lupin_mcp.reuse_needset.source_at.ensure_worktree@87fedcbc7d
+  - lupin_mcp.reuse_needset.source_at.lock@bdbac1f4f9
+  - lupin_mcp.reuse_needset.source_at.unlock@5148a0c4db
+  - lupin_mcp.reuse_needset.source_at.ensure_worktree@0f1e2fbd60
 ---
 # Need set: member text
 
@@ -30,10 +32,9 @@ Prepares member text for the need set. The drafter gets stripped names, and sear
 - A member not found comes back as not ok, or raises `STRIP_FAILED` when strict is set. A missing node or TypeScript compiler raises `DependencyMissing`.
 
 ## Stripping
-- `strip_members` returns, for each id, the kind, the text and the forbidden names. The text holds none of the forbidden names, and all script records share one node start.
-- `strip_member` strips one member through the same path.
+- `strip_members` returns, for each id, the kind, the text and the forbidden names. The text holds none of the forbidden names, and all script records share one node start. `strip_member` strips one member through the same path.
 - `bodies_for` returns each member's source as written, Python by the need-input lookup and script members through one node start.
 
 ## The source commit
-- `ensure_worktree` makes a detached worktree at the source commit under `.claude/worktrees/needset-run-<sha>`. It reuses one already there when `at_commit` says its tracked files are unchanged, and refuses any other with `SOURCE_TREE_MISMATCH`.
+- `ensure_worktree` makes a detached worktree at the source commit under `.claude/worktrees/needset-run-<sha>`. It reuses one already there when `at_commit` says its tracked files are unchanged, and refuses any other with `SOURCE_TREE_MISMATCH`. It locks the worktree with `lock`, and the run frees it with `unlock` when it ends, so the janitor cannot sweep a run's root.
 - A live run takes that worktree as its root before the context is built. So the index, strips, trace and probe cannot move when peers merge. A worktree also keeps the data folder and spend ledger of the parent checkout.
