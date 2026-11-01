@@ -18547,6 +18547,97 @@ class NotificationsUI {
     // ========================================
 
     /**
+     * Show an abstract the way a 📋 click does.
+     *
+     * Horizontal layout uses the Reading Pane and any other layout uses the floating tooltip.
+     *
+     * The abstract 📋 click and the 📄 ticket link both call this, so the two cannot drift.
+     *
+     * Requires:
+     *     - anchorEl is the clicked element; the tooltip is placed beside it
+     *     - abstract is markdown text; it is rendered by renderMarkdown, never as raw HTML
+     *     - titleOverride is a string, or null to derive the title from the card's message
+     *
+     * Ensures:
+     *     - horizontal layout, not inside the action-required card: the pane opens, or closes on a
+     *       second click that shows the same text
+     *     - otherwise the tooltip shows the text beside anchorEl
+     */
+    _showAbstractFor( anchorEl, abstract, titleOverride = null ) {
+        const indicator = anchorEl;
+        const tooltip   = document.getElementById( 'abstract-tooltip' );
+
+        // Self-exception (bug 11c01fbc): when an action-required card is
+        // lifted into the Reading Pane (horizontal mode), its OWN 📋 indicator
+        // lives inside #action-required-content, which SHARES the pane with the
+        // live response buttons. Routing it through _openContentPane would wipe
+        // the pane body (_renderContentPaneEntry's innerHTML="") and destroy
+        // those buttons — the exact case the _openContentPane guard blocks. So
+        // the card's own abstract falls through to the in-tab tooltip below
+        // (vertical parity — a surface Rick already knows). Foreign indicators
+        // (center-column cards) still route to the pane, where the guard holds.
+        const isOwnActionRequired = !!indicator.closest( "#action-required-content" );
+
+        // Horizontal layout mode: route to Reading Pane instead of the
+        // legacy fixed-position tooltip. Design:
+        // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
+        if ( this._layoutMode === "horizontal" && !isOwnActionRequired ) {
+            // Toggle (Rick, 2026-06-08): a second click on the indicator whose
+            // abstract is ALREADY showing in the Reading Pane clears the pane
+            // instead of re-opening it. Clicking a DIFFERENT indicator — or when
+            // a doc-link is showing — switches to the new abstract rather than
+            // toggling off (the predicate returns false → falls through to open).
+            if ( this._abstractAlreadyShown( abstract ) ) {
+                this._closeContentPane();
+                return;
+            }
+            // Derive a short title from the source message if available.
+            const card    = indicator.closest( '.conversation-pair, .notification-message, .sender-card' );
+            const titleEl = card ? card.querySelector( '.message-text' ) : null;
+            const title   = titleOverride !== null
+                ? titleOverride
+                : titleEl
+                    ? ( titleEl.textContent || "" ).trim().slice( 0, 60 )
+                    : "Notification details";
+            this._openContentPane( "abstract", abstract, title );
+            return;
+        }
+
+        const content = tooltip.querySelector( '.abstract-tooltip-content' );
+        // Render markdown with XSS protection (was: content.textContent = abstract)
+        content.innerHTML = this.renderMarkdown( abstract );
+
+        // Position near the indicator
+        const rect = indicator.getBoundingClientRect();
+
+        // Show hidden first so :has()-driven tier sizing takes effect, then measure
+        tooltip.style.visibility = 'hidden';
+        tooltip.classList.add( 'visible' );
+
+        requestAnimationFrame( () => {
+            const tipRect        = tooltip.getBoundingClientRect();
+            const tooltipHeight  = tipRect.height;
+            const tooltipWidth   = tipRect.width;
+            const viewportHeight = window.innerHeight;
+            const viewportWidth  = window.innerWidth;
+
+            // Position below indicator, flip above if it would clip viewport bottom
+            let top = rect.bottom + 8;
+            if ( top + tooltipHeight > viewportHeight - 10 ) {
+                top = Math.max( 10, rect.top - tooltipHeight - 8 );
+            }
+
+            // Center on indicator horizontally, clamp to viewport
+            let left = rect.left + ( rect.width / 2 ) - ( tooltipWidth / 2 );
+            left = Math.max( 10, Math.min( left, viewportWidth - tooltipWidth - 10 ) );
+
+            tooltip.style.top        = `${top}px`;
+            tooltip.style.left       = `${left}px`;
+            tooltip.style.visibility = 'visible';
+        } );
+    }
+
+    /**
      * Creates the abstract tooltip container once and adds document listeners each call.
      *
      * A click on a 📋 indicator shows the abstract in the tooltip, or in the reading pane in horizontal layout.
@@ -18599,73 +18690,7 @@ class NotificationsUI {
             if ( indicator ) {
                 e.stopPropagation();
                 const abstract = decodeURIComponent( indicator.dataset.abstract );
-
-                // Self-exception (bug 11c01fbc): when an action-required card is
-                // lifted into the Reading Pane (horizontal mode), its OWN 📋 indicator
-                // lives inside #action-required-content, which SHARES the pane with the
-                // live response buttons. Routing it through _openContentPane would wipe
-                // the pane body (_renderContentPaneEntry's innerHTML="") and destroy
-                // those buttons — the exact case the _openContentPane guard blocks. So
-                // the card's own abstract falls through to the in-tab tooltip below
-                // (vertical parity — a surface Rick already knows). Foreign indicators
-                // (center-column cards) still route to the pane, where the guard holds.
-                const isOwnActionRequired = !!indicator.closest( "#action-required-content" );
-
-                // Horizontal layout mode: route to Reading Pane instead of the
-                // legacy fixed-position tooltip. Design:
-                // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
-                if ( this._layoutMode === "horizontal" && !isOwnActionRequired ) {
-                    // Toggle (Rick, 2026-06-08): a second click on the indicator whose
-                    // abstract is ALREADY showing in the Reading Pane clears the pane
-                    // instead of re-opening it. Clicking a DIFFERENT indicator — or when
-                    // a doc-link is showing — switches to the new abstract rather than
-                    // toggling off (the predicate returns false → falls through to open).
-                    if ( this._abstractAlreadyShown( abstract ) ) {
-                        this._closeContentPane();
-                        return;
-                    }
-                    // Derive a short title from the source message if available.
-                    const card    = indicator.closest( '.conversation-pair, .notification-message, .sender-card' );
-                    const titleEl = card ? card.querySelector( '.message-text' ) : null;
-                    const title   = titleEl
-                        ? ( titleEl.textContent || "" ).trim().slice( 0, 60 )
-                        : "Notification details";
-                    this._openContentPane( "abstract", abstract, title );
-                    return;
-                }
-
-                const content = tooltip.querySelector( '.abstract-tooltip-content' );
-                // Render markdown with XSS protection (was: content.textContent = abstract)
-                content.innerHTML = this.renderMarkdown( abstract );
-
-                // Position near the indicator
-                const rect = indicator.getBoundingClientRect();
-
-                // Show hidden first so :has()-driven tier sizing takes effect, then measure
-                tooltip.style.visibility = 'hidden';
-                tooltip.classList.add( 'visible' );
-
-                requestAnimationFrame( () => {
-                    const tipRect        = tooltip.getBoundingClientRect();
-                    const tooltipHeight  = tipRect.height;
-                    const tooltipWidth   = tipRect.width;
-                    const viewportHeight = window.innerHeight;
-                    const viewportWidth  = window.innerWidth;
-
-                    // Position below indicator, flip above if it would clip viewport bottom
-                    let top = rect.bottom + 8;
-                    if ( top + tooltipHeight > viewportHeight - 10 ) {
-                        top = Math.max( 10, rect.top - tooltipHeight - 8 );
-                    }
-
-                    // Center on indicator horizontally, clamp to viewport
-                    let left = rect.left + ( rect.width / 2 ) - ( tooltipWidth / 2 );
-                    left = Math.max( 10, Math.min( left, viewportWidth - tooltipWidth - 10 ) );
-
-                    tooltip.style.top        = `${top}px`;
-                    tooltip.style.left       = `${left}px`;
-                    tooltip.style.visibility = 'visible';
-                } );
+                this._showAbstractFor( indicator, abstract );
 
             } else if ( !e.target.closest( '.abstract-tooltip' ) ) {
                 // Click outside closes tooltip
@@ -20988,7 +21013,9 @@ class NotificationsUI {
      * Ensures:
      *     - any other click is left untouched
      *     - the browser does not follow the link
-     *     - the row is read and shown in the task-body overlay; a failed read says so there
+     *     - the row is read and shown the way the abstract 📋 shows text: in the Reading Pane in
+     *       horizontal layout, in the tooltip beside the link otherwise; a failed read says so there
+     *     - no overlay opens and no tab opens
      */
     async _handleViewLinkClick( ev ) {
         const anchor = ev.target.closest( "a[href]" );
@@ -20997,7 +21024,7 @@ class NotificationsUI {
         if ( rowId === null ) return;
         ev.preventDefault();
         const row = await this._readTask( rowId );
-        this.openTaskBodyOverlay( row === null ? "Could not read this ticket." : this._taskOverlayText( row ), rowId.slice( 0, 8 ) );
+        this._showAbstractFor( anchor, row === null ? "Could not read this ticket." : this._taskOverlayText( row ), `Ticket ${rowId.slice( 0, 8 )}` );
     }
 
     /**

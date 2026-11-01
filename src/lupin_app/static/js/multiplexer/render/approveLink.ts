@@ -4,7 +4,7 @@
 // A manager asking Rick to approve rows writes each as a bullet with an ordinary markdown link:
 // `[approve ☐](/app/tasks/approve?row=<full uuid>) [📄](/app/tasks/view?row=<full uuid>)`.
 // Both links are actions, not destinations. The approve click sends the approve move and draws "approved ✅"
-// where the link was. The 📄 click reads the row and shows it in the shared task-body overlay.
+// where the link was. The 📄 click reads the row and shows it the way the abstract 📋 shows text.
 // A card drawn after a reload is checked once per row id: a row that has left the holding area
 // shows "approved ✅" (or its plain status when it was dropped), not a live link.
 //
@@ -15,7 +15,6 @@
 
 import type { HoldingAreaStore } from "../stores/HoldingAreaStore";
 import { normalizeDocLinkHref } from "./docLink";
-import { openTaskBodyOverlay } from "./taskBodyOverlay";
 import type { TaskItem } from "./taskListModel";
 
 /** Every approve link starts here, after loopback normalization. */
@@ -26,6 +25,9 @@ const ROW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 /** Every 📄 view link starts here, after loopback normalization. */
 export const VIEW_LINK_PREFIX = "/app/tasks/view?row=";
+
+/** Shows text the way the abstract 📋 does: in the Reading Pane or the tooltip, by layout. */
+export type AbstractShower = ( anchor: Element, abstract: string, title: string ) => void;
 
 /** Reads one row for the 📄 overlay and the redraw check; null when the read failed. */
 export type TaskReader = ( id: string ) => Promise<TaskItem | null>;
@@ -125,17 +127,18 @@ export function taskOverlayText( row: TaskItem ): string {
  * Ensures:
  *   - a non-view click is untouched and reports false
  *   - the browser does not follow the link
- *   - the row is read and shown in the shared task-body overlay; a failed read says so there
+ *   - the row is read and handed to `show` (the abstract 📋's own display code); a failed read says so there
+ *   - no overlay and no tab opens
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line.
-export function handleViewLinkClick( ev: Event, target: Element, reader: TaskReader ): boolean {
+export function handleViewLinkClick( ev: Event, target: Element, reader: TaskReader, show: AbstractShower ): boolean {
   const anchor = target.closest( "a[href]" );
   if ( anchor === null ) return false;
   const rowId = viewRowId( anchor.getAttribute( "href" ) );
   if ( rowId === null ) return false;
   ev.preventDefault();
   void reader( rowId ).then( ( row ) => {
-    openTaskBodyOverlay( row === null ? "Could not read this ticket." : taskOverlayText( row ), rowId.slice( 0, 8 ) );
+    show( anchor, row === null ? "Could not read this ticket." : taskOverlayText( row ), `Ticket ${ rowId.slice( 0, 8 ) }` );
   } );
   return true;
 }

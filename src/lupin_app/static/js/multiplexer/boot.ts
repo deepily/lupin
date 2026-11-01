@@ -818,6 +818,7 @@ function bootMultiplexer(): void {
   // #layout-mode-toggle). Reads the readingPane store (gesture/AR-driven) and
   // the actionRequired store (count only, for the WP5 lift/drain).
   // Row 27760534 — consoleSeat lets bust-out pop the console out to its own /app/console tab.
+  const abstractTooltip = createAbstractTooltip({ getLayoutMode: () => stores.readingPane.getLayoutMode() });
   const readingPaneRenderer = createReadingPaneRenderer({
     eventBus,
     stores      : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
@@ -826,6 +827,7 @@ function bootMultiplexer(): void {
     // Row 192fecdf — a card's 📄 view link and the redraw check on its approve links read one row.
     // A failed read is null, which leaves the link live and the overlay saying so.
     taskReader    : taskReaderFor(apiClient),
+    tooltip       : abstractTooltip,
   });
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
@@ -837,7 +839,7 @@ function bootMultiplexer(): void {
   sessionTranscriptRenderer.mount(sessionTranscriptMountEl);
   // Row fff605be — the 📋 indicator in VERTICAL layout. The Reading Pane owns
   // horizontal; this floating tooltip (legacy parity) owns vertical.
-  createAbstractTooltip({ getLayoutMode: () => stores.readingPane.getLayoutMode() }).mount();
+  abstractTooltip.mount();
   // Lane C (v0.1.9) — broadcast-to-all-CC compose card. Recipient auto-refresh
   // rides the existing store_session_strip_changed event (no new EventBus event).
   // B1 (01-A): mounted FIRST so its rendered subtree hosts the re-nested commons

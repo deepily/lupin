@@ -83,6 +83,7 @@ function mountOnce(): void {
   const Ctor = ( globalThis as Record<string, unknown> ).NotificationsUI as { prototype: object };
   ui = Object.create( Ctor.prototype ) as Record<string, unknown>;
   ui.debug = false;
+  ui._contentPaneHistory = [];
   ui.log   = (): void => {};
   ui.error = (): void => {};
   ui._openContentPane = ( _k: string, payload: string ): void => { paneOpens.push( payload ); };
@@ -106,6 +107,7 @@ beforeEach( () => {
   calls = []; tabOpens = []; paneOpens = []; release = []; table = {}; asked = [];
   buildDOM();
   document.getElementById( "task-body-overlay" )?.remove();
+  document.getElementById( "abstract-tooltip" )?.remove();
 } );
 
 before( () => {
@@ -207,24 +209,69 @@ const VIEW  = ( id: string ): string => `/app/tasks/view?row=${ id }`;
 const flush = async (): Promise<void> => { await settle(); await new Promise( ( r ) => setTimeout( r, 0 ) ); await settle(); };
 const host  = (): Element => document.getElementById( "action-required-content" ) as Element;
 
-test( "a 📄 link opens the overlay with title, priority, owner, status and the full body, and navigates nowhere", async () => {
-  table[ ROW_A ] = { title: "Fix X", priority: "P2", owner_persona: "krishna", status: "not_approved", body: "line one\nline two" };
-  const [ a ] = plantCard( [ VIEW( ROW_A ) ] );
+const FIX_X = { title: "Fix X", priority: "P2", owner_persona: "krishna", status: "not_approved", body: "line one\nline two" };
+const FACTS = "Fix X\nPriority: P2 · Owner: krishna · Status: not_approved\n\nline one\nline two";
+
+/** The floating tooltip the 📋 uses, with the content box the code writes into. */
+function plantTooltip(): Element {
+  document.getElementById( "abstract-tooltip" )?.remove();
+  const tip = document.createElement( "div" );
+  tip.id = "abstract-tooltip";
+  tip.innerHTML = '<div class="abstract-tooltip-content"></div>';
+  document.body.appendChild( tip );
+  return tip;
+}
+
+test( "horizontal: a 📄 link shows the row in the content pane like the 📋, with no overlay and no new tab", async () => {
+  table[ ROW_A ] = FIX_X;
+  ui._layoutMode = "horizontal";
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
   assert.equal( click( a! ), true, "claimed" );
   await flush();
   assert.deepEqual( asked, [ ROW_A ] );
-  const overlay = document.getElementById( "task-body-overlay" ) as Element;
-  assert.equal( overlay.querySelector( ".task-body-overlay-header" )?.textContent, `Task ${ ROW_A.slice( 0, 8 ) }` );
-  assert.equal( overlay.querySelector( ".task-body-overlay-body" )?.textContent, "Fix X\nPriority: P2 · Owner: krishna · Status: not_approved\n\nline one\nline two" );
+  assert.deepEqual( paneOpens, [ FACTS ], "the pane got the row text" );
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
   assert.deepEqual( tabOpens, [], "no new tab" );
   assert.deepEqual( calls, [], "viewing sends no approve" );
 } );
 
-test( "a 📄 link on a row that cannot be read says so in the overlay", async () => {
+test( "horizontal: a 📄 link inside the action-required card uses the tooltip, as that card's own 📋 does", async () => {
+  table[ ROW_A ] = FIX_X;
+  ui._layoutMode = "horizontal";
+  const tip = plantTooltip();
   const [ a ] = plantCard( [ VIEW( ROW_A ) ] );
   click( a! );
   await flush();
-  assert.equal( document.querySelector( ".task-body-overlay-body" )?.textContent, "Could not read this ticket." );
+  assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, FACTS );
+  assert.deepEqual( paneOpens, [], "the pane is left to the live response buttons" );
+} );
+
+test( "vertical: a 📄 link shows the row in the abstract tooltip, with no pane, no overlay and no new tab", async () => {
+  table[ ROW_A ] = FIX_X;
+  ui._layoutMode = "vertical";
+  const tip = plantTooltip();
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ] );
+  assert.equal( click( a! ), true, "claimed" );
+  await flush();
+  assert.equal( tip.classList.contains( "visible" ), true );
+  assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, FACTS );
+  assert.deepEqual( paneOpens, [], "no pane" );
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
+  assert.deepEqual( tabOpens, [], "no new tab" );
+} );
+
+test( "a 📄 link on a row that cannot be read says so, in the pane and in the tooltip", async () => {
+  ui._layoutMode = "horizontal";
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
+  click( a! );
+  await flush();
+  assert.deepEqual( paneOpens, [ "Could not read this ticket." ] );
+  ui._layoutMode = "vertical";
+  const tip = plantTooltip();
+  const [ b ] = plantCard( [ VIEW( ROW_A ) ] );
+  click( b! );
+  await flush();
+  assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, "Could not read this ticket." );
 } );
 
 test( "a malformed 📄 link and a click off any link are not claimed as views", () => {
@@ -327,14 +374,28 @@ test( "_readTask returns the row on 2xx, null on a non-2xx answer, and null when
   assert.equal( await reader( async () => { throw new Error( "down" ); } ), null );
 } );
 
-test( "a ticket body carrying an img tag is shown as text and creates no element in the overlay", async () => {
+// happy-dom does not run DOMPurify's removals, so this proves the routing: the row text reaches renderMarkdown in
+// both layouts, and what the sanitizer strips never becomes an element. The real browser proof is in
+// test_one_click_approve_link_both_clients.py.
+test( "a ticket body carrying an img tag goes through renderMarkdown and creates no img element in the pane or the tooltip", async () => {
   const evil = '<img src=x onerror="window.__pwned=1">';
+  const seen: string[] = [];
+  ui.renderMarkdown = ( text: string ): string => { seen.push( text ); return text.replace( /<img[^>]*>/g, "" ); };
   table[ ROW_A ] = { title: evil, status: "queued", body: `before ${ evil } after` };
+  ui._layoutMode = "vertical";
+  const tip = plantTooltip();
   const [ a ] = plantCard( [ VIEW( ROW_A ) ] );
   click( a! );
   await flush();
-  const overlay = document.getElementById( "task-body-overlay" ) as Element;
-  assert.ok( overlay.querySelector( ".task-body-overlay-body" )?.textContent?.includes( `before ${ evil } after` ), "the tag is visible as characters" );
-  assert.equal( overlay.querySelector( "img" ), null, "no img element exists" );
+  assert.ok( seen.some( ( t ) => t.includes( `before ${ evil } after` ) ), "the row text reached renderMarkdown" );
+  assert.ok( tip.textContent?.includes( "before" ), "the row was drawn" );
+  assert.equal( tip.querySelector( "img" ), null, "no img element exists" );
   assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
+  // Horizontal hands the text to _openContentPane, whose own renderer is covered by the pane's tests.
+  ui._layoutMode = "horizontal";
+  paneOpens.length = 0;
+  const [ b ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
+  click( b! );
+  await flush();
+  assert.ok( paneOpens[ 0 ]!.includes( `before ${ evil } after` ), "the pane was given the row text, to render as markdown" );
 } );

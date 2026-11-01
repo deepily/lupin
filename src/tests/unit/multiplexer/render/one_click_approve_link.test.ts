@@ -12,11 +12,17 @@
 
 import { test, before, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createStorageServiceForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import { createReadingPaneStore } from "../../../../lupin_app/static/js/multiplexer/stores/ReadingPaneStore";
+import { createAbstractTooltip } from "../../../../lupin_app/static/js/multiplexer/render/abstractTooltip";
+import type { AbstractTooltip } from "../../../../lupin_app/static/js/multiplexer/render/abstractTooltip";
 import { createReadingPaneRenderer } from "../../../../lupin_app/static/js/multiplexer/render/ReadingPaneRenderer";
 import type { ReadingPaneRenderer, WindowLike, WindowDocLike } from "../../../../lupin_app/static/js/multiplexer/render/ReadingPaneRenderer";
 import { approveRowId, viewRowId, taskOverlayText, markApproveLinks, handleViewLinkClick, taskReaderFor } from "../../../../lupin_app/static/js/multiplexer/render/approveLink";
@@ -30,13 +36,21 @@ const APPROVE  = ( id: string ): string => `/app/tasks/approve?row=${ id }`;
 const DOC_HREF = "/app/docs?path=lupin/src/rnd/a-real-doc.md";
 
 let active  : ReadingPaneRenderer | null = null;
+let tip     : AbstractTooltip | null = null;
 let calls   : Array<{ id: string; status: string; extras: unknown }>;
 let release : Array<( r: HoldingTransitionResult ) => void>;
 let opens   : unknown[];
 
-before( () => { if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register(); } );
+const VENDOR = resolve( dirname( fileURLToPath( import.meta.url ) ), "../../../../lupin_app/static/js/vendor" );
+
+// The real vendored marked and DOMPurify, so the pane and the tooltip render the way the page does.
+before( () => {
+  if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
+  vm.runInThisContext( readFileSync( resolve( VENDOR, "marked.min.js" ), "utf8" ) );
+  vm.runInThisContext( readFileSync( resolve( VENDOR, "purify.min.js" ), "utf8" ) );
+} );
 beforeEach( () => { document.body.replaceChildren(); calls = []; release = []; opens = []; } );
-afterEach( () => { if ( active !== null ) { active.unmount(); active = null; } } );
+afterEach( () => { if ( active !== null ) { active.unmount(); active = null; } if ( tip !== null ) { tip.unmount(); tip = null; } } );
 
 const settle = async (): Promise<void> => { for ( let i = 0; i < 5; i++ ) await Promise.resolve(); };
 
@@ -49,13 +63,16 @@ function recorder(): ApproveSender {
   };
 }
 
-function setup( approveSender?: ApproveSender, taskReader?: TaskReader ): HTMLElement {
+/** Mount the renderer, vertical by default; `withTooltip: false` builds no tooltip. */
+function setup( approveSender?: ApproveSender, taskReader?: TaskReader, layout: "vertical" | "horizontal" = "vertical", withTooltip = true, arOwnsPane = false ): HTMLElement {
   const bus     = createEventBusForTesting();
   const storage = createStorageServiceForTesting( bus );
   const store   = createReadingPaneStore( { bus, storage } );
   const win: WindowLike = {
     open( ...args: unknown[] ): WindowDocLike | null { opens.push( args ); return { document: { open() {}, write() {}, close() {} } }; },
   } as WindowLike;
+  const tooltip = createAbstractTooltip( { getLayoutMode: () => store.getLayoutMode(), schedule: ( fn ) => fn() } );
+  if ( withTooltip ) { tooltip.mount(); tip = tooltip; }
   const shell = document.createElement( "div" );
   shell.className = "content-shell";
   shell.innerHTML = `
@@ -74,13 +91,15 @@ function setup( approveSender?: ApproveSender, taskReader?: TaskReader ): HTMLEl
   document.body.appendChild( shell );
   const renderer = createReadingPaneRenderer( {
     eventBus : bus,
-    stores   : { readingPane: store, actionRequired: { list: () => [] } },
+    stores   : { readingPane: store, actionRequired: { list: () => ( arOwnsPane ? [ { state: "pending" } ] : [] ) } },
     windowRef: win,
     ...( approveSender === undefined ? {} : { approveSender } ),
     ...( taskReader === undefined ? {} : { taskReader } ),
+    ...( withTooltip ? { tooltip } : {} ),
   } );
   renderer.mount( shell );
   active = renderer;
+  if ( layout === "horizontal" ) ( shell.querySelector( "#layout-mode-toggle" ) as HTMLElement ).click();
   return shell;
 }
 
@@ -201,27 +220,83 @@ function table( rows: Record<string, Row | null> ): { reader: TaskReader; asked:
   return { asked, reader: async ( id ) => { asked.push( id ); return rows[ id ] ?? null; } };
 }
 
-test( "a 📄 link opens the overlay with title, priority, owner, status and the full body, and navigates nowhere", async () => {
-  const { reader, asked } = table( { [ ROW_A ]: { title: "Fix X", priority: "P2", owner_persona: "krishna", status: "not_approved", body: "line one\nline two" } } );
-  const shell = setup( recorder(), reader );
+const ROW_FACTS = "Fix X\nPriority: P2 · Owner: krishna · Status: not_approved\n\nline one\nline two";
+const paneText  = (): string => ( document.getElementById( "content-pane-body" ) as Element ).textContent ?? "";
+const tipText   = (): string => ( document.querySelector( "#abstract-tooltip .abstract-tooltip-content" ) as Element ).textContent ?? "";
+const tipShown  = (): boolean => ( document.getElementById( "abstract-tooltip" ) as Element ).classList.contains( "visible" );
+const FIX_X     = { title: "Fix X", priority: "P2", owner_persona: "krishna", status: "not_approved", body: "line one\nline two" };
+
+test( "horizontal: a 📄 link shows the row in the content pane, like the 📋, with no overlay and no new tab", async () => {
+  const { reader, asked } = table( { [ ROW_A ]: FIX_X } );
+  const shell = setup( recorder(), reader, "horizontal" );
   const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
   assert.equal( click( a! ), true, "claimed" );
   await flush();
   assert.deepEqual( asked, [ ROW_A ] );
-  const overlay = document.getElementById( "task-body-overlay" ) as Element;
-  assert.equal( overlay.querySelector( ".task-body-overlay-header" )?.textContent, `Task ${ ROW_A.slice( 0, 8 ) }` );
-  assert.equal( overlay.querySelector( ".task-body-overlay-body" )?.textContent, "Fix X\nPriority: P2 · Owner: krishna · Status: not_approved\n\nline one\nline two" );
+  for ( const part of [ "Fix X", "Priority: P2", "Owner: krishna", "Status: not_approved", "line one", "line two" ] ) assert.ok( paneText().includes( part ), part );
+  assert.equal( ( document.getElementById( "content-pane-title" ) as Element ).textContent, `Ticket ${ ROW_A.slice( 0, 8 ) }` );
+  assert.equal( tipShown(), false, "the tooltip stays shut in horizontal layout" );
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
   assert.deepEqual( opens, [], "no new tab" );
   assert.deepEqual( calls, [], "viewing sends no approve" );
 } );
 
-test( "a 📄 link on a row that cannot be read says so in the overlay", async () => {
-  const { reader } = table( {} );
+test( "horizontal: a second click on the same 📄 link closes the pane, as the 📋 does", async () => {
+  const { reader } = table( { [ ROW_A ]: FIX_X } );
+  const shell = setup( recorder(), reader, "horizontal" );
+  const [ a ] = plant( shell.querySelector( "#sender-cards-container" ) as Element, [ VIEW( ROW_A ) ] );
+  click( a! ); await flush();
+  assert.ok( paneText().includes( "line one" ) );
+  click( a! ); await flush();
+  assert.equal( ( document.getElementById( "content-pane" ) as HTMLElement ).hidden, true );
+} );
+
+test( "vertical: a 📄 link shows the row in the abstract tooltip, with no pane, no overlay and no new tab", async () => {
+  const { reader } = table( { [ ROW_A ]: FIX_X } );
   const shell = setup( recorder(), reader );
+  const [ a ] = plant( shell.querySelector( "#sender-cards-container" ) as Element, [ VIEW( ROW_A ) ] );
+  assert.equal( click( a! ), true, "claimed" );
+  await flush();
+  assert.equal( tipShown(), true );
+  for ( const part of [ "Fix X", "Priority: P2", "Owner: krishna", "Status: not_approved", "line one", "line two" ] ) assert.ok( tipText().includes( part ), part );
+  assert.equal( ( document.getElementById( "content-pane" ) as HTMLElement ).hidden, true, "the pane stays shut" );
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
+  assert.deepEqual( opens, [], "no new tab" );
+} );
+
+test( "horizontal with a live action-required card owning the pane: the 📄 link falls back to the tooltip and the pane is untouched", async () => {
+  const { reader } = table( { [ ROW_A ]: FIX_X } );
+  const shell = setup( recorder(), reader, "horizontal", true, true );
   const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
   click( a! );
   await flush();
-  assert.equal( document.querySelector( ".task-body-overlay-body" )?.textContent, "Could not read this ticket." );
+  assert.equal( tipShown(), true );
+  assert.ok( tipText().includes( "line one" ) );
+  assert.equal( paneText().includes( "line one" ), false, "the response card keeps the pane; the ticket is not drawn over it" );
+  assert.deepEqual( opens, [], "no new tab" );
+} );
+
+test( "vertical without a tooltip: the 📄 click is claimed, opens nothing and does not throw", async () => {
+  const { reader } = table( { [ ROW_A ]: FIX_X } );
+  const shell = setup( recorder(), reader, "vertical", false );
+  const [ a ] = plant( shell.querySelector( "#sender-cards-container" ) as Element, [ VIEW( ROW_A ) ] );
+  assert.equal( click( a! ), true );
+  await flush();
+  assert.deepEqual( opens, [] );
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
+} );
+
+test( "a 📄 link on a row that cannot be read says so, in the pane and in the tooltip", async () => {
+  for ( const layout of [ "horizontal", "vertical" ] as const ) {
+    document.body.replaceChildren();
+    if ( tip !== null ) { tip.unmount(); tip = null; }
+    const shell = setup( recorder(), table( {} ).reader, layout );
+    const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
+    click( a! );
+    await flush();
+    assert.ok( ( layout === "horizontal" ? paneText() : tipText() ).includes( "Could not read this ticket." ), layout );
+    if ( active !== null ) { active.unmount(); active = null; }
+  }
 } );
 
 test( "without a reader a 📄 link is left alone", () => {
@@ -238,7 +313,7 @@ test( "viewRowId reads both href forms and refuses the approve path and malforme
 
 test( "handleViewLinkClick reports false for a click off any link", () => {
   const el = document.createElement( "div" );
-  assert.equal( handleViewLinkClick( new MouseEvent( "click" ), el, async () => null ), false );
+  assert.equal( handleViewLinkClick( new MouseEvent( "click" ), el, async () => null, () => { throw new Error( "must not show" ); } ), false );
 } );
 
 test( "taskOverlayText fills a missing field with a dash, unowned or (no body), never undefined", () => {
@@ -369,17 +444,33 @@ test( "with a reader set, a doc link is still not claimed as a view link", () =>
   assert.deepEqual( calls, [] );
 } );
 
-test( "a ticket body carrying an img tag is shown as text and creates no element in the overlay", async () => {
+// happy-dom does not run DOMPurify's removals (an <img src=x> would start a real fetch and kill the runner),
+// so this proves the routing: the row's text reaches the sanitizer in both layouts, and what the sanitizer
+// strips never becomes an element. The real browser proof is in test_one_click_approve_link_both_clients.py.
+test( "a ticket body carrying an img tag goes through the sanitizer and creates no img element in the pane or the tooltip", async () => {
   const evil = '<img src=x onerror="window.__pwned=1">';
-  const { reader } = table( { [ ROW_A ]: { title: evil, status: "queued", body: `before ${ evil } after` } } );
-  const shell = setup( recorder(), reader );
-  const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
-  click( a! );
-  await flush();
-  const overlay = document.getElementById( "task-body-overlay" ) as Element;
-  assert.ok( overlay.querySelector( ".task-body-overlay-body" )?.textContent?.includes( `before ${ evil } after` ), "the tag is visible as characters" );
-  assert.equal( overlay.querySelector( "img" ), null, "no img element exists" );
-  assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
+  const w     = globalThis as unknown as { DOMPurify: { sanitize( h: string ): string } };
+  const real  = w.DOMPurify;
+  const seen: string[] = [];
+  w.DOMPurify = { sanitize: ( h: string ): string => { seen.push( h ); return h.replace( /<img[^>]*>/g, "" ); } };
+  try {
+    for ( const layout of [ "horizontal", "vertical" ] as const ) {
+      document.body.replaceChildren();
+      if ( tip !== null ) { tip.unmount(); tip = null; }
+      if ( active !== null ) { active.unmount(); active = null; }
+      seen.length = 0;
+      const { reader } = table( { [ ROW_A ]: { title: evil, status: "queued", body: `before ${ evil } after` } } );
+      const shell = setup( recorder(), reader, layout );
+      const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
+      click( a! );
+      await flush();
+      assert.ok( seen.some( ( h ) => h.includes( "before" ) && h.includes( "<img" ) ), `${ layout }: the row text reached the sanitizer` );
+      const host = document.getElementById( layout === "horizontal" ? "content-pane-body" : "abstract-tooltip" ) as Element;
+      assert.ok( host.textContent?.includes( "before" ), `${ layout }: the row was drawn` );
+      assert.equal( host.querySelector( "img" ), null, `${ layout }: no img element exists` );
+      assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
+    }
+  } finally { w.DOMPurify = real; }
 } );
 
 test( "taskReaderFor reads the row's own path with the id encoded, and answers null when the read fails", async () => {

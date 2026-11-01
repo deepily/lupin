@@ -130,6 +130,8 @@ export interface ReadingPaneRendererOptions {
   approveSender? : ApproveSender;
   /** Reads a row for a card's 📄 link and for the redraw check; without it both are off. */
   taskReader? : TaskReader;
+  /** The abstract tooltip for the 📄 link in vertical layout. */
+  tooltip? : { showFor( anchor: Element, abstract: string ): void };
 }
 
 /**
@@ -158,6 +160,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private readonly consoleSeat    : ( () => string | null ) | null;
   private readonly approveSender  : ApproveSender | null;
   private readonly taskReader     : TaskReader | null;
+  private readonly tooltip        : { showFor( anchor: Element, abstract: string ): void } | null;
   private stopApproveWatch        : ( () => void ) | null = null;
   private readonly unsubscribers  : Array<() => void> = [];
 
@@ -211,6 +214,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.consoleSeat    = opts.consoleSeat ?? null;
     this.approveSender  = opts.approveSender ?? null;
     this.taskReader     = opts.taskReader ?? null;
+    this.tooltip        = opts.tooltip ?? null;
   }
 
   // -------------------------------------------------------------------------
@@ -557,7 +561,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     // surface (the action-required card) the doc-link branch opens a new tab for what it claims,
     // and an approve link must never navigate anywhere.
     if (this.approveSender !== null && handleApproveLinkClick(ev, target, this.approveSender)) return;
-    if (this.taskReader !== null && handleViewLinkClick(ev, target, this.taskReader)) return;
+    if (this.taskReader !== null && handleViewLinkClick(ev, target, this.taskReader, (a, text, title) => this.showAbstractFor(a, text, title))) return;
 
     if (this.routeDocLinkClick(ev, target)) return;
 
@@ -578,15 +582,36 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
       // encodeURIComponent to BOTH mux writer + reader — the opposite of this
       // fix. The raw/raw symmetry is the intended end-state.
       const abstract = indicator.getAttribute("data-abstract") ?? "";
-      // Second click on the SAME abstract toggles the pane closed (97bfb8c).
-      if (this.store.isAbstractShown(abstract)) {
-        this.store.close();
-        return;
-      }
-      this.store.open("abstract", abstract, this.deriveIndicatorTitle(indicator));
+      this.openAbstractInPane(abstract, this.deriveIndicatorTitle(indicator));
       return;
     }
 
+  }
+
+  /**
+   * Open an abstract in the pane, or close it when already showing.
+   *
+   * A second click on the identical abstract toggles the pane closed (97bfb8c).
+   * Returns false when the pane refused to open, because a live action-required card owns it.
+   */
+  private openAbstractInPane( abstract: string, title: string ): boolean {
+    if (this.store.isAbstractShown(abstract)) {
+      this.store.close();
+      return true;
+    }
+    return this.store.open("abstract", abstract, title);
+  }
+
+  /**
+   * Show text the way an abstract 📋 click does.
+   *
+   * Horizontal layout uses the pane and any other layout uses the tooltip beside `anchor`.
+   * When a live action-required card owns the pane the tooltip is used, as in the legacy client.
+   * The 📄 ticket link calls this, so it cannot open anything else.
+   */
+  private showAbstractFor( anchor: Element, abstract: string, title: string ): void {
+    if (this.store.getLayoutMode() === "horizontal" && this.openAbstractInPane(abstract, title)) return;
+    if (this.tooltip !== null) this.tooltip.showFor(anchor, abstract);
   }
 
   /**
