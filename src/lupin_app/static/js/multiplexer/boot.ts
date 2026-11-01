@@ -822,6 +822,12 @@ function bootMultiplexer(): void {
     stores      : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
     consoleSeat : () => sessionTranscriptRenderer.showingSeat(),
     approveSender : stores.holdingArea,
+    // Row 192fecdf — a card's 📄 view link and the redraw check on its approve links read one row.
+    // A failed read is null, which leaves the link live and the overlay saying so.
+    taskReader    : async (id) => {
+      try { return await apiClient.get<import("./render/taskListModel").TaskItem>(`/api/tasks/${encodeURIComponent(id)}`); }
+      catch { return null; }
+    },
   });
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");

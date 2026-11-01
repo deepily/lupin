@@ -34,7 +34,7 @@ import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
-import { handleApproveLinkClick, type ApproveSender } from "./approveLink";
+import { handleApproveLinkClick, handleViewLinkClick, observeApproveLinks, type ApproveSender, type TaskReader } from "./approveLink";
 import { buildConsolePageHref } from "../console/consolePageUrl";
 import { bindPodcastLinks } from "./podcastLinks";
 
@@ -128,6 +128,8 @@ export interface ReadingPaneRendererOptions {
   consoleSeat? : () => string | null;
   /** The sender behind a one-click approve link; without it, approve links are left alone. */
   approveSender? : ApproveSender;
+  /** Reads a row for a card's 📄 link and for the redraw check; without it both are off. */
+  taskReader? : TaskReader;
 }
 
 /**
@@ -155,6 +157,8 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private readonly win            : WindowLike;
   private readonly consoleSeat    : ( () => string | null ) | null;
   private readonly approveSender  : ApproveSender | null;
+  private readonly taskReader     : TaskReader | null;
+  private stopApproveWatch        : ( () => void ) | null = null;
   private readonly unsubscribers  : Array<() => void> = [];
 
   private mounted   : boolean = false;
@@ -206,6 +210,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.win            = opts.windowRef ?? ( globalThis as unknown as { window: WindowLike } ).window;
     this.consoleSeat    = opts.consoleSeat ?? null;
     this.approveSender  = opts.approveSender ?? null;
+    this.taskReader     = opts.taskReader ?? null;
   }
 
   // -------------------------------------------------------------------------
@@ -259,6 +264,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.splitter.addEventListener("mousedown", this.onSplitterDown);
     document.addEventListener("click", this.onDocClick);
     this.unbindPodcast = bindPodcastLinks();
+    if (this.taskReader !== null) this.stopApproveWatch = observeApproveLinks(document.body, this.taskReader);
 
     this.updateToggleTooltip();
 
@@ -297,6 +303,8 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     document.removeEventListener("click", this.onDocClick);
     this.unbindPodcast?.();
     this.unbindPodcast = null;
+    this.stopApproveWatch?.();
+    this.stopApproveWatch = null;
     this.detachDragListeners();
 
     // Surrender any lifted AR widget back home so unmount leaves the DOM clean.
@@ -549,6 +557,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     // surface (the action-required card) the doc-link branch opens a new tab for what it claims,
     // and an approve link must never navigate anywhere.
     if (this.approveSender !== null && handleApproveLinkClick(ev, target, this.approveSender)) return;
+    if (this.taskReader !== null && handleViewLinkClick(ev, target, this.taskReader)) return;
 
     if (this.routeDocLinkClick(ev, target)) return;
 

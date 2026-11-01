@@ -4,7 +4,11 @@ E2E test of one-click ticket approval from an action-required card, on both clie
 
 A card lists three held rows, each with its own approve link. Rick clicks two of them.
 Exactly those two rows must read `queued` afterwards and the third must still read `not_approved`.
-The clicked links must read "Approved ✓", and no new tab may open.
+The clicked links must read a disabled "approved ✅", and no new tab may open.
+
+Each feature is proved in each client by its own test, so a pass in one client cannot cover a
+failure in the other. The three features are the ☐ to "approved ✅" change on a click.
+Next is the 📄 view link's overlay. Last is a card drawn after a row has left the holding area.
 
 The :8000 login is not Rick's and cannot be made so. Two kinds of test follow from that.
 
@@ -76,7 +80,7 @@ def _seed():
         items = [
             TaskItem(
                 item_class="task", title=f"E2E one-click approve row {i} {uuid.uuid4().hex[ :6 ]}",
-                project="lupin", created_by=MARKER, owner_persona=None,
+                project="lupin", created_by=MARKER, owner_persona=None, body=f"E2E body {i}\nsecond line {i}",
                 accountable_manager=None, status="not_approved", blocked_by=[ ], priority="P3",
             )
             for i in range( ROWS )
@@ -84,7 +88,7 @@ def _seed():
         for item in items:
             session.add( item )
         session.flush()
-        return [ { "id": str( i.id ), "title": i.title } for i in items ]
+        return [ { "id": str( i.id ), "title": i.title, "index": n } for n, i in enumerate( items ) ]
 
 
 def _statuses( ids ):
@@ -95,12 +99,16 @@ def _statuses( ids ):
         return [ session.get( TaskItem, uuid.UUID( i ) ).status for i in ids ]
 
 
-def _set_queued( row_id ):
+def _set_status( row_id, status ):
     from cosa.rest.db.database import get_db
     from cosa.rest.postgres_models import TaskItem
 
     with get_db() as session:
-        session.get( TaskItem, uuid.UUID( row_id ) ).status = "queued"
+        session.get( TaskItem, uuid.UUID( row_id ) ).status = status
+
+
+def _set_queued( row_id ):
+    _set_status( row_id, "queued" )
 
 
 @pytest.fixture( scope="function" )
@@ -154,18 +162,15 @@ def _login_tokens( page ):
     )
 
 
-# ---------------------------------------------------------------------------
-# Legacy client
-# ---------------------------------------------------------------------------
 
-def test_one_click_approve_legacy_two_clicks_approve_exactly_two_rows( notifications_page, held ):
-    page    = notifications_page
-    posted  = []
-    popups  = []
-    page.context.on( "page", lambda p: popups.append( p ) )
-    _operator_door( page, posted )
+def _show_card_legacy( page, rows ):
+    """
+    Draw the card in the legacy client and open its abstract tooltip.
 
-    # Horizontal layout lifts the card into the shared pane: the surface whose doc links open a tab.
+    Ensures:
+        - the horizontal layout is on, so the card is lifted into the shared pane
+        - returns the tooltip content locator
+    """
     page.locator( "#layout-mode-toggle" ).click()
     page.evaluate(
         """( args ) => {
@@ -174,36 +179,19 @@ def test_one_click_approve_legacy_two_clicks_approve_exactly_two_rows( notificat
                 response_type: 'yes_no', message: 'Approve these tickets?', title: 'Approve these tickets?',
                 abstract: args.abstract, timeout_seconds: 300, sender_id: args.sender } } );
         }""",
-        { "nid": CARD_ID, "abstract": _abstract_for( held ), "sender": SENDER },
+        { "nid": CARD_ID, "abstract": _abstract_for( rows ), "sender": SENDER },
     )
     page.locator( "#action-required-content .abstract-indicator" ).first.click()
-    tooltip_links = page.locator( "#abstract-tooltip .abstract-tooltip-content a[href*='/app/tasks/approve']" )
-    expect( tooltip_links ).to_have_count( ROWS, timeout=TIMEOUT_MS )
-
-    tooltip_links.nth( 0 ).click()
-    expect( page.locator( "#abstract-tooltip .approve-link-approved" ) ).to_have_count( 1, timeout=TIMEOUT_MS )
-    page.locator( "#abstract-tooltip .abstract-tooltip-content a[href*='/app/tasks/approve']" ).nth( 1 ).click()
-    expect( page.locator( "#abstract-tooltip .approve-link-approved" ) ).to_have_count( 2, timeout=TIMEOUT_MS )
-
-    assert [ row_id for row_id, _ in posted ] == [ held[ 0 ][ "id" ], held[ 2 ][ "id" ] ], \
-        "one request per clicked link, for that link's row, in click order"
-    assert all( body[ "to_status" ] == "queued" for _, body in posted )
-    assert _statuses( [ r[ "id" ] for r in held ] ) == [ "queued", "not_approved", "queued" ]
-    assert popups == [], "an approve link must never open a tab"
-    assert page.url.startswith( f"{BASE_URL}/app/notifications" ), "and must never navigate this one"
+    return page.locator( "#abstract-tooltip .abstract-tooltip-content" )
 
 
-# ---------------------------------------------------------------------------
-# Multiplexer
-# ---------------------------------------------------------------------------
+def _show_card_multiplexer( page, rows ):
+    """
+    Open the multiplexer and draw the card.
 
-def test_one_click_approve_multiplexer_two_clicks_approve_exactly_two_rows( logged_in_page, held ):
-    page   = logged_in_page
-    posted = []
-    popups = []
-    page.context.on( "page", lambda p: popups.append( p ) )
-    _operator_door( page, posted )
-
+    Ensures:
+        - returns the card locator
+    """
     _login_tokens( page )
     page.goto( f"{BASE_URL}/app/multiplexer", wait_until="networkidle", timeout=15_000 )
     page.wait_for_function(
@@ -220,21 +208,149 @@ def test_one_click_approve_multiplexer_two_clicks_approve_exactly_two_rows( logg
                     timestamp: '2026-10-31T18:00:00.000Z', response_requested: true, response_type: 'yes_no',
                     timeout_seconds: 300, abstract: args.abstract } } } );
         }""",
-        { "nid": CARD_ID, "abstract": _abstract_for( held ), "sender": SENDER },
+        { "nid": CARD_ID, "abstract": _abstract_for( rows ), "sender": SENDER },
     )
-    card  = page.locator( f'[data-testid="multiplexer-action-required"][data-id-hash="{CARD_ID}"]' )
+    return page.locator( f'[data-testid="multiplexer-action-required"][data-id-hash="{CARD_ID}"]' )
+
+
+def _expect_overlay_shows_row( page, row ):
+    """The shared overlay shows the row's title, priority, owner, status and body."""
+    overlay = page.locator( "#task-body-overlay .task-body-overlay-body" )
+    expect( overlay ).to_contain_text( row[ "title" ], timeout=TIMEOUT_MS )
+    text = overlay.inner_text()
+    assert "Priority: P3" in text and "Owner: unowned" in text and "Status: not_approved" in text, text
+    assert f"E2E body {row[ 'index' ]}\nsecond line {row[ 'index' ]}" in text, text
+    expect( page.locator( "#task-body-overlay .task-body-overlay-header" ) ).to_have_text( f"Task {row[ 'id' ][ :8 ]}" )
+
+
+# ---------------------------------------------------------------------------
+# Legacy client
+# ---------------------------------------------------------------------------
+
+def test_one_click_approve_legacy_two_clicks_approve_exactly_two_rows( notifications_page, held ):
+    page    = notifications_page
+    posted  = []
+    popups  = []
+    page.context.on( "page", lambda p: popups.append( p ) )
+    _operator_door( page, posted )
+
+    content = _show_card_legacy( page, held )
+    tooltip_links = content.locator( "a[href*='/app/tasks/approve']" )
+    expect( tooltip_links ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    for i in range( ROWS ):
+        expect( tooltip_links.nth( i ) ).to_have_text( "approve ☐" )
+
+    tooltip_links.nth( 0 ).click()
+    expect( content.locator( ".approve-link-approved" ) ).to_have_count( 1, timeout=TIMEOUT_MS )
+    content.locator( "a[href*='/app/tasks/approve']" ).nth( 1 ).click()
+    expect( content.locator( ".approve-link-approved" ) ).to_have_count( 2, timeout=TIMEOUT_MS )
+
+    approved = content.locator( ".approve-link-approved" )
+    for i in range( 2 ):
+        expect( approved.nth( i ) ).to_have_text( "approved ✅" )
+        expect( approved.nth( i ) ).to_have_attribute( "aria-disabled", "true" )
+    assert [ row_id for row_id, _ in posted ] == [ held[ 0 ][ "id" ], held[ 2 ][ "id" ] ], \
+        "one request per clicked link, for that link's row, in click order"
+    assert all( body[ "to_status" ] == "queued" for _, body in posted )
+    assert _statuses( [ r[ "id" ] for r in held ] ) == [ "queued", "not_approved", "queued" ]
+    assert popups == [], "an approve link must never open a tab"
+    assert page.url.startswith( f"{BASE_URL}/app/notifications" ), "and must never navigate this one"
+
+
+def test_one_click_approve_legacy_view_link_shows_the_row_in_place( notifications_page, held ):
+    page   = notifications_page
+    popups = []
+    page.context.on( "page", lambda p: popups.append( p ) )
+
+    content = _show_card_legacy( page, held )
+    views = content.locator( "a[href*='/app/tasks/view']" )
+    expect( views ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    expect( views.nth( 1 ) ).to_have_text( "📄" )
+    views.nth( 1 ).click()
+
+    _expect_overlay_shows_row( page, held[ 1 ] )
+    assert popups == [], "a view link must never open a tab"
+    assert page.url.startswith( f"{BASE_URL}/app/notifications" ), "and must never navigate this one"
+    assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * ROWS, "viewing moves nothing"
+
+
+def test_one_click_approve_legacy_redrawn_card_shows_each_rows_state( notifications_page, held ):
+    page = notifications_page
+    _set_status( held[ 1 ][ "id" ], "queued" )
+    _set_status( held[ 2 ][ "id" ], "dropped" )
+
+    content = _show_card_legacy( page, held )
+
+    expect( content.locator( ".approve-link-approved" ) ).to_have_count( 1, timeout=TIMEOUT_MS )
+    expect( content.locator( ".approve-link-approved" ) ).to_have_text( "approved ✅" )
+    expect( content.locator( ".approve-link-closed" ) ).to_have_text( "dropped" )
+    live = content.locator( "a[href*='/app/tasks/approve']" )
+    expect( live ).to_have_count( 1 )
+    expect( live ).to_have_attribute( "href", f"/app/tasks/approve?row={held[ 0 ][ 'id' ]}" )
+
+
+# ---------------------------------------------------------------------------
+# Multiplexer
+# ---------------------------------------------------------------------------
+
+def test_one_click_approve_multiplexer_two_clicks_approve_exactly_two_rows( logged_in_page, held ):
+    page   = logged_in_page
+    posted = []
+    popups = []
+    page.context.on( "page", lambda p: popups.append( p ) )
+    _operator_door( page, posted )
+
+    card  = _show_card_multiplexer( page, held )
     links = card.locator( "a[href*='/app/tasks/approve']" )
     expect( links ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    for i in range( ROWS ):
+        expect( links.nth( i ) ).to_have_text( "approve ☐" )
 
     links.nth( 0 ).click()
     expect( card.locator( ".approve-link-approved" ) ).to_have_count( 1, timeout=TIMEOUT_MS )
     card.locator( "a[href*='/app/tasks/approve']" ).nth( 1 ).click()
     expect( card.locator( ".approve-link-approved" ) ).to_have_count( 2, timeout=TIMEOUT_MS )
 
+    approved = card.locator( ".approve-link-approved" )
+    for i in range( 2 ):
+        expect( approved.nth( i ) ).to_have_text( "approved ✅" )
+        expect( approved.nth( i ) ).to_have_attribute( "aria-disabled", "true" )
     assert [ row_id for row_id, _ in posted ] == [ held[ 0 ][ "id" ], held[ 2 ][ "id" ] ]
     assert _statuses( [ r[ "id" ] for r in held ] ) == [ "queued", "not_approved", "queued" ]
     assert popups == [], "an approve link must never open a tab"
     assert page.url.startswith( f"{BASE_URL}/app/multiplexer" )
+
+
+def test_one_click_approve_multiplexer_view_link_shows_the_row_in_place( logged_in_page, held ):
+    page   = logged_in_page
+    popups = []
+    page.context.on( "page", lambda p: popups.append( p ) )
+
+    card  = _show_card_multiplexer( page, held )
+    views = card.locator( "a[href*='/app/tasks/view']" )
+    expect( views ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    expect( views.nth( 1 ) ).to_have_text( "📄" )
+    views.nth( 1 ).click()
+
+    _expect_overlay_shows_row( page, held[ 1 ] )
+    assert popups == [], "a view link must never open a tab"
+    assert page.url.startswith( f"{BASE_URL}/app/multiplexer" )
+    assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * ROWS, "viewing moves nothing"
+
+
+def test_one_click_approve_multiplexer_redrawn_card_shows_each_rows_state( logged_in_page, held ):
+    page = logged_in_page
+    _set_status( held[ 1 ][ "id" ], "queued" )
+    _set_status( held[ 2 ][ "id" ], "dropped" )
+
+    card = _show_card_multiplexer( page, held )
+
+    expect( card.locator( ".approve-link-approved" ) ).to_have_count( 1, timeout=TIMEOUT_MS )
+    expect( card.locator( ".approve-link-approved" ) ).to_have_text( "approved ✅" )
+    expect( card.locator( ".approve-link-closed" ) ).to_have_text( "dropped" )
+    live = card.locator( "a[href*='/app/tasks/approve']" )
+    expect( live ).to_have_count( 1 )
+    expect( live ).to_have_attribute( "href", f"/app/tasks/approve?row={held[ 0 ][ 'id' ]}" )
 
 
 # ---------------------------------------------------------------------------
@@ -261,3 +377,25 @@ def test_one_click_approve_landing_page_refuses_a_short_id( logged_in_page ):
     page.goto( f"{BASE_URL}/app/tasks/approve?row=a3975cf4", wait_until="networkidle", timeout=15_000 )
     expect( page.get_by_test_id( "task-approve-error" ) ).to_contain_text( "full ticket id", timeout=TIMEOUT_MS )
     expect( page.get_by_test_id( "task-approve-row" ) ).to_be_hidden()
+
+
+def test_task_view_landing_page_shows_the_row_and_changes_nothing( logged_in_page, held ):
+    page = logged_in_page
+    _login_tokens( page )
+    row = held[ 0 ]
+
+    page.goto( f"{BASE_URL}/app/tasks/view?row={row[ 'id' ]}", wait_until="networkidle", timeout=15_000 )
+
+    expect( page.get_by_test_id( "task-view-title" ) ).to_have_text( row[ "title" ], timeout=TIMEOUT_MS )
+    expect( page.get_by_test_id( "task-view-priority" ) ).to_have_text( "P3" )
+    expect( page.get_by_test_id( "task-view-owner" ) ).to_have_text( "unowned" )
+    expect( page.get_by_test_id( "task-view-status" ) ).to_have_text( "not_approved" )
+    expect( page.get_by_test_id( "task-view-body" ) ).to_have_text( "E2E body 0\nsecond line 0" )
+    assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * ROWS
+
+
+def test_task_view_landing_page_refuses_a_short_id( logged_in_page ):
+    page = logged_in_page
+    page.goto( f"{BASE_URL}/app/tasks/view?row=a3975cf4", wait_until="networkidle", timeout=15_000 )
+    expect( page.get_by_test_id( "task-view-error" ) ).to_contain_text( "full ticket id", timeout=TIMEOUT_MS )
+    expect( page.get_by_test_id( "task-view-row" ) ).to_be_hidden()

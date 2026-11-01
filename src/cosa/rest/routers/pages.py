@@ -40,6 +40,7 @@ _ROUTE_TABLE = {
     "/app/audio"                 : "html/audio-player.html",
     "/app/console"               : "html/console.html",
     "/app/tasks/approve"         : "html/task-approve.html",
+    "/app/tasks/view"            : "html/task-view.html",
     "/app/pair-labelling"        : "html/pair-labelling.html",
 }
 
@@ -172,6 +173,20 @@ async def page_tasks_approve():
           when its button is pressed
     """
     return _serve_file( _ROUTE_TABLE[ "/app/tasks/approve" ] )
+
+@router.get( "/app/tasks/view", include_in_schema=False )
+async def page_tasks_view():
+    """
+    Serve the read-only landing page for a card's 📄 view link.
+
+    Requires:
+        - html/task-view.html exists under the static directory
+
+    Ensures:
+        - Returns the page shell with the no-cache revalidation header
+        - Changes nothing: the page reads `?row=` client-side and only displays the row
+    """
+    return _serve_file( _ROUTE_TABLE[ "/app/tasks/view" ] )
 
 @router.get( "/app/console", include_in_schema=False )
 async def page_console():

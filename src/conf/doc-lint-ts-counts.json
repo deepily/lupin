@@ -97,7 +97,7 @@
     "src/lupin_app/static/js/multiplexer/render/taskListCollapse.ts": 11,
     "src/lupin_app/static/js/multiplexer/render/taskListModel.ts": 195,
     "src/lupin_app/static/js/multiplexer/render/taskLookupBox.ts": 116,
-    "src/lupin_app/static/js/multiplexer/render/taskRowController.ts": 193,
+    "src/lupin_app/static/js/multiplexer/render/taskRowController.ts": 189,
     "src/lupin_app/static/js/multiplexer/render/taskVerbs.ts": 137,
     "src/lupin_app/static/js/multiplexer/render/templates/actionRequiredChrome.ts": 12,
     "src/lupin_app/static/js/multiplexer/render/templates/actionRequiredInteractive.ts": 11,

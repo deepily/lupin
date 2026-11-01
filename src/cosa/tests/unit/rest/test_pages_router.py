@@ -352,3 +352,51 @@ class TestTaskApproveLandingPage( unittest.TestCase ):
         self.assertNotIn( 'method  : "POST"', load_body )
         self.assertEqual( html.count( "/transition" ), 1 )
         self.assertGreater( html.index( "/transition" ), html.index( 'button.addEventListener( "click"' ) )
+
+
+class TestTaskViewLandingPage( unittest.TestCase ):
+    """
+    Unit tests for `/app/tasks/view`, the read-only landing for a card's 📄 link.
+
+    Ensures:
+        - A GET through TestClient answers 200 text/html with the no-cache header
+        - The page sends no write request of any kind
+    """
+
+    def test_get_serves_the_page_shell( self ):
+        """
+        Serve the view page shell.
+
+        Ensures:
+            - GET /app/tasks/view?row=<id> returns 200, text/html, Cache-Control: no-cache
+            - the body carries the row display and the body element
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.include_router( router )
+        response = TestClient( app ).get( "/app/tasks/view?row=a3975cf4-c640-4659-9247-0a99fa8a5f4a" )
+
+        self.assertEqual( response.status_code, 200 )
+        self.assertTrue( response.headers[ "content-type" ].startswith( "text/html" ) )
+        self.assertEqual( response.headers[ "cache-control" ], "no-cache" )
+        self.assertIn( 'id="task-view-row"', response.text )
+        self.assertIn( 'id="task-view-body"', response.text )
+
+    def test_the_page_cannot_write( self ):
+        """
+        The page only reads.
+
+        Ensures:
+            - the page names no PATCH, DELETE or /transition, and its one POST is the token refresh
+        """
+        from cosa.rest.routers.pages import _ROUTE_TABLE, _static_dir
+
+        with open( os.path.join( _static_dir, _ROUTE_TABLE[ "/app/tasks/view" ] ), encoding = "utf-8" ) as handle:
+            html = handle.read()
+
+        self.assertNotIn( "/transition", html )
+        self.assertNotIn( "PATCH", html )
+        self.assertNotIn( "DELETE", html )
+        self.assertEqual( html.count( "POST" ), 1, "the only POST is the token refresh" )

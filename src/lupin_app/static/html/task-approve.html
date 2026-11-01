@@ -91,7 +91,7 @@
                 } );
                 resultEl.textContent = resp.status === 202
                     ? "Waiting on Rick — he has not been asked yet."
-                    : resp.ok ? "Approved ✓" : await failureText( resp );
+                    : resp.ok ? "approved ✅" : await failureText( resp );
             } );
 
             load();
