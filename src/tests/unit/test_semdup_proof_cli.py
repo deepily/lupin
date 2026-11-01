@@ -626,3 +626,35 @@ def test_main_refuses_a_supplement_with_an_unofficial_run( venue, tmp_path ):
     paths, supp, argv, keys = supplemented( venue, tmp_path )
     with pytest.raises( ValueError, match="--unofficial takes one reviewer's labels only" ):
         pc.main( [ "--run-dir", str( venue.run_dir ), "--unofficial", "--labels", paths[ 0 ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=refuse_run )
+
+
+def split_supplemented( world, tmp_path ):
+    """Like supplemented, but the reviewers split on a pair and a third file settles it."""
+    from tests.unit.test_semdup_proof_label_load import make_supplement, supp_third
+    paths, _      = world.label_both()
+    supp, by_pair = make_supplement( world.toy, tmp_path, [ True, False ], [ False, False ] )
+    split         = list( by_pair )[ 0 ]
+    supp[ "third" ] = supp_third( supp, by_pair, split, True )
+    argv          = [ "--supplement-key", str( supp[ "key" ] ), *[ x for p in supp[ "labels" ] for x in ( "--supplement-labels", str( p ) ) ], "--supplement-third", str( supp[ "third" ] ) ]
+    return paths, supp, argv, split
+
+
+def test_read_supplement_carries_a_third_file_only_when_given():
+    assert pc.read_supplement( "k.json", [ "a", "b" ], third="t.jsonl" ) == { "key": "k.json", "labels": [ "a", "b" ], "third": "t.jsonl" }
+    with pytest.raises( ValueError, match="go together" ): pc.read_supplement( None, [], third="t.jsonl" )
+
+
+def test_label_state_settles_a_supplement_dispute_from_its_third_file_and_counts_that_file( world, tmp_path ):
+    paths, supp, _, split = split_supplemented( world, tmp_path )
+    state                 = pc.label_state( paths, world.key, None, supplement=supp )
+    assert state[ "owed" ] is None and state[ "labels" ][ split ] is True
+    assert state[ "counts" ][ str( supp[ "third" ] ) ] == 1
+
+
+def test_main_runs_the_proof_with_the_supplement_third_file_in_the_provenance( venue, tmp_path ):
+    paths, supp, argv, split = split_supplemented( venue, tmp_path )
+    ran                      = []
+    def run_proof( spec, wiring ): ran.append( spec ); return { "status": "complete" }
+    rc                       = pc.main( [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", *[ x for p in paths for x in ( "--labels", p ) ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=run_proof )
+    assert rc == 0 and ran[ 0 ][ "labels" ][ split ] is True
+    assert ran[ 0 ][ "provenance" ][ "supplement" ][ "third_labels" ] == ll.fingerprints( paths, None, None, venue.key, cu.get_project_root(), supp )[ "supplement" ][ "third_labels" ]

@@ -278,6 +278,7 @@ def label_state( labels_paths, key_path, rulings, third_path=None, supplement=No
     failures = plant_failures( run[ "planted" ], each[ 0 ], each[ 1 ] )
     try:
         if supplement is not None: counts.update( { str( p ): len( label_load.pair_key_labels( p, supplement[ "key" ] ) ) for p in supplement[ "labels" ] } )
+        if supplement is not None and supplement.get( "third" ) is not None: counts[ str( supplement[ "third" ] ) ] = len( label_load.third_votes( supplement[ "third" ], supplement[ "key" ] ) )
         labels = label_load.resolved_labels( labels_paths[ 0 ], labels_paths[ 1 ], key_path, rulings, third_path, supplement )
     except ValueError as e:
         return { "counts": counts, "labels": None, "failures": failures, "owed": str( e ) }
@@ -302,23 +303,24 @@ def unofficial_state( labels_paths, key_path ):
     return { "counts": { str( labels_paths[ 0 ] ): len( labels ) }, "labels": labels, "failures": plant_failures( run[ "planted" ], labels, labels ), "owed": None }
 
 
-def read_supplement( key, labels, unofficial=False ):
+def read_supplement( key, labels, unofficial=False, third=None ):
     """
     Turn the supplement arguments into the dict label_load takes.
 
     Requires:
         - key is None or the path of a supplement key; labels is the list of --supplement-labels files
+        - third is None or the path of the third rater's file for the supplement's disputed pairs
 
     Ensures:
-        - returns None when neither is given, else { key, labels }
+        - returns None when neither key nor labels is given, else { key, labels }, plus third when one is given
 
     Raises:
         - ValueError if only one of the two is given, if labels is not two files, or if the run is unofficial, which takes one reviewer's labels only
     """
-    if key is None and not labels: return None
+    if key is None and not labels and third is None: return None
     if unofficial: raise ValueError( "--unofficial takes one reviewer's labels only, so --supplement-key and --supplement-labels do not apply" )
     if key is None or len( labels ) != 2: raise ValueError( f"--supplement-key and two --supplement-labels files go together; got key {key} and {len( labels )} labels files" )
-    return { "key": key, "labels": list( labels ) }
+    return { "key": key, "labels": list( labels ), **( { "third": third } if third is not None else {} ) }
 
 
 def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring, monolith=label_prep.monolith_definitions, jscpd=structural.run_jscpd ):
@@ -385,6 +387,7 @@ def main( argv=None, make_parts=live_parts, run_proof=proof_run.proof_run ):
         - argv holds --run-dir, up to two --labels files, optionally --rulings (a JSON file of { pair key: bool }), --third-labels,
           --export-third, --unofficial, --parallel, --claude-cli-path and --check
         - --supplement-key and two --supplement-labels files name labels for pairs outside the run's key, kept in files of their own;
+          --supplement-third adds a third rater's file for the supplement's disputed pairs;
           they are read, fingerprinted and checked for unsure pairs like the reviewers' labels, and the run's own labels files are never written
 
     Ensures:
@@ -415,6 +418,7 @@ def _main( argv, make_parts, run_proof, out ):
     parser.add_argument( "--third-labels", default=None )
     parser.add_argument( "--supplement-key", default=None )
     parser.add_argument( "--supplement-labels", action="append", default=[] )
+    parser.add_argument( "--supplement-third", default=None )
     parser.add_argument( "--export-third", default=None )
     parser.add_argument( "--parallel", type=int, default=DEFAULT_PARALLEL )
     parser.add_argument( "--claude-cli-path", default=None )
@@ -437,7 +441,7 @@ def _main( argv, make_parts, run_proof, out ):
     rulings = json.loads( pathlib.Path( args.rulings ).read_text( encoding="utf-8" ) ) if args.rulings is not None else None
     key     = run_dir / KEY_DIR / KEY_FILE
     root    = cu.get_project_root()
-    supp    = read_supplement( args.supplement_key, args.supplement_labels, args.unofficial )
+    supp    = read_supplement( args.supplement_key, args.supplement_labels, args.unofficial, args.supplement_third )
     prints  = label_load.fingerprints( args.labels, args.rulings, args.third_labels, key, root, supp )
     state   = unofficial_state( args.labels, key ) if args.unofficial else label_state( args.labels, key, rulings, args.third_labels, supp )
     if not args.check and state[ "labels" ] is None:

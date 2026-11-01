@@ -351,3 +351,73 @@ def test_unsure_pairs_include_those_either_reviewer_marked_unsure_in_the_supplem
     pl.save_label( pk.packet_path( supp[ "labels" ][ 0 ].parent, "rick-supp" ), item, True, True, "hmm", clock=CLOCK )
     assert ll.unsure_pair_keys( [ first, second ], key, supplement=supp ) == [ next( iter( by_pair ) ) ]
     assert ll.unsure_pair_keys( [ first, second ], key ) == []
+
+
+def supp_third( supp, by_pair, which, same, unsure=False ):
+    """Label a third rater's packet of the supplement's disputed pairs; return its labels path."""
+    path = pk.export_subset_packet( supp[ "labels" ][ 0 ].parent, ll.disputed_items( *supp[ "labels" ] ), "third-supp", 3 )
+    pl.save_label( path, by_pair[ which ], same, unsure=unsure, note="leaning" if unsure else "", clock=CLOCK )
+    return pl.labels_path( path )
+
+
+def test_a_supplement_third_file_settles_a_supplement_dispute_by_majority_even_against_a_ruling( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ False, False ] )
+    split                     = list( by_pair )[ 0 ]
+    supp[ "third" ]           = supp_third( supp, by_pair, split, True )
+    got                       = ll.resolved_labels( first, second, key, rulings={ split: False }, supplement=supp )
+    assert got[ split ] is True and len( got ) == len( truth ) + 2
+
+
+def test_an_unsure_supplement_third_label_falls_to_the_ruling( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ False, False ] )
+    split                     = list( by_pair )[ 0 ]
+    supp[ "third" ]           = supp_third( supp, by_pair, split, True, unsure=True )
+    with pytest.raises( ValueError, match="1 disagreements have no ruling" ): ll.resolved_labels( first, second, key, supplement=supp )
+    assert ll.resolved_labels( first, second, key, rulings={ split: False }, supplement=supp )[ split ] is False
+
+
+def test_a_supplement_third_file_that_misses_a_disputed_pair_is_refused( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ False, False ] )
+    empty                     = tmp_path / "labels-third-supp.jsonl"
+    empty.write_text( "" )
+    supp[ "third" ]           = empty
+    with pytest.raises( ValueError, match="supplement's third rater has not labelled 1 disputed pairs: " + list( by_pair )[ 0 ].replace( "|", r"\|" ) ):
+        ll.resolved_labels( first, second, key, supplement=supp )
+
+
+def test_a_supplement_third_file_that_labels_a_pair_not_in_dispute_is_refused( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ False, False ] )
+    split, other              = list( by_pair )
+    supp[ "third" ]           = supp_third( supp, by_pair, split, True )
+    line                      = json.loads( supp[ "third" ].read_text().splitlines()[ 0 ] )
+    with open( supp[ "third" ], "a" ) as f: f.write( json.dumps( { **line, "item_id": by_pair[ other ] } ) + "\n" )
+    with pytest.raises( ValueError, match="supplement's third rater labelled 1 pairs that are not disputed: " + other.replace( "|", r"\|" ) ):
+        ll.resolved_labels( first, second, key, supplement=supp )
+
+
+def test_a_supplement_third_file_does_not_count_for_a_key_dispute_and_the_key_third_is_still_asked_for_it( run, tmp_path ):
+    toy, packets, key = run
+    truth, odd        = truth_of( toy ), toy.key( "m1", "m5" )
+    answer( packets, key, "rick", truth )
+    answer( packets, key, "second", truth, flip=( odd, ) )
+    first, second     = ( pl.labels_path( packets[ r ] ) for r in ( "rick", "second" ) )
+    supp, by_pair     = make_supplement( toy, tmp_path, [ True, False ], [ False, False ] )
+    split             = list( by_pair )[ 0 ]
+    supp[ "third" ]   = supp_third( supp, by_pair, split, True )
+    with pytest.raises( ValueError, match="disagreements have no ruling: " + odd.replace( "|", r"\|" ) ):
+        ll.resolved_labels( first, second, key, supplement=supp )
+    third = third_packet( packets, key, truth, odd, False )[ 2 ]
+    got   = ll.resolved_labels( first, second, key, third_path=third, supplement=supp )
+    assert got[ odd ] is False and got[ split ] is True
+
+
+def test_fingerprints_add_the_supplement_third_file_only_when_one_is_named( run, tmp_path ):
+    truth, first, second, key = labelled_run( run )
+    supp, by_pair             = make_supplement( run[ 0 ], tmp_path, [ True, False ], [ False, False ] )
+    assert "third_labels" not in ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )[ "supplement" ]
+    supp[ "third" ]           = supp_third( supp, by_pair, list( by_pair )[ 0 ], True )
+    assert ll.fingerprints( [ first, second ], None, None, key, "/t", supplement=supp )[ "supplement" ][ "third_labels" ] == arm_run.sha256_of( supp[ "third" ] )
