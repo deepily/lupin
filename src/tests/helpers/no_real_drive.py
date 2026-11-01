@@ -2,29 +2,60 @@
 A unit test must never build the Google Drive service from the shipped token.
 
 The shipped INI has publishing on. A test that runs a podcast job without its own config reads that INI.
-The job would then build the real Drive service and could write to Rick's Drive. The guard watches
-DrivePublisher._build_service. A call whose token path is the shipped one is recorded and refused, and the
-test fails at teardown. The refusal alone is not enough: the Drive hook catches every exception, so a test
-would pass with the failure hidden in its card text.
+The job would then build the real Drive service and could write to Rick's Drive.
 
-A test with its own token path, such as a temp file, is not touched. That is how the publisher's own
-tests build the service with fake Google modules.
+The guard watches DrivePublisher._build_service. A call whose token path resolves to the INI's token file
+is recorded and refused, and the test fails at teardown. The refusal alone is not enough: the Drive hook
+catches every exception, so a test would pass with the failure hidden in its card text.
+
+The comparison is between resolved real paths, so a symlink to the token cannot get past it. A test with
+its own token path, such as a temp file, is not touched. That is how the publisher's own tests build the
+service with fake Google modules.
 """
+
+import os
 
 import pytest
 
-SHIPPED_TOKEN_SUFFIX = "/src/conf/keys/google-drive-oauth-token.json"
+DEFAULT_TOKEN_REL_PATH = "/src/conf/keys/google-drive-oauth-token.json"
+TOKEN_INI_KEY          = "podcast drive token path"
+
+_shipped_token_path = None
 
 
-def install( monkeypatch ):
+def shipped_token_path():
+    """
+    Name the token file the shipped INI points at, as a resolved real path.
+
+    Requires:
+        - LUPIN_ROOT and LUPIN_CONFIG_MGR_CLI_ARGS are set, as the unit conftests set them
+
+    Ensures:
+        - returns realpath( project root + the INI's token path ); the file need not exist
+        - the answer is computed once per process
+
+    Raises:
+        - nothing
+    """
+    global _shipped_token_path
+    if _shipped_token_path is None:
+        import cosa.utils.util as cu
+        from cosa.config.configuration_manager import ConfigurationManager
+        rel = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( TOKEN_INI_KEY, default=DEFAULT_TOKEN_REL_PATH, silent=True )
+        _shipped_token_path = os.path.realpath( cu.get_project_root() + rel )
+    return _shipped_token_path
+
+
+def install( monkeypatch, shipped=None ):
     """
     Put the guard on DrivePublisher._build_service for the life of one monkeypatch.
 
     Requires:
         - monkeypatch is a pytest MonkeyPatch
+        - shipped is the token path to guard, or None for the INI's
 
     Ensures:
-        - a build from the shipped token path is recorded in the returned list and refused
+        - a build whose token path resolves to the guarded file is recorded in the returned list and refused
         - any other token path reaches the real method unchanged
 
     Raises:
@@ -35,7 +66,7 @@ def install( monkeypatch ):
     violations = []
 
     def guarded( self ):
-        if self.token_path.endswith( SHIPPED_TOKEN_SUFFIX ):
+        if os.path.realpath( self.token_path ) == ( os.path.realpath( shipped ) if shipped is not None else shipped_token_path() ):
             violations.append( self.token_path )
             raise AssertionError( f"a unit test tried to build the real Drive service from {self.token_path}" )
         return real( self )
