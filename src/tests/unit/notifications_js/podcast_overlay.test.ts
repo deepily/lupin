@@ -45,6 +45,8 @@ type OverlayUI = Record<string, unknown> & {
   _handleEmbeddedAudioClick: ( ev: unknown ) => void;
   _showPodcastOverlay: ( audioUrl: string, title: string ) => HTMLElement;
   _dismissPodcastOverlay: () => void;
+  _podcastUrlTitle: ( audioUrl: string ) => string | null;
+  _podcastFullFaceUrl: ( audioUrl: string ) => string;
   _initMasterDetailLayout: () => void;
 };
 
@@ -224,6 +226,60 @@ test( "dismiss button click removes the overlay (stops playback by removing the 
   const btn = document.querySelector( "button.podcast-overlay-dismiss" ) as HTMLButtonElement;
   btn.click();
   assert.ok( document.getElementById( "podcast-overlay" ) === null, "overlay removed on dismiss" );
+} );
+
+// ── the clean title and the ⤢ expand button (row 53760b4c) ───────────────────
+const TITLED = "/app/audio?path=podcasts/u/a.mp3&script=podcasts/u/b-script.md&source=io/deep-research/u/r.md&title=Grading%20Your%20Own%20Exam%3A%20Construct%20Validity&embed=1";
+
+test( "_showPodcastOverlay shows the link's clean title, not the link text", () => {
+  const el = newUI()._showPodcastOverlay( TITLED, "▶️ Play Here" );
+  assert.equal( el.querySelector( ".podcast-overlay-title" )!.textContent, "Grading Your Own Exam: Construct Validity" );
+  assert.equal( el.querySelector( "iframe" )!.getAttribute( "title" ), "Grading Your Own Exam: Construct Validity" );
+} );
+
+test( "_podcastUrlTitle: the title value, trimmed; null for none, blank, or no query at all", () => {
+  const ui = newUI();
+  assert.equal( ui._podcastUrlTitle( "/app/audio?path=a.mp3&title=%20Hello%20&embed=1" ), "Hello" );
+  assert.equal( ui._podcastUrlTitle( "/app/audio?path=a.mp3&embed=1" ), null );
+  assert.equal( ui._podcastUrlTitle( "/app/audio?path=a.mp3&title=%20%20" ), null );
+  assert.equal( ui._podcastUrlTitle( "/app/audio" ), null );
+} );
+
+test( "_podcastFullFaceUrl: drops embed and autoplay, keeps every other value", () => {
+  const ui   = newUI();
+  const full = ui._podcastFullFaceUrl( TITLED + "&autoplay=1" );
+  const q    = new URLSearchParams( full.split( "?" )[ 1 ] );
+  assert.ok( full.startsWith( "/app/audio?" ) );
+  assert.equal( q.has( "embed" ) || q.has( "autoplay" ), false );
+  assert.deepEqual( [ ...q.keys() ], [ "path", "script", "source", "title" ] );
+  assert.equal( q.get( "title" ), "Grading Your Own Exam: Construct Validity" );
+  assert.equal( ui._podcastFullFaceUrl( "/app/audio" ), "/app/audio?" );
+} );
+
+test( "the widget header carries ⤢ and ✕, in that order", () => {
+  const el = newUI()._showPodcastOverlay( TITLED, "x" );
+  const buttons = [ ...el.querySelectorAll( ".podcast-overlay-header button" ) ];
+  assert.deepEqual( buttons.map( ( b ) => b.getAttribute( "data-testid" ) ), [ "podcast-overlay-expand", "podcast-overlay-dismiss" ] );
+  assert.equal( buttons[ 0 ]!.textContent, "⤢" );
+} );
+
+test( "⤢ opens the full face in a new tab and removes the widget, so the audio never plays twice", () => {
+  const opened: unknown[][] = [];
+  const realOpen = window.open;
+  ( window as unknown as Record<string, unknown> ).open = ( ...args: unknown[] ) => { opened.push( args ); return null; };
+  try {
+    const ui = newUI();
+    ui._showPodcastOverlay( TITLED, "x" );
+    ( document.querySelector( "[data-testid=podcast-overlay-expand]" ) as HTMLElement ).click();
+    assert.equal( opened.length, 1 );
+    assert.equal( opened[ 0 ]![ 0 ], ui._podcastFullFaceUrl( TITLED ) );
+    assert.equal( opened[ 0 ]![ 1 ], "_blank" );
+    assert.equal( opened[ 0 ]![ 2 ], "noopener" );
+    assert.ok( !( opened[ 0 ]![ 0 ] as string ).includes( "embed=1" ) );
+    assert.ok( document.getElementById( "podcast-overlay" ) === null, "the widget is gone" );
+  } finally {
+    window.open = realOpen;
+  }
 } );
 
 // ── _dismissPodcastOverlay ────────────────────────────────────────────────────
