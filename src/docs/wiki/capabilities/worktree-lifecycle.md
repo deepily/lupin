@@ -5,7 +5,7 @@ pins:
   - cosa.utils.seat_worktree.provision_seat_worktree@eed42d08b9
   - cosa.utils.worktree_artifacts.provision_worktree_artifacts@fd62ae8430
   - cosa.agents.shared.worktree_context.WorktreeContext@f26451f4ff
-  - cosa.agents.shared.seat_teardown.retire_seat_worktree@ec2c282603
+  - cosa.agents.shared.seat_teardown.retire_seat_worktree@dd06d0a3d6
   - cosa.agents.shared.worktree_reaper.drain_then_remove@5c58cfdd7d
   - cosa.agents.shared.worktree_reaper.reconcile_worktrees@d7ff867a1c
   - cosa.agents.shared.worktree_reaper.sweep_merged_branches@02e1d8c83d
@@ -27,6 +27,7 @@ Git worktrees are made for each spawned seat and for each BFE or TFE job. They a
 ## Retiring a seat's tree
 - `retire_seat_worktree` keeps the tree if it is the main one or lacks this seat's lock. It also keeps it if the seat is still alive after the wait, 10 seconds by default and 120 from the SessionEnd hook. It keeps it with uncommitted work, an unmerged branch, or other ignored files. Build artifacts, mirrored mementos and the tree's own run output do not count: `tmp/`, `io/test-suite/`, `io/swe-team/`, `io/claude_code_hooks/`, `src/docs/index/`, `.claude-session.md`.
 - Otherwise it unlocks and runs `git worktree remove` without force, re-locking on failure. A seat tree is detached, so usually there is no branch. A merged, unprotected branch is deleted with `git branch -d`.
+- If the other door removed the tree during the wait, it returns `removed` true. A directory that is gone while git still registers it is kept as `tree_missing`. If `git worktree list` fails, it is kept as `worktree_list_failed`.
 - The SessionEnd hook runs it detached for a seat under `.claude/worktrees/`, but not on clear or compact.
 - `dismiss_sessions` calls it after a reap, through an adapter that puts the seat's directory first and its session name second.
 
