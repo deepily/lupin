@@ -259,6 +259,41 @@ def test_every_git_failure_keeps_the_tree( dirs, fail, reason ):
     assert ( out[ "removed" ], out[ "kept_reason" ] ) == ( False, reason )
 
 
+def _other_door_retires( repo, tree ):
+    """A liveness check that plays the SessionEnd waiter and removes the tree mid-wait."""
+    def alive( name, path ):
+        """Remove the tree through git on the first poll, then report the seat gone."""
+        if tree.exists():
+            assert _git( repo, "worktree", "unlock", str( tree ) ).returncode == 0
+            assert _git( repo, "worktree", "remove", str( tree ) ).returncode == 0
+        return False
+    return alive
+
+
+def test_a_tree_the_other_door_removed_during_the_wait_counts_as_removed_not_status_failed( repo, capsys ):
+    # Row 7da8908a: the hook waiter (120s) removes the tree inside dismiss's 10s wait; `git status` then hit ENOENT.
+    """The other door removing the tree mid-wait is a removal, not a status failure."""
+    tree = _seat_tree( repo )
+    out  = st.retire_seat_worktree( str( tree ), SEAT, alive_fn=_other_door_retires( repo, tree ), wait_seconds=0, debug=True )
+    assert ( out[ "removed" ], out[ "kept_reason" ], out[ "errors" ] ) == ( True, None, [] )
+    assert not tree.exists() and not _registered( repo, tree )
+    assert "already removed by the other door" in capsys.readouterr().out
+    assert st.teardown_notice( { SEAT: out } ) is None
+
+
+def test_a_directory_that_vanished_while_git_still_registers_it_is_kept_and_named( dirs ):
+    """A bare rmdir leaves the registration behind, so the tree is not claimed as removed."""
+    tree, main = dirs
+    git = _Git( tree, main )
+    def alive( name, path ):
+        """Delete the directory behind git's back on the first poll."""
+        os.rmdir( tree )
+        return False
+    out = st.retire_seat_worktree( tree, SEAT, run=git, alive_fn=alive, wait_seconds=0 )
+    assert ( out[ "removed" ], out[ "kept_reason" ] ) == ( False, "tree_missing" )
+    assert not any( c[ 1:3 ] == [ "worktree", "remove" ] for c in git.calls )
+
+
 def test_a_failed_removal_puts_the_lock_back( dirs ):
     tree, main = dirs
     git = _Git( tree, main, fail=[ "worktree remove" ] )

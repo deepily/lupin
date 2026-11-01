@@ -155,7 +155,18 @@ def retire_seat_worktree(
     if not _wait_until_gone( seat_name, tree, alive_fn, wait_seconds, sleep_fn, clock ):
         return keep( "seat_alive" )
 
-    status = _git( run, tree, "status", "--porcelain" )
+    # The other door may have retired this tree while we waited (the SessionEnd waiter
+    # waits up to 120s, the dismiss door 10s): the directory checked above can be gone now.
+    if not os.path.isdir( tree ):
+        still_registered = any( os.path.realpath( r[ "path" ] ) == os.path.realpath( tree )
+                                for r in list_worktrees( main_root, run=run ) )
+        if still_registered:
+            return keep( "tree_missing", "directory vanished but git still registers the worktree" )
+        out[ "removed" ] = True
+        if debug: print( f"[seat_teardown] {tree} was already removed by the other door" )
+        return out
+
+    status =_git( run, tree, "status", "--porcelain" )
     if not status[ "success" ]:
         return keep( "status_failed", status[ "stderr" ] )
     if status[ "stdout" ]:
