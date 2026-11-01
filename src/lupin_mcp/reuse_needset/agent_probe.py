@@ -14,6 +14,7 @@ from claude_agent_sdk import query as sdk_query
 
 from cosa.agents.shared.sdk_error_result import error_result_text
 from cosa.repo.doc_lint import model_transport as mt
+from lupin_mcp.reuse_needset import call_cap
 from lupin_mcp.reuse_needset import errors as er
 
 TOOLS        = [ "Read" ]
@@ -208,14 +209,18 @@ async def run_probe( need, result, root, model, query_fn=sdk_query ):
     Ensures:
         - returns { reply, rulings, reads, transcript } where reads is read_files of the stream
         - an unreadable reply is asked again once with the same prompt
+        - every attempt is charged through call_cap.charge_attempt before the stream starts, so a retry counts as a call
         - the stream is the only thing run, so nothing is written
 
     Raises:
         - NeedsetError PROBE_UNREADABLE when neither reply holds a ruling
+        - NeedsetError CAP_NOT_INSTALLED when a stage is running and no cap is installed
+        - NeedsetError CALL_CAP_REACHED when the cap has no call left; the stream is not started
         - RuntimeError from the stream
     """
     prompt = build_prompt( need, result )
     for _ in range( 2 ):
+        call_cap.charge_attempt( model )
         messages = await _stream( prompt, probe_options( root, model ), query_fn )
         text     = reply_text( messages )
         ruled    = rulings( text )

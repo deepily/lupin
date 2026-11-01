@@ -270,6 +270,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-hardness]] — finding real code that a BM25 word search misses, and the natural yield per language. `lupin_mcp` (reuse_needset)
 - [[needset-call-cap]] — the shared 1,000-call cap over one ledger, the charge hook and the stage names. `lupin_mcp` (reuse_needset)
 - [[needset-stages]] — the runner for attribution, yield, control and remainder under the cap. `lupin_mcp` (reuse_needset)
+- [[needset-stage-seeds]] — the attribution and yield seed lists, drawn once from tracked code, and the attribution and yield functions that read them. `lupin_mcp` (reuse_needset)
 - [[needset-freeze]] — the hashes that name the index and vectors of a need set, the read-only copy and the check before a run. `lupin_mcp.reuse_needset` (freeze)
 - [[needset-revalidation]] — the day-before check of a frozen need set against a newer index: broken keys, new twin candidates and the refreeze. `lupin_mcp.reuse_needset` (revalidate)
 - [[needset-key-neighbours]] — finding a seed's twins and neighbours by the vector and sampled routes. `lupin_mcp` (reuse_needset)
