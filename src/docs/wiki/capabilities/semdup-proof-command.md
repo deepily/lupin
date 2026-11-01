@@ -13,8 +13,8 @@ pins:
   - cosa.repo.semdup.proof.proof_cli.staged_pairs@32885ab64f
   - cosa.repo.semdup.proof.proof_cli.structural_source@c48304283b
   - cosa.repo.semdup.proof.proof_cli.build_spec@05eb573601
-  - cosa.repo.semdup.proof.proof_cli.label_state@a88d572155
-  - cosa.repo.semdup.proof.proof_cli.read_supplement@7efd192fd9
+  - cosa.repo.semdup.proof.proof_cli.label_state@fa6cd34b7d
+  - cosa.repo.semdup.proof.proof_cli.read_supplement@db4a1cc1e1
   - cosa.repo.semdup.proof.proof_cli.unofficial_state@87cba5dc3c
   - cosa.repo.semdup.proof.proof_cli.live_parts@80c9d8e35a
   - cosa.repo.semdup.proof.proof_cli.proof_ledger@de8052782c
@@ -28,7 +28,7 @@ Builds `proof_run`'s spec and wiring from a labelling run folder, then checks th
 ## What it does
 - `load_run` reads `key/planted.json` and `key/answer-key.json`. `monolith_spec` turns the key's monolith items into pairs, and names any id the pinned monolith does not define.
 - `check_originals` refuses a tree whose planted originals changed since planting. `build_spec` assembles the spec and calls it. It carries the label `provenance` and the list of `unsure_pairs`, both from [[semdup-proof-label-loader]].
-- `plant_failures` lists the planted pairs both reviewers labelled False; a pair either has not labelled is not one. `label_state` reads the two labels files, plus a third rater's file and a supplement when given, and says what is owed. `read_supplement` builds the supplement from `--supplement-key` and two `--supplement-labels`. It refuses one without the other, and any use with `--unofficial`. `unofficial_state` does the same for the one file of an unofficial run.
+- `plant_failures` lists the planted pairs both reviewers labelled False; a pair either has not labelled is not one. `label_state` reads the two labels files, plus a third rater's file and a supplement when given, and says what is owed. `read_supplement` builds the supplement from `--supplement-key` and two `--supplement-labels`, plus `--supplement-third` for a third rater's file on its disputed pairs. It refuses the key or files without each other, and any use with `--unofficial`. `unofficial_state` does the same for the one file of an unofficial run.
 - `rewrite_sources` finds each rewrite's file under `key/rewrites/<NNN>/`. `stage_pool` copies the pool into one temporary tree: server and monolith files under `tree/`, each rewrite under `proof-new/<NNN>/`, so a rewrite never overwrites its original.
 - `staged_pairs` finds the structural clone pairs of the whole pool in that tree and maps them back to pool ids. It hands dups every staged definition, because dups numbers a repeated name `~2` before the node cut. It keys a staged definition by file and line span, not name, because a class-member rewrite is recorded as `destroy` but extracted as `PlantedWrapper.destroy`. `check_found` raises if a pool definition is missing from the staged tree.
 - `structural_source` caches `staged_pairs` by the pool's ids, so the second slot stages nothing. `live_parts` wires the real tree and writes nothing; `main` is the command.
