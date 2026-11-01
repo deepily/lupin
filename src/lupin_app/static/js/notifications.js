@@ -8329,8 +8329,8 @@ class NotificationsUI {
             this.expandJobCard( jobId );
         }
 
-        // Scroll to show new entry
-        entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
+        // Scroll to show new entry — unless Keep place is on, then the view stays where the reader put it
+        if ( !this.keepPlace ) entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
 
         this.log( `[Phase 6] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
     }
@@ -27119,10 +27119,11 @@ class NotificationsUI {
 
         container.appendChild( card );
 
-        // Scroll the action required section into view (delay ensures DOM is settled)
+        // Scroll the action required section into view (delay ensures DOM is settled).
+        // Keep place: the card arrives, but the view stays where the reader put it.
         setTimeout( () => {
             const section = document.getElementById( 'action-required-section' );
-            if ( section ) {
+            if ( section && !this.keepPlace ) {
                 section.scrollIntoView( { behavior: 'smooth', block: 'start' } );
             }
         }, 50 );
@@ -28600,9 +28601,9 @@ class NotificationsUI {
                 this.updateActionRequiredCount();
                 this.saveActionRequiredState();  // Persist removal
 
-                // Scroll target card into view after DOM changes
+                // Scroll target card into view after DOM changes — a timeout is not a click, so Keep place holds the view
                 const targetCard = document.getElementById( destination.cardId );
-                if ( targetCard ) {
+                if ( targetCard && !this.keepPlace ) {
                     targetCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
                 }
 
@@ -29647,9 +29648,9 @@ class NotificationsUI {
                 };
                 this.appendNotificationToJobCard( jobId, responseNotif );
 
-                // Scroll job card into view
+                // Scroll job card into view — Keep place holds the view where the reader put it
                 const jobCard = document.getElementById( `job-card-${jobId}` );
-                if ( jobCard ) {
+                if ( jobCard && !this.keepPlace ) {
                     jobCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
                 }
                 return;
