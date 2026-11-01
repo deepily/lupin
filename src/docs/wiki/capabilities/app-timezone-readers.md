@@ -5,6 +5,7 @@ pins:
   - cosa.config.app_timezone.InvalidAppTimezoneError@07c4aa3130
   - cosa.config.app_timezone.get_zone_for_key@fb1b5bc0d1
   - cosa.config.app_timezone.get_app_timezone@03183a0b2c
+  - cosa.config.app_timezone.process_config_mgr@d19a89e81d
   - cosa.config.app_timezone.get_arbiter_journal_timezone@ed535a1757
   - cosa.config.app_timezone.read_arbiter_journal_timezone@2890049c0e
   - cosa.config.app_timezone.get_decision_proxy_timezone@e3b9b8e3bd
@@ -22,6 +23,7 @@ pins:
 ## Wrappers
 - `get_app_timezone`, `get_arbiter_journal_timezone` and `get_decision_proxy_timezone` fix the key for a manager the caller holds.
 - `read_arbiter_journal_timezone` and `read_decision_proxy_timezone` build the manager from `LUPIN_CONFIG_MGR_CLI_ARGS` first. They raise `ValueError` when no configuration is loaded.
+- `process_config_mgr( started_config_mgr )` returns the app's manager when startup has set it. Before startup `lupin_app.main.config_mgr` is `None`, as in a test process or a smoke block, so it loads the process configuration instead. The notification queue and the notifications router use it before calling `get_app_timezone`. It raises `ValueError` when no configuration is loaded.
 
 ## Don't
 - Do not catch these errors to fall back to a zone. A missing zone is meant to stop the caller.

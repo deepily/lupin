@@ -2,7 +2,7 @@
 capability: research-chained-pipelines
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@f45c502fae
+  - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@bfa10f0417
   - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@7b8bd235de
   - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@86a17644b5
   - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@062895fbcb
@@ -33,7 +33,7 @@ Two queue jobs run [[deep-research]] and then hand its saved report to [[podcast
 - Podcast options: `target_languages` (default `["en"]`) and `max_segments`. The queue factory passes `languages` but not `max_segments`, so `max_segments` is reachable only by constructing the job or agent directly.
 - Presentation options: `target_duration_minutes`, `target_slide_count`, `theme`. The presentation job also takes `lead_model`, which sets the research leg's lead model only; the podcast job does not pass one (its agent accepts it).
 - The presentation leg builds its config from the INI file and then overrides it with these options, plus `audience`. The podcast leg uses a default `PodcastConfig()`.
-- Results: the podcast has `audio_path` and `script_path`, with per-language maps in `pg_artifacts`; the presentation has `yaml_path`, `marp_path` and `slide_count`.
+- Results: the podcast has `audio_path` and `script_path`, with per-language maps in `pg_artifacts`; the presentation has `yaml_path`, `marp_path` and `slide_count`. The podcast job can also copy to Google Drive ([[podcast-drive-publishing]]).
 
 ## When not to use it
 - To run just one stage, use [[deep-research]], [[podcast-generation]] or [[presentation-generation]] directly.
