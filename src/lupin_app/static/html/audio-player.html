@@ -18,6 +18,8 @@
         body.embed #lupin-nav { display: none !important; }
         body.embed .audio-player-container { margin: 8px auto; padding: 0 12px 12px; }
         /* Mini face: the native audio element and nothing else, filling the small widget frame. */
+        /* lupin-nav.js sets an inline 56px padding-top on the body even when the nav is hidden; !important beats it. */
+        body.embed { margin: 0 !important; padding: 0 !important; }
         body.embed .audio-player-container { margin: 0; padding: 0; max-width: none; }
         body.embed .audio-player-element { margin: 0; display: block; }
 
