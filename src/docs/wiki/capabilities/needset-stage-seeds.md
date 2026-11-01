@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_needset.stage_seeds.draw_lists@4c8b1bfb4d
   - lupin_mcp.reuse_needset.stage_seeds.write_lists@93a5bb3cde
   - lupin_mcp.reuse_needset.stage_seeds.load_lists@b589b7d3bc
-  - lupin_mcp.reuse_needset.stage_seeds.attribution_stage@873d1621cc
+  - lupin_mcp.reuse_needset.stage_seeds.attribution_stage@67c67dea99
   - lupin_mcp.reuse_needset.stage_seeds.yield_stage@58e106fba2
 ---
 # Need set: stage seeds

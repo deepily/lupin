@@ -12,7 +12,7 @@ import json
 
 from cosa.repo.doc_lint import harness_report, harness_runner, model_transport
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import agent_probe, finalize, freeze
+from lupin_mcp.reuse_needset import agent_probe, finalize, freeze, schema
 from lupin_mcp.reuse_needset import errors as er
 
 NOT_RETRIEVED      = "NOT_RETRIEVED"
@@ -57,7 +57,7 @@ def check_need( need, ctx ):
         - need is a final need; ctx is a reuse context with the candidate stage on
 
     Ensures:
-        - runs the candidate route with the need's seed left out, so a need is not found by its own source
+        - runs the candidate route with the need's seed left out, so a need is not found by its own source, unless the seed is the need's known answer, which the search must be able to find
         - the language is the need's write language, and all for a cross-language need
         - a nothing need has no seed to leave out
 
@@ -66,7 +66,7 @@ def check_need( need, ctx ):
     """
     language = "all" if need[ "kind" ] == "cross_language" else need[ "write_lang" ]
     text     = need[ "need" ].strip()
-    return rt.run_question( ctx, CHECK_TOOL, text, text, exclude_id=need[ "seed" ], prepared=rt.prepare( ctx ), sweep_only=False, write=False, language=language )
+    return rt.run_question( ctx, CHECK_TOOL, text, text, exclude_id=None if need[ "key" ][ "source" ] == schema.SEED_SOURCE else need[ "seed" ], prepared=rt.prepare( ctx ), sweep_only=False, write=False, language=language )
 
 
 def index_locator( ctx ):

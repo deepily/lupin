@@ -1,5 +1,7 @@
 """
-Drafting: one sentence per seed, leak-checked, rewritten up to three times, else replaced.
+Drafting: one sentence per seed, checked, rewritten once, else replaced.
+
+A sentence goes through the free copy check and then the leak check. A rejection gets one targeted rewrite, and a second rejection replaces the seed.
 
 Every model call goes through a ledger, so a stopped run resumes without repeating a call.
 """
@@ -7,6 +9,7 @@ import asyncio
 import collections
 import inspect
 import json
+import re
 import threading
 
 from cosa.repo.doc_lint import harness_runner, model_transport
@@ -16,7 +19,11 @@ from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import keys
 
 DRAFTER_MODEL = "claude-fable-5-1"
-MAX_TRIES     = 3
+MAX_TRIES     = 2
+MAX_NONE_TRIES = 3
+SLASHED       = re.compile( r"(?<![\w.\-/])(\.{0,2}/)?[\w.\-]+(?:/[\w.\-]+)+" )
+FILE_END      = re.compile( r"\.(?:py|tsx|ts|js|cjs|mjs|json|md|ini|yml|yaml|sh|css|html|txt)$" )
+BARE_FILE     = re.compile( r"\b[\w\-]+\.(?:py|tsx|ts|json|md|ini|yml|yaml|sh)\b" )
 STAGE         = "draft"
 NO_KEY        = "NO_KEY"
 ABSENCE_REJECTED = "ABSENCE_REJECTED"
@@ -71,6 +78,36 @@ def drafter_call( model=DRAFTER_MODEL, query_fn=None ):
 def stripped_input( seed_id, stripped ):
     """Return the NeedInput that need_writer.build_prompt reads, from a strip_member result."""
     return need_input.NeedInput( member_id=seed_id, kind=stripped[ "kind" ], text=stripped[ "text" ], forbidden=list( stripped[ "forbidden" ] ) )
+
+
+def copy_check( sentence, seed ):
+    """
+    Look for the seed's own names and any file path in a drafted sentence, with no model call.
+
+    Requires:
+        - seed is an index record
+
+    Ensures:
+        - returns [] when the sentence holds no identifier token or name piece of the seed, no path and not the seed's file path or file name
+        - a slashed string is a path only when it ends in a file extension, starts with a dot or a slash, or holds a piece of the seed's own path
+        - so and/or, client/server, input/output, TCP/IP and 3/4 pass, and so does Node.js
+        - otherwise returns one { check: identifier, detail, words } failure, the shape leak_check returns, so one rewrite request serves both
+        - words are the bare lower-case words the sentence copied from the seed's names; a copied path adds no word, because the writer is only told the kind
+        - detail names what was copied and is for the local record, never for the writer
+    """
+    lowered = sentence.lower()
+    tokens  = set( re.findall( r"[a-z0-9_]+", lowered ) )
+    tokens |= { p for t in tokens for p in t.split( "_" ) if p }
+    hits    = sorted( tokens & nc.identifier_tokens( seed ) )
+    written = nc.need_words( sentence )
+    pieces  = sorted( written.keys() & nc.name_pieces( seed ) )
+    own     = { w for part in seed[ "file" ].lower().split( "/" ) for w in re.findall( r"[a-z0-9]+", part ) if len( w ) >= nc.PIECE_MIN_LEN }
+    slashed = [ m.group( 0 ) for m in SLASHED.finditer( sentence ) if m.group( 1 ) or FILE_END.search( m.group( 0 ).lower() ) or own & set( re.findall( r"[a-z0-9]+", m.group( 0 ).lower() ) ) ]
+    paths   = sorted( { *slashed, *BARE_FILE.findall( sentence ), *[ p for p in ( seed[ "file" ], seed[ "file" ].rsplit( "/", 1 )[ -1 ] ) if p.lower() in lowered ] } )
+    if not hits and not pieces and not paths: return []
+    words   = sorted( { w for w in [ *hits, *[ written[ p ] for p in pieces ] ] if need_writer.BARE_WORD.fullmatch( w ) } )
+    detail  = "; ".join( ( [ "identifier tokens: " + ", ".join( hits ) ] if hits else [] ) + ( [ "name pieces: " + ", ".join( pieces ) ] if pieces else [] ) + ( [ "paths: " + ", ".join( paths ) ] if paths else [] ) )
+    return [ { "check": "identifier", "detail": detail, "words": words } ]
 
 
 def leak_check( sentence, seed, key_recs ):
@@ -128,27 +165,34 @@ def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL ):
 
     Ensures:
         - returns { ok, seed, key, need, tries, history, reason, meta }
-        - at most MAX_TRIES sentences are checked; an unreadable reply is asked again once with the same prompt
+        - at most MAX_TRIES sentences are checked: the first draft and one targeted rewrite after a rejection; an unreadable reply is asked again once with the same prompt
+        - each sentence goes through copy_check first and leak_check only when that finds nothing, both free
         - a rewrite request names the failure kinds and the seed's own offending words, never a key symbol or its text
         - ok is False with reason UNREADABLE_REPLY when both replies were unreadable, and with reason NEED_LEAKS_KEY after MAX_TRIES failed checks
         - history lists, per try, the failure kinds and the words, and holds no key text
+        - rejections lists, per rejected sentence, { try, sentence, failures } with the full failure details, and unreadable lists each reply that could not be read as { try, retry, reply }; both are for the local record
+        - the key list is empty for a job with no keys, and the sentence is then checked against the seed alone
     """
     seed, write_lang, stripped = job[ "seed" ], job[ "write_lang" ], stripped_input( job[ "seed" ][ "id" ], job[ "stripped" ] )
     version, system = prompt_version(), need_writer.system_prompt( job[ "write_lang" ] )
     failures, avoid, history = None, None, []
-    record = { "ok": False, "seed": seed[ "id" ], "key": [ r[ "id" ] for r in job[ "keys" ] ], "need": None, "tries": 0, "history": history, "reason": er.NEED_LEAKS_KEY, "meta": job[ "meta" ] }
+    record = { "ok": False, "seed": seed[ "id" ], "key": [ r[ "id" ] for r in job[ "keys" ] ], "need": None, "tries": 0, "history": history, "reason": er.NEED_LEAKS_KEY, "meta": job[ "meta" ],
+              "rejections": [], "unreadable": [] }
     for attempt in range( MAX_TRIES ):
         prompt   = need_writer.build_prompt( stripped, failures, None, None, avoid, write_lang )
         sentence = None
         for retry in range( 2 ):
-            sentence = parse_reply( ask_ledgered( ask, ledger, version, model_id, system, prompt, stripped.text, f"{attempt}.{retry}" ) )
+            reply    = ask_ledgered( ask, ledger, version, model_id, system, prompt, stripped.text, f"{attempt}.{retry}" )
+            sentence = parse_reply( reply )
             if sentence is not None: break
+            record[ "unreadable" ].append( { "try": attempt, "retry": retry, "reply": reply } )
         record[ "tries" ] = attempt + 1
         if sentence is None:
             history.append( { "try": attempt, "failures": [ er.UNREADABLE_REPLY ], "words": [] } )
             record[ "reason" ] = er.UNREADABLE_REPLY
             return record
-        found = leak_check( sentence, seed, job[ "keys" ] )
+        found = copy_check( sentence, seed ) or leak_check( sentence, seed, job[ "keys" ] )
+        if found: record[ "rejections" ].append( { "try": attempt, "sentence": sentence, "failures": found } )
         if not found:
             record.update( ok=True, need=sentence, reason=None )
             return record
@@ -278,14 +322,14 @@ def draft_none( job, ask, ledger, model_id=DRAFTER_MODEL ):
 
     Ensures:
         - returns { ok, seed, key, need, tries, history, reason, meta } with key always empty
-        - a sentence that fails reuse_need_check.check_form, or shares a four-word run with a listed symbol, is rewritten, up to MAX_TRIES
+        - a sentence that fails reuse_need_check.check_form, or shares a four-word run with a listed symbol, is rewritten, up to MAX_NONE_TRIES
         - an unreadable reply is asked again once, then recorded as UNREADABLE_REPLY
-        - reason is NEED_LEAKS_KEY after MAX_TRIES failed checks
+        - reason is NEED_LEAKS_KEY after MAX_NONE_TRIES failed checks
     """
     version, system = prompt_version(), need_writer.system_prompt( job[ "write_lang" ] )
     record = { "ok": False, "seed": job[ "seed" ], "key": [], "need": None, "tries": 0, "history": [], "reason": er.NEED_LEAKS_KEY, "meta": job[ "meta" ] }
     note   = ""
-    for attempt in range( MAX_TRIES ):
+    for attempt in range( MAX_NONE_TRIES ):
         prompt   = none_prompt( job[ "lines" ] ) + note
         sentence = None
         for retry in range( 2 ):

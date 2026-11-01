@@ -2,23 +2,26 @@
 capability: needset-drafting-flows
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.draft.draft_need@7a3e16acd7
+  - lupin_mcp.reuse_needset.draft.draft_need@cdaeb93a6e
   - lupin_mcp.reuse_needset.draft.draft_cell@fea09c6d5f
   - lupin_mcp.reuse_needset.draft.replacement_report@75e3a4fa43
   - lupin_mcp.reuse_needset.draft.draft_cells@cd40e8a89d
   - lupin_mcp.reuse_needset.draft.none_prompt@82c49d11e8
   - lupin_mcp.reuse_needset.draft.none_note@908dcd7239
-  - lupin_mcp.reuse_needset.draft.draft_none@4ac24a49db
+  - lupin_mcp.reuse_needset.draft.draft_none@ad0a288d6a
   - lupin_mcp.reuse_needset.draft.make_none_drafter@cb2ca926b8
+  - lupin_mcp.reuse_needset.draft.copy_check@ab47ae2ec9
 ---
 # Need set: drafting flows
 
-Drafts one sentence per seed, leak-checked, with at most three sentences checked (the first and two rewrites), else replaced by the next seed. The calls and checks are on [[needset-drafter-plumbing]].
+Drafts one sentence per seed. It checks for copied names and paths, then for leaks. At most two sentences are checked: the first and one targeted rewrite. A seed that still fails is replaced by the next seed. The calls and checks are on [[needset-drafter-plumbing]].
 
 ## One seed
-- `draft_need` drafts the sentence for one seed. At most three sentences are checked, and an unreadable reply is asked again once with the same prompt.
+- `draft_need` drafts the sentence for one seed. At most two sentences are checked (`MAX_TRIES`), and an unreadable reply is asked again once with the same prompt. A job with no keys is checked against the seed alone.
+- `copy_check` runs first and costs no call. It finds the seed's identifier tokens and name pieces, and its file path or file name. A slashed string counts only with a file extension, a leading dot or slash, or a piece of the seed's own path. A bare file name counts too. So and/or, input/output, TCP/IP and Node.js pass. Then `leak_check` runs only if it found nothing. The rewrite is told the failure kind and the bare words, never a path or a key.
+- The returned record also holds `rejections` and `unreadable`, for the local ledger. Each rejection is a rejected sentence with its full failure details. Each unreadable entry is a reply that could not be read.
 - A rewrite request names the failure kinds and the seed's own offending words, never a key symbol or its text. The history holds no key text.
-- It returns not ok with `UNREADABLE_REPLY` when both replies were unreadable, and `NEED_LEAKS_KEY` after three failed checks.
+- It returns not ok with `UNREADABLE_REPLY` when both replies were unreadable, and `NEED_LEAKS_KEY` after two failed checks. The nothing cell keeps three tries (`MAX_NONE_TRIES`).
 
 ## One cell
 - `draft_cell` walks the seeds in draw order and replaces each failed seed with the next. It returns the original ids, the final ids, the failures and a count of replacements by reason.

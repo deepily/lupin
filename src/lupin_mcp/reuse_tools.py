@@ -1322,6 +1322,26 @@ def _finish( ctx ):
     if isinstance( ctx.transport.budget, reuse_ceiling.TokenBudget ): ctx.transport.budget.end()
 
 
+def close_run( ctx ):
+    """
+    Close the context's spend-ledger run if it began and is still open, whatever ended it.
+
+    Requires:
+        - ctx is a reuse context; a run exists only after prepare built a packed live transport
+
+    Ensures:
+        - returns the run name when it wrote the end row, else None
+        - returns None, and writes nothing, for a context with no live token budget, a run already closed, or a run that never began
+        - the closed run counts at what it spent and no longer holds its ceiling against the account limit
+    """
+    from lupin_mcp import reuse_ceiling                                        # imported here: it imports this module
+    if not isinstance( ctx.transport, LiveJevTransport ) or not isinstance( ctx.transport.budget, reuse_ceiling.TokenBudget ): return None
+    budget = ctx.transport.budget
+    if budget.ledger is None or not budget.ledger.is_open( budget.run ): return None
+    budget.end()
+    return budget.run
+
+
 def _route_pair( ctx, need, entries, flags, frozen=False, model=None, policy=None, gaps=None ):
     """
     Decide one question by the Noul and Score pair: one sweep of every entry, no page stage.

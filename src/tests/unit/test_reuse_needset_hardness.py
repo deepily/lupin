@@ -91,3 +91,12 @@ def test_a_seed_that_is_its_own_target_is_refused_by_name_before_any_rank_is_rea
     rows = [ { "seed": "m.target_late", "need": "banana", "targets": [ "m.target_best", "m.target_late" ], "lang": "py" } ]
     with pytest.raises( er.NeedsetError ) as caught: hardness.source_hard( rows, index )
     assert caught.value.code == er.SEED_IS_TARGET and "m.target_late" in caught.value.detail
+
+
+def test_a_seed_that_is_the_known_answer_is_ranked_like_any_target_and_not_left_out():
+    index, _ = crowded_index()
+    row  = { "seed": "m.target_best", "need": "banana", "targets": [ "m.target_best" ], "lang": "py", "seed_is_answer": True }
+    left = { "seed": "m.target_best", "need": "banana", "targets": [ "m.target_late" ], "lang": "py", "seed_is_answer": False }
+    got  = hardness.source_hard( [ row ], index )[ 0 ]
+    assert got[ "ranks" ] == { "m.target_best": 1 } and got[ "hard" ] is False, "the best match for the query is rank one when the seed is not excluded"
+    assert hardness.source_hard( [ left ], index )[ 0 ][ "ranks" ] == { "m.target_late": 13 }, "the seed still takes its slot out of the ranking when it is not the answer"

@@ -1,5 +1,5 @@
 """
-The shared call cap: 1,000 model calls in all, refused by name at call 1,001.
+The shared call cap: 1,314 calls in all, refused by name at 1,315, and a budget per stage.
 
 Fable drafting, the checker's judge and the agent probe are different doors to a model. The cap counts all of them,
 whichever stage makes the call, and a restarted run keeps the count because it lives in the file.
@@ -41,18 +41,18 @@ def call( model, transport ):
 
 
 def test_the_limit_is_one_thousand():
-    assert call_cap.CALL_LIMIT == 1000
+    assert call_cap.CALL_LIMIT == 1314
 
 
-def test_call_1001_is_refused_by_name_and_no_model_is_contacted( tmp_path ):
+def test_call_1315_is_refused_by_name_and_no_model_is_contacted( tmp_path ):
     cap, transport = call_cap.CallCap( str( tmp_path / "calls.jsonl" ) ), Transport()
     with cap.installed():
         with call_cap.stage( "bulk" ):
-            for _ in range( 1000 ): call( FABLE, transport )
-        assert cap.used() == 1000 and len( transport.seen ) == 1000
+            for _ in range( 1314 ): call( FABLE, transport )
+        assert cap.used() == 1314 and len( transport.seen ) == 1314
         with pytest.raises( er.NeedsetError ) as caught: call( FABLE, transport )
-    assert caught.value.code == er.CALL_CAP_REACHED and "1000 of 1000" in caught.value.detail
-    assert len( transport.seen ) == 1000 and cap.used() == 1000
+    assert caught.value.code == er.CALL_CAP_REACHED and "1314 of 1314" in caught.value.detail
+    assert len( transport.seen ) == 1314 and cap.used() == 1314
 
 
 def test_every_door_to_a_model_shares_one_count_whatever_the_model_or_the_stage( tmp_path ):
@@ -88,15 +88,15 @@ def test_a_new_cap_over_the_same_file_keeps_the_count_so_a_resumed_run_cannot_pa
     assert len( transport.seen ) == 3
 
 
-def test_a_restart_after_37_calls_is_refused_at_1000_minus_37( tmp_path ):
+def test_a_restart_after_37_calls_is_refused_at_1314_minus_37( tmp_path ):
     path  = str( tmp_path / "calls.jsonl" )
     first = call_cap.CallCap( path )
     for _ in range( 37 ): first.charge( FABLE )
     restarted = call_cap.CallCap( path )
     assert restarted.used() == 37
-    for _ in range( 1000 - 37 ): restarted.charge( FABLE )
+    for _ in range( 1314 - 37 ): restarted.charge( FABLE )
     with pytest.raises( er.NeedsetError ) as caught: restarted.charge( FABLE )
-    assert caught.value.code == er.CALL_CAP_REACHED and restarted.used() == 1000 and [ r[ "n" ] for r in restarted.rows() ] == list( range( 1, 1001 ) )
+    assert caught.value.code == er.CALL_CAP_REACHED and restarted.used() == 1314 and [ r[ "n" ] for r in restarted.rows() ] == list( range( 1, 1315 ) )
 
 
 def test_a_limit_of_zero_refuses_the_first_call( tmp_path ):
@@ -221,3 +221,33 @@ def test_a_wait_cut_short_charges_nothing_more( tmp_path, monkeypatch ):
         cap.charge( FABLE )
         with pytest.raises( mt.ModelWaitCutShort ): mt._agy_call( FABLE, "p", 5 )
     assert once.tries == 1 and cap.used() == 1
+
+
+def test_a_stage_over_its_own_budget_is_refused_by_name_while_another_stage_keeps_its_calls( tmp_path ):
+    cap = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 10, { "small": 2, "none": 0 } )
+    with call_cap.stage( "small" ):
+        cap.charge( FABLE )
+        cap.charge( FABLE )
+        with pytest.raises( er.NeedsetError ) as caught: cap.charge( FABLE )
+    assert caught.value.code == er.STAGE_BUDGET_REACHED and "small stage used 2 of its 2" in caught.value.detail and cap.used() == 2
+    with call_cap.stage( "none" ):
+        with pytest.raises( er.NeedsetError ) as zero: cap.charge( FABLE )
+    assert zero.value.code == er.STAGE_BUDGET_REACHED and cap.used() == 2, "a budget of none refuses the first call"
+    with call_cap.stage( "other" ):
+        for _ in range( 8 ): cap.charge( FABLE )
+        with pytest.raises( er.NeedsetError ) as whole: cap.charge( FABLE )
+    assert whole.value.code == er.CALL_CAP_REACHED and cap.used() == 10 and cap.by_stage() == { "other": 8, "small": 2 }
+
+
+def test_the_whole_limit_is_named_before_a_stage_budget_when_both_are_spent( tmp_path ):
+    cap = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 2, { "small": 2 } )
+    with call_cap.stage( "small" ):
+        cap.charge( FABLE )
+        cap.charge( FABLE )
+        with pytest.raises( er.NeedsetError ) as caught: cap.charge( FABLE )
+    assert caught.value.code == er.CALL_CAP_REACHED
+
+
+@pytest.mark.parametrize( "bad", [ { "a": -1 }, { "a": True }, { "a": 1.5 } ] )
+def test_a_stage_limit_must_be_a_whole_number_of_zero_or_more( tmp_path, bad ):
+    with pytest.raises( ValueError, match="limit of stage 'a'" ): call_cap.CallCap( str( tmp_path / "c.jsonl" ), 5, bad )

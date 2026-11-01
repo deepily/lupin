@@ -211,3 +211,40 @@ def test_the_stage_functions_slot_into_the_runner( tmp_path ):
 def test_the_draw_is_pinned_so_a_change_to_the_seed_recipe_is_seen():
     r = draw()
     assert r[ "attribution" ][ "ts" ][ :3 ] == PIN_ATTRIBUTION_TS and r[ "yield" ][ "ts" ][ :3 ] == PIN_YIELD_TS
+
+
+def test_an_attribution_walk_ended_by_its_own_budget_keeps_the_needs_found_and_skips_the_trace( tmp_path ):
+    path, asked, traced = stage_seeds.write_lists( tmp_path, draw() ), [], []
+
+    async def make_need( seed_id ):
+        asked.append( seed_id )
+        if len( asked ) == 6: raise er.NeedsetError( er.STAGE_BUDGET_REACHED, "the attribution stage used 300 of its 300 calls" )
+        return None if len( asked ) == 2 else matched_need( seed_id )
+
+    async def trace_fn( needs ):
+        traced.append( needs )
+        return []
+
+    out = asyncio.run( stage_seeds.attribution_stage( path, make_need, trace_fn )() )
+    assert out[ "budget_reached" ] is True and "300 of its 300" in out[ "budget_detail" ] and out[ "traced" ] is False and traced == []
+    assert out[ "needs" ] == 4 and out[ "skipped" ] == [ asked[ 1 ] ] and out[ "seeds" ] == 50 and out[ "lists_sha" ] == draw()[ "sha" ]
+
+
+def test_an_attribution_trace_ended_by_its_own_budget_keeps_the_needs_and_any_other_error_still_stops( tmp_path ):
+    path = stage_seeds.write_lists( tmp_path, draw() )
+
+    async def make_need( seed_id ): return matched_need( seed_id )
+
+    async def over( needs ): raise er.NeedsetError( er.STAGE_BUDGET_REACHED, "out of budget in the trace" )
+
+    out = asyncio.run( stage_seeds.attribution_stage( path, make_need, over )() )
+    assert out[ "budget_reached" ] is True and out[ "needs" ] == 50 and out[ "traced" ] is False and out[ "budget_detail" ] == "out of budget in the trace"
+
+    async def capped( needs ): raise er.NeedsetError( er.CALL_CAP_REACHED, "cap" )
+
+    with pytest.raises( er.NeedsetError ) as caught: asyncio.run( stage_seeds.attribution_stage( path, make_need, capped )() )
+    assert caught.value.code == er.CALL_CAP_REACHED
+
+    async def make_capped( seed_id ): raise er.NeedsetError( er.CALL_CAP_REACHED, "cap" )
+
+    with pytest.raises( er.NeedsetError ): asyncio.run( stage_seeds.attribution_stage( path, make_capped, over )() )

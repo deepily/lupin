@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.reuse_needset.keys.twins_of@e792508cf7
   - lupin_mcp.reuse_needset.keys.assign_routes@fc0df60129
   - lupin_mcp.reuse_needset.keys.KeyContext@dd000d6769
-  - lupin_mcp.reuse_needset.keys.unlike@f9522a990b
+  - lupin_mcp.reuse_needset.keys.unlike@08230a7c49
   - lupin_mcp.reuse_needset.keys.target_lang@6b73cb183e
   - lupin_mcp.reuse_needset.keys.vector_candidates@b345d7d4df
   - lupin_mcp.reuse_needset.keys.sampled_candidates@1248cceda5
@@ -20,7 +20,7 @@ Finds the neighbours of a seed symbol that might do its job. A work-alike seed g
 - `assign_routes` gives each work-alike seed a route, half and half, with the vector route taking the first of an odd count. The same ids and seed always give the same answer, whatever order the ids arrive in.
 - `KeyContext` holds what the neighbour search reads: the pool, measures, bodies, vectors and the seed.
 - `target_lang` is the seed's own language, or the other one for a cross-language need.
-- `unlike` keeps the ids, in order and without the seed, whose shingle overlap with the seed is under 0.5.
+- `unlike` keeps the ids, in order and without the seed, whose shingle overlap with the seed is under 0.5. For a method or function seed it also drops every whole class. So the seed's own class never takes a slot, and a method is compared with methods and functions. A class seed still sees classes.
 
 ## Candidate lists
 - `vector_candidates` ranks neighbours by cosine over the stored vectors. It uses the seed's own stored row as the query, so no text is embedded. It returns up to ten unlike neighbours in the target language, nearest first.

@@ -1,7 +1,7 @@
 """
 The stage runner for the first 1,000 model calls of Set B (plan section 11.4).
 
-Four stages run in order under one shared call cap: attribution, yield, control, remainder. The control is built elsewhere and handed in.
+Four stages run in order under one shared call cap, and each has a call budget of its own: attribution, yield, control, remainder. The control is built elsewhere and handed in.
 The runner makes no call of its own. It never builds a packet, takes a person's ruling or writes a label file.
 """
 from cosa.repo.doc_lint import harness_report, model_transport
@@ -14,7 +14,10 @@ YIELD         = "yield"
 CONTROL       = "control"
 REMAINDER     = "remainder"
 ORDER         = ( ATTRIBUTION, YIELD, CONTROL, REMAINDER )
-PLANNED_CALLS = { ATTRIBUTION: 200, YIELD: 300, CONTROL: 200 }
+# The budgets of 1 November 2026 (Rick raised the run to 1,314 calls): yield is the sample of about 100 random seeds at about 6 calls a seed with room to spare,
+# control is two passes of the 20 planted pairs at about 5 calls a pair, remainder makes no call, so its budget is none. 164 calls stay unallocated, held for Rick.
+PLANNED_CALLS = { ATTRIBUTION: 300, YIELD: 600, CONTROL: 250 }
+STAGE_BUDGETS = { **PLANNED_CALLS, REMAINDER: 0 }
 YIELD_SEEDS   = 100
 LOST_STAGES   = ( loss_trace.NOT_RETRIEVED, loss_trace.NOT_RATED_RELEVANT, loss_trace.NOT_READ, loss_trace.NOT_RULED_SAME_JOB )
 DRIFTED       = "drifted"
@@ -22,6 +25,7 @@ UNSURE        = "unsure"
 DONE          = "done"
 STOPPED       = "stopped"
 CAP_REACHED   = "cap_reached"
+BUDGET_REACHED = "budget_reached"
 FAILED        = "failed"
 NOT_RUN       = "not_run"
 
@@ -56,20 +60,26 @@ async def run_yield( seed_ids, prepare_fn, index, k=hardness.BM25_K ):
 
     Ensures:
         - seeds run one at a time in the order given, so the calls fall in a fixed order
-        - returns { k, seeds, skipped, hard, by_lang, intervals, stop, short }
+        - returns { k, seeds, skipped, hard, by_lang, intervals, stop, short, budget_reached }
+        - when the running stage's own call budget ends the walk, the seeds done so far are reported, budget_reached is True and budget_detail names the stop; seeds_left counts the seeds never started
         - by_lang and hard come from hardness.yield_report over the seeds that had a partner
         - intervals maps each language to the two-sided 95 percent interval of its hard share
         - stop is True when a language with at least YIELD_SEEDS seeds has no hard row
         - short lists the languages that had fewer seeds than YIELD_SEEDS, which is a warning and not a stop
     """
-    rows, skipped = [], 0
-    for seed_id in seed_ids:
-        row = await prepare_fn( seed_id )
+    rows, skipped, detail, left = [], 0, None, 0
+    for n, seed_id in enumerate( seed_ids ):
+        try:
+            row = await prepare_fn( seed_id )
+        except er.NeedsetError as error:
+            if error.code != er.STAGE_BUDGET_REACHED: raise
+            detail, left = error.detail, len( seed_ids ) - n
+            break
         if row is None: skipped += 1
         else: rows.append( row )
     report = hardness.yield_report( hardness.source_hard( rows, index, k ), k )
     by_lang = report[ "by_lang" ]
-    return { **report, "skipped": skipped,
+    return { **report, "skipped": skipped, "budget_reached": detail is not None, "budget_detail": detail, "seeds_left": left,
              "intervals": { lang: harness_report.interval( v[ "hard" ], v[ "seeds" ] ) for lang, v in by_lang.items() },
              "stop": any( v[ "seeds" ] >= YIELD_SEEDS and v[ "hard" ] == 0 for v in by_lang.values() ),
              "short": sorted( lang for lang, v in by_lang.items() if v[ "seeds" ] < YIELD_SEEDS ) }
@@ -106,15 +116,17 @@ async def run_stages( cap, stages ):
     Run the four stages in order under one cap and report each.
 
     Requires:
-        - cap is a call_cap.CallCap that is installed, so model_transport calls are charged to it
+        - cap is a call_cap.CallCap that is installed, so model_transport calls are charged to it; its stage_limits are the budgets the stages keep to
         - stages maps each of the four stage names to async functions taking no argument and returning a report dict
         - a report with stop true ends the run; a report may be built by attribution_report, run_yield, run_remainder or the control
 
     Ensures:
         - each stage runs inside call_cap.stage( its name ), so its calls carry the name
-        - returns { used, limit, by_stage, over_plan, stages } with a status per stage: done, stopped, cap_reached, failed or not_run
+        - returns { used, limit, by_stage, over_plan, stages } with a status per stage: done, stopped, cap_reached, budget_reached, failed or not_run
         - a stage after a stop, a failure or the cap is not_run and never starts
-        - over_plan lists each stage that spent more than PLANNED_CALLS allows; the plan is a guide, and only the cap stops the run
+        - a stage that spends its own budget ends as budget_reached with the code and detail, and the stages after it still run, because it took nothing from them
+        - over_plan lists each stage that spent more than PLANNED_CALLS allows, which only a cap built without stage limits can show
+        - a report that says budget_reached is kept whole and ends as budget_reached, and the stages after it still run
         - the cap, the stop and a named failure end the run with a report and no exception
 
     Raises:
@@ -133,11 +145,12 @@ async def run_stages( cap, stages ):
         try:
             with call_cap.stage( name ):
                 report = await stages[ name ]()
-            results[ name ] = { "status": STOPPED if report.get( "stop" ) else DONE, "report": report }
+            results[ name ] = { "status": BUDGET_REACHED if report.get( "budget_reached" ) else STOPPED if report.get( "stop" ) else DONE, "report": report }
             halted          = bool( report.get( "stop" ) )
         except er.NeedsetError as error:
-            results[ name ] = { "status": CAP_REACHED if error.code == er.CALL_CAP_REACHED else FAILED, "code": error.code, "detail": error.detail }
-            halted          = True
+            budget          = error.code == er.STAGE_BUDGET_REACHED
+            results[ name ] = { "status": BUDGET_REACHED if budget else CAP_REACHED if error.code == er.CALL_CAP_REACHED else FAILED, "code": error.code, "detail": error.detail }
+            halted          = not budget
     spent = cap.by_stage()
     return { "used": cap.used(), "limit": cap.limit, "by_stage": spent, "stages": results,
              "over_plan": sorted( name for name, allowed in PLANNED_CALLS.items() if spent.get( name, 0 ) > allowed ) }

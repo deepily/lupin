@@ -207,3 +207,25 @@ def test_a_matched_need_whose_seed_is_in_its_own_key_is_refused_by_name():
     with pytest.raises( er.NeedsetError ) as caught: matched( key_symbols=[ "a.b.twin", "a.b.seed" ] )
     assert caught.value.code == er.SEED_IN_KEY and "a.b.seed" in caught.value.detail
     assert matched( key_symbols=[ "a.b.twin", "a.b.seed2" ] )[ "key" ][ "symbols" ] == [ "a.b.twin", "a.b.seed2" ]
+
+
+def seed_answer( **over ):
+    """Build a valid seed-answer need: a work_alike need whose key is its seed alone."""
+    args = dict( kind="work_alike", selection_route=None, key_symbols=[ "a.b.seed" ], key_source="seed" )
+    args.update( over )
+    return matched( **args )
+
+
+def test_a_seed_may_be_its_own_known_answer_only_as_a_work_alike_with_the_seed_alone_and_no_route():
+    rec = seed_answer()
+    assert rec[ "key" ][ "symbols" ] == [ "a.b.seed" ] and rec[ "key" ][ "source" ] == schema.SEED_SOURCE and rec[ "selection_route" ] is None
+    for bad, why in ( ( dict( kind="near_copy" ), "work_alike need whose key is its seed alone" ), ( dict( key_symbols=[ "a.b.seed", "a.b.other" ] ), "work_alike need whose key is its seed alone" ),
+                      ( dict( key_symbols=[ "a.b.other" ] ), "work_alike need whose key is its seed alone" ), ( dict( selection_route="vector" ), "not for a seed-answer need" ) ):
+        with pytest.raises( er.NeedsetError, match=why ): seed_answer( **bad )
+
+
+def test_the_seed_in_its_own_key_is_still_refused_by_name_under_every_other_source():
+    for source in ( "vector", "bm25", "twin" ):
+        kind, route = ( "near_copy", None ) if source == "twin" else ( "work_alike", "vector" if source == "vector" else "sampled" )
+        with pytest.raises( er.NeedsetError ) as caught: matched( kind=kind, selection_route=route, key_source=source, key_symbols=[ "a.b.seed" ] )
+        assert caught.value.code == er.SEED_IN_KEY

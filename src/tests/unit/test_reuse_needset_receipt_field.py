@@ -20,7 +20,7 @@ NEED = "read an RSS feed"
 
 def need_record( seed=None, kind="work_alike" ):
     """Return the parts of a need that check_need reads."""
-    return { "need": NEED, "seed": seed, "kind": kind, "write_lang": "py" }
+    return { "need": NEED, "seed": seed, "kind": kind, "write_lang": "py", "key": { "source": "vector" } }
 
 
 def packed( env, fake, stage, policy=None ):
@@ -83,3 +83,25 @@ def test_a_failed_stage_and_a_context_without_a_stage_raise_instead_of_reading_a
     full = loss_trace.check_need( need_record(), packed( env, PackedFake( NEED ), None ) )
     with pytest.raises( er.NeedsetError ) as e: loss_trace.asked_ids( full )
     assert e.value.code == er.RECEIPT_FIELD_ABSENT and full[ "id" ] in e.value.detail
+
+
+def test_a_seed_that_is_the_known_answer_is_not_left_out_of_the_search_so_it_can_be_found( env ):
+    answer  = { **need_record( seed=FEEDS_ID ), "key": { "source": "seed" } }
+    receipt = loss_trace.check_need( answer, packed( env, PackedFake( NEED ), FakeStage() ) )
+    assert FEEDS_ID in loss_trace.asked_ids( receipt ) and MATH_ID in loss_trace.asked_ids( receipt )
+
+
+def test_the_seed_is_excluded_from_the_search_for_every_source_but_a_seed_answer( env, monkeypatch ):
+    seen = {}
+    real = rt.run_question
+
+    def spy( *args, **kwargs ):
+        seen[ "exclude_id" ] = kwargs[ "exclude_id" ]
+        return real( *args, **kwargs )
+
+    monkeypatch.setattr( rt, "run_question", spy )
+    for source in ( "vector", "bm25", "twin" ):
+        loss_trace.check_need( { **need_record( seed=FEEDS_ID ), "key": { "source": source } }, packed( env, PackedFake( NEED ), FakeStage() ) )
+        assert seen[ "exclude_id" ] == FEEDS_ID, source
+    loss_trace.check_need( { **need_record( seed=FEEDS_ID ), "key": { "source": "seed" } }, packed( env, PackedFake( NEED ), FakeStage() ) )
+    assert seen[ "exclude_id" ] is None, "a seed that is the known answer must be findable"

@@ -26,6 +26,8 @@ from lupin_mcp.reuse_needset import errors as er
 CALLS_FILE   = "call-ledger.jsonl"
 QUERY_CACHE  = "query-cache"
 REPORT_FILE  = "stage-reports.json"
+REJECTIONS_FILE = "ledger-rejections.jsonl"
+CONTROL_PASSES = 2
 NONE_CHOICE  = "NONE"
 UNSURE_NOTE  = "UNSURE"
 
@@ -181,10 +183,11 @@ async def run_first_thousand( run_dir, stage_one, stage_two, control, remainder,
 
     Ensures:
         - the cap reads its count from call-ledger.jsonl in run_dir, so a resumed run keeps the calls already spent
+        - each stage keeps to its budget in stages.STAGE_BUDGETS
         - returns stages.run_stages' report, also written as stage-reports.json in run_dir
         - the cap is installed for the whole run and put back when it ends
     """
-    cap = call_cap.CallCap( f"{run_dir}/{CALLS_FILE}", limit )
+    cap = call_cap.CallCap( f"{run_dir}/{CALLS_FILE}", limit, stages.STAGE_BUDGETS )
     with cap.installed():
         report = await stages.run_stages( cap, { stages.ATTRIBUTION: stage_one, stages.YIELD: stage_two, stages.CONTROL: control, stages.REMAINDER: remainder } )
     with open( f"{run_dir}/{REPORT_FILE}", "w", encoding="utf-8" ) as f: f.write( json.dumps( report, sort_keys=True, indent=4 ) + "\n" )
@@ -229,7 +232,7 @@ def planted_stage_for( live, planted_entries, cache_dir, embed_rows=planted_pool
     return planted_pool.PlantedCandidateStage( live.vectors_dir, str( cache_dir ), live.embed_client, planted, purposes_path=live.purposes_path, K=live.K, arm=live.arm, fusion=live.fusion )
 
 
-def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, prepare=rt.prepare, check=planted_check, build_stage=candidate_stage.build_stage ):
+def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, prepare=rt.prepare, check=planted_check, build_stage=candidate_stage.build_stage, passes=1, pass_resources=None ):
     """
     Return the live control stage: draft the needs, then plant, ask, remove and prove.
 
@@ -237,21 +240,61 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         - ctx is a reuse context with its candidate stage on; ask is the drafter's call; ledger the drafting ledger
         - cache_dir is the run folder's query-cache folder
         - every model call goes through the cap that the runner has installed
+        - passes is how many times the whole control runs; pass_resources( n ) returns the ( drafting ledger, query-cache folder ) of pass n for n of 1 or more, so a later pass asks again and is not answered from the first
 
     Ensures:
         - the needs are drafted first, one at a time in file order, and a need that does not pass stops the stage by name
         - the pool the control plants into and restores is the index's own sendable entries
         - the checker is planted_check over a planted stage that shares the live stage's folders and client
+        - with more than one pass the report is the first pass's, plus passes ( each pass's report ), consistent ( every pass missed the same pairs ) and stop true when any pass stopped
+        - when the stage's own call budget ends a pass, the passes already finished stay in the report, with budget_reached True, budget_detail, passes_done and passes_wanted; with none finished passes is empty
+
+    Raises:
+        - ValueError when passes is more than 1 and pass_resources is None, or passes is less than 1
     """
-    async def stage():
-        """Ensures: returns the control report."""
-        needs   = await draft_control_needs( pairs, lambda p: control_job( p, strip_fn ), ask, ledger, draft_fn )
+    if passes < 1 or ( passes > 1 and pass_resources is None ): raise ValueError( "a control of several passes needs pass_resources, and at least one pass" )
+
+    async def one_pass( n ):
+        """Ensures: returns the control report of pass n, from that pass's own ledger and cache."""
+        book, cache = ( ledger, cache_dir ) if n == 0 else pass_resources( n )
+        needs   = await draft_control_needs( pairs, lambda p: control_job( p, strip_fn ), ask, book, draft_fn )
         entries = [ planted_pool.planted_entry( p[ "rewrite" ] ) for p in pairs ]
-        planted = planted_stage_for( ctx.candidate_stage, entries, cache_dir )
+        planted = planted_stage_for( ctx.candidate_stage, entries, cache )
         pool    = prepare( ctx )[ 1 ]
         asker   = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids )
         return await stage3.control_stage( pool, pairs, asker, build_stage )()
+
+    async def stage():
+        """Ensures: returns the control report."""
+        reports, detail = [], None
+        for n in range( passes ):
+            try:
+                reports.append( await one_pass( n ) )
+            except er.NeedsetError as error:
+                if error.code != er.STAGE_BUDGET_REACHED: raise
+                detail = error.detail
+                break
+        if passes == 1 and detail is None: return reports[ 0 ]
+        first = reports[ 0 ] if reports else {}
+        return { **first, "passes": reports, "consistent": all( r[ "missed" ] == first[ "missed" ] for r in reports ), "stop": any( r[ "stop" ] for r in reports ),
+                 "budget_reached": detail is not None, "budget_detail": detail, "passes_done": len( reports ), "passes_wanted": passes }
     return stage
+
+
+def live_control( args, passes=CONTROL_PASSES ):
+    """
+    Return control_stage_live set up for this run, in CONTROL_PASSES passes.
+
+    Ensures:
+        - each pass has a drafting ledger and a query cache of its own
+        - pass n of 1 or more drafts through ledger-control-draft-pass{n+1}.jsonl in the run folder and caches queries in the first pass's cache folder with -pass{n+1} added
+        - the first pass keeps the ledger and cache main hands in
+    """
+    def control( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir ):
+        """Ensures: returns the multi-pass control stage."""
+        more = lambda n: ( draft.make_ledger( f"{args.run_dir}/ledger-control-draft-pass{n + 1}.jsonl", args.cli_path, args.server ), f"{cache_dir}-pass{n + 1}" )
+        return control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, passes=passes, pass_resources=more )
+    return control
 
 
 def tracked_files( root ):
@@ -293,10 +336,13 @@ def live_parts( args, env, built, lists, build=stage_parts.build_parts ):
     Ensures:
         - the drafter writes the sentences and args.second_model checks them, each through its own ledger in the run folder
         - the tracing ledger is ledger-trace.jsonl, and the probe runs args.probe_model
+        - every rejected sentence, disputed need and unreadable reply is appended to ledger-rejections.jsonl in the run folder
+        - a seed is its own known answer unless args.partners asks for the partner search
     """
     make    = lambda name: draft.make_ledger( f"{args.run_dir}/{name}", args.cli_path, args.server )
-    ledgers = { "draft": draft.SharedLedger( make( "ledger-stage-draft.jsonl" ) ), "second": draft.SharedLedger( make( "ledger-stage-second.jsonl" ) ), "trace": make( "ledger-trace.jsonl" ) }
-    return build( env, built, lists, { "second": args.second_model, "probe": args.probe_model }, env.ask, draft.drafter_call( args.second_model ), ledgers )
+    ledgers = { "draft": draft.SharedLedger( make( "ledger-stage-draft.jsonl" ) ), "second": draft.SharedLedger( make( "ledger-stage-second.jsonl" ) ), "trace": make( "ledger-trace.jsonl" ),
+                "rejections": stage_parts.RejectionLedger( f"{args.run_dir}/{REJECTIONS_FILE}" ) }
+    return build( env, built, lists, { "second": args.second_model, "probe": args.probe_model }, env.ask, draft.drafter_call( args.second_model ), ledgers, args.partners )
 
 
 NEEDS_KEY = { stages.ATTRIBUTION: "needs", stages.YIELD: "seeds" }      # the report field that counts the needs a stage found
@@ -344,7 +390,8 @@ def parse_args( argv ):
     Ensures:
         - the root, run folder, planted file, answer key, labels folder, seed and source commit are required
         - live is false unless --live is given, and without it main plans and contacts nothing
-        - the cap is 1,000 calls unless --limit names another
+        - partners is false unless --partners is given
+        - the cap is 1,314 calls unless --limit names another
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     for name in REQUIRED: ap.add_argument( "--" + name.replace( "_", "-" ), required=True, type=int if name == "seed" else str )
@@ -353,6 +400,7 @@ def parse_args( argv ):
     ap.add_argument( "--server", default="max-plan" )
     ap.add_argument( "--second-model", default=smoke.SECOND_MODEL )
     ap.add_argument( "--probe-model", default=smoke.SECOND_MODEL )
+    ap.add_argument( "--partners", action="store_true", help="search for a partner of each seed; off by default, a seed is then its own known answer" )
     ap.add_argument( "--live", action="store_true" )
     return ap.parse_args( argv )
 
@@ -395,7 +443,7 @@ def main( argv=None, deps=None ):
     Plan the first 1,000 calls, or with --live run them.
 
     Requires:
-        - deps is None for the real parts, or a mapping that replaces any of: planted_sha, context, ask, ledger, draft_fn, strip_fn, built, tracked, parts, factories, control, runner, remainder
+        - deps is None for the real parts, or a mapping that replaces any of: planted_sha, context, ask, ledger, draft_fn, strip_fn, built, tracked, parts, factories, control, runner, remainder, close_run
         - a live run needs the reuse environment variables the context reads, and the live parts of the attribution and yield stages
 
     Ensures:
@@ -403,6 +451,8 @@ def main( argv=None, deps=None ):
         - with --live every Claude Code call (the drafter, the second model and the probe) runs on the binary args.cli_path names
         - a plan makes no call and leaves the binary setting alone
         - with --live the four stages run under one cap in args.run_dir and the report is returned
+        - with --live the Jev spend-ledger run is closed when the stages end, by a stop, a failure, the cap or an error anywhere after the context is built, and closed_run names it (None when no run began)
+        - a close_run that raises while another error is on its way never replaces that error; after a clean finish its error is returned as close_error and the exit status is 1
         - the pairs and their groups are read before anything else, so a bad input stops the run before a call
 
     Raises:
@@ -420,6 +470,33 @@ def main( argv=None, deps=None ):
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "a live run needs --cli-path: the SDK's bundled Claude Code is too old for the drafter's model and answers 400" )
     model_transport.configure( cli_path=args.cli_path )
     ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
+    close     = deps[ "close_run" ] if "close_run" in deps else rt.close_run
+    try:
+        report = live_run( args, loaded, ctx, deps )
+    except BaseException:
+        try: close( ctx )
+        except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
+        raise
+    try:
+        closed, close_error = close( ctx ), None
+    except Exception as error:
+        closed, close_error = None, repr( error )
+    return { "live": True, "plan": shown, "report": report, "closed_run": closed, "close_error": close_error }
+
+
+def live_run( args, loaded, ctx, deps ):
+    """
+    Build the live parts and run the four stages; return the stage runner's report.
+
+    Requires:
+        - ctx is the run's context; deps is main's mapping of stand-ins
+
+    Ensures:
+        - everything that can begin the Jev spend-ledger run, the parts and the control among it, is built here, so main can close the run on any error
+    Raises:
+        - NeedsetError NO_CANDIDATE_STAGE for a context with no candidate stage, before the index is built or a list is written
+        - whatever the parts, the factories or the runner raise
+    """
     if ctx.candidate_stage is None: raise er.NeedsetError( er.NO_CANDIDATE_STAGE, f"the context has no candidate stage; set {rt.PACK_SIZE_VARIABLE}, {rt.CEILING_VARIABLE} and {rt.RUN_NAME_VARIABLE}, which build it" )
     ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
     ledger    = deps[ "ledger" ]( args ) if "ledger" in deps else draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
@@ -430,11 +507,10 @@ def main( argv=None, deps=None ):
     path      = write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit, built, **( { "tracked": deps[ "tracked" ] } if "tracked" in deps else { } ) )
     parts     = ( deps[ "parts" ] if "parts" in deps else live_parts )( args, env, built, stage_seeds.load_lists( path ) )
     factories = deps[ "factories" ] if "factories" in deps else stage_factories( path, parts )
-    control   = ( deps[ "control" ] if "control" in deps else control_stage_live )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )
+    control   = ( deps[ "control" ] if "control" in deps else live_control( args ) )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )
     rem       = remainder_stage( loaded[ "remainder" ], args.seed, **( { "run_remainder": deps[ "remainder" ] } if "remainder" in deps else { } ) )
     runner    = deps[ "runner" ] if "runner" in deps else run_first_thousand
-    report    = asyncio.run( runner( args.run_dir, factories[ 0 ]( env ), factories[ 1 ]( env ), control, rem, args.limit ) )
-    return { "live": True, "plan": shown, "report": report }
+    return asyncio.run( runner( args.run_dir, factories[ 0 ]( env ), factories[ 1 ]( env ), control, rem, args.limit ) )
 
 
 EXIT_FAILED      = 1
@@ -449,14 +525,15 @@ def exit_status( result ):
         - result is main's dict: a plan has no report; a live run has report.stages
 
     Ensures:
-        - returns 1 when any stage failed, 3 when the cap ended a stage and none failed, else 0
+        - returns 1 when any stage failed or the spend-ledger run could not be closed, 3 when the cap or a stage's own budget ended a stage and none failed, else 0
         - 2 is left to the argument parser, which exits 2 on a usage error
         - a stage that stopped on a finding, or did not run because of an earlier stop, is a result and not a failure
         - a plan gives 0
     """
     if not result[ "live" ]: return 0
+    if result[ "close_error" ] is not None: return EXIT_FAILED
     statuses = { v[ "status" ] for v in result[ "report" ][ "stages" ].values() }
-    return EXIT_FAILED if stages.FAILED in statuses else ( EXIT_CAP_REACHED if stages.CAP_REACHED in statuses else 0 )
+    return EXIT_FAILED if stages.FAILED in statuses else ( EXIT_CAP_REACHED if statuses & { stages.CAP_REACHED, stages.BUDGET_REACHED } else 0 )
 
 
 def run_cli( argv=None, deps=None, out=print ):

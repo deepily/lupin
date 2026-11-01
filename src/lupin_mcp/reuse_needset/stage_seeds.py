@@ -161,18 +161,32 @@ def attribution_stage( lists_path, make_need, trace_fn ):
         - the seeds come from the written file, which load_lists has checked, in the file's interleaved order
         - the returned function takes no argument and returns attribution_report's dict plus seeds, needs and skipped
         - when no seed gives a need the report says so and stops the run, and the trace is not called
+        - when the stage's own call budget ends the walk or the trace, the report keeps the seeds and needs found so far, with budget_reached True, budget_detail and traced False; finished traces stay in the trace ledger
     """
     async def stage():
         """Ensures: returns the attribution report."""
         lists            = load_lists( lists_path )
         needs, skipped   = [], []
         for seed_id in lists[ stages.ATTRIBUTION ][ "order" ]:
-            need = await make_need( seed_id )
+            try:
+                need = await make_need( seed_id )
+            except er.NeedsetError as error:
+                if error.code != er.STAGE_BUDGET_REACHED: raise
+                return partial( needs, skipped, lists, error.detail )
             if need is None: skipped.append( seed_id )
             else: needs.append( need )
         head = { "seeds": len( lists[ stages.ATTRIBUTION ][ "order" ] ), "needs": len( needs ), "skipped": skipped, "lists_sha": lists[ "sha" ] }
         if not needs: return { **head, "stop": True, "reason": "no seed gave a need" }
-        return { **head, **stages.attribution_report( await trace_fn( needs ) ) }
+        try:
+            records = await trace_fn( needs )
+        except er.NeedsetError as error:
+            if error.code != er.STAGE_BUDGET_REACHED: raise
+            return partial( needs, skipped, lists, error.detail )
+        return { **head, **stages.attribution_report( records ) }
+
+    def partial( needs, skipped, lists, detail ):
+        """Ensures: returns the report of a stage whose own budget ended it, keeping what it found."""
+        return { "seeds": len( lists[ stages.ATTRIBUTION ][ "order" ] ), "needs": len( needs ), "skipped": skipped, "lists_sha": lists[ "sha" ], "budget_reached": True, "budget_detail": detail, "traced": False }
     return stage
 
 

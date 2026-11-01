@@ -77,6 +77,18 @@ def near_copy_job( env, seed_id, lang ):
              "meta": { "route": None, "key_source": schema.TWIN_SOURCE, "key_lang": env.by_id[ twins[ 0 ] ][ "lang" ] } }
 
 
+def seed_job( env, seed_id, lang ):
+    """
+    Build the job for a seed that is its own known answer: no partner is searched for.
+
+    Ensures:
+        - the job has no keys, so the drafted sentence is checked against the seed alone
+        - its meta names the seed as the key source and holds the seed's language as the key language
+    """
+    seed = env.by_id[ seed_id ]
+    return { "seed": seed, "keys": [], "stripped": env.strip_fn( seed ), "write_lang": lang, "meta": { "route": None, "key_source": schema.SEED_SOURCE, "key_lang": seed[ "lang" ] } }
+
+
 def routed_job( env, kind, seed_id, lang, route ):
     """Build the job for a work-alike seed through its route, or None without a key."""
     found = keys.find_key( env.ctx, seed_id, route, lambda prompt: env.ask( SAME_JOB_SYSTEM, prompt ), env.ledger, env.model_id, kind,
@@ -121,10 +133,13 @@ def to_need( record, kind, lang, env ):
 
     Ensures:
         - returns schema.new_need over it, carrying smoke when the run is a smoke run
+        - a record whose meta names the seed as the key source gives a seed-answer need: the key is the seed and there is no route
         - a nothing need has no seed, no key and no route
     """
     drafter = { "model": env.model_id, "prompt_version": draft.prompt_version(), "server": env.server }
     meta    = record[ "meta" ]
+    if meta[ "key_source" ] == schema.SEED_SOURCE:
+        return schema.new_need( kind, lang, record[ "seed" ], None, [ record[ "seed" ] ], meta[ "key_lang" ], schema.SEED_SOURCE, record[ "need" ], env.source_commit, drafter, env.smoke )
     if kind == quota.NONE_KIND:
         return schema.new_need( kind, lang, None, None, [], None, None, record[ "need" ], env.source_commit, drafter, env.smoke )
     return schema.new_need( kind, lang, record[ "seed" ], meta[ "route" ], record[ "key" ], meta[ "key_lang" ], meta[ "key_source" ], record[ "need" ], env.source_commit, drafter, env.smoke )

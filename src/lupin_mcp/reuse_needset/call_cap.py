@@ -1,8 +1,9 @@
 """
 One shared cap on model calls, over a single ledger file.
 
-Set B's overnight run may make 1,000 model calls in all. Fable need-drafting, the checker's judge and the agent probe are all calls,
-and all of them are counted here, whichever stage makes them. Call 1,001 is refused by name before any model is contacted.
+Set B's first-thousand run may make 1,314 model calls in all. The first attempt spent 686, and Rick raised the budget by about 1,000 on 1 November.
+Fable need-drafting, the checker's judge and the agent probe are all calls, and all of them are counted here, whichever stage makes them.
+Call 1,315 is refused by name before any model is contacted. A stage may also have a budget of its own, so one stage cannot spend the others' calls.
 """
 import contextlib
 import contextvars
@@ -14,7 +15,7 @@ import os
 from cosa.repo.doc_lint import jev_transport, model_transport
 from lupin_mcp.reuse_needset import errors as er
 
-CALL_LIMIT = 1000
+CALL_LIMIT = 1314
 NO_STAGE   = "unstaged"
 _STAGE     = contextvars.ContextVar( "needset_call_stage", default=NO_STAGE )
 
@@ -49,6 +50,7 @@ class CallCap:
     Requires:
         - path is a file in an existing directory; the file may not exist yet
         - limit is an int of zero or more
+        - stage_limits is None, or maps a stage name to an int of zero or more calls that stage may make
 
     Ensures:
         - a call is counted before it is made, so a call that crashes still counts
@@ -56,17 +58,21 @@ class CallCap:
         - a new CallCap over the same file starts from the calls already there, so a resumed run keeps the count
     """
 
-    def __init__( self, path, limit=CALL_LIMIT ):
+    def __init__( self, path, limit=CALL_LIMIT, stage_limits=None ):
         """
-        Hold the ledger path and the limit.
+        Hold the ledger path, the limit and the stage limits.
 
         Raises:
-            - ValueError for a limit that is not an int of zero or more, or a directory that does not exist
+            - ValueError for a limit or a stage limit that is not an int of zero or more, or a directory that does not exist
         """
         if isinstance( limit, bool ) or not isinstance( limit, int ) or limit < 0: raise ValueError( f"limit must be an int of zero or more, got {limit!r}" )
+        stage_limits = {} if stage_limits is None else dict( stage_limits )
+        for name, each in stage_limits.items():
+            if isinstance( each, bool ) or not isinstance( each, int ) or each < 0: raise ValueError( f"the limit of stage {name!r} must be an int of zero or more, got {each!r}" )
         if not os.path.isdir( os.path.dirname( os.path.abspath( path ) ) ): raise ValueError( f"ledger directory for {path!r} does not exist" )
         self.path  = str( path )
         self.limit = limit
+        self.stage_limits = stage_limits
 
     def rows( self ):
         """
@@ -104,24 +110,31 @@ class CallCap:
         Ensures:
             - writes one row, flushed to disk, holding the call number, the stage, the model and the time
             - a call past the limit writes nothing and contacts nothing
+            - a call past the budget of the stage that asks writes nothing and contacts nothing, while the other stages keep their own calls
             - a ledger whose last line was cut off is closed with a newline first, so the fragment cannot hide the new row
 
         Raises:
             - NeedsetError CALL_CAP_REACHED naming the count, the limit and the stage that asked
+            - NeedsetError STAGE_BUDGET_REACHED naming the stage, its calls and its budget, when the whole limit still has room
             - ValueError for an empty model id
         """
         if not model: raise ValueError( "a charged call needs a model id" )
         with open( self.path, "a+", encoding="utf-8" ) as f:
             fcntl.flock( f, fcntl.LOCK_EX )
-            used    = self.used()
+            rows    = self.rows()
+            used    = len( rows )
+            name    = _STAGE.get()
+            spent   = sum( 1 for r in rows if r[ "stage" ] == name )
             allowed = used < self.limit
-            if allowed:
+            over    = allowed and name in self.stage_limits and spent >= self.stage_limits[ name ]
+            if allowed and not over:
                 size = os.fstat( f.fileno() ).st_size
                 if size > 0 and os.pread( f.fileno(), 1, size - 1 ) != b"\n": f.write( "\n" )
-                f.write( json.dumps( { "n": used + 1, "stage": _STAGE.get(), "model": model, "ts": datetime.datetime.now( datetime.timezone.utc ).isoformat() } ) + "\n" )
+                f.write( json.dumps( { "n": used + 1, "stage": name, "model": model, "ts": datetime.datetime.now( datetime.timezone.utc ).isoformat() } ) + "\n" )
                 f.flush()
                 os.fsync( f.fileno() )
-        if not allowed: raise er.NeedsetError( er.CALL_CAP_REACHED, f"{used} of {self.limit} calls used; the {_STAGE.get()} stage asked for another, and no model was contacted" )
+        if not allowed: raise er.NeedsetError( er.CALL_CAP_REACHED, f"{used} of {self.limit} calls used; the {name} stage asked for another, and no model was contacted" )
+        if over: raise er.NeedsetError( er.STAGE_BUDGET_REACHED, f"the {name} stage used {spent} of its {self.stage_limits[ name ]} calls and asked for another; no model was contacted" )
 
     @contextlib.contextmanager
     def installed( self ):
@@ -175,7 +188,8 @@ def charge_attempt( model ):
 
     Raises:
         - NeedsetError CAP_NOT_INSTALLED when a stage is running and no cap is installed, so no caller can go uncounted
-        - NeedsetError CALL_CAP_REACHED from the cap at call 1,001
+        - NeedsetError CALL_CAP_REACHED from the cap at the call past its limit
+        - NeedsetError STAGE_BUDGET_REACHED from the cap at the call past the running stage's budget
     """
     hook = model_transport.CHARGE_HOOK
     if hook is None:
