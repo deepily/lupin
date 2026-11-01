@@ -7,8 +7,8 @@ pins:
   - cosa.repo.semdup.proof.label_load.third_votes@ce4a654a08
   - cosa.repo.semdup.proof.label_load.disputed_items@61090437b8
   - cosa.repo.semdup.proof.label_load.supplement_rows@dd327fdd98
-  - cosa.repo.semdup.proof.label_load.resolved_labels@5da9de8449
-  - cosa.repo.semdup.proof.label_load.fingerprints@9d6d8a63be
+  - cosa.repo.semdup.proof.label_load.resolved_labels@ea3bbd020b
+  - cosa.repo.semdup.proof.label_load.fingerprints@fca0830aef
   - cosa.repo.semdup.proof.label_load.unsure_pair_keys@51041bcc53
 ---
 # Duplicate checker proof: the label loader
@@ -20,8 +20,8 @@ Turns the reviewers' pair labels and the answer key into the `{ pair key: bool }
 - `pair_key_labels` turns one reviewer's labels file into `{ pair key: bool }`, with the key written as `label_key` writes it. An unsure label counts at its leaning choice.
 - `pair_key_labels` refuses labels for an item the key does not know.
 - `resolved_labels` settles every pair from two reviewers with `resolve_label`. A third rater's file may settle each disagreement; that rater labels only the disputed pairs.
-- A supplement is labels for pairs the run's key lacks. It lives in files of its own, so the frozen labels files stay as they were. `supplement_rows` reads its key. It refuses an item id or pair the run's key holds, and anything but two labels files. `resolved_labels` needs both reviewers on those pairs too. A split takes a ruling, because the third rater never sees them.
-- `fingerprints` gives the sha256 of each label file used and of the answer key. It adds the rulings and third files when given, the supplement's key and files when given, and the tree root. It hashes each file with the shared `arm_run.sha256_of`. `unsure_pair_keys` lists the pairs either reviewer's latest answer marks unsure, a supplement's included.
+- A supplement is labels for pairs the run's key lacks. It lives in files of its own, so the frozen labels files stay as they were. `supplement_rows` reads its key. It refuses an item id or pair the run's key holds, and anything but two labels files. `resolved_labels` needs both reviewers on those pairs too. A split takes the supplement's third file if it names one, else a ruling. That file must label every disputed supplement pair and no other.
+- `fingerprints` gives the sha256 of each label file used and of the answer key. It adds the rulings and third files when given, the supplement's key, files and third file when given, and the tree root. It hashes each file with the shared `arm_run.sha256_of`. `unsure_pair_keys` lists the pairs either reviewer's latest answer marks unsure, a supplement's included.
 - `disputed_items` lists the items the two reviewers labelled differently. `third_votes` turns the third rater's file into votes on them, and an unsure label is a vote of `None`.
 - A sure third label outranks a ruling. An unsure one leaves the pair to the ruling, passed in as `{ pair key: bool }`.
 
