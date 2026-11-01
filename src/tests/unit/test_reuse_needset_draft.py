@@ -412,3 +412,13 @@ def test_a_copied_path_is_caught_before_the_leak_check_and_rewritten_once_by_kin
 def test_an_unreadable_drafter_reply_is_kept_in_the_record_for_the_ledger( tmp_path ):
     got = draft.draft_need( job(), Asker( [ "", f"{GOOD}\nmore" ] ), ledger( tmp_path ) )
     assert got[ "unreadable" ] == [ { "try": 0, "retry": 0, "reply": "" }, { "try": 0, "retry": 1, "reply": f"{GOOD}\nmore" } ]
+
+
+@pytest.mark.parametrize( "ext", [ "py", "tsx", "ts", "js", "cjs", "mjs", "json", "md", "ini", "yml", "yaml", "sh", "css", "html", "txt" ] )
+def test_a_slashed_string_ending_in_any_listed_file_extension_is_a_copied_path( ext ):
+    found = draft.copy_check( f"A function that reads static/assets/notes.{ext} and then adds up every number it finds listed there.", SEED )
+    assert found and f"static/assets/notes.{ext}" in found[ 0 ][ "detail" ], ext
+
+
+def test_a_dotted_word_after_a_slash_that_is_not_a_listed_extension_is_not_a_path():
+    assert draft.copy_check( "A function that reads static/assets/notes.final and then adds up every number it finds listed there.", SEED ) == []
