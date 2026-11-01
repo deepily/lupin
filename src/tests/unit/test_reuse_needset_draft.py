@@ -440,3 +440,21 @@ def test_with_more_tries_each_rewrite_is_told_every_word_refused_so_far_and_the_
     draft.draft_need( job(), short, ledger( tmp_path, "two.jsonl" ) )
     assert short.prompts[ :2 ] == ask.prompts[ :2 ]                                                   # the default two tries ask exactly what they always asked, so a ledger replays
     assert [ h[ "words" ] for h in got[ "history" ] ] == [ [ "items" ], [ "total" ], [ "limit" ] ]       # the history keeps each try's own words
+
+
+WORD_ITEMS_AGAIN = "A function that sums the items and the total together and stops once a ceiling has been reached."
+
+
+def test_the_refused_words_reach_the_next_prompt_in_the_order_refused( tmp_path ):
+    ask = Asker( [ LEAKS_IDENTIFIER, WORD_TOTAL, WORD_LIMIT, GOOD ] )
+    draft.draft_need( job(), ask, ledger( tmp_path ), max_tries=4 )
+    last = ask.prompts[ 3 ]
+    marks = [ last.index( f'Do not use the word "{w}"' ) for w in ( "items", "total", "limit" ) ]
+    assert marks == sorted( marks ), "items was refused first, then total, then limit"
+
+
+def test_a_word_refused_twice_is_named_once_in_the_next_prompt( tmp_path ):
+    ask = Asker( [ LEAKS_IDENTIFIER, WORD_ITEMS_AGAIN, GOOD ] )
+    got = draft.draft_need( job(), ask, ledger( tmp_path ), max_tries=3 )
+    assert got[ "ok" ] and [ h[ "words" ] for h in got[ "history" ] ] == [ [ "items" ], [ "items", "total" ] ]      # each try keeps the words it was refused for, repeats included
+    assert ask.prompts[ 2 ].count( 'Do not use the word "items"' ) == 1 and ask.prompts[ 2 ].count( 'Do not use the word "total"' ) == 1
