@@ -128,6 +128,34 @@ class TestPlayHereTwoFaces:
         page.locator( DISMISS ).click()
         assert page.locator( OVERLAY ).count() == 0
 
+    def test_the_audio_player_sits_directly_under_the_header_and_is_fully_visible( self, logged_in_page, client ):
+        page = logged_in_page
+        _stub_files( page )
+        _open_client_and_click_play( page, client, PLAY )
+        frame = page.frame_locator( FRAME )
+        frame.locator( "audio[controls]" ).wait_for( state="attached", timeout=15000 )
+        page.wait_for_function(
+            "() => document.querySelector( '[data-testid=podcast-overlay-frame]' ).contentDocument.querySelector( 'audio' ).getBoundingClientRect().height > 0"
+        )
+
+        box = frame.locator( "audio" ).evaluate(
+            """a => {
+                const r = a.getBoundingClientRect();
+                const cs = getComputedStyle( document.body );
+                return { top: r.top, bottom: r.bottom, height: r.height, frameHeight: window.innerHeight,
+                         bodyPaddingTop: cs.paddingTop, bodyMarginTop: cs.marginTop,
+                         scrollHeight: document.documentElement.scrollHeight };
+            }"""
+        )
+        assert box[ "bodyPaddingTop" ] == "0px" and box[ "bodyMarginTop" ] == "0px", f"no space above the player: {box}"
+        assert box[ "top" ] == 0, f"the player starts at the top of the frame: {box}"
+        assert 0 < box[ "bottom" ] <= box[ "frameHeight" ], f"the player ends inside the frame, not cut off: {box}"
+        assert box[ "scrollHeight" ] <= box[ "frameHeight" ], f"the frame has nothing to scroll: {box}"
+
+        header_bottom = page.locator( ".podcast-overlay-header" ).evaluate( "h => h.getBoundingClientRect().bottom" )
+        frame_top     = page.locator( FRAME ).evaluate( "f => f.getBoundingClientRect().top" )
+        assert abs( frame_top - header_bottom ) <= 1, "the frame starts right under the header"
+
     def test_the_expand_icon_opens_the_full_page_and_closes_the_widget( self, logged_in_page, client ):
         page = logged_in_page
         _stub_files( page )
