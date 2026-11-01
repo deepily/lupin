@@ -265,20 +265,41 @@ def test_the_tracked_files_are_what_git_lists_for_the_tree_and_a_stub_shows_the_
 def test_the_stage_factories_hand_the_lists_file_and_the_live_parts_to_pocholos_two_stages_and_add_the_counts( monkeypatch ):
     seen  = {}
     tally = stage_parts.Tally()
-    tally[ "disputed" ] += 2
-    tally.ids.append( "n-1" )
     parts = { "make_need": "MN", "trace_fn": "TF", "prepare_fn": "PF", "index": "IX", "tally": tally }
 
-    def stage_of( name, report ):
-        async def stage(): return report
+    def stage_of( report ):
+        async def stage():
+            tally[ "disputed" ] += 2
+            tally.ids.append( "n-1" )
+            return report
         return stage
 
-    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or stage_of( "a", { "seeds": 1 } ) )
-    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or stage_of( "y", { "hard": 2 } ) )
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or stage_of( { "seeds": 1 } ) )
+    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or stage_of( { "hard": 2 } ) )
     one, two = ft.stage_factories( "/lists.json", parts )
     counts   = { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-1" ] }
-    assert asyncio.run( one( "env" )() ) == { "seeds": 1, "no_final_need": counts } and asyncio.run( two( "env" )() ) == { "hard": 2, "no_final_need": counts }
+    assert asyncio.run( one( "env" )() ) == { "seeds": 1, "no_final_need": counts } and asyncio.run( two( "env" )() ) == { "hard": 2, "no_final_need": { **counts, "disputed_ids": [ "n-1" ] } }
     assert seen == { "a": ( "/lists.json", "MN", "TF" ), "y": ( "/lists.json", "PF", "IX" ) }
+
+
+def test_the_yield_report_counts_only_the_yield_seeds_and_not_the_attribution_ones( monkeypatch ):
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+
+    def stage_that( reason, ids ):
+        async def stage():
+            tally[ reason ] += len( ids )
+            tally.ids.extend( ids )
+            return {}
+        return stage
+
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: stage_that( "disputed", [ "n-a1", "n-a2" ] ) )
+    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: stage_that( "draft_failed", [] ) )
+    one, two = ft.stage_factories( "/lists.json", parts )
+    first    = asyncio.run( one( "env" )() )[ "no_final_need" ]
+    second   = asyncio.run( two( "env" )() )[ "no_final_need" ]
+    assert first == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-a1", "n-a2" ] }
+    assert second == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 0, "disputed_ids": [] }
 
 
 def test_the_live_parts_use_their_own_ledgers_in_the_run_folder_and_the_arguments_models( tmp_path, monkeypatch ):

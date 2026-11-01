@@ -308,13 +308,14 @@ def stage_factories( lists_path, parts ):
 
     Ensures:
         - the stages are stage_seeds.attribution_stage and stage_seeds.yield_stage over that file and those parts
-        - each report also carries the counts of seeds that gave no final need, with the disputed ids, as stage_parts.counted reads the tally
+        - each report also carries the counts of its own seeds that gave no final need, with the disputed ids; the stage that ran first does not leak into the one after
     """
     def reported( stage ):
         """Ensures: returns the stage with the tally added to its report."""
         async def with_counts():
-            """Ensures: returns the stage's report plus the counts."""
-            return { **await stage(), "no_final_need": stage_parts.counted( parts[ "tally" ] ) }
+            """Ensures: returns the stage's report plus the counts of its own seeds."""
+            since = stage_parts.mark( parts[ "tally" ] )
+            return { **await stage(), "no_final_need": stage_parts.counted( parts[ "tally" ], since ) }
         return with_counts
     return ( lambda env: reported( stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ) ),
              lambda env: reported( stage_seeds.yield_stage( lists_path, parts[ "prepare_fn" ], parts[ "index" ] ) ) )

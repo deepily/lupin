@@ -75,9 +75,23 @@ def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally,
     return final_need
 
 
-def counted( tally ):
-    """Ensures: returns the tally as a plain dict of the four counts and the disputed ids."""
-    return { **{ k: tally[ k ] for k in ( NOT_POOLED, NO_PARTNER, DRAFT_FAILED, DISPUTED ) }, "disputed_ids": list( tally.ids ) }
+def mark( tally ):
+    """Ensures: returns what the tally holds now, to hand to counted as the point a stage began."""
+    return ( dict( tally ), len( tally.ids ) )
+
+
+def counted( tally, since=None ):
+    """
+    Return the counts of the four reasons and the disputed ids, as they grew since a mark.
+
+    Requires:
+        - since is None for everything, or what mark( tally ) returned earlier
+
+    Ensures:
+        - a stage that began at the mark reports only its own seeds, not those of a stage that ran before it
+    """
+    before, first = ( {}, 0 ) if since is None else since
+    return { **{ k: tally[ k ] - before.get( k, 0 ) for k in ( NOT_POOLED, NO_PARTNER, DRAFT_FAILED, DISPUTED ) }, "disputed_ids": tally.ids[ first: ] }
 
 
 class Tally( collections.Counter ):

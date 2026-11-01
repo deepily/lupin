@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.tracked_files@0eecf6442d
   - lupin_mcp.reuse_needset.first_thousand.write_seed_lists@480a3dd8ba
   - lupin_mcp.reuse_needset.first_thousand.live_parts@b64c33385a
-  - lupin_mcp.reuse_needset.first_thousand.stage_factories@2daa7403c9
+  - lupin_mcp.reuse_needset.first_thousand.stage_factories@12be655431
   - lupin_mcp.reuse_needset.first_thousand.parse_args@448dccc178
   - lupin_mcp.reuse_needset.first_thousand.plan@6de27be30d
   - lupin_mcp.reuse_needset.first_thousand.load_inputs@68bde7e075

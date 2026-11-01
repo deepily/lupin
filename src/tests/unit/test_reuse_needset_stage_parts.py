@@ -114,6 +114,11 @@ def test_the_counts_name_the_four_reasons_and_the_disputed_ids():
     tally[ "disputed" ] += 1
     tally.ids.append( "n-1" )
     assert sp.counted( tally ) == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 1, "disputed_ids": [ "n-1" ] }
+    since = sp.mark( tally )
+    tally[ "disputed" ] += 2
+    tally[ "no_partner" ] += 1
+    tally.ids.append( "n-2" )
+    assert sp.counted( tally, since ) == { "not_pooled": 0, "no_partner": 1, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-2" ] }
 
 
 class Vectors:
