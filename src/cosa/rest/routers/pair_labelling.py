@@ -27,7 +27,7 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 router = APIRouter( prefix="/api/pair-labelling", tags=[ "pair-labelling" ] )
 
 DIR_VARIABLE  = "LUPIN_PAIR_LABELLING_DIR"
-DEFAULT_DIR   = "io/semdup-labelling/2026.10.25-run5/packets"
+DEFAULT_DIR   = "io/semdup-labelling/2026.10.25-run5/packets"   # kept: the passing record names this folder; new runs live in io/duplicate-check/labelling/<run>
 DEFAULT_REVIEWER = "rick"
 
 

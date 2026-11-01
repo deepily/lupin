@@ -19,10 +19,10 @@ def rows():
     return ROW_RE.findall( SHEET.read_text() )
 
 
-def test_the_sheet_has_five_cases_numbered_in_order_with_distinct_pairs():
+def test_the_sheet_keeps_the_three_cases_rick_confirmed_in_order_with_distinct_pairs():
     got = rows()
-    assert [ int( r[ 0 ] ) for r in got ] == [ 1, 2, 3, 4, 5 ]
-    assert len( { r[ 1 ] for r in got } ) == 5
+    assert [ int( r[ 0 ] ) for r in got ] == [ 2, 3, 4 ]
+    assert len( { r[ 1 ] for r in got } ) == 3
 
 
 def test_every_case_names_a_known_group_two_reviewer_answers_a_proposed_answer_and_a_rule_the_sheet_defines():
@@ -34,14 +34,14 @@ def test_every_case_names_a_known_group_two_reviewer_answers_a_proposed_answer_a
         assert f"### Case {number}:" in text, f"{pair}: no written case {number}"
 
 
-def test_the_sheet_says_its_answers_are_proposed_and_leaves_the_instructions_alone():
+def test_the_sheet_says_rick_ruled_and_leaves_the_instructions_alone():
     text = SHEET.read_text()
-    assert "answers below are proposed, not ruled" in text and "adds no rules to the instructions" in text
+    assert "ruled by Rick" in text and "proposed, not ruled" not in text and "adds no rules to the instructions" in text
 
 
 def test_flags_come_first_because_they_hold_most_of_the_disputes():
     groups = [ r[ 2 ] for r in rows() ]
-    assert groups[ :3 ] == [ "flag" ] * 3 and "flag" not in groups[ 3: ]
+    assert groups[ :2 ] == [ "flag" ] * 2 and "flag" not in groups[ 2: ]
 
 
 def test_the_row_pattern_actually_matches_a_row_so_an_empty_parse_cannot_pass():

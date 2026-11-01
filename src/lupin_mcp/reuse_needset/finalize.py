@@ -16,7 +16,7 @@ DISPUTED       = "disputed"
 NOTHING        = "nothing"
 RUN_CHECK      = "run_check"
 SAMPLE         = "sample"
-SEMDUP_PAIR    = "semdup_pair"
+DUPLICATE_PAIR = "semdup_pair"   # the value stays: it matches the packets already written
 
 
 def sample_size( n_agreed ):
@@ -24,12 +24,12 @@ def sample_size( n_agreed ):
     return ( SAMPLE_PERCENT * n_agreed + 50 ) // 100
 
 
-def select_for_labelling( needs, seed, semdup_items=(), person_check_ids=(), run_checks=None ):
+def select_for_labelling( needs, seed, duplicate_items=(), person_check_ids=(), run_checks=None ):
     """
     Choose what the reviewers see, keeping each item's reason apart from the item.
 
     Requires:
-        - needs are checked needs; semdup_items are ids of pairs the duplicate checker hands over
+        - needs are checked needs; duplicate_items are ids of pairs the duplicate checker hands over
         - run_checks, when given, is the { need id: run_check record } mapping; every need whose record routes to a person is selected, as person_check_ids are
 
     Ensures:
@@ -53,7 +53,7 @@ def select_for_labelling( needs, seed, semdup_items=(), person_check_ids=(), run
     agreed   = sorted( n[ "id" ] for n in needs if n[ "id" ] not in listed )
     chosen   = random.Random( f"{seed}|labelling" ).sample( agreed, sample_size( len( agreed ) ) )
     picked  += [ { "id": i, "reason": SAMPLE } for i in sorted( chosen ) ]
-    return picked + [ { "id": i, "reason": SEMDUP_PAIR } for i in sorted( semdup_items ) ]
+    return picked + [ { "id": i, "reason": DUPLICATE_PAIR } for i in sorted( duplicate_items ) ]
 
 
 def need_item( need, key_texts=None, hits=None, call_sites=None, run_check=None ):
@@ -151,7 +151,7 @@ def labelling_items( needs, selection, source_of, hits_of, call_sites_of, run_ch
         - source_of( symbol id ) returns a symbol's source; hits_of( need ) returns a nothing need's hit lines; call_sites_of( need ) returns a matched need's call sites or None
 
     Ensures:
-        - returns one need_key item per picked need, in selection order; semdup pairs are not needs and are skipped
+        - returns one need_key item per picked need, in selection order; duplicate-check pairs are not needs and are skipped
         - a matched item holds the key sources and the call sites; a nothing item holds the hits
 
     Raises:
@@ -159,7 +159,7 @@ def labelling_items( needs, selection, source_of, hits_of, call_sites_of, run_ch
     """
     by_id, out = { n[ "id" ]: n for n in needs }, []
     for pick in selection:
-        if pick[ "reason" ] == SEMDUP_PAIR: continue
+        if pick[ "reason" ] == DUPLICATE_PAIR: continue
         need   = by_id[ pick[ "id" ] ]
         ruling = run_checks[ need[ "id" ] ] if need[ "id" ] in run_checks else None
         if need[ "kind" ] == "nothing": out.append( need_item( need, hits=hits_of( need ), run_check=ruling ) )

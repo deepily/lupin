@@ -5,7 +5,7 @@ pins:
   - cosa.repo.labelling.pair_labels.build_label@9ca7866a8e
   - cosa.repo.labelling.pair_labels.is_unsure@927c41f6a4
   - cosa.repo.labelling.pair_labels.labels_path@60a1c8e122
-  - cosa.repo.labelling.pair_labels.load_items@e365b20857
+  - cosa.repo.labelling.pair_labels.load_items@15874913f2
   - cosa.repo.labelling.pair_labels.now_text@543bdc3430
   - cosa.repo.labelling.pair_labels.progress@5b3d94d6d1
   - cosa.repo.labelling.pair_labels.read_existing@ee5fb8e3f7

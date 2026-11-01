@@ -3,7 +3,7 @@ capability: needset-final-set
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.finalize.sample_size@7058a18b07
-  - lupin_mcp.reuse_needset.finalize.select_for_labelling@264d465f76
+  - lupin_mcp.reuse_needset.finalize.select_for_labelling@e3b0670206
   - lupin_mcp.reuse_needset.finalize.need_item@e59599e35b
   - lupin_mcp.reuse_needset.finalize.final_row@d9103e0e5d
   - lupin_mcp.reuse_needset.finalize.file_sha256@263a4ccc40
@@ -13,7 +13,7 @@ pins:
   - lupin_mcp.reuse_needset.finalize.run_check_needs@1a51a94833
   - lupin_mcp.reuse_needset.finalize.screen_needs@c35d3c665d
   - lupin_mcp.reuse_needset.finalize.key_call_sites@0f40246856
-  - lupin_mcp.reuse_needset.finalize.labelling_items@9dc279d5e9
+  - lupin_mcp.reuse_needset.finalize.labelling_items@3f0e6d92b8
 ---
 # Need set: labelling choice and final set
 

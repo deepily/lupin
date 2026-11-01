@@ -17,7 +17,7 @@ CLOCK = lambda: "2026-10-26T21:00:00+00:00"
 
 def make_packet( tmp_path, count=3 ):
     """Write a two-reviewer packet folder with the real exporter and return rick's packet path."""
-    items = [ it.make_item( it.SEMDUP_PAIR, f"pair-{n}", { "a": f"def a{n}(): pass", "b": f"def b{n}(): pass" } ) for n in range( count ) ]
+    items = [ it.make_item( it.DUPLICATE_PAIR, f"pair-{n}", { "a": f"def a{n}(): pass", "b": f"def b{n}(): pass" } ) for n in range( count ) ]
     return pk.export_packets( items, [ "rick", "other" ], "seed", tmp_path )[ "rick" ]
 
 

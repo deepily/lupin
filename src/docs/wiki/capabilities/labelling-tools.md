@@ -15,7 +15,7 @@ pins:
   - cosa.repo.labelling.confirm.read_manifest@b91470f58b
   - cosa.repo.labelling.errors.LabellingError@e96e9bf625
   - cosa.repo.labelling.items.make_item@f76ca4c1ea
-  - cosa.repo.labelling.items.validate_item@61a27a3b84
+  - cosa.repo.labelling.items.validate_item@cf8ed975f4
   - cosa.repo.labelling.packets.blind_form@9b4f75c2f2
   - cosa.repo.labelling.packets.export_packets@e1209de41a
   - cosa.repo.labelling.packets.export_subset_packet@6c8c96f087
@@ -37,4 +37,4 @@ Two human reviewers label items without seeing the model's verdict. In blind mod
 - `confirm_report` computes kappa over the blind sample only and says so, with the sample size and the seed. It counts the other items as confirmed or disputed and lists the disputes of both parts for Rick.
 - `differs` says whether two labels of one item disagree on the choice or the symbols. `disputes` lists the items the reviewers did not settle.
 - `resolve` gives every item its final label. `LabellingError` carries a stable code for each failure.
-- The package imports neither the reuse checker nor the need-set tools. No `semdup` module imports it yet.
+- The package imports neither the reuse checker nor the need-set tools. No `duplicate_check` module imports it yet.

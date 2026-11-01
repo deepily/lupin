@@ -7,7 +7,7 @@ port to call each surface under the configuration, never by reading the configur
 """
 import copy
 
-from cosa.repo.semdup import frozen
+from cosa.repo.duplicate_check import frozen
 from lupin_mcp.reuse_harness import errors as err
 
 ARM_WITH    = "with"
