@@ -320,3 +320,101 @@ class TestBuildService:
         path              = self._token( tmp_path )
         with pytest.raises( DrivePublishError, match=f"unreadable: {re.escape( path )}" ):
             DrivePublisher( path, "X" )
+
+
+def _path_publisher( svc, cache_path, folder_name="Lupin AF/Explainers", debug=False ):
+    return DrivePublisher( "/unused/token.json", folder_name, service=svc, debug=debug, folder_cache_path=cache_path )
+
+
+class TestFolderPath:
+    """A slash-separated folder name is a chain: each level is found or made under the one above."""
+
+    def test_each_level_is_created_under_the_one_above( self, svc, cache_path ):
+        leaf = _path_publisher( svc, cache_path ).ensure_folder( "Lupin AF/Explainers" )
+        creates = [ c for c in svc.calls if c[ 0 ] == "create" ]
+        assert [ ( c[ 1 ], c[ 2 ] ) for c in creates ] == [ ( "Lupin AF", () ), ( "Explainers", ( "id1", ) ) ]
+        assert leaf == "id2"
+
+    def test_an_existing_parent_is_found_not_duplicated( self, svc, cache_path ):
+        _path_publisher( svc, cache_path, "Lupin AF" ).ensure_folder( "Lupin AF" )
+        leaf = _path_publisher( svc, cache_path, "Lupin AF/Explainers" ).ensure_folder( "Lupin AF/Explainers" )
+        assert svc.names( "create" ) == [ "Lupin AF", "Explainers" ]
+        assert leaf == "id2" and svc.folders[ "id2" ][ "parent" ] == "id1"
+
+    def test_a_same_named_folder_under_another_parent_is_not_reused( self, svc, cache_path ):
+        pub = _path_publisher( svc, cache_path, "A/Same" )
+        svc.folders[ "x" ] = { "name": "Same", "parent": "other", "trashed": False }
+        leaf = pub.ensure_folder( "A/Same" )
+        assert leaf != "x" and svc.folders[ leaf ][ "parent" ] != "other"
+
+    def test_empty_levels_and_spaces_are_dropped( self, svc, cache_path ):
+        pub = _path_publisher( svc, cache_path, " /Lupin AF// Explainers / " )
+        assert pub.folder_levels == [ "Lupin AF", "Explainers" ] and pub.folder_path == "Lupin AF/Explainers"
+        pub.ensure_folder( "Lupin AF/Explainers" )
+        assert svc.names( "create" ) == [ "Lupin AF", "Explainers" ]
+
+    @pytest.mark.parametrize( "bad", [ "", "/", " / // " ] )
+    def test_a_path_with_no_level_is_refused( self, svc, cache_path, bad ):
+        with pytest.raises( ValueError, match="no folder level" ):
+            _path_publisher( svc, cache_path, bad )
+
+    def test_ensure_folder_refuses_a_name_with_no_level( self, svc, cache_path ):
+        with pytest.raises( ValueError, match="no folder level" ):
+            _path_publisher( svc, cache_path ).ensure_folder( "//" )
+
+    def test_a_path_under_a_given_parent_starts_there( self, svc, cache_path ):
+        _path_publisher( svc, cache_path ).ensure_folder( "X/Y", parent_id="ROOT" )
+        creates = [ c for c in svc.calls if c[ 0 ] == "create" ]
+        assert creates[ 0 ][ 2 ] == ( "ROOT", ) and creates[ 1 ][ 2 ] == ( "id1", )
+        assert not os.path.exists( cache_path ), "only the top folder is cached"
+
+
+class TestFolderPathCache:
+
+    def test_the_cache_records_the_full_path_and_the_last_level_id( self, svc, cache_path ):
+        leaf = _path_publisher( svc, cache_path ).ensure_folder( "Lupin AF/Explainers" )
+        assert json.load( open( cache_path ) ) == { "folder_name": "Lupin AF/Explainers", "folder_id": leaf }
+        assert stat.S_IMODE( os.stat( cache_path ).st_mode ) == 0o600
+
+    def test_a_live_cached_path_is_reused_with_no_search( self, svc, cache_path, capsys ):
+        leaf = _path_publisher( svc, cache_path ).ensure_folder( "Lupin AF/Explainers" )
+        svc.calls.clear()
+        assert _path_publisher( svc, cache_path, debug=True ).ensure_folder( "Lupin AF/Explainers" ) == leaf
+        assert svc.calls == [ ( "get", leaf ) ]
+        assert "reusing cached folder id for Lupin AF/Explainers" in capsys.readouterr().out
+
+    def test_a_cache_for_the_parent_alone_is_not_used_for_the_path( self, svc, cache_path ):
+        parent = _path_publisher( svc, cache_path, "Lupin AF" ).ensure_folder( "Lupin AF" )
+        svc.calls.clear()
+        leaf = _path_publisher( svc, cache_path ).ensure_folder( "Lupin AF/Explainers" )
+        assert leaf != parent and ( "get", parent ) not in svc.calls
+        assert json.load( open( cache_path ) )[ "folder_name" ] == "Lupin AF/Explainers"
+
+    def test_a_trashed_cached_leaf_is_replaced_and_the_cache_rewritten( self, svc, cache_path ):
+        old = _path_publisher( svc, cache_path ).ensure_folder( "Lupin AF/Explainers" )
+        svc.folders[ old ][ "trashed" ] = True
+        new = _path_publisher( svc, cache_path ).ensure_folder( "Lupin AF/Explainers" )
+        assert new != old and json.load( open( cache_path ) )[ "folder_id" ] == new
+        assert svc.names( "create" ).count( "Lupin AF" ) == 1, "the live parent is reused"
+
+
+class TestPublishJobUnderAPath:
+
+    def test_the_job_folder_goes_inside_the_last_level( self, svc, cache_path, tmp_path ):
+        result = _path_publisher( svc, cache_path ).publish_job( "2026-11-01 grading", [ ( _mp3( tmp_path ), "audio/mpeg" ) ] )
+        assert svc.names( "create" )[ :3 ] == [ "Lupin AF", "Explainers", "2026-11-01 grading" ]
+        assert svc.folders[ result[ "folder_id" ] ][ "parent" ] == "id2"
+
+    def test_a_slash_in_the_job_folder_name_stays_one_folder( self, svc, cache_path, tmp_path ):
+        result = _path_publisher( svc, cache_path ).publish_job( "a/b", [] )
+        assert svc.folders[ result[ "folder_id" ] ][ "name" ] == "a/b"
+
+
+class TestTheConfiguredPath:
+
+    def test_the_ini_folder_name_makes_a_chain_not_one_folder_with_a_slash( self, svc, cache_path, tmp_path ):
+        result = _path_publisher( svc, cache_path, "Lupin AF Mobile/Podcasts" ).publish_job( "2026-11-01 job", [ ( _mp3( tmp_path ), "audio/mpeg" ) ] )
+        assert svc.names( "create" )[ :3 ] == [ "Lupin AF Mobile", "Podcasts", "2026-11-01 job" ]
+        assert [ f[ "name" ] for f in svc.folders.values() if "/" in f[ "name" ] ] == [], "no folder carries a slash in its name"
+        assert svc.folders[ "id1" ][ "parent" ] is None and svc.folders[ "id2" ][ "parent" ] == "id1"
+        assert result[ "folder_link" ].endswith( result[ "folder_id" ] )

@@ -6,10 +6,10 @@ pins:
   - cosa.agents.podcast_generator.drive_hook.resolve_source_path@9a8d24cb0a
   - cosa.agents.podcast_generator.drive_hook.publish_podcast_to_drive@543c171ab4
   - cosa.utils.drive_publisher.DrivePublishError@9c2b053c46
-  - cosa.utils.drive_publisher.DrivePublisher@fafef346b0
-  - cosa.utils.drive_publisher.DrivePublisher.ensure_folder@875f189f17
+  - cosa.utils.drive_publisher.DrivePublisher@33198c94f3
+  - cosa.utils.drive_publisher.DrivePublisher.ensure_folder@5cd34502cc
   - cosa.utils.drive_publisher.DrivePublisher.upload@5aeb9b087f
-  - cosa.utils.drive_publisher.DrivePublisher.publish_job@b3232d4fa5
+  - cosa.utils.drive_publisher.DrivePublisher.publish_job@4ad05c91ac
 ---
 # Publishing finished podcasts to Google Drive
 
@@ -25,7 +25,7 @@ After a podcast's audio is written, both podcast jobs can copy the files to the 
 
 ## The publisher
 - `DrivePublisher` talks to Drive with the `drive.file` scope, so the app sees only files it created. Google libraries are imported inside the methods that need them.
-- `ensure_folder` finds a folder by name or creates it. The top folder's id is cached in `src/conf/keys/google-drive-folder-id.json` and reused while that folder still exists.
+- `ensure_folder` finds a folder by name or creates it. A slash-separated name such as `Lupin AF Mobile/Podcasts` is a chain: each level is found or made under the one above. The top folder's id, keyed to the full path, is cached in `src/conf/keys/google-drive-folder-id.json` and reused while that folder still exists.
 - `upload` sends one file with an 8 MiB resumable upload. `publish_job` makes the job subfolder, uploads each file, and reports a link or an error per file plus the folder link.
 - `DrivePublishError` is raised for a missing or unrefreshable token and for API errors. Its message names the file or folder.
 
