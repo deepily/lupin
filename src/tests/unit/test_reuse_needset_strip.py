@@ -153,4 +153,5 @@ def test_the_dotted_id_of_a_python_record_is_kept_when_it_fits_its_file_and_deri
     assert strip.dotted_id( { "id": "d-x", "file": "src/cosa/pkg/__init__.py", "name": "build", "lang": "py" } ) == "cosa.pkg.build"
     assert strip.dotted_id( { "id": "d-x", "file": "mod.py", "name": "f", "lang": "py" } ) == "mod.f"                                  # a file at the root has no src to drop
     assert strip.dotted_id( { "id": "other.pkg.f", "file": "src/cosa/m.py", "name": "f", "lang": "py" } ) == "cosa.m.f"                # an id for another module is not trusted
+    assert strip.dotted_id( { "id": "x.m.f", "file": "src/cosa/m.py", "name": "f", "lang": "py" } ) == "cosa.m.f"                    # a matching last segment is not enough
     assert strip.dotted_id( { "id": "a.b.f#2" } ) == "a.b.f" and strip.dotted_id( { "id": "d-x", "file": "src/a.ts", "name": "f", "lang": "ts" } ) == "d-x"

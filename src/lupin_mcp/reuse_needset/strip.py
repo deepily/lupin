@@ -52,17 +52,13 @@ def dotted_id( rec ):
         - rec has id; a Python record that also has lang, file and name may carry an id that is no module path
 
     Ensures:
-        - an index record's id is returned as it is, minus a "#N" suffix
-        - a Python record whose id does not end with its name behind the module its file names, such as a planted record's d-<hash> id, gets the id its file and name give: the file's module path from src, then the name
+        - a record without lang, file and name, or a non-Python one, gets its id minus a "#N" suffix
+        - a Python record gets the id its file and name give: the file's module path from src, then the name
     """
     own = rec[ "id" ].split( "#" )[ 0 ]
     if not all( k in rec for k in ( "lang", "file", "name" ) ) or rec[ "lang" ] != "py": return own
     parts = list( pathlib.PurePosixPath( rec[ "file" ] ).with_suffix( "" ).parts )
     if parts[ -1 ] == "__init__": parts.pop()
-    suffix = "." + rec[ "name" ]
-    if own.endswith( suffix ):
-        module = own[ : -len( suffix ) ].split( "." )
-        if parts[ -len( module ): ] == module: return own
     return ".".join( ( parts[ 1: ] if parts[ 0 ] == "src" else parts ) + [ rec[ "name" ] ] )
 
 
