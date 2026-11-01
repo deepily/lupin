@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.notifications.get_notification_queue@419a0b0054
   - cosa.rest.routers.notifications.get_websocket_manager@5c65f1b7d1
-  - cosa.rest.routers.notifications.get_local_timestamp@a19b9ea314
+  - cosa.rest.routers.notifications.get_local_timestamp@eadeda31b5
   - cosa.rest.routers.notifications.get_formatted_time_display@858ac1ccdf
   - cosa.rest.routers.notifications.get_formatted_date_display@4e7ea8de57
   - cosa.rest.routers.notifications.resolve_sender_id@da26ad8ca8

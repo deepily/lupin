@@ -2,7 +2,7 @@
 capability: podcast-generation
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.podcast_generator.job.PodcastGeneratorJob@6877725ac2
+  - cosa.agents.podcast_generator.job.PodcastGeneratorJob@1586c7b225
   - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent@ea3d669e08
   - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.do_all_async@35027a15ba
   - cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent.from_saved_script@31deaf79fe
@@ -12,7 +12,7 @@ pins:
   - cosa.agents.podcast_generator.state.PodcastScript@56902960a1
   - cosa.agents.podcast_generator.tts_client.PodcastTTSClient@b609170958
   - cosa.agents.podcast_generator.audio_stitcher.PodcastAudioStitcher@7a56300067
-  - cosa.agents.podcast_generator.config.PodcastConfig@a0d09ec6c3
+  - cosa.agents.podcast_generator.config.PodcastConfig@0dbff81873
 ---
 # Podcast generation
 
@@ -31,6 +31,7 @@ pins:
 - A script with zero segments raises `PodcastGenerationError` before the gate; it is never offered for approval.
 - If some segments fail, the job asks whether to continue with partial audio and takes "yes" when nobody can answer. A language with no successful segment is skipped; if no language has audio, the job fails with a `RuntimeError` that names `ELEVENLABS_API_KEY`.
 - The `PodcastConfig` code default is `claude-opus-4-6` with at most 5 turns. The shipped INI (`[Lupin: Baseline]`) sets `podcast script model` to `claude-opus-5` instead. `podcast script max turns` is 5 there too.
+- With `publish_to_google_drive` on (off by default), the job copies the files to the user's Google Drive. A Drive failure never fails the job. See [[podcast-drive-publishing]].
 
 ## How to extend
 - A new phase gets an `OrchestratorState` value and a step in `do_all_async` followed by `_check_stop()`.
