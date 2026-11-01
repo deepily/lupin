@@ -422,3 +422,21 @@ def test_a_slashed_string_ending_in_any_listed_file_extension_is_a_copied_path( 
 
 def test_a_dotted_word_after_a_slash_that_is_not_a_listed_extension_is_not_a_path():
     assert draft.copy_check( "A function that reads static/assets/notes.final and then adds up every number it finds listed there.", SEED ) == []
+
+
+WORD_TOTAL = "A function that gives the total of the numbers and stops once a ceiling has been reached."
+WORD_LIMIT = "A function that adds numbers up to a limit and stops there."
+
+
+def test_with_more_tries_each_rewrite_is_told_every_word_refused_so_far_and_the_second_prompt_is_unchanged( tmp_path ):
+    ask  = Asker( [ LEAKS_IDENTIFIER, WORD_TOTAL, WORD_LIMIT, GOOD ] )
+    got  = draft.draft_need( job(), ask, ledger( tmp_path, "four.jsonl" ), max_tries=4 )
+    assert got[ "ok"] and got[ "need" ] == GOOD and got[ "tries" ] == 4 and len( ask.prompts ) == 4
+    assert [ r[ "try" ] for r in got[ "rejections" ] ] == [ 0, 1, 2 ]
+    assert 'Do not use the word "items"' in ask.prompts[ 1 ] and 'Do not use the word "total"' not in ask.prompts[ 1 ]
+    assert all( f'Do not use the word "{w}"' in ask.prompts[ 2 ] for w in ( "items", "total" ) ) and 'Do not use the word "limit"' not in ask.prompts[ 2 ]
+    assert all( f'Do not use the word "{w}"' in ask.prompts[ 3 ] for w in ( "items", "total", "limit" ) )
+    short = Asker( [ LEAKS_IDENTIFIER, WORD_TOTAL ] )
+    draft.draft_need( job(), short, ledger( tmp_path, "two.jsonl" ) )
+    assert short.prompts[ :2 ] == ask.prompts[ :2 ]                                                   # the default two tries ask exactly what they always asked, so a ledger replays
+    assert [ h[ "words" ] for h in got[ "history" ] ] == [ [ "items" ], [ "total" ], [ "limit" ] ]       # the history keeps each try's own words

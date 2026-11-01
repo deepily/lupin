@@ -2,7 +2,7 @@
 capability: needset-drafting-flows
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.draft.draft_need@cdaeb93a6e
+  - lupin_mcp.reuse_needset.draft.draft_need@4625c0eb9d
   - lupin_mcp.reuse_needset.draft.draft_cell@fea09c6d5f
   - lupin_mcp.reuse_needset.draft.replacement_report@75e3a4fa43
   - lupin_mcp.reuse_needset.draft.draft_cells@cd40e8a89d
@@ -17,7 +17,7 @@ pins:
 Drafts one sentence per seed. It checks for copied names and paths, then for leaks. At most two sentences are checked: the first and one targeted rewrite. A seed that still fails is replaced by the next seed. The calls and checks are on [[needset-drafter-plumbing]].
 
 ## One seed
-- `draft_need` drafts the sentence for one seed. At most two sentences are checked (`MAX_TRIES`), and an unreadable reply is asked again once with the same prompt. A job with no keys is checked against the seed alone.
+- `draft_need` drafts the sentence for one seed. At most two sentences are checked (`MAX_TRIES`), or `max_tries` when the caller asks for more. A later rewrite is told every word refused so far. An unreadable reply is asked again once with the same prompt. A job with no keys is checked against the seed alone.
 - `copy_check` runs first and costs no call. It finds the seed's identifier tokens and name pieces, and its file path or file name. A slashed string counts only with a file extension, a leading dot or slash, or a piece of the seed's own path. A bare file name counts too. So and/or, input/output, TCP/IP and Node.js pass. Then `leak_check` runs only if it found nothing. The rewrite is told the failure kind and the bare words, never a path or a key.
 - The returned record also holds `rejections` and `unreadable`, for the local ledger. Each rejection is a rejected sentence with its full failure details. Each unreadable entry is a reply that could not be read.
 - A rewrite request names the failure kinds and the seed's own offending words, never a key symbol or its text. The history holds no key text.

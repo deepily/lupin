@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.run_first_thousand@08a196efe8
   - lupin_mcp.reuse_needset.first_thousand.control_job@da8024fd0c
   - lupin_mcp.reuse_needset.first_thousand.planted_stage_for@d5537af534
-  - lupin_mcp.reuse_needset.first_thousand.control_stage_live@84057b5f0c
+  - lupin_mcp.reuse_needset.first_thousand.control_stage_live@a8afb534f2
   - lupin_mcp.reuse_needset.first_thousand.tracked_files@0eecf6442d
   - lupin_mcp.reuse_needset.first_thousand.write_seed_lists@480a3dd8ba
   - lupin_mcp.reuse_needset.first_thousand.live_parts@6bdad27106
@@ -26,7 +26,7 @@ The live control, the command line and the capped run. The planted pool and the 
 ## The live control
 - `control_job` builds the drafter's job for one pair. The seed is the original and the one key is the rewrite, so the leak check keeps the rewrite out of the sentence.
 - `planted_stage_for` builds the planted stage from the live one's own folders, client, arm, K and fusion, with no refresher. It loads the live vectors from disk and adds the planted rows in memory. Its query cache is the run folder's `query-cache`, so nothing of the run goes into the live data folder.
-- `control_stage_live` drafts the 20 needs first, one at a time. It then plants, asks the checker through `planted_check`, removes the planted records and proves the pool is as it was. The pool is the index's own sendable entries.
+- `control_stage_live` drafts the 20 needs first. A pair that never drafts is left out and listed under `undrafted`; with none drafted, the stage fails. It then plants, asks the checker through `planted_check`, removes the planted records and proves the pool is as it was. The pool is the index's own sendable entries.
 
 ## The command
 - `parse_args` requires the root, run folder, planted file, answer key, labels folder, seed and source commit. The cap is 1,314 unless `--limit` says otherwise. `--partners` turns the partner search on; without it each seed is its own known answer. `--second-model` and `--probe-model` default to Opus.
