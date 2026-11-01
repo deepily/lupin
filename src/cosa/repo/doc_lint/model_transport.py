@@ -216,6 +216,23 @@ class CallBudgetExceeded( Exception ):
 
 BUDGET_LEDGER = None
 BUDGET_CAPS   = {}
+CHARGE_HOOK   = None
+
+
+def set_charge_hook( hook ):
+    """
+    Name a function that sees every model call before it is made, whatever the model.
+
+    Requires:
+        - hook is None or a function taking the model id; it may raise to refuse the call
+
+    Ensures:
+        - later calls to complete call the hook first, before the per-model cap is read
+        - a hook that raises refuses the call, so no model is contacted and nothing is charged to a per-model cap
+        - set_charge_hook( None ) removes the hook
+    """
+    global CHARGE_HOOK
+    CHARGE_HOOK = hook
 
 
 def set_budget( ledger_path, caps ):
@@ -286,6 +303,7 @@ def _charge( model ):
         - model is a non-empty model id
 
     Ensures:
+        - the charge hook, when set, sees the call first and may refuse it
         - a model with no cap is not charged
         - the count is read from the ledger under an exclusive file lock, so two processes cannot both take the last call
         - a call that would pass the cap raises CallBudgetExceeded and writes nothing
@@ -296,6 +314,7 @@ def _charge( model ):
     Raises:
         - CallBudgetExceeded when the model has used its cap
     """
+    if CHARGE_HOOK is not None: CHARGE_HOOK( model )
     cap = BUDGET_CAPS.get( model )
     if cap is None: return
     with open( BUDGET_LEDGER, "a+", encoding="utf-8" ) as f:
