@@ -35,6 +35,7 @@ from cosa.rest.auth import get_current_user
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.routers._dir_listing import list_directory
 from cosa.rest.routers._pinned_open import PROC_FD, PinnedPathGone, PinnedPathUnlinked, landed_path_of_fd, open_pinned
+from cosa.rest.routers._owner_scope import registry_for as owner_registry
 from cosa.rest.routers._scope_registry import ScopeConfig
 from cosa.rest.routers._scope_registry import (
     SECRETS_BLOCKLIST_PATTERNS,
@@ -308,7 +309,9 @@ async def get_docs_file(
             ),
         )
 
-    project_name, scope_cfg, rel_path, full_path = _resolve_scoped( path, _get_scope_registry() )
+    # A person's own podcast folder is added to the lupin scope for this request only (reads, never upload).
+    registry = owner_registry( _get_scope_registry(), path, current_user )
+    project_name, scope_cfg, rel_path, full_path = _resolve_scoped( path, registry )
 
     # Bind scope_cfg into the parent_validator so the directory listing's
     # "parent" field uses per-scope whitelist logic.

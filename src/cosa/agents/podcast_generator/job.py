@@ -378,10 +378,10 @@ class PodcastGeneratorJob( AgenticJobBase ):
                 a_rel  = _to_rel( audio_by_lang.get( lang ) )
                 s_rel  = _to_rel( script_by_lang.get( lang ) )
                 parts  = []
-                title  = read_script_title( io_base + s_rel ) if a_rel and s_rel else None
-                s_link = script_link( a_rel, s_rel, source_rel, title )
+                s_link = script_link( s_rel )
                 if s_link: parts.append( s_link )
                 if a_rel:
+                    title = read_script_title( io_base + s_rel ) if s_rel else None
                     parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
                 if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
                 if parts:

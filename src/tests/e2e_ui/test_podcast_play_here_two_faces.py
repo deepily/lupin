@@ -55,14 +55,18 @@ def _stub_files( page ):
         path = path.replace( "%2F", "/" )
         if path.endswith( ".mp3" ):
             route.fulfill( status=200, body=wav, content_type="audio/wav" )
-        elif path == SCRIPT:
-            route.fulfill( status=200, body="# Podcast: Grading\n\nThe script says **hello**.", content_type="text/plain" )
-        elif path == SOURCE[ 3: ]:
-            route.fulfill( status=200, body="# The original report\n\nBody text.", content_type="text/plain" )
+        else:
+            route.fulfill( status=404, body="", content_type="text/plain" )
+
+    def docs_endpoint( route ):
+        path = route.request.url.split( "path=", 1 )[ 1 ].split( "&", 1 )[ 0 ].replace( "%2F", "/" )
+        if path in ( "lupin/io/" + SCRIPT, "lupin/" + SOURCE ):
+            route.fulfill( status=200, body="# A document\n\nBody text.", content_type="text/plain" )
         else:
             route.fulfill( status=404, body="", content_type="text/plain" )
 
     page.context.route( "**/api/io/file?**", file_endpoint )
+    page.context.route( "**/api/docs/file?**", docs_endpoint )
 
 
 def _open_client_and_click_play( page, client, href ):
@@ -176,17 +180,11 @@ class TestPlayHereTwoFaces:
         for serial in ( "2026.11.01", "014849" ):
             assert serial not in full.locator( "h1" ).inner_text(), "the title carries no date or serial"
 
-        with full.context.expect_page( timeout=10000 ) as script_tab:
-            full.locator( "#audio-player-script-link" ).click()
-        script = script_tab.value
-        script.wait_for_function( "() => document.body.innerText.includes( 'hello' )", timeout=10000 )
-        assert "The script says hello." in script.inner_text( "body" )
-
-        with full.context.expect_page( timeout=10000 ) as source_tab:
-            full.locator( "#audio-player-source-link" ).click()
-        source = source_tab.value
-        source.wait_for_function( "() => document.body.innerText.includes( 'Body text.' )", timeout=10000 )
-        assert "The original report" in source.inner_text( "body" )
+        script_href = full.locator( "#audio-player-script-link" ).get_attribute( "href" )
+        source_href = full.locator( "#audio-player-source-link" ).get_attribute( "href" )
+        assert script_href == f"/app/docs?path=lupin/io/{SCRIPT}", "the script opens in the doc viewer"
+        assert source_href == f"/app/docs?path=lupin/{SOURCE}", "the original opens in the doc viewer"
+        assert full.locator( "#audio-player-script-link" ).get_attribute( "target" ) == "_blank"
 
     def test_an_old_style_link_still_plays_with_a_date_free_title( self, logged_in_page, client ):
         page = logged_in_page
@@ -215,49 +213,3 @@ class TestPlayHereTwoFaces:
         assert full.locator( ".audio-player-links" ).count() == 0
         assert full.locator( "a.audio-player-download" ).count() == 1
 
-
-class TestCardScriptLinkShowsScriptOnThePage:
-
-    def test_open_script_shows_the_script_on_the_page_without_a_new_tab( self, logged_in_page ):
-        page = logged_in_page
-        _stub_files( page )
-        page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script={SCRIPT}&source={SOURCE}&open=script" )
-        inline = page.locator( "[data-testid=audio-player-script-inline]" )
-        inline.wait_for( state="attached", timeout=15000 )
-        page.wait_for_function( "() => document.querySelector( '[data-testid=audio-player-script-inline]' ).innerText.includes( 'hello' )", timeout=10000 )
-        assert "The script says hello." in inline.inner_text()
-        assert len( page.context.pages ) == 1, "no popup is opened"
-
-    def test_without_open_script_nothing_is_shown_inline( self, logged_in_page ):
-        page = logged_in_page
-        _stub_files( page )
-        page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script={SCRIPT}" )
-        page.locator( "audio[controls]" ).wait_for( state="attached", timeout=15000 )
-        assert page.locator( "[data-testid=audio-player-script-inline]" ).count() == 0
-
-    def test_open_script_with_a_missing_script_shows_nothing_inline( self, logged_in_page ):
-        page = logged_in_page
-        _stub_files( page )
-        page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script=podcasts/u/gone-script.md&open=script" )
-        page.locator( "audio[controls]" ).wait_for( state="attached", timeout=15000 )
-        assert page.locator( "[data-testid=audio-player-script-inline]" ).count() == 0
-
-    def test_hostile_markup_in_the_script_is_stripped_from_the_inline_view( self, logged_in_page ):
-        page = logged_in_page
-        _stub_files( page )
-        hostile = ( "# Safe heading\n\nVisible text.\n\n"
-                    "<img src=x onerror=\"window.__pwned = 'img'\">\n\n"
-                    "<script>window.__pwned = 'script'</script>\n" )
-
-        def hostile_script( route ):
-            path = route.request.url.split( "path=", 1 )[ 1 ].split( "&", 1 )[ 0 ].replace( "%2F", "/" )
-            if path == SCRIPT: route.fulfill( status=200, body=hostile, content_type="text/plain" )
-            else:              route.fallback()
-
-        page.context.route( "**/api/io/file?**", hostile_script )   # registered last, so it answers first
-        page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script={SCRIPT}&open=script" )
-        inline = page.locator( "[data-testid=audio-player-script-inline]" )
-        page.wait_for_function( "() => document.querySelector( '[data-testid=audio-player-script-inline]' ).innerText.includes( 'Visible text.' )", timeout=15000 )
-        assert inline.locator( "script" ).count() == 0, "the script tag is stripped"
-        assert inline.locator( "[onerror]" ).count() == 0, "the onerror attribute is stripped"
-        assert page.evaluate( "() => window.__pwned === undefined" ), "no injected code ran"

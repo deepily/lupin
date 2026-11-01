@@ -18,8 +18,10 @@ capability: audio-player-page
 
 ## Invariants
 - A Script or Original link is drawn only when its file answers. An absent file is left out, not shown broken.
-- The script and `io/` originals are read with the user's token and shown in a new tab as markdown. Other originals open in the doc viewer as `lupin/<rel>`.
+- Script and Original are real links into the doc viewer, opened in a new tab. The script is `lupin/io/<script>`; an `io/` original is `lupin/<source>`; any other original is as given.
+- The page probes each link with the user's token and leaves out one that does not answer.
 - The mp3 is fetched with the token and handed to the audio element as a blob URL, because an audio tag cannot send a header.
 
 ## Don't
-- Don't link a podcast script through `/app/docs?path=podcasts/...`. The doc viewer refuses `io/podcasts`.
+- Don't link a podcast script through `/app/docs?path=podcasts/...`. The first segment must be the project: `lupin/io/podcasts/...`, which [[doc-viewer]] serves to the folder's owner only.
+- Don't fetch the text and draw it in the page or a new tab. The doc viewer renders it and sanitises it.
