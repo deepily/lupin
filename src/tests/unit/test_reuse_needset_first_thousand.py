@@ -277,7 +277,7 @@ def test_the_stage_factories_hand_the_lists_file_and_the_live_parts_to_pocholos_
     monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or stage_of( { "seeds": 1 } ) )
     monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or stage_of( { "hard": 2 } ) )
     one, two = ft.stage_factories( "/lists.json", parts )
-    counts   = { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-1" ] }
+    counts   = { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "unreadable_reply": 0, "disputed_ids": [ "n-1" ], "skipped": [] }
     assert asyncio.run( one( "env" )() ) == { "seeds": 1, "no_final_need": counts } and asyncio.run( two( "env" )() ) == { "hard": 2, "no_final_need": { **counts, "disputed_ids": [ "n-1" ] } }
     assert seen == { "a": ( "/lists.json", "MN", "TF" ), "y": ( "/lists.json", "PF", "IX" ) }
 
@@ -298,8 +298,8 @@ def test_the_yield_report_counts_only_the_yield_seeds_and_not_the_attribution_on
     one, two = ft.stage_factories( "/lists.json", parts )
     first    = asyncio.run( one( "env" )() )[ "no_final_need" ]
     second   = asyncio.run( two( "env" )() )[ "no_final_need" ]
-    assert first == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-a1", "n-a2" ] }
-    assert second == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 0, "disputed_ids": [] }
+    assert first == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "unreadable_reply": 0, "disputed_ids": [ "n-a1", "n-a2" ], "skipped": [] }
+    assert second == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 0, "unreadable_reply": 0, "disputed_ids": [], "skipped": [] }
 
 
 def test_the_live_parts_use_their_own_ledgers_in_the_run_folder_and_the_arguments_models( tmp_path, monkeypatch ):
