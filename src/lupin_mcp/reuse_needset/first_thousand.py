@@ -422,7 +422,39 @@ def main( argv=None, deps=None ):
     return { "live": True, "plan": shown, "report": report }
 
 
-if __name__ == "__main__":  # pragma: no cover  reason: the command line entry; main is tested with stand-ins
+EXIT_FAILED      = 1
+EXIT_CAP_REACHED = 2
+
+
+def exit_status( result ):
+    """
+    Say what the process should exit with for the result main returned.
+
+    Requires:
+        - result is main's dict: a plan has no report; a live run has report.stages
+
+    Ensures:
+        - returns 1 when any stage failed, 2 when the cap ended a stage and none failed, else 0
+        - a stage that stopped on a finding, or did not run because of an earlier stop, is a result and not a failure
+        - a plan gives 0
+    """
+    if not result[ "live" ]: return 0
+    statuses = { v[ "status" ] for v in result[ "report" ][ "stages" ].values() }
+    return EXIT_FAILED if stages.FAILED in statuses else ( EXIT_CAP_REACHED if stages.CAP_REACHED in statuses else 0 )
+
+
+def run_cli( argv=None, deps=None, out=print ):
+    """
+    Run main, print its result as JSON and return the exit status.
+
+    Ensures:
+        - the JSON goes to out before the status is returned, so a failed run still shows its report
+    """
+    result = main( argv, deps )
+    out( json.dumps( result, indent=4, sort_keys=True ) )
+    return exit_status( result )
+
+
+if __name__ == "__main__":  # pragma: no cover  reason: the command line entry; run_cli is tested with stand-ins
     import sys
-    print( json.dumps( main(), indent=4, sort_keys=True ) )
-    sys.exit( 0 )
+    sys.exit( run_cli() )

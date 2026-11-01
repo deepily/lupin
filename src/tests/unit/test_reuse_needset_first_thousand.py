@@ -489,3 +489,26 @@ def test_a_live_run_with_a_cli_path_that_is_no_executable_stops_by_name_before_t
     argv, sha = run_dir_files( tmp_path )
     monkeypatch.setattr( ft, "write_seed_lists", lambda *a, **k: pytest.fail( "a list was written" ) )
     with pytest.raises( ValueError, match="not an executable file" ): ft.main( [ *argv, "--live", "--cli-path", str( tmp_path / "missing" ) ], deps=live_deps( sha, None ) | { "built": lambda args: pytest.fail( "the index was built" ) } )
+
+
+def result_of( *statuses ):
+    """Return a live main result whose stages have the given statuses."""
+    return { "live": True, "report": { "stages": { f"s{i}": { "status": st } for i, st in enumerate( statuses ) } } }
+
+
+@pytest.mark.parametrize( "statuses, code", [ ( ( "done", "done", "done", "done" ), 0 ), ( ( "done", "stopped", "not_run", "not_run" ), 0 ), ( ( "failed", "not_run", "not_run", "not_run" ), 1 ),
+                                              ( ( "done", "cap_reached", "not_run", "not_run" ), 2 ), ( ( "cap_reached", "failed", "not_run", "not_run" ), 1 ) ] )
+def test_a_failed_stage_exits_one_and_a_cap_stop_two_while_a_finding_stop_exits_zero( statuses, code ):
+    assert ft.exit_status( result_of( *statuses ) ) == code
+    assert ft.exit_status( { "live": False, "plan": {} } ) == 0
+
+
+def test_the_command_prints_the_report_of_a_failed_run_and_returns_one( tmp_path, capsys ):
+    argv, sha = run_dir_files( tmp_path )
+    shown     = []
+
+    async def runner( run_dir, one, two, control, rem, limit ): return { "stages": { "attribution": { "status": "failed", "code": "UNREADABLE_REPLY" } } }
+
+    code = ft.run_cli( [ *argv, "--live" ], deps=live_deps( sha, runner ), out=shown.append )
+    assert code == 1 and "UNREADABLE_REPLY" in shown[ 0 ] and json.loads( shown[ 0 ] )[ "report" ][ "stages" ][ "attribution" ][ "status" ] == "failed"
+    assert ft.run_cli( argv, deps={ "planted_sha": sha }, out=shown.append ) == 0 and json.loads( shown[ 1 ] )[ "live" ] is False

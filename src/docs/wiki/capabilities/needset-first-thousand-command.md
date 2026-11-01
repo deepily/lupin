@@ -13,6 +13,8 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.parse_args@448dccc178
   - lupin_mcp.reuse_needset.first_thousand.plan@6de27be30d
   - lupin_mcp.reuse_needset.first_thousand.load_inputs@68bde7e075
+  - lupin_mcp.reuse_needset.first_thousand.exit_status@f3baca9fe3
+  - lupin_mcp.reuse_needset.first_thousand.run_cli@2b9e55e56d
   - lupin_mcp.reuse_needset.first_thousand.main@87c32864f5
 ---
 # Need set: the first 1,000 calls, the command
@@ -31,6 +33,7 @@ The live control, the command line and the capped run. The planted pool and the 
 - `main` with `--live` first needs `--cli-path` (without it: `NO_CLI_PATH`) and points every Claude Code call (drafter, second model, probe) at that binary. It then builds the context, draws and writes the seed lists, builds the live parts ([[needset-stage-parts]]) and runs the four stages. A context with no candidate stage raises `NO_CANDIDATE_STAGE` first, naming the three variables that build it. A second run over other seed lists raises `PLAN_ALREADY_WRITTEN`.
 - `write_seed_lists` draws the 50 attribution and 100 yield seeds from the tree's index and tracked files, and writes them once. `tracked_files` is the set git lists.
 - `live_parts` builds the parts with their own ledgers in the run folder, the second model and the probe model from the arguments. `stage_factories` hands the lists file and the parts to the two stages and adds the counts of seeds that gave no final need.
+- `exit_status` gives 1 when any stage failed, 2 when the cap ended a stage and none failed, else 0. A stop on a finding exits 0. `run_cli` prints the report as JSON first, so a failed run still shows what it found.
 
 ## The run
 - `run_first_thousand` installs the cap over `call-ledger.jsonl` in the run folder, runs the four stages and writes `stage-reports.json`. A resumed run keeps the calls already spent.
