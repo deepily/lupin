@@ -8,7 +8,7 @@ The clicked links must read a disabled "approved ✅", and no new tab may open.
 
 Each feature is proved in each client by its own test, so a pass in one client cannot cover a
 failure in the other. The three features are the ☐ to "approved ✅" change on a click.
-Next is the 📄 view link's overlay. Last is a card drawn after a row has left the holding area.
+Next is the 📄 view link, which shows the row as the abstract 📋 does. It uses no overlay and no new tab. Last is a card drawn after a row has left the holding area.
 
 The :8000 login is not Rick's and cannot be made so. Two kinds of test follow from that.
 
@@ -107,6 +107,14 @@ def _set_status( row_id, status ):
         session.get( TaskItem, uuid.UUID( row_id ) ).status = status
 
 
+def _set_body( row_id, body ):
+    from cosa.rest.db.database import get_db
+    from cosa.rest.postgres_models import TaskItem
+
+    with get_db() as session:
+        session.get( TaskItem, uuid.UUID( row_id ) ).body = body
+
+
 def _set_queued( row_id ):
     _set_status( row_id, "queued" )
 
@@ -163,15 +171,15 @@ def _login_tokens( page ):
 
 
 
-def _show_card_legacy( page, rows ):
+def _show_card_legacy( page, rows, horizontal=True ):
     """
     Draw the card in the legacy client and open its abstract tooltip.
 
     Ensures:
-        - the horizontal layout is on, so the card is lifted into the shared pane
+        - `horizontal` True switches to the horizontal layout, so the card is lifted into the shared pane
         - returns the tooltip content locator
     """
-    page.locator( "#layout-mode-toggle" ).click()
+    if horizontal: page.locator( "#layout-mode-toggle" ).click()
     page.evaluate(
         """( args ) => {
             window.notificationsUI.handleNotificationUpdate( { notification: {
@@ -185,11 +193,12 @@ def _show_card_legacy( page, rows ):
     return page.locator( "#abstract-tooltip .abstract-tooltip-content" )
 
 
-def _show_card_multiplexer( page, rows ):
+def _show_card_multiplexer( page, rows, horizontal=False ):
     """
     Open the multiplexer and draw the card.
 
     Ensures:
+        - `horizontal` True switches to the horizontal layout after the card is drawn
         - returns the card locator
     """
     _login_tokens( page )
@@ -210,17 +219,37 @@ def _show_card_multiplexer( page, rows ):
         }""",
         { "nid": CARD_ID, "abstract": _abstract_for( rows ), "sender": SENDER },
     )
-    return page.locator( f'[data-testid="multiplexer-action-required"][data-id-hash="{CARD_ID}"]' )
+    card = page.locator( f'[data-testid="multiplexer-action-required"][data-id-hash="{CARD_ID}"]' )
+    if horizontal:
+        expect( card ).to_be_visible( timeout=TIMEOUT_MS )
+        page.locator( "#layout-mode-toggle" ).click()
+        card = page.locator( f'#content-pane-body [data-testid="multiplexer-action-required"][data-id-hash="{CARD_ID}"]' )
+    return card
 
 
-def _expect_overlay_shows_row( page, row ):
-    """The shared overlay shows the row's title, priority, owner, status and body."""
-    overlay = page.locator( "#task-body-overlay .task-body-overlay-body" )
-    expect( overlay ).to_contain_text( row[ "title" ], timeout=TIMEOUT_MS )
-    text = overlay.inner_text()
+def _expect_row_shown( page, row ):
+    """
+    The row appears in the card's own abstract tooltip and nowhere else.
+
+    The card is a live action-required card, which keeps the content pane in horizontal layout,
+    so the abstract 📋 itself shows in the tooltip there. No separate overlay may exist.
+    """
+    tip = page.locator( "#abstract-tooltip .abstract-tooltip-content" )
+    expect( tip ).to_contain_text( row[ "title" ], timeout=TIMEOUT_MS )
+    text = tip.inner_text()
     assert "Priority: P3" in text and "Owner: unowned" in text and "Status: not_approved" in text, text
-    assert f"E2E body {row[ 'index' ]}\nsecond line {row[ 'index' ]}" in text, text
-    expect( page.locator( "#task-body-overlay .task-body-overlay-header" ) ).to_have_text( f"Task {row[ 'id' ][ :8 ]}" )
+    assert f"E2E body {row[ 'index' ]}" in text and f"second line {row[ 'index' ]}" in text, text
+    assert page.locator( "#task-body-overlay" ).count() == 0, "the 📄 link must not open a separate overlay"
+
+
+EVIL = '<img src=x onerror="window.__pwned=1">'
+
+
+def _expect_no_injected_element( page ):
+    """The hostile body drew as text: no img element in the tooltip, and its onerror never ran."""
+    expect( page.locator( "#abstract-tooltip .abstract-tooltip-content" ) ).to_contain_text( "before", timeout=TIMEOUT_MS )
+    assert page.locator( "#abstract-tooltip img" ).count() == 0, "an img element was created"
+    assert page.evaluate( "() => window.__pwned" ) is None, "the onerror handler ran"
 
 
 # ---------------------------------------------------------------------------
@@ -257,21 +286,38 @@ def test_one_click_approve_legacy_two_clicks_approve_exactly_two_rows( notificat
     assert page.url.startswith( f"{BASE_URL}/app/notifications" ), "and must never navigate this one"
 
 
-def test_one_click_approve_legacy_view_link_shows_the_row_in_place( notifications_page, held ):
+@pytest.mark.parametrize( "horizontal", [ False, True ], ids=[ "vertical", "horizontal" ] )
+def test_one_click_approve_legacy_view_link_shows_the_row_in_place( notifications_page, held, horizontal ):
     page   = notifications_page
     popups = []
     page.context.on( "page", lambda p: popups.append( p ) )
 
-    content = _show_card_legacy( page, held )
+    content = _show_card_legacy( page, held, horizontal=horizontal )
     views = content.locator( "a[href*='/app/tasks/view']" )
     expect( views ).to_have_count( ROWS, timeout=TIMEOUT_MS )
     expect( views.nth( 1 ) ).to_have_text( "📄" )
     views.nth( 1 ).click()
 
-    _expect_overlay_shows_row( page, held[ 1 ] )
+    _expect_row_shown( page, held[ 1 ] )
     assert popups == [], "a view link must never open a tab"
     assert page.url.startswith( f"{BASE_URL}/app/notifications" ), "and must never navigate this one"
     assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * ROWS, "viewing moves nothing"
+
+
+@pytest.mark.parametrize( "horizontal", [ False, True ], ids=[ "vertical", "horizontal" ] )
+def test_one_click_approve_legacy_view_link_draws_a_hostile_body_as_text( notifications_page, held, horizontal ):
+    page   = notifications_page
+    popups = []
+    page.context.on( "page", lambda p: popups.append( p ) )
+    _set_body( held[ 1 ][ "id" ], f"before {EVIL} after" )
+
+    content = _show_card_legacy( page, held, horizontal=horizontal )
+    views = content.locator( "a[href*='/app/tasks/view']" )
+    expect( views ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    views.nth( 1 ).click()
+
+    _expect_no_injected_element( page )
+    assert popups == [], "a view link must never open a tab"
 
 
 def test_one_click_approve_legacy_redrawn_card_shows_each_rows_state( notifications_page, held ):
@@ -321,21 +367,38 @@ def test_one_click_approve_multiplexer_two_clicks_approve_exactly_two_rows( logg
     assert page.url.startswith( f"{BASE_URL}/app/multiplexer" )
 
 
-def test_one_click_approve_multiplexer_view_link_shows_the_row_in_place( logged_in_page, held ):
+@pytest.mark.parametrize( "horizontal", [ False, True ], ids=[ "vertical", "horizontal" ] )
+def test_one_click_approve_multiplexer_view_link_shows_the_row_in_place( logged_in_page, held, horizontal ):
     page   = logged_in_page
     popups = []
     page.context.on( "page", lambda p: popups.append( p ) )
 
-    card  = _show_card_multiplexer( page, held )
+    card  = _show_card_multiplexer( page, held, horizontal=horizontal )
     views = card.locator( "a[href*='/app/tasks/view']" )
     expect( views ).to_have_count( ROWS, timeout=TIMEOUT_MS )
     expect( views.nth( 1 ) ).to_have_text( "📄" )
     views.nth( 1 ).click()
 
-    _expect_overlay_shows_row( page, held[ 1 ] )
+    _expect_row_shown( page, held[ 1 ] )
     assert popups == [], "a view link must never open a tab"
     assert page.url.startswith( f"{BASE_URL}/app/multiplexer" )
     assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * ROWS, "viewing moves nothing"
+
+
+@pytest.mark.parametrize( "horizontal", [ False, True ], ids=[ "vertical", "horizontal" ] )
+def test_one_click_approve_multiplexer_view_link_draws_a_hostile_body_as_text( logged_in_page, held, horizontal ):
+    page   = logged_in_page
+    popups = []
+    page.context.on( "page", lambda p: popups.append( p ) )
+    _set_body( held[ 1 ][ "id" ], f"before {EVIL} after" )
+
+    card  = _show_card_multiplexer( page, held, horizontal=horizontal )
+    views = card.locator( "a[href*='/app/tasks/view']" )
+    expect( views ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    views.nth( 1 ).click()
+
+    _expect_no_injected_element( page )
+    assert popups == [], "a view link must never open a tab"
 
 
 def test_one_click_approve_multiplexer_redrawn_card_shows_each_rows_state( logged_in_page, held ):

@@ -192,3 +192,18 @@ test( "placement: never above the top margin, and clamped inside both side edges
   );
   assert.equal( right.left, 690 );
 });
+
+test( "showFor shows the text beside the anchor exactly as a 📋 click does", () => {
+  mountTooltip();
+  const anchor = addIndicator( "unused" );
+  tooltip!.showFor( anchor, "**ticket** body" );
+  assert.equal( tip().classList.contains( "visible" ), true );
+  assert.equal( ( tip().querySelector( ".abstract-tooltip-content" ) as HTMLElement ).innerHTML, "<p><strong>ticket</strong> body</p>" );
+  assert.equal( tip().style.visibility, "visible" );
+});
+
+test( "showFor before mount, or after unmount, does nothing and does not throw", () => {
+  const t = createAbstractTooltip( { getLayoutMode: () => layout, schedule: syncSchedule } );
+  t.showFor( document.body, "x" );
+  assert.equal( document.getElementById( ABSTRACT_TOOLTIP_ID ), null );
+});

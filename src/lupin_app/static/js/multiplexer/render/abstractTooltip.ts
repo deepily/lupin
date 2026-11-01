@@ -48,6 +48,8 @@ export interface AbstractTooltipDeps {
 export interface AbstractTooltip {
   mount(): void;
   unmount(): void;
+  /** Show `abstract` beside `anchor`, as a click on a 📋 indicator does; a no-op until mounted. */
+  showFor( anchor: Element, abstract: string ): void;
 }
 
 /**
@@ -114,6 +116,11 @@ class AbstractTooltipImpl implements AbstractTooltip {
     document.removeEventListener( "keydown", this.onKeyDown );
     this.tooltip.remove();
     this.tooltip = null;
+  }
+
+  showFor( anchor: Element, abstract: string ): void {
+    if ( this.tooltip === null ) return;
+    this.show( anchor, abstract );
   }
 
   private handleClick( ev: MouseEvent ): void {

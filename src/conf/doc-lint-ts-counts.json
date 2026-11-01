@@ -53,7 +53,7 @@
     "src/lupin_app/static/js/multiplexer/render/NotificationsListRenderer.ts": 169,
     "src/lupin_app/static/js/multiplexer/render/PersonaModalRenderer.ts": 27,
     "src/lupin_app/static/js/multiplexer/render/QaPaneRenderer.ts": 26,
-    "src/lupin_app/static/js/multiplexer/render/ReadingPaneRenderer.ts": 46,
+    "src/lupin_app/static/js/multiplexer/render/ReadingPaneRenderer.ts": 45,
     "src/lupin_app/static/js/multiplexer/render/SectionToolbarRenderer.ts": 38,
     "src/lupin_app/static/js/multiplexer/render/SenderCardConsoleButtons.ts": 29,
     "src/lupin_app/static/js/multiplexer/render/SenderCardRecorderRenderer.ts": 17,
