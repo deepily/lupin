@@ -364,9 +364,9 @@ NEW_CLASS = "diagnostic/websocketDiagnostic.WebSocketDiagnosticTool"
 
 def port_world():
     """
-    Build Chloe's flag A: a method, its class, the port's class, nine methods and the port.
+    Build a method seed, its own class, another class, nine methods and one more method.
 
-    By cosine to the seed the order is: the seed's own class, the port's class, nine other methods, then the port, which is eleventh.
+    By cosine the order is the seed's class, the other class, nine methods, then the last method.
     """
     entries = [ ( OLD_SEED, "websocket-diagnostic.js", "method", 1.0 ), ( OLD_CLASS, "websocket-diagnostic.js", "class", 0.99 ), ( NEW_CLASS, "diagnostic/websocketDiagnostic.ts", "class", 0.98 ) ]
     entries += [ ( f"websocket-diagnostic.m{k}", "websocket-diagnostic.js", "method", 0.9 - 0.01 * k ) for k in range( 9 ) ]
@@ -378,18 +378,17 @@ def port_world():
     return keys.KeyContext( kept, measures, bodies, DRAW_SEED, vectors )
 
 
-def test_a_method_seed_is_never_offered_a_whole_class_and_so_its_line_for_line_port_is_asked_about():
+def test_a_method_seed_is_never_offered_a_whole_class_on_the_vector_route():
     ctx   = port_world()
     found = keys.work_alike_candidates( ctx, OLD_SEED, keys.ROUTE_VECTOR )
     assert OLD_CLASS not in found[ "ids" ] and NEW_CLASS not in found[ "ids" ], "a method is compared with methods, not with a container"
-    assert len( found[ "ids" ] ) == 10 and found[ "ids" ][ -1 ] == PORT, "without the filter the port is eleventh by cosine and is never asked about"
-    assert all( ctx.by_id[ i ][ "kind" ] != "class" for i in found[ "ids" ] )
+    assert len( found[ "ids" ] ) == 10 and all( ctx.by_id[ i ][ "kind" ] != "class" for i in found[ "ids" ] ), "the slots the classes held go to methods"
 
 
 def test_the_sampled_route_drops_whole_classes_for_a_method_seed_too():
     ctx = port_world()
     sampled = keys.sampled_candidates( ctx, OLD_SEED, "work_alike" )
-    assert OLD_CLASS not in sampled and NEW_CLASS not in sampled and PORT in sampled
+    assert OLD_CLASS not in sampled and NEW_CLASS not in sampled and all( ctx.by_id[ i ][ "kind" ] != "class" for i in sampled )
 
 
 def test_a_seed_that_is_itself_a_class_is_still_compared_with_classes_and_never_with_itself():

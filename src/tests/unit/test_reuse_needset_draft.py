@@ -379,15 +379,26 @@ def test_a_call_log_that_cannot_be_written_warns_and_the_run_goes_on( tmp_path, 
     assert "WARNING: call log" in capsys.readouterr().out and not ( tmp_path / "missing-folder" ).exists()
 
 
-def test_copy_check_finds_the_seeds_own_names_and_any_path_with_no_model_call():
+def test_copy_check_finds_the_seeds_own_names_and_real_paths_with_no_model_call():
     assert draft.copy_check( GOOD, SEED ) == []
     named = draft.copy_check( LEAKS_IDENTIFIER, SEED )
     assert [ f[ "check" ] for f in named ] == [ "identifier" ] and "items" in named[ 0 ][ "words" ] and "identifier tokens" in named[ 0 ][ "detail" ]
     for pasted in ( f"A function that reads {SEED[ 'file' ]} and then adds up every number it finds there.", "A function that opens src/lupin_mcp/other/place.py and adds up every number in it.",
-                    "A function that parses config.json and adds up every number it finds listed there." ):
+                    "A function that parses config.json and adds up every number it finds listed there.", "A function that reads mod.py and adds up every number it finds listed there.",
+                    ):
         found = draft.copy_check( pasted, SEED )
         assert found and "paths:" in found[ 0 ][ "detail" ], pasted
         assert all( "/" not in w and "." not in w for w in found[ 0 ][ "words" ] ), "a path is never handed to the writer as a word"
+    for rooted in ( "/etc/hosts", "./run/state", "../shared/state" ): assert "paths:" in draft.copy_check( f"A function that reads {rooted} and adds up every number it finds listed there.", SEED )[ 0 ][ "detail" ], rooted
+    deep = { **SEED, "file": "package/storage/ledger.py" }
+    assert "paths: docs/storage/notes" in draft.copy_check( "A function that reads docs/storage/notes and adds up every number it finds listed there.", deep )[ 0 ][ "detail" ], "a slashed string with a piece of the seed's own path is a path"
+    assert draft.copy_check( "A function that reads docs/other/notes and adds up every number it finds listed there.", deep ) == [], "one with none, and no extension, is not"
+
+
+@pytest.mark.parametrize( "ordinary", [ "and/or", "client/server", "3/4", "Node.js", "input/output", "yes/no", "TCP/IP", "I/O" ] )
+def test_ordinary_text_with_a_slash_or_a_dot_is_not_a_path( ordinary ):
+    sentence = f"A function that adds up a list of numbers with {ordinary} handling but stops once a ceiling has been reached."
+    assert draft.copy_check( sentence, SEED ) == [], ordinary
 
 
 def test_a_copied_path_is_caught_before_the_leak_check_and_rewritten_once_by_kind( tmp_path ):

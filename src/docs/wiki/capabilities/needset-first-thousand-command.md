@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.run_first_thousand@ad0d064da7
   - lupin_mcp.reuse_needset.first_thousand.control_job@da8024fd0c
   - lupin_mcp.reuse_needset.first_thousand.planted_stage_for@d5537af534
-  - lupin_mcp.reuse_needset.first_thousand.control_stage_live@2553ab4a6f
+  - lupin_mcp.reuse_needset.first_thousand.control_stage_live@84e2460c23
   - lupin_mcp.reuse_needset.first_thousand.tracked_files@0eecf6442d
   - lupin_mcp.reuse_needset.first_thousand.write_seed_lists@480a3dd8ba
   - lupin_mcp.reuse_needset.first_thousand.live_parts@6bdad27106
@@ -13,9 +13,11 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.parse_args@1a07efcc78
   - lupin_mcp.reuse_needset.first_thousand.plan@6de27be30d
   - lupin_mcp.reuse_needset.first_thousand.load_inputs@68bde7e075
-  - lupin_mcp.reuse_needset.first_thousand.exit_status@b417b6406c
+  - lupin_mcp.reuse_needset.first_thousand.exit_status@d42a152d3e
   - lupin_mcp.reuse_needset.first_thousand.run_cli@2b9e55e56d
-  - lupin_mcp.reuse_needset.first_thousand.main@47408dae37
+  - lupin_mcp.reuse_needset.first_thousand.main@c0f97e3113
+  - lupin_mcp.reuse_needset.first_thousand.live_control@5a2bebf949
+  - lupin_mcp.reuse_needset.first_thousand.live_run@c033b79f7f
 ---
 # Need set: the first-thousand run, the command
 
@@ -28,13 +30,11 @@ The live control, the command line and the capped run. The planted pool and the 
 
 ## The command
 - `parse_args` requires the root, run folder, planted file, answer key, labels folder, seed and source commit. The cap is 1,314 unless `--limit` says otherwise. `--partners` turns the partner search on; without it each seed is its own known answer. `--second-model` and `--probe-model` default to Opus.
-- `load_inputs` reads the 20 pairs and their groups for reading only. The planted file must match its recorded hash.
-- `main` without `--live` prints `plan` and contacts nothing. The plan shows the cap, the calls already spent, the groups and the flagged count.
-- `main` with `--live` first needs `--cli-path` (without it: `NO_CLI_PATH`) and points every Claude Code call (drafter, second model, probe) at that binary. It then builds the context, draws and writes the seed lists, builds the live parts ([[needset-stage-parts]]) and runs the four stages. A context with no candidate stage raises `NO_CANDIDATE_STAGE` first, naming the three variables that build it. A second run over other seed lists raises `PLAN_ALREADY_WRITTEN`.
-- `write_seed_lists` draws the 50 attribution and 100 yield seeds from the tree's index and tracked files, and writes them once. `tracked_files` is the set git lists.
-- `live_parts` builds the parts with their own ledgers in the run folder, the second model and the probe model from the arguments. `stage_factories` hands the lists file and the parts to the two stages and adds the counts of seeds that gave no final need. A stage whose every seed was skipped as unreadable fails with `ALL_SEEDS_UNREADABLE`. So does a stage with no need and a skipped seed, as `NO_NEEDS_WITH_SKIPS`: an unread seed could have held it.
-- `main` closes the Jev spend-ledger run when the stages end, whether by a finish, a stop, a failure, the cap or an error (`reuse_tools.close_run`). It returns `closed_run`. A run left open would hold its whole token ceiling against the account limit.
-- `exit_status` gives 1 when any stage failed, 3 when the cap or a stage's own budget ended a stage and none failed, else 0. The argument parser keeps 2 for a usage error. A stop on a finding exits 0. `run_cli` prints the report as JSON first, so a failed run still shows what it found.
-
-## The run
+- `load_inputs` reads the 20 pairs and their groups for reading only, and the planted file must match its recorded hash. `main` without `--live` prints `plan` and contacts nothing. The plan shows the cap, the calls spent, the groups and the flagged count.
+- `main` with `--live` first needs `--cli-path` (without it: `NO_CLI_PATH`) and points every Claude Code call at that binary. It then builds the context. A context with no candidate stage raises `NO_CANDIDATE_STAGE`, naming the three variables that build it.
+- `live_run` draws and writes the seed lists, builds the live parts ([[needset-stage-parts]]) and runs the four stages. A second run over other seed lists raises `PLAN_ALREADY_WRITTEN`. `write_seed_lists` draws 50 attribution and 100 yield seeds from the index.
+- `live_parts` builds the parts with their own ledgers in the run folder. `stage_factories` hands the lists file and the parts to the two stages and adds the counts of seeds that gave no final need. A stage whose every seed was skipped as unreadable fails with `ALL_SEEDS_UNREADABLE`. So does a stage with no need and a skipped seed, as `NO_NEEDS_WITH_SKIPS`.
+- `main` closes the Jev spend-ledger run when the stages end, by any ending after the context is built (`reuse_tools.close_run`). It returns `closed_run`. A close that raises during another error never replaces that error. After a clean finish it is returned as `close_error` and the exit status is 1.
+- `exit_status` gives 1 when any stage failed, 3 when the cap or a stage's own budget ended a stage and none failed, else 0. The argument parser keeps 2 for a usage error. A stop on a finding exits 0. `run_cli` prints the report as JSON first.
+- The control runs `CONTROL_PASSES` (two) times. `live_control` gives each later pass its own drafting ledger and query-cache folder, so the second pass asks again. The report is the first pass's plus `passes` and `consistent`, true when every pass missed the same pairs. The stage stops if any pass missed a pair.
 - `run_first_thousand` installs the cap over `call-ledger.jsonl` in the run folder, with each stage's budget, runs the four stages and writes `stage-reports.json`. A resumed run keeps the calls already spent.

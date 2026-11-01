@@ -499,7 +499,7 @@ def test_a_live_run_with_a_cli_path_that_is_no_executable_stops_by_name_before_t
 
 def result_of( *statuses ):
     """Return a live main result whose stages have the given statuses."""
-    return { "live": True, "report": { "stages": { f"s{i}": { "status": st } for i, st in enumerate( statuses ) } } }
+    return { "live": True, "close_error": None, "report": { "stages": { f"s{i}": { "status": st } for i, st in enumerate( statuses ) } } }
 
 
 @pytest.mark.parametrize( "statuses, code", [ ( ( "done", "done", "done", "done" ), 0 ), ( ( "done", "stopped", "not_run", "not_run" ), 0 ), ( ( "failed", "not_run", "not_run", "not_run" ), 1 ),
@@ -566,7 +566,7 @@ def test_a_run_whose_attribution_seeds_were_all_skipped_ends_failed_through_run_
 
     with cap.installed(): report = asyncio.run( stages.run_stages( cap, { stages.ATTRIBUTION: one( None ), stages.YIELD: never, stages.CONTROL: never, stages.REMAINDER: never } ) )
     assert report[ "stages" ][ "attribution" ][ "status" ] == "failed" and report[ "stages" ][ "attribution" ][ "code" ] == er.ALL_SEEDS_UNREADABLE and report[ "stages" ][ "yield" ][ "status" ] == "not_run"
-    assert ft.exit_status( { "live": True, "report": report } ) == 1
+    assert ft.exit_status( { "live": True, "close_error": None, "report": report } ) == 1
 
 
 def test_a_stage_with_no_listed_seeds_and_no_skips_is_not_called_all_skipped( monkeypatch ):
@@ -621,7 +621,7 @@ def test_a_stage_with_no_need_and_only_disputed_or_no_partner_seeds_stays_a_stop
     with cap.installed(): report = asyncio.run( stages.run_stages( cap, { stages.ATTRIBUTION: one( None ), stages.YIELD: never, stages.CONTROL: never, stages.REMAINDER: never } ) )
     seen = report[ "stages" ][ "attribution" ]
     assert seen[ "status" ] == "stopped" and seen[ "report" ][ "no_final_need" ][ "disputed" ] == 1 and seen[ "report" ][ "no_final_need" ][ "no_partner" ] == 1 and seen[ "report" ][ "no_final_need" ][ "unreadable_reply" ] == 0
-    assert ft.exit_status( { "live": True, "report": report } ) == 0
+    assert ft.exit_status( { "live": True, "close_error": None, "report": report } ) == 0
 
 
 def test_the_spend_ledger_run_is_closed_when_the_stages_end_and_also_when_they_raise( tmp_path ):
@@ -641,7 +641,7 @@ def test_the_spend_ledger_run_is_closed_when_the_stages_end_and_also_when_they_r
 def test_partners_are_off_unless_asked_for_and_a_budget_stop_exits_with_the_cap_code( tmp_path ):
     argv, sha = run_dir_files( tmp_path )
     assert ft.parse_args( argv ).partners is False and ft.parse_args( [ *argv, "--partners" ] ).partners is True
-    live = lambda status: { "live": True, "report": { "stages": { "attribution": { "status": status }, "yield": { "status": "done" } } } }
+    live = lambda status: { "live": True, "close_error": None, "report": { "stages": { "attribution": { "status": status }, "yield": { "status": "done" } } } }
     assert ft.exit_status( live( "budget_reached" ) ) == ft.EXIT_CAP_REACHED and ft.exit_status( live( "failed" ) ) == ft.EXIT_FAILED and ft.exit_status( live( "done" ) ) == 0
 
 
@@ -659,3 +659,91 @@ def test_the_first_thousand_cap_gives_each_stage_its_own_budget_and_the_remainde
     try: asyncio.run( ft.run_first_thousand( str( tmp_path ), stage, stage, stage, stage ) )
     finally: call_cap.CallCap = real
     assert cap_seen == [ stages.STAGE_BUDGETS ] and stages.STAGE_BUDGETS[ "remainder" ] == 0
+
+
+def control_world( ledgers, miss_on_second=False ):
+    """Return ( ctx, draft_fn, check ) for a multi-pass control on fakes."""
+    ctx    = types.SimpleNamespace( candidate_stage="live stage" )
+
+    def draft_fn( job, ask, ledger ):
+        ledgers.append( ledger )
+        return { "ok": True, "need": SENTENCE }
+
+    def check( need, c, planted, entries ):
+        n    = len( ledgers ) // 20
+        keep = [ e[ "id" ] for e in entries ]
+        if miss_on_second and n == 2: keep = keep[ 1: ]
+        return { "id": "r", "candidate_stage": { "ids": keep, "widened_ids": [] } }
+
+    return ctx, draft_fn, check
+
+
+def test_the_control_runs_twice_when_asked_each_pass_on_its_own_ledger_and_cache( monkeypatch ):
+    ps, ledgers, caches = [ real_pair( i ) for i in range( 20 ) ], [], []
+    ctx, draft_fn, check = control_world( ledgers )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: caches.append( cache ) or "planted stage" )
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+                                   passes=2, pass_resources=lambda n: ( f"L{n + 1}", f"CACHE-pass{n + 1}" ) )
+    out = asyncio.run( stage() )
+    assert ledgers == [ "L1" ] * 20 + [ "L2" ] * 20 and caches == [ "CACHE", "CACHE-pass2" ], "the second pass asks again, from its own ledger and cache"
+    assert len( out[ "passes" ] ) == 2 and out[ "consistent" ] is True and out[ "stop" ] is False and out[ "found" ] == 20 and out[ "passes" ][ 1 ][ "found" ] == 20
+
+
+def test_a_pair_missed_on_one_pass_only_makes_the_passes_inconsistent_and_stops_the_run( monkeypatch ):
+    ps, ledgers, caches = [ real_pair( i ) for i in range( 20 ) ], [], []
+    ctx, draft_fn, check = control_world( ledgers, miss_on_second=True )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: "planted stage" )
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+                                   passes=2, pass_resources=lambda n: ( "L2", "C2" ) )
+    out = asyncio.run( stage() )
+    assert out[ "passes" ][ 0 ][ "missed" ] == [] and len( out[ "passes" ][ 1 ][ "missed" ] ) == 1 and out[ "consistent" ] is False and out[ "stop" ] is True
+    assert out[ "stop" ] is True and out[ "passes" ][ 0 ][ "stop" ] is False, "the stage stops on the pass that missed, not on the first"
+
+
+def test_a_multi_pass_control_needs_its_pass_resources_and_at_least_one_pass():
+    for passes, resources in ( ( 2, None ), ( 0, None ) ):
+        with pytest.raises( ValueError, match="pass_resources" ): ft.control_stage_live( None, [], "a", "l", None, None, "c", passes=passes, pass_resources=resources )
+
+
+def test_the_live_control_is_two_passes_and_the_second_has_its_own_ledger_file_and_cache_folder( monkeypatch, tmp_path ):
+    seen = {}
+    monkeypatch.setattr( ft, "control_stage_live", lambda *a, **k: seen.update( args=a, kw=k ) or "STAGE" )
+    monkeypatch.setattr( draft, "make_ledger", lambda path, cli, server: ( path, cli, server ) )
+    args = types.SimpleNamespace( run_dir=str( tmp_path ), cli_path="/bin/claude", server="max-plan" )
+    assert ft.CONTROL_PASSES == 2 and ft.live_control( args )( "ctx", "pairs", "ask", "L1", "strip", "draft", "CACHE" ) == "STAGE"
+    assert seen[ "args" ] == ( "ctx", "pairs", "ask", "L1", "strip", "draft", "CACHE" ) and seen[ "kw" ][ "passes" ] == 2
+    assert seen[ "kw" ][ "pass_resources" ]( 1 ) == ( ( f"{tmp_path}/ledger-control-draft-pass2.jsonl", "/bin/claude", "max-plan" ), "CACHE-pass2" )
+
+
+def test_an_error_after_the_context_is_built_but_before_the_runner_still_closes_the_spend_run_and_is_the_error_raised( tmp_path ):
+    argv, sha = run_dir_files( tmp_path )
+    closed    = []
+
+    def broken_parts( args, env, built, lists ): raise RuntimeError( "parts failed after the run began" )
+
+    deps = live_deps( sha, None ) | { "parts": broken_parts, "close_run": lambda ctx: closed.append( ctx ) }
+    with pytest.raises( RuntimeError, match="parts failed" ): ft.main( [ *argv, "--live" ], deps=deps )
+    assert len( closed ) == 1
+
+
+def test_a_close_that_raises_while_another_error_is_on_its_way_never_replaces_it( tmp_path, capsys ):
+    argv, sha = run_dir_files( tmp_path )
+
+    def broken_parts( args, env, built, lists ): raise RuntimeError( "the real error" )
+
+    def broken_close( ctx ): raise OSError( "ledger unreadable" )
+
+    with pytest.raises( RuntimeError, match="the real error" ): ft.main( [ *argv, "--live" ], deps=live_deps( sha, None ) | { "parts": broken_parts, "close_run": broken_close } )
+    assert "close_run failed while another error was raised" in capsys.readouterr().out
+
+
+def test_a_close_that_raises_after_a_clean_finish_is_reported_and_exits_one_and_the_stage_report_survives( tmp_path ):
+    argv, sha = run_dir_files( tmp_path )
+
+    async def ended( run_dir, one, two, control, rem, limit ): return { "stages": { "attribution": { "status": "done" } } }
+
+    def broken_close( ctx ): raise OSError( "ledger unreadable" )
+
+    out = ft.main( [ *argv, "--live" ], deps=live_deps( sha, ended ) | { "close_run": broken_close } )
+    assert out[ "closed_run" ] is None and "ledger unreadable" in out[ "close_error" ] and out[ "report" ][ "stages" ][ "attribution" ][ "status" ] == "done"
+    assert ft.exit_status( out ) == ft.EXIT_FAILED

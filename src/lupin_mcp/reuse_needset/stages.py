@@ -60,20 +60,26 @@ async def run_yield( seed_ids, prepare_fn, index, k=hardness.BM25_K ):
 
     Ensures:
         - seeds run one at a time in the order given, so the calls fall in a fixed order
-        - returns { k, seeds, skipped, hard, by_lang, intervals, stop, short }
+        - returns { k, seeds, skipped, hard, by_lang, intervals, stop, short, budget_reached }
+        - when the running stage's own call budget ends the walk, the seeds done so far are reported, budget_reached is True and budget_detail names the stop; seeds_left counts the seeds never started
         - by_lang and hard come from hardness.yield_report over the seeds that had a partner
         - intervals maps each language to the two-sided 95 percent interval of its hard share
         - stop is True when a language with at least YIELD_SEEDS seeds has no hard row
         - short lists the languages that had fewer seeds than YIELD_SEEDS, which is a warning and not a stop
     """
-    rows, skipped = [], 0
-    for seed_id in seed_ids:
-        row = await prepare_fn( seed_id )
+    rows, skipped, detail, left = [], 0, None, 0
+    for n, seed_id in enumerate( seed_ids ):
+        try:
+            row = await prepare_fn( seed_id )
+        except er.NeedsetError as error:
+            if error.code != er.STAGE_BUDGET_REACHED: raise
+            detail, left = error.detail, len( seed_ids ) - n
+            break
         if row is None: skipped += 1
         else: rows.append( row )
     report = hardness.yield_report( hardness.source_hard( rows, index, k ), k )
     by_lang = report[ "by_lang" ]
-    return { **report, "skipped": skipped,
+    return { **report, "skipped": skipped, "budget_reached": detail is not None, "budget_detail": detail, "seeds_left": left,
              "intervals": { lang: harness_report.interval( v[ "hard" ], v[ "seeds" ] ) for lang, v in by_lang.items() },
              "stop": any( v[ "seeds" ] >= YIELD_SEEDS and v[ "hard" ] == 0 for v in by_lang.values() ),
              "short": sorted( lang for lang, v in by_lang.items() if v[ "seeds" ] < YIELD_SEEDS ) }
@@ -120,6 +126,7 @@ async def run_stages( cap, stages ):
         - a stage after a stop, a failure or the cap is not_run and never starts
         - a stage that spends its own budget ends as budget_reached with the code and detail, and the stages after it still run, because it took nothing from them
         - over_plan lists each stage that spent more than PLANNED_CALLS allows, which only a cap built without stage limits can show
+        - a report that says budget_reached is kept whole and ends as budget_reached, and the stages after it still run
         - the cap, the stop and a named failure end the run with a report and no exception
 
     Raises:
@@ -138,7 +145,7 @@ async def run_stages( cap, stages ):
         try:
             with call_cap.stage( name ):
                 report = await stages[ name ]()
-            results[ name ] = { "status": STOPPED if report.get( "stop" ) else DONE, "report": report }
+            results[ name ] = { "status": BUDGET_REACHED if report.get( "budget_reached" ) else STOPPED if report.get( "stop" ) else DONE, "report": report }
             halted          = bool( report.get( "stop" ) )
         except er.NeedsetError as error:
             budget          = error.code == er.STAGE_BUDGET_REACHED

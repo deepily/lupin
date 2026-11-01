@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.reuse_needset.draft.none_note@908dcd7239
   - lupin_mcp.reuse_needset.draft.draft_none@ad0a288d6a
   - lupin_mcp.reuse_needset.draft.make_none_drafter@cb2ca926b8
-  - lupin_mcp.reuse_needset.draft.copy_check@2a4179fa09
+  - lupin_mcp.reuse_needset.draft.copy_check@ab47ae2ec9
 ---
 # Need set: drafting flows
 
@@ -18,7 +18,7 @@ Drafts one sentence per seed. It checks for copied names and paths, then for lea
 
 ## One seed
 - `draft_need` drafts the sentence for one seed. At most two sentences are checked (`MAX_TRIES`), and an unreadable reply is asked again once with the same prompt. A job with no keys is checked against the seed alone.
-- `copy_check` runs first and costs no call. It finds the seed's identifier tokens and name pieces, any path-like text, and the seed's file path or file name. Then `leak_check` runs only if it found nothing. The rewrite is told the failure kind and the bare words, never a path or a key.
+- `copy_check` runs first and costs no call. It finds the seed's identifier tokens and name pieces, and its file path or file name. A slashed string counts only with a file extension, a leading dot or slash, or a piece of the seed's own path. A bare file name counts too. So and/or, input/output, TCP/IP and Node.js pass. Then `leak_check` runs only if it found nothing. The rewrite is told the failure kind and the bare words, never a path or a key.
 - The returned record also holds `rejections` and `unreadable`, for the local ledger. Each rejection is a rejected sentence with its full failure details. Each unreadable entry is a reply that could not be read.
 - A rewrite request names the failure kinds and the seed's own offending words, never a key symbol or its text. The history holds no key text.
 - It returns not ok with `UNREADABLE_REPLY` when both replies were unreadable, and `NEED_LEAKS_KEY` after two failed checks. The nothing cell keeps three tries (`MAX_NONE_TRIES`).

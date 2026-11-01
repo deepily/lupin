@@ -21,7 +21,9 @@ from lupin_mcp.reuse_needset import keys
 DRAFTER_MODEL = "claude-fable-5-1"
 MAX_TRIES     = 2
 MAX_NONE_TRIES = 3
-PATH_LIKE     = re.compile( r"[\w.\-]+(?:/[\w.\-]+)+|[\w\-]+\.(?:py|tsx|ts|js|json|md)\b" )
+SLASHED       = re.compile( r"(?<![\w.\-/])(\.{0,2}/)?[\w.\-]+(?:/[\w.\-]+)+" )
+FILE_END      = re.compile( r"\.(?:py|tsx|ts|js|cjs|mjs|json|md|ini|yml|yaml|sh|css|html|txt)$" )
+BARE_FILE     = re.compile( r"\b[\w\-]+\.(?:py|tsx|ts|json|md|ini|yml|yaml|sh)\b" )
 STAGE         = "draft"
 NO_KEY        = "NO_KEY"
 ABSENCE_REJECTED = "ABSENCE_REJECTED"
@@ -86,7 +88,9 @@ def copy_check( sentence, seed ):
         - seed is an index record
 
     Ensures:
-        - returns [] when the sentence holds no identifier token or name piece of the seed, no path-like text and not the seed's file path or file name
+        - returns [] when the sentence holds no identifier token or name piece of the seed, no path and not the seed's file path or file name
+        - a slashed string is a path only when it ends in a file extension, starts with a dot or a slash, or holds a piece of the seed's own path
+        - so and/or, client/server, input/output, TCP/IP and 3/4 pass, and so does Node.js
         - otherwise returns one { check: identifier, detail, words } failure, the shape leak_check returns, so one rewrite request serves both
         - words are the bare lower-case words the sentence copied from the seed's names; a copied path adds no word, because the writer is only told the kind
         - detail names what was copied and is for the local record, never for the writer
@@ -97,7 +101,9 @@ def copy_check( sentence, seed ):
     hits    = sorted( tokens & nc.identifier_tokens( seed ) )
     written = nc.need_words( sentence )
     pieces  = sorted( written.keys() & nc.name_pieces( seed ) )
-    paths   = sorted( { *PATH_LIKE.findall( sentence ), *[ p for p in ( seed[ "file" ], seed[ "file" ].rsplit( "/", 1 )[ -1 ] ) if p.lower() in lowered ] } )
+    own     = { w for part in seed[ "file" ].lower().split( "/" ) for w in re.findall( r"[a-z0-9]+", part ) if len( w ) >= nc.PIECE_MIN_LEN }
+    slashed = [ m.group( 0 ) for m in SLASHED.finditer( sentence ) if m.group( 1 ) or FILE_END.search( m.group( 0 ).lower() ) or own & set( re.findall( r"[a-z0-9]+", m.group( 0 ).lower() ) ) ]
+    paths   = sorted( { *slashed, *BARE_FILE.findall( sentence ), *[ p for p in ( seed[ "file" ], seed[ "file" ].rsplit( "/", 1 )[ -1 ] ) if p.lower() in lowered ] } )
     if not hits and not pieces and not paths: return []
     words   = sorted( { w for w in [ *hits, *[ written[ p ] for p in pieces ] ] if need_writer.BARE_WORD.fullmatch( w ) } )
     detail  = "; ".join( ( [ "identifier tokens: " + ", ".join( hits ) ] if hits else [] ) + ( [ "name pieces: " + ", ".join( pieces ) ] if pieces else [] ) + ( [ "paths: " + ", ".join( paths ) ] if paths else [] ) )

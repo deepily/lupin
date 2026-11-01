@@ -16,6 +16,7 @@ from cosa.repo.labelling import run_check
 from cosa.repo.symindex.candidates import candidate_stage as cs
 from lupin_mcp.reuse_needset import call_cap, hardness, loss_trace, stage3, stages
 from lupin_mcp.reuse_needset import errors as er
+from tests.unit.test_reuse_needset_hardness import crowded_index
 from tests.unit.test_reuse_needset_positive_control import pool
 from tests.unit.test_reuse_needset_stage3 import lexical_ask, twenty
 
@@ -274,3 +275,38 @@ def test_the_remainder_has_a_budget_of_none_so_a_call_from_it_is_refused( tmp_pa
     cap, transport = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 100, stages.STAGE_BUDGETS ), Transport()
     out = run( cap, all_stages( transport, **{ "remainder": spend( transport, 1 ) } ) )
     assert out[ "stages" ][ "remainder" ][ "status" ] == "budget_reached" and transport.calls == 3 and "remainder" not in out[ "by_stage" ]
+
+
+def budget_stop( after ):
+    """Return a prepare_fn that gives rows, then hits the stage budget."""
+    async def prepare( seed_id ):
+        if int( seed_id ) >= after: raise er.NeedsetError( er.STAGE_BUDGET_REACHED, "the yield stage used 600 of its 600 calls" )
+        return { "seed": seed_id, "need": "banana", "targets": [ "m.target_best" ], "lang": "py" }
+    return prepare
+
+
+def test_a_yield_walk_ended_by_its_own_budget_reports_what_it_has_and_says_so():
+    index, _ = crowded_index()
+    out = asyncio.run( stages.run_yield( [ "0", "1", "2", "3" ], budget_stop( 2 ), index ) )
+    assert out[ "budget_reached" ] is True and "600 of its 600" in out[ "budget_detail" ] and out[ "seeds_left" ] == 2 and out[ "seeds" ] == 2 and out[ "by_lang" ][ "py" ][ "seeds" ] == 2
+    whole = asyncio.run( stages.run_yield( [ "0", "1" ], budget_stop( 9 ), index ) )
+    assert whole[ "budget_reached" ] is False and whole[ "budget_detail" ] is None and whole[ "seeds_left" ] == 0
+
+
+def test_any_other_error_still_stops_a_yield_walk():
+    index, _ = crowded_index()
+
+    async def crash( seed_id ): raise er.NeedsetError( er.CALL_CAP_REACHED, "cap" )
+
+    with pytest.raises( er.NeedsetError ) as caught: asyncio.run( stages.run_yield( [ "0" ], crash, index ) )
+    assert caught.value.code == er.CALL_CAP_REACHED
+
+
+def test_run_stages_keeps_a_partial_report_whole_under_the_budget_reached_status( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    partial = { "seeds": 3, "budget_reached": True }
+
+    async def yielded(): return partial
+
+    out = run( cap, all_stages( transport, **{ "yield": yielded } ) )
+    assert out[ "stages" ][ "yield" ] == { "status": "budget_reached", "report": partial } and out[ "stages" ][ "control" ][ "status" ] == "done"
