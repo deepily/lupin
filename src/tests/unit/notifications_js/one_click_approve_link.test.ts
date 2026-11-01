@@ -217,6 +217,7 @@ function plantTooltip(): Element {
   document.getElementById( "abstract-tooltip" )?.remove();
   const tip = document.createElement( "div" );
   tip.id = "abstract-tooltip";
+  tip.className = "abstract-tooltip";
   tip.innerHTML = '<div class="abstract-tooltip-content"></div>';
   document.body.appendChild( tip );
   return tip;
@@ -244,6 +245,31 @@ test( "horizontal: a 📄 link inside the action-required card uses the tooltip,
   await flush();
   assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, FACTS );
   assert.deepEqual( paneOpens, [], "the pane is left to the live response buttons" );
+} );
+
+test( "horizontal: while an action-required card owns the pane, a 📄 link in the list uses the tooltip", async () => {
+  table[ ROW_A ] = FIX_X;
+  ui._layoutMode = "horizontal";
+  ui._actionRequiredInPane = true;
+  const tip = plantTooltip();
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
+  click( a! );
+  await flush();
+  ui._actionRequiredInPane = false;
+  assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, FACTS );
+  assert.deepEqual( paneOpens, [], "the pane guard would have dropped it" );
+} );
+
+test( "horizontal: a 📄 link inside the open tooltip replaces the tooltip text, not the pane", async () => {
+  table[ ROW_A ] = FIX_X;
+  ui._layoutMode = "horizontal";
+  const tip = plantTooltip();
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
+  tip.querySelector( ".abstract-tooltip-content" )!.appendChild( a! );
+  click( a! );
+  await flush();
+  assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, FACTS );
+  assert.deepEqual( paneOpens, [] );
 } );
 
 test( "vertical: a 📄 link in the plain notification list shows the tooltip and never the pane", async () => {

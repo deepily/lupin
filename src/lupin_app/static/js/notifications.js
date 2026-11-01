@@ -18557,13 +18557,14 @@ class NotificationsUI {
      *     - anchorEl is the clicked element; the tooltip is placed beside it
      *     - abstract is markdown text; it is rendered by renderMarkdown, never as raw HTML
      *     - titleOverride is a string, or null to derive the title from the card's message
+     *     - tooltipWhenPaneBlocked is true to use the tooltip while an action-required card owns the pane
      *
      * Ensures:
      *     - horizontal layout, not inside the action-required card: the pane opens, or closes on a
      *       second click that shows the same text
      *     - otherwise the tooltip shows the text beside anchorEl
      */
-    _showAbstractFor( anchorEl, abstract, titleOverride = null ) {
+    _showAbstractFor( anchorEl, abstract, titleOverride = null, tooltipWhenPaneBlocked = false ) {
         const indicator = anchorEl;
         const tooltip   = document.getElementById( 'abstract-tooltip' );
 
@@ -18576,7 +18577,10 @@ class NotificationsUI {
         // the card's own abstract falls through to the in-tab tooltip below
         // (vertical parity — a surface Rick already knows). Foreign indicators
         // (center-column cards) still route to the pane, where the guard holds.
-        const isOwnActionRequired = !!indicator.closest( "#action-required-content" );
+        // A link inside the open tooltip also stays in the tooltip, and the 📄 link falls back to it while a
+        // card owns the pane, because the pane guard would drop it silently.
+        const isOwnActionRequired = !!indicator.closest( "#action-required-content, .abstract-tooltip" )
+                                    || ( tooltipWhenPaneBlocked && this._actionRequiredInPane === true );
 
         // Horizontal layout mode: route to Reading Pane instead of the
         // legacy fixed-position tooltip. Design:
@@ -21024,7 +21028,7 @@ class NotificationsUI {
         if ( rowId === null ) return;
         ev.preventDefault();
         const row = await this._readTask( rowId );
-        this._showAbstractFor( anchor, row === null ? "Could not read this ticket." : this._taskOverlayText( row ), `Ticket ${rowId.slice( 0, 8 )}` );
+        this._showAbstractFor( anchor, row === null ? "Could not read this ticket." : this._taskOverlayText( row ), `Ticket ${rowId.slice( 0, 8 )}`, true );
     }
 
     /**
