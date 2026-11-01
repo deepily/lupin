@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import json
 import time
+import zoneinfo
 
 import pytest
 from claude_agent_sdk import AssistantMessage, TextBlock
@@ -40,16 +41,6 @@ def tree( tmp_path ):
 @pytest.fixture( autouse=True )
 def _typescript_lookup( monkeypatch ):
     monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
-
-
-@pytest.mark.parametrize( "moment, expected", [ ( at( 13, 59 ), False ), ( at( 14, 0 ), True ), ( at( 16, 59 ), True ), ( at( 17, 0 ), False ), ( at( 9, 59, smoke.EASTERN ), False ),
-                                               ( at( 10, 0, smoke.EASTERN ), True ), ( at( 12, 59, smoke.EASTERN ), True ), ( at( 13, 0, smoke.EASTERN ), False ) ] )
-def test_a_live_run_is_allowed_from_ten_to_one_eastern_whatever_the_zone_given( moment, expected ):
-    assert smoke.in_window( moment ) is expected
-
-
-def test_a_time_without_a_zone_is_refused():
-    with pytest.raises( ValueError ): smoke.in_window( datetime.datetime( 2026, 10, 24, 11, 0 ) )
 
 
 def test_the_command_line_names_the_split_and_has_no_default_for_it():
@@ -99,31 +90,17 @@ def test_the_report_gives_the_rates_the_reasons_and_calls_it_a_measurement():
     assert idle[ "seconds_per_call" ] is None and idle[ "failure_rate"] is None
 
 
-def test_a_live_run_outside_the_window_is_refused_before_anything_is_built( tmp_path, monkeypatch ):
-    monkeypatch.setattr( smoke, "live_build_env", lambda *a: pytest.fail( "the live env was built" ) )
-    out = tmp_path / "out"
-    with pytest.raises( er.NeedsetError ) as e: smoke.main( argv( out ), now=lambda: at( 3, 0 ) )
-    assert e.value.code == er.OUTSIDE_WINDOW and not out.exists()
-
-
-@pytest.mark.parametrize( "extra", [ (), ( "--window-lifted-by", "" ), ( "--window-lifted-by", "   " ) ] )
-def test_a_blank_or_missing_lift_still_refuses_outside_the_window( tmp_path, monkeypatch, extra ):
-    monkeypatch.setattr( smoke, "live_build_env", lambda *a: pytest.fail( "the live env was built" ) )
-    with pytest.raises( er.NeedsetError ) as e: smoke.main( argv( tmp_path / "out", extra=extra ), now=lambda: at( 3, 0 ) )
-    assert e.value.code == er.OUTSIDE_WINDOW
-
-
-def test_a_named_lift_runs_outside_the_window_and_the_record_says_who( tmp_path, monkeypatch ):
+def test_a_live_run_at_ten_at_night_eastern_is_not_refused_and_the_record_has_no_window_field( tmp_path, monkeypatch ):
     def live( args, set_at, timed ):
         ( tmp_path / "w" ).mkdir()
         return make_env( tmp_path / "w", ask=timed.wrap( "draft", Model() ), name="live.jsonl" )
 
     monkeypatch.setattr( smoke, "live_build_env", live )
-    rep = smoke.main( argv( tmp_path / "out", extra=( "--window-lifted-by", " Rick, 23:55 " ) ), now=lambda: at( 3, 0 ), host="h" )
-    assert rep[ "window_lifted_by" ] == "Rick, 23:55" and json.loads( ( tmp_path / "out" / smoke.SMOKE_FILE ).read_text() )[ "window_lifted_by" ] == "Rick, 23:55"
-    ( tmp_path / "w2" ).mkdir()
-    plain = smoke.main( argv( tmp_path / "out2" ), build_env=lambda a, s, t: make_env( tmp_path / "w2", ask=t.wrap( "draft", Model() ), name="x.jsonl" ), now=lambda: at( 3, 0 ), host="h" )
-    assert plain[ "window_lifted_by" ] is None
+    night = datetime.datetime( 2026, 10, 24, 22, 0, tzinfo=zoneinfo.ZoneInfo( "America/New_York" ) )
+    rep   = smoke.main( argv( tmp_path / "out" ), now=lambda: night, host="h" )
+    disk  = json.loads( ( tmp_path / "out" / smoke.SMOKE_FILE ).read_text() )
+    assert rep[ "needs" ] == 10 and "window_lifted_by" not in rep and "window_lifted_by" not in disk
+    with pytest.raises( SystemExit ): smoke.parse_args( argv( "/o", extra=[ "--window-lifted-by", "Rick" ] ) )
 
 
 def test_a_live_run_in_the_window_uses_the_live_env_and_writes_the_measurements( tmp_path, monkeypatch ):

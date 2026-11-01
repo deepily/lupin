@@ -2,26 +2,22 @@
 capability: needset-smoke-run
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.smoke.in_window@3e463bf907
-  - lupin_mcp.reuse_needset.smoke.parse_args@421604b106
+  - lupin_mcp.reuse_needset.smoke.parse_args@b6e4bf20c1
   - lupin_mcp.reuse_needset.smoke.kind_split@9af7ff40ce
   - lupin_mcp.reuse_needset.smoke.Timed@265424ee74
   - lupin_mcp.reuse_needset.smoke.index_parts@da503efe90
   - lupin_mcp.reuse_needset.smoke.candidate_parts@307e96b916
   - lupin_mcp.reuse_needset.smoke.assemble_env@8ebb9baed4
   - lupin_mcp.reuse_needset.smoke.live_build_env@6d415d4343
-  - lupin_mcp.reuse_needset.smoke.lifted_by@33e224265f
-  - lupin_mcp.reuse_needset.smoke.smoke_report@c5864ce9f2
-  - lupin_mcp.reuse_needset.smoke.main@3aa90d0e32
+  - lupin_mcp.reuse_needset.smoke.smoke_report@970e75f740
+  - lupin_mcp.reuse_needset.smoke.main@cd0a755f6a
 ---
 # Need set: smoke run
 
 A small live run of ten needs that measures and sets no pass bar. It takes a test-only kind split and a named commit, and marks every need smoke. The drafting it drives is on [[needset-drafting-run]].
 
-## Time window
-- `in_window` is true from 10:00 up to, not including, 13:00 Eastern time, on any day. A time with no timezone raises `ValueError`.
-- A live run outside the window is refused with `OUTSIDE_WINDOW`, unless a named person lifts it. `lifted_by` returns who lifted the window, and blank text counts as nobody.
-- The window is checked before anything is built or called, and only for the live env.
+## Time of day
+- A live run goes ahead at any hour. No clock check is made, and the record carries no window field. Older records that carry `window_lifted_by` are history and are not read.
 
 ## Arguments
 - `parse_args` reads the command line. The root, output folder, source commit, seed, vector folders and the three matched-kind counts are required.
