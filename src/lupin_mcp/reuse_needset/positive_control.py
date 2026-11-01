@@ -31,7 +31,7 @@ def load_pairs( path, expected_sha=PLANTED_SHA ):
     Raises:
         - NeedsetError CONTROL_INPUT_CHANGED when the sha or the pair count differs
     """
-    raw = open( path, "rb" ).read()
+    with open( path, "rb" ) as f: raw = f.read()
     got = hashlib.sha256( raw ).hexdigest()
     if got != expected_sha: raise er.NeedsetError( er.CONTROL_INPUT_CHANGED, f"{path}: sha256 {got} is not {expected_sha}" )
     pairs = [ p for p in json.loads( raw )[ "planted" ] if p[ "stratum" ] == STRATUM ]
@@ -90,26 +90,54 @@ def lexical_find( need_fn, K, build_stage, shortlist ):
     return find
 
 
-def run_control( records, pairs, find_fn, build_stage ):
+def snapshot( records, build_stage ):
+    """
+    Record what the pool is now: its digest and its stage ids.
+
+    Requires:
+        - build_stage builds a stage with an ids field from records
+
+    Ensures:
+        - returns { digest, stage_ids }, to hand to check_restored later
+    """
+    return { "digest": pool_digest( records ), "stage_ids": build_stage( records ).ids }
+
+
+def check_restored( records, before, build_stage ):
+    """
+    Prove the pool is as the snapshot says.
+
+    Ensures:
+        - returns the pool's digest now when its digest and stage ids both equal the snapshot's
+
+    Raises:
+        - NeedsetError CONTROL_NOT_RESTORED when either differs
+    """
+    now = snapshot( records, build_stage )
+    if now != before: raise er.NeedsetError( er.CONTROL_NOT_RESTORED, f"pool digest {before[ 'digest' ]} became {now[ 'digest' ]}" )
+    return now[ "digest" ]
+
+
+def run_control( records, pairs, find_fn, build_stage, before=None ):
     """
     Plant the pairs, ask the checker about each, remove them and prove the pool is as it was.
 
     Requires:
         - find_fn( planted_pool, pair ) returns the ids the checker asked about for that pair's need
         - build_stage builds a stage with an ids field from records, so the stage ids are checked too
+        - before is None, taken now, or a snapshot the caller took ahead of its own earlier asks
 
     Ensures:
         - returns { pairs, found, missed, digest_before, digest_after, stage_ids_equal }
         - missed lists the rewrite ids the checker did not ask about; found counts the others
-        - the pool the caller passed is the one checked after: its digest and its stage ids equal what they were before
+        - the pool the caller passed is the one checked after: its digest and its stage ids equal the snapshot's
 
     Raises:
         - NeedsetError CONTROL_NOT_RESTORED when the digest or the stage ids differ after the run
     """
-    before, stage_before = pool_digest( records ), build_stage( records ).ids
+    before  = snapshot( records, build_stage ) if before is None else before
     planted = plant( records, pairs )
     missed  = [ p[ "rewrite" ][ "id" ] for p in pairs if p[ "rewrite" ][ "id" ] not in set( find_fn( planted, p ) ) ]
     del planted
-    after, stage_after = pool_digest( records ), build_stage( records ).ids
-    if after != before or stage_after != stage_before: raise er.NeedsetError( er.CONTROL_NOT_RESTORED, f"pool digest {before} became {after}" )
-    return { "pairs": len( pairs ), "found": len( pairs ) - len( missed ), "missed": missed, "digest_before": before, "digest_after": after, "stage_ids_equal": True }
+    after   = check_restored( records, before, build_stage )
+    return { "pairs": len( pairs ), "found": len( pairs ) - len( missed ), "missed": missed, "digest_before": before[ "digest" ], "digest_after": after, "stage_ids_equal": True }

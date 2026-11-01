@@ -7,11 +7,12 @@ import pathlib
 
 import pytest
 
+import cosa.utils.util as cu
 from cosa.repo.symindex.candidates import candidate_stage as cs
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import positive_control as pc
 
-REAL_PLANTED = pathlib.Path( "/mnt/DATA01/include/www.deepily.ai/projects/lupin/io/semdup-labelling/2026.10.25-run5/key/planted.json" )
+REAL_PLANTED = pathlib.Path( cu.get_project_root() + "/io/semdup-labelling/2026.10.25-run5/key/planted.json" )
 WORDS        = [ "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet" ]
 
 
@@ -21,8 +22,12 @@ def record( i, name=None ):
 
 
 def pool():
-    """Return a pool of 30 records."""
-    return [ record( i ) for i in range( 30 ) ]
+    """
+    Return a pool of 31 records.
+
+    The last id sorts after every rewrite id, so a planted copy is in index order only if it was sorted.
+    """
+    return [ record( i ) for i in range( 30 ) ] + [ { **record( 30 ), "id": "d-zzlast" } ]
 
 
 def pair( i ):
@@ -57,8 +62,8 @@ def planted_file( tmp_path, extra=0, other=0 ):
 def test_the_checker_finds_every_planted_pair_and_the_pool_is_as_it_was():
     records = pool()
     rep     = pc.run_control( records, pairs(), finder(), cs.build_stage )
-    assert rep[ "pairs" ] == 20 and rep[ "found" ] == 20 and rep[ "missed" ] == [] and rep[ "stage_ids_equal"] is True
-    assert rep[ "digest_before" ] == rep[ "digest_after" ] == pc.pool_digest( pool() ) and len( records ) == 30
+    assert rep[ "pairs" ] == 20 and rep[ "found" ] == 20 and rep[ "missed" ] == [] and rep[ "stage_ids_equal" ] is True
+    assert rep[ "digest_before" ] == rep[ "digest_after" ] == pc.pool_digest( pool() ) and len( records ) == 31
 
 
 def test_a_checker_that_cannot_see_the_planted_pool_misses_all_twenty():
@@ -71,7 +76,7 @@ def test_the_planted_copy_holds_the_rewrites_and_leaves_the_pool_alone():
     records = pool()
     before  = pc.pool_digest( records )
     planted = pc.plant( records, pairs() )
-    assert len( planted ) == 50 and {p[ "rewrite" ][ "id" ] for p in pairs()} <= {r[ "id" ] for r in planted} and pc.pool_digest( records ) == before
+    assert len( planted ) == 51 and {p[ "rewrite" ][ "id" ] for p in pairs()} <= {r[ "id" ] for r in planted} and pc.pool_digest( records ) == before
     assert all( set( r ) == set( pc.INDEX_FIELDS ) for r in planted if r[ "id" ].startswith( "d-rew" ) )
     planted[ 0 ][ "name" ] = "changed"
     assert pc.pool_digest( records ) == before and planted == sorted( planted, key=lambda r: r[ "id" ] )
@@ -126,3 +131,33 @@ def test_the_pairs_load_only_from_the_file_with_the_named_hash_and_count( tmp_pa
 def test_the_real_planted_file_has_the_twenty_pairs_with_the_recorded_hash():
     got = pc.load_pairs( REAL_PLANTED )
     assert len( got ) == 20 and sorted( p[ "rewrite" ][ "lang" ] for p in got ).count( "ts" ) == 12
+
+
+def test_a_snapshot_taken_before_earlier_work_catches_what_that_work_changed():
+    records = pool()
+    before  = pc.snapshot( records, cs.build_stage )
+    records[ 3 ][ "name" ] = "changed"
+    with pytest.raises( er.NeedsetError ) as e: pc.run_control( records, pairs(), finder(), cs.build_stage, before )
+    assert e.value.code == er.CONTROL_NOT_RESTORED
+
+
+def test_the_planted_copy_is_in_index_order_with_a_rewrite_before_a_pool_id():
+    ids = [ r[ "id" ] for r in pc.plant( pool(), pairs() ) ]
+    assert ids == sorted( ids ) and ids.index( "d-rew00" ) < ids.index( "d-zzlast" ) and ids[ -1 ] == "d-zzlast"
+
+
+def test_the_copy_without_the_planted_ids_is_the_pool_and_a_run_writes_nothing( monkeypatch ):
+    records = pool()
+    planted = pc.plant( records, pairs() )
+    gone    = { p[ "rewrite" ][ "id" ] for p in pairs() }
+    assert pc.pool_digest( [ r for r in planted if r[ "id" ] not in gone ] ) == pc.pool_digest( sorted( records, key=lambda r: r[ "id" ] ) )
+    real_open = open
+
+    def read_only( file, mode="r", *a, **k ):
+        if set( mode ) & set( "wax+" ): pytest.fail( f"a write was attempted: {file!r} mode {mode!r}" )
+        return real_open( file, mode, *a, **k )
+
+    for name in ( "write_text", "write_bytes" ): monkeypatch.setattr( pathlib.Path, name, lambda *a, **k: pytest.fail( "a Path write was attempted" ) )
+    monkeypatch.setattr( "builtins.open", read_only )
+    rep = pc.run_control( records, pairs(), finder(), cs.build_stage )
+    assert rep[ "found" ] == 20
