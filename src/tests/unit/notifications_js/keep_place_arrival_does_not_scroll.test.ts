@@ -97,6 +97,15 @@ for ( const [ keep, expected ] of [ [ false, 1 ], [ true, 0 ] ] as const ) {
     assert.equal( scrolls.length, expected );
   } );
 
+  test( `a user-initiated message arriving with Keep place ${ word } scrolls ${ expected } time(s)`, () => {
+    const content = element( "interactions-content-j1" );
+    makeUI( keep ).appendNotificationToJobCard( "j1", {
+      type: "user_initiated_message", message: "hi", timestamp: new Date().toISOString()
+    } );
+    assert.equal( content.children.length, 1, "the message did not arrive" );
+    assert.equal( scrolls.length, expected );
+  } );
+
   test( `a question timing out with Keep place ${ word } scrolls ${ expected } time(s) to its card`, () => {
     element( "action-required-t1" );
     element( "sender-card-s1" );

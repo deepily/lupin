@@ -8282,7 +8282,8 @@ class NotificationsUI {
             if ( !this.expandedJobCards.has( jobId ) ) {
                 this.expandJobCard( jobId );
             }
-            entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
+            // Keep place: the message may have been sent from another device, so it is not a click here.
+            if ( !this.keepPlace ) entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
             this.log( `[Phase 6] User message appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
             return;
         }
