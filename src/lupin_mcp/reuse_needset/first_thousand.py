@@ -310,16 +310,24 @@ def stage_factories( lists_path, parts ):
     Ensures:
         - the stages are stage_seeds.attribution_stage and stage_seeds.yield_stage over that file and those parts
         - each report also carries the counts of its own seeds that gave no final need, with the disputed ids; the stage that ran first does not leak into the one after
+        - a stage whose every seed was skipped for an unreadable reply raises ALL_SEEDS_UNREADABLE, so a dead model is a failure and never a finding
+
+    Raises:
+        - NeedsetError ALL_SEEDS_UNREADABLE from a stage whose skipped seeds equal its listed seeds
     """
-    def reported( stage ):
+    def reported( stage, name ):
         """Ensures: returns the stage with the tally added to its report."""
         async def with_counts():
             """Ensures: returns the stage's report plus the counts of its own seeds."""
-            since = stage_parts.mark( parts[ "tally" ] )
-            return { **await stage(), "no_final_need": stage_parts.counted( parts[ "tally" ], since ) }
+            since  = stage_parts.mark( parts[ "tally" ] )
+            report = await stage()
+            counts = stage_parts.counted( parts[ "tally" ], since )
+            seeds  = len( stage_seeds.load_lists( lists_path )[ name ][ "order" ] )
+            if seeds and counts[ stage_parts.UNREADABLE ] == seeds: raise er.NeedsetError( er.ALL_SEEDS_UNREADABLE, f"all {seeds} {name} seeds were skipped for an unreadable reply" )
+            return { **report, "no_final_need": counts }
         return with_counts
-    return ( lambda env: reported( stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ) ),
-             lambda env: reported( stage_seeds.yield_stage( lists_path, parts[ "prepare_fn" ], parts[ "index" ] ) ) )
+    return ( lambda env: reported( stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ), stages.ATTRIBUTION ),
+             lambda env: reported( stage_seeds.yield_stage( lists_path, parts[ "prepare_fn" ], parts[ "index" ] ), stages.YIELD ) )
 
 
 def parse_args( argv ):
@@ -423,7 +431,7 @@ def main( argv=None, deps=None ):
 
 
 EXIT_FAILED      = 1
-EXIT_CAP_REACHED = 2
+EXIT_CAP_REACHED = 3
 
 
 def exit_status( result ):
@@ -434,7 +442,8 @@ def exit_status( result ):
         - result is main's dict: a plan has no report; a live run has report.stages
 
     Ensures:
-        - returns 1 when any stage failed, 2 when the cap ended a stage and none failed, else 0
+        - returns 1 when any stage failed, 3 when the cap ended a stage and none failed, else 0
+        - 2 is left to the argument parser, which exits 2 on a usage error
         - a stage that stopped on a finding, or did not run because of an earlier stop, is a result and not a failure
         - a plan gives 0
     """
