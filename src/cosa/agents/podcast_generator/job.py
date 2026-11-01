@@ -289,6 +289,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # logic in cosa/rest/routers/io_files.py:88-98 (handles abs / "io/" / "/" prefixes).
             import urllib.parse
             from cosa.agents.podcast_generator.config import LANGUAGE_NAMES
+            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, source_ref
             io_base = cu.get_project_root() + "/io/"
 
             def _to_rel( p ):
@@ -371,13 +372,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
             def _script_link( rel ):
                 return f"[📝 Script](/app/docs?path={urllib.parse.quote( rel )})" if rel else None
 
-            def _audio_triplet( rel ):
-                enc = urllib.parse.quote( rel )
-                return (
-                    f"[▶️ Play Here](/app/audio?path={enc}&embed=1) | "
-                    f"[🎧 Listen](/app/audio?path={enc}) | "
-                    f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
-                )
+            # The original document rides the link when it lives inside the project.
+            source_rel = source_ref( full_path, cu.get_project_root() )
 
             # One line per language: "**Mexican Spanish**: 📝 Script | ▶️ Play Here | 🎧 Listen | ⬇️ Download"
             per_language_lines = []
@@ -388,7 +384,9 @@ class PodcastGeneratorJob( AgenticJobBase ):
                 parts  = []
                 s_link = _script_link( s_rel )
                 if s_link: parts.append( s_link )
-                if a_rel:  parts.append( _audio_triplet( a_rel ) )
+                if a_rel:
+                    title = read_script_title( io_base + s_rel ) if s_rel else None
+                    parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
                 if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
                 if parts:
                     per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
@@ -502,12 +500,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
         # Clickable audio links — same shape as the real path (job.py:346-348):
         #   Play Here → &embed=1 floating overlay (auto-starts) · Listen → standalone
         #   tab · Download → raw mp3 attachment.
-        encoded     = urllib.parse.quote( audio_rel )
-        audio_links = (
-            f"[▶️ Play Here](/app/audio?path={encoded}&embed=1) | "
-            f"[🎧 Listen](/app/audio?path={encoded}) | "
-            f"[⬇️ Download](/api/io/file?path={encoded}&download=true)"
-        )
+        from cosa.agents.podcast_generator.play_links import audio_triplet
+        audio_links = audio_triplet( audio_rel )
 
         # Mock cost summary
         self.cost_summary = {

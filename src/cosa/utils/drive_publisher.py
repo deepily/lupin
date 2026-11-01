@@ -36,11 +36,13 @@ class DrivePublisher:
     Requires:
         - token_path names an authorized-user token written by src/scripts/google-drive-authorize.py,
           unless service is injected
-        - folder_name is a non-empty string, the top-level folder in Drive
+        - folder_name is a non-empty string naming the top folder in Drive, or a slash-separated path
+          such as "Lupin AF/Explainers"; empty levels are dropped and each level is trimmed
 
     Ensures:
         - the Drive service is built from the token only when service is None
-        - the top folder's id is cached in the folder cache file and re-checked on every run
+        - the top folder is the last level of the path; each level is found or created under the one above
+        - the top folder's id is cached in the folder cache file, keyed to the full path, and re-checked on every run
     """
 
     def __init__( self, token_path, folder_name, service=None, debug=False, folder_cache_path=None ):
@@ -53,12 +55,17 @@ class DrivePublisher:
 
         Ensures:
             - self.service is the injected service, or one built from the token
+            - self.folder_levels lists the path's levels and self.folder_path joins them with "/"
 
         Raises:
+            - ValueError if folder_name has no level left after empty ones are dropped
             - DrivePublishError if the token is missing, unreadable or cannot be refreshed
         """
         self.token_path        = token_path
         self.folder_name       = folder_name
+        self.folder_levels     = self._split_levels( folder_name )
+        if not self.folder_levels: raise ValueError( f"folder_name has no folder level in it: {folder_name!r}" )
+        self.folder_path       = "/".join( self.folder_levels )
         self.debug             = debug
         self.folder_cache_path = folder_cache_path if folder_cache_path is not None else cu.get_project_root() + FOLDER_CACHE_REL_PATH
         self.service           = service if service is not None else self._build_service()
@@ -114,9 +121,22 @@ class DrivePublisher:
         except Exception as e:
             raise DrivePublishError( f"{what}: {e}" ) from e
 
+    @staticmethod
+    def _split_levels( path ):
+        """
+        Split a slash-separated folder path into its levels.
+
+        Requires:
+            - path is a string
+
+        Ensures:
+            - returns the trimmed, non-empty levels in order; "A//B/" gives [ "A", "B" ]
+        """
+        return [ level.strip() for level in path.split( "/" ) if level.strip() ]
+
     def _read_cached_folder_id( self ):
         """
-        Return the cached top-folder id for self.folder_name, or None when there is none usable.
+        Return the cached top-folder id for self.folder_path, or None when there is none usable.
 
         Ensures:
             - a missing, unreadable or other-name cache returns None
@@ -125,12 +145,12 @@ class DrivePublisher:
             with open( self.folder_cache_path ) as cache_file: cached = json.load( cache_file )
         except ( OSError, ValueError ):
             return None
-        if not isinstance( cached, dict ) or cached.get( "folder_name" ) != self.folder_name: return None
+        if not isinstance( cached, dict ) or cached.get( "folder_name" ) != self.folder_path: return None
         return cached.get( "folder_id" )
 
     def _write_cached_folder_id( self, folder_id ):
         """
-        Record the top-folder id for self.folder_name in the cache file.
+        Record the top-folder id for self.folder_path in the cache file.
 
         Ensures:
             - the cache file exists with mode 600 and names this folder name and id
@@ -138,7 +158,7 @@ class DrivePublisher:
         os.makedirs( os.path.dirname( self.folder_cache_path ), exist_ok=True )
         fd = os.open( self.folder_cache_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 )
         with os.fdopen( fd, "w" ) as cache_file:
-            json.dump( { "folder_name": self.folder_name, "folder_id": folder_id }, cache_file )
+            json.dump( { "folder_name": self.folder_path, "folder_id": folder_id }, cache_file )
 
     def _cached_folder_is_live( self, folder_id ):
         """
@@ -155,42 +175,63 @@ class DrivePublisher:
 
     def ensure_folder( self, name, parent_id=None ):
         """
-        Find a folder the app created, by name, or create it.
+        Find a folder the app created, by name or slash-separated path, or create it.
 
         Requires:
-            - name is a non-empty string
+            - name is a non-empty string; "A/B" means folder B inside folder A
+            - parent_id is a Drive folder id, or None for the Drive root
+
+        Ensures:
+            - returns the id of the last level; each level is found or created under the one above
+            - for the top folder (no parent, same levels as self.folder_name) a cached id that is still live
+              is reused with no search, and a stale one is replaced and the cache rewritten
+
+        Raises:
+            - ValueError if name has no level in it
+            - DrivePublishError on an API error, naming the folder
+        """
+        levels = self._split_levels( name )
+        if not levels: raise ValueError( f"folder name has no folder level in it: {name!r}" )
+
+        is_top = parent_id is None and levels == self.folder_levels
+        if is_top:
+            cached_id = self._read_cached_folder_id()
+            if cached_id is not None and self._cached_folder_is_live( cached_id ):
+                if self.debug: print( f"[DrivePublisher] reusing cached folder id for {self.folder_path}" )
+                return cached_id
+
+        folder_id = parent_id
+        for level in levels: folder_id = self._find_or_create( level, folder_id )
+
+        if is_top: self._write_cached_folder_id( folder_id )
+        return folder_id
+
+    def _find_or_create( self, name, parent_id ):
+        """
+        Find one folder by exact name under a parent, or create it.
+
+        Requires:
+            - name is a non-empty string; a "/" in it is part of the name
             - parent_id is a Drive folder id, or None for the Drive root
 
         Ensures:
             - returns the folder id
-            - for the top folder (no parent, name == self.folder_name) a cached id that is still live is
-              reused with no search, and a stale one is replaced and the cache rewritten
 
         Raises:
             - DrivePublishError on an API error, naming the folder
         """
-        is_top = parent_id is None and name == self.folder_name
-        if is_top:
-            cached_id = self._read_cached_folder_id()
-            if cached_id is not None and self._cached_folder_is_live( cached_id ):
-                if self.debug: print( f"[DrivePublisher] reusing cached folder id for {name}" )
-                return cached_id
-
         escaped = name.replace( "\\", "\\\\" ).replace( "'", "\\'" )
         query   = f"name = '{escaped}' and mimeType = '{FOLDER_MIME_TYPE}' and trashed = false"
         if parent_id is not None: query += f" and '{parent_id}' in parents"
 
         listing = self._call( f"find folder {name}", self.service.files().list( q=query, fields="files(id)", spaces="drive" ) )
         matches = listing.get( "files" ) or []
-        if matches:
-            folder_id = matches[ 0 ][ "id" ]
-        else:
-            body = { "name": name, "mimeType": FOLDER_MIME_TYPE }
-            if parent_id is not None: body[ "parents" ] = [ parent_id ]
-            folder_id = self._call( f"create folder {name}", self.service.files().create( body=body, fields="id" ) )[ "id" ]
-            if self.debug: print( f"[DrivePublisher] created folder {name}" )
+        if matches: return matches[ 0 ][ "id" ]
 
-        if is_top: self._write_cached_folder_id( folder_id )
+        body = { "name": name, "mimeType": FOLDER_MIME_TYPE }
+        if parent_id is not None: body[ "parents" ] = [ parent_id ]
+        folder_id = self._call( f"create folder {name}", self.service.files().create( body=body, fields="id" ) )[ "id" ]
+        if self.debug: print( f"[DrivePublisher] created folder {name}" )
         return folder_id
 
     def upload( self, local_path, mime_type, parent_id ):
@@ -238,7 +279,7 @@ class DrivePublisher:
             - DrivePublishError if a folder cannot be found or made
         """
         top_id    = self.ensure_folder( self.folder_name )
-        folder_id = self.ensure_folder( job_folder_name, parent_id=top_id )
+        folder_id = self._find_or_create( job_folder_name, top_id )
         results   = []
         for local_path, mime_type in files:
             try:

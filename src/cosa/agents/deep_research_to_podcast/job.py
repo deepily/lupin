@@ -269,6 +269,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             #    9b481811, but a missing BUILD, not just a missing store). Mirrors
             #    podcast_generator/job.py:358-406. ──
             import urllib.parse
+            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, source_ref
             io_base = cu.get_project_root() + "/io/"
 
             def _to_rel( p ):
@@ -280,13 +281,8 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             def _script_link( rel ):
                 return f"[📝 Script](/app/docs?path={urllib.parse.quote( rel )})" if rel else None
 
-            def _audio_triplet( rel ):
-                enc = urllib.parse.quote( rel )
-                return (
-                    f"[▶️ Play Here](/app/audio?path={enc}&embed=1) | "
-                    f"[🎧 Listen](/app/audio?path={enc}) | "
-                    f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
-                )
+            # The original document rides the link when it lives inside the project.
+            source_rel = source_ref( result.research_path, cu.get_project_root() )
 
             # One labelled link set PER language (bug 00e6aba1: a two-language run
             # writes two mp3s but must link BOTH, not just the primary). The maps ride
@@ -321,7 +317,9 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 parts  = []
                 s_link = _script_link( s_rel )
                 if s_link: parts.append( s_link )
-                if a_rel:  parts.append( _audio_triplet( a_rel ) )
+                if a_rel:
+                    title = read_script_title( io_base + s_rel ) if s_rel else None
+                    parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
                 if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
                 if parts:
                     per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )

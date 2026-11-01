@@ -17,7 +17,9 @@
         /* embed=1 — strip nav + page chrome so the player fits a narrow container */
         body.embed #lupin-nav { display: none !important; }
         body.embed .audio-player-container { margin: 8px auto; padding: 0 12px 12px; }
-        body.embed .audio-player-content h1.audio-player-title { margin-top: 12px; font-size: 20px; }
+        /* Mini face: the native audio element and nothing else, filling the small widget frame. */
+        body.embed .audio-player-container { margin: 0; padding: 0; max-width: none; }
+        body.embed .audio-player-element { margin: 0; display: block; }
 
         .audio-player-loading {
             text-align: center;
@@ -40,12 +42,6 @@
             color: #111827;
             border-bottom: 1px solid #e5e7eb;
             padding-bottom: 8px;
-        }
-
-        .audio-player-subtitle {
-            font-size: 14px;
-            color: #6b7280;
-            margin: -8px 0 24px;
         }
 
         .audio-player-element {
@@ -74,6 +70,9 @@
             text-decoration: none;
         }
 
+        .audio-player-links { margin: 0 0 16px; display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+        .audio-player-links a { color: #4f46e5; text-decoration: none; cursor: pointer; }
+        .audio-player-links a:hover { text-decoration: underline; }
         .audio-player-details {
             margin: 24px 0 0;
             border: 1px solid #e5e7eb;
@@ -108,6 +107,8 @@
     </div>
 
     <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/purify.min.js"></script>
     <script>
         ( async function() {
             const target   = document.getElementById( 'audio-player-target' );
@@ -126,15 +127,28 @@
                 return;
             }
 
-            // Set page title from filename
-            const filename = path.split( '/' ).pop();
-            if ( filename ) document.title = filename + ' — Lupin';
+            // The job passes the script, the original document and the clean title in the link.
+            // Old cards carry none of them: the title then comes from the file name, minus date and serial.
+            const filename   = path.split( '/' ).pop();
+            const scriptPath = params.get( 'script' );
+            const sourcePath = params.get( 'source' );
 
-            // Derive display title from filename
-            const displayTitle = filename
-                .replace( /\.[^.]+$/, '' )
-                .replace( /[-_]/g, ' ' )
-                .replace( /\b\w/g, c => c.toUpperCase() );
+            // "2026.11.01-014849-grading-your-own-exam-construct-validit.mp3" -> "Grading Your Own Exam Construct Validit"
+            function titleFromFilename( name ) {
+                return name
+                    .replace( /\.[^.]+$/, '' )
+                    .replace( /^\d{4}\.\d{2}\.\d{2}-\d{6}-/, '' )
+                    .replace( /-[0-9a-f]{8}$/i, '' )
+                    .replace( /[-_]/g, ' ' )
+                    .replace( /\b\w/g, c => c.toUpperCase() );
+            }
+
+            const displayTitle = ( params.get( 'title' ) || '' ).trim() || titleFromFilename( filename );
+            document.title = displayTitle + ' — Lupin';
+
+            function escapeHtml( text ) {
+                return text.replace( /&/g, '&amp;' ).replace( /</g, '&lt;' ).replace( />/g, '&gt;' ).replace( /"/g, '&quot;' );
+            }
 
             const audioApiUrl = '/api/io/file?path=' + encodeURIComponent( path );
 
@@ -207,7 +221,7 @@
 
             // File size via HEAD (auth'd; best-effort).
             let fileSizeStr = 'Unknown';
-            try {
+            if ( !embed ) try {
                 const head = await authedFetch( audioApiUrl, { method: 'HEAD' } );
                 if ( head.ok ) {
                     const bytes = parseInt( head.headers.get( 'content-length' ) || '0' );
@@ -215,56 +229,95 @@
                 }
             } catch ( e ) { /* ignore */ }
 
-            // Companion script file for a richer subtitle (auth'd; best-effort).
-            let subtitle = '';
-            try {
-                const scriptPath = path.replace( /\.mp3$/i, '-script.md' );
-                const scriptSrc  = '/api/io/file?path=' + encodeURIComponent( scriptPath );
-                const scriptResp = await authedFetch( scriptSrc, {} );
-                if ( scriptResp.ok ) {
-                    const scriptText = await scriptResp.text();
-                    // Try frontmatter title first
-                    const fmMatch = scriptText.match( /^---\n[\s\S]*?\ntitle:\s*['"]?(.+?)['"]?\s*\n[\s\S]*?\n---/ );
-                    if ( fmMatch ) {
-                        subtitle = fmMatch[ 1 ];
-                    } else {
-                        // Fall back to first H1
-                        const h1Match = scriptText.match( /^#\s+(.+)$/m );
-                        if ( h1Match ) subtitle = h1Match[ 1 ];
-                    }
+            // A link is drawn only when its file answers; a missing file is left out, never shown broken.
+            // The script and an io/ original are read with the user's token; any other original opens in the doc viewer.
+            const ioUrl = ( rel ) => '/api/io/file?path=' + encodeURIComponent( rel );
+            async function answers( url, method ) {
+                try {
+                    const resp = await authedFetch( url, { method: method } );
+                    return resp.ok;
+                } catch ( e ) {
+                    return false;
                 }
-            } catch ( e ) { /* graceful fallback — no subtitle */ }
+            }
 
-            const subtitleHtml = subtitle
-                ? `<p class="audio-player-subtitle">${subtitle.replace( /</g, '&lt;' ).replace( />/g, '&gt;' )}</p>`
-                : '';
+            let linksHtml = '';
+            if ( !embed ) {
+                const sourceInIo  = sourcePath && sourcePath.startsWith( 'io/' );
+                const scriptReady = scriptPath ? await answers( ioUrl( scriptPath ), 'HEAD' ) : false;
+                let sourceReady   = false;
+                if ( sourcePath ) {
+                    sourceReady = sourceInIo
+                        ? await answers( ioUrl( sourcePath.slice( 3 ) ), 'HEAD' )
+                        : await answers( '/api/docs/file?path=' + encodeURIComponent( sourcePath ), 'GET' );
+                }
+                const pieces = [];
+                if ( scriptReady ) pieces.push( '<a id="audio-player-script-link" data-testid="audio-player-script-link">&#128221; Script</a>' );
+                if ( sourceReady && sourceInIo ) {
+                    pieces.push( '<a id="audio-player-source-link" data-testid="audio-player-source-link">&#128196; Original document</a>' );
+                } else if ( sourceReady ) {
+                    pieces.push( '<a id="audio-player-source-link" data-testid="audio-player-source-link" target="_blank" rel="noopener" href="/app/docs?path='
+                                 + encodeURIComponent( sourcePath ).replace( /%2F/g, '/' ) + '">&#128196; Original document</a>' );
+                }
+                if ( pieces.length ) linksHtml = '<div class="audio-player-links">' + pieces.join( '' ) + '</div>';
+            }
 
             // Render WITHOUT an <audio src> / download href — those are set to the
             // blob object URL below, once the auth'd bytes are in hand.
+            // Mini face (embed=1): the native player only. Full face: title, player, download, links, details.
             target.className = 'audio-player-content';
-            target.innerHTML = `
-                <h1 class="audio-player-title">&#127911; ${displayTitle}</h1>
-                ${subtitleHtml}
+            target.innerHTML = embed ? `
+                <audio class="audio-player-element" controls preload="metadata">
+                    Your browser does not support the audio element.
+                </audio>` : `
+                <h1 class="audio-player-title" data-testid="audio-player-title">${escapeHtml( displayTitle )}</h1>
                 <audio class="audio-player-element" controls preload="metadata">
                     Your browser does not support the audio element.
                 </audio>
                 <div class="audio-player-actions">
-                    <a download="${filename}" class="audio-player-download">
+                    <a download="${escapeHtml( filename )}" class="audio-player-download">
                         &#128229; Download MP3
                     </a>
                 </div>
+                ${linksHtml}
                 <details class="audio-player-details">
                     <summary>File Details</summary>
                     <dl>
-                        <dt>Filename</dt><dd>${filename}</dd>
-                        <dt>Path</dt><dd>${path}</dd>
+                        <dt>Filename</dt><dd>${escapeHtml( filename )}</dd>
+                        <dt>Path</dt><dd>${escapeHtml( path )}</dd>
                         <dt>Size</dt><dd>${fileSizeStr}</dd>
                         <dt id="buffer-timing-dt" hidden>Buffer</dt><dd id="buffer-timing-dd" hidden></dd>
                     </dl>
                 </details>`;
 
+            // Open a text file in a new tab, rendered as markdown. The window opens inside the click so
+            // the popup blocker allows it; the text arrives afterwards.
+            function openTextInNewTab( rel, label ) {
+                const win = window.open( '', '_blank' );
+                ( async () => {
+                    let html;
+                    try {
+                        const resp = await authedFetch( ioUrl( rel ), {} );
+                        if ( !resp.ok ) throw new Error( 'HTTP ' + resp.status );
+                        const text = await resp.text();
+                        html = DOMPurify.sanitize( marked.parse( text, { gfm: true, breaks: true } ) );
+                    } catch ( err ) {
+                        html = '<p>Could not load ' + escapeHtml( label ) + ': ' + escapeHtml( err.message ) + '</p>';
+                    }
+                    if ( !win ) return;
+                    win.document.title = displayTitle + ' — ' + label;
+                    win.document.body.innerHTML = '<div style="max-width:860px;margin:32px auto;padding:0 24px;font:16px/1.6 system-ui,sans-serif">' + html + '</div>';
+                } )();
+            }
+            const scriptLinkEl = target.querySelector( '#audio-player-script-link' );
+            if ( scriptLinkEl ) scriptLinkEl.addEventListener( 'click', () => openTextInNewTab( scriptPath, 'Script' ) );
+            const sourceLinkEl = target.querySelector( '#audio-player-source-link' );
+            if ( sourceLinkEl && !sourceLinkEl.getAttribute( 'href' ) ) {
+                sourceLinkEl.addEventListener( 'click', () => openTextInNewTab( sourcePath.slice( 3 ), 'Original document' ) );
+            }
+
             const audioEl    = target.querySelector( 'audio.audio-player-element' );
-            const downloadEl = target.querySelector( 'a.audio-player-download' );
+            const downloadEl = target.querySelector( 'a.audio-player-download' );   // absent in the mini face
 
             // Blob-fetch the mp3 WITH the header. This buffers the WHOLE file before
             // playback can start; the elapsed fetch→blob time is the delay Mr Radio
@@ -279,7 +332,7 @@
                 const bufferMs  = performance.now() - t0;
                 const objectUrl = URL.createObjectURL( blob );
                 audioEl.src     = objectUrl;
-                downloadEl.href = objectUrl;
+                if ( downloadEl ) downloadEl.href = objectUrl;
                 // Release the blob when the page / overlay iframe is torn down.
                 window.addEventListener( 'pagehide', () => URL.revokeObjectURL( objectUrl ), { once: true } );
 

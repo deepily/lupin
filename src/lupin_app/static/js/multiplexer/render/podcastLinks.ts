@@ -62,6 +62,31 @@ export function filenameForIoDownload( url: string, contentDisposition: string |
   return "download";
 }
 
+/**
+ * The clean title a podcast link carries in its `title=` value.
+ *
+ * Requires: audioUrl is an `/app/audio?path=…` href.
+ * Ensures: the trimmed title, or null when the link has none or it is blank.
+ */
+export function podcastUrlTitle( audioUrl: string ): string | null {
+  const title = new URLSearchParams( audioUrl.split( "?" )[ 1 ] ?? "" ).get( "title" );
+  return title !== null && title.trim() !== "" ? title.trim() : null;
+}
+
+/**
+ * The same player URL without the widget-only flags, for the full-size tab.
+ *
+ * Requires: audioUrl is the embed URL the widget plays.
+ * Ensures: the same path and values, with `embed` and `autoplay` removed.
+ */
+export function podcastFullFaceUrl( audioUrl: string ): string {
+  const [ base, query ] = audioUrl.split( "?" );
+  const params = new URLSearchParams( query ?? "" );
+  params.delete( "embed" );
+  params.delete( "autoplay" );
+  return `${base}?${params.toString()}`;
+}
+
 /** Remove the floating player if it is open. Removing the iframe stops the audio. */
 export function dismissPodcastOverlay(): void {
   document.getElementById( PODCAST_OVERLAY_ID )?.remove();
@@ -71,7 +96,9 @@ export function dismissPodcastOverlay(): void {
  * Show the floating in-tab player for an embed URL, replacing any player already open.
  *
  * Requires: embedUrl is an `/app/audio?path=…&embed=1` href; title is the link text.
- * Ensures: returns the overlay; the iframe starts playing (`autoplay=1`, added once); only the user closes it.
+ * Ensures: returns the overlay; the header shows the link's clean title, else the link text. The ⤢ button opens the
+ * full-size player in a new tab and closes the widget. The iframe starts playing (`autoplay=1`, added once);
+ * only the user closes it.
  */
 export function showPodcastOverlay( embedUrl: string, title: string ): HTMLElement {
   dismissPodcastOverlay();
@@ -83,9 +110,20 @@ export function showPodcastOverlay( embedUrl: string, title: string ): HTMLEleme
 
   const header  = document.createElement( "div" );
   header.className = "podcast-overlay-header";
+  const shown   = podcastUrlTitle( embedUrl ) ?? title;
   const titleEl = document.createElement( "div" );
   titleEl.className   = "podcast-overlay-title";
-  titleEl.textContent = title;
+  titleEl.textContent = shown;
+  const expand  = document.createElement( "button" );
+  expand.type      = "button";
+  expand.className = "podcast-overlay-expand";
+  expand.setAttribute( "data-testid", "podcast-overlay-expand" );
+  expand.setAttribute( "aria-label", "Open podcast player in a new tab" );
+  expand.textContent = "⤢";
+  expand.addEventListener( "click", () => {
+    window.open( podcastFullFaceUrl( embedUrl ), "_blank", "noopener" );
+    dismissPodcastOverlay();
+  } );
   const dismiss = document.createElement( "button" );
   dismiss.type      = "button";
   dismiss.className = "podcast-overlay-dismiss";
@@ -94,13 +132,14 @@ export function showPodcastOverlay( embedUrl: string, title: string ): HTMLEleme
   dismiss.textContent = "✕";
   dismiss.addEventListener( "click", dismissPodcastOverlay );
   header.appendChild( titleEl );
+  header.appendChild( expand );
   header.appendChild( dismiss );
 
   const frame = document.createElement( "iframe" );
   frame.className = "podcast-overlay-frame";
   frame.setAttribute( "data-testid", "podcast-overlay-frame" );
   frame.src = AUTOPLAY_FLAG_RE.test( embedUrl ) ? embedUrl : embedUrl + "&autoplay=1";
-  frame.setAttribute( "title", title );
+  frame.setAttribute( "title", shown );
   frame.setAttribute( "allow", "autoplay" );
 
   overlay.appendChild( header );

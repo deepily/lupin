@@ -2984,6 +2984,8 @@
         }
 
         .podcast-overlay-title {
+            flex: 1 1 auto;
+            min-width: 0;
             font-size: 14px;
             font-weight: 600;
             color: #e8f0fe;
@@ -2993,6 +2995,7 @@
             margin-right: 8px;
         }
 
+        .podcast-overlay-expand,
         .podcast-overlay-dismiss {
             background: none;
             border: none;
@@ -3006,6 +3009,7 @@
             transition: color 0.2s ease, background 0.2s ease;
         }
 
+        .podcast-overlay-expand:hover,
         .podcast-overlay-dismiss:hover {
             color: #fff;
             background: rgb( 255, 255, 255, 0.1 );

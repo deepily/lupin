@@ -21159,9 +21159,25 @@ class NotificationsUI {
         const header = document.createElement( "div" );
         header.className = "podcast-overlay-header";
 
+        // The link carries the clean title; an old link has none, so the link text stands in.
+        const urlTitle = this._podcastUrlTitle( audioUrl );
+        const shown    = urlTitle || title || "Podcast";
+
         const titleEl = document.createElement( "div" );
         titleEl.className = "podcast-overlay-title";
-        titleEl.textContent = title || "Podcast";
+        titleEl.textContent = shown;
+
+        const expand = document.createElement( "button" );
+        expand.type = "button";
+        expand.className = "podcast-overlay-expand";
+        expand.setAttribute( "data-testid", "podcast-overlay-expand" );
+        expand.setAttribute( "aria-label", "Open podcast player in a new tab" );
+        expand.textContent = "⤢";
+        // Opens the full face in a new tab and closes the widget, so the audio never plays twice.
+        expand.addEventListener( "click", () => {
+            window.open( this._podcastFullFaceUrl( audioUrl ), "_blank", "noopener" );
+            this._dismissPodcastOverlay();
+        } );
 
         const dismiss = document.createElement( "button" );
         dismiss.type = "button";
@@ -21174,6 +21190,7 @@ class NotificationsUI {
         dismiss.addEventListener( "click", () => this._dismissPodcastOverlay() );
 
         header.appendChild( titleEl );
+        header.appendChild( expand );
         header.appendChild( dismiss );
 
         const frame = document.createElement( "iframe" );
@@ -21186,7 +21203,7 @@ class NotificationsUI {
         // no debug UI as of Krishna's edf0d7c6 (the fired/blocked probe div is
         // gated behind ?probe=1, never shipped). Guard against a doubled flag.
         frame.src = /[?&]autoplay=1(?:&|$)/.test( audioUrl ) ? audioUrl : audioUrl + "&autoplay=1";
-        frame.setAttribute( "title", title || "Podcast player" );
+        frame.setAttribute( "title", shown );
         frame.setAttribute( "allow", "autoplay" );
 
         overlay.appendChild( header );
@@ -21195,6 +21212,31 @@ class NotificationsUI {
 
         this.log( `Showing podcast overlay: ${audioUrl}` );
         return overlay;
+    }
+
+    /**
+     * The clean title a podcast link carries in its `title=` value, or null when it has none.
+     *
+     * @param {string} audioUrl - an /app/audio?path=... URL
+     * @returns {string|null}
+     */
+    _podcastUrlTitle( audioUrl ) {
+        const title = new URLSearchParams( audioUrl.split( "?" )[ 1 ] || "" ).get( "title" );
+        return title && title.trim() ? title.trim() : null;
+    }
+
+    /**
+     * The same player URL without the widget-only flags, for the full-size tab.
+     *
+     * @param {string} audioUrl - the embed URL the widget plays
+     * @returns {string}
+     */
+    _podcastFullFaceUrl( audioUrl ) {
+        const [ base, query ] = audioUrl.split( "?" );
+        const params = new URLSearchParams( query || "" );
+        params.delete( "embed" );
+        params.delete( "autoplay" );
+        return base + "?" + params.toString();
     }
 
     /**

@@ -56,6 +56,7 @@ src/tests/e2e_ui/test_notifications_sections.py
 src/tests/e2e_ui/test_page_smoke.py
 src/tests/e2e_ui/test_podcast_overlay_dry_run.py
 src/tests/e2e_ui/test_podcast_overlay_playhere.py
+src/tests/e2e_ui/test_podcast_play_here_two_faces.py
 src/tests/e2e_ui/test_profile.py
 src/tests/e2e_ui/test_queue_display.py
 src/tests/e2e_ui/test_register.py

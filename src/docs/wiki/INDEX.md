@@ -110,6 +110,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[presentation-generation]] — turning a source document into a YAML deck, Marp Markdown and a pptx, with its review gates. `cosa.agents.presentation_generator` (job, deck_verdict)
 - [[presentation-visual-renderers]] — the seventh pipeline phase, which replaces each `VISUAL` marker in the Marp file with renderer output. `cosa.agents.presentation_generator.renderers`
 - [[podcast-generation]] — turning a research document into a two-host script and one MP3 per language. `cosa.agents.podcast_generator` (orchestrator)
+- [[podcast-card-links]] — the Play Here, Listen and Download links on a podcast card, with the script, original document and clean title. `cosa.agents.podcast_generator` (play_links)
 - [[fix-expediter-bfe]] — the bug-fix expediter: takes one dead queue job and tries to fix the code that killed it. `cosa.agents.bug_fix_expediter`
 - [[fix-expediter-tfe]] — the test-fix expediter: clusters one finished suite's failures, fixes them and queues a rerun. `cosa.agents.test_fix_expediter` (cluster, resume_resolver)
 - [[fix-shared-primitives]] — the coder and tester retry loop, the git step and the plan and report writers both expediters use. `cosa.agents.shared` (fix_executor)
@@ -662,6 +663,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-render-cards-tts]] — the speech queue pane: transport controls, active and waiting cards and the preview slider. `src.lupin_app.static.js.multiplexer.render` (ttsChrome, ttsCardShared, ttsActiveCard, ttsMinimizedCard, ttsPreviewSlider)
 - [[web-client-render-items-notification-item]] — one notification chat-bubble row and its prediction vote buttons. `src.lupin_app.static.js.multiplexer.render.templates` (notificationItem, predictionVoteControls)
 - [[web-client-render-items-podcast-links]] — making the Play Here and Download links of a finished podcast card work inside the multiplexer page. `src.lupin_app.static.js.multiplexer.render` (podcastLinks)
+- [[audio-player-page]] — the player page's mini face and full face, and the query values it reads. `src/lupin_app/static/html`
 - [[web-client-render-items-request-chips]] — a manager's pending promote or demote request on a board row, with Approve and Deny and a header count badge. `src.lupin_app.static.js.multiplexer.render` (requestChips)
 - [[web-client-render-items-status-badges]] — poke mute switch, listener error badge, missed badge and truncated-board banner. `src.lupin_app.static.js.multiplexer.render` (pokeMuteSwitch, listenerErrorBadge, missedBadge, truncationBanner)
 - [[web-client-render-panes-modals-and-state]] — persisted open state of job buckets, the session rename dialog and the persona popover. `src.lupin_app.static.js.multiplexer.render` (jobsBucketExpand, sessionNameEditModal, personaModal)
