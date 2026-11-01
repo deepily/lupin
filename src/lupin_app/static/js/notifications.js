@@ -711,9 +711,8 @@ class NotificationsUI {
         // State management
         // Note: per-channel reconnect attempts + circuit-breaker state live
         // inside each WSChannel facade (this.queueChannel / this.audioChannel).
-        // Phase 2 of the WS reconnect circuit-breaker milestone removed the
-        // legacy shared retry-counter + reconnect-in-flight flags from this
-        // class — channels own those today.
+        // This class keeps no shared retry counter or reconnect-in-flight flag;
+        // each channel owns those.
         this.queueWsConnected = false;
         this.audioWsConnected = false;
         this.authRefreshAttempted = false; // Track refresh attempts to prevent loops
@@ -3222,12 +3221,9 @@ class NotificationsUI {
      * Creates or reuses the queue and audio WebSocket channels and connects them.
      */
     async connectWebSockets( target = 'both' ) {
-        // Phase 2 of the WS reconnect circuit-breaker milestone: this method
-        // now constructs (or reuses) two WSChannel state machines instead of
-        // raw WebSockets. Per-channel reconnect logic + 20-attempt circuit
-        // breaker live inside each channel facade. The legacy per-socket
-        // connect helpers + their separate auth-send methods + the shared
-        // retry-helper have been replaced by:
+        // This method constructs (or reuses) two WSChannel state machines, not
+        // raw WebSockets. Per-channel reconnect logic and the 20-attempt circuit
+        // breaker live inside each channel facade. Connection work is split across:
         //   - the channel factory (createChannel from ws-channel.js)
         //   - per-channel onclose -> internal backoff inside the channel
         //   - the authMessage callback (channel sends auth on AUTHENTICATING)
@@ -3853,9 +3849,8 @@ class NotificationsUI {
      * Answers a server ping on the named channel with a pong message.
      */
     async handlePing( connectionType ) {
-        // Phase 2: `channel.send()` no-ops when state is not CONNECTED, so
-        // the pre-existing readyState check is no longer needed. The channel
-        // facade encapsulates that guard.
+        // `channel.send()` is a no-op unless the channel is CONNECTED, so no
+        // readyState check is needed here; the channel facade holds that guard.
         const channel = connectionType === "queue" ? this.queueChannel : this.audioChannel;
         if ( channel ) {
             channel.send( {
@@ -6263,7 +6258,7 @@ class NotificationsUI {
     }
 
     // ========================================
-    // JOB STATE TRANSITION HANDLERS (Session 107)
+    // JOB STATE TRANSITION HANDLERS
     // ========================================
 
     /**
@@ -6322,7 +6317,7 @@ class NotificationsUI {
             return;
         }
 
-        // Deduplicate events - prevent duplicate card creation (Session 107 bug fix)
+        // Ignore a repeated event, so one transition never creates two cards
         const eventId = `job_state_transition:${jobId}:${fromQueue}:${toQueue}`;
         if ( this.processedEvents.has( eventId ) ) {
             this.log( `[JOB-TRANSITION] Duplicate event ignored: ${eventId}` );
@@ -6345,7 +6340,7 @@ class NotificationsUI {
         const card = fromContainer?.querySelector( `.job-card[data-job-id="${jobId}"]` );
 
         if ( !card ) {
-            // Phase 6.3: Card doesn't exist in source queue - create it in target queue
+            // The card is not in the source queue: create it in the target queue
             this.log( `[JOB-TRANSITION] Card not found in ${fromQueue}, creating in ${toQueue}` );
 
             const toContainer = document.getElementById( `${toQueue}-jobs-container` );
@@ -6354,7 +6349,7 @@ class NotificationsUI {
                 return;
             }
 
-            // Check if card already exists in TARGET container (Session 107 bug fix)
+            // Skip creation when the target container already holds this job's card
             const existingInTarget = toContainer.querySelector( `.job-card[data-job-id="${jobId}"]` );
             if ( existingInTarget ) {
                 this.log( `[JOB-TRANSITION] Card ${jobId} already exists in ${toQueue}, skipping creation` );
@@ -6363,7 +6358,7 @@ class NotificationsUI {
 
             if ( metadata ) {
                 // Build job object for renderJobCard from transition metadata
-                // Session 107: Fix field parity between WebSocket and server-fetched cards
+                // Same fields as a server-fetched card, so both paths render alike
                 const job = {
                     job_id          : jobId,
                     question_text   : metadata.question_text || 'Processing...',
@@ -6716,7 +6711,7 @@ class NotificationsUI {
             }
         }
 
-        // Session 108: Use helper functions for consistent rendering
+        // The render helpers keep this card identical to one built from a fetch
         if ( metadata.abstract ) {
             const abstractEl = card.querySelector( '.job-abstract' );
             if ( abstractEl ) {
@@ -6725,7 +6720,7 @@ class NotificationsUI {
             }
         }
 
-        // Session 108: Use helper function for report link (handle both report_link URL and report_path)
+        // Report link: accepts either a report_link URL or a report_path
         const reportPath = metadata.report_link || metadata.report_path;
         if ( reportPath ) {
             const reportEl = card.querySelector( '.job-report-link' );
@@ -6739,7 +6734,7 @@ class NotificationsUI {
             }
         }
 
-        // Session 108: Use helper function for cost summary (handle object type)
+        // Cost summary: the helper accepts the object form
         if ( metadata.cost_summary ) {
             const costEl = card.querySelector( '.job-cost-summary' );
             if ( costEl ) {
@@ -7042,10 +7037,10 @@ class NotificationsUI {
         }
 
         // ========================================
-        // Phase 6: Job-based notification routing
+        // Job-based notification routing
         // ========================================
         // If notification has job_id AND job is registered (active), route to job card
-        // Session 105 FIX: Extract job_id from sender_id suffix if not explicitly provided
+        // Take job_id from the sender_id suffix when the notification does not carry one
         // Pattern: sender_id ends with #<prefix>-<8hex> (e.g., deep.research@lupin.deepily.ai#dr-77b330d8)
         let jobId = notification.job_id;
         console.log( `[DIAG-JR] notification.job_id=${jobId} sender_id=${notification.sender_id} msg=${(notification.message||'').substring(0,60)}` );
@@ -7064,7 +7059,7 @@ class NotificationsUI {
             if ( !targetEl ) {
                 console.log( `[DIAG-JR] Existing interaction containers:`, existingIds );
             }
-            // Session 107: Simplified - job_state_transition creates cards, we just route
+            // job_state_transition creates the cards; this path only routes the notification to one
             this.log( `[Session 107] Routing notification to job card: ${jobId}` );
             this.appendNotificationToJobCard( jobId, notification );
 
@@ -7074,11 +7069,11 @@ class NotificationsUI {
                     await this.playNotificationSoundByPriority( notification.priority );
                 }
 
-                // FIX (Session 98): Queue TTS for job-routed notifications
+                // Queue TTS for job-routed notifications
                 // Job card context provides clarity, so play the raw message WITHOUT
                 // the "Important! task notification:" prefix used for general notifications
                 const notificationId = notification.id || notification.id_hash;
-                // Phase 6 FIX: Job-card defaults to raw, but allow override via tts_raw: false
+                // A job-card notification speaks its raw message; tts_raw: false asks for the contextualized form
                 const ttsMessage = notification.tts_raw === false
                     ? this.formatNotificationTTSMessage( notification )
                     : notification.message;
@@ -7138,7 +7133,7 @@ class NotificationsUI {
         // Now mirrors the low/medium branch's immediate-render pattern; TTS playback engages
         // independently via the queue. Card carries `.is-tts-pending` until activateNextTTS clears it.
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
-            // Phase 6 FIX: Check tts_raw flag - default to contextualized for backward compatibility
+            // A general notification speaks the contextualized form; tts_raw: true asks for the raw message
             const ttsMessage = notification.tts_raw === true
                 ? notification.message
                 : this.formatNotificationTTSMessage( notification );
@@ -7233,10 +7228,9 @@ class NotificationsUI {
     // ========================================
     // CONNECTION MANAGEMENT
     // ========================================
-    // (The legacy retry-helper was removed in Phase 2 of the WS reconnect
-    // circuit-breaker milestone — each WSChannel owns its own per-channel
-    // backoff schedule + 20-attempt circuit breaker, and the watchdog
-    // delegates to channel._tickWatchdog() rather than scheduling externally.)
+    // Each WSChannel owns its own backoff schedule and 20-attempt circuit
+    // breaker, and the watchdog delegates to channel._tickWatchdog() rather
+    // than scheduling reconnects itself.
 
     /**
      * Read scheduling controls for a job submission form.
@@ -7319,8 +7313,7 @@ class NotificationsUI {
             
             // Update the appropriate list based on queue name
             // Also update the new progressive disclosure count badges
-            // Session 107: Removed updateJobRegistration calls - job_state_transition handles routing
-            // Session 128: Fixed field names - backend returns total_jobs, not {queue}_jobs arrays
+            // The backend returns total_jobs, not per-queue {queue}_jobs arrays
             if ( queueName === "todo" ) {
                 // Update count badge for progressive disclosure UI
                 const countBadge = document.getElementById( "todo-count-badge" );
@@ -7617,7 +7610,6 @@ class NotificationsUI {
 
         // ALWAYS mark as needing reload when new data arrives
         // This ensures collapsed sections re-render on next expansion
-        // (Bug fix: Session 105 - job cards not appearing after expand)
         state.loaded = false;
 
         // If expanded, immediately reload job cards to reflect changes
@@ -7672,8 +7664,6 @@ class NotificationsUI {
             // Store in state
             this.queueCategoryState[ queueName ].jobs = jobsMetadata.length > 0 ? jobsMetadata : jobsHtml;
             this.queueCategoryState[ queueName ].loaded = true;
-
-            // Session 107: Removed updateJobRegistration - job_state_transition handles routing
 
             // Update count badge - use metadata length (API returns *_jobs_metadata, not *_jobs)
             if ( countBadge ) countBadge.textContent = jobsMetadata.length;
@@ -8140,7 +8130,7 @@ class NotificationsUI {
 
     // ========================================
     // ========================================
-    // JOB CARD HELPERS (Session 107: Simplified after job_state_transition refactor)
+    // JOB CARD HELPERS
     // ========================================
 
     /**
@@ -8226,8 +8216,8 @@ class NotificationsUI {
      * Adds a notification to a job card's conversation pane, newest first.
      *
      * A notification whose progress group already has an entry updates that entry in place and returns without expanding or scrolling.
-     * A user-initiated message inserts a chat bubble and expands only the job card.
-     * Any other notification inserts a new entry, then expands the card and pane and scrolls it into view.
+     * A user-initiated message inserts a chat bubble and expands only the job card; it scrolls to the bubble unless Keep place is on.
+     * Any other notification inserts a new entry, then expands the card and pane and scrolls it into view, unless Keep place is on.
      * It does nothing when the card's conversation pane is not in the page.
      */
     appendNotificationToJobCard( jobId, notification ) {
@@ -8506,9 +8496,6 @@ class NotificationsUI {
 
         return entry;
     }
-
-    // Session 107: Removed cacheJobNotification, createProvisionalJobRegistration,
-    // ensureJobCardExists, scheduleQueueRefreshForJob - job_state_transition handles this now
 
     /**
      * Maps a job ID prefix such as dr or pg to a readable agent type name.
@@ -8818,8 +8805,7 @@ class NotificationsUI {
 
         // ═══════════════════════════════════════════════════════════════════
         // Build final HTML
-        // Session 107: Placeholder divs always present (hidden until populated)
-        // Session 107: Removed provisionalAttr - no longer using provisional registration
+        // Placeholder divs are always present, hidden until populated
         // ═══════════════════════════════════════════════════════════════════
 
         // ✕ button means "make this job go away" — but the mechanism differs by queue:
@@ -26990,6 +26976,8 @@ class NotificationsUI {
 
     /**
      * Render an action-required notification into the single active slot.
+     *
+     * The section scrolls into view after the render, unless Keep place is on.
      */
     renderActionRequiredNotification( notification ) {
         // Render to the active slot (only ONE notification fully displayed at a time)
@@ -28544,6 +28532,7 @@ class NotificationsUI {
      * It returns without a visible change when the notification is unknown, already answered, or has no card on the page.
      * For open-ended input it submits the text already typed, if any. Otherwise the default is only shown, not sent.
      * With a card but no destination to animate to, it shows the expired state in place.
+     * The destination card scrolls into view after the move, unless Keep place is on.
      */
     handleLocalTimeout( notificationId ) {
         this.log( `Local timeout for notification ${notificationId}` );
@@ -29620,6 +29609,7 @@ class NotificationsUI {
      *
      * When notification has job_id: routes to job card's interactions area.
      * When no job_id: routes to sender card's conversation history.
+     * The job card scrolls into view after a job route, unless Keep place is on.
      *
      * @param {Object} notification - The original notification object
      * @param {string} response - The user's response text
@@ -29883,12 +29873,8 @@ class NotificationsUI {
         }
     }
 
-    // NOTE: The following deprecated helper methods have been removed and consolidated
-    // into the RecordingManager (initialized in initRecordingManager):
-    // - _startDurationCounter, _stopDurationCounter
-    // - _attachRecordingCancelListener, _detachRecordingCancelListener
-    // - _cancelRecording
-    // - this.audioRecorder, this.audioRecording, this._recordingCancelListener
+    // Recording state (audioRecorder, the duration counter, cancel handling) lives
+    // in the RecordingManager that initRecordingManager builds, not on this class.
 
     // ========================================
     // AGENT MODE MANAGEMENT
