@@ -15,6 +15,7 @@ import pathlib
 import subprocess
 import types
 
+from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import run_check
 from cosa.repo.symindex.candidates import candidate_stage
 from cosa.repo.symindex.candidates import vector_store as vs
@@ -384,10 +385,12 @@ def main( argv=None, deps=None ):
 
     Ensures:
         - without --live the plan is printed and returned, and no model, vector server or context is touched
+        - with --live every model call, the probe's included, runs on the Claude Code binary args.cli_path names, or the SDK's own when none is given
         - with --live the four stages run under one cap in args.run_dir and the report is returned
         - the pairs and their groups are read before anything else, so a bad input stops the run before a call
 
     Raises:
+        - NeedsetError NO_CANDIDATE_STAGE on a live run whose context has none, before the index is built or a list is written
         - NeedsetError QUOTA_UNFILLABLE from the seed draw, and PLAN_ALREADY_WRITTEN when other seed lists are already in the run folder
         - whatever the inputs raise, including CONTROL_INPUT_CHANGED
     """
@@ -396,7 +399,9 @@ def main( argv=None, deps=None ):
     loaded = load_inputs( args, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
     shown  = plan( args, loaded )
     if not args.live: return { "live": False, "plan": shown }
+    model_transport.configure( cli_path=args.cli_path )
     ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
+    if ctx.candidate_stage is None: raise er.NeedsetError( er.NO_CANDIDATE_STAGE, f"the context has no candidate stage; set {rt.PACK_SIZE_VARIABLE}, {rt.CEILING_VARIABLE} and {rt.RUN_NAME_VARIABLE}, which build it" )
     ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
     ledger    = deps[ "ledger" ]( args ) if "ledger" in deps else draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
     strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, args.root ) )
