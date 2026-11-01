@@ -155,3 +155,26 @@ class CallCap:
             self.charge( model )
             return await call( *args, **kwargs )
         return guarded
+
+
+def charge_attempt( model ):
+    """
+    Count one model call that is made outside model_transport.complete.
+
+    Requires:
+        - model is the model id the call will use
+
+    Ensures:
+        - with a cap installed, charges the call to it before the model is contacted
+        - with no cap installed and no stage running, does nothing, so a use outside a stage run is unchanged
+        - a caller that wraps itself in CallCap.guard must not also call this, or one call counts twice
+
+    Raises:
+        - NeedsetError CAP_NOT_INSTALLED when a stage is running and no cap is installed, so no caller can go uncounted
+        - NeedsetError CALL_CAP_REACHED from the cap at call 1,001
+    """
+    hook = model_transport.CHARGE_HOOK
+    if hook is None:
+        if _STAGE.get() != NO_STAGE: raise er.NeedsetError( er.CAP_NOT_INSTALLED, f"the {_STAGE.get()} stage reached a model with no cap installed" )
+        return
+    hook( model )
