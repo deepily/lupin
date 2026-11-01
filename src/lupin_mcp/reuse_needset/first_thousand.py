@@ -258,9 +258,10 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
     Ensures:
         - the needs are drafted first, one at a time in file order, each tried up to CONTROL_TRIES times
         - a pair whose sentence never passes is left out and listed in the report's undrafted with its reason and history, and the control runs over the others; only when no pair drafted does the stage stop by name
+        - an undrafted pair counts as neither found nor missed: pairs and found count the pairs that drafted, and pairs_wanted, in each pass report and at the top level, is the number planned
         - the pool the control plants into and restores is the index's own sendable entries
         - the checker is planted_check over a planted stage that shares the live stage's folders and client
-        - with more than one pass the report is the first pass's, plus passes ( each pass's report ), consistent ( every pass missed the same pairs ) and stop true when any pass stopped
+        - with more than one pass the report is the first pass's, plus passes ( each pass's report ), consistent ( every pass missed the same pairs and left out the same pairs ) and stop true when any pass stopped
         - when the stage's own call budget ends a pass, the passes already finished stay in the report, with budget_reached True, budget_detail, passes_done and passes_wanted; with none finished passes is empty
 
     Raises:
@@ -280,7 +281,7 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         planted   = planted_stage_for( ctx.candidate_stage, entries, cache )
         pool      = prepare( ctx )[ 1 ]
         asker     = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids )
-        return { **await stage3.control_stage( pool, drafted, asker, build_stage )(), "undrafted": undrafted }
+        return { **await stage3.control_stage( pool, drafted, asker, build_stage )(), "undrafted": undrafted, "pairs_wanted": len( pairs ) }
 
     async def stage():
         """Ensures: returns the control report."""
@@ -294,8 +295,9 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
                 break
         if passes == 1 and detail is None: return reports[ 0 ]
         first = reports[ 0 ] if reports else {}
-        return { **first, "passes": reports, "consistent": all( r[ "missed" ] == first[ "missed" ] for r in reports ), "stop": any( r[ "stop" ] for r in reports ),
-                 "budget_reached": detail is not None, "budget_detail": detail, "passes_done": len( reports ), "passes_wanted": passes }
+        same  = lambda r: ( r[ "missed" ], [ u[ "pair" ] for u in r[ "undrafted" ] ] ) == ( first[ "missed" ], [ u[ "pair" ] for u in first[ "undrafted" ] ] )
+        return { **first, "passes": reports, "consistent": all( same( r ) for r in reports ), "stop": any( r[ "stop" ] for r in reports ),
+                 "budget_reached": detail is not None, "budget_detail": detail, "passes_done": len( reports ), "passes_wanted": passes, "pairs_wanted": len( pairs ) }
     return stage
 
 

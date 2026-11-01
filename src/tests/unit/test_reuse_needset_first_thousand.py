@@ -975,3 +975,41 @@ def test_a_control_where_no_pair_drafts_still_fails_by_name_and_a_clean_one_repo
     assert e.value.code == er.CONTROL_NEED_UNDRAFTED and "none of the 3 pairs" in e.value.detail and "d-rew00" in e.value.detail
     out = asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, clean, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
     assert out[ "undrafted" ] == [] and out[ "pairs" ] == 3
+
+
+def two_pass_control( monkeypatch, leaves_out ):
+    """Run a two-pass control on fakes; leaves_out names the seeds each pass never drafts."""
+    ps  = [ real_pair( i ) for i in range( 20 ) ]
+    ctx = types.SimpleNamespace( candidate_stage="live stage" )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: "planted stage" )
+
+    def draft_fn( job, ask, ledger, **kw ):
+        if job[ "seed" ][ "id" ] in leaves_out[ ledger ]: return { "ok": False, "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [] }
+        return { "ok": True, "need": SENTENCE }
+
+    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ], "widened_ids": [] } }
+
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+                                   passes=2, pass_resources=lambda n: ( "L2", "C2" ) )
+    return asyncio.run( stage() )
+
+
+def test_the_report_says_how_many_pairs_were_wanted_in_each_pass_and_at_the_top_so_a_short_run_cannot_read_as_complete( monkeypatch ):
+    out = two_pass_control( monkeypatch, { "L1": { "d-orig01" }, "L2": { "d-orig01" } } )
+    assert out[ "pairs_wanted" ] == 20 and [ p[ "pairs_wanted" ] for p in out[ "passes" ] ] == [ 20, 20 ]
+    assert out[ "pairs" ] == 19 and out[ "found" ] == 19 and out[ "missed" ] == []                                  # the undrafted pair is neither found nor missed
+    assert out[ "pairs" ] + len( out[ "undrafted" ] ) == out[ "pairs_wanted" ]
+
+
+def test_pairs_wanted_is_in_the_report_of_a_control_the_budget_stopped_before_any_pass_finished( monkeypatch ):
+    out = run_budget_control( monkeypatch, "L1" )
+    assert out[ "passes" ] == [] and out[ "pairs_wanted" ] == 20
+
+
+def test_consistent_compares_the_pairs_left_out_as_well_as_the_pairs_missed( monkeypatch ):
+    same = two_pass_control( monkeypatch, { "L1": { "d-orig01" }, "L2": { "d-orig01" } } )
+    assert same[ "consistent" ] is True
+    differs = two_pass_control( monkeypatch, { "L1": { "d-orig01" }, "L2": { "d-orig02" } } )
+    assert differs[ "consistent" ] is False and differs[ "passes" ][ 0 ][ "missed" ] == differs[ "passes" ][ 1 ][ "missed" ] == []
+    one_less = two_pass_control( monkeypatch, { "L1": { "d-orig01" }, "L2": set() } )
+    assert one_less[ "consistent" ] is False
