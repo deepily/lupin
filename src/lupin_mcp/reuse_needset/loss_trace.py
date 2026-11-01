@@ -45,7 +45,9 @@ def asked_ids( receipt ):
         - NeedsetError RECEIPT_FIELD_ABSENT when the receipt has no candidate stage or the stage failed, so a missing field is never read as nothing retrieved
     """
     stage = receipt[ "candidate_stage" ] if "candidate_stage" in receipt else None
-    if stage is None or "error" in stage: raise er.NeedsetError( er.RECEIPT_FIELD_ABSENT, f"receipt {receipt[ 'id' ]} holds no candidate stage ids" )
+    if stage is None or "error" in stage:
+        why = "no candidate_stage block" if stage is None else f"candidate_stage.error {stage[ 'error' ][ 'code' ]}: {stage[ 'error' ][ 'detail' ]}"
+        raise er.NeedsetError( er.RECEIPT_FIELD_ABSENT, f"receipt {receipt[ 'id' ]} holds no candidate stage ids; flags {receipt[ 'flags' ]}; {why}" )
     return sorted( set( stage[ "ids" ] ) | set( stage[ "widened_ids" ] ) )
 
 
