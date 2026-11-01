@@ -50,7 +50,7 @@ def test_a_rewrite_becomes_an_index_record_with_the_fields_the_judge_and_the_sea
     bare = pp.planted_entry( { "id": "d-x", "file": "a.py", "name": "n", "lang": "py", "sig": "()", "public": False } )
     assert bare[ "scope" ] == "private" and bare[ "line" ] == 1 and bare[ "end_line" ] == 1 and bare[ "pin" ] == hashlib.sha256( b"" ).hexdigest()[ :10 ]
     assert pp.planted_entry( { "id": "d-y", "file": "a.py", "name": "n", "lang": "ts", "sig": "()" } )[ "scope" ] == "public"
-    assert pp.planted_entry( { "id": "d-z", "file": "a.ts", "name": "n", "lang": "ts", "sig": "()" } )[ "lang" ] == "ts"      # the rewrite's own language, not one read from the extension
+    assert pp.planted_entry( { "id": "d-z", "file": "x.js", "name": "n", "lang": "ts", "sig": "()" } )[ "lang" ] == "ts"      # the rewrite's own language: the real planted file has a TypeScript rewrite in a .js file
 
 
 def test_the_rewrites_are_embedded_as_the_build_does_and_those_are_embedding_calls_only():
