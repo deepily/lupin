@@ -89,3 +89,10 @@ os.environ.setdefault(
 # DO NOT refactor this into a fixture: fixtures run at execution time, after the
 # collection-time import that needs it.
 os.environ.setdefault( "JWT_SECRET_KEY", "test-only-generated-per-run-" + secrets.token_urlsafe( 32 ) )
+
+
+# ── No unit test may build the real Drive service (row baac4a18) ──────────────
+# The shipped INI has Drive publishing on, so a podcast job test that reads the real config would reach Rick's Drive.
+from tests.helpers.no_real_drive import guard_fixture   # noqa: E402 - needs the sys.path bootstrap above
+
+_no_unit_test_builds_the_real_drive_service = guard_fixture()

@@ -32,6 +32,14 @@ from cosa.agents.deep_research_to_podcast.state import PipelineState, ChainedRes
 from cosa.rest.job_state import JobState
 
 
+@pytest.fixture( autouse=True )
+def _publishing_off( monkeypatch ):
+    """The shipped INI has Drive publishing on; these tests read a fake config with it off."""
+    from cosa.agents.podcast_generator import drive_hook
+    from cosa.agents.podcast_generator.config import PodcastConfig
+    monkeypatch.setattr( drive_hook, "_load_config", lambda: PodcastConfig( publish_to_google_drive=False ) )
+
+
 def _make_module( name, **attrs ):
     mod = types.ModuleType( name )
     for key, value in attrs.items():
