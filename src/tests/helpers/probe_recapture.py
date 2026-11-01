@@ -13,11 +13,11 @@ from claude_agent_sdk import query as sdk_query
 from lupin_mcp.reuse_needset import agent_probe as ap
 from tests.helpers import sdk_stream_capture as cap
 
-NEED     = "Say whether a moment falls inside a fixed daily window of hours in the Eastern time zone."
+NEED     = "Return the split of matched kinds that the command-line arguments name."
 FILE     = "src/lupin_mcp/reuse_needset/smoke.py"
 RESULT   = { "verdict": "REUSE", "shortlist": [
-    { "id": "lupin_mcp.reuse_needset.smoke.in_window", "file": FILE, "p": 0.9 },
-    { "id": "lupin_mcp.reuse_needset.smoke.lifted_by", "file": FILE, "p": 0.3 } ] }
+    { "id": "lupin_mcp.reuse_needset.smoke.kind_split", "file": FILE, "p": 0.9 },
+    { "id": "lupin_mcp.reuse_needset.smoke.Timed", "file": FILE, "p": 0.3 } ] }
 STRIPPED = "RateLimitEvent and the thinking-only message were removed: they carry billing state and a signature, and no test reads them"
 PLACEHOLDER_ROOT = "/root"
 
