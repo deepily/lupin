@@ -17,7 +17,7 @@ The phone lists and plays podcasts published to the owner's Google Drive. The se
 ## Invariants
 - Only the user named by `podcast drive owner email` gets in. Anyone else gets 403 before any Drive call. An empty key means nobody.
 - A stream serves only a file in a job folder directly under the configured folder. Any other id is 404 and is never requested from Drive.
-- A Drive or token failure is 503. A folder not yet in Drive lists as empty.
+- Only a Drive 404 on the file or its folder reads as 404. Any other Drive or token failure is 503. A folder not yet in Drive lists as empty.
 - The body is never held whole in memory.
 
 ## Don't

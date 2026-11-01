@@ -10,6 +10,7 @@ Setup steps and settings: src/docs/agents/podcast-generator-google-drive.md
 
 import json
 import os
+import urllib.parse
 
 import cosa.utils.util as cu
 
@@ -27,6 +28,15 @@ class DrivePublishError( Exception ):
 
     Raised for a missing token, a token that cannot be refreshed, and API errors. The message names
     the file or folder involved.
+    """
+
+
+class DriveNotFound( DrivePublishError ):
+    """
+    Drive answered 404: the file or folder does not exist, or this token cannot see it.
+
+    A subclass of DrivePublishError, so existing handlers still catch it. A caller that must tell
+    "not there" from "Drive is unwell" catches this one first.
     """
 
 
@@ -117,11 +127,14 @@ class DrivePublisher:
             - returns the response dict
 
         Raises:
-            - DrivePublishError naming `what` and the underlying error
+            - DriveNotFound when Drive answered 404
+            - DrivePublishError naming `what` and the underlying error for any other failure
         """
         try:
             return request.execute()
         except Exception as e:
+            status = e.resp.status if hasattr( e, "resp" ) else None   # googleapiclient.errors.HttpError carries the HTTP answer in .resp
+            if status == 404: raise DriveNotFound( f"{what}: {e}" ) from e
             raise DrivePublishError( f"{what}: {e}" ) from e
 
     @staticmethod
@@ -321,10 +334,10 @@ class DrivePublisher:
         Ensures:
             - returns { "id", "name", "mimeType", "size" } when the file is not a folder, is not trashed,
               and its parent is a folder whose parent is top_id
-            - returns None for anything else, including an id Drive cannot find
+            - returns None for anything else, including an id or parent Drive answers 404 for
 
         Raises:
-            - nothing
+            - DrivePublishError when Drive fails any other way, so the caller can say "unavailable" and not "not found"
         """
         try:
             meta = self._call( f"check file {file_id}", self.service.files().get( fileId=file_id, fields="id,name,mimeType,size,parents,trashed" ) )
@@ -333,7 +346,7 @@ class DrivePublisher:
                 parent = self._call( f"check folder {parent_id}", self.service.files().get( fileId=parent_id, fields="id,mimeType,parents,trashed" ) )
                 if parent.get( "mimeType" ) == FOLDER_MIME_TYPE and not parent.get( "trashed" ) and top_id in ( parent.get( "parents" ) or [] ):
                     return { key: meta[ key ] for key in ( "id", "name", "mimeType", "size" ) if key in meta }
-        except DrivePublishError:
+        except DriveNotFound:
             return None
         return None
 
@@ -385,7 +398,7 @@ class DrivePublisher:
         """
         headers = { "Range": range_header } if range_header else {}
         try:
-            return self._authorized_session().get( DRIVE_MEDIA_URL.format( file_id=file_id ), params={ "alt": "media" }, headers=headers, stream=True, timeout=30 )
+            return self._authorized_session().get( DRIVE_MEDIA_URL.format( file_id=urllib.parse.quote( file_id, safe="" ) ), params={ "alt": "media" }, headers=headers, stream=True, timeout=30 )
         except DrivePublishError:
             raise
         except Exception as e:

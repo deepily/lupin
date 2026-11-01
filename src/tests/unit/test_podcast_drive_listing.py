@@ -15,10 +15,18 @@ from fastapi.testclient import TestClient
 import cosa.rest.routers.podcast_drive as router_mod
 from cosa.rest.auth import get_current_user
 from cosa.rest.dependencies.config import get_config_manager
-from cosa.utils.drive_publisher import DrivePublishError, DrivePublisher
+from cosa.utils.drive_publisher import DriveNotFound, DrivePublishError, DrivePublisher
 
 FOLDER = "application/vnd.google-apps.folder"
 OWNER  = "owner@example.com"
+
+
+class _HttpError( Exception ):
+    """What googleapiclient raises: the HTTP answer rides on .resp."""
+
+    def __init__( self, status, text ):
+        super().__init__( text )
+        self.resp = type( "Resp", ( object, ), { "status": status } )()
 
 
 class _Request:
@@ -54,7 +62,8 @@ class FakeFiles:
     def get( self, fileId, fields ):
         self.service.calls.append( ( "get", fileId ) )
         def run( _headers ):
-            if fileId not in self.service.items: raise RuntimeError( "404 not found" )
+            if fileId in self.service.get_fails: raise _HttpError( self.service.get_fails[ fileId ], "drive error" )
+            if fileId not in self.service.items: raise _HttpError( 404, "File not found" )
             f = self.service.items[ fileId ]
             return { "id": fileId, **{ k: v for k, v in f.items() if k != "content" } }
         return _Request( run )
@@ -74,6 +83,7 @@ class FakeService:
         self.calls = []
         self.fail  = False
         self.items = {}
+        self.get_fails = {}
 
     def files( self ): return FakeFiles( self )
 
@@ -140,6 +150,43 @@ class TestPublisherListing:
         assert _publisher( _drive_with_two_jobs(), tmp_path ).read_head( "A1", max_bytes=4 ) == b"0123"
 
 
+class TestNotFoundIsNotOutage:
+    """Only a Drive 404 reads as "not there"; other failures must not."""
+
+    def test_a_404_is_drive_not_found_and_still_a_publish_error( self, tmp_path ):
+        svc = _drive_with_two_jobs()
+        with pytest.raises( DriveNotFound, match="check file NOPE" ) as caught:
+            _publisher( svc, tmp_path )._call( "check file NOPE", svc.files().get( fileId="NOPE", fields="id" ) )
+        assert isinstance( caught.value, DrivePublishError )
+
+    def test_a_500_is_a_plain_publish_error( self, tmp_path ):
+        svc = _drive_with_two_jobs()
+        svc.get_fails[ "A1" ] = 500
+        with pytest.raises( DrivePublishError ) as caught:
+            _publisher( svc, tmp_path )._call( "check file A1", svc.files().get( fileId="A1", fields="id" ) )
+        assert not isinstance( caught.value, DriveNotFound )
+
+    def test_an_error_with_no_http_answer_is_a_plain_publish_error( self, tmp_path ):
+        svc = _drive_with_two_jobs()
+        svc.fail = True
+        with pytest.raises( DrivePublishError ) as caught:
+            _publisher( svc, tmp_path )._call( "list", svc.files().list( q="", fields="", spaces="drive" ) )
+        assert not isinstance( caught.value, DriveNotFound )
+
+    def test_a_500_on_the_file_lookup_is_raised_not_hidden( self, tmp_path ):
+        svc = _drive_with_two_jobs()
+        svc.get_fails[ "A2" ] = 500
+        with pytest.raises( DrivePublishError, match="check file A2" ) as caught:
+            _publisher( svc, tmp_path ).file_inside_top_folder( "A2", "TOP" )
+        assert not isinstance( caught.value, DriveNotFound )
+
+    def test_a_500_on_the_parent_lookup_is_raised_not_hidden( self, tmp_path ):
+        svc = _drive_with_two_jobs()
+        svc.get_fails[ "J2" ] = 503
+        with pytest.raises( DrivePublishError, match="check folder J2" ):
+            _publisher( svc, tmp_path ).file_inside_top_folder( "A2", "TOP" )
+
+
 class TestFileInsideTopFolder:
 
     def test_a_file_in_a_job_folder_is_allowed( self, tmp_path ):
@@ -183,10 +230,13 @@ class _Upstream:
         self.headers     = headers
         self.closed      = False
         self.chunk_size  = None
+        self.yielded     = 0
 
     def iter_content( self, chunk_size ):
         self.chunk_size = chunk_size
-        for i in range( 0, len( self.body ), 4 ): yield self.body[ i: i + 4 ]
+        for i in range( 0, len( self.body ), 4 ):
+            self.yielded += 1
+            yield self.body[ i: i + 4 ]
 
     def close( self ): self.closed = True
 
@@ -225,6 +275,13 @@ class TestOpenMedia:
         monkeypatch.setattr( pub, "_authorized_session", lambda: _Session( boom ) )
         with pytest.raises( DrivePublishError, match="stream file A1: connection reset" ):
             pub.open_media( "A1" )
+
+    def test_the_file_id_is_quoted_in_the_url( self, tmp_path, monkeypatch ):
+        pub     = _publisher( _drive_with_two_jobs(), tmp_path )
+        session = _Session( lambda h: _Upstream( 200, b"x", {} ) )
+        monkeypatch.setattr( pub, "_authorized_session", lambda: session )
+        pub.open_media( "a/b?c=d#e" )
+        assert session.requests[ 0 ][ "url" ] == "https://www.googleapis.com/drive/v3/files/a%2Fb%3Fc%3Dd%23e"
 
     def test_a_publisher_with_an_injected_service_has_no_session( self, tmp_path ):
         with pytest.raises( DrivePublishError, match="no Drive credentials" ):
@@ -385,6 +442,21 @@ class TestStream:
         world[ "client" ].get( "/api/podcast-drive/stream/A1" )
         assert holder[ "up" ].chunk_size == router_mod.STREAM_CHUNK_BYTES and holder[ "up" ].closed is True
 
+    @pytest.mark.asyncio
+    async def test_the_first_chunk_is_sent_before_the_rest_is_read( self, world ):
+        holder = {}
+        def respond( headers ):
+            holder[ "up" ] = _Upstream( 200, b"0123456789abcdefghij", {} )
+            return holder[ "up" ]
+        world[ "upstream" ] = respond
+        request  = type( "Req", ( object, ), { "headers": {} } )()
+        response = router_mod.stream_podcast_file( "A1", request, { "email": OWNER }, world[ "config" ] )
+        first    = await response.body_iterator.__anext__()
+        assert first == b"0123" and holder[ "up" ].yielded == 1, "one chunk read for the first send, not the whole file"
+        assert holder[ "up" ].yielded < len( holder[ "up" ].body ) // 4, "the rest is still unread"
+        rest = [ chunk async for chunk in response.body_iterator ]
+        assert b"".join( [ first ] + rest ) == b"0123456789abcdefghij" and holder[ "up" ].yielded == 5
+
     @pytest.mark.parametrize( "file_id", [ "STRANGER", "J1", "TOP", "NOPE" ] )
     def test_a_file_outside_the_folder_is_404_and_never_opened( self, world, file_id ):
         world[ "upstream" ] = lambda headers: pytest.fail( "an outside file must never be requested from Drive" )
@@ -395,6 +467,16 @@ class TestStream:
         world[ "pub" ].folder_levels = [ "Nowhere" ]
         world[ "pub" ].folder_path   = "Nowhere"
         assert world[ "client" ].get( "/api/podcast-drive/stream/A1" ).status_code == 404
+
+    def test_an_id_drive_calls_not_found_is_404( self, world ):
+        assert world[ "client" ].get( "/api/podcast-drive/stream/NOPE" ).status_code == 404
+
+    @pytest.mark.parametrize( "failing", [ "A1", "J1" ] )
+    def test_any_other_drive_error_on_the_lookup_is_503_not_404( self, world, failing ):
+        world[ "svc" ].get_fails[ failing ] = 500
+        resp = world[ "client" ].get( "/api/podcast-drive/stream/A1" )
+        assert resp.status_code == 503 and "Drive unavailable" in resp.json()[ "detail" ]
+        assert world[ "session" ].requests == []
 
     def test_a_drive_failure_while_opening_is_503( self, world ):
         def boom( headers ): raise OSError( "connection reset" )
