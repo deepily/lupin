@@ -21,17 +21,24 @@ ATTRIBUTION_QUOTA = { "ts": 30, "py": 20 }
 YIELD_QUOTA       = { "ts": 50, "py": 50 }
 
 
-def planted_ids( pairs ):
+def planted_ids( pairs, records ):
     """
-    List every id of Set A's planted pairs, originals and rewrites.
+    List every id of Set A's planted pairs, in the proof's space and in the index's.
 
     Requires:
-        - pairs come from positive_control.load_pairs
+        - pairs come from positive_control.load_pairs; each original carries file and name
+        - records are index records with id, file and name
 
     Ensures:
-        - returns a set holding both ids of every pair
+        - returns a set holding both proof ids of every pair
+        - and the id of every index record that has the same file and name as an original, since the proof's ids are not the index's
+        - an original the index lacks adds nothing; two index records with one file and name are both added
     """
-    return { p[ side ][ "id" ] for p in pairs for side in ( "original", "rewrite" ) }
+    by_place = {}
+    for r in records: by_place.setdefault( ( r[ "file" ], r[ "name" ] ), [] ).append( r[ "id" ] )
+    ids = { p[ side ][ "id" ] for p in pairs for side in ( "original", "rewrite" ) }
+    for p in pairs: ids.update( by_place.get( ( p[ "original" ][ "file" ], p[ "original" ][ "name" ] ), [] ) )
+    return ids
 
 
 def interleave( by_lang ):

@@ -12,6 +12,11 @@ from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import hardness, loss_trace, stage_seeds, stages
 
 
+# Measured once from the draw on the fixture below with seed 7. A change here means the seed recipe changed.
+PIN_ATTRIBUTION_TS = [ "web.m111.fn", "web.m064.fn", "web.m126.fn" ]
+PIN_YIELD_TS       = [ "web.m091.fn", "web.m047.fn", "web.m000.fn" ]
+
+
 def records( n_ts=130, n_py=90 ):
     """Return eligible records sorted by id: n_ts script ones and n_py Python ones, all tracked."""
     out = [ { "id": f"web.m{n:03d}.fn", "file": f"src/web/m{n:03d}.js", "lang": "ts" } for n in range( n_ts ) ]
@@ -22,7 +27,9 @@ def records( n_ts=130, n_py=90 ):
 def tracked_of( recs ): return { r[ "file" ] for r in recs }
 
 
-def pairs_of( *ids ): return [ { "original": { "id": i }, "rewrite": { "id": f"{i}.rewrite" } } for i in ids ]
+def pairs_of( *ids ):
+    """Return pairs whose originals carry a proof-space id, a file and a name."""
+    return [ { "original": { "id": f"d-{i}", "file": f"src/web/{i}.js", "name": f"{i}.fn" }, "rewrite": { "id": f"d-{i}-rew" } } for i in ids ]
 
 
 def draw( recs=None, seed=7, planted=frozenset(), tracked="all" ):
@@ -53,8 +60,24 @@ def test_a_planted_id_is_never_drawn_even_when_it_is_the_only_way_to_fill_a_list
     assert not some & set( draw( recs, planted=some )[ "attribution" ][ "order" ] + draw( recs, planted=some )[ "yield" ][ "order" ] )
 
 
-def test_planted_ids_cover_originals_and_rewrites():
-    assert stage_seeds.planted_ids( pairs_of( "a", "b" ) ) == { "a", "a.rewrite", "b", "b.rewrite" }
+def test_planted_ids_cover_both_proof_ids_and_the_index_ids_found_by_file_and_name():
+    recs = [ { "id": "src.web.m001.fn", "file": "src/web/m001.js", "name": "m001.fn" }, { "id": "src.web.m001.fn#2", "file": "src/web/m001.js", "name": "m001.fn" },
+             { "id": "src.web.m002.fn", "file": "src/web/m002.js", "name": "m002.fn" } ]
+    got = stage_seeds.planted_ids( pairs_of( "m001", "m009" ), recs )
+    assert got == { "d-m001", "d-m001-rew", "d-m009", "d-m009-rew", "src.web.m001.fn", "src.web.m001.fn#2" }
+
+
+def test_an_original_in_proof_space_is_excluded_from_the_draw_through_its_index_id():
+    recs  = records()
+    gone  = recs[ 5 ]
+    pair  = { "original": { "id": "d-063e2b6b4c", "file": gone[ "file" ], "name": gone[ "id" ] + ".name" }, "rewrite": { "id": "d-rew" } }
+    named = [ { **r, "name": r[ "id" ] + ".name" } for r in recs ]
+    planted = stage_seeds.planted_ids( [ pair ], named )
+    assert gone[ "id" ] in planted and "d-063e2b6b4c" in planted
+    r = stage_seeds.draw_lists( [ x for x in recs ], 7, planted, "abc123", tracked_of( recs ) )
+    assert gone[ "id" ] not in r[ "attribution" ][ "order" ] + r[ "yield" ][ "order" ]
+    unmapped = stage_seeds.draw_lists( recs, 7, { "d-063e2b6b4c" }, "abc123", tracked_of( recs ) )
+    assert unmapped[ "pool" ][ "excluded_planted" ] == 0
 
 
 def test_only_tracked_files_are_used():
@@ -183,3 +206,8 @@ def test_the_stage_functions_slot_into_the_runner( tmp_path ):
               "control": nothing, "remainder": nothing }
     with cap.installed(): out = asyncio.run( stages.run_stages( cap, funcs ) )
     assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done" ] * 4 and out[ "stages" ][ "attribution" ][ "report" ][ "needs" ] == 50
+
+
+def test_the_draw_is_pinned_so_a_change_to_the_seed_recipe_is_seen():
+    r = draw()
+    assert r[ "attribution" ][ "ts" ][ :3 ] == PIN_ATTRIBUTION_TS and r[ "yield" ][ "ts" ][ :3 ] == PIN_YIELD_TS
