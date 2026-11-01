@@ -18,15 +18,15 @@ MODE_SHAPE   = "shape"
 
 def module_of( rec ):
     """
-    Read the module path out of a record's id.
+    Read the module path out of a record's dotted id.
 
     Requires:
-        - rec has id and name, and the id ends with the name, optionally followed by "#N"
+        - rec has id and name, and the dotted id ends with the name, optionally followed by "#N"
 
     Ensures:
-        - returns the dotted module path, which is the id without the name
+        - returns the dotted module path, which is the dotted id without the name
     """
-    return rec[ "id" ].split( "#" )[ 0 ][ : -( len( rec[ "name" ] ) + 1 ) ]
+    return dotted_id( rec )[ : -( len( rec[ "name" ] ) + 1 ) ]
 
 
 def src_root_of( root, rec ):
@@ -45,8 +45,25 @@ def src_root_of( root, rec ):
 
 
 def dotted_id( rec ):
-    """Return the record's id without a repeat suffix, the id that need_input resolves."""
-    return rec[ "id" ].split( "#" )[ 0 ]
+    """
+    Return the dotted id that need_input resolves for a record.
+
+    Requires:
+        - rec has id; a Python record that also has lang, file and name may carry an id that is no module path
+
+    Ensures:
+        - an index record's id is returned as it is, minus a "#N" suffix
+        - a Python record whose id does not end with its name behind the module its file names, such as a planted record's d-<hash> id, gets the id its file and name give: the file's module path from src, then the name
+    """
+    own = rec[ "id" ].split( "#" )[ 0 ]
+    if not all( k in rec for k in ( "lang", "file", "name" ) ) or rec[ "lang" ] != "py": return own
+    parts = list( pathlib.PurePosixPath( rec[ "file" ] ).with_suffix( "" ).parts )
+    if parts[ -1 ] == "__init__": parts.pop()
+    suffix = "." + rec[ "name" ]
+    if own.endswith( suffix ):
+        module = own[ : -len( suffix ) ].split( "." )
+        if parts[ -len( module ): ] == module: return own
+    return ".".join( ( parts[ 1: ] if parts[ 0 ] == "src" else parts ) + [ rec[ "name" ] ] )
 
 
 def python_text( rec, root ):
