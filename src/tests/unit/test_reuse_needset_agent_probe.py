@@ -166,7 +166,7 @@ def test_the_real_stream_gives_one_ruling_per_candidate_and_one_whole_file_read(
     doc, messages = captured()
     out = asyncio.run( ap.run_probe( doc[ "need" ], doc[ "result" ], doc[ "root" ], doc[ "model" ], query_fn=replay( messages ) ) )
     ids = [ s[ "id" ] for s in doc[ "result" ][ "shortlist" ] ]
-    assert sorted( out[ "rulings" ] ) == sorted( ids ) and len( ids ) == 2 and set( out[ "rulings" ].values() ) <= { "DUPLICATE", "DISTINCT" }
+    assert out[ "rulings" ] == dict( zip( ids, ( "DUPLICATE", "DISTINCT" ) ) ) and len( ids ) == 2   # verdicts copied from the fixture's recorded RULING lines, in shortlist order
     assert out[ "reads" ] == [ { "path": doc[ "result" ][ "shortlist" ][ 0 ][ "file" ], "offset": None, "limit": None } ] == ap.read_files( messages )
     assert [ t[ "type" ] for t in out[ "transcript" ] ][ 0 ] == "tool_use" and out[ "reply" ] == ap.reply_text( messages ) and out[ "reply" ].startswith( "RULING lupin_mcp" )
 
