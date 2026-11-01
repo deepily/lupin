@@ -32,11 +32,13 @@ class FakePublisher:
 
     def __init__( self, failures=None, raises=None ):
         self.calls    = []
+        self.titles   = []
         self.failures = failures or {}
         self.raises   = raises
 
-    def publish_job( self, job_folder_name, files ):
+    def publish_job( self, job_folder_name, files, title=None ):
         self.calls.append( ( job_folder_name, files ) )
+        self.titles.append( title )
         if self.raises: raise self.raises
         return {
             "folder_id"   : "FID",
@@ -158,12 +160,41 @@ class TestSuccess:
         import threading
         seen = []
         class Spy( FakePublisher ):
-            def publish_job( self, name, f ):
+            def publish_job( self, name, f, title=None ):
                 seen.append( threading.current_thread() )
-                return super().publish_job( name, f )
+                return super().publish_job( name, f, title )
         monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: Spy() )
         await _publish( files, _config() )
         assert seen[ 0 ] is not threading.current_thread()
+
+
+class TestJobFolderTitle:
+    """The publish step passes the podcast's plain title to the publisher."""
+
+    @pytest.mark.asyncio
+    async def test_the_english_script_heading_is_the_title( self, files, monkeypatch ):
+        open( files[ "en-script.md" ], "w" ).write( "# Podcast: Google Drive Sign In Explainer\n## Generated: x\n" )
+        open( files[ "es-script.md" ], "w" ).write( "# Podcast: Explicacion\n" )
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        await _publish( files, _config() )
+        assert fake.titles == [ "Google Drive Sign In Explainer" ]
+
+    @pytest.mark.asyncio
+    async def test_with_no_english_script_the_first_one_is_used( self, files, monkeypatch ):
+        open( files[ "es-script.md" ], "w" ).write( "# Podcast: Explicacion\n" )
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        await drive_hook.publish_podcast_to_drive( { "es-MX": files[ "es.mp3" ] }, { "es-MX": files[ "es-script.md" ] }, None, "job", _config() )
+        assert fake.titles == [ "Explicacion" ]
+
+    @pytest.mark.asyncio
+    async def test_no_script_or_no_heading_means_no_title( self, files, monkeypatch ):
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, "job", _config() )
+        await _publish( files, _config() )   # the scripts here hold the one letter x, no heading
+        assert fake.titles == [ None, None ]
 
 
 class TestFailure:
@@ -223,7 +254,8 @@ class TestBoundary:
         assert got == { "language_links": {}, "folder_link": None, "extra_lines": [ "**Drive**: upload failed (ValueError: ini unreadable)" ] }
 
     def test_load_config_reads_the_real_ini( self ):
-        assert drive_hook._load_config().publish_to_google_drive is False
+        """The shipped INI has publishing on. This reads the config, never the token."""
+        assert drive_hook._load_config().publish_to_google_drive is True
 
 
 class TestHelpers:
@@ -281,11 +313,11 @@ class TestConfigKeys:
         assert [ getattr( c, f ) for f in _DRIVE_FIELDS ] == [ True, "F", True, False, "/t.json" ]
         assert set( wanted ) <= { call.args[ 0 ] for call in mgr.get.call_args_list }
 
-    def test_the_shipped_ini_carries_the_five_keys_with_the_documented_defaults_and_explainers( self ):
-        """The real lupin-app.ini and its splainer, read through the real ConfigurationManager."""
+    def test_the_shipped_ini_carries_the_five_keys_with_the_shipped_values_and_explainers( self ):
+        """The shipped INI and splainer: publishing on, folder Lupin AF Mobile/Podcasts."""
         from cosa.config.configuration_manager import ConfigurationManager
         c = PodcastConfig.from_config( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
-        assert [ getattr( c, f ) for f in _DRIVE_FIELDS ] == [ False, "Lupin Podcasts", False, True, "/src/conf/keys/google-drive-oauth-token.json" ]
+        assert [ getattr( c, f ) for f in _DRIVE_FIELDS ] == [ True, "Lupin AF Mobile/Podcasts", False, True, "/src/conf/keys/google-drive-oauth-token.json" ]
         root = os.environ[ "LUPIN_ROOT" ] + "/src/conf/"
         for key in [ "podcast publish to google drive", "podcast drive folder name", "podcast drive upload script",
                      "podcast drive upload source document", "podcast drive token path" ]:
@@ -417,10 +449,23 @@ class TestDeepResearchToPodcastJobUsesTheHook:
         assert "Research → Podcast Complete" in abstract and "drive_folder_link" not in job.artifacts
 
     @pytest.mark.asyncio
-    async def test_publishing_off_through_the_real_hook_adds_nothing( self ):
+    async def test_publishing_off_through_the_real_hook_adds_nothing( self, monkeypatch ):
+        """A fake config with the flag off, so the shipped INI does not matter."""
+        monkeypatch.setattr( drive_hook, "_load_config", lambda: PodcastConfig( publish_to_google_drive=False ) )
         job      = _drp_job()
         abstract = await _run_drp( job, None )
         assert "Drive" not in abstract and "drive_folder_link" not in job.artifacts
+
+    @pytest.mark.asyncio
+    async def test_publishing_on_with_no_token_file_reports_it_and_the_job_still_succeeds( self, monkeypatch, tmp_path ):
+        """A fake config points at a missing temp token: the card says so."""
+        config = PodcastConfig( publish_to_google_drive=True, drive_token_path="/" + str( tmp_path / "no-token.json" ).lstrip( "/" ) )
+        monkeypatch.setattr( drive_hook, "_load_config", lambda: config )
+        monkeypatch.setattr( "cosa.utils.util.get_project_root", lambda: "" )
+        job      = _drp_job()
+        abstract = await _run_drp( job, None )
+        assert "**Drive**: upload failed (DrivePublishError: Google Drive token file missing" in abstract
+        assert "Research → Podcast Complete" in abstract and "drive_folder_link" not in job.artifacts
 
     @pytest.mark.asyncio
     async def test_calls_the_hook_with_the_research_report_path( self, monkeypatch ):

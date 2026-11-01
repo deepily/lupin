@@ -57,6 +57,7 @@ class FakeFiles:
             new_id = f"id{self.service.counter}"
             if media_body is None:
                 self.service.folders[ new_id ] = { "name": body[ "name" ], "parent": ( body.get( "parents" ) or [ None ] )[ 0 ], "trashed": False }
+                if "description" in body: self.service.folders[ new_id ][ "description" ] = body[ "description" ]
                 return { "id": new_id }
             return { "id": new_id, "webViewLink": f"https://drive.example/file/{new_id}" }
         return _Request( run )
@@ -367,6 +368,23 @@ class TestFolderPath:
         creates = [ c for c in svc.calls if c[ 0 ] == "create" ]
         assert creates[ 0 ][ 2 ] == ( "ROOT", ) and creates[ 1 ][ 2 ] == ( "id1", )
         assert not os.path.exists( cache_path ), "only the top folder is cached"
+
+
+class TestJobFolderTitle:
+
+    def test_a_new_job_folder_carries_the_title_as_its_description( self, svc, cache_path, tmp_path ):
+        result = _publisher( svc, cache_path ).publish_job( "2026-11-01-190015-explainer", [], title="Google Drive Sign In Explainer" )
+        assert svc.folders[ result[ "folder_id" ] ][ "description" ] == "Google Drive Sign In Explainer"
+
+    def test_no_title_writes_no_description( self, svc, cache_path ):
+        result = _publisher( svc, cache_path ).publish_job( "job", [] )
+        assert "description" not in svc.folders[ result[ "folder_id" ] ]
+
+    def test_an_existing_job_folder_keeps_the_description_it_has( self, svc, cache_path ):
+        pub   = _publisher( svc, cache_path )
+        first = pub.publish_job( "job", [], title="First" )
+        again = pub.publish_job( "job", [], title="Second" )
+        assert again[ "folder_id" ] == first[ "folder_id" ] and svc.folders[ first[ "folder_id" ] ][ "description" ] == "First"
 
 
 class TestFolderPathCache:

@@ -7,10 +7,10 @@ pins:
   - cosa.agents.podcast_generator.drive_hook.publish_podcast_to_drive@543c171ab4
   - cosa.utils.drive_publisher.DrivePublishError@9c2b053c46
   - cosa.utils.drive_publisher.DriveNotFound@7fedcdda9b
-  - cosa.utils.drive_publisher.DrivePublisher@33dc69989c
+  - cosa.utils.drive_publisher.DrivePublisher@ec56dd132b
   - cosa.utils.drive_publisher.DrivePublisher.ensure_folder@5cd34502cc
   - cosa.utils.drive_publisher.DrivePublisher.upload@5aeb9b087f
-  - cosa.utils.drive_publisher.DrivePublisher.publish_job@4ad05c91ac
+  - cosa.utils.drive_publisher.DrivePublisher.publish_job@f11b84bfdd
 ---
 # Publishing finished podcasts to Google Drive
 
@@ -28,7 +28,7 @@ After a podcast's audio is written, both podcast jobs can copy the files to the 
 - `DrivePublisher` talks to Drive with the `drive.file` scope, so the app sees only files it created. Google libraries are imported inside the methods that need them.
 - `ensure_folder` finds a folder by name or creates it. A slash-separated name such as `Lupin AF Mobile/Podcasts` is a chain: each level is found or made under the one above. The top folder's id, keyed to the full path, is cached in `src/conf/keys/google-drive-folder-id.json` and reused while that folder still exists.
 - `find_top_folder` finds the top folder without creating it. `list_job_folders`, `list_folder_files`, `file_inside_top_folder`, `read_head` and `open_media` serve the phone door in [[podcast-drive-phone-api]].
-- `upload` sends one file with an 8 MiB resumable upload. `publish_job` makes the job subfolder, uploads each file, and reports a link or an error per file plus the folder link.
+- `upload` sends one file with an 8 MiB resumable upload. `publish_job` makes the job subfolder, uploads each file, and reports a link or an error per file plus the folder link. A new job folder carries the podcast's plain title as its Drive description.
 - `DrivePublishError` is raised for a missing or unrefreshable token and for API errors. Its message names the file or folder. `DriveNotFound` is the subclass for a Drive 404, so a caller can tell "not there" from "Drive is unwell".
 
 ## Don't

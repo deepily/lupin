@@ -14,7 +14,9 @@ import urllib.parse
 
 _PODCAST_PREFIX_RE = re.compile( r"^\s*podcast\s*:\s*", re.IGNORECASE )
 _H1_RE             = re.compile( r"^#[ \t]+(.+?)[ \t]*$", re.MULTILINE )
-_FOLDER_STAMP_RE   = re.compile( r"^\d{4}-\d{2}-\d{2}-\d{6}-" )
+# One leading date (YYYY-MM-DD or YYYY.MM.DD), a 6 or 8 digit time or run number, or an 8 hex serial with a digit in it.
+_LEADING_STAMP_RE  = re.compile( r"^(?:\d{4}[-.]\d{2}[-.]\d{2}|\d{8}|\d{6}|(?=[0-9a-f]*\d)[0-9a-f]{8})(?:[-_ .]+|$)" )
+_TRAILING_SERIAL_RE = re.compile( r"[-_ ]+(?=[0-9a-f]*\d)[0-9a-f]{8}$" )
 
 
 def clean_title( heading ):
@@ -77,19 +79,26 @@ def read_script_title( script_abs_path ):
 
 def title_from_folder_name( folder_name ):
     """
-    Make a plain title from a Drive job folder name such as "2026-11-01-184006-the-empty-net".
+    Make a plain title from a Drive job folder name, with no dates, times or serials.
 
     Requires:
         - folder_name is a string
 
     Ensures:
-        - the date and time stamp is removed, dashes and underscores become spaces, each word is capitalised
+        - every leading run of date, time and serial is removed, however many there are, and so is a trailing 8-hex serial
+        - dashes and underscores become spaces and each word is capitalised
         - returns the folder name unchanged when nothing is left after that
 
     Raises:
         - nothing
     """
-    words = _FOLDER_STAMP_RE.sub( "", folder_name ).replace( "-", " " ).replace( "_", " " ).split()
+    rest = folder_name
+    while True:
+        stripped = _LEADING_STAMP_RE.sub( "", rest )
+        if stripped == rest: break
+        rest = stripped
+    rest  = _TRAILING_SERIAL_RE.sub( "", rest )
+    words = rest.replace( "-", " " ).replace( "_", " " ).split()
     return " ".join( word[ :1 ].upper() + word[ 1: ] for word in words ) or folder_name
 
 

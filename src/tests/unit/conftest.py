@@ -430,3 +430,9 @@ def _no_real_model_in_doc_lint_tests( request, monkeypatch ):
         pytest.fail( "a doc_lint unit test reached the real SDK: pass a query_fn, or monkeypatch model_transport.sdk_query", pytrace=False )
 
     monkeypatch.setattr( model_transport, "sdk_query", refuse )
+
+
+# No unit test may build the real Drive service: the shipped INI has publishing on (row baac4a18).
+from tests.helpers.no_real_drive import guard_fixture   # noqa: E402 - needs the sys.path bootstrap above
+
+_no_unit_test_builds_the_real_drive_service = guard_fixture()

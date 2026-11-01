@@ -16,6 +16,7 @@ import re
 from datetime import datetime
 
 import cosa.utils.util as cu
+from cosa.agents.podcast_generator.play_links import read_script_title
 
 AUDIO_MIME_TYPE  = "audio/mpeg"
 SCRIPT_MIME_TYPE = "text/markdown"
@@ -112,7 +113,8 @@ def _publish_sync( audio_by_lang, script_by_lang, source_path, job_folder_name, 
         - returns the publisher's publish_job() result
     """
     publisher = _make_publisher( config )
-    return publisher.publish_job( job_folder_name, _collect_files( audio_by_lang, script_by_lang, source_path, config ) )
+    script    = script_by_lang.get( "en" ) or next( iter( script_by_lang.values() ), None )
+    return publisher.publish_job( job_folder_name, _collect_files( audio_by_lang, script_by_lang, source_path, config ), title=read_script_title( script ) )
 
 
 async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, job_folder_name=None, config=None ):

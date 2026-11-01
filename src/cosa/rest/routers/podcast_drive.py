@@ -67,9 +67,10 @@ def _owner_publisher( current_user, config_mgr ):
 
 def _title_for( publisher, folder, files ):
     """
-    Pick a job's plain title from its script, else from its folder name.
+    Pick a job's plain title: the folder's description, else its script, else its folder name.
 
-    The script's first heading wins when the folder holds a `-script.md`.
+    The publish step writes the clean title into the folder's description. An older folder has none,
+    so the script's first heading is next, and the folder name without dates or serials is last.
 
     Requires:
         - folder is { "name", ... }; files are the folder's file dicts
@@ -80,6 +81,7 @@ def _title_for( publisher, folder, files ):
     Raises:
         - nothing
     """
+    if folder.get( "description", "" ).strip(): return folder[ "description" ].strip()
     for file in files:
         if file[ "name" ].endswith( "-script.md" ):
             try:

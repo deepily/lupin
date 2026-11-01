@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
+from cosa.agents.podcast_generator import play_links
 from cosa.agents.podcast_generator.job import PodcastGeneratorJob
 from cosa.rest.job_state import JobState
 
@@ -201,6 +202,8 @@ class _ExecGraph:
         self.drive_hook = AsyncMock( return_value={ "language_links": {}, "extra_lines": [], "folder_link": None } )
 
         self.modules = {
+            # The real link builder: a leaf module the job imports by dotted name, which the fake package above hides.
+            "cosa.agents.podcast_generator.play_links": play_links,
             "cosa.agents.podcast_generator.drive_hook": _make_module(
                 "cosa.agents.podcast_generator.drive_hook",
                 publish_podcast_to_drive=self.drive_hook,
@@ -289,8 +292,9 @@ class TestExecute:
         abstract = completion[ 0 ].kwargs[ "abstract" ]
 
         enc       = "pod/ep.mp3"                                    # quote( audio_rel ), '/' is safe
-        play_here = f"[▶️ Play Here](/app/audio?path={enc}&embed=1)"
-        listen    = f"[🎧 Listen](/app/audio?path={enc})"
+        query     = f"path={enc}&script=pod/ep.md"                  # the job passes the script path, the player cannot guess it
+        play_here = f"[▶️ Play Here](/app/audio?{query}&embed=1)"
+        listen    = f"[🎧 Listen](/app/audio?{query})"
         download  = f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
 
         # both audio forms present, plus download
@@ -340,9 +344,9 @@ class TestExecute:
         assert "**Mexican Spanish**:" in abstract
 
         # Each language carries its OWN full triplet against its OWN file.
-        for enc in ( "pod/ep-en.mp3", "pod/ep-es-MX.mp3" ):
-            assert f"[▶️ Play Here](/app/audio?path={enc}&embed=1)" in abstract
-            assert f"[🎧 Listen](/app/audio?path={enc})"           in abstract
+        for enc, script in ( ( "pod/ep-en.mp3", "pod/ep-en.md" ), ( "pod/ep-es-MX.mp3", "pod/ep-es-MX.md" ) ):
+            assert f"[▶️ Play Here](/app/audio?path={enc}&script={script}&embed=1)" in abstract
+            assert f"[🎧 Listen](/app/audio?path={enc}&script={script})"           in abstract
             assert f"[⬇️ Download](/api/io/file?path={enc}&download=true)" in abstract
         # Two languages → two overlay links, two mp3s reachable.
         assert abstract.count( "&embed=1" ) == 2

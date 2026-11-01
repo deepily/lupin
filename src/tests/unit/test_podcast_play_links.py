@@ -58,12 +58,19 @@ class TestTitleFromScriptText:
 class TestTitleFromFolderName:
 
     @pytest.mark.parametrize( "name, expected", [
-        ( "2026-11-01-184006-the-empty-net",       "The Empty Net" ),
-        ( "2026-11-01-014849-grading_your-own-exam", "Grading Your Own Exam" ),
-        ( "no-stamp-here",                          "No Stamp Here" ),
-        ( "2026-11-01-184006-",                     "2026-11-01-184006-" ),
+        ( "2026-11-01-184006-the-empty-net",                                    "The Empty Net" ),
+        ( "2026-11-01-014849-grading_your-own-exam",                            "Grading Your Own Exam" ),
+        ( "2026-11-01-190015-2026.10.31-google-drive-sign-in-explainer",        "Google Drive Sign In Explainer" ),
+        ( "2026-11-01-190015-2026.10.31-014724-google-drive-sign-in-explainer", "Google Drive Sign In Explainer" ),
+        ( "2026.11.01-184006-the-empty-net",                                    "The Empty Net" ),
+        ( "20261101-a1b2c3d4-the-empty-net",                                    "The Empty Net" ),
+        ( "2026-11-01-184006-the-empty-net-a1b2c3d4",                           "The Empty Net" ),
+        ( "no-stamp-here",                                                      "No Stamp Here" ),
+        ( "2026 outlook",                                                       "2026 Outlook" ),
+        ( "decade-review",                                                      "Decade Review" ),
+        ( "2026-11-01-184006-",                                                 "2026-11-01-184006-" ),
     ] )
-    def test_stamp_removed_and_words_capitalised( self, name, expected ):
+    def test_every_leading_date_time_and_serial_is_removed( self, name, expected ):
         assert pl.title_from_folder_name( name ) == expected
 
 

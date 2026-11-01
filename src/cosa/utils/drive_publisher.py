@@ -222,16 +222,17 @@ class DrivePublisher:
         if is_top: self._write_cached_folder_id( folder_id )
         return folder_id
 
-    def _find_or_create( self, name, parent_id ):
+    def _find_or_create( self, name, parent_id, description=None ):
         """
         Find one folder by exact name under a parent, or create it.
 
         Requires:
             - name is a non-empty string; a "/" in it is part of the name
             - parent_id is a Drive folder id, or None for the Drive root
+            - description is text for a folder this call creates, or None
 
         Ensures:
-            - returns the folder id
+            - returns the folder id; an existing folder keeps the description it has
 
         Raises:
             - DrivePublishError on an API error, naming the folder
@@ -241,6 +242,7 @@ class DrivePublisher:
 
         body = { "name": name, "mimeType": FOLDER_MIME_TYPE }
         if parent_id is not None: body[ "parents" ] = [ parent_id ]
+        if description: body[ "description" ] = description
         folder_id = self._call( f"create folder {name}", self.service.files().create( body=body, fields="id" ) )[ "id" ]
         if self.debug: print( f"[DrivePublisher] created folder {name}" )
         return folder_id
@@ -295,14 +297,14 @@ class DrivePublisher:
             - limit is a positive integer
 
         Ensures:
-            - returns up to limit dicts { "id", "name", "createdTime" }, newest first
+            - returns up to limit dicts { "id", "name", "createdTime", "description" }, newest first; description may be absent
 
         Raises:
             - DrivePublishError on an API error
         """
         query   = f"'{top_id}' in parents and mimeType = '{FOLDER_MIME_TYPE}' and trashed = false"
         listing = self._call( "list job folders", self.service.files().list(
-            q=query, fields="files(id,name,createdTime)", spaces="drive", orderBy="createdTime desc", pageSize=limit ) )
+            q=query, fields="files(id,name,createdTime,description)", spaces="drive", orderBy="createdTime desc", pageSize=limit ) )
         return listing.get( "files" ) or []
 
     def list_folder_files( self, folder_id ):
@@ -432,15 +434,17 @@ class DrivePublisher:
         )
         return { "file_id": created[ "id" ], "web_view_link": created.get( "webViewLink" ) }
 
-    def publish_job( self, job_folder_name, files ):
+    def publish_job( self, job_folder_name, files, title=None ):
         """
         Make this job's subfolder under the top folder and upload each file into it.
 
         Requires:
             - job_folder_name is a non-empty string
             - files is a list of ( local_path, mime_type ) pairs
+            - title is the podcast's plain title, or None
 
         Ensures:
+            - a job folder made now carries title as its Drive description, which the phone list shows as the title
             - returns { "folder_id", "folder_link", "files" } where each entry of "files" is
               { "path", "file_id", "web_view_link", "error" } with error None on success
             - one failed file does not stop the rest
@@ -449,7 +453,7 @@ class DrivePublisher:
             - DrivePublishError if a folder cannot be found or made
         """
         top_id    = self.ensure_folder( self.folder_name )
-        folder_id = self._find_or_create( job_folder_name, top_id )
+        folder_id = self._find_or_create( job_folder_name, top_id, title )
         results   = []
         for local_path, mime_type in files:
             try:
