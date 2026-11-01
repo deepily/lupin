@@ -747,3 +747,49 @@ def test_a_close_that_raises_after_a_clean_finish_is_reported_and_exits_one_and_
     out = ft.main( [ *argv, "--live" ], deps=live_deps( sha, ended ) | { "close_run": broken_close } )
     assert out[ "closed_run" ] is None and "ledger unreadable" in out[ "close_error" ] and out[ "report" ][ "stages" ][ "attribution" ][ "status" ] == "done"
     assert ft.exit_status( out ) == ft.EXIT_FAILED
+
+
+def budget_control( budget_on, ledgers, error_code=er.STAGE_BUDGET_REACHED ):
+    """Return ( ctx, draft_fn, check ); a draft from the ledger budget_on raises."""
+    ctx, draft_fn, check = control_world( ledgers )
+
+    def drafting( job, ask, ledger ):
+        if ledger == budget_on: raise er.NeedsetError( error_code, "the control stage used 250 of its 250 calls" )
+        return draft_fn( job, ask, ledger )
+
+    return ctx, drafting, check
+
+
+def run_budget_control( monkeypatch, budget_on, passes=2, error_code=er.STAGE_BUDGET_REACHED ):
+    """Run a control whose drafting raises on one ledger; return its report."""
+    ps, ledgers = [ real_pair( i ) for i in range( 20 ) ], []
+    ctx, drafting, check = budget_control( budget_on, ledgers, error_code )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: "planted stage" )
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, drafting, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+                                   passes=passes, pass_resources=lambda n: ( "L2", "C2" ) )
+    return asyncio.run( stage() )
+
+
+def test_a_control_whose_second_pass_hits_the_budget_keeps_the_finished_first_pass_in_its_report( monkeypatch ):
+    out = run_budget_control( monkeypatch, "L2" )
+    assert out[ "budget_reached" ] is True and "250 of its 250" in out[ "budget_detail" ] and out[ "passes_done" ] == 1 and out[ "passes_wanted" ] == 2
+    assert len( out[ "passes" ] ) == 1 and out[ "passes" ][ 0 ][ "found" ] == 20 and out[ "found" ] == 20 and out[ "stop" ] is False and out[ "consistent" ] is True
+
+
+def test_a_control_that_hits_the_budget_before_any_pass_finishes_reports_an_empty_pass_list( monkeypatch ):
+    out = run_budget_control( monkeypatch, "L1" )
+    assert out[ "budget_reached" ] is True and out[ "passes" ] == [] and out[ "passes_done" ] == 0 and "found" not in out and out[ "stop" ] is False
+    single = run_budget_control( monkeypatch, "L1", passes=1 )
+    assert single[ "budget_reached" ] is True and single[ "passes" ] == [] and single[ "passes_wanted" ] == 1
+
+
+def test_a_finished_multi_pass_control_says_it_was_not_stopped_by_the_budget_and_another_error_still_raises( monkeypatch ):
+    ps, ledgers = [ real_pair( i ) for i in range( 20 ) ], []
+    ctx, draft_fn, check = control_world( ledgers )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: "planted stage" )
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+                                   passes=2, pass_resources=lambda n: ( "L2", "C2" ) )
+    done = asyncio.run( stage() )
+    assert done[ "budget_reached" ] is False and done[ "budget_detail" ] is None and done[ "passes_done" ] == 2
+    with pytest.raises( er.NeedsetError ) as caught: run_budget_control( monkeypatch, "L2", error_code=er.CALL_CAP_REACHED )
+    assert caught.value.code == er.CALL_CAP_REACHED

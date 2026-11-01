@@ -247,6 +247,7 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         - the pool the control plants into and restores is the index's own sendable entries
         - the checker is planted_check over a planted stage that shares the live stage's folders and client
         - with more than one pass the report is the first pass's, plus passes ( each pass's report ), consistent ( every pass missed the same pairs ) and stop true when any pass stopped
+        - when the stage's own call budget ends a pass, the passes already finished stay in the report, with budget_reached True, budget_detail, passes_done and passes_wanted; with none finished passes is empty
 
     Raises:
         - ValueError when passes is more than 1 and pass_resources is None, or passes is less than 1
@@ -265,9 +266,18 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
 
     async def stage():
         """Ensures: returns the control report."""
-        reports = [ await one_pass( n ) for n in range( passes ) ]
-        if passes == 1: return reports[ 0 ]
-        return { **reports[ 0 ], "passes": reports, "consistent": all( r[ "missed" ] == reports[ 0 ][ "missed" ] for r in reports ), "stop": any( r[ "stop" ] for r in reports ) }
+        reports, detail = [], None
+        for n in range( passes ):
+            try:
+                reports.append( await one_pass( n ) )
+            except er.NeedsetError as error:
+                if error.code != er.STAGE_BUDGET_REACHED: raise
+                detail = error.detail
+                break
+        if passes == 1 and detail is None: return reports[ 0 ]
+        first = reports[ 0 ] if reports else {}
+        return { **first, "passes": reports, "consistent": all( r[ "missed" ] == first[ "missed" ] for r in reports ), "stop": any( r[ "stop" ] for r in reports ),
+                 "budget_reached": detail is not None, "budget_detail": detail, "passes_done": len( reports ), "passes_wanted": passes }
     return stage
 
 
