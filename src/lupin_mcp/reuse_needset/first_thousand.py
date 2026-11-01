@@ -385,11 +385,14 @@ def main( argv=None, deps=None ):
 
     Ensures:
         - without --live the plan is printed and returned, and no model, vector server or context is touched
-        - with --live every model call, the probe's included, runs on the Claude Code binary args.cli_path names, or the SDK's own when none is given
+        - with --live every Claude Code call (the drafter, the second model and the probe) runs on the binary args.cli_path names
+        - a plan makes no call and leaves the binary setting alone
         - with --live the four stages run under one cap in args.run_dir and the report is returned
         - the pairs and their groups are read before anything else, so a bad input stops the run before a call
 
     Raises:
+        - NeedsetError NO_CLI_PATH on a live run with no --cli-path, before the context is built
+        - ValueError when --cli-path is not an executable file, before the index is built
         - NeedsetError NO_CANDIDATE_STAGE on a live run whose context has none, before the index is built or a list is written
         - NeedsetError QUOTA_UNFILLABLE from the seed draw, and PLAN_ALREADY_WRITTEN when other seed lists are already in the run folder
         - whatever the inputs raise, including CONTROL_INPUT_CHANGED
@@ -399,6 +402,7 @@ def main( argv=None, deps=None ):
     loaded = load_inputs( args, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
     shown  = plan( args, loaded )
     if not args.live: return { "live": False, "plan": shown }
+    if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "a live run needs --cli-path: the SDK's bundled Claude Code is too old for the drafter's model and answers 400" )
     model_transport.configure( cli_path=args.cli_path )
     ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
     if ctx.candidate_stage is None: raise er.NeedsetError( er.NO_CANDIDATE_STAGE, f"the context has no candidate stage; set {rt.PACK_SIZE_VARIABLE}, {rt.CEILING_VARIABLE} and {rt.RUN_NAME_VARIABLE}, which build it" )

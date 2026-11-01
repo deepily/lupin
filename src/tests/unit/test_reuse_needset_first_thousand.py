@@ -319,8 +319,8 @@ def test_the_live_parts_use_their_own_ledgers_in_the_run_folder_and_the_argument
     assert isinstance( seen[ "ledgers" ][ "draft" ], draft.SharedLedger ) and isinstance( seen[ "ledgers" ][ "second" ], draft.SharedLedger )
 
 
-def run_dir_files( tmp_path ):
-    """Write the proof's input files; return the command line and the planted sha."""
+def run_dir_files( tmp_path, cli=True ):
+    """Write the proof's input files; return the command line, with a binary unless cli is false."""
     import hashlib
     ps       = pairs()
     one, two = labelled( ps )
@@ -335,6 +335,11 @@ def run_dir_files( tmp_path ):
     run = tmp_path / "run"
     run.mkdir()
     argv = [ "--root", "/r", "--run-dir", str( run ), "--planted", str( planted ), "--answer-key", str( key ), "--labels-dir", str( labels ), "--seed", "7", "--source-commit", "abc" ]
+    if cli:
+        binary = tmp_path / "claude-bin"
+        binary.write_text( "#!/bin/sh\n" )
+        binary.chmod( 0o755 )
+        argv  += [ "--cli-path", str( binary ) ]
     return argv, hashlib.sha256( planted.read_bytes() ).hexdigest()
 
 
@@ -454,12 +459,10 @@ def live_deps( sha, runner ):
              "remainder": lambda ps, seed: {}, **seed_deps() }
 
 
-def test_a_live_run_sends_every_call_through_the_binary_named_by_cli_path_and_a_plan_does_not( tmp_path, monkeypatch ):
+def test_a_live_run_sends_every_call_through_the_binary_named_by_cli_path_and_a_plan_with_the_same_path_does_not( tmp_path, monkeypatch ):
     from cosa.repo.doc_lint import model_transport as mt
     argv, sha = run_dir_files( tmp_path )
-    binary    = tmp_path / "claude"
-    binary.write_text( "#!/bin/sh\n" )
-    binary.chmod( 0o755 )
+    binary    = argv[ argv.index( "--cli-path" ) + 1 ]
     seen      = {}
     monkeypatch.setattr( mt, "CLI_PATH", None )
 
@@ -469,8 +472,17 @@ def test_a_live_run_sends_every_call_through_the_binary_named_by_cli_path_and_a_
 
     ft.main( argv, deps=live_deps( sha, runner ) | { "factories": ( None, None ) } )
     assert mt.CLI_PATH is None and "live" not in seen
-    ft.main( [ *argv, "--live", "--cli-path", str( binary ) ], deps=live_deps( sha, runner ) )
-    assert seen[ "live" ] == str( binary )
+    ft.main( [ *argv, "--live" ], deps=live_deps( sha, runner ) )
+    assert seen[ "live" ] == binary
+
+
+def test_a_live_run_without_cli_path_stops_by_name_before_the_context_the_index_or_a_list( tmp_path, monkeypatch ):
+    argv, sha = run_dir_files( tmp_path, cli=False )
+    monkeypatch.setattr( ft, "write_seed_lists", lambda *a, **k: pytest.fail( "a list was written" ) )
+    deps = live_deps( sha, None ) | { "context": lambda root: pytest.fail( "a context was built" ), "built": lambda args: pytest.fail( "the index was built" ) }
+    with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps=deps )
+    assert e.value.code == er.NO_CLI_PATH and "--cli-path" in str( e.value )
+    assert ft.main( argv, deps={ "planted_sha": sha } )[ "live" ] is False
 
 
 def test_a_live_run_with_a_cli_path_that_is_no_executable_stops_by_name_before_the_index_or_a_list( tmp_path, monkeypatch ):
