@@ -155,7 +155,7 @@ def ask_ledgered( ask, ledger, version, model_id, system, prompt, stripped_text,
     return reply
 
 
-def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL ):
+def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL, max_tries=MAX_TRIES ):
     """
     Draft the sentence for one seed, rewriting on a failed check.
 
@@ -165,10 +165,11 @@ def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL ):
 
     Ensures:
         - returns { ok, seed, key, need, tries, history, reason, meta }
-        - at most MAX_TRIES sentences are checked: the first draft and one targeted rewrite after a rejection; an unreadable reply is asked again once with the same prompt
+        - at most max_tries sentences are checked, MAX_TRIES unless the caller asks for more: the first draft and a targeted rewrite after each rejection; an unreadable reply is asked again once with the same prompt
+        - a later rewrite is told every word refused so far, in the order refused, so it cannot swap one refused word for another and bring the first back; the second sentence is asked exactly as before
         - each sentence goes through copy_check first and leak_check only when that finds nothing, both free
         - a rewrite request names the failure kinds and the seed's own offending words, never a key symbol or its text
-        - ok is False with reason UNREADABLE_REPLY when both replies were unreadable, and with reason NEED_LEAKS_KEY after MAX_TRIES failed checks
+        - ok is False with reason UNREADABLE_REPLY when both replies were unreadable, and with reason NEED_LEAKS_KEY after max_tries failed checks
         - history lists, per try, the failure kinds and the words, and holds no key text
         - rejections lists, per rejected sentence, { try, sentence, failures } with the full failure details, and unreadable lists each reply that could not be read as { try, retry, reply }; both are for the local record
         - the key list is empty for a job with no keys, and the sentence is then checked against the seed alone
@@ -178,7 +179,7 @@ def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL ):
     failures, avoid, history = None, None, []
     record = { "ok": False, "seed": seed[ "id" ], "key": [ r[ "id" ] for r in job[ "keys" ] ], "need": None, "tries": 0, "history": history, "reason": er.NEED_LEAKS_KEY, "meta": job[ "meta" ],
               "rejections": [], "unreadable": [] }
-    for attempt in range( MAX_TRIES ):
+    for attempt in range( max_tries ):
         prompt   = need_writer.build_prompt( stripped, failures, None, None, avoid, write_lang )
         sentence = None
         for retry in range( 2 ):
@@ -196,8 +197,9 @@ def draft_need( job, ask, ledger, model_id=DRAFTER_MODEL ):
         if not found:
             record.update( ok=True, need=sentence, reason=None )
             return record
-        failures, avoid = rewrite_request( seed[ "id" ], found )
-        history.append( { "try": attempt, "failures": failures, "words": avoid } )
+        failures, refused = rewrite_request( seed[ "id" ], found )
+        avoid             = refused if avoid is None else avoid + [ w for w in refused if w not in avoid ]
+        history.append( { "try": attempt, "failures": failures, "words": refused } )
     return record
 
 

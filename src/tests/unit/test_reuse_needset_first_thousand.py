@@ -77,7 +77,7 @@ def test_a_pair_with_no_key_item_or_no_label_is_refused_by_name():
 def test_needs_are_drafted_one_pair_at_a_time_in_file_order_through_the_drafter_given():
     order = []
 
-    def draft_fn( job, ask, ledger ):
+    def draft_fn( job, ask, ledger, **kw ):
         order.append( job[ "id" ] )
         return { "ok": True, "need": f"sentence for {job[ 'id' ]}" }
 
@@ -89,7 +89,7 @@ def test_needs_are_drafted_one_pair_at_a_time_in_file_order_through_the_drafter_
 def test_a_need_that_did_not_pass_stops_the_drafting_by_name():
     calls = []
 
-    def draft_fn( job, ask, ledger ):
+    def draft_fn( job, ask, ledger, **kw ):
         calls.append( job[ "id" ] )
         return { "ok": job[ "id" ] != "d-rew01", "need": "n", "reason": "NEED_LEAKS_KEY" }
 
@@ -221,7 +221,7 @@ def test_the_live_control_drafts_first_then_plants_and_the_calls_are_the_drafter
     ctx     = types.SimpleNamespace( candidate_stage="live stage" )
     monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: log.append( ( "stage", live, len( entries ), cache ) ) or "planted stage" )
 
-    def draft_fn( job, ask, ledger ):
+    def draft_fn( job, ask, ledger, **kw ):
         log.append( ( "draft", job[ "seed" ][ "id" ] ) )
         return { "ok": True, "need": SENTENCE }
 
@@ -665,7 +665,7 @@ def control_world( ledgers, miss_on_second=False ):
     """Return ( ctx, draft_fn, check ) for a multi-pass control on fakes."""
     ctx    = types.SimpleNamespace( candidate_stage="live stage" )
 
-    def draft_fn( job, ask, ledger ):
+    def draft_fn( job, ask, ledger, **kw ):
         ledgers.append( ledger )
         return { "ok": True, "need": SENTENCE }
 
@@ -753,7 +753,7 @@ def budget_control( budget_on, ledgers, error_code=er.STAGE_BUDGET_REACHED ):
     """Return ( ctx, draft_fn, check ); a draft from the ledger budget_on raises."""
     ctx, draft_fn, check = control_world( ledgers )
 
-    def drafting( job, ask, ledger ):
+    def drafting( job, ask, ledger, **kw ):
         if ledger == budget_on: raise er.NeedsetError( error_code, "the control stage used 250 of its 250 calls" )
         return draft_fn( job, ask, ledger )
 
@@ -923,3 +923,93 @@ def test_a_stage_that_crashes_leaves_stage_reports_json_with_the_finished_stages
     assert report[ "stages" ][ "attribution" ] == { "status": "done", "report": { "found": 5 } } and report[ "stages" ][ "yield" ][ "status" ] == "done"
     assert report[ "stages" ][ "control" ] == { "status": "failed", "code": "RuntimeError", "detail": "asyncio.run() cannot be called from a running event loop" }
     assert report[ "stages" ][ "remainder" ] == { "status": "not_run" } and report[ "used" ] == 0 and report[ "limit" ] == call_cap.CALL_LIMIT
+
+
+def test_a_control_pair_is_tried_control_tries_times_and_the_drafter_is_told_so( tmp_path ):
+    seen = []
+
+    def draft_fn( job, ask, ledger, **kw ):
+        seen.append( kw )
+        return { "ok": True, "need": "n" }
+
+    asyncio.run( ft.draft_control_needs( pairs()[ :2 ], lambda p: { "id": p[ "rewrite" ][ "id" ] }, None, None, draft_fn ) )
+    assert seen == [ { "max_tries": ft.CONTROL_TRIES } ] * 2 and ft.CONTROL_TRIES > draft.MAX_TRIES
+
+
+def test_a_pair_that_never_drafts_is_handed_to_on_undrafted_and_left_out_while_the_others_go_on():
+    def draft_fn( job, ask, ledger, **kw ): return { "ok": job[ "id" ] != "d-rew01", "need": f"n-{job[ 'id' ]}", "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [ { "try": 0 } ] }
+
+    gone  = []
+    needs = asyncio.run( ft.draft_control_needs( pairs()[ :4 ], lambda p: { "id": p[ "rewrite" ][ "id" ] }, None, None, draft_fn, on_undrafted=lambda p, record: gone.append( ( p[ "rewrite" ][ "id" ], record[ "reason" ] ) ) ) )
+    assert needs == { "d-rew00": "n-d-rew00", "d-rew02": "n-d-rew02", "d-rew03": "n-d-rew03" } and gone == [ ( "d-rew01", "NEED_LEAKS_KEY" ) ]
+
+
+def test_the_control_runs_over_the_pairs_that_drafted_and_the_report_names_the_pair_left_out_and_why( monkeypatch ):
+    ps, log = [ real_pair( i ) for i in range( 20 ) ], []
+    ctx     = types.SimpleNamespace( candidate_stage="live stage" )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: log.append( ( "planted", [ e[ "id" ] for e in entries ] ) ) or "planted stage" )
+
+    def draft_fn( job, ask, ledger, **kw ):
+        if job[ "seed" ][ "id" ] == "d-orig01": return { "ok": False, "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [ { "try": 0, "failures": [ "identifier" ], "words": [ "toolbar" ] } ] }
+        return { "ok": True, "need": SENTENCE }
+
+    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ], "widened_ids": [] } }
+
+    out = asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
+    assert out[ "pairs" ] == 19 and out[ "found" ] == 19 and out[ "stop" ] is False and "d-rew01" not in log[ 0 ][ 1 ] and len( log[ 0 ][ 1 ] ) == 19
+    assert out[ "undrafted" ] == [ { "pair": "d-rew01", "seed": "d-orig01", "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [ { "try": 0, "failures": [ "identifier" ], "words": [ "toolbar" ] } ] } ]
+
+
+def test_a_control_where_no_pair_drafts_still_fails_by_name_and_a_clean_one_reports_nothing_left_out( monkeypatch ):
+    ps  = [ real_pair( i ) for i in range( 3 ) ]
+    ctx = types.SimpleNamespace( candidate_stage="live stage" )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: "planted stage" )
+
+    def leaking( job, ask, ledger, **kw ): return { "ok": False, "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [] }
+
+    def clean( job, ask, ledger, **kw ): return { "ok": True, "need": SENTENCE }
+
+    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ], "widened_ids": [] } }
+
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, leaking, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
+    assert e.value.code == er.CONTROL_NEED_UNDRAFTED and "none of the 3 pairs" in e.value.detail and "d-rew00" in e.value.detail
+    out = asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, clean, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
+    assert out[ "undrafted" ] == [] and out[ "pairs" ] == 3
+
+
+def two_pass_control( monkeypatch, leaves_out ):
+    """Run a two-pass control on fakes; leaves_out names the seeds each pass never drafts."""
+    ps  = [ real_pair( i ) for i in range( 20 ) ]
+    ctx = types.SimpleNamespace( candidate_stage="live stage" )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache: "planted stage" )
+
+    def draft_fn( job, ask, ledger, **kw ):
+        if job[ "seed" ][ "id" ] in leaves_out[ ledger ]: return { "ok": False, "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [] }
+        return { "ok": True, "need": SENTENCE }
+
+    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ], "widened_ids": [] } }
+
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+                                   passes=2, pass_resources=lambda n: ( "L2", "C2" ) )
+    return asyncio.run( stage() )
+
+
+def test_the_report_says_how_many_pairs_were_wanted_in_each_pass_and_at_the_top_so_a_short_run_cannot_read_as_complete( monkeypatch ):
+    out = two_pass_control( monkeypatch, { "L1": { "d-orig01" }, "L2": { "d-orig01" } } )
+    assert out[ "pairs_wanted" ] == 20 and [ p[ "pairs_wanted" ] for p in out[ "passes" ] ] == [ 20, 20 ]
+    assert out[ "pairs" ] == 19 and out[ "found" ] == 19 and out[ "missed" ] == []                                  # the undrafted pair is neither found nor missed
+    assert out[ "pairs" ] + len( out[ "undrafted" ] ) == out[ "pairs_wanted" ]
+
+
+def test_pairs_wanted_is_in_the_report_of_a_control_the_budget_stopped_before_any_pass_finished( monkeypatch ):
+    out = run_budget_control( monkeypatch, "L1" )
+    assert out[ "passes" ] == [] and out[ "pairs_wanted" ] == 20
+
+
+def test_consistent_compares_the_pairs_left_out_as_well_as_the_pairs_missed( monkeypatch ):
+    same = two_pass_control( monkeypatch, { "L1": { "d-orig01" }, "L2": { "d-orig01" } } )
+    assert same[ "consistent" ] is True
+    differs = two_pass_control( monkeypatch, { "L1": { "d-orig01" }, "L2": { "d-orig02" } } )
+    assert differs[ "consistent" ] is False and differs[ "passes" ][ 0 ][ "missed" ] == differs[ "passes" ][ 1 ][ "missed" ] == []
+    one_less = two_pass_control( monkeypatch, { "L1": { "d-orig01" }, "L2": set() } )
+    assert one_less[ "consistent" ] is False

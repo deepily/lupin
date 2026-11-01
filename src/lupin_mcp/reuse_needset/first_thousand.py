@@ -25,6 +25,7 @@ from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
 QUERY_CACHE  = "query-cache"
+CONTROL_TRIES = 4                                # sentences tried per control pair; the Set B stages keep draft.MAX_TRIES
 REPORT_FILE  = "stage-reports.json"
 REJECTIONS_FILE = "ledger-rejections.jsonl"
 CONTROL_PASSES = 2
@@ -82,27 +83,32 @@ def remainder_pairs( pairs, answer_key, first_labels, second_labels ):
     return out
 
 
-async def draft_control_needs( pairs, make_job, ask, ledger, draft_fn ):
+async def draft_control_needs( pairs, make_job, ask, ledger, draft_fn, on_undrafted=None ):
     """
     Write each pair's need sentence, in file order, with the real Set B drafter.
 
     Requires:
-        - make_job( pair ) returns the job draft_fn takes; draft_fn( job, ask, ledger ) returns a record with ok and need
+        - make_job( pair ) returns the job draft_fn takes; draft_fn( job, ask, ledger, max_tries=n ) returns a record with ok and need
+        - on_undrafted is None, or a function taking ( pair, record ) for a pair whose sentence never passed
         - the caller may be inside a running event loop, as the control stage is
         - every model call goes through the installed cap, so these calls count toward the 1,000
-        - each pair is drafted on a worker thread that carries the caller's context, so the call cap files its calls under the running stage and the drafter's own event loop does not meet the running one
 
     Ensures:
-        - returns { rewrite id: sentence } for every pair
+        - returns { rewrite id: sentence } for every pair that drafted, each tried up to CONTROL_TRIES times
+        - each pair drafts on a worker thread that carries the caller's context, so the call cap files its calls under the running stage and the drafter's own event loop does not meet the running one
+        - with on_undrafted a pair that did not pass is handed to it and left out, and the others go on; one leaking pair cannot fail the stage
 
     Raises:
-        - NeedsetError CONTROL_NEED_UNDRAFTED naming the first pair whose sentence did not pass, so a control never runs with a missing need
+        - NeedsetError CONTROL_NEED_UNDRAFTED naming the first pair whose sentence did not pass, when on_undrafted is None, so a control never runs with a missing need unless the caller records the gap
         - whatever the drafter raises, including CALL_CAP_REACHED
     """
     needs = {}
     for p in pairs:
-        record = await asyncio.to_thread( lambda: draft_fn( make_job( p ), ask, ledger ) )
-        if not record[ "ok" ]: raise er.NeedsetError( er.CONTROL_NEED_UNDRAFTED, f"{p[ 'rewrite' ][ 'id' ]}: {record[ 'reason' ]}" )
+        record = await asyncio.to_thread( lambda: draft_fn( make_job( p ), ask, ledger, max_tries=CONTROL_TRIES ) )
+        if not record[ "ok" ]:
+            if on_undrafted is None: raise er.NeedsetError( er.CONTROL_NEED_UNDRAFTED, f"{p[ 'rewrite' ][ 'id' ]}: {record[ 'reason' ]}" )
+            on_undrafted( p, record )
+            continue
         needs[ p[ "rewrite" ][ "id" ] ] = record[ "need" ]
     return needs
 
@@ -250,10 +256,12 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         - passes is how many times the whole control runs; pass_resources( n ) returns the ( drafting ledger, query-cache folder ) of pass n for n of 1 or more, so a later pass asks again and is not answered from the first
 
     Ensures:
-        - the needs are drafted first, one at a time in file order, and a need that does not pass stops the stage by name
+        - the needs are drafted first, one at a time in file order, each tried up to CONTROL_TRIES times
+        - a pair whose sentence never passes is left out and listed in the report's undrafted with its reason and history, and the control runs over the others; only when no pair drafted does the stage stop by name
+        - an undrafted pair counts as neither found nor missed: pairs and found count the pairs that drafted, and pairs_wanted, in each pass report and at the top level, is the number planned
         - the pool the control plants into and restores is the index's own sendable entries
         - the checker is planted_check over a planted stage that shares the live stage's folders and client
-        - with more than one pass the report is the first pass's, plus passes ( each pass's report ), consistent ( every pass missed the same pairs ) and stop true when any pass stopped
+        - with more than one pass the report is the first pass's, plus passes ( each pass's report ), consistent ( every pass missed the same pairs and left out the same pairs ) and stop true when any pass stopped
         - when the stage's own call budget ends a pass, the passes already finished stay in the report, with budget_reached True, budget_detail, passes_done and passes_wanted; with none finished passes is empty
 
     Raises:
@@ -264,12 +272,16 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
     async def one_pass( n ):
         """Ensures: returns the control report of pass n, from that pass's own ledger and cache."""
         book, cache = ( ledger, cache_dir ) if n == 0 else pass_resources( n )
-        needs   = await draft_control_needs( pairs, lambda p: control_job( p, strip_fn ), ask, book, draft_fn )
-        entries = [ planted_pool.planted_entry( p[ "rewrite" ] ) for p in pairs ]
-        planted = planted_stage_for( ctx.candidate_stage, entries, cache )
-        pool    = prepare( ctx )[ 1 ]
-        asker   = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids )
-        return await stage3.control_stage( pool, pairs, asker, build_stage )()
+        undrafted = []
+        needs     = await draft_control_needs( pairs, lambda p: control_job( p, strip_fn ), ask, book, draft_fn,
+                                               on_undrafted=lambda p, record: undrafted.append( { "pair": p[ "rewrite" ][ "id" ], "seed": p[ "original" ][ "id" ], "reason": record[ "reason" ], "tries": record[ "tries" ], "history": record[ "history" ] } ) )
+        drafted   = [ p for p in pairs if p[ "rewrite" ][ "id" ] in needs ]
+        if not drafted: raise er.NeedsetError( er.CONTROL_NEED_UNDRAFTED, f"none of the {len( pairs )} pairs drafted a need that passed; first: {undrafted[ 0 ][ 'pair' ]}: {undrafted[ 0 ][ 'reason' ]}" )
+        entries   = [ planted_pool.planted_entry( p[ "rewrite" ] ) for p in drafted ]
+        planted   = planted_stage_for( ctx.candidate_stage, entries, cache )
+        pool      = prepare( ctx )[ 1 ]
+        asker     = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids )
+        return { **await stage3.control_stage( pool, drafted, asker, build_stage )(), "undrafted": undrafted, "pairs_wanted": len( pairs ) }
 
     async def stage():
         """Ensures: returns the control report."""
@@ -283,8 +295,9 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
                 break
         if passes == 1 and detail is None: return reports[ 0 ]
         first = reports[ 0 ] if reports else {}
-        return { **first, "passes": reports, "consistent": all( r[ "missed" ] == first[ "missed" ] for r in reports ), "stop": any( r[ "stop" ] for r in reports ),
-                 "budget_reached": detail is not None, "budget_detail": detail, "passes_done": len( reports ), "passes_wanted": passes }
+        same  = lambda r: ( r[ "missed" ], [ u[ "pair" ] for u in r[ "undrafted" ] ] ) == ( first[ "missed" ], [ u[ "pair" ] for u in first[ "undrafted" ] ] )
+        return { **first, "passes": reports, "consistent": all( same( r ) for r in reports ), "stop": any( r[ "stop" ] for r in reports ),
+                 "budget_reached": detail is not None, "budget_detail": detail, "passes_done": len( reports ), "passes_wanted": passes, "pairs_wanted": len( pairs ) }
     return stage
 
 
