@@ -386,6 +386,7 @@ def test_the_report_prints_the_member_figures_and_calls_the_any_member_counts_a_
     LT.write_report( tmp_path, s, s, [], { "checker": "c1" }, members=m )
     text = ( tmp_path / "loss-report.md" ).read_text( encoding="utf-8" )
     assert "Per key member (the figure to quote):" in text and "| miss rate | 0.5000 |" in text
+    assert text.index( "Any-member view, a comparison only" ) < text.index( "| outcome | before | after |" )
     assert "Comparison only, not a result: of 3 matched needs, 3 have any member found and 1 have every member found." in text
     assert json.loads( ( tmp_path / "loss-report.json" ).read_text( encoding="utf-8" ) )[ "members" ] == m
     LT.write_report( tmp_path, s, s, [], { "checker": "c1" } )

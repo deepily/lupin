@@ -67,10 +67,12 @@ def source_hard( rows, index, k=BM25_K ):
 
     Raises:
         - NeedsetError BAD_NEED for a row with no targets
+        - NeedsetError SEED_IS_TARGET for a row whose seed is one of its own targets, before any rank is read
     """
     out = []
     for row in rows:
         if not row[ "targets" ]: raise er.NeedsetError( er.BAD_NEED, f"{row[ 'seed' ]}: a hardness row needs at least one target" )
+        if row[ "seed" ] in row[ "targets" ]: raise er.NeedsetError( er.SEED_IS_TARGET, f"{row[ 'seed' ]}: the seed is left out of the search, so it cannot be its own target" )
         ranks = { t: rank_of( index, row[ "need" ], t, exclude=( row[ "seed" ], ) ) for t in row[ "targets" ] }
         missed = [ t for t in row[ "targets" ] if is_hard( ranks[ t ], k ) ]
         out.append( { **row, "ranks": ranks, "hard_members": missed, "hard": len( missed ) == len( row[ "targets" ] ) } )

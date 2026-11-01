@@ -351,12 +351,12 @@ def write_report( out_dir, before, after, records, meta, members=None ):
 
     Ensures:
         - the json holds meta, both summaries and one row per need without its transcript
-        - the markdown prints the figures before and after the confirmations side by side
+        - the markdown prints the figures before and after the confirmations side by side, under a line that calls them an any-member comparison
         - given members, the json holds them and the markdown prints the per-member figures, with the any-member counts labelled as a comparison only
     """
     rows = [ { k: v for k, v in r.items() if k != "transcript" } for r in records ]
     ( out_dir / "loss-report.json" ).write_text( json.dumps( { "meta": meta, "before": before, "after": after, **( { "members": members } if members is not None else {} ), "rows": rows }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
-    lines = [ "# Loss report", "", *[ f"- {k}: {v}" for k, v in sorted( meta.items() ) ], "", "| outcome | before | after |", "|---|---|---|" ]
+    lines = [ "# Loss report", "", *[ f"- {k}: {v}" for k, v in sorted( meta.items() ) ], "", "Any-member view, a comparison only: a need counts as found when any one key member is.", "", "| outcome | before | after |", "|---|---|---|" ]
     for k in sorted( set( before[ "by_lost_at" ] ) | set( after[ "by_lost_at" ] ) ):
         lines.append( f"| {k} | {before[ 'by_lost_at' ].get( k, 0 )} | {after[ 'by_lost_at' ].get( k, 0 )} |" )
     lines += [ f"| miss rate | {before[ 'miss_rate' ]:.4f} | {after[ 'miss_rate' ]:.4f} |", f"| upper bound | {before[ 'upper_bound' ]:.4f} | {after[ 'upper_bound' ]:.4f} |", "",

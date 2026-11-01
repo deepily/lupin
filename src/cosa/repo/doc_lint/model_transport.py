@@ -481,11 +481,13 @@ def _agy_call( model, prompt, timeout_seconds ):
           scratch directory each time; no other failure is tried again here
         - each wait is announced by one line on standard error, naming the model, the try and the wait
         - a wait that AGY_SLEEP reports as cut short, as AGY_WAKE does, ends the tries at once
-        - the caller's budget is not charged again: complete charges before calling this
+        - the per-model cap is not charged again: complete charges before calling this
+        - the charge hook, when set, sees every try after the first, once its wait is over, so a retried try counts as a call
 
     Raises:
         - ModelUnavailableError, a ModelCallError, naming the number of tries when every try was answered
           unavailable; ModelWaitCutShort, its subclass, saying the wait was cut short by a stop
+        - whatever the charge hook raises before a retried try, with the try not made
         - whatever _agy_call_once raises otherwise
     """
     waits = list( AGY_UNAVAILABLE_WAITS )
@@ -502,6 +504,7 @@ def _agy_call( model, prompt, timeout_seconds ):
             print( f"agy unavailable (model {model}), try {tries - len( waits ) - 1} of {tries}; waiting {wait}s", file=sys.stderr )
             if AGY_SLEEP( wait ):
                 raise ModelWaitCutShort( f"model call to {model} stopped waiting for the service, the wait was cut short by a stop after try {tries - len( waits ) - 1} of {tries}: {e}" ) from e
+            if CHARGE_HOOK is not None: CHARGE_HOOK( model )
 
 
 def _scratch_parent():

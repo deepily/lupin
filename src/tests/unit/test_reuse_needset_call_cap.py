@@ -175,3 +175,49 @@ def test_two_processes_cannot_both_take_the_last_call( tmp_path ):
     for p in procs: p.join()
     answers = [ out.get() for _ in procs ]
     assert answers.count( True ) == 10 and answers.count( False ) == 6 and call_cap.CallCap( path, limit=10 ).used() == 10
+
+
+class Busy:
+    """A stand-in for one agy try that answers unavailable until the given try, then answers."""
+
+    def __init__( self, answer_on ):
+        self.tries, self.answer_on = 0, answer_on
+
+    def __call__( self, model, prompt, timeout_seconds ):
+        self.tries += 1
+        if self.tries < self.answer_on: raise mt.agy_runtime.AgyUnavailable( "busy" )
+        return "answer"
+
+
+def quick_waits( monkeypatch, once, cut_short=False ):
+    """Put the agy retry under test: no real waits, and a stand-in for the single try."""
+    monkeypatch.setattr( mt, "_agy_call_once", once )
+    monkeypatch.setattr( mt, "AGY_UNAVAILABLE_WAITS", ( 0, 0 ) )
+    monkeypatch.setattr( mt, "AGY_SLEEP", lambda wait: cut_short )
+
+
+def test_each_retried_agy_try_is_charged_after_its_wait( tmp_path, monkeypatch ):
+    cap, once = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), limit=3 ), Busy( answer_on=3 )
+    quick_waits( monkeypatch, once )
+    with cap.installed():
+        cap.charge( FABLE )          # the first try, which complete charges before _agy_call runs
+        text, _ = mt._agy_call( FABLE, "p", 5 )
+    assert text == "answer" and once.tries == 3 and cap.used() == 3
+
+
+def test_the_cap_can_stop_an_agy_retry_before_the_try_is_made( tmp_path, monkeypatch ):
+    cap, once = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), limit=2 ), Busy( answer_on=9 )
+    quick_waits( monkeypatch, once )
+    with cap.installed():
+        cap.charge( FABLE )
+        with pytest.raises( er.NeedsetError ) as caught: mt._agy_call( FABLE, "p", 5 )
+    assert caught.value.code == er.CALL_CAP_REACHED and once.tries == 2 and cap.used() == 2
+
+
+def test_a_wait_cut_short_charges_nothing_more( tmp_path, monkeypatch ):
+    cap, once = call_cap.CallCap( str( tmp_path / "calls.jsonl" ) ), Busy( answer_on=9 )
+    quick_waits( monkeypatch, once, cut_short=True )
+    with cap.installed():
+        cap.charge( FABLE )
+        with pytest.raises( mt.ModelWaitCutShort ): mt._agy_call( FABLE, "p", 5 )
+    assert once.tries == 1 and cap.used() == 1

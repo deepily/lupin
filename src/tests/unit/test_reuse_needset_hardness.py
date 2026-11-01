@@ -84,3 +84,10 @@ def test_the_search_reads_identifiers_and_docstrings_and_not_the_body():
     index = hardness.build_index( [ entry( "m.a", "alpha", "uses zebra" ), entry( "m.b", "beta", "plain" ) ] )
     assert hardness.rank_of( index, "zebra", "m.a" ) == 1
     assert hardness.rank_of( index, "zebra", "m.b" ) is None
+
+
+def test_a_seed_that_is_its_own_target_is_refused_by_name_before_any_rank_is_read():
+    index, _ = crowded_index()
+    rows = [ { "seed": "m.target_late", "need": "banana", "targets": [ "m.target_best", "m.target_late" ], "lang": "py" } ]
+    with pytest.raises( er.NeedsetError ) as caught: hardness.source_hard( rows, index )
+    assert caught.value.code == er.SEED_IS_TARGET and "m.target_late" in caught.value.detail

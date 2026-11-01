@@ -4,7 +4,7 @@ The stage runner for the first 1,000 model calls of Set B (plan section 11.4).
 Four stages run in order under one shared call cap: attribution, yield, control, remainder. The control is built elsewhere and handed in.
 The runner makes no call of its own. It never builds a packet, takes a person's ruling or writes a label file.
 """
-from cosa.repo.doc_lint import harness_report
+from cosa.repo.doc_lint import harness_report, model_transport
 from cosa.repo.labelling import run_check
 from lupin_mcp.reuse_needset import call_cap, hardness, loss_trace
 from lupin_mcp.reuse_needset import errors as er
@@ -118,9 +118,11 @@ async def run_stages( cap, stages ):
         - the cap, the stop and a named failure end the run with a report and no exception
 
     Raises:
+        - NeedsetError CAP_NOT_INSTALLED when model_transport.CHARGE_HOOK is not this cap's charge, before any stage starts
         - ValueError when a stage is missing
         - whatever a stage raises that is not a NeedsetError
     """
+    if model_transport.CHARGE_HOOK != cap.charge: raise er.NeedsetError( er.CAP_NOT_INSTALLED, "run_stages needs the cap installed, or model calls would go uncounted" )
     missing = [ name for name in ORDER if name not in stages ]
     if missing: raise ValueError( f"stages missing: {missing}" )
     results, halted = {}, False

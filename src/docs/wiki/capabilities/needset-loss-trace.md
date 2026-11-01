@@ -6,14 +6,16 @@ pins:
   - lupin_mcp.reuse_needset.loss_trace.check_need@d4336855da
   - lupin_mcp.reuse_needset.loss_trace.index_locator@e278b6c99a
   - lupin_mcp.reuse_needset.loss_trace.classify@ef032f3b45
-  - lupin_mcp.reuse_needset.loss_trace.trace_need@a2aa83da21
-  - lupin_mcp.reuse_needset.loss_trace.trace_version@36c418760c
+  - lupin_mcp.reuse_needset.loss_trace.classify_members@550175a9c5
+  - lupin_mcp.reuse_needset.loss_trace.trace_need@54e338c445
+  - lupin_mcp.reuse_needset.loss_trace.trace_version@1fbedd0c20
   - lupin_mcp.reuse_needset.loss_trace.trace_all@35441a6794
   - lupin_mcp.reuse_needset.loss_trace.extend_key@b6e8c993a7
-  - lupin_mcp.reuse_needset.loss_trace.retrace@c9ad589de6
+  - lupin_mcp.reuse_needset.loss_trace.retrace@c8454dcb15
   - lupin_mcp.reuse_needset.loss_trace.confirmation_items@91778eb0ec
   - lupin_mcp.reuse_needset.loss_trace.summarize@c6b2aa3ea7
-  - lupin_mcp.reuse_needset.loss_trace.write_report@6477e4e601
+  - lupin_mcp.reuse_needset.loss_trace.summarize_members@09464ee28c
+  - lupin_mcp.reuse_needset.loss_trace.write_report@f7f4748d3f
 ---
 # Need set: loss trace
 
@@ -24,13 +26,15 @@ Finds where, in the search pipeline, a need's key gets lost. Each need goes thro
 - `asked_ids` lists the entries sent to the judge: the stage's ids plus its widened ids, sorted. A receipt with no candidate stage, or a failed one, raises `RECEIPT_FIELD_ABSENT`.
 - `index_locator` builds the function that finds a symbol's file and line range in the searchable index.
 - `classify` names where a matched need's key was lost, as the first stage whose set of key symbols is empty. `ALT_MATCH` replaces a failed ruling when a shortlisted symbol outside the key was ruled the same job.
+- `classify_members` does the same for each key member on its own. A member is found only when that member passed all four stages. No other member's progress counts for it. A nothing need has no members.
 - A nothing need gets `FALSE_MATCH` if the checker ended with reuse or extend or the probe ruled a symbol the same job, else `CORRECT_NO_MATCH`.
-- `trace_need` traces one need. The probe runs only when its rulings can change the answer.
-- `trace_version` names the trace, so a changed checker call, classifier or probe prompt is a ledger miss.
+- `trace_need` traces one need and stores its members beside its loss stage. The probe runs only when its rulings can change the answer.
+- `trace_version` names the trace, so a changed checker call, classifier, member classifier or probe prompt is a ledger miss.
 - `trace_all` first checks the manifest against the live index and vectors, and raises `INDEX_DIFFERS`, `VECTORS_DIFFER` or `FREEZE_INCOMPLETE` before any call ([[needset-freeze]]). It then traces every need and skips those the ledger holds. The ledger key holds the need, source commit, index hash, checker commit, probe model and trace version.
 
 ## Confirmation and report
 - `extend_key` adds reviewer-confirmed alternatives to a need's key, sorted, with the version raised by one. The need's id stays the same.
 - `retrace` classifies a stored record again against the key as it now stands, from the stored evidence, so no call is made.
 - `confirmation_items` builds one reviewer item for every alt match and false match, showing the proposed alternatives' source or the ruled symbols' source.
-- `summarize` counts matched needs by loss stage, kind and language, with the 95 percent upper bound on the miss rate. `write_report` writes a JSON and a markdown report, with the figures before and after the confirmations.
+- `summarize` counts matched needs by loss stage, kind and language, with the 95 percent upper bound on the miss rate. `write_report` writes a JSON and a markdown report, with the figures before and after the confirmations. The markdown calls that table an any-member comparison only.
+- `summarize_members` counts members, not needs, with the 95 percent upper bound on the member miss rate. That is the figure to quote. It also holds the any-member counts, labelled as a comparison. Given those counts, `write_report` prints a per-member table.

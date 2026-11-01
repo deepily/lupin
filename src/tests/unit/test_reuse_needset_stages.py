@@ -213,3 +213,11 @@ def test_the_runner_loads_no_labelling_tool_and_makes_no_packet():
              "print( sorted( m for m in sys.modules if m.startswith( 'cosa.repo.labelling.' ) and m.rsplit( '.', 1 )[ 1 ] in ( 'packets', 'confirm', 'adjudicate', 'agreement', 'pair_labels' ) ) )" )
     out  = subprocess.run( [ sys.executable, "-I", "-c", code ], capture_output=True, text=True, timeout=120 )
     assert out.returncode == 0 and out.stdout.strip().splitlines()[ -1 ] == "[]", out.stderr[ -300: ]
+
+
+def test_run_stages_refuses_unless_this_cap_is_installed_and_starts_nothing( tmp_path ):
+    cap, other, transport = new_cap( tmp_path ), call_cap.CallCap( str( tmp_path / "other.jsonl" ) ), Transport()
+    with pytest.raises( er.NeedsetError ) as bare: asyncio.run( stages.run_stages( cap, all_stages( transport ) ) )
+    assert bare.value.code == er.CAP_NOT_INSTALLED
+    with other.installed(), pytest.raises( er.NeedsetError ) as wrong: asyncio.run( stages.run_stages( cap, all_stages( transport ) ) )
+    assert wrong.value.code == er.CAP_NOT_INSTALLED and transport.calls == 0 and cap.used() == 0 and other.used() == 0
