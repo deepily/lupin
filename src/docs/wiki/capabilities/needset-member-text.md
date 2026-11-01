@@ -10,6 +10,9 @@ pins:
   - lupin_mcp.reuse_needset.strip.strip_members@da1db082ae
   - lupin_mcp.reuse_needset.strip.strip_member@af135d14ff
   - lupin_mcp.reuse_needset.strip.bodies_for@895645cb16
+  - lupin_mcp.reuse_needset.source_at.full_sha@8660da40b2
+  - lupin_mcp.reuse_needset.source_at.tracked_at@01241479bb
+  - lupin_mcp.reuse_needset.source_at.export@b835db4951
 ---
 # Need set: member text
 
@@ -29,3 +32,7 @@ Prepares member text for the need set. The drafter gets stripped names, and sear
 - `strip_members` returns, for each id, the kind, the text and the forbidden names. The text holds none of the forbidden names, and all script records share one node start.
 - `strip_member` strips one member through the same path.
 - `bodies_for` returns each member's source as written, Python by the need-input lookup and script members through one node start.
+
+## The source commit
+- `export` writes the source commit's `src` folder once under the run folder, with a marker naming the full sha. A folder from another commit raises `SOURCE_EXPORT_MISMATCH`.
+- `tracked_at` lists the commit's files under `src`, and `full_sha` resolves a commit name. A run reads the export, never the working tree, because peers change the tree during a run.

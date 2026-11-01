@@ -114,7 +114,7 @@ def test_the_counts_name_the_four_reasons_and_the_disputed_ids():
     tally = sp.Tally()
     tally[ "disputed" ] += 1
     tally.ids.append( "n-1" )
-    assert sp.counted( tally ) == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 1, "unreadable_reply": 0, "disputed_ids": [ "n-1" ], "skipped": [] }
+    assert sp.counted( tally ) == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 1, "unreadable_reply": 0, "unstrippable_seed": 0, "disputed_ids": [ "n-1" ], "skipped": [] }
     tally[ "unreadable_reply" ] += 1
     tally.skipped.append( { "seed": "s-1", "code": "UNREADABLE_REPLY", "detail": "earlier stage" } )
     since = sp.mark( tally )
@@ -123,7 +123,7 @@ def test_the_counts_name_the_four_reasons_and_the_disputed_ids():
     tally.ids.append( "n-2" )
     tally[ "unreadable_reply" ] += 1
     tally.skipped.append( { "seed": "s-9", "code": "UNREADABLE_REPLY", "detail": "k" } )
-    assert sp.counted( tally, since ) == { "not_pooled": 0, "no_partner": 1, "draft_failed": 0, "disputed": 2, "unreadable_reply": 1, "disputed_ids": [ "n-2" ], "skipped": [ { "seed": "s-9", "code": "UNREADABLE_REPLY", "detail": "k" } ] }
+    assert sp.counted( tally, since ) == { "not_pooled": 0, "no_partner": 1, "draft_failed": 0, "disputed": 2, "unreadable_reply": 1, "unstrippable_seed": 0, "disputed_ids": [ "n-2" ], "skipped": [ { "seed": "s-9", "code": "UNREADABLE_REPLY", "detail": "k" } ] }
 
 
 class Vectors:
@@ -294,3 +294,23 @@ def test_the_rejection_ledger_appends_one_flushed_line_per_row_and_reads_back_in
     led.add( { "kind": "a" } )
     led.add( { "kind": "b", "x": 1 } )
     assert [ r[ "kind" ] for r in led.rows() ] == [ "a", "b" ] and ( tmp_path / "r.jsonl" ).read_text( encoding="utf-8" ).count( "\n" ) == 2
+
+
+def test_a_seed_the_strip_step_cannot_find_is_skipped_with_its_reason_and_the_next_seed_goes_on( tmp_path ):
+    asked = []
+
+    def first_is_gone( rec ):
+        asked.append( rec )
+        if len( asked ) == 1: raise er.NeedsetError( er.STRIP_FAILED, "mod.f: no member f" )
+        return strip_of( rec )
+
+    renv = renv_for( tmp_path )
+    renv.ctx.bodies[ "d-orig00" ] = "def original_body(): return 0"
+    renv.by_id[ "other" ] = renv.ctx.by_id[ "other" ] = renv.by_id[ "d-orig00" ]
+    renv.strip_fn = first_is_gone
+    tally, rej = sp.Tally(), sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) )
+    fn = sp.final_need_fn( renv, { "d-orig00": "vector", "other": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), "second-model", tally, rej )
+    assert fn( "d-orig00" ) is None and tally[ "unstrippable_seed" ] == 1 and tally[ "unreadable_reply" ] == 0
+    assert tally.skipped == [ { "seed": "d-orig00", "code": er.STRIP_FAILED, "detail": "mod.f: no member f" } ]
+    assert [ ( r[ "kind" ], r[ "code" ] ) for r in rej.rows() ] == [ ( "seed_skipped", er.STRIP_FAILED ) ]
+    assert fn( "other" )[ "status" ] == "final" and tally[ "unstrippable_seed" ] == 1 and sp.counted( tally )[ "unstrippable_seed" ] == 1

@@ -20,11 +20,12 @@ from cosa.repo.labelling import run_check
 from cosa.repo.symindex.candidates import candidate_stage
 from cosa.repo.symindex.candidates import vector_store as vs
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, smoke, stage3, stage_parts, stage_seeds, stages, strip
+from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, smoke, source_at, stage3, stage_parts, stage_seeds, stages, strip
 from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
 QUERY_CACHE  = "query-cache"
+SOURCE_FOLDER = "source-at-commit"
 REPORT_FILE  = "stage-reports.json"
 REJECTIONS_FILE = "ledger-rejections.jsonl"
 CONTROL_PASSES = 2
@@ -359,8 +360,8 @@ def stage_factories( lists_path, parts ):
     Ensures:
         - the stages are stage_seeds.attribution_stage and stage_seeds.yield_stage over that file and those parts
         - each report also carries the counts of its own seeds that gave no final need, with the disputed ids; the stage that ran first does not leak into the one after
-        - a stage whose every seed was skipped for an unreadable reply raises ALL_SEEDS_UNREADABLE, so a dead model is a failure and never a finding
-        - a stage that ends with no need while any seed was skipped as unreadable raises NO_NEEDS_WITH_SKIPS, because an unread seed could have held the need
+        - a stage whose every seed was skipped, for an unreadable reply or an unstrippable seed, raises ALL_SEEDS_UNREADABLE, so a dead model is a failure and never a finding
+        - a stage that ends with no need while any seed was skipped raises NO_NEEDS_WITH_SKIPS, because a skipped seed could have held the need
         - a stage that ends with no need and no skipped seed is a stop, as before
 
     Raises:
@@ -375,8 +376,9 @@ def stage_factories( lists_path, parts ):
             report = await stage()
             counts = stage_parts.counted( parts[ "tally" ], since )
             seeds  = len( stage_seeds.load_lists( lists_path )[ name ][ "order" ] )
-            if seeds and counts[ stage_parts.UNREADABLE ] == seeds: raise er.NeedsetError( er.ALL_SEEDS_UNREADABLE, f"all {seeds} {name} seeds were skipped for an unreadable reply" )
-            if report[ NEEDS_KEY[ name ] ] == 0 and counts[ stage_parts.UNREADABLE ]: raise er.NeedsetError( er.NO_NEEDS_WITH_SKIPS, f"{name} found no need and {counts[ stage_parts.UNREADABLE ]} seeds were skipped as unreadable; an unread seed could have held it" )
+            skipped = counts[ stage_parts.UNREADABLE ] + counts[ stage_parts.UNSTRIPPABLE ]
+            if seeds and skipped == seeds: raise er.NeedsetError( er.ALL_SEEDS_UNREADABLE, f"all {seeds} {name} seeds were skipped, for an unreadable reply or because the strip step could not find them" )
+            if report[ NEEDS_KEY[ name ] ] == 0 and skipped: raise er.NeedsetError( er.NO_NEEDS_WITH_SKIPS, f"{name} found no need and {skipped} seeds were skipped, unread or unstrippable; a skipped seed could have held it" )
             return { **report, "no_final_need": counts }
         return with_counts
     return ( lambda env: reported( stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ), stages.ATTRIBUTION ),
@@ -493,6 +495,7 @@ def live_run( args, loaded, ctx, deps ):
 
     Ensures:
         - everything that can begin the Jev spend-ledger run, the parts and the control among it, is built here, so main can close the run on any error
+        - the index, the member bodies, the strips and the tracked-file list all come from the source commit, exported once under the run folder, and never from the working tree, which peers change while the run goes on
     Raises:
         - NeedsetError NO_CANDIDATE_STAGE for a context with no candidate stage, before the index is built or a list is written
         - whatever the parts, the factories or the runner raise
@@ -500,11 +503,12 @@ def live_run( args, loaded, ctx, deps ):
     if ctx.candidate_stage is None: raise er.NeedsetError( er.NO_CANDIDATE_STAGE, f"the context has no candidate stage; set {rt.PACK_SIZE_VARIABLE}, {rt.CEILING_VARIABLE} and {rt.RUN_NAME_VARIABLE}, which build it" )
     ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
     ledger    = deps[ "ledger" ]( args ) if "ledger" in deps else draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
-    strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, args.root ) )
+    source    = deps[ "source_root" ]( args ) if "source_root" in deps else source_at.export( args.root, args.source_commit, f"{args.run_dir}/{SOURCE_FOLDER}" )
+    strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, source ) )
     draft_fn  = deps[ "draft_fn" ] if "draft_fn" in deps else draft.draft_need
     env       = types.SimpleNamespace( root=args.root, run_dir=args.run_dir, seed=args.seed, source_commit=args.source_commit, server=args.server, strip_fn=strip_fn, ctx=ctx, ask=ask, draft_ledger=ledger )
-    built     = deps[ "built" ]( args ) if "built" in deps else smoke.index_parts( args.root, f"{args.run_dir}/index" )
-    path      = write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit, built, **( { "tracked": deps[ "tracked" ] } if "tracked" in deps else { } ) )
+    built     = deps[ "built" ]( args ) if "built" in deps else smoke.index_parts( source, f"{args.run_dir}/index" )
+    path      = write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit, built, tracked=deps[ "tracked" ] if "tracked" in deps else lambda repo: source_at.tracked_at( repo, args.source_commit ) )
     parts     = ( deps[ "parts" ] if "parts" in deps else live_parts )( args, env, built, stage_seeds.load_lists( path ) )
     factories = deps[ "factories" ] if "factories" in deps else stage_factories( path, parts )
     control   = ( deps[ "control" ] if "control" in deps else live_control( args ) )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )
