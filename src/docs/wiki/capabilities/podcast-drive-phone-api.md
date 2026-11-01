@@ -11,7 +11,7 @@ The phone lists and plays podcasts published to the owner's Google Drive. The se
 
 ## What it does
 - `list_podcasts` lists the job folders under the configured folder, newest first, each with its files and a `stream_url`.
-- A job's title is its script's first heading when the folder holds a `-script.md`, else the folder name without its timestamp ([[podcast-card-links]]).
+- A job's title is the folder's Drive description, which the publish step fills with the clean title. Older folders use the script's first heading, else the folder name with every date and serial removed ([[podcast-card-links]]).
 - `stream_podcast_file` passes the browser's `Range` header to Drive and streams the answer back in chunks, with 200, 206 or 416 and the range headers.
 
 ## Invariants

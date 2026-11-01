@@ -32,11 +32,13 @@ class FakePublisher:
 
     def __init__( self, failures=None, raises=None ):
         self.calls    = []
+        self.titles   = []
         self.failures = failures or {}
         self.raises   = raises
 
-    def publish_job( self, job_folder_name, files ):
+    def publish_job( self, job_folder_name, files, title=None ):
         self.calls.append( ( job_folder_name, files ) )
+        self.titles.append( title )
         if self.raises: raise self.raises
         return {
             "folder_id"   : "FID",
@@ -158,12 +160,41 @@ class TestSuccess:
         import threading
         seen = []
         class Spy( FakePublisher ):
-            def publish_job( self, name, f ):
+            def publish_job( self, name, f, title=None ):
                 seen.append( threading.current_thread() )
-                return super().publish_job( name, f )
+                return super().publish_job( name, f, title )
         monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: Spy() )
         await _publish( files, _config() )
         assert seen[ 0 ] is not threading.current_thread()
+
+
+class TestJobFolderTitle:
+    """The publish step passes the podcast's plain title to the publisher."""
+
+    @pytest.mark.asyncio
+    async def test_the_english_script_heading_is_the_title( self, files, monkeypatch ):
+        open( files[ "en-script.md" ], "w" ).write( "# Podcast: Google Drive Sign In Explainer\n## Generated: x\n" )
+        open( files[ "es-script.md" ], "w" ).write( "# Podcast: Explicacion\n" )
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        await _publish( files, _config() )
+        assert fake.titles == [ "Google Drive Sign In Explainer" ]
+
+    @pytest.mark.asyncio
+    async def test_with_no_english_script_the_first_one_is_used( self, files, monkeypatch ):
+        open( files[ "es-script.md" ], "w" ).write( "# Podcast: Explicacion\n" )
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        await drive_hook.publish_podcast_to_drive( { "es-MX": files[ "es.mp3" ] }, { "es-MX": files[ "es-script.md" ] }, None, "job", _config() )
+        assert fake.titles == [ "Explicacion" ]
+
+    @pytest.mark.asyncio
+    async def test_no_script_or_no_heading_means_no_title( self, files, monkeypatch ):
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, "job", _config() )
+        await _publish( files, _config() )   # the scripts here hold the one letter x, no heading
+        assert fake.titles == [ None, None ]
 
 
 class TestFailure:

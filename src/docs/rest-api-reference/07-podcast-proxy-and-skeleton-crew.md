@@ -50,7 +50,7 @@ The folder is `podcast drive folder name`, which may be a path such as `Lupin AF
 
 | Method | Path | Summary |
 |--------|------|---------|
-| GET | `/api/podcast-drive/list` | Returns `[ { job_folder, title, created_ts, files: [ { name, mime, size, drive_file_id, stream_url } ] } ]`, newest first, at most 50 jobs. `title` is the script's first heading when the folder holds a `-script.md`, else the folder name without its timestamp. A folder not yet in Drive gives `[]`. 403 not the owner; 503 Drive or the token is unavailable. |
+| GET | `/api/podcast-drive/list` | Returns `[ { job_folder, title, created_ts, files: [ { name, mime, size, drive_file_id, stream_url } ] } ]`, newest first, at most 50 jobs. `title` is the folder's Drive description (the clean title written at publish), else the script's first heading, else the folder name with every date and serial removed. A folder not yet in Drive gives `[]`. 403 not the owner; 503 Drive or the token is unavailable. |
 | GET | `/api/podcast-drive/stream/{drive_file_id}` | Streams one file in 64 KiB chunks and passes the `Range` header to Drive, so the phone can seek. Answers 200, 206 or 416 with `Content-Range`, `Content-Length` and `Accept-Ranges`. Serves only a file in a job folder directly under the configured folder; any other id is 404 and is never requested from Drive. 403 not the owner. 503 for any Drive failure that is not a 404. |
 
 ---

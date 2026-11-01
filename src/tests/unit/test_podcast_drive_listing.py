@@ -56,7 +56,8 @@ class FakeFiles:
             if orderBy == "createdTime desc": rows.sort( key=lambda r: r[ 1 ].get( "createdTime", "" ), reverse=True )
             if orderBy == "name":             rows.sort( key=lambda r: r[ 1 ][ "name" ] )
             if pageSize is not None:          rows = rows[ :pageSize ]
-            return { "files": [ dict( id=i, **{ k: v for k, v in f.items() if k in ( "name", "mimeType", "size", "createdTime" ) } ) for i, f in rows ] }
+            asked = set( re.search( r"files\((.*)\)", fields ).group( 1 ).split( "," ) )   # only the fields the code asks for come back
+            return { "files": [ dict( id=i, **{ k: v for k, v in f.items() if k in asked } ) for i, f in rows ] }
         return _Request( run )
 
     def get( self, fileId, fields ):
@@ -325,6 +326,21 @@ def world( tmp_path, monkeypatch ):
 
 
 class TestList:
+
+    def test_a_folder_description_is_the_title_ahead_of_the_script( self, world ):
+        world[ "svc" ].items[ "J2" ][ "description" ] = "  The Clean Title Rick Wants "
+        assert world[ "client" ].get( "/api/podcast-drive/list" ).json()[ 0 ][ "title" ] == "The Clean Title Rick Wants"
+
+    def test_a_blank_description_is_ignored( self, world ):
+        world[ "svc" ].items[ "J2" ][ "description" ] = "   "
+        assert world[ "client" ].get( "/api/podcast-drive/list" ).json()[ 0 ][ "title" ] == "The Empty Net: A Failed Pilot"
+
+    def test_the_live_folder_with_a_dated_source_name_gets_a_date_free_title( self, world ):
+        world[ "svc" ].add( "J3", "2026-11-01-190015-2026.10.31-google-drive-sign-in-explainer", FOLDER, [ "TOP" ], createdTime="2026-11-01T19:00:15Z" )
+        world[ "svc" ].add( "A3", "explainer.mp3", "audio/mpeg", [ "J3" ], size="9", content=b"x" )
+        newest = world[ "client" ].get( "/api/podcast-drive/list" ).json()[ 0 ]
+        assert newest[ "job_folder" ].endswith( "google-drive-sign-in-explainer" )
+        assert newest[ "title" ] == "Google Drive Sign In Explainer"
 
     def test_lists_newest_first_with_the_contract_fields( self, world ):
         body = world[ "client" ].get( "/api/podcast-drive/list" ).json()
