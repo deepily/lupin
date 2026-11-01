@@ -599,3 +599,25 @@ def test_a_stage_with_no_need_and_a_skipped_seed_fails_but_with_no_skipped_seed_
 def test_a_stage_with_a_need_and_a_skipped_seed_is_not_failed_for_the_skip( monkeypatch ):
     one, two = factory_with( monkeypatch, ( 1, 2 ), { "needs": 1 }, { "seeds": 1, "hard": 0 } )
     assert asyncio.run( one( "env" )() )[ "needs" ] == 1 and asyncio.run( two( "env" )() )[ "seeds" ] == 1
+
+
+def test_a_stage_with_no_need_and_only_disputed_or_no_partner_seeds_stays_a_stop_with_exit_zero( tmp_path, monkeypatch ):
+    cap   = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 5 )
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
+
+    async def stage():
+        tally[ "disputed" ] += 1
+        tally[ "no_partner" ] += 1
+        return { "needs": 0, "stop": True, "reason": "no seed gave a need" }
+
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: stage )
+    one, _ = ft.stage_factories( "/lists.json", parts )
+
+    async def never(): return {}
+
+    with cap.installed(): report = asyncio.run( stages.run_stages( cap, { stages.ATTRIBUTION: one( None ), stages.YIELD: never, stages.CONTROL: never, stages.REMAINDER: never } ) )
+    seen = report[ "stages" ][ "attribution" ]
+    assert seen[ "status" ] == "stopped" and seen[ "report" ][ "no_final_need" ][ "disputed" ] == 1 and seen[ "report" ][ "no_final_need" ][ "no_partner" ] == 1 and seen[ "report" ][ "no_final_need" ][ "unreadable_reply" ] == 0
+    assert ft.exit_status( { "live": True, "report": report } ) == 0
