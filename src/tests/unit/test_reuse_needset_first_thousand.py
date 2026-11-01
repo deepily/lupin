@@ -10,9 +10,10 @@ import types
 import pytest
 
 import cosa.utils.util as cu
-from lupin_mcp.reuse_needset import call_cap, first_thousand as ft, planted_pool, positive_control as pc, stages
+from cosa.repo.symindex.candidates import candidate_stage as cs
+from lupin_mcp.reuse_needset import call_cap, draft, first_thousand as ft, planted_pool, positive_control as pc, stages
 from lupin_mcp.reuse_needset import errors as er
-from tests.unit.test_reuse_needset_positive_control import pairs as bare_pairs
+from tests.unit.test_reuse_needset_positive_control import pairs as bare_pairs, pool
 
 
 def pairs():
@@ -143,7 +144,7 @@ def test_the_remainder_stage_adds_the_count_of_every_unsure_flagged_pair_drifted
         return { "pairs": len( given ), "seed": seed, "per_pair": [ { "id": r[ "id" ], "group": r[ "group" ], "route": routes[ r[ "id" ] ] if r[ "id" ] in routes else "accept", "reason": "x" } for r in given ] }
 
     out = asyncio.run( ft.remainder_stage( rem, 7, run_remainder=run_remainder )() )
-    assert out[ "unsure_flagged" ] == { "total": 2, "resolved": 1 } and out[ "seed" ] == 7 and out[ "pairs" ] == 20
+    assert out[ "unsure_flagged" ] == { "total": 2, "resolved": 1, "of": 20, "also_drifted": 1, "text": "2 of 20, with 1 also drifted" } and out[ "seed" ] == 7 and out[ "pairs" ] == 20
 
 
 def test_a_full_run_charges_nothing_for_fakes_writes_the_report_and_a_resumed_cap_keeps_its_count( tmp_path ):
@@ -172,3 +173,159 @@ def test_the_real_labels_give_three_drifted_and_twelve_unsure_pairs_of_twenty():
     got  = collections.Counter( r[ "group" ] for r in ft.remainder_pairs( real, key, one, two ) )
     assert got == { "drifted": 3, "unsure": 10, "other": 7 }
     assert sum( 1 for r in ft.remainder_pairs( real, key, one, two ) if r[ "unsure_flagged" ] ) == 12
+
+
+SENTENCE = "A function that releases everything a view holds when it goes away."
+
+
+def strip_of( rec ):
+    """Return a stripped original for the drafter, without reading a tree."""
+    return { "kind": "function", "text": "def f(): pass", "forbidden": [ rec[ "name" ] ] }
+
+
+def real_pair( i=0 ):
+    """Return a pair with a language on each side, as the real planted file has."""
+    p = pairs()[ i ]
+    return { **p, "original": { **p[ "original" ], "lang": "py" }, "rewrite": { **p[ "rewrite" ], "lang": "py" } }
+
+
+def test_the_drafter_job_makes_a_sentence_pass_the_real_drafter_with_a_fake_model( tmp_path ):
+    job    = ft.control_job( real_pair(), strip_of )
+    ledger = draft.make_ledger( str( tmp_path / "l.jsonl" ), None, "max-plan" )
+    got    = draft.draft_need( job, lambda system, user: SENTENCE, ledger )
+    assert job[ "seed" ][ "id" ] == "d-orig00" and [ k[ "id" ] for k in job[ "keys" ] ] == [ "d-rew00" ] and job[ "write_lang" ] == "py" and job[ "seed" ][ "lang" ] == "py"
+    assert got[ "ok" ] is True and got[ "need" ] == SENTENCE
+
+
+def test_the_planted_stage_shares_the_live_stage_settings_and_takes_no_refresher( monkeypatch ):
+    live = types.SimpleNamespace( vectors_dir="/v", query_cache_dir="/q", embed_client="client", purposes_path="/p", K=9, arm="B1", fusion=None )
+    seen = {}
+
+    class FakeStage:
+        def __init__( self, vectors_dir, query_cache_dir, embed_client, planted, **kw ): seen.update( vectors_dir=vectors_dir, cache=query_cache_dir, client=embed_client, planted=planted, kw=kw )
+
+    monkeypatch.setattr( planted_pool, "PlantedCandidateStage", FakeStage )
+    monkeypatch.setattr( planted_pool, "PlantedVectors", lambda base, ids, rows: ( base, ids, rows ) )
+    ft.planted_stage_for( live, [ { "id": "d-rew00" } ], embed_rows=lambda entries, client: ( "rows", client ), load_vectors=lambda folder: ( "base", folder ) )
+    assert seen[ "planted" ] == ( ( "base", "/v" ), [ "d-rew00" ], ( "rows", "client" ) ) and seen[ "vectors_dir" ] == "/v" and seen[ "cache" ] == "/q" and seen[ "client" ] == "client"
+    assert seen[ "kw" ] == { "purposes_path": "/p", "K": 9, "arm": "B1", "fusion": None } and "refresher" not in seen[ "kw" ]
+
+
+def test_the_live_control_drafts_first_then_plants_and_the_calls_are_the_drafters_only( monkeypatch, tmp_path ):
+    ps      = [ real_pair( i ) for i in range( 20 ) ]
+    log     = []
+    ctx     = types.SimpleNamespace( candidate_stage="live stage" )
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries: log.append( ( "stage", live, len( entries ) ) ) or "planted stage" )
+
+    def draft_fn( job, ask, ledger ):
+        log.append( ( "draft", job[ "seed" ][ "id" ] ) )
+        return { "ok": True, "need": SENTENCE }
+
+    def check( need, c, planted, entries ):
+        log.append( ( "check", need[ "seed" ], planted ) )
+        return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ], "widened_ids": [] } }
+
+    stage = ft.control_stage_live( ctx, ps, "ask", "ledger", strip_of, draft_fn, prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )
+    out   = asyncio.run( stage() )
+    kinds = [ k[ 0 ] for k in log ]
+    assert kinds == [ "draft" ] * 20 + [ "stage" ] + [ "check" ] * 20 and log[ 20 ] == ( "stage", "live stage", 20 ) and out[ "found" ] == 20 and out[ "stop" ] is False
+    assert all( k[ 2 ] == "planted stage" for k in log[ 21: ] ) and [ k[ 1 ] for k in log[ 21: ] ] == [ p[ "original" ][ "id" ] for p in ps ]
+
+
+def test_the_stage_modules_are_loaded_by_name_only_when_asked_and_a_missing_one_is_named():
+    mod = types.SimpleNamespace( attribution_stage="a", yield_stage="y" )
+    assert ft.load_stage_factories( "m", import_module=lambda name: mod ) == ( "a", "y" )
+    for broken in ( types.SimpleNamespace( attribution_stage="a" ), None ):
+        def importer( name, broken=broken ):
+            if broken is None: raise ImportError( "no module" )
+            return broken
+
+        with pytest.raises( er.NeedsetError ) as e: ft.load_stage_factories( "m", importer )
+        assert e.value.code == er.STAGE_NOT_WIRED
+
+
+def run_dir_files( tmp_path ):
+    """Write the proof's input files; return the command line and the planted sha."""
+    import hashlib
+    ps       = pairs()
+    one, two = labelled( ps )
+    planted  = tmp_path / "planted.json"
+    planted.write_text( json.dumps( { "failed": [], "planted": ps } ), encoding="utf-8" )
+    key      = tmp_path / "answer-key.json"
+    key.write_text( json.dumps( { "items": key_of( ps ) } ), encoding="utf-8" )
+    labels   = tmp_path / "labels"
+    labels.mkdir()
+    for name, rows in ( ( "labels-rick.jsonl", one ), ( "labels-rick-redo.jsonl", { } ), ( "labels-reviewer-2.jsonl", two ) ):
+        ( labels / name ).write_text( "".join( json.dumps( r ) + "\n" for r in rows.values() ), encoding="utf-8" )
+    run = tmp_path / "run"
+    run.mkdir()
+    argv = [ "--root", "/r", "--run-dir", str( run ), "--planted", str( planted ), "--answer-key", str( key ), "--labels-dir", str( labels ), "--seed", "7", "--source-commit", "abc" ]
+    return argv, hashlib.sha256( planted.read_bytes() ).hexdigest()
+
+
+def test_the_command_line_needs_its_inputs_and_is_a_plan_unless_live_is_given():
+    base = [ "--root", "/r", "--run-dir", "/d", "--planted", "p", "--answer-key", "k", "--labels-dir", "l", "--seed", "7", "--source-commit", "abc" ]
+    a    = ft.parse_args( base )
+    assert a.seed == 7 and a.limit == 1000 and a.live is False and a.cli_path is None and a.server == "max-plan" and ft.parse_args( [ *base, "--live", "--limit", "5" ] ).live is True
+    with pytest.raises( SystemExit ): ft.parse_args( base[ :-2 ] )
+
+
+def test_without_live_main_plans_from_files_and_touches_nothing_else( tmp_path ):
+    argv, sha = run_dir_files( tmp_path )
+    boom      = lambda *a, **k: pytest.fail( "something live was touched" )
+    out       = ft.main( argv, deps={ "planted_sha": sha, "context": boom, "factories": boom, "runner": boom, "ask": boom } )
+    assert out[ "live" ] is False and out[ "plan" ][ "used" ] == 0 and out[ "plan" ][ "remaining" ] == 1000 and out[ "plan" ][ "pairs" ] == 20
+    assert out[ "plan" ][ "groups" ] == { "drifted": 2, "other": 17, "unsure": 1 } and out[ "plan" ][ "unsure_flagged" ] == 2 and out[ "plan" ][ "ledger" ].endswith( "call-ledger.jsonl" )
+
+
+def test_the_plan_shows_the_calls_a_resumed_run_has_already_spent( tmp_path ):
+    argv, sha = run_dir_files( tmp_path )
+    cap       = call_cap.CallCap( str( tmp_path / "run" / ft.CALLS_FILE ) )
+    for _ in range( 3 ): cap.charge( "m" )
+    out = ft.main( [ *argv, "--limit", "10" ], deps={ "planted_sha": sha } )
+    assert out[ "plan" ][ "used" ] == 3 and out[ "plan" ][ "remaining" ] == 7
+
+
+def test_a_planted_file_with_the_wrong_hash_stops_before_anything_else( tmp_path ):
+    argv, _ = run_dir_files( tmp_path )
+    with pytest.raises( er.NeedsetError ) as e: ft.main( argv, deps={ "context": lambda root: pytest.fail( "a context was built" ) } )
+    assert e.value.code == er.CONTROL_INPUT_CHANGED
+
+
+def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_stages( tmp_path ):
+    argv, sha = run_dir_files( tmp_path )
+    seen      = {}
+    ctx       = types.SimpleNamespace( candidate_stage="live" )
+
+    def factory( name ):
+        def make( env ):
+            seen[ name ] = env
+            async def stage(): return { "name": name }
+            return stage
+        return make
+
+    async def runner( run_dir, one, two, control, rem, limit ):
+        seen[ "args" ] = ( run_dir, limit, await one(), await two(), await control(), await rem() )
+        return { "ran": True }
+
+    deps = { "planted_sha": sha, "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
+             "strip_fn": strip_of, "draft_fn": "DRAFT", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed },
+             "control": lambda c, ps, ask, ledger, strip_fn, draft_fn: ( seen.update( control_args=( c, len( ps ), ask, ledger, strip_fn, draft_fn ) ) or ( lambda: asyncio.sleep( 0, { "control": True } ) ) ) }
+    out  = ft.main( [ *argv, "--live", "--limit", "9" ], deps=deps )
+    env  = seen[ "a" ]
+    assert out[ "live" ] is True and out[ "report" ] == { "ran": True } and seen[ "y" ] is env
+    assert ( env.root, env.seed, env.source_commit, env.ctx, env.ask, env.draft_ledger ) == ( "/r", 7, "abc", ctx, "ASK", "LEDGER" ) and env.run_dir.endswith( "run" )
+    assert seen[ "args" ][ 1 ] == 9 and seen[ "args" ][ 2:4 ] == ( { "name": "a" }, { "name": "y" } ) and seen[ "args" ][ 4 ] == { "control": True }
+    assert seen[ "args" ][ 5 ][ "unsure_flagged" ] == { "total": 0, "resolved": 0, "of": 20, "also_drifted": 1, "text": "0 of 20, with 1 also drifted" }
+    assert seen[ "control_args" ] == ( ctx, 20, "ASK", "LEDGER", strip_of, "DRAFT" )
+
+
+def test_a_live_run_without_the_stage_module_stops_by_name_before_a_context_is_built( tmp_path, monkeypatch ):
+    argv, sha = run_dir_files( tmp_path )
+    real      = ft.load_stage_factories
+
+    def no_module( name ): raise ImportError( name )
+
+    monkeypatch.setattr( ft, "load_stage_factories", lambda: real( import_module=no_module ) )
+    with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps={ "planted_sha": sha, "context": lambda root: pytest.fail( "a context was built" ) } )
+    assert e.value.code == er.STAGE_NOT_WIRED

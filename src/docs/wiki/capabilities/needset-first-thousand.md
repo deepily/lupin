@@ -11,12 +11,11 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.draft_control_needs@62f1f1ebb1
   - lupin_mcp.reuse_needset.first_thousand.planted_check@f29004ed70
   - lupin_mcp.reuse_needset.first_thousand.control_ask@fa3a692e9a
-  - lupin_mcp.reuse_needset.first_thousand.remainder_stage@923eedc26a
-  - lupin_mcp.reuse_needset.first_thousand.run_first_thousand@77407ae439
+  - lupin_mcp.reuse_needset.first_thousand.remainder_stage@0cf94530e9
 ---
 # Need set: the first 1,000 calls
 
-The pieces that run the control and the remainder of Set B's first 1,000 model calls. The control itself is on [[needset-positive-control]]. The attribution and yield stages and the shared cap come from the stage runner and are handed in.
+The pieces under the control and the remainder of Set B's first 1,000 model calls; the command is on [[needset-first-thousand-command]]. The control itself is on [[needset-positive-control]]. The attribution and yield stages and the shared cap come from the stage runner and are handed in.
 
 ## The planted pool
 - `planted_entry` turns a rewrite into the index record the search and the judge read. A real rewrite has no docstring, so its doc is empty. Its pin is a hash of its text.
@@ -33,7 +32,4 @@ The pieces that run the control and the remainder of Set B's first 1,000 model c
 - `read_latest_labels` reads label files for reading only and keeps the latest label of each item.
 - `remainder_pairs` puts each of the 20 pairs in a group from the two reviewers' labels. Drifted means both reviewers chose none. Unsure means either note starts with the unsure marker. A pair with both is drifted.
 - On the proof's labels that gives 3 drifted, 10 unsure and 7 other. Twelve pairs carry an unsure flag, and two of them are also drifted.
-- `remainder_stage` runs the run-check on them and adds `unsure_flagged`, the count over all twelve flagged pairs. No model is contacted.
-
-## The run
-- `run_first_thousand` installs the cap over `call-ledger.jsonl` in the run folder, runs the four stages and writes `stage-reports.json`. A resumed run keeps the calls already spent.
+- `remainder_stage` runs the run-check on them and adds `unsure_flagged`, the count over all twelve flagged pairs. Its text reads "12 of 20, with 2 also drifted". No model is contacted.

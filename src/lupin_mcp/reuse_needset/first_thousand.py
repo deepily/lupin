@@ -6,13 +6,20 @@ The control and the remainder take every outside thing as an argument. A test ru
 It never builds a packet, takes a person's ruling or writes a label file.
 It reads the labels that already exist, for the remainder's groups, and writes none.
 """
+import argparse
+import asyncio
 import copy
 import hashlib
+import importlib
 import json
+import pathlib
+import types
 
 from cosa.repo.labelling import run_check
+from cosa.repo.symindex.candidates import candidate_stage
+from cosa.repo.symindex.candidates import vector_store as vs
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, loss_trace, stage3, stages
+from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, stage3, stages, strip
 from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
@@ -146,16 +153,19 @@ def remainder_stage( pairs, seed, run_remainder=stages.run_remainder ):
 
     Ensures:
         - the report is run_remainder's, which says no model is contacted
-        - it adds unsure_flagged { total, resolved } over every pair marked unsure, the drifted ones included, because run_remainder counts a pair in one group only
+        - it adds unsure_flagged { total, resolved, of, also_drifted, text } over every pair marked unsure, the drifted ones included
+        - run_remainder counts a pair in one group only, so this is the count the plan quotes; text reads like "12 of 20, with 2 also drifted"
         - resolved counts a verdict route of accept or reject, as run_remainder does for its unsure group
     """
     flagged = { p[ "id" ] for p in pairs if p[ "unsure_flagged" ] }
+    both    = sum( 1 for p in pairs if p[ "unsure_flagged" ] and p[ "group" ] == stages.DRIFTED )
 
     async def stage():
         """Ensures: returns the remainder report with the flagged count added."""
         report = run_remainder( pairs, seed )
         rows   = [ r for r in report[ "per_pair" ] if r[ "id" ] in flagged ]
-        return { **report, "unsure_flagged": { "total": len( rows ), "resolved": sum( 1 for r in rows if r[ "route" ] in ( run_check.ACCEPT, run_check.REJECT ) ) } }
+        flag   = { "total": len( rows ), "resolved": sum( 1 for r in rows if r[ "route" ] in ( run_check.ACCEPT, run_check.REJECT ) ), "of": len( pairs ), "also_drifted": both }
+        return { **report, "unsure_flagged": { **flag, "text": f"{flag[ 'total' ]} of {flag[ 'of' ]}, with {both} also drifted" } }
     return stage
 
 
@@ -176,3 +186,174 @@ async def run_first_thousand( run_dir, stage_one, stage_two, control, remainder,
         report = await stages.run_stages( cap, { stages.ATTRIBUTION: stage_one, stages.YIELD: stage_two, stages.CONTROL: control, stages.REMAINDER: remainder } )
     with open( f"{run_dir}/{REPORT_FILE}", "w", encoding="utf-8" ) as f: f.write( json.dumps( report, sort_keys=True, indent=4 ) + "\n" )
     return report
+
+
+STAGE_MODULE = "lupin_mcp.reuse_needset.stage_one_two"
+REQUIRED     = ( "root", "run_dir", "planted", "answer_key", "labels_dir", "seed", "source_commit" )
+
+
+def control_job( pair, strip_fn ):
+    """
+    Build the job the Set B drafter takes for one planted pair.
+
+    Requires:
+        - pair comes from positive_control.load_pairs; strip_fn( record ) returns { kind, text, forbidden } for the original
+
+    Ensures:
+        - the seed is the original and the one key is the rewrite, both as index records with their language
+        - the sentence is written from the original's stripped text, and the key is what the leak check keeps out of it
+    """
+    seed = { **planted_pool.planted_entry( pair[ "original" ] ), "lang": pair[ "original" ][ "lang" ] }
+    key  = { **planted_pool.planted_entry( pair[ "rewrite" ] ), "lang": pair[ "rewrite" ][ "lang" ] }
+    return { "seed": seed, "keys": [ key ], "stripped": strip_fn( seed ), "write_lang": pair[ "original" ][ "lang" ], "meta": { "control": True } }
+
+
+def planted_stage_for( live, planted_entries, embed_rows=planted_pool.embed_rows, load_vectors=vs.load_vectors ):
+    """
+    Build the planted candidate stage from the live one's own settings.
+
+    Requires:
+        - live is the context's CandidateStage; planted_entries are planted_pool.planted_entry records
+
+    Ensures:
+        - the vectors are the live set read from disk plus the planted rows embedded now, held in memory
+        - the new stage shares the live stage's folders, client, arm, K and fusion, and has no refresher
+    """
+    base    = load_vectors( live.vectors_dir )
+    planted = planted_pool.PlantedVectors( base, [ e[ "id" ] for e in planted_entries ], embed_rows( planted_entries, live.embed_client ) )
+    return planted_pool.PlantedCandidateStage( live.vectors_dir, live.query_cache_dir, live.embed_client, planted, purposes_path=live.purposes_path, K=live.K, arm=live.arm, fusion=live.fusion )
+
+
+def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, prepare=rt.prepare, check=planted_check, build_stage=candidate_stage.build_stage ):
+    """
+    Return the live control stage: draft the needs, then plant, ask, remove and prove.
+
+    Requires:
+        - ctx is a reuse context with its candidate stage on; ask is the drafter's call; ledger the drafting ledger
+        - every model call goes through the cap that the runner has installed
+
+    Ensures:
+        - the needs are drafted first, one at a time in file order, and a need that does not pass stops the stage by name
+        - the pool the control plants into and restores is the index's own sendable entries
+        - the checker is planted_check over a planted stage that shares the live stage's folders and client
+    """
+    async def stage():
+        """Ensures: returns the control report."""
+        needs   = await draft_control_needs( pairs, lambda p: control_job( p, strip_fn ), ask, ledger, draft_fn )
+        entries = [ planted_pool.planted_entry( p[ "rewrite" ] ) for p in pairs ]
+        planted = planted_stage_for( ctx.candidate_stage, entries )
+        pool    = prepare( ctx )[ 1 ]
+        asker   = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids )
+        return await stage3.control_stage( pool, pairs, asker, build_stage )()
+    return stage
+
+
+def load_stage_factories( module_name=STAGE_MODULE, import_module=importlib.import_module ):
+    """
+    Load the two stage factories that Pocholo's module supplies, at run time.
+
+    Ensures:
+        - returns ( attribution_stage, yield_stage ), each taking an env and returning a zero-argument async function
+        - the module is imported only here, so this one needs it only when a live run starts
+
+    Raises:
+        - NeedsetError STAGE_NOT_WIRED when the module or either factory is missing
+    """
+    try:
+        module = import_module( module_name )
+        return module.attribution_stage, module.yield_stage
+    except ( ImportError, AttributeError ) as e:
+        raise er.NeedsetError( er.STAGE_NOT_WIRED, f"{module_name} must supply attribution_stage( env ) and yield_stage( env ): {e}" ) from e
+
+
+def parse_args( argv ):
+    """
+    Read the command line.
+
+    Ensures:
+        - the root, run folder, planted file, answer key, labels folder, seed and source commit are required
+        - live is false unless --live is given, and without it main plans and contacts nothing
+        - the cap is 1,000 calls unless --limit names another
+    """
+    ap = argparse.ArgumentParser( description=__doc__ )
+    for name in REQUIRED: ap.add_argument( "--" + name.replace( "_", "-" ), required=True, type=int if name == "seed" else str )
+    ap.add_argument( "--limit", type=int, default=call_cap.CALL_LIMIT )
+    ap.add_argument( "--cli-path", default=None )
+    ap.add_argument( "--server", default="max-plan" )
+    ap.add_argument( "--live", action="store_true" )
+    return ap.parse_args( argv )
+
+
+def plan( args, loaded ):
+    """
+    Describe what a live run would do, from files only.
+
+    Requires:
+        - loaded holds pairs ( load_pairs ) and remainder ( remainder_pairs )
+
+    Ensures:
+        - returns { limit, used, remaining, pairs, groups, unsure_flagged, ledger } and contacts no model
+        - used is what the ledger already holds, so a resumed run shows its starting count
+    """
+    cap    = call_cap.CallCap( f"{args.run_dir}/{CALLS_FILE}", args.limit )
+    groups = {}
+    for r in loaded[ "remainder" ]: groups[ r[ "group" ] ] = groups.get( r[ "group" ], 0 ) + 1
+    return { "limit": args.limit, "used": cap.used(), "remaining": args.limit - cap.used(), "pairs": len( loaded[ "pairs" ] ), "groups": dict( sorted( groups.items() ) ),
+             "unsure_flagged": sum( 1 for r in loaded[ "remainder" ] if r[ "unsure_flagged" ] ), "ledger": cap.path }
+
+
+def load_inputs( args, expected_sha=positive_control.PLANTED_SHA ):
+    """
+    Read the 20 pairs and their groups from the proof's files, for reading only.
+
+    Ensures:
+        - returns { pairs, remainder }; the planted file is checked against expected_sha, the recorded hash unless a test names another
+        - the first reviewer's labels are labels-rick.jsonl then labels-rick-redo.jsonl, the second's labels-reviewer-2.jsonl
+    """
+    pairs = positive_control.load_pairs( args.planted, expected_sha )
+    key   = json.loads( pathlib.Path( args.answer_key ).read_text( encoding="utf-8" ) )[ "items" ]
+    one   = read_latest_labels( [ f"{args.labels_dir}/labels-rick.jsonl", f"{args.labels_dir}/labels-rick-redo.jsonl" ] )
+    two   = read_latest_labels( [ f"{args.labels_dir}/labels-reviewer-2.jsonl" ] )
+    return { "pairs": pairs, "remainder": remainder_pairs( pairs, key, one, two ) }
+
+
+def main( argv=None, deps=None ):
+    """
+    Plan the first 1,000 calls, or with --live run them.
+
+    Requires:
+        - deps is None for the real parts, or a mapping that replaces any of: planted_sha, context, ask, ledger, draft_fn, strip_fn, factories, control, runner, remainder
+        - a live run needs the reuse environment variables the context reads, and the two stage factories of STAGE_MODULE
+
+    Ensures:
+        - without --live the plan is printed and returned, and no model, vector server or context is touched
+        - with --live the four stages run under one cap in args.run_dir and the report is returned
+        - the pairs and their groups are read before anything else, so a bad input stops the run before a call
+
+    Raises:
+        - NeedsetError STAGE_NOT_WIRED on a live run when the stage module is absent
+        - whatever the inputs raise, including CONTROL_INPUT_CHANGED
+    """
+    args   = parse_args( argv )
+    deps   = {} if deps is None else deps
+    loaded = load_inputs( args, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
+    shown  = plan( args, loaded )
+    if not args.live: return { "live": False, "plan": shown }
+    factories = deps[ "factories" ] if "factories" in deps else load_stage_factories()
+    ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
+    ask       = deps[ "ask" ] if "ask" in deps else draft.drafter_call()
+    ledger    = deps[ "ledger" ]( args ) if "ledger" in deps else draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
+    strip_fn  = deps[ "strip_fn" ] if "strip_fn" in deps else ( lambda rec: strip.strip_member( rec, args.root ) )
+    draft_fn  = deps[ "draft_fn" ] if "draft_fn" in deps else draft.draft_need
+    env       = types.SimpleNamespace( root=args.root, run_dir=args.run_dir, seed=args.seed, source_commit=args.source_commit, ctx=ctx, ask=ask, draft_ledger=ledger )
+    control   = ( deps[ "control" ] if "control" in deps else control_stage_live )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn )
+    rem       = remainder_stage( loaded[ "remainder" ], args.seed, **( { "run_remainder": deps[ "remainder" ] } if "remainder" in deps else { } ) )
+    runner    = deps[ "runner" ] if "runner" in deps else run_first_thousand
+    report    = asyncio.run( runner( args.run_dir, factories[ 0 ]( env ), factories[ 1 ]( env ), control, rem, args.limit ) )
+    return { "live": True, "plan": shown, "report": report }
+
+
+if __name__ == "__main__":  # pragma: no cover  reason: the command line entry; main is tested with stand-ins
+    import sys
+    print( json.dumps( main(), indent=4, sort_keys=True ) )
+    sys.exit( 0 )
