@@ -51,7 +51,7 @@ def test_a_reply_must_be_one_line_without_a_fence():
 def test_a_good_first_reply_is_accepted_and_a_resume_asks_nothing( tmp_path ):
     ask, book = Asker( [ GOOD ] ), ledger( tmp_path )
     got = draft.draft_need( job(), ask, book )
-    assert got == { "ok": True, "seed": SEED[ "id" ], "key": [ KEY[ "id" ] ], "need": GOOD, "tries": 1, "history": [], "reason": None, "meta": { "route": None, "key_source": "twin" } }
+    assert got == { "ok": True, "seed": SEED[ "id" ], "key": [ KEY[ "id" ] ], "need": GOOD, "tries": 1, "history": [], "reason": None, "meta": { "route": None, "key_source": "twin" }, "rejections": [], "unreadable": [] }
     again = draft.draft_need( job(), ask, harness_runner.Ledger( book.path, binding="test" ) )
     assert again == got and len( ask.prompts ) == 1, "resume makes no repeat call"
     assert "Python function" in ask.prompts[ 0 ] and ask.systems[ 0 ].startswith( "You describe what a piece of Python code does" )
@@ -81,11 +81,12 @@ def test_a_form_failure_is_rewritten_by_kind( tmp_path ):
     assert got[ "ok" ] and got[ "history" ][ 0 ][ "failures" ] == [ "form" ] and "Failure kinds: form" in ask.prompts[ 1 ]
 
 
-def test_three_failed_checks_end_in_a_leak_failure_and_ask_three_times( tmp_path ):
+def test_two_failed_checks_end_in_a_leak_failure_after_one_targeted_rewrite( tmp_path ):
     ask = Asker( [ LEAKS_IDENTIFIER ] * 3 )
     got = draft.draft_need( job(), ask, ledger( tmp_path ) )
-    assert got[ "ok" ] is False and got[ "reason" ] == er.NEED_LEAKS_KEY and got[ "tries" ] == draft.MAX_TRIES == 3 and got[ "need" ] is None
-    assert len( got[ "history" ] ) == 3 and len( ask.prompts ) == 3
+    assert got[ "ok" ] is False and got[ "reason" ] == er.NEED_LEAKS_KEY and got[ "tries" ] == draft.MAX_TRIES == 2 and got[ "need" ] is None
+    assert len( got[ "history" ] ) == 2 and len( ask.prompts ) == 2 and 'Do not use the word "items"' in ask.prompts[ 1 ]
+    assert [ r[ "try" ] for r in got[ "rejections" ] ] == [ 0, 1 ] and got[ "rejections" ][ 0 ][ "sentence" ] == LEAKS_IDENTIFIER and got[ "unreadable" ] == []
 
 
 def test_an_unreadable_reply_is_asked_again_once_and_then_recorded_as_a_failure( tmp_path ):
@@ -156,7 +157,7 @@ def test_a_failed_seed_is_replaced_by_the_next_and_the_replacements_are_counted_
     got = draft.draft_cell( "work_alike/py", 2, [ "s0", "s1", "s2", "s3", "s4" ], make_job, ask, ledger( tmp_path ) )
     assert got[ "original" ] == [ "s0", "s1" ] and got[ "final" ] == [ "pkg.mod.s2", "pkg.mod.s3" ]
     assert got[ "replacements" ] == { draft.NO_KEY: 1, er.NEED_LEAKS_KEY: 1 }
-    assert [ ( f[ "seed" ], f[ "reason" ] ) for f in got[ "failed" ] ] == [ ( "s0", draft.NO_KEY ), ( "s1", er.NEED_LEAKS_KEY ) ] and len( got[ "failed" ][ 1 ][ "history" ] ) == 3
+    assert [ ( f[ "seed" ], f[ "reason" ] ) for f in got[ "failed" ] ] == [ ( "s0", draft.NO_KEY ), ( "s1", er.NEED_LEAKS_KEY ) ] and len( got[ "failed" ][ 1 ][ "history" ] ) == 2
     assert "MARK_s4" not in "".join( ask.prompts ), "no seed past the quota is drafted"
 
 
@@ -376,3 +377,27 @@ def test_a_call_log_that_cannot_be_written_warns_and_the_run_goes_on( tmp_path, 
     log = draft.SharedCallLog( tmp_path / "missing-folder" / "calls.jsonl" )
     log.add( { "n": 1 } )
     assert "WARNING: call log" in capsys.readouterr().out and not ( tmp_path / "missing-folder" ).exists()
+
+
+def test_copy_check_finds_the_seeds_own_names_and_any_path_with_no_model_call():
+    assert draft.copy_check( GOOD, SEED ) == []
+    named = draft.copy_check( LEAKS_IDENTIFIER, SEED )
+    assert [ f[ "check" ] for f in named ] == [ "identifier" ] and "items" in named[ 0 ][ "words" ] and "identifier tokens" in named[ 0 ][ "detail" ]
+    for pasted in ( f"A function that reads {SEED[ 'file' ]} and then adds up every number it finds there.", "A function that opens src/lupin_mcp/other/place.py and adds up every number in it.",
+                    "A function that parses config.json and adds up every number it finds listed there." ):
+        found = draft.copy_check( pasted, SEED )
+        assert found and "paths:" in found[ 0 ][ "detail" ], pasted
+        assert all( "/" not in w and "." not in w for w in found[ 0 ][ "words" ] ), "a path is never handed to the writer as a word"
+
+
+def test_a_copied_path_is_caught_before_the_leak_check_and_rewritten_once_by_kind( tmp_path ):
+    ask = Asker( [ f"A function that reads {SEED[ 'file' ]} and then adds up every number it finds there.", GOOD ] )
+    got = draft.draft_need( job(), ask, ledger( tmp_path ) )
+    assert got[ "ok" ] and got[ "tries" ] == 2 and got[ "history" ][ 0 ][ "failures" ] == [ "own_identifier" ] and "Failure kinds: own_identifier" in ask.prompts[ 1 ]
+    assert got[ "rejections" ][ 0 ][ "failures" ][ 0 ][ "check" ] == "identifier" and SEED[ "file" ] in got[ "rejections" ][ 0 ][ "failures" ][ 0 ][ "detail" ]
+    assert SEED[ "file" ] not in ask.prompts[ 1 ], "the path itself never reaches the writer"
+
+
+def test_an_unreadable_drafter_reply_is_kept_in_the_record_for_the_ledger( tmp_path ):
+    got = draft.draft_need( job(), Asker( [ "", f"{GOOD}\nmore" ] ), ledger( tmp_path ) )
+    assert got[ "unreadable" ] == [ { "try": 0, "retry": 0, "reply": "" }, { "try": 0, "retry": 1, "reply": f"{GOOD}\nmore" } ]

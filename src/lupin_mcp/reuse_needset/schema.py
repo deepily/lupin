@@ -18,6 +18,7 @@ ROUTED      = ( "work_alike", "cross_language" )
 VECTOR_SOURCE   = "vector"
 SAMPLED_SOURCES = ( "bm25", "directory", "random" )
 TWIN_SOURCE = "twin"
+SEED_SOURCE = "seed"
 TOP_KEYS    = ( "id", "kind", "write_lang", "seed", "selection_route", "key", "need", "source_commit", "drafter", "check", "status" )
 DRAFTER_KEYS = ( "model", "prompt_version", "server" )
 CHECK_KEYS   = ( "model", "result", "note", "mechanical" )
@@ -84,16 +85,17 @@ def validate_need( rec ):
     Ensures:
         - returns None when the record is valid
         - a matched kind has a seed and a non-empty key; a nothing need has neither
-        - a matched need's seed is never one of its key symbols, so the seed cannot score as its own partner
-        - key.source says how the key was found: twin for near_copy, vector, bm25, directory or random for the two routed kinds, none for nothing
+        - a matched need's seed is never one of its key symbols, so the seed cannot score as its own partner, except in a seed-answer need
+        - a seed-answer need is a work_alike need with key.source seed, key.symbols holding the seed alone and no selection_route: the seed is the known answer and no partner was found
+        - key.source says how the key was found: twin for near_copy, vector, bm25, directory or random for the two routed kinds, seed for a seed-answer need, none for nothing
         - on the vector route key.source is vector; on the sampled route it is bm25, directory or random
-        - selection_route is vector or sampled for the two routed kinds and None otherwise
+        - selection_route is vector or sampled for the two routed kinds, except a seed-answer need, and None otherwise
         - a record at status checked or later carries a check block with a model, a result of agree, disagree or unsure, a note and a mechanical list
         - the id equals need_id of the record
 
     Raises:
         - NeedsetError BAD_NEED naming the first violation
-        - NeedsetError SEED_IN_KEY when a matched need's seed is one of its key symbols
+        - NeedsetError SEED_IN_KEY when a matched need's seed is one of its key symbols and the need is not a seed-answer need
     """
     if not isinstance( rec, dict ): _fail( rec, "not a dict" )
     for k in TOP_KEYS:
@@ -104,6 +106,7 @@ def validate_need( rec ):
     for k in ( "need", "source_commit" ):
         if not _text( rec[ k ] ): _fail( rec, f"{k} must be a non-empty string" )
     key = rec[ "key" ]
+    own = isinstance( key, dict ) and key.get( "source" ) == SEED_SOURCE
     if not isinstance( key, dict ) or not isinstance( key.get( "symbols" ), list ) or not all( _text( s ) for s in key[ "symbols" ] ): _fail( rec, "key.symbols must be a list of ids" )
     if not isinstance( key.get( "version" ), int ) or isinstance( key[ "version" ], bool ) or key[ "version" ] < 1: _fail( rec, "key.version must be a positive int" )
     if rec[ "kind" ] == "nothing":
@@ -111,13 +114,15 @@ def validate_need( rec ):
     else:
         if not _text( rec[ "seed" ] ): _fail( rec, "a matched need needs a seed" )
         if not key[ "symbols" ]: _fail( rec, "a matched need needs a non-empty key" )
-        if rec[ "seed" ] in key[ "symbols" ]: raise er.NeedsetError( er.SEED_IN_KEY, f"{rec.get( 'id', '?' )}: the seed {rec[ 'seed' ]} is in its own key" )
+        if own:
+            if rec[ "kind" ] != "work_alike" or key[ "symbols" ] != [ rec[ "seed" ] ]: _fail( rec, "a seed-answer need is a work_alike need whose key is its seed alone" )
+        elif rec[ "seed" ] in key[ "symbols" ]: raise er.NeedsetError( er.SEED_IN_KEY, f"{rec.get( 'id', '?' )}: the seed {rec[ 'seed' ]} is in its own key" )
         if key.get( "key_lang" ) not in LANGS: _fail( rec, "key.key_lang must be py or ts" )
-        wanted = ( TWIN_SOURCE, ) if rec[ "kind" ] == "near_copy" else ( ( VECTOR_SOURCE, ) if rec[ "selection_route" ] == "vector" else SAMPLED_SOURCES )
+        wanted = ( SEED_SOURCE, ) if own else ( TWIN_SOURCE, ) if rec[ "kind" ] == "near_copy" else ( ( VECTOR_SOURCE, ) if rec[ "selection_route" ] == "vector" else SAMPLED_SOURCES )
         if key.get( "source" ) not in wanted: _fail( rec, f"key.source must be one of {wanted} for this need" )
-    if rec[ "kind" ] in ROUTED:
+    if rec[ "kind" ] in ROUTED and not own:
         if rec[ "selection_route" ] not in ROUTES: _fail( rec, f"selection_route must be one of {ROUTES}" )
-    elif rec[ "selection_route" ] is not None: _fail( rec, "selection_route is only for work_alike and cross_language" )
+    elif rec[ "selection_route" ] is not None: _fail( rec, "selection_route is only for work_alike and cross_language, and not for a seed-answer need" )
     drafter = rec[ "drafter" ]
     if not isinstance( drafter, dict ) or not all( _text( drafter.get( k ) ) for k in DRAFTER_KEYS ): _fail( rec, f"drafter needs {DRAFTER_KEYS}" )
     check = rec[ "check" ]

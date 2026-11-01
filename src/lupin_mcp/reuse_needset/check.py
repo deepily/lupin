@@ -76,17 +76,18 @@ def prompt_version():
     return model_transport.prompt_version( "needset-check", inspect.getsource( matched_prompt ), inspect.getsource( none_check_prompt ), inspect.getsource( parse_check ) )
 
 
-def second_check( need, ask, ledger, model_id, key_texts=None, lines=None, mechanical=None ):
+def second_check( need, ask, ledger, model_id, key_texts=None, lines=None, mechanical=None, on_unreadable=None ):
     """
     Have the second model check one drafted need.
 
     Requires:
         - need is a drafted record; ask( prompt ) returns the reply text
         - a matched need comes with key_texts, the source of each key symbol; a nothing need with lines, the search hits (possibly empty)
+        - on_unreadable is None, or a function taking the reply text of each reply that could not be read
 
     Ensures:
         - returns a copy of the need at status checked, with check { model, result, note, mechanical }
-        - an unreadable reply is asked again once; the reply is stored in the ledger before it is used, so a resume repeats no call
+        - an unreadable reply is asked again once, and each one is handed to on_unreadable before the second ask; the reply is stored in the ledger before it is used, so a resume repeats no call
         - the need's id, key and sentence are unchanged
 
     Raises:
@@ -111,6 +112,7 @@ def second_check( need, ask, ledger, model_id, key_texts=None, lines=None, mecha
         if parsed is not None:
             ledger.put( key, reply )
             break
+        if on_unreadable is not None: on_unreadable( reply )
     if parsed is None: raise er.NeedsetError( er.UNREADABLE_REPLY, key )
     out = copy.deepcopy( need )
     out[ "check" ]  = { "model": model_id, "result": parsed[ "result" ], "note": parsed[ "note" ], "mechanical": list( mechanical or [] ) }

@@ -210,3 +210,12 @@ def test_a_hit_line_over_the_body_limit_is_cut_in_the_nothing_prompt():
     long = "z" * ( check.keys.BODY_LIMIT + 40 )
     prompt = check.none_check_prompt( SENTENCE, [ long ] )
     assert long not in prompt and "[cut at" in prompt
+
+
+def test_every_unreadable_check_reply_is_handed_to_the_callback_before_the_error_is_raised( tmp_path ):
+    seen = []
+    with pytest.raises( er.NeedsetError ) as caught: check.second_check( matched(), Asker( [ "nope", "{}" ] ), ledger( tmp_path ), CHECKER, key_texts=[ "x" ], on_unreadable=seen.append )
+    assert caught.value.code == er.UNREADABLE_REPLY and seen == [ "nope", "{}" ]
+    seen.clear()
+    got = check.second_check( matched(), Asker( [ "nope", reply() ] ), ledger( tmp_path, "b.jsonl" ), CHECKER, key_texts=[ "x" ], on_unreadable=seen.append )
+    assert got[ "check" ][ "result" ] == "agree" and seen == [ "nope" ]

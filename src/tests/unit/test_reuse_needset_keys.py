@@ -27,9 +27,9 @@ class Vectors:
         self.matrices = { "concat": np.array( rows, dtype=np.float32 ) }
 
 
-def record( id, file, lang="py" ):
+def record( id, file, lang="py", kind="function" ):
     """Return a kept-pool record."""
-    return { "id": id, "file": file, "name": id.split( "." )[ -1 ], "lang": lang, "doc": f"Does {id}." }
+    return { "id": id, "file": file, "name": id.split( "." )[ -1 ], "lang": lang, "kind": kind, "doc": f"Does {id}." }
 
 
 def own_shingles( id ):
@@ -354,3 +354,52 @@ def test_the_fence_suffix_is_drawn_again_when_it_occurs_in_a_text( monkeypatch )
     assert "<definition_a_bbbbbbbb>" in same and "</definition_b_bbbbbbbb>" in same and "aaaaaaaa</definition" not in same
     absent = keys.absence_prompt( "capability cccccccc", [ "a.b: does it" ] )
     assert "<capability_dddddddd>" in absent and "</definitions_dddddddd>" in absent
+
+
+OLD_SEED  = "websocket-diagnostic.WebSocketDiagnosticTool.startDiagnosticTest"
+OLD_CLASS = "websocket-diagnostic.WebSocketDiagnosticTool"
+PORT      = "diagnostic/websocketDiagnostic.WebSocketDiagnosticTool.startDiagnosticTest"
+NEW_CLASS = "diagnostic/websocketDiagnostic.WebSocketDiagnosticTool"
+
+
+def port_world():
+    """
+    Build Chloe's flag A: a method, its class, the port's class, nine methods and the port.
+
+    By cosine to the seed the order is: the seed's own class, the port's class, nine other methods, then the port, which is eleventh.
+    """
+    entries = [ ( OLD_SEED, "websocket-diagnostic.js", "method", 1.0 ), ( OLD_CLASS, "websocket-diagnostic.js", "class", 0.99 ), ( NEW_CLASS, "diagnostic/websocketDiagnostic.ts", "class", 0.98 ) ]
+    entries += [ ( f"websocket-diagnostic.m{k}", "websocket-diagnostic.js", "method", 0.9 - 0.01 * k ) for k in range( 9 ) ]
+    entries += [ ( PORT, "diagnostic/websocketDiagnostic.ts", "method", 0.7 ) ]
+    kept     = [ record( i, f, "ts", kind ) for i, f, kind, _ in entries ]
+    bodies   = { i: SEED_WORDS + " tsbody" for i, *_ in entries }
+    vectors  = Vectors( [ i for i, *_ in entries ], [ [ c, (1 - c * c) ** 0.5, 0.0 ] for *_, c in entries ] )
+    measures = { r[ "id" ]: Measure( 40, own_shingles( r[ "id" ] ) ) for r in kept }
+    return keys.KeyContext( kept, measures, bodies, DRAW_SEED, vectors )
+
+
+def test_a_method_seed_is_never_offered_a_whole_class_and_so_its_line_for_line_port_is_asked_about():
+    ctx   = port_world()
+    found = keys.work_alike_candidates( ctx, OLD_SEED, keys.ROUTE_VECTOR )
+    assert OLD_CLASS not in found[ "ids" ] and NEW_CLASS not in found[ "ids" ], "a method is compared with methods, not with a container"
+    assert len( found[ "ids" ] ) == 10 and found[ "ids" ][ -1 ] == PORT, "without the filter the port is eleventh by cosine and is never asked about"
+    assert all( ctx.by_id[ i ][ "kind" ] != "class" for i in found[ "ids" ] )
+
+
+def test_the_sampled_route_drops_whole_classes_for_a_method_seed_too():
+    ctx = port_world()
+    sampled = keys.sampled_candidates( ctx, OLD_SEED, "work_alike" )
+    assert OLD_CLASS not in sampled and NEW_CLASS not in sampled and PORT in sampled
+
+
+def test_a_seed_that_is_itself_a_class_is_still_compared_with_classes_and_never_with_itself():
+    ctx    = port_world()
+    found  = keys.vector_candidates( ctx, OLD_CLASS, "work_alike" )
+    assert NEW_CLASS in found and OLD_CLASS not in found
+
+
+def test_a_python_function_seed_is_not_offered_a_class_either():
+    ctx = port_world()
+    ctx.by_id[ OLD_SEED ][ "kind" ] = "function"
+    ctx.by_id[ NEW_CLASS ][ "kind" ] = "class"
+    assert NEW_CLASS not in keys.vector_candidates( ctx, OLD_SEED, "work_alike" )

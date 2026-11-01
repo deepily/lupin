@@ -186,6 +186,16 @@ def test_an_accepted_draft_becomes_a_valid_need_and_a_smoke_run_marks_it( tmp_pa
     assert run.to_need( record, "near_copy", "py", make_env( tmp_path, smoke=True, name="s.jsonl" ) )[ "smoke" ] is True
 
 
+def test_a_seed_job_has_no_keys_and_its_accepted_draft_is_a_seed_answer_need( tmp_path ):
+    env  = make_env( tmp_path )
+    seed = next( iter( env.by_id ) )
+    job  = run.seed_job( env, seed, "py" )
+    assert job[ "keys" ] == [] and job[ "seed" ] is env.by_id[ seed ] and job[ "meta" ] == { "route": None, "key_source": "seed", "key_lang": env.by_id[ seed ][ "lang" ] }
+    need = run.to_need( { "seed": seed, "key": [], "need": SENTENCE, "meta": job[ "meta" ] }, "work_alike", "py", env )
+    schema.validate_need( need )
+    assert need[ "key" ][ "symbols" ] == [ seed ] and need[ "key" ][ "source" ] == "seed" and need[ "selection_route" ] is None and need[ "status" ] == "drafted"
+
+
 def test_a_whole_run_writes_the_plan_the_drafts_and_the_report_and_fills_every_cell( tmp_path ):
     env    = make_env( tmp_path )
     got    = run.run_needset( env, table(), tmp_path )

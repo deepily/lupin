@@ -1,17 +1,23 @@
 """
 The live pieces of the attribution and yield stages: a final need per seed, and the trace.
 
-By Cheech's ruling, a need becomes final without a person when the drafter's sentence passes the leak check and the second model agrees.
+By Cheech's ruling, a need becomes final without a person when the drafter's sentence passes the checks and the second model agrees.
+By Rick's ruling of 1 November, the seed is then the need's known answer and no partner is searched for.
+Partner search is an option, off unless asked for.
 A disputed need is counted and dropped, and never traced. Every model call here goes through the cap that the runner has installed.
+Every rejected sentence, every disputed need and every unreadable reply goes to the rejection ledger.
 """
 import asyncio
 import collections
+import json
+import os
+import time
 import types
 
 from cosa.repo.symindex.candidates import vector_store
 from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import errors as er
-from lupin_mcp.reuse_needset import check, draft, finalize, freeze, hardness, keys, loss_trace, run, stage_seeds, stages
+from lupin_mcp.reuse_needset import check, draft, finalize, freeze, hardness, keys, loss_trace, run, schema, stage_seeds, stages
 
 KIND          = "work_alike"
 SECOND_SYSTEM = "You answer with one JSON object and nothing else."
@@ -40,18 +46,47 @@ def route_table( lists, seed ):
     return out
 
 
-def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally, job_for=run.routed_job, draft_fn=draft.draft_need, check_fn=check.second_check ):
+class RejectionLedger:
+    """A file of one JSON line per rejection, flushed to disk as each is added."""
+
+    def __init__( self, path ):
+        """
+        Hold the path.
+
+        Requires:
+            - path is a file in an existing directory; the file may not exist yet
+        """
+        self.path = str( path )
+
+    def add( self, row ):
+        """Ensures: appends the row with the time as one flushed line."""
+        with open( self.path, "a", encoding="utf-8" ) as f:
+            f.write( json.dumps( { **row, "at": time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }, sort_keys=True ) + "\n" )
+            f.flush()
+            os.fsync( f.fileno() )
+
+    def rows( self ):
+        """Ensures: returns the rows in file order, [] for a file not yet written."""
+        if not os.path.exists( self.path ): return []
+        with open( self.path, encoding="utf-8" ) as f: return [ json.loads( line ) for line in f if line.strip() ]
+
+
+def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally, rejections, partners=False, job_for=run.routed_job, draft_fn=draft.draft_need, check_fn=check.second_check ):
     """
     Return the synchronous function that turns one seed id into a final need, or None.
 
     Requires:
         - renv holds ctx ( keys.KeyContext ), ask, ledger, model_id, calls_log, by_id, strip_fn, server, source_commit and smoke, as run.routed_job and run.to_need read them
         - routes maps each seed id to its route; second_ask( prompt ) returns the second model's reply text
-        - tally is a Tally
+        - tally is a Tally; rejections has add( row ), as RejectionLedger has
+        - partners is False for the seed to be its own known answer, and True to look for a partner through the routes
 
     Ensures:
-        - a seed that has no row in the search pool, no partner or no accepted sentence is counted under not_pooled, no_partner or draft_failed and gives None
-        - a seed whose same-job or check reply is unreadable twice is counted under unreadable_reply, with its id, code and detail kept, and gives None; the stage goes on to the next seed
+        - with partners off no same-job call is made, and an agreed need is a seed-answer need whose key is the seed
+        - a seed that has no row in the search pool, no partner or no accepted sentence is counted under not_pooled, no_partner or draft_failed and gives None; no_partner arises only with partners on
+        - every sentence the checks rejected, even one the rewrite then replaced, adds a rejected_sentence row; every drafter reply that could not be read adds an unreadable_draft_reply row; a draft that ends rejected adds draft_failed
+        - a disputed need adds a disputed row with the second model's result and note, and every check reply that could not be read adds an unreadable_check_reply row
+        - a seed whose same-job or check reply is unreadable twice is counted under unreadable_reply, with its id, code and detail kept, adds a seed_skipped row, and gives None; the stage goes on to the next seed
         - any other NeedsetError, the call cap's included, is raised
         - a need the second model does not agree to is counted under disputed, its id is kept, and it gives None
         - an agreed need is returned as finalize.final_row makes it, with final_source model_agreed and the key's source texts shown to the checker
@@ -64,6 +99,7 @@ def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally,
             if error.code != er.UNREADABLE_REPLY: raise
             tally[ UNREADABLE ] += 1
             tally.skipped.append( { "seed": seed_id, "code": error.code, "detail": error.detail } )
+            rejections.add( { "kind": "seed_skipped", "seed": seed_id, "code": error.code, "detail": error.detail } )
             return None
 
     def worked( seed_id ):
@@ -72,19 +108,24 @@ def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally,
             tally[ NOT_POOLED ] += 1
             return None
         lang = renv.by_id[ seed_id ][ "lang" ]
-        job  = job_for( renv, KIND, seed_id, lang, routes[ seed_id ] )
+        job  = job_for( renv, KIND, seed_id, lang, routes[ seed_id ] ) if partners else run.seed_job( renv, seed_id, lang )
         if job is None:
             tally[ NO_PARTNER ] += 1
             return None
         record = draft_fn( job, renv.ask, renv.ledger, renv.model_id )
+        for r in record[ "rejections" ]: rejections.add( { "kind": "rejected_sentence", "seed": seed_id, **r } )
+        for r in record[ "unreadable" ]: rejections.add( { "kind": "unreadable_draft_reply", "seed": seed_id, **r } )
         if not record[ "ok" ]:
             tally[ DRAFT_FAILED ] += 1
+            rejections.add( { "kind": "draft_failed", "seed": seed_id, "reason": record[ "reason" ], "tries": record[ "tries" ] } )
             return None
         need    = run.to_need( record, KIND, lang, renv )
-        checked = check_fn( need, second_ask, second_ledger, second_model, key_texts=[ renv.ctx.bodies[ i ] for i in need[ "key" ][ "symbols" ] ] )
+        checked = check_fn( need, second_ask, second_ledger, second_model, key_texts=[ renv.ctx.bodies[ i ] for i in need[ "key" ][ "symbols" ] ],
+                            on_unreadable=lambda reply: rejections.add( { "kind": "unreadable_check_reply", "seed": seed_id, "reply": reply } ) )
         if check.disputed( checked ):
             tally[ DISPUTED ] += 1
             tally.ids.append( checked[ "id" ] )
+            rejections.add( { "kind": "disputed", "seed": seed_id, "need": checked[ "id" ], "result": checked[ "check" ][ "result" ], "note": checked[ "check" ][ "note" ] } )
             return None
         return finalize.final_row( checked, AGREED_LABEL )
     return final_need
@@ -121,18 +162,19 @@ class Tally( collections.Counter ):
 
 
 def yield_row( need ):
-    """Ensures: returns the { seed, need, targets, lang } row that hardness.source_hard reads."""
-    return { "seed": need[ "seed" ], "need": need[ "need" ], "targets": list( need[ "key" ][ "symbols" ] ), "lang": need[ "write_lang" ] }
+    """Ensures: returns the row hardness.source_hard reads, with seed_is_answer set."""
+    return { "seed": need[ "seed" ], "need": need[ "need" ], "targets": list( need[ "key" ][ "symbols" ] ), "lang": need[ "write_lang" ], "seed_is_answer": need[ "key" ][ "source" ] == schema.SEED_SOURCE }
 
 
-def build_parts( env, built, lists, models, drafter, second, ledgers, trace_all=loss_trace.trace_all, identity=freeze.identity, load_vectors=vector_store.load_vectors ):
+def build_parts( env, built, lists, models, drafter, second, ledgers, partners=False, trace_all=loss_trace.trace_all, identity=freeze.identity, load_vectors=vector_store.load_vectors ):
     """
     Return the four live parts of the attribution and yield stages.
 
     Requires:
         - env holds root, seed, source_commit, server, strip_fn and ctx ( the reuse context ); built is smoke.index_parts' result
         - lists come from stage_seeds.load_lists; models holds second and probe; drafter and second are ask( system, user ) functions
-        - ledgers holds draft, second and trace, the three ledgers of the stages
+        - ledgers holds draft, second, trace and rejections, the ledgers of the stages; rejections has add( row )
+        - partners is False unless a partner search was asked for, and then each seed is its own known answer
 
     Ensures:
         - returns { make_need, prepare_fn, trace_fn, index, tally }
@@ -147,7 +189,7 @@ def build_parts( env, built, lists, models, drafter, second, ledgers, trace_all=
     renv     = types.SimpleNamespace( ctx=keys.KeyContext( pooled, measures, bodies, env.seed, vectors ), ask=drafter, ledger=ledgers[ "draft" ], model_id=draft.DRAFTER_MODEL,
                                       calls_log=None, by_id=by_id, strip_fn=env.strip_fn, server=env.server, source_commit=env.source_commit, smoke=False )
     tally    = Tally()
-    final    = final_need_fn( renv, route_table( lists, env.seed ), lambda prompt: second( SECOND_SYSTEM, prompt ), ledgers[ "second" ], models[ "second" ], tally )
+    final    = final_need_fn( renv, route_table( lists, env.seed ), lambda prompt: second( SECOND_SYSTEM, prompt ), ledgers[ "second" ], models[ "second" ], tally, ledgers[ "rejections" ], partners )
     gen      = lambda: rt.prepare( env.ctx )[ 3 ]
     frozen   = identity( gen(), env.ctx.candidate_stage.vectors_dir )
 

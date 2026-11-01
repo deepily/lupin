@@ -218,6 +218,18 @@ class AccountLedger:
         with self._locked() as f: runs = self._state( f )[ 2 ]
         return sum( r[ "spent" ] if r[ "closed" ] else max( r[ "ceiling" ], r[ "spent" ] ) for name, r in runs.items() if name.startswith( prefix ) )
 
+    def is_open( self, run ):
+        """
+        Say whether a run began and has no end row yet.
+
+        Ensures:
+            - returns True for a run that began and is not closed, False for a closed run and for a name that never began
+        Raises:
+            - LedgerUnreadable as snapshot does
+        """
+        with self._locked() as f: runs = self._state( f )[ 2 ]
+        return run in runs and not runs[ run ][ "closed" ]
+
     def limit_tokens( self ):
         """Ensures: returns the latest account limit in tokens."""
         return self.snapshot()[ 0 ]

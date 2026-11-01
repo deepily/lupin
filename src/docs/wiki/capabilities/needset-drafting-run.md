@@ -10,9 +10,10 @@ pins:
   - lupin_mcp.reuse_needset.run.nothing_job@87a5ce11f8
   - lupin_mcp.reuse_needset.run.route_table@c2294fde60
   - lupin_mcp.reuse_needset.run.job_maker@f2d0b02da6
-  - lupin_mcp.reuse_needset.run.to_need@5c68736119
+  - lupin_mcp.reuse_needset.run.to_need@15491aa892
   - lupin_mcp.reuse_needset.run.cell_specs@15214c71c2
   - lupin_mcp.reuse_needset.run.run_needset@d34812f1b1
+  - lupin_mcp.reuse_needset.run.seed_job@51c49ab06f
 ---
 # Need set: drafting run
 
@@ -23,6 +24,7 @@ Runs the drafting end to end: plan, draw, one job per seed, parallel cells, need
 - `cell_name` joins the kind and language with a slash.
 - `near_copy_job` builds the job for a seed keyed on its twin group, or `None` without a twin.
 - `routed_job` builds the job for a work-alike seed through its route, or `None` without a key. It passes `calls_log` and the cell name to `find_key`, so each live call is logged with its cell.
+- `seed_job` builds the job for a seed that is its own known answer. It has no keys, so the sentence is checked against the seed alone, and its meta names the seed as the key source. `to_need` turns its accepted draft into a seed-answer need. That need's key is the seed, and it has no route.
 - `nothing_job` builds the job for a file: the entry line of each eligible symbol in it.
 - `route_table` maps seed ids to routes for a work-alike cell, half and half over the draw order.
 - `job_maker` returns a cell's job function. It takes a seed id and returns a job, or `None` when the seed has no key. Routes are assigned over the whole order, spares included.

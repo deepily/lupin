@@ -327,3 +327,23 @@ def test_every_row_is_on_disk_before_the_lock_is_let_go( ledger, monkeypatch ):
     ledger.end_run( "r" )
     assert [ k for k, _ in seen ] == [ "begin", "spend", "end" ]
     assert [ json.loads( last )[ "kind" ] for _, last in seen ] == [ "begin", "spend", "end" ]
+
+
+def test_a_run_is_open_from_its_begin_row_until_its_end_row_and_an_unknown_name_is_not_open( ledger ):
+    assert ledger.is_open( "a" ) is False
+    ledger.begin_run( "a", 10 )
+    assert ledger.is_open( "a" ) is True
+    ledger.end_run( "a" )
+    assert ledger.is_open( "a" ) is False
+
+
+def test_close_run_ends_an_open_run_once_and_leaves_every_other_context_alone( ledger ):
+    import types
+    budget = rc.TokenBudget( 5, 1_000, ledger=ledger, run="r" )
+    ctx    = types.SimpleNamespace( transport=rt.LiveJevTransport( budget=budget ) )
+    assert ledger.total() == 1_000, "an open run holds its whole ceiling"
+    assert rt.close_run( ctx ) == "r" and ledger.is_open( "r" ) is False and ledger.total() == 0
+    assert rt.close_run( ctx ) is None and [ r[ "kind" ] for r in rows( ledger ) ].count( "end" ) == 1, "a second call writes nothing"
+    assert rt.close_run( types.SimpleNamespace( transport=None ) ) is None
+    assert rt.close_run( types.SimpleNamespace( transport=rt.LiveJevTransport( budget=jt.CallBudget( 3 ) ) ) ) is None
+    assert rt.close_run( types.SimpleNamespace( transport=rt.LiveJevTransport( budget=rc.TokenBudget( 5, 1_000 ) ) ) ) is None

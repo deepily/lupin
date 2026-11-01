@@ -155,7 +155,7 @@ def test_a_full_run_charges_nothing_for_fakes_writes_the_report_and_a_resumed_ca
         return stage
 
     rep = asyncio.run( ft.run_first_thousand( str( tmp_path ), stage_returning( "a" ), stage_returning( "b" ), stage_returning( "c" ), stage_returning( "d" ) ) )
-    assert [ rep[ "stages" ][ n ][ "status" ] for n in stages.ORDER ] == [ "done" ] * 4 and rep[ "used" ] == 0 and rep[ "limit" ] == 1000
+    assert [ rep[ "stages" ][ n ][ "status" ] for n in stages.ORDER ] == [ "done" ] * 4 and rep[ "used" ] == 0 and rep[ "limit" ] == 1314
     assert json.loads( ( tmp_path / ft.REPORT_FILE ).read_text( encoding="utf-8" ) ) == rep
     cap = call_cap.CallCap( str( tmp_path / ft.CALLS_FILE ), 3 )
     for _ in range( 2 ): cap.charge( "m" )
@@ -309,18 +309,19 @@ def test_the_yield_report_counts_only_the_yield_seeds_and_not_the_attribution_on
 
 def test_the_live_parts_use_their_own_ledgers_in_the_run_folder_and_the_arguments_models( tmp_path, monkeypatch ):
     seen = {}
-    args = types.SimpleNamespace( run_dir=str( tmp_path ), cli_path=None, server="max-plan", second_model="M2", probe_model="MP" )
+    args = types.SimpleNamespace( run_dir=str( tmp_path ), cli_path=None, server="max-plan", second_model="M2", probe_model="MP", partners=False )
     env  = types.SimpleNamespace( ask="DRAFT-ASK" )
     monkeypatch.setattr( draft, "drafter_call", lambda model=draft.DRAFTER_MODEL: f"ask-{model}" )
 
-    def build( env_, built, lists, models, drafter, second, ledgers ):
-        seen.update( env=env_, built=built, lists=lists, models=models, drafter=drafter, second=second, ledgers=ledgers )
+    def build( env_, built, lists, models, drafter, second, ledgers, partners ):
+        seen.update( env=env_, built=built, lists=lists, models=models, drafter=drafter, second=second, ledgers=ledgers, partners=partners )
         return "PARTS"
 
     assert ft.live_parts( args, env, "BUILT", "LISTS", build=build ) == "PARTS"
     assert seen[ "models" ] == { "second": "M2", "probe": "MP" } and seen[ "drafter" ] == "DRAFT-ASK" and seen[ "second" ] == "ask-M2" and seen[ "built" ] == "BUILT" and seen[ "lists" ] == "LISTS"
     paths = { k: pathlib.Path( v.ledger.path if hasattr( v, "ledger" ) else v.path ).name for k, v in seen[ "ledgers" ].items() }
-    assert paths == { "draft": "ledger-stage-draft.jsonl", "second": "ledger-stage-second.jsonl", "trace": "ledger-trace.jsonl" }
+    assert paths == { "draft": "ledger-stage-draft.jsonl", "second": "ledger-stage-second.jsonl", "trace": "ledger-trace.jsonl", "rejections": "ledger-rejections.jsonl" }
+    assert seen[ "partners" ] is False and isinstance( seen[ "ledgers" ][ "rejections" ], stage_parts.RejectionLedger )
     assert isinstance( seen[ "ledgers" ][ "draft" ], draft.SharedLedger ) and isinstance( seen[ "ledgers" ][ "second" ], draft.SharedLedger )
 
 
@@ -351,7 +352,7 @@ def run_dir_files( tmp_path, cli=True ):
 def test_the_command_line_needs_its_inputs_and_is_a_plan_unless_live_is_given():
     base = [ "--root", "/r", "--run-dir", "/d", "--planted", "p", "--answer-key", "k", "--labels-dir", "l", "--seed", "7", "--source-commit", "abc" ]
     a    = ft.parse_args( base )
-    assert a.seed == 7 and a.limit == 1000 and a.live is False and a.cli_path is None and a.server == "max-plan" and a.second_model == a.probe_model == smoke.SECOND_MODEL and ft.parse_args( [ *base, "--live", "--limit", "5" ] ).live is True
+    assert a.seed == 7 and a.limit == 1314 and a.live is False and a.cli_path is None and a.server == "max-plan" and a.second_model == a.probe_model == smoke.SECOND_MODEL and ft.parse_args( [ *base, "--live", "--limit", "5" ] ).live is True
     with pytest.raises( SystemExit ): ft.parse_args( base[ :-2 ] )
 
 
@@ -359,7 +360,7 @@ def test_without_live_main_plans_from_files_and_touches_nothing_else( tmp_path )
     argv, sha = run_dir_files( tmp_path )
     boom      = lambda *a, **k: pytest.fail( "something live was touched" )
     out       = ft.main( argv, deps={ "planted_sha": sha, "context": boom, "factories": boom, "runner": boom, "ask": boom } )
-    assert out[ "live" ] is False and out[ "plan" ][ "used" ] == 0 and out[ "plan" ][ "remaining" ] == 1000 and out[ "plan" ][ "pairs" ] == 20
+    assert out[ "live" ] is False and out[ "plan" ][ "used" ] == 0 and out[ "plan" ][ "remaining" ] == 1314 and out[ "plan" ][ "pairs" ] == 20
     assert out[ "plan" ][ "groups" ] == { "drifted": 2, "other": 17, "unsure": 1 } and out[ "plan" ][ "unsure_flagged" ] == 2 and out[ "plan" ][ "ledger" ].endswith( "call-ledger.jsonl" )
 
 
@@ -409,7 +410,7 @@ def test_a_live_run_assembles_the_env_for_the_two_stage_factories_and_runs_four_
         return { "ran": True }
 
     deps = { "planted_sha": sha, "parts": lambda args, env, built, lists: seen.update( parts_args=( args.server, env.server, built, lists[ "seed" ], lists[ "sha" ] ) ) or "PARTS", **seed_deps(), "factories": ( factory( "a" ), factory( "y" ) ), "context": lambda root: ctx, "runner": runner, "ask": "ASK", "ledger": lambda args: "LEDGER",
-             "strip_fn": strip_of, "draft_fn": "DRAFT", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed },
+             "strip_fn": strip_of, "draft_fn": "DRAFT", "close_run": lambda ctx: None, "remainder": lambda ps, seed: { "per_pair": [], "seed": seed },
              "control": lambda c, ps, ask, ledger, strip_fn, draft_fn, cache: ( seen.update( control_args=( c, len( ps ), ask, ledger, strip_fn, draft_fn, cache ) ) or ( lambda: asyncio.sleep( 0, { "control": True } ) ) ) }
     out  = ft.main( [ *argv, "--live", "--limit", "9" ], deps=deps )
     env  = seen[ "a" ]
@@ -433,7 +434,7 @@ def test_a_live_run_passes_the_written_lists_file_and_the_parts_to_the_stage_fac
 
     monkeypatch.setattr( ft, "stage_factories", fake_factories )
     deps = { "planted_sha": sha, "parts": lambda args, env, built, lists: "PARTS", **seed_deps(), "context": lambda root: types.SimpleNamespace( candidate_stage="live" ), "runner": runner, "ask": "ASK", "ledger": lambda args: "L",
-             "strip_fn": strip_of, "draft_fn": "D", "remainder": lambda ps, seed: { "per_pair": [], "seed": seed }, "control": lambda *a: ( lambda: asyncio.sleep( 0, {} ) ) }
+             "strip_fn": strip_of, "draft_fn": "D", "close_run": lambda ctx: None, "remainder": lambda ps, seed: { "per_pair": [], "seed": seed }, "control": lambda *a: ( lambda: asyncio.sleep( 0, {} ) ) }
     out  = ft.main( [ *argv, "--live" ], deps=deps )
     assert seen[ "parts" ] == "PARTS" and pathlib.Path( seen[ "path" ] ).name == stage_seeds.LISTS_FILE and pathlib.Path( seen[ "path" ] ).parent == tmp_path / "run"
     assert out[ "report" ] == { "stages": [ "one", "two" ] }
@@ -442,7 +443,7 @@ def test_a_live_run_passes_the_written_lists_file_and_the_parts_to_the_stage_fac
 def test_a_live_run_over_other_seed_lists_stops_by_name_before_the_parts_are_built( tmp_path ):
     argv, sha = run_dir_files( tmp_path )
     base      = { "planted_sha": sha, "context": lambda root: types.SimpleNamespace( candidate_stage="live" ), "ask": "ASK", "ledger": lambda args: "L", "strip_fn": strip_of, "draft_fn": "D", "control": lambda *a: None,
-                  "parts": lambda args, env, built, lists: "PARTS", "factories": ( lambda env: None, lambda env: None ), "runner": lambda *a: asyncio.sleep( 0, {} ), "remainder": lambda ps, seed: {} }
+                  "parts": lambda args, env, built, lists: "PARTS", "factories": ( lambda env: None, lambda env: None ), "runner": lambda *a: asyncio.sleep( 0, {} ), "close_run": lambda ctx: None, "remainder": lambda ps, seed: {} }
     ft.main( [ *argv, "--live" ], deps={ **base, **seed_deps() } )
     with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps={ **base, **seed_deps( skip="ts-3" ), "parts": lambda *a: pytest.fail( "parts were built" ) } )
     assert e.value.code == er.PLAN_ALREADY_WRITTEN
@@ -461,7 +462,7 @@ def live_deps( sha, runner ):
     """Return deps for a live run on stand-ins, ending in the given runner."""
     return { "planted_sha": sha, "context": lambda root: types.SimpleNamespace( candidate_stage="live" ), "ask": "ASK", "ledger": lambda args: "L", "strip_fn": strip_of, "draft_fn": "D",
              "control": lambda *a: None, "parts": lambda args, env, built, lists: "PARTS", "factories": ( lambda env: None, lambda env: None ), "runner": runner,
-             "remainder": lambda ps, seed: {}, **seed_deps() }
+             "close_run": lambda ctx: None, "remainder": lambda ps, seed: {}, **seed_deps() }
 
 
 def test_a_live_run_sends_every_call_through_the_binary_named_by_cli_path_and_a_plan_with_the_same_path_does_not( tmp_path, monkeypatch ):
@@ -621,3 +622,40 @@ def test_a_stage_with_no_need_and_only_disputed_or_no_partner_seeds_stays_a_stop
     seen = report[ "stages" ][ "attribution" ]
     assert seen[ "status" ] == "stopped" and seen[ "report" ][ "no_final_need" ][ "disputed" ] == 1 and seen[ "report" ][ "no_final_need" ][ "no_partner" ] == 1 and seen[ "report" ][ "no_final_need" ][ "unreadable_reply" ] == 0
     assert ft.exit_status( { "live": True, "report": report } ) == 0
+
+
+def test_the_spend_ledger_run_is_closed_when_the_stages_end_and_also_when_they_raise( tmp_path ):
+    argv, sha = run_dir_files( tmp_path )
+    closed    = []
+
+    async def ended( run_dir, one, two, control, rem, limit ): return { "stages": {} }
+
+    async def crashed( run_dir, one, two, control, rem, limit ): raise RuntimeError( "boom" )
+
+    out = ft.main( [ *argv, "--live" ], deps=live_deps( sha, ended ) | { "close_run": lambda ctx: closed.append( ctx ) or "needset-run" } )
+    assert out[ "closed_run" ] == "needset-run" and len( closed ) == 1
+    with pytest.raises( RuntimeError, match="boom" ): ft.main( [ *argv, "--live" ], deps=live_deps( sha, crashed ) | { "close_run": lambda ctx: closed.append( ctx ) } )
+    assert len( closed ) == 2, "a run that dies on an error still closes its ledger run"
+
+
+def test_partners_are_off_unless_asked_for_and_a_budget_stop_exits_with_the_cap_code( tmp_path ):
+    argv, sha = run_dir_files( tmp_path )
+    assert ft.parse_args( argv ).partners is False and ft.parse_args( [ *argv, "--partners" ] ).partners is True
+    live = lambda status: { "live": True, "report": { "stages": { "attribution": { "status": status }, "yield": { "status": "done" } } } }
+    assert ft.exit_status( live( "budget_reached" ) ) == ft.EXIT_CAP_REACHED and ft.exit_status( live( "failed" ) ) == ft.EXIT_FAILED and ft.exit_status( live( "done" ) ) == 0
+
+
+def test_the_first_thousand_cap_gives_each_stage_its_own_budget_and_the_remainder_none( tmp_path ):
+    async def stage(): return {}
+    cap_seen = []
+    real     = call_cap.CallCap
+
+    class Spy( real ):
+        def __init__( self, *a, **k ):
+            super().__init__( *a, **k )
+            cap_seen.append( self.stage_limits )
+
+    call_cap.CallCap = Spy
+    try: asyncio.run( ft.run_first_thousand( str( tmp_path ), stage, stage, stage, stage ) )
+    finally: call_cap.CallCap = real
+    assert cap_seen == [ stages.STAGE_BUDGETS ] and stages.STAGE_BUDGETS[ "remainder" ] == 0

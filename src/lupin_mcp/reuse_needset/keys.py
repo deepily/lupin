@@ -27,6 +27,7 @@ ABSENCE_VERSION  = "absence-1"
 OTHER_LANG       = { "py": "ts", "ts": "py" }
 YES, NO          = "yes", "no"
 BODY_LIMIT       = 6000
+CLASS_KIND       = "class"
 
 
 def twins_of( seed_id, twins, all_ids ):
@@ -92,16 +93,19 @@ class KeyContext:
 
 def unlike( ctx, seed_id, ids ):
     """
-    Keep the ids whose structure is unlike the seed's.
+    Keep the ids whose structure is unlike the seed's, and compare like with like.
 
     Requires:
-        - the seed and every id have a measure
+        - the seed and every id have a measure and a record in ctx.by_id with a kind
 
     Ensures:
         - returns the ids in order, without the seed itself, whose shingle overlap with the seed is under the lookalike limit
+        - for a method or function seed, no whole class is returned, so the seed's own enclosing class never takes a slot and a candidate list holds only methods and functions
+        - for a class seed, classes stay
     """
-    mine = ctx.measures[ seed_id ].shingles
-    return [ i for i in ids if i != seed_id and dups.jaccard( mine, ctx.measures[ i ].shingles ) < LOOKALIKE ]
+    mine      = ctx.measures[ seed_id ].shingles
+    like_kind = ctx.by_id[ seed_id ][ "kind" ] == CLASS_KIND
+    return [ i for i in ids if i != seed_id and ( like_kind or ctx.by_id[ i ][ "kind" ] != CLASS_KIND ) and dups.jaccard( mine, ctx.measures[ i ].shingles ) < LOOKALIKE ]
 
 
 def target_lang( ctx, seed_id, kind ):

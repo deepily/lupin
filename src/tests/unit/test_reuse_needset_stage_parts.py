@@ -39,7 +39,7 @@ def final_fn( tmp_path, reply=AGREE, job=lambda *a: job_for_pair(), renv=None, a
         seen.append( prompt )
         return reply
 
-    fn = sp.final_need_fn( renv or renv_for( tmp_path ), { "d-orig00": "vector" }, second, draft.make_ledger( str( tmp_path / "second.jsonl" ), None, "max-plan" ), "second-model", tally, job_for=job )
+    fn = sp.final_need_fn( renv or renv_for( tmp_path ), { "d-orig00": "vector" }, second, draft.make_ledger( str( tmp_path / "second.jsonl" ), None, "max-plan" ), "second-model", tally, sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) ), partners=True, job_for=job )
     return fn, tally
 
 
@@ -85,7 +85,7 @@ def test_the_job_is_asked_for_the_seeds_language_and_route( tmp_path ):
 
 def test_the_checker_may_not_be_the_drafter( tmp_path ):
     tally = sp.Tally()
-    fn    = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), draft.DRAFTER_MODEL, tally, job_for=lambda *a: job_for_pair() )
+    fn    = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), draft.DRAFTER_MODEL, tally, sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) ), partners=True, job_for=lambda *a: job_for_pair() )
     with pytest.raises( er.NeedsetError ) as e: fn( "d-orig00" )
     assert e.value.code == er.CHECKER_EQUALS_DRAFTER
 
@@ -105,8 +105,9 @@ def test_the_routes_cover_every_listed_seed_and_split_each_stage_and_language_ev
 
 
 def test_a_yield_row_is_the_seed_the_sentence_the_key_and_the_language():
-    need = { "seed": "s", "need": "n", "key": { "symbols": [ "a", "b" ] }, "write_lang": "ts" }
-    assert sp.yield_row( need ) == { "seed": "s", "need": "n", "targets": [ "a", "b" ], "lang": "ts" }
+    need = { "seed": "s", "need": "n", "key": { "symbols": [ "a", "b" ], "source": "vector" }, "write_lang": "ts" }
+    assert sp.yield_row( need ) == { "seed": "s", "need": "n", "targets": [ "a", "b" ], "lang": "ts", "seed_is_answer": False }
+    assert sp.yield_row( { **need, "key": { "symbols": [ "s" ], "source": "seed" } } )[ "seed_is_answer" ] is True
 
 
 def test_the_counts_name_the_four_reasons_and_the_disputed_ids():
@@ -137,9 +138,9 @@ def build( tmp_path, final=None, trace_all=None, identity=None, ledgers=None, mo
     built = ( { r[ "id" ]: r for r in rows }, rows, "MEASURES", None, { r[ "id" ]: "body" for r in rows } )
     env   = types.SimpleNamespace( root="/r", seed=7, source_commit="abc", server="max-plan", strip_fn=strip_of, ctx=types.SimpleNamespace( candidate_stage=types.SimpleNamespace( vectors_dir="/v" ) ) )
     seen  = {}
-    monkeypatch.setattr( sp, "final_need_fn", lambda renv, routes, second_ask, second_ledger, second_model, tally, **kw: seen.update( renv=renv, routes=routes, second=second_ask( "p" ), model=second_model ) or final )
+    monkeypatch.setattr( sp, "final_need_fn", lambda renv, routes, second_ask, second_ledger, second_model, tally, rejections, partners, **kw: seen.update( renv=renv, routes=routes, second=second_ask( "p" ), model=second_model ) or final )
     monkeypatch.setattr( sp.rt, "prepare", lambda ctx: ( None, None, "sha", "GEN" ) )
-    parts = sp.build_parts( env, built, lists_of( 2 ), { "second": "M2", "probe": "MP" }, "DRAFT", lambda system, user: f"{system}|{user}", ledgers or { "draft": "LD", "second": "LS", "trace": "LT" },
+    parts = sp.build_parts( env, built, lists_of( 2 ), { "second": "M2", "probe": "MP" }, "DRAFT", lambda system, user: f"{system}|{user}", ledgers or { "draft": "LD", "second": "LS", "trace": "LT", "rejections": "LR" },
                             trace_all=trace_all, identity=identity or ( lambda gen, vdir: { "gen": gen, "vdir": vdir } ), load_vectors=lambda folder: Vectors() )
     return parts, seen, env
 
@@ -157,7 +158,7 @@ def test_make_need_and_prepare_fn_run_on_a_worker_thread_under_the_callers_cap_s
 
     def final( seed_id ):
         seen[ seed_id ] = ( threading.current_thread() is threading.main_thread(), call_cap._STAGE.get() )
-        return None if seed_id == "none" else { "seed": seed_id, "need": "n", "key": { "symbols": [ "k" ] }, "write_lang": "ts" }
+        return None if seed_id == "none" else { "seed": seed_id, "need": "n", "key": { "symbols": [ "k" ], "source": "vector" }, "write_lang": "ts" }
 
     parts, _, _ = build( tmp_path, final=final, monkeypatch=monkeypatch )
 
@@ -167,7 +168,7 @@ def test_make_need_and_prepare_fn_run_on_a_worker_thread_under_the_callers_cap_s
         return one, two, await parts[ "prepare_fn" ]( "none" )
 
     one, two, nothing = asyncio.run( go() )
-    assert one[ "seed" ] == "a" and two == { "seed": "b", "need": "n", "targets": [ "k" ], "lang": "ts" } and nothing is None
+    assert one[ "seed" ] == "a" and two == { "seed": "b", "need": "n", "targets": [ "k" ], "lang": "ts", "seed_is_answer": False } and nothing is None
     assert seen[ "a" ] == ( False, "attribution" ) and seen[ "b" ] == ( False, "yield" )
 
 
@@ -202,7 +203,7 @@ def test_an_unreadable_same_job_reply_skips_the_seed_with_the_reason_recorded_an
 
     renv = renv_for( tmp_path )
     renv.ctx.by_id[ "bad" ] = renv.by_id[ "bad" ] = renv.by_id[ "d-orig00" ]
-    fn   = sp.final_need_fn( renv, { "bad": "vector", "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), "second-model", tally, job_for=job )
+    fn   = sp.final_need_fn( renv, { "bad": "vector", "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), "second-model", tally, sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) ), partners=True, job_for=job )
     assert fn( "bad" ) is None and tally[ "unreadable_reply" ] == 1 and tally.skipped == [ { "seed": "bad", "code": er.UNREADABLE_REPLY, "detail": "k-1" } ]
     assert fn( "d-orig00" )[ "status" ] == "final" and tally[ "unreadable_reply" ] == 1
 
@@ -212,11 +213,84 @@ def test_an_unreadable_check_reply_skips_the_seed_the_same_way_and_another_error
 
     def unreadable( *a, **k ): raise er.NeedsetError( er.UNREADABLE_REPLY, "check-key" )
 
-    fn = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), "second-model", tally, job_for=lambda *a: job_for_pair(), check_fn=unreadable )
+    fn = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), "second-model", tally, sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) ), partners=True, job_for=lambda *a: job_for_pair(), check_fn=unreadable )
     assert fn( "d-orig00" ) is None and tally.skipped[ 0 ][ "detail" ] == "check-key" and tally[ "unreadable_reply" ] == 1
 
     def capped( *a, **k ): raise er.NeedsetError( er.CALL_CAP_REACHED, "1000 of 1000" )
 
-    fn = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s2.jsonl" ), None, "max-plan" ), "second-model", tally, job_for=capped )
+    fn = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s2.jsonl" ), None, "max-plan" ), "second-model", tally, sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) ), partners=True, job_for=capped )
     with pytest.raises( er.NeedsetError ) as e: fn( "d-orig00" )
     assert e.value.code == er.CALL_CAP_REACHED and tally[ "unreadable_reply" ] == 1
+
+
+def seed_fn( tmp_path, reply=AGREE, ask=lambda s, u: SENTENCE, partners=False, job=None, **kw ):
+    """Return ( final_need function, tally, rejection ledger, prompts ) with no partner search."""
+    renv = renv_for( tmp_path, ask=ask )
+    renv.ctx.bodies[ "d-orig00" ] = "def original_body(): return 0"
+    tally, rej, seen = sp.Tally(), sp.RejectionLedger( str( tmp_path / "rej.jsonl" ) ), []
+
+    def second( prompt ):
+        seen.append( prompt )
+        return reply
+
+    extra = {} if job is None else { "job_for": job }
+    fn = sp.final_need_fn( renv, { "d-orig00": "vector" }, second, draft.make_ledger( str( tmp_path / "second.jsonl" ), None, "max-plan" ), "second-model", tally, rej, partners=partners, **extra, **kw )
+    return fn, tally, rej, seen
+
+
+def test_a_seed_whose_sentence_passes_the_checks_is_a_final_item_with_itself_as_the_answer_and_no_partner_search( tmp_path ):
+    fn, tally, rej, seen = seed_fn( tmp_path, job=lambda *a: pytest.fail( "a partner was searched for" ) )
+    need = fn( "d-orig00" )
+    assert need[ "status" ] == "final" and need[ "key" ] == { "symbols": [ "d-orig00" ], "key_lang": "py", "source": "seed", "version": 1 } and need[ "selection_route" ] is None
+    assert need[ "seed" ] == "d-orig00" and need[ "need" ] == SENTENCE and need[ "final" ][ "final_source" ] == "model_agreed"
+    assert len( seen ) == 1 and "def original_body(): return 0" in seen[ 0 ], "the checker is shown the seed as the key"
+    assert sum( tally.values() ) == 0 and rej.rows() == []
+
+
+def test_with_partners_on_the_routed_job_is_used_and_a_seed_with_no_partner_is_still_counted( tmp_path ):
+    fn, tally, _, _ = seed_fn( tmp_path, partners=True, job=lambda *a: None )
+    assert fn( "d-orig00" ) is None and dict( tally ) == { "no_partner": 1 }
+    fn, tally, _, _ = seed_fn( tmp_path, partners=True, job=lambda *a: job_for_pair() )
+    assert fn( "d-orig00" )[ "key" ][ "source" ] == "vector"
+
+
+def test_every_rejected_sentence_and_its_reasons_reach_the_ledger_even_when_the_rewrite_then_passes( tmp_path ):
+    replies = iter( [ "A function that reads ../d-orig00.py and then adds up every number it finds there.", SENTENCE ] )
+    fn, tally, rej, _ = seed_fn( tmp_path, ask=lambda s, u: next( replies ) )
+    assert fn( "d-orig00" )[ "status" ] == "final"
+    rows = rej.rows()
+    assert [ r[ "kind" ] for r in rows ] == [ "rejected_sentence" ] and rows[ 0 ][ "seed" ] == "d-orig00" and rows[ 0 ][ "try" ] == 0 and "at" in rows[ 0 ]
+    assert rows[ 0 ][ "failures" ][ 0 ][ "check" ] in ( "identifier", "form", "member_text_run" ) and rows[ 0 ][ "sentence" ].startswith( "A function that reads" )
+
+
+def test_a_draft_that_ends_rejected_is_ledgered_with_its_reason_and_every_unreadable_reply( tmp_path ):
+    fn, tally, rej, _ = seed_fn( tmp_path, ask=lambda s, u: "first line\nsecond line", reply=pytest.fail )
+    assert fn( "d-orig00" ) is None and tally[ "draft_failed" ] == 1
+    assert [ r[ "kind" ] for r in rej.rows() ] == [ "unreadable_draft_reply", "unreadable_draft_reply", "draft_failed" ]
+    assert [ r.get( "reply" ) for r in rej.rows()[ :2 ] ] == [ "first line\nsecond line" ] * 2 and rej.rows()[ 2 ][ "reason" ] == er.UNREADABLE_REPLY
+    other = tmp_path / "other"
+    other.mkdir()
+    fn, tally, rej, _ = seed_fn( other, ask=lambda s, u: "A function that adds numbers.", reply=pytest.fail )
+    assert fn( "d-orig00" ) is None and [ r[ "kind" ] for r in rej.rows() ] == [ "rejected_sentence", "rejected_sentence", "draft_failed" ] and rej.rows()[ -1 ][ "reason" ] == er.NEED_LEAKS_KEY
+
+
+def test_a_disputed_need_is_ledgered_with_the_second_models_result_and_note( tmp_path ):
+    fn, tally, rej, _ = seed_fn( tmp_path, reply=json.dumps( { "result": "disagree", "note": "it also validates" } ) )
+    assert fn( "d-orig00" ) is None
+    row = rej.rows()[ 0 ]
+    assert row[ "kind" ] == "disputed" and row[ "result" ] == "disagree" and row[ "note" ] == "it also validates" and row[ "need" ] == tally.ids[ 0 ]
+
+
+def test_an_unreadable_check_reply_is_saved_as_it_came_and_the_skipped_seed_is_ledgered( tmp_path ):
+    fn, tally, rej, _ = seed_fn( tmp_path, reply="not json" )
+    assert fn( "d-orig00" ) is None and tally[ "unreadable_reply" ] == 1
+    kinds = [ r[ "kind" ] for r in rej.rows() ]
+    assert kinds == [ "unreadable_check_reply", "unreadable_check_reply", "seed_skipped" ] and rej.rows()[ 0 ][ "reply" ] == "not json" and rej.rows()[ 2 ][ "code" ] == er.UNREADABLE_REPLY
+
+
+def test_the_rejection_ledger_appends_one_flushed_line_per_row_and_reads_back_in_order_and_a_missing_file_is_empty( tmp_path ):
+    led = sp.RejectionLedger( str( tmp_path / "r.jsonl" ) )
+    assert led.rows() == []
+    led.add( { "kind": "a" } )
+    led.add( { "kind": "b", "x": 1 } )
+    assert [ r[ "kind" ] for r in led.rows() ] == [ "a", "b" ] and ( tmp_path / "r.jsonl" ).read_text( encoding="utf-8" ).count( "\n" ) == 2

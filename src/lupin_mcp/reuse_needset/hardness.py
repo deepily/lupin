@@ -57,8 +57,8 @@ def source_hard( rows, index, k=BM25_K ):
     Measure every candidate row and mark the hard ones.
 
     Requires:
-        - rows are { seed, need, targets, lang } mappings; targets is a non-empty list of index ids
-        - the seed is left out of the ranking, so the search is the one the checker runs
+        - rows are { seed, need, targets, lang } mappings, with an optional seed_is_answer that is True when the seed is the known answer; targets is a non-empty list of index ids
+        - the seed is left out of the ranking, so the search is the one the checker runs, except when it is the known answer, which is then ranked like any other target
 
     Ensures:
         - returns a copy of each row, in order, with ranks (target to rank or None), hard_members (the targets the search misses) and hard
@@ -67,13 +67,14 @@ def source_hard( rows, index, k=BM25_K ):
 
     Raises:
         - NeedsetError BAD_NEED for a row with no targets
-        - NeedsetError SEED_IS_TARGET for a row whose seed is one of its own targets, before any rank is read
+        - NeedsetError SEED_IS_TARGET for a row whose seed is one of its own targets and is not marked as the known answer, before any rank is read
     """
     out = []
     for row in rows:
         if not row[ "targets" ]: raise er.NeedsetError( er.BAD_NEED, f"{row[ 'seed' ]}: a hardness row needs at least one target" )
-        if row[ "seed" ] in row[ "targets" ]: raise er.NeedsetError( er.SEED_IS_TARGET, f"{row[ 'seed' ]}: the seed is left out of the search, so it cannot be its own target" )
-        ranks = { t: rank_of( index, row[ "need" ], t, exclude=( row[ "seed" ], ) ) for t in row[ "targets" ] }
+        answer = row.get( "seed_is_answer", False )
+        if row[ "seed" ] in row[ "targets" ] and not answer: raise er.NeedsetError( er.SEED_IS_TARGET, f"{row[ 'seed' ]}: the seed is left out of the search, so it cannot be its own target" )
+        ranks = { t: rank_of( index, row[ "need" ], t, exclude=() if answer else ( row[ "seed" ], ) ) for t in row[ "targets" ] }
         missed = [ t for t in row[ "targets" ] if is_hard( ranks[ t ], k ) ]
         out.append( { **row, "ranks": ranks, "hard_members": missed, "hard": len( missed ) == len( row[ "targets" ] ) } )
     return out

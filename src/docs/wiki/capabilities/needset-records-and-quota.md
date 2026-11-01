@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.reuse_needset.errors.NeedsetError@86f8e53032
   - lupin_mcp.reuse_needset.schema.need_id@9851f0d4bf
   - lupin_mcp.reuse_needset.schema.new_need@f480326b80
-  - lupin_mcp.reuse_needset.schema.validate_need@367184e403
+  - lupin_mcp.reuse_needset.schema.validate_need@60e0195f7f
   - lupin_mcp.reuse_needset.quota.plan_quota@be72893016
   - lupin_mcp.reuse_needset.quota.census@fa2d8eead2
   - lupin_mcp.reuse_needset.quota.draw@48b7979bcb
@@ -17,7 +17,7 @@ pins:
 The need set is a diagnostic set of plain-sentence needs. Each is paired with an answer key: the index symbols that already do the job, or none. This page covers the record, its errors and the plan that fixes how many needs of each kind are drawn.
 
 ## Need record
-- `validate_need` checks a record against the `needset-need-1` format. A matched kind has a seed and a non-empty key, and the seed is never one of its own key symbols (`SEED_IN_KEY`). A `nothing` need has neither.
+- `validate_need` checks a record against the `needset-need-1` format. A matched kind has a seed and a non-empty key. The seed is never one of its own key symbols (`SEED_IN_KEY`), except in a seed-answer need. That is a `work_alike` need with key source `seed`, the seed alone as key and no route. A `nothing` need has neither.
 - The key source says how the key was found. It is `twin` for a near copy, `vector`, `bm25`, `directory` or `random` for the two routed kinds, and none for `nothing`.
 - A record at status `checked` or later carries a check block. It holds a model, a result of agree, disagree or unsure, a note and a mechanical list. The id must equal `need_id`.
 - `need_id` is `n-` and ten hex digits of the sha256 of the kind, language, seed, need and source commit. It does not depend on key order, or on the key, check or status.
