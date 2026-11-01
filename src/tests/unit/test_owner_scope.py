@@ -58,11 +58,11 @@ def registry( lupin_root, monkeypatch ):
     return reg
 
 
-def _get( path, user=ME ):
-    return asyncio.run( docs_files.get_docs_file( path=path, scope=None, current_user=user ) )
+def _get( path, user=None ):
+    return asyncio.run( docs_files.get_docs_file( path=path, scope=None, current_user=ME if user is None else user ) )
 
 
-def _refusal( path, user=ME ):
+def _refusal( path, user=None ):
     with pytest.raises( HTTPException ) as raised:
         _get( path, user )
     return raised.value
