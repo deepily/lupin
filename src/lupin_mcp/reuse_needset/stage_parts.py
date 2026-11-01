@@ -10,6 +10,7 @@ import types
 
 from cosa.repo.symindex.candidates import vector_store
 from lupin_mcp import reuse_tools as rt
+from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import check, draft, finalize, freeze, hardness, keys, loss_trace, run, stage_seeds, stages
 
 KIND          = "work_alike"
@@ -19,6 +20,8 @@ NOT_POOLED   = "not_pooled"
 NO_PARTNER   = "no_partner"
 DRAFT_FAILED = "draft_failed"
 DISPUTED     = "disputed"
+UNREADABLE   = "unreadable_reply"
+REASONS      = ( NOT_POOLED, NO_PARTNER, DRAFT_FAILED, DISPUTED, UNREADABLE )
 
 
 def route_table( lists, seed ):
@@ -48,11 +51,23 @@ def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally,
 
     Ensures:
         - a seed that has no row in the search pool, no partner or no accepted sentence is counted under not_pooled, no_partner or draft_failed and gives None
+        - a seed whose same-job or check reply is unreadable twice is counted under unreadable_reply, with its id, code and detail kept, and gives None; the stage goes on to the next seed
+        - any other NeedsetError, the call cap's included, is raised
         - a need the second model does not agree to is counted under disputed, its id is kept, and it gives None
         - an agreed need is returned as finalize.final_row makes it, with final_source model_agreed and the key's source texts shown to the checker
     """
     def final_need( seed_id ):
         """Ensures: returns the final need of the seed, or None after counting why not."""
+        try:
+            return worked( seed_id )
+        except er.NeedsetError as error:
+            if error.code != er.UNREADABLE_REPLY: raise
+            tally[ UNREADABLE ] += 1
+            tally.skipped.append( { "seed": seed_id, "code": error.code, "detail": error.detail } )
+            return None
+
+    def worked( seed_id ):
+        """Ensures: returns the seed's final need, or None after counting why."""
         if seed_id not in renv.ctx.by_id:
             tally[ NOT_POOLED ] += 1
             return None
@@ -77,30 +92,32 @@ def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally,
 
 def mark( tally ):
     """Ensures: returns what the tally holds now, to hand to counted as the point a stage began."""
-    return ( dict( tally ), len( tally.ids ) )
+    return ( dict( tally ), len( tally.ids ), len( tally.skipped ) )
 
 
 def counted( tally, since=None ):
     """
-    Return the counts of the four reasons and the disputed ids, as they grew since a mark.
+    Return the reason counts, disputed ids and skipped seeds that grew since a mark.
 
     Requires:
         - since is None for everything, or what mark( tally ) returned earlier
 
     Ensures:
         - a stage that began at the mark reports only its own seeds, not those of a stage that ran before it
+        - skipped lists each seed skipped for an unreadable reply, with its code and detail
     """
-    before, first = ( {}, 0 ) if since is None else since
-    return { **{ k: tally[ k ] - before.get( k, 0 ) for k in ( NOT_POOLED, NO_PARTNER, DRAFT_FAILED, DISPUTED ) }, "disputed_ids": tally.ids[ first: ] }
+    before, first, skipped = ( {}, 0, 0 ) if since is None else since
+    return { **{ k: tally[ k ] - before.get( k, 0 ) for k in REASONS }, "disputed_ids": tally.ids[ first: ], "skipped": tally.skipped[ skipped: ] }
 
 
 class Tally( collections.Counter ):
-    """A count of why seeds gave no final need, with the ids of the disputed ones."""
+    """A count of why seeds gave no final need, with the disputed ids and the skipped seeds."""
 
     def __init__( self ):
-        """Ensures: starts empty, with an empty ids list."""
+        """Ensures: starts empty, with an empty ids list and an empty skipped list."""
         super().__init__()
-        self.ids = []
+        self.ids     = []
+        self.skipped = []
 
 
 def yield_row( need ):

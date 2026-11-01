@@ -262,6 +262,9 @@ def test_the_tracked_files_are_what_git_lists_for_the_tree_and_a_stub_shows_the_
     assert ft.tracked_files( "/x" ) == { "a.py", "b/c.ts" } and seen[ "argv" ] == [ "git", "-C", "/x", "ls-files", "-z" ]
 
 
+LISTS_OF_TWO_AND_THREE = { "attribution": { "order": [ "a1", "a2" ] }, "yield": { "order": [ "y1", "y2", "y3" ] } }
+
+
 def test_the_stage_factories_hand_the_lists_file_and_the_live_parts_to_pocholos_two_stages_and_add_the_counts( monkeypatch ):
     seen  = {}
     tally = stage_parts.Tally()
@@ -276,8 +279,9 @@ def test_the_stage_factories_hand_the_lists_file_and_the_live_parts_to_pocholos_
 
     monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: seen.update( a=( path, make_need, trace_fn ) ) or stage_of( { "seeds": 1 } ) )
     monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: seen.update( y=( path, prepare_fn, index ) ) or stage_of( { "hard": 2 } ) )
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
     one, two = ft.stage_factories( "/lists.json", parts )
-    counts   = { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-1" ] }
+    counts   = { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "unreadable_reply": 0, "disputed_ids": [ "n-1" ], "skipped": [] }
     assert asyncio.run( one( "env" )() ) == { "seeds": 1, "no_final_need": counts } and asyncio.run( two( "env" )() ) == { "hard": 2, "no_final_need": { **counts, "disputed_ids": [ "n-1" ] } }
     assert seen == { "a": ( "/lists.json", "MN", "TF" ), "y": ( "/lists.json", "PF", "IX" ) }
 
@@ -295,11 +299,12 @@ def test_the_yield_report_counts_only_the_yield_seeds_and_not_the_attribution_on
 
     monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: stage_that( "disputed", [ "n-a1", "n-a2" ] ) )
     monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: stage_that( "draft_failed", [] ) )
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
     one, two = ft.stage_factories( "/lists.json", parts )
     first    = asyncio.run( one( "env" )() )[ "no_final_need" ]
     second   = asyncio.run( two( "env" )() )[ "no_final_need" ]
-    assert first == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-a1", "n-a2" ] }
-    assert second == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 0, "disputed_ids": [] }
+    assert first == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 2, "unreadable_reply": 0, "disputed_ids": [ "n-a1", "n-a2" ], "skipped": [] }
+    assert second == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 0, "unreadable_reply": 0, "disputed_ids": [], "skipped": [] }
 
 
 def test_the_live_parts_use_their_own_ledgers_in_the_run_folder_and_the_arguments_models( tmp_path, monkeypatch ):
@@ -319,8 +324,8 @@ def test_the_live_parts_use_their_own_ledgers_in_the_run_folder_and_the_argument
     assert isinstance( seen[ "ledgers" ][ "draft" ], draft.SharedLedger ) and isinstance( seen[ "ledgers" ][ "second" ], draft.SharedLedger )
 
 
-def run_dir_files( tmp_path ):
-    """Write the proof's input files; return the command line and the planted sha."""
+def run_dir_files( tmp_path, cli=True ):
+    """Write the proof's input files; return the command line, with a binary unless cli is false."""
     import hashlib
     ps       = pairs()
     one, two = labelled( ps )
@@ -335,6 +340,11 @@ def run_dir_files( tmp_path ):
     run = tmp_path / "run"
     run.mkdir()
     argv = [ "--root", "/r", "--run-dir", str( run ), "--planted", str( planted ), "--answer-key", str( key ), "--labels-dir", str( labels ), "--seed", "7", "--source-commit", "abc" ]
+    if cli:
+        binary = tmp_path / "claude-bin"
+        binary.write_text( "#!/bin/sh\n" )
+        binary.chmod( 0o755 )
+        argv  += [ "--cli-path", str( binary ) ]
     return argv, hashlib.sha256( planted.read_bytes() ).hexdigest()
 
 
@@ -454,12 +464,10 @@ def live_deps( sha, runner ):
              "remainder": lambda ps, seed: {}, **seed_deps() }
 
 
-def test_a_live_run_sends_every_call_through_the_binary_named_by_cli_path_and_a_plan_does_not( tmp_path, monkeypatch ):
+def test_a_live_run_sends_every_call_through_the_binary_named_by_cli_path_and_a_plan_with_the_same_path_does_not( tmp_path, monkeypatch ):
     from cosa.repo.doc_lint import model_transport as mt
     argv, sha = run_dir_files( tmp_path )
-    binary    = tmp_path / "claude"
-    binary.write_text( "#!/bin/sh\n" )
-    binary.chmod( 0o755 )
+    binary    = argv[ argv.index( "--cli-path" ) + 1 ]
     seen      = {}
     monkeypatch.setattr( mt, "CLI_PATH", None )
 
@@ -469,11 +477,92 @@ def test_a_live_run_sends_every_call_through_the_binary_named_by_cli_path_and_a_
 
     ft.main( argv, deps=live_deps( sha, runner ) | { "factories": ( None, None ) } )
     assert mt.CLI_PATH is None and "live" not in seen
-    ft.main( [ *argv, "--live", "--cli-path", str( binary ) ], deps=live_deps( sha, runner ) )
-    assert seen[ "live" ] == str( binary )
+    ft.main( [ *argv, "--live" ], deps=live_deps( sha, runner ) )
+    assert seen[ "live" ] == binary
+
+
+def test_a_live_run_without_cli_path_stops_by_name_before_the_context_the_index_or_a_list( tmp_path, monkeypatch ):
+    argv, sha = run_dir_files( tmp_path, cli=False )
+    monkeypatch.setattr( ft, "write_seed_lists", lambda *a, **k: pytest.fail( "a list was written" ) )
+    deps = live_deps( sha, None ) | { "context": lambda root: pytest.fail( "a context was built" ), "built": lambda args: pytest.fail( "the index was built" ) }
+    with pytest.raises( er.NeedsetError ) as e: ft.main( [ *argv, "--live" ], deps=deps )
+    assert e.value.code == er.NO_CLI_PATH and "--cli-path" in str( e.value )
+    assert ft.main( argv, deps={ "planted_sha": sha } )[ "live" ] is False
 
 
 def test_a_live_run_with_a_cli_path_that_is_no_executable_stops_by_name_before_the_index_or_a_list( tmp_path, monkeypatch ):
     argv, sha = run_dir_files( tmp_path )
     monkeypatch.setattr( ft, "write_seed_lists", lambda *a, **k: pytest.fail( "a list was written" ) )
     with pytest.raises( ValueError, match="not an executable file" ): ft.main( [ *argv, "--live", "--cli-path", str( tmp_path / "missing" ) ], deps=live_deps( sha, None ) | { "built": lambda args: pytest.fail( "the index was built" ) } )
+
+
+def result_of( *statuses ):
+    """Return a live main result whose stages have the given statuses."""
+    return { "live": True, "report": { "stages": { f"s{i}": { "status": st } for i, st in enumerate( statuses ) } } }
+
+
+@pytest.mark.parametrize( "statuses, code", [ ( ( "done", "done", "done", "done" ), 0 ), ( ( "done", "stopped", "not_run", "not_run" ), 0 ), ( ( "failed", "not_run", "not_run", "not_run" ), 1 ),
+                                              ( ( "done", "cap_reached", "not_run", "not_run" ), 3 ), ( ( "cap_reached", "failed", "not_run", "not_run" ), 1 ) ] )
+def test_a_failed_stage_exits_one_and_a_cap_stop_three_while_a_finding_stop_exits_zero( statuses, code ):
+    assert ft.exit_status( result_of( *statuses ) ) == code and code != 2
+    assert ft.exit_status( { "live": False, "plan": {} } ) == 0
+
+
+def test_the_command_prints_the_report_of_a_failed_run_and_returns_one( tmp_path, capsys ):
+    argv, sha = run_dir_files( tmp_path )
+    shown     = []
+
+    async def runner( run_dir, one, two, control, rem, limit ): return { "stages": { "attribution": { "status": "failed", "code": "UNREADABLE_REPLY" } } }
+
+    code = ft.run_cli( [ *argv, "--live" ], deps=live_deps( sha, runner ), out=shown.append )
+    assert code == 1 and "UNREADABLE_REPLY" in shown[ 0 ] and json.loads( shown[ 0 ] )[ "report" ][ "stages" ][ "attribution" ][ "status" ] == "failed"
+    assert ft.run_cli( argv, deps={ "planted_sha": sha }, out=shown.append ) == 0 and json.loads( shown[ 1 ] )[ "live" ] is False
+
+
+def skipping_stage( tally, count, report ):
+    """Return a stage that skips count seeds as unreadable when it runs and then returns report."""
+    async def stage():
+        for i in range( count ):
+            tally[ "unreadable_reply" ] += 1
+            tally.skipped.append( { "seed": f"s{i}", "code": "UNREADABLE_REPLY", "detail": "k" } )
+        return report
+    return stage
+
+
+def test_a_stage_whose_every_seed_was_skipped_as_unreadable_fails_by_name_and_does_not_read_as_a_stop( monkeypatch ):
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: skipping_stage( tally, 2, { "stop": True, "reason": "no seed gave a need" } ) )
+    monkeypatch.setattr( stage_seeds, "yield_stage", lambda path, prepare_fn, index: skipping_stage( tally, 3, {} ) )
+    one, two = ft.stage_factories( "/lists.json", parts )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( one( "env" )() )
+    assert e.value.code == er.ALL_SEEDS_UNREADABLE and "attribution" in str( e.value ) and "2" in str( e.value )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( two( "env" )() )
+    assert e.value.code == er.ALL_SEEDS_UNREADABLE and "yield" in str( e.value ) and "3" in str( e.value )
+
+
+def test_a_stage_with_some_seeds_skipped_as_unreadable_still_reports_and_the_failed_stage_exits_one( monkeypatch ):
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: skipping_stage( tally, 1, { "needs": 1 } ) )
+    one, _ = ft.stage_factories( "/lists.json", parts )
+    got    = asyncio.run( one( "env" )() )
+    assert got[ "needs" ] == 1 and got[ "no_final_need" ][ "unreadable_reply" ] == 1 and got[ "no_final_need" ][ "skipped" ][ 0 ][ "seed" ] == "s0"
+    assert ft.exit_status( result_of( "failed", "not_run", "not_run", "not_run" ) ) == 1
+
+
+def test_a_run_whose_attribution_seeds_were_all_skipped_ends_failed_through_run_stages_and_exits_one( tmp_path, monkeypatch ):
+    cap   = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 5 )
+    tally = stage_parts.Tally()
+    parts = { "make_need": None, "trace_fn": None, "prepare_fn": None, "index": None, "tally": tally }
+    monkeypatch.setattr( stage_seeds, "load_lists", lambda path: LISTS_OF_TWO_AND_THREE )
+    monkeypatch.setattr( stage_seeds, "attribution_stage", lambda path, make_need, trace_fn: skipping_stage( tally, 2, { "stop": True } ) )
+    one, two = ft.stage_factories( "/lists.json", parts )
+
+    async def never(): return {}
+
+    with cap.installed(): report = asyncio.run( stages.run_stages( cap, { stages.ATTRIBUTION: one( None ), stages.YIELD: never, stages.CONTROL: never, stages.REMAINDER: never } ) )
+    assert report[ "stages" ][ "attribution" ][ "status" ] == "failed" and report[ "stages" ][ "attribution" ][ "code" ] == er.ALL_SEEDS_UNREADABLE and report[ "stages" ][ "yield" ][ "status" ] == "not_run"
+    assert ft.exit_status( { "live": True, "report": report } ) == 1

@@ -8,7 +8,7 @@ import types
 
 import pytest
 
-from lupin_mcp.reuse_needset import call_cap, draft, first_thousand as ft, loss_trace, stage_parts as sp, stages
+from lupin_mcp.reuse_needset import call_cap, draft, first_thousand as ft, keys, loss_trace, stage_parts as sp, stages
 from lupin_mcp.reuse_needset import errors as er
 from tests.unit.test_reuse_needset_first_thousand import SENTENCE, real_pair, strip_of
 
@@ -113,12 +113,16 @@ def test_the_counts_name_the_four_reasons_and_the_disputed_ids():
     tally = sp.Tally()
     tally[ "disputed" ] += 1
     tally.ids.append( "n-1" )
-    assert sp.counted( tally ) == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 1, "disputed_ids": [ "n-1" ] }
+    assert sp.counted( tally ) == { "not_pooled": 0, "no_partner": 0, "draft_failed": 0, "disputed": 1, "unreadable_reply": 0, "disputed_ids": [ "n-1" ], "skipped": [] }
+    tally[ "unreadable_reply" ] += 1
+    tally.skipped.append( { "seed": "s-1", "code": "UNREADABLE_REPLY", "detail": "earlier stage" } )
     since = sp.mark( tally )
     tally[ "disputed" ] += 2
     tally[ "no_partner" ] += 1
     tally.ids.append( "n-2" )
-    assert sp.counted( tally, since ) == { "not_pooled": 0, "no_partner": 1, "draft_failed": 0, "disputed": 2, "disputed_ids": [ "n-2" ] }
+    tally[ "unreadable_reply" ] += 1
+    tally.skipped.append( { "seed": "s-9", "code": "UNREADABLE_REPLY", "detail": "k" } )
+    assert sp.counted( tally, since ) == { "not_pooled": 0, "no_partner": 1, "draft_failed": 0, "disputed": 2, "unreadable_reply": 1, "disputed_ids": [ "n-2" ], "skipped": [ { "seed": "s-9", "code": "UNREADABLE_REPLY", "detail": "k" } ] }
 
 
 class Vectors:
@@ -185,3 +189,34 @@ def test_a_moved_index_or_vector_set_is_refused_before_any_call( tmp_path, monke
     parts, _, _ = build( tmp_path, trace_all=loss_trace.trace_all, identity=lambda gen, vdir: next( names ), monkeypatch=monkeypatch )
     with pytest.raises( er.NeedsetError ) as e: asyncio.run( parts[ "trace_fn" ]( [ { "id": "n-1" } ] ) )
     assert e.value.code == er.INDEX_DIFFERS
+
+
+def test_an_unreadable_same_job_reply_skips_the_seed_with_the_reason_recorded_and_the_next_seed_goes_on( tmp_path ):
+    ledger = draft.make_ledger( str( tmp_path / "keys.jsonl" ), None, "max-plan" )
+    turns  = iter( [ "garbage", "garbage" ] )
+    tally  = sp.Tally()
+
+    def job( env, kind, seed_id, lang, route ):
+        if seed_id == "bad": return keys.ruled( lambda prompt: next( turns ), ledger, "k-1", "p", "same_job" )
+        return job_for_pair()
+
+    renv = renv_for( tmp_path )
+    renv.ctx.by_id[ "bad" ] = renv.by_id[ "bad" ] = renv.by_id[ "d-orig00" ]
+    fn   = sp.final_need_fn( renv, { "bad": "vector", "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), "second-model", tally, job_for=job )
+    assert fn( "bad" ) is None and tally[ "unreadable_reply" ] == 1 and tally.skipped == [ { "seed": "bad", "code": er.UNREADABLE_REPLY, "detail": "k-1" } ]
+    assert fn( "d-orig00" )[ "status" ] == "final" and tally[ "unreadable_reply" ] == 1
+
+
+def test_an_unreadable_check_reply_skips_the_seed_the_same_way_and_another_error_still_stops_the_stage( tmp_path ):
+    tally = sp.Tally()
+
+    def unreadable( *a, **k ): raise er.NeedsetError( er.UNREADABLE_REPLY, "check-key" )
+
+    fn = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s.jsonl" ), None, "max-plan" ), "second-model", tally, job_for=lambda *a: job_for_pair(), check_fn=unreadable )
+    assert fn( "d-orig00" ) is None and tally.skipped[ 0 ][ "detail" ] == "check-key" and tally[ "unreadable_reply" ] == 1
+
+    def capped( *a, **k ): raise er.NeedsetError( er.CALL_CAP_REACHED, "1000 of 1000" )
+
+    fn = sp.final_need_fn( renv_for( tmp_path ), { "d-orig00": "vector" }, lambda p: AGREE, draft.make_ledger( str( tmp_path / "s2.jsonl" ), None, "max-plan" ), "second-model", tally, job_for=capped )
+    with pytest.raises( er.NeedsetError ) as e: fn( "d-orig00" )
+    assert e.value.code == er.CALL_CAP_REACHED and tally[ "unreadable_reply" ] == 1
