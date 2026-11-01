@@ -116,6 +116,25 @@ def classify( kind, key, evidence ):
     return { "lost_at": ALT_MATCH if alt else lost_at, "alt": alt }
 
 
+def classify_members( kind, key, evidence ):
+    """
+    Name where each key member was lost, one member at a time.
+
+    Requires:
+        - key and evidence are as classify reads them
+
+    Ensures:
+        - returns { member: lost_at } over the key, sorted by member
+        - a member counts as found only when that member was retrieved, rated relevant, read and ruled the same job
+        - another member's progress never counts for a member
+        - a nothing need has no members and returns an empty dict
+    """
+    if kind == "nothing": return {}
+    ruled = evidence[ "rulings" ] or {}
+    return { m: NOT_RETRIEVED if m not in evidence[ "asked" ] else NOT_RATED_RELEVANT if m not in evidence[ "shortlist" ] else NOT_READ if m not in evidence[ "read" ]
+             else FOUND if ruled.get( m ) in agent_probe.SAME_JOB else NOT_RULED_SAME_JOB for m in sorted( key ) }
+
+
 def _evidence( receipt, probe_out, root, where ):
     """
     Gather the facts classify reads.
@@ -143,7 +162,7 @@ async def trace_need( need, ctx, probe, root, model, ask=check_need, where=None 
 
     Ensures:
         - the probe runs only when its rulings can change the answer: for a matched need when a key symbol reached the shortlist, for a nothing need when the checker did not already end in reuse or extend and the shortlist is not empty
-        - returns { id, kind, write_lang, selection_route, key, lost_at, alt, evidence, transcript }
+        - returns { id, kind, write_lang, selection_route, key, lost_at, alt, members, evidence, transcript }
     """
     receipt = ask( need, ctx )
     key     = need[ "key" ][ "symbols" ]
@@ -153,7 +172,7 @@ async def trace_need( need, ctx, probe, root, model, ask=check_need, where=None 
     out     = await probe( need[ "need" ], receipt, root, model ) if wanted else None
     ev      = _evidence( receipt, out, root, where )
     return { "id": need[ "id" ], "kind": need[ "kind" ], "write_lang": need[ "write_lang" ], "selection_route": need[ "selection_route" ], "key": list( key ),
-             **classify( need[ "kind" ], key, ev ), "evidence": ev, "transcript": out[ "transcript" ] if out is not None else None }
+             **classify( need[ "kind" ], key, ev ), "members": classify_members( need[ "kind" ], key, ev ), "evidence": ev, "transcript": out[ "transcript" ] if out is not None else None }
 
 
 def trace_version():
@@ -161,9 +180,9 @@ def trace_version():
     Name the trace, so a changed checker call, classifier or probe prompt is a ledger miss.
 
     Ensures:
-        - returns model_transport.prompt_version over the sources of check_need and classify and the probe's own version
+        - returns model_transport.prompt_version over the sources of check_need, classify and classify_members and the probe's own version
     """
-    return model_transport.prompt_version( "needset-trace", inspect.getsource( check_need ), inspect.getsource( classify ), agent_probe.prompt_version() )
+    return model_transport.prompt_version( "needset-trace", inspect.getsource( check_need ), inspect.getsource( classify ), inspect.getsource( classify_members ), agent_probe.prompt_version() )
 
 
 async def trace_all( needs, ctx, ledger, root, model, checker_commit, manifest, live, index_sha=None, probe=agent_probe.run_probe, ask=check_need, where=None, parallel=3 ):
@@ -235,10 +254,10 @@ def retrace( record, need ):
         - need is the need the record traced, possibly with an extended key
 
     Ensures:
-        - returns a copy of the record with key, lost_at and alt recomputed from the stored evidence, so no call is made
+        - returns a copy of the record with key, lost_at, alt and members recomputed from the stored evidence, so no call is made
     """
     key = need[ "key" ][ "symbols" ]
-    return { **copy.deepcopy( record ), "key": list( key ), **classify( record[ "kind" ], key, record[ "evidence" ] ) }
+    return { **copy.deepcopy( record ), "key": list( key ), **classify( record[ "kind" ], key, record[ "evidence" ] ), "members": classify_members( record[ "kind" ], key, record[ "evidence" ] ) }
 
 
 def confirmation_items( records, needs, source_of ):
@@ -294,24 +313,58 @@ def summarize( records ):
              "misses": misses, "miss_rate": misses / len( matched ), "upper_bound": harness_report.upper_bound( misses, len( matched ) ) }
 
 
-def write_report( out_dir, before, after, records, meta ):
+def summarize_members( records ):
+    """
+    Count the outcomes of a trace member by member.
+
+    Requires:
+        - records come from trace_need or retrace and hold members
+
+    Ensures:
+        - returns the member count, the counts by lost_at and by language, the misses, the miss rate and its 95 percent bound, all over members
+        - the rate is never an any-member rate
+        - any_member_comparison_only holds the number of matched needs and how many have at least one found member and how many have every member found
+        - the comparison is there so a reader can see how much the any-member figure overstates, and it is not a result
+
+    Raises:
+        - NeedsetError BAD_NEED when no record is of a matched need
+    """
+    matched = [ r for r in records if r[ "kind" ] != "nothing" ]
+    if not matched: raise er.NeedsetError( er.BAD_NEED, "a member summary needs at least one matched need" )
+    rows    = [ { "write_lang": r[ "write_lang" ], "lost_at": lost } for r in matched for lost in r[ "members" ].values() ]
+    misses  = sum( 1 for r in rows if r[ "lost_at" ] != FOUND )
+    return { "members": len( rows ), "by_lost_at": _count( rows, "lost_at" ),
+             "by_lang": { k: _count( [ r for r in rows if r[ "write_lang" ] == k ], "lost_at" ) for k in sorted( { r[ "write_lang" ] for r in rows } ) },
+             "misses": misses, "miss_rate": misses / len( rows ), "upper_bound": harness_report.upper_bound( misses, len( rows ) ),
+             "any_member_comparison_only": { "needs": len( matched ), "any_member_found": sum( 1 for r in matched if FOUND in r[ "members" ].values() ),
+                                             "every_member_found": sum( 1 for r in matched if all( v == FOUND for v in r[ "members" ].values() ) ) } }
+
+
+def write_report( out_dir, before, after, records, meta, members=None ):
     """
     Write loss-report.json and loss-report.md.
 
     Requires:
         - before and after are summaries of the trace before and after the confirmations
         - meta holds the checker commit, the index sha, the probe model and the date
+        - members is None or the summarize_members result of the trace after the confirmations
 
     Ensures:
         - the json holds meta, both summaries and one row per need without its transcript
         - the markdown prints the figures before and after the confirmations side by side
+        - given members, the json holds them and the markdown prints the per-member figures, with the any-member counts labelled as a comparison only
     """
     rows = [ { k: v for k, v in r.items() if k != "transcript" } for r in records ]
-    ( out_dir / "loss-report.json" ).write_text( json.dumps( { "meta": meta, "before": before, "after": after, "rows": rows }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+    ( out_dir / "loss-report.json" ).write_text( json.dumps( { "meta": meta, "before": before, "after": after, **( { "members": members } if members is not None else {} ), "rows": rows }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
     lines = [ "# Loss report", "", *[ f"- {k}: {v}" for k, v in sorted( meta.items() ) ], "", "| outcome | before | after |", "|---|---|---|" ]
     for k in sorted( set( before[ "by_lost_at" ] ) | set( after[ "by_lost_at" ] ) ):
         lines.append( f"| {k} | {before[ 'by_lost_at' ].get( k, 0 )} | {after[ 'by_lost_at' ].get( k, 0 )} |" )
     lines += [ f"| miss rate | {before[ 'miss_rate' ]:.4f} | {after[ 'miss_rate' ]:.4f} |", f"| upper bound | {before[ 'upper_bound' ]:.4f} | {after[ 'upper_bound' ]:.4f} |", "",
                "Not retrieved, by selection route:", "", "| route | needs | not retrieved |", "|---|---|---|" ]
     lines += [ f"| {k} | {v[ 'needs' ]} | {v[ 'not_retrieved' ]} |" for k, v in after[ "not_retrieved_by_route" ].items() ]
+    if members is not None:
+        cmp = members[ "any_member_comparison_only" ]
+        lines += [ "", "Per key member (the figure to quote):", "", "| outcome | members |", "|---|---|", *[ f"| {k} | {v} |" for k, v in members[ "by_lost_at" ].items() ],
+                   f"| miss rate | {members[ 'miss_rate' ]:.4f} |", f"| upper bound | {members[ 'upper_bound' ]:.4f} |", "",
+                   f"Comparison only, not a result: of {cmp[ 'needs' ]} matched needs, {cmp[ 'any_member_found' ]} have any member found and {cmp[ 'every_member_found' ]} have every member found." ]
     ( out_dir / "loss-report.md" ).write_text( "\n".join( lines ) + "\n", encoding="utf-8" )
