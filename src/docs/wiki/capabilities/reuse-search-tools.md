@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.cosa_voice_mcp.replay@42a3299a59
   - lupin_mcp.reuse_tools.prepare@793f35c0eb
   - lupin_mcp.reuse_tools.sendable@42a71ac125
-  - lupin_mcp.reuse_tools.sweep@6b56c2af23
+  - lupin_mcp.reuse_tools.sweep@306c565947
   - lupin_mcp.reuse_tools.LiveJevTransport.post@05ba74d3cf
   - cosa.repo.symindex.verdict.decide@6eccda3305
   - lupin_mcp.reuse_call_log_middleware.ReuseCallLogMiddleware@f56d5fddbb

@@ -382,7 +382,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         return out, unwritten
 
     with concurrent.futures.ThreadPoolExecutor( max_workers=workers ) as pool:
-        results = list( pool.map( one, chunks ) )
+        results = list( rt.map_in_context( pool, one, chunks ) )
     rows, unwritten = [], []
     for out, bad in results:
         for a in out[ "answers" ]:
