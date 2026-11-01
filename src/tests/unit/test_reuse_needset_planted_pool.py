@@ -13,7 +13,7 @@ from cosa.repo.symindex.candidates.errors import CandidateError
 from lupin_mcp.reuse_needset import planted_pool as pp
 from tests.unit.test_candidates_vector_build import FakeClient, entry, vec
 
-REWRITE = { "id": "d-rew0", "file": "src/new/zq_wrapper.py", "name": "zqwrapper", "sig": "(x)", "text": "def zqwrapper(x): return x", "line": 3, "end_line": 4, "public": True }
+REWRITE = { "id": "d-rew0", "file": "src/new/zq_wrapper.py", "name": "zqwrapper", "lang": "py", "sig": "(x)", "text": "def zqwrapper(x): return x", "line": 3, "end_line": 4, "public": True }
 
 
 def live_entries():
@@ -45,11 +45,12 @@ def planted_stage( tmp_path, client=None ):
 
 def test_a_rewrite_becomes_an_index_record_with_the_fields_the_judge_and_the_search_read():
     e = pp.planted_entry( REWRITE )
-    assert e == { "id": "d-rew0", "file": "src/new/zq_wrapper.py", "module": "src.new.zq_wrapper", "name": "zqwrapper", "sig": "(x)", "doc": "",
+    assert e == { "id": "d-rew0", "file": "src/new/zq_wrapper.py", "lang": "py", "module": "src.new.zq_wrapper", "name": "zqwrapper", "sig": "(x)", "doc": "",
                   "pin": hashlib.sha256( REWRITE[ "text" ].encode() ).hexdigest()[ :10 ], "scope": "public", "line": 3, "end_line": 4 }
-    bare = pp.planted_entry( { "id": "d-x", "file": "a.py", "name": "n", "sig": "()", "public": False } )
+    bare = pp.planted_entry( { "id": "d-x", "file": "a.py", "name": "n", "lang": "py", "sig": "()", "public": False } )
     assert bare[ "scope" ] == "private" and bare[ "line" ] == 1 and bare[ "end_line" ] == 1 and bare[ "pin" ] == hashlib.sha256( b"" ).hexdigest()[ :10 ]
-    assert pp.planted_entry( { "id": "d-y", "file": "a.py", "name": "n", "sig": "()" } )[ "scope" ] == "public"
+    assert pp.planted_entry( { "id": "d-y", "file": "a.py", "name": "n", "lang": "ts", "sig": "()" } )[ "scope" ] == "public"
+    assert pp.planted_entry( { "id": "d-z", "file": "a.ts", "name": "n", "lang": "ts", "sig": "()" } )[ "lang" ] == "ts"      # the rewrite's own language, not one read from the extension
 
 
 def test_the_rewrites_are_embedded_as_the_build_does_and_those_are_embedding_calls_only():

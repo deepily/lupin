@@ -22,16 +22,17 @@ def planted_entry( rewrite ):
     Build the index record a rewrite is searched and judged by.
 
     Requires:
-        - rewrite holds id, file, name and sig; line, end_line, public and text may be absent
+        - rewrite holds id, file, name, sig and lang; line, end_line, public and text may be absent
 
     Ensures:
-        - returns the index fields the candidate stage and the judge read: id, file, module, name, sig, doc, pin, scope, line, end_line
+        - returns the index fields the candidate stage and the judge read: id, file, lang, module, name, sig, doc, pin, scope, line, end_line
+        - lang is the rewrite's own, because the checker keeps only the entries in the need's write language and reads that field
         - doc is empty, because a real rewrite carries no docstring field; module is the file path without its extension
         - pin is the first 10 hex of the sha256 of the rewrite's text, so it changes when the text does
     """
     import hashlib
     text = rewrite[ "text" ] if "text" in rewrite else ""
-    return { "id": rewrite[ "id" ], "file": rewrite[ "file" ], "module": os.path.splitext( rewrite[ "file" ] )[ 0 ].replace( "/", "." ), "name": rewrite[ "name" ],
+    return { "id": rewrite[ "id" ], "file": rewrite[ "file" ], "lang": rewrite[ "lang" ], "module": os.path.splitext( rewrite[ "file" ] )[ 0 ].replace( "/", "." ), "name": rewrite[ "name" ],
              "sig": rewrite[ "sig" ], "doc": "", "pin": hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()[ :10 ],
              "scope": "public" if ( "public" not in rewrite or rewrite[ "public" ] ) else "private",
              "line": rewrite[ "line" ] if "line" in rewrite else 1, "end_line": rewrite[ "end_line" ] if "end_line" in rewrite else 1 }
