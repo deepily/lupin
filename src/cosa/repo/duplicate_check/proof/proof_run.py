@@ -8,6 +8,8 @@ from cosa.repo.duplicate_check import cluster, errors as err, extract, pipeline
 from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check.proof import proof_bar
 
+# The passing record 2.json lives under the old names: io/semdup/proof-official-2026.10.31/.
+# New runs use io/duplicate-check/.
 PROOF_FOLDER = ( "duplicate-check", "proof" )
 TRIAL_FOLDER = ( "duplicate-check", "proof-trial" )
 LEDGER_FILE  = "proof-ledger.jsonl"
