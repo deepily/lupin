@@ -124,3 +124,24 @@ def audio_triplet( audio_rel, script_rel=None, source_rel=None, title=None ):
         f"[🎧 Listen](/app/audio?{query}) | "
         f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
     )
+
+
+def script_link( script_rel ):
+    """
+    Build the Script link for one language on a finished podcast card.
+
+    The link opens the script in the doc viewer. The viewer serves io/podcasts/<email>/ only to the person it
+    belongs to, so the same link is safe on any card.
+
+    Requires:
+        - script_rel is a path relative to io/ ( "podcasts/<email>/<file>" ), or None
+
+    Ensures:
+        - returns None when there is no script
+        - otherwise returns a markdown link to /app/docs?path=lupin/io/<script_rel>
+
+    Raises:
+        - nothing
+    """
+    if not script_rel: return None
+    return f"[📝 Script](/app/docs?path={urllib.parse.quote( 'lupin/io/' + script_rel )})"

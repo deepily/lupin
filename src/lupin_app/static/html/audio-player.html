@@ -109,8 +109,6 @@
     </div>
 
     <script src="/static/js/lupin-nav.js" defer></script>
-    <script src="/static/js/vendor/marked.min.js"></script>
-    <script src="/static/js/vendor/purify.min.js"></script>
     <script>
         ( async function() {
             const target   = document.getElementById( 'audio-player-target' );
@@ -231,36 +229,27 @@
                 }
             } catch ( e ) { /* ignore */ }
 
-            // A link is drawn only when its file answers; a missing file is left out, never shown broken.
-            // The script and an io/ original are read with the user's token; any other original opens in the doc viewer.
-            const ioUrl = ( rel ) => '/api/io/file?path=' + encodeURIComponent( rel );
-            async function answers( url, method ) {
+            // A link is drawn only when its file answers. Script and Original open in the doc viewer, which serves a
+            // person's own podcast files to that person only. The script path is relative to io/; the source is already
+            // "io/<rel>" or "lupin/<rel>".
+            const scriptDoc = scriptPath ? 'lupin/io/' + scriptPath : null;
+            const sourceDoc = sourcePath ? ( sourcePath.startsWith( 'io/' ) ? 'lupin/' + sourcePath : sourcePath ) : null;
+            async function answers( docPath ) {
                 try {
-                    const resp = await authedFetch( url, { method: method } );
+                    const resp = await authedFetch( '/api/docs/file?path=' + encodeURIComponent( docPath ).replace( /%2F/g, '/' ), { method: 'GET' } );
                     return resp.ok;
                 } catch ( e ) {
                     return false;
                 }
             }
+            const docLink = ( id, docPath, label ) => '<a id="' + id + '" data-testid="' + id + '" target="_blank" rel="noopener" href="/app/docs?path='
+                                                      + encodeURIComponent( docPath ).replace( /%2F/g, '/' ) + '">' + label + '</a>';
 
             let linksHtml = '';
             if ( !embed ) {
-                const sourceInIo  = sourcePath && sourcePath.startsWith( 'io/' );
-                const scriptReady = scriptPath ? await answers( ioUrl( scriptPath ), 'HEAD' ) : false;
-                let sourceReady   = false;
-                if ( sourcePath ) {
-                    sourceReady = sourceInIo
-                        ? await answers( ioUrl( sourcePath.slice( 3 ) ), 'HEAD' )
-                        : await answers( '/api/docs/file?path=' + encodeURIComponent( sourcePath ), 'GET' );
-                }
                 const pieces = [];
-                if ( scriptReady ) pieces.push( '<a id="audio-player-script-link" data-testid="audio-player-script-link">&#128221; Script</a>' );
-                if ( sourceReady && sourceInIo ) {
-                    pieces.push( '<a id="audio-player-source-link" data-testid="audio-player-source-link">&#128196; Original document</a>' );
-                } else if ( sourceReady ) {
-                    pieces.push( '<a id="audio-player-source-link" data-testid="audio-player-source-link" target="_blank" rel="noopener" href="/app/docs?path='
-                                 + encodeURIComponent( sourcePath ).replace( /%2F/g, '/' ) + '">&#128196; Original document</a>' );
-                }
+                if ( scriptDoc && await answers( scriptDoc ) ) pieces.push( docLink( 'audio-player-script-link', scriptDoc, '&#128221; Script' ) );
+                if ( sourceDoc && await answers( sourceDoc ) ) pieces.push( docLink( 'audio-player-source-link', sourceDoc, '&#128196; Original document' ) );
                 if ( pieces.length ) linksHtml = '<div class="audio-player-links">' + pieces.join( '' ) + '</div>';
             }
 
@@ -291,32 +280,6 @@
                         <dt id="buffer-timing-dt" hidden>Buffer</dt><dd id="buffer-timing-dd" hidden></dd>
                     </dl>
                 </details>`;
-
-            // Open a text file in a new tab, rendered as markdown. The window opens inside the click so
-            // the popup blocker allows it; the text arrives afterwards.
-            function openTextInNewTab( rel, label ) {
-                const win = window.open( '', '_blank' );
-                ( async () => {
-                    let html;
-                    try {
-                        const resp = await authedFetch( ioUrl( rel ), {} );
-                        if ( !resp.ok ) throw new Error( 'HTTP ' + resp.status );
-                        const text = await resp.text();
-                        html = DOMPurify.sanitize( marked.parse( text, { gfm: true, breaks: true } ) );
-                    } catch ( err ) {
-                        html = '<p>Could not load ' + escapeHtml( label ) + ': ' + escapeHtml( err.message ) + '</p>';
-                    }
-                    if ( !win ) return;
-                    win.document.title = displayTitle + ' — ' + label;
-                    win.document.body.innerHTML = '<div style="max-width:860px;margin:32px auto;padding:0 24px;font:16px/1.6 system-ui,sans-serif">' + html + '</div>';
-                } )();
-            }
-            const scriptLinkEl = target.querySelector( '#audio-player-script-link' );
-            if ( scriptLinkEl ) scriptLinkEl.addEventListener( 'click', () => openTextInNewTab( scriptPath, 'Script' ) );
-            const sourceLinkEl = target.querySelector( '#audio-player-source-link' );
-            if ( sourceLinkEl && !sourceLinkEl.getAttribute( 'href' ) ) {
-                sourceLinkEl.addEventListener( 'click', () => openTextInNewTab( sourcePath.slice( 3 ), 'Original document' ) );
-            }
 
             const audioEl    = target.querySelector( 'audio.audio-player-element' );
             const downloadEl = target.querySelector( 'a.audio-player-download' );   // absent in the mini face

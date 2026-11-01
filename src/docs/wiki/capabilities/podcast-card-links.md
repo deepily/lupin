@@ -18,6 +18,8 @@ Builds the Play Here, Listen and Download links on a finished podcast card. `Pod
 - `read_script_title` reads the script's first top-level heading and `clean_title` removes the `Podcast:` label. An unreadable file or no heading gives None.
 - `source_ref` names the original document: `io/<rel>` under `io/`, `lupin/<rel>` for any other project file, None outside the project.
 
+- `script_link( script_rel )` returns the 📝 Script link: the doc viewer URL `/app/docs?path=lupin/io/<script_rel>`, or None with no script. It does not need audio.
+
 ## Invariants
 - The job passes the script path. The script and mp3 carry different time stamps, so the player cannot pair them by file name.
 - Each language gets its own title, read from its own script.

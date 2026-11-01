@@ -269,7 +269,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             #    9b481811, but a missing BUILD, not just a missing store). Mirrors
             #    podcast_generator/job.py:358-406. ──
             import urllib.parse
-            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, source_ref
+            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
             io_base = cu.get_project_root() + "/io/"
 
             def _to_rel( p ):
@@ -277,9 +277,6 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 if p.startswith( io_base ): return p[ len( io_base ): ]
                 if p.startswith( "io/" ):   return p[ 3: ]
                 return p.lstrip( "/" )
-
-            def _script_link( rel ):
-                return f"[📝 Script](/app/docs?path={urllib.parse.quote( rel )})" if rel else None
 
             # The original document rides the link when it lives inside the project.
             source_rel = source_ref( result.research_path, cu.get_project_root() )
@@ -315,7 +312,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 a_rel  = _to_rel( audio_by_lang.get( lang ) )
                 s_rel  = _to_rel( script_by_lang.get( lang ) )
                 parts  = []
-                s_link = _script_link( s_rel )
+                s_link = script_link( s_rel )
                 if s_link: parts.append( s_link )
                 if a_rel:
                     title = read_script_title( io_base + s_rel ) if s_rel else None

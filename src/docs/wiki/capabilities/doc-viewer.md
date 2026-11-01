@@ -18,7 +18,7 @@ pins:
 The doc viewer serves repo files and the `io/` folder to the browser, and lets an admin upload into them. A request names its file as `path=<project>/<rel>`, and the first segment must be a registered project.
 
 ## What it does
-- `get_docs_file` (`GET /api/docs/file`) resolves the path through one gate, then returns a file or a directory listing.
+- `get_docs_file` (`GET /api/docs/file`) resolves the path through one gate, then returns a file or a directory listing. A person's own podcast folders are added per read, see [[doc-viewer-owner-rule]].
 - `get_io_file` (`GET /api/io/file`) is the older, separate door for `io/`. It accepts `.pptx`, which the docs door does not.
 - `build_scope_registry` reads the INI `external repos` block each time it is called. It skips names that collide with `docs` or `io`. It prints a warning for any `external repo <name>` key whose name is not listed, and does not register that scope. The docs router calls it once and caches the result.
 - A repo's `.docview.yml` (`DocviewManifest`) narrows what is served. `load_manifest_for_scope` reads it. A missing, oversized, unparsable or invalid manifest means the INI `allowed prefixes` apply, or a wildcard if there are none. The floor blocklist still applies.
