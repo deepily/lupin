@@ -7,11 +7,12 @@ import json
 import pytest
 
 from cosa.repo.doc_lint import jev_transport as jt
+from lupin_mcp import reuse_ceiling as rc
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import call_cap, errors as er
 from tests.unit.test_reuse_pack_breaker import MANY
-from tests.unit.test_reuse_pack_send import NEED, PROBS, Fake
+from tests.unit.test_reuse_pack_send import ENTRIES, NEED, PROBS, Fake
 
 
 class Charging( Fake ):
@@ -69,3 +70,11 @@ def test_without_the_context_copy_the_same_worker_calls_would_be_filed_unstaged(
     with cap.installed(), call_cap.stage( "attribution" ), concurrent.futures.ThreadPoolExecutor( max_workers=2 ) as pool:
         list( pool.map( lambda n: jt._charged( json.dumps( { "model": "m" } ) ), [ 1, 2 ] ) )
     assert cap.by_stage() == { "unstaged": 2 }
+
+
+def test_a_request_the_cap_refuses_gives_its_token_reserve_back_before_the_error_goes_up():
+    budget = rc.TokenBudget( 10, 1_000_000 )
+    fake   = Fake( fail=er.NeedsetError( er.STAGE_BUDGET_REACHED, "the attribution stage used 1 of its 1 calls" ), budget=budget )
+    with pytest.raises( er.NeedsetError ) as e: rp.send_pack( fake, NEED, ENTRIES[ :3 ], budget=budget )
+    assert e.value.code == er.STAGE_BUDGET_REACHED and len( fake.bodies ) == 1
+    assert budget.reserved_tokens == 0 and budget.spent_tokens > 0                    # the reserve is released, and the input part of the last attempt is charged
