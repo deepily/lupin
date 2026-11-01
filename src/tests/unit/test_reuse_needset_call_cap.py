@@ -88,6 +88,17 @@ def test_a_new_cap_over_the_same_file_keeps_the_count_so_a_resumed_run_cannot_pa
     assert len( transport.seen ) == 3
 
 
+def test_a_restart_after_37_calls_is_refused_at_1000_minus_37( tmp_path ):
+    path  = str( tmp_path / "calls.jsonl" )
+    first = call_cap.CallCap( path )
+    for _ in range( 37 ): first.charge( FABLE )
+    restarted = call_cap.CallCap( path )
+    assert restarted.used() == 37
+    for _ in range( 1000 - 37 ): restarted.charge( FABLE )
+    with pytest.raises( er.NeedsetError ) as caught: restarted.charge( FABLE )
+    assert caught.value.code == er.CALL_CAP_REACHED and restarted.used() == 1000 and [ r[ "n" ] for r in restarted.rows() ] == list( range( 1, 1001 ) )
+
+
 def test_a_limit_of_zero_refuses_the_first_call( tmp_path ):
     cap, transport = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), limit=0 ), Transport()
     with cap.installed(), pytest.raises( er.NeedsetError ) as caught: call( FABLE, transport )
