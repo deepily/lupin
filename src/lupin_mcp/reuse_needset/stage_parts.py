@@ -27,7 +27,8 @@ NO_PARTNER   = "no_partner"
 DRAFT_FAILED = "draft_failed"
 DISPUTED     = "disputed"
 UNREADABLE   = "unreadable_reply"
-REASONS      = ( NOT_POOLED, NO_PARTNER, DRAFT_FAILED, DISPUTED, UNREADABLE )
+UNSTRIPPABLE = "unstrippable_seed"
+REASONS      = ( NOT_POOLED, NO_PARTNER, DRAFT_FAILED, DISPUTED, UNREADABLE, UNSTRIPPABLE )
 
 
 def route_table( lists, seed ):
@@ -87,6 +88,7 @@ def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally,
         - every sentence the checks rejected, even one the rewrite then replaced, adds a rejected_sentence row; every drafter reply that could not be read adds an unreadable_draft_reply row; a draft that ends rejected adds draft_failed
         - a disputed need adds a disputed row with the second model's result and note, and every check reply that could not be read adds an unreadable_check_reply row
         - a seed whose same-job or check reply is unreadable twice is counted under unreadable_reply, with its id, code and detail kept, adds a seed_skipped row, and gives None; the stage goes on to the next seed
+        - a seed the strip step cannot find (STRIP_FAILED) is counted under unstrippable_seed the same way, with its id, code and detail kept and a seed_skipped row, so one seed cannot fail the stage
         - any other NeedsetError, the call cap's included, is raised
         - a need the second model does not agree to is counted under disputed, its id is kept, and it gives None
         - an agreed need is returned as finalize.final_row makes it, with final_source model_agreed and the key's source texts shown to the checker
@@ -96,8 +98,8 @@ def final_need_fn( renv, routes, second_ask, second_ledger, second_model, tally,
         try:
             return worked( seed_id )
         except er.NeedsetError as error:
-            if error.code != er.UNREADABLE_REPLY: raise
-            tally[ UNREADABLE ] += 1
+            if error.code not in ( er.UNREADABLE_REPLY, er.STRIP_FAILED ): raise
+            tally[ UNSTRIPPABLE if error.code == er.STRIP_FAILED else UNREADABLE ] += 1
             tally.skipped.append( { "seed": seed_id, "code": error.code, "detail": error.detail } )
             rejections.add( { "kind": "seed_skipped", "seed": seed_id, "code": error.code, "detail": error.detail } )
             return None

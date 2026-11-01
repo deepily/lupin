@@ -20,7 +20,7 @@ from cosa.repo.labelling import run_check
 from cosa.repo.symindex.candidates import candidate_stage
 from cosa.repo.symindex.candidates import vector_store as vs
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, smoke, stage3, stage_parts, stage_seeds, stages, strip
+from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, smoke, source_at, stage3, stage_parts, stage_seeds, stages, strip
 from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
@@ -359,8 +359,8 @@ def stage_factories( lists_path, parts ):
     Ensures:
         - the stages are stage_seeds.attribution_stage and stage_seeds.yield_stage over that file and those parts
         - each report also carries the counts of its own seeds that gave no final need, with the disputed ids; the stage that ran first does not leak into the one after
-        - a stage whose every seed was skipped for an unreadable reply raises ALL_SEEDS_UNREADABLE, so a dead model is a failure and never a finding
-        - a stage that ends with no need while any seed was skipped as unreadable raises NO_NEEDS_WITH_SKIPS, because an unread seed could have held the need
+        - a stage whose every seed was skipped, for an unreadable reply or an unstrippable seed, raises ALL_SEEDS_UNREADABLE, so a dead model is a failure and never a finding
+        - a stage that ends with no need while any seed was skipped raises NO_NEEDS_WITH_SKIPS, because a skipped seed could have held the need
         - a stage that ends with no need and no skipped seed is a stop, as before
 
     Raises:
@@ -375,8 +375,9 @@ def stage_factories( lists_path, parts ):
             report = await stage()
             counts = stage_parts.counted( parts[ "tally" ], since )
             seeds  = len( stage_seeds.load_lists( lists_path )[ name ][ "order" ] )
-            if seeds and counts[ stage_parts.UNREADABLE ] == seeds: raise er.NeedsetError( er.ALL_SEEDS_UNREADABLE, f"all {seeds} {name} seeds were skipped for an unreadable reply" )
-            if report[ NEEDS_KEY[ name ] ] == 0 and counts[ stage_parts.UNREADABLE ]: raise er.NeedsetError( er.NO_NEEDS_WITH_SKIPS, f"{name} found no need and {counts[ stage_parts.UNREADABLE ]} seeds were skipped as unreadable; an unread seed could have held it" )
+            skipped = counts[ stage_parts.UNREADABLE ] + counts[ stage_parts.UNSTRIPPABLE ]
+            if seeds and skipped == seeds: raise er.NeedsetError( er.ALL_SEEDS_UNREADABLE, f"all {seeds} {name} seeds were skipped, for an unreadable reply or because the strip step could not find them" )
+            if report[ NEEDS_KEY[ name ] ] == 0 and skipped: raise er.NeedsetError( er.NO_NEEDS_WITH_SKIPS, f"{name} found no need and {skipped} seeds were skipped, unread or unstrippable; a skipped seed could have held it" )
             return { **report, "no_final_need": counts }
         return with_counts
     return ( lambda env: reported( stage_seeds.attribution_stage( lists_path, parts[ "make_need" ], parts[ "trace_fn" ] ), stages.ATTRIBUTION ),
@@ -457,6 +458,9 @@ def main( argv=None, deps=None ):
 
     Raises:
         - NeedsetError NO_CLI_PATH on a live run with no --cli-path, before the context is built
+        - with --live, args.root becomes a detached worktree at the source commit before the context is built, so the context, the index, the strips, the trace and the probe all read the commit and a merge into the main tree mid-run moves none of them
+        - that worktree is locked while the run goes on and unlocked when it ends, by a result or by any error, so the janitor cannot sweep the root of a long run
+        - NeedsetError SOURCE_TREE_MISMATCH or SOURCE_TREE_FAILED when that worktree cannot be had
         - ValueError when --cli-path is not an executable file, before the index is built
         - NeedsetError NO_CANDIDATE_STAGE on a live run whose context has none, before the index is built or a list is written
         - NeedsetError QUOTA_UNFILLABLE from the seed draw, and PLAN_ALREADY_WRITTEN when other seed lists are already in the run folder
@@ -469,19 +473,25 @@ def main( argv=None, deps=None ):
     if not args.live: return { "live": False, "plan": shown }
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "a live run needs --cli-path: the SDK's bundled Claude Code is too old for the drafter's model and answers 400" )
     model_transport.configure( cli_path=args.cli_path )
-    ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
-    close     = deps[ "close_run" ] if "close_run" in deps else rt.close_run
+    made      = "source_root" not in deps
+    repo      = args.root
+    args.root = deps[ "source_root" ]( args ) if not made else source_at.ensure_worktree( repo, args.source_commit )
     try:
-        report = live_run( args, loaded, ctx, deps )
-    except BaseException:
-        try: close( ctx )
-        except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
-        raise
-    try:
-        closed, close_error = close( ctx ), None
-    except Exception as error:
-        closed, close_error = None, repr( error )
-    return { "live": True, "plan": shown, "report": report, "closed_run": closed, "close_error": close_error }
+        ctx       = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
+        close     = deps[ "close_run" ] if "close_run" in deps else rt.close_run
+        try:
+            report = live_run( args, loaded, ctx, deps )
+        except BaseException:
+            try: close( ctx )
+            except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
+            raise
+        try:
+            closed, close_error = close( ctx ), None
+        except Exception as error:
+            closed, close_error = None, repr( error )
+        return { "live": True, "plan": shown, "report": report, "closed_run": closed, "close_error": close_error }
+    finally:
+        if made: source_at.unlock( repo, args.root )
 
 
 def live_run( args, loaded, ctx, deps ):
@@ -493,6 +503,7 @@ def live_run( args, loaded, ctx, deps ):
 
     Ensures:
         - everything that can begin the Jev spend-ledger run, the parts and the control among it, is built here, so main can close the run on any error
+        - args.root is already the source commit's worktree, which main made before the context, so everything here reads the commit and not the tree peers change
     Raises:
         - NeedsetError NO_CANDIDATE_STAGE for a context with no candidate stage, before the index is built or a list is written
         - whatever the parts, the factories or the runner raise

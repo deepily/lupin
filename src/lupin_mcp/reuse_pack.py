@@ -12,6 +12,7 @@ from lupin_mcp import reuse_ceiling as rc
 from lupin_mcp import reuse_pair as rpair
 from lupin_mcp import reuse_pair_request as rpr
 from lupin_mcp import reuse_tools as rt
+from lupin_mcp.reuse_needset import errors as ne
 
 SHAPE           = "packed-choice-1"                           # names the body layout; a new layout needs a new name; packs are cut from the cache misses
 SHAPE_WHOLE     = "packed-choice-2"                           # packs are cut from the whole shortlist sorted by id, so a pack does not move with cache state
@@ -200,6 +201,7 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         - a stopped breaker leaves the pack, or the halves not yet sent, not reached with no HTTP
         - a response whose model is not the one asked for fails every entry as ModelMismatch, keeps the served name in
           the row, counts its tokens, and stops a given breaker
+        - the call cap's NeedsetError, a stage budget or the whole cap reached, is raised and fails no entry, so the stage stops
         - any other error fails every entry of the pack; the row keeps the error class, the attempt log, and the
           last HTTP status when the error carries one (a JevConfigError or a JevCallError)
         - rows lists this request first, then the rows of its halves, each with status answered, failed,
@@ -226,6 +228,9 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     except Exception as e:                                          # any transport error ends this one request, never the run
         error = e
     taken = budget.end_tally() if budget is not None else None
+    if isinstance( error, ne.NeedsetError ):                          # the call cap's refusal stops the stage, and is no failed request
+        if metered: budget.fail_request()
+        raise error
     if isinstance( error, jt.JevBudgetSpent ): sent, row[ "attempt_log" ] = False, error.attempt_log
     row[ "attempts" ] = taken if taken is not None else ( meta[ "attempts" ] if meta is not None else ( 1 if sent else 0 ) )
     if error is None:
@@ -382,7 +387,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         return out, unwritten
 
     with concurrent.futures.ThreadPoolExecutor( max_workers=workers ) as pool:
-        results = list( pool.map( one, chunks ) )
+        results = list( rt.map_in_context( pool, one, chunks ) )
     rows, unwritten = [], []
     for out, bad in results:
         for a in out[ "answers" ]:

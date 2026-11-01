@@ -3,7 +3,7 @@ capability: needset-stage-parts
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.stage_parts.route_table@28c12f9bc9
-  - lupin_mcp.reuse_needset.stage_parts.final_need_fn@b72596fbc5
+  - lupin_mcp.reuse_needset.stage_parts.final_need_fn@3e78263f0a
   - lupin_mcp.reuse_needset.stage_parts.mark@c43da76f40
   - lupin_mcp.reuse_needset.stage_parts.counted@b290dae039
   - lupin_mcp.reuse_needset.stage_parts.Tally@a51b5f124a
@@ -20,7 +20,7 @@ The live pieces of the attribution and yield stages. Each seed becomes a final n
 ## One seed
 - `final_need_fn` returns the function for one seed. By default no partner is searched for. The drafter writes the sentence from the seed alone, and the second model checks it against the seed's own source. So the seed is the need's known answer: a seed-answer need with key source `seed` and no route. With `partners` on, it first finds a partner by the seed's route, and the second model checks against the partner.
 - The need is final only when the second model agrees, with `final_source` model_agreed. A disagree or unsure answer is counted as disputed, its id is kept, and the need is never traced.
-- A seed outside the search pool is counted under `not_pooled`. A seed with no partner (partners on only) is counted under `no_partner`. A seed with no sentence that passes the copy and leak checks is counted under `draft_failed`.
+- A seed outside the search pool is counted under `not_pooled`. A seed with no partner (partners on only) is counted under `no_partner`. A seed with no sentence that passes the copy and leak checks is counted under `draft_failed`. A seed the strip step cannot find is skipped under `unstrippable_seed`.
 - The `RejectionLedger` writes one flushed JSON line for each rejection. It records a rejected sentence with its failure details and a draft that ends rejected. It records a disputed need with the second model's result and note, and a skipped seed. It records a reply that could not be read, as raw text. The file is `ledger-rejections.jsonl` in the run folder.
 - A seed whose same-job or check reply is unreadable twice is skipped and counted under `unreadable_reply`. Its id, code and detail go in `skipped`, and the stage goes on. Any other error, the call cap's included, still stops it.
 - The second model may not be the drafter's model. That raises `CHECKER_EQUALS_DRAFTER` before the check.

@@ -16,6 +16,7 @@ cosa.repo.doc_lint.jev_transport, the one HTTP path to Jev, and the key comes fr
 variable JEV_API_TOASTER only. A server started without the variable reports KEY_UNREADABLE.
 """
 import concurrent.futures
+import contextvars
 import copy
 import fnmatch
 import gzip
@@ -40,6 +41,7 @@ from cosa.repo.symindex.paths import data_dir, default_out_dir
 from cosa.repo.symindex.paths import index_readable
 from cosa.repo.symindex.spec import NotARepo, git_toplevel, spec_for, tests_spec
 from cosa.repo.symindex.candidates import freshness as fr
+from lupin_mcp.reuse_needset import errors as ne
 from cosa.repo.symindex.candidates.errors import CandidateError
 from cosa.repo.symindex.candidates.search import read_purposes
 from lupin_mcp import reuse_redact
@@ -789,6 +791,23 @@ def transport_summary( calls ):
              "latency_ms": { "min": times[ 0 ], "max": times[ -1 ], "mean": round( sum( times ) / len( times ) ), "p50": rank( 50 ), "p95": rank( 95 ) } if times else None }
 
 
+def map_in_context( pool, fn, items ):
+    """
+    Map fn over items on a thread pool, each call in a copy of the caller's context.
+
+    Requires:
+        - pool is a concurrent.futures executor; items is an iterable
+
+    Ensures:
+        - returns pool.map's iterator, in item order
+        - a context variable set by the caller, such as the call cap's stage name, reads the same inside fn
+        - each item gets its own copy, because one context cannot be entered by two threads at once
+    """
+    items    = list( items )
+    contexts = [ contextvars.copy_context() for _ in items ]
+    return pool.map( lambda pair: pair[ 0 ].run( fn, pair[ 1 ] ), zip( contexts, items ) )
+
+
 def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=None, breaker=None ):
     """
     Ask Jev about every entry.
@@ -878,6 +897,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                     if e.attempt_log: attempt_logs.append( e.attempt_log )
                     if isinstance( ctx.transport, LiveJevTransport ) and ctx.transport.transient: break      # that transport already used its four sends; asking again would multiply them
                     continue
+                except ne.NeedsetError:                                   # the call cap's refusal stops the stage, and is no failed call
+                    raise
                 except Exception:                                         # any other error, such as a failed cache write, is a failed call, never a verdict
                     continue
         finally:
@@ -892,7 +913,7 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
     used  = { "in": 0, "out": 0, "missing": 0 }
     seen_calls = []
     with concurrent.futures.ThreadPoolExecutor( max_workers=WORKERS ) as pool:
-        for rid, resp, how, attempts, replies in pool.map( one, entries ):
+        for rid, resp, how, attempts, replies in map_in_context( pool, one, entries ):
             for tokens, meta, reply in replies:
                 if tokens is None: used[ "missing" ] += 1
                 else: used[ "in" ] += tokens[ 0 ]; used[ "out" ] += tokens[ 1 ]

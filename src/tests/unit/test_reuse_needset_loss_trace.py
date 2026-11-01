@@ -8,6 +8,7 @@ import copy
 import itertools
 import json
 import math
+import pathlib
 
 import pytest
 
@@ -392,3 +393,15 @@ def test_the_report_prints_the_member_figures_and_calls_the_any_member_counts_a_
     LT.write_report( tmp_path, s, s, [], { "checker": "c1" } )
     assert "members" not in json.loads( ( tmp_path / "loss-report.json" ).read_text( encoding="utf-8" ) )
     assert "Per key member" not in ( tmp_path / "loss-report.md" ).read_text( encoding="utf-8" )
+
+
+def test_a_real_receipt_whose_stage_was_refused_names_its_flags_and_the_stage_error():
+    receipt = json.loads( ( pathlib.Path( __file__ ).resolve().parent.parent / "fixtures" / "reuse_needset" / "receipt-stage-path-refused.json" ).read_text( encoding="utf-8" ) )     # captured 2026-11-01 from rt.run_question on run -f's vectors, whose folder the search server refused
+    with pytest.raises( er.NeedsetError ) as e: loss_trace.asked_ids( receipt )
+    assert e.value.code == er.RECEIPT_FIELD_ABSENT
+    assert receipt[ "id" ] in e.value.detail and "CALL_FAILED" in e.value.detail and "CANDIDATE_SEARCH_FAILED" in e.value.detail and "not under the allowed root" in e.value.detail
+
+
+def test_a_receipt_with_no_stage_block_says_so_in_its_detail():
+    with pytest.raises( er.NeedsetError ) as e: loss_trace.asked_ids( { "id": "abc", "flags": [ "KEY_UNREADABLE" ] } )
+    assert "flags ['KEY_UNREADABLE']" in e.value.detail and "no candidate_stage block" in e.value.detail

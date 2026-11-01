@@ -2,7 +2,7 @@
 capability: needset-loss-trace
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.loss_trace.asked_ids@0847f41e7f
+  - lupin_mcp.reuse_needset.loss_trace.asked_ids@b176ad4781
   - lupin_mcp.reuse_needset.loss_trace.check_need@029f2b5ab1
   - lupin_mcp.reuse_needset.loss_trace.index_locator@e278b6c99a
   - lupin_mcp.reuse_needset.loss_trace.classify@ef032f3b45
@@ -23,7 +23,7 @@ Finds where, in the search pipeline, a need's key gets lost. Each need goes thro
 
 ## Tracing
 - `check_need` asks the checker about one need on the candidate route and returns its receipt, stored nowhere. The need's seed is left out, so a need is not found by its own source. A seed-answer need is the exception: its seed is the answer and must be findable.
-- `asked_ids` lists the entries sent to the judge: the stage's ids plus its widened ids, sorted. A receipt with no candidate stage, or a failed one, raises `RECEIPT_FIELD_ABSENT`.
+- `asked_ids` lists the entries sent to the judge: the stage's ids plus its widened ids, sorted. A receipt with no candidate stage, or a failed one, raises `RECEIPT_FIELD_ABSENT`, naming the receipt's flags and the stage error.
 - `index_locator` builds the function that finds a symbol's file and line range in the searchable index.
 - `classify` names where a matched need's key was lost, as the first stage whose set of key symbols is empty. `ALT_MATCH` replaces a failed ruling when a shortlisted symbol outside the key was ruled the same job.
 - `classify_members` does the same for each key member on its own. A member is found only when that member passed all four stages. No other member's progress counts for it. A nothing need has no members.
