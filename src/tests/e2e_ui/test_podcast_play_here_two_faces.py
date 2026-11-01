@@ -241,3 +241,23 @@ class TestCardScriptLinkShowsScriptOnThePage:
         page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script=podcasts/u/gone-script.md&open=script" )
         page.locator( "audio[controls]" ).wait_for( state="attached", timeout=15000 )
         assert page.locator( "[data-testid=audio-player-script-inline]" ).count() == 0
+
+    def test_hostile_markup_in_the_script_is_stripped_from_the_inline_view( self, logged_in_page ):
+        page = logged_in_page
+        _stub_files( page )
+        hostile = ( "# Safe heading\n\nVisible text.\n\n"
+                    "<img src=x onerror=\"window.__pwned = 'img'\">\n\n"
+                    "<script>window.__pwned = 'script'</script>\n" )
+
+        def hostile_script( route ):
+            path = route.request.url.split( "path=", 1 )[ 1 ].split( "&", 1 )[ 0 ].replace( "%2F", "/" )
+            if path == SCRIPT: route.fulfill( status=200, body=hostile, content_type="text/plain" )
+            else:              route.fallback()
+
+        page.context.route( "**/api/io/file?**", hostile_script )   # registered last, so it answers first
+        page.goto( f"{BASE_URL}/app/audio?path={AUDIO}&script={SCRIPT}&open=script" )
+        inline = page.locator( "[data-testid=audio-player-script-inline]" )
+        page.wait_for_function( "() => document.querySelector( '[data-testid=audio-player-script-inline]' ).innerText.includes( 'Visible text.' )", timeout=15000 )
+        assert inline.locator( "script" ).count() == 0, "the script tag is stripped"
+        assert inline.locator( "[onerror]" ).count() == 0, "the onerror attribute is stripped"
+        assert page.evaluate( "() => window.__pwned === undefined" ), "no injected code ran"
