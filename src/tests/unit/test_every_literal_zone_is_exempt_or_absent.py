@@ -25,7 +25,6 @@ EXEMPT = {
     "src/cosa/agents/heartbeat_arbiter/arbiter_journal.py": "LEGIT: the module's own self-test names a zone",
     "src/cosa/repo/doc_lint/harness_schedule.py"         : "LEGIT: the harness schedule window is defined as 10:00 to 13:00 Eastern",
     "src/cosa/utils/edt_timestamp.py"                    : "LEGIT: the module's own self-test names a zone",
-    "src/lupin_mcp/reuse_needset/smoke.py"               : "LEGIT: the smoke schedule window is defined in Eastern, like the harness",
     "src/scripts/dm-experiment/generate_schedule.py"     : "LEGIT: the experiment schedule is defined in Eastern",
 }
 
