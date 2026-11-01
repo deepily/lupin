@@ -193,7 +193,7 @@
     "src/lupin_app/static/js/multiplexer/wireTtsPlayback.ts": 60,
     "src/lupin_app/static/js/nav/boot.ts": 1,
     "src/lupin_app/static/js/nav/lupinNav.ts": 45,
-    "src/lupin_app/static/js/notifications.js": 4142,
+    "src/lupin_app/static/js/notifications.js": 4136,
     "src/lupin_app/static/js/sequential-audio-manager.js": 2,
     "src/lupin_app/static/js/shared/agent-select.js": 70,
     "src/lupin_app/static/js/shared/arg-interview.js": 41,
