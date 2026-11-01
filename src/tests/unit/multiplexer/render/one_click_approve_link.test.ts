@@ -19,7 +19,7 @@ import { createStorageServiceForTesting } from "../../../../lupin_app/static/js/
 import { createReadingPaneStore } from "../../../../lupin_app/static/js/multiplexer/stores/ReadingPaneStore";
 import { createReadingPaneRenderer } from "../../../../lupin_app/static/js/multiplexer/render/ReadingPaneRenderer";
 import type { ReadingPaneRenderer, WindowLike, WindowDocLike } from "../../../../lupin_app/static/js/multiplexer/render/ReadingPaneRenderer";
-import { approveRowId, viewRowId, taskOverlayText, markApproveLinks, handleViewLinkClick } from "../../../../lupin_app/static/js/multiplexer/render/approveLink";
+import { approveRowId, viewRowId, taskOverlayText, markApproveLinks, handleViewLinkClick, taskReaderFor } from "../../../../lupin_app/static/js/multiplexer/render/approveLink";
 import type { ApproveSender, TaskReader } from "../../../../lupin_app/static/js/multiplexer/render/approveLink";
 import type { HoldingTransitionResult } from "../../../../lupin_app/static/js/multiplexer/stores/HoldingAreaStore";
 
@@ -380,4 +380,13 @@ test( "a ticket body carrying an img tag is shown as text and creates no element
   assert.ok( overlay.querySelector( ".task-body-overlay-body" )?.textContent?.includes( `before ${ evil } after` ), "the tag is visible as characters" );
   assert.equal( overlay.querySelector( "img" ), null, "no img element exists" );
   assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
+} );
+
+test( "taskReaderFor reads the row's own path with the id encoded, and answers null when the read fails", async () => {
+  const asked: string[] = [];
+  const ok = taskReaderFor( { get: async <T,>( path: string ): Promise<T> => { asked.push( path ); return { status: "queued" } as unknown as T; } } );
+  assert.deepEqual( await ok( "a/b?c#d" ), { status: "queued" } );
+  assert.deepEqual( asked, [ "/api/tasks/a%2Fb%3Fc%23d" ] );
+  const down = taskReaderFor( { get: async (): Promise<never> => { throw new Error( "down" ); } } );
+  assert.equal( await down( ROW_A ), null );
 } );
