@@ -3,7 +3,9 @@ capability: podcast-card-links
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.podcast_generator.play_links.clean_title@d9fce3f41d
-  - cosa.agents.podcast_generator.play_links.read_script_title@9e38f07b11
+  - cosa.agents.podcast_generator.play_links.read_script_title@79229cef0c
+  - cosa.agents.podcast_generator.play_links.title_from_script_text@0c820ee701
+  - cosa.agents.podcast_generator.play_links.title_from_folder_name@13af846575
   - cosa.agents.podcast_generator.play_links.source_ref@b60d79bab5
   - cosa.agents.podcast_generator.play_links.player_query@d03688e872
   - cosa.agents.podcast_generator.play_links.audio_triplet@f8e5467aae
@@ -15,7 +17,8 @@ Builds the Play Here, Listen and Download links on a finished podcast card. `Pod
 ## What it does
 - `audio_triplet( audio_rel, script_rel, source_rel, title )` returns the three markdown links for one mp3. Play Here is the player URL with `embed=1`; Listen is the same URL without it.
 - `player_query` writes `path=`, then `script=`, `source=` and `title=` only when given. A missing value is left out, never written empty.
-- `read_script_title` reads the script's first top-level heading and `clean_title` removes the `Podcast:` label. An unreadable file or no heading gives None.
+- `read_script_title` reads a script file's first top-level heading; `title_from_script_text` does the same for text already in hand. `clean_title` removes the `Podcast:` label. No heading gives None.
+- `title_from_folder_name` turns a Drive job folder name into a title: no timestamp, words capitalised.
 - `source_ref` names the original document: `io/<rel>` under `io/`, `lupin/<rel>` for any other project file, None outside the project.
 
 ## Invariants
