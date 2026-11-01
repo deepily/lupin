@@ -246,6 +246,18 @@ test( "horizontal: a 📄 link inside the action-required card uses the tooltip,
   assert.deepEqual( paneOpens, [], "the pane is left to the live response buttons" );
 } );
 
+test( "vertical: a 📄 link in the plain notification list shows the tooltip and never the pane", async () => {
+  table[ ROW_A ] = FIX_X;
+  ui._layoutMode = "vertical";
+  const tip = plantTooltip();
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
+  assert.equal( click( a! ), true, "claimed" );
+  await flush();
+  assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, FACTS );
+  assert.deepEqual( paneOpens, [], "vertical layout never opens the pane" );
+  assert.deepEqual( tabOpens, [], "no new tab" );
+} );
+
 test( "vertical: a 📄 link shows the row in the abstract tooltip, with no pane, no overlay and no new tab", async () => {
   table[ ROW_A ] = FIX_X;
   ui._layoutMode = "vertical";

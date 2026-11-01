@@ -40,6 +40,7 @@ let tip     : AbstractTooltip | null = null;
 let calls   : Array<{ id: string; status: string; extras: unknown }>;
 let release : Array<( r: HoldingTransitionResult ) => void>;
 let opens   : unknown[];
+let globalOpens: unknown[];
 
 const VENDOR = resolve( dirname( fileURLToPath( import.meta.url ) ), "../../../../lupin_app/static/js/vendor" );
 
@@ -49,7 +50,17 @@ before( () => {
   vm.runInThisContext( readFileSync( resolve( VENDOR, "marked.min.js" ), "utf8" ) );
   vm.runInThisContext( readFileSync( resolve( VENDOR, "purify.min.js" ), "utf8" ) );
 } );
-beforeEach( () => { document.body.replaceChildren(); calls = []; release = []; opens = []; } );
+beforeEach( () => {
+  document.body.replaceChildren(); calls = []; release = []; opens = []; globalOpens = [];
+  // A global spy, so a stray window.open from any module reddens a test, not only one through the renderer's windowRef.
+  ( globalThis as unknown as { open: unknown } ).open = ( ...args: unknown[] ): null => { globalOpens.push( args ); return null; };
+} );
+
+/** Neither the renderer's window nor the global window opened a tab. */
+function assertNoTab(): void {
+  assert.deepEqual( opens, [], "no new tab through the renderer's window" );
+  assert.deepEqual( globalOpens, [], "no new tab through the global window.open" );
+}
 afterEach( () => { if ( active !== null ) { active.unmount(); active = null; } if ( tip !== null ) { tip.unmount(); tip = null; } } );
 
 const settle = async (): Promise<void> => { for ( let i = 0; i < 5; i++ ) await Promise.resolve(); };
@@ -237,7 +248,7 @@ test( "horizontal: a 📄 link shows the row in the content pane, like the 📋,
   assert.equal( ( document.getElementById( "content-pane-title" ) as Element ).textContent, `Ticket ${ ROW_A.slice( 0, 8 ) }` );
   assert.equal( tipShown(), false, "the tooltip stays shut in horizontal layout" );
   assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
-  assert.deepEqual( opens, [], "no new tab" );
+  assertNoTab();
   assert.deepEqual( calls, [], "viewing sends no approve" );
 } );
 
@@ -261,7 +272,7 @@ test( "vertical: a 📄 link shows the row in the abstract tooltip, with no pane
   for ( const part of [ "Fix X", "Priority: P2", "Owner: krishna", "Status: not_approved", "line one", "line two" ] ) assert.ok( tipText().includes( part ), part );
   assert.equal( ( document.getElementById( "content-pane" ) as HTMLElement ).hidden, true, "the pane stays shut" );
   assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
-  assert.deepEqual( opens, [], "no new tab" );
+  assertNoTab();
 } );
 
 test( "horizontal with a live action-required card owning the pane: the 📄 link falls back to the tooltip and the pane is untouched", async () => {
@@ -273,7 +284,7 @@ test( "horizontal with a live action-required card owning the pane: the 📄 lin
   assert.equal( tipShown(), true );
   assert.ok( tipText().includes( "line one" ) );
   assert.equal( paneText().includes( "line one" ), false, "the response card keeps the pane; the ticket is not drawn over it" );
-  assert.deepEqual( opens, [], "no new tab" );
+  assertNoTab();
 } );
 
 test( "vertical without a tooltip: the 📄 click is claimed, opens nothing and does not throw", async () => {
@@ -282,7 +293,7 @@ test( "vertical without a tooltip: the 📄 click is claimed, opens nothing and 
   const [ a ] = plant( shell.querySelector( "#sender-cards-container" ) as Element, [ VIEW( ROW_A ) ] );
   assert.equal( click( a! ), true );
   await flush();
-  assert.deepEqual( opens, [] );
+  assertNoTab();
   assert.equal( document.getElementById( "task-body-overlay" ), null );
 } );
 
