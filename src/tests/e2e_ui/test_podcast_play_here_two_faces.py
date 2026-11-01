@@ -169,6 +169,9 @@ class TestPlayHereTwoFaces:
 
         full.locator( "audio[controls]" ).wait_for( state="attached", timeout=15000 )
         assert full.locator( "h1" ).inner_text() == TITLE
+        # The zero-padding rule is for embed=1 only: the full page keeps the room under its fixed nav bar.
+        full.locator( "#lupin-nav" ).wait_for( state="visible", timeout=10000 )
+        assert full.evaluate( "() => getComputedStyle( document.body ).paddingTop" ) == "56px"
         assert full.locator( "a.audio-player-download" ).count() == 1
         assert full.locator( "#audio-player-script-link" ).count() == 1
         assert full.locator( "#audio-player-source-link" ).count() == 1
