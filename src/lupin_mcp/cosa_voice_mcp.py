@@ -4197,7 +4197,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_ask_unpark_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_ask_unpark_impl, task_edit_impl, task_get_impl, task_approve_line_impl, task_promotion_status_impl
 from lupin_mcp.podcast_for_rick import podcast_for_rick_impl
 
 
@@ -4480,6 +4480,31 @@ def task_get( task_id: str ) -> dict:
         task_get(task_id="4288dd53-6779-460a-88bd-a7365fb734b2")    # open one row by id, e.g. from a terse list's `id` field
     """
     return task_get_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        task_id      = task_id,
+    )
+
+
+@mcp.tool
+def task_approve_line( task_id: str ) -> dict:
+    """
+    **[Read tier, always allowed]** Write the card bullet for one held row.
+
+    The bullet carries a link that lets Rick approve the row with one click.
+
+    Use it whenever you ask Rick to approve rows: put one returned `line` per row in your action-required card. Both browser clients turn a click on the link into the approve move and show "Approved ✓" in place. Do not hand-type the link.
+
+    Args:
+        task_id: The row's full lowercase UUID. A short or malformed id is refused here without asking the server.
+
+    Returns:
+        { "line": "- <title> [✅ approve](/app/tasks/approve?row=<id>)" }, or an error dict: `invalid_row_id`, `blank_title`, or the server's own error for a row it could not return (404, auth, transport).
+
+    Example:
+        task_approve_line(task_id="a3975cf4-c640-4659-9247-0a99fa8a5f4a")
+    """
+    return task_approve_line_impl(
         api_base_url = _get_server_url(),
         api_key      = _mcp_outbound_api_key(),
         task_id      = task_id,

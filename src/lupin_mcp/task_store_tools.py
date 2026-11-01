@@ -910,3 +910,34 @@ def task_get_impl( api_base_url, api_key, task_id ):
           two is the defect `4d4f3fd8` was filed for
     """
     return task_store_request( "GET", f"/api/tasks/{task_id}", api_base_url, api_key )
+
+
+def task_approve_line_impl( api_base_url, api_key, task_id ):
+    """
+    Write the card bullet for one held row: its title and its one-click approve link.
+
+    Reuses `task_get_impl` for the title and `approve_link_line` for the format, so the
+    MCP verb and the Python caller cannot write two different links.
+
+    Requires:
+        - task_id is the row's full lowercase UUID
+
+    Ensures:
+        - on success returns { "line": "- <title> [✅ approve](/app/tasks/approve?row=<id>)" }
+        - a malformed id returns { "error": "invalid_row_id", "detail": ... } and asks the server nothing
+        - a row the server could not return (404, auth, transport) returns that error dict
+          verbatim, never a line built from nothing
+        - a row with a blank title returns { "error": "blank_title", "detail": ... }
+        - never raises
+    """
+    from cosa.rest.task_approve_link import approve_link_line
+    try:
+        approve_link_line( task_id, "x" )
+    except ( ValueError, TypeError ) as err:
+        return { "error": "invalid_row_id", "detail": str( err ) }
+    row = task_get_impl( api_base_url, api_key, task_id )
+    if "title" not in row: return row
+    try:
+        return { "line": approve_link_line( task_id, row[ "title" ] ) }
+    except ( ValueError, TypeError ) as err:
+        return { "error": "blank_title", "detail": str( err ) }

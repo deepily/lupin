@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Approve a ticket</title>
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+</head>
+<body>
+    <!-- Row a3975cf4 — the safe landing for an approve link the card's click handler did not
+         catch (middle-click, link preview, copied URL). OPENING THIS PAGE CHANGES NOTHING: it
+         reads the row and shows one Approve button; only pressing the button sends the move. -->
+    <main style="max-width: 40rem; margin: 2rem auto; padding: 0 1rem;">
+        <h1>Approve a ticket</h1>
+        <p id="task-approve-error" role="alert" data-testid="task-approve-error" hidden></p>
+        <section id="task-approve-row" data-testid="task-approve-row" hidden>
+            <h2 id="task-approve-title" data-testid="task-approve-title"></h2>
+            <p>Status: <strong id="task-approve-status" data-testid="task-approve-status"></strong></p>
+            <button type="button" id="task-approve-button" data-testid="task-approve-button">Approve</button>
+            <p id="task-approve-result" role="status" data-testid="task-approve-result"></p>
+        </section>
+    </main>
+    <script>
+        ( function () {
+            const ROW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+            const rowId     = new URLSearchParams( window.location.search ).get( "row" );
+            const errorEl   = document.getElementById( "task-approve-error" );
+            const rowEl     = document.getElementById( "task-approve-row" );
+            const button    = document.getElementById( "task-approve-button" );
+            const resultEl  = document.getElementById( "task-approve-result" );
+
+            function showError( message ) {
+                errorEl.textContent = message;
+                errorEl.hidden      = false;
+            }
+
+            async function refreshToken() {
+                const refresh = localStorage.getItem( "lupin_refresh_token" );
+                if ( !refresh ) return null;
+                const resp = await fetch( "/auth/refresh", {
+                    method  : "POST",
+                    headers : { "Content-Type": "application/json" },
+                    body    : JSON.stringify( { refresh_token: refresh } )
+                } );
+                if ( !resp.ok ) return null;
+                const data = await resp.json();
+                localStorage.setItem( "lupin_access_token",  data.tokens.access_token );
+                localStorage.setItem( "lupin_refresh_token", data.tokens.refresh_token );
+                return data.tokens.access_token;
+            }
+
+            async function authedFetch( url, init ) {
+                const send = ( token ) => fetch( url, {
+                    ...init,
+                    headers : { ...( init.headers || {} ), ...( token ? { Authorization: "Bearer " + token } : {} ) }
+                } );
+                let resp = await send( localStorage.getItem( "lupin_access_token" ) );
+                if ( resp.status === 401 ) {
+                    const fresh = await refreshToken();
+                    if ( fresh ) resp = await send( fresh );
+                }
+                return resp;
+            }
+
+            async function failureText( resp ) {
+                try {
+                    const body = await resp.json();
+                    if ( body && body.detail ) return typeof body.detail === "string" ? body.detail : JSON.stringify( body.detail );
+                } catch ( e ) { /* non-JSON body: the status alone is the message */ }
+                return String( resp.status );
+            }
+
+            async function load() {
+                if ( !rowId || !ROW_ID_RE.test( rowId ) ) { showError( "This link does not name a full ticket id." ); return; }
+                const resp = await authedFetch( "/api/tasks/" + encodeURIComponent( rowId ), { method: "GET" } );
+                if ( !resp.ok ) { showError( await failureText( resp ) ); return; }
+                const row = await resp.json();
+                document.getElementById( "task-approve-title" ).textContent  = row.title;
+                document.getElementById( "task-approve-status" ).textContent = row.status;
+                button.disabled = row.status !== "not_approved";
+                if ( button.disabled ) resultEl.textContent = "Nothing to approve: this ticket is not waiting for approval.";
+                rowEl.hidden = false;
+            }
+
+            button.addEventListener( "click", async function () {
+                button.disabled = true;
+                const resp = await authedFetch( "/api/tasks/" + encodeURIComponent( rowId ) + "/transition", {
+                    method  : "POST",
+                    headers : { "Content-Type": "application/json" },
+                    body    : JSON.stringify( { to_status: "queued", actor: "operator approve-landing-page", authority: "user_direct" } )
+                } );
+                resultEl.textContent = resp.status === 202
+                    ? "Waiting on Rick — he has not been asked yet."
+                    : resp.ok ? "Approved ✓" : await failureText( resp );
+            } );
+
+            load();
+        } )();
+    </script>
+</body>
+</html>
