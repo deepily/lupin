@@ -368,3 +368,16 @@ test( "with a reader set, a doc link is still not claimed as a view link", () =>
   assert.equal( document.getElementById( "task-body-overlay" ), null );
   assert.deepEqual( calls, [] );
 } );
+
+test( "a ticket body carrying an img tag is shown as text and creates no element in the overlay", async () => {
+  const evil = '<img src=x onerror="window.__pwned=1">';
+  const { reader } = table( { [ ROW_A ]: { title: evil, status: "queued", body: `before ${ evil } after` } } );
+  const shell = setup( recorder(), reader );
+  const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
+  click( a! );
+  await flush();
+  const overlay = document.getElementById( "task-body-overlay" ) as Element;
+  assert.ok( overlay.querySelector( ".task-body-overlay-body" )?.textContent?.includes( `before ${ evil } after` ), "the tag is visible as characters" );
+  assert.equal( overlay.querySelector( "img" ), null, "no img element exists" );
+  assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
+} );

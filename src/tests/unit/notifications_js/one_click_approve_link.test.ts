@@ -326,3 +326,15 @@ test( "_readTask returns the row on 2xx, null on a non-2xx answer, and null when
   assert.equal( await reader( async () => ( { ok: false } ) ), null );
   assert.equal( await reader( async () => { throw new Error( "down" ); } ), null );
 } );
+
+test( "a ticket body carrying an img tag is shown as text and creates no element in the overlay", async () => {
+  const evil = '<img src=x onerror="window.__pwned=1">';
+  table[ ROW_A ] = { title: evil, status: "queued", body: `before ${ evil } after` };
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ] );
+  click( a! );
+  await flush();
+  const overlay = document.getElementById( "task-body-overlay" ) as Element;
+  assert.ok( overlay.querySelector( ".task-body-overlay-body" )?.textContent?.includes( `before ${ evil } after` ), "the tag is visible as characters" );
+  assert.equal( overlay.querySelector( "img" ), null, "no img element exists" );
+  assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
+} );
