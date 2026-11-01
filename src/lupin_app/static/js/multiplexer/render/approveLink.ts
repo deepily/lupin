@@ -10,7 +10,7 @@
 // it resolves as done without sending anything, so the link would say "Approved ✓" for a request
 // never made. The holding-area sender always posts, never throws, and reports a refusal as a value.
 
-import type { HoldingTransitionResult } from "../stores/HoldingAreaStore";
+import type { HoldingAreaStore } from "../stores/HoldingAreaStore";
 import { normalizeDocLinkHref } from "./docLink";
 
 /** Every approve link starts here, after loopback normalization. */
@@ -19,10 +19,8 @@ export const APPROVE_LINK_PREFIX = "/app/tasks/approve?row=";
 // A full lowercase hyphenated row id, the only thing sent to the server.
 const ROW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** The one call this module needs: move a row to a status, and report the answer as a value. */
-export interface ApproveSender {
-  transitionTask( id: string, toStatus: string, extras: Record<string, never> ): Promise<HoldingTransitionResult>;
-}
+/** The one call this module needs, taken from the holding-area store so the two cannot drift. */
+export type ApproveSender = Pick<HoldingAreaStore, "transitionTask">;
 
 /**
  * The row id an approve-link href names, or null when the href is not an approve link.
