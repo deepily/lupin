@@ -1,6 +1,6 @@
 // Tests for one-click ticket approval in the legacy client.
 //
-// A card lists held rows as `[✅ approve](/app/tasks/approve?row=<uuid>)`. The click handler must
+// A card lists held rows as `[approve ☐](/app/tasks/approve?row=<uuid>) [📄](/app/tasks/view?row=<uuid>)`. The click handler must
 // claim the link, send the approve move once, and draw the answer where the link was.
 //
 // The links are planted inside `#action-required-content`, where the card lives.
@@ -35,6 +35,9 @@ let tabOpens : unknown[];
 let paneOpens: string[];
 let release  : Array<( r: Result ) => void>;
 let ui       : Record<string, unknown>;
+type Row = { title?: string; priority?: string | null; owner_persona?: string | null; status?: string; body?: string | null };
+let table    : Record<string, Row | null>;
+let asked    : string[];
 
 function buildDOM(): void {
   document.body.replaceChildren();
@@ -57,7 +60,7 @@ function plantCard( hrefs: string[], hostId = "action-required-content" ): HTMLA
     const li = document.createElement( "li" );
     const a  = document.createElement( "a" );
     a.setAttribute( "href", href );
-    a.textContent = "✅ approve";
+    a.textContent = "approve ☐";
     li.appendChild( a );
     host.appendChild( li );
     return a;
@@ -93,13 +96,16 @@ function mountOnce(): void {
     calls.push( { id, status, extras } );
     return new Promise<Result>( ( res ) => { release.push( res ); } );
   };
+  // The reader: answers from `table` and records every id asked for.
+  ui._readTask = async ( id: string ): Promise<Row | null> => { asked.push( id ); return table[ id ] ?? null; };
   ( globalThis as unknown as { open: unknown } ).open = ( ...args: unknown[] ): null => { tabOpens.push( args ); return null; };
   ( ui as unknown as { _initMasterDetailLayout(): void } )._initMasterDetailLayout();
 }
 
 beforeEach( () => {
-  calls = []; tabOpens = []; paneOpens = []; release = [];
+  calls = []; tabOpens = []; paneOpens = []; release = []; table = {}; asked = [];
   buildDOM();
+  document.getElementById( "task-body-overlay" )?.remove();
 } );
 
 before( () => {
@@ -120,14 +126,16 @@ test( "an approve link in the action-required card is claimed, sent once with th
   assert.deepEqual( paneOpens, [], "no pane open" );
 } );
 
-test( "success replaces the link with Approved ✓", async () => {
+test( "success replaces the link with a disabled approved ✅", async () => {
   const [ a ] = plantCard( [ APPROVE( ROW_A ) ] );
   click( a! );
   release[ 0 ]!( { ok: true } );
   await settle();
   const host = document.getElementById( "action-required-content" ) as Element;
   assert.equal( host.querySelector( "a" ), null, "the link is gone" );
-  assert.equal( host.querySelector( ".approve-link-approved" )?.textContent, "Approved ✓" );
+  const done = host.querySelector( ".approve-link-approved" ) as Element;
+  assert.equal( done.textContent, "approved ✅" );
+  assert.equal( done.getAttribute( "aria-disabled" ), "true", "no second click is possible" );
 } );
 
 test( "a refusal shows the server's words and nothing else", async () => {
@@ -188,4 +196,145 @@ test( "an external link and a click off any link are left alone", () => {
   const host = document.getElementById( "action-required-content" ) as Element;
   assert.equal( click( host ), false );
   assert.deepEqual( calls, [] );
+} );
+
+
+// ---------------------------------------------------------------------------
+// Row 192fecdf — the 📄 view link; row 39624bae — the state of a card drawn after a reload
+// ---------------------------------------------------------------------------
+
+const VIEW  = ( id: string ): string => `/app/tasks/view?row=${ id }`;
+const flush = async (): Promise<void> => { await settle(); await new Promise( ( r ) => setTimeout( r, 0 ) ); await settle(); };
+const host  = (): Element => document.getElementById( "action-required-content" ) as Element;
+
+test( "a 📄 link opens the overlay with title, priority, owner, status and the full body, and navigates nowhere", async () => {
+  table[ ROW_A ] = { title: "Fix X", priority: "P2", owner_persona: "krishna", status: "not_approved", body: "line one\nline two" };
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ] );
+  assert.equal( click( a! ), true, "claimed" );
+  await flush();
+  assert.deepEqual( asked, [ ROW_A ] );
+  const overlay = document.getElementById( "task-body-overlay" ) as Element;
+  assert.equal( overlay.querySelector( ".task-body-overlay-header" )?.textContent, `Task ${ ROW_A.slice( 0, 8 ) }` );
+  assert.equal( overlay.querySelector( ".task-body-overlay-body" )?.textContent, "Fix X\nPriority: P2 · Owner: krishna · Status: not_approved\n\nline one\nline two" );
+  assert.deepEqual( tabOpens, [], "no new tab" );
+  assert.deepEqual( calls, [], "viewing sends no approve" );
+} );
+
+test( "a 📄 link on a row that cannot be read says so in the overlay", async () => {
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ] );
+  click( a! );
+  await flush();
+  assert.equal( document.querySelector( ".task-body-overlay-body" )?.textContent, "Could not read this ticket." );
+} );
+
+test( "a malformed 📄 link and a click off any link are not claimed as views", () => {
+  const [ a ] = plantCard( [ "/app/tasks/view?row=a3975cf4" ] );
+  click( a! );
+  click( host() );
+  assert.deepEqual( asked, [] );
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
+} );
+
+test( "a card drawn later: a held row keeps its live link, a live or done row reads approved ✅ and is disabled", async () => {
+  table[ ROW_A ] = { status: "not_approved" }; table[ ROW_B ] = { status: "queued" }; table[ "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a1b" ] = { status: "done" };
+  plantCard( [ APPROVE( ROW_A ), APPROVE( ROW_B ), APPROVE( "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a1b" ) ] );
+  await flush();
+  assert.deepEqual( [ ...host().querySelectorAll( "a" ) ].map( ( e ) => e.getAttribute( "href" ) ), [ APPROVE( ROW_A ) ], "only the held row keeps a link" );
+  const done = [ ...host().querySelectorAll( ".approve-link-approved" ) ];
+  assert.deepEqual( done.map( ( e ) => e.textContent ), [ "approved ✅", "approved ✅" ] );
+  assert.ok( done.every( ( e ) => e.getAttribute( "aria-disabled" ) === "true" ) );
+} );
+
+test( "a dropped or wont_fix row reads as its plain status, never approved", async () => {
+  table[ ROW_A ] = { status: "dropped" }; table[ ROW_B ] = { status: "wont_fix" };
+  plantCard( [ APPROVE( ROW_A ), APPROVE( ROW_B ) ] );
+  await flush();
+  assert.deepEqual( [ ...host().querySelectorAll( ".approve-link-closed" ) ].map( ( e ) => e.textContent ), [ "dropped", "wont_fix" ] );
+  assert.equal( host().querySelector( ".approve-link-approved" ), null );
+  assert.equal( host().querySelector( "a" ), null );
+} );
+
+test( "a failed read, or a row with no status, leaves the live link", async () => {
+  table[ ROW_B ] = {};
+  plantCard( [ APPROVE( ROW_A ), APPROVE( ROW_B ) ] );
+  await flush();
+  assert.equal( host().querySelectorAll( "a" ).length, 2 );
+} );
+
+test( "the same row id twice in one card is read once and both links are drawn the same", async () => {
+  table[ ROW_A ] = { status: "in_progress" };
+  plantCard( [ APPROVE( ROW_A ), APPROVE( ROW_A ) ] );
+  await flush();
+  assert.deepEqual( asked, [ ROW_A ], "one read" );
+  assert.equal( host().querySelectorAll( ".approve-link-approved" ).length, 2 );
+} );
+
+test( "a link clicked before the read answers is not replaced by the read", async () => {
+  table[ ROW_A ] = { status: "queued" };
+  const [ a ] = plantCard( [ APPROVE( ROW_A ) ] );
+  click( a! );
+  await flush();
+  assert.ok( host().contains( a! ), "the pending link stays until the click's own answer" );
+  release[ 0 ]!( { ok: true } );
+  await settle();
+  assert.equal( host().querySelector( ".approve-link-approved" )?.textContent, "approved ✅" );
+} );
+
+test( "a link already checked is not read again, and a disconnected one is skipped", async () => {
+  table[ ROW_A ] = { status: "queued" };
+  const box = document.createElement( "div" );
+  const a   = document.createElement( "a" );
+  a.setAttribute( "href", APPROVE( ROW_A ) );
+  box.appendChild( a );
+  const n = ui as unknown as { _markApproveLinks( roots: Element[] ): Promise<void> };
+  const pending = n._markApproveLinks( [ box ] );
+  a.remove();
+  await pending;
+  await n._markApproveLinks( [ box ] );
+  const b = document.createElement( "a" );
+  b.setAttribute( "href", APPROVE( ROW_A ) );
+  b.setAttribute( "data-approve-checked", "1" );
+  box.appendChild( b );
+  await n._markApproveLinks( [ box ] );
+  assert.deepEqual( asked, [ ROW_A ], "one read in total" );
+  assert.equal( box.contains( b ), true, "an already-checked link is untouched" );
+} );
+
+test( "an anchor passed directly as a root is checked", async () => {
+  table[ ROW_A ] = { status: "done" };
+  const [ a ] = plantCard( [ APPROVE( ROW_A ) ] );
+  await ( ui as unknown as { _markApproveLinks( roots: Element[] ): Promise<void> } )._markApproveLinks( [ a! ] );
+  assert.equal( host().querySelector( ".approve-link-approved" )?.textContent, "approved ✅" );
+} );
+
+test( "text nodes drawn into the page start no read", async () => {
+  document.body.appendChild( document.createTextNode( "plain text" ) );
+  await flush();
+  assert.deepEqual( asked, [] );
+} );
+
+test( "_taskOverlayText fills a missing field with a dash, unowned or (no body), never undefined", () => {
+  const f = ( ui as unknown as { _taskOverlayText( r: Row ): string } )._taskOverlayText.bind( ui );
+  assert.equal( f( {} ), "(no title)\nPriority: — · Owner: unowned · Status: —\n\n(no body)" );
+  assert.equal( f( { title: "T", status: "queued" } ), "T\nPriority: — · Owner: unowned · Status: queued\n\n(no body)" );
+} );
+
+test( "_readTask returns the row on 2xx, null on a non-2xx answer, and null when the fetch throws", async () => {
+  const real = ( Object.getPrototypeOf( ui ) as { _readTask( id: string ): Promise<Row | null> } )._readTask;
+  const reader = ( impl: () => Promise<unknown> ): Promise<Row | null> => real.call( { authedFetch: impl }, ROW_A );
+  assert.deepEqual( await reader( async () => ( { ok: true, json: async () => ( { status: "queued" } ) } ) ), { status: "queued" } );
+  assert.equal( await reader( async () => ( { ok: false } ) ), null );
+  assert.equal( await reader( async () => { throw new Error( "down" ); } ), null );
+} );
+
+test( "a ticket body carrying an img tag is shown as text and creates no element in the overlay", async () => {
+  const evil = '<img src=x onerror="window.__pwned=1">';
+  table[ ROW_A ] = { title: evil, status: "queued", body: `before ${ evil } after` };
+  const [ a ] = plantCard( [ VIEW( ROW_A ) ] );
+  click( a! );
+  await flush();
+  const overlay = document.getElementById( "task-body-overlay" ) as Element;
+  assert.ok( overlay.querySelector( ".task-body-overlay-body" )?.textContent?.includes( `before ${ evil } after` ), "the tag is visible as characters" );
+  assert.equal( overlay.querySelector( "img" ), null, "no img element exists" );
+  assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
 } );

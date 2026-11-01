@@ -20855,6 +20855,9 @@ class NotificationsUI {
         // action-required card would never reach a branch added after it; this one claims
         // the click first and stops the browser from following it.
         document.addEventListener( "click", ( ev ) => this._handleApproveLinkClick( ev ) );
+        // Row 192fecdf — the 📄 view link beside it, and the redraw check on drawn approve links.
+        document.addEventListener( "click", ( ev ) => this._handleViewLinkClick( ev ) );
+        this._observeApproveLinks( document.body );
 
         // Doc-link click interception — EVERY layout mode (row 47759aa3; this
         // line read "horizontal mode only" until the gate below was removed, and
@@ -20935,10 +20938,114 @@ class NotificationsUI {
      * The href is `/app/tasks/approve?row=<full lowercase uuid>`, relative or with a loopback origin.
      */
     _approveLinkRowId( href ) {
+        return this._rowIdAfter( "/app/tasks/approve?row=", href );
+    }
+
+    /**
+     * Reads the row id out of a 📄 view-link href, or returns null when it is not one.
+     *
+     * The href is `/app/tasks/view?row=<full lowercase uuid>`, relative or with a loopback origin.
+     */
+    _viewLinkRowId( href ) {
+        return this._rowIdAfter( "/app/tasks/view?row=", href );
+    }
+
+    /** The full lowercase row id after `prefix` in a link href, or null. */
+    _rowIdAfter( prefix, href ) {
         const normalized = this._normalizeDocLinkHref( href );
-        if ( !normalized || !normalized.startsWith( "/app/tasks/approve?row=" ) ) return null;
-        const id = normalized.slice( "/app/tasks/approve?row=".length );
+        if ( !normalized || !normalized.startsWith( prefix ) ) return null;
+        const id = normalized.slice( prefix.length );
         return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test( id ) ? id : null;
+    }
+
+    /**
+     * Reads one task row for the 📄 overlay and the redraw check.
+     *
+     * Ensures: returns the row object on a 2xx answer, null on any failure; never throws.
+     */
+    async _readTask( taskId ) {
+        try {
+            const response = await this.authedFetch( `/api/tasks/${encodeURIComponent( taskId )}`, { method: "GET" } );
+            return response.ok ? await response.json() : null;
+        } catch ( error ) {
+            return null;
+        }
+    }
+
+    /**
+     * The title, priority, owner, status and full body of a row as one block of text.
+     *
+     * Ensures: a missing field reads as a dash, "unowned" or "(no body)", never "undefined".
+     */
+    _taskOverlayText( row ) {
+        const facts = `Priority: ${row.priority ?? "—"} · Owner: ${row.owner_persona ?? "unowned"} · Status: ${row.status ?? "—"}`;
+        return `${row.title ?? "(no title)"}\n${facts}\n\n${row.body ?? "(no body)"}`;
+    }
+
+    /**
+     * Document-level click handler for the 📄 view link in a card.
+     *
+     * Ensures:
+     *     - any other click is left untouched
+     *     - the browser does not follow the link
+     *     - the row is read and shown in the task-body overlay; a failed read says so there
+     */
+    async _handleViewLinkClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        const rowId = this._viewLinkRowId( anchor.getAttribute( "href" ) );
+        if ( rowId === null ) return;
+        ev.preventDefault();
+        const row = await this._readTask( rowId );
+        this.openTaskBodyOverlay( row === null ? "Could not read this ticket." : this._taskOverlayText( row ), rowId.slice( 0, 8 ) );
+    }
+
+    /**
+     * Checks every unchecked approve link under the given roots, one read per distinct row id.
+     *
+     * Ensures:
+     *     - a link is checked once; one already clicked (pending) is left alone
+     *     - not_approved, or a failed read, leaves the live link as it is
+     *     - a row that left not_approved for a live or done status becomes a disabled "approved ✅"
+     *     - a dropped or wont_fix row becomes plain text naming that status, never "approved"
+     */
+    async _markApproveLinks( roots ) {
+        const byRow = new Map();
+        for ( const root of roots ) {
+            const found = root.matches( "a[href]" ) ? [ root ] : Array.from( root.querySelectorAll( "a[href]" ) );
+            for ( const anchor of found ) {
+                const id = this._approveLinkRowId( anchor.getAttribute( "href" ) );
+                if ( id === null || anchor.hasAttribute( "data-approve-checked" ) ) continue;
+                anchor.setAttribute( "data-approve-checked", "1" );
+                byRow.set( id, [ ...( byRow.get( id ) || [] ), anchor ] );
+            }
+        }
+        await Promise.all( Array.from( byRow, async ( [ id, anchors ] ) => {
+            const row = await this._readTask( id );
+            if ( row === null || !row.status || row.status === "not_approved" ) return;
+            const closed = row.status === "dropped" || row.status === "wont_fix";
+            for ( const anchor of anchors ) {
+                if ( !anchor.isConnected || anchor.dataset.approveState === "pending" ) continue;
+                const verdict = document.createElement( "span" );
+                verdict.className   = closed ? "approve-link-result approve-link-closed" : "approve-link-result approve-link-approved";
+                verdict.textContent = closed ? row.status : "approved ✅";
+                if ( !closed ) verdict.setAttribute( "aria-disabled", "true" );
+                anchor.replaceWith( verdict );
+            }
+        } ) );
+    }
+
+    /**
+     * Checks the approve links under `root`, then each batch of nodes drawn into it later.
+     */
+    _observeApproveLinks( root ) {
+        this._markApproveLinks( [ root ] );
+        this._approveLinkObserver = new MutationObserver( ( records ) => {
+            const added = [];
+            for ( const rec of records ) rec.addedNodes.forEach( ( n ) => { if ( n.nodeType === 1 ) added.push( n ); } );
+            if ( added.length > 0 ) this._markApproveLinks( added );
+        } );
+        this._approveLinkObserver.observe( root, { childList: true, subtree: true } );
     }
 
     /**
@@ -20951,7 +21058,7 @@ class NotificationsUI {
      *     - the browser does not follow the link
      *     - `_transitionTask( id, "queued" )` runs once per link: a second click while the
      *       request is out sends nothing
-     *     - on success the link becomes the text "Approved ✓"
+     *     - on success the link becomes the disabled text "approved ✅"
      *     - on a refusal or a pending answer the link becomes the server's message, word for word
      */
     async _handleApproveLinkClick( ev ) {
@@ -20967,7 +21074,8 @@ class NotificationsUI {
         const result = await this._transitionTask( rowId, "queued", {} );
         const outcome = document.createElement( "span" );
         outcome.className = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
-        outcome.textContent = result.ok ? "Approved ✓" : result.message;
+        outcome.textContent = result.ok ? "approved ✅" : result.message;
+        if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
         anchor.replaceWith( outcome );
     }
 

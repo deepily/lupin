@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>View a ticket</title>
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+</head>
+<body>
+    <!-- Row 192fecdf — the safe landing for a 📄 view link the card's click handler did not
+         catch (middle-click, link preview, copied URL). It only READS the row and shows it:
+         there is no button and no write request on this page. -->
+    <main style="max-width: 40rem; margin: 2rem auto; padding: 0 1rem;">
+        <h1>View a ticket</h1>
+        <p id="task-view-error" role="alert" data-testid="task-view-error" hidden></p>
+        <section id="task-view-row" data-testid="task-view-row" hidden>
+            <h2 id="task-view-title" data-testid="task-view-title"></h2>
+            <p>
+                Priority: <strong id="task-view-priority" data-testid="task-view-priority"></strong>
+                · Owner: <strong id="task-view-owner" data-testid="task-view-owner"></strong>
+                · Status: <strong id="task-view-status" data-testid="task-view-status"></strong>
+            </p>
+            <pre id="task-view-body" data-testid="task-view-body" style="white-space: pre-wrap;"></pre>
+        </section>
+    </main>
+    <script>
+        ( function () {
+            const ROW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+            const rowId     = new URLSearchParams( window.location.search ).get( "row" );
+            const errorEl   = document.getElementById( "task-view-error" );
+            const rowEl     = document.getElementById( "task-view-row" );
+
+            function showError( message ) {
+                errorEl.textContent = message;
+                errorEl.hidden      = false;
+            }
+
+            async function refreshToken() {
+                const refresh = localStorage.getItem( "lupin_refresh_token" );
+                if ( !refresh ) return null;
+                const resp = await fetch( "/auth/refresh", {
+                    method  : "POST",
+                    headers : { "Content-Type": "application/json" },
+                    body    : JSON.stringify( { refresh_token: refresh } )
+                } );
+                if ( !resp.ok ) return null;
+                const data = await resp.json();
+                localStorage.setItem( "lupin_access_token",  data.tokens.access_token );
+                localStorage.setItem( "lupin_refresh_token", data.tokens.refresh_token );
+                return data.tokens.access_token;
+            }
+
+            async function authedGet( url ) {
+                const withAuth = ( token ) => ( { method: "GET", headers: token ? { Authorization: "Bearer " + token } : {} } );
+                let resp = await fetch( url, withAuth( localStorage.getItem( "lupin_access_token" ) ) );
+                if ( resp.status === 401 ) {
+                    const fresh = await refreshToken();
+                    if ( fresh ) resp = await fetch( url, withAuth( fresh ) );
+                }
+                return resp;
+            }
+
+            async function failureText( resp ) {
+                try {
+                    const body = await resp.json();
+                    if ( body && body.detail ) return typeof body.detail === "string" ? body.detail : JSON.stringify( body.detail );
+                } catch ( e ) { /* non-JSON body: the status alone is the message */ }
+                return String( resp.status );
+            }
+
+            async function load() {
+                if ( !rowId || !ROW_ID_RE.test( rowId ) ) { showError( "This link does not name a full ticket id." ); return; }
+                const resp = await authedGet( "/api/tasks/" + encodeURIComponent( rowId ) );
+                if ( !resp.ok ) { showError( await failureText( resp ) ); return; }
+                const row = await resp.json();
+                document.getElementById( "task-view-title" ).textContent    = row.title;
+                document.getElementById( "task-view-priority" ).textContent = row.priority || "";
+                document.getElementById( "task-view-owner" ).textContent    = row.owner_persona || "unowned";
+                document.getElementById( "task-view-status" ).textContent   = row.status;
+                document.getElementById( "task-view-body" ).textContent     = row.body || "";
+                rowEl.hidden = false;
+            }
+
+            load();
+        } )();
+    </script>
+</body>
+</html>

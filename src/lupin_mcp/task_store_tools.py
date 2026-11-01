@@ -914,8 +914,9 @@ def task_get_impl( api_base_url, api_key, task_id ):
 
 def task_approve_line_impl( api_base_url, api_key, task_id ):
     """
-    Write the card bullet for one held row: its title and its one-click approve link.
+    Write the card bullet for one held row: its title and its two links.
 
+    The links are the one-click approve link and the 📄 view link.
     Reuses `task_get_impl` for the title and `approve_link_line` for the format, so the
     MCP verb and the Python caller cannot write two different links.
 
@@ -923,7 +924,7 @@ def task_approve_line_impl( api_base_url, api_key, task_id ):
         - task_id is the row's full lowercase UUID
 
     Ensures:
-        - on success returns { "line": "- <title> [✅ approve](/app/tasks/approve?row=<id>)" }
+        - on success returns { "line": "- <title> [approve ☐](/app/tasks/approve?row=<id>) [📄](/app/tasks/view?row=<id>)" }
         - a malformed id returns { "error": "invalid_row_id", "detail": ... } and asks the server nothing
         - a row the server could not return (404, auth, transport) returns that error dict
           verbatim, never a line built from nothing

@@ -11,7 +11,9 @@ Plan: src/rnd/v0.2.2/2026.10.31-one-click-ticket-approval-plan.md
 import re
 
 APPROVE_LINK_PATH  = "/app/tasks/approve?row="
-APPROVE_LINK_LABEL = "✅ approve"
+APPROVE_LINK_LABEL = "approve ☐"
+VIEW_LINK_PATH     = "/app/tasks/view?row="
+VIEW_LINK_LABEL    = "📄"
 
 # A full, canonical, lowercase row id. Short ids and braced or unhyphenated forms are
 # refused: the click handlers send exactly this string to the server.
@@ -20,14 +22,14 @@ _ROW_ID_RE = re.compile( r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 def approve_link_line( row_id, title ):
     """
-    Write the card bullet for one held row: its title, then its approve link.
+    Write the card bullet for one held row: its title, its approve link, then its 📄 view link.
 
     Requires:
         - row_id is a full lowercase hyphenated UUID string
         - title is a string with at least one non-blank character
 
     Ensures:
-        - returns one line, `- <title> [✅ approve](/app/tasks/approve?row=<row_id>)`
+        - returns one line, `- <title> [approve ☐](/app/tasks/approve?row=<row_id>) [📄](/app/tasks/view?row=<row_id>)`
         - whitespace runs in the title (newlines included) collapse to single spaces
         - `[` and `]` in the title are backslash-escaped so a title cannot form a link
 
@@ -42,4 +44,4 @@ def approve_link_line( row_id, title ):
     flat = " ".join( title.split() )
     if flat == "": raise ValueError( "title must not be blank" )
     flat = flat.replace( "[", "\\[" ).replace( "]", "\\]" )
-    return f"- {flat} [{APPROVE_LINK_LABEL}]({APPROVE_LINK_PATH}{row_id})"
+    return f"- {flat} [{APPROVE_LINK_LABEL}]({APPROVE_LINK_PATH}{row_id}) [{VIEW_LINK_LABEL}]({VIEW_LINK_PATH}{row_id})"

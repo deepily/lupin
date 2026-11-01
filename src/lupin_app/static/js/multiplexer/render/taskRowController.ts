@@ -40,6 +40,7 @@ import {
 } from "./taskVerbs";
 import { renderRowError as paintRowError, toggleDisclosure } from "./templates/rowDisclosure";
 import type { OperatorStateHandlers } from "./operatorState";
+import { openTaskBodyOverlay, dismissTaskBodyOverlay } from "./taskBodyOverlay";
 import {
   DROP_REASON_DATALIST_ID,
   PRIORITY_UPDATE_IDLE_TITLE,
@@ -119,9 +120,6 @@ export class TaskRowController {
   // `recordingManager.isProcessing()`.
   private readonly micProcessing : Set<string> = new Set();
 
-  // The document-level Esc listener for the body overlay (null when closed).
-  private overlayKeyListener : ( ( e: KeyboardEvent ) => void ) | null = null;
-
   /**
    * Stores the container, writer, recorder, and timing hooks from the options.
    */
@@ -157,7 +155,7 @@ export class TaskRowController {
 
   /** Close the body overlay, if one is open. Call from the pane's unmount. */
   dispose(): void {
-    this.dismissTaskBodyOverlay();
+    dismissTaskBodyOverlay();
   }
 
   // -------------------------------------------------------------------------
@@ -179,7 +177,7 @@ export class TaskRowController {
     if ( emoji !== null ) {
       if ( !emoji.classList.contains( "task-detail-empty" ) ) {
         const span = emoji as HTMLElement;
-        this.openTaskBodyOverlay( span.dataset.taskBody ?? "", span.dataset.taskId ?? "" );
+        openTaskBodyOverlay( span.dataset.taskBody ?? "", span.dataset.taskId ?? "" );
       }
       return true;
     }
@@ -670,62 +668,6 @@ export class TaskRowController {
     if ( identity.length === 0 ) return this.container;
     return Array.from( this.container.querySelectorAll<HTMLElement>( "tbody" ) )
       .find( ( t ) => identity.every( ( [ k, v ] ) => t.dataset[ k ] === v ) ) ?? this.container;
-  }
-
-  // -------------------------------------------------------------------------
-  // Body overlay (row redesign 2026.06.29 / D2 — renders the task `body`)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Show a small dismissible overlay rendering the task-store `body`. All DOM via
-   * createElement + textContent. Dismiss on backdrop click or Escape.
-   *
-   * Ensures:
-   *   - any prior overlay is removed first (single instance)
-   *   - the overlay carries an id header + the body in a <pre> (whitespace kept)
-   *   - a backdrop click OR Escape removes the overlay AND detaches its keydown listener
-   */
-  private openTaskBodyOverlay( bodyText: string, idLabel: string ): void {
-    this.dismissTaskBodyOverlay();
-
-    const overlay = document.createElement( "div" );
-    overlay.id        = "task-body-overlay";
-    overlay.className = "task-body-overlay";
-
-    const panel = document.createElement( "div" );
-    panel.className = "task-body-overlay-content";
-
-    const header = document.createElement( "div" );
-    header.className = "task-body-overlay-header";
-    header.textContent = idLabel ? `Task ${idLabel}` : "Task detail";
-
-    const pre = document.createElement( "pre" );
-    pre.className = "task-body-overlay-body";
-    pre.textContent = bodyText;
-
-    panel.appendChild( header );
-    panel.appendChild( pre );
-    overlay.appendChild( panel );
-
-    overlay.addEventListener( "click", () => this.dismissTaskBodyOverlay() );
-    panel.addEventListener( "click", ( e ) => e.stopPropagation() );
-
-    this.overlayKeyListener = ( e: KeyboardEvent ): void => {
-      if ( e.key === "Escape" ) this.dismissTaskBodyOverlay();
-    };
-    document.addEventListener( "keydown", this.overlayKeyListener );
-
-    document.body.appendChild( overlay );
-  }
-
-  /** Remove the body overlay and its Esc listener. Idempotent. */
-  private dismissTaskBodyOverlay(): void {
-    if ( this.overlayKeyListener !== null ) {
-      document.removeEventListener( "keydown", this.overlayKeyListener );
-      this.overlayKeyListener = null;
-    }
-    const existing = document.getElementById( "task-body-overlay" );
-    if ( existing !== null ) existing.remove();
   }
 }
 
