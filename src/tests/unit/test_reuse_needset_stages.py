@@ -13,8 +13,11 @@ from claude_agent_sdk import AssistantMessage, TextBlock
 
 from cosa.repo.doc_lint import harness_report, model_transport as mt
 from cosa.repo.labelling import run_check
-from lupin_mcp.reuse_needset import call_cap, hardness, loss_trace, stages
+from cosa.repo.symindex.candidates import candidate_stage as cs
+from lupin_mcp.reuse_needset import call_cap, hardness, loss_trace, stage3, stages
 from lupin_mcp.reuse_needset import errors as er
+from tests.unit.test_reuse_needset_positive_control import pool
+from tests.unit.test_reuse_needset_stage3 import lexical_ask, twenty
 
 FABLE = "claude-fable-5-1"
 
@@ -221,3 +224,40 @@ def test_run_stages_refuses_unless_this_cap_is_installed_and_starts_nothing( tmp
     assert bare.value.code == er.CAP_NOT_INSTALLED
     with other.installed(), pytest.raises( er.NeedsetError ) as wrong: asyncio.run( stages.run_stages( cap, all_stages( transport ) ) )
     assert wrong.value.code == er.CAP_NOT_INSTALLED and transport.calls == 0 and cap.used() == 0 and other.used() == 0
+
+
+def counted_ask( transport ):
+    """Return an ask that makes one counted model call per pair, then answers by the word stage."""
+    word_stage = lexical_ask()
+    async def ask( planted, pair ):
+        await mt.complete( FABLE, "s", "u", query_fn=transport )
+        return await word_stage( planted, pair )
+    return ask
+
+
+def with_control( transport, ask ):
+    """Return the four stages with the real control stage in its slot."""
+    return all_stages( transport, **{ "control": stage3.control_stage( pool(), twenty(), ask, cs.build_stage ) } )
+
+
+def test_the_real_control_stage_runs_in_its_slot_and_its_twenty_calls_are_counted_under_control( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    out = run( cap, with_control( transport, counted_ask( transport ) ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done" ] * 4 and out[ "stages" ][ "control" ][ "report" ][ "found" ] == 20
+    assert out[ "by_stage" ] == { "attribution": 1, "control": 20, "remainder": 1, "yield": 1 } and out[ "used" ] == 23 and out[ "over_plan" ] == []
+
+
+def test_a_missed_planted_pair_stops_the_run_before_the_remainder( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    async def blind( planted, pair ):
+        await mt.complete( FABLE, "s", "u", query_fn=transport )
+        return []
+    out = run( cap, with_control( transport, blind ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done", "done", "stopped", "not_run" ] and out[ "stages" ][ "control" ][ "report" ][ "stop" ] is True
+
+
+def test_the_cap_ending_the_control_mid_run_is_reported_and_the_remainder_never_starts( tmp_path ):
+    cap, transport = new_cap( tmp_path, limit=12 ), Transport()
+    out = run( cap, with_control( transport, counted_ask( transport ) ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done", "done", "cap_reached", "not_run" ] and out[ "used" ] == 12 and transport.calls == 12
+    assert out[ "by_stage" ] == { "attribution": 1, "control": 10, "yield": 1 }
