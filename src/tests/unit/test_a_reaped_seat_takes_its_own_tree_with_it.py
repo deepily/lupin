@@ -294,6 +294,24 @@ def test_a_directory_that_vanished_while_git_still_registers_it_is_kept_and_name
     assert not any( c[ 1:3 ] == [ "worktree", "remove" ] for c in git.calls )
 
 
+def test_a_vanished_directory_with_an_unreadable_registry_is_a_failure_not_a_removal( dirs ):
+    """When git cannot list worktrees, a gone directory proves nothing about the registration."""
+    tree, main = dirs
+    git, lists = _Git( tree, main ), []
+    def run( argv, cwd=None, timeout=60 ):
+        if argv[ 1:3 ] == [ "worktree", "list" ]:
+            lists.append( argv )
+            if len( lists ) > 1:
+                return SimpleNamespace( returncode=128, stdout="", stderr="registry unreadable" )
+        return git( argv, cwd=cwd, timeout=timeout )
+    def alive( name, path ):
+        """Delete the directory behind git's back on the first poll."""
+        os.rmdir( tree )
+        return False
+    out = st.retire_seat_worktree( tree, SEAT, run=run, alive_fn=alive, wait_seconds=0 )
+    assert ( out[ "removed" ], out[ "kept_reason" ], out[ "errors" ] ) == ( False, "worktree_list_failed", [ "registry unreadable" ] )
+
+
 def test_a_failed_removal_puts_the_lock_back( dirs ):
     tree, main = dirs
     git = _Git( tree, main, fail=[ "worktree remove" ] )
