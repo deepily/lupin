@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.tracked_files@0eecf6442d
   - lupin_mcp.reuse_needset.first_thousand.write_seed_lists@480a3dd8ba
   - lupin_mcp.reuse_needset.first_thousand.live_parts@b64c33385a
-  - lupin_mcp.reuse_needset.first_thousand.stage_factories@0a100b319e
+  - lupin_mcp.reuse_needset.first_thousand.stage_factories@8eb56d3b0a
   - lupin_mcp.reuse_needset.first_thousand.parse_args@448dccc178
   - lupin_mcp.reuse_needset.first_thousand.plan@6de27be30d
   - lupin_mcp.reuse_needset.first_thousand.load_inputs@68bde7e075
@@ -32,7 +32,7 @@ The live control, the command line and the capped run. The planted pool and the 
 - `main` without `--live` prints `plan` and contacts nothing. The plan shows the cap, the calls already spent, the groups and the flagged count.
 - `main` with `--live` first needs `--cli-path` (without it: `NO_CLI_PATH`) and points every Claude Code call (drafter, second model, probe) at that binary. It then builds the context, draws and writes the seed lists, builds the live parts ([[needset-stage-parts]]) and runs the four stages. A context with no candidate stage raises `NO_CANDIDATE_STAGE` first, naming the three variables that build it. A second run over other seed lists raises `PLAN_ALREADY_WRITTEN`.
 - `write_seed_lists` draws the 50 attribution and 100 yield seeds from the tree's index and tracked files, and writes them once. `tracked_files` is the set git lists.
-- `live_parts` builds the parts with their own ledgers in the run folder, the second model and the probe model from the arguments. `stage_factories` hands the lists file and the parts to the two stages and adds the counts of seeds that gave no final need. A stage whose every seed was skipped as unreadable fails with `ALL_SEEDS_UNREADABLE`.
+- `live_parts` builds the parts with their own ledgers in the run folder, the second model and the probe model from the arguments. `stage_factories` hands the lists file and the parts to the two stages and adds the counts of seeds that gave no final need. A stage whose every seed was skipped as unreadable fails with `ALL_SEEDS_UNREADABLE`. So does a stage with no need and a skipped seed, as `NO_NEEDS_WITH_SKIPS`: an unread seed could have held it.
 - `exit_status` gives 1 when any stage failed, 3 when the cap ended a stage and none failed, else 0. The argument parser keeps 2 for a usage error. A stop on a finding exits 0. `run_cli` prints the report as JSON first, so a failed run still shows what it found.
 
 ## The run
