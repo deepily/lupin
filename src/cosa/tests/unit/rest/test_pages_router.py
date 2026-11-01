@@ -296,3 +296,59 @@ if __name__ == "__main__":
     status = "✅ PASS" if success else "❌ FAIL"
     print( f"\n{status} Pages router unit tests completed in {duration:.3f}s" )
     print( f"Result: {message}" )
+
+
+class TestTaskApproveLandingPage( unittest.TestCase ):
+    """
+    Unit tests for `/app/tasks/approve`.
+
+    The page is the safe landing for a one-click approve link.
+
+    Requires:
+        - The pages router registers `/app/tasks/approve`
+
+    Ensures:
+        - A GET through TestClient answers 200 text/html with the no-cache header, reading the page off disk
+        - The page sends the approve move only from its button's click handler
+        - The load path reads the row and sends no POST
+    """
+
+    def test_get_serves_the_page_shell( self ):
+        """
+        Serve the landing page shell.
+
+        Ensures:
+            - GET /app/tasks/approve?row=<id> returns 200, text/html, Cache-Control: no-cache
+            - the body carries the approve button and the row display
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.include_router( router )
+        response = TestClient( app ).get( "/app/tasks/approve?row=a3975cf4-c640-4659-9247-0a99fa8a5f4a" )
+
+        self.assertEqual( response.status_code, 200 )
+        self.assertTrue( response.headers[ "content-type" ].startswith( "text/html" ) )
+        self.assertEqual( response.headers[ "cache-control" ], "no-cache" )
+        self.assertIn( 'id="task-approve-button"', response.text )
+        self.assertIn( 'id="task-approve-row"', response.text )
+
+    def test_opening_the_page_cannot_send_the_approve_move( self ):
+        """
+        Opening the page cannot send the approve move.
+
+        Ensures:
+            - the only `/transition` request in the page sits inside the button's click handler,
+              after the `load()` function that runs on open has ended
+        """
+        from cosa.rest.routers.pages import _ROUTE_TABLE, _static_dir
+
+        with open( os.path.join( _static_dir, _ROUTE_TABLE[ "/app/tasks/approve" ] ), encoding = "utf-8" ) as handle:
+            html = handle.read()
+
+        load_body = html[ html.index( "async function load()" ) : html.index( 'button.addEventListener( "click"' ) ]
+        self.assertNotIn( "/transition", load_body, "the load path must not send the approve move" )
+        self.assertNotIn( 'method  : "POST"', load_body )
+        self.assertEqual( html.count( "/transition" ), 1 )
+        self.assertGreater( html.index( "/transition" ), html.index( 'button.addEventListener( "click"' ) )

@@ -58,6 +58,7 @@
 | `/app/admin/proxy-dashboard` | Trust dashboard |
 | `/app/admin/dev-tools` | Developer tools |
 | `/app/console?seat=<full cc session id>&title=<url-encoded title>` | One seat's live CC console, full-page in its own tab. Stands alone: reload- and bookmark-safe, needs no multiplexer tab. A missing or malformed `seat` (e.g. an 8-hex chip prefix) shows an error on the page. Opened by the multiplexer reading pane's bust-out while the pane shows a console. Bundle: `src/scripts/build-console.sh` (part of `npm run build`) |
+| `/app/tasks/approve?row=<full row id>` | Safe landing for a one-click approve link that a card's click handler did not catch (middle-click, preview, copied URL). Shows the row's title and status and one Approve button. Opening it changes nothing; only pressing the button sends the move. Normally the card's click handler claims the link and approves in place without opening this page |
 | `/app/pair-labelling?reviewer=<name>` | One reviewer's blind pair labelling: a and b side by side, one pair at a time, each answer written to disk at the click, resuming at the first unlabelled pair. Default reviewer `rick`. API: section 29 |
 
 ## 24. Multiplexer (`/api/multiplexer/*`)

@@ -34,6 +34,7 @@ import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
+import { handleApproveLinkClick, type ApproveSender } from "./approveLink";
 import { buildConsolePageHref } from "../console/consolePageUrl";
 import { bindPodcastLinks } from "./podcastLinks";
 
@@ -125,6 +126,8 @@ export interface ReadingPaneRendererOptions {
    * it the pane cannot name a seat, so bust-out stays disabled while the console shows.
    */
   consoleSeat? : () => string | null;
+  /** The sender behind a one-click approve link; without it, approve links are left alone. */
+  approveSender? : ApproveSender;
 }
 
 /**
@@ -151,6 +154,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private readonly actionRequired : ActionRequiredCountLike;
   private readonly win            : WindowLike;
   private readonly consoleSeat    : ( () => string | null ) | null;
+  private readonly approveSender  : ApproveSender | null;
   private readonly unsubscribers  : Array<() => void> = [];
 
   private mounted   : boolean = false;
@@ -201,6 +205,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     /* c8 ignore next */ // default-arg fallback to global window; tests always inject windowRef.
     this.win            = opts.windowRef ?? ( globalThis as unknown as { window: WindowLike } ).window;
     this.consoleSeat    = opts.consoleSeat ?? null;
+    this.approveSender  = opts.approveSender ?? null;
   }
 
   // -------------------------------------------------------------------------
@@ -540,6 +545,11 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     // horizontal intercepted and rendered in the pane, vertical did not.
     // Rick's ruling 2026-09-26: a history doc link renders in the content area
     // wherever the layout puts it — on top of the accordion, or to the right.
+    // Row a3975cf4 — an approve link is claimed ahead of the doc-link branch: on a pane-resident
+    // surface (the action-required card) the doc-link branch opens a new tab for what it claims,
+    // and an approve link must never navigate anywhere.
+    if (this.approveSender !== null && handleApproveLinkClick(ev, target, this.approveSender)) return;
+
     if (this.routeDocLinkClick(ev, target)) return;
 
     // Everything below remains horizontal-only. The ruling was about doc links;

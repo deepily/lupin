@@ -28,6 +28,7 @@ Eight functions in `task_store_tools.py` carry the verbs [[mcp-task-store-tools]
 ## Reads
 - `task_get_impl` fetches one row by its full id and returns the whole row, body included. A missing row is an error dict, never an empty success.
 - A filtered query that comes back empty does not prove a row is absent, so use this call to check one.
+- When you ask Rick to approve rows, put one line per row from the `task_approve_line` verb in the action-required card. It fetches the title with this call and writes the bullet with its one-click approve link, so nobody types the link by hand.
 - `task_query_impl` drops every unset filter and canonicalizes `project`. It returns the server envelope unchanged: `count` is the page length and `has_more` says whether to keep paging.
 - `blocked_by_persona` lists rows waiting on that persona, whoever owns them. `id_prefix` takes the short id form and counts as a scoping filter.
 - Parked rows are hidden by default. Pass `include_parked`, or ask for `status="parked"`.

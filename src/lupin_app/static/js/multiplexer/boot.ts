@@ -821,6 +821,7 @@ function bootMultiplexer(): void {
     eventBus,
     stores      : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
     consoleSeat : () => sessionTranscriptRenderer.showingSeat(),
+    approveSender : stores.holdingArea,
   });
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");

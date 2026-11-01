@@ -39,6 +39,7 @@ _ROUTE_TABLE = {
     "/app/docs"                  : "html/document-viewer.html",
     "/app/audio"                 : "html/audio-player.html",
     "/app/console"               : "html/console.html",
+    "/app/tasks/approve"         : "html/task-approve.html",
     "/app/pair-labelling"        : "html/pair-labelling.html",
 }
 
@@ -156,6 +157,21 @@ async def page_docs():
 @router.get( "/app/audio", include_in_schema=False )
 async def page_audio():
     return _serve_file( _ROUTE_TABLE[ "/app/audio" ] )
+
+@router.get( "/app/tasks/approve", include_in_schema=False )
+async def page_tasks_approve():
+    """
+    Serve the safe landing page for a one-click approve link.
+
+    Requires:
+        - html/task-approve.html exists under the static directory
+
+    Ensures:
+        - Returns the page shell with the no-cache revalidation header
+        - Changes nothing: the page reads `?row=` client-side and sends the approve move only
+          when its button is pressed
+    """
+    return _serve_file( _ROUTE_TABLE[ "/app/tasks/approve" ] )
 
 @router.get( "/app/console", include_in_schema=False )
 async def page_console():

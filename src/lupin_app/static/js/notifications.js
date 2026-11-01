@@ -20849,6 +20849,13 @@ class NotificationsUI {
             } );
         }
 
+        // One-click ticket approval. A separate listener, registered ahead of
+        // the doc-link one below. The doc-link listener's pane-resident branch returns
+        // early for anything that is not a doc link, so an approve link in the
+        // action-required card would never reach a branch added after it; this one claims
+        // the click first and stops the browser from following it.
+        document.addEventListener( "click", ( ev ) => this._handleApproveLinkClick( ev ) );
+
         // Doc-link click interception — EVERY layout mode (row 47759aa3; this
         // line read "horizontal mode only" until the gate below was removed, and
         // a comment that vouches for a deleted guard is worse than none).
@@ -20920,6 +20927,48 @@ class NotificationsUI {
         // <a href="/api/io/file?..."> click 401s. Intercept and re-issue the
         // request as an authenticated fetch, then save the response blob.
         document.addEventListener( "click", ( ev ) => this._handleIoFileDownloadClick( ev ) );
+    }
+
+    /**
+     * Reads the row id out of an approve-link href, or returns null when it is not one.
+     *
+     * The href is `/app/tasks/approve?row=<full lowercase uuid>`, relative or with a loopback origin.
+     */
+    _approveLinkRowId( href ) {
+        const normalized = this._normalizeDocLinkHref( href );
+        if ( !normalized || !normalized.startsWith( "/app/tasks/approve?row=" ) ) return null;
+        const id = normalized.slice( "/app/tasks/approve?row=".length );
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test( id ) ? id : null;
+    }
+
+    /**
+     * Document-level click handler for the one-click approve link in a card.
+     *
+     * Requires:
+     *     - ev is a click event; any other click is left untouched
+     *
+     * Ensures:
+     *     - the browser does not follow the link
+     *     - `_transitionTask( id, "queued" )` runs once per link: a second click while the
+     *       request is out sends nothing
+     *     - on success the link becomes the text "Approved ✓"
+     *     - on a refusal or a pending answer the link becomes the server's message, word for word
+     */
+    async _handleApproveLinkClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        const rowId = this._approveLinkRowId( anchor.getAttribute( "href" ) );
+        if ( rowId === null ) return;
+        ev.preventDefault();
+        if ( anchor.dataset.approveState === "pending" ) return;
+        anchor.dataset.approveState = "pending";
+        anchor.setAttribute( "aria-disabled", "true" );
+        anchor.style.opacity = "0.5";
+        const result = await this._transitionTask( rowId, "queued", {} );
+        const outcome = document.createElement( "span" );
+        outcome.className = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
+        outcome.textContent = result.ok ? "Approved ✓" : result.message;
+        anchor.replaceWith( outcome );
     }
 
     /**

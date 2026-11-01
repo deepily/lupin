@@ -62,6 +62,7 @@ EXEMPT = {
     "dm_get"                : "read-only (docstring tag READ); whether the server marks anything delivered on read was not checked",
     "list_spawned_sessions" : "read-only (docstring tag READ)",
     "task_get"              : "read-only (docstring tag READ)",
+    "task_approve_line"     : "read-only (docstring tag READ); fetches one row and writes nothing",
     "task_promotion_status" : "read-only (docstring tag READ)",
     "task_query"            : "read-only (docstring tag READ)",
     "get_session_info"      : "returns this session's own identity and writes nothing",
