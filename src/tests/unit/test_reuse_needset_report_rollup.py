@@ -5,6 +5,7 @@ import json
 import pytest
 
 from lupin_mcp import reuse_e2e
+from lupin_mcp.reuse_needset import control_report as cr
 from lupin_mcp.reuse_needset import report_rollup as rr
 
 FORCED_PLAN    = { "live": False, "plan": { "by_label": { "not_same": 4, "same_job": 8 }, "pairs": 12, "requests_needed": 48, "stage_budget": 100, "undrafted": [] } }
@@ -146,8 +147,60 @@ def test_control_section_without_pairs_is_a_placeholder():
     assert "Not read yet" in rr.control_section() and "not run" in rr.control_section()
 
 
-def test_control_report_reader_is_a_stub_until_johns_merge():
-    with pytest.raises( NotImplementedError, match="not merged yet" ): rr.control_pairs_from_report( { } )
+LEGACY_CONTROL = { "found": 5, "pairs": 17, "pairs_wanted": 20, "by_lang": { "py": { "found": 1, "total": 6 }, "ts": { "found": 4, "total": 11 } }, "missed": [ "d-ff5795ef28" ], "undrafted": [ ] }
+
+
+def scored_report( flags ):
+    """Ensures: returns scored output for a pair per flag triple, plus one undrafted."""
+    rows = [ ]
+    for i, ( orig, plant, rated ) in enumerate( flags ):
+        rid, oid = f"d-rew{i}", f"orig-{i}"
+        asked    = ( [ rid ] if plant else [ ] ) + ( [ oid ] if orig else [ ] )
+        receipt  = { "id": "r", "candidate_stage": { "ids": sorted( asked ), "widened_ids": [ ] }, "shortlist": [ { "id": rid } ] if rated else [ ] }
+        answer   = { "lists": { "code": [ rid, oid ], "prose": [ oid, rid ] } }
+        rows.append( cr.pair_row( { "rewrite": { "id": rid, "lang": "py" }, "original": { "id": oid, "lang": "py" } }, i < len( flags ) - 1, "tears down the widget", ( receipt, answer ), "Does the work.", { "id": oid, "line": None }, ( receipt, answer ) ) )
+    gone = [ { "pair": "d-gone", "seed": "orig-gone", "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [ ] } ]
+    return cr.scored( rows, gone, { **{ f"d-rew{i}": i < len( flags ) - 1 for i in range( len( flags ) ) }, "d-gone": True } )
+
+
+def test_control_pairs_from_report_keep_only_the_same_job_pairs_that_drafted():
+    report = scored_report( [ ( 1, 0, 0 ), ( 0, 1, 1 ), ( 1, 1, 1 ), ( 1, 1, 1 ) ] )
+    assert rr.control_pairs_from_report( report ) == [ { "id": "d-rew0", "original_in": True, "plant_in": False }, { "id": "d-rew1", "original_in": False, "plant_in": True }, { "id": "d-rew2", "original_in": True, "plant_in": True } ]
+    assert rr.discordant( rr.control_pairs_from_report( report ) )[ "passes" ] is report[ "primary" ][ "pass_mark" ][ "passed" ]
+
+
+def test_the_rollup_mark_agrees_with_the_producers_for_each_verdict():
+    for flags, passed in ( ( [ ( 1, 0, 0 ) ] * 3 + [ ( 1, 1, 1 ), ( 1, 1, 1 ) ], False ), ( [ ( 1, 0, 0 ) ] * 2 + [ ( 1, 1, 1 ), ( 1, 1, 1 ) ], True ) ):
+        report = scored_report( flags )
+        assert report[ "primary" ][ "pass_mark" ][ "passed" ] is passed
+        text   = rr.control_sections( report )
+        assert ( "a - b <= 2: met." if passed else "a - b <= 2: not met." ) in text and f"a {report[ 'primary' ][ 'pass_mark' ][ 'a' ]}, b" in text and "pass 1 of" not in text
+
+
+def test_several_passes_each_get_a_titled_section():
+    one, two = scored_report( [ ( 1, 1, 1 ), ( 1, 1, 1 ) ] ), scored_report( [ ( 1, 0, 0 ), ( 1, 1, 1 ) ] )
+    text     = rr.control_sections( { **one, "passes": [ one, two ] } )
+    assert "pass 1 of 2" in text and "pass 2 of 2" in text and text.count( "The report's own pass mark" ) == 2
+
+
+def test_the_older_report_without_rows_gives_shares_and_says_a_and_b_are_not_countable():
+    text = rr.control_sections( LEGACY_CONTROL )
+    assert "| all pairs that drafted | 5/17 (29.4%," in text and "| py | 1/6 (16.7%," in text and "3 of 20 pairs never drafted." in text and "a and b cannot be counted" in text
+
+
+def test_control_report_of_reads_a_stage_reports_file_or_a_bare_report():
+    assert rr.control_report_of( { "stages": { "control": { "status": "done", "report": LEGACY_CONTROL } } } ) is LEGACY_CONTROL
+    assert rr.control_report_of( { "stages": { "control": { "status": "not_run" } } } ) is None
+    assert rr.control_report_of( LEGACY_CONTROL ) is LEGACY_CONTROL
+
+
+def test_no_pairs_is_not_a_met_mark_and_the_older_title_says_all_pairs():
+    assert rr.discordant( [ ] )[ "passes" ] is False and "not met" in rr.control_section( [ ] )
+    assert "all pairs that drafted)" in rr.control_sections( LEGACY_CONTROL )
+
+
+def test_control_sections_without_a_report_is_the_placeholder():
+    assert "Not read yet" in rr.control_sections( None )
 
 
 def test_render_orders_sections_and_flags_missing_inputs():
@@ -157,7 +210,7 @@ def test_render_orders_sections_and_flags_missing_inputs():
 
 
 def test_render_with_every_input_and_control_rows():
-    text = rr.render( YIELD_RUN, FORCED_RUN, EXPANSION_PLAN, [ pair( 1, 1 ) ] )
+    text = rr.render( YIELD_RUN, FORCED_RUN, EXPANSION_PLAN, scored_report( [ ( 1, 1, 1 ) ] ) )
     assert "No input given" not in text and "| a - b | 0 |" in text
 
 
@@ -166,8 +219,10 @@ def test_main_prints_or_writes_and_reads_only_named_files(tmp_path):
     f.write_text( json.dumps( FORCED_PLAN ), encoding="utf-8" )
     y.write_text( json.dumps( YIELD_PLAN ), encoding="utf-8" )
     e.write_text( json.dumps( EXPANSION_PLAN ), encoding="utf-8" )
+    c = tmp_path / "c.json"
+    c.write_text( json.dumps( { "stages": { "control": { "status": "stopped", "report": LEGACY_CONTROL } } } ), encoding="utf-8" )
     got = [ ]
-    assert rr.main( [ "--forced-judge", str( f ), "--yield-trace", str( y ), "--expansion", str( e ) ], out=got.append ) == 0
-    assert len( got ) == 1 and "Plan only" in got[ 0 ] and "No input given" not in got[ 0 ]
+    assert rr.main( [ "--forced-judge", str( f ), "--yield-trace", str( y ), "--expansion", str( e ), "--control", str( c ) ], out=got.append ) == 0
+    assert len( got ) == 1 and "Plan only" in got[ 0 ] and "No input given" not in got[ 0 ] and "5/17" in got[ 0 ]
     assert rr.main( [ "--forced-judge", str( f ), "--out", str( o ) ], out=got.append ) == 0
     assert len( got ) == 1 and "C1 forced" in o.read_text( encoding="utf-8" )
