@@ -3,6 +3,7 @@ The four-arm read of plan section 17.3, on synthetic reports, with no model call
 
 A report is built from a table of which plants each arm and repeat accepts, so every figure has a value the test states first.
 """
+import itertools
 import json
 
 import pytest
@@ -13,13 +14,13 @@ from lupin_mcp.reuse_needset import judge_probe_read as jr
 SAME = [ f"s{i:02d}" for i in range( 13 ) ]
 NOTS = [ f"n{i}" for i in range( 4 ) ]
 HIGH, LOW = 0.80, 0.10
+SERIAL     = itertools.count( 1 )
 
 
-def row( pair, arm, repeat, p, original=0.9, tokens=100, answered=True, orig_answered=True, serial=[ 0 ] ):
+def row( pair, arm, repeat, p, original=0.9, tokens=100, answered=True, orig_answered=True ):
     """Return one report row; p is the plant's p_overlap, original the original's."""
-    serial[ 0 ] += 1
     side = lambda v, ok: { "answered": ok, "p_overlap": v if ok else None, "confidence": 0.5 if ok else None, "choice": "reuse" if ok else None }
-    return { "pair": pair, "label": jp.SAME_JOB if pair in SAME else jp.NOT_SAME, "arm": arm, "repeat": repeat, "request_hash": f"h{serial[ 0 ]}", "status": "ok",
+    return { "pair": pair, "label": jp.SAME_JOB if pair in SAME else jp.NOT_SAME, "arm": arm, "repeat": repeat, "request_hash": f"h{next( SERIAL )}", "status": "ok",
              "tokens_in": tokens, "plant": side( p, answered ), "original": side( original, orig_answered ) }
 
 
