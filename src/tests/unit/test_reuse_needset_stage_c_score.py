@@ -134,7 +134,7 @@ def test_a_big_d_with_a_lower_bound_at_or_below_zero_is_not_usable():
 def test_a_clean_separation_is_strong_and_usable_with_no_level_for_the_small_stratum():
     out  = sc.score( report_of(), SMALL )
     pop  = out[ "populations" ][ "all_drafted" ]
-    assert out[ "headline" ] == { "covers": "67 of 67 pairs judged", "blocked_by": [ ], "threshold_free": "strong", "line": "usable" }
+    assert out[ "headline" ] == { "covers": "67 of 67 pairs judged (0 not drafted, 0 refused before drafting)", "blocked_by": [ ], "threshold_free": "strong", "line": "usable" }
     assert pop[ "auc" ][ "primary" ] == 1.0 and pop[ "counts" ] == { sc.SAME: 35, sc.NOT_SAME: 32 }
     assert pop[ "strata" ][ "monolith:neighbour" ][ "levels" ] == { "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }, "5 same-job pairs is under 10"
     assert pop[ "strata" ][ "flag" ][ "levels" ] == { "threshold_free": "strong", "line": "usable" } and pop[ "consistent" ] == { "flag": True, "monolith:structural": True }
@@ -297,13 +297,13 @@ def test_main_prints_the_headline_and_writes_the_scored_json( tmp_path, capsys )
     path.write_text( json.dumps( report_of( cue=2 ) ), encoding="utf-8" )
     assert sc.main( [ "--report", str( path ), "--out", str( out ), "--resamples", "50" ] ) == 0
     text = capsys.readouterr().out
-    assert "headline: strong / usable" in text and "all_drafted" in text and "blocked by: nothing" in text and "drafting lost: not_same 0/32, same_job 0/35" in text and "population 67 of 67" in text
+    assert "headline: strong / usable" in text and "all_drafted" in text and "blocked by: nothing" in text and "drafting lost: not_same 0/32, same_job 0/35" in text and "population 67 (67 judged, 0 not drafted); 0 refused, outside it" in text
     assert json.loads( out.read_text( encoding="utf-8" ) )[ "headline" ][ "threshold_free" ] == "strong"
     assert sc.main( [ "--report", str( path ), "--resamples", "20" ] ) == 0 and not ( tmp_path / "other.json" ).exists()
 
 
 def test_render_names_a_population_with_no_auc():
-    scored = { "headline": { "covers": "1 of 2 pairs judged", "blocked_by": [ "x" ], "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }, "coverage": { "by_class": { "c": { "drafted": 1, "undrafted": 1 } }, "population": { "judged": 2, "of": 2 }, "refused": { "total": 0, "by_class_stratum": { } } },
+    scored = { "headline": { "covers": "1 of 2 pairs judged", "blocked_by": [ "x" ], "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }, "coverage": { "by_class": { "c": { "drafted": 1, "undrafted": 1 } }, "population": { "judged": 1, "undrafted": 1, "in_population": 2, "refused": 0, "of": 2 }, "refused": { "total": 0, "by_class_stratum": { } } },
                "populations": { "p": { "pairs": 0, "auc": { "primary": None }, "levels": { "threshold_free": "none shown", "line": "not usable at the line" } } } }
     assert any( "n/a" in line for line in sc.render( scored ) ) and "blocked by: ['x']" in sc.render( scored )
 
@@ -398,7 +398,7 @@ def test_refused_pairs_print_as_a_fixed_row_with_reasons_and_stay_out_of_the_fif
     out = sc.score( rep, 50 )
     gone = out[ "coverage" ][ "refused" ]
     assert out[ "coverage" ][ "limited" ] is False and out[ "headline" ][ "blocked_by" ] == [ ], "20 refused of 52 not-same pairs would have fired the rule over the whole population"
-    assert out[ "coverage" ][ "by_class" ][ sc.NOT_SAME ] == { "drafted": 32, "undrafted": 0, "lost": 0.0 } and out[ "coverage" ][ "population" ] == { "judged": 67, "of": 89 }
+    assert out[ "coverage" ][ "by_class" ][ sc.NOT_SAME ] == { "drafted": 32, "undrafted": 0, "lost": 0.0 } and out[ "coverage" ][ "population" ] == { "judged": 67, "undrafted": 0, "in_population": 67, "refused": 22, "of": 89 }
     assert gone[ "total" ] == 22 and gone[ "by_class" ] == { sc.NOT_SAME: 20, sc.SAME: 2 } and gone[ "by_stratum" ][ "flag" ] == 20 and gone[ "by_stratum" ][ "monolith:neighbour" ] == 0
     assert gone[ "by_reason" ] == { "planted side": 22, "anonymous callback": 2 }
     cells = gone[ "by_class_stratum" ]
@@ -420,9 +420,9 @@ def test_the_printed_output_opens_with_the_population_and_the_refused_row_before
     rep = report_of()
     rep[ "refused" ] = refused_rows( 3, reasons=( "planted side", "anonymous callback" ) )
     lines = sc.render( sc.score( rep, 50 ) )
-    assert lines[ 0 ] == "population 67 of 70; 3 pairs refused, not judged, outside the population"
+    assert lines[ 0 ] == "population 67 (67 judged, 0 not drafted); 3 refused, outside it"
     scored = sc.score( rep, 50 )
-    assert scored[ "headline" ][ "covers" ] == "67 of 70 pairs judged" and "headline: strong / usable ( 67 of 70 pairs judged; the refused row above is not judged )" in lines
+    assert scored[ "headline" ][ "covers" ] == "67 of 70 pairs judged (0 not drafted, 3 refused before drafting)" and "headline: strong / usable ( 67 of 70 pairs judged (0 not drafted, 3 refused before drafting); the refused row above is not judged )" in lines
     assert "refused not_same/flag: 3 anonymous callback 3, planted side 3" in lines and "refused same_job/flag: 0" in lines
     last_refused = max( i for i, line in enumerate( lines ) if line.startswith( "refused" ) )
     first_other  = min( i for i, line in enumerate( lines ) if line.startswith( ( "drafting lost", "blocked by", "headline", "all_drafted" ) ) )
@@ -442,3 +442,11 @@ def test_a_report_with_no_refused_key_is_not_valid_so_a_forgotten_write_cannot_r
     out = sc.score( rep, 50 )
     assert out[ "valid_run" ][ "valid" ] is False and any( "no refused list" in r for r in out[ "valid_run" ][ "reasons" ] ) and out[ "headline" ][ "threshold_free" ] == sc.NO_LEVEL
     assert sc.score( report_of(), 50 )[ "valid_run" ][ "valid" ] is True
+
+
+def test_judged_counts_the_rated_pairs_only_and_the_population_keeps_the_undrafted_beside_them():
+    rated     = [ { "pair": f"r{i}", "stratum": "flag", "label": sc.NOT_SAME } for i in range( 97 ) ]
+    undrafted = [ { "pair": f"u{i}", "stratum": "flag", "label": sc.NOT_SAME } for i in range( 8 ) ]
+    refused   = [ { "pair": f"x{i}", "stratum": "flag", "label": sc.NOT_SAME, "reasons": [ "planted side" ] } for i in range( 52 ) ]
+    pop       = sc.coverage( rated, undrafted, refused )[ "population" ]
+    assert pop == { "judged": 97, "undrafted": 8, "in_population": 105, "refused": 52, "of": 157 }
