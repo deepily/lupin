@@ -18,6 +18,8 @@ ACCEPT_AT      = 0.30
 SIZE_MOVED     = 0.40
 MIN_NET_PAIRS  = 2
 MAX_SAME_DROP  = 1
+NAME_COLUMN    = "name_cue"
+NEAR_COLUMN    = "line_near_identical"
 YES            = ( "yes", "y", "true", "1" )
 NO             = ( "no", "n", "false", "0", "" )
 RATING_PLACES  = 6
@@ -275,7 +277,7 @@ def read_cues( path ):
 
     Requires:
         - path is a tab-separated file; the first column is the pair id; an optional header row names the columns
-        - with a header, the name-cue column is the first whose name contains "name" and the near-identical column the first containing "near" or "ident"; without one, columns 2 and 3
+        - with a header, the columns are the ones named exactly name_cue and line_near_identical; without one, columns 2 and 3
         - a value is yes, y, true or 1 for a cue, and no, n, false, 0 or empty for none, in any case
 
     Ensures:
@@ -288,10 +290,8 @@ def read_cues( path ):
     cols  = [ 1, 2 ]
     if lines and lines[ 0 ].split( "\t" )[ 0 ].strip().lower() in ( "pair", "pair_id", "id" ):
         head = [ h.strip().lower() for h in lines.pop( 0 ).split( "\t" ) ]
-        name = next( ( i for i, h in enumerate( head ) if "name" in h ), None )
-        near = next( ( i for i, h in enumerate( head ) if "near" in h or "ident" in h ), None )
-        if name is None or near is None: raise ValueError( f"the header {head!r} lacks a name-cue column or a near-identical column" )
-        cols = [ name, near ]
+        if NAME_COLUMN not in head or NEAR_COLUMN not in head: raise ValueError( f"the header {head!r} lacks a {NAME_COLUMN} column or a {NEAR_COLUMN} column" )
+        cols = [ head.index( NAME_COLUMN ), head.index( NEAR_COLUMN ) ]
     out = {}
     for n, ln in enumerate( lines, 1 ):
         cells = [ c.strip() for c in ln.split( "\t" ) ]
@@ -311,14 +311,15 @@ def proof_of( results ):
 
     Ensures:
         - returns { posts, distinct_hashes, every_hash_distinct, with_tokens, without_tokens, arm0_all_fresh, missing_readings }
-        - arm0_all_fresh is True when every arm 0 row reported tokens, so none was served from a cache
+        - arm0_all_fresh is True when there is an arm 0 row and none of them was answered with no tokens, which is what a cache read looks like
+        - an arm 0 row that failed and was not answered does not void the floor; it stays in missing_readings, and the spread is then over fewer repeats
         - missing_readings lists { pair, arm, repeat } for a plant or original that was not answered
     """
     hashes = [ r[ "request_hash" ] for r in results ]
     arm0   = [ r for r in results if r[ "arm" ] == jp.ARM_BASELINE ]
     return { "posts": len( results ), "distinct_hashes": len( set( hashes ) ), "every_hash_distinct": len( set( hashes ) ) == len( results ),
              "with_tokens": sum( 1 for r in results if r[ "tokens_in" ] ), "without_tokens": sum( 1 for r in results if not r[ "tokens_in" ] ),
-             "arm0_all_fresh": bool( arm0 ) and all( r[ "tokens_in" ] for r in arm0 ),
+             "arm0_all_fresh": bool( arm0 ) and not any( ( r[ "plant" ][ "answered" ] or r[ "original" ][ "answered" ] ) and not r[ "tokens_in" ] for r in arm0 ),
              "missing_readings": [ { "pair": r[ "pair" ], "arm": r[ "arm" ], "repeat": r[ "repeat" ], "side": s } for r in results for s in ( "plant", "original" ) if not r[ s ][ "answered" ] ] }
 
 
@@ -402,7 +403,7 @@ def render( a ):
         L.append( f"| **{arm}** | mean | | | **{s[ 'd_bar' ]}** | {s[ 'd_low' ]} to {s[ 'd_high' ]}; spread {s[ 'spread' ]}; separated: {s[ 'separated' ]} |" )
     L += [ "", "## Comparisons, each read alone", "", "| comparison | later minus earlier | delta | met | label |", "|---|---|---|---|---|" ]
     for c in a[ "comparisons" ]: L.append( f"| {c[ 'name' ]} | {c[ 'late' ]} - {c[ 'early' ]} | {c[ 'delta' ]} | {', '.join( c[ 'met' ] ) or 'none'} | **{c[ 'label' ]}** (n pairs {c[ 'n_pairs' ]}) |" )
-    L += [ "", "## Second reading (plant or original at 0.30 or more; originals from arms 0 to 2 only)", "", "| arm/repeat | same | not-same | originals used |", "|---|---|---|---|" ]
+    L += [ "", "## Second reading (plant or original at 0.30 or more; originals from arms 0 to 2 only; arm 3 is the plant only, so do not compare it with arms 0 to 2)", "", "| arm/repeat | same | not-same | originals used |", "|---|---|---|---|" ]
     for k, g in a[ "second_reading" ].items(): L.append( f"| {k} | {g[ 'same' ]} of {g[ 'same_n' ]} | {g[ 'not_same' ]} of {g[ 'not_same_n' ]} | {g[ 'originals_used' ]} |" )
     L += [ "", "## Threshold-free share (same-job plant rates higher; not a mark figure)", "", "| arm/repeat | share | pairings |", "|---|---|---|" ]
     for k, g in a[ "pairing" ].items(): L.append( f"| {k} | {g[ 'share' ]} | {g[ 'pairings' ]} |" )

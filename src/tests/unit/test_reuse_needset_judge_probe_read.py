@@ -198,7 +198,7 @@ def tsv( tmp_path, text, name="cues.tsv" ):
 
 
 def test_read_cues_reads_a_headed_file_by_column_name_and_ignores_other_columns(tmp_path):
-    got = jr.read_cues( tsv( tmp_path, "pair\tnote\tName cue\tnear identical lines\nd-1\tx\tYes\tno\n\nd-2\ty\tn\tTRUE\n" ) )
+    got = jr.read_cues( tsv( tmp_path, "pair\tplant_name\tname_cue\tline_near_identical\nd-1\tx\tYes\tno\n\nd-2\ty\tn\tTRUE\n" ) )
     assert got == { "d-1": { "name_cue": True, "near_identical": False }, "d-2": { "name_cue": False, "near_identical": True } }
 
 
@@ -210,7 +210,7 @@ def test_read_cues_reads_a_file_without_a_header_by_position_and_takes_empty_as_
 def test_read_cues_names_the_line_it_cannot_read(tmp_path):
     with pytest.raises( ValueError, match="neither yes nor no" ): jr.read_cues( tsv( tmp_path, "d-1\tmaybe\tno\n" ) )
     with pytest.raises( ValueError, match="2 columns" ): jr.read_cues( tsv( tmp_path, "d-1\tyes\n" ) )
-    with pytest.raises( ValueError, match="lacks a name-cue column" ): jr.read_cues( tsv( tmp_path, "pair\tfoo\tbar\nd-1\tyes\tno\n" ) )
+    with pytest.raises( ValueError, match="lacks a name_cue column" ): jr.read_cues( tsv( tmp_path, "pair\tfoo\tbar\nd-1\tyes\tno\n" ) )
 
 
 def test_splits_use_chloes_lists_and_recompute_n_and_l_without_those_pairs():
@@ -289,6 +289,7 @@ def test_render_prints_every_section_and_no_joint_label(tmp_path):
     for part in ( "## D per arm and repeat", "## Comparisons, each read alone", "## Second reading", "## Threshold-free share", "## Flips per comparison and repeat", "## Splits (decide no label)" ):
         assert part in text
     assert "pass flag" not in text and "joint" not in text.lower()
+    assert "arm 3 is the plant only" in text
     assert "N_without: delta" in text
     assert "arm missing" in jr.render( jr.analyze( report( { jp.ARM_BASELINE: flat( 6, 2 ) } ), CUES ) )
 
@@ -332,3 +333,25 @@ def test_four_of_five_conditions_is_within_noise_and_not_moved():
     spec = { jp.ARM_BASELINE: flat( 6, 2 ), jp.ARM_PLANT: flat( 6, 2 ), jp.ARM_SHAPED: { 1: ( 12, 1 ), 2: ( 12, 1 ), 3: ( 6, 2 ) }, jp.ARM_BOTH: flat( 6, 2 ) }
     n = { c[ "name" ]: c for c in jr.analyze( report( spec ) )[ "comparisons" ] }[ "N" ]
     assert n[ "met" ] == [ c for c in jr.CRITERIA if c != "every_repeat" ] and n[ "label" ] == jr.WITHIN
+
+
+CHLOE_HEADER = "pair\tlabel\tlang\tplant_name\toriginal_name\tname_same_as_original\tname_word_jaccard\tname_need_shared_stems\tname_cue\tname_cue_original\tname_cue_need\tline_ratio\tline_jaccard\tline_near_identical\tplant_line_present\toriginal_line_present"
+
+
+def test_read_cues_reads_chloes_real_header_by_the_exact_column_names(tmp_path):
+    """Chloe's real header and two rows; plant_name sits before name_cue."""
+    rows = "d-ff5795ef28\tsame_job\tts\tdestroy\tTtsPreviewSliderRendererImpl.unmount\t0\t0.00\t\t0\t0\t0\t0.46\t0.06\t0\t1\t1\n" \
+           "d-51d9c4c2ab\tsame_job\tts\tstartRecording\tAudioRecorder.startRecording\t1\t1.00\t\t1\t1\t0\t0.39\t0.20\t1\t1\t1\n"
+    assert jr.read_cues( tsv( tmp_path, CHLOE_HEADER + "\n" + rows ) ) == { "d-ff5795ef28": { "name_cue": False, "near_identical": False }, "d-51d9c4c2ab": { "name_cue": True, "near_identical": True } }
+
+
+def test_a_failed_arm_zero_post_does_not_void_the_floor_but_an_answered_post_with_no_tokens_does():
+    failed = report( MOVER )
+    at = next( i for i, r in enumerate( failed[ "results" ] ) if r[ "arm" ] == jp.ARM_BASELINE and r[ "repeat" ] == 1 and r[ "pair" ] == "s00" )
+    failed[ "results" ][ at ] = row( "s00", jp.ARM_BASELINE, 1, None, answered=False, orig_answered=False, tokens=0 )
+    a = jr.analyze( failed )
+    assert a[ "proof" ][ "arm0_all_fresh" ] is True and a[ "floor" ][ "valid" ] is True
+    assert { "pair": "s00", "arm": jp.ARM_BASELINE, "repeat": 1, "side": "plant" } in a[ "proof" ][ "missing_readings" ]
+    cached = report( MOVER )
+    cached[ "results" ][ at ] = row( "s00", jp.ARM_BASELINE, 1, HIGH, tokens=0 )
+    assert jr.analyze( cached )[ "proof" ][ "arm0_all_fresh" ] is False
