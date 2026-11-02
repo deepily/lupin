@@ -247,6 +247,22 @@ DEFAULT_EXPERT_HOST = HostPersonality(
 )
 
 
+OWNER_EMAIL_KEY = "podcast drive owner email"
+
+
+def read_owner_email( config_mgr ) -> str:
+    """
+    Read the Drive owner's email, the one reader of `podcast drive owner email`.
+
+    Requires:
+        - config_mgr has get( key, default=, silent= )
+
+    Ensures:
+        - returns the stripped email, or "" when the key is absent or blank
+    """
+    return config_mgr.get( OWNER_EMAIL_KEY, default="", silent=True ).strip()
+
+
 @dataclass
 class PodcastConfig:
     """
@@ -484,7 +500,7 @@ class PodcastConfig:
             drive_upload_source_document = _get( "podcast drive upload source document",      "True",  "boolean" ),
             drive_token_path             = _get( "podcast drive token path",                  "/src/conf/keys/google-drive-oauth-token.json" ),
             drive_upload_users           = _get( "podcast drive upload users",                "owner" ),
-            drive_owner_email            = _get( "podcast drive owner email",                 "" ),
+            drive_owner_email            = read_owner_email( config_mgr ),
         )
 
         # Handle audience_context

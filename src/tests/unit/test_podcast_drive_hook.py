@@ -574,16 +574,48 @@ class TestUploadUsersScope:
         assert got[ "extra_lines" ] == []
 
     @pytest.mark.asyncio
-    async def test_a_changed_setting_applies_to_the_next_job_without_a_restart( self, files, monkeypatch ):
-        """The hook loads the config per call when none is passed, so the INI value is read fresh."""
-        fake    = FakePublisher()
-        current = { "scope": "owner" }
+    @pytest.mark.parametrize( "email", [ None, "", "   " ] )
+    async def test_a_job_with_no_user_email_gets_its_own_card_line_and_log( self, email, files, monkeypatch, capsys ):
+        fake = FakePublisher()
         monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
-        monkeypatch.setattr( drive_hook, "_load_config", lambda: _config( drive_upload_users=current[ "scope" ], drive_owner_email="o@x.com" ) )
-        first = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, user_email="other@x.com" )
-        current[ "scope" ] = "all"
-        second = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, user_email="other@x.com" )
-        assert first[ "extra_lines" ] == [ "**Drive**: not uploaded to Drive (setting)" ] and second[ "folder_link" ]
+        config = _config( drive_upload_users="owner", drive_owner_email="o@x.com" )
+        got = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, config=config, user_email=email )
+        assert got[ "extra_lines" ] == [ "**Drive**: not uploaded to Drive (no user email)" ]
+        assert fake.calls == [] and "unknown user" in capsys.readouterr().out
+
+    @pytest.mark.asyncio
+    async def test_scope_all_uploads_a_job_with_no_user_email( self, files, monkeypatch ):
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        got = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, config=_config(), user_email=None )
+        assert len( fake.calls ) == 1 and got[ "folder_link" ]
+
+    def test_read_owner_email_strips_and_defaults_to_empty( self ):
+        from cosa.agents.podcast_generator.config import read_owner_email, OWNER_EMAIL_KEY
+        mgr = MagicMock()
+        mgr.get.return_value = "  o@x.com "
+        assert read_owner_email( mgr ) == "o@x.com"
+        mgr.get.assert_called_once_with( OWNER_EMAIL_KEY, default="", silent=True )
+        mgr.get.return_value = "   "
+        assert read_owner_email( mgr ) == ""
+
+    def test_the_router_and_the_hook_config_read_the_owner_through_one_helper( self ):
+        from cosa.rest.routers import podcast_drive
+        from cosa.agents.podcast_generator import config as pc
+        assert podcast_drive.read_owner_email is pc.read_owner_email and podcast_drive.OWNER_KEY == pc.OWNER_EMAIL_KEY
+        mgr = MagicMock()
+        mgr.get.side_effect = _typed_get( { pc.OWNER_EMAIL_KEY: " o@x.com " } )
+        assert PodcastConfig.from_config( mgr ).drive_owner_email == "o@x.com"
+
+    def test_every_reader_of_the_owner_email_key_goes_through_the_one_helper( self ):
+        """Only the helper and the router docs spell the key, so the two readers cannot drift."""
+        out = subprocess.run( [ "git", "grep", "-l", "-F", "podcast drive owner email", "--", "src/cosa/*.py", "src/lupin_app/*.py" ],
+                              capture_output=True, text=True, cwd=os.environ[ "LUPIN_ROOT" ] ).stdout.split()
+        allowed = { "src/cosa/agents/podcast_generator/config.py", "src/cosa/rest/routers/podcast_drive.py" }
+        spelled = [ f for f in out if "/tests/" not in f ]
+        assert spelled and set( spelled ) <= allowed, spelled
+        router = open( os.environ[ "LUPIN_ROOT" ] + "/src/cosa/rest/routers/podcast_drive.py" ).read()
+        assert 'config_mgr.get( OWNER_KEY' not in router and '"podcast drive owner email"' not in router.replace( "`podcast drive owner email`", "" )
 
     def test_the_config_defaults_and_ini_names( self ):
         c = PodcastConfig()

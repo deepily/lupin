@@ -148,12 +148,15 @@ async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, 
         - source_path is the source document's path, absolute or relative to the project root, or None
         - job_folder_name is the Drive subfolder name, or None to build <timestamp>-<topic> from source_path
         - config carries the drive_* fields and publish_to_google_drive, or None to load it from the INI
-        - user_email is the job's user; the config is loaded per job, so a changed upload-users setting applies to the next job
+        - user_email is the job's user, or None
 
     Ensures:
         - everything runs inside one boundary: loading the config, resolving the path and naming the
           folder can fail without failing the job
         - flag off: returns the empty result and imports no Google module
+        - user not allowed by `podcast drive upload users`: logs the user and reason, uploads nothing, and
+          "extra_lines" carries one "**Drive**: not uploaded to Drive (setting)" line, or "(no user email)"
+          when the job has no user
         - success: "language_links" maps each language with an uploaded mp3 to its Drive link, and
           "extra_lines" carries one "**Drive folder**" line
         - any failure (including a non-Drive exception): "extra_lines" carries one
@@ -168,7 +171,8 @@ async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, 
         skip_reason = upload_skip_reason( config, user_email )
         if skip_reason:
             print( f"[DriveHook] not uploading for {user_email}: {skip_reason}" )
-            result[ "extra_lines" ].append( "**Drive**: not uploaded to Drive (setting)" )
+            why = "setting" if ( user_email or "" ).strip() else "no user email"
+            result[ "extra_lines" ].append( f"**Drive**: not uploaded to Drive ({why})" )
             return result
         source_path     = resolve_source_path( source_path )
         job_folder_name = job_folder_name or make_job_folder_name( source_path or "podcast" )

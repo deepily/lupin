@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
+from cosa.agents.podcast_generator.config import OWNER_EMAIL_KEY, read_owner_email
 from cosa.agents.podcast_generator.drive_hook import _make_publisher
 from cosa.agents.podcast_generator.play_links import title_from_folder_name, title_from_script_text
 from cosa.config.configuration_manager import ConfigurationManager
@@ -25,7 +26,7 @@ from cosa.utils.drive_publisher import DrivePublishError
 
 router = APIRouter( prefix="/api/podcast-drive", tags=[ "podcast-drive" ] )
 
-OWNER_KEY              = "podcast drive owner email"
+OWNER_KEY              = OWNER_EMAIL_KEY
 FOLDER_KEY             = "podcast drive folder name"
 TOKEN_KEY              = "podcast drive token path"
 DEFAULT_FOLDER         = "Lupin Podcasts"
@@ -52,7 +53,7 @@ def _owner_publisher( current_user, config_mgr ):
         - HTTPException 403 when the owner email is unset or is not the caller's, before any Drive call
         - HTTPException 503 when the Drive token is missing or unusable
     """
-    owner = config_mgr.get( OWNER_KEY, default="", silent=True ).strip().lower()
+    owner = read_owner_email( config_mgr ).lower()
     if not owner or current_user.get( "email", "" ).strip().lower() != owner:
         raise HTTPException( status_code=403, detail="Only the owner of the Drive token may use the podcast Drive" )
     drive_ini = SimpleNamespace(
