@@ -274,6 +274,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-stages]] — the runner for attribution, yield, control and remainder under the cap. `lupin_mcp` (reuse_needset)
 - [[needset-stage-seeds]] — the attribution and yield seed lists, drawn once from tracked code, and the attribution and yield functions that read them. `lupin_mcp` (reuse_needset)
 - [[needset-yield-trace]] — the yield seeds' needs rebuilt from saved answers and traced end to end, each seed its own known answer. `lupin_mcp` (reuse_needset)
+- [[needset-expansion-replay]] — draft: ask for paraphrases and identifier words per need, search five ways, rank the known answer before and after. `lupin_mcp` (reuse_needset)
 - [[needset-stage-parts]] — the live pieces of the attribution and yield stages: a final need per seed, model-agreed or counted and dropped, and the trace. `lupin_mcp` (reuse_needset)
 - [[needset-freeze]] — the hashes that name the index and vectors of a need set, the read-only copy and the check before a run. `lupin_mcp.reuse_needset` (freeze)
 - [[needset-revalidation]] — the day-before check of a frozen need set against a newer index: broken keys, new twin candidates and the refreeze. `lupin_mcp.reuse_needset` (revalidate)
