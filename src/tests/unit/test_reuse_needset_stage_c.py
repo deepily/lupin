@@ -198,7 +198,7 @@ def test_the_plan_counts_calls_shows_every_purpose_line_and_lists_the_refused():
     plan = sc.plan_of( rows, refused, sides )
     assert ( plan[ "pairs_total" ], plan[ "pairs_judged" ] ) == ( 3, 2 ) and plan[ "by_stratum" ] == { "flag": 1, "monolith:neighbour": 1 } and plan[ "by_label" ] == { "same_job": 1, "not_same": 1 }
     assert plan[ "calls" ] == { "drafts_min": 2, "drafts_max": 4, "posts": 6, "post_budget": sc.POST_BUDGET } and plan[ "ambiguous" ] == [ ]
-    assert plan[ "refused" ] == [ { "pair": "pair-3", "stratum": "flag", "reasons": [ "side b text matches no index record" ] } ]
+    assert plan[ "refused" ] == [ { "pair": "pair-3", "stratum": "flag", "label": sc.SAME_JOB, "reasons": [ "side b text matches no index record" ] } ]
     assert plan[ "shown" ][ 0 ] == { "pair": "pair-1", "side": "a", "id": "src.m1.f1", "purpose_line": "line pin1" } and len( plan[ "shown" ] ) == 4
     assert plan[ "audit" ][ "sides" ] == 6 and plan[ "audit" ][ "matched" ] == 5 and [ n[ "pair" ] for n in plan[ "audit" ][ "named" ] ] == [ "pair-3" ]
     assert sc.plan_of( rows, refused, sides, 9 )[ "calls" ][ "post_budget" ] == 9
@@ -329,19 +329,19 @@ def live_argv( tmp_path, *more ):
     return argv( tmp_path, "--live", "--run-name", "needset-stage-c-x", "--from-run", str( tmp_path / "from-run" ), "--cli-path", "/x/claude", *more )
 
 
-def stand_ins( tmp_path, rows, undrafted_pair=None ):
+def stand_ins( tmp_path, rows, undrafted_pair=None, refused=() ):
     """Return the patches that replace the files, the drafter ledger and the strip step."""
     def draft_need( job, ask, ledger ):
         if job[ "meta" ][ "stage_c" ] == undrafted_pair: return { "ok": False, "reason": er.NEED_LEAKS_KEY }
         return { "ok": True, "need": f"Need for {job[ 'meta' ][ 'stage_c' ]}." }
-    return [ mock.patch.object( sc, "collect_rows", return_value=( rows, [ ], [ ] ) ), mock.patch.object( sc.draft, "draft_need", side_effect=draft_need ),
+    return [ mock.patch.object( sc, "collect_rows", return_value=( rows, list( refused ), [ ] ) ), mock.patch.object( sc.draft, "draft_need", side_effect=draft_need ),
              mock.patch.object( sc.draft, "make_ledger", return_value="ledger" ), mock.patch.object( sc.strip, "strip_member", side_effect=lambda r, root: { "kind": "k", "text": "t", "forbidden": [ ] } ),
              mock.patch.object( rt, "prepare" ) ]
 
 
-def run_live( tmp_path, deps, rows, undrafted_pair=None ):
+def run_live( tmp_path, deps, rows, undrafted_pair=None, refused=() ):
     """Run a live stage on stand-ins and return its result."""
-    patches = stand_ins( tmp_path, rows, undrafted_pair )
+    patches = stand_ins( tmp_path, rows, undrafted_pair, refused )
     for p in patches: p.start()
     try:
         return sc.main( live_argv( tmp_path ), deps )
@@ -353,13 +353,14 @@ def test_a_live_run_drafts_posts_every_repeat_writes_the_report_and_closes_the_r
     deps, state = live_parts( tmp_path )
     rows = [ make_row( 1 ), make_row( 2, label=sc.NOT_SAME ), make_row( 3 ) ]
     ( tmp_path / "run-dir" ).mkdir()
-    out = run_live( tmp_path, deps, rows, undrafted_pair="pair-2" )
+    refused = [ { "pair": "pair-9", "stratum": "flag", "label": sc.NOT_SAME, "reasons": [ "side a text matches no index record" ] } ]
+    out = run_live( tmp_path, deps, rows, undrafted_pair="pair-2", refused=refused )
     assert out[ "live" ] is True and out[ "closed_run" ] == "needset-stage-c-x" and out[ "close_error" ] is None and out[ "report" ][ "status" ] == sc.jp.DONE
     assert [ ( r[ "pair" ], r[ "repeat" ] ) for r in state[ "asked" ] ] == [ ( "pair-1", 1 ), ( "pair-1", 2 ), ( "pair-1", 3 ), ( "pair-3", 1 ), ( "pair-3", 2 ), ( "pair-3", 3 ) ]
     assert state[ "asked" ][ 0 ][ "need" ] == "Need for pair-1." and state[ "closed" ] == 1 and state[ "context_root" ] == tmp_path / "source-tree"
     assert [ u[ "pair" ] for u in out[ "undrafted" ] ] == [ "pair-2" ] and out[ "undrafted" ][ 0 ][ "reason" ] == er.NEED_LEAKS_KEY
     saved = json.loads( ( tmp_path / "run-dir" / sc.REPORT_FILE ).read_text( encoding="utf-8" ) )
-    assert saved[ "undrafted" ][ 0 ][ "pair" ] == "pair-2" and len( saved[ "results" ] ) == 6 and saved[ "status" ] == "done"
+    assert saved[ "undrafted" ][ 0 ][ "pair" ] == "pair-2" and saved[ "refused" ] == refused and out[ "plan" ][ "pairs_total" ] == 4 and len( saved[ "results" ] ) == 6 and saved[ "status" ] == "done"
     assert os.environ[ rt.RUN_NAME_VARIABLE ] == "needset-stage-c-x" and os.environ[ rt.CEILING_VARIABLE ] == str( sc.jp.CEILING ) and sc.exit_status( out ) == 0
 
 
