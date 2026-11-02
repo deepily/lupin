@@ -215,7 +215,7 @@ class TestDeepResearchToPodcastJobCard:
             state=PipelineState.COMPLETED, error=None, research_path="io/deep-research/u/report.md", research_abstract="a",
             audio_path=io + "en.mp3", script_path=io + "en-script.md",
             pg_artifacts={ "audio_paths_by_language": { "en": io + "en.mp3" }, "script_paths_by_language": { "en": io + "en-script.md" } },
-            dr_cost=1.0, pg_cost=1.0, total_cost=2.0 )
+            dr_cost=1.0, pg_cost=1.0, total_cost=2.0, dr_artifacts={} )
         agent = MagicMock()
         agent.run_async = AsyncMock( return_value=result )
         with patch( "cosa.agents.deep_research.voice_io.notify", new_callable=AsyncMock ) as notify, \
@@ -238,7 +238,7 @@ class TestDeepResearchToPodcastJobCard:
             state=PipelineState.COMPLETED, error=None, research_path="io/deep-research/u/report.md", research_abstract="a",
             audio_path=None, script_path=io + "en-script.md",
             pg_artifacts={ "audio_paths_by_language": {}, "script_paths_by_language": { "en": io + "en-script.md" } },
-            dr_cost=1.0, pg_cost=1.0, total_cost=2.0 )
+            dr_cost=1.0, pg_cost=1.0, total_cost=2.0, dr_artifacts={} )
         agent = MagicMock()
         agent.run_async = AsyncMock( return_value=result )
         with patch( "cosa.agents.deep_research.voice_io.notify", new_callable=AsyncMock ) as notify, \

@@ -23,6 +23,7 @@ from cosa.agents.podcast_generator.config import PodcastConfig
 def _config( **overrides ):
     config = PodcastConfig()
     config.publish_to_google_drive = True
+    config.drive_upload_users      = "all"
     for k, v in overrides.items(): setattr( config, k, v )
     return config
 
@@ -416,14 +417,14 @@ def _drp_job():
     return DeepResearchToPodcastJob( query="q", user_id="u", user_email="u@x.com", session_id="s", target_languages=[ "en" ] )
 
 
-async def _run_drp( job, hook, research_path="io/deep-research/u@x.com/report.md" ):
+async def _run_drp( job, hook, research_path="io/deep-research/u@x.com/report.md", dr_artifacts=None ):
     from cosa.agents.deep_research_to_podcast.state import PipelineState
     result = SimpleNamespace(
         state=PipelineState.COMPLETED, error=None, research_path=research_path, research_abstract="a",
         audio_path="/var/lupin/io/podcasts/u/en.mp3", script_path="/var/lupin/io/podcasts/u/en.md",
         pg_artifacts={ "audio_paths_by_language": { "en": "/var/lupin/io/podcasts/u/en.mp3" },
                        "script_paths_by_language": { "en": "/var/lupin/io/podcasts/u/en.md" } },
-        dr_cost=1.0, pg_cost=1.0, total_cost=2.0 )
+        dr_cost=1.0, pg_cost=1.0, total_cost=2.0, dr_artifacts=dr_artifacts or {} )
     agent = MagicMock()
     agent.run_async = AsyncMock( return_value=result )
     hook_patch = patch( "cosa.agents.podcast_generator.drive_hook.publish_podcast_to_drive", hook ) if hook is not None else contextlib.nullcontext()
@@ -434,10 +435,26 @@ async def _run_drp( job, hook, research_path="io/deep-research/u@x.com/report.md
          hook_patch, \
          patch.object( type( job ), "_make_agent", return_value=agent ):
         await job._execute()
+    _run_drp.notify = notify
     return next( c.kwargs[ "abstract" ] for c in notify.call_args_list if c.kwargs.get( "abstract" ) and "Research → Podcast Complete" in c.kwargs[ "abstract" ] )
 
 
 class TestDeepResearchToPodcastJobUsesTheHook:
+
+    @pytest.mark.asyncio
+    async def test_skipped_topics_are_named_on_the_card_and_in_the_spoken_line( self, monkeypatch ):
+        monkeypatch.setattr( drive_hook, "_load_config", lambda: PodcastConfig( publish_to_google_drive=False ) )
+        gaps     = [ { "topic": "Alpha", "reason": "r1" }, { "topic": "Beta", "reason": "r2" } ]
+        abstract = await _run_drp( _drp_job(), None, dr_artifacts={ "skipped_topics": gaps } )
+        assert "**Skipped topics (2)**: Alpha; Beta" in abstract
+        assert any( "2 topics were skipped" in c.args[ 0 ] for c in _run_drp.notify.call_args_list )
+
+    @pytest.mark.asyncio
+    async def test_no_skipped_topics_adds_no_line( self, monkeypatch ):
+        monkeypatch.setattr( drive_hook, "_load_config", lambda: PodcastConfig( publish_to_google_drive=False ) )
+        abstract = await _run_drp( _drp_job(), None )
+        assert "Skipped topics" not in abstract
+        assert not any( "skipped" in c.args[ 0 ] for c in _run_drp.notify.call_args_list )
 
     @pytest.mark.asyncio
     async def test_a_config_error_in_the_real_hook_does_not_fail_the_job( self ):
@@ -459,7 +476,7 @@ class TestDeepResearchToPodcastJobUsesTheHook:
     @pytest.mark.asyncio
     async def test_publishing_on_with_no_token_file_reports_it_and_the_job_still_succeeds( self, monkeypatch, tmp_path ):
         """A fake config points at a missing temp token: the card says so."""
-        config = PodcastConfig( publish_to_google_drive=True, drive_token_path="/" + str( tmp_path / "no-token.json" ).lstrip( "/" ) )
+        config = PodcastConfig( publish_to_google_drive=True, drive_upload_users="all", drive_token_path="/" + str( tmp_path / "no-token.json" ).lstrip( "/" ) )
         monkeypatch.setattr( drive_hook, "_load_config", lambda: config )
         monkeypatch.setattr( "cosa.utils.util.get_project_root", lambda: "" )
         job      = _drp_job()
@@ -476,7 +493,7 @@ class TestDeepResearchToPodcastJobUsesTheHook:
         assert audio  == { "en": "/var/lupin/io/podcasts/u/en.mp3" }
         assert script == { "en": "/var/lupin/io/podcasts/u/en.md" }
         assert source == "io/deep-research/u@x.com/report.md"  # unresolved: the hook resolves it inside its boundary
-        assert hook.call_args.kwargs == {}
+        assert hook.call_args.kwargs == { "user_email": "u@x.com" }
 
     @pytest.mark.asyncio
     async def test_no_research_path_still_calls_the_hook_with_no_source( self, monkeypatch ):
@@ -503,3 +520,122 @@ class TestDeepResearchToPodcastJobUsesTheHook:
         job      = _drp_job()
         abstract = await _run_drp( job, hook )
         assert "**Drive**: upload failed (OSError: x)" in abstract and "drive_folder_link" not in job.artifacts
+
+
+# ── `podcast drive upload users`: whose podcasts go to Drive (row 273c731a) ────
+
+class TestUploadUsersScope:
+
+    @pytest.mark.parametrize( "scope, owner, user, allowed", [
+        ( "all",                    "",        "anyone@x.com",  True  ),
+        ( "all",                    "",        None,            True  ),
+        ( "owner",                  "o@x.com", "o@x.com",       True  ),
+        ( "owner",                  "o@x.com", " O@X.com ",     True  ),
+        ( "owner",                  "o@x.com", "other@x.com",   False ),
+        ( "owner",                  "",        "other@x.com",   False ),
+        ( "owner",                  "o@x.com", None,            False ),
+        ( "",                       "o@x.com", "o@x.com",       True  ),
+        ( "",                       "o@x.com", "other@x.com",   False ),
+        ( "a@x.com, B@x.com",       "o@x.com", "b@x.com",       True  ),
+        ( "a@x.com, B@x.com",       "o@x.com", "o@x.com",       False ),
+        ( "a@x.com,,",              "o@x.com", "",              False ),
+    ] )
+    def test_the_decision_for_each_value( self, scope, owner, user, allowed ):
+        config = _config( drive_upload_users=scope, drive_owner_email=owner )
+        reason = drive_hook.upload_skip_reason( config, user )
+        assert ( reason is None ) is allowed
+        if not allowed: assert reason.startswith( "'podcast drive upload users' is" )
+
+    def test_the_reason_names_an_unknown_user( self ):
+        assert "an unknown user is not in it" in drive_hook.upload_skip_reason( _config( drive_upload_users="owner" ), None )
+
+    @pytest.mark.asyncio
+    async def test_a_skipped_user_uploads_nothing_logs_and_gets_the_setting_line( self, files, monkeypatch, capsys ):
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        config = _config( drive_upload_users="owner", drive_owner_email="o@x.com" )
+        got = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, config=config, user_email="other@x.com" )
+        assert got == { "language_links": {}, "folder_link": None, "extra_lines": [ "**Drive**: not uploaded to Drive (setting)" ] }
+        assert fake.calls == []
+        assert "other@x.com" in capsys.readouterr().out
+
+    @pytest.mark.asyncio
+    async def test_the_owner_is_uploaded( self, files, monkeypatch ):
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        config = _config( drive_upload_users="owner", drive_owner_email="o@x.com" )
+        got = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, config=config, user_email="o@x.com" )
+        assert len( fake.calls ) == 1 and got[ "folder_link" ]
+
+    @pytest.mark.asyncio
+    async def test_the_flag_off_still_wins_over_the_scope( self, monkeypatch ):
+        config = _config( publish_to_google_drive=False, drive_upload_users="owner" )
+        got = await drive_hook.publish_podcast_to_drive( {}, {}, None, config=config, user_email="x@x.com" )
+        assert got[ "extra_lines" ] == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize( "email", [ None, "", "   " ] )
+    async def test_a_job_with_no_user_email_gets_its_own_card_line_and_log( self, email, files, monkeypatch, capsys ):
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        config = _config( drive_upload_users="owner", drive_owner_email="o@x.com" )
+        got = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, config=config, user_email=email )
+        assert got[ "extra_lines" ] == [ "**Drive**: not uploaded to Drive (no user email)" ]
+        assert fake.calls == [] and "unknown user" in capsys.readouterr().out
+
+    @pytest.mark.asyncio
+    async def test_scope_all_uploads_a_job_with_no_user_email( self, files, monkeypatch ):
+        fake = FakePublisher()
+        monkeypatch.setattr( drive_hook, "_make_publisher", lambda config: fake )
+        got = await drive_hook.publish_podcast_to_drive( { "en": files[ "en.mp3" ] }, {}, None, config=_config(), user_email=None )
+        assert len( fake.calls ) == 1 and got[ "folder_link" ]
+
+    def test_read_owner_email_strips_and_defaults_to_empty( self ):
+        from cosa.agents.podcast_generator.config import read_owner_email, OWNER_EMAIL_KEY
+        mgr = MagicMock()
+        mgr.get.return_value = "  o@x.com "
+        assert read_owner_email( mgr ) == "o@x.com"
+        mgr.get.assert_called_once_with( OWNER_EMAIL_KEY, default="", silent=True )
+        mgr.get.return_value = "   "
+        assert read_owner_email( mgr ) == ""
+
+    def test_the_router_and_the_hook_config_read_the_owner_through_one_helper( self ):
+        from cosa.rest.routers import podcast_drive
+        from cosa.agents.podcast_generator import config as pc
+        assert podcast_drive.read_owner_email is pc.read_owner_email and podcast_drive.OWNER_KEY == pc.OWNER_EMAIL_KEY
+        mgr = MagicMock()
+        mgr.get.side_effect = _typed_get( { pc.OWNER_EMAIL_KEY: " o@x.com " } )
+        assert PodcastConfig.from_config( mgr ).drive_owner_email == "o@x.com"
+
+    def test_every_reader_of_the_owner_email_key_goes_through_the_one_helper( self ):
+        """Only the helper and the router docs spell the key, so the two readers cannot drift."""
+        out = subprocess.run( [ "git", "grep", "-l", "-F", "podcast drive owner email", "--", "src/cosa/*.py", "src/lupin_app/*.py" ],
+                              capture_output=True, text=True, cwd=os.environ[ "LUPIN_ROOT" ] ).stdout.split()
+        allowed = { "src/cosa/agents/podcast_generator/config.py", "src/cosa/rest/routers/podcast_drive.py" }
+        spelled = [ f for f in out if "/tests/" not in f ]
+        assert spelled and set( spelled ) <= allowed, spelled
+        router = open( os.environ[ "LUPIN_ROOT" ] + "/src/cosa/rest/routers/podcast_drive.py" ).read()
+        assert 'config_mgr.get( OWNER_KEY' not in router and '"podcast drive owner email"' not in router.replace( "`podcast drive owner email`", "" )
+
+    def test_the_config_defaults_and_ini_names( self ):
+        c = PodcastConfig()
+        assert ( c.drive_upload_users, c.drive_owner_email ) == ( "owner", "" )
+        mgr = MagicMock()
+        mgr.get.side_effect = _typed_get( { "podcast drive upload users": "a@x.com", "podcast drive owner email": "o@x.com" } )
+        c = PodcastConfig.from_config( mgr )
+        assert ( c.drive_upload_users, c.drive_owner_email ) == ( "a@x.com", "o@x.com" )
+
+    def test_the_shipped_ini_says_owner_with_an_explainer( self ):
+        from cosa.config.configuration_manager import ConfigurationManager
+        c = PodcastConfig.from_config( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+        assert c.drive_upload_users == "owner" and c.drive_owner_email
+        root = os.environ[ "LUPIN_ROOT" ] + "/src/conf/"
+        for ini in [ "lupin-app.ini", "lupin-app-splainer.ini" ]:
+            assert re.search( r"^podcast drive upload users\s*=", open( root + ini ).read(), re.M ), f"missing from {ini}"
+
+    @pytest.mark.asyncio
+    async def test_the_real_podcast_job_hands_its_user_to_the_hook( self ):
+        """Real job, real hook, shipped INI: a non-owner is skipped before any Google module loads."""
+        job = _drp_job()
+        abstract = await _run_drp( job, None )
+        assert "**Drive**: not uploaded to Drive (setting)" in abstract

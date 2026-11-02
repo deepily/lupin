@@ -50,6 +50,28 @@ def resolve_source_path( path ):
     return path if path.startswith( "/" ) else cu.get_project_root() + "/" + path
 
 
+def upload_skip_reason( config, user_email ):
+    """
+    Decide whether the job's user may be uploaded, from `podcast drive upload users`.
+
+    Requires:
+        - config carries drive_upload_users and drive_owner_email
+        - user_email is the job's user, or None
+
+    Ensures:
+        - "all" always allows; "owner" allows only drive_owner_email; any other value is a comma list of emails
+        - emails compare case-insensitively; an empty owner or an unknown user is never allowed
+        - returns None when allowed, else a one-sentence reason for the log
+    """
+    scope = ( config.drive_upload_users or "owner" ).strip().lower()
+    user  = ( user_email or "" ).strip().lower()
+    if scope == "all": return None
+    names   = [ config.drive_owner_email ] if scope == "owner" else scope.split( "," )
+    allowed = { n.strip().lower() for n in names if n.strip() }
+    if user and user in allowed: return None
+    return f"'podcast drive upload users' is '{scope}' and {user or 'an unknown user'} is not in it"
+
+
 def _load_config():
     """
     Load the PodcastConfig from the INI. Used by callers that do not already hold one.
@@ -117,7 +139,7 @@ def _publish_sync( audio_by_lang, script_by_lang, source_path, job_folder_name, 
     return publisher.publish_job( job_folder_name, _collect_files( audio_by_lang, script_by_lang, source_path, config ), title=read_script_title( script ) )
 
 
-async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, job_folder_name=None, config=None ):
+async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, job_folder_name=None, config=None, user_email=None ):
     """
     Upload a finished podcast to Google Drive when publishing is on, and never fail the job.
 
@@ -125,12 +147,16 @@ async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, 
         - audio_by_lang and script_by_lang map language to an absolute file path
         - source_path is the source document's path, absolute or relative to the project root, or None
         - job_folder_name is the Drive subfolder name, or None to build <timestamp>-<topic> from source_path
-        - config carries the five drive_* fields and publish_to_google_drive, or None to load it from the INI
+        - config carries the drive_* fields and publish_to_google_drive, or None to load it from the INI
+        - user_email is the job's user, or None
 
     Ensures:
         - everything runs inside one boundary: loading the config, resolving the path and naming the
           folder can fail without failing the job
         - flag off: returns the empty result and imports no Google module
+        - user not allowed by `podcast drive upload users`: logs the user and reason, uploads nothing, and
+          "extra_lines" carries one "**Drive**: not uploaded to Drive (setting)" line, or "(no user email)"
+          when the job has no user
         - success: "language_links" maps each language with an uploaded mp3 to its Drive link, and
           "extra_lines" carries one "**Drive folder**" line
         - any failure (including a non-Drive exception): "extra_lines" carries one
@@ -142,6 +168,12 @@ async def publish_podcast_to_drive( audio_by_lang, script_by_lang, source_path, 
     try:
         if config is None: config = _load_config()
         if not config.publish_to_google_drive: return result
+        skip_reason = upload_skip_reason( config, user_email )
+        if skip_reason:
+            print( f"[DriveHook] not uploading for {user_email}: {skip_reason}" )
+            why = "setting" if ( user_email or "" ).strip() else "no user email"
+            result[ "extra_lines" ].append( f"**Drive**: not uploaded to Drive ({why})" )
+            return result
         source_path     = resolve_source_path( source_path )
         job_folder_name = job_folder_name or make_job_folder_name( source_path or "podcast" )
         published       = await asyncio.to_thread( _publish_sync, audio_by_lang, script_by_lang, source_path, job_folder_name, config )
