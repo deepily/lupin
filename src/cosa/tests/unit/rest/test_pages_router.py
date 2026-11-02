@@ -356,7 +356,7 @@ class TestTaskApproveLandingPage( unittest.TestCase ):
 
 class TestTaskViewLandingPage( unittest.TestCase ):
     """
-    Unit tests for `/app/tasks/view`, the read-only landing for a card's 📄 link.
+    Unit tests for `/app/tasks/view`, the read-only landing for a card's 📋 link.
 
     Ensures:
         - A GET through TestClient answers 200 text/html with the no-cache header

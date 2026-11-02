@@ -177,7 +177,7 @@ async def page_tasks_approve():
 @router.get( "/app/tasks/view", include_in_schema=False )
 async def page_tasks_view():
     """
-    Serve the read-only landing page for a card's 📄 view link.
+    Serve the read-only landing page for a card's 📋 view link.
 
     Requires:
         - html/task-view.html exists under the static directory

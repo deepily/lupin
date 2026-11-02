@@ -4493,13 +4493,13 @@ def task_approve_line( task_id: str ) -> dict:
 
     The bullet carries a link that lets Rick approve the row with one click.
 
-    Use it whenever you ask Rick to approve rows: put one returned `line` per row in your action-required card. Both browser clients turn a click on the link into the approve move and show "approved ✅" in place. A 📄 link beside it shows the ticket. Do not hand-type the link.
+    Use it whenever you ask Rick to approve rows: put one returned `line` per row in your action-required card. Both browser clients turn a click on the link into the approve move and show "approved ✅" in place. A 📋 link beside it shows the ticket. Do not hand-type the link.
 
     Args:
         task_id: The row's full lowercase UUID. A short or malformed id is refused here without asking the server.
 
     Returns:
-        { "line": "- <title> [approve ☐](/app/tasks/approve?row=<id>) [📄](/app/tasks/view?row=<id>)" }, or an error dict: `invalid_row_id`, `blank_title`, or the server's own error for a row it could not return (404, auth, transport).
+        { "line": "- <title> [approve ☐](/app/tasks/approve?row=<id>) [📋](/app/tasks/view?row=<id>)" }, or an error dict: `invalid_row_id`, `blank_title`, or the server's own error for a row it could not return (404, auth, transport).
 
     Example:
         task_approve_line(task_id="a3975cf4-c640-4659-9247-0a99fa8a5f4a")

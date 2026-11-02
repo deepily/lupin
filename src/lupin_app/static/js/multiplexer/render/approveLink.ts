@@ -2,9 +2,9 @@
 // One-click ticket approval in the multiplexer.
 //
 // A manager asking Rick to approve rows writes each as a bullet with an ordinary markdown link:
-// `[approve ☐](/app/tasks/approve?row=<full uuid>) [📄](/app/tasks/view?row=<full uuid>)`.
+// `[approve ☐](/app/tasks/approve?row=<full uuid>) [📋](/app/tasks/view?row=<full uuid>)`.
 // Both links are actions, not destinations. The approve click sends the approve move and draws "approved ✅"
-// where the link was. The 📄 click reads the row and shows it the way the abstract 📋 shows text.
+// where the link was. The 📋 click reads the row and shows it the way the abstract 📋 shows text.
 // A card drawn after a reload is checked once per row id: a row that has left the holding area
 // shows "approved ✅" (or its plain status when it was dropped), not a live link.
 //
@@ -23,13 +23,13 @@ export const APPROVE_LINK_PREFIX = "/app/tasks/approve?row=";
 // A full lowercase hyphenated row id, the only thing sent to the server.
 const ROW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** Every 📄 view link starts here, after loopback normalization. */
+/** Every 📋 view link starts here, after loopback normalization. */
 export const VIEW_LINK_PREFIX = "/app/tasks/view?row=";
 
 /** Shows text the way the abstract 📋 does: in the Reading Pane or the tooltip, by layout. */
 export type AbstractShower = ( anchor: Element, abstract: string, title: string ) => void;
 
-/** Reads one row for the 📄 overlay and the redraw check; null when the read failed. */
+/** Reads one row for the 📋 link and the redraw check; null when the read failed. */
 export type TaskReader = ( id: string ) => Promise<TaskItem | null>;
 
 /** The one call this module needs, taken from the holding-area store so the two cannot drift. */
@@ -45,7 +45,7 @@ export function approveRowId( href: string | null ): string | null {
   return rowIdAfter( APPROVE_LINK_PREFIX, href );
 }
 
-/** The row id a 📄 view-link href names, or null when the href is not a view link. */
+/** The row id a 📋 view-link href names, or null when the href is not a view link. */
 export function viewRowId( href: string | null ): string | null {
   return rowIdAfter( VIEW_LINK_PREFIX, href );
 }
@@ -90,7 +90,7 @@ export function handleApproveLinkClick( ev: Event, target: Element, sender: Appr
 }
 
 /**
- * The reader the 📄 link and the redraw check share, built on the api client.
+ * The reader the 📋 link and the redraw check share, built on the api client.
  *
  * Requires: api.get sends a GET and resolves with the parsed body.
  * Ensures:
@@ -122,7 +122,7 @@ export function taskOverlayText( row: TaskItem ): string {
 }
 
 /**
- * Handle a click that may be on a 📄 view link. Returns true when the click was claimed.
+ * Handle a click that may be on a 📋 view link. Returns true when the click was claimed.
  *
  * Ensures:
  *   - a non-view click is untouched and reports false
