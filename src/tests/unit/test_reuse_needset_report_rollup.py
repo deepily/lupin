@@ -62,6 +62,19 @@ def test_yield_plan_only_marks_figures_not_run():
     assert "| draft_failed | 29 |" in text and "disputed_ids" not in text and "Seeds 100, needs 70" in text
 
 
+def test_yield_plan_names_each_skipped_seed_with_code_and_cut_detail():
+    skipped = [ { "seed": "s-1", "code": "STRIP_FAILED", "detail": "line one\nhas | a bar " + "x" * 200 }, { "seed": "s-2", "code": "BAD_REPLY", "detail": "short" } ]
+    plan    = { "live": False, "plan": { **YIELD_PLAN[ "plan" ], "no_final_need": { **NO_NEED, "skipped": skipped } } }
+    text    = rr.yield_section( plan )
+    assert "| skipped seed | code | detail |" in text and "| s-2 | BAD_REPLY | short |" in text
+    row = next( l for l in text.split( "\n" ) if l.startswith( "| s-1 " ) )
+    assert "line one has a bar xxx" in row and "\n" not in row and row.count( "|" ) == 4 and len( row.split( "| " )[ 3 ] ) <= 103
+
+
+def test_yield_plan_without_skipped_seeds_says_none():
+    assert "Skipped seeds: none." in rr.yield_section( YIELD_PLAN )
+
+
 def test_yield_run_gives_wilson_overall_and_per_language():
     text = rr.yield_section( YIELD_RUN )
     assert "| all | 6/10 (60.0%, 31.3-83.2%) |" in text
