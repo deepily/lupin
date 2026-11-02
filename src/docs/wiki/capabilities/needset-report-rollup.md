@@ -19,7 +19,7 @@ pins:
   - lupin_mcp.reuse_needset.report_rollup.parse_args@5012ccf80a
   - lupin_mcp.reuse_needset.report_rollup.main@fd8374792d
   - lupin_mcp.reuse_needset.report_rollup.control_report_of@82bff48097
-  - lupin_mcp.reuse_needset.report_rollup.legacy_control@493687a942
+  - lupin_mcp.reuse_needset.report_rollup.legacy_control@39390c8c0e
   - lupin_mcp.reuse_needset.report_rollup.control_sections@1b1513d027
 ---
 # Need set: report roll-up
