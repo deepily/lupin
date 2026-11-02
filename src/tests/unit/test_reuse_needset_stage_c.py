@@ -681,6 +681,20 @@ def test_a_live_run_that_uses_the_environment_context_builds_it_on_the_source_tr
     assert out[ "closed_run" ] == "closed-by-rt" and state[ "closed" ] == closed_before
 
 
+def test_a_live_redraft_exits_zero_through_the_command_line_runner( tmp_path ):
+    world = RedraftWorld( tmp_path )
+    lines = [ ]
+    with mock.patch.object( sc, "collect_rows", return_value=( world.rows, [ ], [ ] ) ), mock.patch.object( sc.draft, "draft_need", side_effect=world.draft_need ), mock.patch.object( sc.draft, "make_ledger", return_value="ledger" ), \
+         mock.patch.object( sc.strip, "strip_member", return_value={ "kind": "k", "text": "t", "forbidden": [ ] } ), mock.patch.object( sc.source_at, "ensure_worktree", return_value="the-tree" ), mock.patch.object( sc.source_at, "unlock" ):
+        code = sc.run_cli( argv( tmp_path, "--redraft", "--live", "--cli-path", str( tmp_path / "claude" ) ), { "drafter": "the-drafter" }, out=lines.append )
+    assert code == 0 and json.loads( lines[ 0 ] )[ "mode" ] == "stage_c_redraft"
+
+
+def test_the_exit_status_of_the_replay_and_the_redraft_plan_is_zero_and_the_judge_runs_keep_theirs():
+    assert sc.exit_status( { "mode": "stage_c_save_rejects", "live": False } ) == 0 and sc.exit_status( { "mode": "stage_c_redraft", "live": False } ) == 0 and sc.exit_status( { "mode": "stage_c_redraft", "live": True } ) == 0
+    assert sc.exit_status( { "mode": "stage_c", "live": False } ) == 0
+
+
 def test_the_cap_ends_a_live_run_with_a_report_and_the_exit_status_says_so( tmp_path ):
     deps, _state = live_parts( tmp_path )
     ( tmp_path / "run-dir" ).mkdir()
