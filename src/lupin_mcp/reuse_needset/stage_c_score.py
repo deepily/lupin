@@ -394,18 +394,25 @@ def valid_run( results ):
         - results are the report's rows
 
     Ensures:
-        - returns { valid, posts, distinct_hashes, without_tokens, short_pairs, reasons }
+        - returns { valid, posts, shared, stray_pairs, distinct_hashes, without_tokens, short_pairs, unanswered_pairs, reasons }
+        - a row with a shared_with key is a twin's copy of a posted row, not a post; posts, hashes and token counts read the other rows
         - valid needs every post to have its own request hash, every post to report tokens ( so none was served from the cache ), every pair to have three repeats, and every status to be answered
+        - valid also needs every shared_with to name a posted row of the same report with the same repeat, so a stray copy fails the run
     """
-    hashes  = [ r[ "request_hash" ] for r in results ]
+    posted  = [ r for r in results if "shared_with" not in r ]
+    twins   = [ r for r in results if "shared_with" in r ]
+    keys    = { ( r[ "pair" ], r[ "repeat" ] ) for r in posted }
+    strays  = sorted( { r[ "pair" ] for r in twins if ( r[ "shared_with" ], r[ "repeat" ] ) not in keys } )
+    hashes  = [ r[ "request_hash" ] for r in posted ]
     per     = { }
     for r in results: per.setdefault( r[ "pair" ], set() ).add( r[ "repeat" ] )
     short   = sorted( p for p, reps in per.items() if len( reps ) < REPEATS )
     bad     = sorted( { r[ "pair" ] for r in results if r[ "status" ] != "answered" or not r[ "side_b" ][ "answered" ] or not r[ "side_a" ][ "answered" ] } )
-    notoken = sum( 1 for r in results if not r[ "tokens_in" ] )
+    notoken = sum( 1 for r in posted if not r[ "tokens_in" ] )
     reasons = [ text for text, hit in ( ( "a post shares its request hash with another", len( set( hashes ) ) != len( hashes ) ), ( f"{notoken} posts reported no tokens, so they may be cache reads", notoken > 0 ),
-                                        ( f"{len( short )} pairs lack a repeat", bool( short ) ), ( f"{len( bad )} pairs have a post that was not answered", bool( bad ) ), ( "the report has no results", not results ) ) if hit ]
-    return { "valid": not reasons, "posts": len( results ), "distinct_hashes": len( set( hashes ) ), "without_tokens": notoken, "short_pairs": short, "unanswered_pairs": bad, "reasons": reasons }
+                                        ( f"{len( short )} pairs lack a repeat", bool( short ) ), ( f"{len( bad )} pairs have a post that was not answered", bool( bad ) ),
+                                        ( f"{len( strays )} pairs carry a copy that names no posted row of the same repeat", bool( strays ) ), ( "the report has no results", not results ) ) if hit ]
+    return { "valid": not reasons, "posts": len( posted ), "shared": len( twins ), "stray_pairs": strays, "distinct_hashes": len( set( hashes ) ), "without_tokens": notoken, "short_pairs": short, "unanswered_pairs": bad, "reasons": reasons }
 
 
 def lowest( levels, order ):
