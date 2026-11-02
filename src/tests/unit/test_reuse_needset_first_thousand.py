@@ -30,6 +30,11 @@ class PlantedStage( str ):
 PLANTED = PlantedStage( "planted stage" )
 
 
+def live_pool():
+    """Return the pool as the real index has it, with the originals under dotted ids."""
+    return [ { **r, "id": f"idx.{r[ 'id' ]}" } for r in pool() ]
+
+
 def live_ctx():
     """Return a context whose candidate stage is the live stand-in."""
     return types.SimpleNamespace( candidate_stage=LiveStage( "live stage" ) )
@@ -249,13 +254,14 @@ def test_the_live_control_drafts_first_then_plants_and_the_calls_are_the_drafter
 
     def check( need, c, planted, entries ):
         log.append( ( "check", need[ "seed" ], planted ) )
-        return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ] + [ need[ "seed" ] ], "widened_ids": [] }, "shortlist": [] }
+        return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ] + [ f"idx.{need[ 'seed' ]}" ], "widened_ids": [] }, "shortlist": [] }
 
-    stage = ft.control_stage_live( ctx, ps, "ask", "ledger", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )
+    stage = ft.control_stage_live( ctx, ps, "ask", "ledger", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )
     out   = asyncio.run( stage() )
     kinds = [ k[ 0 ] for k in log ]
-    assert kinds == [ "draft" ] * 20 + [ "stage" ] + [ "check" ] * 20 and log[ 20 ] == ( "stage", "live stage", 20, "CACHE" ) and out[ "found" ] == 20 and out[ "stop" ] is False
-    assert all( k[ 2 ] == "planted stage" for k in log[ 21: ] ) and [ k[ 1 ] for k in log[ 21: ] ] == [ p[ "original" ][ "id" ] for p in ps ]
+    assert kinds == [ "draft" ] * 20 + [ "stage", "stage" ] + [ "check" ] * 40 and log[ 20 ] == ( "stage", "live stage", 20, "CACHE" ) and log[ 21 ] == ( "stage", "live stage", 20, "CACHE-bare" )
+    assert out[ "found" ] == 20 and out[ "stop" ] is False
+    assert all( k[ 2 ] == "planted stage" for k in log[ 22: ] ) and [ k[ 1 ] for k in log[ 22: ][ ::2 ] ] == [ p[ "original" ][ "id" ] for p in ps ], "each pair is checked live, then once over the bare plants"
 
 
 def index_records():
@@ -693,7 +699,7 @@ def control_world( ledgers, miss_on_second=False ):
 
     def check( need, c, planted, entries ):
         n    = len( ledgers ) // 20
-        keep = [ e[ "id" ] for e in entries ] + [ need[ "seed" ] ]
+        keep = [ e[ "id" ] for e in entries ] + [ f"idx.{need[ 'seed' ]}" ]
         if miss_on_second and n == 2: keep = keep[ 1: ]
         return { "id": "r", "candidate_stage": { "ids": keep, "widened_ids": [] }, "shortlist": [] }
 
@@ -704,10 +710,10 @@ def test_the_control_runs_twice_when_asked_each_pass_on_its_own_ledger_and_cache
     ps, ledgers, caches = [ real_pair( i ) for i in range( 20 ) ], [], []
     ctx, draft_fn, check = control_world( ledgers )
     monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache, **kw: caches.append( cache ) or PLANTED )
-    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
                                    passes=2, pass_resources=lambda n: ( f"L{n + 1}", f"CACHE-pass{n + 1}" ) )
     out = asyncio.run( stage() )
-    assert ledgers == [ "L1" ] * 20 + [ "L2" ] * 20 and caches == [ "CACHE", "CACHE-pass2" ], "the second pass asks again, from its own ledger and cache"
+    assert ledgers == [ "L1" ] * 20 + [ "L2" ] * 20 and caches == [ "CACHE", "CACHE-bare", "CACHE-pass2", "CACHE-pass2-bare" ], "the second pass asks again, from its own cache"
     assert len( out[ "passes" ] ) == 2 and out[ "consistent" ] is True and out[ "stop" ] is False and out[ "found" ] == 20 and out[ "passes" ][ 1 ][ "found" ] == 20
 
 
@@ -715,7 +721,7 @@ def test_a_pair_missed_on_one_pass_only_makes_the_passes_inconsistent_and_a_plan
     ps, ledgers, caches = [ real_pair( i ) for i in range( 20 ) ], [], []
     ctx, draft_fn, check = control_world( ledgers, miss_on_second=True )
     monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache, **kw: PLANTED )
-    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
                                    passes=2, pass_resources=lambda n: ( "L2", "C2" ) )
     out = asyncio.run( stage() )
     assert out[ "passes" ][ 0 ][ "missed" ] == [] and len( out[ "passes" ][ 1 ][ "missed" ] ) == 1 and out[ "consistent" ] is False
@@ -814,7 +820,7 @@ def run_budget_control( monkeypatch, budget_on, passes=2, error_code=er.STAGE_BU
     ps, ledgers = [ real_pair( i ) for i in range( 20 ) ], []
     ctx, drafting, check = budget_control( budget_on, ledgers, error_code )
     monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache, **kw: PLANTED )
-    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, drafting, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, drafting, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
                                    passes=passes, pass_resources=lambda n: ( "L2", "C2" ) )
     return asyncio.run( stage() )
 
@@ -836,7 +842,7 @@ def test_a_finished_multi_pass_control_says_it_was_not_stopped_by_the_budget_and
     ps, ledgers = [ real_pair( i ) for i in range( 20 ) ], []
     ctx, draft_fn, check = control_world( ledgers )
     monkeypatch.setattr( ft, "planted_stage_for", lambda live, entries, cache, **kw: PLANTED )
-    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
                                    passes=2, pass_resources=lambda n: ( "L2", "C2" ) )
     done = asyncio.run( stage() )
     assert done[ "budget_reached" ] is False and done[ "budget_detail" ] is None and done[ "passes_done" ] == 2
@@ -1003,9 +1009,9 @@ def test_the_control_runs_over_the_pairs_that_drafted_and_the_report_names_the_p
         if job[ "seed" ][ "id" ] == "d-orig01": return { "ok": False, "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [ { "try": 0, "failures": [ "identifier" ], "words": [ "toolbar" ] } ] }
         return { "ok": True, "need": SENTENCE }
 
-    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ] + [ need[ "seed" ] ], "widened_ids": [] }, "shortlist": [] }
+    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ] + [ f"idx.{need[ 'seed' ]}" ], "widened_ids": [] }, "shortlist": [] }
 
-    out = asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
+    out = asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
     assert out[ "pairs" ] == 19 and out[ "found" ] == 19 and out[ "stop" ] is False and "d-rew01" not in log[ 0 ][ 1 ] and len( log[ 0 ][ 1 ] ) == 19
     assert out[ "undrafted" ] == [ { "pair": "d-rew01", "seed": "d-orig01", "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [ { "try": 0, "failures": [ "identifier" ], "words": [ "toolbar" ] } ] } ]
 
@@ -1019,11 +1025,11 @@ def test_a_control_where_no_pair_drafts_still_fails_by_name_and_a_clean_one_repo
 
     def clean( job, ask, ledger, **kw ): return { "ok": True, "need": SENTENCE }
 
-    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ] + [ need[ "seed" ] ], "widened_ids": [] }, "shortlist": [] }
+    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ] + [ f"idx.{need[ 'seed' ]}" ], "widened_ids": [] }, "shortlist": [] }
 
-    with pytest.raises( er.NeedsetError ) as e: asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, leaking, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
+    with pytest.raises( er.NeedsetError ) as e: asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, leaking, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
     assert e.value.code == er.CONTROL_NEED_UNDRAFTED and "none of the 3 pairs" in e.value.detail and "d-rew00" in e.value.detail
-    out = asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, clean, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
+    out = asyncio.run( ft.control_stage_live( ctx, ps, "ask", "L", strip_of, clean, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )() )
     assert out[ "undrafted" ] == [] and out[ "pairs" ] == 3
 
 
@@ -1037,9 +1043,9 @@ def two_pass_control( monkeypatch, leaves_out ):
         if job[ "seed" ][ "id" ] in leaves_out[ ledger ]: return { "ok": False, "reason": "NEED_LEAKS_KEY", "tries": 4, "history": [] }
         return { "ok": True, "need": SENTENCE }
 
-    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ] + [ need[ "seed" ] ], "widened_ids": [] }, "shortlist": [] }
+    def check( need, c, planted, entries ): return { "id": "r", "candidate_stage": { "ids": [ e[ "id" ] for e in entries ] + [ f"idx.{need[ 'seed' ]}" ], "widened_ids": [] }, "shortlist": [] }
 
-    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, "CACHE", prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
                                    passes=2, pass_resources=lambda n: ( "L2", "C2" ) )
     return asyncio.run( stage() )
 
@@ -1065,7 +1071,7 @@ def test_consistent_compares_the_pairs_left_out_as_well_as_the_pairs_missed( mon
     assert one_less[ "consistent" ] is False
 
 
-def scored_world( tmp_path, monkeypatch, ids_of=None, shortlist_of=None, lines=None, without=( ), same_job=None, label_info=None, passes=1 ):
+def scored_world( tmp_path, monkeypatch, ids_of=None, shortlist_of=None, lines=None, without=( ), same_job=None, label_info=None, passes=1, bare_ids_of=None ):
     """
     Run the live control on fakes; return ( report, what planted_stage_for was given ).
 
@@ -1075,17 +1081,19 @@ def scored_world( tmp_path, monkeypatch, ids_of=None, shortlist_of=None, lines=N
     live      = LiveStage( "live stage" )
     live.purposes_path = str( tmp_path / "live-purposes.jsonl" )
     ( tmp_path / "live-purposes.jsonl" ).write_text( json.dumps( { "pin": "pin00", "purpose": "Original line that tears down." } ) + "\n", encoding="utf-8" )
-    ctx       = types.SimpleNamespace( candidate_stage=live )
-    given     = {}
-    monkeypatch.setattr( ft, "planted_stage_for", lambda live_stage, entries, cache, **kw: given.update( entries=entries, cache=cache, kw=kw ) or PLANTED )
+    ctx       = types.SimpleNamespace( candidate_stage=live, transport=None )
+    given     = { "calls": [ ], "transports": [ ] }
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live_stage, entries, cache, **kw: given[ "calls" ].append( { "entries": entries, "cache": cache, "kw": kw } ) or PLANTED )
 
     def draft_fn( job, ask, ledger, **kw ): return { "ok": True, "need": SENTENCE }
 
     def check( need, c, planted, entries ):
-        ids = [ e[ "id" ] for e in entries ] + [ need[ "seed" ] ] if ids_of is None else ids_of( need, entries )
+        given[ "transports" ].append( type( c.transport ).__name__ )
+        arm = bare_ids_of if isinstance( c.transport, ft.RefusingTransport ) and bare_ids_of is not None else ids_of
+        ids = [ e[ "id" ] for e in entries ] + [ f"idx.{need[ 'seed' ]}" ] if arm is None else arm( need, entries )
         return { "id": "r", "candidate_stage": { "ids": ids, "widened_ids": [] }, "shortlist": [ { "id": i } for i in ( ids if shortlist_of is None else shortlist_of( need, ids ) ) ] }
 
-    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, str( tmp_path / "cache" ), prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
+    stage = ft.control_stage_live( ctx, ps, "ask", "L1", strip_of, draft_fn, str( tmp_path / "cache" ), prepare=lambda c: ( set(), live_pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage,
                                    passes=passes, pass_resources=lambda n: ( "L2", str( tmp_path / f"cache-pass{n + 1}" ) ), plant_lines=lines, plant_without=without, same_job=same_job, label_info=label_info )
     return asyncio.run( stage() ), given
 
@@ -1093,40 +1101,83 @@ def scored_world( tmp_path, monkeypatch, ids_of=None, shortlist_of=None, lines=N
 def test_the_scored_control_gives_each_plant_its_line_through_a_merged_store_and_a_row_per_pair_with_the_leak_beside_the_original( monkeypatch, tmp_path ):
     pin   = planted_pool.planted_entry( real_pair( 0 )[ "rewrite" ] )[ "pin" ]
     out, given = scored_world( tmp_path, monkeypatch, lines={ pin: "Does the plant's work." }, without=[ "d-rew01" ], label_info={ "answer_key_sha": "k" } )
-    assert given[ "kw" ][ "purposes" ] == { pin: "Does the plant's work." } and given[ "kw" ][ "purposes_file" ] == f"{tmp_path}/cache-purposes.jsonl"
-    merged = [ json.loads( line ) for line in pathlib.Path( given[ "kw" ][ "purposes_file" ] ).read_text( encoding="utf-8" ).splitlines() ]
+    live_call, bare_call = given[ "calls" ]
+    assert live_call[ "kw" ][ "purposes" ] == { pin: "Does the plant's work." } and live_call[ "kw" ][ "purposes_file" ] == f"{tmp_path}/cache-purposes.jsonl"
+    assert bare_call[ "cache" ] == f"{tmp_path}/cache-bare" and bare_call[ "kw" ] == { }, "the bare stage is built with no purpose line at all"
+    merged = [ json.loads( line ) for line in pathlib.Path( live_call[ "kw" ][ "purposes_file" ] ).read_text( encoding="utf-8" ).splitlines() ]
     assert merged == [ { "pin": "pin00", "purpose": "Original line that tears down." }, { "pin": pin, "purpose": "Does the plant's work." } ], "the live lines first, then the plants', and the live store is only read"
     assert out[ "purpose_lines_used" ] == 1 and out[ "plants_without_line" ] == [ "d-rew01" ] and out[ "labels" ] == { "answer_key_sha": "k" }
     first = out[ "rows" ][ 0 ]
-    assert len( out[ "rows" ] ) == 20 and first[ "purpose_line" ] == "Does the plant's work." and first[ "original" ][ "id" ] == "d-orig00" and first[ "leak" ][ "original" ] == control_report.word_overlap( SENTENCE, "Original line that tears down." )
+    assert len( out[ "rows" ] ) == 20 and first[ "purpose_line" ] == "Does the plant's work." and first[ "original" ][ "id" ] == "idx.d-orig00" and first[ "leak" ][ "original" ] == control_report.word_overlap( SENTENCE, "Original line that tears down." )
     assert out[ "rows" ][ 1 ][ "purpose_line" ] is None and out[ "rows" ][ 1 ][ "leak" ] == { "plant": None, "original": None }
     assert out[ "primary" ][ "drafted" ] == 20 and out[ "primary" ][ "retrieval" ][ "k" ] == 20 and out[ "stop" ] is False and out[ "found" ] == 20
 
 
 def test_the_scored_control_without_lines_plants_bare_and_treats_every_pair_as_the_same_job_unless_labelled( monkeypatch, tmp_path ):
     out, given = scored_world( tmp_path, monkeypatch )
-    assert given[ "kw" ] == { "purposes": None, "purposes_file": None } and out[ "purpose_lines_used" ] == 0 and out[ "primary" ][ "drafted" ] == 20 and out[ "secondary" ][ "drafted" ] == 0
+    assert given[ "calls" ][ 0 ][ "kw" ] == { "purposes": None, "purposes_file": None } and out[ "purpose_lines_used" ] == 0 and out[ "primary" ][ "drafted" ] == 20 and out[ "secondary" ][ "drafted" ] == 0
     labelled, _ = scored_world( tmp_path, monkeypatch, same_job={ f"d-rew{i:02d}": i >= 5 for i in range( 20 ) } )
     assert labelled[ "primary" ][ "drafted" ] == 15 and labelled[ "secondary" ][ "drafted" ] == 5 and labelled[ "false_positives" ] == 5, "the five not-the-same-job plants the fake judge accepted are false positives"
 
 
 def test_a_plant_the_checker_misses_is_scored_and_listed_but_never_stops_the_run_while_the_originals_are_found( monkeypatch, tmp_path ):
-    blind = lambda need, entries: [ need[ "seed" ] ]
+    blind = lambda need, entries: [ f"idx.{need[ 'seed' ]}" ]
     out, _ = scored_world( tmp_path, monkeypatch, ids_of=blind )
-    assert out[ "found" ] == 0 and len( out[ "missed" ] ) == 20 and out[ "primary" ][ "retrieval" ][ "k" ] == 0 and out[ "primary" ][ "pass_mark" ] == { "a": 20, "b": 0, "slack": 2, "passed": False }
-    assert out[ "stop" ] is False and out[ "originals_floor" ][ "rate" ] == 1.0
+    assert out[ "found" ] == 0 and len( out[ "missed" ] ) == 20 and out[ "primary" ][ "retrieval" ][ "k" ] == 0 and out[ "primary" ][ "pass_mark" ] == { "a": 20, "b": 0, "n": 20, "slack": 2, "passed": False }
+    assert out[ "stop" ] is False and out[ "originals" ] == control_report.count( 20, 20 )
 
 
-def test_the_control_stops_only_when_the_originals_fall_under_the_floor_because_the_needs_broke( monkeypatch, tmp_path ):
+def test_a_control_whose_originals_are_all_missed_still_does_not_stop_and_reports_their_rate_beside_the_attribution_figure( monkeypatch, tmp_path ):
     out, _ = scored_world( tmp_path, monkeypatch, ids_of=lambda need, entries: [ e[ "id" ] for e in entries ] )
-    assert out[ "found" ] == 20 and out[ "stop" ] is True and out[ "originals_floor" ][ "rate" ] == 0.0
+    assert out[ "found" ] == 20 and out[ "stop" ] is False and out[ "originals" ] == control_report.count( 0, 20 ) and out[ "attribution" ] == control_report.count( 27, 37 )
+    assert out[ "primary" ][ "pass_mark" ][ "b" ] == 20 and out[ "primary" ][ "pass_mark" ][ "passed" ] is True, "the plants beat the originals, so the paired mark holds"
+
+
+def test_the_bare_arm_is_checked_on_a_transport_that_refuses_every_model_request_and_its_figure_sits_beside_the_lines( monkeypatch, tmp_path ):
+    only_originals = lambda need, entries: [ f"idx.{need[ 'seed' ]}" ]
+    out, given = scored_world( tmp_path, monkeypatch, bare_ids_of=only_originals )
+    assert given[ "transports" ] == [ "NoneType", "RefusingTransport" ] * 20, "the live check keeps the context's own transport and the bare one is refused"
+    assert out[ "primary" ][ "retrieval" ] == control_report.count( 20, 20 ) and out[ "primary" ][ "retrieval_bare" ] == control_report.count( 0, 20 )
+    assert all( r[ "plant" ][ "retrieved" ] and not r[ "plant_bare" ][ "retrieved" ] for r in out[ "rows" ] ) and out[ "stop" ] is False
+
+
+def test_the_refusing_transport_raises_on_every_post_counts_the_refusals_and_sends_nothing():
+    transport = ft.RefusingTransport()
+    for n in range( 2 ):
+        with pytest.raises( ft.NoModelCall, match="no model call" ): transport.post_with_meta( { "state": { "need": f"n{n}" } } )
+    assert len( transport.refused ) == 2 and transport.calls == 0
+
+
+def test_the_original_is_found_by_file_and_name_and_the_pair_is_refused_before_any_check_when_its_id_is_an_index_id_or_it_is_not_there():
+    ps    = [ real_pair( i ) for i in range( 3 ) ]
+    found = ft.original_entries( ps, live_pool(), { "pin01": "A stored line." } )
+    assert found == { "d-rew00": { "id": "idx.d-orig00", "line": None }, "d-rew01": { "id": "idx.d-orig01", "line": "A stored line." }, "d-rew02": { "id": "idx.d-orig02", "line": None } }
+    with pytest.raises( er.NeedsetError ) as excluded: ft.original_entries( ps, pool(), { } )
+    assert excluded.value.code == er.CONTROL_ORIGINAL_EXCLUDED and "d-orig00" in excluded.value.detail and "leave it out" in excluded.value.detail
+    gone = [ r for r in live_pool() if r[ "name" ] != ps[ 1 ][ "original" ][ "name" ] ]
+    with pytest.raises( er.NeedsetError ) as missing: ft.original_entries( ps, gone, { } )
+    assert missing.value.code == er.CONTROL_ORIGINAL_UNRESOLVED and "d-orig01" in missing.value.detail
+
+
+def test_a_control_with_an_original_the_index_would_leave_out_stops_by_name_before_the_first_plant_is_checked( monkeypatch, tmp_path ):
+    checked = [ ]
+    monkeypatch.setattr( ft, "planted_stage_for", lambda live_stage, entries, cache, **kw: PLANTED )
+    ps = [ real_pair( i ) for i in range( 3 ) ]
+
+    def check( need, c, planted, entries ):
+        checked.append( need[ "seed" ] )
+        return { "id": "r", "candidate_stage": { "ids": [ ], "widened_ids": [ ] }, "shortlist": [ ] }
+
+    stage = ft.control_stage_live( live_ctx(), ps, "ask", "L", strip_of, lambda job, ask, ledger, **kw: { "ok": True, "need": SENTENCE }, "CACHE", prepare=lambda c: ( set(), pool(), "sha", "gen" ), check=check, build_stage=cs.build_stage )
+    with pytest.raises( er.NeedsetError ) as caught: asyncio.run( stage() )
+    assert caught.value.code == er.CONTROL_ORIGINAL_EXCLUDED and checked == [ ], "no plant was checked, so no judge call could be spent on a control that cannot read the originals"
 
 
 def test_the_judge_figure_counts_a_plant_only_when_the_judge_rated_it_relevant_and_two_passes_each_carry_a_pass_mark( monkeypatch, tmp_path ):
-    only_orig = lambda need, ids: [ need[ "seed" ] ]
+    only_orig = lambda need, ids: [ f"idx.{need[ 'seed' ]}" ]
     out, _ = scored_world( tmp_path, monkeypatch, shortlist_of=only_orig, passes=2 )
     assert out[ "passes" ][ 0 ][ "primary" ][ "retrieval" ][ "k" ] == 20 and out[ "passes" ][ 0 ][ "primary" ][ "judge" ] == control_report.count( 0, 20 ) and out[ "pass_marks" ] == [ True, True ]
-    assert out[ "passes" ][ 0 ][ "primary" ][ "originals_accepted" ][ "k" ] == 20 and out[ "stop" ] is False
+    assert out[ "passes" ][ 0 ][ "primary" ][ "originals_retrieved" ][ "k" ] == 20 and out[ "stop" ] is False
 
 
 def test_the_ask_tells_an_observer_about_each_pair_after_the_check_and_before_the_ids_are_read():

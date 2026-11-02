@@ -3,6 +3,7 @@ The positive control's report for run -m, scored by the rules fixed before the r
 
 A pair is scored where it was lost. Retrieval asks if the plant is in the shortlist, the judge if it was rated relevant, and end to end both.
 The plants are scored against their own originals on the same need, because the checker finds a known item about 7 times in 10.
+The original stays in the pool and competes with the plant: one search per pair gives both places.
 Pairs the human labels call a different job are a negative control, reported apart, and a plant found there is a false positive.
 Nothing here makes a model call or reads a file except the label files and the answer key.
 """
@@ -18,8 +19,11 @@ from lupin_mcp.reuse_needset import loss_trace
 
 NOT_SAME_JOB   = frozenset( ( "d-35e19468ee", "d-5270a48d23", "d-e4d0d1e147", "d-7a334b0576", "d-803557386f" ) )
 LABEL_FILES    = ( "labels-rick.jsonl", "labels-reviewer-2.jsonl", "labels-jason.jsonl" )
+KEY_FILE       = "answer-key.json"
+LABEL_PINS     = { "labels-rick.jsonl": "e87e9ef367406fce4f921a720c7334eced80f9d4ed99f595ae3feae7a6e0f961", "labels-reviewer-2.jsonl": "947b20b8af234309ec6f53e753128f90eec89358d47669f0eb7c38f66a99c26b",
+                   "labels-jason.jsonl": "2d7e4033a0263235f7c932323e3a3aca899d480ca18e6f32541d259ff7f3f5e2", "answer-key.json": "f17236f7cf913fcab41d5a6d9b0fab0c0a6dfc0e0caf9916d8e0d7bed22456e8" }
 PASS_SLACK     = 2
-ORIGINAL_FLOOR = 0.57
+ATTRIBUTION    = ( 27, 37 )
 
 
 def file_sha( path ):
@@ -27,7 +31,7 @@ def file_sha( path ):
     return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
 
 
-def same_job_labels( pairs, labels_dir, answer_key, expected_not_same=NOT_SAME_JOB ):
+def same_job_labels( pairs, labels_dir, answer_key, expected_not_same=NOT_SAME_JOB, expected_shas=LABEL_PINS ):
     """
     Settle whether each pair is the same job.
 
@@ -37,19 +41,23 @@ def same_job_labels( pairs, labels_dir, answer_key, expected_not_same=NOT_SAME_J
     Ensures:
         - returns { same_job: { rewrite id: bool }, label_shas: { file name: sha256 }, answer_key_sha }
         - a pair both reviewers label alike takes that label, and a disputed one takes the third rater's, as label_load.resolved_labels settles it
+        - the three label files and the answer key hash to expected_shas, unless that is None, before anything is read from them
         - the pairs that are not the same job are exactly expected_not_same
 
     Raises:
-        - NeedsetError CONTROL_LABELS_CHANGED naming the difference when the not-same set is not expected_not_same
+        - NeedsetError CONTROL_LABELS_CHANGED naming the files whose hash differs, or the difference when the not-same set is not expected_not_same
         - ValueError from label_load when a label file is incomplete
     """
     first, second, third = ( f"{labels_dir}/{name}" for name in LABEL_FILES )
+    shas      = { **{ name: file_sha( f"{labels_dir}/{name}" ) for name in LABEL_FILES }, KEY_FILE: file_sha( answer_key ) }
+    changed   = sorted( n for n in shas if expected_shas is not None and shas[ n ] != expected_shas[ n ] )
+    if changed: raise er.NeedsetError( er.CONTROL_LABELS_CHANGED, f"the hash of {', '.join( changed )} is not the pinned one" )
     resolved  = label_load.resolved_labels( first, second, answer_key, third_path=third )
     same_job  = { p[ "rewrite" ][ "id" ]: bool( resolved[ proof_run.label_key( p[ "rewrite" ][ "id" ], p[ "original" ][ "id" ] ) ] ) for p in pairs }
     not_same  = frozenset( i for i, same in same_job.items() if not same )
     if not_same != expected_not_same:
         raise er.NeedsetError( er.CONTROL_LABELS_CHANGED, f"not the same job: {sorted( not_same )}; expected {sorted( expected_not_same )}" )
-    return { "same_job": same_job, "label_shas": { name: file_sha( f"{labels_dir}/{name}" ) for name in LABEL_FILES }, "answer_key_sha": file_sha( answer_key ) }
+    return { "same_job": same_job, "label_shas": { name: shas[ name ] for name in LABEL_FILES }, "answer_key_sha": shas[ KEY_FILE ] }
 
 
 def content_words( text ):
@@ -80,6 +88,7 @@ def ranks_of( answer, ident ):
 
     Requires:
         - answer is a search answer whose lists are whole, as PlantedCandidateStage.last_answer holds them
+        - when the check widened its shortlist the answer is the wide search's; the lists do not depend on the shortlist size, so the places agree
 
     Ensures:
         - returns { source name: place or None, ..., fused: place or None }
@@ -90,25 +99,40 @@ def ranks_of( answer, ident ):
     return { **{ n: position( lists[ n ], ident ) for n in sorted( lists ) }, "fused": position( fused, ident ) }
 
 
-def pair_row( pair, label, need, receipt, answer, line, original_id, original_line ):
+def reading( ident, receipt, answer ):
+    """
+    Read where one entry stood in one search.
+
+    Requires:
+        - receipt is a checker receipt and answer the planted stage's last answer for the same search
+
+    Ensures:
+        - returns { id, retrieved, ranks }; retrieved means in the ids sent to the judge, and ranks are ranks_of's
+    """
+    return { "id": ident, "retrieved": ident in set( loss_trace.asked_ids( receipt ) ), "ranks": ranks_of( answer, ident ) }
+
+
+def pair_row( pair, label, need, live, line, original, bare ):
     """
     Build the row of one drafted pair.
 
     Requires:
-        - receipt is the checker's receipt for the need; answer is the planted stage's last answer for that search
-        - line is the plant's purpose line or None; original_id is the original's id in the index or None; original_line is its stored line or None
+        - live and bare are ( receipt, answer ) pairs: the live check, and the same check over plants with no line
+        - line is the plant's purpose line or None; original is { id, line }, id being its id in the index and line its stored line or None
+        - the original is in the pool, because its id in the pair is not an index id and so nothing is left out
 
     Ensures:
-        - returns { rewrite, lang, same_job, drafted, plant, original, purpose_line, leak }
-        - retrieved means in the ids sent to the judge, and accepted means retrieved and rated relevant by the judge
+        - returns { rewrite, lang, same_job, drafted, plant, plant_bare, original, purpose_line, leak }
+        - plant and original are read from the one live search; accepted means retrieved and rated relevant by the judge
+        - plant_bare is the same plant planted with no purpose line, read from the bare search
         - leak is the word overlap of the need with the plant's line and with the original's, None for a line that does not exist
     """
-    rid      = pair[ "rewrite" ][ "id" ]
-    asked    = set( loss_trace.asked_ids( receipt ) )
-    rated    = { row[ "id" ] for row in receipt[ "shortlist" ] }
-    side     = lambda ident: { "id": ident, "retrieved": ident in asked, "accepted": ident in asked and ident in rated, "ranks": ranks_of( answer, ident ) }
-    return { "rewrite": rid, "lang": pair[ "rewrite" ][ "lang" ], "same_job": label, "drafted": True, "plant": side( rid ), "original": side( original_id ), "purpose_line": line,
-             "leak": { "plant": word_overlap( need, line ) if line is not None else None, "original": word_overlap( need, original_line ) if original_line is not None else None } }
+    rid                = pair[ "rewrite" ][ "id" ]
+    receipt, answer    = live
+    plant              = reading( rid, receipt, answer )
+    plant[ "accepted" ] = plant[ "retrieved" ] and rid in { row[ "id" ] for row in receipt[ "shortlist" ] }
+    return { "rewrite": rid, "lang": pair[ "rewrite" ][ "lang" ], "same_job": label, "drafted": True, "plant": plant, "plant_bare": reading( rid, *bare ), "original": reading( original[ "id" ], receipt, answer ),
+             "purpose_line": line, "leak": { "plant": word_overlap( need, line ) if line is not None else None, "original": word_overlap( need, original[ "line" ] ) if original[ "line" ] is not None else None } }
 
 
 def count( k, n ):
@@ -126,19 +150,19 @@ def figures( rows, undrafted_count ):
     Ensures:
         - retrieval is plants retrieved of drafted, judge is plants accepted of retrieved, end_to_end is plants accepted of drafted
         - itt counts every undrafted pair as a miss: retrieved and accepted of drafted plus undrafted
-        - originals_retrieved and originals_accepted are the same counts for the originals
-        - pass_mark.a counts pairs where the original was retrieved and the plant not, b the reverse; passed when a - b is at most PASS_SLACK, on retrieval
-        - pass_mark_end_to_end is the same count on acceptance, reported beside it and not gating
+        - retrieval_bare is the plants retrieved with no purpose line, the same count as retrieval
+        - originals_retrieved is the originals retrieved of drafted, from the same search as the plant
+        - pass_mark.a counts pairs where the original was retrieved and the plant not, b the reverse; passed when n is above 0 and a - b is at most PASS_SLACK
+        - the original competes with the plants present, as in the replay of run -l
     """
     n     = len( rows )
     plant = lambda key: sum( 1 for r in rows if r[ "plant" ][ key ] )
-    orig  = lambda key: sum( 1 for r in rows if r[ "original" ][ key ] )
-    marks = lambda key: ( lambda a, b: { "a": a, "b": b, "slack": PASS_SLACK, "passed": a - b <= PASS_SLACK } )(
-        sum( 1 for r in rows if r[ "original" ][ key ] and not r[ "plant" ][ key ] ), sum( 1 for r in rows if r[ "plant" ][ key ] and not r[ "original" ][ key ] ) )
+    a     = sum( 1 for r in rows if r[ "original" ][ "retrieved" ] and not r[ "plant" ][ "retrieved" ] )
+    b     = sum( 1 for r in rows if r[ "plant" ][ "retrieved" ] and not r[ "original" ][ "retrieved" ] )
     return { "drafted": n, "undrafted": undrafted_count, "retrieval": count( plant( "retrieved" ), n ), "judge": count( plant( "accepted" ), plant( "retrieved" ) ),
              "end_to_end": count( plant( "accepted" ), n ), "itt_retrieved": count( plant( "retrieved" ), n + undrafted_count ), "itt_end_to_end": count( plant( "accepted" ), n + undrafted_count ),
-             "originals_retrieved": count( orig( "retrieved" ), n ), "originals_accepted": count( orig( "accepted" ), n ),
-             "pass_mark": marks( "retrieved" ), "pass_mark_end_to_end": marks( "accepted" ) }
+             "retrieval_bare": count( sum( 1 for r in rows if r[ "plant_bare" ][ "retrieved" ] ), n ), "originals_retrieved": count( sum( 1 for r in rows if r[ "original" ][ "retrieved" ] ), n ),
+             "pass_mark": { "a": a, "b": b, "n": n, "slack": PASS_SLACK, "passed": n > 0 and a - b <= PASS_SLACK } }
 
 
 def scored( rows, undrafted, same_job ):
@@ -150,16 +174,15 @@ def scored( rows, undrafted, same_job ):
         - same_job maps every rewrite id to its label
 
     Ensures:
-        - returns { rows, primary, secondary, false_positives, originals_floor, stop }
+        - returns { rows, primary, secondary, false_positives, originals, attribution }
         - primary is figures over the same-job pairs and secondary over the others, the negative control
         - rows holds a row for each undrafted pair too, with drafted False, its reason and its word history, so no pair is dropped from the count
         - false_positives counts the not-the-same-job plants the judge accepted
-        - stop is True only when the originals retrieved of all drafted pairs fall under ORIGINAL_FLOOR, because then the needs broke and the plants did not; a plant miss never sets it
+        - originals is the originals retrieved of all drafted pairs, and attribution the attribution stage's 27 of 37, each with a Wilson interval and gating nothing
+        - nothing in the report stops the run: a plant miss and a low originals rate are figures
     """
     absent  = [ { "rewrite": u[ "pair" ], "same_job": same_job[ u[ "pair" ] ], "drafted": False, "reason": u[ "reason" ], "history": u[ "history" ] } for u in undrafted ]
     sides   = { key: [ r for r in rows if r[ "same_job" ] is want ] for key, want in ( ( "primary", True ), ( "secondary", False ) ) }
     lost    = { key: sum( 1 for a in absent if a[ "same_job" ] is want ) for key, want in ( ( "primary", True ), ( "secondary", False ) ) }
-    kept    = sum( 1 for r in rows if r[ "original" ][ "retrieved" ] )
-    rate    = kept / len( rows ) if rows else 0.0
     return { "rows": [ *rows, *absent ], "primary": figures( sides[ "primary" ], lost[ "primary" ] ), "secondary": figures( sides[ "secondary" ], lost[ "secondary" ] ),
-             "false_positives": sum( 1 for r in sides[ "secondary" ] if r[ "plant" ][ "accepted" ] ), "originals_floor": { "floor": ORIGINAL_FLOOR, "rate": rate, "n": len( rows ) }, "stop": rate < ORIGINAL_FLOOR }
+             "false_positives": sum( 1 for r in sides[ "secondary" ] if r[ "plant" ][ "accepted" ] ), "originals": count( sum( 1 for r in rows if r[ "original" ][ "retrieved" ] ), len( rows ) ), "attribution": count( *ATTRIBUTION ) }

@@ -13,6 +13,7 @@ import hashlib
 import json
 import pathlib
 import subprocess
+import threading
 import types
 
 from cosa.repo.doc_lint import model_transport
@@ -231,6 +232,32 @@ def control_job( pair, strip_fn ):
     return { "seed": seed, "keys": [ key ], "stripped": strip_fn( seed ), "write_lang": pair[ "original" ][ "lang" ], "meta": { "control": True } }
 
 
+class NoModelCall( Exception ):
+    """The bare arm asked for a model call, which it never makes."""
+
+
+class RefusingTransport:
+    """
+    The bare arm's transport: it refuses every request, so no model is reached.
+
+    Ensures:
+        - every post raises NoModelCall, and the sweep counts that as a failed call of its own
+        - refused holds each request that was refused, and calls stays 0 because nothing is sent
+    """
+
+    calls = 0
+
+    def __init__( self ):
+        """Start with nothing refused."""
+        self.refused = []
+        self.lock    = threading.Lock()
+
+    def post_with_meta( self, body ):
+        """Raises: NoModelCall always."""
+        with self.lock: self.refused.append( body )
+        raise NoModelCall( "the bare arm makes no model call" )
+
+
 def planted_stage_for( live, planted_entries, cache_dir, embed_rows=planted_pool.embed_rows, load_vectors=vs.load_vectors, purposes=None, purposes_file=None ):
     """
     Build the planted candidate stage from the live one's own settings.
@@ -252,6 +279,31 @@ def planted_stage_for( live, planted_entries, cache_dir, embed_rows=planted_pool
     return planted_pool.PlantedCandidateStage( live.vectors_dir, str( cache_dir ), live.embed_client, planted, purposes_path=live.purposes_path if purposes_file is None else purposes_file, K=live.K, arm=live.arm, fusion=live.fusion )
 
 
+def original_entries( pairs, pool, stored ):
+    """
+    Find each pair's original in the index and check that it stays in the pool.
+
+    Requires:
+        - pairs come from positive_control.load_pairs; pool is the index's sendable entries; stored is { pin: purpose line } of the live store
+
+    Ensures:
+        - returns { rewrite id: { id, line } }: the original's id in the index, found by file and name, and its stored purpose line or None
+        - the original stays in the pool and competes with the plant, because its id in the pair is not an index id, so the checker leaves nothing out
+
+    Raises:
+        - NeedsetError CONTROL_ORIGINAL_EXCLUDED when a pair's original id is an index id, because the checker would then leave the original out of its own search
+        - NeedsetError CONTROL_ORIGINAL_UNRESOLVED when no index entry has the original's file and name
+    """
+    ids, by_name, found = { e[ "id" ] for e in pool }, { ( e[ "file" ], e[ "name" ] ): e for e in pool }, {}
+    for p in pairs:
+        o = p[ "original" ]
+        if o[ "id" ] in ids: raise er.NeedsetError( er.CONTROL_ORIGINAL_EXCLUDED, f"{o[ 'id' ]}: the original's id is an index id, so the checker would leave it out of its own search" )
+        e = by_name.get( ( o[ "file" ], o[ "name" ] ) )
+        if e is None: raise er.NeedsetError( er.CONTROL_ORIGINAL_UNRESOLVED, f"{o[ 'id' ]}: no index entry has the file {o[ 'file' ]} and the name {o[ 'name' ]}" )
+        found[ p[ "rewrite" ][ "id" ] ] = { "id": e[ "id" ], "line": stored.get( e[ "pin" ] ) }
+    return found
+
+
 def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, prepare=rt.prepare, check=planted_check, build_stage=candidate_stage.build_stage, passes=1, pass_resources=None,
                         plant_lines=None, plant_without=(), same_job=None, label_info=None ):
     """
@@ -271,12 +323,14 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         - the pool the control plants into and restores is the index's own sendable entries
         - the checker is planted_check over a planted stage that shares the live stage's folders and client
         - a plant with a line is embedded and word-indexed with it, through a purpose store written in the run folder that holds the live lines and the plants'; a plant without one is planted bare and listed in plants_without_line
-        - each pass report carries control_report.scored: a row for every pair, undrafted ones too, the primary and secondary figures, false_positives and the originals floor; stop is set by that floor only, never by a plant miss
+        - each pass report carries control_report.scored: a row for every pair, undrafted ones too, the primary and secondary figures and false_positives; nothing in it sets stop
+        - each pair is searched once with its plant and its original in the pool, and once more over plants with no line; that second search makes no model call
         - with more than one pass the report is the first pass's, plus passes ( each pass's report ), consistent ( every pass missed the same pairs and left out the same pairs ) and stop true when any pass stopped
         - when the stage's own call budget ends a pass, the passes already finished stay in the report, with budget_reached True, budget_detail, passes_done and passes_wanted; with none finished passes is empty
 
     Raises:
         - ValueError when passes is more than 1 and pass_resources is None, or passes is less than 1
+        - NeedsetError CONTROL_ORIGINAL_EXCLUDED or CONTROL_ORIGINAL_UNRESOLVED, before any plant is checked, as original_entries raises them
     """
     if passes < 1 or ( passes > 1 and pass_resources is None ): raise ValueError( "a control of several passes needs pass_resources, and at least one pass" )
 
@@ -293,17 +347,20 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         store     = None if plant_lines is None else planted_purposes.merged_store( ctx.candidate_stage.purposes_path, lines, f"{cache}-purposes.jsonl" )
         planted   = planted_stage_for( ctx.candidate_stage, entries, cache, purposes=plant_lines, purposes_file=store )
         pool      = prepare( ctx )[ 1 ]
-        by_name   = { ( e[ "file" ], e[ "name" ] ): e for e in pool }
-        stored    = cs_search.read_purposes( ctx.candidate_stage.purposes_path )
+        originals = original_entries( drafted, pool, cs_search.read_purposes( ctx.candidate_stage.purposes_path ) )
+        bare      = planted_stage_for( ctx.candidate_stage, entries, f"{cache}-bare" )
+        bare_ctx  = copy.copy( ctx )
+        bare_ctx.transport = RefusingTransport()
         pins      = { e[ "id" ]: e[ "pin" ] for e in entries }
         labels    = { p[ "rewrite" ][ "id" ]: True for p in pairs } if same_job is None else same_job
         rows      = []
 
         def observe( pair, need, receipt ):
-            """Ensures: adds the pair's scored row, read from the search the check just ran."""
-            rid, orig = pair[ "rewrite" ][ "id" ], by_name.get( ( pair[ "original" ][ "file" ], pair[ "original" ][ "name" ] ) )
-            rows.append( control_report.pair_row( pair, labels[ rid ], need[ "need" ], receipt, planted.last_answer, lines.get( pins[ rid ] ),
-                                                  None if orig is None else orig[ "id" ], None if orig is None else stored.get( orig[ "pin" ] ) ) )
+            """Ensures: adds the pair's scored row, with a second bare check that calls no model."""
+            rid  = pair[ "rewrite" ][ "id" ]
+            live = ( receipt, planted.last_answer )
+            more = ( check( need, bare_ctx, bare, entries ), None )
+            rows.append( control_report.pair_row( pair, labels[ rid ], need[ "need" ], live, lines.get( pins[ rid ] ), originals[ rid ], ( more[ 0 ], bare.last_answer ) ) )
 
         asker     = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids, observe )
         base      = await stage3.control_stage( pool, drafted, asker, build_stage )()
