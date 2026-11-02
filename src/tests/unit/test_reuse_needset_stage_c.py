@@ -195,13 +195,30 @@ def test_the_audit_counts_and_names_each_side_that_did_not_arrive_in_full():
 def test_the_plan_counts_calls_shows_every_purpose_line_and_lists_the_refused():
     _records, index, by_id, purposes = world( 3 )
     rows, refused, sides = sc.split_pairs( [ pair( 1, 1, 2 ), pair( 2, 3, 1, label=sc.NOT_SAME, stratum="monolith:neighbour" ), pair( 3, 1, 9 ) ], index, by_id, purposes )
-    plan = sc.plan_of( rows, refused, sides )
+    plan = sc.plan_of( rows, refused, sides, sc.budgets_for( rows ) )
     assert ( plan[ "pairs_total" ], plan[ "pairs_judged" ] ) == ( 3, 2 ) and plan[ "by_stratum" ] == { "flag": 1, "monolith:neighbour": 1 } and plan[ "by_label" ] == { "same_job": 1, "not_same": 1 }
-    assert plan[ "calls" ] == { "drafts_min": 2, "drafts_max": 4, "posts": 6, "post_budget": sc.POST_BUDGET } and plan[ "ambiguous" ] == [ ]
+    assert plan[ "calls" ] == { "drafts_min": 2, "drafts_max": 4, "posts": 6 } and plan[ "ambiguous" ] == [ ]
+    assert plan[ "budgets" ] == sc.budgets_for( rows ) and plan[ "budgets" ][ "drafts_planned" ] == 4 and plan[ "budgets" ][ "posts_planned" ] == 6
     assert plan[ "refused" ] == [ { "pair": "pair-3", "stratum": "flag", "label": sc.SAME_JOB, "reasons": [ "side b text matches no index record" ] } ]
     assert plan[ "shown" ][ 0 ] == { "pair": "pair-1", "side": "a", "id": "src.m1.f1", "purpose_line": "line pin1" } and len( plan[ "shown" ] ) == 4
     assert plan[ "audit" ][ "sides" ] == 6 and plan[ "audit" ][ "matched" ] == 5 and [ n[ "pair" ] for n in plan[ "audit" ][ "named" ] ] == [ "pair-3" ]
-    assert sc.plan_of( rows, refused, sides, 9 )[ "calls" ][ "post_budget" ] == 9
+    assert sc.plan_of( rows, refused, sides, sc.budgets_for( rows, post_budget=9 ) )[ "budgets" ][ "posts_budget" ] == 9
+
+
+def test_the_budgets_follow_the_planned_calls_with_five_percent_headroom_at_86_and_105_pairs():
+    at_86, at_105 = sc.budgets_for( [ None ] * 86 ), sc.budgets_for( [ None ] * 105 )
+    assert ( at_86[ "drafts_planned" ], at_86[ "drafts_budget" ], at_86[ "posts_planned" ], at_86[ "posts_budget" ], at_86[ "limit" ] ) == ( 172, 181, 258, 271, 452 )
+    assert ( at_105[ "drafts_planned" ], at_105[ "drafts_budget" ], at_105[ "posts_planned" ], at_105[ "posts_budget" ], at_105[ "limit" ] ) == ( 210, 221, 315, 331, 552 )
+    assert at_105[ "headroom_percent" ] == 5 and at_105[ "overridden" ] == [ ] and at_105[ "short" ] == [ ]
+    assert sc.budgets_for( [ ] )[ "limit" ] == 0 and sc.budgets_for( [ None ] )[ "posts_budget" ] == 4, "a budget is rounded up, never down"
+
+
+def test_a_named_budget_replaces_the_derived_one_and_a_short_one_is_named():
+    got = sc.budgets_for( [ None ] * 105, draft_budget=100, post_budget=400, limit=9999 )
+    assert ( got[ "drafts_budget" ], got[ "posts_budget" ], got[ "limit" ] ) == ( 100, 400, 9999 ) and got[ "overridden" ] == [ "draft_budget", "post_budget", "limit" ]
+    assert got[ "short" ] == [ "draft_budget" ], "only the draft budget is below its planned figure"
+    assert sc.budgets_for( [ None ] * 105, limit=500 )[ "short" ] == [ "limit" ] and sc.budgets_for( [ None ] * 105, post_budget=300 )[ "short" ] == [ "post_budget", "limit" ], "the limit of the two budgets together is then short too"
+    assert sc.budgets_for( [ None ] * 105, post_budget=300 )[ "limit" ] == 221 + 300, "the limit follows the budgets that are in force"
 
 
 def test_the_cue_is_a_shared_name_piece_between_the_need_and_side_b():
@@ -268,7 +285,7 @@ def argv( tmp_path, *more ):
 
 def test_the_command_line_needs_its_inputs_and_defaults_to_a_plan( tmp_path ):
     args = sc.parse_args( argv( tmp_path ) )
-    assert args.live is False and args.run_name is None and args.limit == sc.DRAFT_BUDGET + sc.POST_BUDGET and args.post_budget == sc.POST_BUDGET and args.draft_budget == sc.DRAFT_BUDGET
+    assert args.live is False and args.run_name is None and args.limit is None and args.post_budget is None and args.draft_budget is None
     assert args.server == "max-plan" and args.ceiling == sc.jp.CEILING and args.cli_path is None and args.from_run is None
     with pytest.raises( SystemExit ): sc.parse_args( [ "--live" ] )
 
@@ -454,3 +471,23 @@ def test_the_real_send_carries_both_purpose_lines_the_need_and_the_repeat_token_
     assert "Read a feed and list its articles." in body and "(repeat 2)" in body and "(repeat 1)" not in body
     assert row[ "side_a" ][ "record" ][ "id" ] in body and row[ "side_b" ][ "record" ][ "id" ] in body
     assert len( wire.bodies[ 0 ][ "questions" ] ) == 2, "one post holds both sides' questions"
+
+
+def test_the_live_cap_gets_the_derived_budgets_and_a_named_flag_overrides_them( tmp_path ):
+    deps, _state = live_parts( tmp_path )
+    ( tmp_path / "run-dir" ).mkdir()
+    rows = [ make_row( 1 ), make_row( 2 ), make_row( 3 ) ]
+    with mock.patch.object( sc.call_cap, "CallCap", wraps=sc.call_cap.CallCap ) as cap:
+        out = run_live( tmp_path, deps, rows )
+    assert cap.call_args_list[ 0 ][ 0 ][ 1 ] == 17 and cap.call_args_list[ 0 ][ 0 ][ 2 ] == { sc.DRAFT_STAGE: 7 } and out[ "plan" ][ "budgets" ][ "limit" ] == 17
+    assert out[ "report" ][ "limit" ] == 17 and cap.call_args_list[ 1 ][ 0 ][ 1 ] == 17 and cap.call_args_list[ 1 ][ 0 ][ 2 ] == { sc.jp.STAGE_NAME: 10 }
+    deps, _state = live_parts( tmp_path )
+    patches = stand_ins( tmp_path, rows )
+    for p in patches: p.start()
+    try:
+        with mock.patch.object( sc.call_cap, "CallCap", wraps=sc.call_cap.CallCap ) as cap:
+            out = sc.main( live_argv( tmp_path, "--limit", "40", "--draft-budget", "11", "--post-budget", "29" ), deps )
+    finally:
+        for p in patches: p.stop()
+    assert cap.call_args_list[ 0 ][ 0 ][ 1:3 ] == ( 40, { sc.DRAFT_STAGE: 11 } ) and cap.call_args_list[ 1 ][ 0 ][ 2 ] == { sc.jp.STAGE_NAME: 29 }
+    assert out[ "plan" ][ "budgets" ][ "overridden" ] == [ "draft_budget", "post_budget", "limit" ]

@@ -34,8 +34,8 @@ STRATA        = ( "flag", "monolith:structural", "monolith:neighbour" )
 SAME_JOB      = forced_judge.SAME_JOB
 NOT_SAME      = forced_judge.NOT_SAME
 REPEATS       = jp.REPEATS
-DRAFT_BUDGET  = 180                                                               # 86 pairs, one draft and at most one rewrite each
-POST_BUDGET   = 270                                                               # 86 pairs x 3 repeats = 258 posts, with room for a split request
+DRAFTS_PER_PAIR = 2                                                              # the first draft and at most one targeted rewrite
+HEADROOM_PERCENT = 5                                                             # budgets sit this far above the planned calls, for a split request or a repeated unreadable reply
 REPORT_FILE   = "stage-c-report.json"
 DRAFT_LEDGER  = "ledger-stage-c-draft.jsonl"
 UNMATCHED     = "unmatched"
@@ -214,20 +214,43 @@ def audit_sides( sides ):
              "with_purpose_line": sum( bool( s[ "has_purpose" ] ) for s in sides ), "named": named }
 
 
-def plan_of( rows, refused, sides, budget=POST_BUDGET ):
+def budgets_for( rows, draft_budget=None, post_budget=None, limit=None ):
+    """
+    Derive the call budgets from the pairs that will run, unless the caller names them.
+
+    Requires:
+        - each override is None or a whole number of calls
+
+    Ensures:
+        - returns { drafts_planned, drafts_budget, posts_planned, posts_budget, limit, headroom_percent, overridden, short }
+        - drafts_planned is DRAFTS_PER_PAIR for each row and posts_planned is one post per row and repeat
+        - a budget not overridden is its planned figure plus HEADROOM_PERCENT, rounded up; the limit is the two budgets together
+        - overridden names the flags used, and short names each budget or limit below its planned figure
+    """
+    drafts, posts = DRAFTS_PER_PAIR * len( rows ), len( rows ) * len( REPEATS )
+    above         = lambda n: n + ( n * HEADROOM_PERCENT + 99 ) // 100
+    d, q          = above( drafts ) if draft_budget is None else draft_budget, above( posts ) if post_budget is None else post_budget
+    cap           = d + q if limit is None else limit
+    given         = { "draft_budget": draft_budget, "post_budget": post_budget, "limit": limit }
+    return { "drafts_planned": drafts, "drafts_budget": d, "posts_planned": posts, "posts_budget": q, "limit": cap, "headroom_percent": HEADROOM_PERCENT,
+             "overridden": [ n for n, v in given.items() if v is not None ], "short": [ n for n, low in ( ( "draft_budget", d < drafts ), ( "post_budget", q < posts ), ( "limit", cap < drafts + posts ) ) if low ] }
+
+
+def plan_of( rows, refused, sides, budgets ):
     """
     Describe the run without making a call.
 
     Ensures:
-        - returns { pairs_total, pairs_judged, refused, by_stratum, by_label, ambiguous, calls, audit, shown }
+        - returns { pairs_total, pairs_judged, refused, by_stratum, by_label, ambiguous, calls, budgets, audit, shown }
         - calls holds drafts_min and drafts_max (one to two per judged pair) and posts (one two-question post per pair and repeat)
+        - budgets is budgets_for's answer, so the planned and the budgeted figures print together
         - shown lists, for every judged pair and side, the id and the purpose line the judge text carries
         - refused is the full list of refused pairs with their reasons
     """
     shown = [ { "pair": r[ "pair" ], "side": s, "id": r[ f"side_{s}" ][ "record" ][ "id" ], "purpose_line": r[ f"side_{s}" ][ "record" ][ "purpose" ] } for r in rows for s in ( "a", "b" ) ]
     return { "pairs_total": len( rows ) + len( refused ), "pairs_judged": len( rows ), "refused": refused, "by_stratum": dict( collections.Counter( r[ "stratum" ] for r in rows ) ),
              "by_label": dict( collections.Counter( r[ "label" ] for r in rows ) ), "ambiguous": [ r[ "pair" ] for r in rows if r[ "ambiguous" ] ],
-             "calls": { "drafts_min": len( rows ), "drafts_max": 2 * len( rows ), "posts": len( rows ) * len( REPEATS ), "post_budget": budget }, "audit": audit_sides( sides ), "shown": shown }
+             "calls": { "drafts_min": len( rows ), "drafts_max": 2 * len( rows ), "posts": len( rows ) * len( REPEATS ) }, "budgets": budgets, "audit": audit_sides( sides ), "shown": shown }
 
 
 def cue_of( need, side_b ):
@@ -299,14 +322,13 @@ def parse_args( argv ):
     Ensures:
         - the repo, run folder, answer key, packet, labels folder, symbols file, purpose file and source commit are required
         - live is false unless --live is given; a live run also needs --run-name, --from-run and --cli-path
+        - the call limit and the two budgets are None unless named, and then budgets_for derives them from the planned calls
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     for name in ( "root", "run_dir", "answer_key", "packet", "labels_dir", "symbols", "purposes", "source_commit" ):
         ap.add_argument( "--" + name.replace( "_", "-" ), required=True )
     for name in ( "from_run", "run_name", "cli_path" ): ap.add_argument( "--" + name.replace( "_", "-" ), default=None )
-    ap.add_argument( "--limit", type=int, default=DRAFT_BUDGET + POST_BUDGET )
-    ap.add_argument( "--draft-budget", type=int, default=DRAFT_BUDGET )
-    ap.add_argument( "--post-budget", type=int, default=POST_BUDGET )
+    for name in ( "limit", "draft_budget", "post_budget" ): ap.add_argument( "--" + name.replace( "_", "-" ), type=int, default=None )
     ap.add_argument( "--ceiling", type=int, default=jp.CEILING )
     ap.add_argument( "--server", default="max-plan" )
     ap.add_argument( "--live", action="store_true" )
@@ -343,7 +365,7 @@ def main( argv=None, deps=None ):
     args = parse_args( argv )
     deps = {} if deps is None else deps
     rows, refused, sides = collect_rows( args, deps )
-    plan = plan_of( rows, refused, sides, args.post_budget )
+    plan = plan_of( rows, refused, sides, budgets_for( rows, args.draft_budget, args.post_budget, args.limit ) )
     if not args.live: return { "live": False, "mode": "stage_c", "plan": plan }
     if not args.run_name or not args.from_run: raise er.NeedsetError( er.BAD_NEED, "a live run needs --run-name, a spend-ledger run name that was not used before, and --from-run for its environment" )
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "the ledgers are bound to the Claude Code binary's version" )
@@ -368,7 +390,7 @@ def live( args, rows, refused, plan, deps ):
         close = deps[ "close_run" ] if "close_run" in deps else rt.close_run
         try:
             rt.prepare( ctx )
-            report, undrafted = judge_all( args, rows, refused, root, ctx, deps )
+            report, undrafted = judge_all( args, rows, refused, plan[ "budgets" ], root, ctx, deps )
         except BaseException:
             try: close( ctx )
             except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
@@ -382,7 +404,7 @@ def live( args, rows, refused, plan, deps ):
         if made: source_at.unlock( args.root, root )
 
 
-def judge_all( args, rows, refused, root, ctx, deps ):
+def judge_all( args, rows, refused, budgets, root, ctx, deps ):
     """
     Draft under its own stage budget, then post every pair and repeat.
 
@@ -390,7 +412,7 @@ def judge_all( args, rows, refused, root, ctx, deps ):
         - returns ( report, undrafted ); the report is run_variant's, written again with undrafted and refused as REPORT_FILE
         - the posts are checked for distinct bodies before the first goes out
     """
-    cap = call_cap.CallCap( f"{args.run_dir}/{first_thousand.CALLS_FILE}", args.limit, { DRAFT_STAGE: args.draft_budget } )
+    cap = call_cap.CallCap( f"{args.run_dir}/{first_thousand.CALLS_FILE}", budgets[ "limit" ], { DRAFT_STAGE: budgets[ "drafts_budget" ] } )
     ask = deps[ "drafter" ] if "drafter" in deps else draft.drafter_call()
     ledger = draft.make_ledger( f"{args.run_dir}/{DRAFT_LEDGER}", args.cli_path, args.server )
     with cap.installed():
@@ -399,7 +421,7 @@ def judge_all( args, rows, refused, root, ctx, deps ):
     requests = [ request_for( r, needs[ r[ "pair" ] ], n ) for r in rows if r[ "pair" ] in needs for n in REPEATS ]
     jp.distinct_bodies( requests )
     send   = deps[ "ask" ] if "ask" in deps else ( lambda request: ask_pair( ctx.transport, request, ctx.transport.budget ) )
-    report = jp.run_variant( args.run_dir, requests, send, args.limit, args.post_budget )
+    report = jp.run_variant( args.run_dir, requests, send, budgets[ "limit" ], budgets[ "posts_budget" ] )
     pathlib.Path( f"{args.run_dir}/{REPORT_FILE}" ).write_text( json.dumps( { **report, "undrafted": undrafted, "refused": refused }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
     return report, undrafted
 
