@@ -17,6 +17,7 @@ from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, source_at, stag
 from lupin_mcp.reuse_seeded_miss_e2e import SavedAnswerMissing
 
 BINDING = "1.0 (Claude Code)|max-plan"
+CTX     = types.SimpleNamespace()                  # a reuse context with no transport yet
 
 
 def records( n_ts=130, n_py=90 ):
@@ -167,7 +168,7 @@ def fake_parts( needs_for, trace_fn=None, tally=None ):
 
 
 def deps_for( tmp_path, parts, **more ):
-    return { "source_root": lambda args: str( tmp_path ), "context": lambda root: "ctx", "built": lambda args: "built", "build_parts": parts, "close_run": lambda ctx: None, **more }
+    return { "source_root": lambda args: str( tmp_path ), "context": lambda root: CTX, "built": lambda args: "built", "build_parts": parts, "close_run": lambda ctx: None, **more }
 
 
 @pytest.fixture
@@ -205,7 +206,7 @@ def test_a_live_run_with_an_unsaved_seed_stops_before_it_spends_anything( tmp_pa
     closed = []
     out = yt.main( argv( tmp_path, "--cli-path", binary, "--live" ), deps_for( tmp_path, fake_parts( answers ), close_run=lambda ctx: closed.append( ctx ) or "run-x" ) )
     assert out[ "live" ] is True and out[ "report" ][ "status" ] == yt.STOPPED and out[ "report" ][ "used" ] == 0 and "1 seeds have no saved answer" in out[ "report" ][ "report" ][ "reason" ]
-    assert closed == [ "ctx" ] and out[ "closed_run" ] == "run-x" and out[ "close_error" ] is None and yt.exit_status( out ) == 0
+    assert closed == [ CTX ] and out[ "closed_run" ] == "run-x" and out[ "close_error" ] is None and yt.exit_status( out ) == 0
 
 
 def test_a_live_run_with_no_needs_at_all_stops_and_says_so( tmp_path, quiet ):
@@ -247,7 +248,7 @@ def test_without_deps_main_uses_the_real_worktree_context_index_parts_and_closer
     seen = { }
     monkeypatch.setattr( source_at, "ensure_worktree", lambda repo, commit: seen.setdefault( "made", str( tmp_path ) ) )
     monkeypatch.setattr( source_at, "unlock", lambda repo, dest: seen.setdefault( "unlocked", dest ) )
-    monkeypatch.setattr( rt, "context_from_environment", lambda root: "ctx" )
+    monkeypatch.setattr( rt, "context_from_environment", lambda root: CTX )
     monkeypatch.setattr( rt, "close_run", lambda ctx: "run-z" )
     monkeypatch.setattr( yt.smoke, "index_parts", lambda root, folder: seen.setdefault( "index", folder ) )
     monkeypatch.setattr( stage_parts, "build_parts", fake_parts( { s: None for s in record[ "yield" ][ "order" ] } ) )
@@ -267,3 +268,23 @@ def test_run_cli_prints_the_result_as_json_and_returns_the_status( tmp_path, qui
     lines = []
     status = yt.run_cli( argv( tmp_path, "--cli-path", binary ), deps_for( tmp_path, fake_parts( { s: None for s in record[ "yield" ][ "order" ] } ) ), out=lines.append )
     assert status == 0 and json.loads( lines[ 0 ] )[ "live" ] is False
+
+
+def test_a_plan_gives_the_context_a_refusing_transport_so_no_spend_run_begins_and_a_live_run_leaves_it_alone( tmp_path, quiet ):
+    from lupin_mcp.reuse_seeded_miss_e2e import NoCallTransport
+    record, binary = quiet
+    answers = { s: None for s in record[ "yield" ][ "order" ] }
+    ctx = types.SimpleNamespace()
+    yt.main( argv( tmp_path, "--cli-path", binary ), deps_for( tmp_path, fake_parts( answers ), context=lambda root: ctx ) )
+    assert isinstance( ctx.transport, NoCallTransport ) and ctx.transport.calls == 0
+    live_ctx = types.SimpleNamespace()
+    yt.main( argv( tmp_path, "--cli-path", binary, "--live" ), deps_for( tmp_path, fake_parts( answers ), context=lambda root: live_ctx ) )
+    assert not hasattr( live_ctx, "transport" )
+
+
+def test_hold_transport_sets_a_transport_that_refuses_a_request():
+    from lupin_mcp.reuse_seeded_miss_e2e import NoCallTransport
+    ctx = types.SimpleNamespace()
+    yt.hold_transport( ctx )
+    assert isinstance( ctx.transport, NoCallTransport )
+    with pytest.raises( SavedAnswerMissing ): ctx.transport.post_with_meta( { "state": { "need": "n" } } )

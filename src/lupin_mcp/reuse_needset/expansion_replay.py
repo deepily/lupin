@@ -66,6 +66,16 @@ def queries_for( need, expansion ):
     return [ need ] + expansion[ "paraphrases" ] + [ " ".join( expansion[ "identifiers" ] ) ]
 
 
+def expansion_key( need, model_id ):
+    """
+    Name the ledger entry that holds a need's saved reply.
+
+    Ensures:
+        - returns the key expand_need reads and writes, so a count of saved replies uses the same key
+    """
+    return harness_runner.ledger_key( STAGE_NAME, { "old": need, "new": expansion_prompt( need ) }, VERSION, model_id, 0 )
+
+
 def expand_need( need, ask, ledger, model_id ):
     """
     Ask for the expansion of one need once, or read the ledger's saved reply.
@@ -78,7 +88,7 @@ def expand_need( need, ask, ledger, model_id ):
         - returns parse_expansion's result
     """
     prompt = expansion_prompt( need )
-    key    = harness_runner.ledger_key( STAGE_NAME, { "old": need, "new": prompt }, VERSION, model_id, 0 )
+    key    = expansion_key( need, model_id )
     reply  = ledger.get( key )
     if reply is None:
         reply = ask( SYSTEM, prompt )
@@ -107,7 +117,7 @@ def union_rank( lists_by_query, known_id, fusion ):
     return { "before": before, "after": after, "enters_before": before is not None and before <= SHORTLIST, "enters_after": after is not None and after <= SHORTLIST }
 
 
-def replay( rows, ask, ledger, search, fusion, model_id ):
+def replay( rows, ask, ledger, search, fusion, model_id, into=None ):
     """
     Expand each need, search it five ways and rank its known answer.
 
@@ -118,8 +128,9 @@ def replay( rows, ask, ledger, search, fusion, model_id ):
     Ensures:
         - returns one result per row in order, holding id, group and union_rank's figures
         - a row whose reply is unreadable gets unreadable True and no ranks, and is never searched
+        - when into is a list, each result is added to it as it is made and it is returned, so an error part-way keeps the finished rows
     """
-    out = []
+    out = [] if into is None else into
     for row in rows:
         expansion = expand_need( row[ "need" ], ask, ledger, model_id )
         if expansion is None:

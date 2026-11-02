@@ -18,7 +18,7 @@ from cosa.repo.doc_lint import harness_report, model_transport
 from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import call_cap, draft, first_thousand, loss_trace, smoke, source_at, stage_parts, stage_seeds, stages, strip
 from lupin_mcp.reuse_needset import errors as er
-from lupin_mcp.reuse_seeded_miss_e2e import SavedAnswerMissing
+from lupin_mcp.reuse_seeded_miss_e2e import NoCallTransport, SavedAnswerMissing
 
 YIELD_TRACE  = "yield_trace"
 TRACE_BUDGET = 260                       # about 69 needs at about 3 calls each, with room for retries
@@ -44,24 +44,39 @@ def saved_ask( system, prompt ):
     raise SavedAnswerMissing( "the saved ledgers hold no answer to this question; the yield replay never asks the drafter or the second model" )
 
 
-def copy_saved( from_run, run_dir ):
+def hold_transport( ctx ):
+    """
+    Give the context a transport that refuses every request.
+
+    Requires:
+        - ctx is a reuse context that has not been prepared
+
+    Ensures:
+        - prepare then builds no live transport, so it begins no spend-ledger run and holds no ceiling
+        - a request that reaches the transport is refused and its need kept, so nothing is sent
+    """
+    ctx.transport = NoCallTransport()
+
+
+def copy_saved( from_run, run_dir, names=SAVED_FILES ):
     """
     Copy the saved ledgers and the seed lists of an earlier run into this run's folder.
 
     Requires:
         - from_run is the earlier run's folder; run_dir exists
+        - names are the files to copy, the saved ledgers and the seed lists unless a caller names more
 
     Ensures:
         - a file already in run_dir is kept as it is, so a resumed run is not overwritten
         - the earlier run's folder is only read
-        - returns the names copied, in SAVED_FILES order
+        - returns the names copied, in the order of names
 
     Raises:
         - NeedsetError SAVED_FILE_MISSING naming a file the earlier run lacks, before anything is copied
     """
-    missing = [ n for n in SAVED_FILES if not ( pathlib.Path( run_dir ) / n ).exists() and not ( pathlib.Path( from_run ) / n ).is_file() ]
+    missing = [ n for n in names if not ( pathlib.Path( run_dir ) / n ).exists() and not ( pathlib.Path( from_run ) / n ).is_file() ]
     if missing: raise er.NeedsetError( er.SAVED_FILE_MISSING, f"{from_run} lacks {missing}" )
-    copied = [ n for n in SAVED_FILES if not ( pathlib.Path( run_dir ) / n ).exists() ]
+    copied = [ n for n in names if not ( pathlib.Path( run_dir ) / n ).exists() ]
     for name in copied: shutil.copyfile( pathlib.Path( from_run ) / name, pathlib.Path( run_dir ) / name )
     return copied
 
@@ -230,7 +245,7 @@ def main( argv=None, deps=None ):
         - the reuse environment variables the context reads are set
 
     Ensures:
-        - without --live returns { live False, plan } with the counts of seeds, needs and unsaved seeds, and no model has been contacted
+        - without --live returns { live False, plan } with the counts of seeds, needs and unsaved seeds; no model is contacted and no spend-ledger run is begun
         - with --live and an unsaved seed returns the plan with a stopped report and no call
         - with --live and every answer saved the needs are traced under the cap and the report is returned and written
         - with --live the spend-ledger run is closed when the trace ends, however it ends
@@ -268,6 +283,7 @@ def _run( args, root, ctx, deps, close ):
     Ensures:
         - returns { live, plan, report, closed_run, close_error } for a live run and { live False, plan } for a plan
     """
+    if not args.live: hold_transport( ctx )
     parts = live_parts( args, root, ctx, deps )
     path  = f"{args.run_dir}/{stage_seeds.LISTS_FILE}"
     needs, head = asyncio.run( rebuild_head( path, parts[ "make_need" ], parts[ "tally" ] ) )

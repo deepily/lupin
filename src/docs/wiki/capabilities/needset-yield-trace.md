@@ -3,7 +3,8 @@ capability: needset-yield-trace
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.yield_trace.saved_ask@04aac966fd
-  - lupin_mcp.reuse_needset.yield_trace.copy_saved@5471ae171c
+  - lupin_mcp.reuse_needset.yield_trace.copy_saved@5055147353
+  - lupin_mcp.reuse_needset.yield_trace.hold_transport@4f41ef8910
   - lupin_mcp.reuse_needset.yield_trace.rebuild@166fb1b44a
   - lupin_mcp.reuse_needset.yield_trace.rebuild_head@d632674775
   - lupin_mcp.reuse_needset.yield_trace.found_intervals@beba11123d
@@ -29,5 +30,6 @@ Runs the yield seeds' needs through the full checker, each seed as its own known
 - `run_traced` runs the work under the call cap, charges every call to the `yield_trace` stage and writes `yield-trace-report.json`. Its status is done, stopped, budget_reached, cap_reached or failed.
 
 ## Command line
-- `main` without `--live` rebuilds the needs and prints the plan, with no model call. With `--live` and an unsaved seed it stops before spending anything. `--cli-path` is needed in both modes.
+- `main` without `--live` rebuilds the needs and prints the plan, with no model call and no spend-ledger run. With `--live` and an unsaved seed it stops before spending anything. `--cli-path` is needed in both modes.
+- `hold_transport` gives the context a transport that refuses every request. A plan uses it, because the real prepare would otherwise begin a spend run and hold its whole ceiling.
 - `live_parts` builds the parts over the copied ledgers, and `exit_status` gives 1 for a failure, 3 for the cap or the budget, else 0. `parse_args` and `run_cli` read the line and print the result.
