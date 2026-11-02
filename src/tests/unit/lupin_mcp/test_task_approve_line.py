@@ -49,11 +49,11 @@ def server( monkeypatch ):
 class TestApproveLinkLine:
 
     def test_exact_format_for_a_real_row_id( self ):
-        assert approve_link_line( ROW, "Fix the thing" ) == f"- Fix the thing [approve ☐](/app/tasks/approve?row={ROW}) [📄](/app/tasks/view?row={ROW})"
+        assert approve_link_line( ROW, "Fix the thing" ) == f"- Fix the thing [approve ☐](/app/tasks/approve?row={ROW}) [📋](/app/tasks/view?row={ROW})"
 
     def test_title_whitespace_collapses_and_brackets_are_escaped( self ):
         line = approve_link_line( ROW, "[LUPIN] Fix:\n  two   lines" )
-        assert line == f"- \\[LUPIN\\] Fix: two lines [approve ☐](/app/tasks/approve?row={ROW}) [📄](/app/tasks/view?row={ROW})"
+        assert line == f"- \\[LUPIN\\] Fix: two lines [approve ☐](/app/tasks/approve?row={ROW}) [📋](/app/tasks/view?row={ROW})"
         assert "\n" not in line
 
     @pytest.mark.parametrize( "bad", [ "a3975cf4", "", ROW.upper(), ROW.replace( "-", "" ), "{" + ROW + "}", ROW + "0" ] )

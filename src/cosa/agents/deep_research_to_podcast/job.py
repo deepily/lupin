@@ -303,7 +303,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             # the generated research report; the hook loads the config and resolves the path inside its
             # own boundary, so a config error here cannot fail the job.
             from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive
-            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path )
+            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path, user_email=self.user_email )
             if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
 
             per_language_lines = []
@@ -327,6 +327,9 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 lines.append( f"**Research Report**: [📄 View](/app/docs?path={urllib.parse.quote( r_rel )})" )
             lines.extend( per_language_lines )
             lines.extend( drive[ "extra_lines" ] )
+            skipped_names = [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
+            if skipped_names:
+                lines.append( f"**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names ) )
             lines.append( f"**Cost**: ${result.total_cost:.4f}" )
             completion_abstract = "\n".join( lines )
 
@@ -336,7 +339,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
 
             try:
                 await voice_io.notify(
-                    f"Research to podcast complete. Total cost ${result.total_cost:.4f}.",
+                    f"Research to podcast complete. Total cost ${result.total_cost:.4f}." + ( f" {len( skipped_names )} topics were skipped; see the card." if skipped_names else "" ),
                     priority   = "medium",
                     abstract   = completion_abstract,
                     job_id     = self.id_hash,

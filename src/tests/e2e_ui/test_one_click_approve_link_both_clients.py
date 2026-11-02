@@ -8,7 +8,7 @@ The clicked links must read a disabled "approved ✅", and no new tab may open.
 
 Each feature is proved in each client by its own test, so a pass in one client cannot cover a
 failure in the other. The three features are the ☐ to "approved ✅" change on a click.
-Next is the 📄 view link, which shows the row as the abstract 📋 does. It uses no overlay and no new tab. Last is a card drawn after a row has left the holding area.
+Next is the 📋 view link, which shows the row as the abstract 📋 does. It uses no overlay and no new tab. Last is a card drawn after a row has left the holding area.
 
 The :8000 login is not Rick's and cannot be made so. Two kinds of test follow from that.
 
@@ -189,7 +189,9 @@ def _show_card_legacy( page, rows, horizontal=True ):
         }""",
         { "nid": CARD_ID, "abstract": _abstract_for( rows ), "sender": SENDER },
     )
-    page.locator( "#action-required-content .abstract-indicator" ).first.click()
+    # Name the planted card's own indicator by the row id inside its abstract; ids are uuids, so the
+    # attribute value carries them unescaped and no peer's card can match.
+    page.locator( f'#action-required-content .abstract-indicator[data-abstract*="{rows[ 0 ][ "id" ]}"]' ).click()
     return page.locator( "#abstract-tooltip .abstract-tooltip-content" )
 
 
@@ -240,7 +242,7 @@ def _expect_row_shown( page, row ):
     text = tip.inner_text()
     assert row[ "title" ] in text and "Owner: unowned" in text and "Status: not_approved" in text, text
     assert f"E2E body {row[ 'index' ]}" in text and f"second line {row[ 'index' ]}" in text, text
-    assert page.locator( "#task-body-overlay" ).count() == 0, "the 📄 link must not open a separate overlay"
+    assert page.locator( "#task-body-overlay" ).count() == 0, "the 📋 link must not open a separate overlay"
 
 
 EVIL = '<img src=x onerror="window.__pwned=1">'
@@ -301,7 +303,7 @@ def test_one_click_approve_legacy_view_link_shows_the_row_in_place( notification
     content = _show_card_legacy( page, held, horizontal=horizontal )
     views = content.locator( "a[href*='/app/tasks/view']" )
     expect( views ).to_have_count( ROWS, timeout=TIMEOUT_MS )
-    expect( views.nth( 1 ) ).to_have_text( "📄" )
+    expect( views.nth( 1 ) ).to_have_text( "📋" )
     views.nth( 1 ).click()
 
     _expect_row_shown( page, held[ 1 ] )
@@ -382,7 +384,7 @@ def test_one_click_approve_multiplexer_view_link_shows_the_row_in_place( logged_
     card  = _show_card_multiplexer( page, held, horizontal=horizontal )
     views = card.locator( "a[href*='/app/tasks/view']" )
     expect( views ).to_have_count( ROWS, timeout=TIMEOUT_MS )
-    expect( views.nth( 1 ) ).to_have_text( "📄" )
+    expect( views.nth( 1 ) ).to_have_text( "📋" )
     views.nth( 1 ).click()
 
     _expect_row_shown( page, held[ 1 ] )

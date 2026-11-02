@@ -197,8 +197,12 @@ class DeepResearchToPodcastAgent:
                 f"**Duration**: {dr_artifacts.get( 'duration_seconds', 0 ):.0f}s"
             )
 
+            skipped_names = [ g[ "topic" ] for g in dr_artifacts.get( "skipped_topics", [] ) ]
+            if skipped_names:
+                checkpoint_abstract += f"\n\n**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names )
+
             await self._notify(
-                f"Deep Research complete! Cost: ${self.result.dr_cost:.4f}",
+                f"Deep Research complete! Cost: ${self.result.dr_cost:.4f}" + ( f" ({len( skipped_names )} topics skipped)" if skipped_names else "" ),
                 priority="medium",
                 abstract=checkpoint_abstract
             )
@@ -333,6 +337,7 @@ class DeepResearchToPodcastAgent:
             # deliberately NOT folded into `self.query`, which also feeds the session-name
             # gist above, the pipeline notifications, and the saved report's frontmatter —
             # a whole file in any of those is unreadable. One call site, one enrichment.
+            skipped_topics = []
             report = await run_research(
                 query        = query_with_seed_context( self.query, self.source_document ),
                 config       = config,
@@ -340,7 +345,8 @@ class DeepResearchToPodcastAgent:
                 user_email   = self.user_email,
                 no_confirm   = self.no_confirm,
                 debug        = self.debug,
-                verbose      = self.verbose
+                verbose      = self.verbose,
+                skipped_topics = skipped_topics
             )
 
             if report is None:
@@ -379,6 +385,7 @@ class DeepResearchToPodcastAgent:
                 "cost"        : summary.total_cost_usd,
                 "artifacts"   : {
                     "report"          : report,
+                    "skipped_topics"  : skipped_topics,
                     "session_name"    : session_name,
                     "semantic_topic"  : semantic_topic,
                     "tokens_used"     : summary.total_input_tokens + summary.total_output_tokens,

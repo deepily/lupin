@@ -36,6 +36,7 @@ from .orchestrator import ResearchOrchestratorAgent, OrchestratorState  # noqa: 
 from . import cosa_interface
 from . import voice_io
 from . import search_cache
+from cosa.agents.shared.sdk_error_result import LOGIN_MARKER
 
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -230,6 +231,22 @@ def print_header( query: str, config: ResearchConfig, budget: Optional[ float ] 
     print( "" )
 
 
+def skipped_topics_section( skipped: list ) -> str:
+    """
+    Render the report section that names the topics research could not complete.
+
+    Requires:
+        - skipped is a non-empty list of {"topic": str, "reason": str}
+
+    Ensures:
+        - returns markdown starting with a blank line, one bullet per topic with its reason
+    """
+    lines = [ "", "", "## Skipped topics", "", "Research could not complete these topics, so this report does not cover them:", "" ]
+    for gap in skipped:
+        lines.append( f"- **{gap[ 'topic' ]}**: {gap[ 'reason' ]}" )
+    return "\n".join( lines ) + "\n"
+
+
 async def run_research(
     query: str,
     config: ResearchConfig,
@@ -240,7 +257,8 @@ async def run_research(
     debug: bool = False,
     verbose: bool = False,
     confirm_topics: bool = False,
-    topic_source: Optional[ str ] = None
+    topic_source: Optional[ str ] = None,
+    skipped_topics: Optional[ list ] = None
 ) -> Optional[ str ]:
     """
     Run the research workflow with voice-first interaction.
@@ -259,6 +277,9 @@ async def run_research(
             answer within TOPIC_CONFIRM_TIMEOUT_SECS follows
             config.cancel_when_no_topics_ticked — cancel unless it is False.
         topic_source: Name(s) of the document the topics came from, shown in the ask
+        skipped_topics: Optional list the caller owns. Each topic whose research call returns an
+            error result (for example error_max_turns) is appended as {"topic", "reason"}, so the
+            caller can name the gaps in its own completion message.
         cancel_check: Optional callable returning True if cancellation requested
         debug: Enable debug output
         verbose: Enable verbose output
@@ -266,8 +287,14 @@ async def run_research(
     Returns:
         str or None: The final research report, or None if cancelled
 
+    Ensures:
+        - a topic whose research call fails with an error result is recorded as a gap, the loop
+          goes on, and the returned report ends with a "Skipped topics" section naming it
+        - a login-expiry failure (401) is never a gap: it aborts the run, as every later call would fail too
+
     Raises:
         BudgetExceededError: when the cost tracker's limit is crossed; this is a failure, not a cancel
+        RuntimeError: when every topic failed (no finding to synthesize), or the Claude login expired
     """
     # Create API client
     api_client = ResearchAPIClient(
@@ -626,6 +653,7 @@ async def run_research(
 
         # Research loop with partial result recovery on rate limit
         findings = []
+        skipped  = skipped_topics if skipped_topics is not None else []
         rate_limit_hit = False
         cache_hits = 0
 
@@ -654,19 +682,30 @@ async def run_research(
                     tokens_used = cached_result.get( "results", {} ).get( "tokens", 0 )
 
                 else:
-                    # No cache - make API call
-                    subagent_response = await api_client.call_subagent(
-                        system_prompt  = SUBAGENT_SYSTEM_PROMPT.format( min_sources=3, max_sources=10 ),
-                        user_message   = get_subagent_prompt(
-                            topic            = sq.get( "topic", "" ),
-                            objective        = sq.get( "objective", "" ),
-                            output_format    = sq.get( "output_format", "summary" ),
-                            audience         = config.audience,
-                            audience_context = config.audience_context,
-                        ),
-                        subquery_index = i,
-                        call_type      = "research",
-                    )
+                    # No cache - make API call. An error result (e.g. error_max_turns) costs this
+                    # topic only: record the gap and go on. Budget and rate-limit errors are not
+                    # RuntimeErrors, so they keep their own paths; a 401 would fail every later call.
+                    try:
+                        subagent_response = await api_client.call_subagent(
+                            system_prompt  = SUBAGENT_SYSTEM_PROMPT.format( min_sources=3, max_sources=10 ),
+                            user_message   = get_subagent_prompt(
+                                topic            = sq.get( "topic", "" ),
+                                objective        = sq.get( "objective", "" ),
+                                output_format    = sq.get( "output_format", "summary" ),
+                                audience         = config.audience,
+                                audience_context = config.audience_context,
+                            ),
+                            subquery_index = i,
+                            call_type      = "research",
+                        )
+                    except RuntimeError as e:
+                        if LOGIN_MARKER in str( e ): raise
+                        skipped.append( { "topic": topic, "reason": str( e )[ :200 ] } )
+                        await voice_io.notify(
+                            f"Skipping topic {i + 1} of {len( subqueries )} ({topic}): {str( e )[ :120 ]}",
+                            priority="high", progress_group_id=research_group_id
+                        )
+                        continue
 
                     content = subagent_response.content
                     tokens_used = subagent_response.input_tokens
@@ -749,6 +788,9 @@ async def run_research(
                 )
                 return None
 
+        if skipped and not findings:
+            raise RuntimeError( f"Research failed for all {len( skipped )} topics; first error: {skipped[ 0 ][ 'reason' ]}" )
+
         if rate_limit_hit:
             await voice_io.notify( f"Proceeding with {len( findings )} partial research findings", priority="medium" )
         else:
@@ -778,6 +820,12 @@ async def run_research(
         )
 
         report = synthesis_response.content
+        if skipped:
+            report += skipped_topics_section( skipped )
+            await voice_io.notify(
+                f"{len( skipped )} of {len( subqueries )} topics were skipped: " + "; ".join( g[ "topic" ] for g in skipped ),
+                priority="high"
+            )
         # Note: Completion notification is sent in main() with enhanced details
 
         return report

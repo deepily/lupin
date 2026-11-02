@@ -326,6 +326,7 @@ class DeepResearchJob( AgenticJobBase ):
 
             # Run the research (with cancellation callback)
             cancel_check = lambda: self._cancel_requested
+            skipped_topics = []
             report = await run_research(
                 query        = self._query_with_seed_context(),
                 config       = config,
@@ -336,7 +337,8 @@ class DeepResearchJob( AgenticJobBase ):
                 verbose        = self.verbose,
                 confirm_topics = self.confirm_topics,
                 topic_source   = ", ".join( os.path.basename( p ) for p in self.source_document ) or None,
-                user_email     = self.user_email
+                user_email     = self.user_email,
+                skipped_topics = skipped_topics
             )
 
             if report is None:
@@ -390,6 +392,8 @@ class DeepResearchJob( AgenticJobBase ):
 **Report**: {self.report_path}
 
 **Stats**: ${cost:.4f} | {tokens:,} tokens | {duration:.1f}s"""
+            if skipped_topics:
+                completion_abstract += f"\n\n**Skipped topics ({len( skipped_topics )})**: " + "; ".join( g[ "topic" ] for g in skipped_topics )
 
             # Notify completion (with job_id and queue_name for job card routing)
             await voice_io.notify(

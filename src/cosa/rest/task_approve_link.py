@@ -13,7 +13,7 @@ import re
 APPROVE_LINK_PATH  = "/app/tasks/approve?row="
 APPROVE_LINK_LABEL = "approve ☐"
 VIEW_LINK_PATH     = "/app/tasks/view?row="
-VIEW_LINK_LABEL    = "📄"
+VIEW_LINK_LABEL    = "📋"
 
 # A full, canonical, lowercase row id. Short ids and braced or unhyphenated forms are
 # refused: the click handlers send exactly this string to the server.
@@ -22,14 +22,14 @@ _ROW_ID_RE = re.compile( r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 def approve_link_line( row_id, title ):
     """
-    Write the card bullet for one held row: its title, its approve link, then its 📄 view link.
+    Write the card bullet for one held row: its title, its approve link, then its 📋 view link.
 
     Requires:
         - row_id is a full lowercase hyphenated UUID string
         - title is a string with at least one non-blank character
 
     Ensures:
-        - returns one line, `- <title> [approve ☐](/app/tasks/approve?row=<row_id>) [📄](/app/tasks/view?row=<row_id>)`
+        - returns one line, `- <title> [approve ☐](/app/tasks/approve?row=<row_id>) [📋](/app/tasks/view?row=<row_id>)`
         - whitespace runs in the title (newlines included) collapse to single spaces
         - `[` and `]` in the title are backslash-escaped so a title cannot form a link
 

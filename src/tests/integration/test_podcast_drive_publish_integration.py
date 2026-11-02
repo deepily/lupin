@@ -127,7 +127,7 @@ def _dr_result( source, audio, script ):
         research_path=str( source ), research_abstract="abs",
         audio_path=next( iter( audio.values() ) ), script_path=next( iter( script.values() ) ),
         pg_artifacts={ "audio_paths_by_language": audio, "script_paths_by_language": script },
-        dr_cost=0.0, pg_cost=0.0, total_cost=0.0,
+        dr_cost=0.0, pg_cost=0.0, total_cost=0.0, dr_artifacts={},
     )
 
 

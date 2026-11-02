@@ -2525,6 +2525,64 @@ Report registered scopes (with manifest presence + on-disk reachability) plus th
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+## GET `/api/podcast-drive/list`
+
+> **List podcasts in the owner's Drive folder, newest first**
+
+List the job folders in the configured Drive folder with their files.
+
+Requires:
+    - the caller is logged in and is the configured Drive owner
+
+Ensures:
+    - returns [ { job_folder, title, created_ts, files: [ { name, mime, size, drive_file_id, stream_url } ] } ], newest first
+    - a Drive folder that does not exist yet gives an empty list
+
+Raises:
+    - HTTPException 403 for any other user, 503 when Drive cannot be reached
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+## GET `/api/podcast-drive/stream/{drive_file_id}`
+
+> **Stream one Drive podcast file, with Range support**
+
+Stream a file from a job folder in the configured Drive folder.
+
+Requires:
+    - the caller is logged in and is the configured Drive owner
+    - drive_file_id names a file in a job folder directly under the configured folder
+
+Ensures:
+    - the browser's Range header goes to Drive and Drive's answer (200, 206 or 416) comes back with
+      Content-Range, Content-Length and Accept-Ranges passed through
+    - the body is streamed in chunks, never held whole in memory
+
+Raises:
+    - HTTPException 403 for any other user, 404 for any file outside the folder, 503 when Drive cannot be reached
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| drive_file_id | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/mock-job/submit`
 
 > **GONE — use /api/v2/submit**

@@ -454,7 +454,7 @@ class TestExecute:
             _run( job._execute() )
         graph.drive_hook.assert_awaited_once()
         assert graph.drive_hook.call_args.args[ 2 ] == "/proj/io/dr/report.md"
-        assert graph.drive_hook.call_args.kwargs == { "config": graph.config_obj }
+        assert graph.drive_hook.call_args.kwargs == { "config": graph.config_obj, "user_email": "u@test.com" }
 
     def test_missing_file_raises( self ):
         job   = _job()
