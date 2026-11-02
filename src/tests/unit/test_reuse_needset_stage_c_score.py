@@ -151,18 +151,50 @@ def test_inverted_ratings_are_named_inverted():
     assert out[ "headline" ][ "threshold_free" ] == "inverted"
 
 
-def test_an_auc_above_half_by_less_than_the_repeat_floor_is_capped_at_none_shown_and_inverted_is_not_raised():
-    rows = lambda same, other: [ { "pair": f"s{i}", "stratum": "flag", "label": sc.SAME, "r": r, "repeats": { 1: r, 2: r, 3: r } } for i, r in enumerate( same ) ] + \
-                               [ { "pair": f"n{i}", "stratum": "flag", "label": sc.NOT_SAME, "r": r, "repeats": { 1: r, 2: r, 3: r } } for i, r in enumerate( other ) ]
-    pairs = rows( [ 0.9 ] * 12, [ 0.1 ] * 12 )
-    steady = { n: [ { "stratum": p[ "stratum" ], "label": p[ "label" ], "r": p[ "r" ] } for p in pairs ] for n in ( 1, 2, 3 ) }
-    assert sc.figures( pairs, steady, 50 )[ "levels" ][ "threshold_free" ] == "strong"
-    wild   = { **steady, 2: [ { "stratum": p[ "stratum" ], "label": p[ "label" ], "r": 1 - p[ "r" ] } for p in pairs ] }
-    got    = sc.figures( pairs, wild, 50 )
-    assert got[ "floor" ][ "floor_primary" ] == 1.0 and got[ "auc" ][ "primary" ] - 0.5 <= got[ "floor" ][ "floor_primary" ] and got[ "levels" ][ "threshold_free" ] == "none shown"
-    flipped = rows( [ 0.1 ] * 12, [ 0.9 ] * 12 )
-    back    = { n: [ { "stratum": p[ "stratum" ], "label": p[ "label" ], "r": p[ "r" ] if n != 2 else 1 - p[ "r" ] } for p in flipped ] for n in ( 1, 2, 3 ) }
-    assert sc.figures( flipped, back, 50 )[ "levels" ][ "threshold_free" ] == "inverted"
+def pairs_of( same, other, stratum="flag" ):
+    """Return rated pairs of one stratum, each with the three repeats equal to its rating."""
+    one = lambda name, label, r: { "pair": name, "stratum": stratum, "label": label, "r": r, "repeats": { 1: r, 2: r, 3: r } }
+    return [ one( f"{stratum}-s{i}", sc.SAME, r ) for i, r in enumerate( same ) ] + [ one( f"{stratum}-n{i}", sc.NOT_SAME, r ) for i, r in enumerate( other ) ]
+
+
+def repeats_of( pairs, flip=() ):
+    """Return the by-repeat view of pairs, with every rating turned over in the repeats of flip."""
+    return { n: [ { "stratum": p[ "stratum" ], "label": p[ "label" ], "r": 1 - p[ "r" ] if n in flip else p[ "r" ] } for p in pairs ] for n in ( 1, 2, 3 ) }
+
+
+@pytest.mark.parametrize( "level, point, floor, expect", [ ( "strong", 0.9, 0.3, "strong" ), ( "strong", 0.9, 0.4, "none shown" ), ( "weak", 0.6, 0.1, "none shown" ), ( "moderate", 0.75, 0.2, "moderate" ),
+                                                            ( "inverted", 0.1, 0.3, "inverted" ), ( "inverted", 0.1, 0.4, "none shown" ), ( "inverted", 0.4, 0.2, "none shown" ),
+                                                            ( "strong", 0.9, None, "none shown" ), ( "inverted", 0.1, None, "none shown" ), ( "none shown", 0.5, 0.0, "none shown" ) ] )
+def test_the_floor_cap_is_symmetric( level, point, floor, expect ):
+    assert sc.cap_level( level, point, floor ) == expect
+
+
+def test_an_auc_above_half_by_no_more_than_the_repeat_floor_is_capped_and_so_is_an_inverted_one():
+    good = pairs_of( [ 0.9 ] * 12, [ 0.1 ] * 12 )
+    assert sc.figures( good, repeats_of( good ), 50 )[ "levels" ][ "threshold_free" ] == "strong"
+    wild = sc.figures( good, repeats_of( good, flip=( 2, ) ), 50 )
+    assert wild[ "floor" ][ "floor_primary" ] == 1.0 and wild[ "levels" ][ "threshold_free" ] == "none shown"
+    bad = pairs_of( [ 0.1 ] * 12, [ 0.9 ] * 12 )
+    assert sc.figures( bad, repeats_of( bad ), 50 )[ "levels" ][ "threshold_free" ] == "inverted"
+    assert sc.figures( bad, repeats_of( bad, flip=( 2, ) ), 50 )[ "levels" ][ "threshold_free" ] == "none shown", "an inverted AUC is capped by the floor as a positive one is"
+
+
+def test_each_stratum_is_capped_by_its_own_floor_and_not_the_overall_one():
+    steady, shaky = pairs_of( [ 0.9 ] * 12, [ 0.1 ] * 12, "flag" ), pairs_of( [ 0.9 ] * 12, [ 0.1 ] * 12, "monolith:structural" )
+    pairs = steady + shaky
+    rep   = { n: repeats_of( steady )[ n ] + repeats_of( shaky, flip=( 2, ) )[ n ] for n in ( 1, 2, 3 ) }
+    got   = sc.figures( pairs, rep, 50 )
+    assert got[ "floor" ][ "floor_by_stratum" ] == { "flag": 0.0, "monolith:structural": 1.0 } and got[ "floor" ][ "floor_primary" ] == 0.5
+    assert got[ "levels" ][ "threshold_free" ] == "none shown", "the overall AUC of 1.0 beats a floor of 0.5 by exactly the floor"
+    assert got[ "strata" ][ "flag" ][ "levels" ][ "threshold_free" ] == "strong" and got[ "strata" ][ "flag" ][ "floor" ] == 0.0, "flag keeps its level: the overall floor does not apply"
+    assert got[ "strata" ][ "monolith:structural" ][ "levels" ][ "threshold_free" ] == "none shown" and got[ "strata" ][ "monolith:structural" ][ "floor" ] == 1.0
+
+
+def test_a_stratum_with_only_one_class_has_no_auc_and_no_level():
+    pairs = pairs_of( [ 0.9 ] * 12, [ 0.1 ] * 12 ) + pairs_of( [ ], [ 0.2 ] * 3, "monolith:neighbour" )
+    got   = sc.figures( pairs, repeats_of( pairs ), 50 )
+    assert got[ "strata" ][ "monolith:neighbour" ][ "auc" ] is None and got[ "strata" ][ "monolith:neighbour" ][ "floor" ] is None
+    assert got[ "strata" ][ "monolith:neighbour" ][ "levels" ] == { "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }
 
 
 def test_a_missing_repeat_makes_the_floor_unavailable_and_blocks_the_run():
@@ -270,7 +302,7 @@ def test_main_prints_the_headline_and_writes_the_scored_json( tmp_path, capsys )
 
 
 def test_render_names_a_population_with_no_auc():
-    scored = { "headline": { "blocked_by": [ "x" ], "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }, "coverage": { "by_class": { "c": { "drafted": 1, "undrafted": 1 } } },
+    scored = { "headline": { "blocked_by": [ "x" ], "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }, "coverage": { "by_class": { "c": { "drafted": 1, "undrafted": 1, "refused": 0 } } },
                "populations": { "p": { "pairs": 0, "auc": { "primary": None }, "levels": { "threshold_free": "none shown", "line": "not usable at the line" } } } }
     assert any( "n/a" in line for line in sc.render( scored ) ) and "blocked by: ['x']" in sc.render( scored )[ 1 ]
 
@@ -305,3 +337,16 @@ def test_the_scorer_reads_rows_made_by_the_real_request_poster():
     pairs = sc.mean_ratings( rows )
     assert pairs[ "p1" ][ "r" ] == pytest.approx( 0.9 ) and sorted( pairs[ "p1" ][ "repeats" ] ) == [ 1, 2, 3 ] and sc.mean_ratings( rows, "side_a" )[ "p1" ][ "r" ] == pytest.approx( 0.9 )
     assert sc.valid_run( rows )[ "valid" ] is True and sc.valid_run( rows )[ "distinct_hashes" ] == 3
+
+
+def test_pairs_the_runner_refused_before_drafting_count_toward_the_fifteen_percent_rule():
+    rep = report_of()
+    rep[ "refused" ] = [ { "pair": f"r{i}", "stratum": "flag", "label": sc.NOT_SAME, "unsure": False, "raters": 2, "reason": "ambiguous" } for i in range( 8 ) ]
+    out = sc.score( rep, 50 )
+    cell = out[ "coverage" ][ "by_class" ][ sc.NOT_SAME ]
+    assert cell == { "drafted": 32, "undrafted": 0, "refused": 8, "lost": 8 / 40 } and out[ "coverage" ][ "by_stratum" ][ "flag" ][ "refused" ] == 8
+    assert out[ "coverage" ][ "limited" ] is True and COVERAGE in out[ "headline" ][ "blocked_by" ] and out[ "headline" ][ "threshold_free" ] == sc.NO_LEVEL
+    assert "not_same 8/40" in "\n".join( sc.render( out ) )
+    few = report_of()
+    few[ "refused" ] = rep[ "refused" ][ :5 ]
+    assert sc.score( few, 50 )[ "coverage" ][ "limited" ] is False, "5 of 37 is under 15%"

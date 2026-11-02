@@ -235,17 +235,36 @@ def repeat_floor( pairs_by_repeat ):
         - pairs_by_repeat is { n: list of { stratum, label, r } } for each repeat, r being that repeat's rating
 
     Ensures:
-        - returns { primary: [ per repeat ], pooled: [ ... ], d: [ ... ], floor_primary, floor_d }
+        - returns { primary: [ per repeat ], pooled: [ ... ], d: [ ... ], by_stratum: { stratum: [ per repeat ] }, floor_primary, floor_d, floor_by_stratum }
         - a floor is the largest minus the smallest of the repeats' figures, None when a repeat has none
+        - a stratum's floor comes from that stratum's own AUC in each repeat
     """
-    prim, pool, ds = [ ], [ ], [ ]
+    prim, pool, ds, per = [ ], [ ], [ ], { }
     for n in sorted( pairs_by_repeat ):
-        got = aucs( split( pairs_by_repeat[ n ] ) )
         g   = split( pairs_by_repeat[ n ] )
+        got = aucs( g )
+        for name, value in got[ "by_stratum" ].items(): per.setdefault( name, [ ] ).append( value )
         acc = acceptance( [ r for s in g.values() for r in s[ SAME ] ], [ r for s in g.values() for r in s[ NOT_SAME ] ] )
         prim.append( got[ "primary" ] ); pool.append( got[ "pooled" ] ); ds.append( None if acc[ "diff" ] is None else acc[ "diff" ][ "d" ] )
     gap = lambda xs: ( max( xs ) - min( xs ) ) if xs and None not in xs else None
-    return { "primary": prim, "pooled": pool, "d": ds, "floor_primary": gap( prim ), "floor_d": gap( ds ) }
+    return { "primary": prim, "pooled": pool, "d": ds, "by_stratum": per, "floor_primary": gap( prim ), "floor_d": gap( ds ), "floor_by_stratum": { name: gap( v ) for name, v in per.items() } }
+
+
+def cap_level( level, point, floor ):
+    """
+    Cap an AUC level by the repeat floor, the same way in both directions.
+
+    Requires:
+        - level is one of THRESHOLD_FREE; point is the AUC; floor is the repeat floor or None
+
+    Ensures:
+        - a weak, moderate or strong level stands only if ( point - 0.50 ) exceeds the floor, else none shown
+        - inverted stands only if ( 0.50 - point ) exceeds the floor, else none shown
+        - an unavailable floor ( None ) caps every level but none shown
+    """
+    margin = point - 0.50 if level in ( "weak", "moderate", "strong" ) else 0.50 - point if level == "inverted" else None
+    if margin is None: return level
+    return level if floor is not None and margin > floor else "none shown"
 
 
 def pair_sd_median( pairs ):
@@ -264,7 +283,7 @@ def figures( pairs, by_repeat, resamples=RESAMPLES ):
     Ensures:
         - returns { counts, auc, interval, accept, descriptive, floor, strata, levels } with per-stratum figures and levels beside the overall ones
         - a stratum with fewer than MIN_PER_CLASS pairs in either class gets figures and level NO_LEVEL
-        - the threshold-free level is capped at none shown unless ( point - 0.50 ) is above the primary floor; inverted is never raised
+        - the threshold-free level is capped by cap_level with the primary floor; a stratum is capped with its own floor, never the overall one
     """
     groups = split( pairs )
     got    = aucs( groups )
@@ -272,14 +291,15 @@ def figures( pairs, by_repeat, resamples=RESAMPLES ):
     every  = { c: [ r for g in groups.values() for r in g[ c ] ] for c in ( SAME, NOT_SAME ) }
     accept = acceptance( every[ SAME ], every[ NOT_SAME ] )
     floor  = repeat_floor( by_repeat )
-    level  = threshold_free_level( got[ "primary" ], ci[ "primary" ] )
-    if level in ( "weak", "moderate", "strong" ) and ( floor[ "floor_primary" ] is None or got[ "primary" ] - 0.50 <= floor[ "floor_primary" ] ): level = "none shown"
+    level  = cap_level( threshold_free_level( got[ "primary" ], ci[ "primary" ] ), got[ "primary" ], floor[ "floor_primary" ] )
     strata = { }
     for name, g in sorted( groups.items() ):
         a    = acceptance( g[ SAME ], g[ NOT_SAME ] )
         full = len( g[ SAME ] ) >= MIN_PER_CLASS and len( g[ NOT_SAME ] ) >= MIN_PER_CLASS
-        strata[ name ] = { "n": { SAME: len( g[ SAME ] ), NOT_SAME: len( g[ NOT_SAME ] ) }, "auc": got[ "by_stratum" ][ name ], "interval": ci[ "by_stratum" ][ name ], "accept": a,
-                           "levels": { "threshold_free": threshold_free_level( got[ "by_stratum" ][ name ], ci[ "by_stratum" ][ name ] ), "line": line_level( a ) } if full else { "threshold_free": NO_LEVEL, "line": NO_LEVEL } }
+        own  = floor[ "floor_by_stratum" ][ name ]
+        tf   = cap_level( threshold_free_level( got[ "by_stratum" ][ name ], ci[ "by_stratum" ][ name ] ), got[ "by_stratum" ][ name ], own ) if got[ "by_stratum" ][ name ] is not None else "none shown"
+        strata[ name ] = { "n": { SAME: len( g[ SAME ] ), NOT_SAME: len( g[ NOT_SAME ] ) }, "auc": got[ "by_stratum" ][ name ], "interval": ci[ "by_stratum" ][ name ], "accept": a, "floor": own,
+                           "levels": { "threshold_free": tf, "line": line_level( a ) } if full else { "threshold_free": NO_LEVEL, "line": NO_LEVEL } }
     return { "counts": { SAME: len( every[ SAME ] ), NOT_SAME: len( every[ NOT_SAME ] ) }, "auc": got, "interval": ci, "accept": accept,
              "descriptive": { "fixed_lines": { str( x ): acceptance( every[ SAME ], every[ NOT_SAME ], x ) for x in FIXED_LINES }, "at_same_80": reach_line( every[ SAME ], every[ NOT_SAME ] ),
                               "spread": { SAME: spread( every[ SAME ] ), NOT_SAME: spread( every[ NOT_SAME ] ) } },
@@ -317,22 +337,24 @@ def side_a_check( a_pairs, b_pairs ):
              "failing": sorted( k for k, v in rated.items() if v[ "r" ] < LINE ), "correlation": { c: pearson( [ x for x, _ in pts ], [ y for _, y in pts ] ) for c, pts in both.items() } }
 
 
-def coverage( rated, undrafted ):
+def coverage( rated, undrafted, refused=() ):
     """
-    Report the pairs lost to drafting, before any figure.
+    Report the pairs lost before any figure, to drafting and to refusal.
 
     Requires:
-        - rated are the drafted pairs ( mean_ratings' values ); undrafted are { pair, stratum, label } rows
+        - rated are the drafted pairs ( mean_ratings' values ); undrafted and refused are { pair, stratum, label } rows
+        - refused are pairs the runner would not post at all, such as a side whose text matches more than one record
 
     Ensures:
-        - returns { by_class, by_stratum, limited } where each cell is { drafted, undrafted, lost }
-        - limited is true when drafting lost more than MAX_LOSS of either class
+        - returns { by_class, by_stratum, limited } where each cell is { drafted, undrafted, refused, lost }
+        - lost counts both kinds, over the cell's whole population of drafted, undrafted and refused pairs
+        - limited is true when either kind together lost more than MAX_LOSS of any class
     """
-    cells = lambda key, rows, rows_u: { name: { "drafted": sum( 1 for r in rows if r[ key ] == name ), "undrafted": sum( 1 for r in rows_u if r[ key ] == name ) } for name in sorted( { r[ key ] for r in rows } | { r[ key ] for r in rows_u } ) }
-    by_c  = cells( "label", rated, undrafted )
-    by_s  = cells( "stratum", rated, undrafted )
+    cells = lambda key: { name: { "drafted": sum( 1 for r in rated if r[ key ] == name ), "undrafted": sum( 1 for r in undrafted if r[ key ] == name ), "refused": sum( 1 for r in refused if r[ key ] == name ) }
+                          for name in sorted( { r[ key ] for r in [ *rated, *undrafted, *refused ] } ) }
+    by_c, by_s = cells( "label" ), cells( "stratum" )
     for table in ( by_c, by_s ):
-        for cell in table.values(): cell[ "lost" ] = cell[ "undrafted" ] / ( cell[ "drafted" ] + cell[ "undrafted" ] )
+        for cell in table.values(): cell[ "lost" ] = ( cell[ "undrafted" ] + cell[ "refused" ] ) / ( cell[ "drafted" ] + cell[ "undrafted" ] + cell[ "refused" ] )
     return { "by_class": by_c, "by_stratum": by_s, "limited": any( c[ "lost" ] > MAX_LOSS for c in by_c.values() ) }
 
 
@@ -379,7 +401,7 @@ def score( report, resamples=RESAMPLES ):
     Score a judge-only report against the pre-registered mark.
 
     Requires:
-        - report is the parsed stage-c-report.json: results ( one row per pair and repeat ) and undrafted ( pairs with no need )
+        - report is the parsed stage-c-report.json: results ( one row per pair and repeat ), undrafted ( pairs with no need ) and, when the runner refused pairs before drafting, refused
 
     Ensures:
         - returns { coverage, valid_run, side_a, populations, headline }
@@ -388,8 +410,7 @@ def score( report, resamples=RESAMPLES ):
         - the headline level is the lowest of the populations' levels; the without_cue_pairs population counts only when some pair carries the cue
         - repeats that the run lacks make the repeat floor, and so any threshold-free level above none shown, unavailable
 
-    Readings where the mark is silent, each open to Chloé's correction:
-        - the floor cap lowers weak, moderate and strong to none shown and never raises inverted; per-stratum levels are not capped, since the floor is the overall one
+    Readings where the mark is silent, each open to Chloé's correction ( the floor cap is symmetric, and each stratum has its own floor, by her ruling of 12:25 ):
         - the spread of a pair's ratings is the sample standard deviation, and the side-a to side-b correlation is Pearson's
         - the without-cue population is the fourth population in the lowest-of rule, as the cue check says the headline is also read without those pairs
         - the sanity check and the valid-run conditions block both levels; a pair with no answered side-b rating is left out of the figures
@@ -397,7 +418,7 @@ def score( report, resamples=RESAMPLES ):
     results = report[ "results" ]
     b, a    = mean_ratings( results, "side_b" ), mean_ratings( results, "side_a" )
     pairs   = [ dict( v, pair=k ) for k, v in b.items() ]
-    cover   = coverage( pairs, report[ "undrafted" ] )
+    cover   = coverage( pairs, report[ "undrafted" ], report[ "refused" ] if "refused" in report else [ ] )
     valid   = valid_run( results )
     side    = side_a_check( a, b )
     pops    = { }
@@ -431,7 +452,7 @@ def render( scored ):
         - returns lines that open with the coverage and the blocks, then one row per population
     """
     head = scored[ "headline" ]
-    out  = [ f"coverage lost: " + ", ".join( f"{k} {v['undrafted']}/{v['drafted'] + v['undrafted']}" for k, v in scored[ "coverage" ][ "by_class" ].items() ),
+    out  = [ "coverage lost: " + ", ".join( f"{k} {v['undrafted'] + v['refused']}/{v['drafted'] + v['undrafted'] + v['refused']}" for k, v in scored[ "coverage" ][ "by_class" ].items() ),
              f"blocked by: {head[ 'blocked_by' ] or 'nothing'}", f"headline: {head[ 'threshold_free' ]} / {head[ 'line' ]}" ]
     for name, p in scored[ "populations" ].items():
         auc = p[ "auc" ][ "primary" ]
