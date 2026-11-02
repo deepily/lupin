@@ -10,6 +10,7 @@ File naming: `yyyy.mm.dd-<slug>-post-game.md`. Frontmatter names the manager. Th
 
 | Date | Retro | Manager | Tier | Tags |
 |---|---|---|---|---|
+| 2 Nov 2026 | [Part 3 of the first-thousand trial, the judge experiment and the real-pairs run](v0.2.2/2026.11.02-first-thousand-part-3-stage-c-post-game.md) | Cheech 🌿 | full | judge-experiment · real-pairs-run · pre-registered-mark · zero-spend-failures · recorded-is-not-used · missing-provenance · identical-text-sides · count-before-check · decision-card-jargon · census-recurrence · plan-form-misses-guard |
 | 2 Nov 2026 | [Part 2 of the first-thousand trial, the overnight crew run](v0.2.2/2026.11.02-first-thousand-part-2-crew-post-game.md) | Cheech 🌿 | full | crew-run · overnight · roundtable-on-commons · from-memento-witnesses · claim-sent-before-its-receipt · identity-check-after-tree-touch · ledger-name-single-use · clock-written-from-pace · reviews-fed-real-output · judge-is-the-loss-stage · plant-text-asymmetry |
 | 25 Oct 2026 | [Plan 1, ratchet and handover](v0.2.2/2026.10.25-plan-1-phase-7-ratchet-post-game.md) | Mr. Radio 🦉 | lite | plan-close · census-first · two-of-four-items-already-met |
 | 19 Oct 2026 | [Cheech's reuse-refresh and wiki-rollup day](v0.2.2/2026.10.19-cheech-reuse-refresh-and-wiki-rollup-post-game.md) | Cheech 🌿 | lite | manager-solo · classifier-blocked-landing · cherry-pick-range-order · host-layout-gaps · plan-looked-done · missing-phase-row · jargon-titles · long-user-ask-timeouts |
