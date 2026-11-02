@@ -190,7 +190,7 @@ def split_pairs( pairs, index, by_id, purposes ):
                             "ambiguous": len( ids ) > 1, "reason": prepared[ "reason" ] } )
             if prepared[ "reason" ] is not None: why.append( f"side {s} {prepared[ 'reason' ]}: {ids[ 0 ]}" )
         if len( found ) == 2 and found[ "a" ][ 0 ] == found[ "b" ][ 0 ]: why.append( f"{SAME_RECORD}: both sides are {found[ 'a' ][ 0 ]}" )
-        if why: refused.append( { "pair": p[ "pair" ], "stratum": p[ "stratum" ], "reasons": why } ); continue
+        if why: refused.append( { "pair": p[ "pair" ], "stratum": p[ "stratum" ], "label": p[ "label" ], "reasons": why } ); continue
         rows.append( { **{ k: p[ k ] for k in ( "pair", "stratum", "label", "unsure", "raters" ) }, "need_seed": by_id[ found[ "a" ][ 0 ] ], "side_a": found[ "a" ][ 1 ], "side_b": found[ "b" ][ 1 ], "ambiguous": ambiguous } )
     return rows, refused, sides
 
@@ -347,16 +347,16 @@ def main( argv=None, deps=None ):
     if not args.live: return { "live": False, "mode": "stage_c", "plan": plan }
     if not args.run_name or not args.from_run: raise er.NeedsetError( er.BAD_NEED, "a live run needs --run-name, a spend-ledger run name that was not used before, and --from-run for its environment" )
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "the ledgers are bound to the Claude Code binary's version" )
-    return live( args, rows, plan, deps )
+    return live( args, rows, refused, plan, deps )
 
 
-def live( args, rows, plan, deps ):
+def live( args, rows, refused, plan, deps ):
     """
     Draft the needs, ask the judge and write the report.
 
     Ensures:
         - returns { live True, mode, plan, undrafted, report, closed_run, close_error }
-        - REPORT_FILE holds the run_variant report plus undrafted; the spend-ledger run is closed whatever happens
+        - REPORT_FILE holds the run_variant report plus undrafted and refused; the spend-ledger run is closed whatever happens
     """
     import os
     os.environ.update( { **expansion_run.read_env_file( f"{args.from_run}/run-env.sh" ), rt.RUN_NAME_VARIABLE: args.run_name, rt.CEILING_VARIABLE: str( args.ceiling ) } )
@@ -368,7 +368,7 @@ def live( args, rows, plan, deps ):
         close = deps[ "close_run" ] if "close_run" in deps else rt.close_run
         try:
             rt.prepare( ctx )
-            report, undrafted = judge_all( args, rows, root, ctx, deps )
+            report, undrafted = judge_all( args, rows, refused, root, ctx, deps )
         except BaseException:
             try: close( ctx )
             except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
@@ -382,12 +382,12 @@ def live( args, rows, plan, deps ):
         if made: source_at.unlock( args.root, root )
 
 
-def judge_all( args, rows, root, ctx, deps ):
+def judge_all( args, rows, refused, root, ctx, deps ):
     """
     Draft under its own stage budget, then post every pair and repeat.
 
     Ensures:
-        - returns ( report, undrafted ); the report is run_variant's, written again with undrafted as REPORT_FILE
+        - returns ( report, undrafted ); the report is run_variant's, written again with undrafted and refused as REPORT_FILE
         - the posts are checked for distinct bodies before the first goes out
     """
     cap = call_cap.CallCap( f"{args.run_dir}/{first_thousand.CALLS_FILE}", args.limit, { DRAFT_STAGE: args.draft_budget } )
@@ -400,7 +400,7 @@ def judge_all( args, rows, root, ctx, deps ):
     jp.distinct_bodies( requests )
     send   = deps[ "ask" ] if "ask" in deps else ( lambda request: ask_pair( ctx.transport, request, ctx.transport.budget ) )
     report = jp.run_variant( args.run_dir, requests, send, args.limit, args.post_budget )
-    pathlib.Path( f"{args.run_dir}/{REPORT_FILE}" ).write_text( json.dumps( { **report, "undrafted": undrafted }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+    pathlib.Path( f"{args.run_dir}/{REPORT_FILE}" ).write_text( json.dumps( { **report, "undrafted": undrafted, "refused": refused }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
     return report, undrafted
 
 
