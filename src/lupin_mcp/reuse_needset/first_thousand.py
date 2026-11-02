@@ -152,7 +152,7 @@ def control_ask( needs, check_fn, asked_ids_fn, observe=None ):
 
     Ensures:
         - returns an async ask( planted pool, pair ) giving that list
-        - the need record is stage3.need_for( pair, sentence ), whose seed is the original, so the checker leaves the original out
+        - the need record is stage3.need_for( pair, sentence ), whose seed is the original's id; it matches no index id, so the original stays in the search
     """
     async def ask( planted, pair ):
         """Ensures: returns the ids the checker asked about for this pair."""

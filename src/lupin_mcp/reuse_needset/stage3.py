@@ -38,7 +38,7 @@ def control_stage( records, pairs, ask, build_stage ):
         - the pool is fingerprinted before the first ask, so a trace left by an ask is caught as well as one left by the plant
         - the pairs are asked one at a time in file order, so the calls fall in a fixed order
         - the report is run_control's, plus by_lang ( found and total per rewrite language ), restored true and stop false
-        - a missed pair does not stop the run; the caller scores the misses and sets stop by its own rule
+        - a missed pair does not stop the run; stop is always false and the caller scores the misses
 
     Raises:
         - NeedsetError CONTROL_NOT_RESTORED from the returned function when the pool or the stage ids changed
