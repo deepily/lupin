@@ -110,7 +110,8 @@ def preflight( run_name, ledger_file, vectors_dir, live=True, advance=False, tre
         - without live nothing is checked and no tree is touched: a plan-only run contacts no model and begins no ledger run
         - the run name is judged first; then the tree is made and locked, the index built from it, and the identity read as the final step
         - a consumed name with advance letters forward and the result carries run_name as the new name
-        - a refusal after the tree step unlocks the tree again, so a refused launch leaves nothing locked
+        - any failure after the tree step, a crash included, unlocks the tree when this call made it, and re-raises
+        - a tree that was already there is never unlocked, because a live run on the same commit may hold it
         - returns { live, run_name, identity, advanced_from, tree, tree_recreated }
     Raises:
         - NeedsetError RUN_NAME_CONSUMED for a consumed name without advance
@@ -124,9 +125,9 @@ def preflight( run_name, ledger_file, vectors_dir, live=True, advance=False, tre
     tree, recreated = tree_fn()
     try:
         identity = identity_fn( index_fn( tree ), vectors_dir )
-    except er.NeedsetError as e:
-        if unlock_fn is not None: unlock_fn( tree )
-        if e.code == er.VECTORS_NOT_FROM_INDEX and recreated:
+    except BaseException as e:
+        if recreated and unlock_fn is not None: unlock_fn( tree )
+        if isinstance( e, er.NeedsetError ) and e.code == er.VECTORS_NOT_FROM_INDEX and recreated:
             raise er.NeedsetError( e.code, f"{e.detail}. This launch had to make {tree} again, which moves every file time the index hashes: rebuild the vectors against it with rebuild_vectors, then relaunch" )
         raise
     return { "live": True, "run_name": run_name, "identity": identity, "advanced_from": was, "tree": str( tree ), "tree_recreated": recreated }

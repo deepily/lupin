@@ -17,13 +17,20 @@ from tests.unit.needset_freeze_helpers import built_pair
 RUN = "needset-first-1000-20261101-m"
 
 
-def make_ledger( tmp_path, *begun ):
-    """Ensures: returns a real ledger that has begun and ended each named run."""
+def make_ledger( tmp_path, *begun, end=True ):
+    """Ensures: returns a real ledger that began each run, and ended it unless end is False."""
     led = reuse_ledger.AccountLedger.create( tmp_path / "ledger.jsonl", 1_000_000, "test", "fixture" )
     for name in begun:
         led.begin_run( name, 10 )
-        led.end_run( name )
+        if end: led.end_run( name )
     return led.path
+
+
+def folder( base, name ):
+    """Ensures: returns the new sub-folder base/name."""
+    path = base / name
+    path.mkdir()
+    return path
 
 
 def code_of( call, *args, **kw ):
@@ -117,11 +124,39 @@ def test_a_refused_name_touches_no_tree_and_reads_no_identity( tmp_path ):
     assert log == []
 
 
-def test_a_refusal_after_the_tree_step_unlocks_the_tree_it_locked( tmp_path ):
-    unlocked = []
+def test_a_refusal_unlocks_a_tree_this_call_made_and_never_one_that_was_already_there( tmp_path ):
     def stale( g, v ): raise er.NeedsetError( er.VECTORS_NOT_FROM_INDEX, "built from another index" )
-    assert code_of( lp.preflight, RUN, make_ledger( tmp_path ), "v", tree_fn=tree_of(), index_fn=index_of( "g" ), identity_fn=stale, unlock_fn=unlocked.append ) == er.VECTORS_NOT_FROM_INDEX
-    assert unlocked == [ "/tree" ]
+    for recreated, want in ( ( True, [ "/tree" ] ), ( False, [] ) ):
+        unlocked = []
+        assert code_of( lp.preflight, RUN, make_ledger( folder( tmp_path, f"r{recreated}" ) ), "v", tree_fn=tree_of( recreated ), index_fn=index_of( "g" ), identity_fn=stale, unlock_fn=unlocked.append ) == er.VECTORS_NOT_FROM_INDEX
+        assert unlocked == want
+
+
+def test_a_crash_in_the_index_step_unlocks_a_tree_this_call_made_and_re_raises( tmp_path ):
+    def crash( tree ): raise RuntimeError( "index build died" )
+    for recreated, want in ( ( True, [ "/tree" ] ), ( False, [] ) ):
+        unlocked = []
+        ledger = make_ledger( folder( tmp_path, f"c{recreated}" ) )
+        with pytest.raises( RuntimeError, match="index build died" ): lp.preflight( RUN, ledger, "v", tree_fn=tree_of( recreated ), index_fn=crash, unlock_fn=unlocked.append )
+        assert unlocked == want
+
+
+def test_a_run_name_with_only_a_begin_row_is_consumed( tmp_path ):
+    ledger = make_ledger( tmp_path, RUN, end=False )
+    assert lp.begun_run_names( ledger ) == { RUN } and code_of( lp.check_run_name, RUN, lp.begun_run_names( ledger ) ) == er.RUN_NAME_CONSUMED
+
+
+def test_an_end_row_alone_does_not_make_a_name_begun( tmp_path ):
+    ledger = make_ledger( tmp_path )
+    with ledger.open( "a", encoding="utf-8" ) as f: f.write( json.dumps( { "kind": "end", "run": RUN } ) + "\n" )
+    assert lp.begun_run_names( ledger ) == set()
+
+
+def test_advance_on_an_unused_name_keeps_the_name_and_prints_no_new_one( tmp_path ):
+    got = lp.preflight( RUN, make_ledger( tmp_path ), "v", advance=True, tree_fn=tree_of(), index_fn=index_of( "g" ), identity_fn=lambda g, v: {} )
+    assert got[ "run_name" ] == RUN and got[ "advanced_from" ] is None
+    rc, out, err = run_main( tmp_path, make_ledger( folder( tmp_path, "x" ) ), "--live", "--advance" )
+    assert rc == 0 and "RUN_NAME=" not in out
 
 
 def test_a_stale_identity_after_the_tree_was_recreated_says_so_and_names_the_rebuild( tmp_path ):
