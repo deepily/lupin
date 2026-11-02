@@ -133,7 +133,7 @@ def test_a_big_d_with_a_lower_bound_at_or_below_zero_is_not_usable():
 def test_a_clean_separation_is_strong_and_usable_with_no_level_for_the_small_stratum():
     out  = sc.score( report_of(), SMALL )
     pop  = out[ "populations" ][ "all_drafted" ]
-    assert out[ "headline" ] == { "blocked_by": [ ], "threshold_free": "strong", "line": "usable" }
+    assert out[ "headline" ] == { "covers": "67 of 67 pairs judged", "blocked_by": [ ], "threshold_free": "strong", "line": "usable" }
     assert pop[ "auc" ][ "primary" ] == 1.0 and pop[ "counts" ] == { sc.SAME: 35, sc.NOT_SAME: 32 }
     assert pop[ "strata" ][ "monolith:neighbour" ][ "levels" ] == { "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }, "5 same-job pairs is under 10"
     assert pop[ "strata" ][ "flag" ][ "levels" ] == { "threshold_free": "strong", "line": "usable" } and pop[ "consistent" ] == { "flag": True, "monolith:structural": True }
@@ -296,15 +296,15 @@ def test_main_prints_the_headline_and_writes_the_scored_json( tmp_path, capsys )
     path.write_text( json.dumps( report_of( cue=2 ) ), encoding="utf-8" )
     assert sc.main( [ "--report", str( path ), "--out", str( out ), "--resamples", "50" ] ) == 0
     text = capsys.readouterr().out
-    assert "headline: strong / usable" in text and "all_drafted" in text and "blocked by: nothing" in text and "coverage lost: not_same 0/32, same_job 0/35" in text
+    assert "headline: strong / usable" in text and "all_drafted" in text and "blocked by: nothing" in text and "drafting lost: not_same 0/32, same_job 0/35" in text and "population 67 of 67" in text
     assert json.loads( out.read_text( encoding="utf-8" ) )[ "headline" ][ "threshold_free" ] == "strong"
     assert sc.main( [ "--report", str( path ), "--resamples", "20" ] ) == 0 and not ( tmp_path / "other.json" ).exists()
 
 
 def test_render_names_a_population_with_no_auc():
-    scored = { "headline": { "blocked_by": [ "x" ], "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }, "coverage": { "by_class": { "c": { "drafted": 1, "undrafted": 1, "refused": 0 } } },
+    scored = { "headline": { "covers": "1 of 2 pairs judged", "blocked_by": [ "x" ], "threshold_free": sc.NO_LEVEL, "line": sc.NO_LEVEL }, "coverage": { "by_class": { "c": { "drafted": 1, "undrafted": 1 } }, "population": { "judged": 2, "of": 2 }, "refused": { "total": 0, "by_class_stratum": { } } },
                "populations": { "p": { "pairs": 0, "auc": { "primary": None }, "levels": { "threshold_free": "none shown", "line": "not usable at the line" } } } }
-    assert any( "n/a" in line for line in sc.render( scored ) ) and "blocked by: ['x']" in sc.render( scored )[ 1 ]
+    assert any( "n/a" in line for line in sc.render( scored ) ) and "blocked by: ['x']" in sc.render( scored )
 
 
 def test_the_boundaries_sit_where_the_mark_puts_them():
@@ -339,17 +339,46 @@ def test_the_scorer_reads_rows_made_by_the_real_request_poster():
     assert sc.valid_run( rows )[ "valid" ] is True and sc.valid_run( rows )[ "distinct_hashes" ] == 3
 
 
-def test_pairs_the_runner_refused_before_drafting_count_toward_the_fifteen_percent_rule():
+def refused_rows( n, label=sc.NOT_SAME, stratum="flag", reasons=( "planted side", ) ):
+    """Return n refused rows of one class and stratum."""
+    return [ { "pair": f"r{label}{stratum}{i}", "stratum": stratum, "label": label, "unsure": False, "raters": 2, "reasons": list( reasons ) } for i in range( n ) ]
+
+
+def test_refused_pairs_print_as_a_fixed_row_with_reasons_and_stay_out_of_the_fifteen_percent_rule():
     rep = report_of()
-    rep[ "refused" ] = [ { "pair": f"r{i}", "stratum": "flag", "label": sc.NOT_SAME, "unsure": False, "raters": 2, "reason": "ambiguous" } for i in range( 8 ) ]
+    rep[ "refused" ] = refused_rows( 20 ) + refused_rows( 2, sc.SAME, "monolith:structural", ( "planted side", "anonymous callback" ) )
     out = sc.score( rep, 50 )
-    cell = out[ "coverage" ][ "by_class" ][ sc.NOT_SAME ]
-    assert cell == { "drafted": 32, "undrafted": 0, "refused": 8, "lost": 8 / 40 } and out[ "coverage" ][ "by_stratum" ][ "flag" ][ "refused" ] == 8
-    assert out[ "coverage" ][ "limited" ] is True and COVERAGE in out[ "headline" ][ "blocked_by" ] and out[ "headline" ][ "threshold_free" ] == sc.NO_LEVEL
-    assert "not_same 8/40" in "\n".join( sc.render( out ) )
-    few = report_of()
-    few[ "refused" ] = rep[ "refused" ][ :5 ]
-    assert sc.score( few, 50 )[ "coverage" ][ "limited" ] is False, "5 of 37 is under 15%"
+    gone = out[ "coverage" ][ "refused" ]
+    assert out[ "coverage" ][ "limited" ] is False and out[ "headline" ][ "blocked_by" ] == [ ], "20 refused of 52 not-same pairs would have fired the rule over the whole population"
+    assert out[ "coverage" ][ "by_class" ][ sc.NOT_SAME ] == { "drafted": 32, "undrafted": 0, "lost": 0.0 } and out[ "coverage" ][ "population" ] == { "judged": 67, "of": 89 }
+    assert gone[ "total" ] == 22 and gone[ "by_class" ] == { sc.NOT_SAME: 20, sc.SAME: 2 } and gone[ "by_stratum" ][ "flag" ] == 20 and gone[ "by_stratum" ][ "monolith:neighbour" ] == 0
+    assert gone[ "by_reason" ] == { "planted side": 22, "anonymous callback": 2 }
+    cells = gone[ "by_class_stratum" ]
+    assert cells[ "not_same/flag" ] == { "n": 20, "reasons": { "planted side": 20 } } and cells[ "same_job/monolith:structural" ][ "reasons" ] == { "planted side": 2, "anonymous callback": 2 }
+    assert cells[ "same_job/monolith:neighbour" ] == { "n": 0, "reasons": { } } and len( cells ) == 6, "a cell for every class and stratum, zero where none"
+
+
+def test_the_fifteen_percent_rule_counts_drafting_losses_over_the_judged_population_only():
+    rep = report_of( undrafted=8 )
+    rep[ "refused" ] = refused_rows( 40, sc.SAME )
+    out = sc.score( rep, 50 )
+    assert out[ "coverage" ][ "by_class" ][ sc.SAME ] == { "drafted": 35, "undrafted": 8, "lost": 8 / 43 } and out[ "coverage" ][ "limited" ] is True and COVERAGE in out[ "headline" ][ "blocked_by" ]
+    ok = report_of( undrafted=5 )
+    ok[ "refused" ] = refused_rows( 40, sc.SAME )
+    assert sc.score( ok, 50 )[ "coverage" ][ "limited" ] is False, "5 of 40 is under 15%, whatever was refused"
+
+
+def test_the_printed_output_opens_with_the_population_and_the_refused_row_before_any_figure():
+    rep = report_of()
+    rep[ "refused" ] = refused_rows( 3, reasons=( "planted side", "anonymous callback" ) )
+    lines = sc.render( sc.score( rep, 50 ) )
+    assert lines[ 0 ] == "population 67 of 70; 3 pairs refused, not judged, outside the population"
+    scored = sc.score( rep, 50 )
+    assert scored[ "headline" ][ "covers" ] == "67 of 70 pairs judged" and "headline: strong / usable ( 67 of 70 pairs judged; the refused row above is not judged )" in lines
+    assert "refused not_same/flag: 3 anonymous callback 3, planted side 3" in lines and "refused same_job/flag: 0" in lines
+    last_refused = max( i for i, line in enumerate( lines ) if line.startswith( "refused" ) )
+    first_other  = min( i for i, line in enumerate( lines ) if line.startswith( ( "drafting lost", "blocked by", "headline", "all_drafted" ) ) )
+    assert last_refused < first_other and last_refused == 6, "six cells ( two classes, three strata ) print before drafting, the headline or a figure"
 
 
 def test_the_numbers_of_the_mark_are_pinned_to_literals():

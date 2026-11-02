@@ -337,25 +337,53 @@ def side_a_check( a_pairs, b_pairs ):
              "failing": sorted( k for k, v in rated.items() if v[ "r" ] < LINE ), "correlation": { c: pearson( [ x for x, _ in pts ], [ y for _, y in pts ] ) for c, pts in both.items() } }
 
 
+def refused_row( refused, rated, undrafted ):
+    """
+    Print the pairs the runner refused as a fixed row, outside the population.
+
+    Requires:
+        - refused are { pair, stratum, label, reasons } rows; rated and undrafted give the classes and strata of the judged population
+
+    Ensures:
+        - returns { total, by_class_stratum, by_class, by_stratum, by_reason } with a cell for every class and stratum named anywhere, zero where nothing was refused
+        - a by_class_stratum cell is { n, reasons: { reason: count } }; a pair with several reasons counts once under each
+        - refused pairs are never rated, imputed or counted as misses
+    """
+    names  = lambda key: sorted( { r[ key ] for r in [ *rated, *undrafted, *refused ] } )
+    cells  = { f"{c}/{st}": { "n": 0, "reasons": { } } for c in names( "label" ) for st in names( "stratum" ) }
+    reason = { }
+    for r in refused:
+        cell = cells[ f"{r[ 'label' ]}/{r[ 'stratum' ]}" ]
+        cell[ "n" ] += 1
+        for why in r[ "reasons" ]:
+            cell[ "reasons" ][ why ] = cell[ "reasons" ].get( why, 0 ) + 1
+            reason[ why ] = reason.get( why, 0 ) + 1
+    return { "total": len( refused ), "by_class_stratum": cells, "by_class": { c: sum( 1 for r in refused if r[ "label" ] == c ) for c in names( "label" ) },
+             "by_stratum": { st: sum( 1 for r in refused if r[ "stratum" ] == st ) for st in names( "stratum" ) }, "by_reason": reason }
+
+
 def coverage( rated, undrafted, refused=() ):
     """
-    Report the pairs lost before any figure, to drafting and to refusal.
+    Report the drafting losses and, beside them, the pairs refused outside the population.
 
     Requires:
         - rated are the drafted pairs ( mean_ratings' values ); undrafted and refused are { pair, stratum, label } rows
-        - refused are pairs the runner would not post at all, such as a side whose text matches more than one record
+        - refused are pairs the runner would not post at all, such as a side that is not a real record; refused rows carry reasons
 
     Ensures:
-        - returns { by_class, by_stratum, limited } where each cell is { drafted, undrafted, refused, lost }
-        - lost counts both kinds, over the cell's whole population of drafted, undrafted and refused pairs
-        - limited is true when either kind together lost more than MAX_LOSS of any class
+        - returns { by_class, by_stratum, limited, population, refused }
+        - each cell of by_class and by_stratum is { drafted, undrafted, lost }; lost is undrafted over drafted plus undrafted, so refused pairs are not in it
+        - limited is true when drafting lost more than MAX_LOSS of either class of the judged population
+        - population is { judged, of }: the drafted and undrafted pairs, and those plus the refused
+        - refused is refused_row's fixed row
     """
-    cells = lambda key: { name: { "drafted": sum( 1 for r in rated if r[ key ] == name ), "undrafted": sum( 1 for r in undrafted if r[ key ] == name ), "refused": sum( 1 for r in refused if r[ key ] == name ) }
-                          for name in sorted( { r[ key ] for r in [ *rated, *undrafted, *refused ] } ) }
+    cells = lambda key: { name: { "drafted": sum( 1 for r in rated if r[ key ] == name ), "undrafted": sum( 1 for r in undrafted if r[ key ] == name ) }
+                          for name in sorted( { r[ key ] for r in [ *rated, *undrafted ] } ) }
     by_c, by_s = cells( "label" ), cells( "stratum" )
     for table in ( by_c, by_s ):
-        for cell in table.values(): cell[ "lost" ] = ( cell[ "undrafted" ] + cell[ "refused" ] ) / ( cell[ "drafted" ] + cell[ "undrafted" ] + cell[ "refused" ] )
-    return { "by_class": by_c, "by_stratum": by_s, "limited": any( c[ "lost" ] > MAX_LOSS for c in by_c.values() ) }
+        for cell in table.values(): cell[ "lost" ] = cell[ "undrafted" ] / ( cell[ "drafted" ] + cell[ "undrafted" ] )
+    return { "by_class": by_c, "by_stratum": by_s, "limited": any( c[ "lost" ] > MAX_LOSS for c in by_c.values() ),
+             "population": { "judged": len( rated ) + len( undrafted ), "of": len( rated ) + len( undrafted ) + len( refused ) }, "refused": refused_row( refused, rated, undrafted ) }
 
 
 def valid_run( results ):
@@ -404,8 +432,9 @@ def score( report, resamples=RESAMPLES ):
         - report is the parsed stage-c-report.json: results ( one row per pair and repeat ), undrafted ( pairs with no need ) and, when the runner refused pairs before drafting, refused
 
     Ensures:
-        - returns { coverage, valid_run, side_a, populations, headline }
-        - coverage comes first and, when drafting lost more than 15% of either class, no level is awarded
+        - returns { coverage, valid_run, side_a, populations, headline }; the headline says how many of the whole set were judged, as covers
+        - coverage comes first and, when drafting lost more than 15% of either class of the judged population, no level is awarded
+        - refused pairs are printed as a fixed row and kept out of the loss count: they were removed before drafting by a stated rule, so they say nothing about drafting
         - a run that is not valid, or whose side-a check fails, awards no level
         - a report with no refused key is not valid, so a refused list that was never written cannot read as no refusals
         - the headline level is the lowest of the populations' levels; the without_cue_pairs population counts only when some pair carries the cue
@@ -432,7 +461,7 @@ def score( report, resamples=RESAMPLES ):
         pops[ name ] = figures( chosen, rep, resamples ) | { "pairs": len( names ) }
     blocked = [ text for text, hit in ( ( COVERAGE_LIMITED, cover[ "limited" ] ), ( "the run is not valid: " + "; ".join( valid[ "reasons" ] ), not valid[ "valid" ] ),
                                         ( "the judge did not recognise a need's own source", not side[ "passed" ] ) ) if hit ]
-    head    = { "blocked_by": blocked, "threshold_free": NO_LEVEL if blocked else lowest( [ p[ "levels" ][ "threshold_free" ] for p in pops.values() ], THRESHOLD_FREE ),
+    head    = { "covers": f"{cover[ 'population' ][ 'judged' ]} of {cover[ 'population' ][ 'of' ]} pairs judged", "blocked_by": blocked, "threshold_free": NO_LEVEL if blocked else lowest( [ p[ "levels" ][ "threshold_free" ] for p in pops.values() ], THRESHOLD_FREE ),
                 "line": NO_LEVEL if blocked else lowest( [ p[ "levels" ][ "line" ] for p in pops.values() ], LINE_LEVELS ) }
     return { "coverage": cover, "valid_run": valid, "side_a": side, "populations": pops, "headline": head }
 
@@ -448,14 +477,19 @@ def parse_args( argv=None ):
 
 def render( scored ):
     """
-    Render the headline, coverage and per-population levels as text.
+    Render the refused row, the coverage, the headline and the per-population levels as text.
 
     Ensures:
-        - returns lines that open with the coverage and the blocks, then one row per population
+        - returns lines that open with the population line and the refused row per class and stratum, with reasons, before any figure
+        - then the drafting loss, the blocks, the headline and one row per population
     """
-    head = scored[ "headline" ]
-    out  = [ "coverage lost: " + ", ".join( f"{k} {v['undrafted'] + v['refused']}/{v['drafted'] + v['undrafted'] + v['refused']}" for k, v in scored[ "coverage" ][ "by_class" ].items() ),
-             f"blocked by: {head[ 'blocked_by' ] or 'nothing'}", f"headline: {head[ 'threshold_free' ]} / {head[ 'line' ]}" ]
+    head, cover = scored[ "headline" ], scored[ "coverage" ]
+    gone        = cover[ "refused" ]
+    out         = [ f"population {cover[ 'population' ][ 'judged' ]} of {cover[ 'population' ][ 'of' ]}; {gone[ 'total' ]} pairs refused, not judged, outside the population" ]
+    for name, cell in gone[ "by_class_stratum" ].items():
+        out.append( f"refused {name}: {cell[ 'n' ]}" + ( " " + ", ".join( f"{why} {n}" for why, n in sorted( cell[ "reasons" ].items() ) ) if cell[ "reasons" ] else "" ) )
+    out += [ "drafting lost: " + ", ".join( f"{k} {v['undrafted']}/{v['drafted'] + v['undrafted']}" for k, v in cover[ "by_class" ].items() ),
+             f"blocked by: {head[ 'blocked_by' ] or 'nothing'}", f"headline: {head[ 'threshold_free' ]} / {head[ 'line' ]} ( {head[ 'covers' ]}; the refused row above is not judged )" ]
     for name, p in scored[ "populations" ].items():
         auc = p[ "auc" ][ "primary" ]
         out.append( f"{name:22} pairs {p[ 'pairs' ]:4} primary AUC {'n/a' if auc is None else f'{auc:.3f}'} levels {p[ 'levels' ][ 'threshold_free' ]} / {p[ 'levels' ][ 'line' ]}" )
