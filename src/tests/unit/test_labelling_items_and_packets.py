@@ -262,7 +262,7 @@ def test_a_subset_packet_inherits_the_provenance_of_the_packets_it_draws_from( t
 
 def test_a_subset_packet_is_refused_when_an_earlier_packet_has_no_provenance_or_they_disagree( tmp_path ):
     paths = pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path, PROV )
-    pk._write_provenance( paths[ "sam" ], { **PROV, "source_commit": "b" * 40 } )
+    pk.write_provenance( paths[ "sam" ], { **PROV, "source_commit": "b" * 40 } )
     assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.PROVENANCE_MISSING
     pk._provenance_path( paths[ "sam" ] ).unlink()
     assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.PROVENANCE_MISSING

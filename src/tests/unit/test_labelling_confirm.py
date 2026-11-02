@@ -8,7 +8,7 @@ import pytest
 from cosa.repo.labelling import confirm as cf
 from cosa.repo.labelling import errors as er
 from cosa.repo.labelling import packets as pk
-from tests.unit.test_labelling_items_and_packets import code_of, need_item, none_item, pair_item
+from tests.unit.test_labelling_items_and_packets import PROV, code_of, need_item, none_item, pair_item
 
 
 def label( item_id, reviewer, choice=pk.AS_PROPOSED, symbols=() ):
@@ -43,7 +43,7 @@ def test_the_sample_is_twenty_percent_half_rounded_up_seeded_and_independent_of_
 def test_a_confirm_packet_hides_rick_on_the_blind_sample_and_shows_him_on_the_rest( tmp_path ):
     items = items_of( 10 )
     rick  = rick_of( items, **{ "n-000": ( pk.OTHER, [ "pkg.f" ] ), "z-001": ( pk.NONE, () ) } )
-    paths = cf.export_confirm_packet( items, rick, "sam", 7, tmp_path )
+    paths = cf.export_confirm_packet( items, rick, "sam", 7, tmp_path, PROV )
     lines, manifest = written( paths )
     blind = set( paths[ "blind_ids" ] )
     assert len( blind ) == 2 and set( paths[ "confirm_ids" ] ) == { i[ "item_id" ] for i in items } - blind
@@ -63,8 +63,8 @@ def test_a_confirm_packet_hides_rick_on_the_blind_sample_and_shows_him_on_the_re
 def test_the_same_seed_gives_the_same_packet_and_another_seed_a_different_sample( tmp_path ):
     items = items_of( 20 )
     rick  = rick_of( items )
-    a, b  = cf.export_confirm_packet( items, rick, "sam", 7, tmp_path / "a" ), cf.export_confirm_packet( items, rick, "sam", 7, tmp_path / "b" )
-    c     = cf.export_confirm_packet( items, rick, "sam", 8, tmp_path / "c" )
+    a, b  = cf.export_confirm_packet( items, rick, "sam", 7, tmp_path / "a", PROV ), cf.export_confirm_packet( items, rick, "sam", 7, tmp_path / "b", PROV )
+    c     = cf.export_confirm_packet( items, rick, "sam", 8, tmp_path / "c", PROV )
     assert a[ "path" ].read_text() == b[ "path" ].read_text() and a[ "blind_ids" ] == b[ "blind_ids" ] != c[ "blind_ids" ]
 
 
@@ -82,14 +82,14 @@ def test_the_same_seed_gives_the_same_packet_and_another_seed_a_different_sample
 def test_a_bad_round_is_refused_by_name_and_writes_nothing( tmp_path, mutate, code ):
     items = items_of( 10 )
     args  = mutate( items, rick_of( items ) )
-    assert code_of( lambda: cf.export_confirm_packet( args[ 0 ], args[ 1 ], args[ 2 ], 7, tmp_path, args[ 3 ] ) ) == code
+    assert code_of( lambda: cf.export_confirm_packet( args[ 0 ], args[ 1 ], args[ 2 ], 7, tmp_path, PROV, args[ 3 ] ) ) == code
     assert list( tmp_path.iterdir() ) == []
 
 
 def test_an_item_with_a_hidden_field_is_refused_before_anything_is_written( tmp_path ):
     items = items_of( 10 )
     items[ 3 ] = dict( items[ 3 ], verdict="same" )
-    assert code_of( lambda: cf.export_confirm_packet( items, rick_of( items ), "sam", 7, tmp_path ) ) == er.PACKET_LEAK and list( tmp_path.iterdir() ) == []
+    assert code_of( lambda: cf.export_confirm_packet( items, rick_of( items ), "sam", 7, tmp_path, PROV ) ) == er.PACKET_LEAK and list( tmp_path.iterdir() ) == []
 
 
 def test_a_packet_that_reads_back_differently_is_removed_and_a_changed_line_is_a_leak( tmp_path, monkeypatch ):
@@ -99,7 +99,7 @@ def test_a_packet_that_reads_back_differently_is_removed_and_a_changed_line_is_a
         return real( path, expected )
     real = cf._check_written
     monkeypatch.setattr( cf, "_check_written", tampered )
-    assert code_of( lambda: cf.export_confirm_packet( items, rick_of( items ), "sam", 7, tmp_path ) ) == er.PACKET_LEAK
+    assert code_of( lambda: cf.export_confirm_packet( items, rick_of( items ), "sam", 7, tmp_path, PROV ) ) == er.PACKET_LEAK
     assert list( tmp_path.iterdir() ) == []
     path = tmp_path / "p.jsonl"
     path.write_text( json.dumps( { "item_id": "ghost" } ) + "\n" )
@@ -122,7 +122,7 @@ def run_round( tmp_path, n=20, rick_choices=None, second=None ):
     """
     items = items_of( n )
     rick  = rick_of( items, **( rick_choices or {} ) )
-    paths = cf.export_confirm_packet( items, rick, "sam", 7, tmp_path )
+    paths = cf.export_confirm_packet( items, rick, "sam", 7, tmp_path, PROV )
     mine  = [ label( l[ "item_id" ], "sam", *( second or {} ).get( l[ "item_id" ], ( l[ "choice" ], l[ "symbols" ] ) ) ) for l in rick ]
     return items, rick, mine, cf.read_manifest( paths[ "manifest_path" ] ), paths
 
@@ -170,3 +170,18 @@ def test_a_report_over_other_items_or_an_unknown_blind_id_is_refused( tmp_path )
 def test_a_choice_outside_the_categories_is_not_swallowed_as_undefined_kappa( tmp_path ):
     items, rick, mine, manifest, _ = run_round( tmp_path, 10 )
     assert code_of( cf.confirm_report, rick, mine, manifest, [ pk.NONE ] ) == er.BAD_LABEL
+
+
+# ---- provenance: the commit and index generation the confirm packet was cut from ----------------------------------
+
+def test_the_confirm_packet_carries_the_commit_and_index_generation_it_was_cut_from( tmp_path ):
+    items = items_of( 10 )
+    made  = cf.export_confirm_packet( items, rick_of( items ), "sam", 7, tmp_path, PROV )
+    assert pk.read_provenance( made[ "path" ] ) == PROV
+
+
+@pytest.mark.parametrize( "bad", [ { }, { "source_commit": "a" * 40 }, { "index_generation": "gen-1" }, { "source_commit": "main", "index_generation": "gen-1" } ] )
+def test_a_confirm_packet_without_a_commit_or_index_generation_is_refused_and_nothing_is_written( tmp_path, bad ):
+    items = items_of( 10 )
+    assert code_of( lambda: cf.export_confirm_packet( items, rick_of( items ), "sam", 7, tmp_path, bad ) ) == er.PROVENANCE_MISSING
+    assert list( tmp_path.iterdir() ) == []

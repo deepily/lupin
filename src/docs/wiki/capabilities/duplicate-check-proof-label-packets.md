@@ -10,7 +10,7 @@ pins:
   - cosa.repo.duplicate_check.proof.label_prep.pair_item@b3d5b13847
   - cosa.repo.duplicate_check.proof.label_prep.prepare@089967022e
   - cosa.repo.duplicate_check.proof.label_prep.save_doc@8e644e313a
-  - cosa.repo.duplicate_check.proof.label_prep.source_provenance@1eb9654ab1
+  - cosa.repo.duplicate_check.proof.label_prep.source_provenance@6040461b8a
   - cosa.repo.duplicate_check.proof.label_prep.run@3ff409c0cf
   - cosa.repo.duplicate_check.proof.label_prep.live_wiring@7a6c7abc06
   - cosa.repo.duplicate_check.proof.label_prep.main@63d7e5c866
@@ -30,7 +30,7 @@ The second half of `label_prep.py`: the monolith pairs, the blind items, the pac
 
 ## Packets and key
 - `prepare` builds one item per planted pair and monolith pair. It writes `packets/packet-<reviewer>.jsonl`, with the same items in a different order each, and `key/answer-key.json` once. It raises `FileExistsError` if the key exists, before anything is written.
-- The key maps each item id to its ids, which side is a, its kind and its stratum or source. It also records the `source_commit` and `index_generation` the pairs were cut from, and `prepare` refuses to write without them. `source_provenance( root )` reads them from the tree: the full id of HEAD and the live generation folder name. A packet holds the item ids and texts only.
+- The key maps each item id to its ids, which side is a, its kind and its stratum or source. It also records the `source_commit` and `index_generation` the pairs were cut from, and `prepare` refuses to write without them. `source_provenance( root )` reads them from the tree: the full id of HEAD and the live generation folder name. It refuses a tree with uncommitted tracked changes. It also refuses an index that `is_fresh` calls stale. So the commit is the one the index was built from. A packet holds the item ids and texts only.
 
 ## Command
 - `save_doc` writes the planted document to a temporary file and renames it. The file holds the old document or the new one, never half of either.

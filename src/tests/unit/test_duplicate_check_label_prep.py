@@ -693,30 +693,63 @@ def test_prepare_refuses_a_run_without_a_commit_or_index_generation_before_writi
     assert not list( tmp_path.iterdir() )
 
 
-def test_source_provenance_names_the_head_commit_and_the_live_generation( tmp_path, monkeypatch ):
-    tree = tmp_path / "tree"
+def git_tree( tmp_path, monkeypatch, name="tree", commit=True ):
+    """Return a git tree whose live index generation is gen-abc1234567."""
+    tree = tmp_path / name
     gen  = tree / "index" / "gen-abc1234567"
     gen.mkdir( parents=True )
     ( tree / "index" / "current" ).symlink_to( gen.name )
     monkeypatch.setattr( lp.sx_paths, "default_out_dir", lambda root: pathlib.Path( root ) / "index" )
     subprocess.run( [ "git", "init", "-q" ], cwd=tree, check=True )
-    subprocess.run( [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x" ], cwd=tree, check=True )
-    head = subprocess.run( [ "git", "rev-parse", "HEAD" ], cwd=tree, capture_output=True, text=True, check=True ).stdout.strip()
-    assert lp.source_provenance( tree ) == { "source_commit": head, "index_generation": "gen-abc1234567" }
+    ( tree / "f.txt" ).write_text( "one", encoding="utf-8" )
+    subprocess.run( [ "git", "add", "f.txt" ], cwd=tree, check=True )
+    if commit: subprocess.run( [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x" ], cwd=tree, check=True )
+    return tree
 
 
-def test_source_provenance_refuses_a_tree_with_no_commit_or_no_published_index( tmp_path ):
-    nowhere = tmp_path / "absent"
-    with pytest.raises( lb_errors.LabellingError ) as e: lp.source_provenance( nowhere )
-    assert e.value.code == lb_errors.PROVENANCE_MISSING and "source_commit" in e.value.detail
-    bare = tmp_path / "bare"
-    bare.mkdir()
-    subprocess.run( [ "git", "init", "-q" ], cwd=bare, check=True )
-    with pytest.raises( lb_errors.LabellingError ) as e: lp.source_provenance( bare )
-    assert e.value.code == lb_errors.PROVENANCE_MISSING and "source_commit" in e.value.detail
-    subprocess.run( [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x" ], cwd=bare, check=True )
-    with pytest.raises( lb_errors.LabellingError ) as e: lp.source_provenance( bare )
-    assert e.value.code == lb_errors.PROVENANCE_MISSING and "index_generation" in e.value.detail
+def head_of( tree ):
+    """Return the full id of HEAD in tree."""
+    return subprocess.run( [ "git", "rev-parse", "HEAD" ], cwd=tree, capture_output=True, text=True, check=True ).stdout.strip()
+
+
+def refused( fn, *args, **kw ):
+    """Return the detail of the PROVENANCE_MISSING that fn raises."""
+    with pytest.raises( lb_errors.LabellingError ) as e: fn( *args, **kw )
+    assert e.value.code == lb_errors.PROVENANCE_MISSING
+    return e.value.detail
+
+
+def test_source_provenance_names_the_head_commit_and_the_live_generation_when_the_index_is_fresh( tmp_path, monkeypatch ):
+    tree  = git_tree( tmp_path, monkeypatch )
+    asked = []
+    got   = lp.source_provenance( tree, spec_fn=lambda root: ( "spec", str( root ) ), fresh_fn=lambda spec, out: asked.append( ( spec, out ) ) or True )
+    assert got == { "source_commit": head_of( tree ), "index_generation": "gen-abc1234567" }
+    assert asked == [ ( ( "spec", str( tree ) ), tree / "index" ) ]
+
+
+def test_source_provenance_refuses_a_stale_index_because_it_was_not_built_from_this_commit( tmp_path, monkeypatch ):
+    tree   = git_tree( tmp_path, monkeypatch )
+    detail = refused( lp.source_provenance, tree, spec_fn=lambda root: None, fresh_fn=lambda spec, out: False )
+    assert "stale" in detail and "gen-abc1234567" in detail
+
+
+def test_source_provenance_refuses_a_tree_whose_tracked_files_differ_from_head( tmp_path, monkeypatch ):
+    tree = git_tree( tmp_path, monkeypatch )
+    ( tree / "f.txt" ).write_text( "two", encoding="utf-8" )
+    assert "differ from HEAD" in refused( lp.source_provenance, tree, spec_fn=lambda root: None, fresh_fn=lambda spec, out: True )
+    ( tree / "f.txt" ).write_text( "one", encoding="utf-8" )
+    ( tree / "untracked.txt" ).write_text( "x", encoding="utf-8" )
+    assert lp.source_provenance( tree, spec_fn=lambda root: None, fresh_fn=lambda spec, out: True )[ "source_commit" ] == head_of( tree )
+
+
+def test_source_provenance_refuses_a_tree_with_no_commit_or_no_published_index( tmp_path, monkeypatch ):
+    never = dict( spec_fn=lambda root: None, fresh_fn=lambda spec, out: True )
+    assert "source_commit" in refused( lp.source_provenance, tmp_path / "absent", **never )
+    bare = git_tree( tmp_path, monkeypatch, "bare", commit=False )
+    assert "source_commit" in refused( lp.source_provenance, bare, **never )
+    nogen = git_tree( tmp_path, monkeypatch, "nogen" )
+    ( nogen / "index" / "current" ).unlink()
+    assert "index_generation" in refused( lp.source_provenance, nogen, **never )
 
 
 def test_run_takes_the_provenance_from_the_tree_when_none_is_given_and_refuses_before_any_model_call( tmp_path ):

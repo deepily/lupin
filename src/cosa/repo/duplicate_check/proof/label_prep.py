@@ -15,6 +15,7 @@ import tempfile
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import items as lb_items
+from cosa.repo.labelling import errors as lb_errors
 from cosa.repo.labelling import packets as lb_packets
 from cosa.repo.duplicate_check import blind, body_vectors, extract, frozen, structural
 from cosa.repo.duplicate_check import config as cfg_mod
@@ -438,26 +439,47 @@ def top_up_alikes( doc, pools, root, wiring, folder, count=PLANTED_COUNT, thread
     return added
 
 
-def source_provenance( root ):
+def source_provenance( root, spec_fn=sp.spec_for, fresh_fn=sx_build.is_fresh ):
     """
     Name the commit and the index generation a run over this tree is cut from.
 
     Requires:
         - root is a git work tree with a published index
+        - spec_fn( root ) gives the index spec and fresh_fn( spec, out_dir ) says whether the live index matches the tree
 
     Ensures:
         - returns { source_commit, index_generation }: the full id of HEAD and the name of the live generation folder
+        - the tree is clean in its tracked files, and the live generation matches the tree now, so the commit is the one the index was built from
 
     Raises:
-        - LabellingError PROVENANCE_MISSING when the tree has no commit or no published index
+        - LabellingError PROVENANCE_MISSING when the tree has no commit, has uncommitted tracked changes, has no published index, or the index is stale
     """
+    where = str( root )
     try:
-        done   = subprocess.run( [ "git", "rev-parse", "HEAD" ], cwd=root, capture_output=True, text=True )
-        commit = done.stdout.strip() if done.returncode == 0 else None
+        commit = _git( root, "rev-parse", "HEAD" )
+        dirty  = _git( root, "status", "--porcelain", "--untracked-files=no" ) if commit else ""
     except OSError:
-        commit = None
-    gen  = sx_build.current_generation( sx_paths.default_out_dir( root ) )
-    return lb_packets.check_provenance( { "source_commit": commit, "index_generation": gen.name if gen is not None else None }, str( root ) )
+        commit, dirty = None, ""
+    if dirty: raise lb_errors.LabellingError( lb_errors.PROVENANCE_MISSING, f"{where}: tracked files differ from HEAD, so HEAD is not the commit the pairs are read from" )
+    out = sx_paths.default_out_dir( root )
+    gen = sx_build.current_generation( out )
+    if commit and gen is not None and not fresh_fn( spec_fn( root ), out ):
+        raise lb_errors.LabellingError( lb_errors.PROVENANCE_MISSING, f"{where}: the live index {gen.name} is stale against the tree, so it was not built from this commit" )
+    return lb_packets.check_provenance( { "source_commit": commit, "index_generation": gen.name if gen is not None else None }, where )
+
+
+def _git( root, *args ):
+    """
+    Run one git command in root.
+
+    Ensures:
+        - returns the stripped stdout, or None when git fails
+
+    Raises:
+        - OSError when root cannot be entered
+    """
+    done = subprocess.run( [ "git", *args ], cwd=root, capture_output=True, text=True )
+    return done.stdout.strip() if done.returncode == 0 else None
 
 
 def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=REVIEWERS, provenance=None ):

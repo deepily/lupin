@@ -77,8 +77,16 @@ def read_provenance( packet ):
     return check_provenance( record, str( path ) )
 
 
-def _write_provenance( packet, provenance ):
-    """Ensures: writes the checked provenance beside the packet and returns its path."""
+def write_provenance( packet, provenance ):
+    """
+    Write the checked provenance beside a packet, whatever tool wrote the packet.
+
+    Ensures:
+        - returns the path of the provenance file; nothing is written when the provenance is missing or malformed
+
+    Raises:
+        - LabellingError PROVENANCE_MISSING from check_provenance
+    """
     path = _provenance_path( packet )
     path.write_text( json.dumps( check_provenance( provenance ), sort_keys=True ), encoding="utf-8" )
     return path
@@ -146,7 +154,7 @@ def export_packets( items, reviewers, seed, out_dir, provenance ):
         taken.append( [ i[ "item_id" ] for i in order ] )
         paths[ reviewer ] = packet_path( out, reviewer )
         paths[ reviewer ].write_text( "".join( json.dumps( i, sort_keys=True ) + "\n" for i in order ), encoding="utf-8" )
-        _write_provenance( paths[ reviewer ], provenance )
+        write_provenance( paths[ reviewer ], provenance )
     try:
         for path in paths.values():
             for line in path.read_text( encoding="utf-8" ).splitlines(): blind_form( json.loads( line ) )
@@ -192,7 +200,7 @@ def export_subset_packet( packet_dir, item_ids, reviewer, seed ):
     order  = seeded_order( [ blind_form( by_id[ i ] ) for i in sorted( wanted ) ], f"{seed}|{reviewer}", taken )
     path   = packet_path( packet_dir, reviewer )
     path.write_text( "".join( json.dumps( i, sort_keys=True ) + "\n" for i in order ), encoding="utf-8" )
-    _write_provenance( path, provs[ 0 ] )
+    write_provenance( path, provs[ 0 ] )
     try:
         for line in path.read_text( encoding="utf-8" ).splitlines(): blind_form( json.loads( line ) )
     except er.LabellingError:
