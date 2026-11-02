@@ -18,7 +18,7 @@ CLOCK = lambda: "2026-10-26T21:00:00+00:00"
 def make_packet( tmp_path, count=3 ):
     """Write a two-reviewer packet folder with the real exporter and return rick's packet path."""
     items = [ it.make_item( it.DUPLICATE_PAIR, f"pair-{n}", { "a": f"def a{n}(): pass", "b": f"def b{n}(): pass" } ) for n in range( count ) ]
-    return pk.export_packets( items, [ "rick", "other" ], "seed", tmp_path )[ "rick" ]
+    return pk.export_packets( items, [ "rick", "other" ], "seed", tmp_path, { "source_commit": "a" * 40, "index_generation": "gen-0123456789" } )[ "rick" ]
 
 
 def test_the_rule_maps_as_proposed_to_same_job_and_none_to_not():

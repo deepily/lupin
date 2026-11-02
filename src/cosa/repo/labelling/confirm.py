@@ -61,7 +61,7 @@ def _check_written( path, expected ):
         if got != expected.get( got.get( "item_id" ) ): raise er.LabellingError( er.PACKET_LEAK, f"{got.get( 'item_id' )}: the written line is not the intended one" )
 
 
-def export_confirm_packet( items, rick_labels, reviewer, seed, out_dir, share=BLIND_SHARE ):
+def export_confirm_packet( items, rick_labels, reviewer, seed, out_dir, provenance, share=BLIND_SHARE ):
     """
     Write the second reviewer's packet in confirm mode, and its manifest.
 
@@ -69,10 +69,12 @@ def export_confirm_packet( items, rick_labels, reviewer, seed, out_dir, share=BL
         - items are labelling items with distinct ids; rick_labels is Rick's read_labels output, one label per item and no other
         - reviewer is a name of letters, digits, _ and -, and is not the name on Rick's labels
         - share is above 0 and below 1, and draws at least one item
+        - provenance names the source_commit and index_generation the items were cut from
 
     Ensures:
         - returns { path, manifest_path, blind_ids, confirm_ids }
         - the blind items carry the blind form and the mode; every other item also carries Rick's choice and symbols, and no note, time or other field
+        - the packet carries the provenance in a file beside it
         - the sample is drawn with the seed, which the manifest records with the share, the item count and the blind ids
         - the bytes written are read back and compared with the intended lines; on a mismatch the files are removed
 
@@ -80,7 +82,9 @@ def export_confirm_packet( items, rick_labels, reviewer, seed, out_dir, share=BL
         - LabellingError BAD_ITEM for an invalid item, duplicate ids, a bad or repeated reviewer name, a share outside 0 to 1 or an empty sample
         - LabellingError BAD_LABEL when Rick's labels and the items are not the same set
         - LabellingError PACKET_LEAK as export_packets does
+        - LabellingError PROVENANCE_MISSING for a provenance without a commit or an index generation, before anything is written
     """
+    provenance = pk.check_provenance( provenance )
     clean = [ pk.blind_form( i ) for i in items ]
     ids   = [ i[ "item_id" ] for i in clean ]
     if len( set( ids ) ) != len( ids ): raise er.LabellingError( er.BAD_ITEM, "item ids repeat" )
@@ -101,10 +105,11 @@ def export_confirm_packet( items, rick_labels, reviewer, seed, out_dir, share=BL
     path.write_text( "".join( json.dumps( l, sort_keys=True ) + "\n" for l in lines ), encoding="utf-8" )
     mpath.write_text( json.dumps( { "format": MANIFEST_FORMAT, "seed": seed, "share": share, "reviewer": reviewer, "rick": rick_name, "n_items": len( ids ), "n_blind": len( blind ), "blind_ids": blind },
                                   sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+    ppath = pk.write_provenance( path, provenance )
     try:
         _check_written( path, { l[ "item_id" ]: l for l in lines } )
     except er.LabellingError:
-        path.unlink(); mpath.unlink()
+        path.unlink(); mpath.unlink(); ppath.unlink()
         raise
     return { "path": path, "manifest_path": mpath, "blind_ids": blind, "confirm_ids": sorted( set( ids ) - set( blind ) ) }
 

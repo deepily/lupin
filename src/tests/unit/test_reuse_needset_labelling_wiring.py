@@ -72,7 +72,7 @@ def test_the_fake_judge_end_to_end_a_rejected_key_never_reaches_a_packet_a_perso
     by_id  = world[ "by_id" ]
     items  = finalize.labelling_items( kept, picked, world[ "source_of" ], lambda n: [ "pkg.a.f() — Adds." ], lambda n: finalize.key_call_sites( n, by_id, world[ "tree" ], world[ "files" ] ), checks )
     assert [ i[ "item_id" ] for i in items ] == [ p[ "id" ] for p in picked ] and b[ "id" ] not in { i[ "item_id" ] for i in items }
-    pk.export_packets( items, [ "r1", "r2" ], 7, world[ "out" ] )
+    pk.export_packets( items, [ "r1", "r2" ], 7, world[ "out" ], { "source_commit": "a" * 40, "index_generation": "gen-0123456789" } )
     shown  = { r[ "item_id" ]: r for r in ( json.loads( l ) for l in pk.packet_path( world[ "out" ], "r1" ).read_text().splitlines() ) }
     assert c[ "id" ] in shown and "run_check" not in json.dumps( shown[ c[ "id" ] ] ), "a reviewer never sees the run-check ruling"
     py_item = shown[ c[ "id" ] ][ "payload" ]

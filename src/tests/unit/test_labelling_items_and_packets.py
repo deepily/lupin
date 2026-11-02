@@ -10,6 +10,9 @@ from cosa.repo.labelling import items as it
 from cosa.repo.labelling import packets as pk
 
 
+PROV = { "source_commit": "a" * 40, "index_generation": "gen-0123456789" }
+
+
 def need_item( n=0 ):
     """Return a matched need item."""
     return it.make_item( "need_key", f"n-{n:03d}", { "need": f"A function that does job {n} in a loop.", "key_sources": [ f"def key{n}(): pass" ] } )
@@ -62,18 +65,18 @@ def test_the_error_carries_its_code_and_detail():
 
 def test_two_reviewers_get_the_same_items_in_different_seeded_orders( tmp_path ):
     items = [ need_item( n ) for n in range( 8 ) ] + [ none_item( 1 ), pair_item( 2 ) ]
-    paths = pk.export_packets( items, [ "rick", "sam" ], 7, tmp_path )
+    paths = pk.export_packets( items, [ "rick", "sam" ], 7, tmp_path, PROV )
     rows  = { r: [ json.loads( l ) for l in p.read_text().splitlines() ] for r, p in paths.items() }
     ids   = { r: [ x[ "item_id" ] for x in v ] for r, v in rows.items() }
     assert set( ids[ "rick" ] ) == set( ids[ "sam" ] ) == { i[ "item_id" ] for i in items } and ids[ "rick" ] != ids[ "sam" ]
-    assert pk.export_packets( items, [ "rick", "sam" ], 7, tmp_path / "again" )[ "rick" ].read_text() == paths[ "rick" ].read_text()
-    assert pk.export_packets( items, [ "rick", "sam" ], 8, tmp_path / "other" )[ "rick" ].read_text() != paths[ "rick" ].read_text()
+    assert pk.export_packets( items, [ "rick", "sam" ], 7, tmp_path / "again", PROV )[ "rick" ].read_text() == paths[ "rick" ].read_text()
+    assert pk.export_packets( items, [ "rick", "sam" ], 8, tmp_path / "other", PROV )[ "rick" ].read_text() != paths[ "rick" ].read_text()
     assert paths[ "rick" ] == pk.packet_path( tmp_path, "rick" )
     assert all( set( x ) == { "item_id", "type", "payload" } for v in rows.values() for x in v )
 
 
 def test_one_item_can_still_be_given_to_two_reviewers( tmp_path ):
-    paths = pk.export_packets( [ need_item() ], [ "a", "b" ], 1, tmp_path )
+    paths = pk.export_packets( [ need_item() ], [ "a", "b" ], 1, tmp_path, PROV )
     assert paths[ "a" ].read_text() == paths[ "b" ].read_text()
 
 
@@ -81,20 +84,20 @@ def test_one_item_can_still_be_given_to_two_reviewers( tmp_path ):
 def test_an_item_that_carries_a_verdict_or_a_reason_is_a_packet_leak_and_nothing_is_written( tmp_path, field, where ):
     item = need_item()
     ( item[ "payload" ] if where == "payload" else item )[ field ] = "agree"
-    assert code_of( pk.export_packets, [ item, need_item( 1 ) ], [ "a", "b" ], 1, tmp_path ) == er.PACKET_LEAK
+    assert code_of( pk.export_packets, [ item, need_item( 1 ) ], [ "a", "b" ], 1, tmp_path, PROV ) == er.PACKET_LEAK
     assert not list( tmp_path.glob( "packet-*" ) )
 
 
 def test_a_leak_found_in_the_bytes_written_removes_the_packets( tmp_path, monkeypatch ):
     monkeypatch.setattr( pk, "seeded_order", lambda items, seed, taken: [ dict( i, verdict="agree" ) for i in items ] )
-    assert code_of( pk.export_packets, [ need_item(), need_item( 1 ) ], [ "a", "b" ], 1, tmp_path ) == er.PACKET_LEAK
+    assert code_of( pk.export_packets, [ need_item(), need_item( 1 ) ], [ "a", "b" ], 1, tmp_path, PROV ) == er.PACKET_LEAK
     assert not list( tmp_path.glob( "packet-*" ) )
 
 
 @pytest.mark.parametrize( "items, reviewers", [ ( [ need_item(), need_item() ], [ "a", "b" ] ), ( [ need_item() ], [ "a" ] ), ( [ need_item() ], [ "a", "a" ] ), ( [ need_item() ], [ "a", "../b" ] ),
                                                ( [ need_item() ], [ "a", "" ] ), ( [ { "item_id": "x" } ], [ "a", "b" ] ) ] )
 def test_duplicate_ids_a_bad_item_and_bad_reviewer_lists_are_refused( tmp_path, items, reviewers ):
-    assert code_of( pk.export_packets, items, reviewers, 1, tmp_path ) == er.BAD_ITEM
+    assert code_of( pk.export_packets, items, reviewers, 1, tmp_path, PROV ) == er.BAD_ITEM
 
 
 def label( item="n-000", reviewer="rick", choice="AS_PROPOSED", symbols=(), note="", ts="2026-10-24T20:00:00-04:00" ):
@@ -141,7 +144,7 @@ def test_an_item_answered_again_counts_once_at_its_latest_answer_and_the_history
 
 def test_a_subset_packet_holds_only_the_named_items_in_an_order_no_earlier_packet_used( tmp_path ):
     items = [ need_item( n ) for n in range( 8 ) ]
-    pk.export_packets( items, [ "rick", "sam" ], 7, tmp_path )
+    pk.export_packets( items, [ "rick", "sam" ], 7, tmp_path, PROV )
     named = [ i[ "item_id" ] for i in items[ :5 ] ]
     path  = pk.export_subset_packet( tmp_path, named, "third", 7 )
     got   = [ json.loads( l ) for l in path.read_text().splitlines() ]
@@ -152,7 +155,7 @@ def test_a_subset_packet_holds_only_the_named_items_in_an_order_no_earlier_packe
 
 @pytest.mark.parametrize( "named, reviewer", [ ( [], "third" ), ( [ "n-099" ], "third" ), ( [ "n-000" ], "rick" ), ( [ "n-000" ], "../x" ) ] )
 def test_a_subset_packet_refuses_no_items_an_unknown_item_and_a_used_or_bad_name( tmp_path, named, reviewer ):
-    pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path )
+    pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path, PROV )
     assert code_of( pk.export_subset_packet, tmp_path, named, reviewer, 7 ) == er.BAD_ITEM
     assert not pk.packet_path( tmp_path, "third" ).exists()
 
@@ -162,10 +165,11 @@ def test_a_subset_packet_needs_earlier_packets_to_draw_from( tmp_path ):
 
 
 def test_a_leak_found_in_the_subset_bytes_written_removes_the_packet( tmp_path, monkeypatch ):
-    pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path )
+    pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path, PROV )
     monkeypatch.setattr( pk, "seeded_order", lambda items, seed, taken: [ dict( i, verdict="agree" ) for i in items ] )
     assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.PACKET_LEAK
     assert not pk.packet_path( tmp_path, "third" ).exists()
+    assert not pk._provenance_path( pk.packet_path( tmp_path, "third" ) ).exists()
 
 
 # ---- a duplicate answer that save_label could not have written ---------------------------------------------------
@@ -203,3 +207,63 @@ def test_a_repeat_is_compared_with_the_answer_just_before_it_and_not_with_the_fi
     path = write_labels( tmp_path / "l.jsonl", rows )
     with pytest.raises( er.LabellingError ) as e: pk.read_history( path )
     assert e.value.code == er.BAD_LABEL and f"{path}:3:" in e.value.detail and "earlier" in e.value.detail
+
+
+# ---- provenance: the commit and index generation a packet was cut from --------------------------------------------
+
+def test_every_packet_carries_the_commit_and_index_generation_it_was_cut_from( tmp_path ):
+    paths = pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path, PROV )
+    for path in paths.values():
+        assert pk._provenance_path( path ).name == path.name.replace( ".jsonl", ".provenance.json" )
+        assert pk.read_provenance( path ) == PROV
+    assert sorted( p.name for p in tmp_path.glob( "packet-*.jsonl" ) ) == [ "packet-rick.jsonl", "packet-sam.jsonl" ]
+
+
+@pytest.mark.parametrize( "bad", [ { }, { "source_commit": "a" * 40 }, { "index_generation": "gen-1" }, { "source_commit": "", "index_generation": "gen-1" },
+                                   { "source_commit": "main", "index_generation": "gen-1" }, { "source_commit": "A" * 40, "index_generation": "gen-1" },
+                                   { "source_commit": "a" * 6, "index_generation": "gen-1" }, { "source_commit": "a" * 41, "index_generation": "gen-1" },
+                                   { "source_commit": None, "index_generation": "gen-1" }, { "source_commit": "a" * 40, "index_generation": " " },
+                                   { "source_commit": "a" * 40, "index_generation": None }, { "source_commit": "a" * 40, "index_generation": 7 }, "a" * 40, None ] )
+def test_a_packet_without_a_commit_or_an_index_generation_is_refused_and_nothing_is_written( tmp_path, bad ):
+    assert code_of( pk.export_packets, [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path, bad ) == er.PROVENANCE_MISSING
+    assert not list( tmp_path.glob( "packet-*" ) )
+
+
+def test_the_packet_writer_drops_a_field_that_is_not_provenance_and_names_the_missing_commit( tmp_path ):
+    assert pk.check_provenance( { **PROV, "note": "x" } ) == PROV
+    with pytest.raises( er.LabellingError ) as e: pk.check_provenance( { "index_generation": "gen-1" }, "key.json" )
+    assert e.value.code == er.PROVENANCE_MISSING and "key.json" in e.value.detail and "source_commit" in e.value.detail
+    with pytest.raises( er.LabellingError ) as e: pk.check_provenance( { "source_commit": "a" * 40 } )
+    assert "index_generation" in e.value.detail
+
+
+def test_a_packet_cut_before_the_commit_was_recorded_has_no_provenance_to_read( tmp_path ):
+    old = tmp_path / "packet-rick.jsonl"
+    old.write_text( "", encoding="utf-8" )
+    with pytest.raises( er.LabellingError ) as e: pk.read_provenance( old )
+    assert e.value.code == er.PROVENANCE_MISSING and "before the commit was recorded" in e.value.detail
+    pk._provenance_path( old ).write_text( "not json", encoding="utf-8" )
+    assert code_of( pk.read_provenance, old ) == er.PROVENANCE_MISSING
+    pk._provenance_path( old ).write_text( json.dumps( { "source_commit": "a" * 40 } ), encoding="utf-8" )
+    assert code_of( pk.read_provenance, old ) == er.PROVENANCE_MISSING
+
+
+def test_a_leak_found_in_the_bytes_written_removes_the_provenance_files_too( tmp_path, monkeypatch ):
+    monkeypatch.setattr( pk, "seeded_order", lambda items, seed, taken: [ dict( i, verdict="agree" ) for i in items ] )
+    assert code_of( pk.export_packets, [ need_item(), need_item( 1 ) ], [ "a", "b" ], 1, tmp_path, PROV ) == er.PACKET_LEAK
+    assert not list( tmp_path.iterdir() )
+
+
+def test_a_subset_packet_inherits_the_provenance_of_the_packets_it_draws_from( tmp_path ):
+    pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path, PROV )
+    path = pk.export_subset_packet( tmp_path, [ "n-000" ], "third", 7 )
+    assert pk.read_provenance( path ) == PROV
+
+
+def test_a_subset_packet_is_refused_when_an_earlier_packet_has_no_provenance_or_they_disagree( tmp_path ):
+    paths = pk.export_packets( [ need_item( 0 ), need_item( 1 ) ], [ "rick", "sam" ], 7, tmp_path, PROV )
+    pk.write_provenance( paths[ "sam" ], { **PROV, "source_commit": "b" * 40 } )
+    assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.PROVENANCE_MISSING
+    pk._provenance_path( paths[ "sam" ] ).unlink()
+    assert code_of( pk.export_subset_packet, tmp_path, [ "n-000" ], "third", 7 ) == er.PROVENANCE_MISSING
+    assert not pk.packet_path( tmp_path, "third" ).exists()

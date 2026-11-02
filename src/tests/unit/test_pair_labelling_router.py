@@ -25,7 +25,7 @@ def env( tmp_path, monkeypatch ):
     """Make a packets folder for two reviewers, an unread key folder, and a client."""
     items = [ it.make_item( it.DUPLICATE_PAIR, f"pair-{n}", { "a": f"def a{n}(): pass", "b": f"def b{n}(): pass" } ) for n in range( 3 ) ]
     packets = tmp_path / "packets"
-    pk.export_packets( items, [ "rick", "second" ], "seed", packets )
+    pk.export_packets( items, [ "rick", "second" ], "seed", packets, { "source_commit": "a" * 40, "index_generation": "gen-0123456789" } )
     ( tmp_path / "key" ).mkdir()
     monkeypatch.setenv( plr.DIR_VARIABLE, str( packets ) )
     app = FastAPI()
