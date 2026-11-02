@@ -42,12 +42,31 @@ def load_run( run_dir ):
         - run_dir holds key/planted.json and key/answer-key.json as label_prep wrote them
 
     Ensures:
-        - returns { planted, items, seed, monolith_blob, config_sha }; planted is the list of { original, rewrite, stratum }
+        - returns { planted, items, seed, monolith_blob, config_sha, source_commit, index_generation }; planted is the list of { original, rewrite, stratum }
+        - source_commit and index_generation are None for a key written before they were recorded, the 25 Oct run among them; that run's commit is inferred, not recorded
     """
     key_dir = pathlib.Path( run_dir ) / KEY_DIR
     planted = json.loads( ( key_dir / PLANTED_FILE ).read_text( encoding="utf-8" ) )[ "planted" ]
     key     = json.loads( ( key_dir / KEY_FILE ).read_text( encoding="utf-8" ) )
-    return { "planted": planted, "items": key[ "items" ], "seed": key[ "seed" ], "monolith_blob": key[ "monolith_blob" ], "config_sha": key[ "config_sha" ] }
+    return { "planted": planted, "items": key[ "items" ], "seed": key[ "seed" ], "monolith_blob": key[ "monolith_blob" ], "config_sha": key[ "config_sha" ],
+             "source_commit": key.get( "source_commit" ), "index_generation": key.get( "index_generation" ) }
+
+
+def run_provenance( run_dir ):
+    """
+    Return the commit and index generation a run was cut from.
+
+    Requires:
+        - run_dir holds key/answer-key.json
+
+    Ensures:
+        - returns { source_commit, index_generation } as the key records them
+
+    Raises:
+        - LabellingError PROVENANCE_MISSING for a key written before they were recorded; the 25 Oct run is one, and its commit is inferred
+    """
+    key = json.loads( ( pathlib.Path( run_dir ) / KEY_DIR / KEY_FILE ).read_text( encoding="utf-8" ) )
+    return lb_packets.check_provenance( key, str( pathlib.Path( run_dir ) / KEY_DIR / KEY_FILE ) )
 
 
 def monolith_spec( items, mono_defs ):

@@ -12,6 +12,7 @@ import pytest
 
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import model_transport
+from cosa.repo.labelling import errors as lb_errors
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
 from cosa.repo.symindex.candidates import arm_run
@@ -51,7 +52,7 @@ class World:
             dst.parent.mkdir( parents=True )
             shutil.copyfile( self.toy.root / p[ "rewrite" ][ "file" ], dst )
         lp.save_doc( self.run_dir / pc.KEY_DIR / pc.PLANTED_FILE, { "planted": planted } )
-        made         = lp.prepare( planted, mono, [ "rick", "second" ], 3, self.run_dir, config_sha or self.toy.cfg[ "config_sha" ] )
+        made         = lp.prepare( planted, mono, [ "rick", "second" ], 3, self.run_dir, config_sha or self.toy.cfg[ "config_sha" ], { "source_commit": "a" * 40, "index_generation": "gen-0123456789" } )
         self.key     = pathlib.Path( made[ "key" ] )
         self.packets = { r: pk.packet_path( self.run_dir / "packets", r ) for r in made[ "packets" ] }
 
@@ -93,6 +94,24 @@ def refuse_run( spec, wiring ):
 
 
 # ---- load_run, monolith_spec, check_originals, plant_failures, build_spec -------------------------------------------
+
+def test_the_readers_expose_the_commit_and_index_generation_the_run_was_cut_from( world ):
+    want = { "source_commit": "a" * 40, "index_generation": "gen-0123456789" }
+    assert pc.run_provenance( world.run_dir ) == want
+    run = pc.load_run( world.run_dir )
+    assert run[ "source_commit" ] == want[ "source_commit" ] and run[ "index_generation" ] == want[ "index_generation" ]
+
+
+def test_a_run_cut_before_the_commit_was_recorded_loads_with_none_and_has_no_provenance_to_rebuild_from( world ):
+    key  = world.run_dir / pc.KEY_DIR / pc.KEY_FILE
+    data = json.loads( key.read_text( encoding="utf-8" ) )
+    for field in ( "source_commit", "index_generation" ): del data[ field ]
+    key.write_text( json.dumps( data ), encoding="utf-8" )
+    run = pc.load_run( world.run_dir )
+    assert run[ "source_commit" ] is None and run[ "index_generation" ] is None
+    with pytest.raises( lb_errors.LabellingError ) as e: pc.run_provenance( world.run_dir )
+    assert e.value.code == lb_errors.PROVENANCE_MISSING and str( key ) in e.value.detail
+
 
 def test_load_run_reads_the_planted_pairs_and_the_key_the_writers_left( world ):
     run = pc.load_run( world.run_dir )

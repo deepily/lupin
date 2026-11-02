@@ -291,6 +291,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-control-bare-arm]] — the control's bare arm that sends no request, and the guard that keeps each original in the pool. `lupin_mcp` (reuse_needset)
 - [[needset-control-scoring]] — the plants' purpose lines and the control's scored report: figures and the pass mark. No stop. `lupin_mcp` (reuse_needset)
 - [[needset-first-thousand-command]] — the live control, the command line and the capped run of the first 1,000 calls. `lupin_mcp` (reuse_needset)
+- [[needset-launch-guards]] — the launch preflight (a consumed run name, the source tree, the identity check last) and the vector rebuild that needs the prior generation. `lupin_mcp.reuse_needset` (launch_preflight, rebuild_vectors)
 - [[reuse-stage-two-negatives]] — the stage-two hard-negative selector: word overlap, held-out look-alikes and the recorded selection. `lupin_mcp` (reuse_stage2_negatives)
 - [[reuse-stage-two-run]] — the labelled-pair driver that asks both questions and writes the fit rows. `lupin_mcp` (reuse_stage2_run)
 - [[reuse-stage-two-fit-rows]] — stage-two fit rows, the shortlist under a policy and the figures that score it. `lupin_mcp` (reuse_stage2_fit)

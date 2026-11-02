@@ -162,7 +162,13 @@ services:
     # added (google-auth-oauthlib 1.5.0, oauthlib 4.0.1, requests-oauthlib 2.0.0), zero
     # removed or changed. Built locally, so it has no registry copy. Rollback: put
     # lupin:1.1.3-testtoolchain-candidate back here and force-recreate.
-    image: lupin:1.1.5-gdrive-candidate
+    # 2026-11-02 (Mr. Radio, Rick user_direct, row eded549d): dev and test back on ONE image.
+    # 1.1.6-candidate is a full rebuild of docker/lupin/Dockerfile at e0a277ab3 (uv sync
+    # --locked), so it carries both the Google Drive libraries and python-pptx 1.0.2, which
+    # 1.1.5 (no pptx) and 1.1.4 (no google_auth_oauthlib) each lacked. Checked in the built
+    # image by import: pptx, playwright, pytest, googleapiclient, google_auth_oauthlib; and
+    # chromium-1208 present. Rollback: lupin:1.1.5-gdrive-candidate plus a force-recreate.
+    image: lupin:1.1.6-candidate
     container_name: lupin-rest-dev
     # Row 3c86391e (2026-09-30): the server is PID 1 here, so without an init the Playwright
     # chrome and pytest orphans of a finished test-suite job reparent to it and sit as
@@ -472,7 +478,10 @@ services:
     # repointing dev means recreating Rick's live :7999, which is his call, not this row's. The
     # merge pyramid runs HERE. Candidate tag, never auto-promoted (feedback_no_auto_promote_tags);
     # rollback is this line set back to lupin:1.1.3-testtoolchain-candidate plus a force-recreate.
-    image: lupin:1.1.4-pptx-candidate
+    # 2026-11-02 (Mr. Radio, Rick user_direct, row eded549d): the dev-stays-behind note above
+    # is superseded; dev and test now share 1.1.6-candidate (see lupin-rest-dev for the
+    # receipts). Rollback: lupin:1.1.4-pptx-candidate plus a force-recreate.
+    image: lupin:1.1.6-candidate
     container_name: lupin-rest-test
     # Row 3c86391e (2026-09-30): the server is PID 1 here, so without an init the Playwright
     # chrome and pytest orphans of a finished test-suite job reparent to it and sit as

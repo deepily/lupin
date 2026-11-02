@@ -15,12 +15,15 @@ import tempfile
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import items as lb_items
+from cosa.repo.labelling import errors as lb_errors
 from cosa.repo.labelling import packets as lb_packets
 from cosa.repo.duplicate_check import blind, body_vectors, extract, frozen, structural
 from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check.proof import monolith_pairs, plant
 from cosa.repo.symindex import dups, js_index, need_input, need_writer
 from cosa.repo.symindex import spec as sp
+from cosa.repo.symindex import build as sx_build
+from cosa.repo.symindex import paths as sx_paths
 from cosa.repo.symindex.candidates import vector_build
 
 MONOLITH_FILE  = "src/lupin_app/static/js/notifications.js"
@@ -323,22 +326,26 @@ def checked( original, planted ):
     return planted
 
 
-def prepare( planted, mono, reviewers, seed, out_dir, config_sha ):
+def prepare( planted, mono, reviewers, seed, out_dir, config_sha, provenance ):
     """
     Write the blind packets and, apart from them, the answer key.
 
     Requires:
         - planted is a list of { original, rewrite, stratum } with both sides definition records; mono is monolith_candidates' result
         - reviewers are two or more names for export_packets
+        - provenance names the source_commit and index_generation the pairs were cut from
 
     Ensures:
+        - the key records the source_commit and index_generation, and each packet carries them in a file beside it
         - writes <out_dir>/packets/packet-<reviewer>.jsonl with the same items in a different order each, and <out_dir>/key/answer-key.json once
         - a packet holds item ids and the two texts only; the key maps each item id to its ids, which side is a, its kind and its stratum or source
         - returns { packets, key, items }
 
     Raises:
         - FileExistsError if the key already exists, before anything is written
+        - LabellingError PROVENANCE_MISSING for a provenance without a commit or an index generation, before anything is written
     """
+    provenance = lb_packets.check_provenance( provenance )
     by_id, built = { d[ "id" ]: d for d in mono[ "defs" ] }, []
     rows  = {}
     for p in planted:
@@ -353,8 +360,8 @@ def prepare( planted, mono, reviewers, seed, out_dir, config_sha ):
     key   = out / "key" / KEY_FILE
     if key.exists(): raise FileExistsError( f"{key} already exists; packets are made once" )
     key.parent.mkdir( parents=True, exist_ok=True )
-    paths = lb_packets.export_packets( built, reviewers, seed, out / "packets" )
-    record = { "config_sha": config_sha, "seed": seed, "monolith_blob": mono[ "blob" ], "items": rows }
+    paths = lb_packets.export_packets( built, reviewers, seed, out / "packets", provenance )
+    record = { **provenance, "config_sha": config_sha, "seed": seed, "monolith_blob": mono[ "blob" ], "items": rows }
     with open( key, "x", encoding="utf-8" ) as f: json.dump( record, f, indent=2, sort_keys=True )
     return { "packets": { r: str( p ) for r, p in paths.items() }, "key": str( key ), "items": len( built ) }
 
@@ -432,7 +439,50 @@ def top_up_alikes( doc, pools, root, wiring, folder, count=PLANTED_COUNT, thread
     return added
 
 
-def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=REVIEWERS ):
+def source_provenance( root, spec_fn=sp.spec_for, fresh_fn=sx_build.is_fresh ):
+    """
+    Name the commit and the index generation a run over this tree is cut from.
+
+    Requires:
+        - root is a git work tree with a published index
+        - spec_fn( root ) gives the index spec and fresh_fn( spec, out_dir ) says whether the live index matches the tree
+
+    Ensures:
+        - returns { source_commit, index_generation }: the full id of HEAD and the name of the live generation folder
+        - the tree is clean in its tracked files, a failed status read counting as not clean, and the live generation matches the tree now, so the commit is the one the index was built from
+
+    Raises:
+        - LabellingError PROVENANCE_MISSING when the tree has no commit, has uncommitted tracked changes, has no published index, or the index is stale
+    """
+    where = str( root )
+    try:
+        commit = _git( root, "rev-parse", "HEAD" )
+        dirty  = _git( root, "status", "--porcelain", "--untracked-files=no" ) if commit else ""
+    except OSError:
+        commit, dirty = None, ""
+    if dirty is None or dirty: raise lb_errors.LabellingError( lb_errors.PROVENANCE_MISSING, f"{where}: tracked files differ from HEAD or could not be read, so HEAD is not the commit the pairs are read from" )
+    out = sx_paths.default_out_dir( root )
+    gen = sx_build.current_generation( out )
+    if commit and gen is not None and not fresh_fn( spec_fn( root ), out ):
+        raise lb_errors.LabellingError( lb_errors.PROVENANCE_MISSING, f"{where}: the live index {gen.name} is stale against the tree, so it was not built from this commit" )
+    return lb_packets.check_provenance( { "source_commit": commit, "index_generation": gen.name if gen is not None else None }, where )
+
+
+def _git( root, *args ):
+    """
+    Run one git command in root.
+
+    Ensures:
+        - returns the stripped stdout, or None when git fails
+
+    Raises:
+        - OSError when root cannot be entered
+    """
+    done = subprocess.run( [ "git", *args ], cwd=root, capture_output=True, text=True )
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=REVIEWERS, provenance=None ):
     """
     Plant the pairs, collect the monolith pairs and write the packets and key.
 
@@ -445,11 +495,13 @@ def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=R
         - a work-alike that fails is replaced by a Fable pair, and top_up_alikes then adds work-alikes until the third is reached, so the total can pass count
         - the planted pairs are written to <out>/key/planted.json before the monolith step, and a run that finds the file reads it instead of asking the models again, so a later failure costs no model call
         - the file also records the seed, count and config_sha it was made for; a run that finds a file made for other values, or for none, raises before any model call
+        - the packets and key record the provenance given, or source_provenance( root ) when none is given; a tree that cannot name its commit and index generation is refused before any model call
         - returns prepare's result plus planted and failed counts by stratum, so a short count is visible
 
     Raises:
         - ValueError if <out>/key/planted.json was made for a different seed, count or config_sha, or records none
     """
+    provenance = provenance if provenance is not None else source_provenance( root )
     out_dir = pathlib.Path( out_dir ).resolve()
     folder  = out_dir / "key"
     saved   = folder / PLANTED_FILE
@@ -468,7 +520,7 @@ def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=R
         save_doc( saved, doc )
     top_up_alikes( doc, pools, root, wiring, folder / "rewrites", count, save=lambda: save_doc( saved, doc ) )
     mono    = monolith_candidates( root, cfg, wiring[ "client" ], wiring[ "cache_dir" ] )
-    out     = prepare( doc[ "planted" ], mono, reviewers, seed, out_dir, cfg[ "config_sha" ] )
+    out     = prepare( doc[ "planted" ], mono, reviewers, seed, out_dir, cfg[ "config_sha" ], provenance )
     return { **out, "planted": { s: sum( 1 for p in doc[ "planted" ] if p[ "stratum" ] == s ) for s in STRATA }, "failed": len( doc[ "failed" ] ),
              "monolith": { src: sum( 1 for p in mono[ "pairs" ] if p[ "source" ] == src ) for src in monolith_pairs.SOURCES } }
 

@@ -19,11 +19,77 @@ CHOICES     = ( AS_PROPOSED, OTHER, NONE )
 LABEL_KEYS  = ( "item_id", "reviewer", "choice", "symbols", "note", "ts" )
 NAME_RE     = re.compile( r"[A-Za-z0-9_-]+" )
 MAX_ORDER_TRIES = 50
+PROVENANCE_KEYS = ( "source_commit", "index_generation" )
+COMMIT_RE       = re.compile( r"[0-9a-f]{7,40}" )
 
 
 def packet_path( out_dir, reviewer ):
     """Return the path of one reviewer's packet file."""
     return pathlib.Path( out_dir ) / f"packet-{reviewer}.jsonl"
+
+
+def _provenance_path( packet ):
+    """Return the path of the provenance file that sits beside one packet."""
+    return pathlib.Path( packet ).with_suffix( ".provenance.json" )
+
+
+def check_provenance( record, where="provenance" ):
+    """
+    Refuse a record that does not name the commit and the index generation a run was cut from.
+
+    Requires:
+        - record is a dict
+
+    Ensures:
+        - returns { source_commit, index_generation } when the commit is 7 to 40 lowercase hex digits and the generation is a non-empty name
+        - other fields of the record are left out of the result
+
+    Raises:
+        - LabellingError PROVENANCE_MISSING naming where and which field is absent or malformed
+    """
+    if not isinstance( record, dict ): raise er.LabellingError( er.PROVENANCE_MISSING, f"{where}: not a record" )
+    commit, gen = record.get( "source_commit" ), record.get( "index_generation" )
+    if not isinstance( commit, str ) or not COMMIT_RE.fullmatch( commit ): raise er.LabellingError( er.PROVENANCE_MISSING, f"{where}: source_commit must be a git commit id, got {commit!r}" )
+    if not isinstance( gen, str ) or not gen.strip(): raise er.LabellingError( er.PROVENANCE_MISSING, f"{where}: index_generation must be a generation name, got {gen!r}" )
+    return { "source_commit": commit, "index_generation": gen }
+
+
+def read_provenance( packet ):
+    """
+    Read the commit and index generation one packet was cut from.
+
+    The 25 Oct run was cut before this record existed. It has no file, and its commit is inferred, never recorded.
+
+    Requires:
+        - packet is the path of a packet export_packets or export_subset_packet wrote
+
+    Ensures:
+        - returns { source_commit, index_generation } as check_provenance accepts them
+
+    Raises:
+        - LabellingError PROVENANCE_MISSING when the file is absent, unreadable or incomplete
+    """
+    path = _provenance_path( packet )
+    try:
+        record = json.loads( path.read_text( encoding="utf-8" ) )
+    except ( OSError, ValueError ):
+        raise er.LabellingError( er.PROVENANCE_MISSING, f"{path}: no readable provenance file; this packet was cut before the commit was recorded" )
+    return check_provenance( record, str( path ) )
+
+
+def write_provenance( packet, provenance ):
+    """
+    Write the checked provenance beside a packet, whatever tool wrote the packet.
+
+    Ensures:
+        - returns the path of the provenance file; nothing is written when the provenance is missing or malformed
+
+    Raises:
+        - LabellingError PROVENANCE_MISSING from check_provenance
+    """
+    path = _provenance_path( packet )
+    path.write_text( json.dumps( check_provenance( provenance ), sort_keys=True ), encoding="utf-8" )
+    return path
 
 
 def blind_form( item ):
@@ -58,21 +124,25 @@ def seeded_order( items, seed, taken ):
     return order
 
 
-def export_packets( items, reviewers, seed, out_dir ):
+def export_packets( items, reviewers, seed, out_dir, provenance ):
     """
     Write one blind packet per reviewer.
 
     Requires:
         - items are labelling items with distinct item ids; reviewers are two or more distinct names of letters, digits, _ and -
+        - provenance names the source_commit and index_generation the items were cut from
 
     Ensures:
         - returns { reviewer: path } and writes one JSON line per item, the same items for every reviewer in a different seeded order
+        - writes the provenance beside each packet, and writes nothing when it is missing or malformed
         - the bytes written are read back and every line is checked to hold the blind form only; on a leak the files are removed
 
     Raises:
         - LabellingError BAD_ITEM for an invalid item, duplicate ids, or fewer than two or repeated reviewers
         - LabellingError PACKET_LEAK for a field a reviewer may not see
+        - LabellingError PROVENANCE_MISSING for a provenance without a commit or an index generation
     """
+    provenance = check_provenance( provenance )
     clean = [ blind_form( i ) for i in items ]
     if len( {i[ "item_id" ] for i in clean} ) != len( clean ): raise er.LabellingError( er.BAD_ITEM, "item ids repeat" )
     if len( reviewers ) < 2 or len( set( reviewers ) ) != len( reviewers ) or not all( NAME_RE.fullmatch( r ) for r in reviewers ):
@@ -84,11 +154,14 @@ def export_packets( items, reviewers, seed, out_dir ):
         taken.append( [ i[ "item_id" ] for i in order ] )
         paths[ reviewer ] = packet_path( out, reviewer )
         paths[ reviewer ].write_text( "".join( json.dumps( i, sort_keys=True ) + "\n" for i in order ), encoding="utf-8" )
+        write_provenance( paths[ reviewer ], provenance )
     try:
         for path in paths.values():
             for line in path.read_text( encoding="utf-8" ).splitlines(): blind_form( json.loads( line ) )
     except er.LabellingError:
-        for path in paths.values(): path.unlink()
+        for path in paths.values():
+            path.unlink()
+            _provenance_path( path ).unlink()
         raise
     return paths
 
@@ -104,16 +177,20 @@ def export_subset_packet( packet_dir, item_ids, reviewer, seed ):
 
     Ensures:
         - returns the new packet's path, holding the named items in a seeded order that differs from each earlier packet's order of the same items
+        - the new packet carries the provenance of the earlier ones, which must all agree
         - the bytes written are read back and checked to hold the blind form only; on a leak the file is removed
 
     Raises:
         - LabellingError BAD_ITEM for no earlier packet, no items, an id no packet holds, a bad name, or a reviewer who already has a packet
         - LabellingError PACKET_LEAK for a field a reviewer may not see
+        - LabellingError PROVENANCE_MISSING when an earlier packet has no provenance, or two of them differ
     """
     earlier = sorted( pathlib.Path( packet_dir ).glob( "packet-*.jsonl" ) )
     if not earlier: raise er.LabellingError( er.BAD_ITEM, f"{packet_dir}: no packets to draw from" )
     if not NAME_RE.fullmatch( reviewer ) or packet_path( packet_dir, reviewer ).exists():
         raise er.LabellingError( er.BAD_ITEM, f"{reviewer}: needs a new name of letters, digits, _ and -" )
+    provs  = [ read_provenance( p ) for p in earlier ]
+    if any( x != provs[ 0 ] for x in provs ): raise er.LabellingError( er.PROVENANCE_MISSING, f"{packet_dir}: the earlier packets were cut from different commits or index generations" )
     wanted = set( item_ids )
     orders = [ [ json.loads( line ) for line in path.read_text( encoding="utf-8" ).splitlines() ] for path in earlier ]
     by_id  = { i[ "item_id" ]: i for i in orders[ 0 ] }
@@ -123,10 +200,12 @@ def export_subset_packet( packet_dir, item_ids, reviewer, seed ):
     order  = seeded_order( [ blind_form( by_id[ i ] ) for i in sorted( wanted ) ], f"{seed}|{reviewer}", taken )
     path   = packet_path( packet_dir, reviewer )
     path.write_text( "".join( json.dumps( i, sort_keys=True ) + "\n" for i in order ), encoding="utf-8" )
+    write_provenance( path, provs[ 0 ] )
     try:
         for line in path.read_text( encoding="utf-8" ).splitlines(): blind_form( json.loads( line ) )
     except er.LabellingError:
         path.unlink()
+        _provenance_path( path ).unlink()
         raise
     return path
 
