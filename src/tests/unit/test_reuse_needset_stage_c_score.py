@@ -41,7 +41,7 @@ def report_of( same_p=0.8, other_p=0.1, noise=0.02, a_p=0.97, seed=7, unsure=0, 
                                       "repeat": repeat, "side_b": side( p ), "side_a": side( min( 1.0, a_p + rng.uniform( -noise, noise ) ) ), "request_hash": f"h{n}-{repeat}",
                                       "tokens_in": 100 if tokens else 0, "status": status } )
     lost = [ { "pair": f"u{i}", "stratum": "flag", "label": sc.SAME, "unsure": False, "raters": 2 } for i in range( undrafted ) ]
-    return { "results": results, "undrafted": lost }
+    return { "results": results, "undrafted": lost, "refused": [ ] }
 
 
 # -- the arithmetic -----------------------------------------------------------------------------
@@ -228,7 +228,7 @@ def test_a_run_that_is_not_valid_awards_no_level( change, reason ):
     if change == "tokens": rep[ "results" ][ 0 ][ "tokens_in" ] = 0
     if change == "status": rep[ "results" ][ 0 ][ "status" ] = "failed"
     if change == "side": rep[ "results" ][ 0 ][ "side_a" ] = side( 0.0, answered=False )
-    if change == "empty": rep = { "results": [ ], "undrafted": [ ] }
+    if change == "empty": rep = { "results": [ ], "undrafted": [ ], "refused": [ ] }
     if change == "empty":
         assert sc.valid_run( [ ] )[ "valid" ] is False and reason in sc.valid_run( [ ] )[ "reasons" ][ 0 ]
         return
@@ -357,3 +357,11 @@ def test_the_numbers_of_the_mark_are_pinned_to_literals():
     assert ( sc.LINE, sc.FIXED_LINES, sc.SAME_REACH, sc.RESAMPLES, sc.SEED, sc.REPEATS ) == ( 0.30, ( 0.50, 0.70, 0.90 ), 0.80, 10000, 20261102, 3 )
     assert ( sc.MIN_PER_CLASS, sc.MAX_LOSS, sc.SIDE_A_SHARE, sc.SIDE_A_MEDIAN ) == ( 10, 0.15, 0.95, 0.90 )
     assert ( sc.STRONG, sc.MODERATE, sc.D_USABLE, sc.FALSE_ACCEPT ) == ( ( 0.80, 0.70 ), ( 0.70, 0.60 ), 0.40, 0.50 )
+
+
+def test_a_report_with_no_refused_key_is_not_valid_so_a_forgotten_write_cannot_read_as_no_refusals():
+    rep = report_of()
+    del rep[ "refused" ]
+    out = sc.score( rep, 50 )
+    assert out[ "valid_run" ][ "valid" ] is False and any( "no refused list" in r for r in out[ "valid_run" ][ "reasons" ] ) and out[ "headline" ][ "threshold_free" ] == sc.NO_LEVEL
+    assert sc.score( report_of(), 50 )[ "valid_run" ][ "valid" ] is True

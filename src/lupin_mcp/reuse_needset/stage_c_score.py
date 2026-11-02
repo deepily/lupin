@@ -407,6 +407,7 @@ def score( report, resamples=RESAMPLES ):
         - returns { coverage, valid_run, side_a, populations, headline }
         - coverage comes first and, when drafting lost more than 15% of either class, no level is awarded
         - a run that is not valid, or whose side-a check fails, awards no level
+        - a report with no refused key is not valid, so a refused list that was never written cannot read as no refusals
         - the headline level is the lowest of the populations' levels; the without_cue_pairs population counts only when some pair carries the cue
         - repeats that the run lacks make the repeat floor, and so any threshold-free level above none shown, unavailable
 
@@ -420,6 +421,7 @@ def score( report, resamples=RESAMPLES ):
     pairs   = [ dict( v, pair=k ) for k, v in b.items() ]
     cover   = coverage( pairs, report[ "undrafted" ], report[ "refused" ] if "refused" in report else [ ] )
     valid   = valid_run( results )
+    if "refused" not in report: valid = { **valid, "valid": False, "reasons": [ *valid[ "reasons" ], "the report has no refused list, so a forgotten write would read as no refusals" ] }
     side    = side_a_check( a, b )
     pops    = { }
     for name in POPULATIONS:
