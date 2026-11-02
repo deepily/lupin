@@ -39,6 +39,11 @@ DRAFTS_PER_PAIR = 2                                                             
 HEADROOM_PERCENT = 5                                                             # budgets sit this far above the planned calls, for a split request or a repeated unreadable reply
 REPORT_FILE   = "stage-c-report.json"
 DRAFT_LEDGER  = "ledger-stage-c-draft.jsonl"
+REJECTS_FILE  = "stage-c-rejected-drafts.json"
+REDRAFT_FILE  = "stage-c-redraft.json"
+REDRAFT_CALLS = "call-ledger-redraft.jsonl"                                      # its own count, so the judge run that follows starts from none
+REDRAFT_STAGE = "stage_c_redraft"
+EXTRA_TRIES   = 2                                                                # sentences tried beyond the drafter's own limit, for a pair that still has none
 UNMATCHED     = "unmatched"
 DROPPED       = "dropped_by_screen"
 NO_PURPOSE    = "no_purpose_line"
@@ -215,6 +220,11 @@ def audit_sides( sides ):
              "with_purpose_line": sum( bool( s[ "has_purpose" ] ) for s in sides ), "named": named }
 
 
+def with_headroom( calls ):
+    """Ensures: returns the planned calls plus HEADROOM_PERCENT of them, rounded up."""
+    return calls + ( calls * HEADROOM_PERCENT + 99 ) // 100
+
+
 def budgets_for( rows, draft_budget=None, post_budget=None, limit=None ):
     """
     Derive the call budgets from the pairs that will run, unless the caller names them.
@@ -229,8 +239,7 @@ def budgets_for( rows, draft_budget=None, post_budget=None, limit=None ):
         - overridden names the flags used, and short names each budget or limit below its planned figure
     """
     drafts, posts = DRAFTS_PER_PAIR * len( rows ), len( rows ) * len( REPEATS )
-    above         = lambda n: n + ( n * HEADROOM_PERCENT + 99 ) // 100
-    d, q          = above( drafts ) if draft_budget is None else draft_budget, above( posts ) if post_budget is None else post_budget
+    d, q          = with_headroom( drafts ) if draft_budget is None else draft_budget, with_headroom( posts ) if post_budget is None else post_budget
     cap           = d + q if limit is None else limit
     given         = { "draft_budget": draft_budget, "post_budget": post_budget, "limit": limit }
     return { "drafts_planned": drafts, "drafts_budget": d, "posts_planned": posts, "posts_budget": q, "limit": cap, "headroom_percent": HEADROOM_PERCENT,
@@ -298,7 +307,17 @@ def ask_pair( transport, request, budget=None, send=rp.send_pack ):
     return { **got, "stratum": request[ "stratum" ], "unsure": request[ "unsure" ], "raters": request[ "raters" ], "cue": request[ "cue" ], "side_b": got[ "plant" ], "side_a": got[ "original" ] }
 
 
-def draft_all( rows, strip_fn, ask, ledger ):
+def cache_only( system, user ):
+    """
+    Stand in for the drafter when a saved ledger must answer every question.
+
+    Raises:
+        - NeedsetError BAD_NEED, because an unanswered prompt would need a model call
+    """
+    raise er.NeedsetError( er.BAD_NEED, "the saved draft ledger has no answer for this prompt, so replaying it would need a model call" )
+
+
+def draft_all( rows, strip_fn, ask, ledger, max_tries=draft.MAX_TRIES ):
     """
     Draft one need per pair.
 
@@ -306,14 +325,37 @@ def draft_all( rows, strip_fn, ask, ledger ):
         - ask( system_prompt, user_prompt ) returns the reply text; ledger is a drafting ledger
 
     Ensures:
-        - returns ( needs, undrafted ): needs is { pair: sentence } for each pair whose draft passed; undrafted lists { pair, stratum, label, unsure, raters, reason } for the others
+        - returns ( needs, undrafted, rejected ): needs is { pair: sentence } for each pair whose draft passed
+        - undrafted lists { pair, stratum, label, unsure, raters, reason } for the others
+        - rejected lists every sentence a check refused, whether or not the pair was later accepted, as { pair, stratum, label, unsure, raters, try, sentence, failures, outcome }
+        - outcome is accepted_later or undrafted
     """
-    needs, undrafted = {}, []
+    needs, undrafted, rejected = {}, [], []
     for row in rows:
-        rec = draft.draft_need( draft_job( row, strip_fn ), ask, ledger )
+        rec = draft.draft_need( draft_job( row, strip_fn ), ask, ledger, max_tries=max_tries )
+        who = { k: row[ k ] for k in ( "pair", "stratum", "label", "unsure", "raters" ) }
         if rec[ "ok" ]: needs[ row[ "pair" ] ] = rec[ "need" ]
-        else: undrafted.append( { **{ k: row[ k ] for k in ( "pair", "stratum", "label", "unsure", "raters" ) }, "reason": rec[ "reason" ] } )
-    return needs, undrafted
+        else: undrafted.append( { **who, "reason": rec[ "reason" ] } )
+        rejected += [ { **who, "try": r[ "try" ], "sentence": r[ "sentence" ], "failures": r[ "failures" ], "outcome": "accepted_later" if rec[ "ok" ] else "undrafted" } for r in rec[ "rejections" ] ]
+    return needs, undrafted, rejected
+
+
+def tries_of( args ):
+    """Ensures: returns --max-tries, or the drafter's own limit when none was given."""
+    return draft.MAX_TRIES if args.max_tries is None else args.max_tries
+
+
+def save_rejects( run_dir, rejected ):
+    """
+    Write every rejected sentence beside the check that refused it.
+
+    Ensures:
+        - REJECTS_FILE in run_dir holds { count, rejected } as sorted-key JSON, replacing an earlier file
+        - returns the path written
+    """
+    path = pathlib.Path( run_dir ) / REJECTS_FILE
+    path.write_text( json.dumps( { "count": len( rejected ), "rejected": rejected }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+    return path
 
 
 def parse_args( argv ):
@@ -333,6 +375,10 @@ def parse_args( argv ):
     ap.add_argument( "--ceiling", type=int, default=jp.CEILING )
     ap.add_argument( "--server", default="max-plan" )
     ap.add_argument( "--live", action="store_true" )
+    ap.add_argument( "--max-tries", type=int, default=None, help="sentences the drafter may check per pair; default the drafter's own limit" )
+    ap.add_argument( "--redraft", action="store_true", help="try again, up to --extra-tries more sentences, only for pairs the saved draft ledger left without a need; rates nothing" )
+    ap.add_argument( "--extra-tries", type=int, default=EXTRA_TRIES )
+    ap.add_argument( "--save-rejects", action="store_true", help="replay the saved draft ledger, make no model call, and write the rejected sentences" )
     return ap.parse_args( argv )
 
 
@@ -358,6 +404,8 @@ def main( argv=None, deps=None ):
 
     Ensures:
         - without --live returns { live False, mode, plan } and contacts nothing: no model, no search, no spend ledger, no file written
+        - with --save-rejects replays the saved draft ledger without a model call and writes only REJECTS_FILE
+        - with --redraft prints the pairs still undrafted and the calls planned and writes no file; with --live too it makes those calls and writes REJECTS_FILE and REDRAFT_FILE
         - with --live and a run name, drafts one need per pair, posts each pair three times under the call cap and the token ceiling, writes REPORT_FILE and closes the spend-ledger run however it ends
 
     Raises:
@@ -366,12 +414,104 @@ def main( argv=None, deps=None ):
     args = parse_args( argv )
     deps = {} if deps is None else deps
     rows, refused, sides = collect_rows( args, deps )
+    if args.save_rejects: return replay_rejects( args, rows, deps )
+    if args.redraft: return redraft( args, rows, deps )
     plan = plan_of( rows, refused, sides, budgets_for( rows, args.draft_budget, args.post_budget, args.limit ) )
     if not args.live: return { "live": False, "mode": "stage_c", "plan": plan }
     if not args.run_name or not args.from_run: raise er.NeedsetError( er.BAD_NEED, "a live run needs --run-name, a spend-ledger run name that was not used before, and --from-run for its environment" )
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "the ledgers are bound to the Claude Code binary's version" )
     model_transport.configure( cli_path=args.cli_path )
     return live( args, rows, refused, plan, deps )
+
+
+def in_source_tree( args, deps, work ):
+    """
+    Call work with the source tree at --source-commit and release the tree afterwards.
+
+    Ensures:
+        - the tree is made by source_at.ensure_worktree unless deps names source_root, as the live run does
+        - a tree this call made is unlocked when work ends, by an error too; one the caller named is left alone
+    """
+    made = "source_root" not in deps
+    root = source_at.ensure_worktree( args.root, args.source_commit ) if made else deps[ "source_root" ]( args )
+    try:
+        return work( root )
+    finally:
+        if made: source_at.unlock( args.root, root )
+
+
+def replay_rejects( args, rows, deps ):
+    """
+    Read the saved draft ledger back and write the sentences its checks refused.
+
+    Requires:
+        - run_dir holds the ledger of an earlier run, and --cli-path names the binary it was bound to
+
+    Ensures:
+        - the stripped texts are read in the source tree at --source-commit, made and released as a live run does, so a prompt is the one the ledger holds
+        - no model is called: a prompt the ledger cannot answer raises BAD_NEED
+        - returns { live False, mode, drafted, undrafted, rejected, path } and writes REJECTS_FILE
+    """
+    if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "the ledger is bound to the Claude Code binary's version" )
+    ledger_path = pathlib.Path( args.run_dir ) / DRAFT_LEDGER
+    if not ledger_path.exists(): raise er.NeedsetError( er.BAD_NEED, f"{ledger_path} does not exist: there is no saved draft ledger to replay" )
+    needs, undrafted, rejected = in_source_tree( args, deps, lambda root: draft_all( rows, lambda rec: strip.strip_member( rec, root ), cache_only, draft.make_ledger( str( ledger_path ), args.cli_path, args.server ), tries_of( args ) ) )
+    path = save_rejects( args.run_dir, rejected )
+    return { "live": False, "mode": "stage_c_save_rejects", "drafted": len( needs ), "undrafted": undrafted, "rejected": len( rejected ), "path": str( path ) }
+
+
+def redraft_plan( count, extra ):
+    """
+    Describe the extra drafting without making a call.
+
+    Ensures:
+        - returns { undrafted, extra_tries, calls_planned, calls_budget }
+        - calls_planned is one call per extra sentence and pair; the budget adds HEADROOM_PERCENT for a reply asked again
+    """
+    planned = count * extra
+    return { "undrafted": count, "extra_tries": extra, "calls_planned": planned, "calls_budget": with_headroom( planned ) }
+
+
+def redraft( args, rows, deps ):
+    """
+    Try again, for a few more sentences, on the pairs the saved ledger left without a need.
+
+    Requires:
+        - run_dir holds the ledger of an earlier run, and --cli-path names the binary it was bound to
+
+    Ensures:
+        - the stripped texts are read in the source tree at --source-commit, made and released as a live run does, so a prompt is the one the ledger holds
+        - the pairs are found by replaying the ledger with no model call: those that drafted before are not touched
+        - the replay uses --max-tries and each pair may then try --extra-tries more sentences, the first of which asks the drafter
+        - without --live returns { live False, mode, plan, pairs } and writes nothing
+        - with --live returns { live True, mode, plan, accepted, still_failing, calls, path }, writes REDRAFT_FILE and REJECTS_FILE, and counts its calls in REDRAFT_CALLS under its own budget
+        - a pair still failing stays without a need, and no rating is read or posted
+    """
+    if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "the ledger is bound to the Claude Code binary's version" )
+    ledger_path = pathlib.Path( args.run_dir ) / DRAFT_LEDGER
+    if not ledger_path.exists(): raise er.NeedsetError( er.BAD_NEED, f"{ledger_path} does not exist: there is no saved draft ledger to redraft from" )
+    return in_source_tree( args, deps, lambda root: redraft_in( args, rows, deps, root, ledger_path ) )
+
+
+def redraft_in( args, rows, deps, root, ledger_path ):
+    """Ensures: does redraft's work with the stripped texts read in root, and returns its answer."""
+    strip_fn = lambda rec: strip.strip_member( rec, root )
+    ledger = draft.make_ledger( str( ledger_path ), args.cli_path, args.server )
+    _needs, undrafted, rejected = draft_all( rows, strip_fn, cache_only, ledger, tries_of( args ) )
+    pairs  = [ u[ "pair" ] for u in undrafted ]
+    plan   = redraft_plan( len( pairs ), args.extra_tries )
+    if not args.live: return { "live": False, "mode": "stage_c_redraft", "plan": plan, "pairs": pairs }
+    model_transport.configure( cli_path=args.cli_path )
+    again = [ r for r in rows if r[ "pair" ] in pairs ]
+    cap   = call_cap.CallCap( f"{args.run_dir}/{REDRAFT_CALLS}", plan[ "calls_budget" ], { REDRAFT_STAGE: plan[ "calls_budget" ] } )
+    ask   = deps[ "drafter" ] if "drafter" in deps else draft.drafter_call()
+    with cap.installed():
+        with call_cap.stage( REDRAFT_STAGE ):
+            accepted, still, more = draft_all( again, strip_fn, ask, ledger, tries_of( args ) + args.extra_tries )
+    save_rejects( args.run_dir, [ r for r in rejected if r[ "pair" ] not in pairs ] + more )
+    path = pathlib.Path( args.run_dir ) / REDRAFT_FILE
+    path.write_text( json.dumps( { "tries": tries_of( args ) + args.extra_tries, "accepted": accepted, "still_failing": still, "calls": cap.used(), "by_stage": cap.by_stage() }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+    return { "live": True, "mode": "stage_c_redraft", "plan": plan, "accepted": len( accepted ), "still_failing": len( still ), "calls": cap.used(), "path": str( path ) }
 
 
 def live( args, rows, refused, plan, deps ):
@@ -458,7 +598,8 @@ def judge_all( args, rows, refused, budgets, root, ctx, deps ):
     ledger = draft.make_ledger( f"{args.run_dir}/{DRAFT_LEDGER}", args.cli_path, args.server )
     with cap.installed():
         with call_cap.stage( DRAFT_STAGE ):
-            needs, undrafted = draft_all( rows, lambda rec: strip.strip_member( rec, root ), ask, ledger )
+            needs, undrafted, rejected = draft_all( rows, lambda rec: strip.strip_member( rec, root ), ask, ledger, tries_of( args ) )
+    save_rejects( args.run_dir, rejected )
     posting, shared = share_bodies( rows, needs )
     requests = [ request_for( r, needs[ r[ "pair" ] ], n ) for r in posting for n in REPEATS ]
     jp.distinct_bodies( requests )
