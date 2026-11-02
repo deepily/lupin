@@ -38,9 +38,10 @@ def plant( n ):
     return { "id": f"d-p{n}", "sig": f"( b{n} )", "doc": "", "pin": f"pinp{n}", "file": f"src/p{n}.py", "name": f"p{n}", "lang": "py" }
 
 
-def record( n, label=jp.SAME_JOB, plant_line="plant line", original_line="orig line", with_plant=True, with_original=True ):
+def record( n, label=jp.SAME_JOB, plant_line="plant line", original_line="orig line", with_plant=True, with_original=True, collision=None ):
     """Return one pair record as pair_records builds it."""
     return { "id": f"d-r{n}", "label": label, "lang": "py", "need": f"need {n}", "plant": plant( n ) if with_plant else None,
+             "shaped_id": f"pkg.p{n}.p{n}" if with_plant else None, "shaped_collision": collision if with_plant else None,
              "original": entry( n, **( { "purpose": original_line } if original_line else {} ) ) if with_original else None, "plant_line": plant_line, "original_line": original_line }
 
 
@@ -160,8 +161,11 @@ def test_each_arm_builds_the_plant_and_template_it_names():
     assert plant_p == sx_build.attach_purposes( [ r[ "plant" ] ], { r[ "plant" ][ "pin" ]: "plant line" } )[ 0 ], "the plant gets its line exactly as the index gives a real entry its line"
     assert plant_p[ "purpose" ] == "plant line" and tmpl_p is rt.PROMPT_TEMPLATE and "purpose" not in r[ "plant" ]
     assert rt.entry_text( plant_p ) == rt.entry_text( r[ "plant" ] ) + " | purpose: plant line"
+    plant_s, _o, tmpl_s = jp.arm_inputs( r, jp.ARM_SHAPED )[ 0 ]
+    assert plant_s == { **plant_p, "id": "pkg.p1.p1", "control_id": "d-p1" } and tmpl_s is rt.PROMPT_TEMPLATE
     plant_c, _o, tmpl_c = jp.arm_inputs( r, jp.ARM_BOTH )[ 0 ]
-    assert plant_c == plant_p and "orig line" in tmpl_c[ "instructions" ]
+    assert plant_c == plant_s and "orig line" in tmpl_c[ "instructions" ], "arm 3 is arm 2 with the original's line named in the instructions"
+    assert jp.arm_inputs( record( 1, collision=jp.COLLIDES_INDEX ), jp.ARM_BOTH ) == ( None, "shaped_id_equals_index_id" )
     assert jp.arm_inputs( record( 1, with_plant=False ), jp.ARM_BASELINE ) == ( None, "plant_dropped_by_screen" )
     assert jp.arm_inputs( record( 1, with_original=False ), jp.ARM_BASELINE ) == ( None, "original_not_in_snapshot" )
     assert jp.arm_inputs( record( 1, plant_line=None ), jp.ARM_PLANT ) == ( None, "plant_has_no_line" )
@@ -169,24 +173,71 @@ def test_each_arm_builds_the_plant_and_template_it_names():
     assert jp.arm_inputs( record( 1, plant_line=None ), jp.ARM_BASELINE )[ 0 ] is not None
 
 
-def test_the_plan_is_pairs_times_three_arms_times_two_repeats_each_with_its_own_body():
+def test_the_shaped_id_follows_the_index_rule_on_real_ids():
+    ts = lambda f, n: jp.shaped_id( { "lang": "ts", "file": f, "name": n } )
+    py = lambda f, n: jp.shaped_id( { "lang": "py", "file": f, "name": n } )
+    assert ts( "src/lupin_app/static/js/multiplexer/render/TtsPreviewSliderRenderer.ts", "readLegacyFraction" ) == "src.lupin_app.static.js.multiplexer.render.TtsPreviewSliderRenderer.readLegacyFraction"
+    assert ts( "src/lupin_app/static/js/multiplexer/transport/QueueTransport.ts", "BaseTransportImpl.constructor" ) == "src.lupin_app.static.js.multiplexer.transport.QueueTransport.BaseTransportImpl.constructor"
+    assert py( "src/cosa/agents/test_fix_expediter/orchestrator.py", "TFEOrchestrator._build_tfe_coder_options" ) == "cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator._build_tfe_coder_options"
+    assert py( "src/scripts/auth_migration/migrate_mock_users.py", "migrate_users" ) == "scripts.auth_migration.migrate_mock_users.migrate_users"
+    assert py( "src/cosa/memory/__init__.py", "f" ) == "cosa.memory.f" and py( "tools/x.py", "f" ) == "tools.x.f", "a package file gives its package; a path outside src keeps its first part"
+    assert ts( "src/lupin_app/static/js/a.mjs", "go" ) == "src.lupin_app.static.js.a.go", "a script keeps src and drops the suffix"
+
+
+def test_a_shaped_id_that_equals_the_originals_or_another_index_id_is_a_collision():
+    entries = [ { "id": "pkg.a.f" }, { "id": "pkg.b.g#2" } ]
+    original = { "id": "pkg.o.h" }
+    assert jp.id_collision( "pkg.o.h", original, entries ) == jp.COLLIDES_ORIGINAL
+    assert jp.id_collision( "pkg.a.f", original, entries ) == jp.COLLIDES_INDEX and jp.id_collision( "pkg.b.g", original, entries ) == jp.COLLIDES_INDEX, "a #N suffix is ignored"
+    assert jp.id_collision( "pkg.new.k", original, entries ) is None and jp.id_collision( "pkg.new.k", None, entries ) is None
+    assert jp.id_collision( "pkg.o.h#1", None, [ { "id": "pkg.o.h#1" } ] ) is None, "only the base of an index id is compared, not a shaped id with its own suffix"
+
+
+def test_pair_records_carry_the_shaped_id_and_its_collision():
+    pairs = [ { "original": { "id": "d-o1", "file": "src/m1.py", "name": "f1", "lang": "py" }, "rewrite": { "id": "d-r1", "file": "src/m1.py", "name": "f1", "sig": "( b1 )", "lang": "py", "text": "t" } },
+              { "original": { "id": "d-o2", "file": "src/m2.py", "name": "f2", "lang": "py" }, "rewrite": { "id": "d-r2", "file": "src/m2.py", "name": "g2", "sig": "( b2 )", "lang": "py", "text": "t" } } ]
+    rows  = [ { "id": "d-r1", "label": jp.SAME_JOB, "lang": "py", "need": "n1" }, { "id": "d-r2", "label": jp.SAME_JOB, "lang": "py", "need": "n2" } ]
+    ents  = [ entry( 1, id="m1.f1", file="src/m1.py", name="f1" ), entry( 2, id="m2.f2", file="src/m2.py", name="f2" ) ]
+    got   = jp.pair_records( pairs, rows, ents, { } )
+    assert [ ( r[ "shaped_id" ], r[ "shaped_collision" ] ) for r in got ] == [ ( "m1.f1", jp.COLLIDES_ORIGINAL ), ( "m2.g2", None ) ]
+    with mock.patch.object( rt, "sendable_report", return_value=( [], { } ) ):
+        gone = jp.pair_records( pairs[ :1 ], rows[ :1 ], ents, { } )[ 0 ]
+    assert gone[ "shaped_id" ] is None and gone[ "shaped_collision" ] is None
+
+
+def test_the_shaped_id_arm_is_the_plant_line_arm_with_a_production_shaped_id_and_keeps_the_control_id():
+    r = record( 1 )
+    plant_s, orig_s, tmpl_s = jp.arm_inputs( r, jp.ARM_SHAPED )[ 0 ]
+    plant_p = jp.arm_inputs( r, jp.ARM_PLANT )[ 0 ][ 0 ]
+    assert plant_s[ "id" ] == "pkg.p1.p1" and plant_s[ "control_id" ] == "d-p1" and plant_s[ "purpose" ] == "plant line" and tmpl_s is rt.PROMPT_TEMPLATE and orig_s is r[ "original" ]
+    assert rt.entry_text( plant_s ) == rt.entry_text( { **plant_p, "id": "pkg.p1.p1" } ) and rt.entry_text( plant_s ).startswith( "pkg.p1.p1( b1 )" )
+    assert jp.arm_inputs( record( 1, collision=jp.COLLIDES_ORIGINAL ), jp.ARM_SHAPED ) == ( None, "shaped_id_equals_original" )
+    assert jp.arm_inputs( record( 1, collision=jp.COLLIDES_INDEX ), jp.ARM_SHAPED ) == ( None, "shaped_id_equals_index_id" )
+    assert jp.arm_inputs( record( 1, collision=jp.COLLIDES_INDEX ), jp.ARM_PLANT )[ 0 ] is not None, "a collision only bars the arm that uses the shaped id"
+    assert jp.arm_inputs( record( 1, plant_line=None ), jp.ARM_SHAPED ) == ( None, "plant_has_no_line" )
+
+
+def test_the_plan_is_pairs_times_four_arms_times_three_repeats_each_with_its_own_body():
     records = [ record( n ) for n in range( 1, 18 ) ]
-    assert jp.DEFAULT_ARMS == jp.ARMS == ( "baseline", "plant_line", "both_lines" ) and jp.REPEATS == ( 1, 2 )
+    assert jp.DEFAULT_ARMS == jp.ARMS == ( "baseline", "plant_line", "shaped_id", "both_lines" ) and jp.REPEATS == ( 1, 2, 3 )
+    assert [ jp.ARM_NUMBER[ a ] for a in jp.ARMS ] == [ 0, 1, 2, 3 ] and jp.BUDGET >= 204
     reqs, skipped = jp.plan_requests( records )
-    assert len( reqs ) == 102 and skipped == [] and jp.distinct_bodies( reqs ) == 102
-    assert [ ( r[ "pair" ], r[ "arm" ], r[ "repeat" ] ) for r in reqs[ :6 ] ] == [ ( "d-r1", a, n ) for a in jp.ARMS for n in ( 1, 2 ) ]
-    assert all( [ e[ "id" ] for e in r[ "entries" ] ] == [ f"d-p{r[ 'pair' ][ 3: ]}", f"src.m{r[ 'pair' ][ 3: ]}.f{r[ 'pair' ][ 3: ]}" ] for r in reqs )
+    assert len( reqs ) == 204 and skipped == [] and jp.distinct_bodies( reqs ) == 204
+    assert [ ( r[ "pair" ], r[ "arm" ], r[ "repeat" ] ) for r in reqs[ :12 ] ] == [ ( "d-r1", a, n ) for a in jp.ARMS for n in ( 1, 2, 3 ) ]
+    ids = lambda r, n: [ f"d-p{n}" if r[ "arm" ] in ( "baseline", "plant_line" ) else f"pkg.p{n}.p{n}", f"src.m{n}.f{n}" ]
+    assert all( [ e[ "id" ] for e in r[ "entries" ] ] == ids( r, r[ "pair" ][ 3: ] ) for r in reqs ), "arms 0 and 1 keep the d- id; arms 2 and 3 carry the shaped id"
     bodies = [ rp.pack_request( r[ "need" ], r[ "entries" ], r[ "template" ] )[ 0 ] for r in reqs[ :2 ] ]
     assert bodies[ 0 ][ "state" ] == bodies[ 1 ][ "state" ] and bodies[ 0 ] != bodies[ 1 ] and rt.request_hash( bodies[ 0 ] ) != rt.request_hash( bodies[ 1 ] )
     assert reqs[ 0 ][ "template" ][ "instructions" ].endswith( " (repeat 1)" ) and reqs[ 1 ][ "template" ][ "instructions" ].endswith( " (repeat 2)" )
-    assert reqs[ 0 ][ "template" ][ "criteria" ] == reqs[ 4 ][ "template" ][ "criteria" ] == rt.PROMPT_TEMPLATE[ "criteria" ]
+    assert reqs[ 0 ][ "template" ][ "criteria" ] == reqs[ 7 ][ "template" ][ "criteria" ] == rt.PROMPT_TEMPLATE[ "criteria" ]
     for n in jp.REPEATS:
         tails = { r[ "template" ][ "instructions" ][ -len( f" (repeat {n})" ): ] for r in reqs if r[ "repeat" ] == n }
         assert tails == { f" (repeat {n})" }, "within a repeat the token is the same bytes in every arm"
-    assert [ r[ "template" ][ "instructions" ] for r in reqs[ :1 ] ] == [ rt.PROMPT_TEMPLATE[ "instructions" ] + " (repeat 1)" ] and reqs[ 2 ][ "template" ][ "instructions" ].endswith( rt.PROMPT_TEMPLATE[ "instructions" ][ -30: ] + " (repeat 1)" )
+    assert [ r[ "template" ][ "instructions" ] for r in reqs[ :1 ] ] == [ rt.PROMPT_TEMPLATE[ "instructions" ] + " (repeat 1)" ] and reqs[ 3 ][ "template" ][ "instructions" ].endswith( rt.PROMPT_TEMPLATE[ "instructions" ][ -30: ] + " (repeat 1)" )
     reqs2, skipped2 = jp.plan_requests( [ record( 1 ), record( 2, original_line=None ), record( 3, with_plant=False ) ], jp.DEFAULT_ARMS, ( 1, ) )
-    assert len( reqs2 ) == 5 and skipped2 == [ { "pair": "d-r2", "arm": "both_lines", "reason": "original_has_no_line" }, { "pair": "d-r3", "arm": "baseline", "reason": "plant_dropped_by_screen" },
-                                               { "pair": "d-r3", "arm": "plant_line", "reason": "plant_dropped_by_screen" }, { "pair": "d-r3", "arm": "both_lines", "reason": "plant_dropped_by_screen" } ]
+    assert len( reqs2 ) == 7 and skipped2 == [ { "pair": "d-r2", "arm": "both_lines", "reason": "original_has_no_line" }, { "pair": "d-r3", "arm": "baseline", "reason": "plant_dropped_by_screen" },
+                                               { "pair": "d-r3", "arm": "plant_line", "reason": "plant_dropped_by_screen" }, { "pair": "d-r3", "arm": "shaped_id", "reason": "plant_dropped_by_screen" },
+                                               { "pair": "d-r3", "arm": "both_lines", "reason": "plant_dropped_by_screen" } ]
     for bad in ( dict( arms=( "nope", ) ), dict( repeats=( 0, ) ), dict( repeats=( 1, 1 ) ), dict( repeats=( "1", ) ), dict( repeats=( True, ) ) ):
         with pytest.raises( ValueError ): jp.plan_requests( [ record( 1 ) ], **bad )
 
@@ -266,9 +317,9 @@ def argv( tmp_path, mode, *more ):
     return base + list( more )
 
 
-def test_parse_args_defaults_to_the_plan_and_three_arms( tmp_path ):
+def test_parse_args_defaults_to_the_plan_and_four_arms( tmp_path ):
     a = jp.parse_args( argv( tmp_path, "variant" ) )
-    assert a.live is False and a.arms == [ "baseline", "plant_line", "both_lines" ] and a.budget == 140 and a.limit == 140 and a.ceiling == 8_000_000 and a.run_name is None
+    assert a.live is False and a.arms == [ "baseline", "plant_line", "shaped_id", "both_lines" ] and a.budget == 240 and a.limit == 240 and a.ceiling == 8_000_000 and a.run_name is None
     assert jp.parse_args( argv( tmp_path, "replay", "--arms", "plant_line" ) ).arms == [ "plant_line" ]
     with pytest.raises( SystemExit ): jp.parse_args( argv( tmp_path, "sideways" ) )
 
@@ -293,8 +344,17 @@ def test_a_variant_without_live_prints_the_plan_and_contacts_nothing( tmp_path )
     deps = { "source_root": lambda a: tmp_path, "records": lambda a, root: ( [ record( 1 ), record( 2, original_line=None ) ], [] ), "context": lambda root: pytest.fail( "a plan builds no context" ) }
     with mock.patch.object( jp.model_transport, "configure" ), mock.patch.object( jp, "ask_request", side_effect=AssertionError( "a plan asks nothing" ) ):
         out = jp.main( argv( tmp_path, "variant", "--cli-path", "/x/claude" ), deps )
-    assert out[ "live" ] is False and out[ "plan" ][ "requests" ] == 10 and out[ "plan" ][ "distinct_bodies" ] == 10 and out[ "plan" ][ "by_arm" ] == { "baseline": 4, "plant_line": 4, "both_lines": 2 } and out[ "plan" ][ "skipped" ][ 0 ][ "reason" ] == "original_has_no_line"
+    assert out[ "plan" ][ "id_collisions" ] == [ ] and out[ "live" ] is False and out[ "plan" ][ "requests" ] == 21 and out[ "plan" ][ "distinct_bodies" ] == 21 and out[ "plan" ][ "by_arm" ] == { "baseline": 6, "plant_line": 6, "shaped_id": 6, "both_lines": 3 } and out[ "plan" ][ "skipped" ][ 0 ][ "reason" ] == "original_has_no_line"
     assert not ( tmp_path / "run" / jp.REPORT_FILE ).exists()
+
+
+def test_the_plan_lists_each_shaped_id_collision_and_skips_only_the_arm_that_needs_it( tmp_path ):
+    recs = [ record( 1 ), record( 2, collision=jp.COLLIDES_ORIGINAL ), record( 3, collision=jp.COLLIDES_INDEX ) ]
+    deps = { "source_root": lambda a: tmp_path, "records": lambda a, root: ( recs, [ ] ) }
+    with mock.patch.object( jp.model_transport, "configure" ):
+        out = jp.main( argv( tmp_path, "variant", "--cli-path", "/x/claude", "--arms", "plant_line", "shaped_id" ), deps )
+    assert out[ "plan" ][ "id_collisions" ] == [ { "pair": "d-r2", "shaped_id": "pkg.p2.p2", "collides_with": "original" }, { "pair": "d-r3", "shaped_id": "pkg.p3.p3", "collides_with": "index_id" } ]
+    assert out[ "plan" ][ "by_arm" ] == { "plant_line": 9, "shaped_id": 3 } and [ ( s[ "pair" ], s[ "reason" ] ) for s in out[ "plan" ][ "skipped" ] ] == [ ( "d-r2", "shaped_id_equals_original" ), ( "d-r3", "shaped_id_equals_index_id" ) ]
 
 
 def test_a_live_variant_needs_a_cli_path_and_a_run_name( tmp_path ):
@@ -333,7 +393,7 @@ def test_a_live_variant_posts_every_request_under_its_own_run_name_and_closes_th
     prep.assert_called_once()
     assert out[ "live" ] is True and out[ "closed_run" ] == "needset-judge-x" and out[ "close_error" ] is None and out[ "report" ][ "status" ] == jp.DONE
     assert state[ "context_root" ] == tmp_path / "source-tree" != tmp_path / "root", "the context is built on the source tree, not on --root"
-    assert len( state[ "seen" ] ) == 6 and state[ "seen" ][ 0 ] == ( "B", "B" ) and state[ "closed" ] == 1
+    assert len( state[ "seen" ] ) == 12 and state[ "seen" ][ 0 ] == ( "B", "B" ) and state[ "closed" ] == 1
     assert os.environ[ rt.RUN_NAME_VARIABLE ] == "needset-judge-x" and os.environ[ rt.CEILING_VARIABLE ] == "8000000"
     assert jp.exit_status( out ) == 0
 
