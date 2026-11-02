@@ -7101,6 +7101,77 @@
                 }
             }
         },
+        "/api/podcast-drive/list": {
+            "get": {
+                "tags": [
+                    "podcast-drive"
+                ],
+                "summary": "List podcasts in the owner's Drive folder, newest first",
+                "description": "List the job folders in the configured Drive folder with their files.\n\nRequires:\n    - the caller is logged in and is the configured Drive owner\n\nEnsures:\n    - returns [ { job_folder, title, created_ts, files: [ { name, mime, size, drive_file_id, stream_url } ] } ], newest first\n    - a Drive folder that does not exist yet gives an empty list\n\nRaises:\n    - HTTPException 403 for any other user, 503 when Drive cannot be reached",
+                "operationId": "list_podcasts_api_podcast_drive_list_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ]
+            }
+        },
+        "/api/podcast-drive/stream/{drive_file_id}": {
+            "get": {
+                "tags": [
+                    "podcast-drive"
+                ],
+                "summary": "Stream one Drive podcast file, with Range support",
+                "description": "Stream a file from a job folder in the configured Drive folder.\n\nRequires:\n    - the caller is logged in and is the configured Drive owner\n    - drive_file_id names a file in a job folder directly under the configured folder\n\nEnsures:\n    - the browser's Range header goes to Drive and Drive's answer (200, 206 or 416) comes back with\n      Content-Range, Content-Length and Accept-Ranges passed through\n    - the body is streamed in chunks, never held whole in memory\n\nRaises:\n    - HTTPException 403 for any other user, 404 for any file outside the folder, 503 when Drive cannot be reached",
+                "operationId": "stream_podcast_file_api_podcast_drive_stream__drive_file_id__get",
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "drive_file_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Drive File Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/mock-job/submit": {
             "post": {
                 "tags": [

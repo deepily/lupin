@@ -189,7 +189,9 @@ def _show_card_legacy( page, rows, horizontal=True ):
         }""",
         { "nid": CARD_ID, "abstract": _abstract_for( rows ), "sender": SENDER },
     )
-    page.locator( "#action-required-content .abstract-indicator" ).first.click()
+    # Name the planted card's own indicator by the row id inside its abstract; ids are uuids, so the
+    # attribute value carries them unescaped and no peer's card can match.
+    page.locator( f'#action-required-content .abstract-indicator[data-abstract*="{rows[ 0 ][ "id" ]}"]' ).click()
     return page.locator( "#abstract-tooltip .abstract-tooltip-content" )
 
 

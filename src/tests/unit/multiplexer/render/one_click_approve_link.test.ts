@@ -148,7 +148,7 @@ test( "success replaces the link with a disabled approved ✅", async () => {
   click( a! );
   release[ 0 ]!( { ok: true } );
   await settle();
-  assert.equal( host.querySelector( "a" ), null );
+  assert.ok( host.querySelector( "a" ) === null );
   const done = host.querySelector( ".approve-link-approved" ) as Element;
   assert.equal( done.textContent, "approved ✅" );
   assert.equal( done.getAttribute( "aria-disabled" ), "true", "no second click is possible" );
@@ -164,7 +164,7 @@ test( "a refusal shows the server's words; a pending answer shows its message to
   await settle();
   const texts = [ ...host.querySelectorAll( ".approve-link-refused" ) ].map( ( e ) => e.textContent );
   assert.deepEqual( texts, [ "only an operator may approve", "Waiting on Rick — he has not been asked yet." ] );
-  assert.equal( host.querySelector( ".approve-link-approved" ), null );
+  assert.ok( host.querySelector( ".approve-link-approved" ) === null );
 } );
 
 test( "a second click while the request is out sends nothing", () => {
@@ -247,7 +247,7 @@ test( "horizontal: a 📋 link shows the row in the content pane, like the 📋,
   for ( const part of [ "Fix X", "Priority: P2", "Owner: krishna", "Status: not_approved", "line one", "line two" ] ) assert.ok( paneText().includes( part ), part );
   assert.equal( ( document.getElementById( "content-pane-title" ) as Element ).textContent, `Ticket ${ ROW_A.slice( 0, 8 ) }` );
   assert.equal( tipShown(), false, "the tooltip stays shut in horizontal layout" );
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay" );
   assertNoTab();
   assert.deepEqual( calls, [], "viewing sends no approve" );
 } );
@@ -271,7 +271,7 @@ test( "vertical: a 📋 link shows the row in the abstract tooltip, with no pane
   assert.equal( tipShown(), true );
   for ( const part of [ "Fix X", "Priority: P2", "Owner: krishna", "Status: not_approved", "line one", "line two" ] ) assert.ok( tipText().includes( part ), part );
   assert.equal( ( document.getElementById( "content-pane" ) as HTMLElement ).hidden, true, "the pane stays shut" );
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay" );
   assertNoTab();
 } );
 
@@ -294,7 +294,7 @@ test( "vertical without a tooltip: the 📋 click is claimed, opens nothing and 
   assert.equal( click( a! ), true );
   await flush();
   assertNoTab();
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 test( "a 📋 link on a row that cannot be read says so, in the pane and in the tooltip", async () => {
@@ -353,8 +353,8 @@ test( "a dropped or wont_fix row reads as its plain status, never approved", asy
   plant( host, [ APPROVE( ROW_A ), APPROVE( ROW_B ) ] );
   await flush();
   assert.deepEqual( [ ...host.querySelectorAll( ".approve-link-closed" ) ].map( ( e ) => e.textContent ), [ "dropped", "wont_fix" ] );
-  assert.equal( host.querySelector( ".approve-link-approved" ), null );
-  assert.equal( host.querySelector( "a" ), null );
+  assert.ok( host.querySelector( ".approve-link-approved" ) === null );
+  assert.ok( host.querySelector( "a" ) === null );
 } );
 
 test( "a failed read, or a row with no status, leaves the live link", async () => {
@@ -451,7 +451,7 @@ test( "with a reader set, a doc link is still not claimed as a view link", () =>
   const shell = setup( recorder(), table( {} ).reader );
   const [ d ] = plant( shell.querySelector( "#sender-cards-container" ) as Element, [ DOC_HREF ] );
   click( d! );
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
   assert.deepEqual( calls, [] );
 } );
 
@@ -478,7 +478,7 @@ test( "a ticket body carrying an img tag goes through the sanitizer and creates 
       assert.ok( seen.some( ( h ) => h.includes( "before" ) && h.includes( "<img" ) ), `${ layout }: the row text reached the sanitizer` );
       const host = document.getElementById( layout === "horizontal" ? "content-pane-body" : "abstract-tooltip" ) as Element;
       assert.ok( host.textContent?.includes( "before" ), `${ layout }: the row was drawn` );
-      assert.equal( host.querySelector( "img" ), null, `${ layout }: no img element exists` );
+      assert.ok( host.querySelector( "img" ) === null, `${ layout }: no img element exists` );
       assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
     }
   } finally { w.DOMPurify = real; }

@@ -134,7 +134,7 @@ test( "success replaces the link with a disabled approved ✅", async () => {
   release[ 0 ]!( { ok: true } );
   await settle();
   const host = document.getElementById( "action-required-content" ) as Element;
-  assert.equal( host.querySelector( "a" ), null, "the link is gone" );
+  assert.ok( host.querySelector( "a" ) === null, "the link is gone" );
   const done = host.querySelector( ".approve-link-approved" ) as Element;
   assert.equal( done.textContent, "approved ✅" );
   assert.equal( done.getAttribute( "aria-disabled" ), "true", "no second click is possible" );
@@ -146,9 +146,9 @@ test( "a refusal shows the server's words and nothing else", async () => {
   release[ 0 ]!( { ok: false, message: "only an operator may approve" } );
   await settle();
   const host = document.getElementById( "action-required-content" ) as Element;
-  assert.equal( host.querySelector( "a" ), null );
+  assert.ok( host.querySelector( "a" ) === null );
   assert.equal( host.querySelector( ".approve-link-refused" )?.textContent, "only an operator may approve" );
-  assert.equal( host.querySelector( ".approve-link-approved" ), null );
+  assert.ok( host.querySelector( ".approve-link-approved" ) === null );
 } );
 
 test( "a second click while the request is out sends nothing", async () => {
@@ -231,7 +231,7 @@ test( "horizontal: a 📋 link shows the row in the content pane like the 📋, 
   await flush();
   assert.deepEqual( asked, [ ROW_A ] );
   assert.deepEqual( paneOpens, [ FACTS ], "the pane got the row text" );
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay" );
   assert.deepEqual( tabOpens, [], "no new tab" );
   assert.deepEqual( calls, [], "viewing sends no approve" );
 } );
@@ -294,7 +294,7 @@ test( "vertical: a 📋 link shows the row in the abstract tooltip, with no pane
   assert.equal( tip.classList.contains( "visible" ), true );
   assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, FACTS );
   assert.deepEqual( paneOpens, [], "no pane" );
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay" );
   assert.deepEqual( tabOpens, [], "no new tab" );
 } );
 
@@ -317,7 +317,7 @@ test( "a malformed 📋 link and a click off any link are not claimed as views",
   click( a! );
   click( host() );
   assert.deepEqual( asked, [] );
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 test( "a card drawn later: a held row keeps its live link, a live or done row reads approved ✅ and is disabled", async () => {
@@ -335,8 +335,8 @@ test( "a dropped or wont_fix row reads as its plain status, never approved", asy
   plantCard( [ APPROVE( ROW_A ), APPROVE( ROW_B ) ] );
   await flush();
   assert.deepEqual( [ ...host().querySelectorAll( ".approve-link-closed" ) ].map( ( e ) => e.textContent ), [ "dropped", "wont_fix" ] );
-  assert.equal( host().querySelector( ".approve-link-approved" ), null );
-  assert.equal( host().querySelector( "a" ), null );
+  assert.ok( host().querySelector( ".approve-link-approved" ) === null );
+  assert.ok( host().querySelector( "a" ) === null );
 } );
 
 test( "a failed read, or a row with no status, leaves the live link", async () => {
@@ -427,7 +427,7 @@ test( "a ticket body carrying an img tag goes through renderMarkdown and creates
   await flush();
   assert.ok( seen.some( ( t ) => t.includes( `before ${ evil } after` ) ), "the row text reached renderMarkdown" );
   assert.ok( tip.textContent?.includes( "before" ), "the row was drawn" );
-  assert.equal( tip.querySelector( "img" ), null, "no img element exists" );
+  assert.ok( tip.querySelector( "img" ) === null, "no img element exists" );
   assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
   // Horizontal hands the text to _openContentPane, whose own renderer is covered by the pane's tests.
   ui._layoutMode = "horizontal";
