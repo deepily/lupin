@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from lupin_mcp import reuse_e2e
 from lupin_mcp.reuse_needset import report_rollup as rr
 
 FORCED_PLAN    = { "live": False, "plan": { "by_label": { "not_same": 4, "same_job": 8 }, "pairs": 12, "requests_needed": 48, "stage_budget": 100, "undrafted": [] } }
@@ -31,28 +32,11 @@ def expansion_run( summary ):
     return { "used": 124, "limit": 669, "by_stage": {}, "status": "done", "detail": None, "summary": summary, "results": [] }
 
 
-def test_wilson_matches_known_values():
-    lo, hi = rr.wilson( 8, 10 )
-    assert round( lo, 4 ) == 0.4902 and round( hi, 4 ) == 0.9433
-
-
-def test_wilson_edges_are_exact():
-    assert rr.wilson( 0, 5 )[ 0 ] == 0.0 and rr.wilson( 5, 5 )[ 1 ] == 1.0
-    assert rr.wilson( 0, 5 )[ 1 ] > 0.0 and rr.wilson( 5, 5 )[ 0 ] < 1.0
-
-
-def test_wilson_no_trials_is_none():
-    assert rr.wilson( 0, 0 ) is None
-
-
-@pytest.mark.parametrize( "k,n", [ ( -1, 3 ), ( 4, 3 ) ] )
-def test_wilson_rejects_out_of_range( k, n ):
-    with pytest.raises( ValueError ): rr.wilson( k, n )
-
-
 def test_share_formats_count_percent_and_interval():
+    assert rr.wilson is reuse_e2e.wilson
     assert rr.share( 8, 10 ) == "8/10 (80.0%, 49.0-94.3%)"
     assert rr.share( 0, 0 ) == "0/0 (n/a)"
+    assert rr.share( 0, 5 ).startswith( "0/5 (0.0%, 0.0-" ) and rr.share( 5, 5 ).endswith( "-100.0%)" )
 
 
 def test_table_has_header_rule_and_rows():
