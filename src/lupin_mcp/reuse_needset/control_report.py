@@ -15,7 +15,7 @@ from cosa.repo.duplicate_check.proof import label_load, proof_run
 from cosa.repo.symindex.candidates import rank_fusion as rf
 from lupin_mcp.reuse_e2e import wilson
 from lupin_mcp.reuse_needset import errors as er
-from lupin_mcp.reuse_needset import loss_trace
+from lupin_mcp.reuse_needset import judge_readings, loss_trace
 
 NOT_SAME_JOB   = frozenset( ( "d-35e19468ee", "d-5270a48d23", "d-e4d0d1e147", "d-7a334b0576", "d-803557386f" ) )
 LABEL_FILES    = ( "labels-rick.jsonl", "labels-reviewer-2.jsonl", "labels-jason.jsonl" )
@@ -134,7 +134,7 @@ def reading( ident, receipt, answer ):
     return { "id": ident, "retrieved": ident in set( loss_trace.asked_ids( receipt ) ), "ranks": ranks_of( answer, ident ) }
 
 
-def pair_row( pair, label, need, live, line, original, bare ):
+def pair_row( pair, label, need, live, line, original, bare, sweeps=None ):
     """
     Build the row of one drafted pair.
 
@@ -148,12 +148,16 @@ def pair_row( pair, label, need, live, line, original, bare ):
         - plant and original are read from the one live search; accepted means retrieved and rated relevant by the judge
         - plant_bare is the same plant planted with no purpose line, read from the bare search
         - leak is the word overlap of the need with the plant's line and with the original's, None for a line that does not exist
+        - sweeps is None, or the judge sweeps of the live check; then plant and original also carry fusion ( fusion_terms ) and judge ( judge_reading ), and without it the row is as before
     """
     rid                = pair[ "rewrite" ][ "id" ]
     receipt, answer    = live
     plant              = reading( rid, receipt, answer )
     plant[ "accepted" ] = plant[ "retrieved" ] and rid in { row[ "id" ] for row in receipt[ "shortlist" ] }
-    return { "rewrite": rid, "lang": pair[ "rewrite" ][ "lang" ], "same_job": label, "drafted": True, "plant": plant, "plant_bare": reading( rid, *bare ), "original": reading( original[ "id" ], receipt, answer ),
+    other              = reading( original[ "id" ], receipt, answer )
+    if sweeps is not None:
+        for side in ( plant, other ): side.update( { "fusion": fusion_terms( answer, side[ "id" ] ), "judge": judge_readings.judge_reading( side[ "id" ], sweeps, side[ "retrieved" ] ) } )
+    return { "rewrite": rid, "lang": pair[ "rewrite" ][ "lang" ], "same_job": label, "drafted": True, "plant": plant, "plant_bare": reading( rid, *bare ), "original": other,
              "purpose_line": line, "leak": { "plant": word_overlap( need, line ) if line is not None else None, "original": word_overlap( need, original[ "line" ] ) if original[ "line" ] is not None else None } }
 
 

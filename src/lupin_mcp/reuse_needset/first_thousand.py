@@ -23,7 +23,7 @@ from cosa.repo.symindex.candidates import candidate_stage
 from cosa.repo.symindex.candidates import search as cs_search
 from cosa.repo.symindex.candidates import vector_store as vs
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, control_report, draft, loss_trace, planted_pool, planted_purposes, positive_control, smoke, source_at, stage3, stage_parts, stage_seeds, stages, strip
+from lupin_mcp.reuse_needset import call_cap, control_report, draft, judge_readings, loss_trace, planted_pool, planted_purposes, positive_control, smoke, source_at, stage3, stage_parts, stage_seeds, stages, strip
 from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
@@ -208,8 +208,9 @@ async def run_first_thousand( run_dir, stage_one, stage_two, control, remainder,
     """
     cap = call_cap.CallCap( f"{run_dir}/{CALLS_FILE}", limit, stages.STAGE_BUDGETS )
     def write( report ):
-        """Ensures: writes the report to stage-reports.json in the run folder."""
+        """Ensures: writes the report to stage-reports.json and the judge readings beside it."""
         with open( f"{run_dir}/{REPORT_FILE}", "w", encoding="utf-8" ) as f: f.write( json.dumps( report, sort_keys=True, indent=4 ) + "\n" )
+        judge_readings.write_readings( run_dir, report )
 
     with cap.installed():
         report = await stages.run_stages( cap, { stages.ATTRIBUTION: stage_one, stages.YIELD: stage_two, stages.CONTROL: control, stages.REMAINDER: remainder }, on_raise=write )
@@ -359,14 +360,24 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         labels    = { p[ "rewrite" ][ "id" ]: True for p in pairs } if same_job is None else same_job
         rows      = []
 
+        taps      = []
+
+        def live_check( need, _pool ):
+            """Ensures: runs the live check on a context copy whose sweeper is a fresh tap."""
+            tap          = judge_readings.SweepTap( ctx )
+            tapped       = copy.copy( ctx )
+            tapped.sweeper = tap
+            taps.append( tap )
+            return check( need, tapped, planted, entries, **( {} if plant_lines is None else { "purposes": plant_lines } ) )
+
         def observe( pair, need, receipt ):
-            """Ensures: adds the pair's scored row, with a second bare check that calls no model."""
+            """Ensures: adds the pair's row, with its judge readings and a model-free bare check."""
             rid  = pair[ "rewrite" ][ "id" ]
             live = ( receipt, planted.last_answer )
             more = ( check( need, bare_ctx, bare, entries ), None )
-            rows.append( control_report.pair_row( pair, labels[ rid ], need[ "need" ], live, lines.get( pins[ rid ] ), originals[ rid ], ( more[ 0 ], bare.last_answer ) ) )
+            rows.append( control_report.pair_row( pair, labels[ rid ], need[ "need" ], live, lines.get( pins[ rid ] ), originals[ rid ], ( more[ 0 ], bare.last_answer ), taps[ -1 ].sweeps ) )
 
-        asker     = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries, **( {} if plant_lines is None else { "purposes": plant_lines } ) ), loss_trace.asked_ids, observe )
+        asker     = control_ask( needs, live_check, loss_trace.asked_ids, observe )
         base      = await stage3.control_stage( pool, drafted, asker, build_stage )()
         return { **base, "undrafted": undrafted, "pairs_wanted": len( pairs ), **control_report.scored( rows, undrafted, labels ), "plants_without_line": list( plant_without ),
                  "purpose_lines_used": len( lines ), "labels": label_info }
