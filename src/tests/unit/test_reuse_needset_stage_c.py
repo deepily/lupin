@@ -429,3 +429,27 @@ def test_run_cli_prints_the_plan_as_json_and_returns_zero( tmp_path ):
     with mock.patch.object( sc, "collect_rows", return_value=( [ ], [ ], [ ] ) ):
         code = sc.run_cli( argv( tmp_path ), { }, printed.append )
     assert code == 0 and json.loads( printed[ 0 ] )[ "plan" ][ "pairs_judged" ] == 0
+
+
+class Capture:
+    """A transport that keeps each body sent and answers every question with one overlap."""
+
+    def __init__( self ):
+        self.bodies = [ ]
+
+    def post_with_meta( self, body ):
+        self.bodies.append( body )
+        probs = { "reuse": 0.0, "extend": 0.5, "unrelated": 0.5 }
+        return { "answers": { k: { "probabilities": dict( probs ) } for k in body[ "questions" ] }, "model": body[ "model" ], "usage": { "input_tokens": 50, "output_tokens": 5 } }, \
+               { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 1 }
+
+
+def test_the_real_send_carries_both_purpose_lines_the_need_and_the_repeat_token_in_the_posted_body():
+    row, wire = make_row( unsure=True ), Capture()
+    got = sc.ask_pair( wire, sc.request_for( row, "Read a feed and list its articles.", 2 ) )
+    body = json.dumps( wire.bodies[ 0 ], sort_keys=True )
+    assert len( wire.bodies ) == 1 and got[ "status" ] == "answered" and got[ "tokens_in" ] == 50 and got[ "side_b" ][ "answered" ] and got[ "side_a" ][ "answered" ]
+    assert row[ "side_a" ][ "record" ][ "purpose" ] in body and row[ "side_b" ][ "record" ][ "purpose" ] in body and "line pin1" in body and "line pin2" in body
+    assert "Read a feed and list its articles." in body and "(repeat 2)" in body and "(repeat 1)" not in body
+    assert row[ "side_a" ][ "record" ][ "id" ] in body and row[ "side_b" ][ "record" ][ "id" ] in body
+    assert len( wire.bodies[ 0 ][ "questions" ] ) == 2, "one post holds both sides' questions"
