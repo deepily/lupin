@@ -31,7 +31,7 @@ def file_sha( path ):
     return hashlib.sha256( pathlib.Path( path ).read_bytes() ).hexdigest()
 
 
-def same_job_labels( pairs, labels_dir, answer_key, expected_not_same=NOT_SAME_JOB, expected_shas=LABEL_PINS ):
+def same_job_labels( pairs, labels_dir, answer_key, expected_not_same=NOT_SAME_JOB, expected_shas="pinned" ):
     """
     Settle whether each pair is the same job.
 
@@ -41,7 +41,7 @@ def same_job_labels( pairs, labels_dir, answer_key, expected_not_same=NOT_SAME_J
     Ensures:
         - returns { same_job: { rewrite id: bool }, label_shas: { file name: sha256 }, answer_key_sha }
         - a pair both reviewers label alike takes that label, and a disputed one takes the third rater's, as label_load.resolved_labels settles it
-        - the three label files and the answer key hash to expected_shas, unless that is None, before anything is read from them
+        - the three label files and the answer key hash to expected_shas, unless that is None; the default "pinned" means LABEL_PINS, before anything is read from them
         - the pairs that are not the same job are exactly expected_not_same
 
     Raises:
@@ -50,7 +50,8 @@ def same_job_labels( pairs, labels_dir, answer_key, expected_not_same=NOT_SAME_J
     """
     first, second, third = ( f"{labels_dir}/{name}" for name in LABEL_FILES )
     shas      = { **{ name: file_sha( f"{labels_dir}/{name}" ) for name in LABEL_FILES }, KEY_FILE: file_sha( answer_key ) }
-    changed   = sorted( n for n in shas if expected_shas is not None and shas[ n ] != expected_shas[ n ] )
+    wanted    = LABEL_PINS if expected_shas == "pinned" else expected_shas
+    changed   = sorted( n for n in shas if wanted is not None and shas[ n ] != wanted[ n ] )
     if changed: raise er.NeedsetError( er.CONTROL_LABELS_CHANGED, f"the hash of {', '.join( changed )} is not the pinned one" )
     resolved  = label_load.resolved_labels( first, second, answer_key, third_path=third )
     same_job  = { p[ "rewrite" ][ "id" ]: bool( resolved[ proof_run.label_key( p[ "rewrite" ][ "id" ], p[ "original" ][ "id" ] ) ] ) for p in pairs }

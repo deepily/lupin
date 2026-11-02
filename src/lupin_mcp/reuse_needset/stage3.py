@@ -19,7 +19,7 @@ def need_for( pair, text ):
         - pair comes from positive_control.load_pairs; text is the need sentence written from the pair's original
 
     Ensures:
-        - returns { kind, write_lang, seed, need }: the seed is the original's id, so the checker leaves it out and can find the rewrite only
+        - returns { kind, write_lang, seed, need }: the seed is the original's id; it matches no index id, so nothing is left out
         - write_lang is the original's language
     """
     return { "kind": NEED_KIND, "write_lang": pair[ "original" ][ "lang" ], "seed": pair[ "original" ][ "id" ], "need": text }

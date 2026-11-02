@@ -36,5 +36,5 @@ The one-time check that the checker finds a duplicate that is known to be there.
 - `control_stage` returns the zero-argument async function the stage runner takes for its control stage. It snapshots the pool, plants, and awaits the caller's `ask( planted pool, pair )` once per pair in file order.
 - It then calls `run_control` with the answers and the earlier snapshot. A trace left by an ask is caught as well as one left by the plant.
 - The report is `run_control`'s plus `by_lang` (found and total per language) and `restored`. It carries `stop` true when any pair was missed.
-- `need_for` builds the need record the checker takes. The seed is the original's id, so the checker leaves the original out and can find only the rewrite.
+- `need_for` builds the need record the checker takes. The seed is the original's id. It matches no index id, so nothing is left out and the original competes with the rewrite.
 - The module makes no call. The calls the checker makes go through the cap that the runner has installed.
