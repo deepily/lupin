@@ -5,6 +5,7 @@ The replay reads ratings from a Jev cache built in a temp folder. The variant pl
 """
 import json
 import os
+import pathlib
 import types
 from unittest import mock
 
@@ -429,6 +430,8 @@ def test_collect_records_reads_files_only_and_takes_lines_from_the_control_repor
     ( tmp_path / "answer-key" ).write_text( json.dumps( { "items": { } } ), encoding="utf-8" )
     pairs = [ { "original": { "id": "d-o1", "file": "src/m1.py", "name": "f1", "lang": "py" }, "rewrite": { "id": "d-r1", "file": "src/p1.py", "name": "p1", "sig": "( b1 )", "lang": "py", "text": "t" } } ]
     ( tmp_path / "run" ).mkdir()
+    ( tmp_path / "from-run" ).mkdir()
+    ( tmp_path / "from-run" / "ledger-control-draft.jsonl" ).write_text( "saved\n", encoding="utf-8" )
     args  = jp.parse_args( argv( tmp_path, "replay", "--cli-path", "/x/claude" ) )
     args.control_report = str( report )
     with mock.patch.object( jp.positive_control, "load_pairs", return_value=pairs ) as lp, mock.patch.object( jp.first_thousand, "read_latest_labels", return_value={ } ), \
@@ -444,6 +447,41 @@ def test_collect_records_reads_files_only_and_takes_lines_from_the_control_repor
          mock.patch.object( rt, "load_snapshot", return_value=( [ ], [ ] ) ):
         records, undrafted = jp.collect_records( args, tmp_path, { } )
     assert records == [] and undrafted == [ "d-r1" ]
+
+
+def test_collect_records_copies_the_saved_draft_ledger_first_and_keeps_one_already_there( tmp_path ):
+    """The saved ledger is copied in before it is read; a file already there stays."""
+    ( tmp_path / "answer-key" ).write_text( json.dumps( { "items": { } } ), encoding="utf-8" )
+    ( tmp_path / "control-report" ).write_text( json.dumps( { "stages": { "control": { "report": { "rows": [ ] } } } } ), encoding="utf-8" )
+    ( tmp_path / "from-run" ).mkdir()
+    ( tmp_path / "run" ).mkdir()
+    saved = tmp_path / "from-run" / "ledger-control-draft.jsonl"
+    saved.write_text( "saved\n", encoding="utf-8" )
+    args  = jp.parse_args( argv( tmp_path, "replay", "--cli-path", "/x/claude" ) )
+    seen  = [ ]
+    def make( path, cli, server ):
+        seen.append( pathlib.Path( path ).read_text( encoding="utf-8" ) )
+        return "ledger"
+    for before in ( None, "stub\n" ):
+        target = tmp_path / "run" / "ledger-control-draft.jsonl"
+        if target.exists(): target.unlink()
+        if before: target.write_text( before, encoding="utf-8" )
+        with mock.patch.object( jp.positive_control, "load_pairs", return_value=[ ] ), mock.patch.object( jp.first_thousand, "read_latest_labels", return_value={ } ), \
+             mock.patch.object( jp.draft, "make_ledger", side_effect=make ), mock.patch.object( jp.forced_judge, "frozen_needs", return_value={ } ), \
+             mock.patch.object( rt, "load_snapshot", return_value=( [ ], [ ] ) ):
+            jp.collect_records( args, tmp_path, { } )
+    assert seen == [ "saved\n", "stub\n" ]
+
+
+def test_collect_records_names_a_missing_saved_ledger_before_reading_anything( tmp_path ):
+    """A from-run without the ledger is refused by name."""
+    ( tmp_path / "answer-key" ).write_text( json.dumps( { "items": { } } ), encoding="utf-8" )
+    ( tmp_path / "from-run" ).mkdir()
+    ( tmp_path / "run" ).mkdir()
+    args = jp.parse_args( argv( tmp_path, "replay", "--cli-path", "/x/claude" ) )
+    with mock.patch.object( jp.positive_control, "load_pairs", return_value=[ ] ), mock.patch.object( jp.first_thousand, "read_latest_labels", return_value={ } ), pytest.raises( er.NeedsetError ) as exc:
+        jp.collect_records( args, tmp_path, { } )
+    assert exc.value.code == er.SAVED_FILE_MISSING
 
 
 def test_run_cli_prints_json_and_returns_the_status( tmp_path ):
