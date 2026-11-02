@@ -205,5 +205,5 @@ test( "showFor shows the text beside the anchor exactly as a 📋 click does", (
 test( "showFor before mount, or after unmount, does nothing and does not throw", () => {
   const t = createAbstractTooltip( { getLayoutMode: () => layout, schedule: syncSchedule } );
   t.showFor( document.body, "x" );
-  assert.equal( document.getElementById( ABSTRACT_TOOLTIP_ID ), null );
+  assert.ok( document.getElementById( ABSTRACT_TOOLTIP_ID ) === null );
 });

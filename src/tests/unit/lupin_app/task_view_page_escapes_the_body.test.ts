@@ -37,7 +37,7 @@ test( "a body carrying an img tag is shown as text and creates no element", asyn
   await loadPage( { title: "T", priority: "P2", owner_persona: "krishna", status: "queued", body: `before ${ EVIL } after` } );
   const body = document.getElementById( "task-view-body" ) as Element;
   assert.equal( body.textContent, `before ${ EVIL } after`, "the tag is visible as characters" );
-  assert.equal( document.querySelector( "#task-view-row img" ), null, "no img element exists" );
+  assert.ok( document.querySelector( "#task-view-row img" ) === null, "no img element exists" );
   assert.equal( ( globalThis as unknown as { __pwned?: number } ).__pwned, undefined );
 } );
 
@@ -45,5 +45,5 @@ test( "a title and an owner carrying an img tag are shown as text too", async ()
   await loadPage( { title: EVIL, priority: "P2", owner_persona: EVIL, status: "queued", body: "b" } );
   assert.equal( document.getElementById( "task-view-title" )?.textContent, EVIL );
   assert.equal( document.getElementById( "task-view-owner" )?.textContent, EVIL );
-  assert.equal( document.querySelector( "#task-view-row img" ), null );
+  assert.ok( document.querySelector( "#task-view-row img" ) === null );
 } );
