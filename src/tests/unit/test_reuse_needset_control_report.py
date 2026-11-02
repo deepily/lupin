@@ -158,3 +158,24 @@ def test_the_scored_report_splits_the_populations_counts_every_undrafted_pair_an
     assert missed[ "originals" ] == cr.count( 0, 3 ) and "stop" not in missed and missed[ "originals" ][ "interval" ] == cr.wilson( 0, 3 ), "originals not found are a figure with an interval, never a halt"
     none = cr.scored( [ ], [ ], { } )
     assert none[ "originals" ] == { "k": 0, "n": 0, "interval": ( None, None ) } and none[ "primary" ][ "pass_mark" ][ "passed" ] is False
+
+
+def test_fusion_terms_are_the_reciprocal_rank_terms_fuse_adds_and_their_sum_orders_the_fused_list():
+    from cosa.repo.symindex.candidates import rank_fusion as rf
+    answer = { "lists": { "code": [ "x", "y", "z" ], "prose": [ "z", "x" ], "vector": [ "w", "w", "y" ] } }
+    got = cr.fusion_terms( answer, "x" )
+    assert got == { "code": 1 / 61, "prose": 1 / 62, "vector": None, "total": round( 1 / 61 + 1 / 62, 6 ) }
+    assert cr.fusion_terms( answer, "y" )[ "vector" ] == 1 / 62, "a repeated id in a list counts once, so y sits second there, as fuse reads it"
+    assert cr.fusion_terms( answer, "nobody" ) == { "code": None, "prose": None, "vector": None, "total": 0.0 }
+    ids   = [ "w", "x", "y", "z" ]
+    order = sorted( ids, key=lambda i: ( -cr.fusion_terms( answer, i )[ "total" ], i ) )
+    assert order == rf.fuse( [ answer[ "lists" ][ n ] for n in sorted( answer[ "lists" ] ) ], rf.FUSION_K, rf.FUSION_DEPTH, rf.FUSION_HEAD ), "the terms rebuild the order fuse gives"
+    assert order == [ "x", "z", "y", "w" ] and cr.fusion_terms( answer, "w" )[ "total" ] == round( 1 / 61, 6 )
+
+
+def test_an_entry_beyond_the_fusion_depth_is_present_but_adds_nothing():
+    from cosa.repo.symindex.candidates import rank_fusion as rf
+    ranked = [ f"id{i}" for i in range( rf.FUSION_DEPTH + 1 ) ]
+    got = cr.fusion_terms( { "lists": { "a": ranked } }, f"id{rf.FUSION_DEPTH}" )
+    assert got == { "a": 0.0, "total": 0.0 }
+    assert cr.fusion_terms( { "lists": { "a": ranked } }, f"id{rf.FUSION_DEPTH - 1}" )[ "a" ] == 1 / ( rf.FUSION_K + rf.FUSION_DEPTH )
