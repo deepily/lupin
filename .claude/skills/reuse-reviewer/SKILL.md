@@ -51,7 +51,7 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
 4. **Read source** only for shortlisted candidates and for any call that returned an `uncertain`
    cause. Rule on source, never on a shortlist line alone, and leave the rest of the tree unread.
 
-   **Search the tree for each `DISTINCT` you mean to rule.** The shortlist only covers the index. Call
+   **Search the tree for every new definition, whatever you mean to rule.** The shortlist only covers the index. Call
    `record_search( receipt_id )` with the receipt from the `fetch_similar` call. It makes no model call. It
    searches the working tree for three to six terms and returns the five nearest definitions and a
    `search_id`. Add terms of your own with `extra_terms`. With no receipt, pass `entry` and `language`
@@ -68,6 +68,23 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    ```text
    SEARCHED <symbol id> :: <search id> :: none :: <why>
    ```
+
+   Then close each lookup with the outcome line from `planning-is-prompting` `workflow/plan-review.md` section 4
+   (commit `3a715cd31`). It ties the receipt and the search to what the diff did:
+
+   ```text
+   REUSE-OUTCOME <receipt id> :: <search id> :: REUSED <symbol> | EXTENDED <symbol> | WROTE_NEW <difference> :: <plan path>#<step>
+   ```
+
+   `REUSED` goes with a `DUPLICATE` ruling, `EXTENDED` with `EXTEND`, `WROTE_NEW` with `DISTINCT`. `WROTE_NEW` takes
+   any text without ` :: `. A definition the tool refused has `excluded` in the receipt position; code outside the
+   index has `unindexed` in both id positions. The reader challenges that line. A receipt with no outcome line is a
+   lookup nobody acted on.
+
+   **What the gate enforces today.** `src/lupin_mcp/reuse_exit_gate.py` requires the search only for a
+   `DISTINCT` ruling. It does not yet require one for `DUPLICATE` or `EXTEND`, and it does not read
+   `REUSE-OUTCOME` lines. The search and the outcome line are still required of you for every new definition;
+   the gate changes only when a later track changes it.
 
 5. **Rule**, one line per new definition, in the review document, in this exact shape:
 
