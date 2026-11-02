@@ -5,9 +5,8 @@ It reads the JSON that yield_trace, forced_judge and expansion_run print or writ
 It renders one table per experiment: counts with Wilson intervals, per language,
 and per resolved label where the data carries one.
 
-The positive control's table is rendered from per-pair rows. It shows the discordant
-pairs a and b and the a - b <= 2 mark. The reader that turns John's control report
-into those rows is a stub until his merge lands.
+The positive control's table is rendered from the scored control report, or from a
+stage-reports file holding it. It shows the discordant pairs a and b and the a - b <= 2 mark.
 
 It makes no model call, no search and no spend-ledger write: it only reads files and returns text.
 """
@@ -18,8 +17,9 @@ import pathlib
 
 from lupin_mcp.reuse_e2e import wilson
 
-CONTROL_MARK = 2                   # plan section 10: the control passes when a - b <= 2
-NOT_RUN      = "not run"
+CONTROL_MARK  = 2                   # plan section 10: the control passes when a - b <= 2
+NOT_RUN       = "not run"
+CONTROL_TITLE = "## Positive control (plants against originals, same-job pairs that drafted)"
 
 
 def share( successes, trials ):
@@ -241,18 +241,20 @@ def discordant( pairs ):
 
 def control_pairs_from_report( report ):
     """
-    Turn John's positive-control report into per-pair rows. A stub until his merge lands.
+    Turn one pass of the scored control report into per-pair rows.
 
     Requires:
-        - report is the parsed control report
+        - report is a pass of control_report.scored's output: rows with drafted, same_job, plant and original
 
-    Raises:
-        - NotImplementedError always, naming what is waiting
+    Ensures:
+        - returns { id, original_in, plant_in } for each same-job pair that drafted, in the report's order
+        - a flag is the producer's retrieved: the entry was among the ids sent to the judge
+        - undrafted and not-the-same-job rows are left out, as the producer's primary figures leave them out
     """
-    raise NotImplementedError( "the control report's shape is John's and is not merged yet; pass per-pair rows to control_section instead" )
+    return [ { "id": r[ "rewrite" ], "original_in": r[ "original" ][ "retrieved" ], "plant_in": r[ "plant" ][ "retrieved" ] } for r in report[ "rows" ] if r[ "drafted" ] and r[ "same_job" ] ]
 
 
-def control_section( pairs=None ):
+def control_section( pairs=None, title=CONTROL_TITLE ):
     """
     Render the positive control (plan section 10, the paired mark).
 
@@ -261,32 +263,86 @@ def control_section( pairs=None ):
 
     Ensures:
         - with no pairs gives a placeholder saying the control report is not read yet
-        - otherwise gives a, b, both-in, neither-in, the original's and the plant's share in the 128 with Wilson intervals, and the verdict on a - b <= 2
+        - otherwise gives a, b, both-in, neither-in, the original's and the plant's retrieved share with Wilson intervals, and the verdict on a - b <= 2
         - the verdict is worded "the plants are not worse than the originals by more than two pairs", never "equivalent"
         - the note that retrieval is one sample, the same in both passes, is printed beside the figures
     """
-    head = [ "## Positive control (plants against originals, same-job pairs that drafted)" ]
-    if pairs is None: return "\n\n".join( head + [ f"Not read yet: the control report is John's and has not merged. Figures: {NOT_RUN}." ] )
+    head = [ title ]
+    if pairs is None: return "\n\n".join( head + [ f"Not read yet: no control report was given. Figures: {NOT_RUN}." ] )
     d, n = discordant( pairs ), len( pairs )
-    rows = [ [ "original in the 128", share( sum( 1 for p in pairs if p[ "original_in" ] ), n ) ], [ "plant in the 128", share( sum( 1 for p in pairs if p[ "plant_in" ] ), n ) ],
+    rows = [ [ "original retrieved", share( sum( 1 for p in pairs if p[ "original_in" ] ), n ) ], [ "plant retrieved", share( sum( 1 for p in pairs if p[ "plant_in" ] ), n ) ],
              [ "a (original in, plant not)", d[ "a" ] ], [ "b (plant in, original not)", d[ "b" ] ], [ "both in", d[ "both" ] ], [ "neither in", d[ "neither" ] ], [ "a - b", d[ "a" ] - d[ "b" ] ] ]
     verdict = f"a - b <= {CONTROL_MARK}: " + ( "met" if d[ "passes" ] else "not met" ) + ". Read as: the plants are not worse than the originals by more than two pairs."
-    return "\n\n".join( head + [ table( [ "figure", "value" ], rows ), verdict, "Retrieval is deterministic on frozen drafts, so this is one sample, the same in both passes; only the judge varies." ] )
+    return "\n\n".join( head + [ table( [ "figure", "value" ], rows ), verdict, "Retrieved means among the ids sent to the judge. Retrieval is deterministic on frozen drafts, so this is one sample, the same in both passes; only the judge varies." ] )
 
 
-def render( yield_doc=None, forced_doc=None, expansion_doc=None, control_pairs=None ):
+def control_report_of( doc ):
+    """
+    Pick the control report out of a document.
+
+    Requires:
+        - doc is the parsed JSON of a control report, or of a stage-reports file with a stages mapping
+
+    Ensures:
+        - returns the control stage's report from a stage-reports file, None if that stage has none
+        - otherwise returns doc itself
+    """
+    if "stages" in doc: return doc[ "stages" ][ "control" ].get( "report" )
+    return doc
+
+
+def legacy_control( report, title=CONTROL_TITLE ):
+    """
+    Render a control report of the older shape, which has no per-pair rows.
+
+    Requires:
+        - report has pairs, pairs_wanted, found and by_lang
+
+    Ensures:
+        - returns the found share over the pairs that drafted, the share per language and the number left undrafted
+        - says plainly that a and b cannot be counted from it
+    """
+    rows = [ [ "all pairs that drafted", share( report[ "found" ], report[ "pairs" ] ) ] ] + [ [ lang, share( g[ "found" ], g[ "total" ] ) ] for lang, g in report[ "by_lang" ].items() ]
+    return "\n\n".join( [ title, table( [ "group", "plants found (Wilson 95%)" ], rows ), f"{report[ 'pairs_wanted' ] - report[ 'pairs' ]} of {report[ 'pairs_wanted' ]} pairs never drafted.",
+                           "This report has no per-pair rows, so a and b cannot be counted from it." ] )
+
+
+def control_sections( report ):
+    """
+    Render the control from its report, one section per pass.
+
+    Requires:
+        - report is None, or what control_report_of returns
+
+    Ensures:
+        - None gives the not-read placeholder; a report of the older shape gives legacy_control
+        - otherwise each pass gets control_section over its pairs, and a line quoting the report's own pass mark so the two can be compared
+        - several passes are titled by number
+    """
+    if report is None: return control_section( None )
+    if "rows" not in report: return legacy_control( report )
+    passes = report.get( "passes" ) or [ report ]
+    out    = [ ]
+    for i, one in enumerate( passes, 1 ):
+        mark = one[ "primary" ][ "pass_mark" ]
+        out.append( control_section( control_pairs_from_report( one ), CONTROL_TITLE if len( passes ) == 1 else f"{CONTROL_TITLE} - pass {i} of {len( passes )}" ) )
+        out.append( f"The report's own pass mark: a {mark[ 'a' ]}, b {mark[ 'b' ]}, n {mark[ 'n' ]}, " + ( "met." if mark[ "passed" ] else "not met." ) )
+    return "\n\n".join( out )
+
+
+def render( yield_doc=None, forced_doc=None, expansion_doc=None, control_doc=None ):
     """
     Render the whole report.
 
     Requires:
-        - each document is None or the parsed JSON of its experiment; control_pairs is None or rows for discordant()
+        - each document is None or the parsed JSON of its experiment; control_doc is None or the parsed control report or stage-reports file
 
     Ensures:
         - returns markdown with the control, forced judge, yield trace and expansion sections in that order, one per experiment
         - an experiment with no document gets a line saying so and no figures
     """
     parts = [ "# First-thousand overnight experiments: roll-up", "Intervals are two-sided 95 percent Wilson. A plan-only input shows counts and what a run would do; its figures are marked not run." ]
-    parts.append( control_section( control_pairs ) )
+    parts.append( control_sections( None if control_doc is None else control_report_of( control_doc ) ) )
     for doc, section, name in ( ( forced_doc, forced_section, "C1 forced-shortlist judge" ), ( yield_doc, yield_section, "C2 yield trace" ), ( expansion_doc, expansion_section, "C5 need expansion" ) ):
         parts.append( section( doc ) if doc is not None else f"## {name}\n\nNo input given." )
     return "\n\n".join( parts ) + "\n"
@@ -300,7 +356,7 @@ def parse_args( argv ):
         - every input is optional; --out names a file to write, otherwise the report is printed
     """
     ap = argparse.ArgumentParser( description=__doc__ )
-    for name in ( "yield-trace", "forced-judge", "expansion", "out" ): ap.add_argument( "--" + name, default=None )
+    for name in ( "yield-trace", "forced-judge", "expansion", "control", "out" ): ap.add_argument( "--" + name, default=None )
     return ap.parse_args( argv )
 
 
@@ -315,7 +371,7 @@ def main( argv=None, out=print ):
     """
     args = parse_args( argv )
     read = lambda path: None if path is None else load( path )
-    text = render( read( args.yield_trace ), read( args.forced_judge ), read( args.expansion ) )
+    text = render( read( args.yield_trace ), read( args.forced_judge ), read( args.expansion ), read( args.control ) )
     if args.out is None: out( text )
     else: pathlib.Path( args.out ).write_text( text, encoding="utf-8" )
     return 0
