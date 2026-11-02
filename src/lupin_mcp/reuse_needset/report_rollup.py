@@ -20,6 +20,7 @@ from lupin_mcp.reuse_e2e import wilson
 CONTROL_MARK  = 2                   # plan section 10: the control passes when a - b <= 2
 NOT_RUN       = "not run"
 CONTROL_TITLE = "## Positive control (plants against originals, same-job pairs that drafted)"
+LEGACY_TITLE  = "## Positive control (plants against originals, all pairs that drafted)"
 
 
 def share( successes, trials ):
@@ -291,7 +292,7 @@ def control_report_of( doc ):
     return doc
 
 
-def legacy_control( report, title=CONTROL_TITLE.replace( "same-job pairs", "all pairs" ) ):
+def legacy_control( report, title=LEGACY_TITLE ):
     """
     Render a control report of the older shape, which has no per-pair rows.
 
