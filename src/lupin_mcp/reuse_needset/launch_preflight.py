@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import pathlib
+import subprocess
 import sys
 
 from lupin_mcp.reuse_needset import errors as er
@@ -102,7 +103,7 @@ def preflight( run_name, ledger_file, vectors_dir, live=True, advance=False, tre
     Run the guards of a live launch, the identity check last.
 
     Requires:
-        - tree_fn() returns ( the run's source tree, True when this call had to make it ); the tree is left locked
+        - tree_fn() returns ( the run's source tree, True when this call had to make it, True when it was locked before this call ); the tree is left locked
         - index_fn( tree ) returns the index generation folder the run will read from that tree
         - identity_fn( index_gen, vectors_dir ) is freeze.identity or a stand-in; unlock_fn( tree ) unlocks a tree
 
@@ -110,8 +111,8 @@ def preflight( run_name, ledger_file, vectors_dir, live=True, advance=False, tre
         - without live nothing is checked and no tree is touched: a plan-only run contacts no model and begins no ledger run
         - the run name is judged first; then the tree is made and locked, the index built from it, and the identity read as the final step
         - a consumed name with advance letters forward and the result carries run_name as the new name
-        - any failure after the tree step, a crash included, unlocks the tree when this call made it, and re-raises
-        - a tree that was already there is never unlocked, because a live run on the same commit may hold it
+        - any failure after the tree step, a crash included, unlocks the tree unless it was locked before this call, and re-raises
+        - a tree locked before the call is never unlocked, because a live run on the same commit may hold it; one left unlocked is unlocked again
         - returns { live, run_name, identity, advanced_from, tree, tree_recreated }
     Raises:
         - NeedsetError RUN_NAME_CONSUMED for a consumed name without advance
@@ -122,29 +123,53 @@ def preflight( run_name, ledger_file, vectors_dir, live=True, advance=False, tre
     was   = None
     if advance and run_name in begun: run_name, was = next_run_name( run_name, begun ), run_name
     check_run_name( run_name, begun )
-    tree, recreated = tree_fn()
+    tree, recreated, was_locked = tree_fn()
     try:
         identity = identity_fn( index_fn( tree ), vectors_dir )
     except BaseException as e:
-        if recreated and unlock_fn is not None: unlock_fn( tree )
+        if not was_locked and unlock_fn is not None: unlock_fn( tree )
         if isinstance( e, er.NeedsetError ) and e.code == er.VECTORS_NOT_FROM_INDEX and recreated:
             raise er.NeedsetError( e.code, f"{e.detail}. This launch had to make {tree} again, which moves every file time the index hashes: rebuild the vectors against it with rebuild_vectors, then relaunch" )
         raise
     return { "live": True, "run_name": run_name, "identity": identity, "advanced_from": was, "tree": str( tree ), "tree_recreated": recreated }
 
 
+def tree_is_locked( root, tree ):
+    """
+    Say whether git has a worktree locked.
+
+    Requires:
+        - root is a git working tree; tree is a path
+
+    Ensures:
+        - returns True iff git worktree list names that path with a locked line
+        - paths compare by their real location, so a symlinked or relative spelling of the same tree matches
+        - returns False for a path git does not list
+        - returns True when git cannot list, so a failed read never leads to unlocking a tree a live run may hold
+    """
+    got = subprocess.run( [ "git", "-C", str( root ), "worktree", "list", "--porcelain" ], capture_output=True, text=True )
+    if got.returncode != 0: return True
+    want = os.path.realpath( tree )
+    for block in got.stdout.split( "\n\n" ):
+        lines = block.splitlines()
+        if lines and lines[ 0 ].startswith( "worktree " ) and os.path.realpath( lines[ 0 ][ len( "worktree " ): ] ) == want: return any( line == "locked" or line.startswith( "locked " ) for line in lines )
+    return False
+
+
 def source_tree_of( root, commit ):
     """
-    Make and lock the run's source tree, saying whether it had to be made.
+    Make and lock the run's source tree, saying what state it was in before.
 
     Requires:
         - root is the lupin repository and commit a commit it holds
 
     Ensures:
-        - returns ( the tree at the commit, locked, True when it did not exist before this call )
+        - returns ( the tree at the commit, now locked, True when it did not exist, True when it was locked before this call )
     """
-    existed = source_at.worktree_path( root, commit ).exists()
-    return source_at.ensure_worktree( root, commit ), not existed
+    path    = source_at.worktree_path( root, commit )
+    existed = path.exists()
+    locked  = existed and tree_is_locked( root, path )
+    return source_at.ensure_worktree( root, commit ), not existed, locked
 
 
 def index_of( tree ):  # pragma: no cover -- builds the real index of a real tree; main's test replaces it

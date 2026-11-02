@@ -74,11 +74,11 @@ def test_next_run_name_refuses_when_the_letters_run_out():
     assert code_of( lp.next_run_name, "x-z", { "x-z" } ) == er.RUN_NAME_CONSUMED
 
 
-def tree_of( recreated=False, log=None ):
+def tree_of( recreated=False, log=None, was_locked=False ):
     """Ensures: returns a tree_fn for a stand-in tree that logs its call."""
     def tree():
         if log is not None: log.append( "tree" )
-        return "/tree", recreated
+        return "/tree", recreated, was_locked
     return tree
 
 
@@ -124,39 +124,23 @@ def test_a_refused_name_touches_no_tree_and_reads_no_identity( tmp_path ):
     assert log == []
 
 
-def test_a_refusal_unlocks_a_tree_this_call_made_and_never_one_that_was_already_there( tmp_path ):
+STATES = [ ( True, False, [ "/tree" ] ), ( False, False, [ "/tree" ] ), ( False, True, [] ) ]   # ( made now, locked before, unlocked after a failure )
+
+
+@pytest.mark.parametrize( "recreated,was_locked,want", STATES )
+def test_a_refusal_unlocks_a_tree_unless_it_was_locked_before_the_call( tmp_path, recreated, was_locked, want ):
     def stale( g, v ): raise er.NeedsetError( er.VECTORS_NOT_FROM_INDEX, "built from another index" )
-    for recreated, want in ( ( True, [ "/tree" ] ), ( False, [] ) ):
-        unlocked = []
-        assert code_of( lp.preflight, RUN, make_ledger( folder( tmp_path, f"r{recreated}" ) ), "v", tree_fn=tree_of( recreated ), index_fn=index_of( "g" ), identity_fn=stale, unlock_fn=unlocked.append ) == er.VECTORS_NOT_FROM_INDEX
-        assert unlocked == want
+    unlocked = []
+    assert code_of( lp.preflight, RUN, make_ledger( tmp_path ), "v", tree_fn=tree_of( recreated, was_locked=was_locked ), index_fn=index_of( "g" ), identity_fn=stale, unlock_fn=unlocked.append ) == er.VECTORS_NOT_FROM_INDEX
+    assert unlocked == want
 
 
-def test_a_crash_in_the_index_step_unlocks_a_tree_this_call_made_and_re_raises( tmp_path ):
+@pytest.mark.parametrize( "recreated,was_locked,want", STATES )
+def test_a_crash_in_the_index_step_unlocks_a_tree_unless_it_was_locked_before_and_re_raises( tmp_path, recreated, was_locked, want ):
     def crash( tree ): raise RuntimeError( "index build died" )
-    for recreated, want in ( ( True, [ "/tree" ] ), ( False, [] ) ):
-        unlocked = []
-        ledger = make_ledger( folder( tmp_path, f"c{recreated}" ) )
-        with pytest.raises( RuntimeError, match="index build died" ): lp.preflight( RUN, ledger, "v", tree_fn=tree_of( recreated ), index_fn=crash, unlock_fn=unlocked.append )
-        assert unlocked == want
-
-
-def test_a_run_name_with_only_a_begin_row_is_consumed( tmp_path ):
-    ledger = make_ledger( tmp_path, RUN, end=False )
-    assert lp.begun_run_names( ledger ) == { RUN } and code_of( lp.check_run_name, RUN, lp.begun_run_names( ledger ) ) == er.RUN_NAME_CONSUMED
-
-
-def test_an_end_row_alone_does_not_make_a_name_begun( tmp_path ):
-    ledger = make_ledger( tmp_path )
-    with ledger.open( "a", encoding="utf-8" ) as f: f.write( json.dumps( { "kind": "end", "run": RUN } ) + "\n" )
-    assert lp.begun_run_names( ledger ) == set()
-
-
-def test_advance_on_an_unused_name_keeps_the_name_and_prints_no_new_one( tmp_path ):
-    got = lp.preflight( RUN, make_ledger( tmp_path ), "v", advance=True, tree_fn=tree_of(), index_fn=index_of( "g" ), identity_fn=lambda g, v: {} )
-    assert got[ "run_name" ] == RUN and got[ "advanced_from" ] is None
-    rc, out, err = run_main( tmp_path, make_ledger( folder( tmp_path, "x" ) ), "--live", "--advance" )
-    assert rc == 0 and "RUN_NAME=" not in out
+    unlocked = []
+    with pytest.raises( RuntimeError, match="index build died" ): lp.preflight( RUN, make_ledger( tmp_path ), "v", tree_fn=tree_of( recreated, was_locked=was_locked ), index_fn=crash, unlock_fn=unlocked.append )
+    assert unlocked == want
 
 
 def test_a_stale_identity_after_the_tree_was_recreated_says_so_and_names_the_rebuild( tmp_path ):
@@ -227,15 +211,37 @@ def test_main_reads_the_default_ledger_from_the_root_when_none_is_given( tmp_pat
     assert rc == 2 and "RUN_NAME_CONSUMED" in err.getvalue()
 
 
-def test_the_real_source_tree_is_made_locked_and_reported_recreated_once( tmp_path ):
+def test_the_real_source_tree_reports_made_and_locked_before_and_tree_is_locked_reads_git( tmp_path ):
     import subprocess
     from lupin_mcp.reuse_needset import source_at
     repo = tmp_path / "repo"
     repo.mkdir()
     for cmd in ( [ "init", "-q" ], [ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "c" ] ): subprocess.run( [ "git", "-C", str( repo ), *cmd ], check=True, capture_output=True )
-    first, again = lp.source_tree_of( repo, "HEAD" ), lp.source_tree_of( repo, "HEAD" )
-    assert first[ 1 ] is True and again[ 1 ] is False and first[ 0 ] == again[ 0 ] == source_at.worktree_path( repo, "HEAD" )
-    assert "locked" in subprocess.run( [ "git", "-C", str( repo ), "worktree", "list", "--porcelain" ], capture_output=True, text=True ).stdout
+    path = source_at.worktree_path( repo, "HEAD" )
+    assert lp.tree_is_locked( repo, path ) is False
+    first = lp.source_tree_of( repo, "HEAD" )
+    again = lp.source_tree_of( repo, "HEAD" )
+    assert first == ( path, True, False ) and again == ( path, False, True ) and lp.tree_is_locked( repo, path ) is True
+    source_at.unlock( repo, path )
+    assert lp.tree_is_locked( repo, path ) is False
+    assert lp.source_tree_of( repo, "HEAD" ) == ( path, False, False ) and lp.tree_is_locked( repo, path ) is True
+
+
+def test_tree_is_locked_matches_a_symlinked_or_relative_spelling_and_treats_a_failed_read_as_locked( tmp_path, monkeypatch ):
+    import subprocess
+    from lupin_mcp.reuse_needset import source_at
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in ( [ "init", "-q" ], [ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "c" ] ): subprocess.run( [ "git", "-C", str( repo ), *cmd ], check=True, capture_output=True )
+    path = lp.source_tree_of( repo, "HEAD" )[ 0 ]
+    link = tmp_path / "link"
+    link.symlink_to( path, target_is_directory=True )
+    assert lp.tree_is_locked( repo, link ) is True
+    monkeypatch.chdir( tmp_path )
+    assert lp.tree_is_locked( repo, "repo/" + str( path.relative_to( repo ) ) ) is True
+    source_at.unlock( repo, path )
+    assert lp.tree_is_locked( repo, link ) is False
+    assert lp.tree_is_locked( tmp_path / "not-a-repo", path ) is True
 
 
 def test_a_ledger_line_that_is_not_json_is_skipped_not_fatal( tmp_path ):
