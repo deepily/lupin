@@ -231,12 +231,12 @@ def discordant( pairs ):
 
     Ensures:
         - returns { a, b, both, neither, passes }: a is original in and plant not, b is plant in and original not
-        - passes is true when a - b is at most CONTROL_MARK
+        - passes is true when there is at least one pair and a - b is at most CONTROL_MARK
     """
     a       = sum( 1 for p in pairs if p[ "original_in" ] and not p[ "plant_in" ] )
     b       = sum( 1 for p in pairs if p[ "plant_in" ] and not p[ "original_in" ] )
     both    = sum( 1 for p in pairs if p[ "original_in" ] and p[ "plant_in" ] )
-    return { "a": a, "b": b, "both": both, "neither": len( pairs ) - a - b - both, "passes": a - b <= CONTROL_MARK }
+    return { "a": a, "b": b, "both": both, "neither": len( pairs ) - a - b - both, "passes": len( pairs ) > 0 and a - b <= CONTROL_MARK }
 
 
 def control_pairs_from_report( report ):
@@ -268,7 +268,7 @@ def control_section( pairs=None, title=CONTROL_TITLE ):
         - the note that retrieval is one sample, the same in both passes, is printed beside the figures
     """
     head = [ title ]
-    if pairs is None: return "\n\n".join( head + [ f"Not read yet: no control report was given. Figures: {NOT_RUN}." ] )
+    if pairs is None: return "\n\n".join( head + [ f"Not read yet: the control stage has no report. Figures: {NOT_RUN}." ] )
     d, n = discordant( pairs ), len( pairs )
     rows = [ [ "original retrieved", share( sum( 1 for p in pairs if p[ "original_in" ] ), n ) ], [ "plant retrieved", share( sum( 1 for p in pairs if p[ "plant_in" ] ), n ) ],
              [ "a (original in, plant not)", d[ "a" ] ], [ "b (plant in, original not)", d[ "b" ] ], [ "both in", d[ "both" ] ], [ "neither in", d[ "neither" ] ], [ "a - b", d[ "a" ] - d[ "b" ] ] ]
@@ -291,7 +291,7 @@ def control_report_of( doc ):
     return doc
 
 
-def legacy_control( report, title=CONTROL_TITLE ):
+def legacy_control( report, title=CONTROL_TITLE.replace( "same-job pairs", "all pairs" ) ):
     """
     Render a control report of the older shape, which has no per-pair rows.
 

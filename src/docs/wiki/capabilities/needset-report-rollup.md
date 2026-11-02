@@ -12,14 +12,14 @@ pins:
   - lupin_mcp.reuse_needset.report_rollup.judge_rows@3f3f656d91
   - lupin_mcp.reuse_needset.report_rollup.forced_section@cf2714e716
   - lupin_mcp.reuse_needset.report_rollup.expansion_section@6237d3ab25
-  - lupin_mcp.reuse_needset.report_rollup.discordant@fac3f6d59c
+  - lupin_mcp.reuse_needset.report_rollup.discordant@f5f4314402
   - lupin_mcp.reuse_needset.report_rollup.control_pairs_from_report@eade7131c1
-  - lupin_mcp.reuse_needset.report_rollup.control_section@206c1ef685
+  - lupin_mcp.reuse_needset.report_rollup.control_section@cd2153434b
   - lupin_mcp.reuse_needset.report_rollup.render@14a69d195d
   - lupin_mcp.reuse_needset.report_rollup.parse_args@5012ccf80a
   - lupin_mcp.reuse_needset.report_rollup.main@fd8374792d
   - lupin_mcp.reuse_needset.report_rollup.control_report_of@82bff48097
-  - lupin_mcp.reuse_needset.report_rollup.legacy_control@f6bb7f366b
+  - lupin_mcp.reuse_needset.report_rollup.legacy_control@493687a942
   - lupin_mcp.reuse_needset.report_rollup.control_sections@1b1513d027
 ---
 # Need set: report roll-up

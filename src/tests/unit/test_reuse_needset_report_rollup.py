@@ -194,6 +194,11 @@ def test_control_report_of_reads_a_stage_reports_file_or_a_bare_report():
     assert rr.control_report_of( LEGACY_CONTROL ) is LEGACY_CONTROL
 
 
+def test_no_pairs_is_not_a_met_mark_and_the_older_title_says_all_pairs():
+    assert rr.discordant( [ ] )[ "passes" ] is False and "not met" in rr.control_section( [ ] )
+    assert "all pairs that drafted)" in rr.control_sections( LEGACY_CONTROL )
+
+
 def test_control_sections_without_a_report_is_the_placeholder():
     assert "Not read yet" in rr.control_sections( None )
 
