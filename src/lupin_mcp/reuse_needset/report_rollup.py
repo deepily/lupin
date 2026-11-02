@@ -95,6 +95,23 @@ def counts_table( title, counts ):
     return table( [ title, "count" ], [ [ k, v ] for k, v in counts.items() ] )
 
 
+def skipped_seeds( skipped ):
+    """
+    Name each seed the yield stage skipped, with its code and detail.
+
+    Requires:
+        - skipped is the plan's no_final_need skipped list: { seed, code, detail } rows
+
+    Ensures:
+        - returns "Skipped seeds: none." for an empty list
+        - otherwise returns a table of seed, code and detail
+        - a detail is cut to 100 characters, with line breaks and bars made into spaces so the table holds
+    """
+    if not skipped: return "Skipped seeds: none."
+    clean = lambda text: " ".join( str( text ).replace( "|", " " ).split() )[ :100 ]
+    return table( [ "skipped seed", "code", "detail" ], [ [ r[ "seed" ], r[ "code" ], clean( r[ "detail" ] ) ] for r in skipped ] )
+
+
 def yield_section( doc ):
     """
     Render the yield trace, the needs traced end to end.
@@ -103,7 +120,7 @@ def yield_section( doc ):
         - doc comes from yield_trace: its printed result or its yield-trace-report.json
 
     Ensures:
-        - a plan-only result gives the needs per language, the seeds left without a need by reason, and what a run would trace, with the figures marked not run
+        - a plan-only result gives the needs per language, the seeds left without a need by reason, each skipped seed with its code and detail, and what a run would trace, with the figures marked not run
         - a finished trace gives the found share overall and per language with Wilson intervals, then the count by where each member was lost
         - a run that stopped or hit its budget gives its status and no figures
     """
@@ -112,7 +129,7 @@ def yield_section( doc ):
     if run is None:
         why = { k: v for k, v in plan[ "no_final_need" ].items() if isinstance( v, int ) }
         out = [ f"Plan only: no model was asked. Seeds {plan[ 'seeds' ]}, needs {plan[ 'needs' ]}, unsaved answers {len( plan[ 'unsaved' ] )}.",
-                counts_table( "language", plan[ "by_lang" ] ), counts_table( "seed left without a need", why ), f"Found share: {NOT_RUN}." ]
+                counts_table( "language", plan[ "by_lang" ] ), counts_table( "seed left without a need", why ), skipped_seeds( plan[ "no_final_need" ][ "skipped" ] ), f"Found share: {NOT_RUN}." ]
         return "\n\n".join( head + out )
     report = run[ "report" ]
     out    = [ f"Run status {run[ 'status' ]}, {run[ 'used' ]} of {run[ 'limit' ]} calls used." ]
