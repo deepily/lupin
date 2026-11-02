@@ -28,6 +28,21 @@ def test_parse_expansion_reads_the_reply_inside_extra_text_and_strips_each_word(
     assert ex.parse_expansion( '{"paraphrases": [" a ", "b", "c"], "identifiers": [" x "]}' ) == { "paraphrases": [ "a", "b", "c" ], "identifiers": [ "x" ] }
 
 
+SMOKE_REPLY = "{\"paraphrases\": [\"A function that truncates text-to-speech content to roughly a specified fraction of its length, continuing until it hits a newline, hyphen, or end-of-sentence punctuation while skipping over periods belonging to abbreviations, and returns the resulting leading excerpt.\", \"A method that cuts a verbal or TTS response down to approximately a given percentage of the original, snapping the cut point forward to the nearest line break, dash, or sentence terminator and treating abbreviation dots as non-terminating, then returns the shortened head of the text.\", \"A helper that clips spoken-response text to a target proportion of its characters, extending the cutoff to the next natural boundary (newline, dash, period, question mark, or exclamation) without splitting on abbreviation periods, and gives back the trimmed first segment.\"]\uff0c \"identifiers\": [\"truncate\", \"speech\", \"fraction\", \"sentence\", \"abbreviation\"]}"
+
+
+def test_parse_expansion_reads_the_smoke_reply_that_has_a_full_width_comma_between_its_two_keys():
+    assert "\uff0c" in SMOKE_REPLY and ex.parse_expansion( SMOKE_REPLY )[ "identifiers" ] == [ "truncate", "speech", "fraction", "sentence", "abbreviation" ]
+    assert len( ex.parse_expansion( SMOKE_REPLY )[ "paraphrases" ] ) == 3
+
+
+def test_every_full_width_form_is_read_as_its_plain_one_and_a_reply_that_parses_is_left_alone():
+    wide = GOOD.replace( ",", "\uff0c" ).replace( ":", "\uff1a" ).replace( '"', "\uff02" ).replace( "[", "\uff3b" ).replace( "]", "\uff3d" ).replace( "{", "\uff5b" ).replace( "}", "\uff5d" )
+    assert ex.parse_expansion( wide ) == ex.parse_expansion( GOOD )
+    kept = json.dumps( { "paraphrases": [ "a\uff0cb", "two", "three" ], "identifiers": [ "x" ] }, ensure_ascii=False )
+    assert ex.parse_expansion( kept )[ "paraphrases" ][ 0 ] == "a\uff0cb"
+
+
 def test_parse_expansion_refuses_every_wrong_shape():
     bad = [ "no json", "{broken", '{"paraphrases": ["a","b","c"]}', '{"paraphrases": "abc", "identifiers": ["x"]}', '{"paraphrases": ["a","b"], "identifiers": ["x"]}',
             '{"paraphrases": ["a","b","c"], "identifiers": []}', '{"paraphrases": ["a","b","c"], "identifiers": ["1","2","3","4","5","6"]}',
