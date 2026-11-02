@@ -40,6 +40,7 @@ Both key files are secrets. They are never committed and never linked into workt
 | `podcast drive upload source document` | `true` | also upload the source document, once per job |
 | `podcast drive token path` | `/src/conf/keys/google-drive-oauth-token.json` | joined to the project root at run time |
 | `podcast drive owner email` | empty | the one Lupin user who may list and stream the folder through `/api/podcast-drive`; empty means nobody |
+| `podcast drive upload users` | `owner` | whose podcasts are uploaded: `owner` (only the user in `podcast drive owner email`), `all` (every user), or a comma list of emails. Read for each job, so a change applies to the next job without a bounce; an environment override works as for every INI key. A skipped job logs the user and reason, and its card says `not uploaded to Drive (setting)`. An empty owner with `owner` means nobody is uploaded |
 
 ## Switching it off
 

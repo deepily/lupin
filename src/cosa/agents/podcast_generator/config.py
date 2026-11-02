@@ -321,6 +321,8 @@ class PodcastConfig:
     drive_upload_script           : bool = False
     drive_upload_source_document  : bool = True
     drive_token_path              : str  = "/src/conf/keys/google-drive-oauth-token.json"  # joined to the project root at run time
+    drive_upload_users            : str  = "owner"  # owner | all | comma list of emails; who may be uploaded
+    drive_owner_email             : str  = ""       # the user "owner" means; empty means nobody
 
     # === COSA Integration ===
     stream_thoughts_to_voice   : bool  = True
@@ -481,6 +483,8 @@ class PodcastConfig:
             drive_upload_script          = _get( "podcast drive upload script",               "False", "boolean" ),
             drive_upload_source_document = _get( "podcast drive upload source document",      "True",  "boolean" ),
             drive_token_path             = _get( "podcast drive token path",                  "/src/conf/keys/google-drive-oauth-token.json" ),
+            drive_upload_users           = _get( "podcast drive upload users",                "owner" ),
+            drive_owner_email            = _get( "podcast drive owner email",                 "" ),
         )
 
         # Handle audience_context

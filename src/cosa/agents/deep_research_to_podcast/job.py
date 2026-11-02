@@ -303,7 +303,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             # the generated research report; the hook loads the config and resolves the path inside its
             # own boundary, so a config error here cannot fail the job.
             from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive
-            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path )
+            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path, user_email=self.user_email )
             if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
 
             per_language_lines = []
