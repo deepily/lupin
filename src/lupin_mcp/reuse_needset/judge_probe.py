@@ -21,7 +21,7 @@ from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex import verdict as vd
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, draft, expansion_run, first_thousand, forced_judge, planted_pool, positive_control, source_at, strip
+from lupin_mcp.reuse_needset import call_cap, draft, expansion_run, first_thousand, forced_judge, planted_pool, positive_control, source_at, strip, yield_trace
 from lupin_mcp.reuse_needset import errors as er
 
 STAGE_NAME   = "judge_probe"
@@ -483,6 +483,7 @@ def collect_records( args, root, deps ):
     Read each drafted pair, its frozen need, label and judged records, from files.
 
     Ensures:
+        - the saved draft ledger is copied from --from-run first, an existing file in the run folder kept, so the pairs are not read from a stub
         - returns ( records, undrafted ); no reuse context is built and no model, search or spend ledger is touched
         - the plants' lines come from the control report's rows, and the index entries from the saved snapshot named by --snapshot-sha
     """
@@ -492,6 +493,7 @@ def collect_records( args, root, deps ):
     first  = read( [ f"{args.labels_dir}/labels-rick.jsonl", f"{args.labels_dir}/labels-rick-redo.jsonl" ] )
     second = read( [ f"{args.labels_dir}/labels-reviewer-2.jsonl" ] )
     third  = read( [ f"{args.labels_dir}/labels-jason.jsonl" ] )
+    yield_trace.copy_saved( args.from_run, args.run_dir, ( "ledger-control-draft.jsonl", ) )
     ledger = draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
     needs  = forced_judge.frozen_needs( pairs, ledger, lambda rec: strip.strip_member( rec, root ) )
     rows, undrafted = forced_judge.build_rows( pairs, { p[ "rewrite" ][ "id" ] for p in pairs }, needs, forced_judge.pair_labels( pairs, key, first, second, third ) )

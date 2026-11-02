@@ -100,6 +100,27 @@ def ranks_of( answer, ident ):
     return { **{ n: position( lists[ n ], ident ) for n in sorted( lists ) }, "fused": position( fused, ident ) }
 
 
+def fusion_terms( answer, ident ):
+    """
+    Give what each source list added to an entry's fused score in one search.
+
+    Requires:
+        - answer is a search answer whose lists are whole, as ranks_of takes it
+
+    Ensures:
+        - returns { source name: term or None, ..., total }
+        - a term is 1 / ( FUSION_K + place ), as rank_fusion.fuse adds it, for a place inside FUSION_DEPTH, the place counted in the list without repeated ids
+        - a term is 0.0 for an entry present in a list beyond the depth, and None for an entry absent from the list
+        - total is the sum of the terms rounded to SCORE_DIGITS places, the score fuse sorts on, so 0.0 for an entry no list scores
+    """
+    lists = answer[ "lists" ]
+    terms = {}
+    for n in sorted( lists ):
+        place    = position( list( dict.fromkeys( lists[ n ] ) ), ident )                  # fuse counts a repeated id once, so the place is read in the list without repeats
+        terms[ n ] = None if place is None else ( 1.0 / ( rf.FUSION_K + place ) if place <= rf.FUSION_DEPTH else 0.0 )
+    return { **terms, "total": round( sum( t for t in terms.values() if t is not None ), rf.SCORE_DIGITS ) }
+
+
 def reading( ident, receipt, answer ):
     """
     Read where one entry stood in one search.
