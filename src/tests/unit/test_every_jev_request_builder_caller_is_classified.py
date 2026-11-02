@@ -28,7 +28,9 @@ MEASUREMENT = { "src/lupin_mcp/reuse_stage1.py"         : { "pack_request" },
                 "src/cosa/repo/symindex/candidates/arm_run.py": { "pair_key" },
                 # The judge probe reads saved ratings by key (sends nothing) and posts the control's frozen need sentences, which are written from repository code, not typed by a user.
                 # All 17 saved plant ratings hit the cache under the raw sentence, so the redactor leaves these sentences unchanged.
-                "src/lupin_mcp/reuse_needset/judge_probe.py": { "candidate_key", "pack_request" } }
+                "src/lupin_mcp/reuse_needset/judge_probe.py": { "candidate_key", "pack_request" },
+                # Only names the cache key of a sweep already made and sends nothing; the needs are the control's drafted sentences, the same ones the sweep itself used.
+                "src/lupin_mcp/reuse_needset/judge_readings.py": { "build_request", "candidate_key" } }
 
 
 def builders_called( source ):
