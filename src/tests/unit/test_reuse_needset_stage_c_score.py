@@ -350,3 +350,10 @@ def test_pairs_the_runner_refused_before_drafting_count_toward_the_fifteen_perce
     few = report_of()
     few[ "refused" ] = rep[ "refused" ][ :5 ]
     assert sc.score( few, 50 )[ "coverage" ][ "limited" ] is False, "5 of 37 is under 15%"
+
+
+def test_the_numbers_of_the_mark_are_pinned_to_literals():
+    """Each constant is written here as the mark gives it, so a drift in the module is seen."""
+    assert ( sc.LINE, sc.FIXED_LINES, sc.SAME_REACH, sc.RESAMPLES, sc.SEED, sc.REPEATS ) == ( 0.30, ( 0.50, 0.70, 0.90 ), 0.80, 10000, 20261102, 3 )
+    assert ( sc.MIN_PER_CLASS, sc.MAX_LOSS, sc.SIDE_A_SHARE, sc.SIDE_A_MEDIAN ) == ( 10, 0.15, 0.95, 0.90 )
+    assert ( sc.STRONG, sc.MODERATE, sc.D_USABLE, sc.FALSE_ACCEPT ) == ( ( 0.80, 0.70 ), ( 0.70, 0.60 ), 0.40, 0.50 )
