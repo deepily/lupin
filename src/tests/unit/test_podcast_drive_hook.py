@@ -416,14 +416,14 @@ def _drp_job():
     return DeepResearchToPodcastJob( query="q", user_id="u", user_email="u@x.com", session_id="s", target_languages=[ "en" ] )
 
 
-async def _run_drp( job, hook, research_path="io/deep-research/u@x.com/report.md" ):
+async def _run_drp( job, hook, research_path="io/deep-research/u@x.com/report.md", dr_artifacts=None ):
     from cosa.agents.deep_research_to_podcast.state import PipelineState
     result = SimpleNamespace(
         state=PipelineState.COMPLETED, error=None, research_path=research_path, research_abstract="a",
         audio_path="/var/lupin/io/podcasts/u/en.mp3", script_path="/var/lupin/io/podcasts/u/en.md",
         pg_artifacts={ "audio_paths_by_language": { "en": "/var/lupin/io/podcasts/u/en.mp3" },
                        "script_paths_by_language": { "en": "/var/lupin/io/podcasts/u/en.md" } },
-        dr_cost=1.0, pg_cost=1.0, total_cost=2.0 )
+        dr_cost=1.0, pg_cost=1.0, total_cost=2.0, dr_artifacts=dr_artifacts or {} )
     agent = MagicMock()
     agent.run_async = AsyncMock( return_value=result )
     hook_patch = patch( "cosa.agents.podcast_generator.drive_hook.publish_podcast_to_drive", hook ) if hook is not None else contextlib.nullcontext()
@@ -434,10 +434,26 @@ async def _run_drp( job, hook, research_path="io/deep-research/u@x.com/report.md
          hook_patch, \
          patch.object( type( job ), "_make_agent", return_value=agent ):
         await job._execute()
+    _run_drp.notify = notify
     return next( c.kwargs[ "abstract" ] for c in notify.call_args_list if c.kwargs.get( "abstract" ) and "Research → Podcast Complete" in c.kwargs[ "abstract" ] )
 
 
 class TestDeepResearchToPodcastJobUsesTheHook:
+
+    @pytest.mark.asyncio
+    async def test_skipped_topics_are_named_on_the_card_and_in_the_spoken_line( self, monkeypatch ):
+        monkeypatch.setattr( drive_hook, "_load_config", lambda: PodcastConfig( publish_to_google_drive=False ) )
+        gaps     = [ { "topic": "Alpha", "reason": "r1" }, { "topic": "Beta", "reason": "r2" } ]
+        abstract = await _run_drp( _drp_job(), None, dr_artifacts={ "skipped_topics": gaps } )
+        assert "**Skipped topics (2)**: Alpha; Beta" in abstract
+        assert any( "2 topics were skipped" in c.args[ 0 ] for c in _run_drp.notify.call_args_list )
+
+    @pytest.mark.asyncio
+    async def test_no_skipped_topics_adds_no_line( self, monkeypatch ):
+        monkeypatch.setattr( drive_hook, "_load_config", lambda: PodcastConfig( publish_to_google_drive=False ) )
+        abstract = await _run_drp( _drp_job(), None )
+        assert "Skipped topics" not in abstract
+        assert not any( "skipped" in c.args[ 0 ] for c in _run_drp.notify.call_args_list )
 
     @pytest.mark.asyncio
     async def test_a_config_error_in_the_real_hook_does_not_fail_the_job( self ):
