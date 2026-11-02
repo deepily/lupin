@@ -348,7 +348,7 @@ def summarize_variant( results, dump=None, threshold=0.3 ):
     Ensures:
         - returns { arms, by_repeat, baseline_vs_cached, repeat_gap, bypass_proof }
         - arms: for each arm, same_job and not_same plants accepted of those answered at the threshold over both repeats, and the mean p_overlap by label; by_repeat does the same per arm and repeat
-        - baseline_vs_cached: for each arm 0 answer with a saved rating, whether the two are equal; equal on every pair is the tell of a cache read, or of a deterministic judge, and tokens_in then separates them
+        - baseline_vs_cached: for each arm 0 answer with a saved rating, whether the two are equal; the runner never reads the cache and the repeat token changes the body, so an equal value means a deterministic judge, not a cache read, and tokens_in shows the post was paid for
         - repeat_gap: the largest difference in a plant's p_overlap between the repeats of the same pair and arm, the judge's noise floor
         - bypass_proof counts the requests posted, their distinct request hashes (equal to the posts when each repeat has its own body) and those that reported tokens; a cache read would report none
     """
@@ -484,7 +484,7 @@ def main( argv=None, deps=None ):
     root       = deps[ "source_root" ]( args ) if not made else source_at.ensure_worktree( repo, args.source_commit )
     try:
         records, undrafted = deps[ "records" ]( args, root ) if "records" in deps else collect_records( args, root, deps )
-        return replay( args, records, undrafted ) if args.mode == "replay" else variant( args, records, undrafted, deps )
+        return replay( args, records, undrafted ) if args.mode == "replay" else variant( args, records, undrafted, deps, root )
     finally:
         if made: source_at.unlock( repo, root )
 
@@ -506,9 +506,12 @@ def replay( args, records, undrafted ):
     return out
 
 
-def variant( args, records, undrafted, deps ):
+def variant( args, records, undrafted, deps, root ):
     """
     Plan the variant run, and with --live ask the judge.
+
+    Requires:
+        - root is the source tree of the run's commit, the tree the index and the context are built from
 
     Ensures:
         - returns { live False, mode, plan } for a plan, with no context built
@@ -522,7 +525,7 @@ def variant( args, records, undrafted, deps ):
     if not args.live: return { "live": False, "mode": "variant", "plan": plan }
     import os
     os.environ.update( { **expansion_run.read_env_file( f"{args.from_run}/run-env.sh" ), rt.RUN_NAME_VARIABLE: args.run_name, rt.CEILING_VARIABLE: str( args.ceiling ) } )
-    ctx   = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( args.root )
+    ctx   = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( root )
     close = deps[ "close_run" ] if "close_run" in deps else rt.close_run
     try:
         rt.prepare( ctx )

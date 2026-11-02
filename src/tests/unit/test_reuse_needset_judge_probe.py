@@ -180,6 +180,10 @@ def test_the_plan_is_pairs_times_three_arms_times_two_repeats_each_with_its_own_
     assert bodies[ 0 ][ "state" ] == bodies[ 1 ][ "state" ] and bodies[ 0 ] != bodies[ 1 ] and rt.request_hash( bodies[ 0 ] ) != rt.request_hash( bodies[ 1 ] )
     assert reqs[ 0 ][ "template" ][ "instructions" ].endswith( " (repeat 1)" ) and reqs[ 1 ][ "template" ][ "instructions" ].endswith( " (repeat 2)" )
     assert reqs[ 0 ][ "template" ][ "criteria" ] == reqs[ 4 ][ "template" ][ "criteria" ] == rt.PROMPT_TEMPLATE[ "criteria" ]
+    for n in jp.REPEATS:
+        tails = { r[ "template" ][ "instructions" ][ -len( f" (repeat {n})" ): ] for r in reqs if r[ "repeat" ] == n }
+        assert tails == { f" (repeat {n})" }, "within a repeat the token is the same bytes in every arm"
+    assert [ r[ "template" ][ "instructions" ] for r in reqs[ :1 ] ] == [ rt.PROMPT_TEMPLATE[ "instructions" ] + " (repeat 1)" ] and reqs[ 2 ][ "template" ][ "instructions" ].endswith( rt.PROMPT_TEMPLATE[ "instructions" ][ -30: ] + " (repeat 1)" )
     reqs2, skipped2 = jp.plan_requests( [ record( 1 ), record( 2, original_line=None ), record( 3, with_plant=False ) ], jp.DEFAULT_ARMS, ( 1, ) )
     assert len( reqs2 ) == 5 and skipped2 == [ { "pair": "d-r2", "arm": "both_lines", "reason": "original_has_no_line" }, { "pair": "d-r3", "arm": "baseline", "reason": "plant_dropped_by_screen" },
                                                { "pair": "d-r3", "arm": "plant_line", "reason": "plant_dropped_by_screen" }, { "pair": "d-r3", "arm": "both_lines", "reason": "plant_dropped_by_screen" } ]
@@ -310,7 +314,10 @@ def live_parts( tmp_path ):
     def close( c ):
         state[ "closed" ] += 1
         return "needset-judge-x"
-    return { "source_root": lambda a: tmp_path, "records": lambda a, root: ( [ record( 1 ) ], [] ), "context": lambda root: ctx, "close_run": close }, state
+    def context( root ):
+        state[ "context_root" ] = root
+        return ctx
+    return { "source_root": lambda a: tmp_path / "source-tree", "records": lambda a, root: ( [ record( 1 ) ], [] ), "context": context, "close_run": close }, state
 
 
 def test_a_live_variant_posts_every_request_under_its_own_run_name_and_closes_the_run( tmp_path ):
@@ -325,6 +332,7 @@ def test_a_live_variant_posts_every_request_under_its_own_run_name_and_closes_th
         out = jp.main( argv( tmp_path, "variant", "--live", "--run-name", "needset-judge-x", "--cli-path", "/x/claude" ), deps )
     prep.assert_called_once()
     assert out[ "live" ] is True and out[ "closed_run" ] == "needset-judge-x" and out[ "close_error" ] is None and out[ "report" ][ "status" ] == jp.DONE
+    assert state[ "context_root" ] == tmp_path / "source-tree" != tmp_path / "root", "the context is built on the source tree, not on --root"
     assert len( state[ "seen" ] ) == 6 and state[ "seen" ][ 0 ] == ( "B", "B" ) and state[ "closed" ] == 1
     assert os.environ[ rt.RUN_NAME_VARIABLE ] == "needset-judge-x" and os.environ[ rt.CEILING_VARIABLE ] == "8000000"
     assert jp.exit_status( out ) == 0
