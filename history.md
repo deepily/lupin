@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.01 - Session ade365b2 (Mr. Radio 🦉, manager; crew Tiberius, Clayton, Rio, all reaped) | Drive podcast publishing proven end to end, row d0361881 closed
+
+### Checkpoint | 2026.11.02 00:10 | Drive proof run done; d0361881, 7826d34b closed
+
+- **Landed on the working branch, not pushed**:
+  - `bf7307966`: research skips a failed topic (row `9f726f77`), and the setting `podcast drive upload users` (row `273c731a`).
+  - `64961152c`: the 📋 view link (row `c65e449a`).
+  - `1eb7c6d0b`: four unit reds (row `6717ff87`).
+  - e2e_a `ts-22756399`: 491 passed, 0 failed.
+- **Proof**: job `rp-f4e44cc2` uploaded its mp3 (20 MB) and the source document to Rick's Drive, checked with the publisher token. The test user was added for that run only; the setting is back to `owner` and :7999 was bounced.
+- **Owed by Rick**: renew the Claude login in lupin-rest-test (expired 2026-11-01 04:35 UTC). The 10-26 post-game row `320e0229` still waits in holding.
+- **Files**: history.md
+- **Commit**: [pending]
+
 ## 2026.10.30 - Session d4efa51c (Cheech 🌿, manager; crew Rio and Rachel, reaped) | Opus work-alikes regraded, all 222 pairs labelled, trial runs 2 and 3, a JSON handoff for the second reviewer
 
 - **Landed and pushed** (`9508dfa42..16df2ee4c`):
