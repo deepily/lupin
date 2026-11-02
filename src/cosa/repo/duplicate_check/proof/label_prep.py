@@ -449,7 +449,7 @@ def source_provenance( root, spec_fn=sp.spec_for, fresh_fn=sx_build.is_fresh ):
 
     Ensures:
         - returns { source_commit, index_generation }: the full id of HEAD and the name of the live generation folder
-        - the tree is clean in its tracked files, and the live generation matches the tree now, so the commit is the one the index was built from
+        - the tree is clean in its tracked files, a failed status read counting as not clean, and the live generation matches the tree now, so the commit is the one the index was built from
 
     Raises:
         - LabellingError PROVENANCE_MISSING when the tree has no commit, has uncommitted tracked changes, has no published index, or the index is stale
@@ -460,7 +460,7 @@ def source_provenance( root, spec_fn=sp.spec_for, fresh_fn=sx_build.is_fresh ):
         dirty  = _git( root, "status", "--porcelain", "--untracked-files=no" ) if commit else ""
     except OSError:
         commit, dirty = None, ""
-    if dirty: raise lb_errors.LabellingError( lb_errors.PROVENANCE_MISSING, f"{where}: tracked files differ from HEAD, so HEAD is not the commit the pairs are read from" )
+    if dirty is None or dirty: raise lb_errors.LabellingError( lb_errors.PROVENANCE_MISSING, f"{where}: tracked files differ from HEAD or could not be read, so HEAD is not the commit the pairs are read from" )
     out = sx_paths.default_out_dir( root )
     gen = sx_build.current_generation( out )
     if commit and gen is not None and not fresh_fn( spec_fn( root ), out ):

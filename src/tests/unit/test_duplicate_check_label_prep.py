@@ -742,6 +742,13 @@ def test_source_provenance_refuses_a_tree_whose_tracked_files_differ_from_head( 
     assert lp.source_provenance( tree, spec_fn=lambda root: None, fresh_fn=lambda spec, out: True )[ "source_commit" ] == head_of( tree )
 
 
+def test_source_provenance_counts_a_failed_status_read_as_a_dirty_tree( tmp_path, monkeypatch ):
+    tree = git_tree( tmp_path, monkeypatch )
+    real = lp._git
+    monkeypatch.setattr( lp, "_git", lambda root, *args: None if args[ 0 ] == "status" else real( root, *args ) )
+    assert "could not be read" in refused( lp.source_provenance, tree, spec_fn=lambda root: None, fresh_fn=lambda spec, out: True )
+
+
 def test_source_provenance_refuses_a_tree_with_no_commit_or_no_published_index( tmp_path, monkeypatch ):
     never = dict( spec_fn=lambda root: None, fresh_fn=lambda spec, out: True )
     assert "source_commit" in refused( lp.source_provenance, tmp_path / "absent", **never )

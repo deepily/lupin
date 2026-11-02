@@ -10,7 +10,7 @@ pins:
   - cosa.repo.duplicate_check.proof.label_prep.pair_item@b3d5b13847
   - cosa.repo.duplicate_check.proof.label_prep.prepare@089967022e
   - cosa.repo.duplicate_check.proof.label_prep.save_doc@8e644e313a
-  - cosa.repo.duplicate_check.proof.label_prep.source_provenance@6040461b8a
+  - cosa.repo.duplicate_check.proof.label_prep.source_provenance@fc815af83c
   - cosa.repo.duplicate_check.proof.label_prep.run@3ff409c0cf
   - cosa.repo.duplicate_check.proof.label_prep.live_wiring@7a6c7abc06
   - cosa.repo.duplicate_check.proof.label_prep.main@63d7e5c866
