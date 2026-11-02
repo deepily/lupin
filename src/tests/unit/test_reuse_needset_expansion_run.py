@@ -4,8 +4,10 @@ The need-expansion wiring, run on fakes: no model call, no embedding, no search 
 The plan reads files only. A live run asks the expansion replies through a counted transport and writes its report.
 """
 import json
+import os
 import stat
 import types
+from unittest import mock
 
 import pytest
 
@@ -18,6 +20,12 @@ from lupin_mcp.reuse_needset import expansion_replay as ex
 from lupin_mcp.reuse_needset import expansion_run as xr
 from lupin_mcp.reuse_needset import first_thousand, source_at, yield_trace
 from lupin_mcp.reuse_seeded_miss_e2e import SavedAnswerMissing
+
+
+@pytest.fixture( autouse=True )
+def restore_environment():
+    """Ensures: os.environ is restored after each test, since main writes into it."""
+    with mock.patch.dict( os.environ ): yield
 
 BINDING = "1.0 (Claude Code)|max-plan"
 GOOD    = json.dumps( { "paraphrases": [ "one", "two", "three" ], "identifiers": [ "alpha", "beta" ] } )

@@ -4,7 +4,9 @@ The forced-shortlist judge, run on fakes: no model call, no search, no spend led
 A plan reads files only. A live run asks the judge about each missed plant in a pack of its own and writes its report.
 """
 import json
+import os
 import types
+from unittest import mock
 
 import pytest
 
@@ -18,6 +20,12 @@ from lupin_mcp.reuse_needset import first_thousand, source_at
 from lupin_mcp.reuse_seeded_miss_e2e import SavedAnswerMissing
 from tests.unit.symindex_helpers import make_lupin_repo
 from tests.unit.test_reuse_needset_expansion_run import cli, old_run          # old_run is a fixture: the earlier run folder
+
+
+@pytest.fixture( autouse=True )
+def restore_environment():
+    """Ensures: os.environ is restored after each test, since main writes into it."""
+    with mock.patch.dict( os.environ ): yield
 
 ENV = "export LUPIN_REUSE_JEV_PACK_SIZE=50\nexport LUPIN_REUSE_JEV_TOKEN_CEILING=60000000\nexport LUPIN_REUSE_JEV_RUN_NAME=needset-x\n"
 
