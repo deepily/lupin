@@ -2,8 +2,7 @@
 capability: needset-report-rollup
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.report_rollup.wilson@d3a5f5cf65
-  - lupin_mcp.reuse_needset.report_rollup.share@bc0f27139f
+  - lupin_mcp.reuse_needset.report_rollup.share@341fd51a8b
   - lupin_mcp.reuse_needset.report_rollup.table@380119a51f
   - lupin_mcp.reuse_needset.report_rollup.split@e036ea5d2a
   - lupin_mcp.reuse_needset.report_rollup.load@e90a99b57d
@@ -25,7 +24,7 @@ Reads the JSON that [[needset-forced-judge]], the yield trace and the need expan
 It renders the plan section 10 figures as one markdown table per experiment. It makes no model call, no search and no spend-ledger write.
 
 ## Figures
-- `wilson` gives the two-sided 95 percent Wilson interval; `share` formats a count as `k/n (p%, lo-hi%)`.
+- `share` formats a count as `k/n (p%, lo-hi%)`, with the 95 percent Wilson interval of `reuse_e2e.wilson`.
 - `yield_section`, `forced_section` and `expansion_section` each take a plan-only result or a finished report.
 - A plan-only input shows counts and what a run would do. Its figures are marked not run. `judge_rows` counts the forced judge by label and by language.
 - The expansion results record no language, so its table is per group only.

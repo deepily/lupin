@@ -14,38 +14,12 @@ It makes no model call, no search and no spend-ledger write: it only reads files
 
 import argparse
 import json
-import math
 import pathlib
 
-Z95          = 1.959963984540054   # two-sided 95 percent
+from lupin_mcp.reuse_e2e import wilson
+
 CONTROL_MARK = 2                   # plan section 10: the control passes when a - b <= 2
 NOT_RUN      = "not run"
-
-
-def wilson( successes, trials, z=Z95 ):
-    """
-    Return the two-sided Wilson score interval for a proportion.
-
-    Requires:
-        - 0 <= successes <= trials
-
-    Ensures:
-        - returns None when trials is 0
-        - returns ( lower, upper ) within 0.0 and 1.0
-        - the lower end is exactly 0.0 for no successes and the upper end exactly 1.0 for all of them
-
-    Raises:
-        - ValueError when successes is outside 0..trials
-    """
-    if not 0 <= successes <= trials: raise ValueError( f"successes {successes} is outside 0..{trials}" )
-    if trials == 0: return None
-    p      = successes / trials
-    denom  = 1 + z * z / trials
-    centre = ( p + z * z / ( 2 * trials ) ) / denom
-    half   = z * math.sqrt( p * ( 1 - p ) / trials + z * z / ( 4 * trials * trials ) ) / denom
-    lower  = 0.0 if successes == 0 else max( 0.0, centre - half )
-    upper  = 1.0 if successes == trials else min( 1.0, centre + half )
-    return lower, upper
 
 
 def share( successes, trials ):
@@ -56,12 +30,13 @@ def share( successes, trials ):
         - 0 <= successes <= trials
 
     Ensures:
+        - the interval is reuse_e2e.wilson's
         - returns "k/0 (n/a)" when there are no trials
         - percentages carry one decimal
     """
-    interval = wilson( successes, trials )
-    if interval is None: return f"{successes}/{trials} (n/a)"
-    return f"{successes}/{trials} ({100 * successes / trials:.1f}%, {100 * interval[ 0 ]:.1f}-{100 * interval[ 1 ]:.1f}%)"
+    low, high = wilson( successes, trials )
+    if low is None: return f"{successes}/{trials} (n/a)"
+    return f"{successes}/{trials} ({100 * successes / trials:.1f}%, {100 * low:.1f}-{100 * high:.1f}%)"
 
 
 def table( headers, rows ):
