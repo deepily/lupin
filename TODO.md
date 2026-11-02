@@ -27,7 +27,10 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **The fix merged before the push** (Rick, card, 10:34). Commit `e607c9040` gives each plant its purpose line at the judge. The plant's opaque id is not changed yet.
 - **An explainer for program managers** (Rick, voice, about 10:30). It is `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.11.02-reuse-search-measurement-explainer.md`, pushed at 10:46. Rick then said the crew is not harvested and work continues.
 - **Post-game rulings** are in `src/docs/post-games/v0.2.2/2026.11.02-first-thousand-part-2-crew-post-game.md`. The control takes the production path at every stage. The launch checklist becomes a script step. A run keeps its own judge receipts.
-- **Pending for Rick.** Should the re-judging give each plant an id that ends in its name? The go on the Part 3 probe. Two extra zero-call checks from John. Three follow-up rows in holding. Archiving history.md, now about 17.3k tokens.
+- **What the judge should see: the name first, then one run** (Rick, voice cards, 10:53 and 10:55). Each plant gets a production-shaped id that ends in its name. The run has four arms: as judged, with the purpose line, with the line and the name, and with the original's line shown too. Rick lifted the call cap for it: "a cap is an artificial construct". Three repeats per arm per pair.
+- **Which stages run** (Rick, voice card, about 11:00). Two parts go now: a zero-call reference table from saved answers, and the four-arm run. A third part, the judge alone on the 157 real labelled pairs, waits until Rick has read the four-arm results. John's count: all 157 pairs have two or three raters, 86 same job and 71 not.
+- **Judge temperature: keep as is** (Rick, voice card, about 11:01). No reuse code sets a temperature, and the four-arm run's repeats measure the noise. This closes the question Rick raised on 25 Oct.
+- **Pending for Rick.** Should the re-judging give each plant an id that ends in its name? (Ruled yes at 10:53.) The go on the Part 3 probe. Two extra zero-call checks from John. Three follow-up rows in holding. Archiving history.md, now about 17.3k tokens.
 
 ```text
 Rows, by subject
