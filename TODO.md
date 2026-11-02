@@ -30,7 +30,8 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **What the judge should see: the name first, then one run** (Rick, voice cards, 10:53 and 10:55). Each plant gets a production-shaped id that ends in its name. The run has four arms: as judged, with the purpose line, with the line and the name, and with the original's line shown too. Rick lifted the call cap for it: "a cap is an artificial construct". Three repeats per arm per pair.
 - **Which stages run** (Rick, voice card, about 11:00). Two parts go now: a zero-call reference table from saved answers, and the four-arm run. A third part, the judge alone on the 157 real labelled pairs, waits until Rick has read the four-arm results. John's count: all 157 pairs have two or three raters, 86 same job and 71 not.
 - **Judge temperature: keep as is** (Rick, voice card, about 11:01). No reuse code sets a temperature, and the four-arm run's repeats measure the noise. This closes the question Rick raised on 25 Oct.
-- **Pending for Rick.** Should the re-judging give each plant an id that ends in its name? (Ruled yes at 10:53.) The go on the Part 3 probe. Two extra zero-call checks from John. Three follow-up rows in holding. Archiving history.md, now about 17.3k tokens.
+- **The four-arm run is pre-approved** (Rick, voice, 11:06). He may run it "once all the pieces are in place", in his words. The runner is merged at `55cefc190` after Rachel's review. The launch waits on Chloé's revised mark and the tests on the merge.
+- **Pending for Rick.** Should the re-judging give each plant an id that ends in its name? (Ruled yes at 10:53.) The go on the Part 3 probe (pre-approved at 11:06). Two extra zero-call checks from John. Three follow-up rows in holding. Archiving history.md, now about 17.3k tokens.
 
 ```text
 Rows, by subject
