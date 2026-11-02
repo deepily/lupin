@@ -18,6 +18,7 @@ import types
 
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import run_check
+from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.candidates import candidate_stage
 from cosa.repo.symindex.candidates import search as cs_search
 from cosa.repo.symindex.candidates import vector_store as vs
@@ -115,7 +116,7 @@ async def draft_control_needs( pairs, make_job, ask, ledger, draft_fn, on_undraf
     return needs
 
 
-def planted_check( need, ctx, planted_stage, planted_entries, prepare=rt.prepare, run_question=rt.run_question ):
+def planted_check( need, ctx, planted_stage, planted_entries, prepare=rt.prepare, run_question=rt.run_question, purposes=None ):
     """
     Ask the checker about one need over a pool that holds the planted rewrites.
 
@@ -123,15 +124,18 @@ def planted_check( need, ctx, planted_stage, planted_entries, prepare=rt.prepare
         - need is a need record ( kind, write_lang, seed, need ); ctx is a reuse context with the candidate stage on
         - planted_stage is a planted_pool.PlantedCandidateStage over the same vector set as ctx's stage
         - planted_entries are planted_pool.planted_entry records
+        - purposes is None or { pin: purpose line } of the plants
 
     Ensures:
         - the entries the judge may be asked about are the index's own plus the planted ones, screened as the index's are
+        - a planted record whose pin has a line in purposes carries it as `purpose`, through the same attach_purposes call prepare gives the index's own entries, so the judge reads a plant as it reads a real entry
         - the context is copied and only the copy's candidate stage is swapped, so the caller's context keeps its own
         - the question is loss_trace.check_need's: the seed left out, the need's write language, nothing stored
         - the index sha names the planted ids, so a receipt of this pool is never taken for one of the real index
     """
     flags, entries, sha, gen = prepare( ctx )
     kept, _dropped = rt.sendable_report( planted_entries )
+    kept     = sx_build.attach_purposes( kept, purposes )
     ids      = ",".join( sorted( e[ "id" ] for e in planted_entries ) )
     prepared = ( flags, [ *entries, *kept ], hashlib.sha256( f"{sha}|planted|{ids}".encode( "utf-8" ) ).hexdigest()[ :32 ], gen )
     at       = copy.copy( ctx )
@@ -362,7 +366,7 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
             more = ( check( need, bare_ctx, bare, entries ), None )
             rows.append( control_report.pair_row( pair, labels[ rid ], need[ "need" ], live, lines.get( pins[ rid ] ), originals[ rid ], ( more[ 0 ], bare.last_answer ) ) )
 
-        asker     = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids, observe )
+        asker     = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries, **( {} if plant_lines is None else { "purposes": plant_lines } ) ), loss_trace.asked_ids, observe )
         base      = await stage3.control_stage( pool, drafted, asker, build_stage )()
         return { **base, "undrafted": undrafted, "pairs_wanted": len( pairs ), **control_report.scored( rows, undrafted, labels ), "plants_without_line": list( plant_without ),
                  "purpose_lines_used": len( lines ), "labels": label_info }

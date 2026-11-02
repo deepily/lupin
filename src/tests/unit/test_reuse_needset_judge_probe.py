@@ -10,6 +10,7 @@ from unittest import mock
 
 import pytest
 
+from cosa.repo.symindex import build as sx_build
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import errors as er
@@ -34,7 +35,7 @@ def entry( n, **more ):
 
 def plant( n ):
     """Return a planted record, as planted_entry builds it: no docstring and no purpose."""
-    return { "id": f"d-p{n}", "sig": f"( b{n} )", "doc": "", "file": f"src/p{n}.py", "name": f"p{n}", "lang": "py" }
+    return { "id": f"d-p{n}", "sig": f"( b{n} )", "doc": "", "pin": f"pinp{n}", "file": f"src/p{n}.py", "name": f"p{n}", "lang": "py" }
 
 
 def record( n, label=jp.SAME_JOB, plant_line="plant line", original_line="orig line", with_plant=True, with_original=True ):
@@ -156,9 +157,11 @@ def test_each_arm_builds_the_plant_and_template_it_names():
     plant_b, orig_b, tmpl_b = jp.arm_inputs( r, jp.ARM_BASELINE )[ 0 ]
     assert "purpose" not in plant_b and tmpl_b is rt.PROMPT_TEMPLATE and orig_b is r[ "original" ]
     plant_p, _o, tmpl_p = jp.arm_inputs( r, jp.ARM_PLANT )[ 0 ]
+    assert plant_p == sx_build.attach_purposes( [ r[ "plant" ] ], { r[ "plant" ][ "pin" ]: "plant line" } )[ 0 ], "the plant gets its line exactly as the index gives a real entry its line"
     assert plant_p[ "purpose" ] == "plant line" and tmpl_p is rt.PROMPT_TEMPLATE and "purpose" not in r[ "plant" ]
+    assert rt.entry_text( plant_p ) == rt.entry_text( r[ "plant" ] ) + " | purpose: plant line"
     plant_c, _o, tmpl_c = jp.arm_inputs( r, jp.ARM_BOTH )[ 0 ]
-    assert plant_c[ "purpose" ] == "plant line" and "orig line" in tmpl_c[ "instructions" ]
+    assert plant_c == plant_p and "orig line" in tmpl_c[ "instructions" ]
     assert jp.arm_inputs( record( 1, with_plant=False ), jp.ARM_BASELINE ) == ( None, "plant_dropped_by_screen" )
     assert jp.arm_inputs( record( 1, with_original=False ), jp.ARM_BASELINE ) == ( None, "original_not_in_snapshot" )
     assert jp.arm_inputs( record( 1, plant_line=None ), jp.ARM_PLANT ) == ( None, "plant_has_no_line" )
@@ -166,23 +169,29 @@ def test_each_arm_builds_the_plant_and_template_it_names():
     assert jp.arm_inputs( record( 1, plant_line=None ), jp.ARM_BASELINE )[ 0 ] is not None
 
 
-def test_the_plan_is_pairs_times_arms_times_orderings_in_pair_order():
+def test_the_plan_is_pairs_times_three_arms_times_two_repeats_each_with_its_own_body():
     records = [ record( n ) for n in range( 1, 18 ) ]
+    assert jp.DEFAULT_ARMS == jp.ARMS == ( "baseline", "plant_line", "both_lines" ) and jp.REPEATS == ( 1, 2 )
     reqs, skipped = jp.plan_requests( records )
-    assert len( reqs ) == 68 and skipped == []
-    assert [ ( r[ "pair" ], r[ "arm" ], r[ "ordering" ] ) for r in reqs[ :4 ] ] == [ ( "d-r1", "baseline", "plant_first" ), ( "d-r1", "baseline", "original_first" ), ( "d-r1", "both_lines", "plant_first" ), ( "d-r1", "both_lines", "original_first" ) ]
-    first, second = reqs[ 0 ][ "entries" ], reqs[ 1 ][ "entries" ]
-    assert [ e[ "id" ] for e in first ] == [ "d-p1", "src.m1.f1" ] and [ e[ "id" ] for e in second ] == [ "src.m1.f1", "d-p1" ]
-    assert len( jp.plan_requests( records, tuple( jp.ARMS ) )[ 0 ] ) == 102
-    bodies = [ rp.pack_request( r[ "need" ], r[ "entries" ], r[ "template" ] )[ 0 ] for r in reqs ]
-    assert len( { rt.request_hash( b ) for b in bodies } ) == 34                                     # two arms per pair; an ordering moves the question order, not the canonical body
-    assert list( bodies[ 0 ][ "questions" ] ) != list( bodies[ 1 ][ "questions" ] ) and rt.request_hash( bodies[ 0 ] ) == rt.request_hash( bodies[ 1 ] )
-    assert rt.request_hash( bodies[ 0 ] ) != rt.request_hash( bodies[ 2 ] )
-    reqs2, skipped2 = jp.plan_requests( [ record( 1 ), record( 2, original_line=None ), record( 3, with_plant=False ) ], jp.DEFAULT_ARMS, ( jp.PLANT_FIRST, ) )
-    assert len( reqs2 ) == 3 and skipped2 == [ { "pair": "d-r2", "arm": "both_lines", "reason": "original_has_no_line" }, { "pair": "d-r3", "arm": "baseline", "reason": "plant_dropped_by_screen" },
-                                               { "pair": "d-r3", "arm": "both_lines", "reason": "plant_dropped_by_screen" } ]
-    with pytest.raises( ValueError ): jp.plan_requests( [ record( 1 ) ], ( "nope", ) )
-    with pytest.raises( ValueError ): jp.plan_requests( [ record( 1 ) ], jp.DEFAULT_ARMS, ( "sideways", ) )
+    assert len( reqs ) == 102 and skipped == [] and jp.distinct_bodies( reqs ) == 102
+    assert [ ( r[ "pair" ], r[ "arm" ], r[ "repeat" ] ) for r in reqs[ :6 ] ] == [ ( "d-r1", a, n ) for a in jp.ARMS for n in ( 1, 2 ) ]
+    assert all( [ e[ "id" ] for e in r[ "entries" ] ] == [ f"d-p{r[ 'pair' ][ 3: ]}", f"src.m{r[ 'pair' ][ 3: ]}.f{r[ 'pair' ][ 3: ]}" ] for r in reqs )
+    bodies = [ rp.pack_request( r[ "need" ], r[ "entries" ], r[ "template" ] )[ 0 ] for r in reqs[ :2 ] ]
+    assert bodies[ 0 ][ "state" ] == bodies[ 1 ][ "state" ] and bodies[ 0 ] != bodies[ 1 ] and rt.request_hash( bodies[ 0 ] ) != rt.request_hash( bodies[ 1 ] )
+    assert reqs[ 0 ][ "template" ][ "instructions" ].endswith( " (repeat 1)" ) and reqs[ 1 ][ "template" ][ "instructions" ].endswith( " (repeat 2)" )
+    assert reqs[ 0 ][ "template" ][ "criteria" ] == reqs[ 4 ][ "template" ][ "criteria" ] == rt.PROMPT_TEMPLATE[ "criteria" ]
+    reqs2, skipped2 = jp.plan_requests( [ record( 1 ), record( 2, original_line=None ), record( 3, with_plant=False ) ], jp.DEFAULT_ARMS, ( 1, ) )
+    assert len( reqs2 ) == 5 and skipped2 == [ { "pair": "d-r2", "arm": "both_lines", "reason": "original_has_no_line" }, { "pair": "d-r3", "arm": "baseline", "reason": "plant_dropped_by_screen" },
+                                               { "pair": "d-r3", "arm": "plant_line", "reason": "plant_dropped_by_screen" }, { "pair": "d-r3", "arm": "both_lines", "reason": "plant_dropped_by_screen" } ]
+    for bad in ( dict( arms=( "nope", ) ), dict( repeats=( 0, ) ), dict( repeats=( 1, 1 ) ), dict( repeats=( "1", ) ), dict( repeats=( True, ) ) ):
+        with pytest.raises( ValueError ): jp.plan_requests( [ record( 1 ) ], **bad )
+
+
+def test_two_requests_that_post_one_body_are_refused_before_any_post():
+    twin = { "need": "n", "entries": [ plant( 1 ), entry( 1 ) ], "template": rt.PROMPT_TEMPLATE }
+    other = { **twin, "entries": [ entry( 1 ), plant( 1 ) ] }                       # only the order of the two questions differs, and the canonical body sorts it away
+    with pytest.raises( ValueError, match="1 requests repeat another's body" ): jp.distinct_bodies( [ twin, other ] )
+    assert jp.distinct_bodies( [ twin ] ) == 1
 
 
 def fake_send( p_plant, p_original, status="answered" ):
@@ -195,33 +204,32 @@ def fake_send( p_plant, p_original, status="answered" ):
     return send
 
 
-def test_ask_request_reads_the_plant_and_the_original_in_either_order():
+def test_ask_request_reads_the_plant_and_the_original():
     reqs, _ = jp.plan_requests( [ record( 1 ) ] )
-    for req in reqs[ :2 ]:
-        got = jp.ask_request( None, req, None, fake_send( 0.5, 0.9 ) )
-        assert got[ "plant" ][ "p_overlap" ] == 0.5 and got[ "original" ][ "p_overlap" ] == 0.9 and got[ "plant" ][ "answered" ] and got[ "tokens_in" ] == 120
-        assert got[ "pair" ] == "d-r1" and got[ "arm" ] == "baseline" and got[ "ordering" ] == req[ "ordering" ] and got[ "label" ] == jp.SAME_JOB
+    got = jp.ask_request( None, reqs[ 0 ], None, fake_send( 0.5, 0.9 ) )
+    assert got[ "plant" ][ "p_overlap" ] == 0.5 and got[ "original" ][ "p_overlap" ] == 0.9 and got[ "plant" ][ "answered" ] and got[ "tokens_in" ] == 120
+    assert got[ "pair" ] == "d-r1" and got[ "arm" ] == "baseline" and got[ "repeat" ] == 1 and got[ "label" ] == jp.SAME_JOB
     lost = jp.ask_request( None, reqs[ 0 ], None, fake_send( 0.5, 0.9, status="failed" ) )
     assert lost[ "plant" ] == { "answered": False, "p_overlap": None, "confidence": None, "choice": None } and lost[ "status" ] == "failed" and lost[ "tokens_in" ] is None
 
 
-def result( pair, arm, ordering, p_plant, label=jp.SAME_JOB, tokens=100 ):
+def result( pair, arm, repeat, p_plant, label=jp.SAME_JOB, tokens=100 ):
     """Return one ask_request-shaped result."""
     side = { "answered": p_plant is not None, "p_overlap": p_plant, "confidence": 0.9, "choice": "extend" }
-    return { "pair": pair, "label": label, "arm": arm, "ordering": ordering, "request_hash": f"{pair}{arm}{ordering}", "status": "answered", "tokens_in": tokens, "plant": side, "original": side }
+    return { "pair": pair, "label": label, "arm": arm, "repeat": repeat, "request_hash": f"{pair}{arm}{repeat}", "status": "answered", "tokens_in": tokens, "plant": side, "original": side }
 
 
 def test_the_summary_counts_accepts_compares_the_baseline_with_the_cache_and_proves_the_bypass( tmp_path ):
     dump    = dump_of( tmp_path )[ 1 ]
-    results = [ result( "d-r1", "baseline", "plant_first", 0.64 ), result( "d-r1", "baseline", "original_first", 0.5 ), result( "d-r1", "both_lines", "plant_first", 0.9 ),
-                result( "d-r3", "baseline", "plant_first", 0.4, label=jp.NOT_SAME, tokens=0 ), result( "d-r2", "baseline", "plant_first", None ),
-                result( "d-r4", "baseline", "plant_first", 0.2 ), result( "d-zz", "baseline", "plant_first", 0.2 ), result( "d-r5", "both_lines", "plant_first", 0.3 ) ]
+    results = [ result( "d-r1", "baseline", 1, 0.64 ), result( "d-r1", "baseline", 2, 0.5 ), result( "d-r1", "both_lines", 1, 0.9 ),
+                result( "d-r3", "baseline", 1, 0.4, label=jp.NOT_SAME, tokens=0 ), result( "d-r2", "baseline", 1, None ),
+                result( "d-r4", "baseline", 1, 0.2 ), result( "d-zz", "baseline", 1, 0.2 ), result( "d-r5", "both_lines", 1, 0.3 ) ]
     s = jp.summarize_variant( results, dump )
     assert s[ "arms" ][ "baseline" ][ "same_job" ] == { "accepted": 2, "answered": 4, "mean_p": 0.385 }
     assert s[ "arms" ][ "baseline" ][ "not_same" ] == { "accepted": 1, "answered": 1, "mean_p": 0.4 }
     assert s[ "arms" ][ "both_lines" ][ "same_job" ] == { "accepted": 2, "answered": 2, "mean_p": 0.6 } and s[ "arms" ][ "both_lines" ][ "not_same" ] == { "accepted": 0, "answered": 0, "mean_p": None }
-    assert [ ( v[ "pair" ], v[ "ordering" ], v[ "equal" ] ) for v in s[ "baseline_vs_cached" ] ] == [ ( "d-r1", "plant_first", True ), ( "d-r1", "original_first", False ), ( "d-r3", "plant_first", False ) ]
-    assert s[ "ordering_gap" ] == 0.14
+    assert [ ( v[ "pair" ], v[ "repeat" ], v[ "equal" ] ) for v in s[ "baseline_vs_cached" ] ] == [ ( "d-r1", 1, True ), ( "d-r1", 2, False ), ( "d-r3", 1, False ) ]
+    assert s[ "repeat_gap" ] == 0.14
     assert s[ "bypass_proof" ][ "requests_posted" ] == 8 and s[ "bypass_proof" ][ "distinct_request_hashes" ] == 8
     assert s[ "bypass_proof" ][ "requests_with_tokens" ] == 7 and s[ "bypass_proof" ][ "requests_without_tokens" ] == 1 and s[ "bypass_proof" ][ "keys" ].startswith( "none" )
     assert jp.summarize_variant( [] )[ "baseline_vs_cached" ] == []
@@ -229,7 +237,7 @@ def test_the_summary_counts_accepts_compares_the_baseline_with_the_cache_and_pro
 
 def test_run_variant_writes_the_report_and_ends_by_name_on_a_cap( tmp_path ):
     reqs, _ = jp.plan_requests( [ record( 1 ), record( 2 ) ] )
-    ok = jp.run_variant( str( tmp_path ), reqs[ :2 ], lambda r: result( r[ "pair" ], r[ "arm" ], r[ "ordering" ], 0.5 ), 10, 10 )
+    ok = jp.run_variant( str( tmp_path ), reqs[ :2 ], lambda r: result( r[ "pair" ], r[ "arm" ], r[ "repeat" ], 0.5 ), 10, 10 )
     assert ok[ "status" ] == jp.DONE and len( ok[ "results" ] ) == 2 and ( tmp_path / jp.REPORT_FILE ).is_file()
     proof = json.loads( ( tmp_path / jp.REPORT_FILE ).read_text( encoding="utf-8" ) )[ "summary" ][ "bypass_proof" ]
     assert proof[ "requests_posted" ] == 2 and proof[ "calls_charged_to_the_cap" ] == ok[ "used" ] == 0
@@ -254,9 +262,9 @@ def argv( tmp_path, mode, *more ):
     return base + list( more )
 
 
-def test_parse_args_defaults_to_the_plan_and_two_arms( tmp_path ):
+def test_parse_args_defaults_to_the_plan_and_three_arms( tmp_path ):
     a = jp.parse_args( argv( tmp_path, "variant" ) )
-    assert a.live is False and a.arms == [ "baseline", "both_lines" ] and a.budget == 140 and a.limit == 140 and a.ceiling == 8_000_000 and a.run_name is None
+    assert a.live is False and a.arms == [ "baseline", "plant_line", "both_lines" ] and a.budget == 140 and a.limit == 140 and a.ceiling == 8_000_000 and a.run_name is None
     assert jp.parse_args( argv( tmp_path, "replay", "--arms", "plant_line" ) ).arms == [ "plant_line" ]
     with pytest.raises( SystemExit ): jp.parse_args( argv( tmp_path, "sideways" ) )
 
@@ -281,7 +289,7 @@ def test_a_variant_without_live_prints_the_plan_and_contacts_nothing( tmp_path )
     deps = { "source_root": lambda a: tmp_path, "records": lambda a, root: ( [ record( 1 ), record( 2, original_line=None ) ], [] ), "context": lambda root: pytest.fail( "a plan builds no context" ) }
     with mock.patch.object( jp.model_transport, "configure" ), mock.patch.object( jp, "ask_request", side_effect=AssertionError( "a plan asks nothing" ) ):
         out = jp.main( argv( tmp_path, "variant", "--cli-path", "/x/claude" ), deps )
-    assert out[ "live" ] is False and out[ "plan" ][ "requests" ] == 6 and out[ "plan" ][ "by_arm" ] == { "baseline": 4, "both_lines": 2 } and out[ "plan" ][ "skipped" ][ 0 ][ "reason" ] == "original_has_no_line"
+    assert out[ "live" ] is False and out[ "plan" ][ "requests" ] == 10 and out[ "plan" ][ "distinct_bodies" ] == 10 and out[ "plan" ][ "by_arm" ] == { "baseline": 4, "plant_line": 4, "both_lines": 2 } and out[ "plan" ][ "skipped" ][ 0 ][ "reason" ] == "original_has_no_line"
     assert not ( tmp_path / "run" / jp.REPORT_FILE ).exists()
 
 
@@ -310,14 +318,14 @@ def test_a_live_variant_posts_every_request_under_its_own_run_name_and_closes_th
 
     def fake_ask( transport, request, budget ):
         state[ "seen" ].append( ( transport.budget, budget ) )
-        return result( request[ "pair" ], request[ "arm" ], request[ "ordering" ], 0.5 )
+        return result( request[ "pair" ], request[ "arm" ], request[ "repeat" ], 0.5 )
     with mock.patch.object( jp.model_transport, "configure" ), mock.patch.object( rt, "prepare" ) as prep, mock.patch.object( jp, "ask_request", fake_ask ), \
          mock.patch.object( rt, "JevCache" ) as jc:
         jc.return_value.get.return_value = None
         out = jp.main( argv( tmp_path, "variant", "--live", "--run-name", "needset-judge-x", "--cli-path", "/x/claude" ), deps )
     prep.assert_called_once()
     assert out[ "live" ] is True and out[ "closed_run" ] == "needset-judge-x" and out[ "close_error" ] is None and out[ "report" ][ "status" ] == jp.DONE
-    assert len( state[ "seen" ] ) == 4 and state[ "seen" ][ 0 ] == ( "B", "B" ) and state[ "closed" ] == 1
+    assert len( state[ "seen" ] ) == 6 and state[ "seen" ][ 0 ] == ( "B", "B" ) and state[ "closed" ] == 1
     assert os.environ[ rt.RUN_NAME_VARIABLE ] == "needset-judge-x" and os.environ[ rt.CEILING_VARIABLE ] == "8000000"
     assert jp.exit_status( out ) == 0
 
@@ -334,7 +342,7 @@ def test_a_live_variant_that_fails_still_closes_the_run_and_a_failed_close_is_re
     assert "close_run failed while another error was raised" in capsys.readouterr().out
     deps3, _ = live_parts( tmp_path )
     deps3[ "close_run" ] = lambda c: ( _ for _ in () ).throw( OSError( "ledger gone" ) )
-    with mock.patch.object( jp.model_transport, "configure" ), mock.patch.object( rt, "prepare" ), mock.patch.object( jp, "ask_request", side_effect=lambda t, r, b: result( r[ "pair" ], r[ "arm" ], r[ "ordering" ], 0.5 ) ), mock.patch.object( rt, "JevCache" ):
+    with mock.patch.object( jp.model_transport, "configure" ), mock.patch.object( rt, "prepare" ), mock.patch.object( jp, "ask_request", side_effect=lambda t, r, b: result( r[ "pair" ], r[ "arm" ], r[ "repeat" ], 0.5 ) ), mock.patch.object( rt, "JevCache" ):
         out = jp.main( argv( tmp_path, "variant", "--live", "--run-name", "n", "--cli-path", "/x/claude" ), deps3 )
     assert out[ "closed_run" ] is None and "ledger gone" in out[ "close_error" ]
 

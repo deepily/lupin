@@ -5,11 +5,11 @@ Does the judge's p_overlap rating tell a same-job plant from a not-same one, on 
 
   replay   probes (a) and (b). Reads every rating from the saved Jev cache, dumps them per pair, and sweeps the shortlist threshold over them.
            It makes no model call, builds no reuse context and writes nothing to the cache or the spend ledger. A pair with no cached rating is named, never asked again.
-  variant  probe (c). Asks the judge about each pair's plant and original in one pack, under three arms and two orderings of the two questions.
+  variant  probe (c). Asks the judge about each pair's plant and original in one pack, under three arms and two repeats.
            Without --live it only prints the plan. Every request is posted straight to the transport and never reads the cache, so a baseline answer is a fresh judgment.
 
-What the judge reads of a plant: a plant is judged as its id and signature alone. The planted record has no docstring and no purpose line,
-whereas an original, a real index entry, carries both. The plant_line arm gives the plant the line its embedding was built from.
+What the judge read of a plant in Part 2: its id and signature alone. The planted record has no docstring and no purpose line,
+whereas an original, a real index entry, carries both. Arm 0 repeats that text. Arm 1 gives the plant its line as the index gives a real entry its line. Arm 2 adds the original's line.
 """
 import argparse
 import json
@@ -17,6 +17,7 @@ import pathlib
 import types
 
 from cosa.repo.doc_lint import model_transport
+from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex import verdict as vd
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
@@ -29,14 +30,13 @@ CEILING      = 8_000_000
 SAME_JOB     = forced_judge.SAME_JOB
 NOT_SAME     = forced_judge.NOT_SAME
 THRESHOLDS   = tuple( round( 0.10 + 0.05 * i, 2 ) for i in range( 9 ) )          # 0.10 to 0.50 by 0.05
-ARM_BASELINE = "baseline"                                                       # production: the plant as id and signature, the unchanged template
-ARM_PLANT    = "plant_line"                                                     # the plant also carries its purpose line, the template unchanged
-ARM_BOTH     = "both_lines"                                                     # the plant carries its line, and the instructions state the original's line
+ARM_BASELINE = "baseline"                                                       # arm 0, as Part 2 judged: the plant as id and signature, the unchanged template
+ARM_PLANT    = "plant_line"                                                     # arm 1, the production text: the plant carries its line through attach_purposes
+ARM_BOTH     = "both_lines"                                                     # arm 2: arm 1 and the original's line named in the instructions
 ARMS         = ( ARM_BASELINE, ARM_PLANT, ARM_BOTH )
-DEFAULT_ARMS = ( ARM_BASELINE, ARM_BOTH )
-PLANT_FIRST  = "plant_first"
-ORIG_FIRST   = "original_first"
-ORDERINGS    = ( PLANT_FIRST, ORIG_FIRST )
+ARM_NUMBER   = { ARM_BASELINE: 0, ARM_PLANT: 1, ARM_BOTH: 2 }
+DEFAULT_ARMS = ARMS
+REPEATS      = ( 1, 2 )                                                         # each pair and arm is posted once per repeat, each with its own run-index token
 RATINGS_FILE = "judge-probe-ratings.json"
 TABLE_FILE   = "judge-probe-ratings.md"
 REPORT_FILE  = "judge-probe-variant-report.json"
@@ -234,43 +234,59 @@ def arm_inputs( record, arm ):
     Choose the plant record and template an arm asks with.
 
     Ensures:
-        - returns ( plant record, original record, template ), or None with the reason when the arm cannot be built for the pair
-        - baseline keeps the plant as production judges it and the production template
-        - plant_line adds the plant's line to the plant; both_lines adds it and states the original's line in the instructions
+        - returns ( ( plant record, original record, template ), None ), or ( None, reason ) when the arm cannot be built for the pair
+        - baseline keeps the plant as the control built it and the production template
+        - plant_line gives the plant its line through sx_build.attach_purposes, keyed by the plant's pin, as the index gives a real entry its line
+        - both_lines does the same and states the original's line in the instructions
     """
     if record[ "plant" ] is None: return None, "plant_dropped_by_screen"
     if record[ "original" ] is None: return None, "original_not_in_snapshot"
     if arm == ARM_BASELINE: return ( record[ "plant" ], record[ "original" ], rt.PROMPT_TEMPLATE ), None
     if record[ "plant_line" ] is None: return None, "plant_has_no_line"
-    plant = { **record[ "plant" ], "purpose": record[ "plant_line" ] }
+    plant = sx_build.attach_purposes( [ record[ "plant" ] ], { record[ "plant" ][ "pin" ]: record[ "plant_line" ] } )[ 0 ]
     if arm == ARM_PLANT: return ( plant, record[ "original" ], rt.PROMPT_TEMPLATE ), None
     if record[ "original_line" ] is None: return None, "original_has_no_line"
     return ( plant, record[ "original" ], variant_template( record[ "original_line" ] ) ), None
 
 
-def plan_requests( records, arms=DEFAULT_ARMS, orderings=ORDERINGS ):
+def repeat_template( template, repeat ):
     """
-    List the requests a variant run would make, one pack per pair, arm and ordering.
+    Give a template a run-index token, so the repeat's request body is its own.
 
     Requires:
-        - arms and orderings are subsets of the module's arm and ordering tuples
+        - template is a pack template; repeat is a whole number of 1 or more
 
     Ensures:
-        - returns ( requests, skipped ): a request holds pair, label, arm, ordering, need, entries (plant and original in the ordering) and template
-        - skipped lists { pair, arm, reason } for each arm that cannot be built; it has no request
-        - the order is pair, arm, ordering, so a stopped run leaves whole pairs
+        - returns a copy whose instructions end with " (repeat n)" and whose criteria are unchanged; the argument is not changed
+        - the copy's request body, and so its hash, differs from every other repeat's
     """
-    unknown = [ a for a in arms if a not in ARMS ] + [ o for o in orderings if o not in ORDERINGS ]
-    if unknown: raise ValueError( f"unknown arm or ordering {unknown!r}" )
+    return { "instructions": f"{template[ 'instructions' ]} (repeat {repeat})", "criteria": dict( template[ "criteria" ] ) }
+
+
+def plan_requests( records, arms=DEFAULT_ARMS, repeats=REPEATS ):
+    """
+    List the requests a variant run would make, one pack per pair, arm and repeat.
+
+    Requires:
+        - arms are among the module's arm names; repeats are whole numbers of 1 or more, each once
+
+    Ensures:
+        - returns ( requests, skipped ): a request holds pair, label, arm, repeat, need, entries (the plant, then the original) and template
+        - the template carries the repeat's run-index token, so no two requests share a body
+        - skipped lists { pair, arm, reason } for each arm that cannot be built; it has no request
+        - the order is pair, arm, repeat, so a stopped run leaves whole pairs
+    """
+    unknown = [ a for a in arms if a not in ARMS ] + [ r for r in repeats if type( r ) is not int or r < 1 ] + ( [ "repeats" ] if len( set( repeats ) ) != len( repeats ) else [] )
+    if unknown: raise ValueError( f"unknown arm, or a repeat that is not a distinct whole number of 1 or more: {unknown!r}" )
     requests, skipped = [], []
     for r in records:
         for arm in arms:
             inputs, why = arm_inputs( r, arm )
             if inputs is None: skipped.append( { "pair": r[ "id" ], "arm": arm, "reason": why } ); continue
             plant, original, template = inputs
-            for ordering in orderings:
-                entries = [ plant, original ] if ordering == PLANT_FIRST else [ original, plant ]
-                requests.append( { "pair": r[ "id" ], "label": r[ "label" ], "arm": arm, "ordering": ordering, "need": r[ "need" ], "entries": entries, "template": template } )
+            for repeat in repeats:
+                requests.append( { "pair": r[ "id" ], "label": r[ "label" ], "arm": arm, "repeat": repeat, "need": r[ "need" ], "entries": [ plant, original ],
+                                   "template": repeat_template( template, repeat ) } )
     return requests, skipped
 
 
@@ -284,41 +300,64 @@ def ask_request( transport, request, budget=None, send=rp.send_pack ):
 
     Ensures:
         - returns the request's identity plus plant and original, each { answered, p_overlap, confidence, choice } with answered false for an entry the response lacked
-        - the entry ids are the plant's then the original's, as the request listed them, so the same pair in the other ordering reads the same two ids
     """
-    out = send( transport, request[ "need" ], request[ "entries" ], request[ "template" ], rt.JEV_MODEL, budget )
-    got = { a[ "id" ]: rating_of( a[ "probabilities" ] ) for a in out[ "answers" ] }
+    out  = send( transport, request[ "need" ], request[ "entries" ], request[ "template" ], rt.JEV_MODEL, budget )
+    got  = { a[ "id" ]: rating_of( a[ "probabilities" ] ) for a in out[ "answers" ] }
     side = lambda e: { "answered": got.get( e[ "id" ] ) is not None, **( got[ e[ "id" ] ] if got.get( e[ "id" ] ) is not None else { "p_overlap": None, "confidence": None, "choice": None } ) }
-    ids  = { "plant": request[ "entries" ][ 0 if request[ "ordering" ] == PLANT_FIRST else 1 ], "original": request[ "entries" ][ 1 if request[ "ordering" ] == PLANT_FIRST else 0 ] }
-    return { "pair": request[ "pair" ], "label": request[ "label" ], "arm": request[ "arm" ], "ordering": request[ "ordering" ],
-             "request_hash": out[ "rows" ][ 0 ][ "request_hash" ], "status": out[ "rows" ][ 0 ][ "status" ], "tokens_in": out[ "rows" ][ 0 ][ "tokens_in" ],
-             "plant": side( ids[ "plant" ] ), "original": side( ids[ "original" ] ) }
+    row  = out[ "rows" ][ 0 ]
+    return { "pair": request[ "pair" ], "label": request[ "label" ], "arm": request[ "arm" ], "repeat": request[ "repeat" ], "request_hash": row[ "request_hash" ],
+             "status": row[ "status" ], "tokens_in": row[ "tokens_in" ], "plant": side( request[ "entries" ][ 0 ] ), "original": side( request[ "entries" ][ 1 ] ) }
+
+
+def distinct_bodies( requests ):
+    """
+    Check that no two requests would post the same body.
+
+    Ensures:
+        - returns the number of distinct request hashes, which equals the number of requests when the check holds
+        - the hash is the pack builder's own, so two requests that differ only in question order, which the canonical form sorts away, count as one
+
+    Raises:
+        - ValueError naming the surplus when two requests share a body
+    """
+    hashes = { rt.request_hash( rp.pack_request( r[ "need" ], r[ "entries" ], r[ "template" ] )[ 0 ] ) for r in requests }
+    if len( hashes ) != len( requests ): raise ValueError( f"{len( requests ) - len( hashes )} requests repeat another's body: the repeats would not be separate posts" )
+    return len( hashes )
+
+
+def tally( results, threshold ):
+    """
+    Count the plants accepted at the threshold, per label.
+
+    Ensures:
+        - returns same_job and not_same plants accepted of those answered, with the mean p_overlap, over the results given
+    """
+    out = { "same_job": { "accepted": 0, "answered": 0, "p": [] }, "not_same": { "accepted": 0, "answered": 0, "p": [] } }
+    for r in results:
+        if r[ "plant" ][ "answered" ]:
+            g = out[ r[ "label" ] ]
+            g[ "answered" ] += 1; g[ "accepted" ] += r[ "plant" ][ "p_overlap" ] >= threshold; g[ "p" ].append( r[ "plant" ][ "p_overlap" ] )
+    for g in out.values(): g[ "mean_p" ] = round( sum( g[ "p" ] ) / len( g[ "p" ] ), 4 ) if g[ "p" ] else None; del g[ "p" ]
+    return out
 
 
 def summarize_variant( results, dump=None, threshold=0.3 ):
     """
-    Count the plants the judge accepts by arm and label, and show the baseline was fresh.
+    Count the plants the judge accepts, per arm and per repeat, and show the posts were fresh.
 
     Ensures:
-        - returns { arms, baseline_vs_cached, ordering_gap, bypass_proof }
-        - bypass_proof counts the requests posted, their distinct request hashes and those that reported tokens; a cache read would report none
-        - the two orderings of a pair and arm differ only in the order the two questions are sent, so they share one request hash: a pair and arm give two posts and one hash
-        - arms: for each arm, same_job and not_same plants accepted of those answered at the threshold, over both orderings, and the mean p_overlap by label
-        - baseline_vs_cached: for each baseline answer with a saved rating, whether the two are equal; equal on every pair is the tell of a cache read, or of a deterministic judge, and tokens_in then separates them
-        - ordering_gap: the largest difference in a plant's p_overlap between the two orderings of the same pair and arm
+        - returns { arms, by_repeat, baseline_vs_cached, repeat_gap, bypass_proof }
+        - arms: for each arm, same_job and not_same plants accepted of those answered at the threshold over both repeats, and the mean p_overlap by label; by_repeat does the same per arm and repeat
+        - baseline_vs_cached: for each arm 0 answer with a saved rating, whether the two are equal; equal on every pair is the tell of a cache read, or of a deterministic judge, and tokens_in then separates them
+        - repeat_gap: the largest difference in a plant's p_overlap between the repeats of the same pair and arm, the judge's noise floor
+        - bypass_proof counts the requests posted, their distinct request hashes (equal to the posts when each repeat has its own body) and those that reported tokens; a cache read would report none
     """
-    arms = {}
-    for r in results:
-        a = arms.setdefault( r[ "arm" ], { "same_job": { "accepted": 0, "answered": 0, "p": [] }, "not_same": { "accepted": 0, "answered": 0, "p": [] } } )
-        if r[ "plant" ][ "answered" ]:
-            g = a[ r[ "label" ] ]
-            g[ "answered" ] += 1; g[ "accepted" ] += r[ "plant" ][ "p_overlap" ] >= threshold; g[ "p" ].append( r[ "plant" ][ "p_overlap" ] )
-    for a in arms.values():
-        for g in a.values(): g[ "mean_p" ] = round( sum( g[ "p" ] ) / len( g[ "p" ] ), 4 ) if g[ "p" ] else None; del g[ "p" ]
-    saved = {} if dump is None else { r[ "id" ]: r[ "plant" ] for r in dump }
-    vs    = [ { "pair": r[ "pair" ], "ordering": r[ "ordering" ], "cached": saved[ r[ "pair" ] ][ "p_overlap" ], "fresh": r[ "plant" ][ "p_overlap" ], "tokens_in": r[ "tokens_in" ],
-              "equal": saved[ r[ "pair" ] ][ "p_overlap" ] == r[ "plant" ][ "p_overlap" ] }
-            for r in results if r[ "arm" ] == ARM_BASELINE and r[ "plant" ][ "answered" ] and r[ "pair" ] in saved and saved[ r[ "pair" ] ][ "status" ] == HIT ]
+    arms      = { a: tally( [ r for r in results if r[ "arm" ] == a ], threshold ) for a in sorted( { r[ "arm" ] for r in results } ) }
+    by_repeat = { f"{a}/{n}": tally( [ r for r in results if r[ "arm" ] == a and r[ "repeat" ] == n ], threshold ) for a in arms for n in sorted( { r[ "repeat" ] for r in results if r[ "arm" ] == a } ) }
+    saved     = {} if dump is None else { r[ "id" ]: r[ "plant" ] for r in dump }
+    vs        = [ { "pair": r[ "pair" ], "repeat": r[ "repeat" ], "cached": saved[ r[ "pair" ] ][ "p_overlap" ], "fresh": r[ "plant" ][ "p_overlap" ], "tokens_in": r[ "tokens_in" ],
+                    "equal": saved[ r[ "pair" ] ][ "p_overlap" ] == r[ "plant" ][ "p_overlap" ] }
+                  for r in results if r[ "arm" ] == ARM_BASELINE and r[ "plant" ][ "answered" ] and r[ "pair" ] in saved and saved[ r[ "pair" ] ][ "status" ] == HIT ]
     seen, gap = {}, 0.0
     for r in results:
         if not r[ "plant" ][ "answered" ]: continue
@@ -327,9 +366,9 @@ def summarize_variant( results, dump=None, threshold=0.3 ):
         else: seen[ k ] = r[ "plant" ][ "p_overlap" ]
     hashes = [ r[ "request_hash" ] for r in results ]
     proof  = { "keys": "none: each request is posted as built; no candidate_key, no run_index, and no answer is read from or written to the cache",
-               "requests_posted": len( results ), "distinct_request_hashes": len( set( hashes ) ),
+               "requests_posted": len( results ), "distinct_request_hashes": len( set( hashes ) ), "every_post_has_its_own_body": len( set( hashes ) ) == len( results ),
                "requests_with_tokens": sum( 1 for r in results if r[ "tokens_in" ] ), "requests_without_tokens": sum( 1 for r in results if not r[ "tokens_in" ] ) }
-    return { "arms": arms, "baseline_vs_cached": vs, "ordering_gap": round( gap, 6 ), "bypass_proof": proof }
+    return { "arms": arms, "by_repeat": by_repeat, "baseline_vs_cached": vs, "repeat_gap": round( gap, 6 ), "bypass_proof": proof }
 
 
 def run_variant( run_dir, requests, ask, limit, budget, dump=None ):
@@ -379,7 +418,7 @@ def parse_args( argv ):
         - the first word is replay or variant; the source tree, the run folder, the earlier run's folder, the planted file, the answer key, the labels folder,
           the control report, the forced-judge report, the snapshot sha and the Jev data folder are required
         - live is false unless --live is given, and a live run also needs --run-name, a fresh spend-ledger run name
-        - the arms are baseline and both_lines unless --arms names others; the call budget is 140 unless named
+        - all three arms are asked unless --arms names others; the call budget is 140 unless named
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument( "mode", choices=( "replay", "variant" ) )
@@ -429,7 +468,7 @@ def main( argv=None, deps=None ):
 
     Ensures:
         - replay returns { live False, mode, dump, sweep, agreement, undrafted } and writes RATINGS_FILE and TABLE_FILE in the run folder; it contacts no model, no search and no spend ledger
-        - variant without --live returns { live False, plan } with the request count by arm and what was skipped, and contacts nothing
+        - variant without --live returns { live False, plan } with the request count by arm, the distinct bodies and what was skipped, and contacts nothing; it refuses a plan whose repeats share a body
         - variant with --live and a run name asks the judge once per request under the call cap and the token ceiling, and closes the spend-ledger run however it ends
 
     Raises:
@@ -479,7 +518,7 @@ def variant( args, records, undrafted, deps ):
     requests, skipped = plan_requests( records, tuple( args.arms ) )
     by_arm = {}
     for r in requests: by_arm[ r[ "arm" ] ] = by_arm.get( r[ "arm" ], 0 ) + 1
-    plan = { "pairs": len( records ), "undrafted": undrafted, "arms": list( args.arms ), "requests": len( requests ), "by_arm": by_arm, "skipped": skipped, "call_budget": args.budget }
+    plan = { "pairs": len( records ), "undrafted": undrafted, "arms": list( args.arms ), "requests": len( requests ), "distinct_bodies": distinct_bodies( requests ), "by_arm": by_arm, "skipped": skipped, "call_budget": args.budget }
     if not args.live: return { "live": False, "mode": "variant", "plan": plan }
     import os
     os.environ.update( { **expansion_run.read_env_file( f"{args.from_run}/run-env.sh" ), rt.RUN_NAME_VARIABLE: args.run_name, rt.CEILING_VARIABLE: str( args.ceiling ) } )

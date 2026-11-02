@@ -25,7 +25,10 @@ PRODUCTION = { "src/lupin_mcp/reuse_tools.py": { "build_request" },
 MEASUREMENT = { "src/lupin_mcp/reuse_stage1.py"         : { "pack_request" },
                 "src/lupin_mcp/reuse_stage1_analysis.py": { "build_request" },
                 # Only looks a key up in the cache of answers already given; it sends nothing, so a raw need never leaves the box.
-                "src/cosa/repo/symindex/candidates/arm_run.py": { "pair_key" } }
+                "src/cosa/repo/symindex/candidates/arm_run.py": { "pair_key" },
+                # The judge probe reads saved ratings by key (sends nothing) and posts the control's frozen need sentences, which are written from repository code, not typed by a user.
+                # All 17 saved plant ratings hit the cache under the raw sentence, so the redactor leaves these sentences unchanged.
+                "src/lupin_mcp/reuse_needset/judge_probe.py": { "candidate_key", "pack_request" } }
 
 
 def builders_called( source ):

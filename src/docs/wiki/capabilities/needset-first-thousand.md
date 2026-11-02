@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_needset.first_thousand.read_latest_labels@e66a6cadd1
   - lupin_mcp.reuse_needset.first_thousand.remainder_pairs@e6db44db98
   - lupin_mcp.reuse_needset.first_thousand.draft_control_needs@b7d264a6e8
-  - lupin_mcp.reuse_needset.first_thousand.planted_check@f29004ed70
+  - lupin_mcp.reuse_needset.first_thousand.planted_check@53d07356ce
   - lupin_mcp.reuse_needset.first_thousand.control_ask@e9868056c1
   - lupin_mcp.reuse_needset.first_thousand.remainder_stage@0cf94530e9
 ---
@@ -24,7 +24,7 @@ The pieces under the control and the remainder of Set B's first 1,000 model call
 - `PlantedCandidateStage` is the candidate stage client, answering the stage upload and the search from this process. It refuses a refresher, so nothing can rebuild or write the live vector set. It writes query vectors to the cache folder it is given, which must be a scratch folder of the run and never the live cache. `last_answer` keeps the latest search with every list whole, so a rank can be read. The control then tests both halves of the search.
 
 ## The control
-- `planted_check` asks the checker about one need over a pool that holds the planted records. It adds them to the entries the judge may be asked about and swaps the stage on a copy of the context. The seed is left out as in `check_need`.
+- `planted_check` asks the checker about one need over a pool that holds the planted records. It adds them to the entries the judge may be asked about and swaps the stage on a copy of the context. The seed is left out as in `check_need`. When the caller gives the plants' purpose lines, each plant carries its line through the same `attach_purposes` call that gives a real entry its line. So the judge reads a plant as it reads a real entry. Before 2 November 2026 it did not, and the judge saw a plant as its id and signature alone.
 - `draft_control_needs` writes the need sentence of each pair, one at a time, with the drafter that writes real Set B needs. Each pair drafts on a worker thread. Those calls count toward the cap, under the running stage. Each pair gets `CONTROL_TRIES` (four) tries. A pair that never passes raises `CONTROL_NEED_UNDRAFTED`, or goes to `on_undrafted` when the caller gives one.
 - `control_ask` builds the ask function the control stage takes, from the drafted needs and a checker. An optional observer sees each pair's receipt, which is how the scored rows are built.
 

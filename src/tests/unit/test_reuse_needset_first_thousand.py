@@ -160,6 +160,22 @@ def test_the_planted_check_adds_the_planted_entries_swaps_the_stage_on_a_copy_an
     assert got[ "prepared" ][ 2 ] != sha
 
 
+def test_the_planted_check_gives_a_plant_its_line_as_attach_purposes_gives_a_real_entry_and_leaves_the_rest_alone():
+    from cosa.repo.symindex import build as sx_build
+    from lupin_mcp import reuse_tools as rt
+    first, second = ( planted_pool.planted_entry( p[ "rewrite" ] ) for p in pairs()[ :2 ] )
+    got  = {}
+    base = ( set(), [ ], "shaX", "gen1" )
+    need = { "kind": "work_alike", "write_lang": "py", "seed": "d-orig00", "need": "a need" }
+    run  = lambda c, tool, query, need, **kw: got.update( kw ) or "receipt"
+    ft.planted_check( need, fake_ctx(), "S", [ first, second ], prepare=lambda c: base, run_question=run, purposes={ first[ "pin" ]: "Does the first one's work." } )
+    shown = { e[ "id" ]: e for e in got[ "prepared" ][ 1 ] }
+    assert shown[ first[ "id" ] ][ "purpose" ] == "Does the first one's work." and "purpose" not in shown[ second[ "id" ] ]
+    assert rt.entry_text( shown[ first[ "id" ] ] ).endswith( "| purpose: Does the first one's work." ) and shown[ first[ "id" ] ] == sx_build.attach_purposes( [ first ], { first[ "pin" ] : "Does the first one's work." } )[ 0 ]
+    ft.planted_check( need, fake_ctx(), "S", [ first ], prepare=lambda c: base, run_question=run )
+    assert "purpose" not in got[ "prepared" ][ 1 ][ 0 ]
+
+
 def test_the_remainder_stage_adds_the_count_of_every_unsure_flagged_pair_drifted_ones_included():
     ps       = pairs()
     one, two = labelled( ps )
@@ -1087,8 +1103,9 @@ def scored_world( tmp_path, monkeypatch, ids_of=None, shortlist_of=None, lines=N
 
     def draft_fn( job, ask, ledger, **kw ): return { "ok": True, "need": SENTENCE }
 
-    def check( need, c, planted, entries ):
+    def check( need, c, planted, entries, **kw ):
         given[ "transports" ].append( type( c.transport ).__name__ )
+        given.setdefault( "purposes", [ ] ).append( ( type( c.transport ).__name__, kw ) )
         arm = bare_ids_of if isinstance( c.transport, ft.RefusingTransport ) and bare_ids_of is not None else ids_of
         ids = [ e[ "id" ] for e in entries ] + [ f"idx.{need[ 'seed' ]}" ] if arm is None else arm( need, entries )
         return { "id": "r", "candidate_stage": { "ids": ids, "widened_ids": [] }, "shortlist": [ { "id": i } for i in ( ids if shortlist_of is None else shortlist_of( need, ids ) ) ] }
@@ -1107,6 +1124,8 @@ def test_the_scored_control_gives_each_plant_its_line_through_a_merged_store_and
     merged = [ json.loads( line ) for line in pathlib.Path( live_call[ "kw" ][ "purposes_file" ] ).read_text( encoding="utf-8" ).splitlines() ]
     assert merged == [ { "pin": "pin00", "purpose": "Original line that tears down." }, { "pin": pin, "purpose": "Does the plant's work." } ], "the live lines first, then the plants', and the live store is only read"
     assert out[ "purpose_lines_used" ] == 1 and out[ "plants_without_line" ] == [ "d-rew01" ] and out[ "labels" ] == { "answer_key_sha": "k" }
+    assert all( kw == { "purposes": { pin: "Does the plant's work." } } for name, kw in given[ "purposes" ] if name != "RefusingTransport" ) and len( given[ "purposes" ] ) > 20, "the live check judges the plant with its line"
+    assert all( kw == { } for name, kw in given[ "purposes" ] if name == "RefusingTransport" ), "the bare check judges the plant with no line at all"
     first = out[ "rows" ][ 0 ]
     assert len( out[ "rows" ] ) == 20 and first[ "purpose_line" ] == "Does the plant's work." and first[ "original" ][ "id" ] == "idx.d-orig00" and first[ "leak" ][ "original" ] == control_report.word_overlap( SENTENCE, "Original line that tears down." )
     assert out[ "rows" ][ 1 ][ "purpose_line" ] is None and out[ "rows" ][ 1 ][ "leak" ] == { "plant": None, "original": None }
