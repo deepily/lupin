@@ -277,6 +277,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[needset-expansion-replay]] — draft: ask for paraphrases and identifier words per need, search five ways, rank the known answer before and after. `lupin_mcp` (reuse_needset)
 - [[needset-expansion-run]] — the expansion replay on the real model and search, in a run folder of its own, with a plan mode that contacts nothing. `lupin_mcp` (reuse_needset)
 - [[needset-forced-judge]] — the judge's answer for each missed planted rewrite placed in the 128, beside its human label. `lupin_mcp` (reuse_needset)
+- [[needset-report-rollup]] — one markdown table per overnight experiment with Wilson intervals, and the control's a − b mark. `lupin_mcp` (reuse_needset)
 - [[needset-stage-parts]] — the live pieces of the attribution and yield stages: a final need per seed, model-agreed or counted and dropped, and the trace. `lupin_mcp` (reuse_needset)
 - [[needset-freeze]] — the hashes that name the index and vectors of a need set, the read-only copy and the check before a run. `lupin_mcp.reuse_needset` (freeze)
 - [[needset-revalidation]] — the day-before check of a frozen need set against a newer index: broken keys, new twin candidates and the refreeze. `lupin_mcp.reuse_needset` (revalidate)
