@@ -337,6 +337,16 @@ def ask_request( transport, request, budget=None, send=rp.send_pack ):
              "status": row[ "status" ], "tokens_in": row[ "tokens_in" ], "plant": side( request[ "entries" ][ 0 ] ), "original": side( request[ "entries" ][ 1 ] ) }
 
 
+def body_hash( request ):
+    """
+    Return the hash of the body a request would post.
+
+    Ensures:
+        - the hash is the pack builder's own, so two requests that differ only in question order, which the canonical form sorts away, hash alike
+    """
+    return rt.request_hash( rp.pack_request( request[ "need" ], request[ "entries" ], request[ "template" ] )[ 0 ] )
+
+
 def distinct_bodies( requests ):
     """
     Check that no two requests would post the same body.
@@ -348,7 +358,7 @@ def distinct_bodies( requests ):
     Raises:
         - ValueError naming the surplus when two requests share a body
     """
-    hashes = { rt.request_hash( rp.pack_request( r[ "need" ], r[ "entries" ], r[ "template" ] )[ 0 ] ) for r in requests }
+    hashes = { body_hash( r ) for r in requests }
     if len( hashes ) != len( requests ): raise ValueError( f"{len( requests ) - len( hashes )} requests repeat another's body: the repeats would not be separate posts" )
     return len( hashes )
 

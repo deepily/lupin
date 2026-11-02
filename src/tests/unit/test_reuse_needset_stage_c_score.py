@@ -12,6 +12,7 @@ from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import judge_probe as jp
 from tests.unit.test_reuse_pack_send import ENTRIES, NEED, Fake
 
+from lupin_mcp.reuse_needset import stage_c
 from lupin_mcp.reuse_needset import stage_c_score as sc
 
 STRATA = { "flag": ( 20, 10 ), "monolith:structural": ( 10, 10 ), "monolith:neighbour": ( 5, 12 ) }
@@ -337,6 +338,53 @@ def test_the_scorer_reads_rows_made_by_the_real_request_poster():
     pairs = sc.mean_ratings( rows )
     assert pairs[ "p1" ][ "r" ] == pytest.approx( 0.9 ) and sorted( pairs[ "p1" ][ "repeats" ] ) == [ 1, 2, 3 ] and sc.mean_ratings( rows, "side_a" )[ "p1" ][ "r" ] == pytest.approx( 0.9 )
     assert sc.valid_run( rows )[ "valid" ] is True and sc.valid_run( rows )[ "distinct_hashes" ] == 3
+
+
+def posted_and_twin_rows():
+    """Ensures: returns the posted rows of p1 and the rows with fan_out's copies for p2."""
+    posted = [ ]
+    for repeat in ( 1, 2, 3 ):
+        request = { "pair": "p1", "label": jp.SAME_JOB, "arm": "stage_c", "repeat": repeat, "need": f"{NEED} {repeat}", "entries": ENTRIES[ :2 ], "template": rt.PROMPT_TEMPLATE }
+        got     = jp.ask_request( Fake(), request )
+        posted.append( { **got, "stratum": "flag", "unsure": False, "raters": 2, "cue": False, "side_b": got[ "plant" ], "side_a": got[ "original" ] } )
+    twin = { "pair": "p2", "stratum": "flag", "label": jp.NOT_SAME, "unsure": False, "raters": 2 }
+    return posted, stage_c.fan_out( posted, { "p1": [ twin ] } )
+
+
+def test_valid_run_skips_the_hash_check_for_rows_a_real_fan_out_copied():
+    posted, out = posted_and_twin_rows()
+    assert len( out ) == 6 and len( { r[ "request_hash" ] for r in out } ) == 3
+    got = sc.valid_run( out )
+    assert got[ "valid" ] is True and got[ "reasons" ] == [ ]
+    assert ( got[ "posts" ], got[ "shared" ], got[ "distinct_hashes" ], got[ "without_tokens" ], got[ "stray_pairs" ], got[ "short_pairs" ] ) == ( 3, 3, 3, 0, [ ], [ ] )
+    assert sc.valid_run( posted )[ "shared" ] == 0
+
+
+def test_valid_run_still_refuses_a_repeated_hash_among_posted_rows_beside_twins():
+    _p, out = posted_and_twin_rows()
+    out[ 1 ][ "request_hash" ] = out[ 0 ][ "request_hash" ]
+    got = sc.valid_run( out )
+    assert got[ "valid" ] is False and got[ "reasons" ] == [ "a post shares its request hash with another" ]
+
+
+@pytest.mark.parametrize( "change", [ "unposted_pair", "other_repeat", "copy_of_a_copy" ] )
+def test_valid_run_refuses_a_copy_that_names_no_posted_row_of_the_same_repeat( change ):
+    _p, out = posted_and_twin_rows()
+    twin = out[ 3 ]
+    if change == "unposted_pair": twin[ "shared_with" ] = "p9"
+    if change == "other_repeat": twin[ "repeat" ] = 4
+    if change == "copy_of_a_copy": twin[ "shared_with" ] = "p2"
+    got = sc.valid_run( out )
+    assert got[ "valid" ] is False and got[ "stray_pairs" ] == [ "p2" ]
+    assert any( "1 pairs carry a copy that names no posted row of the same repeat" in r for r in got[ "reasons" ] )
+
+
+def test_a_stray_copy_makes_the_scored_report_invalid_with_no_level():
+    rep = report_of()
+    first = rep[ "results" ][ 0 ]
+    rep[ "results" ].append( { **first, "pair": "ghost", "shared_with": "nobody" } )
+    out = sc.score( rep, 20 )
+    assert out[ "valid_run" ][ "valid" ] is False and out[ "headline" ][ "threshold_free" ] == sc.NO_LEVEL
 
 
 def refused_rows( n, label=sc.NOT_SAME, stratum="flag", reasons=( "planted side", ) ):

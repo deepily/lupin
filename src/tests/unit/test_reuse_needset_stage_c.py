@@ -351,19 +351,20 @@ def live_argv( tmp_path, *more ):
     return argv( tmp_path, "--live", "--run-name", "needset-stage-c-x", "--from-run", str( tmp_path / "from-run" ), "--cli-path", str( cli ), *more )
 
 
-def stand_ins( tmp_path, rows, undrafted_pair=None, refused=() ):
+def stand_ins( tmp_path, rows, undrafted_pair=None, refused=(), by_records=False ):
     """Return the patches that replace the files, the drafter ledger and the strip step."""
     def draft_need( job, ask, ledger ):
         if job[ "meta" ][ "stage_c" ] == undrafted_pair: return { "ok": False, "reason": er.NEED_LEAKS_KEY }
+        if by_records: return { "ok": True, "need": f"Need for {job[ 'seed' ][ 'id' ]} against {job[ 'keys' ][ 0 ][ 'id' ]}." }   # as the saved drafts do: one sentence per record pair
         return { "ok": True, "need": f"Need for {job[ 'meta' ][ 'stage_c' ]}." }
     return [ mock.patch.object( sc, "collect_rows", return_value=( rows, list( refused ), [ ] ) ), mock.patch.object( sc.draft, "draft_need", side_effect=draft_need ),
              mock.patch.object( sc.draft, "make_ledger", return_value="ledger" ), mock.patch.object( sc.strip, "strip_member", side_effect=lambda r, root: { "kind": "k", "text": "t", "forbidden": [ ] } ),
              mock.patch.object( rt, "prepare" ) ]
 
 
-def run_live( tmp_path, deps, rows, undrafted_pair=None, refused=() ):
+def run_live( tmp_path, deps, rows, undrafted_pair=None, refused=(), by_records=False ):
     """Run a live stage on stand-ins and return its result."""
-    patches = stand_ins( tmp_path, rows, undrafted_pair, refused )
+    patches = stand_ins( tmp_path, rows, undrafted_pair, refused, by_records )
     for p in patches: p.start()
     try:
         return sc.main( live_argv( tmp_path ), deps )
@@ -408,6 +409,49 @@ def test_a_plan_run_leaves_the_model_transport_alone( tmp_path ):
     with mock.patch.object( sc.model_transport, "configure" ) as cfg, mock.patch.object( sc, "collect_rows", return_value=( [ make_row() ], [ ], [ ] ) ):
         sc.main( argv( tmp_path, "--cli-path", "/x/claude" ), { } )
     cfg.assert_not_called()
+
+
+def twin_rows():
+    """Return four rows: pairs 1 and 2 share records, pair 3 has others, pair 4 reverses pair 1."""
+    _records, index, by_id, purposes = world( 4 )
+    pairs = [ pair( 1, 1, 2 ), pair( 2, 1, 2, label=sc.NOT_SAME, unsure=True, raters=3, stratum="monolith:neighbour" ), pair( 3, 3, 4 ), pair( 4, 2, 1 ) ]
+    rows, _r, _s = sc.split_pairs( pairs, index, by_id, purposes )
+    return rows
+
+
+def test_pairs_on_the_same_records_in_the_same_order_share_one_body_and_the_reverse_order_does_not():
+    rows = twin_rows()
+    needs = { "pair-1": "One need.", "pair-2": "One need.", "pair-3": "One need.", "pair-4": "Another need." }
+    posting, shared = sc.share_bodies( rows, needs )
+    assert [ r[ "pair" ] for r in posting ] == [ "pair-1", "pair-3", "pair-4" ]
+    assert { p: [ r[ "pair" ] for r in rs ] for p, rs in shared.items() } == { "pair-1": [ "pair-2" ], "pair-3": [ ], "pair-4": [ ] }
+    posting, shared = sc.share_bodies( rows, { "pair-2": "One need.", "pair-3": "One need." } )
+    assert [ r[ "pair" ] for r in posting ] == [ "pair-2", "pair-3" ] and shared == { "pair-2": [ ], "pair-3": [ ] }
+    different, _s = sc.share_bodies( rows, { "pair-1": "One need.", "pair-2": "A different need." } )
+    assert [ r[ "pair" ] for r in different ] == [ "pair-1", "pair-2" ]
+
+
+def test_fan_out_gives_each_sharing_pair_the_posted_results_under_its_own_label():
+    rows = twin_rows()
+    results = [ { "pair": "pair-1", "label": sc.SAME_JOB, "stratum": "flag", "unsure": False, "raters": 2, "repeat": n, "request_hash": f"h{n}", "tokens_in": 9 } for n in ( 1, 2 ) ]
+    out = sc.fan_out( results, { "pair-1": [ rows[ 1 ] ], "pair-3": [ ] } )
+    assert out[ :2 ] == results and len( out ) == 4
+    assert [ ( r[ "pair" ], r[ "label" ], r[ "stratum" ], r[ "unsure" ], r[ "raters" ], r[ "repeat" ], r[ "request_hash" ], r[ "shared_with" ] ) for r in out[ 2: ] ] == [
+        ( "pair-2", sc.NOT_SAME, "monolith:neighbour", True, 3, n, f"h{n}", "pair-1" ) for n in ( 1, 2 ) ]
+    assert sc.fan_out( results, { } ) == results
+
+
+def test_a_live_run_posts_a_shared_body_once_and_reports_every_pair( tmp_path ):
+    deps, state = live_parts( tmp_path )
+    ( tmp_path / "run-dir" ).mkdir()
+    out = run_live( tmp_path, deps, twin_rows(), by_records=True )
+    assert sorted( { r[ "pair" ] for r in state[ "asked" ] } ) == [ "pair-1", "pair-3", "pair-4" ] and len( state[ "asked" ] ) == 9
+    assert out[ "report" ][ "status" ] == sc.jp.DONE
+    saved = json.loads( ( tmp_path / "run-dir" / sc.REPORT_FILE ).read_text( encoding="utf-8" ) )
+    assert saved[ "shared" ] == [ { "pair": "pair-2", "with": "pair-1" } ] and len( saved[ "results" ] ) == 12
+    twins = [ r for r in saved[ "results" ] if r[ "pair" ] == "pair-2" ]
+    assert [ r[ "repeat" ] for r in twins ] == [ 1, 2, 3 ] and {ra[ "label" ] for ra in twins} == { sc.NOT_SAME } and {r[ "shared_with" ] for r in twins} == { "pair-1" }
+    assert saved[ "summary" ][ "bypass_proof" ][ "calls_charged_to_the_cap" ] == out[ "report" ][ "used" ]
 
 
 def test_a_live_run_uses_the_transport_and_real_drafter_when_no_stand_ins_are_given( tmp_path ):

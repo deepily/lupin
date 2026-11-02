@@ -406,12 +406,51 @@ def live( args, rows, refused, plan, deps ):
         if made: source_at.unlock( args.root, root )
 
 
+def share_bodies( rows, needs ):
+    """
+    Find the pairs whose posts would repeat an earlier pair's body.
+
+    Requires:
+        - needs is { pair: sentence } for the drafted pairs
+
+    Ensures:
+        - returns ( posting, shared ): posting lists the first drafted row of each distinct body, in order, and shared is { posting pair: [ later rows with that body ] }
+        - the body is judge_probe's hash of the first repeat, so two pairs on one record pair in one order with one drafted need count as one
+        - a pair without a draft is in neither
+    """
+    posting, shared, first = [], {}, {}
+    for row in rows:
+        if row[ "pair" ] not in needs: continue
+        request = request_for( row, needs[ row[ "pair" ] ], REPEATS[ 0 ] )
+        digest  = jp.body_hash( request )
+        if digest in first: shared[ first[ digest ] ].append( row )
+        else:
+            first[ digest ] = row[ "pair" ]
+            shared[ row[ "pair" ] ] = []
+            posting.append( row )
+    return posting, shared
+
+
+def fan_out( results, shared ):
+    """
+    Give each pair that shares a body the posted pair's results as its own.
+
+    Ensures:
+        - returns results followed by one copy per result and sharing pair, carrying that pair's id, stratum, label, unsure mark and rater count, and shared_with naming the pair that was posted
+        - the copies are not new posts; they carry the same request hash and token counts as the original
+    """
+    copies = [ { **r, "pair": row[ "pair" ], "stratum": row[ "stratum" ], "label": row[ "label" ], "unsure": row[ "unsure" ], "raters": row[ "raters" ], "shared_with": r[ "pair" ] }
+               for r in results for row in shared.get( r[ "pair" ], [ ] ) ]
+    return results + copies
+
+
 def judge_all( args, rows, refused, budgets, root, ctx, deps ):
     """
     Draft under its own stage budget, then post every pair and repeat.
 
     Ensures:
-        - returns ( report, undrafted ); the report is run_variant's, written again with undrafted and refused as REPORT_FILE
+        - returns ( report, undrafted ); the report is run_variant's, written again with undrafted, refused and shared as REPORT_FILE
+        - a pair whose body repeats an earlier pair's is not posted again: it takes that pair's results, marked shared_with, and is listed in shared
         - the posts are checked for distinct bodies before the first goes out
     """
     cap = call_cap.CallCap( f"{args.run_dir}/{first_thousand.CALLS_FILE}", budgets[ "limit" ], { DRAFT_STAGE: budgets[ "drafts_budget" ] } )
@@ -420,11 +459,13 @@ def judge_all( args, rows, refused, budgets, root, ctx, deps ):
     with cap.installed():
         with call_cap.stage( DRAFT_STAGE ):
             needs, undrafted = draft_all( rows, lambda rec: strip.strip_member( rec, root ), ask, ledger )
-    requests = [ request_for( r, needs[ r[ "pair" ] ], n ) for r in rows if r[ "pair" ] in needs for n in REPEATS ]
+    posting, shared = share_bodies( rows, needs )
+    requests = [ request_for( r, needs[ r[ "pair" ] ], n ) for r in posting for n in REPEATS ]
     jp.distinct_bodies( requests )
     send   = deps[ "ask" ] if "ask" in deps else ( lambda request: ask_pair( ctx.transport, request, ctx.transport.budget ) )
     report = jp.run_variant( args.run_dir, requests, send, budgets[ "limit" ], budgets[ "posts_budget" ] )
-    pathlib.Path( f"{args.run_dir}/{REPORT_FILE}" ).write_text( json.dumps( { **report, "undrafted": undrafted, "refused": refused }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+    report = { **report, "results": fan_out( report[ "results" ], shared ) }
+    pathlib.Path( f"{args.run_dir}/{REPORT_FILE}" ).write_text( json.dumps( { **report, "undrafted": undrafted, "refused": refused, "shared": [ { "pair": r[ "pair" ], "with": p } for p, rs in shared.items() for r in rs ] }, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
     return report, undrafted
 
 
