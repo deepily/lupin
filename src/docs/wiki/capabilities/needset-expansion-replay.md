@@ -3,7 +3,8 @@ capability: needset-expansion-replay
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.expansion_replay.expansion_prompt@73ce117187
-  - lupin_mcp.reuse_needset.expansion_replay.parse_expansion@1e40dd7c56
+  - lupin_mcp.reuse_needset.expansion_replay.parse_expansion@a9f3bff934
+  - lupin_mcp.reuse_needset.expansion_replay.read_object@e0066efbdd
   - lupin_mcp.reuse_needset.expansion_replay.queries_for@23c07cab3d
   - lupin_mcp.reuse_needset.expansion_replay.expansion_key@a0e9587c6b
   - lupin_mcp.reuse_needset.expansion_replay.expand_need@08781b508c
@@ -17,7 +18,7 @@ Asks whether three paraphrases and five identifier words lift a known answer in 
 
 ## Expanding
 - `expansion_prompt` holds the need sentence and nothing from the code, so the key cannot leak into the reply.
-- `parse_expansion` accepts three paraphrases and one to five identifier words, and returns None for any other shape.
+- `parse_expansion` accepts three paraphrases and one to five identifier words, and returns None for any other shape. `read_object` reads the reply as written and, only if that fails, with full-width punctuation made plain.
 - `expand_need` asks once and saves the reply before reading it, so an unreadable reply is not paid for twice. `expansion_key` names the ledger entry, so a count of saved replies uses the same key.
 - `queries_for` lists five searches: the need, the three paraphrases, then the identifier words joined into one.
 

@@ -16,6 +16,7 @@ STAGE_NAME = "expansion"
 BUDGET     = 140                  # 124 needs (37 attribution, 70 yield, 17 control originals) with room for retries
 VERSION    = "expansion-1"
 SHORTLIST  = 128
+FULL_WIDTH = str.maketrans( { "\uff0c": ",", "\uff1a": ":", "\uff02": '"', "\uff3b": "[", "\uff3d": "]", "\uff5b": "{", "\uff5d": "}" } )
 SYSTEM     = "You answer with one JSON object and nothing else."
 PROMPT     = ( "Below is a one-sentence description of a function someone wants to find in a codebase.\n"
                "Reply with JSON {{\"paraphrases\": [three different wordings of the same description], \"identifiers\": [five words likely to appear in the "
@@ -35,6 +36,29 @@ def expansion_prompt( need ):
     return PROMPT.format( need=need )
 
 
+def read_object( reply ):
+    """
+    Read the JSON object inside a reply.
+
+    Requires:
+        - reply is the reply text
+
+    Ensures:
+        - returns the object as the reply wrote it when that parses
+        - otherwise returns it with the full-width comma, colon, quote, bracket and brace made plain, since the model sometimes writes one in place of its plain form
+        - the reply itself is never changed
+
+    Raises:
+        - ValueError when neither reading parses
+    """
+    for text in ( reply, reply.translate( FULL_WIDTH ) ):
+        try:
+            return json.loads( text[ text.index( "{" ):text.rindex( "}" ) + 1 ] )
+        except ValueError:
+            continue
+    raise ValueError( "the reply holds no readable JSON object" )
+
+
 def parse_expansion( reply ):
     """
     Read the model's reply.
@@ -44,10 +68,11 @@ def parse_expansion( reply ):
 
     Ensures:
         - returns { paraphrases, identifiers } with three paraphrases and one to five identifier words, each stripped and non-empty
+        - a full-width comma, colon, quote, bracket or brace is read as its plain form, but only when the reply does not parse as written
         - returns None when the reply is not that shape
     """
     try:
-        obj = json.loads( reply[ reply.index( "{" ):reply.rindex( "}" ) + 1 ] )
+        obj = read_object( reply )
         paraphrases, identifiers = obj[ "paraphrases" ], obj[ "identifiers" ]
     except ( ValueError, KeyError, TypeError ):
         return None
