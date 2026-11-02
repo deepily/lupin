@@ -199,3 +199,12 @@ def test_a_set_whose_manifest_cannot_be_read_is_loaded_every_time_and_never_held
     rs.search( request )
     rs.search( request )
     assert len( loader.calls ) == 2
+
+
+def test_a_search_with_no_list_head_keeps_every_list_whole_and_the_default_still_cuts(held):
+    rs, loader, root = held
+    whole = resident.ResidentSearch( root, loader, list_head=None )
+    whole.put_stage( "k1", ENTRIES )
+    cut, full = rs.search( with_vectors( root ) ), whole.search( with_vectors( root ) )
+    assert full[ "list_sizes" ] == cut[ "list_sizes" ] and all( len( full[ "lists" ][ n ] ) == full[ "list_sizes" ][ n ] for n in full[ "lists" ] ) and full[ "shortlist" ] == cut[ "shortlist" ]
+    assert resident.ResidentSearch( root, loader, list_head=1 ).__dict__[ "_head" ] == 1 and rs.__dict__[ "_head" ] == resident.LIST_HEAD

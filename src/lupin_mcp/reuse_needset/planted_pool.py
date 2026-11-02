@@ -60,19 +60,22 @@ class PlantedVectors:
         self.manifest_hash = base.manifest_hash
 
 
-def embed_rows( entries, client ):
+def embed_rows( entries, client, purposes=None ):
     """
     Embed the entries as the vector build does, one matrix at a time.
 
     Requires:
-        - entries are index records with file, name, sig and doc; client has embed( texts, content_type, role )
+        - entries are index records with file, name, sig, doc and pin; client has embed( texts, content_type, role )
+        - purposes is None or { pin: purpose line }
 
     Ensures:
         - returns { matrix name: one vector per entry, in order }
         - the texts, engines and roles are those of vector_build.build_vectors, so a planted row sits in the same space as the live rows
+        - an entry whose pin has a purpose line embeds it as a real entry does, and one without embeds the empty line
         - these are embedding calls, not model calls
     """
-    texts = [ vb.entry_texts( e, PURPOSE ) for e in entries ]
+    lines = {} if purposes is None else purposes
+    texts = [ vb.entry_texts( e, lines[ e[ "pin" ] ] if e[ "pin" ] in lines else PURPOSE ) for e in entries ]
     out   = {}
     for name in vs.MATRICES:
         content_type, role = vs.DOCUMENT_ROLES[ name ]
@@ -91,6 +94,7 @@ class PlantedCandidateStage( rc.CandidateStage ):
 
     Ensures:
         - every request the parent would send over HTTP is answered by a ResidentSearch in this process
+        - last_answer is the latest search answer with every source list whole, and the caller gets it cut to the usual list head, as the server cuts it
         - no refresher is allowed, so nothing rebuilds or writes the live vector set
     """
 
@@ -98,7 +102,8 @@ class PlantedCandidateStage( rc.CandidateStage ):
         """Hold an in-process resident search that loads the planted vectors, not the disk."""
         if kwargs.get( "refresher" ) is not None: raise ValueError( "a planted stage may not refresh the live vector set" )
         super().__init__( "http://in-process", "", vectors_dir, query_cache_dir, embed_client, **kwargs )
-        self._resident = resident.ResidentSearch( os.path.realpath( vectors_dir ), load_vectors=lambda _folder: planted )
+        self._resident   = resident.ResidentSearch( os.path.realpath( vectors_dir ), load_vectors=lambda _folder: planted, list_head=None )
+        self.last_answer = None
 
     def _call( self, method, path, body ):
         """
@@ -109,6 +114,7 @@ class PlantedCandidateStage( rc.CandidateStage ):
         """
         try:
             if method == "PUT": return 200, self._resident.put_stage( body[ "key" ], body[ "entries" ], body[ "purposes" ], body[ "fusion" ] )
-            return 200, self._resident.search( body )
+            self.last_answer = self._resident.search( body )
+            return 200, resident.trim_lists( self.last_answer )
         except CandidateError as e:
             return STATUS_OF[ e.code ] if e.code in STATUS_OF else 503, { "error": e.code, "detail": e.detail }

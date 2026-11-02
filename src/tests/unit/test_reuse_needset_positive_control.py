@@ -18,7 +18,7 @@ WORDS        = [ "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"
 
 def record( i, name=None ):
     """Return an index record whose words are its own."""
-    return { "id": f"d-orig{i:02d}", "file": f"src/a{i}.py", "module": f"a{i}", "name": name or f"{WORDS[ i % 10 ]}Thing{i}", "sig": "()", "doc": f"{WORDS[ i % 10 ]} routine number {i}" }
+    return { "id": f"d-orig{i:02d}", "file": f"src/a{i}.py", "module": f"a{i}", "name": name or f"{WORDS[ i % 10 ]}Thing{i}", "sig": "()", "doc": f"{WORDS[ i % 10 ]} routine number {i}", "pin": f"pin{i:02d}" }
 
 
 def pool():

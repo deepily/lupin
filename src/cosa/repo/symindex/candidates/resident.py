@@ -51,8 +51,14 @@ class ResidentSearch:
         - one call is one search; no state of one search reaches another
     """
 
-    def __init__( self, allowed_root, load_vectors=search.default_loader, max_stages=MAX_STAGES, max_vector_sets=MAX_VECTOR_SETS ):
-        """Hold the root, the loader and the limits, with nothing loaded."""
+    def __init__( self, allowed_root, load_vectors=search.default_loader, max_stages=MAX_STAGES, max_vector_sets=MAX_VECTOR_SETS, list_head=LIST_HEAD ):
+        """
+        Hold the root, the loader, the limits and the list cut, with nothing loaded.
+
+        Requires:
+            - list_head is a positive integer, or None to keep every list whole
+        """
+        self._head     = list_head
         self._root     = os.path.realpath( allowed_root )
         self._load     = load_vectors
         self._max_s    = max_stages
@@ -140,7 +146,7 @@ class ResidentSearch:
             - request holds stage_key, need and K, and may hold vectors_dir with query_vectors, wiki and expect_manifest_hash
 
         Ensures:
-            - returns what search.answer_for_stage returns, with each source's list cut to its first LIST_HEAD ids and list_sizes added
+            - returns what search.answer_for_stage returns, with each source's list cut to its first LIST_HEAD ids ( the constructor's list_head, None for no cut ) and list_sizes added
             - a request with expect_manifest_hash is refused when the set it would read has another hash
 
         Raises:
@@ -165,4 +171,4 @@ class ResidentSearch:
                 raise CandidateError( VECTOR_SET_REPLACED, f"expected {expected[ :12 ]}, the set on disk is {vectors.manifest_hash[ :12 ]}" )
             return vectors
 
-        return trim_lists( search.answer_for_stage( request, stage, loader ) )
+        return trim_lists( search.answer_for_stage( request, stage, loader ), self._head )
