@@ -250,6 +250,11 @@ def test_two_requests_that_post_one_body_are_refused_before_any_post():
     assert jp.distinct_bodies( [ twin ] ) == 1
 
 
+def test_the_body_hash_ignores_question_order_and_follows_the_need():
+    twin = { "need": "n", "entries": [ plant( 1 ), entry( 1 ) ], "template": rt.PROMPT_TEMPLATE }
+    assert jp.body_hash( twin ) == jp.body_hash( { **twin, "entries": [ entry( 1 ), plant( 1 ) ] } ) and jp.body_hash( twin ) != jp.body_hash( { **twin, "need": "another need" } )
+
+
 def fake_send( p_plant, p_original, status="answered" ):
     """Return a send function answering the two questions of a pack with fixed overlaps."""
     def send( transport, need, entries, template, model, budget ):
