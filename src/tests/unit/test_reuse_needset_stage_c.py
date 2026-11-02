@@ -23,7 +23,9 @@ SERIAL = itertools.count( 1 )
 @pytest.fixture( autouse=True )
 def restore_environment():
     """Ensures: os.environ is restored after each test, since a live run writes into it."""
+    saved = sc.model_transport.CLI_PATH
     with mock.patch.dict( os.environ ): yield
+    sc.model_transport.CLI_PATH = saved
 
 
 def rec( n, doc="does a thing", **more ):
@@ -342,8 +344,11 @@ def live_parts( tmp_path ):
 
 
 def live_argv( tmp_path, *more ):
-    """Return the live command line."""
-    return argv( tmp_path, "--live", "--run-name", "needset-stage-c-x", "--from-run", str( tmp_path / "from-run" ), "--cli-path", "/x/claude", *more )
+    """Return the live command line, naming a real executable as the Claude Code binary."""
+    cli = tmp_path / "claude"
+    cli.write_text( "#!/bin/sh\n", encoding="utf-8" )
+    cli.chmod( 0o755 )
+    return argv( tmp_path, "--live", "--run-name", "needset-stage-c-x", "--from-run", str( tmp_path / "from-run" ), "--cli-path", str( cli ), *more )
 
 
 def stand_ins( tmp_path, rows, undrafted_pair=None, refused=() ):
@@ -379,6 +384,30 @@ def test_a_live_run_drafts_posts_every_repeat_writes_the_report_and_closes_the_r
     saved = json.loads( ( tmp_path / "run-dir" / sc.REPORT_FILE ).read_text( encoding="utf-8" ) )
     assert saved[ "undrafted" ][ 0 ][ "pair" ] == "pair-2" and saved[ "refused" ] == refused and out[ "plan" ][ "pairs_total" ] == 4 and len( saved[ "results" ] ) == 6 and saved[ "status" ] == "done"
     assert os.environ[ rt.RUN_NAME_VARIABLE ] == "needset-stage-c-x" and os.environ[ rt.CEILING_VARIABLE ] == str( sc.jp.CEILING ) and sc.exit_status( out ) == 0
+
+
+def test_a_live_run_points_the_model_transport_at_the_cli_path_before_any_call( tmp_path ):
+    deps, state = live_parts( tmp_path )
+    ( tmp_path / "run-dir" ).mkdir( exist_ok=True )
+    order = []
+    with mock.patch.object( sc.model_transport, "configure", side_effect=lambda **kw: order.append( ( "configure", kw ) ) ) as cfg:
+        deps[ "ask" ] = lambda request, _ask=deps[ "ask" ]: ( order.append( ( "ask", None ) ), _ask( request ) )[ 1 ]
+        run_live( tmp_path, deps, [ make_row() ] )
+    cfg.assert_called_once_with( cli_path=str( tmp_path / "claude" ) )
+    assert order[ 0 ] == ( "configure", { "cli_path": str( tmp_path / "claude" ) } ) and ( "ask", None ) in order
+
+
+def test_a_live_run_leaves_the_real_transport_bound_to_the_cli_path( tmp_path ):
+    deps, _state = live_parts( tmp_path )
+    ( tmp_path / "run-dir" ).mkdir( exist_ok=True )
+    run_live( tmp_path, deps, [ make_row() ] )
+    assert sc.model_transport.CLI_PATH == str( tmp_path / "claude" )
+
+
+def test_a_plan_run_leaves_the_model_transport_alone( tmp_path ):
+    with mock.patch.object( sc.model_transport, "configure" ) as cfg, mock.patch.object( sc, "collect_rows", return_value=( [ make_row() ], [ ], [ ] ) ):
+        sc.main( argv( tmp_path, "--cli-path", "/x/claude" ), { } )
+    cfg.assert_not_called()
 
 
 def test_a_live_run_uses_the_transport_and_real_drafter_when_no_stand_ins_are_given( tmp_path ):

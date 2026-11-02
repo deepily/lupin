@@ -16,6 +16,7 @@ import pathlib
 import subprocess
 import textwrap
 
+from cosa.repo.doc_lint import model_transport
 from cosa.repo.duplicate_check.proof import label_load, proof_run
 from cosa.repo.labelling import packets as pk
 from cosa.repo.labelling import pair_labels as pl
@@ -369,6 +370,7 @@ def main( argv=None, deps=None ):
     if not args.live: return { "live": False, "mode": "stage_c", "plan": plan }
     if not args.run_name or not args.from_run: raise er.NeedsetError( er.BAD_NEED, "a live run needs --run-name, a spend-ledger run name that was not used before, and --from-run for its environment" )
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "the ledgers are bound to the Claude Code binary's version" )
+    model_transport.configure( cli_path=args.cli_path )
     return live( args, rows, refused, plan, deps )
 
 
