@@ -218,7 +218,7 @@ test( "an external link and a click off any link are left alone", () => {
 
 
 // ---------------------------------------------------------------------------
-// Row 192fecdf — the 📄 view link; row 39624bae — the state of a card drawn after a reload
+// Row 192fecdf — the 📋 view link; row 39624bae — the state of a card drawn after a reload
 // ---------------------------------------------------------------------------
 
 const VIEW   = ( id: string ): string => `/app/tasks/view?row=${ id }`;
@@ -237,7 +237,7 @@ const tipText   = (): string => ( document.querySelector( "#abstract-tooltip .ab
 const tipShown  = (): boolean => ( document.getElementById( "abstract-tooltip" ) as Element ).classList.contains( "visible" );
 const FIX_X     = { title: "Fix X", priority: "P2", owner_persona: "krishna", status: "not_approved", body: "line one\nline two" };
 
-test( "horizontal: a 📄 link shows the row in the content pane, like the 📋, with no overlay and no new tab", async () => {
+test( "horizontal: a 📋 link shows the row in the content pane, like the 📋, with no overlay and no new tab", async () => {
   const { reader, asked } = table( { [ ROW_A ]: FIX_X } );
   const shell = setup( recorder(), reader, "horizontal" );
   const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
@@ -252,7 +252,7 @@ test( "horizontal: a 📄 link shows the row in the content pane, like the 📋,
   assert.deepEqual( calls, [], "viewing sends no approve" );
 } );
 
-test( "horizontal: a second click on the same 📄 link closes the pane, as the 📋 does", async () => {
+test( "horizontal: a second click on the same 📋 link closes the pane, as the 📋 does", async () => {
   const { reader } = table( { [ ROW_A ]: FIX_X } );
   const shell = setup( recorder(), reader, "horizontal" );
   const [ a ] = plant( shell.querySelector( "#sender-cards-container" ) as Element, [ VIEW( ROW_A ) ] );
@@ -262,7 +262,7 @@ test( "horizontal: a second click on the same 📄 link closes the pane, as the 
   assert.equal( ( document.getElementById( "content-pane" ) as HTMLElement ).hidden, true );
 } );
 
-test( "vertical: a 📄 link shows the row in the abstract tooltip, with no pane, no overlay and no new tab", async () => {
+test( "vertical: a 📋 link shows the row in the abstract tooltip, with no pane, no overlay and no new tab", async () => {
   const { reader } = table( { [ ROW_A ]: FIX_X } );
   const shell = setup( recorder(), reader );
   const [ a ] = plant( shell.querySelector( "#sender-cards-container" ) as Element, [ VIEW( ROW_A ) ] );
@@ -275,7 +275,7 @@ test( "vertical: a 📄 link shows the row in the abstract tooltip, with no pane
   assertNoTab();
 } );
 
-test( "horizontal with a live action-required card owning the pane: the 📄 link falls back to the tooltip and the pane is untouched", async () => {
+test( "horizontal with a live action-required card owning the pane: the 📋 link falls back to the tooltip and the pane is untouched", async () => {
   const { reader } = table( { [ ROW_A ]: FIX_X } );
   const shell = setup( recorder(), reader, "horizontal", true, true );
   const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
@@ -287,7 +287,7 @@ test( "horizontal with a live action-required card owning the pane: the 📄 lin
   assertNoTab();
 } );
 
-test( "vertical without a tooltip: the 📄 click is claimed, opens nothing and does not throw", async () => {
+test( "vertical without a tooltip: the 📋 click is claimed, opens nothing and does not throw", async () => {
   const { reader } = table( { [ ROW_A ]: FIX_X } );
   const shell = setup( recorder(), reader, "vertical", false );
   const [ a ] = plant( shell.querySelector( "#sender-cards-container" ) as Element, [ VIEW( ROW_A ) ] );
@@ -297,7 +297,7 @@ test( "vertical without a tooltip: the 📄 click is claimed, opens nothing and 
   assert.equal( document.getElementById( "task-body-overlay" ), null );
 } );
 
-test( "a 📄 link on a row that cannot be read says so, in the pane and in the tooltip", async () => {
+test( "a 📋 link on a row that cannot be read says so, in the pane and in the tooltip", async () => {
   for ( const layout of [ "horizontal", "vertical" ] as const ) {
     document.body.replaceChildren();
     if ( tip !== null ) { tip.unmount(); tip = null; }
@@ -310,7 +310,7 @@ test( "a 📄 link on a row that cannot be read says so, in the pane and in the 
   }
 } );
 
-test( "without a reader a 📄 link is left alone", () => {
+test( "without a reader a 📋 link is left alone", () => {
   const shell = setup( recorder() );
   const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
   assert.equal( click( a! ), false );
@@ -492,3 +492,17 @@ test( "taskReaderFor reads the row's own path with the id encoded, and answers n
   const down = taskReaderFor( { get: async (): Promise<never> => { throw new Error( "down" ); } } );
   assert.equal( await down( ROW_A ), null );
 } );
+
+// A view link is found by its address, so a card sent before the label changed to 📋 still works.
+for ( const label of [ "\u{1F4CB}", "\u{1F4C4}" ] ) {
+  test( `a view link labelled ${ label } is claimed and shows the row`, async () => {
+    const { reader, asked } = table( { [ ROW_A ]: FIX_X } );
+    const shell = setup( recorder(), reader, "horizontal" );
+    const [ a ] = plant( shell.querySelector( "#action-required-content" ) as Element, [ VIEW( ROW_A ) ] );
+    a!.textContent = label;
+    assert.equal( click( a! ), true, "claimed" );
+    await flush();
+    assert.deepEqual( asked, [ ROW_A ] );
+    assert.ok( paneText().includes( "Fix X" ) );
+  } );
+}

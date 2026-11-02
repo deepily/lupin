@@ -1,7 +1,7 @@
 /* c8 ignore next */ // tsx phantom-branch artifact, file header.
 // The shared task-body overlay.
 //
-// The task list's 📄 and a card's 📄 view link both open it.
+// The task list's 📄 and a card's 📋 view link both open it.
 // It was a private method of TaskRowController and moved here unchanged.
 // The card link and the task list open the same overlay, so the two cannot drift.
 

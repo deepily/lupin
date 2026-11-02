@@ -1,6 +1,6 @@
 // Tests for one-click ticket approval in the legacy client.
 //
-// A card lists held rows as `[approve ☐](/app/tasks/approve?row=<uuid>) [📄](/app/tasks/view?row=<uuid>)`. The click handler must
+// A card lists held rows as `[approve ☐](/app/tasks/approve?row=<uuid>) [📋](/app/tasks/view?row=<uuid>)`. The click handler must
 // claim the link, send the approve move once, and draw the answer where the link was.
 //
 // The links are planted inside `#action-required-content`, where the card lives.
@@ -202,7 +202,7 @@ test( "an external link and a click off any link are left alone", () => {
 
 
 // ---------------------------------------------------------------------------
-// Row 192fecdf — the 📄 view link; row 39624bae — the state of a card drawn after a reload
+// Row 192fecdf — the 📋 view link; row 39624bae — the state of a card drawn after a reload
 // ---------------------------------------------------------------------------
 
 const VIEW  = ( id: string ): string => `/app/tasks/view?row=${ id }`;
@@ -223,7 +223,7 @@ function plantTooltip(): Element {
   return tip;
 }
 
-test( "horizontal: a 📄 link shows the row in the content pane like the 📋, with no overlay and no new tab", async () => {
+test( "horizontal: a 📋 link shows the row in the content pane like the 📋, with no overlay and no new tab", async () => {
   table[ ROW_A ] = FIX_X;
   ui._layoutMode = "horizontal";
   const [ a ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
@@ -236,7 +236,7 @@ test( "horizontal: a 📄 link shows the row in the content pane like the 📋, 
   assert.deepEqual( calls, [], "viewing sends no approve" );
 } );
 
-test( "horizontal: a 📄 link inside the action-required card uses the tooltip, as that card's own 📋 does", async () => {
+test( "horizontal: a 📋 link inside the action-required card uses the tooltip, as that card's own 📋 does", async () => {
   table[ ROW_A ] = FIX_X;
   ui._layoutMode = "horizontal";
   const tip = plantTooltip();
@@ -247,7 +247,7 @@ test( "horizontal: a 📄 link inside the action-required card uses the tooltip,
   assert.deepEqual( paneOpens, [], "the pane is left to the live response buttons" );
 } );
 
-test( "horizontal: while an action-required card owns the pane, a 📄 link in the list uses the tooltip", async () => {
+test( "horizontal: while an action-required card owns the pane, a 📋 link in the list uses the tooltip", async () => {
   table[ ROW_A ] = FIX_X;
   ui._layoutMode = "horizontal";
   ui._actionRequiredInPane = true;
@@ -260,7 +260,7 @@ test( "horizontal: while an action-required card owns the pane, a 📄 link in t
   assert.deepEqual( paneOpens, [], "the pane guard would have dropped it" );
 } );
 
-test( "horizontal: a 📄 link inside the open tooltip replaces the tooltip text, not the pane", async () => {
+test( "horizontal: a 📋 link inside the open tooltip replaces the tooltip text, not the pane", async () => {
   table[ ROW_A ] = FIX_X;
   ui._layoutMode = "horizontal";
   const tip = plantTooltip();
@@ -272,7 +272,7 @@ test( "horizontal: a 📄 link inside the open tooltip replaces the tooltip text
   assert.deepEqual( paneOpens, [] );
 } );
 
-test( "vertical: a 📄 link in the plain notification list shows the tooltip and never the pane", async () => {
+test( "vertical: a 📋 link in the plain notification list shows the tooltip and never the pane", async () => {
   table[ ROW_A ] = FIX_X;
   ui._layoutMode = "vertical";
   const tip = plantTooltip();
@@ -284,7 +284,7 @@ test( "vertical: a 📄 link in the plain notification list shows the tooltip an
   assert.deepEqual( tabOpens, [], "no new tab" );
 } );
 
-test( "vertical: a 📄 link shows the row in the abstract tooltip, with no pane, no overlay and no new tab", async () => {
+test( "vertical: a 📋 link shows the row in the abstract tooltip, with no pane, no overlay and no new tab", async () => {
   table[ ROW_A ] = FIX_X;
   ui._layoutMode = "vertical";
   const tip = plantTooltip();
@@ -298,7 +298,7 @@ test( "vertical: a 📄 link shows the row in the abstract tooltip, with no pane
   assert.deepEqual( tabOpens, [], "no new tab" );
 } );
 
-test( "a 📄 link on a row that cannot be read says so, in the pane and in the tooltip", async () => {
+test( "a 📋 link on a row that cannot be read says so, in the pane and in the tooltip", async () => {
   ui._layoutMode = "horizontal";
   const [ a ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
   click( a! );
@@ -312,7 +312,7 @@ test( "a 📄 link on a row that cannot be read says so, in the pane and in the 
   assert.equal( tip.querySelector( ".abstract-tooltip-content" )?.textContent, "Could not read this ticket." );
 } );
 
-test( "a malformed 📄 link and a click off any link are not claimed as views", () => {
+test( "a malformed 📋 link and a click off any link are not claimed as views", () => {
   const [ a ] = plantCard( [ "/app/tasks/view?row=a3975cf4" ] );
   click( a! );
   click( host() );
@@ -437,3 +437,17 @@ test( "a ticket body carrying an img tag goes through renderMarkdown and creates
   await flush();
   assert.ok( paneOpens[ 0 ]!.includes( `before ${ evil } after` ), "the pane was given the row text, to render as markdown" );
 } );
+
+// A view link is found by its address, so a card sent before the label changed to 📋 still works.
+for ( const label of [ "\u{1F4CB}", "\u{1F4C4}" ] ) {
+  test( `a view link labelled ${ label } is claimed and shows the row`, async () => {
+    table[ ROW_A ] = FIX_X;
+    ui._layoutMode = "horizontal";
+    const [ a ] = plantCard( [ VIEW( ROW_A ) ], "notification-list" );
+    a!.textContent = label;
+    assert.equal( click( a! ), true, "claimed" );
+    await flush();
+    assert.deepEqual( asked, [ ROW_A ] );
+    assert.deepEqual( paneOpens, [ FACTS ] );
+  } );
+}

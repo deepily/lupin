@@ -18577,7 +18577,7 @@ class NotificationsUI {
         // the card's own abstract falls through to the in-tab tooltip below
         // (vertical parity — a surface Rick already knows). Foreign indicators
         // (center-column cards) still route to the pane, where the guard holds.
-        // A link inside the open tooltip also stays in the tooltip, and the 📄 link falls back to it while a
+        // A link inside the open tooltip also stays in the tooltip, and the 📋 link falls back to it while a
         // card owns the pane, because the pane guard would drop it silently.
         const isOwnActionRequired = !!indicator.closest( "#action-required-content, .abstract-tooltip" )
                                     || ( tooltipWhenPaneBlocked && this._actionRequiredInPane === true );
@@ -20884,7 +20884,7 @@ class NotificationsUI {
         // action-required card would never reach a branch added after it; this one claims
         // the click first and stops the browser from following it.
         document.addEventListener( "click", ( ev ) => this._handleApproveLinkClick( ev ) );
-        // Row 192fecdf — the 📄 view link beside it, and the redraw check on drawn approve links.
+        // Row 192fecdf — the 📋 view link beside it, and the redraw check on drawn approve links.
         document.addEventListener( "click", ( ev ) => this._handleViewLinkClick( ev ) );
         this._observeApproveLinks( document.body );
 
@@ -20971,7 +20971,7 @@ class NotificationsUI {
     }
 
     /**
-     * Reads the row id out of a 📄 view-link href, or returns null when it is not one.
+     * Reads the row id out of a 📋 view-link href, or returns null when it is not one.
      *
      * The href is `/app/tasks/view?row=<full lowercase uuid>`, relative or with a loopback origin.
      */
@@ -20988,7 +20988,7 @@ class NotificationsUI {
     }
 
     /**
-     * Reads one task row for the 📄 overlay and the redraw check.
+     * Reads one task row for the 📋 link and the redraw check.
      *
      * Ensures: returns the row object on a 2xx answer, null on any failure; never throws.
      */
@@ -21012,7 +21012,7 @@ class NotificationsUI {
     }
 
     /**
-     * Document-level click handler for the 📄 view link in a card.
+     * Document-level click handler for the 📋 view link in a card.
      *
      * Ensures:
      *     - any other click is left untouched
