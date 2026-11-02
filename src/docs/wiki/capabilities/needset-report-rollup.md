@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.reuse_needset.report_rollup.split@e036ea5d2a
   - lupin_mcp.reuse_needset.report_rollup.load@e90a99b57d
   - lupin_mcp.reuse_needset.report_rollup.counts_table@b0b2b297a6
-  - lupin_mcp.reuse_needset.report_rollup.yield_section@1a6e34d896
+  - lupin_mcp.reuse_needset.report_rollup.yield_section@88b0562e2f
   - lupin_mcp.reuse_needset.report_rollup.judge_rows@3f3f656d91
   - lupin_mcp.reuse_needset.report_rollup.forced_section@cf2714e716
   - lupin_mcp.reuse_needset.report_rollup.expansion_section@6237d3ab25
