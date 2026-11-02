@@ -11,7 +11,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.inlineThinking@dae4212c87
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.folded@6bbcf6a191
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.createSessionTranscriptRenderer@eb73d026b3
-  - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.ReadingPaneRendererImpl@a1bd1fb7d4
+  - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.ReadingPaneRendererImpl@d56e4c7338
   - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.req@dd208cc4ab
   - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.reqId@f912a21288
   - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.formatMetric@d058d31430
@@ -31,6 +31,7 @@ These four renderers paint the reading pane, one seat's live console, the Q&A pa
 - `unrecordedThinking` is a dim label for thinking with no text. `inlineThinking` shows thinking text under a label, unfolded. `folded` is a `details` element with plain text inside; `tool_result` uses it.
 - `ReadingPaneRendererImpl` owns the pane chrome, splitter, layout toggle and bust-out. It hides the reading body and shows the optional console mount when the content is `console` and no action-required card is in the pane. `req` and `reqId` look up elements by selector or id at mount and throw when one is missing.
 - `ReadingPaneRendererImpl` takes an optional `approveSender`. With it, a click is first offered to the approve-link handler, ahead of the doc-link branch, so an approve link never navigates ([[task-approve-link]]). Without it, approve links are left alone.
+- It also takes an optional `taskReader` and `tooltip`. With a reader, a click goes next to the 📋 view-link handler. The pane also watches for newly drawn approve links (`observeApproveLinks`) until unmount. The ticket text shows like an abstract 📋: in the pane in horizontal layout, else in the tooltip. A live action-required card owning the pane also sends it to the tooltip.
 - `QaPaneRendererImpl` paints the Q&A pane from its store. `formatMetric` shows milliseconds or `--`. `anyMetric` keeps the metrics strip hidden until one of the three stamps has landed.
 - `SubmitJobsPaneRendererImpl` wires the CC, research, test suite and TFE cards to the store. `schedulingOf` reads a card's schedule checkbox and time, plus the monopolize box when the card has one.
 

@@ -175,6 +175,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[mcp-spawner-helpers]] — the spawner's identity, config, prompt, command and alarm helpers, and the idle reap. `lupin_mcp` (session_spawner)
 - [[session-transcript-console]] — showing another seat's transcript as display blocks: a REST backlog plus a live WebSocket tail, admin accounts only. `cosa.rest` (cc_transcript_mapper, cc_transcript_tailer), `cosa.rest.routers` (cc_transcript, websocket)
 - [[doc-viewer]] — serving repo files and the `io/` folder to the browser by `path=<project>/<rel>`, and admin upload into them. `cosa.rest.routers` (docs_files, io_files, _scope_registry), `cosa.rest` (upload_size_guard), `cosa.config` (docview_manifest)
+- [[doc-viewer-owner-rule]] — a person reads their own podcast and deep-research folders in the doc viewer, and nobody else's. `cosa.rest.routers` (_owner_scope)
 - [[system-admin-and-stats]] — the small routers that report on the server, steer it, and map clean URLs to pages. `cosa.rest.routers` (system, mode, stats, multiplexer_config, pages, websocket_admin)
 - [[symbol-index]] — the list of every Python, JavaScript, TypeScript and Dart definition in a tree, each with a content pin that wiki pages quote. `cosa.repo.symindex` (build, py_index, spec, paths, wiki_lint)
 - [[symindex-tests-scope]] — the separate index of test files, kept apart from the main index so a test is never a reuse candidate by default. `cosa.repo.symindex` (spec)

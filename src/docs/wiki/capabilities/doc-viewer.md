@@ -2,7 +2,7 @@
 capability: doc-viewer
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.routers.docs_files.get_docs_file@f6b61c9fe4
+  - cosa.rest.routers.docs_files.get_docs_file@5f50d0fe56
   - cosa.rest.routers.docs_files.upload_docs_file@ed41be996e
   - cosa.rest.routers.io_files.get_io_file@3e431b3d92
   - cosa.rest.routers._pinned_open.open_pinned@4865d9e913

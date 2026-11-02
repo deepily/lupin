@@ -2,10 +2,11 @@
 capability: deep-research
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.deep_research.job.DeepResearchJob@91f9c77f32
-  - cosa.agents.deep_research.cli.run_research@6d63dedaf3
+  - cosa.agents.deep_research.job.DeepResearchJob@3180632dda
+  - cosa.agents.deep_research.cli.run_research@15318a5392
   - cosa.agents.deep_research.cli.generate_abstract_for_cli@802bfc04b2
   - cosa.agents.deep_research.cli.save_report_with_frontmatter@3805e7087f
+  - cosa.agents.deep_research.cli.skipped_topics_section@e4502c2378
   - cosa.agents.deep_research.config.ResearchConfig@fcd3ee4805
   - cosa.agents.deep_research.cost_tracker.CostTracker@acea766158
   - cosa.agents.deep_research.cost_tracker.BudgetExceededError@d9783d68d7
@@ -21,6 +22,7 @@ pins:
 - `run_research` runs four steps inline: clarify the query, plan sub-topics, research each topic, synthesize one report. The job then makes an abstract (`generate_abstract_for_cli`) and saves the report (`save_report_with_frontmatter`, local or GCS).
 - Topics are researched one after another, not in parallel. Each result is cached for the day under `io/deep-research/{user_email}/cache/{date}`; the key is the topic's six alphabetically-first words (`normalize_query`).
 - The `ResearchConfig` code default is `claude-opus-4-6` for the lead. The shipped INI (`[Lupin: Baseline]`, every section inherits it) sets `deep research lead model` to `claude-opus-5` instead. Subagents run `claude-sonnet-4-6` and at most 20 turns per call in both. The job's `lead_model`, `audience` and `audience_context` override.
+- A topic whose research call returns an error result (for example a turn limit) costs that topic only. `run_research` records it as `{ topic, reason }`, tells the user, and goes on. An expired Claude login aborts the run instead, because every later call would fail too. `skipped_topics_section( skipped )` renders the "Skipped topics" section appended to the report. The job passes in an empty `skipped_topics` list and adds a "Skipped topics" line to its completion abstract. When every topic failed, `run_research` raises `RuntimeError`.
 - `source_document` paths are already validated by the v2 door; `query_with_seed_context` puts them in front of the question for this job and for the chained ones.
 
 ## Invariants

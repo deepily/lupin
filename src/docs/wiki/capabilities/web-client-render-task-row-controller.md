@@ -3,15 +3,17 @@ capability: web-client-render-task-row-controller
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.taskRowController.reasonMicContextId@c81468f4d4
-  - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController@16e5a78be9
+  - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController@71718237a1
   - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.constructor@774aeb6e6d
   - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.operatorStateHandlers@150ce9c1ca
-  - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.dispose@0e59932ce0
-  - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.handleClick@7e0c1f6f7a
+  - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.dispose@0d27f80bea
+  - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.handleClick@aea00f8638
   - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.handleKeydown@848bf2b3e3
   - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.handleChange@320e292dd5
   - src.lupin_app.static.js.multiplexer.render.taskRowController.TaskRowController.renderRowError@52a66df123
   - src.lupin_app.static.js.multiplexer.render.taskRowController.deriveEditErrorMessage@997b63b391
+  - src.lupin_app.static.js.multiplexer.render.taskBodyOverlay.dismissTaskBodyOverlay@369332111e
+  - src.lupin_app.static.js.multiplexer.render.taskBodyOverlay.openTaskBodyOverlay@d785194270
 ---
 # Web client: task row controller
 
@@ -28,7 +30,11 @@ The row it drives is in [[web-client-render-task-row-cells]]; the verb table is 
 - Update PATCHes only `priority`, and only when it differs from `data-original`.
 - `reasonMicContextId( id )` is `task-reason-<id>`. The mic records into its own row's reason box; a second click stops it.
 - A 404 on a write counts as success with `gone` true. Any other failure restores the optimistic state and shows `deriveEditErrorMessage`: "Edit failed (HTTP n)" or "Edit failed: <message>". A non-Error throw gets a bare "Edit failed".
-- `renderRowError( id, message )` paints or clears the stripe. `operatorStateHandlers` returns the verb, priority and error handlers. `dispose` closes the 📄 overlay.
+- `renderRowError( id, message )` paints or clears the stripe. `operatorStateHandlers` returns the verb, priority and error handlers. `dispose` closes the 📄 overlay by calling `dismissTaskBodyOverlay`.
+
+## The body overlay
+- `openTaskBodyOverlay( bodyText, idLabel )` shows one `#task-body-overlay` with a header ("Task <id>", or "Task detail" for a blank label) and the text in a `<pre>`. It is set as text, never as HTML. A second call replaces the first.
+- A backdrop click or Escape runs `dismissTaskBodyOverlay`, which removes the overlay and its key listener. It is safe to call with none open. The controller opens it from the 📄 and the id cell. A card's 📋 ticket link does not use it ([[task-approve-link]]).
 
 ## Don't
 - Don't look a control up by task id across the pane. The epic board paints a row twice, so lookups use the pressed control's own group.
