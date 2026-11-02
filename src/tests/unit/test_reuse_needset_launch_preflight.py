@@ -227,6 +227,23 @@ def test_the_real_source_tree_reports_made_and_locked_before_and_tree_is_locked_
     assert lp.source_tree_of( repo, "HEAD" ) == ( path, False, False ) and lp.tree_is_locked( repo, path ) is True
 
 
+def test_tree_is_locked_matches_a_symlinked_or_relative_spelling_and_treats_a_failed_read_as_locked( tmp_path, monkeypatch ):
+    import subprocess
+    from lupin_mcp.reuse_needset import source_at
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in ( [ "init", "-q" ], [ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "c" ] ): subprocess.run( [ "git", "-C", str( repo ), *cmd ], check=True, capture_output=True )
+    path = lp.source_tree_of( repo, "HEAD" )[ 0 ]
+    link = tmp_path / "link"
+    link.symlink_to( path, target_is_directory=True )
+    assert lp.tree_is_locked( repo, link ) is True
+    monkeypatch.chdir( tmp_path )
+    assert lp.tree_is_locked( repo, "repo/" + str( path.relative_to( repo ) ) ) is True
+    source_at.unlock( repo, path )
+    assert lp.tree_is_locked( repo, link ) is False
+    assert lp.tree_is_locked( tmp_path / "not-a-repo", path ) is True
+
+
 def test_a_ledger_line_that_is_not_json_is_skipped_not_fatal( tmp_path ):
     path = make_ledger( tmp_path, RUN )
     with path.open( "a", encoding="utf-8" ) as f: f.write( "not json\n[1]\n" )

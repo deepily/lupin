@@ -143,12 +143,16 @@ def tree_is_locked( root, tree ):
 
     Ensures:
         - returns True iff git worktree list names that path with a locked line
+        - paths compare by their real location, so a symlinked or relative spelling of the same tree matches
         - returns False for a path git does not list
+        - returns True when git cannot list, so a failed read never leads to unlocking a tree a live run may hold
     """
     got = subprocess.run( [ "git", "-C", str( root ), "worktree", "list", "--porcelain" ], capture_output=True, text=True )
+    if got.returncode != 0: return True
+    want = os.path.realpath( tree )
     for block in got.stdout.split( "\n\n" ):
         lines = block.splitlines()
-        if lines and lines[ 0 ] == f"worktree {tree}": return any( line == "locked" or line.startswith( "locked " ) for line in lines )
+        if lines and lines[ 0 ].startswith( "worktree " ) and os.path.realpath( lines[ 0 ][ len( "worktree " ): ] ) == want: return any( line == "locked" or line.startswith( "locked " ) for line in lines )
     return False
 
 
