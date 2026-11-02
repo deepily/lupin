@@ -9,6 +9,7 @@ import subprocess
 import pytest
 
 from cosa.repo.doc_lint import model_transport
+from cosa.repo.labelling import errors as lb_errors
 from cosa.repo.labelling import packets as lb_packets
 from cosa.repo.duplicate_check import blind
 from cosa.repo.duplicate_check import errors as err
@@ -386,6 +387,9 @@ def test_a_rewrite_that_cannot_be_extracted_is_a_named_failure_so_the_next_origi
         assert got[ "status" ] == "failed" and got[ "stratum" ] == method and "no definition could be extracted" in got[ "failures" ][ 0 ][ "extract" ]
 
 
+PROV = { "source_commit": "a" * 40, "index_generation": "gen-0123456789" }
+
+
 def planted_pair( i, stratum="fable-planted" ):
     o = rec( f"o{i}", f"original text {i}" )
     return { "original": o, "rewrite": rec( f"r{i}", f"rewrite text {i}" ), "stratum": stratum }
@@ -393,7 +397,7 @@ def planted_pair( i, stratum="fable-planted" ):
 
 def test_prepare_writes_one_blind_packet_per_reviewer_and_the_key_apart_and_only_once( tmp_path ):
     mono = { "defs": [ rec( "m1", "mono one" ), rec( "m2", "mono two" ) ], "pairs": [ { "ids": [ "d-m1", "d-m2" ], "source": "structural" } ], "blob": "b" * 40 }
-    got  = lp.prepare( [ planted_pair( 1 ), planted_pair( 2, "opus-work-alike" ) ], mono, [ "rick", "reviewer-2" ], 5, tmp_path, "c" * 64 )
+    got  = lp.prepare( [ planted_pair( 1 ), planted_pair( 2, "opus-work-alike" ) ], mono, [ "rick", "reviewer-2" ], 5, tmp_path, "c" * 64, PROV )
     assert got[ "items" ] == 3 and set( got[ "packets" ] ) == { "rick", "reviewer-2" }
     key = json.loads( pathlib.Path( got[ "key" ] ).read_text( encoding="utf-8" ) )
     assert key[ "config_sha" ] == "c" * 64 and key[ "monolith_blob" ] == "b" * 40 and len( key[ "items" ] ) == 3
@@ -406,13 +410,13 @@ def test_prepare_writes_one_blind_packet_per_reviewer_and_the_key_apart_and_only
     other = [ json.loads( l )[ "item_id" ] for l in pathlib.Path( got[ "packets" ][ "reviewer-2" ] ).read_text( encoding="utf-8" ).splitlines() ]
     assert other != [ l[ "item_id" ] for l in lines ] and sorted( other ) == sorted( key[ "items" ] )
     before = pathlib.Path( got[ "packets" ][ "rick" ] ).read_bytes()
-    with pytest.raises( FileExistsError, match="already exists" ): lp.prepare( [ planted_pair( 1 ) ], mono, [ "rick", "reviewer-2" ], 5, tmp_path, "c" * 64 )
+    with pytest.raises( FileExistsError, match="already exists" ): lp.prepare( [ planted_pair( 1 ) ], mono, [ "rick", "reviewer-2" ], 5, tmp_path, "c" * 64, PROV )
     assert pathlib.Path( got[ "packets" ][ "rick" ] ).read_bytes() == before
 
 
 def test_a_packet_prepared_here_is_read_back_by_the_packet_tools_blind_form( tmp_path ):
     mono = { "defs": [ rec( "m1", "mono one" ), rec( "m2", "mono two" ) ], "pairs": [ { "ids": [ "d-m1", "d-m2" ], "source": "neighbour" } ], "blob": "b" * 40 }
-    got  = lp.prepare( [ planted_pair( 1 ) ], mono, [ "rick", "reviewer-2" ], 5, tmp_path, "c" * 64 )
+    got  = lp.prepare( [ planted_pair( 1 ) ], mono, [ "rick", "reviewer-2" ], 5, tmp_path, "c" * 64, PROV )
     for line in pathlib.Path( got[ "packets" ][ "rick" ] ).read_text( encoding="utf-8" ).splitlines(): assert lb_packets.blind_form( json.loads( line ) ) == json.loads( line )
 
 
@@ -470,12 +474,12 @@ def test_a_saved_planted_file_made_for_other_inputs_is_refused_before_any_model_
     made  = { "seed": 3, "count": 60, "config_sha": CFG[ "config_sha" ] }
     lp.save_doc( tmp_path / "out" / "key" / lp.PLANTED_FILE, { "planted": [], "failed": [], "inputs": made } )
     asked = { "seed": 3, "count": 60, "cfg": CFG, **{ ( "cfg" if k == "config_sha" else k ): ( { **CFG, "config_sha": v } if k == "config_sha" else v ) for k, v in changed.items() } }
-    with pytest.raises( ValueError, match="was made for" ): lp.run( tmp_path / "repo", tmp_path / "out", asked[ "cfg" ], resume_wiring( tmp_path ), seed=asked[ "seed" ], count=asked[ "count" ] )
+    with pytest.raises( ValueError, match="was made for" ): lp.run( tmp_path / "repo", tmp_path / "out", asked[ "cfg" ], resume_wiring( tmp_path ), seed=asked[ "seed" ], count=asked[ "count" ], provenance=PROV )
 
 
 def test_a_saved_planted_file_that_records_no_inputs_is_refused( tmp_path ):
     lp.save_doc( tmp_path / "out" / "key" / lp.PLANTED_FILE, { "planted": [], "failed": [] } )
-    with pytest.raises( ValueError, match="was made for None" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, resume_wiring( tmp_path ), seed=3 )
+    with pytest.raises( ValueError, match="was made for None" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, resume_wiring( tmp_path ), seed=3, provenance=PROV )
 
 
 def test_a_relative_out_folder_gives_absolute_paths_whatever_the_working_folder( tmp_path, monkeypatch ):
@@ -484,7 +488,7 @@ def test_a_relative_out_folder_gives_absolute_paths_whatever_the_working_folder(
     wiring = { **resume_wiring( tmp_path ), "asks": { "rewrite": lambda s, u: PY_TEXT if "def " in u else TS_TEXT, "sentence": lambda s, u: SENTENCE, "alike": lambda s, u: PY_TEXT if "Python" in u else TS_TEXT },
                "shape_of": { "py": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9}, "ts": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9} } }
     monkeypatch.chdir( tmp_path )
-    out = lp.run( tmp_path / "repo", "rel-out", CFG, wiring, seed=3 )
+    out = lp.run( tmp_path / "repo", "rel-out", CFG, wiring, seed=3, provenance=PROV )
     assert out[ "key" ] == str( tmp_path / "rel-out" / "key" / lp.KEY_FILE ) and all( v.startswith( str( tmp_path / "rel-out" ) ) for v in out[ "packets" ].values() )
 
 
@@ -499,7 +503,7 @@ def test_the_whole_run_plants_sixty_pairs_sixty_forty_one_third_work_alikes_and_
                "asks": { "rewrite": rewrite, "sentence": lambda s, u: SENTENCE, "alike": alike },
                "shape_of": { "py": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9}, "ts": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9} },
                "client": FakeEmbed(), "cache_dir": tmp_path / "vec" }
-    out = lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3 )
+    out = lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3, provenance=PROV )
     assert out[ "planted" ] == { "fable-planted": 40, "opus-work-alike": 20 } and out[ "failed" ] == 0 and out[ "items" ] == 60 + sum( out[ "monolith" ].values() )
     assert set( out[ "monolith" ] ) == { "structural", "neighbour", "nominated" } and out[ "monolith" ][ "nominated" ] == 0
     key  = json.loads( pathlib.Path( out[ "key" ] ).read_text( encoding="utf-8" ) )
@@ -523,10 +527,10 @@ def test_a_failure_after_planting_costs_no_model_call_on_the_next_run( tmp_path,
                "asks": { "rewrite": ask( py_reply ), "sentence": lambda s, u: calls.append( 1 ) or SENTENCE, "alike": ask( py_reply ) },
                "shape_of": { "py": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9}, "ts": lambda text: {1, 2, 3} if "fn_" in text else {7, 8, 9} },
                "client": Broken(), "cache_dir": tmp_path / "vec" }
-    with pytest.raises( RuntimeError, match="no API key" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3 )
+    with pytest.raises( RuntimeError, match="no API key" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3, provenance=PROV )
     used = len( calls )
     assert used >= 60 and ( tmp_path / "out" / "key" / lp.PLANTED_FILE ).is_file() and not ( tmp_path / "out" / "key" / lp.KEY_FILE ).exists()
-    out = lp.run( tmp_path / "repo", tmp_path / "out", CFG, { **wiring, "client": FakeEmbed() }, seed=3 )
+    out = lp.run( tmp_path / "repo", tmp_path / "out", CFG, { **wiring, "client": FakeEmbed() }, seed=3, provenance=PROV )
     assert len( calls ) == used and out[ "planted" ] == { "fable-planted": 40, "opus-work-alike": 20 } and out[ "failed" ] == 0
 
 
@@ -600,21 +604,21 @@ def test_a_resumed_run_tops_up_the_work_alikes_saves_the_document_and_then_asks_
         def info( self ): raise RuntimeError( "no key" )
     real_top_up = lp.top_up_alikes
     monkeypatch.setattr( lp, "top_up_alikes", lambda *a, **k: 0 )                  # the first run stops before any top-up, as a crash would
-    with pytest.raises( RuntimeError, match="no key" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, { **wiring, "client": Broken() }, seed=3 )
+    with pytest.raises( RuntimeError, match="no key" ): lp.run( tmp_path / "repo", tmp_path / "out", CFG, { **wiring, "client": Broken() }, seed=3, provenance=PROV )
     monkeypatch.setattr( lp, "top_up_alikes", real_top_up )
     saved = tmp_path / "out" / "key" / lp.PLANTED_FILE
     first = json.loads( saved.read_text( encoding="utf-8" ) )
     assert not any( p[ "stratum" ] == "opus-work-alike" for p in first[ "planted" ] ) and len( first[ "failed" ] ) > 0
     assert first[ "inputs" ] == { "seed": 3, "count": 60, "config_sha": CFG[ "config_sha" ] }
     state[ "sentence" ] = SENTENCE
-    out  = lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3 )
+    out  = lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3, provenance=PROV )
     assert out[ "planted" ][ "opus-work-alike" ] == 20 and out[ "planted" ][ "fable-planted" ] == len( first[ "planted" ] )
     assert json.loads( saved.read_text( encoding="utf-8" ) )[ "planted" ][ :len( first[ "planted" ] ) ] == first[ "planted" ]
     used = state[ "calls" ]
     again = tmp_path / "out2"
     ( again / "key" ).mkdir( parents=True )
     ( again / "key" / lp.PLANTED_FILE ).write_text( saved.read_text( encoding="utf-8" ), encoding="utf-8" )
-    lp.run( tmp_path / "repo", again, CFG, wiring, seed=3 )
+    lp.run( tmp_path / "repo", again, CFG, wiring, seed=3, provenance=PROV )
     assert state[ "calls" ] == used
 
 
@@ -666,3 +670,56 @@ def test_main_refuses_to_run_when_the_frozen_file_is_not_the_live_configuration(
     monkeypatch.setattr( model_transport, "configure", lambda path=None: None )
     with pytest.raises( err.DuplicateCheckError ) as caught: lp.main( [ "--out", str( tmp_path / "o" ) ], make_wiring=lambda root, cache: None )
     assert caught.value.code == err.CONFIG_DRIFT
+
+
+# ---- provenance: the commit and index generation the run is cut from ----------------------------------------------
+
+def mono_pairs():
+    """Return a small monolith result for prepare."""
+    return { "defs": [ rec( "m1", "mono one" ), rec( "m2", "mono two" ) ], "pairs": [ { "ids": [ "d-m1", "d-m2" ], "source": "structural" } ], "blob": "b" * 40 }
+
+
+def test_the_answer_key_records_the_source_commit_and_the_index_generation( tmp_path ):
+    got = lp.prepare( [ planted_pair( 1 ) ], mono_pairs(), [ "rick", "reviewer-2" ], 5, tmp_path, "c" * 64, PROV )
+    key = json.loads( pathlib.Path( got[ "key" ] ).read_text( encoding="utf-8" ) )
+    assert key[ "source_commit" ] == "a" * 40 and key[ "index_generation" ] == "gen-0123456789"
+    for path in got[ "packets" ].values(): assert lb_packets.read_provenance( path ) == PROV
+
+
+@pytest.mark.parametrize( "bad", [ { }, { "index_generation": "gen-1" }, { "source_commit": "a" * 40 }, { "source_commit": "", "index_generation": "gen-1" } ] )
+def test_prepare_refuses_a_run_without_a_commit_or_index_generation_before_writing_anything( tmp_path, bad ):
+    with pytest.raises( lb_errors.LabellingError ) as e: lp.prepare( [ planted_pair( 1 ) ], mono_pairs(), [ "rick", "reviewer-2" ], 5, tmp_path, "c" * 64, bad )
+    assert e.value.code == lb_errors.PROVENANCE_MISSING
+    assert not list( tmp_path.iterdir() )
+
+
+def test_source_provenance_names_the_head_commit_and_the_live_generation( tmp_path, monkeypatch ):
+    tree = tmp_path / "tree"
+    gen  = tree / "index" / "gen-abc1234567"
+    gen.mkdir( parents=True )
+    ( tree / "index" / "current" ).symlink_to( gen.name )
+    monkeypatch.setattr( lp.sx_paths, "default_out_dir", lambda root: pathlib.Path( root ) / "index" )
+    subprocess.run( [ "git", "init", "-q" ], cwd=tree, check=True )
+    subprocess.run( [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x" ], cwd=tree, check=True )
+    head = subprocess.run( [ "git", "rev-parse", "HEAD" ], cwd=tree, capture_output=True, text=True, check=True ).stdout.strip()
+    assert lp.source_provenance( tree ) == { "source_commit": head, "index_generation": "gen-abc1234567" }
+
+
+def test_source_provenance_refuses_a_tree_with_no_commit_or_no_published_index( tmp_path ):
+    nowhere = tmp_path / "absent"
+    with pytest.raises( lb_errors.LabellingError ) as e: lp.source_provenance( nowhere )
+    assert e.value.code == lb_errors.PROVENANCE_MISSING and "source_commit" in e.value.detail
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    subprocess.run( [ "git", "init", "-q" ], cwd=bare, check=True )
+    with pytest.raises( lb_errors.LabellingError ) as e: lp.source_provenance( bare )
+    assert e.value.code == lb_errors.PROVENANCE_MISSING and "source_commit" in e.value.detail
+    subprocess.run( [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x" ], cwd=bare, check=True )
+    with pytest.raises( lb_errors.LabellingError ) as e: lp.source_provenance( bare )
+    assert e.value.code == lb_errors.PROVENANCE_MISSING and "index_generation" in e.value.detail
+
+
+def test_run_takes_the_provenance_from_the_tree_when_none_is_given_and_refuses_before_any_model_call( tmp_path ):
+    wiring = resume_wiring( tmp_path )
+    with pytest.raises( lb_errors.LabellingError ) as e: lp.run( tmp_path / "repo", tmp_path / "out", CFG, wiring, seed=3 )
+    assert e.value.code == lb_errors.PROVENANCE_MISSING and not ( tmp_path / "out" ).exists()

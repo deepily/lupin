@@ -25,7 +25,7 @@ def run( tmp_path ):
     """Prepare packets and a key for the toy's known pairs; return ( toy, packets, key path )."""
     toy  = Toy( tmp_path )
     mono = { "defs": toy.spec[ "monolith_defs" ], "pairs": toy.spec[ "monolith_pairs" ], "blob": "blob" }
-    made = lp.prepare( toy.spec[ "planted" ], mono, [ "rick", "second" ], 3, tmp_path / "run", "sha" )
+    made = lp.prepare( toy.spec[ "planted" ], mono, [ "rick", "second" ], 3, tmp_path / "run", "sha", { "source_commit": "a" * 40, "index_generation": "gen-0123456789" } )
     return toy, { r: pk.packet_path( tmp_path / "run" / "packets", r ) for r in made[ "packets" ] }, made[ "key" ]
 
 
@@ -266,7 +266,7 @@ def make_supplement( toy, tmp_path, rick, second, key_name="supplement-key.json"
     rows  = { m[ "item" ][ "item_id" ]: { **m[ "row" ], "kind": "flag", "stratum": "flag" } for m in made }
     key   = tmp_path / key_name
     key.write_text( json.dumps( { "items": rows } ), encoding="utf-8" )
-    packs = pk.export_packets( [ m[ "item" ] for m in made ], [ "rick-supp", "second-supp" ], 3, tmp_path / "supp-packets" )
+    packs = pk.export_packets( [ m[ "item" ] for m in made ], [ "rick-supp", "second-supp" ], 3, tmp_path / "supp-packets", { "source_commit": "a" * 40, "index_generation": "gen-0123456789" } )
     for reviewer, answers in ( ( "rick-supp", rick ), ( "second-supp", second ) ):
         for n, m in enumerate( made ): pl.save_label( packs[ reviewer ], m[ "item" ][ "item_id" ], answers[ n ], clock=CLOCK )
     by_pair = { pr.label_key( p[ 0 ][ "id" ], p[ 1 ][ "id" ] ): m[ "item" ][ "item_id" ] for p, m in zip( pairs, made ) }

@@ -8,9 +8,10 @@ pins:
   - cosa.repo.duplicate_check.proof.label_prep.unordered_key@73bdda79d6
   - cosa.repo.duplicate_check.proof.label_prep.item_id@b6a2e0ea4f
   - cosa.repo.duplicate_check.proof.label_prep.pair_item@b3d5b13847
-  - cosa.repo.duplicate_check.proof.label_prep.prepare@f4343902d3
+  - cosa.repo.duplicate_check.proof.label_prep.prepare@089967022e
   - cosa.repo.duplicate_check.proof.label_prep.save_doc@8e644e313a
-  - cosa.repo.duplicate_check.proof.label_prep.run@dc662b8fc6
+  - cosa.repo.duplicate_check.proof.label_prep.source_provenance@1eb9654ab1
+  - cosa.repo.duplicate_check.proof.label_prep.run@3ff409c0cf
   - cosa.repo.duplicate_check.proof.label_prep.live_wiring@7a6c7abc06
   - cosa.repo.duplicate_check.proof.label_prep.main@63d7e5c866
 ---
@@ -29,10 +30,10 @@ The second half of `label_prep.py`: the monolith pairs, the blind items, the pac
 
 ## Packets and key
 - `prepare` builds one item per planted pair and monolith pair. It writes `packets/packet-<reviewer>.jsonl`, with the same items in a different order each, and `key/answer-key.json` once. It raises `FileExistsError` if the key exists, before anything is written.
-- The key maps each item id to its ids, which side is a, its kind and its stratum or source. A packet holds the item ids and texts only.
+- The key maps each item id to its ids, which side is a, its kind and its stratum or source. It also records the `source_commit` and `index_generation` the pairs were cut from, and `prepare` refuses to write without them. `source_provenance( root )` reads them from the tree: the full id of HEAD and the live generation folder name. A packet holds the item ids and texts only.
 
 ## Command
 - `save_doc` writes the planted document to a temporary file and renames it. The file holds the old document or the new one, never half of either.
-- `run` plants 60 pairs, 60 percent script and 40 percent Python. A failed pair is replaced by the next original in the order. `top_up_alikes` then adds work-alikes, so the total can pass 60. It saves them to `key/planted.json` before the monolith step, and after each top-up wave, so a later failure costs no model call. The file also records the seed, count and config hash. A run that finds a file made for other values, or for none, raises `ValueError` before any model call. It then returns the packets and key path. It also returns planted and failed counts by stratum, and monolith pair counts.
+- `run` plants 60 pairs, 60 percent script and 40 percent Python. A failed pair is replaced by the next original in the order. `top_up_alikes` then adds work-alikes, so the total can pass 60. It saves them to `key/planted.json` before the monolith step, and after each top-up wave, so a later failure costs no model call. The file also records the seed, count and config hash. A run that finds a file made for other values, or for none, raises `ValueError` before any model call. A tree that cannot name its commit and index generation raises `PROVENANCE_MISSING` first. It then returns the packets and key path. It also returns planted and failed counts by stratum, and monolith pair counts.
 - `live_wiring` builds the real definitions, the three model asks (Fable rewrites, the need-writer model, Opus work-alikes) and the shape readers.
 - `main` takes `--out` and an optional `--claude-cli-path`. It checks the frozen configuration against the live one, runs, prints JSON and returns 0. It raises `CONFIG_DRIFT` if they differ.
