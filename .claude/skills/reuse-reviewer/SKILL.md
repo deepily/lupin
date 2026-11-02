@@ -69,8 +69,8 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    SEARCHED <symbol id> :: <search id> :: none :: <why>
    ```
 
-   Then close each lookup with the outcome line from `planning-is-prompting` `workflow/plan-review.md` section 4
-   (commit `3a715cd31`). It ties the receipt and the search to what the diff did:
+   Then close each lookup with the outcome line from `planning-is-prompting` `workflow/plan-review.md` section 4.
+   It ties the receipt and the search to what the diff did:
 
    ```text
    REUSE-OUTCOME <receipt id> :: <search id> :: REUSED <symbol> | EXTENDED <symbol> | WROTE_NEW <difference> :: <plan path>#<step>
@@ -80,6 +80,11 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    any text without ` :: `. A definition the tool refused has `excluded` in the receipt position; code outside the
    index has `unindexed` in both id positions. The reader challenges that line. A receipt with no outcome line is a
    lookup nobody acted on.
+
+   The implementer writes the line when the code lands. You write it from the diff for any definition that has none.
+   In the plan slot put the plan path and step that called for the definition. When the diff has no plan, put the
+   task row id and `#diff`: `<task row id>#diff`. The section's pattern accepts any token like `<text>#<text>` with no spaces.
+   It names no plan-less form, so this is the skill's own convention.
 
    **What the gate enforces today.** `src/lupin_mcp/reuse_exit_gate.py` requires the search only for a
    `DISTINCT` ruling. It does not yet require one for `DUPLICATE` or `EXTEND`, and it does not read
