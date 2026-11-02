@@ -25,18 +25,21 @@ from lupin_mcp.reuse_needset import call_cap, draft, expansion_run, first_thousa
 from lupin_mcp.reuse_needset import errors as er
 
 STAGE_NAME   = "judge_probe"
-BUDGET       = 140
+BUDGET       = 240                                                              # 17 pairs x 4 arms x 3 repeats = 204 posts, with room for a split request
 CEILING      = 8_000_000
 SAME_JOB     = forced_judge.SAME_JOB
 NOT_SAME     = forced_judge.NOT_SAME
 THRESHOLDS   = tuple( round( 0.10 + 0.05 * i, 2 ) for i in range( 9 ) )          # 0.10 to 0.50 by 0.05
 ARM_BASELINE = "baseline"                                                       # arm 0, as Part 2 judged: the plant as id and signature, the unchanged template
-ARM_PLANT    = "plant_line"                                                     # arm 1, the production text: the plant carries its line through attach_purposes
-ARM_BOTH     = "both_lines"                                                     # arm 2: arm 1 and the original's line named in the instructions
-ARMS         = ( ARM_BASELINE, ARM_PLANT, ARM_BOTH )
-ARM_NUMBER   = { ARM_BASELINE: 0, ARM_PLANT: 1, ARM_BOTH: 2 }
+ARM_PLANT    = "plant_line"                                                     # arm 1: the plant carries its line through attach_purposes
+ARM_SHAPED   = "shaped_id"                                                      # arm 2: arm 1 and an id shaped as the index shapes one, from the plant's file and name
+ARM_BOTH     = "both_lines"                                                     # arm 3: arm 2 and the original's line named in the instructions
+ARMS         = ( ARM_BASELINE, ARM_PLANT, ARM_SHAPED, ARM_BOTH )
+ARM_NUMBER   = { ARM_BASELINE: 0, ARM_PLANT: 1, ARM_SHAPED: 2, ARM_BOTH: 3 }
 DEFAULT_ARMS = ARMS
-REPEATS      = ( 1, 2 )                                                         # each pair and arm is posted once per repeat, each with its own run-index token
+COLLIDES_ORIGINAL = "original"
+COLLIDES_INDEX    = "index_id"
+REPEATS      = ( 1, 2, 3 )                                                       # each pair and arm is posted once per repeat, each with its own run-index token
 RATINGS_FILE = "judge-probe-ratings.json"
 TABLE_FILE   = "judge-probe-ratings.md"
 REPORT_FILE  = "judge-probe-variant-report.json"
@@ -105,6 +108,39 @@ def read_cached( cache, need, rec ):
     return { "status": MALFORMED, "key": key } if rating is None else { "status": HIT, "key": key, **rating }
 
 
+def shaped_id( rec ):
+    """
+    Build the id the index would give a symbol, from its file and name.
+
+    Requires:
+        - rec has lang, file and name
+
+    Ensures:
+        - a Python record gets its module path from src, then the name; a file named __init__ gives its package
+        - any other record gets its whole file path with dots, src included, then the name
+        - the suffix of the file is dropped; checked against all 12,959 entries of the saved index snapshot, where it equals the id of every one (a #N suffix aside)
+    """
+    parts = list( pathlib.PurePosixPath( rec[ "file" ] ).with_suffix( "" ).parts )
+    if rec[ "lang" ] == "py":
+        if parts[ -1 ] == "__init__": parts.pop()
+        if parts[ 0 ] == "src": parts = parts[ 1: ]
+    return ".".join( parts + [ rec[ "name" ] ] )
+
+
+def id_collision( shaped, original, entries ):
+    """
+    Say whether a shaped id would collide with a real id.
+
+    Requires:
+        - original is the pair's index entry or None; entries are the index entries of the snapshot
+
+    Ensures:
+        - returns original when the shaped id equals the original's id, index_id when it equals another entry's id (a #N suffix ignored), else None
+    """
+    if original is not None and shaped == original[ "id" ].split( "#" )[ 0 ]: return COLLIDES_ORIGINAL
+    return COLLIDES_INDEX if shaped in { e[ "id" ].split( "#" )[ 0 ] for e in entries } else None
+
+
 def pair_records( pairs, rows, entries, plant_lines ):
     """
     Pair each drafted control row with the records the judge was shown.
@@ -116,7 +152,8 @@ def pair_records( pairs, rows, entries, plant_lines ):
 
     Ensures:
         - returns one record per row, in row order: id, label, lang, need, plant (the planted record as the production judge saw it, None if the screen dropped it),
-          original (the index entry found by file and name, None if absent), plant_line and original_line (each None when there is none)
+          original (the index entry found by file and name, None if absent), plant_line and original_line (each None when there is none),
+          shaped_id (the id the index would give the plant, None when the plant was dropped) and shaped_collision (id_collision's answer)
     """
     by_name = { ( e[ "file" ], e[ "name" ] ): e for e in entries }
     by_id   = { p[ "rewrite" ][ "id" ]: p for p in pairs }
@@ -125,7 +162,9 @@ def pair_records( pairs, rows, entries, plant_lines ):
         pair     = by_id[ row[ "id" ] ]
         kept, _  = rt.sendable_report( [ planted_pool.planted_entry( pair[ "rewrite" ] ) ] )
         original = by_name.get( ( pair[ "original" ][ "file" ], pair[ "original" ][ "name" ] ) )
+        shaped = shaped_id( kept[ 0 ] ) if kept else None
         out.append( { "id": row[ "id" ], "label": row[ "label" ], "lang": row[ "lang" ], "need": row[ "need" ], "plant": kept[ 0 ] if kept else None, "original": original,
+                      "shaped_id": shaped, "shaped_collision": id_collision( shaped, original, entries ) if kept else None,
                       "plant_line": plant_lines[ row[ "id" ] ] if row[ "id" ] in plant_lines else None,
                       "original_line": original[ "purpose" ] if original is not None and "purpose" in original and original[ "purpose" ] else None } )
     return out
@@ -237,7 +276,8 @@ def arm_inputs( record, arm ):
         - returns ( ( plant record, original record, template ), None ), or ( None, reason ) when the arm cannot be built for the pair
         - baseline keeps the plant as the control built it and the production template
         - plant_line gives the plant its line through sx_build.attach_purposes, keyed by the plant's pin, as the index gives a real entry its line
-        - both_lines does the same and states the original's line in the instructions
+        - shaped_id does that and gives the plant its shaped id in place of the d- id; the d- id stays in control_id, and a shaped id that collides is no arm
+        - both_lines does what shaped_id does and states the original's line in the instructions
     """
     if record[ "plant" ] is None: return None, "plant_dropped_by_screen"
     if record[ "original" ] is None: return None, "original_not_in_snapshot"
@@ -245,6 +285,9 @@ def arm_inputs( record, arm ):
     if record[ "plant_line" ] is None: return None, "plant_has_no_line"
     plant = sx_build.attach_purposes( [ record[ "plant" ] ], { record[ "plant" ][ "pin" ]: record[ "plant_line" ] } )[ 0 ]
     if arm == ARM_PLANT: return ( plant, record[ "original" ], rt.PROMPT_TEMPLATE ), None
+    if record[ "shaped_collision" ] is not None: return None, f"shaped_id_equals_{record[ 'shaped_collision' ]}"
+    plant = { **plant, "id": record[ "shaped_id" ], "control_id": plant[ "id" ] }
+    if arm == ARM_SHAPED: return ( plant, record[ "original" ], rt.PROMPT_TEMPLATE ), None
     if record[ "original_line" ] is None: return None, "original_has_no_line"
     return ( plant, record[ "original" ], variant_template( record[ "original_line" ] ) ), None
 
@@ -418,7 +461,7 @@ def parse_args( argv ):
         - the first word is replay or variant; the source tree, the run folder, the earlier run's folder, the planted file, the answer key, the labels folder,
           the control report, the forced-judge report, the snapshot sha and the Jev data folder are required
         - live is false unless --live is given, and a live run also needs --run-name, a fresh spend-ledger run name
-        - all three arms are asked unless --arms names others; the call budget is 140 unless named
+        - all four arms are asked unless --arms names others; the call budget and the cap are 240 unless named
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument( "mode", choices=( "replay", "variant" ) )
@@ -468,7 +511,7 @@ def main( argv=None, deps=None ):
 
     Ensures:
         - replay returns { live False, mode, dump, sweep, agreement, undrafted } and writes RATINGS_FILE and TABLE_FILE in the run folder; it contacts no model, no search and no spend ledger
-        - variant without --live returns { live False, plan } with the request count by arm, the distinct bodies and what was skipped, and contacts nothing; it refuses a plan whose repeats share a body
+        - variant without --live returns { live False, plan } with the request count by arm, the distinct bodies, the shaped-id collisions and what was skipped, and contacts nothing; it refuses a plan whose repeats share a body
         - variant with --live and a run name asks the judge once per request under the call cap and the token ceiling, and closes the spend-ledger run however it ends
 
     Raises:
@@ -521,7 +564,8 @@ def variant( args, records, undrafted, deps, root ):
     requests, skipped = plan_requests( records, tuple( args.arms ) )
     by_arm = {}
     for r in requests: by_arm[ r[ "arm" ] ] = by_arm.get( r[ "arm" ], 0 ) + 1
-    plan = { "pairs": len( records ), "undrafted": undrafted, "arms": list( args.arms ), "requests": len( requests ), "distinct_bodies": distinct_bodies( requests ), "by_arm": by_arm, "skipped": skipped, "call_budget": args.budget }
+    clashes = [ { "pair": r[ "id" ], "shaped_id": r[ "shaped_id" ], "collides_with": r[ "shaped_collision" ] } for r in records if r[ "shaped_collision" ] is not None ]
+    plan = { "pairs": len( records ), "undrafted": undrafted, "id_collisions": clashes, "arms": list( args.arms ), "requests": len( requests ), "distinct_bodies": distinct_bodies( requests ), "by_arm": by_arm, "skipped": skipped, "call_budget": args.budget }
     if not args.live: return { "live": False, "mode": "variant", "plan": plan }
     import os
     os.environ.update( { **expansion_run.read_env_file( f"{args.from_run}/run-env.sh" ), rt.RUN_NAME_VARIABLE: args.run_name, rt.CEILING_VARIABLE: str( args.ceiling ) } )
