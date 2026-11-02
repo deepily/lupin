@@ -440,18 +440,21 @@ def test_replaying_the_saved_ledger_writes_the_rejects_and_makes_no_model_call( 
     def draft_need( job, ask, ledger, max_tries ):
         seen.append( ( ask, ledger, max_tries ) )
         return { "ok": job[ "meta" ][ "stage_c" ] == "pair-1", "need": "n", "reason": er.NEED_LEAKS_KEY, "rejections": [ { "try": 0, "sentence": "A function that x.", "failures": [ ] } ] }
-    with mock.patch.object( sc.draft, "draft_need", side_effect=draft_need ), mock.patch.object( sc.draft, "make_ledger", return_value="ledger" ) as made, mock.patch.object( sc.strip, "strip_member", return_value={ "kind": "k", "text": "t", "forbidden": [ ] } ) as stripped:
+    with mock.patch.object( sc.draft, "draft_need", side_effect=draft_need ), mock.patch.object( sc.draft, "make_ledger", return_value="ledger" ) as made, mock.patch.object( sc.strip, "strip_member", return_value={ "kind": "k", "text": "t", "forbidden": [ ] } ) as stripped, \
+         mock.patch.object( sc.source_at, "ensure_worktree", return_value="the-tree" ) as tree, mock.patch.object( sc.source_at, "unlock" ) as unlock:
         out = sc.replay_rejects( args, rows, { } )
+    assert tree.call_args[ 0 ] == ( str( tmp_path / "root" ), str( tmp_path / "source-commit" ) ) and unlock.call_args[ 0 ] == ( str( tmp_path / "root" ), "the-tree" )
     assert out[ "mode" ] == "stage_c_save_rejects" and out[ "live" ] is False and out[ "drafted" ] == 1 and out[ "rejected" ] == 2 and [ u[ "pair" ] for u in out[ "undrafted" ] ] == [ "pair-2" ]
-    assert seen == [ ( sc.cache_only, "ledger", 3 ) ] * 2 and made.call_args[ 0 ] == ( str( tmp_path / "run-dir" / sc.DRAFT_LEDGER ), "/x/claude", "max-plan" ) and stripped.call_args[ 0 ][ 1 ] == str( tmp_path / "root" )
+    assert seen == [ ( sc.cache_only, "ledger", 3 ) ] * 2 and made.call_args[ 0 ] == ( str( tmp_path / "run-dir" / sc.DRAFT_LEDGER ), "/x/claude", "max-plan" ) and stripped.call_args[ 0 ][ 1 ] == "the-tree"
     assert json.loads( Path( out[ "path" ] ).read_text( encoding="utf-8" ) )[ "count" ] == 2
 
 
 def test_replaying_reads_the_source_tree_the_caller_names_and_needs_a_cli_path_and_a_saved_ledger( tmp_path ):
     args = replay_args( tmp_path )
     with mock.patch.object( sc.draft, "draft_need", return_value={ "ok": True, "need": "n", "rejections": [ ] } ), mock.patch.object( sc.draft, "make_ledger", return_value="l" ), mock.patch.object( sc.strip, "strip_member", return_value={ "kind": "k", "text": "t", "forbidden": [ ] } ) as stripped:
-        sc.replay_rejects( args, [ make_row( 1 ) ], { "source_root": lambda a: tmp_path / "elsewhere" } )
-    assert stripped.call_args[ 0 ][ 1 ] == tmp_path / "elsewhere"
+        with mock.patch.object( sc.source_at, "ensure_worktree" ) as made, mock.patch.object( sc.source_at, "unlock" ) as unlock:
+            sc.replay_rejects( args, [ make_row( 1 ) ], { "source_root": lambda a: tmp_path / "elsewhere" } )
+    assert stripped.call_args[ 0 ][ 1 ] == tmp_path / "elsewhere" and made.call_count == 0 and unlock.call_count == 0
     no_cli = sc.parse_args( argv( tmp_path, "--save-rejects" ) )
     with pytest.raises( er.NeedsetError ) as caught: sc.replay_rejects( no_cli, [ ], { } )
     assert caught.value.code == er.NO_CLI_PATH
@@ -500,8 +503,12 @@ class RedraftWorld:
     def run( self, args ):
         """Run main over the world with the drafting step replaced."""
         with mock.patch.object( sc, "collect_rows", return_value=( self.rows, [ ], [ ] ) ), mock.patch.object( sc.draft, "draft_need", side_effect=self.draft_need ), \
-             mock.patch.object( sc.draft, "make_ledger", return_value="ledger" ), mock.patch.object( sc.strip, "strip_member", return_value={ "kind": "k", "text": "t", "forbidden": [ ] } ):
-            return sc.main( args, { "drafter": "the-drafter" } )
+             mock.patch.object( sc.draft, "make_ledger", return_value="ledger" ), mock.patch.object( sc.strip, "strip_member", return_value={ "kind": "k", "text": "t", "forbidden": [ ] } ), \
+             mock.patch.object( sc.source_at, "ensure_worktree", return_value="the-tree" ) as made, mock.patch.object( sc.source_at, "unlock" ) as unlock:
+            try:
+                return sc.main( args, { "drafter": "the-drafter" } )
+            finally:
+                self.made, self.unlock = made, unlock
 
 
 def test_a_redraft_without_live_names_the_undrafted_pairs_and_the_calls_and_writes_nothing( tmp_path ):
@@ -510,6 +517,7 @@ def test_a_redraft_without_live_names_the_undrafted_pairs_and_the_calls_and_writ
     out = world.run( argv( tmp_path, "--redraft", "--cli-path", str( tmp_path / "claude" ) ) )
     assert out == { "live": False, "mode": "stage_c_redraft", "plan": { "undrafted": 2, "extra_tries": 2, "calls_planned": 4, "calls_budget": 5 }, "pairs": [ "pair-2", "pair-3" ] }
     assert world.calls == [ ( "pair-1", True, 2 ), ( "pair-2", True, 2 ), ( "pair-3", True, 2 ) ] and sorted( p.name for p in ( tmp_path / "run-dir" ).iterdir() ) == before
+    assert world.made.call_args[ 0 ] == ( str( tmp_path / "root" ), str( tmp_path / "source-commit" ) ) and world.unlock.call_args[ 0 ] == ( str( tmp_path / "root" ), "the-tree" )
 
 
 def test_a_live_redraft_asks_only_the_undrafted_pairs_for_more_sentences_and_keeps_the_rest_failed( tmp_path ):
@@ -524,7 +532,7 @@ def test_a_live_redraft_asks_only_the_undrafted_pairs_for_more_sentences_and_kee
     rejects = json.loads( ( tmp_path / "run-dir" / sc.REJECTS_FILE ).read_text( encoding="utf-8" ) )
     assert sorted( { r[ "pair" ] for r in rejects[ "rejected" ] } ) == [ "pair-1", "pair-2", "pair-3" ] and rejects[ "count" ] == 9
     assert sorted( ( r[ "pair" ], r[ "outcome" ] ) for r in rejects[ "rejected" ] if r[ "try" ] == 0 ) == [ ( "pair-1", "accepted_later" ), ( "pair-2", "accepted_later" ), ( "pair-3", "undrafted" ) ]
-    assert sc.model_transport.CLI_PATH == str( tmp_path / "claude" )
+    assert sc.model_transport.CLI_PATH == str( tmp_path / "claude" ) and world.unlock.call_count == 1
 
 
 def test_a_live_redraft_stops_at_its_own_budget_and_leaves_the_judge_count_alone( tmp_path ):
@@ -532,6 +540,7 @@ def test_a_live_redraft_stops_at_its_own_budget_and_leaves_the_judge_count_alone
     ( tmp_path / "run-dir" / sc.REDRAFT_CALLS ).write_text( "".join( json.dumps( { "n": n, "stage": sc.REDRAFT_STAGE, "model": "m", "ts": "t" } ) + "\n" for n in range( 1, 6 ) ), encoding="utf-8" )
     with pytest.raises( er.NeedsetError ) as caught: world.run( argv( tmp_path, "--redraft", "--live", "--cli-path", str( tmp_path / "claude" ) ) )
     assert caught.value.code in ( er.STAGE_BUDGET_REACHED, er.CALL_CAP_REACHED ) and not ( tmp_path / "run-dir" / sc.REDRAFT_FILE ).exists()
+    assert world.unlock.call_count == 1                                           # the tree is released when the run fails
 
 
 def test_a_redraft_needs_a_cli_path_and_a_saved_ledger( tmp_path ):
@@ -547,8 +556,9 @@ def test_a_redraft_reads_the_source_tree_the_caller_names( tmp_path ):
     world = RedraftWorld( tmp_path )
     with mock.patch.object( sc, "collect_rows", return_value=( world.rows[ :1 ], [ ], [ ] ) ), mock.patch.object( sc.draft, "make_ledger", return_value="l" ), mock.patch.object( sc.strip, "strip_member", return_value={ "kind": "k", "text": "t", "forbidden": [ ] } ) as stripped, \
          mock.patch.object( sc.draft, "draft_need", return_value={ "ok": True, "need": "n", "rejections": [ ] } ):
-        sc.main( argv( tmp_path, "--redraft", "--cli-path", "/x" ), { "source_root": lambda a: tmp_path / "elsewhere" } )
-    assert stripped.call_args[ 0 ][ 1 ] == tmp_path / "elsewhere"
+        with mock.patch.object( sc.source_at, "ensure_worktree" ) as made, mock.patch.object( sc.source_at, "unlock" ) as unlock:
+            sc.main( argv( tmp_path, "--redraft", "--cli-path", "/x" ), { "source_root": lambda a: tmp_path / "elsewhere" } )
+    assert stripped.call_args[ 0 ][ 1 ] == tmp_path / "elsewhere" and made.call_count == 0 and unlock.call_count == 0
 
 
 def test_a_live_run_points_the_model_transport_at_the_cli_path_before_any_call( tmp_path ):

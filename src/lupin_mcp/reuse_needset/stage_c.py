@@ -405,7 +405,7 @@ def main( argv=None, deps=None ):
     Ensures:
         - without --live returns { live False, mode, plan } and contacts nothing: no model, no search, no spend ledger, no file written
         - with --save-rejects replays the saved draft ledger without a model call and writes only REJECTS_FILE
-        - with --redraft prints the pairs still undrafted and the calls planned and writes nothing; with --live too it makes those calls and writes REJECTS_FILE and REDRAFT_FILE
+        - with --redraft prints the pairs still undrafted and the calls planned and writes no file; with --live too it makes those calls and writes REJECTS_FILE and REDRAFT_FILE
         - with --live and a run name, drafts one need per pair, posts each pair three times under the call cap and the token ceiling, writes REPORT_FILE and closes the spend-ledger run however it ends
 
     Raises:
@@ -424,23 +424,38 @@ def main( argv=None, deps=None ):
     return live( args, rows, refused, plan, deps )
 
 
+def in_source_tree( args, deps, work ):
+    """
+    Call work with the source tree at --source-commit and release the tree afterwards.
+
+    Ensures:
+        - the tree is made by source_at.ensure_worktree unless deps names source_root, as the live run does
+        - a tree this call made is unlocked when work ends, by an error too; one the caller named is left alone
+    """
+    made = "source_root" not in deps
+    root = source_at.ensure_worktree( args.root, args.source_commit ) if made else deps[ "source_root" ]( args )
+    try:
+        return work( root )
+    finally:
+        if made: source_at.unlock( args.root, root )
+
+
 def replay_rejects( args, rows, deps ):
     """
     Read the saved draft ledger back and write the sentences its checks refused.
 
     Requires:
         - run_dir holds the ledger of an earlier run, and --cli-path names the binary it was bound to
-        - root is a checkout at the source commit, read for the stripped texts
 
     Ensures:
+        - the stripped texts are read in the source tree at --source-commit, made and released as a live run does, so a prompt is the one the ledger holds
         - no model is called: a prompt the ledger cannot answer raises BAD_NEED
         - returns { live False, mode, drafted, undrafted, rejected, path } and writes REJECTS_FILE
     """
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "the ledger is bound to the Claude Code binary's version" )
     ledger_path = pathlib.Path( args.run_dir ) / DRAFT_LEDGER
     if not ledger_path.exists(): raise er.NeedsetError( er.BAD_NEED, f"{ledger_path} does not exist: there is no saved draft ledger to replay" )
-    root = deps[ "source_root" ]( args ) if "source_root" in deps else args.root
-    needs, undrafted, rejected = draft_all( rows, lambda rec: strip.strip_member( rec, root ), cache_only, draft.make_ledger( str( ledger_path ), args.cli_path, args.server ), tries_of( args ) )
+    needs, undrafted, rejected = in_source_tree( args, deps, lambda root: draft_all( rows, lambda rec: strip.strip_member( rec, root ), cache_only, draft.make_ledger( str( ledger_path ), args.cli_path, args.server ), tries_of( args ) ) )
     path = save_rejects( args.run_dir, rejected )
     return { "live": False, "mode": "stage_c_save_rejects", "drafted": len( needs ), "undrafted": undrafted, "rejected": len( rejected ), "path": str( path ) }
 
@@ -463,9 +478,9 @@ def redraft( args, rows, deps ):
 
     Requires:
         - run_dir holds the ledger of an earlier run, and --cli-path names the binary it was bound to
-        - root is a checkout at the source commit, read for the stripped texts
 
     Ensures:
+        - the stripped texts are read in the source tree at --source-commit, made and released as a live run does, so a prompt is the one the ledger holds
         - the pairs are found by replaying the ledger with no model call: those that drafted before are not touched
         - the replay uses --max-tries and each pair may then try --extra-tries more sentences, the first of which asks the drafter
         - without --live returns { live False, mode, plan, pairs } and writes nothing
@@ -475,7 +490,11 @@ def redraft( args, rows, deps ):
     if args.cli_path is None: raise er.NeedsetError( er.NO_CLI_PATH, "the ledger is bound to the Claude Code binary's version" )
     ledger_path = pathlib.Path( args.run_dir ) / DRAFT_LEDGER
     if not ledger_path.exists(): raise er.NeedsetError( er.BAD_NEED, f"{ledger_path} does not exist: there is no saved draft ledger to redraft from" )
-    root   = deps[ "source_root" ]( args ) if "source_root" in deps else args.root
+    return in_source_tree( args, deps, lambda root: redraft_in( args, rows, deps, root, ledger_path ) )
+
+
+def redraft_in( args, rows, deps, root, ledger_path ):
+    """Ensures: does redraft's work with the stripped texts read in root, and returns its answer."""
     strip_fn = lambda rec: strip.strip_member( rec, root )
     ledger = draft.make_ledger( str( ledger_path ), args.cli_path, args.server )
     _needs, undrafted, rejected = draft_all( rows, strip_fn, cache_only, ledger, tries_of( args ) )
