@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.01 to 11.02 - Sessions b3670c7d and 7e4810a2 (Cheech 🌿, manager; crew John, Pocholo, Rachel, Chloé, still seated) | First-thousand trial Parts 1 and 2; the plants reached the judge without their purpose line; an explainer for program managers
+
+- **Part 1, 1 Nov by day.** Rick ruled that a seed can be its own test item. The method change landed in seven reviewed merges, `f01a270ae` to `b6d5a5cb2`. The first control run found 5 of 17 planted rewrites.
+- **Part 2, 1 Nov at night.** Expert 1 traced the miss to the plants' missing purpose lines, and the plants got lines (`81fa95da0`). The rerun put 12 of 13 plants in the 128, against 5 of 13 bare. The pass mark held with a = 1 and b = 4. The yield trace found 58 of 70. Merges `865c63cd0`, `823526117` and `83c88f6f6`.
+- **2 Nov, morning.** Rick closed Part 2 and opened Part 3. Expert 2's response joined expert 1's in one review document. Part 3 was designed with the crew. The post-game is `db66a1756`.
+- **The gap.** The plants reached the judge as an opaque id and a signature, with no purpose line. The judge figures on the plants are suspended. The fix is merged at `e607c9040`, with 3,831 unit tests and 1,567 census guards passing.
+- **Explainer** for program managers, with four Mermaid charts: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.11.02-reuse-search-measurement-explainer.md`. Pushed at 10:46 as `c7e8f6564`.
+- **Files**: history.md, TODO.md, the plan, the explainer, the review document, the R&D index, the post-game and its index.
+
 ## 2026.11.01 - Session ade365b2 (Mr. Radio 🦉, manager; crew Tiberius, Clayton, Rio, all reaped) | Drive podcast publishing proven end to end, row d0361881 closed
 
 ### Checkpoint | 2026.11.02 00:10 | Drive proof run done; d0361881, 7826d34b closed

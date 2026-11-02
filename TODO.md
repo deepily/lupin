@@ -16,6 +16,29 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-01 night to 2026-11-02 morning (Cheech 🌿, crew John, Pocholo, Rachel, Chloé; times Eastern)
+
+- **The first-thousand rerun ran the full plan** (Rick, voice card, about 22:55 on 1 Nov). He raised the call cap from 1,314 to 2,314. Spend is not the constraint: "we have tokens to burn". A cap raise is sized to the plan and announced, not asked.
+- **Pass mark: a minus b at most 2**, over the same-job pairs, fixed before the run. It passed with a = 1 and b = 4.
+- **Outcome, written by 00:22 on 2 Nov.** With a purpose line, 12 of 13 planted rewrites reached the 128; bare, 5 of 13. The yield trace found 58 of 70. Need expansion lifted the answers entering the 128 from 80 to 110 of 119. The results are in the plan, `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.11.01-first-thousand-run-revised-plan.md` section 15.
+- **Morning rulings** (Rick, voice cards, 09:15 to 09:46). Run a small judge experiment. Keep checking a cross-language near-copy when partners are on. Part 2 is complete, and Part 3 gets its own row. Both outside experts' responses live in one review document.
+- **Decided under standing authority.** The crew was re-seated from mementos. The five unreadable expansion replies stay as recorded. John's two held rows were closed, their work merged.
+- **Erratum to the night's headline** (10:01 to 10:05). The planted rewrites reached the judge without their purpose line. The judge figures on the plants are suspended. The search figures stand.
+- **The fix merged before the push** (Rick, card, 10:34). Commit `e607c9040` gives each plant its purpose line at the judge. The plant's opaque id is not changed yet.
+- **An explainer for program managers** (Rick, voice, about 10:30). It is `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.11.02-reuse-search-measurement-explainer.md`, pushed at 10:46. Rick then said the crew is not harvested and work continues.
+- **Post-game rulings** are in `src/docs/post-games/v0.2.2/2026.11.02-first-thousand-part-2-crew-post-game.md`. The control takes the production path at every stage. The launch checklist becomes a script step. A run keeps its own judge receipts.
+- **Pending for Rick.** Should the re-judging give each plant an id that ends in its name? The go on the Part 3 probe. Two extra zero-call checks from John. Three follow-up rows in holding. Archiving history.md, now about 17.3k tokens.
+
+```text
+Rows, by subject
+Part 2 of the trial (done)          46105b99-46b8-4f05-a90e-59103c6ef23b
+Part 3 of the trial (queued)        539c4135-c838-4ff6-9fbb-f56dea687185
+Launch preflight (holding)          14cfb4d3-cac0-4a71-ac8e-024720416e06
+Run keeps its receipts (holding)    60fb6c86-434e-44aa-99ae-46dd0f5a0c98
+File-time diagnosis (holding)       f628c894-12ae-476e-8123-115bb0505fbd
+John's held rows (closed)           43ab30f5, cb1ed010
+```
+
 ## 📚 Decisions log 2026-10-30 (Cheech 🌿 `d4efa51c`, crew Rio and Rachel, reaped)
 
 - **Opus work-alikes**: regraded, not regenerated. Rick relabelled the 20 blind; the new labels replace the old ones in `labels-rick.jsonl` (backup `io/tmp/2026.10.30-labels-rick-before-redo.jsonl`). Why: faster, and Rick's rubric was clearer the second time.
@@ -528,6 +551,17 @@ last -x reboot | head -20      # then read the morning boot times yourself
 - 2026-10-31 — **Set B worked-examples sheet, five proposed answers?** → **Drop cases 1 and 5; confirm 2, 3 and 4** (Rick, about 20:25 EDT, cards). The sheet is `src/docs/labelling/set-b-worked-examples.md`. Why: on cases 1 and 5 the draft overruled both Rick and Jason. It would teach the opposite of Set A's settled label. Cases 2 to 4 match Jason.
 - 2026-10-31 — **Reviewer 2's supplement labels came back with one code line changed. Import anyway?** → **Import, and log the change** (Rick, about 21:00 EDT, card). In pair-6351ffcafb, side B lost `: ${error}`, so the importer refused the file. Why: the change can't reach a label field, and the log and fingerprints keep it auditable. The 4 disagreements went to Jason.
 - 2026-10-31 — **Name the passing semdup proof record (row `35914482`)?** → **Record 2 of the official run** (Rick, about 21:38 EDT, card). It passed all three bars: found 72/80, right 127/157, self-agreement 1075/1110. The record is `io/semdup/proof/2.json` in the pinned proof worktree at `ccb6bd276`. Caveat: "right" is 0.809 against 0.80, and its interval's low end is 0.739.
+- 2026-10-31 — **Set B, after the expert's review: what counts as found?** → **Score recall for each key member separately** (Rick, about 21:46 EDT, card). Why: the need is written from the seed, so "any member" passes without the work-alike ever being found.
+- 2026-10-31 — **Set B: plant model-written work-alikes?** → **No planting in Set B** (Rick, about 21:47 EDT, card). Planting stays only as a one-time positive control with Set A's 20 synthetic pairs. This replaces the synthetic Python part of the 29 October ruling.
+- 2026-10-31 — **Set B: the labelling question?** → **A substitutability checklist** (Rick, about 21:48 EDT, card). It asks about inputs, outputs, side effects and callers, and the same-job answer derives from it. Each stratum reports its own agreement with an interval.
+- 2026-10-31 — **Set B: confirm mode?** → **Adaptive, with a threshold of 0.6** (Rick, about 21:49 EDT, card). The blind 20% decides each stratum: kappa at or above 0.6 allows confirm mode, and below it the stratum stays fully blind.
+- 2026-10-31 — **Set B: work-alike count and source?** → **60 to 80, sourced by measured hardness** (Rick, about 21:50 EDT, card). The option he picked read "Source from real code in both languages". The pool is real code whose need a BM25 search misses. The first 1,000 calls follow the expert's order, measuring yield first.
+- 2026-10-31 — **Semdup rename: move the old io data folders too?** → **No, keep them** (Rick, about 21:54 EDT, card). The code, tests and wiki become duplicate-check. The existing io folders and `semdup-frozen-2.json` keep their names, because the passing record names those paths.
+- 2026-10-31 — **Set B overnight: run the first 1,000 calls before Rick signs the plan?** → **Yes** (Rick, about 22:00 EDT, card). That covered revising the plan and building it. Hard stops: 1,000 judge calls, no labelling, no full draw. Rick signs the plan and reads the yield in the morning. Cheech's rulings within that go-ahead follow. Every attempt that reaches a model counts toward the 1,000, retries and Jev's HTTP calls included. Calls to our own embedding server are not model calls.
+- 2026-10-31 — **Leave the host on overnight for the Set B run?** → **Yes** (Rick, about 23:50 EDT, card).
+- 2026-10-31 — **Set B total size once work-alikes drop to 60 to 80?** → **Keep 310 to 330** (Rick, about 23:50 EDT, card). The 150 near-copies and 100 nothing-exists stay unchanged.
+- 2026-10-31 — **A second instrument to confirm work-alike partners?** → **Decide after the yield** (Rick, about 23:50 EDT, card). Until then the report states the judge's blind spot.
+- 2026-10-31 — **The 10:00 to 13:00 Eastern live judge-call window in `reuse_needset/smoke.py`?** → **Delete the rule** (Rick, about 22:00 EDT, card). His words: "I have no idea why that exists. Delete it."
 
 → entries dated 2026-08-26 to 2026-10-09 archived to `todo-history/2026-08-26-to-2026-10-10-todo.md`.
 
