@@ -610,7 +610,19 @@ def judge_all( args, rows, refused, budgets, root, ctx, deps ):
     return report, undrafted
 
 
-exit_status = expansion_run.exit_status
+def exit_status( result ):
+    """
+    Say what the process should exit with for the result main returned.
+
+    Requires:
+        - result is what main returned: a plan, a judge run, or the answer of --save-rejects or --redraft
+
+    Ensures:
+        - a save-rejects or redraft result exits 0, since it holds no judge report and no run to close
+        - any other result is expansion_run.exit_status's answer
+    """
+    if result[ "mode" ] in ( "stage_c_save_rejects", "stage_c_redraft" ): return 0
+    return expansion_run.exit_status( result )
 
 
 def run_cli( argv=None, deps=None, out=print ):
