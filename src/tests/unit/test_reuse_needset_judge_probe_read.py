@@ -355,3 +355,15 @@ def test_a_failed_arm_zero_post_does_not_void_the_floor_but_an_answered_post_wit
     cached = report( MOVER )
     cached[ "results" ][ at ] = row( "s00", jp.ARM_BASELINE, 1, HIGH, tokens=0 )
     assert jr.analyze( cached )[ "proof" ][ "arm0_all_fresh" ] is False
+
+
+def test_rule_three_net_count_uses_the_two_of_three_majority_status_not_one_repeat():
+    """A pair accepted in 1 of 3 early repeats and 2 of 3 late ones moves by status."""
+    early = [ HIGH, LOW, LOW ]                      # status rejected
+    late  = [ HIGH, HIGH, LOW ]                     # status accepted
+    rows  = [ row( "s00", "plant_line", n, early[ n - 1 ] ) for n in ( 1, 2, 3 ) ] + [ row( "s00", "shaped_id", n, late[ n - 1 ] ) for n in ( 1, 2, 3 ) ]
+    cells = jr.index_results( rows )
+    got   = jr.moves( cells, "plant_line", "shaped_id", { "s00": jp.SAME_JOB } )
+    assert got[ "net" ] == 1 and got[ "toward" ] == 1 and got[ "n" ] == 1
+    flipped = jr.flips( cells, "plant_line", "shaped_id" )
+    assert [ r[ "flip" ] for r in flipped[ 1 ][ "rows" ] ] == [ None ] and [ r[ "flip" ] for r in flipped[ 2 ][ "rows" ] ] == [ "reject_to_accept" ]
