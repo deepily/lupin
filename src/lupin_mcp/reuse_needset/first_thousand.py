@@ -18,9 +18,10 @@ import types
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.labelling import run_check
 from cosa.repo.symindex.candidates import candidate_stage
+from cosa.repo.symindex.candidates import search as cs_search
 from cosa.repo.symindex.candidates import vector_store as vs
 from lupin_mcp import reuse_tools as rt
-from lupin_mcp.reuse_needset import call_cap, draft, loss_trace, planted_pool, positive_control, smoke, source_at, stage3, stage_parts, stage_seeds, stages, strip
+from lupin_mcp.reuse_needset import call_cap, control_report, draft, loss_trace, planted_pool, planted_purposes, positive_control, smoke, source_at, stage3, stage_parts, stage_seeds, stages, strip
 from lupin_mcp.reuse_needset import errors as er
 
 CALLS_FILE   = "call-ledger.jsonl"
@@ -139,13 +140,14 @@ def planted_check( need, ctx, planted_stage, planted_entries, prepare=rt.prepare
     return run_question( at, loss_trace.CHECK_TOOL, text, text, exclude_id=need[ "seed" ], prepared=prepared, sweep_only=False, write=False, language=language )
 
 
-def control_ask( needs, check_fn, asked_ids_fn ):
+def control_ask( needs, check_fn, asked_ids_fn, observe=None ):
     """
     Build the control's ask function: the checker's candidate ids for a drafted need.
 
     Requires:
         - needs maps each rewrite id to its sentence; check_fn( need record, planted pool ) returns the checker's receipt
         - asked_ids_fn( receipt ) returns the ids the candidate stage sent to the judge
+        - observe is None or observe( pair, need record, receipt ), called once per pair after the check and before the ids are read
 
     Ensures:
         - returns an async ask( planted pool, pair ) giving that list
@@ -153,7 +155,10 @@ def control_ask( needs, check_fn, asked_ids_fn ):
     """
     async def ask( planted, pair ):
         """Ensures: returns the ids the checker asked about for this pair."""
-        return asked_ids_fn( check_fn( stage3.need_for( pair, needs[ pair[ "rewrite" ][ "id" ] ] ), planted ) )
+        need    = stage3.need_for( pair, needs[ pair[ "rewrite" ][ "id" ] ] )
+        receipt = check_fn( need, planted )
+        if observe is not None: observe( pair, need, receipt )
+        return asked_ids_fn( receipt )
     return ask
 
 
@@ -226,26 +231,29 @@ def control_job( pair, strip_fn ):
     return { "seed": seed, "keys": [ key ], "stripped": strip_fn( seed ), "write_lang": pair[ "original" ][ "lang" ], "meta": { "control": True } }
 
 
-def planted_stage_for( live, planted_entries, cache_dir, embed_rows=planted_pool.embed_rows, load_vectors=vs.load_vectors ):
+def planted_stage_for( live, planted_entries, cache_dir, embed_rows=planted_pool.embed_rows, load_vectors=vs.load_vectors, purposes=None, purposes_file=None ):
     """
     Build the planted candidate stage from the live one's own settings.
 
     Requires:
         - live is the context's CandidateStage; planted_entries are planted_pool.planted_entry records
         - cache_dir is a folder inside the run folder, where the query vectors of this run are cached
+        - purposes is None or { pin: purpose line } of the plants; purposes_file is None or a purpose store holding the live lines and those, written in the run folder
 
     Ensures:
-        - the vectors are the live set read from disk plus the planted rows embedded now, held in memory
+        - the vectors are the live set read from disk plus the planted rows embedded now, with their purpose lines when purposes names them, held in memory
+        - the prose index reads purposes_file when it is given, else the live store, so a plant's line reaches the word list as a real entry's does
         - the new stage shares the live stage's vector folder, client, arm, K and fusion, and has no refresher
         - its query cache is cache_dir, created here, so nothing of this run is written into the live data folder
     """
     pathlib.Path( cache_dir ).mkdir( parents=True, exist_ok=True )
     base    = load_vectors( live.vectors_dir )
-    planted = planted_pool.PlantedVectors( base, [ e[ "id" ] for e in planted_entries ], embed_rows( planted_entries, live.embed_client ) )
-    return planted_pool.PlantedCandidateStage( live.vectors_dir, str( cache_dir ), live.embed_client, planted, purposes_path=live.purposes_path, K=live.K, arm=live.arm, fusion=live.fusion )
+    planted = planted_pool.PlantedVectors( base, [ e[ "id" ] for e in planted_entries ], embed_rows( planted_entries, live.embed_client, purposes ) )
+    return planted_pool.PlantedCandidateStage( live.vectors_dir, str( cache_dir ), live.embed_client, planted, purposes_path=live.purposes_path if purposes_file is None else purposes_file, K=live.K, arm=live.arm, fusion=live.fusion )
 
 
-def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, prepare=rt.prepare, check=planted_check, build_stage=candidate_stage.build_stage, passes=1, pass_resources=None ):
+def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, prepare=rt.prepare, check=planted_check, build_stage=candidate_stage.build_stage, passes=1, pass_resources=None,
+                        plant_lines=None, plant_without=(), same_job=None, label_info=None ):
     """
     Return the live control stage: draft the needs, then plant, ask, remove and prove.
 
@@ -254,6 +262,7 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         - cache_dir is the run folder's query-cache folder
         - every model call goes through the cap that the runner has installed
         - passes is how many times the whole control runs; pass_resources( n ) returns the ( drafting ledger, query-cache folder ) of pass n for n of 1 or more, so a later pass asks again and is not answered from the first
+        - plant_lines is None or { pin: purpose line } of the plants, plant_without lists the rewrite ids that hold none, same_job maps each rewrite id to its label ( None: every pair is the same job ) and label_info names the label files by hash
 
     Ensures:
         - the needs are drafted first, one at a time in file order, each tried up to CONTROL_TRIES times
@@ -261,6 +270,8 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         - an undrafted pair counts as neither found nor missed: pairs and found count the pairs that drafted, and pairs_wanted, in each pass report and at the top level, is the number planned
         - the pool the control plants into and restores is the index's own sendable entries
         - the checker is planted_check over a planted stage that shares the live stage's folders and client
+        - a plant with a line is embedded and word-indexed with it, through a purpose store written in the run folder that holds the live lines and the plants'; a plant without one is planted bare and listed in plants_without_line
+        - each pass report carries control_report.scored: a row for every pair, undrafted ones too, the primary and secondary figures, false_positives and the originals floor; stop is set by that floor only, never by a plant miss
         - with more than one pass the report is the first pass's, plus passes ( each pass's report ), consistent ( every pass missed the same pairs and left out the same pairs ) and stop true when any pass stopped
         - when the stage's own call budget ends a pass, the passes already finished stay in the report, with budget_reached True, budget_detail, passes_done and passes_wanted; with none finished passes is empty
 
@@ -278,10 +289,26 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         drafted   = [ p for p in pairs if p[ "rewrite" ][ "id" ] in needs ]
         if not drafted: raise er.NeedsetError( er.CONTROL_NEED_UNDRAFTED, f"none of the {len( pairs )} pairs drafted a need that passed; first: {undrafted[ 0 ][ 'pair' ]}: {undrafted[ 0 ][ 'reason' ]}" )
         entries   = [ planted_pool.planted_entry( p[ "rewrite" ] ) for p in drafted ]
-        planted   = planted_stage_for( ctx.candidate_stage, entries, cache )
+        lines     = {} if plant_lines is None else plant_lines
+        store     = None if plant_lines is None else planted_purposes.merged_store( ctx.candidate_stage.purposes_path, lines, f"{cache}-purposes.jsonl" )
+        planted   = planted_stage_for( ctx.candidate_stage, entries, cache, purposes=plant_lines, purposes_file=store )
         pool      = prepare( ctx )[ 1 ]
-        asker     = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids )
-        return { **await stage3.control_stage( pool, drafted, asker, build_stage )(), "undrafted": undrafted, "pairs_wanted": len( pairs ) }
+        by_name   = { ( e[ "file" ], e[ "name" ] ): e for e in pool }
+        stored    = cs_search.read_purposes( ctx.candidate_stage.purposes_path )
+        pins      = { e[ "id" ]: e[ "pin" ] for e in entries }
+        labels    = { p[ "rewrite" ][ "id" ]: True for p in pairs } if same_job is None else same_job
+        rows      = []
+
+        def observe( pair, need, receipt ):
+            """Ensures: adds the pair's scored row, read from the search the check just ran."""
+            rid, orig = pair[ "rewrite" ][ "id" ], by_name.get( ( pair[ "original" ][ "file" ], pair[ "original" ][ "name" ] ) )
+            rows.append( control_report.pair_row( pair, labels[ rid ], need[ "need" ], receipt, planted.last_answer, lines.get( pins[ rid ] ),
+                                                  None if orig is None else orig[ "id" ], None if orig is None else stored.get( orig[ "pin" ] ) ) )
+
+        asker     = control_ask( needs, lambda need, _pool: check( need, ctx, planted, entries ), loss_trace.asked_ids, observe )
+        base      = await stage3.control_stage( pool, drafted, asker, build_stage )()
+        return { **base, "undrafted": undrafted, "pairs_wanted": len( pairs ), **control_report.scored( rows, undrafted, labels ), "plants_without_line": list( plant_without ),
+                 "purpose_lines_used": len( lines ), "labels": label_info }
 
     async def stage():
         """Ensures: returns the control report."""
@@ -296,24 +323,36 @@ def control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, 
         if passes == 1 and detail is None: return reports[ 0 ]
         first = reports[ 0 ] if reports else {}
         same  = lambda r: ( r[ "missed" ], [ u[ "pair" ] for u in r[ "undrafted" ] ] ) == ( first[ "missed" ], [ u[ "pair" ] for u in first[ "undrafted" ] ] )
-        return { **first, "passes": reports, "consistent": all( same( r ) for r in reports ), "stop": any( r[ "stop" ] for r in reports ),
+        return { **first, "passes": reports, "consistent": all( same( r ) for r in reports ), "stop": any( r[ "stop" ] for r in reports ), "pass_marks": [ r[ "primary" ][ "pass_mark" ][ "passed" ] for r in reports ],
                  "budget_reached": detail is not None, "budget_detail": detail, "passes_done": len( reports ), "passes_wanted": passes, "pairs_wanted": len( pairs ) }
     return stage
 
 
-def live_control( args, passes=CONTROL_PASSES ):
+def live_control( args, labelled=None, passes=CONTROL_PASSES ):
     """
     Return control_stage_live set up for this run, in CONTROL_PASSES passes.
 
+    Requires:
+        - labelled is None or control_report.same_job_labels' result for the run's label files
+        - the plants' purpose store, args.plant_purposes or the run folder's own, exists: planted_purposes.main writes it
+
     Ensures:
-        - each pass has a drafting ledger and a query cache of its own
-        - pass n of 1 or more drafts through ledger-control-draft-pass{n+1}.jsonl in the run folder and caches queries in the first pass's cache folder with -pass{n+1} added
-        - the first pass keeps the ledger and cache main hands in
+        - every pass drafts through the drafting ledger the first pass uses, so a later pass is judged on the same sentences and draws none again
+        - each pass has a query cache of its own, the first pass's folder with -pass{n+1} added for pass n of 1 or more
+        - the plants carry the lines in that store, and a plant without one is listed in the report
+
+    Raises:
+        - NeedsetError PLANT_LINES_MISSING when the purpose store does not exist, before any draft is made
     """
     def control( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir ):
         """Ensures: returns the multi-pass control stage."""
-        more = lambda n: ( draft.make_ledger( f"{args.run_dir}/ledger-control-draft-pass{n + 1}.jsonl", args.cli_path, args.server ), f"{cache_dir}-pass{n + 1}" )
-        return control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, passes=passes, pass_resources=more )
+        store = args.plant_purposes if args.plant_purposes is not None else planted_purposes.lines_path( args.run_dir )
+        if not pathlib.Path( store ).is_file(): raise er.NeedsetError( er.PLANT_LINES_MISSING, f"{store}: the plants have no purpose lines; run lupin_mcp.reuse_needset.planted_purposes first" )
+        lines, without = planted_purposes.load_lines( store, pairs )
+        more = lambda n: ( ledger, f"{cache_dir}-pass{n + 1}" )
+        return control_stage_live( ctx, pairs, ask, ledger, strip_fn, draft_fn, cache_dir, passes=passes, pass_resources=more, plant_lines=lines, plant_without=without,
+                                   same_job=None if labelled is None else labelled[ "same_job" ],
+                                   label_info=None if labelled is None else { "label_shas": labelled[ "label_shas" ], "answer_key_sha": labelled[ "answer_key_sha" ] } )
     return control
 
 
@@ -421,6 +460,7 @@ def parse_args( argv ):
     ap.add_argument( "--server", default="max-plan" )
     ap.add_argument( "--second-model", default=smoke.SECOND_MODEL )
     ap.add_argument( "--probe-model", default=smoke.SECOND_MODEL )
+    ap.add_argument( "--plant-purposes", default=None, help="the plants' purpose.jsonl; the run folder's purpose-plants/purpose.jsonl when left out" )
     ap.add_argument( "--partners", action="store_true", help="search for a partner of each seed; off by default, a seed is then its own known answer" )
     ap.add_argument( "--live", action="store_true" )
     return ap.parse_args( argv )
@@ -538,7 +578,7 @@ def live_run( args, loaded, ctx, deps ):
     path      = write_seed_lists( args.root, args.run_dir, loaded[ "pairs" ], args.seed, args.source_commit, built, **( { "tracked": deps[ "tracked" ] } if "tracked" in deps else { } ) )
     parts     = ( deps[ "parts" ] if "parts" in deps else live_parts )( args, env, built, stage_seeds.load_lists( path ) )
     factories = deps[ "factories" ] if "factories" in deps else stage_factories( path, parts )
-    control   = ( deps[ "control" ] if "control" in deps else live_control( args ) )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )
+    control   = ( deps[ "control" ] if "control" in deps else live_control( args, control_report.same_job_labels( loaded[ "pairs" ], args.labels_dir, args.answer_key ) ) )( ctx, loaded[ "pairs" ], ask, ledger, strip_fn, draft_fn, f"{args.run_dir}/{QUERY_CACHE}" )
     rem       = remainder_stage( loaded[ "remainder" ], args.seed, **( { "run_remainder": deps[ "remainder" ] } if "remainder" in deps else { } ) )
     runner    = deps[ "runner" ] if "runner" in deps else run_first_thousand
     return asyncio.run( runner( args.run_dir, factories[ 0 ]( env ), factories[ 1 ]( env ), control, rem, args.limit ) )

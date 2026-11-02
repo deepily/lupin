@@ -114,3 +114,33 @@ def test_a_planted_stage_refuses_a_refresher_because_that_would_rebuild_the_live
     client = FakeClient()
     live   = build_live( tmp_path, client )
     with pytest.raises( ValueError ): pp.PlantedCandidateStage( live, tmp_path / "q", client, None, refresher=lambda: None )
+
+
+def test_a_plant_with_a_purpose_line_embeds_it_as_a_real_entry_does_and_one_without_embeds_the_empty_line():
+    client = FakeClient()
+    plain  = pp.planted_entry( REWRITE )
+    other  = pp.planted_entry( { **REWRITE, "id": "d-rew1", "text": "def other(): pass" } )
+    rows   = pp.embed_rows( [ plain, other ], client, { plain[ "pin" ]: "Wraps a value so a caller can pass it on." } )
+    first  = vb.entry_texts( plain, "Wraps a value so a caller can pass it on." )
+    second = vb.entry_texts( other, "" )
+    for name in vs.MATRICES:
+        content_type, role = vs.DOCUMENT_ROLES[ name ]
+        assert rows[ name ] == [ vec( content_type, role, first[ name ] ), vec( content_type, role, second[ name ] ) ]
+    assert first[ "prose" ] != vb.entry_texts( plain, "" )[ "prose" ], "the line is part of the text, so a plant without it differs"
+
+
+def test_the_stage_keeps_the_whole_lists_of_its_last_search_and_hands_the_caller_the_cut_ones( tmp_path ):
+    stage, live, extra = planted_stage( tmp_path )
+    assert stage.last_answer is None
+    found = stage.shortlist( "zqwrapper", [ *live_entries(), extra ], "sha", [] )
+    whole = stage.last_answer
+    assert all( len( whole[ "lists" ][ n ] ) == whole[ "list_sizes" ][ n ] for n in whole[ "lists" ] ) and found[ "ids" ] == whole[ "shortlist" ]
+    assert all( len( found[ "lists" ][ n ] ) <= 20 for n in found[ "lists" ] )
+
+
+def test_a_list_longer_than_the_head_is_kept_whole_in_last_answer_and_cut_only_in_what_the_caller_gets( tmp_path, monkeypatch ):
+    stage, live, extra = planted_stage( tmp_path )
+    big = { "shortlist": [ ], "ranking": [ ], "lists": { "code": [ f"i{n}" for n in range( 30 ) ] }, "scores": { "code": [ 1.0 ] * 30 } }
+    monkeypatch.setattr( stage._resident, "search", lambda body: big )
+    status, body = stage._call( "POST", "/search", { } )
+    assert status == 200 and len( stage.last_answer[ "lists" ][ "code" ] ) == 30 and len( body[ "lists" ][ "code" ] ) == 20 and body[ "list_sizes" ] == { "code": 30 }

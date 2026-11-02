@@ -42,12 +42,12 @@ def test_the_stage_finds_all_twenty_in_file_order_and_reports_each_language():
     assert rep[ "by_lang" ] == { "py": { "found": 10, "total": 10 }, "ts": { "found": 10, "total": 10 } }
 
 
-def test_a_missed_pair_stops_the_run_and_the_report_names_it_by_language():
+def test_a_missed_pair_is_named_by_language_and_does_not_stop_the_run():
     async def blind_for_two( planted, p ):
         return [] if p[ "rewrite" ][ "id" ] in ( "d-rew01", "d-rew04" ) else await lexical_ask()( planted, p )
 
     rep = asyncio.run( stage3.control_stage( pool(), twenty(), blind_for_two, cs.build_stage )() )
-    assert rep[ "stop" ] is True and rep[ "missed" ] == [ "d-rew01", "d-rew04" ] and rep[ "found" ] == 18
+    assert rep[ "stop" ] is False and rep[ "missed" ] == [ "d-rew01", "d-rew04" ] and rep[ "found" ] == 18      # the caller scores the misses and sets stop by its own rule
     assert rep[ "by_lang" ] == { "py": { "found": 9, "total": 10 }, "ts": { "found": 9, "total": 10 } }
 
 

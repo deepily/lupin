@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.strip.module_of@14c8855104
   - lupin_mcp.reuse_needset.strip.src_root_of@cfeae4d6fb
-  - lupin_mcp.reuse_needset.strip.dotted_id@5b58e6a5e9
+  - lupin_mcp.reuse_needset.strip.dotted_id@56f561e92f
   - lupin_mcp.reuse_needset.strip.python_text@6e9b11a162
   - lupin_mcp.reuse_needset.strip.script_results@5fffc8a0cf
   - lupin_mcp.reuse_needset.strip.strip_members@da1db082ae

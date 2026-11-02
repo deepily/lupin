@@ -248,13 +248,21 @@ def test_the_real_control_stage_runs_in_its_slot_and_its_twenty_calls_are_counte
     assert out[ "by_stage" ] == { "attribution": 1, "control": 20, "remainder": 1, "yield": 1 } and out[ "used" ] == 23 and out[ "over_plan" ] == []
 
 
-def test_a_missed_planted_pair_stops_the_run_before_the_remainder( tmp_path ):
+def test_a_missed_planted_pair_alone_does_not_stop_the_run_but_a_control_report_that_says_stop_does( tmp_path ):
     cap, transport = new_cap( tmp_path ), Transport()
     async def blind( planted, pair ):
         await mt.complete( FABLE, "s", "u", query_fn=transport )
         return []
     out = run( cap, with_control( transport, blind ) )
-    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done", "done", "stopped", "not_run" ] and out[ "stages" ][ "control" ][ "report" ][ "stop" ] is True
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done" ] * 4 and out[ "stages" ][ "control" ][ "report" ][ "stop" ] is False
+    ( tmp_path / "again" ).mkdir()
+    cap2, transport2 = new_cap( tmp_path / "again" ), Transport()
+    inner = stage3.control_stage( pool(), twenty(), blind, cs.build_stage )
+
+    async def says_stop(): return { **await inner(), "stop": True }
+
+    halted = run( cap2, all_stages( transport2, **{ "control": says_stop } ) )
+    assert [ s[ "status" ] for s in halted[ "stages" ].values() ] == [ "done", "done", "stopped", "not_run" ]
 
 
 def test_the_cap_ending_the_control_mid_run_is_reported_and_the_remainder_never_starts( tmp_path ):

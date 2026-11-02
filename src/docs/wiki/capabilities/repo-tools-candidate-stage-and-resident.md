@@ -7,7 +7,7 @@ pins:
   - cosa.repo.symindex.candidates.candidate_stage.shortlist@e7dd9e8fbb
   - cosa.repo.symindex.candidates.candidate_stage.shortlist_bytes@7871f266ef
   - cosa.repo.symindex.candidates.candidate_stage.replay@defe90f423
-  - cosa.repo.symindex.candidates.resident.ResidentSearch@c535d098c7
+  - cosa.repo.symindex.candidates.resident.ResidentSearch@6b5d50efaa
   - cosa.repo.symindex.candidates.resident.trim_lists@9d506a25fc
 ---
 # Candidate stage and resident search

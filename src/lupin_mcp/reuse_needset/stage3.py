@@ -37,8 +37,8 @@ def control_stage( records, pairs, ask, build_stage ):
         - the returned function takes no argument and returns a report dict
         - the pool is fingerprinted before the first ask, so a trace left by an ask is caught as well as one left by the plant
         - the pairs are asked one at a time in file order, so the calls fall in a fixed order
-        - the report is run_control's, plus by_lang ( found and total per rewrite language ), restored true and stop true when any pair was missed
-        - a missed pair stops the run, as the plan says: the checker missed a planted pair
+        - the report is run_control's, plus by_lang ( found and total per rewrite language ), restored true and stop false
+        - a missed pair does not stop the run; the caller scores the misses and sets stop by its own rule
 
     Raises:
         - NeedsetError CONTROL_NOT_RESTORED from the returned function when the pool or the stage ids changed
@@ -56,5 +56,5 @@ def control_stage( records, pairs, ask, build_stage ):
             row = by_lang.setdefault( p[ "rewrite" ][ "lang" ], { "found": 0, "total": 0 } )
             row[ "total" ] += 1
             row[ "found" ] += 0 if p[ "rewrite" ][ "id" ] in rep[ "missed" ] else 1
-        return { **rep, "by_lang": dict( sorted( by_lang.items() ) ), "restored": True, "stop": bool( rep[ "missed" ] ) }
+        return { **rep, "by_lang": dict( sorted( by_lang.items() ) ), "restored": True, "stop": False }
     return stage
