@@ -10,11 +10,12 @@ from lupin_mcp.reuse_needset import report_rollup as rr
 FORCED_PLAN    = { "live": False, "plan": { "by_label": { "not_same": 4, "same_job": 8 }, "pairs": 12, "requests_needed": 48, "stage_budget": 100, "undrafted": [] } }
 EXPANSION_PLAN = { "live": False, "plan": { "by_group": { "attribution": 37, "control": 17, "yield": 70 }, "calls_needed": 124, "embeddings_needed": 620, "rows": 124,
                                             "saved_replies": 0, "stage_budget": 140, "undrafted": [ "d-1", "d-2", "d-3" ], "unsaved": [] } }
-YIELD_PLAN     = { "live": False, "plan": { "seeds": 72, "needs": 70, "unsaved": [], "no_final_need": 2, "by_lang": { "python": 40, "typescript": 30 }, "lists_sha": "abc" } }
+NO_NEED        = { "disputed": 0, "disputed_ids": [], "draft_failed": 29, "no_partner": 0, "not_pooled": 1, "skipped": [], "unreadable_reply": 0, "unstrippable_seed": 0 }
+YIELD_PLAN     = { "live": False, "plan": { "seeds": 100, "needs": 70, "unsaved": [], "no_final_need": NO_NEED, "by_lang": { "py": 36, "ts": 34 }, "lists_sha": "abc" } }
 YIELD_RUN      = { "live": True, "plan": YIELD_PLAN[ "plan" ], "closed_run": None, "close_error": None,
                    "report": { "used": 200, "limit": 669, "by_stage": {}, "status": "done",
                                "report": { "traced": True, "members": 10, "found": 6, "by_lost_at": { "found": 6, "retrieval": 4 },
-                                           "found_by_lang": { "typescript": { "found": 2, "members": 4, "interval": [ 0.1, 0.9 ] }, "python": { "found": 4, "members": 6, "interval": [ 0.3, 0.9 ] } } } } }
+                                           "found_by_lang": { "ts": { "found": 2, "members": 4, "interval": [ 0.1, 0.9 ] }, "py": { "found": 4, "members": 6, "interval": [ 0.3, 0.9 ] } } } } }
 
 
 def forced_result( rid, label, lang, was_in=False, answered=True, accepted=False ):
@@ -57,13 +58,14 @@ def test_load_reads_json(tmp_path):
 
 def test_yield_plan_only_marks_figures_not_run():
     text = rr.yield_section( YIELD_PLAN )
-    assert "Plan only" in text and "| python | 40 |" in text and "Found share: not run" in text
+    assert "Plan only" in text and "| py | 36 |" in text and "Found share: not run" in text
+    assert "| draft_failed | 29 |" in text and "disputed_ids" not in text and "Seeds 100, needs 70" in text
 
 
 def test_yield_run_gives_wilson_overall_and_per_language():
     text = rr.yield_section( YIELD_RUN )
     assert "| all | 6/10 (60.0%, 31.3-83.2%) |" in text
-    assert text.index( "| python |" ) < text.index( "| typescript |" ) and "| python | 4/6 (66.7%," in text
+    assert text.index( "| py |" ) < text.index( "| ts |" ) and "| py | 4/6 (66.7%," in text
     assert "| retrieval | 4 |" in text and "Run status done, 200 of 669" in text
 
 

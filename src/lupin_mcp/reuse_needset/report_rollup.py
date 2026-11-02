@@ -103,15 +103,16 @@ def yield_section( doc ):
         - doc comes from yield_trace: its printed result or its yield-trace-report.json
 
     Ensures:
-        - a plan-only result gives the needs per language and what a run would trace, with the figures marked not run
+        - a plan-only result gives the needs per language, the seeds left without a need by reason, and what a run would trace, with the figures marked not run
         - a finished trace gives the found share overall and per language with Wilson intervals, then the count by where each member was lost
         - a run that stopped or hit its budget gives its status and no figures
     """
     plan, run = split( doc )
     head      = [ "## C2 yield trace (needs traced end to end, the seed as known answer)" ]
     if run is None:
-        out = [ f"Plan only: no model was asked. Seeds {plan[ 'seeds' ]}, needs {plan[ 'needs' ]}, unsaved answers {len( plan[ 'unsaved' ] )}, seeds with no final need {plan[ 'no_final_need' ]}.",
-                counts_table( "language", plan[ "by_lang" ] ), f"Found share: {NOT_RUN}." ]
+        why = { k: v for k, v in plan[ "no_final_need" ].items() if isinstance( v, int ) }
+        out = [ f"Plan only: no model was asked. Seeds {plan[ 'seeds' ]}, needs {plan[ 'needs' ]}, unsaved answers {len( plan[ 'unsaved' ] )}.",
+                counts_table( "language", plan[ "by_lang" ] ), counts_table( "seed left without a need", why ), f"Found share: {NOT_RUN}." ]
         return "\n\n".join( head + out )
     report = run[ "report" ]
     out    = [ f"Run status {run[ 'status' ]}, {run[ 'used' ]} of {run[ 'limit' ]} calls used." ]
