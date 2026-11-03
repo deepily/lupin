@@ -9,7 +9,8 @@ With no date given, the week is the last complete Monday-to-Sunday one, so pages
 A record whose time cannot be read is left out of every count and listed on its own row, never guessed into a week.
 The daily duplicate check has a table of its own: one row per run dated inside the week, then a total row.
 It reads the result files of the check's folder.
-The verdict on each finding comes from the finding itself or from its row in the task store.
+The verdict on each finding comes from the finding itself, then from verdicts.jsonl beside the result files, then from its row in the task store.
+A run with findings and no verdict at all shows "not triaged" in place of its counts.
 A run with no findings is a row of zeros; a result file that cannot be read is counted under "Left out of the week".
 No table has a column for a seat or a person; the page counts the fleet.
 The tables are drawn by report_rollup.counts_table in its plain form. Nothing here sends anything or runs a model.
@@ -49,6 +50,8 @@ REAL_VERDICTS  = ( "DUPLICATE", "EXTEND" )
 NOT_VERDICTS   = ( "DISTINCT", )
 CHECK_HEADERS  = ( "date", "trigger", "commits judged", "definitions judged", "judge calls", "minutes", "findings", "real duplicates", "not duplicates", "no verdict yet", "precision (real of ruled)" )
 CHECK_TITLE    = "Daily duplicate check"
+VERDICTS_FILE  = "verdicts.jsonl"                                   # beside the result files; duplicate_check_verdicts is its only writer
+NOT_TRIAGED    = "not triaged"                                      # shown in place of a count when a run has findings and no verdict at all
 BAD_CHECK_ROW  = "duplicate-check result files that cannot be read"
 OUTCOME_KINDS  = ( "REUSED", "EXTENDED", "WROTE_NEW" )
 UNPARSED       = "unparsed"
@@ -242,15 +245,16 @@ def read_check_run( path ):
     Requires:
         - path is a file named like <date>-<time>-<trigger>.json
     Ensures:
-        - returns { day, trigger, commits, judged, calls, seconds, findings } where findings is a list of ( verdict field or None, correlation key or None )
+        - returns { day, trigger, stem, commits, judged, calls, seconds, findings } where findings is a list of ( verdict field or None, correlation key or None, finding id or None )
+        - stem is the file name without `.json`, the `run=` of a verdict line
         - commits is the window's commit count, 0 for a run with no window; judged is the number of definitions judged
         - a run that judged nothing, or never reached judging, has judged 0 and no findings
         - returns None when the file cannot be read, is not a JSON object, or lacks a readable date, trigger, judge_calls or elapsed_seconds
     """
     try:
         doc = json.loads( path.read_text( encoding="utf-8" ) )
-        return { "day": datetime.date.fromisoformat( doc[ "date" ] ), "trigger": str( doc[ "trigger" ] ), "commits": int( doc.get( "window", { } ).get( "commits", 0 ) ), "judged": int( doc.get( "judged", 0 ) ), "calls": int( doc[ "judge_calls" ] ),
-                 "seconds": float( doc[ "elapsed_seconds" ] ), "findings": [ ( f.get( "verdict" ), f.get( "correlation_key" ) ) for f in doc.get( "findings", [] ) ] }
+        return { "day": datetime.date.fromisoformat( doc[ "date" ] ), "trigger": str( doc[ "trigger" ] ), "stem": path.stem, "commits": int( doc.get( "window", { } ).get( "commits", 0 ) ), "judged": int( doc.get( "judged", 0 ) ), "calls": int( doc[ "judge_calls" ] ),
+                 "seconds": float( doc[ "elapsed_seconds" ] ), "findings": [ ( f.get( "verdict" ), f.get( "correlation_key" ), f.get( "id" ) ) for f in doc.get( "findings", [] ) ] }
     except ( OSError, ValueError, KeyError, TypeError, AttributeError ):
         return None
 
@@ -272,19 +276,47 @@ def read_check_runs( folder, week ):
     return [ r for r in read if r is not None and week[ 0 ] <= r[ "day" ] <= week[ 1 ] ], sum( 1 for r in read if r is None )
 
 
-def verdict_of( field, key, store ):
+def read_verdicts( folder ):
+    """
+    Read the verdict lines the triage seat logged, as the writer saved them.
+
+    Requires:
+        - folder is the check's result folder; the file is VERDICTS_FILE inside it
+    Ensures:
+        - returns { ( run, finding ): verdict }, the last line for a pair winning
+        - a missing file is an empty answer
+    Raises:
+        - ValueError naming the line when a line is not a JSON object with a run, a finding and a known verdict
+    """
+    path = pathlib.Path( folder ) / VERDICTS_FILE
+    if not path.is_file(): return { }
+    got = { }
+    for n, text in enumerate( path.read_text( encoding="utf-8" ).splitlines(), 1 ):
+        try:
+            rec = json.loads( text )
+            if rec[ "verdict" ] not in REAL_VERDICTS + NOT_VERDICTS: raise ValueError( "unknown verdict" )
+            got[ ( rec[ "run" ], rec[ "finding" ] ) ] = rec[ "verdict" ]
+        except ( ValueError, KeyError, TypeError ) as e:
+            raise ValueError( f"{VERDICTS_FILE} line {n} is not a verdict record: {type( e ).__name__}: {e}" ) from e
+    return got
+
+
+def verdict_of( field, key, store, logged=None ):
     """
     Name the crew's verdict on one finding.
 
     Requires:
         - field is the finding's own verdict, or None; key is its correlation key, or None
         - store has query( key ) returning ( ok, status, body ), or is None
+        - logged is the verdict read_verdicts holds for the finding, or None
     Ensures:
         - returns `duplicate`, `extend` or `distinct` in capitals, taken from the finding's own verdict field when it holds one, whatever the case
+        - otherwise returns logged, when there is one; the log is read from a file, so it costs no store read
         - otherwise returns the word of the last `VERDICT <word>` in the row's amendments in the store
         - returns None when there is no key, no store, a read that did not answer ok, or no verdict yet
     """
     if isinstance( field, str ) and field.upper() in REAL_VERDICTS + NOT_VERDICTS: return field.upper()
+    if logged is not None: return logged
     if store is None or key is None: return None
     ok, _status, body = store.query( key )
     if not ok: return None
@@ -292,37 +324,57 @@ def verdict_of( field, key, store ):
     return found[ -1 ] if found else None
 
 
-def check_counts( run, store ):
+def check_counts( run, store, logged=None ):
     """
     Count one run's findings by verdict.
 
+    Requires:
+        - logged is read_verdicts' answer, or None for no log
     Ensures:
         - returns { real, not_dup, open } that add up to the run's findings; open are the findings with no verdict yet
+        - a finding is looked up in the log by the run's stem and its own id
     """
-    verdicts = [ verdict_of( field, key, store ) for field, key in run[ "findings" ] ]
+    logged   = logged if logged is not None else { }
+    verdicts = [ verdict_of( field, key, store, logged.get( ( run[ "stem" ], fid ) ) ) for field, key, fid in run[ "findings" ] ]
     real     = sum( 1 for v in verdicts if v in REAL_VERDICTS )
     not_dup  = sum( 1 for v in verdicts if v in NOT_VERDICTS )
     return { "real": real, "not_dup": not_dup, "open": len( verdicts ) - real - not_dup }
 
 
-def check_table( runs, store ):
+def ruled_cells( findings, real, not_dup ):
+    """
+    Name the three cells that depend on the verdicts: real, not, precision.
+
+    Ensures:
+        - returns ( real, not, precision ) as the page shows them
+        - findings with no verdict at all give NOT_TRIAGED in all three, never 0: nobody has looked, which is not the same as none being real
+        - no findings, or at least one verdict, gives the counts and share's precision
+    """
+    if findings > 0 and real + not_dup == 0: return NOT_TRIAGED, NOT_TRIAGED, NOT_TRIAGED
+    return real, not_dup, share( real, real + not_dup )
+
+
+def check_table( runs, store, logged=None ):
     """
     Draw the daily duplicate check table.
 
     Requires:
-        - runs are read_check_runs' answer
+        - runs are read_check_runs' answer; logged is read_verdicts' answer, or None
     Ensures:
         - returns CHECK_TITLE, then a table with one row per run in the given order and a last row `total`
         - a run with no findings is a row of zeros
+        - a run with findings and no verdict shows `not triaged` for real, not and precision, never 0; so does the total row when that holds for every finding
         - precision is real duplicates out of those ruled, real plus not; findings with no verdict are in their own column and in neither side
         - the total row sums every column, and its precision is the sum's, not an average of the rows'
     """
     rows, sums = [], { "commits": 0, "judged": 0, "calls": 0, "seconds": 0.0, "findings": 0, "real": 0, "not_dup": 0, "open": 0 }
     for run in runs:
-        got  = check_counts( run, store ) | { "commits": run[ "commits" ], "judged": run[ "judged" ], "calls": run[ "calls" ], "seconds": run[ "seconds" ], "findings": len( run[ "findings" ] ) }
+        got  = check_counts( run, store, logged ) | { "commits": run[ "commits" ], "judged": run[ "judged" ], "calls": run[ "calls" ], "seconds": run[ "seconds" ], "findings": len( run[ "findings" ] ) }
         for k in sums: sums[ k ] += got[ k ]
-        rows.append( [ run[ "day" ].isoformat(), run[ "trigger" ], got[ "commits" ], got[ "judged" ], got[ "calls" ], f"{got[ 'seconds' ] / 60:.1f}", got[ "findings" ], got[ "real" ], got[ "not_dup" ], got[ "open" ], share( got[ "real" ], got[ "real" ] + got[ "not_dup" ] ) ] )
-    rows.append( [ "total", "", sums[ "commits" ], sums[ "judged" ], sums[ "calls" ], f"{sums[ 'seconds' ] / 60:.1f}", sums[ "findings" ], sums[ "real" ], sums[ "not_dup" ], sums[ "open" ], share( sums[ "real" ], sums[ "real" ] + sums[ "not_dup" ] ) ] )
+        real, not_dup, precision = ruled_cells( got[ "findings" ], got[ "real" ], got[ "not_dup" ] )
+        rows.append( [ run[ "day" ].isoformat(), run[ "trigger" ], got[ "commits" ], got[ "judged" ], got[ "calls" ], f"{got[ 'seconds' ] / 60:.1f}", got[ "findings" ], real, not_dup, got[ "open" ], precision ] )
+    real, not_dup, precision = ruled_cells( sums[ "findings" ], sums[ "real" ], sums[ "not_dup" ] )
+    rows.append( [ "total", "", sums[ "commits" ], sums[ "judged" ], sums[ "calls" ], f"{sums[ 'seconds' ] / 60:.1f}", sums[ "findings" ], real, not_dup, sums[ "open" ], precision ] )
     return CHECK_TITLE + "\n\n" + table( list( CHECK_HEADERS ), rows )
 
 
@@ -334,7 +386,7 @@ def weekly_report( records, rows, receipts, end, tz=None, check_dir=None, store=
         - records is what merge_call_logs returns; rows is what read_refusals returns; receipts is what load_receipts returns
         - end is an ISO date text or a date; tz is a tzinfo, or None for the host's
         - check_dir is the folder of the daily duplicate check's result files, or None for a page with no such table
-        - store is verdict_of's store; it is read only when a finding in the week has no verdict field
+        - store is verdict_of's store; it is read only when a finding in the week has no verdict field and no line in verdicts.jsonl
     Ensures:
         - with a check_dir, the audits are followed by check_table's table, and unreadable result files are counted in the left-out table's last row
         - returns a title line naming the seven days, then the tables of report, then the audits table, joined by blank lines
@@ -351,7 +403,7 @@ def weekly_report( records, rows, receipts, end, tz=None, check_dir=None, store=
     bad_files     = 0
     if check_dir is not None:
         runs, bad_files = read_check_runs( check_dir, week )
-        parts.append( check_table( runs, store ) )
+        parts.append( check_table( runs, store, read_verdicts( check_dir ) ) )
         left_out[ BAD_CHECK_ROW ] = bad_files
     if no_ts or no_at or bad_files: parts.append( counts_table( "Left out of the week", left_out ) )
     return "\n\n".join( parts )
@@ -386,7 +438,7 @@ def main( argv=None, out=None, store=None ):
         - --write also saves the page as <data dir>/reuse-behaviour/reuse-behaviour-<end>.txt, replacing that day's file
         - --skip-if-saved, with --write, makes no page and prints one line saying so when that file already exists and is not empty; it returns 0
         - --print-cron prints the two cron lines and nothing else; it installs nothing
-        - the page carries the daily duplicate check table from <data dir>/duplicate-check-daily, or from --check-dir; verdicts come from the task store unless store is given
+        - the page carries the daily duplicate check table from <data dir>/duplicate-check-daily, or from --check-dir; verdicts come from the finding, then verdicts.jsonl in that folder, then the task store (unless store is given)
         - returns 0 when the page was made, 3 with the reason printed when it could not be
     """
     ap = argparse.ArgumentParser( description="The weekly fleet page of the reuse checks." )
