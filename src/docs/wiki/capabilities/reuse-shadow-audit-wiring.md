@@ -21,7 +21,7 @@ pins:
 ## Draining
 - `read_ceiling` returns the token ceiling from `reuse shadow audit max tokens per drain`. There is no default. A missing, blank, non-numeric or zero value raises `AUDIT_CEILING_UNSET`.
 - `sweep_of( ctx_factory, ask )` builds the sweep function. Each sweep gets a fresh packed context and its own run name. It returns the verdict, the shortlist ids and the tokens in plus out, and the cause when the verdict is uncertain. An error answer raises `AUDIT_SWEEP_REFUSED`.
-- `drain` runs the queue through `run_pending` under that ceiling and returns its result with `spent_tokens` and `stopped_by`. It also stops at `reuse_ledger.SHADOW_AUDIT_WEEKLY_CAP` audits in the last seven days, with `stopped_by` reading `weekly_cap`.
+- `drain` runs the queue through `run_pending` under that ceiling and returns its result with `spent_tokens` and `stopped_by`. It also stops at `reuse_ledger.SHADOW_AUDIT_WEEKLY_CAP` audits in the last seven days, with `stopped_by` reading `weekly_cap`. Known-miss items drain first, so a week with four known misses leaves no sample audits.
 - The live drain needs the pack size variable, or it raises `AUDIT_NEEDS_PACKED`.
 
 ## Command and cron

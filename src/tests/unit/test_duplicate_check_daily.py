@@ -464,3 +464,17 @@ def test_the_live_auditor_ties_each_finding_with_the_lookup_tools_logs_and_queue
     assert dd.live_auditor( [ { "id": "d1", "commit": "abc" } ], tmp_path ) == "queued"
     assert seen[ "logs" ] == Ctx.data / "call-log" and seen[ "tie" ] == ( "d1", [ "row" ], [ "rec" ], Ctx.root, "abc" )
     assert seen[ "receipt" ] == ( Ctx, "r1" ) and seen[ "data_dir" ] == Ctx.data and seen[ "today" ] == datetime.date.today().isoformat()
+
+
+def test_a_failed_file_after_some_judge_calls_were_made_counts_the_calls_made( repo, tmp_path ):
+    history( repo )
+    class Dies( FakeBackend ):
+        async def complete( self, *a ):
+            if self.calls >= 1: self.calls += 1; raise RuntimeError( "backend gone" )
+            return await super().complete( *a )
+    backend = Dies()
+    doc     = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, backend=backend ) )
+    assert doc[ "status" ] == "failed" and "backend gone" in doc[ "error" ]
+    assert doc[ "judge_calls" ] == backend.calls and doc[ "judge_calls" ] >= 2, "the calls made before the failure are counted, the failing one too"
+    assert json.loads( results( tmp_path )[ 0 ].read_text() )[ "judge_calls" ] == doc[ "judge_calls" ]
+

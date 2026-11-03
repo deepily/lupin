@@ -463,3 +463,19 @@ def test_a_batch_the_server_takes_is_not_split():
     client = RefusingClient( 8 )
     vb.embed_all( client, [ "a", "b", "c" ], "code", "document", 8, 0, lambda s: None )
     assert client.batches == [ 3 ]
+
+
+class UnreachableError( Exception ):
+    """A refusal that is not a RuntimeError, like the embedding provider's unreachable error."""
+
+
+def test_a_refusal_that_is_not_a_runtime_error_is_also_retried_in_halves():
+    class Client:
+        def __init__( self ): self.batches = []
+        def embed( self, texts, content_type, role ):
+            self.batches.append( len( texts ) )
+            if len( texts ) > 1: raise UnreachableError( "HTTP batch fallback unreachable after 3 attempts" )
+            return [ [ 1.0, 0.0 ] for _ in texts ]
+    client = Client()
+    out    = vb.embed_all( client, [ "a", "b", "c", "d" ], "code", "document", 8, 0, lambda s: None )
+    assert len( out ) == 4 and client.batches == [ 4, 2, 1, 1, 2, 1, 1 ]
