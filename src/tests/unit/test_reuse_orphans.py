@@ -128,5 +128,5 @@ def test_main_takes_the_default_ledger_and_clock_and_refuses_an_unreadable_ledge
     assert ro.main( [] ) == 0
     assert json.loads( capsys.readouterr().out )[ "orphans" ] == []
     monkeypatch.setattr( rl, "ledger_path", lambda root: tmp_path / "missing.jsonl" )
-    assert ro.main( [ "--confirmed-by", "cheech" ] ) == ro.UNREADABLE
+    assert ro.main( [ "--confirmed-by", "cheech" ] ) == 3
     assert "does not exist" in json.loads( capsys.readouterr().out )[ "error" ]
