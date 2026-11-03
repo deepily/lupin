@@ -434,3 +434,43 @@ def test_a_cap_of_zero_makes_no_call_and_a_cap_that_is_not_reached_changes_nothi
     roomy   = FakeBackend()
     wide    = asyncio.run( jd.judge_run( news, cands, roomy, hr.Ledger( str( tmp_path / "b" ) ), 0, CFG, SCRUB, 1, max_calls=3 ) )
     assert len( roomy.calls ) == 3 and wide[ "unjudged" ] == [] and len( wide[ "verdicts" ] ) == 9
+
+
+def test_with_skip_breaching_a_definition_naming_a_scrub_token_is_left_unjudged_and_a_candidate_naming_one_is_left_out(tmp_path):
+    news, cands = world()
+    news[ 0 ]   = { **news[ 0 ], "text": "def first( x ):\n    return check_exists( x )" }                    # the definition itself names the tool
+    leaky       = definition( "leaky", "def leaky( y ):\n    return reuse-receipt( y )", origin="new" )
+    cands[ news[ 1 ][ "id" ] ][ 0 ] = leaky                                                                   # and one candidate of the second one does
+    backend = FakeBackend()
+    out     = asyncio.run( jd.judge_run( news, cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, skip_breaching=True ) )
+    assert [ ( u[ "id" ], u[ "code" ] ) for u in out[ "unjudged" ] ] == [ ( news[ 0 ][ "id" ], err.BLINDNESS_BREACH ) ] and "check_exists" in out[ "unjudged" ][ 0 ][ "detail" ]
+    assert len( backend.calls ) == 2 and {v[ "id" ] for v in out[ "verdicts" ]} == {news[ 1 ][ "id" ], news[ 2 ][ "id" ]}, "the two clean definitions were judged"
+    assert leaky[ "id" ] not in {v[ "candidate" ] for v in out[ "verdicts" ]} and len( [ v for v in out[ "verdicts" ] if v[ "id" ] == news[ 1 ][ "id" ] ] ) == 2
+    with pytest.raises( err.DuplicateCheckError ) as caught:                                                  # off by default: the run still stops
+        asyncio.run( jd.judge_run( news[ :1 ], cands, FakeBackend(), hr.Ledger( str( tmp_path / "m" ) ), 0, CFG, SCRUB, 1 ) )
+    assert caught.value.code == err.BLINDNESS_BREACH
+
+
+def test_a_definition_whose_every_candidate_names_a_scrub_token_gets_no_ruling_and_no_call(tmp_path):
+    news, cands = world()
+    only        = definition( "leaky", "def leaky( y ):\n    return check_exists( y )", origin="new" )
+    cands[ news[ 0 ][ "id" ] ] = [ only ]
+    backend     = FakeBackend()
+    out         = asyncio.run( jd.judge_run( news[ :1 ], cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, skip_breaching=True ) )
+    assert backend.calls == [] and out == { "verdicts": [], "unjudged": [] }
+
+
+def test_the_cap_is_tested_before_the_definition_is_blinded_or_a_prompt_is_built(tmp_path, monkeypatch):
+    news, cands = world()
+    news[ 0 ]   = { **news[ 0 ], "text": "def first( x ):\n    return check_exists( x )" }
+    monkeypatch.setattr( jd, "build_prompt", lambda *a, **k: pytest.fail( "a prompt was built past the cap" ) )
+    none        = FakeBackend()
+    out         = asyncio.run( jd.judge_run( news, cands, none, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, max_calls=0 ) )
+    assert none.calls == [] and [u[ "code" ] for u in out[ "unjudged" ]] == [err.JUDGE_CAP_REACHED] * 3, "even the breaching definition is carried, not raised"
+
+
+def test_a_reply_that_must_be_asked_again_past_the_cap_leaves_the_definition_unjudged_after_one_call(tmp_path):
+    news, cands = world()
+    backend     = FakeBackend( replies=[ "I think they match" ] )
+    out         = asyncio.run( jd.judge_run( news[ :1 ], cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, max_calls=1 ) )
+    assert len( backend.calls ) == 1 and [ u[ "code" ] for u in out[ "unjudged" ] ] == [ err.JUDGE_CAP_REACHED ]

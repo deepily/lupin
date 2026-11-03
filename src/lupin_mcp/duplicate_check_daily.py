@@ -296,7 +296,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         if fresh[ "defs" ]:
             ledger = proof_cli.proof_ledger( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
             wiring = { **proof_cli.base_wiring( folder / VECTORS_DIR, parts[ "structural" ]( tree, cfg ), parallel, parts[ "client" ] ), "backend": count, "ledger": ledger }
-            out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap )
+            out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap, skip_breaching=True )
     except Exception as exc:               # the pool build, the embeddings or the judge failed: leave a record and change nothing else
         doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, elapsed_seconds=round( clock() - started, 3 ) )
         write_json( folder / f"{stem}.json", doc )
