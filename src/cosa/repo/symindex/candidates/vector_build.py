@@ -94,6 +94,26 @@ def entry_texts( entry, purpose ):
     return { "code": code, "prose": prose, "concat": code + "\n" + prose }
 
 
+def _embed_halving( client, batch, content_type, role, pause_seconds, sleep ):
+    """
+    Embed one batch, and when the server refuses it, embed its two halves instead.
+
+    Ensures:
+        - returns one vector per text, in order
+        - a refused batch of two or more texts is split in the middle and each half tried alone, down to one text
+        - the pause is taken before each retry, so a crowded GPU is not hit again at once
+        - a refused single text raises what the client raised
+    """
+    try: return client.embed( batch, content_type, role )
+    except Exception:                    # the server answers a crowded GPU with a 500 whatever the client wraps it in
+        if len( batch ) < 2: raise
+        sleep( pause_seconds )
+        mid   = len( batch ) // 2
+        first = _embed_halving( client, batch[ :mid ], content_type, role, pause_seconds, sleep )
+        sleep( pause_seconds )
+        return first + _embed_halving( client, batch[ mid: ], content_type, role, pause_seconds, sleep )
+
+
 def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sleep ):
     """
     Embed every text in batches, one batch at a time, with a pause between batches.
@@ -102,6 +122,7 @@ def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sle
         - returns one vector per text, in order
         - a batch holds at most batch_size texts, and at most CHAR_BUDGET characters counted as
           rows times the longest text, except a single text longer than the budget, sent alone
+        - a batch the server refuses is retried in halves, down to one text, so a GPU shared with another process still gets every text
         - every vector has the length of the first
 
     Raises:
@@ -116,7 +137,7 @@ def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sle
             if end > i and ( end - i + 1 ) * longest > CHAR_BUDGET: break
             end += 1
         batch = texts[ i:end ]
-        out   = client.embed( batch, content_type, role )
+        out   = _embed_halving( client, batch, content_type, role, pause_seconds, sleep )
         if len( out ) != len( batch ):
             raise CandidateError( EMBEDDING_SHAPE, f"asked for {len( batch )} vectors and got {len( out )}" )
         vectors.extend( out )

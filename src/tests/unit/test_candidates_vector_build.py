@@ -429,3 +429,37 @@ def test_a_batch_that_lands_exactly_on_the_budget_is_kept_whole():
     client = SizeClient()
     vb._embed_all( client, [ "a" * half, "b" * half, "c" * half ], "code", "document", 16, 0, lambda s: None )
     assert client.batches == [ [ half, half ], [ half ] ]
+
+
+class RefusingClient:
+    """Refuses any batch of more than limit texts, as a crowded GPU does, else answers."""
+
+    def __init__( self, limit ):
+        self.limit, self.batches = limit, []
+
+    def embed( self, texts, content_type, role ):
+        self.batches.append( len( texts ) )
+        if len( texts ) > self.limit: raise RuntimeError( "HTTP 500: Internal Server Error" )
+        return [ [ float( len( t ) ), 0.0 ] for t in texts ]
+
+
+def test_a_refused_batch_is_retried_in_halves_down_to_what_the_server_takes_and_order_is_kept():
+    texts, naps = [ "t" * n for n in range( 1, 9 ) ], []
+    client = RefusingClient( 2 )
+    out    = vb.embed_all( client, texts, "code", "document", 8, 0.5, naps.append )
+    assert [ v[ 0 ] for v in out ] == [ float( n ) for n in range( 1, 9 ) ]
+    assert client.batches == [ 8, 4, 2, 2, 4, 2, 2 ], "8 refused, then 4 refused, 2 and 2 taken, then 4 refused, 2 and 2 taken"
+    assert naps.count( 0.5 ) == 6, "a pause before each half"
+
+
+def test_a_single_text_the_server_refuses_raises_the_client_error_after_one_try():
+    client = RefusingClient( 0 )
+    with pytest.raises( RuntimeError, match="HTTP 500" ):
+        vb.embed_all( client, [ "only" ], "code", "document", 8, 0, lambda s: None )
+    assert client.batches == [ 1 ]
+
+
+def test_a_batch_the_server_takes_is_not_split():
+    client = RefusingClient( 8 )
+    vb.embed_all( client, [ "a", "b", "c" ], "code", "document", 8, 0, lambda s: None )
+    assert client.batches == [ 3 ]
