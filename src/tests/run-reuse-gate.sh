@@ -4,15 +4,16 @@
 # Usage:
 #   run-reuse-gate.sh                       # this tree's HEAD against the merge base with main
 #   run-reuse-gate.sh --base REV            # measure from REV instead of main
-#   run-reuse-gate.sh --diff FILE           # also require an outcome line for each definition in a symbol index diff
+#   run-reuse-gate.sh --diff FILE           # use a symbol index diff as the list of new definitions, in place of the one built from git
 #
-# What it reads: the Markdown lines HEAD adds since the merge base, the call log, the search records and
-# the key `reuse review gating` in the main checkout's lupin-app.ini. It sends nothing and runs no model.
+# What it reads: the Markdown lines HEAD adds since the merge base, the call log, the search records, the
+# definitions HEAD adds to indexed files (found from git, each needs an outcome line) and the key
+# `reuse review gating` in the main checkout's lupin-app.ini. It sends nothing and runs no model.
 # With the key false it reports and exits 0. With the key true any refused line or any definition with no
 # outcome line exits 1.
 #
 # Exit codes: 0 clean or report only, 1 refused, 3 could not check (the key is unreadable, git names no base,
-# the symbol index diff reports a changed algorithm, or no interpreter). A run that could not check prints no
+# the list of new definitions cannot be built, or no interpreter). A run that could not check prints no
 # summary block, so TestSuiteJob reads it as not executed, never as passed.
 #
 # Called by TestSuiteJob when test_types="reuse". Module: src/lupin_mcp/reuse_merge_gate.py.

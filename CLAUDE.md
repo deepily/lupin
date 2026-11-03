@@ -516,12 +516,13 @@ not a pass. `src/scripts/pre-push-chain.sh` runs the first step only, on the tip
 
 **reuse runs fourth, for the same reason**. It reads the Markdown lines the branch adds since its merge base
 with main. It judges each `REUSE-OUTCOME` line against the call log: shape, receipt and search, token and kind pairing.
-It keeps a record of every line, takes seconds and makes no model call. With `--diff FILE`, a symbol index diff,
-each new definition in it also needs an outcome line. A branch that adds no definitions and no outcome lines passes.
+It keeps a record of every line, takes seconds and makes no model call. Each definition the branch adds
+to an indexed file also needs an outcome line. The list comes from git, through the daily check's window and changed files.
+A branch that adds no definitions and no outcome lines passes.
 The key `reuse review gating` is read on each run. False means refusals are reported under `Report-only:` and the run exits 0.
 True means any refusal or missing outcome line exits 1. Its summary counts checks: one for the scan,
 one per outcome line, one per new definition. Exit 3 means it could not check: the key is unreadable,
-git names no merge base, or the diff reports a changed algorithm. It then prints no summary,
+git names no merge base, or the list of new definitions cannot be built. It then prints no summary,
 so it reads as not executed, never as passed.
 
 > The heading above and the HTML comment above are machine-read; neither is styling. `test_bridge_dir_guard.py` looks for the exact line `## PR merge requirements`, on a line of its own. `test_typescript_suite_gate.py` parses the `merge-pyramid-suites` marker and compares its set to `ALL_SUITE_COMPONENTS` in `src/cosa/agents/test_suite/job.py`. It then checks the paragraph beneath the marker names every one. Rewording the heading or dropping the marker reddens the unit tier. The marker is a set, not a sequence. The shell array runs integration before e2e, while the documented pyramid holds integration back as the final gate. That ordering difference is deliberate.

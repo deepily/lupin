@@ -108,7 +108,7 @@ def test_a_branch_that_adds_no_definitions_and_no_outcome_lines_passes( repo, da
 
 
 def test_only_added_markdown_lines_are_read( repo, data, tmp_path ):
-    ( repo / "code.py" ).write_text( NOT_IN_LOG + "\n", encoding="utf-8" )
+    ( repo / "code.py" ).write_text( 'TEXT = """\n' + NOT_IN_LOG + '\n"""\n', encoding="utf-8" )
     ( repo / "doc.txt" ).write_text( NOT_IN_LOG + "\n", encoding="utf-8" )
     git( repo, "add", "code.py", "doc.txt" )
     git( repo, "commit", "-q", "-m", "not markdown" )
@@ -250,3 +250,97 @@ def test_a_data_folder_that_cannot_be_made_could_not_be_checked( repo, tmp_path 
     blocker.write_text( "x", encoding="utf-8" )
     code, text = run( repo, blocker / "data", tmp_path )
     assert code == 3 and "Nothing was checked." in text and "Total Tests" not in text
+
+
+def commit_code( repo, name, text ):
+    """Ensures: commits a source file with this text."""
+    ( repo / name ).parent.mkdir( parents=True, exist_ok=True )
+    ( repo / name ).write_text( text, encoding="utf-8" )
+    git( repo, "add", name )
+    git( repo, "commit", "-q", "-m", f"code {name}" )
+
+
+def worktrees( repo ):
+    """Ensures: returns the paths git lists as working trees of repo."""
+    return [ l[ 9: ] for l in git( repo, "worktree", "list", "--porcelain" ).splitlines() if l.startswith( "worktree " ) ]
+
+
+def test_a_new_function_with_no_outcome_line_is_found_from_git_and_refused( repo, data, tmp_path ):
+    commit_code( repo, "pkg/mod.py", "def old():\n    return 1\n" )
+    git( repo, "branch", "-f", "main", "HEAD" )
+    commit_code( repo, "pkg/mod.py", "def old():\n    return 2\n\n\ndef fresh():\n    return 3\n\n\nclass K:\n    def method( self ):\n        return 4\n" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "MISSING repo:pkg.mod.fresh is new in the diff" in text and "MISSING repo:pkg.mod.K.method is new in the diff" in text
+    assert "old is new" not in text, "a function whose text changed is not a new definition"
+    assert ( count( text, "Total Tests" ), count( text, "Failed" ) ) == ( 3, 2 )
+    assert worktrees( repo ) == [ str( repo ) ], "both detached worktrees are removed"
+
+
+def test_a_ruling_and_an_outcome_line_cover_a_new_function( repo, data, tmp_path ):
+    commit_code( repo, "pkg/mod.py", "def fresh():\n    return 3\n" )
+    ( repo / "review.md" ).write_text( f"RULING repo:pkg.mod.fresh :: DUPLICATE :: reuse-receipt: {RID}\n{GOOD}\n", encoding="utf-8" )
+    git( repo, "add", "review.md" )
+    git( repo, "commit", "-q", "-m", "review" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 0 and "MISSING" not in text and "1 outcome lines and 1 new definitions" in text
+
+
+def test_a_branch_with_a_new_function_is_only_reported_when_gating_is_off( repo, data, tmp_path ):
+    commit_code( repo, "pkg/mod.py", "def fresh():\n    return 3\n" )
+    code, text = run( repo, data, tmp_path, value="false" )
+    assert code == 0 and "MISSING repo:pkg.mod.fresh" in text and "Report-only: 1" in text
+
+
+def test_a_given_diff_replaces_the_definitions_found_from_git( repo, data, tmp_path ):
+    commit_code( repo, "pkg/mod.py", "def fresh():\n    return 3\n" )
+    diff = tmp_path / "diff.json"
+    diff.write_text( json.dumps( { "added": [] } ), encoding="utf-8" )
+    code, text = run( repo, data, tmp_path, "--diff", str( diff ) )
+    assert code == 0 and "MISSING" not in text
+
+
+def test_a_script_file_gets_the_file_stem_id( repo, data, tmp_path, monkeypatch ):
+    commit_code( repo, "static/js/a.ts", "export function foo() {}\n" )
+    def fake( root, files, origin ):
+        return { "definitions": [] if root.name.endswith( "-base" ) else [ { "lang": "ts", "file": "static/js/a.ts", "name": "foo", "line": 1 } ],
+                 "skipped_python": [], "skipped_script": [], "script_accounts": [], "repeated_ids": [] }
+    monkeypatch.setattr( mg.extract, "extract_tree", fake )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "MISSING repo:static.js.a.foo is new in the diff" in text
+
+
+def test_a_changed_file_that_is_not_source_python_could_not_be_checked( repo, data, tmp_path ):
+    commit_code( repo, "pkg/broken.py", "def (:\n" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 3 and "pkg/broken.py did not parse, so its definitions cannot be listed" in text and "Nothing was checked." in text and "Total Tests" not in text
+    assert worktrees( repo ) == [ str( repo ) ], "the worktrees are removed after a failure too"
+
+
+def test_a_window_git_cannot_build_could_not_be_checked( repo, data, tmp_path, monkeypatch ):
+    def boom( *a, **k ): raise RuntimeError( "git rev-parse failed" )
+    monkeypatch.setattr( mg.daily, "window_of", boom )
+    code, text = run( repo, data, tmp_path )
+    assert code == 3 and "RuntimeError: git rev-parse failed. Nothing was checked." in text
+
+
+def test_a_script_extraction_that_does_not_close_could_not_be_checked( repo, data, tmp_path, monkeypatch ):
+    commit_code( repo, "static/js/a.ts", "export function foo() {}\n" )
+    account = { "file": "static/js/a.ts", "reported": 1, "anonymous_walked": 0, "function_like_total": 2 }
+    monkeypatch.setattr( mg.extract, "extract_tree", lambda root, files, origin: { "definitions": [], "skipped_python": [], "skipped_script": [], "script_accounts": [ account ], "repeated_ids": [] } )
+    code, text = run( repo, data, tmp_path )
+    assert code == 3 and "DuplicateCheckError" in text and "1 reported + 0 anonymous != 2 function-like nodes" in text
+
+
+def test_a_file_the_symbol_index_does_not_hold_lists_no_definitions( repo, data, tmp_path ):
+    commit_code( repo, "tests/test_thing.py", "def test_it():\n    return 1\n" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 0 and "MISSING" not in text and "0 new definitions" in text
+    commit_code( repo, "pkg/mod.py", "def fresh():\n    return 3\n" )
+    assert "MISSING repo:pkg.mod.fresh" in run( repo, data, tmp_path )[ 1 ], "an indexed file beside it is listed"
+
+
+def test_a_branch_that_changes_no_indexed_file_makes_no_worktree( repo, data, tmp_path, monkeypatch ):
+    def boom( *a, **k ): raise AssertionError( "a worktree was made" )
+    monkeypatch.setattr( mg.source_at, "ensure_worktree", boom )
+    commit_doc( repo, "review.md", GOOD )
+    assert run( repo, data, tmp_path )[ 0 ] == 0
