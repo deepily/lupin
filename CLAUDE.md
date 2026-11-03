@@ -21,6 +21,7 @@
 - For LLM-driven agents that fit its tool surface, prefer bounded Claude Code over the direct Anthropic SDK. Bounded Claude Code is `ClaudeCodeJob` with `task_type=BOUNDED`, covered by the Max plan. The direct SDK uses `ANTHROPIC_API_KEY_FIREWALLED` and is billed per token.
 - On bounded CC today: BFE (`src/cosa/agents/bug_fix_expediter/`), TFE (`src/cosa/agents/test_fix_expediter/`), podcast script generation (`src/cosa/agents/podcast_generator/`), presentation content generation (`src/cosa/agents/presentation_generator/`), Deep Research (`src/cosa/agents/deep_research/`).
 - Never use the bare `ANTHROPIC_API_KEY`; it is reserved for the Claude Code CLI.
+- **Token spend is not a gate**. A manager gives the go for a token-spending step itself: a measured lookup run, an audit or a live pass. Record the go on the row and announce it afterwards. Never ask Rick to approve spend, whether by card, open item or caveat. A memento or brief line saying a step "waits for Rick's go" because it spends tokens is wrong. Strike it. (Rick, 14 October and 2 November 2026.)
 - The SDK's `cost_usd` telemetry on a bounded job is a notional figure: the Anthropic console balance does not move for it.
 - Deferred and not ratified for migration: OpenAI call sites and the Runtime Argument Expeditor (see TODO.md).
 - A migration is a cost-shift, not zero-cost. Say "covered by existing fixed cost", never "free".
