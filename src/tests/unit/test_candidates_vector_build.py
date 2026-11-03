@@ -479,3 +479,22 @@ def test_a_refusal_that_is_not_a_runtime_error_is_also_retried_in_halves():
     client = Client()
     out    = vb.embed_all( client, [ "a", "b", "c", "d" ], "code", "document", 8, 0, lambda s: None )
     assert len( out ) == 4 and client.batches == [ 4, 2, 1, 1, 2, 1, 1 ]
+
+
+def test_on_batch_gets_each_batch_with_its_start_and_vectors_once_its_halves_are_in():
+    seen, client = [], RefusingClient( 2 )
+    vb.embed_all( client, [ "a", "bb", "ccc", "dddd", "eeeee" ], "code", "document", 4, 0, lambda s: None, on_batch=lambda start, vectors: seen.append( ( start, [ v[ 0 ] for v in vectors ] ) ) )
+    assert seen == [ ( 0, [ 1.0, 2.0, 3.0, 4.0 ] ), ( 4, [ 5.0 ] ) ], "the refused batch of four reaches on_batch whole, once its halves are in"
+
+
+def test_a_crash_on_a_later_batch_leaves_the_earlier_batches_already_handed_to_on_batch():
+    class DiesOnThird:
+        def __init__( self ): self.n = 0
+        def embed( self, texts, content_type, role ):
+            self.n += 1
+            if self.n >= 3: raise ConnectionError( "model server gone" )          # gone for good, so the halves fail too
+            return [ [ float( len( t ) ), 0.0 ] for t in texts ]
+    seen = []
+    with pytest.raises( ConnectionError ):
+        vb.embed_all( DiesOnThird(), [ "a", "b", "c", "d", "e", "f" ], "code", "document", 2, 0, lambda s: None, on_batch=lambda start, vectors: seen.append( start ) )
+    assert seen == [ 0, 2 ]
