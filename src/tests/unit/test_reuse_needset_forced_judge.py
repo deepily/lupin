@@ -517,6 +517,16 @@ def test_a_cell_is_asked_with_a_pack_template_that_ends_in_its_run_index_and_the
     assert out[ "accepted" ] is True and out[ "survives" ] is False and out[ "wrong_at_threshold" ] == 127
 
 
+def test_a_job_builds_its_sweeper_for_the_contexts_pack_size_its_run_index_and_the_whole_shape( tmp_path ):
+    made = [ ]
+    def sweeper_for( size, workers, index, shape=None ):
+        made.append( ( size, workers, index, shape ) )
+        return swept_with( { }, [ ] )
+    row, ctx, stage, prepared = real_world( tmp_path, Echo() )
+    fj.judge_job( { **row, "arm": "plant_line", "repeat": 2 }, ctx, stage, prepared, rt.in_language, sweeper_for=sweeper_for )
+    assert made == [ ( 40, rp.WORKERS_DEFAULT, 102, rp.SHAPE_WHOLE ) ]
+
+
 def fake_in_pack_rows( args, root ): return [ pair( 1 ) ], [ row_with_line( 1, "A line." ), row_with_line( 2, None ) ], [ "u1" ]
 
 
