@@ -372,3 +372,11 @@ def test_aggregate_runs_names_a_policy_the_registry_does_not_hold():
     reports = [ { "run": "r1", "status": "unscorable" } ]
     with pytest.raises( err.DuplicateCheckError ) as caught: sr.aggregate_runs( reports, policy_cfg( "worst-rank" ), { "stub": print } )
     assert caught.value.code == err.POLICY_UNKNOWN and "worst-rank" in caught.value.detail and "stub" in caught.value.detail
+
+
+def test_judge_all_hands_the_call_cap_to_the_judge_and_names_the_definitions_it_left(tmp_path):
+    run, w  = build( tmp_path, new=[ ( "a1", [ "MARKA" ] ), ( "a2", [ "MARKB" ] ), ( "a3", [ "MARKC" ] ) ] )
+    cfg     = cf.verify_frozen( w[ "frozen_path" ], w[ "live" ] )
+    defs    = ex.extract_tree( w[ "root" ], w[ "files" ], "new" )[ "definitions" ]
+    out     = pl.judge_all( defs, defs, cfg, w, 0, max_calls=2 )
+    assert w[ "backend" ].calls == 2 and len( out[ "unjudged" ] ) == 1 and out[ "unjudged" ][ 0 ][ "code" ] == "JUDGE_CAP_REACHED"

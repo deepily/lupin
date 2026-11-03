@@ -233,7 +233,7 @@ def _pair( d, cands ):
     return { "old": "\0".join( c[ "text" ] for c in cands ), "new": d[ "text" ] }
 
 
-async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
+async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, max_calls=None ):
     """
     Judge each new definition once against its candidates, resuming from the ledger.
 
@@ -241,6 +241,7 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
         - defs are the new definition records; cands maps each definition id to its candidate records in fused order
         - backend is a judge backend; ledger is a harness_runner.Ledger bound with ledger_binding
         - slot is the pass number; cfg is the frozen configuration; scrub is the scrub list; parallel is an int of 1 or more
+        - max_calls is None for no cap, or the most backend calls this run may make
 
     Ensures:
         - returns { verdicts, unjudged }: a row { id, candidate, verdict, reason, model, prompt_version, server, slot } for each candidate of each
@@ -252,13 +253,16 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
         - a finished definition is never asked again: the ledger key holds the candidates' text, the definition's text, the prompt version, the
           model id and the slot
         - the calls run through harness_runner.run_parallel, keyed on the definition's text, so byte-equal definitions run one after another
-        - no call cap is set
+        - with no max_calls no call cap is set; with one, a definition that would need a call past the cap is left unjudged with code JUDGE_CAP_REACHED and nothing ledgered, so a later run asks it
+        - a call counts when it is made, and a reply asked for again counts as a second call
         - rows come in the order of defs, and within a definition in the order the judge saw the candidates
 
     Raises:
         - DuplicateCheckError BLINDNESS_BREACH if a definition or candidate or the finished prompt carries a scrub token
         - the errors that are not a ModelCallError, as run_parallel raises them
     """
+    made = [ 0 ]
+
     async def judge_one( d ):
         """Judge one definition, or read its finished ruling from the ledger."""
         records = cands[ d[ "id" ] ]
@@ -273,6 +277,8 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel ):
         failure = None
         for _ in range( ATTEMPTS ):
             system, user, labels = build_prompt( mine, shown, scrub )
+            if max_calls is not None and made[ 0 ] >= max_calls: return { "unreadable": { "code": err.JUDGE_CAP_REACHED, "detail": f"the cap of {max_calls} calls was reached" } }
+            made[ 0 ] += 1
             try:
                 reply = await backend.complete( cfg[ "model_id" ], system, user )
             except model_transport.ModelCallError as e:

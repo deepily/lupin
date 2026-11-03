@@ -405,3 +405,32 @@ def test_candidates_that_look_the_same_to_the_judge_are_still_mapped_to_their_ow
     b    = { **a, "id": "d-copy", "origin": "new" }                                                  # same path, name and text, other origin: one opaque id
     out  = run( [ d ], { d[ "id" ]: [ a, b ] }, FakeBackend(), hr.Ledger( str( tmp_path / "l" ) ) )
     assert sorted( v[ "candidate" ] for v in out[ "verdicts" ] ) == sorted( [ a[ "id" ], "d-copy" ] )
+
+
+def test_a_call_cap_leaves_the_later_definitions_unjudged_by_name_with_nothing_ledgered_and_a_resume_asks_them(tmp_path):
+    news, cands = world()
+    path   = str( tmp_path / "l" )
+    first  = FakeBackend()
+    out    = asyncio.run( jd.judge_run( news, cands, first, hr.Ledger( path ), 0, CFG, SCRUB, 1, max_calls=2 ) )
+    assert len( first.calls ) == 2 and [ u[ "id" ] for u in out[ "unjudged" ] ] == [ news[ 2 ][ "id" ] ] and out[ "unjudged" ][ 0 ][ "code" ] == err.JUDGE_CAP_REACHED
+    assert { v[ "id" ] for v in out[ "verdicts" ] } == { news[ 0 ][ "id" ], news[ 1 ][ "id" ] }
+    second = FakeBackend()
+    again  = run( news, cands, second, hr.Ledger( path ) )
+    assert len( second.calls ) == 1 and again[ "unjudged" ] == [] and len( again[ "verdicts" ] ) == 9, "the two finished definitions came from the ledger, the third was asked"
+
+
+def test_a_reply_asked_for_again_counts_as_a_second_call_against_the_cap(tmp_path):
+    news, cands = world()
+    backend = FakeBackend( replies=[ "I think they match", good_reply( [ "c1", "c2", "c3" ], "related" ) ] )
+    out     = asyncio.run( jd.judge_run( news[ :2 ], cands, backend, hr.Ledger( str( tmp_path / "l" ) ), 0, CFG, SCRUB, 1, max_calls=2 ) )
+    assert len( backend.calls ) == 2 and [ u[ "id" ] for u in out[ "unjudged" ] ] == [ news[ 1 ][ "id" ] ] and out[ "unjudged" ][ 0 ][ "code" ] == err.JUDGE_CAP_REACHED
+
+
+def test_a_cap_of_zero_makes_no_call_and_a_cap_that_is_not_reached_changes_nothing(tmp_path):
+    news, cands = world()
+    none    = FakeBackend()
+    out     = asyncio.run( jd.judge_run( news, cands, none, hr.Ledger( str( tmp_path / "a" ) ), 0, CFG, SCRUB, 1, max_calls=0 ) )
+    assert none.calls == [] and len( out[ "unjudged" ] ) == 3 and out[ "verdicts" ] == []
+    roomy   = FakeBackend()
+    wide    = asyncio.run( jd.judge_run( news, cands, roomy, hr.Ledger( str( tmp_path / "b" ) ), 0, CFG, SCRUB, 1, max_calls=3 ) )
+    assert len( roomy.calls ) == 3 and wide[ "unjudged" ] == [] and len( wide[ "verdicts" ] ) == 9

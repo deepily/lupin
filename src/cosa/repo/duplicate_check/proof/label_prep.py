@@ -525,6 +525,23 @@ def run( root, out_dir, cfg, wiring, seed=SEED, count=PLANTED_COUNT, reviewers=R
              "monolith": { src: sum( 1 for p in mono[ "pairs" ] if p[ "source" ] == src ) for src in monolith_pairs.SOURCES } }
 
 
+def tree_definitions( root ):
+    """
+    Extract the server and client definitions of a tree.
+
+    Requires:
+        - root is a repository root or a worktree of one, with git
+
+    Ensures:
+        - server_defs are those of every Python file of the spec; client_defs those of the tracked client script files except the monolith
+        - returns { server_defs, client_defs }, each extract_tree's definitions with origin "server"
+    """
+    py_files = [ f for f in sp.all_files( sp.spec_for( root ) ) if str( f ).endswith( ".py" ) ]
+    tracked  = subprocess.run( [ "git", "ls-files", "--", CLIENT_DIR ], cwd=root, capture_output=True, text=True, check=True ).stdout.split()
+    js_files = [ pathlib.Path( root ) / f for f in tracked if f.endswith( extract.SCRIPT_SUFFIXES ) and not f.endswith( ( ".d.ts", ".min.js" ) ) and f != MONOLITH_FILE ]
+    return { "server_defs": extract.extract_tree( root, py_files, "server" )[ "definitions" ], "client_defs": extract.extract_tree( root, js_files, "server" )[ "definitions" ] }
+
+
 def live_wiring( root, cache_dir, complete=model_transport.complete, client=None ):
     """
     Build the wiring that talks to the real tree and the real models.
@@ -536,10 +553,7 @@ def live_wiring( root, cache_dir, complete=model_transport.complete, client=None
         - returns the dict run takes: server-origin definitions of every Python file of the spec and of the tracked client script files except the monolith,
           three asks (Fable for rewrites, the need-writer model for sentences, Opus for work-alikes) and the shape readers
     """
-    py_files = [ f for f in sp.all_files( sp.spec_for( root ) ) if str( f ).endswith( ".py" ) ]
-    tracked  = subprocess.run( [ "git", "ls-files", "--", CLIENT_DIR ], cwd=root, capture_output=True, text=True, check=True ).stdout.split()
-    js_files = [ pathlib.Path( root ) / f for f in tracked if f.endswith( extract.SCRIPT_SUFFIXES ) and not f.endswith( ( ".d.ts", ".min.js" ) ) and f != MONOLITH_FILE ]
-    return { "server_defs": extract.extract_tree( root, py_files, "server" )[ "definitions" ], "client_defs": extract.extract_tree( root, js_files, "server" )[ "definitions" ],
+    return { **tree_definitions( root ),
              "asks": { "rewrite": make_ask( complete, REWRITE_MODEL ), "sentence": make_ask( complete, SENTENCE_MODEL ), "alike": make_ask( complete, ALIKE_MODEL ) },
              "shape_of": { "py": plant.python_shape, "ts": script_shape },
              "client": client if client is not None else vector_build.EndpointClient(), "cache_dir": cache_dir }
