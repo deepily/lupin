@@ -2,7 +2,7 @@
 capability: scheduled-test-suite
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.test_suite.job.TestSuiteJob@ff64d1ba50
+  - cosa.agents.test_suite.job.TestSuiteJob@eb62c39f39
   - cosa.agents.test_suite.job.TestSuiteJob.do_all@e22090c710
   - cosa.agents.test_suite.job.unknown_suite_names@9f548f8b52
   - cosa.agents.test_suite.job.BetweenSuiteResetError@d5be6190f9
@@ -19,7 +19,7 @@ pins:
 - The one door is `POST /api/v2/submit` with the command `agent router go to test suite`. `submit_body` builds the request, and `read_reply` reads the answer. The old `/api/test-suite/submit` door answers 410.
 - A refused submit is HTTP 200 with `status` `failed` and the cause in `error`. Only `status` `waiting` on a 2xx answer counts as accepted.
 - `unknown_suite_names` lists names that are not keys of `SUITE_SCRIPTS`. `e2e_ui` is a directory, not a suite.
-- `all` expands to `ALL_SUITE_COMPONENTS`: typecheck, stylelint, doclint, unit, cosa, coverage, typescript, smoke, docker_smoke, websocket, integration, e2e_a, e2e_b. Duplicates are dropped, first one wins.
+- `all` expands to `ALL_SUITE_COMPONENTS`: typecheck, stylelint, doclint, reuse, unit, cosa, coverage, typescript, smoke, docker_smoke, websocket, integration, e2e_a, e2e_b. Duplicates are dropped, first one wins.
 - A server in a container refuses a request naming `unit` or `docker_smoke`. There, `all` leaves both out and says `unit: not run here, host tier` and the same for `docker_smoke`.
 - The job always runs with `monopolize=True`, because the scripts swap the database config.
 
@@ -31,7 +31,7 @@ pins:
 - A failed reset raises `BetweenSuiteResetError`. The next suite is recorded as failed with `errors` 1, the sweep stops, and the summary still reports a failing verdict.
 
 ## Verdicts
-- A run with all counts zero is `NOT EXECUTED`, not a pass. A collection error is `COLLECTION ERROR`.
+- A run with all counts zero is `NOT EXECUTED`, not a pass. A collection error is `COLLECTION ERROR`. A unit run that exits 72 was killed for memory, and its card says `OUT OF MEMORY`, not a test failure.
 - Any failed or errored test is `FAILED`, and so is a printed coverage-threshold miss on a run where tests ran. A tier that did not run, with no failures, is `NOT EXECUTED`. Only a run where every tier ran with no failures is `PASSED`.
 
 ## Attestation
