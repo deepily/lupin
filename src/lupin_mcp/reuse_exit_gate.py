@@ -45,6 +45,7 @@ MIN_NEW         = 10
 RUNS_REQUIRED   = 2
 EXCLUDED_PREFIX = "EXCLUDED_"
 EXCLUDED_TOKEN  = "excluded"
+RECEIPT_TOOLS   = ( "check_exists", "fetch_similar" )            # the tools whose receipts an outcome line may cite
 NO_CANDIDATE    = "none"                                        # the word that stands for the candidate of an empty search
 
 RULING_RE = re.compile( r"^\s*RULING\s+(?P<id>\S+)\s+::\s+(?P<ruling>DUPLICATE|EXTEND\s+\S+|DISTINCT\s+\S.*?)\s+::\s+reuse-receipt:\s*(?P<rid>[0-9A-Za-z_-]+)"
@@ -212,6 +213,26 @@ def _receipt_symbol( data, receipt_id ):
     return doc[ "query" ] if doc is not None and doc.get( "tool" ) == "fetch_similar" and isinstance( doc.get( "query" ), str ) else None
 
 
+def _usable_search( data, r ):
+    """
+    Read the search record behind one logged `record_search` call.
+
+    Requires:
+        - data is a pathlib.Path of the folder that holds `search-records`
+        - r is one record from merge_call_logs
+
+    Ensures:
+        - returns ( search id, record, candidate ids ) for a call that logged no error and a well-formed search id
+        - returns None when the record file is missing, unreadable, does not carry its own id, or has no candidates list
+        - a candidate entry that is not an object with an id is left out of the ids
+    """
+    sid = r.get( "search_id" )
+    if r.get( "tool" ) != "record_search" or r.get( "error" ) or not isinstance( sid, str ) or not SEARCH_ID_RE.match( sid ): return None
+    doc = _read_json( data / "search-records" / f"{sid}.json" )
+    if doc is None or doc.get( "id" ) != sid or not isinstance( doc.get( "candidates" ), list ): return None
+    return sid, doc, [ c[ "id" ] for c in doc[ "candidates" ] if isinstance( c, dict ) and "id" in c ]
+
+
 def searches_by_symbol( records, data_dir ):
     """
     Collect the recorded searches each symbol was searched under.
@@ -229,13 +250,57 @@ def searches_by_symbol( records, data_dir ):
     """
     data, out = pathlib.Path( data_dir ), {}
     for r in records:
-        sid = r.get( "search_id" )
-        if r.get( "tool" ) != "record_search" or r.get( "error" ) or not isinstance( sid, str ) or not SEARCH_ID_RE.match( sid ): continue
-        doc = _read_json( data / "search-records" / f"{sid}.json" )
-        if doc is None or doc.get( "id" ) != sid or not isinstance( doc.get( "candidates" ), list ): continue
+        found = _usable_search( data, r )
+        if found is None: continue
+        sid, doc, candidates = found
         symbol = doc.get( "entry" ) or _receipt_symbol( data, doc.get( "receipt_id" ) )
         if not symbol: continue
-        out.setdefault( symbol, {} )[ sid ] = [ c[ "id" ] for c in doc[ "candidates" ] if isinstance( c, dict ) and "id" in c ]
+        out.setdefault( symbol, {} )[ sid ] = candidates
+    return out
+
+
+def receipts_by_id( records ):
+    """
+    Collect the receipts that a lookup returned, whatever tool made them.
+
+    Requires:
+        - records is what merge_call_logs returns
+
+    Ensures:
+        - returns { receipt id: tool name } over `check_exists` and `fetch_similar` calls
+        - only calls that carry a receipt id and logged no error count
+        - a receipt id logged twice keeps the tool of its first call
+        - unlike receipts_by_symbol it needs no `entry`, so a `check_exists` receipt is kept
+    """
+    out = {}
+    for r in records:
+        rid = r.get( "receipt_id" )
+        if r.get( "tool" ) not in RECEIPT_TOOLS or not rid or r.get( "error" ): continue
+        out.setdefault( rid, r[ "tool" ] )
+    return out
+
+
+def searches_by_receipt( records, data_dir ):
+    """
+    Collect the recorded searches made on each receipt.
+
+    Requires:
+        - records is what merge_call_logs returns; data_dir holds the search-records folder
+
+    Ensures:
+        - returns { receipt id: { search id: [ candidate ids ] } }
+        - counts the same calls as searches_by_symbol, and keys each by the `receipt_id` its record file names
+        - a record with no receipt id, or one that is not 16 hex characters, yields no search here
+        - the id comes from the record file, not the call log, whose args field can be cut
+    """
+    data, out = pathlib.Path( data_dir ), {}
+    for r in records:
+        found = _usable_search( data, r )
+        if found is None: continue
+        sid, doc, candidates = found
+        rid = doc.get( "receipt_id" )
+        if not isinstance( rid, str ) or not RECEIPT_ID_RE.fullmatch( rid ): continue
+        out.setdefault( rid, {} )[ sid ] = candidates
     return out
 
 

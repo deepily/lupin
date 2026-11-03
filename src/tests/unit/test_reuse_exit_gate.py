@@ -492,3 +492,71 @@ def test_main_reads_the_data_dir_option_and_the_review_of_the_skill_passes_the_g
     assert eg.main( args + [ "--data-dir", str( data ) ], out=buf ) == 0, buf.getvalue()
     assert json.loads( buf.getvalue() )[ "reasons" ] == []
     assert eg.main( args, out=io.StringIO() ) == 1                                                  # the default data folder is the call log's parent: it holds no search records
+
+
+# ---- B1: the receipt-keyed readers, beside the symbol-keyed ones (Plan 3 section 12.3) ----
+
+REAL_LOG    = pathlib.Path( __file__ ).parent / "reuse_call_log_real_2026.11.02.jsonl"
+REAL_RECORD = pathlib.Path( __file__ ).parent / "reuse_search_record_real_rs-bc3ca2c901.json"
+REAL_RID    = "5d37236290c7d93f"                                                # a check_exists receipt, made by a real seat
+REAL_SID    = "rs-bc3ca2c901"                                                   # the record_search made on it
+
+
+def _real_data( tmp_path ):
+    """Ensures: returns ( real log records, a data dir holding the real search record )."""
+    logs = tmp_path / "call-log"; logs.mkdir()
+    ( logs / "real.jsonl" ).write_text( REAL_LOG.read_text( encoding="utf-8" ), encoding="utf-8" )
+    ( tmp_path / "search-records" ).mkdir()
+    ( tmp_path / "search-records" / f"{REAL_SID}.json" ).write_text( REAL_RECORD.read_text( encoding="utf-8" ), encoding="utf-8" )
+    return eg.merge_call_logs( logs )[ 0 ], tmp_path
+
+
+def test_the_symbol_keyed_readers_cannot_see_a_real_check_exists_receipt_or_its_search( tmp_path ):
+    # the gap B1 closes, shown on a log a real seat wrote and the real reader reads
+    records, data = _real_data( tmp_path )
+    assert any( r[ "tool" ] == "check_exists" and r[ "receipt_id" ] == REAL_RID for r in records )
+    assert REAL_RID not in {  rid for rids in eg.receipts_by_symbol( records ).values() for rid in rids }
+    assert eg.searches_by_symbol( records, data ) == { }
+
+
+def test_the_receipt_keyed_readers_find_a_real_check_exists_receipt_and_its_search( tmp_path ):
+    records, data = _real_data( tmp_path )
+    assert eg.receipts_by_id( records )[ REAL_RID ] == "check_exists"
+    found = eg.searches_by_receipt( records, data )
+    assert list( found ) == [ REAL_RID ] and list( found[ REAL_RID ] ) == [ REAL_SID ]          # the other real search has no record file, so it yields nothing
+    assert len( found[ REAL_RID ][ REAL_SID ] ) == len( json.loads( REAL_RECORD.read_text( encoding="utf-8" ) )[ "candidates" ] ) > 0
+
+
+def test_receipts_by_id_keeps_a_clean_receipt_from_either_lookup_tool_and_nothing_else():
+    recs = [ _call( "a", None, "0123456789abcdef", tool="check_exists" ),                        # no entry: still kept
+             _call( "a", "m.x", "1123456789abcdef" ),                                            # a fetch_similar receipt
+             _call( "a", "m.x", "2123456789abcdef", tool="check_exists", error="BAD_LANGUAGE" ),  # logged an error
+             _call( "a", "m.x", None ),                                                          # no receipt id
+             _call( "a", "m.x", "3123456789abcdef", tool="read_capability" ),                    # not a lookup tool
+             _call( "a", "m.x", "4123456789abcdef", tool="replay" ),
+             _call( "b", "m.x", "0123456789abcdef", tool="fetch_similar" ) ]                     # the same id again: the first tool stays
+    assert eg.receipts_by_id( recs ) == { "0123456789abcdef": "check_exists", "1123456789abcdef": "fetch_similar" }
+
+
+def test_searches_by_receipt_keys_each_search_by_the_receipt_id_in_its_record_file( tmp_path ):
+    rid, other = "0123456789abcdef", "fedcba9876543210"
+    _write_record( tmp_path, SID, [ "m.c1", "m.c2" ], receipt_id=rid )
+    _write_record( tmp_path, SID2, [ ], receipt_id=rid )                                          # two searches on one receipt
+    _write_record( tmp_path, "rs-1111111111", [ "m.c3" ], entry="m.byEntry", receipt_id=other )   # an entry search that also names a receipt
+    _write_record( tmp_path, "rs-2222222222", [ "m.c4" ], entry="m.noReceipt" )                   # no receipt id: nothing to key on
+    _write_record( tmp_path, "rs-3333333333", [ "m.c5" ], receipt_id="not-a-receipt-id" )         # an id the gate would never turn into a path
+    _write_record( tmp_path, "rs-6666666666", [ "m.c6" ], entry="aaaaaaaaaaaaaaaa" )              # an entry that looks like a receipt id is still an entry
+    recs = [ _search_call( "a", s ) for s in ( SID, SID2, "rs-1111111111", "rs-2222222222", "rs-3333333333", "rs-6666666666" ) ]
+    recs += [ _search_call( "a", "rs-4444444444", error="BAD_SEARCH_KEY" ), _search_call( "a", "rs-5555555555", tool="fetch_similar" ) ]
+    assert eg.searches_by_receipt( recs, tmp_path ) == { rid: { SID: [ "m.c1", "m.c2" ], SID2: [ ] }, other: { "rs-1111111111": [ "m.c3" ] } }
+
+
+def test_searches_by_receipt_counts_the_same_calls_as_searches_by_symbol( tmp_path ):
+    # the two readers share one record check; an unusable record yields nothing in either
+    rid = "0123456789abcdef"
+    ( tmp_path / "search-records" ).mkdir()
+    ( tmp_path / "search-records" / f"{SID}.json" ).write_text( "{not json", encoding="utf-8" )
+    _write_record( tmp_path, SID2, [ "m.c1" ], receipt_id=rid, id="rs-9999999999" )               # the file does not carry its own name
+    _write_record( tmp_path, "rs-1111111111", [ ], receipt_id=rid, candidates="not a list" )
+    recs = [ _search_call( "a", s ) for s in ( SID, SID2, "rs-1111111111", "rs-0000000000" ) ]
+    assert eg.searches_by_receipt( recs, tmp_path ) == { } == eg.searches_by_symbol( recs, tmp_path )
