@@ -93,6 +93,14 @@ test( "batchLinkOf reads an approve and a drop, relative or on a loopback origin
   assert.deepEqual( batchLinkOf( "http://localhost:7999" + OK( [ ROW_A ], "dropped", "&reason=duplicate%20refile%20%26%20more" ) ), { ids: [ ROW_A ], move: "dropped", reason: "duplicate refile & more" } );
 } );
 
+test( "a queued link that carries a reason drops the reason: an approve never sends one", async () => {
+  assert.deepEqual( batchLinkOf( OK( [ ROW_A ], "queued", "&reason=x" ) ), { ids: [ ROW_A ], move: "queued", reason: null } );
+  const a = plant( document.body, OK( [ ROW_A ], "queued", "&reason=x" ) );
+  handleBatchApproveLinkClick( new MouseEvent( "click", { cancelable: true } ), a, sender() );
+  await settle();
+  assert.deepEqual( calls, [ { id: ROW_A, status: "queued", extras: {} } ] );
+} );
+
 test( "batchLinkOf refuses what it cannot trust", () => {
   assert.equal( batchLinkOf( null ), null, "no href" );
   assert.equal( batchLinkOf( "/app/docs?path=lupin/a.md" ), null, "not a batch link" );
@@ -152,6 +160,9 @@ test( "an untrusted batch link is claimed so the browser stays put, and sends no
   assert.equal( ev.defaultPrevented, true );
   assert.deepEqual( calls, [] );
   assert.equal( a.isConnected, true, "the link is left in place" );
+  assert.equal( a.getAttribute( "data-approve-state" ), null, "and is not marked pending" );
+  assert.equal( a.getAttribute( "aria-disabled" ), null, "or greyed" );
+  assert.equal( a.style.opacity, "", "or dimmed" );
 } );
 
 test( "a good click applies every row, then shows 'N of N applied' and one line per row", async () => {

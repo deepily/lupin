@@ -95,8 +95,10 @@
                 document.getElementById( "task-approve-heading" ).textContent = verb + " " + batch.ids.length + " tickets";
                 const listEl = document.getElementById( "task-approve-batch-list" );
                 const rows   = await Promise.all( batch.ids.map( async ( id ) => {
-                    const resp = await authedFetch( "/api/tasks/" + encodeURIComponent( id ), { method: "GET" } );
-                    return resp.ok ? await resp.json() : null;
+                    try {
+                        const resp = await authedFetch( "/api/tasks/" + encodeURIComponent( id ), { method: "GET" } );
+                        return resp.ok ? await resp.json() : null;
+                    } catch ( e ) { return null; }
                 } ) );
                 rows.forEach( ( row, i ) => {
                     const li = document.createElement( "li" );
@@ -110,13 +112,18 @@
                     const lines = await Promise.all( batch.ids.map( async ( id ) => {
                         const body = { to_status: batch.move, actor: "operator approve-landing-page", authority: "user_direct" };
                         if ( batch.reason !== null ) body.reason = batch.reason;
-                        const resp = await authedFetch( "/api/tasks/" + encodeURIComponent( id ) + "/transition", {
-                            method  : "POST",
-                            headers : { "Content-Type": "application/json" },
-                            body    : JSON.stringify( body )
-                        } );
-                        const ok = resp.ok && resp.status !== 202;
-                        return id.slice( 0, 8 ) + " " + ( ok ? "applied ✅" : "refused: " + ( resp.status === 202 ? "waiting on Rick — he has not been asked yet" : await failureText( resp ) ) );
+                        // A network failure on one row is that row's line alone: it must not reject the Promise.all and hide the rest.
+                        try {
+                            const resp = await authedFetch( "/api/tasks/" + encodeURIComponent( id ) + "/transition", {
+                                method  : "POST",
+                                headers : { "Content-Type": "application/json" },
+                                body    : JSON.stringify( body )
+                            } );
+                            const ok = resp.ok && resp.status !== 202;
+                            return id.slice( 0, 8 ) + " " + ( ok ? "applied ✅" : "refused: " + ( resp.status === 202 ? "waiting on Rick — he has not been asked yet" : await failureText( resp ) ) );
+                        } catch ( e ) {
+                            return id.slice( 0, 8 ) + " refused: unreachable: " + ( e && e.message ? e.message : e );
+                        }
                     } ) );
                     const done = lines.filter( ( l ) => l.endsWith( "applied ✅" ) ).length;
                     document.getElementById( "task-approve-batch-result" ).textContent = [ done + " of " + lines.length + " applied" ].concat( lines ).join( "\n" );
