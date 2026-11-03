@@ -777,6 +777,11 @@ class TestSuiteJob( AgenticJobBase ):
         if crash_output:
             line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
 
+        # The unit tier's own scope exits 72 when the kernel killed a process for memory. Say so,
+        # because the counts alone read as failing tests (row d0b369af).
+        if suite_type == "unit" and result.get( "exit_code" ) == 72:
+            line += "\n  **OUT OF MEMORY**: the unit scope was killed for memory (exit 72); this is not a test failure"
+
         # A FAIL next to "0 failed" reads as a harness bug unless the card says why (row 1a11fe96).
         coverage_misses = result.get( "coverage_threshold_failures" ) or []
         if coverage_misses:

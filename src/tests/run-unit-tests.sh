@@ -62,8 +62,8 @@ export LUPIN_UNIT_NETWORK="${LUPIN_UNIT_NETWORK:-block}"
 # itself inside the scope; LUPIN_UNIT_SCOPED stops the second pass from nesting. A container
 # has no systemd-run (and does not offer this tier), so it skips the scope.
 # LUPIN_UNIT_SCOPE=off opts out. The lane's reasoning is in src/scripts/lib/jstest-slice.sh.
-if [ -z "${LUPIN_UNIT_SCOPED:-}" ] && [ "${LUPIN_UNIT_SCOPE:-on}" != "off" ] && [ ! -f /.dockerenv ]; then
-    source "$PROJECT_ROOT/src/scripts/lib/jstest-slice.sh"
+source "$PROJECT_ROOT/src/scripts/lib/jstest-slice.sh"
+if [ -z "${LUPIN_UNIT_SCOPED:-}" ] && [ "${LUPIN_UNIT_SCOPE:-on}" != "off" ] && ! _jstest_in_container; then
     export LUPIN_UNIT_SCOPED=1
     unit_scope_exec "$PROJECT_ROOT/src/tests/run-unit-tests.sh" "$@"
     exit $?

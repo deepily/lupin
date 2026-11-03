@@ -128,5 +128,73 @@ class TestTheRunnerIsWiredToTheLane:
         assert 'LUPIN_UNIT_SCOPE:-on}" != "off"' in text
 
 
+class TestTheRunnerReachesTheScopeOnceAndPytestOnce:
+    """
+    A fake systemd-run stands in for the real one.
+
+    It logs each call, then runs the command after the `--`. From the fourth call on it refuses,
+    so a broken nesting guard ends as a failed assertion and never as a runaway loop.
+    """
+
+
+    ARGS = [ "--collect-only", "-q", "-k", "test_the_oom_status_is_72" ]
+
+    def _fake_path( self, tmp_path ):
+        bin_dir = tmp_path / "fakebin"
+        bin_dir.mkdir()
+        log = tmp_path / "systemd-run.log"
+        fake = bin_dir / "systemd-run"
+        fake.write_text( textwrap.dedent( """\
+            #!/bin/bash
+            echo "call" >> "%s"
+            [ "$( wc -l < "%s" )" -gt 3 ] && { echo "fake systemd-run: too many calls" >&2; exit 99; }
+            while [ "$1" != "--" ]; do shift; done
+            shift
+            exec "$@"
+            """ % ( log, log ) ), encoding="utf-8" )
+        fake.chmod( 0o755 )
+        return bin_dir, log
+
+    def _run_runner( self, tmp_path, extra_env=None ):
+        bin_dir, log = self._fake_path( tmp_path )
+        env = dict( os.environ )
+        env[ "PATH" ] = "%s:%s" % ( bin_dir, env[ "PATH" ] )
+        env.pop( "LUPIN_UNIT_SCOPED", None )
+        env.pop( "LUPIN_UNIT_SCOPE", None )
+        if extra_env: env.update( extra_env )
+        r = subprocess.run( [ "bash", str( RUNNER ) ] + self.ARGS, capture_output=True, text=True, env=env, timeout=240 )
+        calls = log.read_text( encoding="utf-8" ).count( "call" ) if log.exists() else 0
+        return r, calls
+
+    def test_the_runner_calls_systemd_run_once_and_reaches_pytest_once( self, tmp_path ):
+        r, calls = self._run_runner( tmp_path, { "JSTEST_CONTAINER_MARKER": str( tmp_path / "no-such-marker" ) } )
+        assert r.returncode == 0, "rc=%r\nstderr=%s" % ( r.returncode, r.stderr[ -800: ] )
+        assert calls == 1, "systemd-run was called %d times; the nesting guard should leave exactly one" % calls
+        assert r.stderr.count( "using pytest at" ) == 1
+
+    def test_inside_a_container_the_runner_skips_the_scope_and_still_reaches_pytest_once( self, tmp_path ):
+        marker = tmp_path / "dockerenv"
+        marker.write_text( "", encoding="utf-8" )
+        r, calls = self._run_runner( tmp_path, { "JSTEST_CONTAINER_MARKER": str( marker ) } )
+        assert r.returncode == 0, "rc=%r\nstderr=%s" % ( r.returncode, r.stderr[ -800: ] )
+        assert calls == 0, "the container path must not call systemd-run"
+        assert r.stderr.count( "using pytest at" ) == 1
+
+    def test_the_off_switch_skips_the_scope_and_still_reaches_pytest_once( self, tmp_path ):
+        r, calls = self._run_runner( tmp_path, { "LUPIN_UNIT_SCOPE": "off", "JSTEST_CONTAINER_MARKER": str( tmp_path / "no-such-marker" ) } )
+        assert r.returncode == 0, "rc=%r\nstderr=%s" % ( r.returncode, r.stderr[ -800: ] )
+        assert calls == 0
+        assert r.stderr.count( "using pytest at" ) == 1
+
+
+class TestTheMergeGateSaysOutOfMemory:
+
+    def test_run_all_tests_labels_a_unit_exit_of_72_in_both_places( self ):
+        text = ( ROOT / "src" / "tests" / "run-all-tests.sh" ).read_text( encoding="utf-8" )
+        assert 'unit: OUT OF MEMORY' in text
+        assert 'status="FAIL (out of memory)"' in text
+        assert text.count( "-eq 72" ) == 2
+
+
 def test_every_test_this_file_declares_is_actually_collected( request ):
     assert_every_declared_test_is_collected( request, __file__ )

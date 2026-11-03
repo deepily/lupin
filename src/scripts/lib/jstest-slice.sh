@@ -74,7 +74,7 @@ JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-1500}"
 # UNCAPPED, and a door that runs the suite uncapped while reporting itself as the
 # capped lane is worse than a door that will not open. This is what makes the
 # compose limit load-bearing rather than decorative.
-_jstest_in_container() { [ -f /.dockerenv ]; }
+_jstest_in_container() { [ -f "${JSTEST_CONTAINER_MARKER:-/.dockerenv}" ]; }
 
 _jstest_container_ceiling() {
     # Echoes the byte ceiling, or "max"/"" when there is none to find.
