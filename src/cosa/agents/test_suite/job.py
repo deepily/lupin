@@ -243,10 +243,13 @@ ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "doclint", "reuse", "unit", "
 # Suites a container does not offer: they run on the host. The unit tier ran inside the :8000 container
 # until it hit its own time limit, and part of it needs what only the host has (the venv at
 # /var/lupin/.venv, systemd-run, the Dart SDK). Rick took it off the container's menu on 2026-10-07.
-HOST_ONLY_SUITES = ( "unit", "docker_smoke" )
+# The reuse gate joined them after run ts-04537a36: it reads the call log under /projects-data, a host path the
+# container does not mount, and refused with PermissionError there.
+HOST_ONLY_SUITES = ( "unit", "reuse", "docker_smoke" )
 # Where each host-only suite runs. The refusal names this command, so each suite has to have its own.
 HOST_COMMANDS    = {
     "unit"         : "`pytest src/tests/unit/` (or `src/tests/run-unit-tests.sh`)",
+    "reuse"        : "`src/tests/run-reuse-gate.sh`",
     "docker_smoke" : "`src/tests/run-docker-smoke-gate.sh`",
 }
 NOT_RUN_HERE     = "not run here, host tier"

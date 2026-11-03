@@ -97,8 +97,11 @@ file is in neither half or in both. A new e2e test file therefore goes into one 
 manifests, whichever half is lighter.
 
 **The `all` suite**: expands to the curated pyramid in `ALL_SUITE_COMPONENTS`, each leg with its own
-timeout. In a container it runs the pyramid without `unit` and `docker_smoke`. The result says so.
-The notes `unit: not run here, host tier` and `docker_smoke: not run here, host tier` appear in the summary, the abstract, the report and `cost_summary["suites_not_run"]`.
+timeout. In a container it runs the pyramid without `unit`, `reuse` and `docker_smoke`. The result says so.
+Each left-out suite gets a note such as `unit: not run here, host tier`, likewise for `reuse` and `docker_smoke`.
+The notes appear in the summary, the abstract, the report and `cost_summary["suites_not_run"]`.
+The reuse gate is a host tier too (`src/tests/run-reuse-gate.sh`).
+It reads the call log under `/projects-data`, which the container does not mount.
 A pyramid without them is not the full pyramid, so read that note before reading the verdict.
 The job also tells the coverage gate (`LUPIN_TEST_TIERS_NOT_RUN`), which then answers exit 2, inconclusive,
 because the data file holds no unit tier. Run unit on the host, and run the coverage gate there.
