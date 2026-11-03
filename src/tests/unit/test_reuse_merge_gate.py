@@ -449,18 +449,23 @@ def test_a_renamed_file_makes_only_its_new_functions_new( repo, data, tmp_path )
     assert ( count( text, "Total Tests" ), count( text, "Failed" ) ) == ( 2, 1 )
 
 
+FLIP_SINCE  = "a8be4dbd62c4aafe4be38a780d5884bfd41c13ef"                                     # the commit at the C3 flip (row 3f6b7e79, 3 Nov 2026)
+FLIP_BASE   = "wip-v0.2.2-2026.09.30-code-wiki-and-jev-for-reuse-planning-review"           # the integration branch the flip measures from
+FLIP_VALUES = { mg.SINCE_KEY: FLIP_SINCE, mg.BASE_KEY: FLIP_BASE }
+
+
 @pytest.mark.parametrize( "key", [ mg.SINCE_KEY, mg.BASE_KEY ] )
-def test_the_shipped_ini_defines_each_new_key_once_empty_and_the_explainer_describes_it( key ):
+def test_the_shipped_ini_defines_each_new_key_once_with_its_flip_value_and_the_explainer_describes_it( key ):
     root = pathlib.Path( mg.__file__ ).resolve().parents[ 2 ]
     for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ):
         text = ( root / "src" / "conf" / name ).read_text( encoding="utf-8" )
         rows = [ l for l in text.splitlines() if l.startswith( f"{key} " ) ]
         assert len( rows ) == 1, f"{key} is defined {len( rows )} times in {name}"
-        if name == "lupin-app.ini": assert rows[ 0 ].split( "=", 1 )[ 1 ].strip() == "", "it ships empty, so nothing is exempt and the default branches apply"
+        if name == "lupin-app.ini": assert rows[ 0 ].split( "=", 1 )[ 1 ].strip() == FLIP_VALUES[ key ], "the flip sets both keys in the commit that turns gating on"
         else: assert "Keep it defined exactly once." in rows[ 0 ] and len( rows[ 0 ] ) > 200
     ini_path = str( root / "src" / "conf" / "lupin-app.ini" )
-    assert mg.read_since( ini_path ) is None and mg.read_names( ini_path ) == list( mg.BASE_CANDIDATES )
-    assert gate.read_gating( ini_path, quiet=True ) is False, "the longer key names do not make the gating key read as doubled"
+    assert mg.read_since( ini_path ) == FLIP_SINCE and mg.read_names( ini_path ) == [ FLIP_BASE ]
+    assert gate.read_gating( ini_path, quiet=True ) is True, "gating is on, and the longer key names do not make the gating key read as doubled"
 
 
 @pytest.mark.parametrize( "lines", [ "", "reuse merge gate since =\n", "reuse merge gate since = aaaaaaa\nreuse merge gate since = bbbbbbb\n" ] )
