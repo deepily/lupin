@@ -380,7 +380,7 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
         - a sweep answer that lacks verdict or causal_ids counts as a failure of that item, like a raised error
         - a temporary file of a write in progress is never read
         - at most limit items are taken, known-miss items first, then fewest attempts, then oldest queued date, then queue id
-        - an item whose sweep raises a CandidateError naming UNKNOWN_ENTRY stays queued like any failure, until its third failed attempt; then its file is removed and it counts as dropped
+        - an item whose sweep raises a CandidateError whose detail is exactly UNKNOWN_ENTRY, the code the sweep gives, stays queued like any failure, until its third failed attempt; then its file is removed and it counts as dropped
         - an item queued before known_miss existed is read as known_miss False
         - with weekly_cap, the run stops before the audit that would make the audits stored in the seven days ending today pass the cap; the rest stay queued
         - with pass_language the sweep is called as sweep_fn( need, language ), else as sweep_fn( need )
@@ -421,7 +421,7 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
             stored  = store_receipt( data_dir, receipt )
         except Exception as exc:               # a transport failure, a malformed answer or a damaged receipt file leaves the item queued, behind the fresh ones
             failed += 1
-            if isinstance( exc, CandidateError ) and UNKNOWN_ENTRY in exc.detail and item[ "attempts" ] + 1 >= UNKNOWN_ENTRY_TRIES:
+            if isinstance( exc, CandidateError ) and exc.detail == UNKNOWN_ENTRY and item[ "attempts" ] + 1 >= UNKNOWN_ENTRY_TRIES:
                 os.remove( path )
                 dropped += 1
                 continue

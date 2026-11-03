@@ -6,7 +6,7 @@ pins:
   - cosa.repo.symindex.candidates.shadow_audit.enqueue_pending@2a7888df6f
   - cosa.repo.symindex.candidates.shadow_audit.audits_in_week@f9f110db24
   - cosa.repo.symindex.candidates.shadow_audit.count_lookup@cf3f37d3c6
-  - cosa.repo.symindex.candidates.shadow_audit.run_pending@73f31d1717
+  - cosa.repo.symindex.candidates.shadow_audit.run_pending@2e6b413d97
   - cosa.repo.symindex.candidates.shadow_audit.store_receipt@525e2b37b5
   - cosa.repo.symindex.candidates.shadow_audit.load_receipts@b15e583a38
   - cosa.repo.symindex.candidates.shadow_audit.daily_volume@6b4bf98a0c
@@ -22,7 +22,7 @@ Files live under the data folder: `shadow-pending/<id>.json` for queued lookups,
 
 ## Draining
 - `run_pending( data_dir, sweep_fn, today, limit=None )` takes known-miss items first, then fewest attempts, then oldest, then id. It sweeps each, stores a receipt and removes the queue file. It returns `audited`, `failed`, `corrupt`, `dropped` and `receipts`.
-- A sweep that raises a `CandidateError` naming `UNKNOWN_ENTRY` leaves the item queued like any failure. On its third failed attempt the file is removed and the item counts as `dropped`. An item with an `exclude_id` adds the keyword `exclude_id` to the sweep call.
+- A sweep that raises a `CandidateError` whose detail is exactly `UNKNOWN_ENTRY` leaves the item queued like any failure. On its third failed attempt the file is removed and the item counts as `dropped`. An item with an `exclude_id` adds the keyword `exclude_id` to the sweep call.
 - `weekly_cap` stops the drain before an audit that would pass the cap. It counts the audits stored in the seven days ending today, and `stopped_by` reads `weekly_cap`. `audits_in_week( data_dir, today )` is that count. `lupin_mcp.reuse_shadow.drain` passes `reuse_ledger.SHADOW_AUDIT_WEEKLY_CAP`, the constant the budget test reads too.
 - `max_tokens` caps a drain. Each sweep answer must then carry a whole-number `tokens`. The run stops before a sweep when the tokens spent plus the largest sweep seen would pass the cap. The result gains `spent_tokens` and `stopped_by`. `pass_language` calls the sweep as `( need, language )`. `lupin_mcp.reuse_shadow` sets both, reading the cap from the INI key `reuse shadow audit max tokens per drain`, which has no default.
 - A sweep that raises or answers without `verdict` or `causal_ids` leaves the item queued with its attempt count up by one. So does an item whose receipt file is already there and damaged, and that check comes before the sweep, so no sweep is spent. A queue file that is not valid is renamed to `<name>.corrupt` and the run goes on.

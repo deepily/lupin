@@ -538,3 +538,10 @@ class TestKnownMissAndCaps:
         assert receipt_for( "n1", "NEW", [] )[ "id" ] == old
         assert sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" ) == old
         assert sa._receipt_id( sa.need_hash( "n1" ), GEN, INDEX, "x" ) != old
+
+    @pytest.mark.parametrize( "detail", [ "INDEX_STALE: UNKNOWN_ENTRY was named in passing", "UNKNOWN_ENTRY_X", "unknown_entry", "" ] )
+    def test_a_detail_that_only_mentions_unknown_entry_never_drops_an_item( self, tmp_path, detail ):
+        key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        def refuse( need ): raise CandidateError( "AUDIT_SWEEP_REFUSED", detail )
+        outs = [ sa.run_pending( tmp_path, refuse, "2026-10-15" ) for _ in range( sa.UNKNOWN_ENTRY_TRIES + 1 ) ]
+        assert [ o[ "dropped" ] for o in outs ] == [ 0 ] * ( sa.UNKNOWN_ENTRY_TRIES + 1 ) and self.pending( tmp_path )[ key ][ "attempts" ] == sa.UNKNOWN_ENTRY_TRIES + 1
