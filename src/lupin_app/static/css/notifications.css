@@ -2286,6 +2286,19 @@
             border-color: #212529;
         }
 
+        /* Keep place pill active state — the same dark fill as hide-inactive, so all three pills read alike when ON. */
+        .cc-strip-toggle[data-keep-place="true"] {
+            background: #495057;
+            border-color: #343a40;
+            color: #fff;
+            opacity: 1;
+        }
+
+        .cc-strip-toggle[data-keep-place="true"]:hover {
+            background: #343a40;
+            border-color: #212529;
+        }
+
         /* Strip filter: icons whose senderId has no allocated voice persona
          * disappear from the tray. Independent of [data-focus-hidden] —
          * either rule can fire display: none, no interaction needed. */

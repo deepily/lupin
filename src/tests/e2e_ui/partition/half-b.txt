@@ -81,3 +81,4 @@ src/tests/e2e_ui/test_doc_link_pane_is_in_the_viewport_in_vertical.py
 src/tests/e2e_ui/test_doc_link_renders_in_app_without_a_new_page.py
 src/tests/e2e_ui/test_legacy_podcast_card_yes_and_no.py
 src/tests/e2e_ui/test_multiplexer_focus_bar_toggles_row.py
+src/tests/e2e_ui/test_multiplexer_keep_place_toggle_style.py

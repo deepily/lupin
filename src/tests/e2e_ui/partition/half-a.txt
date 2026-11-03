@@ -82,3 +82,4 @@ src/tests/e2e_ui/test_multiplexer_podcast_card_filed_before_load.py
 src/tests/e2e_ui/test_legacy_keep_place_holds_the_view_on_arrival.py
 src/tests/e2e_ui/test_legacy_keep_place_holds_the_history_pane.py
 src/tests/e2e_ui/test_legacy_focus_bar_toggles_row.py
+src/tests/e2e_ui/test_legacy_keep_place_toggle_style.py
