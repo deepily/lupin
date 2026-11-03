@@ -512,3 +512,13 @@ def test_a_short_reply_raises_before_its_batch_reaches_on_batch_so_nothing_is_ca
         vb.embed_all( ShortOnSecond(), [ "a", "bb", "ccc", "dddd" ], "code", "document", 2, 0, lambda s: None, on_batch=lambda start, vectors: seen.append( start ) )
     assert caught.value.code == EMBEDDING_SHAPE and "asked for 2 vectors and got 1" in str( caught.value )
     assert seen == [ 0 ], "only the whole first batch was handed on; the short one never was"
+
+
+def test_a_long_reply_raises_too_so_an_extra_vector_never_shifts_the_rest_onto_the_wrong_texts():
+    class LongReply:
+        def embed( self, texts, content_type, role ):
+            return [ [ float( len( t ) ), 0.0 ] for t in texts ] + [ [ 9.0, 9.0 ] ]   # one vector more than asked for
+    seen = []
+    with pytest.raises( CandidateError ) as caught:
+        vb.embed_all( LongReply(), [ "a", "bb" ], "code", "document", 2, 0, lambda s: None, on_batch=lambda start, vectors: seen.append( start ) )
+    assert caught.value.code == EMBEDDING_SHAPE and "asked for 2 vectors and got 3" in str( caught.value ) and seen == []
