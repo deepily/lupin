@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import vm from "node:vm";
+import v8 from "node:v8";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
@@ -110,7 +111,19 @@ beforeEach( () => {
   document.getElementById( "abstract-tooltip" )?.remove();
 } );
 
+// happy-dom keeps a MutationObserver's callback only behind a WeakRef, so a garbage collection
+// between two tests silences the observer and the "card drawn later" tests read nothing.
+// Measured 3 Nov 2026: forcing gc() before the first of them failed 3 of 3 runs; CPU load failed 2 of 6.
+// This shim pins every referent for the life of the process, as a browser does for a live observer.
+const PINNED: unknown[] = [];
+class PinnedWeakRef<T extends object> {
+  readonly #target: T;
+  constructor( target: T ) { this.#target = target; PINNED.push( target ); }
+  deref(): T { return this.#target; }
+}
+
 before( () => {
+  ( globalThis as unknown as { WeakRef: unknown } ).WeakRef = PinnedWeakRef;
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
@@ -328,6 +341,18 @@ test( "a card drawn later: a held row keeps its live link, a live or done row re
   const done = [ ...host().querySelectorAll( ".approve-link-approved" ) ];
   assert.deepEqual( done.map( ( e ) => e.textContent ), [ "approved ✅", "approved ✅" ] );
   assert.ok( done.every( ( e ) => e.getAttribute( "aria-disabled" ) === "true" ) );
+} );
+
+test( "a card drawn after a full garbage collection is still read: the observer survives gc", async () => {
+  v8.setFlagsFromString( "--expose-gc" );
+  const gc = vm.runInNewContext( "gc" ) as () => void;
+  await new Promise( ( r ) => setTimeout( r, 5 ) );
+  gc(); gc();
+  table[ ROW_A ] = { status: "queued" };
+  plantCard( [ APPROVE( ROW_A ) ] );
+  await flush();
+  assert.deepEqual( asked, [ ROW_A ], "the observer must still deliver after gc" );
+  assert.equal( host().querySelectorAll( "a" ).length, 0, "a queued row's link is replaced" );
 } );
 
 test( "a dropped or wont_fix row reads as its plain status, never approved", async () => {
