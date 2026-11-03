@@ -98,29 +98,34 @@ def run( root, base, diff_path, data_dir, log_dir, gating ):
         - diff_path is a symbol index diff file, or None
     Ensures:
         - returns { "refusals": [ { path, n, line, reasons } ], "missing": [ { symbol, reason } ], "lines": int, "definitions": int, "appended": int }
-        - returns { "error": text } when the gate could not check
+        - returns { "error": text } when the gate could not check: an unreadable or ill-shaped diff file, an unreadable call log, a diff with `algorithm_changed`, no base, or a record that could not be written
         - refusals.jsonl in data_dir gains one record per judged line, once per document text
         - the call log, searches and exclusions are read once for all documents
     """
-    diff = json.loads( pathlib.Path( diff_path ).read_text( encoding="utf-8" ) ) if diff_path else { "added": [] }
-    if "algorithm_changed" in diff: return { "error": f"{diff_path}: the pin algorithm changed, so the diff lists no definitions to check" }
+    try:
+        diff = json.loads( pathlib.Path( diff_path ).read_text( encoding="utf-8" ) ) if diff_path else { "added": [] }
+        if not isinstance( diff, dict ) or not isinstance( diff.get( "added", [] ), list ): raise ValueError( f"{diff_path} is not a symbol index diff" )
+        if "algorithm_changed" in diff: raise ValueError( f"{diff_path}: the pin algorithm changed, so the diff lists no definitions to check" )
+        records, _bad = eg.merge_call_logs( log_dir )
+    except ( OSError, ValueError ) as e: return { "error": f"{type( e ).__name__}: {e}" }
     sha = resolve_base( root, base )
     if sha is None: return { "error": "git names no merge base for HEAD; pass --base" }
     files = added_text_by_file( root, sha )
     if files is None: return { "error": f"git could not diff {sha} against HEAD" }
-    records, _bad = eg.merge_call_logs( log_dir )
     receipts, searches, exclusions = eg.receipts_by_id( records ), eg.searches_by_receipt( records, data_dir ), eg.exclusions_by_symbol( records )
     refusals, outcomes, rulings, lines, appended = [], [], {}, 0, 0
     for path, text in files.items():
         file_rulings = eg.parse_rulings( text )
         verdicts     = rr.judge( text, receipts, searches, exclusions, file_rulings, root )
         lines       += len( verdicts )
-        if verdicts: appended += rr.record( data_dir, text, verdicts )
+        try:
+            if verdicts: appended += rr.record( data_dir, text, verdicts )
+        except OSError as e: return { "error": f"{type( e ).__name__}: {e}" }
         outcomes    += ro.parse_outcomes( text )
         for sym, rows in file_rulings.items(): rulings.setdefault( sym, [] ).extend( rows )
         refusals    += [ { "path": path, "n": v[ "n" ], "line": v[ "line" ], "reasons": v[ "reasons" ] } for v in verdicts if v[ "status" ] == "refused" ]
-    missing = ro.missing_outcome_refusals( diff[ "added" ], outcomes, rulings )
-    return { "refusals": refusals, "missing": missing, "lines": lines, "definitions": len( diff[ "added" ] ), "appended": appended }
+    missing = ro.missing_outcome_refusals( diff.get( "added", [] ), outcomes, rulings )
+    return { "refusals": refusals, "missing": missing, "lines": lines, "definitions": len( diff.get( "added", [] ) ), "appended": appended }
 
 
 def summary( result, gating ):
@@ -172,7 +177,10 @@ def main( argv=None, out=None ):
         print( f"REFUSING: `{gate.GATING_KEY}` could not be read. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
     data = pathlib.Path( a.data_dir or rr.default_data_dir( root ) )
-    data.mkdir( parents=True, exist_ok=True )
+    try: data.mkdir( parents=True, exist_ok=True )
+    except OSError as e:
+        print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was checked.", file=out )
+        return EXIT_NOT_CHECKED
     result = run( root, a.base, a.diff, data, a.log_dir or data / "call-log", flag )
     if "error" in result:
         print( f"REFUSING: {result[ 'error' ]}. Nothing was checked.", file=out )

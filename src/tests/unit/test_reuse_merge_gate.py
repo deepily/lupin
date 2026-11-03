@@ -218,3 +218,35 @@ def test_the_command_prints_to_standard_output_by_default( repo, data, tmp_path,
     commit_doc( repo, "review.md", GOOD )
     assert mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path ) ] ) == 0
     assert "REUSE GATE PASSED" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize( "content", [ None, "not json", "[1, 2]", '{"added": "m.q"}' ] )
+def test_a_diff_file_that_is_missing_or_not_a_symbol_index_diff_could_not_be_checked( repo, data, tmp_path, content ):
+    commit_doc( repo, "review.md", GOOD )
+    diff = tmp_path / "diff.json"
+    if content is not None: diff.write_text( content, encoding="utf-8" )
+    code, text = run( repo, data, tmp_path, "--diff", str( diff ) )
+    assert code == 3 and "Nothing was checked." in text and "Total Tests" not in text and not ( data / rr.REFUSALS_NAME ).exists()
+
+
+def test_an_unreadable_call_log_could_not_be_checked( repo, data, tmp_path, monkeypatch ):
+    commit_doc( repo, "review.md", GOOD )
+    def boom( folder ): raise OSError( "log folder unreadable" )
+    monkeypatch.setattr( mg.eg, "merge_call_logs", boom )
+    code, text = run( repo, data, tmp_path )
+    assert code == 3 and "OSError: log folder unreadable. Nothing was checked." in text
+
+
+def test_a_record_that_cannot_be_written_could_not_be_checked( repo, data, tmp_path, monkeypatch ):
+    commit_doc( repo, "review.md", GOOD )
+    def boom( folder, text, verdicts ): raise OSError( "disk full" )
+    monkeypatch.setattr( mg.rr, "record", boom )
+    code, text = run( repo, data, tmp_path )
+    assert code == 3 and "OSError: disk full. Nothing was checked." in text and "Total Tests" not in text
+
+
+def test_a_data_folder_that_cannot_be_made_could_not_be_checked( repo, tmp_path ):
+    blocker = tmp_path / "a-file"
+    blocker.write_text( "x", encoding="utf-8" )
+    code, text = run( repo, blocker / "data", tmp_path )
+    assert code == 3 and "Nothing was checked." in text and "Total Tests" not in text
