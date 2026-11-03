@@ -7,9 +7,10 @@ The line ties a lookup to what the diff did with it. It reads:
 REUSE-OUTCOME <receipt id> :: <search id> :: REUSED <symbol> | EXTENDED <symbol> | WROTE_NEW <difference> :: <plan path>#<step>
 ```
 `REUSED` and `EXTENDED` take one symbol token and no free text after it. `WROTE_NEW` takes text with no " :: " in it.
-This module reads the shape, and gives the two tokens `excluded` and `unindexed` their meaning.
-Whether a real receipt and search are in the call log is a later step.
-Nothing here reads the log, sends anything, or runs a model.
+This module reads the shape and gives the tokens `excluded` and `unindexed` their meaning.
+It also checks that a real receipt and its search are in the call log.
+It is handed what the log readers return and reads no log itself.
+Nothing here sends anything or runs a model.
 """
 import pathlib
 import re
@@ -112,4 +113,29 @@ def token_refusals( outcomes, exclusions, root ):
             if o[ "search" ] != UNINDEXED_TOKEN: out.append( { "line": o[ "line" ], "reason": f"{UNINDEXED_TOKEN} goes in both id slots" } )
             elif is_indexed( key, root ): out.append( { "line": o[ "line" ], "reason": f"{key} is a file the symbol index holds, so look it up instead" } )
         elif o[ "search" ] == UNINDEXED_TOKEN: out.append( { "line": o[ "line" ], "reason": f"{UNINDEXED_TOKEN} in the search slot needs {UNINDEXED_TOKEN} in the receipt slot" } )
+    return out
+
+
+def log_refusals( outcomes, receipts, searches ):
+    """
+    Refuse the outcome lines whose receipt or search is not in the call log.
+
+    Requires:
+        - outcomes comes from parse_outcomes
+        - receipts is what reuse_exit_gate.receipts_by_id returns; searches is what searches_by_receipt returns
+    Ensures:
+        - a line passes when its receipt is a `check_exists` or `fetch_similar` call that logged no error and its search is a `record_search` on that same receipt
+        - the check is that the receipt is in the log, not that it is about this definition
+        - a line with the `excluded` or `unindexed` token is left to token_refusals; so is a search slot holding `unindexed`
+        - returns [ { line, reason } ] in document order
+        - the reason says "not in the log", never that anything was made up, and says to re-run the lookup and check the log folder
+        - the reason says a failed log write makes a real receipt look absent, because the log middleware swallows its own errors
+    """
+    advice = "re-run the lookup and check the log folder; a failed log write makes a real receipt look absent"
+    out    = []
+    for o in outcomes:
+        if o[ "receipt" ] in ( EXCLUDED_TOKEN, UNINDEXED_TOKEN ): continue
+        if o[ "receipt" ] not in receipts: out.append( { "line": o[ "line" ], "reason": f"receipt {o[ 'receipt' ]} is not in the log; {advice}" } )
+        elif o[ "search" ] != UNINDEXED_TOKEN and o[ "search" ] not in searches.get( o[ "receipt" ], {} ):
+            out.append( { "line": o[ "line" ], "reason": f"search {o[ 'search' ]} is not in the log for receipt {o[ 'receipt' ]}; {advice}" } )
     return out

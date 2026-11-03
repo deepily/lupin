@@ -165,3 +165,55 @@ def test_for_a_file_on_disk_the_rule_agrees_with_the_indexers_own_file_list():
     tracked = [ ROOT / f for f in subprocess.run( [ "git", "ls-files", "src" ], cwd=ROOT, capture_output=True, text=True, check=True ).stdout.split( "\n" ) if f ]
     assert any( p.resolve() not in indexed for p in tracked ) and any( p.resolve() in indexed for p in tracked )
     assert [ p for p in tracked if p.is_file() and ro.is_indexed( p, ROOT ) != ( p.resolve() in indexed ) ] == []
+
+
+# The call-log check (plan section 12.3, the third step of track B)
+
+REAL_LOG    = pathlib.Path( __file__ ).parent / "reuse_call_log_real_2026.11.02.jsonl"
+REAL_RECORD = pathlib.Path( __file__ ).parent / "reuse_search_record_real_rs-bc3ca2c901.json"
+REAL_RID    = "5d37236290c7d93f"                                       # a check_exists receipt a real seat made
+REAL_SID    = "rs-bc3ca2c901"                                          # the record_search made on it, whose record file is the fixture
+OTHER_SID   = "rs-98ce3e6760"                                          # a real record_search call in the same log whose record file is not in the fixture
+
+
+def real_readers( tmp_path ):
+    """Ensures: returns ( receipts, searches ) read from the real log and record."""
+    logs = tmp_path / "call-log"
+    logs.mkdir()
+    ( logs / "real.jsonl" ).write_text( REAL_LOG.read_text( encoding="utf-8" ), encoding="utf-8" )
+    ( tmp_path / "search-records" ).mkdir()
+    ( tmp_path / "search-records" / f"{REAL_SID}.json" ).write_text( REAL_RECORD.read_text( encoding="utf-8" ), encoding="utf-8" )
+    records = eg.merge_call_logs( logs )[ 0 ]
+    return eg.receipts_by_id( records ), eg.searches_by_receipt( records, tmp_path )
+
+
+def test_a_line_citing_a_real_receipt_and_its_own_search_passes_the_log_check( tmp_path ):
+    receipts, searches = real_readers( tmp_path )
+    assert REAL_RID in receipts and REAL_SID in searches[ REAL_RID ], "the readers found the real receipt and search"
+    assert ro.log_refusals( lines( ( REAL_RID, REAL_SID, "the helper is new" ) ), receipts, searches ) == []
+
+
+def test_a_receipt_or_search_that_is_not_in_the_log_is_refused_with_what_to_do( tmp_path ):
+    receipts, searches = real_readers( tmp_path )
+    got = lines( ( "0123456789abcdef", REAL_SID, "no such receipt" ),
+                 ( REAL_RID, "rs-0000000000", "no such search" ),
+                 ( REAL_RID, OTHER_SID, "a real search call that has no record file and is on another receipt" ) )
+    out = ro.log_refusals( got, receipts, searches )
+    assert [ r[ "line" ] for r in out ] == [ g[ "line" ] for g in got ]
+    assert out[ 0 ][ "reason" ].startswith( "receipt 0123456789abcdef is not in the log" )
+    assert all( r[ "reason" ].startswith( ( "receipt", "search" ) ) and "not in the log" in r[ "reason" ] for r in out )
+    assert all( "re-run the lookup" in r[ "reason" ] and "log folder" in r[ "reason" ] and "failed log write" in r[ "reason" ] for r in out )
+    assert not any( "fabricat" in r[ "reason" ].lower() for r in out ), "the wording says absent, never made up"
+
+
+def test_a_receipt_whose_lookup_logged_an_error_is_not_in_the_log():
+    receipts = eg.receipts_by_id( [ call( None, "BAD_LANGUAGE" ) | { "tool": "check_exists", "receipt_id": "0123456789abcdef" } ] )
+    out      = ro.log_refusals( lines( ( "0123456789abcdef", "rs-bc3ca2c901", "text" ) ), receipts, {} )
+    assert len( out ) == 1 and "is not in the log" in out[ 0 ][ "reason" ]
+
+
+def test_the_log_check_leaves_the_two_tokens_to_the_token_check():
+    got = lines( ( "excluded", "rs-bc3ca2c901", "lupin_mcp.x is refused" ), ( "unindexed", "unindexed", "src/rnd/x.md" ), ( REAL_RID, "unindexed", "text" ) )
+    out = ro.log_refusals( got, { REAL_RID: "check_exists" }, {} )
+    assert out == [], "token lines are not judged here; a real receipt beside unindexed is refused by the token check"
+    assert [ r[ "line" ] for r in ro.token_refusals( got[ 2: ], {}, ROOT ) ] == [ got[ 2 ][ "line" ] ]
