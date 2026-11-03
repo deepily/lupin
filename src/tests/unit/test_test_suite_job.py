@@ -1577,6 +1577,14 @@ def test_the_card_carries_the_failure_message_not_just_the_count():
     assert "test_v2_eval_two_pass_live" in line
 
 
+def test_a_unit_exit_of_72_is_called_out_of_memory_on_the_card_and_other_suites_and_codes_are_not():
+    """The unit scope's memory kill must not read as failing tests."""
+    unit = lambda code: TestSuiteJob._suite_abstract_line( TestSuiteJob, "unit", { "passed": 5, "failed": 2, "errors": 0, "skipped": 0, "exit_code": code } )
+    assert "OUT OF MEMORY" in unit( 72 )
+    assert "OUT OF MEMORY" not in unit( 1 )
+    assert "OUT OF MEMORY" not in _line( failed=1, exit_code=72 ), "only the unit suite carries this code"
+
+
 def test_a_clean_suite_line_gains_nothing():
     """The control: no failures, no appended detail — the card must not grow noise."""
     line = _line( passed=12 )

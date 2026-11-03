@@ -192,6 +192,9 @@ for suite in "${SUITES[@]}"; do
         SUITES_FAILED=$(( SUITES_FAILED + 1 ))
         OVERALL_EXIT=$EXIT
         echo "  ✗ $suite FAILED (exit=$EXIT, ${DUR}s)" | tee -a "$COMBINED_LOG"
+        if [ "$suite" = "unit" ] && [ "$EXIT" -eq 72 ]; then
+            echo "    unit: OUT OF MEMORY — the unit scope was killed for memory (exit 72), not a test failure" | tee -a "$COMBINED_LOG"
+        fi
 
         if [ $FAIL_FAST -eq 1 ]; then
             echo "" | tee -a "$COMBINED_LOG"
@@ -208,6 +211,7 @@ echo "==================================================================" | tee 
 for suite in "${SUITES[@]}"; do
     if [ -n "${EXIT_CODES[$suite]}" ]; then
         status=$( [ "${EXIT_CODES[$suite]}" -eq 0 ] && echo "PASS" || echo "FAIL" )
+        if [ "$suite" = "unit" ] && [ "${EXIT_CODES[$suite]}" -eq 72 ]; then status="FAIL (out of memory)"; fi
         printf "  %-12s %s (%ss)\n" "$suite" "$status" "${DURATIONS[$suite]}" | tee -a "$COMBINED_LOG"
     else
         printf "  %-12s SKIPPED\n" "$suite" | tee -a "$COMBINED_LOG"

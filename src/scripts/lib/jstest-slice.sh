@@ -74,7 +74,7 @@ JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-1500}"
 # UNCAPPED, and a door that runs the suite uncapped while reporting itself as the
 # capped lane is worse than a door that will not open. This is what makes the
 # compose limit load-bearing rather than decorative.
-_jstest_in_container() { [ -f /.dockerenv ]; }
+_jstest_in_container() { [ -f "${JSTEST_CONTAINER_MARKER:-/.dockerenv}" ]; }
 
 _jstest_container_ceiling() {
     # Echoes the byte ceiling, or "max"/"" when there is none to find.
@@ -244,4 +244,66 @@ jstest_slice_exec() {
         -p MemorySwapMax=0 \
         -p RuntimeMaxSec="$JSTEST_RUNTIME_MAX" \
         -- bash -c 'source "$0"; jstest_watchdog_exec "$@"' "$JSTEST_LIB_PATH" "$@"
+}
+
+
+# ── THE UNIT-TIER LANE (row d0b369af) ────────────────────────────────────────
+# The same idea as the lane above, for the pytest unit tier: run it in its OWN
+# cgroup, outside the seat's 8 GiB, and say so plainly when that cgroup kills it.
+#
+# WHY. Measured 2026-11-02 (Sam, row d0b369af): the full unit tier at -n 4 peaks at
+# 12.0 GB in a scope of its own (7.8 GB anonymous memory, the rest page cache), at 645 s
+# of a 680 s run. A seat scope is 8 GiB and also holds claude and the MCP server, so the
+# tier got a worker OOM-killed there (20:57:26, victim python3). Cheech ruled 16G, kept at -n 4.
+#
+# THE REAL DEFECT WAS THE READING, not the kill. pytest-xdist reports a killed worker as a
+# crashed node and the run ends with an ordinary failing exit code, so an out-of-memory kill
+# read as "tests failed". The inner half below reads the scope's own oom_kill counter after
+# the tier ends. A non-zero run that saw a kill exits UNIT_OOM_EXIT (72), whose banner names
+# the limit and the original status. A passing run that saw a kill keeps its 0 and warns.
+#
+# Same policy as the JS lane: MemoryMax and never MemoryHigh (throttling stalls the slice
+# instead of killing the offender), MemorySwapMax=0, and a refusal rather than an uncapped run.
+# There is no per-process RSS watchdog here: a legitimate worker holds about 2.3 GB.
+UNIT_SLICE="${UNIT_SLICE:-unittier.slice}"
+UNIT_MEM_MAX="${UNIT_MEM_MAX:-16G}"
+UNIT_RUNTIME_MAX="${UNIT_RUNTIME_MAX:-3600}"
+UNIT_OOM_EXIT=72
+
+# Run "$@" in the capped scope and report an OOM kill. Replaces the shell, as the JS lane does.
+# Requires: systemd-run on the host. Returns 70 (message on stderr) when it is missing.
+unit_scope_exec() {
+    if ! command -v systemd-run >/dev/null 2>&1; then
+        echo "🔴 [unit-lane] systemd-run NOT FOUND — refusing to run the unit tier outside its own memory cap." >&2
+        echo "    Inside a seat the tier shares 8 GiB with claude and gets a worker OOM-killed." >&2
+        echo "    Set LUPIN_UNIT_SCOPE=off to run it uncapped knowingly." >&2
+        return 70
+    fi
+    echo "[unit-lane] slice=$UNIT_SLICE MemoryMax=$UNIT_MEM_MAX MemorySwapMax=0 RuntimeMaxSec=$UNIT_RUNTIME_MAX" >&2
+    exec systemd-run --user --scope --quiet \
+        --slice="$UNIT_SLICE" \
+        -p MemoryMax="$UNIT_MEM_MAX" \
+        -p MemorySwapMax=0 \
+        -p RuntimeMaxSec="$UNIT_RUNTIME_MAX" \
+        -- bash -c 'source "$0"; unit_scope_inner "$@"' "$JSTEST_LIB_PATH" "$@"
+}
+
+# Runs inside the scope. Runs "$@", then reads this cgroup's oom_kill count.
+# Ensures: returns the command's own status, except UNIT_OOM_EXIT when that status was
+#          non-zero and the scope saw at least one OOM kill.
+unit_scope_inner() {
+    "$@"
+    local rc=$? cg kills=""
+    cg="$( sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null )"
+    [ -n "$cg" ] && kills="$( awk '$1 == "oom_kill" { print $2 }' "/sys/fs/cgroup${cg}/memory.events" 2>/dev/null )"
+    if [ -n "$kills" ] && [ "$kills" -gt 0 ]; then
+        if [ "$rc" -ne 0 ]; then
+            echo "🔴 [unit-lane] OUT OF MEMORY: the kernel killed $kills process(es) in this scope (MemoryMax=$UNIT_MEM_MAX)." >&2
+            echo "    The tier's own status was $rc. This is a memory kill, not a test failure: read the log for 'node down' or 'worker crashed'." >&2
+            echo "    Exit $UNIT_OOM_EXIT. Measured full-tier peak at -n 4 was 12.0 GB (2026-11-02, row d0b369af)." >&2
+            return "$UNIT_OOM_EXIT"
+        fi
+        echo "⚠️  [unit-lane] the kernel killed $kills process(es) in this scope (MemoryMax=$UNIT_MEM_MAX), yet the tier passed. Check the log." >&2
+    fi
+    return "$rc"
 }
