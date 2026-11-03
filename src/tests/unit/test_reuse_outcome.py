@@ -217,3 +217,53 @@ def test_the_log_check_leaves_the_two_tokens_to_the_token_check():
     out = ro.log_refusals( got, { REAL_RID: "check_exists" }, {} )
     assert out == [], "token lines are not judged here; a real receipt beside unindexed is refused by the token check"
     assert [ r[ "line" ] for r in ro.token_refusals( got[ 2: ], {}, ROOT ) ] == [ got[ 2 ][ "line" ] ]
+
+
+# The kinds must pair (plan section 12.3, the fifth step of track B)
+
+R_A, R_B, R_C = "0123456789abcdef", "1123456789abcdef", "2123456789abcdef"
+
+
+def pair_text( *rulings ):
+    """Ensures: the rulings of ( symbol, text, receipt ) triples, read by the gate's parser."""
+    return eg.parse_rulings( "\n".join( f"RULING {sym} :: {ruling} :: reuse-receipt: {rid}" for sym, ruling, rid in rulings ) )
+
+
+def outcome_lines( *rows ):
+    """Ensures: the parsed outcome lines of ( receipt, outcome text ) rows."""
+    return ro.parse_outcomes( "\n".join( f"REUSE-OUTCOME {r} :: rs-bc3ca2c901 :: {text} :: {PLAN}#12.3-B5" for r, text in rows ) )
+
+
+def test_each_ruling_kind_passes_with_its_own_outcome_kind_and_no_other():
+    rulings = pair_text( ( "m.a", "DUPLICATE", R_A ), ( "m.b", "EXTEND m.q", R_B ), ( "m.c", "DISTINCT it differs", R_C ) )
+    right   = outcome_lines( ( R_A, "REUSED m.q" ), ( R_B, "EXTENDED m.q" ), ( R_C, "WROTE_NEW it differs" ) )
+    assert ro.pairing_refusals( right, rulings ) == []
+    for rid, wrong in ( ( R_A, ( "EXTENDED m.q", "WROTE_NEW x" ) ), ( R_B, ( "REUSED m.q", "WROTE_NEW x" ) ), ( R_C, ( "REUSED m.q", "EXTENDED m.q" ) ) ):
+        for text in wrong:
+            got = outcome_lines( ( rid, text ) )
+            out = ro.pairing_refusals( got, rulings )
+            assert [ r[ "line" ] for r in out ] == [ got[ 0 ][ "line" ] ], f"{rid} with {text}"
+
+
+def test_a_ruling_distinct_with_an_outcome_reused_is_refused_naming_both():
+    rulings = pair_text( ( "m.x", "DISTINCT it differs", R_A ) )
+    out     = ro.pairing_refusals( outcome_lines( ( R_A, "REUSED m.q" ) ), rulings )
+    assert len( out ) == 1 and "outcome is REUSED" in out[ 0 ][ "reason" ] and "m.x is DISTINCT" in out[ 0 ][ "reason" ] and R_A in out[ 0 ][ "reason" ]
+
+
+def test_an_outcome_line_whose_receipt_no_ruling_cites_is_refused():
+    rulings = pair_text( ( "m.x", "DUPLICATE", R_A ) )
+    got     = outcome_lines( ( R_B, "REUSED m.q" ) )
+    out     = ro.pairing_refusals( got, rulings )
+    assert [ r[ "line" ] for r in out ] == [ got[ 0 ][ "line" ] ] and "no ruling line" in out[ 0 ][ "reason" ]
+    assert ro.pairing_refusals( got, {} )[ 0 ][ "reason" ].endswith( "no ruling line" ), "a document with no ruling line at all"
+
+
+def test_pairing_goes_by_receipt_so_two_symbols_on_one_receipt_pass_when_one_pairs_and_the_tokens_are_left_alone():
+    rulings = pair_text( ( "m.x", "DUPLICATE", R_A ), ( "m.y", "DISTINCT it differs", R_A ), ( "m.z", "DISTINCT it differs", "excluded" ) )
+    assert ro.pairing_refusals( outcome_lines( ( R_A, "REUSED m.q" ) ), rulings ) == []
+    assert ro.pairing_refusals( outcome_lines( ( R_A, "WROTE_NEW it differs" ) ), rulings ) == []
+    out = ro.pairing_refusals( outcome_lines( ( R_A, "EXTENDED m.q" ) ), rulings )
+    assert len( out ) == 1 and "m.x is DUPLICATE, m.y is DISTINCT" in out[ 0 ][ "reason" ]
+    tokens = outcome_lines( ( "excluded", "WROTE_NEW refused" ), ( "unindexed", "WROTE_NEW src/rnd/x.md" ) )
+    assert ro.pairing_refusals( tokens, rulings ) == []

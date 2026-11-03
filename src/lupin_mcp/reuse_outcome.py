@@ -8,7 +8,7 @@ REUSE-OUTCOME <receipt id> :: <search id> :: REUSED <symbol> | EXTENDED <symbol>
 ```
 `REUSED` and `EXTENDED` take one symbol token and no free text after it. `WROTE_NEW` takes text with no " :: " in it.
 This module reads the shape and gives the tokens `excluded` and `unindexed` their meaning.
-It also checks that a real receipt and its search are in the call log.
+It also checks that a real receipt and its search are in the call log, and that each outcome kind pairs with the ruling kind.
 It is handed what the log readers return and reads no log itself.
 Nothing here sends anything or runs a model.
 """
@@ -19,6 +19,7 @@ from cosa.repo.symindex.spec import SCRIPT_SUFFIXES, skipped, spec_for
 from lupin_mcp.reuse_exit_gate import EXCLUDED_PREFIX, EXCLUDED_TOKEN
 
 UNINDEXED_TOKEN  = "unindexed"                                      # the receipt and search token for a file outside the index
+KIND_PAIRS      = { "DUPLICATE": "REUSED", "EXTEND": "EXTENDED", "DISTINCT": "WROTE_NEW" }   # a ruling kind and the outcome kind that goes with it (reviewer skill, step 4)
 
 TEMPLATE_RECEIPT = "<receipt id>"                                   # the receipt slot of the skill's template line
 TEMPLATE_SEARCH  = "<search id>"                                    # the search slot of the same line
@@ -138,4 +139,32 @@ def log_refusals( outcomes, receipts, searches ):
         if o[ "receipt" ] not in receipts: out.append( { "line": o[ "line" ], "reason": f"receipt {o[ 'receipt' ]} is not in the log; {advice}" } )
         elif o[ "search" ] != UNINDEXED_TOKEN and o[ "search" ] not in searches.get( o[ "receipt" ], {} ):
             out.append( { "line": o[ "line" ], "reason": f"search {o[ 'search' ]} is not in the log for receipt {o[ 'receipt' ]}; {advice}" } )
+    return out
+
+
+def pairing_refusals( outcomes, rulings ):
+    """
+    Refuse the outcome lines whose kind does not pair with the ruling on the same receipt.
+
+    Requires:
+        - outcomes comes from parse_outcomes
+        - rulings is what reuse_exit_gate.parse_rulings returns
+    Ensures:
+        - the pairs are `DUPLICATE` with `REUSED`, `EXTEND` with `EXTENDED` and `DISTINCT` with `WROTE_NEW`, joined by receipt id
+        - an outcome line passes when some ruling on its receipt pairs with it
+        - an outcome line whose receipt no ruling cites is refused as having no ruling line
+        - a line with the `excluded` or `unindexed` token is left alone, because many definitions share the token and a receipt id cannot pair them
+        - returns [ { line, reason } ] in document order, the reason naming the symbols and kinds that disagree
+    """
+    by_receipt = {}
+    for symbol, rows in rulings.items():
+        for row in rows: by_receipt.setdefault( row[ "receipt" ], [] ).append( ( symbol, row[ "ruling" ].split()[ 0 ] ) )
+    out = []
+    for o in outcomes:
+        if o[ "receipt" ] in ( EXCLUDED_TOKEN, UNINDEXED_TOKEN ): continue
+        cited = by_receipt.get( o[ "receipt" ] )
+        if not cited: out.append( { "line": o[ "line" ], "reason": f"receipt {o[ 'receipt' ]} has an outcome line and no ruling line" } )
+        elif not any( KIND_PAIRS.get( kind ) == o[ "outcome" ] for _, kind in cited ):
+            seen = ", ".join( f"{symbol} is {kind}" for symbol, kind in cited )
+            out.append( { "line": o[ "line" ], "reason": f"the outcome is {o[ 'outcome' ]} but the ruling on receipt {o[ 'receipt' ]} disagrees ({seen}); DUPLICATE goes with REUSED, EXTEND with EXTENDED, DISTINCT with WROTE_NEW" } )
     return out
