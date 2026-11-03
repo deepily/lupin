@@ -22,7 +22,10 @@ cli_version_lag() {
     local host="$1" image="$2"
     local h_mm="${host%.*}" i_mm="${image%.*}"
     if [[ "${h_mm}" != "${i_mm}" ]]; then
-        printf "%s\n" $(( CLAUDE_CLI_MAX_LAG + 1 ))
+        local h_key i_key
+        h_key=$(( ${h_mm%%.*} * 100000 + ${h_mm##*.} ))
+        i_key=$(( ${i_mm%%.*} * 100000 + ${i_mm##*.} ))
+        if (( i_key > h_key )); then printf "0\n"; else printf "%s\n" $(( CLAUDE_CLI_MAX_LAG + 1 )); fi
         return 0
     fi
     local lag=$(( ${host##*.} - ${image##*.} ))

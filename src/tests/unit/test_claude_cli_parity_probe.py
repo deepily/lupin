@@ -49,6 +49,8 @@ def _probe( path, extra_env=None ):
     ( "2.1.317", "2.1.161", "156" ),
     ( "2.1.317", "2.1.400", "0" ),
     ( "2.2.5",   "2.1.400", "11" ),
+    ( "2.1.317", "2.2.0",   "0" ),
+    ( "2.9.1",   "10.0.0",  "0" ),
 ] )
 def test_the_lag_is_the_patch_difference_inside_one_minor_and_the_limit_plus_one_across_minors( host, image, lag ):
     out = subprocess.run( [ "bash", "-c", f"source {PROBE}; cli_version_lag {host} {image}" ], capture_output=True, text=True )
@@ -86,6 +88,20 @@ def test_the_standalone_script_reports_through_the_probe( tmp_path ):
     assert done.returncode == 1 and "[WARN]" in done.stdout
 
 
-def test_the_preflight_sources_the_probe_and_calls_it():
+def test_the_standalone_script_aborts_with_2_when_docker_is_unreachable( tmp_path ):
+    shims = _shims( tmp_path, "2.1.317", "2.1.317" )
+    ( tmp_path / "docker" ).write_text( "#!/bin/sh\nexit 1\n" )
+    done  = _run( [ "bash", CHECK ], shims )
+    assert done.returncode == 2 and "[ABORT]" in done.stdout
+
+
+@pytest.mark.parametrize( "image, ok, warn", [ ( "2.1.317", 1, 0 ), ( "2.1.161", 0, 1 ), ( "", 0, 1 ) ] )
+def test_the_probe_reports_through_the_callers_say_functions_as_the_preflight_does( tmp_path, image, ok, warn ):
+    script = f'ok=0; warn=0; say_ok() {{ ok=$((ok+1)); }}; say_warn() {{ warn=$((warn+1)); }}; source {PROBE}; probe_claude_cli_parity lupin-rest-dev >/dev/null; echo "$ok $warn"'
+    done   = _run( [ "bash", "-c", script ], _shims( tmp_path, "2.1.317", image ) )
+    assert done.stdout.split() == [ str( ok ), str( warn ) ]
+
+
+def test_the_preflight_sources_the_probe_and_calls_it_without_failing_the_run():
     text = open( ROOT + "/src/scripts/preflight-test-container.sh" ).read()
-    assert "lib/claude-cli-parity-probe.sh" in text and 'probe_claude_cli_parity "${CONTAINER}"' in text
+    assert 'source "$(dirname "${BASH_SOURCE[0]}")/lib/claude-cli-parity-probe.sh"' in text and 'probe_claude_cli_parity "${CONTAINER}" || true' in text
