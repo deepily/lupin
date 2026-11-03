@@ -7,6 +7,10 @@ The audit receipts of the shadow audit show the audits; the receipt's own flag t
 One report is one week: the seven calendar days that end on a given date, read in the host's time zone.
 With no date given, the week is the last complete Monday-to-Sunday one, so pages follow one another with no lookup between them.
 A record whose time cannot be read is left out of every count and listed on its own row, never guessed into a week.
+The daily duplicate check has a table of its own: one row per run dated inside the week, then a total row.
+It reads the result files of the check's folder.
+The verdict on each finding comes from the finding itself or from its row in the task store.
+A run with no findings is a row of zeros; a result file that cannot be read is counted under "Left out of the week".
 No table has a column for a seat or a person; the page counts the fleet.
 The tables are drawn by report_rollup.counts_table in its plain form. Nothing here sends anything or runs a model.
 
@@ -24,10 +28,11 @@ import cosa.utils.util as cu
 from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import shadow_audit as sa
 from cosa.repo.symindex.candidates.errors import CandidateError
+from lupin_mcp import duplicate_check_filing as ff
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_outcome as ro
 from lupin_mcp import reuse_refusals as rr
-from lupin_mcp.reuse_needset.report_rollup import counts_table
+from lupin_mcp.reuse_needset.report_rollup import counts_table, share, table
 
 WEEK_DAYS      = sa.WEEK_DAYS                                       # the days one report covers, the end date included
 EXIT_NOT_MADE  = 3
@@ -37,6 +42,14 @@ PAGE_FOLDER    = "reuse-behaviour"                                  # under the 
 CRON_TAG       = "# reuse-behaviour-weekly"
 CRON_SCHEDULE  = "0 18 * * *"                                       # every day at 18:00, an hour the host is on; the run skips when the last complete week's page is saved
 BOOT_DELAY     = 360                                                # seconds after a boot, after the daily check's 300
+CHECK_FOLDER   = "duplicate-check-daily"                            # under the data folder; the same folder duplicate_check_daily.FOLDER names
+CHECK_NAME     = re.compile( r"^\d{4}-\d{2}-\d{2}-\d{6}-.+\.json$" )   # <date>-<time>-<trigger>.json; last-success.json does not match
+VERDICT_LINE   = re.compile( r"\[amendment [^\]]*\]\s*VERDICT (DUPLICATE|EXTEND|DISTINCT)" )
+REAL_VERDICTS  = ( "DUPLICATE", "EXTEND" )
+NOT_VERDICTS   = ( "DISTINCT", )
+CHECK_HEADERS  = ( "date", "trigger", "commits judged", "judge calls", "minutes", "findings", "real duplicates", "not duplicates", "no verdict yet", "precision (real of ruled)" )
+CHECK_TITLE    = "Daily duplicate check"
+BAD_CHECK_ROW  = "duplicate-check result files that cannot be read"
 OUTCOME_KINDS  = ( "REUSED", "EXTENDED", "WROTE_NEW" )
 UNPARSED       = "unparsed"
 OTHER_REASON   = "other (not in this list)"
@@ -222,14 +235,107 @@ def count_audits( receipts, week ):
     return { AUDIT_ROWS[ 0 ]: sum( 1 for r in held if r[ sa.NEW_FIELD ] ), AUDIT_ROWS[ 1 ]: sum( 1 for r in held if not r[ sa.NEW_FIELD ] ) }
 
 
-def weekly_report( records, rows, receipts, end, tz=None ):
+def read_check_run( path ):
+    """
+    Read one result file of the daily duplicate check.
+
+    Requires:
+        - path is a file named like <date>-<time>-<trigger>.json
+    Ensures:
+        - returns { day, trigger, judged, calls, seconds, findings } where findings is a list of ( verdict field or None, correlation key or None )
+        - a run that judged nothing, or never reached judging, has judged 0 and no findings
+        - returns None when the file cannot be read, is not a JSON object, or lacks a readable date, trigger, judge_calls or elapsed_seconds
+    """
+    try:
+        doc = json.loads( path.read_text( encoding="utf-8" ) )
+        return { "day": datetime.date.fromisoformat( doc[ "date" ] ), "trigger": str( doc[ "trigger" ] ), "judged": int( doc.get( "judged", 0 ) ), "calls": int( doc[ "judge_calls" ] ),
+                 "seconds": float( doc[ "elapsed_seconds" ] ), "findings": [ ( f.get( "verdict" ), f.get( "correlation_key" ) ) for f in doc.get( "findings", [] ) ] }
+    except ( OSError, ValueError, KeyError, TypeError, AttributeError ):
+        return None
+
+
+def read_check_runs( folder, week ):
+    """
+    Read the result files of the week.
+
+    Requires:
+        - week is week_of's answer
+    Ensures:
+        - returns ( runs, unreadable ): runs are the read_check_run answers dated inside the week, oldest file name first; unreadable is the count of files that could not be read
+        - a missing folder gives ( [], 0 ); a file whose name is not a result file's, such as last-success.json, is not read
+        - a readable run dated outside the week is in neither
+    """
+    folder = pathlib.Path( folder )
+    if not folder.is_dir(): return [], 0
+    read = [ read_check_run( p ) for p in sorted( folder.glob( "*.json" ) ) if CHECK_NAME.match( p.name ) ]
+    return [ r for r in read if r is not None and week[ 0 ] <= r[ "day" ] <= week[ 1 ] ], sum( 1 for r in read if r is None )
+
+
+def verdict_of( field, key, store ):
+    """
+    Name the crew's verdict on one finding.
+
+    Requires:
+        - field is the finding's own verdict, or None; key is its correlation key, or None
+        - store has query( key ) returning ( ok, status, body ), or is None
+    Ensures:
+        - returns `duplicate`, `extend` or `distinct` in capitals, taken from the finding's own verdict field when it holds one, whatever the case
+        - otherwise returns the word of the last `VERDICT <word>` in the row's amendments in the store
+        - returns None when there is no key, no store, a read that did not answer ok, or no verdict yet
+    """
+    if isinstance( field, str ) and field.upper() in REAL_VERDICTS + NOT_VERDICTS: return field.upper()
+    if store is None or key is None: return None
+    ok, _status, body = store.query( key )
+    if not ok: return None
+    found = [ w for task in body.get( "tasks", [] ) for w in VERDICT_LINE.findall( task.get( "body", "" ) ) ]
+    return found[ -1 ] if found else None
+
+
+def check_counts( run, store ):
+    """
+    Count one run's findings by verdict.
+
+    Ensures:
+        - returns { real, not_dup, open } that add up to the run's findings; open are the findings with no verdict yet
+    """
+    verdicts = [ verdict_of( field, key, store ) for field, key in run[ "findings" ] ]
+    real     = sum( 1 for v in verdicts if v in REAL_VERDICTS )
+    not_dup  = sum( 1 for v in verdicts if v in NOT_VERDICTS )
+    return { "real": real, "not_dup": not_dup, "open": len( verdicts ) - real - not_dup }
+
+
+def check_table( runs, store ):
+    """
+    Draw the daily duplicate check table.
+
+    Requires:
+        - runs are read_check_runs' answer
+    Ensures:
+        - returns CHECK_TITLE, then a table with one row per run in the given order and a last row `total`
+        - a run with no findings is a row of zeros
+        - precision is real duplicates out of those ruled, real plus not; findings with no verdict are in their own column and in neither side
+        - the total row sums every column, and its precision is the sum's, not an average of the rows'
+    """
+    rows, sums = [], { "judged": 0, "calls": 0, "seconds": 0.0, "findings": 0, "real": 0, "not_dup": 0, "open": 0 }
+    for run in runs:
+        got  = check_counts( run, store ) | { "judged": run[ "judged" ], "calls": run[ "calls" ], "seconds": run[ "seconds" ], "findings": len( run[ "findings" ] ) }
+        for k in sums: sums[ k ] += got[ k ]
+        rows.append( [ run[ "day" ].isoformat(), run[ "trigger" ], got[ "judged" ], got[ "calls" ], f"{got[ 'seconds' ] / 60:.1f}", got[ "findings" ], got[ "real" ], got[ "not_dup" ], got[ "open" ], share( got[ "real" ], got[ "real" ] + got[ "not_dup" ] ) ] )
+    rows.append( [ "total", "", sums[ "judged" ], sums[ "calls" ], f"{sums[ 'seconds' ] / 60:.1f}", sums[ "findings" ], sums[ "real" ], sums[ "not_dup" ], sums[ "open" ], share( sums[ "real" ], sums[ "real" ] + sums[ "not_dup" ] ) ] )
+    return CHECK_TITLE + "\n\n" + table( list( CHECK_HEADERS ), rows )
+
+
+def weekly_report( records, rows, receipts, end, tz=None, check_dir=None, store=None ):
     """
     Render the week that ends on a date.
 
     Requires:
         - records is what merge_call_logs returns; rows is what read_refusals returns; receipts is what load_receipts returns
         - end is an ISO date text or a date; tz is a tzinfo, or None for the host's
+        - check_dir is the folder of the daily duplicate check's result files, or None for a page with no such table
+        - store is verdict_of's store; it is read only when a finding in the week has no verdict field
     Ensures:
+        - with a check_dir, the audits are followed by check_table's table, and unreadable result files are counted in the left-out table's last row
         - returns a title line naming the seven days, then the tables of report, then the audits table, joined by blank lines
         - only records and refusal rows dated inside the week are counted
         - when any record has no readable time, a last table counts them, under one row per source
@@ -240,7 +346,13 @@ def weekly_report( records, rows, receipts, end, tz=None ):
     kept, no_at   = in_week( rows, "at", week, tz )
     title         = f"Reuse behaviour, {week[ 0 ].isoformat()} to {week[ 1 ].isoformat()} (seven days, the whole fleet, no seat named)"
     parts         = [ title, report( calls, kept ), counts_table( "Audits", count_audits( receipts, week ) ) ]
-    if no_ts or no_at: parts.append( counts_table( "Left out of the week", { "call log records with no readable time": len( no_ts ), "outcome records with no readable time": len( no_at ) } ) )
+    left_out      = { "call log records with no readable time": len( no_ts ), "outcome records with no readable time": len( no_at ) }
+    bad_files     = 0
+    if check_dir is not None:
+        runs, bad_files = read_check_runs( check_dir, week )
+        parts.append( check_table( runs, store ) )
+        left_out[ BAD_CHECK_ROW ] = bad_files
+    if no_ts or no_at or bad_files: parts.append( counts_table( "Left out of the week", left_out ) )
     return "\n\n".join( parts )
 
 
@@ -263,7 +375,7 @@ def cron_lines( root, python, log_path, carried=None ):
     return lt.cron_lines_for( run, CRON_SCHEDULE, BOOT_DELAY )
 
 
-def main( argv=None, out=None ):
+def main( argv=None, out=None, store=None ):
     """
     Run the weekly page from the command line.
 
@@ -273,12 +385,14 @@ def main( argv=None, out=None ):
         - --write also saves the page as <data dir>/reuse-behaviour/reuse-behaviour-<end>.txt, replacing that day's file
         - --skip-if-saved, with --write, makes no page and prints one line saying so when that file already exists and is not empty; it returns 0
         - --print-cron prints the two cron lines and nothing else; it installs nothing
+        - the page carries the daily duplicate check table from <data dir>/duplicate-check-daily, or from --check-dir; verdicts come from the task store unless store is given
         - returns 0 when the page was made, 3 with the reason printed when it could not be
     """
     ap = argparse.ArgumentParser( description="The weekly fleet page of the reuse checks." )
     ap.add_argument( "--end", default=None, help="the last of the seven days, as YYYY-MM-DD; default is the Sunday that closes the last complete week" )
     ap.add_argument( "--data-dir", default=None )
     ap.add_argument( "--log-dir", default=None, help="the call log folder; default is <data dir>/call-log" )
+    ap.add_argument( "--check-dir", default=None, help="the daily duplicate check's result folder; default is <data dir>/duplicate-check-daily" )
     ap.add_argument( "--write", action="store_true", help="also save the page under the data folder" )
     ap.add_argument( "--skip-if-saved", action="store_true", help="with --write: do nothing when the page for the end date is already saved" )
     ap.add_argument( "--print-cron", action="store_true", help="print the weekly and reboot cron lines" )
@@ -303,7 +417,7 @@ def main( argv=None, out=None ):
             print( f"SKIPPED: the page for {end} is already saved at {saved}.", file=out )
             return 0
         records, _bad = eg.merge_call_logs( a.log_dir or data / "call-log" )
-        page  = weekly_report( records, read_refusals( data ), sa.load_receipts( data ), end )
+        page  = weekly_report( records, read_refusals( data ), sa.load_receipts( data ), end, check_dir=a.check_dir or data / CHECK_FOLDER, store=store if store is not None else ff.LiveStore() )
         if a.write:
             saved.parent.mkdir( parents=True, exist_ok=True )
             saved.write_text( page + "\n", encoding="utf-8" )
