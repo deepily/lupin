@@ -14,7 +14,7 @@ Nothing here reads the log, sends anything, or runs a model.
 import pathlib
 import re
 
-from cosa.repo.symindex.spec import spec_for
+from cosa.repo.symindex.spec import SCRIPT_SUFFIXES, skipped, spec_for
 from lupin_mcp.reuse_exit_gate import EXCLUDED_PREFIX, EXCLUDED_TOKEN
 
 UNINDEXED_TOKEN  = "unindexed"                                      # the receipt and search token for a file outside the index
@@ -66,20 +66,25 @@ def unparsed_outcome_lines( text ):
     return [ line.strip() for line in text.splitlines() if OUTCOME_LEAD_RE.match( line ) and not TEMPLATE_RE.match( line ) and not OUTCOME_RE.match( line ) ]
 
 
-def outside_index_roots( path, root ):
+def is_indexed( path, root ):
     """
-    Say whether a file lies outside every directory the indexer reads.
+    Say whether the symbol index holds a file, by the indexer's own rule.
 
     Requires:
         - root is a repository root; path is a file path, relative to root or absolute
     Ensures:
-        - the roots are the Python, script and Dart roots of spec_for( root ), the indexer's own settings
-        - returns False when the path is inside one of them, True otherwise, including a path outside the tree
-        - the path need not exist
+        - returns True when the path lies under a Python root with a .py suffix, a script root with a script suffix, or a Dart root with a .dart suffix
+        - and the indexer's skip rule (a skipped directory name or a skipped suffix) does not drop it
+        - the roots, suffixes and skip rule are spec_for's and iter_files's own, so a file in a root that the index drops is not indexed
+        - a path outside the tree is not indexed; the path need not exist
+        - reads only the paths, not the tests scope, which the index builds separately
     """
     spec  = spec_for( root )
     where = ( spec.root / path ).resolve()
-    return not any( where.is_relative_to( base.resolve() ) for base in spec.py_roots + spec.js_roots + spec.dart_roots )
+    if not where.is_relative_to( spec.root.resolve() ): return False
+    if skipped( where.relative_to( spec.root.resolve() ).as_posix(), spec.skip_parts ): return False
+    kinds = ( ( spec.py_roots, ( ".py", ) ), ( spec.js_roots, SCRIPT_SUFFIXES ), ( spec.dart_roots, ( ".dart", ) ) )
+    return any( where.suffix in suffixes and where.is_relative_to( base.resolve() ) for bases, suffixes in kinds for base in bases )
 
 
 def token_refusals( outcomes, exclusions, root ):
@@ -93,7 +98,7 @@ def token_refusals( outcomes, exclusions, root ):
     Ensures:
         - the key of a line is the first word of its detail text
         - an `excluded` receipt passes only when the log holds an `EXCLUDED_` refusal for exactly that key
-        - an `unindexed` receipt passes only with `unindexed` in the search slot and a key that lies outside the index roots
+        - an `unindexed` receipt passes only with `unindexed` in the search slot and a key the symbol index does not hold
         - an `unindexed` search beside any other receipt is refused
         - returns [ { line, reason } ] in document order; every other line is left alone
         - the reason for a missing refusal says to re-run the lookup and check the log folder, because a swallowed log write looks the same
@@ -105,6 +110,6 @@ def token_refusals( outcomes, exclusions, root ):
             if key not in exclusions: out.append( { "line": o[ "line" ], "reason": f"{key} has no {EXCLUDED_PREFIX} refusal in the log; re-run the lookup and check the log folder, since a failed log write looks the same" } )
         elif o[ "receipt" ] == UNINDEXED_TOKEN:
             if o[ "search" ] != UNINDEXED_TOKEN: out.append( { "line": o[ "line" ], "reason": f"{UNINDEXED_TOKEN} goes in both id slots" } )
-            elif not outside_index_roots( key, root ): out.append( { "line": o[ "line" ], "reason": f"{key} lies inside the index roots, so it is indexed" } )
+            elif is_indexed( key, root ): out.append( { "line": o[ "line" ], "reason": f"{key} is a file the symbol index holds, so look it up instead" } )
         elif o[ "search" ] == UNINDEXED_TOKEN: out.append( { "line": o[ "line" ], "reason": f"{UNINDEXED_TOKEN} in the search slot needs {UNINDEXED_TOKEN} in the receipt slot" } )
     return out

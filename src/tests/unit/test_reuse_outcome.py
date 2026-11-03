@@ -5,10 +5,12 @@ The good lines are two real ones from the remediation plan and the template is t
 Nothing here reads a call log or runs a model.
 """
 import pathlib
+import subprocess
 
 import pytest
 
 import cosa.utils.util as cu
+from cosa.repo.symindex import spec as sp
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_outcome as ro
 
@@ -125,20 +127,25 @@ def test_an_excluded_line_passes_only_for_a_symbol_the_log_refused():
     assert "lupin_mcp.other" in out[ 0 ][ "reason" ]
 
 
-def test_an_unindexed_line_passes_only_for_a_file_outside_the_index_roots():
-    outside = [ "src/rnd/v0.2.2/x.md", "src/docs/README.md", "README.md", "src/docs/wiki/x.md", "/etc/hosts" ]
-    inside  = [ "src/lupin_mcp/reuse_outcome.py", "src/cosa/CLAUDE.md", "src/lupin_app/static/css/site.css", "src/scripts/run.mjs", "src/lupin_app/static/js/notifications/x.ts", "src/tests/../lupin_mcp/x.py" ]
-    got     = lines( *[ ( "unindexed", "unindexed", f"{p} is not code" ) for p in outside + inside ] )
+def test_an_unindexed_line_passes_only_for_a_file_the_symbol_index_does_not_hold():
+    unheld = [ "src/rnd/v0.2.2/x.md", "src/docs/README.md", "README.md", "src/docs/wiki/x.md", "/etc/hosts",
+               "src/cosa/CLAUDE.md", "src/lupin_app/static/css/site.css", "src/scripts/bounce-dev-server.sh", "src/lupin_app/static/html/index.html", "src/conf/lupin-app.ini",   # inside a root, wrong suffix for it (the last four are Chloe's cases)
+               "src/cosa/tests/test_x.py", "src/cosa/tests/__init__.py", "src/lupin_mcp/.venv/x.py", "src/scripts/x.min.js",   # inside a root, dropped by the skip rule
+               "src/scripts/x.d.ts", "src/lupin_mcp/x.js" ]                                       # a skipped suffix, a script in a Python-only root
+    held   = [ "src/lupin_mcp/reuse_outcome.py", "src/scripts/run.mjs", "src/lupin_app/static/js/notifications/x.ts", "src/tests/../lupin_mcp/x.py",
+               "src/cosa/repo/symindex/ts_extract.js", "src/conf/x.js", "src/scripts/x.py" ]       # src/scripts is both a Python and a script root
+    got     = lines( *[ ( "unindexed", "unindexed", f"{p} is not code" ) for p in unheld + held ] )
     refused = [ r[ "line" ] for r in ro.token_refusals( got, {}, ROOT ) ]
-    assert refused == [ g[ "line" ] for g in got[ len( outside ): ] ], "a file inside a root is refused, whatever its suffix, and a path that climbs back in is resolved first"
-    assert "inside the index roots" in ro.token_refusals( got[ -1: ], {}, ROOT )[ 0 ][ "reason" ]
+    assert refused == [ g[ "line" ] for g in got[ len( unheld ): ] ], "the roots alone do not decide it; the suffix and the skip rule do, and a path that climbs back in is resolved first"
+    assert "symbol index holds" in ro.token_refusals( got[ -1: ], {}, ROOT )[ 0 ][ "reason" ]
 
 
-def test_the_roots_come_from_the_indexers_settings_for_the_tree_given( tmp_path ):
+def test_the_rule_is_the_indexers_own_for_the_tree_given( tmp_path ):
     for d in ( "src/cosa", "src/lupin_mcp", "src/scripts" ): ( tmp_path / d ).mkdir( parents=True )
-    assert ro.outside_index_roots( "src/docs/a.md", tmp_path ) and not ro.outside_index_roots( "src/scripts/a.sh", tmp_path )
-    assert ro.outside_index_roots( "src/lupin_app/x.py", tmp_path ), "this tree has no lupin_app directory, so it is no root here"
-    assert ro.outside_index_roots( "src/lupin_app/x.py", ROOT ) is False, "the real tree has one"
+    assert ro.is_indexed( "src/scripts/a.mjs", tmp_path ) and not ro.is_indexed( "src/docs/a.md", tmp_path ) and not ro.is_indexed( "src/scripts/a.sh", tmp_path )
+    assert not ro.is_indexed( "src/lupin_app/x.py", tmp_path ), "this tree has no lupin_app directory, so it is no root here"
+    assert ro.is_indexed( "src/lupin_app/x.py", ROOT ), "the real tree has one"
+    assert not ro.is_indexed( "../elsewhere/x.py", tmp_path ), "a path outside the tree is not held"
 
 
 def test_unindexed_must_stand_in_both_slots_and_a_real_receipt_keeps_its_own_meaning():
@@ -149,3 +156,12 @@ def test_unindexed_must_stand_in_both_slots_and_a_real_receipt_keeps_its_own_mea
     assert [ r[ "line" ] for r in out ] == [ got[ 0 ][ "line" ], got[ 1 ][ "line" ] ]
     assert "both id slots" in out[ 0 ][ "reason" ] and "needs unindexed in the receipt slot" in out[ 1 ][ "reason" ]
     assert ro.token_refusals( [], EXCLUSIONS, ROOT ) == []
+
+
+def test_for_a_file_on_disk_the_rule_agrees_with_the_indexers_own_file_list():
+    spec    = sp.spec_for( ROOT )
+    indexed = { p.resolve() for p in sp.all_files( spec ) }
+    assert len( indexed ) > 1000, "the list was read, so agreement below is not over an empty set"
+    tracked = [ ROOT / f for f in subprocess.run( [ "git", "ls-files", "src" ], cwd=ROOT, capture_output=True, text=True, check=True ).stdout.split( "\n" ) if f ]
+    assert any( p.resolve() not in indexed for p in tracked ) and any( p.resolve() in indexed for p in tracked )
+    assert [ p for p in tracked if p.is_file() and ro.is_indexed( p, ROOT ) != ( p.resolve() in indexed ) ] == []
