@@ -45,6 +45,19 @@ def correlation_key( definition_id, text ):
     return KEY_PREFIX + hashlib.sha256( f"{definition_id}:{content_hash( text )}".encode( "utf-8" ) ).hexdigest()[ :KEY_HEX ]
 
 
+def for_record( finding ):
+    """
+    Shrink a finding to what the result file keeps.
+
+    Requires:
+        - finding is { id, name, file, line, text, session_id, others, window }, plus any other keys
+    Ensures:
+        - returns a copy without the definition's text and with its correlation_key, so the file can be refiled with no source to hand
+        - the key is the one correlation_key gives the id and the text, so a refiled row has the key of the original
+    """
+    return { **{ k: v for k, v in finding.items() if k != "text" }, "correlation_key": correlation_key( finding[ "id" ], finding[ "text" ] ) }
+
+
 def manager_for( session_id, declared, roster, resolve=manager_resolver.resolve_manager ):
     """
     Find the manager a finding goes to, and say which rung found them.
@@ -71,19 +84,21 @@ def row_payload( finding, found ):
 
     Requires:
         - finding is { id, name, file, line, text, session_id, others, window }; others are { id, name, file } of the definitions it duplicates
+        - a finding that holds a correlation_key (for_record's) needs no text
         - found is manager_for's answer
     Ensures:
         - returns a TaskCreateIn payload at P5 with no status, so the store's holding default applies and a manager raises it
         - created_by is the job's fixed name and carries no session id, so the store reads the caller as a worker, not a manager
         - owner_persona and accountable_manager are the manager found, and the body names the rung used
     """
+    key    = finding[ "correlation_key" ] if "correlation_key" in finding else correlation_key( finding[ "id" ], finding[ "text" ] )
     others = "\n".join( f"- {o['name']} in {o['file']} ({o['id']})" for o in finding[ "others" ] )
     body   = ( f"The daily duplicate check judged {finding['name']} ({finding['file']}:{finding['line']}, {finding['id']}) a duplicate of:\n{others}\n\n"
                f"Window: {finding['window']['start']}..{finding['window']['end']}. Manager: {found['manager']} ({found['rung']}: {found['note']}).\n"
-               f"Correlation: one row per definition text, key {correlation_key( finding['id'], finding['text'] )}." )
+               f"Correlation: one row per definition text, key {key}." )
     return { "item_class": ITEM_CLASS, "title": f"Duplicate: {finding['name']} in {finding['file']} repeats {len( finding['others'] )} existing definition(s)",
              "project": PROJECT, "created_by": CREATED_BY, "body": body, "owner_persona": found[ "manager" ], "accountable_manager": found[ "manager" ],
-             "priority": PRIORITY, "correlation_key": correlation_key( finding[ "id" ], finding[ "text" ] ) }
+             "priority": PRIORITY, "correlation_key": key }
 
 
 def read_pending( folder ):
