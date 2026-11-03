@@ -48,15 +48,16 @@ def repo( tmp_path ):
 
 
 @pytest.fixture
-def env( tmp_path ):
-    """Ensures: an environment naming a real call log folder and an ini with gating on."""
+def env( tmp_path, repo ):
+    """Ensures: an environment naming a call log folder and an ini with gating on, since set."""
     data = tmp_path / "data"
     ( data / "call-log" ).mkdir( parents=True )
     ( data / "call-log" / "real.jsonl" ).write_text( REAL_LOG.read_text( encoding="utf-8" ), encoding="utf-8" )
     ( data / "search-records" ).mkdir()
     ( data / "search-records" / f"{SID}.json" ).write_text( REAL_RECORD.read_text( encoding="utf-8" ), encoding="utf-8" )
     ini = tmp_path / "lupin-app.ini"
-    ini.write_text( "[x]\nreuse review gating = true\n", encoding="utf-8" )
+    since = subprocess.run( [ "git", "-C", str( repo ), "rev-parse", "main" ], capture_output=True, text=True, check=True ).stdout.strip()
+    ini.write_text( f"[x]\nreuse review gating = true\nreuse merge gate since = {since}\n", encoding="utf-8" )
     return dict( os.environ, LUPIN_REUSE_DATA_DIR=str( data ), LUPIN_REUSE_REVIEW_INI=str( ini ) )
 
 
@@ -116,3 +117,10 @@ def test_a_crash_is_not_read_as_a_gate_result( repo, env ):
     ( repo / "src" / "lupin_mcp" / "reuse_merge_gate.py" ).write_text( "import sys\nif __name__ == '__main__': sys.exit( 7 )\n", encoding="utf-8" )
     code, text = _run( repo, env )
     assert code == 3 and "REFUSING: the gate exited 7, which is not a gate result. Nothing was checked." in text
+
+
+def test_gating_on_with_an_empty_since_exits_three_and_prints_no_summary( repo, env, tmp_path ):
+    _commit_doc( repo, GOOD )
+    ( tmp_path / "lupin-app.ini" ).write_text( "[x]\nreuse review gating = true\nreuse merge gate since =\n", encoding="utf-8" )
+    code, text = _run( repo, env )
+    assert code == 3 and "is true and `reuse merge gate since` is empty" in text and "Total Tests" not in text

@@ -18,6 +18,7 @@ The flag `reuse review gating` is read fresh on every run:
     - true: any refusal or missing definition exits 1.
 
 Exit 3 means the gate could not check. Either the flag is absent, doubled or garbled, or git named no base.
+It also means the flag is true and `since` is empty, because the gate would then check every definition back to the base.
 It also means `since` is not a known commit, the list of new definitions could not be built,
 or a given diff reports `algorithm_changed`.
 That is not a pass, in either phase.
@@ -303,6 +304,10 @@ def main( argv=None, out=None ):
     try: since = read_since( a.ini )
     except ValueError as e:
         print( f"REFUSING: {e}. Nothing was checked.", file=out )
+        return EXIT_NOT_CHECKED
+    if flag and since is None:
+        print( f"REFUSING: `{gate.GATING_KEY}` is true and `{SINCE_KEY}` is empty, so the gate would check every definition back to the merge base."
+               f" Set both in one commit. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
     data = pathlib.Path( a.data_dir or rr.default_data_dir( root ) )
     try: data.mkdir( parents=True, exist_ok=True )

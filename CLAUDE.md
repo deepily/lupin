@@ -522,6 +522,7 @@ A renamed file is followed to its old path, so only functions absent there count
 A branch that adds no definitions and no outcome lines passes.
 The base is the merge base with the nearest branch named in `reuse merge gate base` (default main and origin/main).
 The key `reuse merge gate since` is a commit set when gating flips; earlier lines and definitions are exempt.
+With gating true and `since` empty the gate exits 3.
 The key `reuse review gating` is read on each run. False means refusals are reported under `Report-only:` and the run exits 0.
 True means any refusal or missing outcome line exits 1. Its summary counts checks: one for the scan,
 one per outcome line, one per new definition. Exit 3 means it could not check: the key is unreadable,

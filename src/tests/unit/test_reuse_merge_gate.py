@@ -63,8 +63,15 @@ def commit_doc( repo, name, *lines, rulings=True ):
     git( repo, "commit", "-q", "-m", f"add {name}" )
 
 
+def default_since( repo ):
+    """Ensures: returns the commit main names, or HEAD when there is no main."""
+    code = subprocess.run( [ "git", "-C", str( repo ), "rev-parse", "--verify", "--quiet", "main" ], capture_output=True, text=True )
+    return code.stdout.strip() if code.returncode == 0 else sha_of( repo )
+
+
 def run( repo, data, tmp_path, *extra, value="true", lines="" ):
-    """Ensures: returns ( exit code, printed text ) of the command on repo."""
+    """Ensures: returns ( exit code, text ) of the command on repo, with a since unless given."""
+    if "reuse merge gate since" not in lines: lines = f"reuse merge gate since = {default_since( repo )}\n{lines}"
     out  = io.StringIO()
     code = mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, value, lines ), *extra ], out=out )
     return code, out.getvalue()
@@ -209,14 +216,14 @@ def test_a_git_that_cannot_start_answers_127(  repo, monkeypatch ):
 def test_the_data_folder_and_the_flag_default_to_the_shared_choices( repo, data, tmp_path, monkeypatch ):
     commit_doc( repo, "review.md", GOOD )
     monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", str( data ) )
-    monkeypatch.setenv( gate.INI_OVERRIDE, ini( tmp_path ) )
+    monkeypatch.setenv( gate.INI_OVERRIDE, ini( tmp_path, extra=f"reuse merge gate since = {default_since( repo )}\n" ) )
     out = io.StringIO()
     assert mg.main( [ "--root", str( repo ) ], out=out ) == 0 and ( data / rr.REFUSALS_NAME ).exists()
 
 
 def test_the_command_prints_to_standard_output_by_default( repo, data, tmp_path, capsys ):
     commit_doc( repo, "review.md", GOOD )
-    assert mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path ) ] ) == 0
+    assert mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, extra=f"reuse merge gate since = {default_since( repo )}\n" ) ] ) == 0
     assert "REUSE GATE PASSED" in capsys.readouterr().out
 
 
@@ -454,3 +461,22 @@ def test_the_shipped_ini_defines_each_new_key_once_empty_and_the_explainer_descr
     ini_path = str( root / "src" / "conf" / "lupin-app.ini" )
     assert mg.read_since( ini_path ) is None and mg.read_names( ini_path ) == list( mg.BASE_CANDIDATES )
     assert gate.read_gating( ini_path, quiet=True ) is False, "the longer key names do not make the gating key read as doubled"
+
+
+@pytest.mark.parametrize( "lines", [ "", "reuse merge gate since =\n", "reuse merge gate since = aaaaaaa\nreuse merge gate since = bbbbbbb\n" ] )
+def test_gating_on_with_an_empty_since_could_not_be_checked_and_says_why( repo, data, tmp_path, lines ):
+    commit_doc( repo, "review.md", GOOD )
+    out  = io.StringIO()
+    code = mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, "true", lines ) ], out=out )
+    text = out.getvalue()
+    assert code == 3 and "`reuse review gating` is true and `reuse merge gate since` is empty" in text and "Set both in one commit. Nothing was checked." in text
+    assert "Total Tests" not in text and not ( data / rr.REFUSALS_NAME ).exists(), "nothing was scanned or recorded"
+
+
+def test_an_empty_since_is_allowed_while_gating_is_off_and_a_set_one_is_allowed_while_it_is_on( repo, data, tmp_path ):
+    commit_doc( repo, "review.md", GOOD )
+    out  = io.StringIO()
+    code = mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, "false" ) ], out=out )
+    assert code == 0 and "gating is off (report only)" in out.getvalue(), "the shipped state: gating false, since empty"
+    code, text = run( repo, data, tmp_path, value="true" )
+    assert code == 0 and "REUSE GATE PASSED" in text, "gating true with a since set runs the gate"
