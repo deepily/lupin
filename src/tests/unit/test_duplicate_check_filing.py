@@ -216,14 +216,55 @@ def test_the_live_store_calls_the_hooks_client_with_the_settings_and_key_it_was_
     seen = []
     monkeypatch.setattr( task_store_settings, "load_task_store_settings", lambda: { "api_base_url": "http://x" } )
     monkeypatch.setattr( client, "read_api_key", lambda: "key-read" )
-    monkeypatch.setattr( client, "query_by_correlation_key", lambda s, k, key: seen.append( ( "query", s, k, key ) ) or ( True, 200, { "count": 0 } ) )
+    monkeypatch.setattr( client, "query_by_correlation_key", lambda s, k, key, every_state=False: seen.append( ( "query", s, k, key, every_state ) ) or ( True, 200, { "count": 0 } ) )
     monkeypatch.setattr( client, "create_task", lambda s, k, p: seen.append( ( "create", s, k, p ) ) or ( True, 201, { } ) )
     live = ff.LiveStore()
     live.query( "epic:dupcheck-x" )
     live.create( { "title": "t" } )
-    assert seen == [ ( "query", { "api_base_url": "http://x" }, "key-read", "epic:dupcheck-x" ), ( "create", { "api_base_url": "http://x" }, "key-read", { "title": "t" } ) ]
+    assert seen == [ ( "query", { "api_base_url": "http://x" }, "key-read", "epic:dupcheck-x", True ), ( "create", { "api_base_url": "http://x" }, "key-read", { "title": "t" } ) ]
     given = ff.LiveStore( settings={ "api_base_url": "http://y" }, api_key="given" )
     assert given.settings == { "api_base_url": "http://y" } and given.api_key == "given"
+
+
+class HeldRowClient:
+    """
+    A task-store client whose creates are held rows, as the real store's are.
+
+    Like the store, a plain read withholds a held row and a read for every state returns it.
+    """
+
+    def __init__( self ):
+        self.held = { }
+
+    def query_by_correlation_key( self, settings, api_key, key, every_state=False ):
+        rows = [ self.held[ key ] ] if every_state and key in self.held else [ ]
+        return True, 200, { "tasks": rows, "count": len( rows ) }
+
+    def create_task( self, settings, api_key, payload ):
+        self.held[ payload[ "correlation_key" ] ] = { **payload, "status": "not_approved" }
+        return True, 201, self.held[ payload[ "correlation_key" ] ]
+
+
+def test_a_second_run_over_held_rows_files_none_and_skips_them_as_already_filed( tmp_path ):
+    live = ff.LiveStore( settings={ "api_base_url": "http://x" }, api_key="k" )
+    live.client = HeldRowClient()
+    first  = run_once( tmp_path, [ finding( "d-1", "a1", "def a1(): pass" ), finding( "d-2", "a2", "def a2(): pass" ) ], live )
+    second = run_once( tmp_path, [ finding( "d-1", "a1", "def a1(): pass" ), finding( "d-2", "a2", "def a2(): pass" ) ], live )
+    assert len( first[ "filed" ] ) == 2 and second[ "filed" ] == [ ] and len( second[ "already_filed" ] ) == 2 and len( live.client.held ) == 2
+
+
+def test_a_plain_read_of_held_rows_sees_nothing_which_is_the_defect_the_every_state_read_removes():
+    client = HeldRowClient()
+    client.create_task( None, None, { "correlation_key": "epic:dupcheck-x" } )
+    assert client.query_by_correlation_key( None, None, "epic:dupcheck-x" )[ 2 ][ "count" ] == 0
+    assert client.query_by_correlation_key( None, None, "epic:dupcheck-x", every_state=True )[ 2 ][ "count" ] == 1
+
+
+@pytest.mark.parametrize( "answer", [ ( False, None, { "error": "refused" } ), ( False, 500, { "detail": "boom" } ), ( False, 401, { "detail": "no key" } ) ] )
+def test_a_probe_that_did_not_answer_ok_queues_the_row_and_creates_nothing( tmp_path, answer ):
+    store = Store( query=answer )
+    got   = run_once( tmp_path, [ finding() ], store )
+    assert len( got[ "queued_for_retry" ] ) == 1 and got[ "queued_for_retry" ][ 0 ][ "status" ] == answer[ 1 ] and store.created == [ ]
 
 
 def test_the_key_is_pinned_to_a_literal_so_a_change_of_its_recipe_cannot_slip_by():

@@ -8,7 +8,7 @@ pins:
   - lupin_cli.claude_code.hooks.lib.task_store_client.correlate_task@5466fdecbe
   - lupin_cli.claude_code.hooks.lib.task_store_client.amend_task@e02875bd11
   - lupin_cli.claude_code.hooks.lib.task_store_client.query_tasks@67f912d34b
-  - lupin_cli.claude_code.hooks.lib.task_store_client.query_by_correlation_key@b5ece8dcc3
+  - lupin_cli.claude_code.hooks.lib.task_store_client.query_by_correlation_key@4699227f60
   - lupin_cli.claude_code.hooks.lib.task_store_client.query_blocked_user_rows@672046a4e4
   - lupin_cli.claude_code.hooks.lib.task_store_client.query_owed@9e73ec7e08
   - lupin_cli.claude_code.hooks.lib.task_store_client.query_owed_breakdowns@5603479ccf
@@ -26,7 +26,7 @@ The hook side of the unified task store: a stdlib REST client for `/api/tasks`, 
 - Every client call returns `( ok, status_code, body )` and never raises. A `status_code` of `None` means the transport failed, which is the only spool trigger.
 - `read_api_key()` reads the hook-writer key file under `LUPIN_ROOT` and returns an empty string when it is missing.
 - `create_task`, `transition_task`, `correlate_task` and `amend_task` POST to the matching task endpoints.
-- `query_tasks()` and `query_by_correlation_key()` GET `/api/tasks`; the second one is the replay idempotency probe.
+- `query_tasks()` and `query_by_correlation_key()` GET `/api/tasks`; the second one is the replay idempotency probe. A plain probe withholds held, finished and parked rows. `every_state=True` adds `include_terminal=true` and `hide_parked=false`, which returns all of them.
 - `query_owed()` asks the server for the owed set in one request. `query_owed_breakdowns()` adds the priority breakdown. A failed read gives `( False, 0, ... )`, so the caller does not poke.
 - `query_blocked_user_rows()` returns an owner's blocked rows, from which the user-chase time is derived.
 - `fetch_board()` pages the whole board and returns `( rows, truncated )`. It raises `RuntimeError` on a non-ok response.
