@@ -12,7 +12,8 @@ pins:
   - cosa.repo.duplicate_check.proof.label_prep.save_doc@8e644e313a
   - cosa.repo.duplicate_check.proof.label_prep.source_provenance@fc815af83c
   - cosa.repo.duplicate_check.proof.label_prep.run@3ff409c0cf
-  - cosa.repo.duplicate_check.proof.label_prep.live_wiring@7a6c7abc06
+  - cosa.repo.duplicate_check.proof.label_prep.tree_definitions@34b0cb5b10
+  - cosa.repo.duplicate_check.proof.label_prep.live_wiring@1c3826a9a3
   - cosa.repo.duplicate_check.proof.label_prep.main@63d7e5c866
 ---
 # Duplicate checker proof: blind packets and the answer key
@@ -35,5 +36,5 @@ The second half of `label_prep.py`: the monolith pairs, the blind items, the pac
 ## Command
 - `save_doc` writes the planted document to a temporary file and renames it. The file holds the old document or the new one, never half of either.
 - `run` plants 60 pairs, 60 percent script and 40 percent Python. A failed pair is replaced by the next original in the order. `top_up_alikes` then adds work-alikes, so the total can pass 60. It saves them to `key/planted.json` before the monolith step, and after each top-up wave, so a later failure costs no model call. The file also records the seed, count and config hash. A run that finds a file made for other values, or for none, raises `ValueError` before any model call. A tree that cannot name its commit and index generation raises `PROVENANCE_MISSING` first. It then returns the packets and key path. It also returns planted and failed counts by stratum, and monolith pair counts.
-- `live_wiring` builds the real definitions, the three model asks (Fable rewrites, the need-writer model, Opus work-alikes) and the shape readers.
+- `tree_definitions( root )` extracts the server-origin definitions of every Python file of the spec and of the tracked client script files except the monolith. `live_wiring` adds the three model asks (Fable rewrites, the need-writer model, Opus work-alikes) and the shape readers.
 - `main` takes `--out` and an optional `--claude-cli-path`. It checks the frozen configuration against the live one, runs, prints JSON and returns 0. It raises `CONFIG_DRIFT` if they differ.
