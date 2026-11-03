@@ -28,7 +28,8 @@ The rest of `lupin_mcp.reuse_ledger`. The file, its rows and `begin_run` are in 
 - `snapshot()` returns the limit and the total from one read. `total()` and `limit_tokens()` each return one half of it.
 - `held_by_prefix( prefix )` sums what the runs whose name starts with `prefix` hold against the account. A closed run counts at its spend and an open one at the larger of ceiling and spend.
 - `open_runs()` lists `{ run, ceiling, spent, began }` for each run with no end row, in the order they began. `began` is None for a hand-typed row with no time stamp.
-- Each read parses only the rows appended since this instance last read, and raises `LedgerUnreadable` as `snapshot` does.
+- Each read parses only the rows appended since this instance last read. It reads from the start when the file was replaced, shrank or no longer holds the bytes read last time.
+- Each read raises `LedgerUnreadable` as `snapshot` does.
 
 ## Defaults
 - The module pins the price at 0.042 dollars per million tokens and the account limit at 40 dollars.

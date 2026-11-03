@@ -30,7 +30,7 @@ pins:
 ## Exit codes
 - 0: nothing refused, or `reuse review gating` is false. With gating false, refusals show as `Report-only` and `Failed` stays 0.
 - 1: gating is true and a line is refused or a definition has no outcome line.
-- 3: the gate could not check, so no summary block prints. Causes: an unreadable flag, a bad `since`, no base, an unreadable call log or diff, or `algorithm_changed`.
+- 3: the gate could not check, so no summary block prints. Causes: an unreadable flag, a bad or unknown `since`, no base, or a failed git diff. Also an unwritable data folder, an unreadable call log or diff, or `algorithm_changed`.
 
 ## Don't
 - Do not turn `reuse review gating` on without `reuse merge gate since` in the same commit. The gate answers 3 rather than check back to the base.
