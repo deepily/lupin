@@ -31,20 +31,23 @@ def _sweeper_factory( key_mode, kind=None ):
         - key_mode is "stage1" or "replay"
         - kind is None (the old question) or "pair" (the new question)
     Ensures:
-        - returns factory( size, workers, run_index, breaker=None ) that checks its arguments, then returns a function with sweep's signature
+        - returns factory( size, workers, run_index, breaker=None, shape=None ) that checks its arguments, then returns a function with sweep's signature
         - the function sweeps in key_mode with the given run_index; it passes kind to sweep_packed only when kind is not None
+        - it passes shape only when one is given, and a shape is checked with the kind, which is the choice question when kind is None
     Raises:
         - ValueError from the factory for a size, worker count or run_index out of range, before anything is sent
     """
     check_args = () if kind is None else ( kind, )
     sweep_args = {} if kind is None else { "kind": kind }
 
-    def factory( size, workers, run_index, breaker=None ):
-        rp._check_sweep_args( size, workers, key_mode, run_index, *check_args )
+    def factory( size, workers, run_index, breaker=None, shape=None ):
+        shaped     = {} if shape is None else { "shape": shape }
+        shape_args = check_args if shape is None else ( "choice" if kind is None else kind, shape )
+        rp._check_sweep_args( size, workers, key_mode, run_index, *shape_args )
 
         def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
             return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode=key_mode, run_index=run_index, template=template, model=model,
-                                    frozen=frozen, gaps=gaps, breaker=breaker, **sweep_args )
+                                    frozen=frozen, gaps=gaps, breaker=breaker, **sweep_args, **shaped )
 
         return sweeper
 
