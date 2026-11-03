@@ -478,3 +478,37 @@ def test_a_failed_file_after_some_judge_calls_were_made_counts_the_calls_made( r
     assert doc[ "judge_calls" ] == backend.calls and doc[ "judge_calls" ] >= 2, "the calls made before the failure are counted, the failing one too"
     assert json.loads( results( tmp_path )[ 0 ].read_text() )[ "judge_calls" ] == doc[ "judge_calls" ]
 
+
+def moved( repo, old, new, text, hours_ago ):
+    """Ensures: renames a file with git, writes the new text and commits; returns the sha."""
+    git( repo, "mv", old, new )
+    return commit( repo, { new: text }, f"rename {old}", hours_ago )
+
+
+def test_a_renamed_file_is_listed_by_its_new_path_and_maps_to_its_old_one( repo ):
+    two  = function( "same", [ "MARKA" ], 2 ) + "\n\n" + function( "edit", [ "MARKB" ], 3 )
+    c1   = commit( repo, { "client/m.py": two, "client/keep.py": function( "keep", [ "MARKC" ], 4 ), "client/gone.py": function( "gone", [ "MARKD" ], 5 ) }, "base", 48 )
+    moved( repo, "client/m.py", "client/n.py", two + "\n", 5 )
+    commit( repo, { "client/keep.py": function( "keep", [ "MARKC", "MARKE" ], 6 ), "client/fresh.py": function( "fresh", [ "MARKF" ], 7 ) }, "edit and add", 4 )
+    git( repo, "rm", "-q", "client/gone.py" )
+    commit( repo, {}, "delete", 3 )
+    window = dd.window_of( repo, { "commit": c1 }, NOW )
+    assert sorted( dd.changes( repo, window ), key=str ) == sorted( [ ( "client/keep.py", "client/keep.py" ), ( "client/m.py", "client/n.py" ), ( None, "client/fresh.py" ) ], key=str )
+    assert dd.changed_files( repo, window ) == [ "client/fresh.py", "client/keep.py", "client/n.py" ], "the renamed file is listed, the deleted one is not"
+    assert dd.old_paths( repo, window ) == { "client/n.py": "client/m.py" }, "only a renamed file has an old path"
+
+
+def test_a_rename_alone_leaves_its_functions_out_and_an_edit_beside_it_judges_only_that_function( repo ):
+    two = function( "same", [ "MARKA" ], 2 ) + "\n\n" + function( "edit", [ "MARKB" ], 3 )
+    c1  = commit( repo, { "client/m.py": two }, "base", 48 )
+    moved( repo, "client/m.py", "client/n.py", two, 5 )
+    window = dd.window_of( repo, { "commit": c1 }, NOW )
+    tree   = dd.source_at.ensure_worktree( repo, window[ "end" ], repo / ".wt-test" )
+    try: assert dd.new_definitions( tree, repo, window )[ "defs" ] == [], "a pure rename holds the same functions it had"
+    finally: dd.release( repo, tree )
+    moved( repo, "client/n.py", "client/o.py", function( "same", [ "MARKA" ], 2 ) + "\n\n" + function( "edit", [ "MARKB", "MARKC" ], 4 ) + "\n\n" + function( "added", [ "MARKD" ], 5 ), 3 )
+    window = dd.window_of( repo, { "commit": c1 }, NOW )
+    tree   = dd.source_at.ensure_worktree( repo, window[ "end" ], repo / ".wt-test2" )
+    try: names = sorted( d[ "name" ] for d in dd.new_definitions( tree, repo, window )[ "defs" ] )
+    finally: dd.release( repo, tree )
+    assert names == [ "added", "edit" ], "the renamed and edited file is read against its old path"

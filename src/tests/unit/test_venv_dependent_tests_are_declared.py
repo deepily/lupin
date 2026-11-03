@@ -108,6 +108,16 @@ BREAKS_WITHOUT_VENV = {
     #     no .venv   26 failed, 11 passed
     #     .venv      37 passed   (restore control)
     "test_doclint_gate_runner.py",
+    # The reuse gate's runner (Plan 3 step C3). Its `repo` fixture links PROJECT_ROOT/.venv into a
+    # scratch git tree, and the script under test finds its interpreter through
+    # resolve-venv-pytest.sh. The file does not skip when both are absent, so the tests fail by name.
+    # Measured both ways in one worktree (seat-cc-author-cheech-1, on 578eac2e2 plus this change), the
+    # `.venv` link moved aside and restored, the interpreter pinned to the main checkout, on a host
+    # with no /opt/venv:
+    #     .venv      7 passed
+    #     no .venv   7 failed
+    #     .venv      7 passed   (restore control)
+    "test_reuse_gate_runner.py",
     "test_pre_push_chain.py",
     # 3 of its 24 cases. Its `tree` fixture links PROJECT_ROOT/.venv into a scratch git
     # tree, and the census runner it drives resolves its interpreter through

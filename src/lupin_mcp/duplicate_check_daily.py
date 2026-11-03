@@ -104,10 +104,45 @@ def window_of( root, last, now, branch=BRANCH, hours=WINDOW_HOURS ):
     return { "start": start, "end": end, "commits": listed.split() if listed else [] }
 
 
+def changes( root, window ):
+    """
+    Read what the window added, changed or renamed.
+
+    Requires:
+        - window is window_of's answer
+    Ensures:
+        - returns [ ( old path, new path ) ] for every added, modified or renamed file; old path is None for an added file and equals the new path for a modified one
+        - a rename is what git detects (`-M`, the default similarity), so a file renamed and edited maps to the path it had at the window's start
+        - a deleted file is not listed
+    """
+    out = git( root, "diff", "-z", "--name-status", "-M", "--diff-filter=AMR", window[ "start" ], window[ "end" ] ).split( "\0" )
+    pairs, i = [], 0
+    while i < len( out ) and out[ i ]:
+        status = out[ i ][ 0 ]
+        if status == "R": pairs.append( ( out[ i + 1 ], out[ i + 2 ] ) ); i += 3
+        else: pairs.append( ( None if status == "A" else out[ i + 1 ], out[ i + 1 ] ) ); i += 2
+    return pairs
+
+
 def changed_files( root, window ):
-    """Ensures: returns the sorted Python and script files added or changed in the window."""
-    names = git( root, "diff", "--name-only", "--diff-filter=AM", window[ "start" ], window[ "end" ] ).split( "\n" )
-    return sorted( n for n in names if n.endswith( extract.PY_SUFFIXES + extract.SCRIPT_SUFFIXES ) )
+    """
+    List the Python and script files the window added, changed or renamed.
+
+    Ensures:
+        - returns the sorted new paths
+    """
+    return sorted( new for old, new in changes( root, window ) if new.endswith( extract.PY_SUFFIXES + extract.SCRIPT_SUFFIXES ) )
+
+
+def old_paths( root, window ):
+    """
+    Map each renamed file to the path it had at the window's start.
+
+    Ensures:
+        - returns { new path: old path }
+        - a file that kept its path is not in it
+    """
+    return { new: old for old, new in changes( root, window ) if old is not None and old != new }
 
 
 def new_definitions( tree, root, window ):
@@ -120,13 +155,16 @@ def new_definitions( tree, root, window ):
         - returns { defs, commit_of }: new-origin definitions of the changed files, in the order of the first-parent commit that last touched their file, then file and line
         - commit_of maps a definition id to that commit
         - a definition whose file, name and text the window's start already held is left out, so only a function that changed or is new is judged
+        - a renamed file is compared with the path it had at the start, so a rename alone leaves its functions out
     """
     files = changed_files( root, window )
     found = extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )[ "definitions" ] if files else []
     held  = set()
     if files:
-        old = source_at.ensure_worktree( root, window[ "start" ], pathlib.Path( tree ).parent / f"{pathlib.Path( tree ).name}-start" )
-        try: held = { ( d[ "file" ], d[ "name" ], d[ "text" ] ) for d in extract.extract_tree( old, [ pathlib.Path( old ) / f for f in files if ( pathlib.Path( old ) / f ).exists() ], "new" )[ "definitions" ] }
+        was  = old_paths( root, window )
+        back = { was.get( f, f ): f for f in files }
+        old  = source_at.ensure_worktree( root, window[ "start" ], pathlib.Path( tree ).parent / f"{pathlib.Path( tree ).name}-start" )
+        try: held = { ( back[ d[ "file" ] ], d[ "name" ], d[ "text" ] ) for d in extract.extract_tree( old, [ pathlib.Path( old ) / o for o in back if ( pathlib.Path( old ) / o ).exists() ], "new" )[ "definitions" ] }
         finally: release( root, old )
     rank  = { c: i for i, c in enumerate( window[ "commits" ] ) }
     touch = { f: git( root, "log", "-1", "--first-parent", "--format=%H", f"{window[ 'start' ]}..{window[ 'end' ]}", "--", f ) for f in files }
