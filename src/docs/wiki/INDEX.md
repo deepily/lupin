@@ -212,6 +212,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[duplicate-check-filing]] — the store row for each duplicate the daily check finds: the date-free key, manager lookup, the retry spool and the live store client. `lupin_mcp` (duplicate_check_filing)
 - [[duplicate-check-daily-window]] — the daily check's commit window, the definitions new in it, the pool without their earlier versions, and how far a run advanced. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-daily-run]] — one daily run: prerequisites, result file, filing, cron lines and the live parts. `lupin_mcp` (duplicate_check_daily)
+- [[duplicate-check-branch-guard]] — the daily check refuses a pinned branch that is stale or gone, exits 3 and alerts with the reinstall command. `lupin_mcp` (duplicate_check_daily)
 - [[duplicate-check-audit]] — queues a known-miss shadow audit for each duplicate the daily check finds, and counts why the rest were not queued. `lupin_mcp` (duplicate_check_audit)
 - [[reuse-merge-gate]] — the merge-pyramid reuse gate: the base it measures from, the outcome lines and new definitions it checks, and its exit codes. `lupin_mcp` (reuse_merge_gate)
 - [[reuse-record-search]] — the `record_search` MCP tool: a fixed-string search of the tree for the nearest existing definitions, recorded under a search id. `lupin_mcp` (cosa_voice_mcp, reuse_search)

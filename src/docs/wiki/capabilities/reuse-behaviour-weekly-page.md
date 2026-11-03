@@ -15,8 +15,8 @@ pins:
   - lupin_mcp.reuse_behaviour.in_week@c1a0ce6077
   - lupin_mcp.reuse_behaviour.count_audits@ab2d088c69
   - lupin_mcp.reuse_behaviour.weekly_report@3d68e374f4
-  - lupin_mcp.reuse_behaviour.cron_lines@373c168cbb
-  - lupin_mcp.reuse_behaviour.main@5600718805
+  - lupin_mcp.reuse_behaviour.cron_lines@1b21643193
+  - lupin_mcp.reuse_behaviour.main@9bed3e9e73
 ---
 # Reuse behaviour weekly page
 `lupin_mcp.reuse_behaviour` makes one page a week on how the fleet used the reuse checks. It counts the fleet, never a seat. It sends nothing and runs no model. See [[reuse-merge-gate]].
@@ -29,8 +29,9 @@ pins:
 - `count_outcomes` counts scanned lines as `REUSED`, `EXTENDED`, `WROTE_NEW` or `unparsed`. `count_refusals` counts reasons under the labels from `reason_label`. A record with two reasons counts under each.
 - `report` draws four tables: lookups, scanned lines by status, outcomes by kind and refusals by reason.
 - `count_audits` counts the shadow-audit receipts audited in the week, split by the known-miss flag. `weekly_report` adds a title, the audits and the left-out table.
-- `cron_lines( root, python, log_path )` returns a Monday 12:17 line and a reboot line six minutes after boot. Both write the same file.
+- `cron_lines( root, python, log_path )` returns a line for every day at 18:00 and a reboot line six minutes after boot. Both run with `--write --skip-if-saved`, so the page is made on the first run after its week closes and later runs skip.
 - `main` prints the page. `--write` saves it under `reuse-behaviour/` in the data folder, replacing that day's file. `--print-cron` prints the two lines and installs nothing.
+- `--skip-if-saved`, with `--write`, reads no data and prints one `SKIPPED` line when that file exists and is not empty. An empty file is written over. Without `--write` it is a usage error.
 
 ## Exit codes
 - 0: the page was made.

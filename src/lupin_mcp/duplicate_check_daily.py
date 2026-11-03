@@ -15,6 +15,7 @@ import shlex
 import subprocess
 import sys
 import time
+import uuid
 
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.duplicate_check import cluster, extract, pipeline
@@ -49,6 +50,11 @@ CRON_SCHEDULE     = "7 12 * * *"      # 12:07, 30 minutes after the 11:37 shadow
 BOOT_DELAY        = 300               # seconds the host waits after a boot before the reboot line runs
 LOG_NAME          = "daily.log"
 LOCK_OWNER        = "duplicate-check-daily"
+STALE_DAYS        = 3                 # a pinned branch whose tip is this old, with a newer branch beside it, is refused
+STALE_BRANCH      = "stale_branch"
+MISSING_BRANCH    = "missing_branch"
+STAGE_GUARD       = "branch_guard"
+REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
 CARRIED           = ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR", "COSA_VOICE_MANAGERS__LUPIN" )     # names copied into the cron lines from the installer's environment
 
 
@@ -254,6 +260,80 @@ def failed_prerequisite( client, cli_path, verify, version_fn ):
     return None
 
 
+def other_branches( root, branch ):
+    """
+    List the local branches the guard compares the pinned one with.
+
+    Ensures:
+        - returns [ ( name, tip commit time as epoch seconds ) ] for every ref under refs/heads except main and the pinned branch, newest first, ties by name
+    """
+    listed = git( root, "for-each-ref", "--format=%(refname:short) %(committerdate:unix)", "refs/heads" )
+    rows   = [ line.split() for line in listed.splitlines() ]
+    return sorted( ( ( name, int( at ) ) for name, at in rows if name not in ( BRANCH, branch ) ), key=lambda row: ( -row[ 1 ], row[ 0 ] ) )
+
+
+def branch_guard( root, branch, now, days=STALE_DAYS ):
+    """
+    Refuse a pinned branch that work has left, so a branch change never fails silently.
+
+    Requires:
+        - now is a timezone-aware datetime
+    Ensures:
+        - returns None when the pinned branch resolves and is either younger than days or has no newer local branch beside it
+        - returns { refusal: stale_branch, branch, idle_days, newest, newest_at } when its tip is days old or older and another local branch has a newer commit
+        - returns { refusal: missing_branch, branch, newest, newest_at } when the pinned name resolves to no commit; newest is the newest other local branch, or None when there is none
+        - main is never the newest branch named
+    """
+    try: tip = int( git( root, "log", "-1", "--format=%ct", f"{branch}^{{commit}}" ) )
+    except RuntimeError: tip = None
+    newer = [ row for row in other_branches( root, branch ) if tip is None or row[ 1 ] > tip ]
+    where = { "newest": newer[ 0 ][ 0 ], "newest_at": datetime.datetime.fromtimestamp( newer[ 0 ][ 1 ], datetime.timezone.utc ).isoformat() } if newer else { "newest": None, "newest_at": None }
+    if tip is None: return { "refusal": MISSING_BRANCH, "branch": branch, **where }
+    idle = now.timestamp() - tip
+    if newer and idle >= days * 86400: return { "refusal": STALE_BRANCH, "branch": branch, "idle_days": round( idle / 86400, 1 ), **where }
+    return None
+
+
+def reinstall_command( root, python, cap, cli_path, branch ):
+    """Ensures: returns the command that pins the cron lines to the branch."""
+    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {python} -m lupin_mcp.duplicate_check_daily --install --cap {cap} --claude-cli-path {cli_path} --branch {shlex.quote( branch )}"
+
+
+def refusal_message( refusal, command ):
+    """
+    Say what a refusal means and what to run.
+
+    Ensures:
+        - returns ( spoken, abstract ): spoken is short and holds no path; abstract names the branch and carries the reinstall command, or says no other branch exists
+    """
+    name = refusal[ "branch" ]
+    if refusal[ "refusal" ] == STALE_BRANCH: spoken, why = f"The daily duplicate check refused to run: its branch {name} has been idle {refusal[ 'idle_days' ]} days.", f"Pinned branch `{name}` has not moved in {refusal[ 'idle_days' ]} days and `{refusal[ 'newest' ]}` has a newer commit ({refusal[ 'newest_at' ]})."
+    else:                                      spoken, why = f"The daily duplicate check refused to run: its branch {name} no longer exists.", f"Pinned branch `{name}` does not resolve to a commit."
+    fix = f"Reinstall for the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
+    return spoken, f"{why}\n\n{fix}"
+
+
+def live_notifier( message, abstract, environ=None, query=None, api_key=None, target_of=None ):
+    """
+    Send Rick one high-priority alert.
+
+    Requires:
+        - query is a callable ( base, key, path, params ) returning ( status, text ), or None for the live one; api_key and target_of likewise
+    Ensures:
+        - returns True when the server answered 200
+        - never raises: no key, no recipient or a failed post returns False
+    """
+    from cosa.utils import hook_link_tick as hlt
+    environ = os.environ if environ is None else environ
+    base    = environ.get( "LUPIN_API_BASE", lt.DEFAULT_API_BASE ).rstrip( "/" )
+    try: key, target = ( api_key or hlt._api_key )(), ( target_of or hlt._notify_target )( environ )
+    except Exception: return False
+    if not target: return False
+    status, _ = ( query or hlt.post_query )( base, key, "/api/notify", { "message": message, "type": "alert", "priority": "high", "target_user": target, "abstract": abstract,
+                                                                         "sender_id": "claude.code@lupin.deepily.ai#duplicate-check-daily", "idempotency_key": str( uuid.uuid4() ) } )
+    return status == 200
+
+
 def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof_cli.DEFAULT_PARALLEL, clock=time.monotonic ):
     """
     Run the daily check once.
@@ -263,6 +343,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - parts holds client, backend, structural ( a function taking the tree and the frozen configuration and giving judge_all's structural_pairs ), verify, version_fn and data_dir
     Ensures:
         - writes <data_dir>/duplicate-check-daily/<date>-<time>-<trigger>.json: the verdicts' clusters, the window, the judge calls and elapsed_seconds
+        - before anything else, branch_guard runs: a pinned branch that is stale or gone writes that file with status failed, stage branch_guard, the refusal, the reinstall command and notified (the notifier hook's answer, False without one); nothing else changes and last-success does not move
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
@@ -278,6 +359,16 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     folder  = pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER )
     stem    = f"{now.date().isoformat()}-{now.strftime( '%H%M%S' )}-{trigger}"
     base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap }
+    refused = branch_guard( root, branch, now )
+    if refused is not None:
+        command = reinstall_command( root, sys.executable, cap, cli_path, refused[ "newest" ] ) if refused[ "newest" ] is not None else None
+        sent    = False
+        if "notifier" in parts:
+            try: sent = parts[ "notifier" ]( *refusal_message( refused, command ) )
+            except Exception: sent = False       # a broken notifier must not hide the refusal: the file and the exit code still say it
+        doc = { **base, "status": "failed", "stage": STAGE_GUARD, **refused, "reinstall": command, "notified": sent, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
+        write_json( folder / f"{stem}.json", doc )
+        return doc
     miss    = failed_prerequisite( parts[ "client" ], cli_path, parts[ "verify" ], parts[ "version_fn" ] )
     if miss is not None:
         doc = { **base, "status": "failed", **miss, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
@@ -388,12 +479,13 @@ def live_parts():
         - returns the embedding client, the Claude Code backend, the staged structural source, verify_frozen over the live file, cli_version, the data root and the filer
         - the filer files the findings' rows over HTTP; it builds its store client, reads the roster and the configured manager only when it is called
         - the auditor queues known-miss audits in the lookup tool's data folder, reading it only when it is called
+        - the notifier sends the branch guard's alert, only when it is called
         - writes nothing and makes no call
     """
     base = proof_cli.base_wiring( ".", lambda defs: [], 1, vector_build.EndpointClient() )
     return { "client": base[ "client" ], "backend": base[ "backend" ], "data_dir": base[ "data_dir" ], "version_fn": model_transport.cli_version,
              "verify": lambda: cfg_mod.verify_frozen( base[ "frozen_path" ], base[ "live" ] ),
-             "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor }
+             "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor, "notifier": live_notifier }
 
 
 def live_filer( findings, folder ):
@@ -437,7 +529,7 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
         - argv holds --cap ( judge calls, no default, needed to run or to print or install the cron lines ) and --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch and --parallel
         - one of --print-install, --install, --uninstall or --status, with --python, works on the cron lines instead of running
     Ensures:
-        - prints the result document as JSON and returns 0, or 1 when a prerequisite failed
+        - prints the result document as JSON and returns 0, REFUSED_EXIT (3) when the branch guard refused, or 1 when anything else failed
         - the cron modes never run the check
     """
     ap = argparse.ArgumentParser( description="Judge the day's new definitions for duplicates." )
@@ -459,7 +551,7 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     with contextlib.redirect_stdout( sys.stderr ):
         doc = run( root, now or datetime.datetime.now().astimezone(), args.trigger, args.cap, args.claude_cli_path, parts or live_parts(), args.branch, args.parallel )
     out( json.dumps( doc, indent=2, sort_keys=True ) )
-    return 1 if doc[ "status" ] == "failed" else 0
+    return REFUSED_EXIT if "refusal" in doc else 1 if doc[ "status" ] == "failed" else 0
 
 
 if __name__ == "__main__":  # pragma: no cover - the entry only calls main

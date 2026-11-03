@@ -268,7 +268,7 @@ def test_git_names_the_command_when_it_fails( tmp_path ):
 
 def test_the_live_parts_are_built_without_a_call():
     parts = dd.live_parts()
-    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor" } and callable( parts[ "structural" ] )
+    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier" } and callable( parts[ "structural" ] )
 
 
 def lines_of( **over ):
@@ -546,3 +546,158 @@ def test_a_new_definition_naming_the_lookup_tool_is_left_unjudged_and_counted_an
     assert doc[ "status" ] == "ok" and doc[ "advanced_to" ] == c2 and doc[ "judge_calls" ] == 2, "only the two clean definitions were asked"
     assert [ ( u[ "code" ], "check_exists" in u[ "detail" ] ) for u in doc[ "unreadable" ] ] == [ ( err.BLINDNESS_BREACH, True ) ]
     assert doc[ "carried" ] == [], "a definition that can never be shown is not carried to the next run"
+
+
+def branched( repo, name, hours_ago ):
+    """Ensures: a branch of main with one commit at the given hour; main is checked out again."""
+    git( repo, "checkout", "-q", "-b", name, "main" )
+    sha = commit( repo, { f"{name}.txt": name }, name, hours_ago )
+    git( repo, "checkout", "-q", "main" )
+    return sha
+
+
+class Notifier:
+    """Ensures: records each ( spoken, abstract ) it is called with and answers as told."""
+
+    def __init__( self, answer=True ): self.sent, self.answer = [], answer
+
+    def __call__( self, spoken, abstract ):
+        self.sent.append( ( spoken, abstract ) )
+        if isinstance( self.answer, Exception ): raise self.answer
+        return self.answer
+
+
+def stale_repo( repo ):
+    """Ensures: main, a branch idle 100 hours and a newer branch 2 hours old."""
+    commit( repo, { "server/s1.py": function( "s1", [ "MARKB" ], 50 ) }, "base", 200 )
+    branched( repo, "wip-old", 100 )
+    branched( repo, "wip-new", 2 )
+
+
+def test_a_pinned_branch_idle_three_days_with_a_newer_branch_beside_it_is_refused_noted_and_named_in_a_failed_file( repo, tmp_path ):
+    stale_repo( repo )
+    notifier = Notifier()
+    doc      = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path, notifier=notifier ), branch="wip-old" )
+    assert doc[ "status" ] == "failed" and doc[ "stage" ] == dd.STAGE_GUARD and doc[ "refusal" ] == dd.STALE_BRANCH, "a stale branch is a failed day, never a clean one"
+    assert doc[ "branch" ] == "wip-old" and doc[ "newest" ] == "wip-new" and doc[ "idle_days" ] == 4.2 and doc[ "judge_calls" ] == 0 and doc[ "notified" ] is True
+    assert "--branch wip-new" in doc[ "reinstall" ] and "--cap 300" in doc[ "reinstall" ] and "--claude-cli-path /bin/claude" in doc[ "reinstall" ] and f"cd {repo} " in doc[ "reinstall" ]
+    assert len( notifier.sent ) == 1 and "wip-old" in notifier.sent[ 0 ][ 0 ] and "wip-old" in notifier.sent[ 0 ][ 1 ] and doc[ "reinstall" ] in notifier.sent[ 0 ][ 1 ]
+    assert "/" not in notifier.sent[ 0 ][ 0 ], "the spoken line holds no path"
+    assert len( results( tmp_path ) ) == 1 and json.loads( results( tmp_path )[ 0 ].read_text() )[ "refusal" ] == dd.STALE_BRANCH
+    assert not ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).exists(), "a refusal never moves last-success"
+    assert len( worktrees( repo ) ) == 1, "nothing was judged, so no worktree was made"
+
+
+def test_the_guard_runs_before_the_prerequisites_so_a_dead_endpoint_does_not_hide_a_stale_branch( repo, tmp_path ):
+    stale_repo( repo )
+    class Dead:
+        def info( self ): raise OSError( "down" )
+    doc = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path, client=Dead() ), branch="wip-old" )
+    assert doc[ "refusal" ] == dd.STALE_BRANCH and "prerequisite" not in doc
+
+
+def test_the_guard_judges_the_age_at_three_days_and_needs_a_newer_branch_that_is_not_main( repo ):
+    stale_repo( repo )
+    tip = NOW - datetime.timedelta( hours=100 )
+    assert dd.branch_guard( repo, "wip-old", tip + datetime.timedelta( days=3, seconds=-1 ) ) is None, "just under three days"
+    assert dd.branch_guard( repo, "wip-old", tip + datetime.timedelta( days=3 ) )[ "refusal" ] == dd.STALE_BRANCH, "exactly three days"
+    assert dd.branch_guard( repo, "wip-new", NOW ) is None, "the newest branch is never stale"
+    assert dd.branch_guard( repo, "wip-old", NOW, days=10 ) is None, "the limit is a parameter"
+    git( repo, "branch", "-q", "-D", "wip-new" )
+    assert dd.branch_guard( repo, "wip-old", NOW ) is None, "an idle branch with nothing newer beside it is the only work there is"
+    commit( repo, { "m.txt": "m" }, "main moves", 1 )
+    assert dd.branch_guard( repo, "wip-old", NOW ) is None, "main is not a branch to move to"
+
+
+def test_the_default_pin_main_is_judged_like_any_other_when_a_newer_branch_exists( repo ):
+    commit( repo, { "m.txt": "m" }, "main is old", 100 )
+    branched( repo, "wip", 2 )
+    refusal = dd.branch_guard( repo, "main", NOW )
+    assert refusal[ "refusal" ] == dd.STALE_BRANCH and refusal[ "newest" ] == "wip"
+
+
+def test_a_pinned_branch_that_does_not_exist_is_refused_and_the_newest_other_branch_is_named( repo, tmp_path ):
+    stale_repo( repo )
+    notifier = Notifier()
+    doc      = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path, notifier=notifier ), branch="gone" )
+    assert doc[ "refusal" ] == dd.MISSING_BRANCH and doc[ "status" ] == "failed" and doc[ "newest" ] == "wip-new" and "--branch wip-new" in doc[ "reinstall" ]
+    assert "no longer exists" in notifier.sent[ 0 ][ 0 ] and "does not resolve" in notifier.sent[ 0 ][ 1 ]
+
+
+def test_a_missing_pinned_branch_with_no_other_branch_says_there_is_nothing_to_reinstall_for( repo, tmp_path ):
+    commit( repo, { "m.txt": "m" }, "only main", 5 )
+    notifier = Notifier()
+    doc      = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path, notifier=notifier ), branch="gone" )
+    assert doc[ "refusal" ] == dd.MISSING_BRANCH and doc[ "newest" ] is None and doc[ "newest_at" ] is None and doc[ "reinstall" ] is None
+    assert "nothing to reinstall" in notifier.sent[ 0 ][ 1 ]
+
+
+def test_a_refusal_is_recorded_without_a_notifier_and_with_one_that_raises( repo, tmp_path ):
+    stale_repo( repo )
+    assert dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path ), branch="wip-old" )[ "notified" ] is False
+    broken = Notifier( answer=OSError( "down" ) )
+    doc    = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", 300, "/bin/claude", parts_of( tmp_path, notifier=broken ), branch="wip-old" )
+    assert doc[ "notified" ] is False and doc[ "refusal" ] == dd.STALE_BRANCH and len( broken.sent ) == 1 and len( results( tmp_path ) ) == 2
+
+
+def test_main_exits_three_on_a_refusal_which_is_neither_a_failed_run_nor_a_usage_error( repo, tmp_path, monkeypatch ):
+    stale_repo( repo )
+    monkeypatch.setattr( dd.model_transport, "configure", lambda path=None: None )
+    out  = []
+    code = dd.main( [ "--cap", "10", "--root", str( repo ), "--claude-cli-path", "/bin/claude", "--branch", "wip-old" ], parts=parts_of( tmp_path ), now=NOW, out=out.append )
+    assert code == dd.REFUSED_EXIT == 3 and json.loads( out[ 0 ] )[ "refusal" ] == dd.STALE_BRANCH
+    assert dd.main( [ "--cap", "10", "--root", str( repo ), "--claude-cli-path", "/bin/claude", "--branch", "wip-new" ], parts=parts_of( tmp_path ), now=NOW, out=out.append ) == 0
+
+
+def test_other_branches_leaves_out_main_and_the_pinned_one_and_sorts_newest_first_then_by_name( repo ):
+    commit( repo, { "m.txt": "m" }, "base", 200 )
+    for name, hours in ( ( "b", 10 ), ( "a", 10 ), ( "c", 1 ), ( "pinned", 5 ) ): branched( repo, name, hours )
+    names = [ n for n, _ in dd.other_branches( repo, "pinned" ) ]
+    assert names == [ "c", "a", "b" ]
+
+
+def test_a_head_pin_resolves_like_a_branch( repo ):
+    stale_repo( repo )
+    git( repo, "checkout", "-q", "wip-old" )
+    assert dd.branch_guard( repo, "HEAD", NOW )[ "refusal" ] == dd.STALE_BRANCH
+
+
+def test_the_live_notifier_posts_one_high_priority_alert_and_is_true_only_on_200():
+    seen = []
+    def query( base, key, path, params ): seen.append( ( base, key, path, params ) ); return 200, ""
+    assert dd.live_notifier( "spoken", "abstract", { "LUPIN_API_BASE": "http://h:1/" }, query=query, api_key=lambda: "k", target_of=lambda e: "rick@x" ) is True
+    base, key, path, params = seen[ 0 ]
+    assert ( base, key, path ) == ( "http://h:1", "k", "/api/notify" )
+    assert params[ "priority" ] == "high" and params[ "target_user" ] == "rick@x" and params[ "message" ] == "spoken" and params[ "abstract" ] == "abstract" and params[ "idempotency_key" ]
+    assert dd.live_notifier( "s", "a", { }, query=lambda *a: ( 500, "" ), api_key=lambda: "k", target_of=lambda e: "rick@x" ) is False
+
+
+def test_the_live_notifier_never_raises_on_a_missing_key_or_recipient():
+    def broken( *a ): raise OSError( "no key" )
+    assert dd.live_notifier( "s", "a", { }, query=lambda *a: ( 200, "" ), api_key=broken, target_of=lambda e: "r" ) is False
+    assert dd.live_notifier( "s", "a", { }, query=lambda *a: ( 200, "" ), api_key=lambda: "k", target_of=lambda e: None ) is False
+
+
+def test_the_live_notifier_falls_back_to_the_live_post_key_recipient_and_environment( monkeypatch ):
+    from cosa.utils import hook_link_tick as hlt
+    sent = []
+    monkeypatch.setattr( hlt, "post_query", lambda base, key, path, params: sent.append( ( base, key, params[ "target_user" ] ) ) or ( 200, "" ) )
+    monkeypatch.setattr( hlt, "_api_key", lambda: "live-key" )
+    monkeypatch.setattr( hlt, "_notify_target", lambda environ: "live@x" )
+    monkeypatch.setenv( "LUPIN_API_BASE", "http://env:2" )
+    assert dd.live_notifier( "s", "a" ) is True and sent == [ ( "http://env:2", "live-key", "live@x" ) ]
+
+
+def test_the_reinstall_command_quotes_the_branch_for_the_shell():
+    command = dd.reinstall_command( "/main", "/py", 300, "/bin/claude", "wip; rm -rf x" )
+    assert command.endswith( "--branch 'wip; rm -rf x'" ) and command.startswith( "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --install --cap 300" )
+
+
+def test_an_idle_pinned_branch_with_only_older_branches_beside_it_is_not_refused( repo, tmp_path ):
+    commit( repo, { "m.txt": "m" }, "base", 300 )
+    branched( repo, "wip-older", 150 )
+    branched( repo, "wip-pinned", 100 )
+    assert dd.branch_guard( repo, "wip-pinned", NOW ) is None, "the pin is idle 100 hours but nothing beside it is newer"
+    assert dd.branch_guard( repo, "wip-pinned", NOW + datetime.timedelta( days=10 ) ) is None, "idle for days, still the newest work there is"
+    branched( repo, "wip-newer", 2 )
+    assert dd.branch_guard( repo, "wip-pinned", NOW )[ "newest" ] == "wip-newer", "the same pin is refused once a newer branch exists"
