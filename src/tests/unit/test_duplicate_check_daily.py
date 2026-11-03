@@ -314,6 +314,9 @@ def test_install_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_pa
     assert "lock-enter " + dd.LOCK_OWNER in cron[ "log" ].read_text()
     assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 2 lines" ]
     assert cron_main( tmp_path, [ "--uninstall" ], cron, cron[ "env" ] )[ 1 ] == [ "uninstalled" ]
+    entered = [ line for line in cron[ "log" ].read_text().splitlines() if line.startswith( "lock-enter" ) ]
+    assert entered == [ "lock-enter " + dd.LOCK_OWNER ] * 2, "the install and the uninstall each take the lock as this job, and nothing else enters it"
+    assert cron[ "log" ].read_text().count( "lock-exit" ) == 2, "and each lets it go"
     text = cron[ "file" ].read_text()
     assert text.strip() == "0 * * * * other", "only the other line is left, and nothing was added"
     assert list( ( tmp_path / "io" / "duplicate-check-daily" / "crontab-backups" ).iterdir() ), "a backup is written before each change"
