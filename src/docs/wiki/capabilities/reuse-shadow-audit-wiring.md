@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.reuse_shadow.read_ceiling@c22b1dffd6
   - lupin_mcp.reuse_shadow.queue_lookup@41edf225f7
   - lupin_mcp.reuse_shadow.sweep_of@98d5f7e604
-  - lupin_mcp.reuse_shadow.drain@6f786cc156
+  - lupin_mcp.reuse_shadow.drain@b1bc9d9b80
   - lupin_mcp.reuse_shadow.cron_lines@074a604b39
   - lupin_mcp.reuse_shadow.main@8af0b204d2
 ---
@@ -21,7 +21,7 @@ pins:
 ## Draining
 - `read_ceiling` returns the token ceiling from `reuse shadow audit max tokens per drain`. There is no default. A missing, blank, non-numeric or zero value raises `AUDIT_CEILING_UNSET`.
 - `sweep_of( ctx_factory, ask )` builds the sweep function. Each sweep gets a fresh packed context and its own run name. It returns the verdict, the shortlist ids and the tokens in plus out, and the cause when the verdict is uncertain. An error answer raises `AUDIT_SWEEP_REFUSED`.
-- `drain` runs the queue through `run_pending` under that ceiling and returns its result with `spent_tokens` and `stopped_by`.
+- `drain` runs the queue through `run_pending` under that ceiling and returns its result with `spent_tokens` and `stopped_by`. It also stops at `reuse_ledger.SHADOW_AUDIT_WEEKLY_CAP` audits in the last seven days, with `stopped_by` reading `weekly_cap`.
 - The live drain needs the pack size variable, or it raises `AUDIT_NEEDS_PACKED`.
 
 ## Command and cron

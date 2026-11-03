@@ -349,10 +349,118 @@ class TestQueueAndRun:
         assert list( tmp_path.rglob( ".tmp-*" ) ) == []
 
     def test_an_empty_queue_audits_nothing( self, tmp_path ):
-        assert sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" ) == { "audited": 0, "failed": 0, "corrupt": 0, "receipts": [] }
+        assert sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" ) == { "audited": 0, "failed": 0, "corrupt": 0, "dropped": 0, "receipts": [] }
 
     def test_daily_volume_joins_lookups_and_audits( self, tmp_path ):
         sa.enqueue_if_sampled( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
         sa.enqueue_if_sampled( tmp_path, "n2", "py", GEN, INDEX, LIVE, "2026-10-14", rate=0 )
         sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )
         assert sa.daily_volume( tmp_path ) == { "2026-10-14": { "lookups": 2, "audits": 0 }, "2026-10-15": { "lookups": 0, "audits": 1 } }
+
+
+class TestKnownMissAndCaps:
+    """The known-miss marker, the drain order, the UNKNOWN_ENTRY drop and the weekly cap."""
+
+    def pending( self, tmp_path ):
+        """The queue files, by queue id."""
+        return { p.stem: json.loads( p.read_text() ) for p in ( tmp_path / "shadow-pending" ).glob( "*.json" ) }
+
+    def test_enqueue_pending_writes_the_item_without_a_count_or_a_sample( self, tmp_path ):
+        key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        assert self.pending( tmp_path )[ key ] == { "id": key, "need": "n1", "language": "py", "generation": GEN, "index_sha": INDEX, "live": LIVE,
+                                                    "queued_on": "2026-10-14", "attempts": 0, "known_miss": True }
+        assert not ( tmp_path / "receipts" ).exists(), "no lookup count was added"
+        assert sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" ) == key and len( self.pending( tmp_path ) ) == 1, "the same lookup queues once"
+
+    def test_the_sampled_path_queues_through_it_with_the_marker_false_and_still_counts( self, tmp_path ):
+        key = sa.enqueue_if_sampled( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
+        assert self.pending( tmp_path )[ key ][ "known_miss" ] is False and sa.daily_volume( tmp_path )[ "2026-10-14" ][ "lookups" ] == 1
+
+    def test_old_queue_and_receipt_files_without_the_marker_still_read_as_not_known_miss( self, tmp_path ):
+        key  = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        path = tmp_path / "shadow-pending" / f"{key}.json"
+        old  = { k: v for k, v in json.loads( path.read_text() ).items() if k != "known_miss" }
+        path.write_text( json.dumps( old ) )
+        out = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )
+        assert out[ "audited" ] == 1 and out[ "corrupt" ] == 0 and out[ "receipts" ][ 0 ][ "known_miss" ] is False
+        stored = tmp_path / "receipts" / f"shadow-{out[ 'receipts' ][ 0 ][ 'id' ]}.json"
+        stored.write_text( json.dumps( { k: v for k, v in out[ "receipts" ][ 0 ].items() if k != "known_miss" } ) )
+        assert sa.load_receipts( tmp_path )[ 0 ][ "known_miss" ] is False
+
+    def test_a_marker_that_is_not_true_or_false_is_a_corrupt_item( self, tmp_path ):
+        key  = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        path = tmp_path / "shadow-pending" / f"{key}.json"
+        path.write_text( json.dumps( { **json.loads( path.read_text() ), "known_miss": "yes" } ) )
+        assert sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )[ "corrupt" ] == 1
+
+    def test_known_miss_items_drain_before_older_and_fresher_random_ones( self, tmp_path ):
+        sa.enqueue_pending( tmp_path, "random-old", "py", GEN, INDEX, LIVE, "2026-10-10" )
+        sa.enqueue_pending( tmp_path, "known", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        seen = []
+        def transport( need ):
+            seen.append( need )
+            return sweep_of( "NEW" )
+        sa.run_pending( tmp_path, transport, "2026-10-15", limit=1 )
+        assert seen == [ "known" ], "a known-miss item beats an older random one"
+
+    def test_a_known_miss_item_that_failed_still_goes_before_a_fresh_random_one( self, tmp_path ):
+        sa.enqueue_pending( tmp_path, "known", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        sa.run_pending( tmp_path, lambda need: ( _ for _ in () ).throw( TimeoutError( "x" ) ), "2026-10-15" )
+        sa.enqueue_pending( tmp_path, "random", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        seen = []
+        def transport( need ):
+            seen.append( need )
+            return sweep_of( "NEW" )
+        sa.run_pending( tmp_path, transport, "2026-10-15", limit=1 )
+        assert seen == [ "known" ]
+
+    def test_the_receipt_carries_the_marker_and_the_two_tallies_are_separate( self, tmp_path ):
+        sa.enqueue_pending( tmp_path, "known", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        sa.enqueue_pending( tmp_path, "random", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        sa.run_pending( tmp_path, lambda need: sweep_of( "REUSE", [ "z" ] ), "2026-10-15" )
+        receipts = sa.load_receipts( tmp_path )
+        assert sorted( r[ "known_miss" ] for r in receipts ) == [ False, True ]
+        assert ( sa.tally( receipts, "py", GEN )[ "audits" ], sa.tally( receipts, "py", GEN )[ "misses" ] ) == ( 1, 1 ), "the random bound sees one audit"
+        assert sa.tally( receipts, "py", GEN, known_miss=True )[ "audits" ] == 1
+
+    def test_an_item_answering_unknown_entry_is_dropped_and_counted_on_its_third_failed_attempt( self, tmp_path ):
+        key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        def refuse( need ): raise CandidateError( "AUDIT_SWEEP_REFUSED", sa.UNKNOWN_ENTRY )
+        first  = sa.run_pending( tmp_path, refuse, "2026-10-15" )
+        second = sa.run_pending( tmp_path, refuse, "2026-10-15" )
+        assert ( first[ "dropped" ], second[ "dropped" ] ) == ( 0, 0 ) and self.pending( tmp_path )[ key ][ "attempts" ] == 2
+        third = sa.run_pending( tmp_path, refuse, "2026-10-15" )
+        assert ( third[ "dropped" ], third[ "failed" ], third[ "audited" ] ) == ( 1, 1, 0 ) and self.pending( tmp_path ) == {}
+
+    def test_other_failures_are_never_dropped_however_often_they_repeat( self, tmp_path ):
+        key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        def stale( need ): raise CandidateError( "AUDIT_SWEEP_REFUSED", "INDEX_STALE" )
+        def late( need ): raise TimeoutError( sa.UNKNOWN_ENTRY )
+        for fn in ( stale, stale, stale, late, late, late ): assert sa.run_pending( tmp_path, fn, "2026-10-15" )[ "dropped" ] == 0
+        assert self.pending( tmp_path )[ key ][ "attempts" ] == 6
+
+    def test_audits_in_week_counts_the_seven_days_ending_today_and_no_others( self, tmp_path ):
+        for need, day in ( ( "n1", "2026-10-08" ), ( "n2", "2026-10-09" ), ( "n3", "2026-10-15" ), ( "n4", "2026-10-16" ) ):
+            sa.enqueue_pending( tmp_path, need, "py", GEN, INDEX, LIVE, "2026-10-01" )
+            sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), day )
+        assert sa.audits_in_week( tmp_path, "2026-10-15" ) == 2, "the 9th through the 15th: not the 8th, not the 16th"
+
+    def test_the_weekly_cap_stops_the_drain_and_leaves_the_rest_queued( self, tmp_path ):
+        for n in range( 5 ): sa.enqueue_pending( tmp_path, f"n{n}", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        out = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15", weekly_cap=3 )
+        assert ( out[ "audited" ], out[ "stopped_by" ] ) == ( 3, "weekly_cap" ) and len( self.pending( tmp_path ) ) == 2
+        again = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-16", weekly_cap=3 )
+        assert ( again[ "audited" ], again[ "stopped_by" ] ) == ( 0, "weekly_cap" ), "the week is already spent"
+        later = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-22", weekly_cap=3 )
+        assert later[ "audited" ] == 2 and later[ "stopped_by" ] is None, "the first three fell out of the seven days"
+
+    def test_a_failed_attempt_does_not_use_up_the_weekly_cap( self, tmp_path ):
+        for n in range( 3 ): sa.enqueue_pending( tmp_path, f"n{n}", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        def transport( need ):
+            if need == "n0": raise TimeoutError( "x" )
+            return sweep_of( "NEW" )
+        out = sa.run_pending( tmp_path, transport, "2026-10-15", weekly_cap=2 )
+        assert ( out[ "audited" ], out[ "failed" ] ) == ( 2, 1 ) and out[ "stopped_by" ] is None
+
+    def test_without_a_cap_or_a_ceiling_there_is_no_stopped_by( self, tmp_path ):
+        assert "stopped_by" not in sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )

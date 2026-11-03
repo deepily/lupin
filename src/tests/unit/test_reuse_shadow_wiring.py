@@ -99,10 +99,16 @@ class TestRunPendingCeiling:
         assert ( out[ "audited" ], out[ "failed" ] ) == ( 0, 1 )
         assert json.loads( queue_files( tmp_path )[ 0 ].read_text() )[ "attempts" ] == 1
 
-    def test_without_a_ceiling_the_result_keeps_its_four_keys_and_tokens_are_ignored( self, tmp_path ):
+    def test_the_drain_reads_the_weekly_cap_from_the_ledger_constant( self, tmp_path, monkeypatch ):
+        monkeypatch.setattr( rs.reuse_ledger, "SHADOW_AUDIT_WEEKLY_CAP", 1 )
+        queue_up( tmp_path, [ "n1", "n2" ] )
+        out = rs.drain( tmp_path, lambda name: None, lambda *a, **k: result_of( ids=( "z", ) ), DAY, 10_000 )
+        assert ( out[ "audited" ], out[ "stopped_by" ] ) == ( 1, "weekly_cap" )
+
+    def test_without_a_ceiling_the_result_keeps_its_five_keys_and_tokens_are_ignored( self, tmp_path ):
         queue_up( tmp_path, [ "n1" ] )
         out = sa.run_pending( tmp_path, lambda need: { "verdict": "REUSE", "causal_ids": [ "z" ] }, DAY )
-        assert sorted( out ) == [ "audited", "corrupt", "failed", "receipts" ]
+        assert sorted( out ) == [ "audited", "corrupt", "dropped", "failed", "receipts" ]
 
     def test_pass_language_hands_the_items_language_to_the_sweep( self, tmp_path ):
         sa.enqueue_if_sampled( tmp_path, "n1", "ts", SET_ID, INDEX, LIVE, DAY, rate=1 )
@@ -364,7 +370,7 @@ class TestMain:
     def test_a_drain_prints_its_summary_and_returns_zero( self, world ):
         queue_up( world[ "data" ], [ "n1", "n2" ] )
         rc, out, _ = run_main( world, [ ], reader=reader_of( ON ), factory=lambda name: name, ask=lambda *a, **k: result_of() )
-        assert rc == 0 and json.loads( out ) == { "audited": 2, "failed": 0, "corrupt": 0, "spent_tokens": 200, "stopped_by": None }
+        assert rc == 0 and json.loads( out ) == { "audited": 2, "failed": 0, "corrupt": 0, "dropped": 0, "spent_tokens": 200, "stopped_by": None }
         assert "drain done" in ( world[ "data" ] / "shadow-audit" / rs.LOG_NAME ).read_text()
 
     def test_an_empty_queue_is_a_clean_zero( self, world ):
