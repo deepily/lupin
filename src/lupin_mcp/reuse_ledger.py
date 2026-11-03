@@ -17,12 +17,17 @@ import secrets
 import threading
 import time
 
-PRICE_PER_MILLION_USD = 0.042                                 # the pinned input price; output is counted at the same price
-ACCOUNT_LIMIT_USD     = 40.00                                 # Rick raised the Jev account to about 44 dollars; was 19.31
-STAGE1_CEILING_TOKENS = 71_000_000                            # three dollars at the price above, rounded down (plan 11.1)
-LEDGER_NAME           = "jev-spend-ledger.jsonl"
-RUN_NAME_RANDOM_BYTES = 4                                     # a name's random part is this many bytes, in hex
-ANCHOR_BYTES          = 256                                   # the last bytes read, compared on the next read to catch a rewrite in place
+PRICE_PER_MILLION_USD       = 0.042        # the pinned input price; output is counted at the same price
+ACCOUNT_LIMIT_USD           = 40.00        # Rick raised the Jev account to about 44 dollars; was 19.31
+STAGE1_CEILING_TOKENS       = 71_000_000   # three dollars at the price above, rounded down (plan 11.1)
+LEDGER_NAME                 = "jev-spend-ledger.jsonl"
+RUN_NAME_RANDOM_BYTES       = 4            # a name's random part is this many bytes, in hex
+SEATS_AT_ONCE               = 5            # seats expected to look up at the same moment (plan 3 section 12.3 D2)
+LOOKUP_CEILING_TOKENS       = 35_000_000   # a placeholder until D4 measures the worst fast lookup; the largest round ceiling that fits with the audits below
+CEILING_MARGIN              = 1.5          # the final ceiling is the worst measured lookup times this
+SHADOW_AUDIT_CEILING_TOKENS = 5_000_000    # the ceiling a drain run holds; an unmeasured estimate until D5 records an audit's real cost
+SHADOW_AUDIT_WEEKLY_CAP     = 4            # audits a week; the shadow audit's cap reads this same constant
+ANCHOR_BYTES                = 256          # the last bytes read, compared on the next read to catch a rewrite in place
 
 
 class LedgerUnreadable( Exception ):
@@ -69,6 +74,52 @@ def make_run_name( prefix, today=None, pid=None ):
     today = datetime.date.today().isoformat() if today is None else today
     pid   = os.getpid() if pid is None else pid
     return f"{prefix}-{today}-{pid}-{count}-{secrets.token_hex( RUN_NAME_RANDOM_BYTES )}"
+
+
+def ceiling_for( worst_tokens, margin=CEILING_MARGIN ):
+    """
+    Give the run ceiling for a lookup whose worst measured spend is known.
+
+    Requires:
+        - worst_tokens is a positive whole number, the largest spend of one measured lookup
+        - margin is a number of at least 1
+    Ensures:
+        - returns the worst spend times the margin, in whole tokens, rounded up
+    """
+    return math.ceil( worst_tokens * margin )
+
+
+def capacity( headroom, lookup_ceiling=LOOKUP_CEILING_TOKENS, seats=SEATS_AT_ONCE, audit_ceiling=SHADOW_AUDIT_CEILING_TOKENS, weekly_cap=SHADOW_AUDIT_WEEKLY_CAP ):
+    """
+    Work out whether a ceiling lets the expected seats look up at once beside the audits.
+
+    Requires:
+        - headroom is the tokens left under the account limit, zero or more
+        - the other arguments are positive whole numbers
+    Ensures:
+        - returns { lookups_at_once, open_tokens, audit_week_tokens, spare_tokens, fits }
+        - lookups_at_once is how many runs at lookup_ceiling the headroom admits alone
+        - open_tokens is the seats at the lookup ceiling plus one audit run, all open together
+        - audit_week_tokens is one week of audits at the audit ceiling
+        - spare_tokens is the headroom less both, and is negative when they do not fit
+        - fits is true when spare_tokens is zero or more
+    """
+    open_tokens, week_tokens = seats * lookup_ceiling + audit_ceiling, weekly_cap * audit_ceiling
+    return { "lookups_at_once": headroom // lookup_ceiling, "open_tokens": open_tokens, "audit_week_tokens": week_tokens,
+             "spare_tokens": headroom - open_tokens - week_tokens, "fits": headroom - open_tokens - week_tokens >= 0 }
+
+
+def account_capacity( ledger, **settings ):
+    """
+    Run capacity against the headroom a ledger holds now.
+
+    Requires:
+        - ledger is an AccountLedger; settings are capacity's keyword arguments
+    Ensures:
+        - returns capacity's answer plus headroom, the limit less the total, from one read of the ledger
+    """
+    limit, total = ledger.snapshot()
+    return { "headroom": limit - total, **capacity( limit - total, **settings ) }
 
 
 def ledger_path( index_root ):
