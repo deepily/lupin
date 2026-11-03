@@ -267,3 +267,20 @@ def test_pairing_goes_by_receipt_so_two_symbols_on_one_receipt_pass_when_one_pai
     assert len( out ) == 1 and "m.x is DUPLICATE, m.y is DISTINCT" in out[ 0 ][ "reason" ]
     tokens = outcome_lines( ( "excluded", "WROTE_NEW refused" ), ( "unindexed", "WROTE_NEW src/rnd/x.md" ) )
     assert ro.pairing_refusals( tokens, rulings ) == []
+
+
+def test_a_new_definition_with_no_outcome_line_is_refused():
+    rulings = pair_text( ( "m.a", "DUPLICATE", R_A ), ( "m.b", "DISTINCT it differs", R_B ), ( "m.c", "DUPLICATE", R_C ) )
+    got     = outcome_lines( ( R_A, "REUSED m.q" ), ( R_C, "REUSED m.q" ) ) + outcome_lines( ( "excluded", "WROTE_NEW m.e is refused" ) )
+    out     = ro.missing_outcome_refusals( [ "m.a", "m.b", "m.c", "m.d", "m.e" ], got, rulings )
+    assert [ r[ "symbol" ] for r in out ] == [ "m.b", "m.d" ], "m.b has a ruling whose receipt has no outcome line; m.d has no ruling; m.e is named by an excluded line"
+    assert "m.b is new in the diff and has no outcome line" == out[ 0 ][ "reason" ]
+    assert ro.missing_outcome_refusals( [], got, rulings ) == [] and ro.missing_outcome_refusals( [ "m.a" ], [], rulings ) == [ { "symbol": "m.a", "reason": "m.a is new in the diff and has no outcome line" } ]
+
+
+def test_the_excluded_and_unindexed_lines_are_skipped_by_pairing_not_refused_and_the_token_check_still_judges_them():
+    rulings = pair_text( ( "m.z", "DISTINCT it differs", "excluded" ) )
+    tokens  = outcome_lines( ( "excluded", "REUSED m.z" ), ( "unindexed", "EXTENDED src/rnd/x.md" ) )
+    assert ro.pairing_refusals( tokens, rulings ) == [] and ro.pairing_refusals( tokens, {} ) == [], "no ruling pairs them and nothing is refused, even with a kind that would not pair"
+    out = ro.token_refusals( tokens, {}, ROOT )
+    assert [ r[ "line" ] for r in out ] == [ t[ "line" ] for t in tokens ], "the token check judges both: no log refusal for the first, and the second lacks unindexed in its search slot"

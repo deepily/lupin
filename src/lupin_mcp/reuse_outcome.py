@@ -9,6 +9,7 @@ REUSE-OUTCOME <receipt id> :: <search id> :: REUSED <symbol> | EXTENDED <symbol>
 `REUSED` and `EXTENDED` take one symbol token and no free text after it. `WROTE_NEW` takes text with no " :: " in it.
 This module reads the shape and gives the tokens `excluded` and `unindexed` their meaning.
 It also checks that a real receipt and its search are in the call log, and that each outcome kind pairs with the ruling kind.
+It also names the new definitions that have no outcome line.
 It is handed what the log readers return and reads no log itself.
 Nothing here sends anything or runs a model.
 """
@@ -168,3 +169,21 @@ def pairing_refusals( outcomes, rulings ):
             seen = ", ".join( f"{symbol} is {kind}" for symbol, kind in cited )
             out.append( { "line": o[ "line" ], "reason": f"the outcome is {o[ 'outcome' ]} but the ruling on receipt {o[ 'receipt' ]} disagrees ({seen}); DUPLICATE goes with REUSED, EXTEND with EXTENDED, DISTINCT with WROTE_NEW" } )
     return out
+
+
+def missing_outcome_refusals( added, outcomes, rulings ):
+    """
+    Name the new definitions that have no outcome line.
+
+    Requires:
+        - added is the `added` list of a symbol index diff; the caller handles a diff that reports algorithm_changed, which has none
+        - outcomes comes from parse_outcomes; rulings is what reuse_exit_gate.parse_rulings returns
+    Ensures:
+        - a definition has an outcome line when a ruling on it cites a receipt that an outcome line cites
+        - or when an `excluded` outcome line names it as the first word of its text
+        - returns [ { symbol, reason } ] in the order of added, one per definition with neither
+        - a definition with no ruling line is refused too, since nothing ties it to an outcome line
+    """
+    with_outcome = { o[ "receipt" ] for o in outcomes } | { o[ "detail" ].split()[ 0 ] for o in outcomes if o[ "receipt" ] == EXCLUDED_TOKEN }
+    return [ { "symbol": sym, "reason": f"{sym} is new in the diff and has no outcome line" }
+             for sym in added if sym not in with_outcome and not any( row[ "receipt" ] in with_outcome for row in rulings.get( sym, [] ) ) ]
