@@ -268,7 +268,7 @@ def test_git_names_the_command_when_it_fails( tmp_path ):
 
 def test_the_live_parts_are_built_without_a_call():
     parts = dd.live_parts()
-    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural" } and callable( parts[ "structural" ] )
+    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer" } and callable( parts[ "structural" ] )
 
 
 def lines_of( **over ):
@@ -354,3 +354,47 @@ def test_the_default_err_goes_to_standard_error_and_the_default_cron_command_is_
     assert dd.main( [ "--install", "--cap", "1", "--claude-cli-path", "/b" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append, crontab_cmd=cron[ "cmd" ] ) == 1
     assert "duplicate-check-daily:" in capsys.readouterr().err
 
+
+
+def test_findings_are_one_per_new_definition_with_the_rest_of_the_cluster_and_no_session_without_session_of():
+    fresh = [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta" } ]
+    pool  = [ { "id": "p1", "name": "b", "file": "f2.py", "line": 2, "text": "tb" } ]
+    win   = { "start": "s", "end": "e", "commits": 1 }
+    got   = dd.findings_of( [ [ "n1", "p1" ], [ "p1", "x" ] ], fresh, pool, win, {} )
+    assert got == [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta", "session_id": None, "window": win,
+                      "others": [ { "id": "p1", "name": "b", "file": "f2.py" } ] } ], "pool-only members get no finding"
+    seen = dd.findings_of( [ [ "n1", "p1" ] ], fresh, pool, win, { "session_of": lambda d: "sess-" + d[ "id" ] } )
+    assert seen[ 0 ][ "session_id" ] == "sess-n1"
+
+
+def test_a_run_with_a_filer_files_the_findings_and_records_the_answer_and_without_one_records_nothing( repo, tmp_path ):
+    history( repo )
+    calls = []
+    def filer( findings, folder ):
+        calls.append( ( findings, folder ) )
+        return { "filed": len( findings ) }
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, filer=filer ) )
+    assert doc[ "filing" ] == { "filed": 3 } and len( calls ) == 1 and len( calls[ 0 ][ 0 ] ) == 3
+    assert calls[ 0 ][ 1 ] == tmp_path / "io" / "duplicate-check-daily"
+    assert json.loads( results( tmp_path )[ 0 ].read_text() )[ "filing" ] == { "filed": 3 }
+    plain = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert "filing" not in plain
+
+
+def test_the_live_filer_files_with_the_configured_manager_the_roster_and_the_live_store( monkeypatch, tmp_path ):
+    import cosa.config.configuration_manager as cm
+    import cosa.rest.voice_persona_helpers as vh
+    seen = {}
+    class Cfg:
+        def __init__( self, env_var_name ): seen[ "env" ] = env_var_name
+        def get( self, key, default=None ):
+            seen[ "key" ] = key
+            return seen.get( "value" )
+    monkeypatch.setattr( cm, "ConfigurationManager", Cfg )
+    monkeypatch.setattr( vh, "pick_declared_managers_from_env", lambda project: [ "roster-" + project ] )
+    monkeypatch.setattr( dd.filing, "LiveStore", lambda: "store" )
+    monkeypatch.setattr( dd.filing, "file_findings", lambda findings, folder, store, declared, roster: ( findings, folder, store, declared, roster ) )
+    assert dd.live_filer( [ "f" ], tmp_path ) == ( [ "f" ], tmp_path, "store", "manager-on-duty", [ "roster-lupin" ] ), "an empty setting falls back to the placeholder"
+    seen[ "value" ] = "real-manager"
+    assert dd.live_filer( [ "f" ], tmp_path )[ 3 ] == "real-manager"
+    assert seen[ "env" ] == "LUPIN_CONFIG_MGR_CLI_ARGS" and seen[ "key" ] == "arbiter manager on duty"
