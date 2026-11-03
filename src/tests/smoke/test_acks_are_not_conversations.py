@@ -452,7 +452,7 @@ class TestTheWINDOWQueryExcludesItToo:
         session = db()
         try:
             rows = NotificationRepository( session ).get_sender_conversation(
-                _ACK_SENDER, recipient, anchor=self._anchor(), timezone_name=_ZONE )
+                _ACK_SENDER, recipient, anchor=self._anchor() )
         finally:
             session.close()
         assert rows == [], (

@@ -554,7 +554,7 @@ This table's numbering and membership are guarded by
 `ALL_SUITE_COMPONENTS` appears in a row. The count is the suites plus the serial bridge guard.
 A new suite therefore needs a row here as well as a marker entry.
 
-The test container does not offer the unit suite or `docker_smoke`. A request naming either is refused with `status: failed` and the cause in `error`. `all` there runs the pyramid without them, and says `unit: not run here, host tier` and the same for `docker_smoke`. The coverage gate then answers exit 2, because the data file holds no unit tier. Unit runs on the host, as row 5 says, and `docker_smoke` as row 10 says. Inside a container the docker files skip, so the smoke step cannot vouch for them.
+The test container does not offer the unit suite, the reuse gate or `docker_smoke`. A request naming any of them is refused with `status: failed` and the cause in `error`. `all` there runs the pyramid without them, and says `unit: not run here, host tier` and the same for `reuse` and `docker_smoke`. The coverage gate then answers exit 2, because the data file holds no unit tier. Unit runs on the host, as row 5 says. Reuse runs there as row 4 says, because its call log is under `/projects-data`, which the container does not mount. `docker_smoke` runs there as row 10 says. Inside a container the docker files skip, so the smoke step cannot vouch for them.
 
 The coverage gate re-runs nothing. The unit and cosa tiers append to one isolated data file. The gate renders
 that file, checks `fail_under`, and checks the frame still measures every file it claims.
