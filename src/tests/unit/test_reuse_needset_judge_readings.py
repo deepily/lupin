@@ -167,16 +167,19 @@ def test_each_control_row_carries_the_judge_reading_and_fusion_of_both_sides( mo
     assert first[ "original" ][ "judge" ][ "reason" ] == jr.NOT_RETRIEVED and set( first[ "plant" ][ "fusion" ] ) >= { "total" }
 
 
+async def not_stopped():
+    """Stand in for a first-thousand stage that finishes and does not stop the run."""
+    return { "stop": False }
+
+
 def test_a_full_run_writes_the_readings_file_beside_the_report_and_equal_to_its_rows( monkeypatch, tmp_path ):
     _ctx, _seen, out = wired( monkeypatch, tmp_path )
     async def control(): return out
-    async def other(): return { "stop": False }
-    rep = asyncio.run( ft.run_first_thousand( str( tmp_path ), other, other, control, other ) )
+    rep = asyncio.run( ft.run_first_thousand( str( tmp_path ), not_stopped, not_stopped, control, not_stopped ) )
     assert json.loads( ( tmp_path / jr.READINGS_FILE ).read_text( encoding="utf-8" ) ) == jr.readings_of( rep ) and jr.readings_of( rep )[ "passes" ][ 0 ][ "rows" ]
 
 
 def test_a_run_that_fails_midway_still_writes_the_readings_of_the_stages_so_far( tmp_path ):
-    async def done(): return { "stop": False }
     async def crash(): raise RuntimeError( "boom" )
-    with pytest.raises( RuntimeError ): asyncio.run( ft.run_first_thousand( str( tmp_path ), done, done, crash, done ) )
+    with pytest.raises( RuntimeError ): asyncio.run( ft.run_first_thousand( str( tmp_path ), not_stopped, not_stopped, crash, not_stopped ) )
     assert json.loads( ( tmp_path / jr.READINGS_FILE ).read_text( encoding="utf-8" ) ) == { "format": jr.FORMAT, "passes": [ ] }
