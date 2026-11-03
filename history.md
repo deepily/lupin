@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.02 afternoon to night - Session 7e4810a2 (Cheech 🌿, manager; crew John, Pocholo, Sam, Rachel, Chloé) | Plan 3's rollout ruled, reviewed and mostly built; the daily duplicate check's first timed pass
+
+- **Rulings.** Rick ruled Plan 3's rollout section by card, fifteen rulings from 17:26 to 19:30, and question 3 at 21:49. The cascaded review closed at revision 8 (`095d2d2a6`). The reviewed plan merged as `0f179c8aa`.
+- **Built and merged, all reviewed.** Track A, María's workflow. Track B, the outcome checker. Track C, the gate and its weekly report. Track D, the run names, the token ceiling and the install script. Track E, the daily duplicate job and its filing. Track F, the tie and both parts. The closing merges were `621639bf5`, `18b032d81`, `8b4aa8838`, `c7c456cb6`, `b1fe08aa0` and `ae3047506`. Census guards passed 1,579 at `c7c456cb6`.
+- **Two standing rules** went into the root CLAUDE.md: the config file is always committed (`e1395a64d`), and token spend is the manager's call (`8e08fa499`).
+- **The daily check's first timed pass.** The first pass failed on GPU refusals and was fixed (`9016c6a24`). The second embedded 12,834 texts in about 32 minutes from a cold start, then stopped while judging. One definition naming the reuse tools tripped the judge's leak check (row `9311c904`).
+- **The unit tier needs 12 GB.** It cannot fit a seat's 8 GiB, so it gets its own 16 GB scope (row `d0b369af`).
+- **Files**: history.md, TODO.md, the remediation plan, and the root CLAUDE.md.
+
 ## 2026.11.01 to 11.02 - Sessions b3670c7d and 7e4810a2 (Cheech 🌿, manager; crew John, Pocholo, Rachel, Chloé, still seated) | First-thousand trial Parts 1 and 2; the plants reached the judge without their purpose line; an explainer for program managers
 
 - **Part 1, 1 Nov by day.** Rick ruled that a seed can be its own test item. The method change landed in seven reviewed merges, `f01a270ae` to `b6d5a5cb2`. The first control run found 5 of 17 planted rewrites.
