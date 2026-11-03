@@ -5,6 +5,7 @@ The ports are stubs that behave like what they stand for. The session stub refus
 So the arm tests redden if the configuration stops denying a surface. The server stub keeps real per-name databases.
 A shared or reused database then shows up as rows that should not be there.
 """
+import datetime
 import json
 import re
 
@@ -15,6 +16,7 @@ from cosa.repo.duplicate_check import config as duplicate_check_config
 from cosa.repo.duplicate_check import frozen
 from lupin_mcp.reuse_harness import arms
 from lupin_mcp.reuse_harness import errors as err
+from lupin_mcp.reuse_harness import measure
 from lupin_mcp.reuse_harness import run as harness
 
 TEST_IDS = [ "t1", "t2", "t3", "t4" ]
@@ -49,8 +51,10 @@ class StubWorktree:
 class StubServer:
     """A server port with one real database per name, shared across runs so reuse would show."""
 
-    def __init__( self, preload=None, wrong_name=False ):
-        """Start with no databases, or with rows already in the one a run is about to get."""
+    def __init__( self, preload=None, wrong_name=False, readings=None ):
+        """Start with no databases or with preloaded rows; readings are the samples to hand out."""
+        self.readings   = list( readings or [] )
+        self.sampled    = []
         self.dbs        = {}
         self.preload    = preload
         self.wrong_name = wrong_name
@@ -67,6 +71,11 @@ class StubServer:
         """Say whether the database holds no rows."""
         return self.dbs[ handle[ "db_name" ] ] == []
 
+    def sample( self, handle ):
+        """Answer the next reading of the container, or None once the readings are used up."""
+        self.sampled.append( handle[ "container" ] )
+        return self.readings.pop( 0 ) if self.readings else None
+
     def seed( self, handle ):
         """Add the sender key's owner to the run's database, as the real port does."""
         self.dbs[ handle[ "db_name" ] ].append( "sender-key-owner" )
@@ -78,6 +87,36 @@ class StubServer:
         del self.dbs[ handle[ "db_name" ] ]
 
 
+START = datetime.datetime( 2026, 11, 2, 12, 0, tzinfo=datetime.timezone.utc )   # a Monday
+
+
+class StubClock:
+    """A clock that moves only when a slice of work moves it."""
+
+    zone = "America/New_York"
+
+    def __init__( self, moment=START ):
+        """Start at a moment."""
+        self.moment = moment
+
+    def now( self ):
+        """Return the moment."""
+        return self.moment
+
+
+class StubMeter:
+    """A meter whose readings grow by a fixed amount per reading."""
+
+    def __init__( self ):
+        """Start with nothing used."""
+        self.reads = 0
+
+    def read( self ):
+        """Give 10 CPU seconds and 1000 bytes more than the last reading."""
+        self.reads += 1
+        return { "cpu_seconds" : 10.0 * self.reads, "peak_rss_bytes" : 1000 * self.reads }
+
+
 class StubSession:
     """
     A session port: the client under construction passes `per_slice` more tests each slice.
@@ -85,8 +124,10 @@ class StubSession:
     probe() refuses by the configuration's deny rules, as the CLI does; leaky=True models a CLI that ignores them.
     """
 
-    def __init__( self, per_slice=1, hours=1.0, finish_after=None, leaky=False, blind=False, require_bind=False ):
-        """Set how fast the stub client gains passing tests and how many hours a slice costs."""
+    def __init__( self, per_slice=1, hours=1.0, finish_after=None, leaky=False, blind=False, require_bind=False, clock=None, seats=1 ):
+        """Set how fast the client gains passing tests and what a slice costs; a clock moves by it."""
+        self.clock        = clock
+        self.seats        = seats
         self.per_slice    = per_slice
         self.hours        = hours
         self.finish_after = finish_after
@@ -113,7 +154,8 @@ class StubSession:
         self.slices   += 1
         self.progress += self.per_slice
         self.budgets.append( remaining_hours )
-        return { "seat_hours" : self.hours, "finished" : self.finish_after is not None and self.slices >= self.finish_after }
+        if self.clock is not None: self.clock.moment += datetime.timedelta( hours=self.hours )
+        return { "seat_hours" : self.hours, "finished" : self.finish_after is not None and self.slices >= self.finish_after, "seats" : self.seats }
 
 
 class StubTests:
@@ -144,13 +186,15 @@ class StubLog:
 
 
 class Ports:
-    """The five ports of a run."""
+    """The seven ports of a run."""
 
-    def __init__( self, session=None, server=None, worktree=None ):
-        """Wire the stubs, each overridable."""
-        self.session  = session  or StubSession()
+    def __init__( self, session=None, server=None, worktree=None, clock=None, meter=None, **session_options ):
+        """Wire the stubs, each overridable; session_options shape the default session."""
+        self.clock    = clock    or StubClock()
+        self.session  = session  or StubSession( clock=self.clock, **session_options )
         self.server   = server   or StubServer()
         self.worktree = worktree or StubWorktree()
+        self.meter    = meter    or StubMeter()
         self.tests    = StubTests( self.session, self.server )
         self.log      = StubLog()
 
@@ -329,7 +373,9 @@ def test_a_client_that_passes_one_test_per_slice_stops_at_all_pass_with_the_hour
     """Four tests, one per slice, one hour each: all_pass at four hours."""
     ports  = Ports()
     result = harness.run_one( spec(), ports )
-    assert result == { "run" : "pair01-a", "passing_tests" : 4, "pass_rate" : 1.0, "client_builds" : True, "stop" : "all_pass", "seat_hours" : 4.0 }
+    assert result == { "run" : "pair01-a", "passing_tests" : 4, "pass_rate" : 1.0, "client_builds" : True, "stop" : "all_pass", "seat_hours" : 4.0, "pilot" : False,
+                       "time_to_all_pass_working_days" : 4 / 24, "working_days" : 4 / 24, "wall_hours" : 4.0, "cpu_seconds" : 40.0, "peak_rss_bytes" : 4000,
+                       "server_peak_rss_bytes" : None, "server_peak_cpu_percent" : None, "peak_seats" : 1 }
     assert ports.session.slices == 4
 
 
@@ -392,6 +438,133 @@ def test_client_builds_false_is_carried_to_the_result():
     assert harness.run_one( spec(), ports )[ "client_builds" ] is False
 
 
+# ── the pilot: no cap, and the working-day guard ───────────────────────────────────────────
+
+def test_a_spec_with_no_cap_is_a_pilot_and_passes_but_a_zero_cap_is_still_refused():
+    """None means the pilot; zero would be a cap that stops a run before it starts."""
+    assert harness.check_spec( spec( cap_seat_hours=None ) ) is None
+    with pytest.raises( err.HarnessError ) as raised:
+        harness.check_spec( spec( cap_seat_hours=0 ) )
+    assert raised.value.code == err.BAD_SPEC
+
+
+def test_a_pilot_is_given_the_working_hours_left_under_the_guard_and_stops_at_all_pass():
+    """Ten working days are 240 hours, and each one-hour slice leaves one fewer."""
+    ports  = Ports()
+    result = harness.run_one( spec( cap_seat_hours=None ), ports )
+    assert ports.session.budgets == [ 240.0, 239.0, 238.0, 237.0 ]
+    assert ( result[ "stop" ], result[ "pilot" ], result[ "time_to_all_pass_working_days" ] ) == ( harness.STOP_ALL_PASS, True, 4 / 24 )
+
+
+def test_a_pilot_that_uses_up_ten_working_days_stops_on_the_guard_and_not_on_the_cap():
+    """A slice a day with no test passing stops on the guard at fourteen slices."""
+    ports  = Ports( per_slice=0, hours=24.0 )
+    result = harness.run_one( spec( cap_seat_hours=None ), ports )
+    assert ( result[ "stop" ], result[ "passing_tests" ], ports.session.slices ) == ( harness.STOP_GUARD, 0, 14 )
+    assert result[ "working_days" ] == pytest.approx( 10.0 ) and result[ "wall_hours" ] == 14 * 24.0 and result[ "time_to_all_pass_working_days" ] is None
+    assert ports.session.budgets[ 0 ] == 240.0 and ports.session.budgets[ -1 ] == pytest.approx( 7.0 )
+    assert ports.log.records[ -1 ][ "stop" ] == "guard_working_days" and ports.log.records[ -1 ][ "pilot" ] is True
+
+
+def test_a_scored_run_ignores_the_guard_and_stops_on_its_cap():
+    """A scored run goes past ten working days and the cap ends it, not the guard."""
+    ports  = Ports( per_slice=0, hours=24.0 )
+    result = harness.run_one( spec( cap_seat_hours=1000 ), ports )
+    assert result[ "stop" ] == harness.STOP_CAP and result[ "working_days" ] > measure.GUARD_WORKING_DAYS and result[ "pilot" ] is False
+
+
+def test_all_pass_wins_over_the_guard_when_both_happen_at_the_same_verdict():
+    """One slice of ten working days that passes everything is all_pass, not the guard."""
+    ports  = Ports( per_slice=4, hours=14 * 24.0 )
+    result = harness.run_one( spec( cap_seat_hours=None ), ports )
+    assert ( result[ "stop" ], result[ "time_to_all_pass_working_days" ] ) == ( harness.STOP_ALL_PASS, pytest.approx( 10.0 ) )
+
+
+def test_a_pilot_whose_session_finishes_short_of_all_pass_stops_session_ended():
+    """The guard is not the only way a pilot ends."""
+    ports  = Ports()
+    ports.session.finish_after = 2
+    result = harness.run_one( spec( cap_seat_hours=None ), ports )
+    assert ( result[ "stop" ], result[ "passing_tests" ] ) == ( harness.STOP_SESSION_ENDED, 2 )
+
+
+def test_the_guard_stop_is_not_the_cap_stop():
+    """A caller that tells the two apart reads different strings."""
+    assert harness.STOP_GUARD == "guard_working_days" and harness.STOP_GUARD != harness.STOP_CAP
+
+
+# ── the measurements ────────────────────────────────────────────────────────────────────────
+
+def test_the_clock_starts_after_the_arm_proof_so_set_up_is_not_counted_as_build_time():
+    """A slow probe does not count: the first verdict shows only the hour of work."""
+    ports = Ports()
+    probe = ports.session.probe
+    def slow_probe( config, surface ):
+        ports.clock.moment += datetime.timedelta( hours=5 )
+        return probe( config, surface )
+    ports.session.probe = slow_probe
+    harness.run_one( spec(), ports )
+    assert ports.log.records[ 0 ][ "wall_hours" ] == 1.0
+
+
+def test_working_days_leave_the_weekend_out_while_wall_hours_do_not():
+    """Friday 18:00 in New York to Saturday 18:00: a day of wall time, six hours of working time."""
+    friday = datetime.datetime( 2026, 11, 6, 23, 0, tzinfo=datetime.timezone.utc )
+    ports  = Ports( clock=StubClock( friday ), hours=24.0 )
+    result = harness.run_one( spec(), ports )
+    first  = ports.log.records[ 0 ]
+    assert ( first[ "wall_hours" ], first[ "working_days" ] ) == ( 24.0, 0.25 ) and result[ "stop" ] == harness.STOP_CAP
+
+
+def test_each_verdict_carries_the_cpu_and_the_largest_process_read_at_that_verdict():
+    """Verdict n carries the meter's nth reading: 10n CPU seconds and 1000n bytes."""
+    ports = Ports()
+    harness.run_one( spec(), ports )
+    verdicts = [ record for record in ports.log.records if record[ "event" ] == "verdict" ]
+    assert [ record[ "cpu_seconds" ] for record in verdicts ] == [ 10.0, 20.0, 30.0, 40.0 ] and [ record[ "peak_rss_bytes" ] for record in verdicts ] == [ 1000, 2000, 3000, 4000 ]
+
+
+def test_the_server_peaks_are_the_largest_samples_so_far_and_an_unreadable_sample_leaves_them_alone():
+    """Memory peaks follow the largest sample so far and an unreadable sample changes nothing."""
+    readings = [ { "mem_bytes" : 100, "cpu_percent" : 5.0 }, { "mem_bytes" : 300, "cpu_percent" : 2.0 }, None, { "mem_bytes" : 200, "cpu_percent" : 9.0 } ]
+    ports    = Ports( server=StubServer( readings=readings ) )
+    result   = harness.run_one( spec(), ports )
+    verdicts = [ record for record in ports.log.records if record[ "event" ] == "verdict" ]
+    assert [ record[ "server_peak_rss_bytes" ] for record in verdicts ] == [ 100, 300, 300, 300 ]
+    assert [ record[ "server_peak_cpu_percent" ] for record in verdicts ] == [ 5.0, 5.0, 5.0, 9.0 ]
+    assert ( result[ "server_peak_rss_bytes" ], result[ "server_peak_cpu_percent" ] ) == ( 300, 9.0 ) and len( ports.server.sampled ) == 4
+
+
+def test_a_server_that_is_never_readable_leaves_its_peaks_as_none_and_the_run_goes_on():
+    """A gap is recorded as a gap, not as zero."""
+    result = harness.run_one( spec(), Ports() )
+    assert result[ "server_peak_rss_bytes" ] is None and result[ "server_peak_cpu_percent" ] is None and result[ "stop" ] == harness.STOP_ALL_PASS
+
+
+def test_peak_seats_is_the_largest_seat_count_any_slice_reported():
+    """Slices report 1, 3, 2, 1 seats: the peak is 3 from the second verdict on."""
+    class Wide( StubSession ):
+        """A session whose slices report different seat counts."""
+        counts = [ 1, 3, 2, 1 ]
+        def work( self, config, path, handle, remaining_hours ):
+            """Do a slice and report the next seat count."""
+            result = super().work( config, path, handle, remaining_hours )
+            result[ "seats" ] = self.counts[ self.slices - 1 ]
+            return result
+    clock  = StubClock()
+    ports  = Ports( session=Wide( clock=clock ), clock=clock )
+    result = harness.run_one( spec(), ports )
+    assert [ record[ "peak_seats" ] for record in ports.log.records if record[ "event" ] == "verdict" ] == [ 1, 3, 3, 3 ] and result[ "peak_seats" ] == 3
+
+
+def test_the_time_to_pass_is_the_working_days_at_all_pass_and_none_for_a_capped_run():
+    """A run that passes reports its working days; a run the cap ends reports none."""
+    passed = harness.run_one( spec(), Ports() )
+    capped = harness.run_one( spec( cap_seat_hours=3 ), Ports( per_slice=0 ) )
+    assert passed[ "time_to_all_pass_working_days" ] == passed[ "working_days" ] == 4 / 24
+    assert capped[ "stop" ] == harness.STOP_CAP and capped[ "time_to_all_pass_working_days" ] is None
+
+
 # ── the log ─────────────────────────────────────────────────────────────────────────────────
 
 def test_one_verdict_record_per_slice_and_one_stop_record_each_with_the_model_server_and_hours():
@@ -403,7 +576,9 @@ def test_one_verdict_record_per_slice_and_one_stop_record_each_with_the_model_se
     assert [ record[ "passing_tests" ] for record in verdicts ] == [ 1, 2, 3, 4 ]
     assert all( record[ "model_id" ] == "claude-opus-5-5" and record[ "server_commit" ] == "abc1234" and record[ "arm_label" ] == "arm-label-without-9c41e7" and record[ "total_tests" ] == 4
                 for record in verdicts )
-    assert ports.log.records[ -1 ] == { "event" : "stop", "run" : "pair01-a", "arm_label" : "arm-label-without-9c41e7", "stop" : "all_pass", "seat_hours" : 4.0 }
+    assert ports.log.records[ -1 ] == { "event" : "stop", "run" : "pair01-a", "arm_label" : "arm-label-without-9c41e7", "stop" : "all_pass", "seat_hours" : 4.0, "pilot" : False,
+                                        "time_to_all_pass_working_days" : 4 / 24, "working_days" : 4 / 24, "wall_hours" : 4.0, "cpu_seconds" : 40.0, "peak_rss_bytes" : 4000,
+                                        "server_peak_rss_bytes" : None, "server_peak_cpu_percent" : None, "peak_seats" : 1 }
     assert len( ports.log.records ) == 5
 
 

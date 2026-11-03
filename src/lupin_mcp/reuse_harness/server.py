@@ -15,6 +15,7 @@ import urllib.request
 import cosa.utils.dotenv_password as dp
 from lupin_mcp.reuse_harness import commands
 from lupin_mcp.reuse_harness import errors as err
+from lupin_mcp.reuse_harness import measure
 from lupin_mcp.reuse_harness import run as harness
 
 PORT_BASE       = 18000
@@ -119,6 +120,20 @@ class Servers:
     def db_is_fresh( self, handle ):
         """Say whether the run's database holds no account and no notification yet."""
         return self.databases.is_fresh( handle[ "db_name" ] )
+
+    def sample( self, handle ):
+        """
+        Read the memory and CPU share of the run's container once.
+
+        Requires:
+            - handle is the result of start
+
+        Ensures:
+            - returns { mem_bytes, cpu_percent } as docker reports them at this moment
+            - returns None when docker does not answer or the answer cannot be read, so the caller records a gap and never a guess
+        """
+        code, output = self.runner( [ "docker", "stats", "--no-stream", "--format", "{{.MemUsage}}|{{.CPUPerc}}", handle[ "container" ] ], None )
+        return measure.parse_stats( output ) if code == 0 else None
 
     def stop( self, handle ):
         """

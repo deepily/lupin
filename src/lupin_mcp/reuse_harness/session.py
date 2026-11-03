@@ -15,6 +15,7 @@ import uuid
 from lupin_mcp.reuse_harness import arms
 from lupin_mcp.reuse_harness import commands
 from lupin_mcp.reuse_harness import errors as err
+from lupin_mcp.reuse_harness import measure
 
 SLICE_HOURS     = 2.0
 PROBE_TIMEOUT   = 300
@@ -192,7 +193,8 @@ class Sessions:
         Ensures:
             - the first slice starts the session with the brief; each later slice resumes it
             - the slice is stopped at min( slice length, remaining hours )
-            - returns { seat_hours, finished }; seat_hours is the wall time times the seats
+            - returns { seat_hours, finished, seats }; seat_hours is the wall time times the seats
+            - seats is the configured seats plus the most subagent calls the slice made in one message (the output of a slice cut off by its time limit holds no stream, so it adds none)
             - finished is true once the session has stopped on its own STOPS_TO_FINISH times in a row; a slice stopped by its time limit resets the count
 
         Raises:
@@ -210,7 +212,8 @@ class Sessions:
             if code != 0: raise err.HarnessError( err.SESSION_FAILED, f"the session ended with {code}: {' | '.join( output.splitlines()[ -TAIL: ] )}" )
         self.slices += 1
         self.stops   = 0 if timed_out else self.stops + 1
-        return { "seat_hours" : elapsed / 3600 * self.seats, "finished" : self.stops >= STOPS_TO_FINISH }
+        agents  = measure.peak_agents( events_of( output ) )
+        return { "seat_hours" : elapsed / 3600 * self.seats, "finished" : self.stops >= STOPS_TO_FINISH, "seats" : self.seats + agents }
 
     def _argv( self, config, prompt ):
         """Build the command of one session; the prompt comes first, so no flag takes it as a value."""
