@@ -21,7 +21,7 @@ Everything outside the process comes in through five ports, so the harness is pr
 - session.work( config, path, handle, remaining_hours ) returns { seat_hours, finished, seats }
 - tests.run( handle, path, test_ids ) returns { results: { test_id: bool }, client_builds: bool }
 - meter.read() returns { cpu_seconds, peak_rss_bytes } for the commands the harness has finished
-- clock.now() returns the current timezone-aware moment
+- clock.now() returns the current timezone-aware moment; clock.zone names the zone working days are counted in
 - log.write( record ) keeps one record
 """
 import hashlib
@@ -182,7 +182,7 @@ def run_one( spec, ports ):
         started    = ports.clock.now()
         peaks      = { "server_rss" : None, "server_cpu" : None, "seats" : 0 }
         while True:
-            if pilot: remaining = ( measure.GUARD_WORKING_DAYS * measure.SECONDS_PER_DAY - measure.working_seconds( started, ports.clock.now() ) ) / 3600
+            if pilot: remaining = ( measure.GUARD_WORKING_DAYS * measure.SECONDS_PER_DAY - measure.working_seconds( started, ports.clock.now(), ports.clock.zone ) ) / 3600
             else:     remaining = spec[ "cap_seat_hours" ] - seat_hours
             work        = ports.session.work( config, path, handle, remaining )
             seat_hours += work[ "seat_hours" ]
@@ -195,14 +195,14 @@ def run_one( spec, ports ):
             peaks[ "server_rss" ] = _peak( peaks[ "server_rss" ], sample, "mem_bytes" )
             peaks[ "server_cpu" ] = _peak( peaks[ "server_cpu" ], sample, "cpu_percent" )
             used        = ports.meter.read()
-            measured    = { "working_days" : measure.working_days( started, now ), "wall_hours" : ( now - started ).total_seconds() / 3600,
+            measured    = { "working_days" : measure.working_days( started, now, ports.clock.zone ), "wall_hours" : ( now - started ).total_seconds() / 3600,
                             "cpu_seconds" : used[ "cpu_seconds" ], "peak_rss_bytes" : used[ "peak_rss_bytes" ],
                             "server_peak_rss_bytes" : peaks[ "server_rss" ], "server_peak_cpu_percent" : peaks[ "server_cpu" ], "peak_seats" : peaks[ "seats" ] }
             ports.log.write( _record( spec, config, "verdict", model_id=spec[ "model_id" ], server_commit=spec[ "server_commit" ], seat_hours=seat_hours,
                                       passing_tests=passing, total_tests=len( test_ids ), **measured ) )
             if passing == len( test_ids ):
                 stop = STOP_ALL_PASS
-            elif pilot and measure.guard_reached( started, now ):
+            elif pilot and measure.guard_reached( started, now, ports.clock.zone ):
                 stop = STOP_GUARD
             elif not pilot and seat_hours >= spec[ "cap_seat_hours" ]:
                 stop = STOP_CAP

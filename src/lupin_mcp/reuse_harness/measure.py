@@ -4,7 +4,7 @@ What a run costs, measured by the harness (plan 3, section 7.4).
 The pilot pair exists to size the cap and to say how many pairs one machine can run at once. So each run records, beside its
 verdicts, how long it took in working days, the CPU it used, its peak memory and its seats.
 
-A working day is a day that is not a Saturday or a Sunday in New York. Nights count.
+A working day is a day that is not a Saturday or a Sunday in the configured app timezone. Nights count.
 The harness cannot pause a run and cannot know which hours the host was off, so only the weekend is taken out.
 
 Named limits, each stated again where the figure is logged:
@@ -19,7 +19,6 @@ import zoneinfo
 
 from lupin_mcp.reuse_harness import errors as err
 
-WORKING_ZONE       = "America/New_York"
 GUARD_WORKING_DAYS = 10
 SECONDS_PER_DAY    = 86400
 KB_TO_BYTES        = 1024
@@ -29,22 +28,23 @@ UNIT_BYTES         = { "B" : 1, "kB" : 1000, "KiB" : 1024, "MB" : 1000 ** 2, "Mi
 STATS_PATTERN      = re.compile( r"^\s*([0-9.]+)\s*([A-Za-z]+)\s*/.*\|\s*([0-9.]+)%\s*$" )
 
 
-def working_seconds( start, end ):
+def working_seconds( start, end, zone ):
     """
-    Count the seconds between two moments that fall on a weekday in New York.
+    Count the seconds between two moments that fall on a weekday in the given zone.
 
     Requires:
         - start and end are timezone-aware datetimes with start not after end
+        - zone is an IANA zone name, read from the `app timezone` key and never defaulted here
 
     Ensures:
-        - a Saturday or Sunday (New York dates) adds nothing, a weekday adds its real elapsed seconds, measured in UTC, so a change of clocks over a weekend cannot shift the count
+        - a Saturday or Sunday in the zone adds nothing, a weekday adds its real elapsed seconds, measured in UTC, so a change of clocks over a weekend cannot shift the count
         - the result is between 0 and the plain elapsed seconds
 
     Raises:
         - HarnessError BAD_SPEC if end is before start
     """
     if end < start: raise err.HarnessError( err.BAD_SPEC, f"the run ended ({end.isoformat()}) before it started ({start.isoformat()})" )
-    zone   = zoneinfo.ZoneInfo( WORKING_ZONE )
+    zone   = zoneinfo.ZoneInfo( zone )
     cursor = start.astimezone( zone )
     stop   = end.astimezone( zone )
     total  = 0.0
@@ -56,14 +56,14 @@ def working_seconds( start, end ):
     return total
 
 
-def working_days( start, end ):
+def working_days( start, end, zone ):
     """Return working_seconds as days of 24 hours."""
-    return working_seconds( start, end ) / SECONDS_PER_DAY
+    return working_seconds( start, end, zone ) / SECONDS_PER_DAY
 
 
-def guard_reached( start, end ):
+def guard_reached( start, end, zone ):
     """Say whether a pilot has used up its GUARD_WORKING_DAYS between start and end."""
-    return working_days( start, end ) >= GUARD_WORKING_DAYS
+    return working_days( start, end, zone ) >= GUARD_WORKING_DAYS
 
 
 def parse_stats( text ):
@@ -117,7 +117,19 @@ class Meter:
 
 
 class Clock:
-    """The wall clock of a run."""
+    """The wall clock of a run, and the zone its working days are counted in."""
+
+    def __init__( self, zone ):
+        """
+        Remember the zone.
+
+        Requires:
+            - zone is an IANA zone name read from the `app timezone` key
+
+        Ensures:
+            - zone is kept as the attribute zone
+        """
+        self.zone = zone
 
     def now( self ):
         """Return the current moment as a timezone-aware UTC datetime."""

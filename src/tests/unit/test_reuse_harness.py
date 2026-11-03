@@ -93,6 +93,8 @@ START = datetime.datetime( 2026, 11, 2, 12, 0, tzinfo=datetime.timezone.utc )   
 class StubClock:
     """A clock that moves only when a slice of work moves it."""
 
+    zone = "America/New_York"
+
     def __init__( self, moment=START ):
         """Start at a moment."""
         self.moment = moment

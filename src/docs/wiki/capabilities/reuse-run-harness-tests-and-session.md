@@ -9,10 +9,10 @@ pins:
   - lupin_mcp.reuse_harness.session.init_of@2a5948dc75
   - lupin_mcp.reuse_harness.session.surface_listed@0ce85043be
   - lupin_mcp.reuse_harness.session.surface_answered@7a7b53f83f
-  - lupin_mcp.reuse_harness.session.Sessions@cb3f9ce009
+  - lupin_mcp.reuse_harness.session.Sessions@2a39d636bf
   - lupin_mcp.reuse_harness.session.Sessions.bind@8cb4a647b1
   - lupin_mcp.reuse_harness.session.Sessions.probe@3edfcd37a2
-  - lupin_mcp.reuse_harness.session.Sessions.work@c92e1a89e4
+  - lupin_mcp.reuse_harness.session.Sessions.work@9c1a1c2f78
 ---
 # Reuse run harness: the tests and the session
 
@@ -35,5 +35,5 @@ Named gap: no real `claude` command has been started. The deny rules and the hoo
 - `surface_answered` reads the init event's tool and skill lists first, so a model that declines the prompt proves nothing. A call that was not refused also counts. A denied tool leaves the tool list. A denied skill stays in the skill list (measured on claude 2.1.310). Only the folder removal hides the reviewer.
 - Output with no init event, or none with a tool list, is `PROBE_BLIND`. It is never read as a denial.
 - `work` runs one slice. The first slice starts the session with the brief and later slices resume it.
-- Seat hours are the wall time times the seats. Two own stops in a row mean it has finished.
+- Seat hours are the wall time times the seats. The slice also reports `seats`, the seats plus the most subagent calls in one message. Two own stops in a row mean it has finished.
 - The builder's permission mode defaults to `bypassPermissions`. That default awaits a ruling.

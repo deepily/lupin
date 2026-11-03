@@ -15,6 +15,7 @@ from lupin_mcp.reuse_harness import errors as err
 from lupin_mcp.reuse_harness import measure
 
 NEW_YORK = datetime.timezone( datetime.timedelta( hours=-5 ) )   # EST, the offset on the dates below
+ZONE     = "America/New_York"
 
 
 def at( day, hour=0, minute=0, second=0 ):
@@ -23,46 +24,46 @@ def at( day, hour=0, minute=0, second=0 ):
 
 
 def test_a_span_inside_one_weekday_counts_in_full():
-    assert measure.working_seconds( at( 2, 9 ), at( 2, 17 ) ) == 8 * 3600
+    assert measure.working_seconds( at( 2, 9 ), at( 2, 17 ), ZONE ) == 8 * 3600
 
 
 def test_a_span_over_a_weekend_loses_the_whole_weekend_and_keeps_the_nights():
     # Friday 6 Nov 18:00 to Monday 9 Nov 06:00: six hours of Friday, none of Saturday or Sunday, six hours of Monday
-    assert measure.working_seconds( at( 6, 18 ), at( 9, 6 ) ) == 12 * 3600
+    assert measure.working_seconds( at( 6, 18 ), at( 9, 6 ), ZONE ) == 12 * 3600
 
 
 def test_a_span_that_lies_inside_a_weekend_counts_nothing():
-    assert measure.working_seconds( at( 7, 3 ), at( 8, 22 ) ) == 0
+    assert measure.working_seconds( at( 7, 3 ), at( 8, 22 ), ZONE ) == 0
 
 
 def test_a_span_over_the_end_of_summer_time_is_measured_in_real_hours():
     # Friday 30 Oct 20:00 EDT (00:00 UTC on the 31st) to Monday 2 Nov 04:00 EST: four hours of Friday, four of Monday
     start = datetime.datetime( 2026, 10, 30, 20, tzinfo=datetime.timezone( datetime.timedelta( hours=-4 ) ) )
-    assert measure.working_seconds( start, at( 2, 4 ) ) == 8 * 3600
+    assert measure.working_seconds( start, at( 2, 4 ), ZONE ) == 8 * 3600
 
 
 def test_a_span_given_in_utc_is_read_in_new_york():
     # 03:00 UTC on Saturday 7 Nov is still Friday evening in New York: 22:00 EST
     start = at( 6, 20 )
     end   = datetime.datetime( 2026, 11, 7, 3, tzinfo=datetime.timezone.utc )
-    assert measure.working_seconds( start, end ) == 2 * 3600
+    assert measure.working_seconds( start, end, ZONE ) == 2 * 3600
 
 
 def test_an_end_before_the_start_is_refused():
-    with pytest.raises( err.HarnessError ) as caught: measure.working_seconds( at( 3 ), at( 2 ) )
+    with pytest.raises( err.HarnessError ) as caught: measure.working_seconds( at( 3 ), at( 2 ), ZONE )
     assert caught.value.code == err.BAD_SPEC
 
 
 def test_working_days_are_days_of_twenty_four_hours():
-    assert measure.working_days( at( 2, 12 ), at( 4 ) ) == 1.5
+    assert measure.working_days( at( 2, 12 ), at( 4 ), ZONE ) == 1.5
 
 
 def test_the_guard_is_ten_working_days_and_is_reached_at_the_second_it_is_used_up():
     # Monday 2 Nov 00:00 to Saturday 14 Nov 00:00 is ten weekdays and one weekend
     assert measure.GUARD_WORKING_DAYS == 10
-    assert measure.guard_reached( at( 2 ), at( 13, 23, 59, 59 ) ) is False
-    assert measure.guard_reached( at( 2 ), at( 14 ) ) is True
-    assert measure.guard_reached( at( 2 ), at( 20 ) ) is True
+    assert measure.guard_reached( at( 2 ), at( 13, 23, 59, 59 ), ZONE ) is False
+    assert measure.guard_reached( at( 2 ), at( 14 ), ZONE ) is True
+    assert measure.guard_reached( at( 2 ), at( 20 ), ZONE ) is True
 
 
 @pytest.mark.parametrize( "text, expected", [
@@ -109,6 +110,18 @@ def test_the_meter_sees_the_cpu_and_largest_process_of_a_finished_command():
 
 def test_the_clock_gives_the_current_moment_in_utc():
     low  = datetime.datetime.now( datetime.timezone.utc )
-    now  = measure.Clock().now()
+    now  = measure.Clock( ZONE ).now()
     high = datetime.datetime.now( datetime.timezone.utc )
     assert low <= now <= high and now.utcoffset() == datetime.timedelta( 0 )
+
+
+def test_working_days_follow_the_zone_given_and_not_a_fixed_one():
+    """A Friday evening in New York is a Saturday in Tokyo, so it counts in one zone only."""
+    start = at( 6, 20 )
+    end   = at( 6, 23 )
+    assert measure.working_seconds( start, end, "America/New_York" ) == 3 * 3600
+    assert measure.working_seconds( start, end, "Asia/Tokyo" ) == 0
+
+
+def test_the_clock_keeps_the_zone_it_was_given():
+    assert measure.Clock( "Europe/Paris" ).zone == "Europe/Paris"

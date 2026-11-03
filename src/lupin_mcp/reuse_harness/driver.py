@@ -15,6 +15,7 @@ import types
 
 import yaml
 
+from cosa.config import app_timezone
 from lupin_mcp.reuse_harness import acceptance
 from lupin_mcp.reuse_harness import arms
 from lupin_mcp.reuse_harness import databases
@@ -64,22 +65,25 @@ def make_key():
     return f"ck_live_{secrets.token_urlsafe( KEY_BYTES )}"
 
 
-def build_ports( spec, repo_root, data_root, image, mcp_config=None, environ=None ):
+def build_ports( spec, repo_root, data_root, image, mcp_config=None, environ=None, zone=None ):
     """
     Build the real ports of one run.
 
     Requires:
         - spec passes check_spec; image names the server image; the test-role database login exists
+        - zone is an IANA zone name, or None to read the `app timezone` key of the process configuration
 
     Ensures:
         - the run's folder exists and nothing else is created or started
         - one fresh sender key is shared by the server, the tests and the session, and appears nowhere on disk or in an argument
         - the environment gains a JWT secret for the run's server when it has none
+        - the clock counts working days in zone
 
     Raises:
         - HarnessError DB_UNAVAILABLE if there is no test-role login
     """
     environ = dict( os.environ if environ is None else environ )
+    if zone is None: zone = app_timezone.get_app_timezone( app_timezone.process_config_mgr( None ) )
     if not environ.get( "JWT_SECRET_KEY" ): environ[ "JWT_SECRET_KEY" ] = secrets.token_urlsafe( KEY_BYTES )
     run_dir = run_dir_of( data_root, spec )
     os.makedirs( os.path.join( run_dir, "reports" ) )
@@ -91,7 +95,7 @@ def build_ports( spec, repo_root, data_root, image, mcp_config=None, environ=Non
         tests    = acceptance.Acceptance( spec[ "server_commit" ], key, os.path.join( run_dir, "reports" ), environ=environ,
                                           removed=arms.build_session_config( spec[ "arm" ], spec[ "model_id" ] )[ "remove_paths" ] ),
         meter    = measure.Meter(),
-        clock    = measure.Clock(),
+        clock    = measure.Clock( zone ),
         log      = log.RunLog( run_dir ) )
 
 
