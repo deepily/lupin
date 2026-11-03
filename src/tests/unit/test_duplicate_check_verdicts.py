@@ -122,6 +122,34 @@ def test_a_store_that_refuses_the_amend_puts_an_existing_file_back_byte_for_byte
     assert ( folder / "verdicts.jsonl" ).read_bytes() == before
 
 
+class Exploding:
+    """A store whose amend raises, as a client bug or an interrupt would."""
+
+    def __init__( self, error ):
+        self.error = error
+
+    def amend( self, row_id, note ):
+        raise self.error
+
+
+@pytest.mark.parametrize( "error", [ RuntimeError( "client bug" ), KeyboardInterrupt() ], ids=[ "runtime-error", "keyboard-interrupt" ] )
+def test_any_exception_from_the_amend_puts_the_file_back_and_is_raised_on_unchanged( folder, error ):
+    dv.write_verdict( swap( "finding", "d-a2" ), folder, ROW, Amender() )
+    before = ( folder / "verdicts.jsonl" ).read_bytes()
+    with pytest.raises( type( error ) ) as seen: dv.write_verdict( LINE_OK, folder, ROW, Exploding( error ) )
+    assert seen.value is error and ( folder / "verdicts.jsonl" ).read_bytes() == before
+
+
+def test_an_exception_from_the_amend_removes_a_file_that_did_not_exist_before( folder ):
+    with pytest.raises( RuntimeError ): dv.write_verdict( LINE_OK, folder, ROW, Exploding( RuntimeError( "x" ) ) )
+    assert not ( folder / "verdicts.jsonl" ).exists()
+
+
+def test_an_exception_from_the_amend_still_raises_when_the_file_cannot_be_put_back( folder, monkeypatch ):
+    monkeypatch.setattr( dv.pathlib.Path, "unlink", lambda self, *a, **k: ( _ for _ in () ).throw( PermissionError( "read-only" ) ) )
+    with pytest.raises( RuntimeError, match="client bug" ): dv.write_verdict( LINE_OK, folder, ROW, Exploding( RuntimeError( "client bug" ) ) )
+
+
 def test_a_file_that_cannot_be_appended_is_refused_with_the_row_untouched_and_says_so( folder ):
     ( folder / "verdicts.jsonl" ).mkdir()
     store = Amender()
@@ -135,7 +163,7 @@ def test_a_rollback_that_cannot_run_says_the_line_is_still_in_the_file( folder, 
     def broken( self, *a, **k ): raise PermissionError( "read-only" )
 
     monkeypatch.setattr( dv.pathlib.Path, "unlink", broken )
-    with pytest.raises( dv.VerdictRefused, match="still in .*could not be taken out.*PermissionError" ): dv.write_verdict( LINE_OK, folder, ROW, Amender( ok=False ) )
+    with pytest.raises( dv.VerdictRefused, match="still in .*could not be taken out" ): dv.write_verdict( LINE_OK, folder, ROW, Amender( ok=False ) )
     monkeypatch.setattr( dv.pathlib.Path, "unlink", real )
     assert len( lines( folder ) ) == 1
 

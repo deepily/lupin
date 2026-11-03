@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_verdicts.parse_line@aaba3c7c88
   - lupin_mcp.duplicate_check_verdicts.finding_ids@2bce6f3244
-  - lupin_mcp.duplicate_check_verdicts.write_verdict@9d65bdc8b9
+  - lupin_mcp.duplicate_check_verdicts.write_verdict@4e3755992e
   - lupin_mcp.duplicate_check_verdicts.main@6507b26c37
 ---
 # Duplicate check: verdict lines and their writer
@@ -21,7 +21,7 @@ The triage seat rules on each finding of a run with one line. `python -m lupin_m
 - `finding_ids` reads the ids of `<run>.json` in the result folder. A run with no readable result file is refused.
 - `write_verdict` refuses a finding id that is not in that run. It also refuses a finding that already has a line.
 - It appends the record to `verdicts.jsonl` in the result folder first. Then it amends the line onto the triage row (`--row <uuid>`).
-- A store that refuses the amend gets the file put back as it was, so the file and the row cannot disagree.
+- If the amend is refused or raises, the file is put back as it was, so the file and the row cannot disagree.
 - A file that cannot be written is refused with the row untouched. Every refusal names what was and was not written.
 - `--file-only` writes the file alone, for a back-fill. The command needs exactly one of `--row` and `--file-only`.
 - The amend goes through `LiveStore.amend` of [[duplicate-check-filing]], the hooks' own client over HTTP.

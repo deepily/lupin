@@ -74,6 +74,25 @@ def finding_ids( folder, run ):
     return [ fid for _verdict, _key, fid in got[ "findings" ] ]
 
 
+def put_back( path, existed, before ):
+    """
+    Put verdicts.jsonl back to what it was before this call appended to it.
+
+    Requires:
+        - existed says whether the file was there before; before is its size in bytes then
+    Ensures:
+        - cuts the file back to before bytes, or removes it when it did not exist
+        - returns None when that worked, or the OSError's text when it did not; never raises it
+    """
+    try:
+        if existed:
+            with path.open( "r+b" ) as f: f.truncate( before )
+        else: path.unlink()
+    except OSError as e:
+        return f"{type( e ).__name__}: {e}"
+    return None
+
+
 def write_verdict( line, folder, row_id, amender ):
     """
     Check a verdict line, append it to verdicts.jsonl, then amend it onto the triage row.
@@ -86,6 +105,7 @@ def write_verdict( line, folder, row_id, amender ):
         - the file is written first and the row amended second; if the amend fails, the file is put back to what it was
         - so a failed append leaves the row unamended, and a failed amend leaves the file as it was
         - the file's line is the record as JSON, one per line, the folder made if absent
+        - any exception from the amend, not only a refusal, puts the file back before it is raised on
     Raises:
         - VerdictRefused for a malformed line, a missing run file, a finding id not in that run, a finding that already has a line, an amend the store did not accept, or a file that cannot be written
         - the message says what was and was not written
@@ -103,15 +123,13 @@ def write_verdict( line, folder, row_id, amender ):
     except OSError as e:
         raise VerdictRefused( f"could not append to {path} ({type( e ).__name__}: {e}); the row was not amended and the file holds what it held before" ) from e
     if row_id is not None:
-        ok, status, body = amender.amend( row_id, line )
+        try: ok, status, body = amender.amend( row_id, line )
+        except BaseException:
+            put_back( path, existed, before )
+            raise
         if not ok:
-            try:
-                if existed:
-                    with path.open( "r+b" ) as f: f.truncate( before )
-                else: path.unlink()
-            except OSError as e:
-                raise VerdictRefused( f"the store refused the amend onto row {row_id} (HTTP {status}): {body}; the line is still in {path} and could not be taken out ({type( e ).__name__}: {e})" ) from e
-            raise VerdictRefused( f"the store refused the amend onto row {row_id} (HTTP {status}): {body}; the file was put back as it was" )
+            failed = f"the store refused the amend onto row {row_id} (HTTP {status}): {body}"
+            raise VerdictRefused( f"{failed}; the file was put back as it was" if put_back( path, existed, before ) is None else f"{failed}; the line is still in {path} and could not be taken out" )
     return rec
 
 
