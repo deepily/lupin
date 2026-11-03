@@ -167,19 +167,17 @@ def plant_answer( routed, plant_id, policy ):
     return { "answered": True, "p_overlap": round( p, 6 ), "confidence": round( conf, 6 ), "choice": choice, "accepted": p >= policy[ "threshold" ] }
 
 
-def judge_row( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, route=rt._route, widen=rt._widened_route ):
+def places_for( row, ctx, stage, prepared, entries_of ):
     """
-    Ask the judge about one missed plant placed in the shortlist.
+    Choose the real places that stand beside one row's plant.
 
     Requires:
         - stage is a planted candidate stage holding the row's plant; prepared is the planted pool's ( flags, entries, sha, gen )
         - entries_of( entries, language ) keeps the entries of one language
 
     Ensures:
-        - the real shortlist is the stage's own answer for the need, the seed left out, in the need's language
-        - the 127 best of it are asked in the usual packs, and the plant in a pack of its own
-        - returns the row's id, label and language with plant_answer's figures and was_in_shortlist
-        - a plant the stage already had in its first 128 was asked in the real run, so it is returned as was_in_shortlist true and nothing is asked
+        - returns ( sent, flags, pool, real, head ): the redacted need, the flags, the language's entries without the seed, forced_ids' real places, and the row's id, label, language and was_in_shortlist
+        - the real places are the stage's own answer for the need, the seed left out, in the need's language
     """
     flags, entries, sha_, gen = prepared
     need     = stage3.need_for( row[ "pair" ], row[ "need" ] )
@@ -192,8 +190,25 @@ def judge_row( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, route=rt
     order    = [ i for i in got[ "ranking" ] if i in known ]
     real, was_in = forced_ids( order, row[ "id" ] )
     head     = { "id": row[ "id" ], "label": row[ "label" ], "lang": row[ "lang" ], "was_in_shortlist": was_in }
-    if was_in: return { **head, "answered": None, "p_overlap": None, "confidence": None, "choice": None, "accepted": None }
-    pool     = [ e for e in every if e[ "id" ] != need[ "seed" ] ]
+    return sent, flags, [ e for e in every if e[ "id" ] != need[ "seed" ] ], real, head
+
+
+def judge_row( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, route=rt._route, widen=rt._widened_route ):
+    """
+    Ask the judge about one missed plant placed in the shortlist.
+
+    Requires:
+        - stage is a planted candidate stage holding the row's plant; prepared is the planted pool's ( flags, entries, sha, gen )
+        - entries_of( entries, language ) keeps the entries of one language
+
+    Ensures:
+        - the real shortlist is the one places_for chooses
+        - the 127 best of it are asked in the usual packs, and the plant in a pack of its own
+        - returns the row's id, label and language with plant_answer's figures and was_in_shortlist
+        - a plant the stage already had in its first 128 was asked in the real run, so it is returned as was_in_shortlist true and nothing is asked
+    """
+    sent, flags, pool, real, head = places_for( row, ctx, stage, prepared, entries_of )
+    if head[ "was_in_shortlist" ]: return { **head, "answered": None, "p_overlap": None, "confidence": None, "choice": None, "accepted": None }
     first    = route( ctx, sent, pool, flags, policy=policy, candidate_ids=real )
     routed   = widen( ctx, first, sent, pool, flags, [ row[ "id" ] ], policy=policy )
     return { **head, **plant_answer( routed, row[ "id" ], policy ) }
@@ -248,25 +263,14 @@ def judge_row_in_pack( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, 
         - entries_of( entries, language ) keeps the entries of one language
 
     Ensures:
-        - the real places are the stage's own answer for the need, the seed left out, in the need's language, as judge_row takes them
+        - the real places are the ones places_for chooses, as judge_row takes them
         - the 127 best of them and the plant are asked in a single route call, so the plant is never asked alone and nothing is widened
         - a plant the real shortlist already held is asked all the same, and was_in_shortlist says so
         - returns the row's id, label and language, was_in_shortlist, plant_answer's figures, in_pack_figures' figures and pack_place's place
     """
-    flags, entries, sha_, gen = prepared
-    need     = stage3.need_for( row[ "pair" ], row[ "need" ] )
-    language = need[ "write_lang" ]
-    routes, _source = rt.known_routes_of( gen )
-    sent, ranking, _redactions = reuse_redact.redact_need( need[ "need" ].strip(), routes )
-    got      = stage.shortlist( ranking, entries, sha_, ctx.pages, exclude_id=need[ "seed" ], index_manifest=None )
-    every    = entries_of( entries, language )
-    known    = { e[ "id" ] for e in every }
-    order    = [ i for i in got[ "ranking" ] if i in known ]
-    real, was_in = forced_ids( order, row[ "id" ] )
-    pool     = [ e for e in every if e[ "id" ] != need[ "seed" ] ]
+    sent, flags, pool, real, head = places_for( row, ctx, stage, prepared, entries_of )
     asked    = real + [ row[ "id" ] ]
     routed   = route( ctx, sent, pool, flags, policy=policy, candidate_ids=asked )
-    head     = { "id": row[ "id" ], "label": row[ "label" ], "lang": row[ "lang" ], "was_in_shortlist": was_in }
     return { **head, **plant_answer( routed, row[ "id" ], policy ), **in_pack_figures( routed, row[ "id" ], policy ), **pack_place( asked, row[ "id" ], ctx.pack_size ) }
 
 
