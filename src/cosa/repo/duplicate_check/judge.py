@@ -233,7 +233,7 @@ def _pair( d, cands ):
     return { "old": "\0".join( c[ "text" ] for c in cands ), "new": d[ "text" ] }
 
 
-async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, max_calls=None ):
+async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, max_calls=None, skip_breaching=False ):
     """
     Judge each new definition once against its candidates, resuming from the ledger.
 
@@ -242,6 +242,7 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         - backend is a judge backend; ledger is a harness_runner.Ledger bound with ledger_binding
         - slot is the pass number; cfg is the frozen configuration; scrub is the scrub list; parallel is an int of 1 or more
         - max_calls is None for no cap, or the most backend calls this run may make
+        - skip_breaching is False to stop the run on a scrub token, or True to leave the definition unjudged and the candidate out
 
     Ensures:
         - returns { verdicts, unjudged }: a row { id, candidate, verdict, reason, model, prompt_version, server, slot } for each candidate of each
@@ -255,10 +256,13 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         - the calls run through harness_runner.run_parallel, keyed on the definition's text, so byte-equal definitions run one after another
         - with no max_calls no call cap is set; with one, a definition that would need a call past the cap is left unjudged with code JUDGE_CAP_REACHED and nothing ledgered, so a later run asks it
         - a call counts when it is made, and a reply asked for again counts as a second call
+        - the cap is tested before the definition is blinded and before each prompt is built, so a definition past the cap is carried whatever its text holds
+        - with skip_breaching, a definition that carries a scrub token is left unjudged with code BLINDNESS_BREACH and the token names, nothing ledgered, and the other definitions go on
+        - with skip_breaching, a candidate that carries a scrub token is left out of that definition's candidates, and a definition left with none has no ruling and no call
         - rows come in the order of defs, and within a definition in the order the judge saw the candidates
 
     Raises:
-        - DuplicateCheckError BLINDNESS_BREACH if a definition or candidate or the finished prompt carries a scrub token
+        - DuplicateCheckError BLINDNESS_BREACH if a definition or candidate or the finished prompt carries a scrub token, unless skip_breaching leaves the definition unjudged or the candidate out; the finished prompt always raises
         - the errors that are not a ModelCallError, as run_parallel raises them
     """
     made = [ 0 ]
@@ -269,15 +273,23 @@ async def judge_run( defs, cands, backend, ledger, slot, cfg, scrub, parallel, m
         key     = harness_runner.ledger_key( STAGE, _pair( d, records ), cfg[ "prompt_version" ], cfg[ "model_id" ], slot )
         done    = ledger.get( key )
         if done is not None: return done
+        capped  = { "unreadable": { "code": err.JUDGE_CAP_REACHED, "detail": f"the cap of {max_calls} calls was reached" } }
+        if max_calls is not None and made[ 0 ] >= max_calls: return capped
+        try: mine = blind.blind_definition( d, scrub )
+        except err.DuplicateCheckError as e:
+            if not skip_breaching: raise
+            return { "unreadable": { "code": e.code, "detail": e.detail } }
+        if skip_breaching and records:
+            records = [ c for c in records if c[ "id" ] not in set( blind.breaching_ids( records, scrub ) ) ]
+            if not records: return { "rulings": [] }
         shown   = blind.candidate_order( [ blind.blind_definition( c, scrub ) for c in records ] )
         by_seen = {}
         for c in records: by_seen.setdefault( blind.opaque_id( c ), [] ).append( c[ "id" ] )
         order   = [ by_seen[ b[ "id" ] ].pop( 0 ) for b in shown ]
-        mine    = blind.blind_definition( d, scrub )
         failure = None
         for _ in range( ATTEMPTS ):
+            if max_calls is not None and made[ 0 ] >= max_calls: return capped
             system, user, labels = build_prompt( mine, shown, scrub )
-            if max_calls is not None and made[ 0 ] >= max_calls: return { "unreadable": { "code": err.JUDGE_CAP_REACHED, "detail": f"the cap of {max_calls} calls was reached" } }
             made[ 0 ] += 1
             try:
                 reply = await backend.complete( cfg[ "model_id" ], system, user )
