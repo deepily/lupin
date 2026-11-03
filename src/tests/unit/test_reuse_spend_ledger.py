@@ -4,7 +4,10 @@ The account spend ledger: one file, read before a run starts and before each sen
 Plan section 11.5. A run is admitted only when the ledger total plus the run's ceiling fits the account
 limit. An open run counts at its ceiling, a closed one at what it spent. An unreadable ledger refuses.
 """
+import datetime
 import json
+import os
+import re
 import threading
 
 import pytest
@@ -347,3 +350,36 @@ def test_close_run_ends_an_open_run_once_and_leaves_every_other_context_alone( l
     assert rt.close_run( types.SimpleNamespace( transport=None ) ) is None
     assert rt.close_run( types.SimpleNamespace( transport=rt.LiveJevTransport( budget=jt.CallBudget( 3 ) ) ) ) is None
     assert rt.close_run( types.SimpleNamespace( transport=rt.LiveJevTransport( budget=rc.TokenBudget( 5, 1_000 ) ) ) ) is None
+
+
+def test_a_run_name_holds_the_prefix_the_date_the_process_id_a_count_and_a_random_part():
+    name = rl.make_run_name( "shadow-audit", today="2026-11-02", pid=4242 )
+    head, count, random = name.rsplit( "-", 2 )
+    assert head == "shadow-audit-2026-11-02-4242" and count.isdigit() and re.fullmatch( "[0-9a-f]{8}", random )
+    assert name.split( "-" )[ -3 ] == "4242", "a reader takes the process id back out as the third part from the right"
+
+
+def test_the_count_of_a_run_name_rises_by_one_for_each_name_this_process_makes():
+    first, second = ( int( rl.make_run_name( "x", today="d", pid=1 ).split( "-" )[ -2 ] ) for _ in range( 2 ) )
+    assert second == first + 1
+
+
+def test_a_run_name_defaults_to_today_and_this_process():
+    parts = rl.make_run_name( "lookup" ).split( "-" )
+    assert "-".join( parts[ 1:4 ] ) == datetime.date.today().isoformat() and parts[ 4 ] == str( os.getpid() )
+
+
+def test_names_made_at_once_by_many_threads_are_all_different():
+    names, lock = [], threading.Lock()
+
+    def make():
+        for _ in range( 50 ):
+            name = rl.make_run_name( "t", today="d", pid=1 )
+            with lock: names.append( name )
+
+    threads = [ threading.Thread( target=make ) for _ in range( 8 ) ]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    assert len( names ) == 400 and len( set( names ) ) == 400
+    assert len( { n.rsplit( "-", 1 )[ 0 ] for n in names } ) == 400, "the counts alone are all different, whatever the random part"
+

@@ -6,17 +6,22 @@ at its ceiling and a closed run at what it spent. A file that cannot be read ref
 Nothing here sends anything.
 """
 import contextlib
+import datetime
 import fcntl
+import itertools
 import json
 import math
 import os
 import pathlib
+import secrets
+import threading
 import time
 
 PRICE_PER_MILLION_USD = 0.042                                 # the pinned input price; output is counted at the same price
 ACCOUNT_LIMIT_USD     = 40.00                                 # Rick raised the Jev account to about 44 dollars; was 19.31
 STAGE1_CEILING_TOKENS = 71_000_000                            # three dollars at the price above, rounded down (plan 11.1)
 LEDGER_NAME           = "jev-spend-ledger.jsonl"
+RUN_NAME_RANDOM_BYTES = 4                                     # a name's random part is this many bytes, in hex
 ANCHOR_BYTES          = 256                                   # the last bytes read, compared on the next read to catch a rewrite in place
 
 
@@ -41,6 +46,29 @@ def usd_to_tokens( usd, price_per_million=PRICE_PER_MILLION_USD ):
 
 
 ACCOUNT_LIMIT_TOKENS = usd_to_tokens( ACCOUNT_LIMIT_USD )
+
+_NAME_COUNT = itertools.count( 1 )
+_NAME_LOCK  = threading.Lock()
+
+
+def make_run_name( prefix, today=None, pid=None ):
+    """
+    Make a ledger run name that no other lookup, process or restart will make.
+
+    Requires:
+        - prefix is a non-empty string; it may hold dashes
+        - today is an ISO date string and pid a whole number, or None for the current date and process
+
+    Ensures:
+        - returns <prefix>-<date>-<pid>-<count>-<random>, where count rises by one for each name this process makes
+        - the random part is RUN_NAME_RANDOM_BYTES bytes in hex, so a restart that reuses a process id and starts its count again still makes a new name
+        - the process id is the third part from the right, so a reader can take it back out
+        - two threads never get the same count
+    """
+    with _NAME_LOCK: count = next( _NAME_COUNT )
+    today = datetime.date.today().isoformat() if today is None else today
+    pid   = os.getpid() if pid is None else pid
+    return f"{prefix}-{today}-{pid}-{count}-{secrets.token_hex( RUN_NAME_RANDOM_BYTES )}"
 
 
 def ledger_path( index_root ):

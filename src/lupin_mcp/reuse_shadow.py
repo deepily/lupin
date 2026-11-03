@@ -22,10 +22,12 @@ import sys
 from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import shadow_audit as sa
 from cosa.repo.symindex.candidates.errors import CandidateError
+from lupin_mcp import reuse_ledger
 
 AUDIT_CEILING_UNSET  = "AUDIT_CEILING_UNSET"
 AUDIT_NEEDS_PACKED   = "AUDIT_NEEDS_PACKED"
 AUDIT_SWEEP_REFUSED  = "AUDIT_SWEEP_REFUSED"
+SWEEP_RUN_PREFIX     = "shadow-audit"
 ENABLED_KEY          = "reuse shadow audit enabled"
 CEILING_KEY          = "reuse shadow audit max tokens per drain"
 CRON_TAG             = "# reuse-shadow-audit"
@@ -98,17 +100,14 @@ def sweep_of( ctx_factory, ask ):
         - returns a function ( need, language ) giving { verdict, causal_ids, tokens } and the cause when the verdict is uncertain
         - causal_ids are the ids of the full sweep's shortlist
         - tokens are the sweep's tokens in plus tokens out
-        - every sweep gets its own run name
+        - every sweep gets its own run name, from reuse_ledger.make_run_name
 
     Raises:
         - CandidateError AUDIT_SWEEP_REFUSED from the returned function when the sweep answers an error
     """
-    count = [ 0 ]
-
     def sweep( need, language ):
         """Ensures: returns the audit's view of one full sweep of the need."""
-        count[ 0 ] += 1
-        result = ask( need, None, ctx_factory( f"shadow-audit-{datetime.date.today().isoformat()}-{os.getpid()}-{count[ 0 ]}" ), language=language )
+        result = ask( need, None, ctx_factory( reuse_ledger.make_run_name( SWEEP_RUN_PREFIX ) ), language=language )
         if result[ "status" ] != "ok": raise CandidateError( AUDIT_SWEEP_REFUSED, f"{result[ 'error' ]}" )
         out = { "verdict": result[ "verdict" ], "causal_ids": [ row[ "id" ] for row in result[ "shortlist" ] ],
                 "tokens": result[ "stats" ][ "tokens_in" ] + result[ "stats" ][ "tokens_out" ] }

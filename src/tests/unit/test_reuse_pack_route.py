@@ -5,6 +5,8 @@ Plan 10.3 a to e (as changed by 11.1) and 10.6. The stand-in Jev answers a quest
 it finds in the question's instructions, and refuses any text it was not given.
 """
 import json
+import os
+import re
 import threading
 
 import pytest
@@ -176,13 +178,33 @@ def test_a_bad_pack_size_is_refused_not_clamped( monkeypatch, env, value ):
         rt.context_from_environment( env[ 0 ] )
 
 
-def test_a_packed_live_run_without_a_token_ceiling_or_a_run_name_is_refused_at_the_start( monkeypatch, env ):
+def test_a_packed_live_run_without_a_token_ceiling_is_refused_at_the_start_with_or_without_a_run_name( monkeypatch, env ):
     monkeypatch.setenv( "LUPIN_REUSE_JEV_PACK_SIZE", "50" )
     with pytest.raises( rt.ReuseError, match="BAD_SPEND_LIMIT" ):
         rt.context_from_environment( env[ 0 ] )
-    monkeypatch.setenv( "LUPIN_REUSE_JEV_TOKEN_CEILING", "71000000" )
+    monkeypatch.setenv( "LUPIN_REUSE_JEV_RUN_NAME", "named" )
     with pytest.raises( rt.ReuseError, match="BAD_SPEND_LIMIT" ):
         rt.context_from_environment( env[ 0 ] )
+
+
+def test_a_packed_run_name_set_is_used_exactly_and_unset_or_empty_makes_a_new_one( monkeypatch, env ):
+    monkeypatch.setenv( "LUPIN_REUSE_JEV_PACK_SIZE", "50" ); monkeypatch.setenv( "LUPIN_REUSE_JEV_TOKEN_CEILING", "71000000" )
+    monkeypatch.setenv( "LUPIN_REUSE_JEV_RUN_NAME", "stage1-a" )
+    assert rt.context_from_environment( env[ 0 ] ).run_name == "stage1-a"
+    for value in ( None, "" ):
+        if value is None: monkeypatch.delenv( "LUPIN_REUSE_JEV_RUN_NAME" )
+        else: monkeypatch.setenv( "LUPIN_REUSE_JEV_RUN_NAME", value )
+        assert re.fullmatch( rf"{rt.LOOKUP_RUN_PREFIX}-\d{{4}}-\d{{2}}-\d{{2}}-{os.getpid()}-\d+-[0-9a-f]{{8}}", rt.context_from_environment( env[ 0 ] ).run_name )
+
+
+def test_two_lookups_in_a_row_each_open_a_run_under_their_own_name_in_one_ledger( monkeypatch, env, tmp_path ):
+    led = rl.AccountLedger.create( tmp_path / "ledger.jsonl", limit_tokens=100_000_000, by="t", why="fixture" )
+    monkeypatch.setenv( "LUPIN_REUSE_LEDGER_PATH", str( led.path ) )
+    monkeypatch.setenv( "LUPIN_REUSE_JEV_PACK_SIZE", "50" ); monkeypatch.setenv( "LUPIN_REUSE_JEV_TOKEN_CEILING", "1000" )
+    monkeypatch.delenv( "LUPIN_REUSE_JEV_RUN_NAME", raising=False )
+    names = [ rt.context_from_environment( env[ 0 ] ).run_name for _ in range( 2 ) ]
+    for name in names: rc.TokenBudget( 10, 1000, ledger=led, run=name )
+    assert names[ 0 ] != names[ 1 ] and led.total() == 2000
 
 
 @pytest.mark.parametrize( "ceiling", [ "0", "-1", "lots", "1.5" ] )

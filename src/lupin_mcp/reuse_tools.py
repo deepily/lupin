@@ -58,6 +58,7 @@ MAX_PACK_SIZE = 10_000                                          # more than the 
 PACK_SIZE_VARIABLE    = "LUPIN_REUSE_JEV_PACK_SIZE"
 CEILING_VARIABLE      = "LUPIN_REUSE_JEV_TOKEN_CEILING"
 RUN_NAME_VARIABLE     = "LUPIN_REUSE_JEV_RUN_NAME"
+LOOKUP_RUN_PREFIX     = "lookup"                    # the start of a run name made for one lookup
 LEDGER_VARIABLE       = "LUPIN_REUSE_LEDGER_PATH"
 JEV_MODEL    = "jev-1.13.0"                     # pinned: a moving alias would break replay
 RETRIES      = 2
@@ -349,19 +350,21 @@ def _packed_settings( top ):
         - with no pack size set, returns {} and the old path is used
         - otherwise returns the context arguments for the packed path, single use, with the ledger from
           LUPIN_REUSE_LEDGER_PATH or the repository's fleet data root
+        - the run name is LUPIN_REUSE_JEV_RUN_NAME exactly as given; unset or empty, it is a new name from reuse_ledger.make_run_name
         - the packed path packs the whole shortlist and carries a candidate stage built from the INI storage keys
     Raises:
         - ReuseError BAD_PACK_SIZE for a pack size that is not a whole number from 1 to MAX_PACK_SIZE
-        - ReuseError BAD_SPEND_LIMIT when a pack size is set without a positive token ceiling and a run name
+        - ReuseError BAD_SPEND_LIMIT when a pack size is set without a positive token ceiling
     """
     raw = os.environ.get( PACK_SIZE_VARIABLE )
     if not raw: return {}
     from lupin_mcp import reuse_ledger, reuse_pack                             # imported here: both import this module, and the old path needs neither
     size = _whole_number( raw )
     if size is None or not 1 <= size <= MAX_PACK_SIZE: raise ReuseError( "BAD_PACK_SIZE", f"{PACK_SIZE_VARIABLE} must be a whole number from 1 to {MAX_PACK_SIZE}, got {raw!r}" )
-    ceiling, run = _whole_number( os.environ.get( CEILING_VARIABLE, "" ) ), os.environ.get( RUN_NAME_VARIABLE )
-    if ceiling is None or ceiling < 1 or not run:
-        raise ReuseError( "BAD_SPEND_LIMIT", f"a packed live run needs {CEILING_VARIABLE} (a positive whole number of tokens) and {RUN_NAME_VARIABLE}" )
+    ceiling = _whole_number( os.environ.get( CEILING_VARIABLE, "" ) )
+    if ceiling is None or ceiling < 1:
+        raise ReuseError( "BAD_SPEND_LIMIT", f"a packed live run needs {CEILING_VARIABLE} (a positive whole number of tokens)" )
+    run  = os.environ.get( RUN_NAME_VARIABLE ) or reuse_ledger.make_run_name( LOOKUP_RUN_PREFIX )
     path = os.environ.get( LEDGER_VARIABLE ) or reuse_ledger.ledger_path( top )
     return { "pack_size": size, "sweeper": reuse_pack.packed_sweeper( size, shape=reuse_pack.SHAPE_WHOLE ), "request_shape": reuse_pack.SHAPE_WHOLE, "token_ceiling": ceiling,
              "run_name": run, "ledger": reuse_ledger.AccountLedger( path ), "single_use": True, "candidate_stage": _candidate_stage( top ) }
