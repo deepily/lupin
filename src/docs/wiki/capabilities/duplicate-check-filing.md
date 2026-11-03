@@ -24,7 +24,7 @@ pins:
 - An unresolved finding still goes to the configured manager, with a note saying so. No row is ownerless.
 - `row_payload( finding, found )` builds a P5 task with no status, so the store's holding default applies. `created_by` is `duplicate-check-daily`, with no session id.
 - `send_row( payload, store )` asks the store for the key before every create. It answers `already_filed`, `filed`, `queued_for_retry` or `refused`.
-- A transport failure, on the probe or the create, queues the row. So does a 422 that opens with `New tickets are gated`.
+- A transport failure, on the probe or the create, queues the row. So does a 422 whose error text contains `New tickets are gated`.
 - `file_findings` tries the spooled rows first, then new ones. The spool, `pending-rows.jsonl` in the record folder, afterwards holds only the queued rows.
 - `read_pending` and `write_pending` read and write the spool. An empty list removes the file.
 - `LiveStore` is the store over HTTP with the hooks' own client. It needs no MCP session, and its `query` and `create` never raise.

@@ -29,5 +29,5 @@ The first half of `lupin_mcp.duplicate_check_daily`: which commits a run judges,
 - `release( root, tree )` unlocks and removes a detached worktree. It raises nothing.
 - `pool_without_earlier_versions` drops, from the tree's server and client definitions, any that share a file and name with a new one. No new definition pairs with its own earlier version.
 - `progress( defs, commit_of, unjudged, window )` returns `{ advanced_to, carried }`. A definition the cap or a failed call left unjudged is carried. An unreadable reply was ledgered and is not carried.
-- `advanced_to` is the commit before the first one with a carried definition. With nothing carried it is the window's end.
+- `advanced_to` is the commit before the first one with a carried definition, or the window's start when that is the first. With nothing carried it is the window's end.
 - `write_json( path, doc )` writes the document, makes the folder and returns the path.

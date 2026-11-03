@@ -35,6 +35,6 @@ Three small tools around the reuse review: did the reviewer look before ruling (
 
 ## Review gate and verdict fit
 - `read_gating` reads `reuse review gating` fresh from the configuration file. A clean `true` or `false` is returned. An absent, doubled, unreadable or garbled key gives None, meaning the gate could not check. `ini_path` names that file, or the env override.
-- `kind_of` names a finding's kind. A record in the linter's shape is `docstring_lint`, and any other finding with no kind has none. `blocks` is False only for `docstring_lint`. A kind it does not know, and a finding with no kind, block.
+- `kind_of` returns a finding's own non-empty kind first. Else a record in the linter's shape is `docstring_lint`, and any other finding has none. `blocks` is False only for `docstring_lint`. A kind it does not know, and a finding with no kind, block.
 - `evaluate( findings, gating )` returns the mode, `reject`, the blocking findings and all findings in every mode. Gating true with a blocking finding rejects. Gating None gives `could-not-check`, not a pass. Its `main` returns 1 when the diff is rejected, 3 when the gate could not check, else 0.
 - The verdict fit's `receipt` fits the old question's one cut-off on the fit half of a recorded split. A person chooses the false-reuse rate. Its `main` writes the receipt once and never overwrites one.
