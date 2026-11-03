@@ -6,7 +6,7 @@ pins:
   - cosa.repo.symindex.candidates.vector_build.entry_texts@f1e5053a5e
   - cosa.repo.symindex.candidates.vector_build.build_vectors@5032e82f20
   - cosa.repo.symindex.candidates.vector_build.reuse_mismatches@702e022da1
-  - cosa.repo.symindex.candidates.vector_build.embed_all@076eb8869f
+  - cosa.repo.symindex.candidates.vector_build.embed_all@a3d789bb70
   - cosa.repo.symindex.candidates.vector_store.check_engines@608e588f45
   - cosa.repo.symindex.candidates.vector_store.query_key@36f39c90b7
   - cosa.repo.symindex.candidates.vector_store.query_vectors@6c2ee3ea04
@@ -19,7 +19,7 @@ The build embeds every index entry three ways by posting batches to the FastAPI 
 ## Build
 - `EndpointClient( provider=None, get=None )` has `embed( texts, content_type, role )` and `info()`. `info()` reads `GET /api/embeddings/info` and raises `RuntimeError` for no key or a non-200 answer. Calls are pinned to FastAPI.
 - `entry_texts( entry, purpose )` returns `code` (path, name, signature), `prose` (name, purpose, docstring) and `concat` (code, then prose).
-- `build_vectors( entries, purposes, client, out_dir, ..., reuse=None, stats=None )` sorts entries by id and warms both engines. It embeds through `embed_all`, in batches of at most 16 texts with a 0.5 s pause. A batch closes early when its rows times its longest text would pass 32,000 characters. It writes three matrices and a row-text sidecar, and returns the sealed manifest. It raises `ENGINE_NOT_LOADED` when a revision is still null and `EMBEDDING_SHAPE` for a wrong count or ragged row. The caller swaps the folder in.
+- `build_vectors( entries, purposes, client, out_dir, ..., reuse=None, stats=None )` sorts entries by id and warms both engines. It embeds through `embed_all`, in batches of at most 16 texts with a 0.5 s pause. A batch closes early when its rows times its longest text would pass 32,000 characters. A batch the server refuses is retried in halves, down to one text, so a GPU shared with another process still gets every text. It writes three matrices and a row-text sidecar, and returns the sealed manifest. It raises `ENGINE_NOT_LOADED` when a revision is still null and `EMBEDDING_SHAPE` for a wrong count or ragged row. The caller swaps the folder in.
 - The build driver passes `build_vectors` only the entries `screen.sendable` keeps, which is the list the lookup uploads as the stage. A vector id the stage does not hold is refused with `VECTOR_IDS_NOT_INDEX`, so a row for a dropped entry would make every lookup fail.
 - `reuse_mismatches( old_manifest, info )` returns `[]` when the live set's engines, device class, libraries and roles match a build made now. Otherwise it names the failing clauses, or `[ "manifest" ]` for a malformed manifest. Only on `[]` are rows with an equal id and text hash copied.
 

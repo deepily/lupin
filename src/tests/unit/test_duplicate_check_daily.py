@@ -187,8 +187,8 @@ def test_the_worktrees_are_removed_when_the_run_fails_part_way( repo, tmp_path )
     history( repo )
     class Boom( FakeBackend ):
         async def complete( self, *a ): raise RuntimeError( "boom" )
-    with pytest.raises( RuntimeError, match="boom" ):
-        dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, backend=Boom() ) )
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, backend=Boom() ) )
+    assert doc[ "status" ] == "failed" and "boom" in doc[ "error" ], "the failure is recorded, not raised"
     assert len( worktrees( repo ) ) == 1 and not ( tmp_path / "io" / "duplicate-check-daily" / dd.LAST_SUCCESS ).exists()
 
 
@@ -413,3 +413,15 @@ def test_a_filer_that_raises_is_recorded_and_the_run_still_writes_its_file_and_a
 def test_the_cron_lines_carry_the_manager_roster_variable_when_the_installer_has_it():
     assert dd.CARRIED == ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR", "COSA_VOICE_MANAGERS__LUPIN" )
     assert "COSA_VOICE_MANAGERS__LUPIN=" in lines_of( carried={ "COSA_VOICE_MANAGERS__LUPIN": "a,b" } )[ 0 ]
+
+
+def test_a_failure_while_building_the_pool_or_judging_writes_a_failed_file_with_the_error_and_leaves_last_success_alone( repo, tmp_path ):
+    history( repo )
+    def broken( tree, cfg ): raise RuntimeError( "embeddings answered 500" )
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, structural=broken ) )
+    assert ( doc[ "status" ], doc[ "stage" ], doc[ "error" ], doc[ "judge_calls" ] ) == ( "failed", dd.STAGE_JUDGING, "RuntimeError: embeddings answered 500", 0 )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    assert json.loads( results( tmp_path )[ 0 ].read_text() ) == doc and not ( folder / dd.LAST_SUCCESS ).exists(), "the day is judged again next time"
+    assert len( worktrees( repo ) ) == 1, "the detached worktrees are gone"
+    again = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert again[ "status" ] == "ok" and again[ "judged" ] == 3, "a later run with a working setup judges the same window"

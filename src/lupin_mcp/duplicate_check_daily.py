@@ -37,6 +37,7 @@ CARRIED_CODES     = ( err.JUDGE_CAP_REACHED, err.JUDGE_CALL_FAILED )
 PREREQ_EMBEDDINGS = "embedding_endpoint"
 PREREQ_BINARY     = "claude_binary"
 PREREQ_FROZEN     = "frozen_config"
+STAGE_JUDGING     = "judging"                                   # the stage named in a result file when the pool build, the embeddings or the judge failed
 UNREADABLE        = "unreadable"
 CRON_TAG          = "# duplicate-check-daily"
 CRON_SCHEDULE     = "7 12 * * *"      # 12:07, 30 minutes after the 11:37 shadow audit drain
@@ -219,6 +220,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     Ensures:
         - writes <data_dir>/duplicate-check-daily/<date>-<time>-<trigger>.json: the verdicts' clusters, the window, the judge calls and elapsed_seconds
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
+        - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
         - a filer that raises is caught: the result holds filing { error } and the run ends as if it had filed nothing
         - the detached worktrees are removed whether the run ends or fails
@@ -241,15 +243,19 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     window = window_of( root, last, now, branch )
     doc    = { **base, "window": { "start": window[ "start" ], "end": window[ "end" ], "commits": len( window[ "commits" ] ) } }
     tree   = source_at.ensure_worktree( root, window[ "end" ], pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}" )
+    count = Counting( parts[ "backend" ] )
     try:
         fresh = new_definitions( tree, root, window )
         pool  = pool_without_earlier_versions( tree, fresh[ "defs" ] )
-        count = Counting( parts[ "backend" ] )
         out   = { "verdicts": [], "unjudged": [], "dropped": { "count": 0, "ids": [] } }
         if fresh[ "defs" ]:
             ledger = proof_cli.proof_ledger( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
             wiring = { **proof_cli.base_wiring( folder / VECTORS_DIR, parts[ "structural" ]( tree, cfg ), parallel, parts[ "client" ] ), "backend": count, "ledger": ledger }
             out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap )
+    except Exception as exc:               # the pool build, the embeddings or the judge failed: leave a record and change nothing else
+        doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, elapsed_seconds=round( clock() - started, 3 ) )
+        write_json( folder / f"{stem}.json", doc )
+        return doc
     finally:
         release( root, tree )
     ids    = [ d[ "id" ] for d in [ *fresh[ "defs" ], *pool ] if d[ "id" ] not in set( out[ "dropped" ][ "ids" ] ) ]
