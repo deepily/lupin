@@ -171,7 +171,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 | Suite | Venue | Command | Rules that matter |
 |---|---|---|---|
-| Unit | :7999 | `src/tests/run-unit-tests.sh` (runs `-n 4`; `pytest src/tests/unit/` for a bare serial run) | `LUPIN_UNIT_WORKERS=0` runs serial; the runner exits 3 when pytest-xdist is missing; the serial bridge guard is its own step (row 10) |
+| Unit | :7999 | `src/tests/run-unit-tests.sh` (runs `-n 4`; `pytest src/tests/unit/` for a bare serial run) | `LUPIN_UNIT_WORKERS=0` runs serial; the runner exits 3 when pytest-xdist is missing; the serial bridge guard is its own step (row 11) |
 | TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` | runs under c8 at 100% inside the memory-capped `jstest.slice` cgroup, so `test_types: ["all"]` is safe; an `RC=124` is a hang on leaked transports, not memory |
 | Docker smoke | :7999 (host only) | `./src/tests/run-docker-smoke-gate.sh` | any skip, error or missing file is a failure; not offered inside a container |
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks, non-destructive; `src/tests/smoke/` files are heterogeneous, route each by the rubric in the "Testing venues" section above |
@@ -488,8 +488,8 @@ One row per topic; every path below exists (checked by `src/tests/unit/test_clau
 
 ## PR merge requirements
 
-<!-- merge-pyramid-suites: typecheck stylelint doclint unit cosa coverage typescript smoke docker_smoke websocket integration e2e_a e2e_b -->
-All must pass before merging to main, in this order. First typecheck → stylelint → doclint → unit → cosa → coverage.
+<!-- merge-pyramid-suites: typecheck stylelint doclint reuse unit cosa coverage typescript smoke docker_smoke websocket integration e2e_a e2e_b -->
+All must pass before merging to main, in this order. First typecheck → stylelint → doclint → reuse → unit → cosa → coverage.
 Then typescript → smoke → docker_smoke → serial bridge guard → websocket smoke. Then e2e UI and visual regression,
 as two halves e2e_a then e2e_b. Last is integration, which is the final gate. Each requires 100% pass. Venues and
 commands are in the "Testing" section above.
@@ -514,6 +514,16 @@ The swept scope is every tracked `.py` file the documentation standard covers, e
 `src/lupin_mcp/`, which carves out `src/lupin_mcp/reuse_needset/`; `src/cosa/repo/doc_lint/swept_scope.py` decides it. Exit 2 or 3 means the gate could not check, which is
 not a pass. `src/scripts/pre-push-chain.sh` runs the first step only, on the tip of a pushed ref.
 
+**reuse runs fourth, for the same reason**. It reads the Markdown lines the branch adds since its merge base
+with main. It judges each `REUSE-OUTCOME` line against the call log: shape, receipt and search, token and kind pairing.
+It keeps a record of every line, takes seconds and makes no model call. With `--diff FILE`, a symbol index diff,
+each new definition in it also needs an outcome line. A branch that adds no definitions and no outcome lines passes.
+The key `reuse review gating` is read on each run. False means refusals are reported under `Report-only:` and the run exits 0.
+True means any refusal or missing outcome line exits 1. Its summary counts checks: one for the scan,
+one per outcome line, one per new definition. Exit 3 means it could not check: the key is unreadable,
+git names no merge base, or the diff reports a changed algorithm. It then prints no summary,
+so it reads as not executed, never as passed.
+
 > The heading above and the HTML comment above are machine-read; neither is styling. `test_bridge_dir_guard.py` looks for the exact line `## PR merge requirements`, on a line of its own. `test_typescript_suite_gate.py` parses the `merge-pyramid-suites` marker and compares its set to `ALL_SUITE_COMPONENTS` in `src/cosa/agents/test_suite/job.py`. It then checks the paragraph beneath the marker names every one. Rewording the heading or dropping the marker reddens the unit tier. The marker is a set, not a sequence. The shell array runs integration before e2e, while the documented pyramid holds integration back as the final gate. That ordering difference is deliberate.
 
 | # | gate | venue |
@@ -521,24 +531,25 @@ not a pass. `src/scripts/pre-push-chain.sh` runs the first step only, on the tip
 | 1 | **typecheck — `src/tests/run-typecheck-gate.sh`** — ~3s, fails a type-red branch first | :7999 |
 | 2 | **stylelint — `src/tests/run-stylelint-gate.sh`** — ~1.5s, every tracked .css file | :7999 |
 | 3 | **doclint — `src/tests/run-doclint-gate.sh`** — ~10s, the docstrings of every swept-scope .py file, then the metrics page check | :7999 |
-| 4 | unit — `pytest src/tests/unit/` | :7999 |
-| 5 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
-| 6 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
-| 7 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
-| 8 | smoke | :7999 |
-| 9 | docker_smoke — `src/tests/run-docker-smoke-gate.sh` — the three docker smoke files on the host, a skip is a failure | :7999, host only |
-| 10 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
-| 11 | websocket smoke | :7999 |
-| 12 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
-| 13 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
-| 14 | **integration — the final gate** | :8000 scheduled |
+| 4 | **reuse — `src/tests/run-reuse-gate.sh`** — seconds, the outcome lines the branch adds, judged against the call log; no model call | :7999 |
+| 5 | unit — `pytest src/tests/unit/` | :7999 |
+| 6 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
+| 7 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
+| 8 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
+| 9 | smoke | :7999 |
+| 10 | docker_smoke — `src/tests/run-docker-smoke-gate.sh` — the three docker smoke files on the host, a skip is a failure | :7999, host only |
+| 11 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
+| 12 | websocket smoke | :7999 |
+| 13 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
+| 14 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
+| 15 | **integration — the final gate** | :8000 scheduled |
 
 This table's numbering and membership are guarded by
 `test_claude_md_numbered_gate_table_carries_every_suite`. Rows run 1..n, and every suite in
 `ALL_SUITE_COMPONENTS` appears in a row. The count is the suites plus the serial bridge guard.
 A new suite therefore needs a row here as well as a marker entry.
 
-The test container does not offer the unit suite or `docker_smoke`. A request naming either is refused with `status: failed` and the cause in `error`. `all` there runs the pyramid without them, and says `unit: not run here, host tier` and the same for `docker_smoke`. The coverage gate then answers exit 2, because the data file holds no unit tier. Unit runs on the host, as row 4 says, and `docker_smoke` as row 9 says. Inside a container the docker files skip, so the smoke step cannot vouch for them.
+The test container does not offer the unit suite or `docker_smoke`. A request naming either is refused with `status: failed` and the cause in `error`. `all` there runs the pyramid without them, and says `unit: not run here, host tier` and the same for `docker_smoke`. The coverage gate then answers exit 2, because the data file holds no unit tier. Unit runs on the host, as row 5 says, and `docker_smoke` as row 10 says. Inside a container the docker files skip, so the smoke step cannot vouch for them.
 
 The coverage gate re-runs nothing. The unit and cosa tiers append to one isolated data file. The gate renders
 that file, checks `fail_under`, and checks the frame still measures every file it claims.

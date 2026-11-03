@@ -71,7 +71,9 @@ done
 # reason: 1.5s of static analysis over every tracked .css file (measured).
 # "doclint" joined with row 2c48c717 (Rick's ruling), third for the same reason:
 # 4.6s of static analysis over every swept-scope Python file's docstrings (measured).
-SUITES=( "typecheck" "stylelint" "doclint" "unit" "cosa" "coverage" "typescript" "smoke" "docker_smoke" "websocket" "integration" "e2e_a" "e2e_b" )
+# "reuse" joined with Plan 3 step C3 (ruling 12), fourth: it reads the outcome lines the branch adds
+# and the call log, makes no model call, and takes seconds.
+SUITES=( "typecheck" "stylelint" "doclint" "reuse" "unit" "cosa" "coverage" "typescript" "smoke" "docker_smoke" "websocket" "integration" "e2e_a" "e2e_b" )
 declare -A SCRIPTS=(
     # The three tsc projects as a blocking gate (row 7bc67019). Prints
     # "Total Tests: / Passed: / Failed:" whose unit is PROJECTS, not tests.
@@ -83,6 +85,9 @@ declare -A SCRIPTS=(
     # Its second step checks the metrics dashboard page. Prints "Total Tests: / Passed: / Failed:"
     # whose unit is files plus one for that check, and "Errors:" in findings plus that check's lines.
     [doclint]="src/tests/run-doclint-gate.sh"
+    # The outcome lines the branch adds, judged against the call log (Plan 3 step C3). Prints
+    # "Total Tests: / Passed: / Failed:" whose unit is checks. Exits 3 with no summary when it could not check.
+    [reuse]="src/tests/run-reuse-gate.sh"
     [unit]="src/tests/run-unit-tests.sh"
     [cosa]="src/tests/run-cosa-tests.sh"
     # The Python coverage gate (row e2099400, 2026-08-29). Placed straight after the two
