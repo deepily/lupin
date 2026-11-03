@@ -314,3 +314,14 @@ def test_a_token_line_for_one_definition_does_not_cover_another_that_cites_the_s
     one     = outcome_lines( ( "excluded", "WROTE_NEW m.d1 is refused" ), ( "unindexed", "WROTE_NEW src/rnd/x.md is a note" ) )
     out     = ro.missing_outcome_refusals( [ "m.d1", "m.d2", "m.d3", "m.d4" ], one, rulings )
     assert [ r[ "symbol" ] for r in out ] == [ "m.d2", "m.d3", "m.d4" ], "only the definition the excluded line names is covered; an unindexed line names a file, not a definition"
+
+
+def test_a_dart_file_in_a_dart_root_is_held_by_the_index_and_the_rest_are_not( tmp_path ):
+    ( tmp_path / "pubspec.yaml" ).write_text( "name: app\n", encoding="utf-8" )
+    for d in ( "lib", "lib/generated", "test" ): ( tmp_path / d ).mkdir( parents=True )
+    held   = [ "lib/a.dart" ]
+    unheld = [ "lib/generated/b.dart", "lib/c.g.dart", "lib/d.freezed.dart", "lib/e.py", "lib/f.js", "test/g.dart", "pubspec.yaml" ]
+    assert [ ro.is_indexed( p, tmp_path ) for p in held ] == [ True ]
+    assert [ ro.is_indexed( p, tmp_path ) for p in unheld ] == [ False ] * len( unheld ), "a skipped folder, skipped endings, another language and a folder that is not a root"
+    line = ro.parse_outcomes( f"REUSE-OUTCOME unindexed :: unindexed :: WROTE_NEW lib/a.dart is code :: {PLAN}#12.3-B4" )
+    assert len( ro.token_refusals( line, {}, tmp_path ) ) == 1, "an unindexed claim for the held file is refused in that tree"

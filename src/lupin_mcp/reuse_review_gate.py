@@ -103,10 +103,13 @@ def blocks( finding ):
     Say whether one finding blocks a diff when the gate is on.
 
     Ensures:
+        - returns True for a named reuse-evidence kind, those of REUSE_KINDS
         - returns False only for a `docstring_lint` finding
-        - returns True for a reuse-evidence kind, for a kind this module does not know, and for a finding with no kind
+        - returns True for a kind this module does not know, and for a finding with no kind, which fail closed
     """
-    return kind_of( finding ) != ADVISORY_KIND
+    kind = kind_of( finding )
+    if kind in REUSE_KINDS: return True
+    return kind != ADVISORY_KIND
 
 
 def evaluate( findings, gating ):
