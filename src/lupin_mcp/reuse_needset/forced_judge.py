@@ -37,6 +37,10 @@ DONE         = "done"
 CAP          = "cap_reached"
 BUDGET_HIT   = "budget_reached"
 FAILED       = "failed"
+ALONE        = "alone"             # the plant is asked in a pack of its own, after the 127 real places
+IN_PACK      = "in_pack"           # the plant is asked inside the 128 places, in the packs the real run would cut
+VARIANTS     = ( ALONE, IN_PACK )
+IN_PACK_REQUESTS_PER = 3           # 128 places are packs of up to 50: 50, 50 and 28
 
 
 def missed_ids( report_path ):
@@ -195,6 +199,95 @@ def judge_row( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, route=rt
     return { **head, **plant_answer( routed, row[ "id" ], policy ) }
 
 
+def pack_place( asked_ids, plant_id, size ):
+    """
+    Say where the plant sits among the places the judge is asked about.
+
+    Requires:
+        - asked_ids are the ids of every place in the question; size is the most entries in one pack
+
+    Ensures:
+        - returns { pack_index, pack_position, position, asked } counted from 0 over the ids sorted as the sweep sorts them, which is by id
+        - the plant's place comes from its id, so it is a record of where it fell and not a claim of random placement
+    """
+    order    = sorted( asked_ids )
+    position = order.index( plant_id )
+    return { "pack_index": position // size, "pack_position": position % size, "position": position, "asked": len( order ) }
+
+
+def in_pack_figures( routed, plant_id, policy ):
+    """
+    Read the judge's answer for the plant among the real places, and its standing.
+
+    Requires:
+        - routed is the result of one route over the real places and the plant
+
+    Ensures:
+        - returns { survives, rank, wrong_at_threshold }
+        - survives is true when the plant is in the shortlist the verdict itself cut to policy["shortlist"], read from routed["d"] and not worked out again
+        - rank counts from 1 over the answered places in the verdict's own order, p_overlap descending then id; None for a plant with no valid answer
+        - wrong_at_threshold counts the other places with a valid answer at or above the policy threshold
+    """
+    rows = [ ]
+    for a in routed[ "sw" ][ "answers" ]:
+        if vd.malformed_reason( a[ "probabilities" ], policy ) is not None: continue
+        p, _conf, _choice = vd.call_facts( a[ "probabilities" ] )
+        rows.append( { "id": a[ "id" ], "p_overlap": round( p, 6 ) } )
+    ids = [ r[ "id" ] for r in vd._order( rows ) ]
+    return { "survives": plant_id in [ r[ "id" ] for r in routed[ "d" ][ "shortlist" ] ],
+             "rank": ids.index( plant_id ) + 1 if plant_id in ids else None,
+             "wrong_at_threshold": sum( 1 for r in rows if r[ "id" ] != plant_id and r[ "p_overlap" ] >= policy[ "threshold" ] ) }
+
+
+def judge_row_in_pack( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, route=rt._route ):
+    """
+    Ask the judge about one plant placed among the 127 real places, in one question.
+
+    Requires:
+        - stage is a planted candidate stage holding the row's plant; prepared is the planted pool's ( flags, entries, sha, gen )
+        - entries_of( entries, language ) keeps the entries of one language
+
+    Ensures:
+        - the real places are the stage's own answer for the need, the seed left out, in the need's language, as judge_row takes them
+        - the 127 best of them and the plant are asked in a single route call, so the plant is never asked alone and nothing is widened
+        - a plant the real shortlist already held is asked all the same, and was_in_shortlist says so
+        - returns the row's id, label and language, was_in_shortlist, plant_answer's figures, in_pack_figures' figures and pack_place's place
+    """
+    flags, entries, sha_, gen = prepared
+    need     = stage3.need_for( row[ "pair" ], row[ "need" ] )
+    language = need[ "write_lang" ]
+    routes, _source = rt.known_routes_of( gen )
+    sent, ranking, _redactions = reuse_redact.redact_need( need[ "need" ].strip(), routes )
+    got      = stage.shortlist( ranking, entries, sha_, ctx.pages, exclude_id=need[ "seed" ], index_manifest=None )
+    every    = entries_of( entries, language )
+    known    = { e[ "id" ] for e in every }
+    order    = [ i for i in got[ "ranking" ] if i in known ]
+    real, was_in = forced_ids( order, row[ "id" ] )
+    pool     = [ e for e in every if e[ "id" ] != need[ "seed" ] ]
+    asked    = real + [ row[ "id" ] ]
+    routed   = route( ctx, sent, pool, flags, policy=policy, candidate_ids=asked )
+    head     = { "id": row[ "id" ], "label": row[ "label" ], "lang": row[ "lang" ], "was_in_shortlist": was_in }
+    return { **head, **plant_answer( routed, row[ "id" ], policy ), **in_pack_figures( routed, row[ "id" ], policy ), **pack_place( asked, row[ "id" ], ctx.pack_size ) }
+
+
+def summarize_in_pack( results ):
+    """
+    Count the judge's accepts, and the plants that survive the cap, by the pairs' human label.
+
+    Ensures:
+        - returns { label: { pairs, answered, accepted, survived } } sorted by label
+        - every pair was asked, so there is no already_in count; survived counts the plants in the verdict's cut shortlist
+    """
+    out = { }
+    for r in results:
+        g = out.setdefault( r[ "label" ], { "pairs": 0, "answered": 0, "accepted": 0, "survived": 0 } )
+        g[ "pairs" ]    += 1
+        g[ "answered" ] += bool( r[ "answered" ] )
+        g[ "accepted" ] += bool( r[ "accepted" ] )
+        g[ "survived" ] += bool( r[ "survives" ] )
+    return dict( sorted( out.items() ) )
+
+
 def summarize( results ):
     """
     Count the judge's accepts by the pairs' human label.
@@ -215,25 +308,25 @@ def summarize( results ):
     return dict( sorted( out.items() ) )
 
 
-def plan_of( rows, undrafted, budget ):
+def plan_of( rows, undrafted, budget, variant=ALONE ):
     """
     Describe what a live run would do.
 
     Ensures:
-        - returns { pairs, by_label, undrafted, requests_needed, stage_budget }
-        - requests_needed is REQUESTS_PER for each pair, counted against the cap as one call each
+        - returns { pairs, by_label, undrafted, requests_needed, stage_budget, variant }
+        - requests_needed is REQUESTS_PER for each pair, or IN_PACK_REQUESTS_PER for the in_pack variant, counted against the cap as one call each
     """
     by_label = { }
     for r in rows: by_label[ r[ "label" ] ] = by_label.get( r[ "label" ], 0 ) + 1
-    return { "pairs": len( rows ), "by_label": dict( sorted( by_label.items() ) ), "undrafted": undrafted, "requests_needed": REQUESTS_PER * len( rows ), "stage_budget": budget }
+    return { "pairs": len( rows ), "by_label": dict( sorted( by_label.items() ) ), "undrafted": undrafted, "requests_needed": ( REQUESTS_PER if variant == ALONE else IN_PACK_REQUESTS_PER ) * len( rows ), "stage_budget": budget, "variant": variant }
 
 
-def run_live( run_dir, rows, judge, limit, budget ):
+def run_live( run_dir, rows, judge, limit, budget, summary=summarize ):
     """
     Judge each row under the call cap and write the report.
 
     Requires:
-        - judge( row ) asks the judge about one row and returns its result
+        - judge( row ) asks the judge about one row and returns its result; summary( results ) counts the results for the report
 
     Ensures:
         - the cap reads its count from call-ledger.jsonl in run_dir and gives the stage STAGE_NAME budget calls
@@ -247,7 +340,7 @@ def run_live( run_dir, rows, judge, limit, budget ):
 
     def write():
         """Ensures: writes the report as it stands and returns it."""
-        out = { "used": cap.used(), "limit": limit, "by_stage": cap.by_stage(), "status": status, "detail": detail, "summary": summarize( results ), "results": results }
+        out = { "used": cap.used(), "limit": limit, "by_stage": cap.by_stage(), "status": status, "detail": detail, "summary": summary( results ), "results": results }
         pathlib.Path( f"{run_dir}/{REPORT_FILE}" ).write_text( json.dumps( out, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
         return out
 
@@ -272,6 +365,7 @@ def parse_args( argv ):
     Ensures:
         - the source tree, this run's folder, the earlier run's folder, the planted file, the answer key, the labels folder, the control report, the seed and the source commit are required
         - live is false unless --live is given, and a live run also needs --run-name, a fresh spend-ledger run name
+        - the variant is alone unless --variant in_pack is given
         - the stage budget is 100 calls and the run's cap equal to it unless named; the token ceiling is 8,000,000 unless named
     """
     ap = argparse.ArgumentParser( description=__doc__ )
@@ -284,6 +378,7 @@ def parse_args( argv ):
     ap.add_argument( "--cli-path", default=None )
     ap.add_argument( "--server", default="max-plan" )
     ap.add_argument( "--live", action="store_true" )
+    ap.add_argument( "--variant", choices=VARIANTS, default=ALONE )
     return ap.parse_args( argv )
 
 
@@ -294,6 +389,7 @@ def collect_rows( args, root, deps ):
     Ensures:
         - returns ( pairs, rows, undrafted ) and has built no reuse context
         - the labels are the first rater's, then the second's, with the third rater for a disagreement
+        - the alone variant keeps the pairs retrieval missed; the in_pack variant keeps every pair with a frozen draft, since a plant asked among the real places needs no miss
     """
     pairs  = positive_control.load_pairs( args.planted, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
     key    = json.loads( pathlib.Path( args.answer_key ).read_text( encoding="utf-8" ) )[ "items" ]
@@ -303,7 +399,8 @@ def collect_rows( args, root, deps ):
     third  = read( [ f"{args.labels_dir}/labels-jason.jsonl" ] )
     ledger = draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
     needs  = frozen_needs( pairs, ledger, lambda rec: strip.strip_member( rec, root ) )
-    rows, undrafted = build_rows( pairs, set( missed_ids( args.control_report ) ), needs, pair_labels( pairs, key, first, second, third ) )
+    missed  = { p[ "rewrite" ][ "id" ] for p in pairs } if args.variant == IN_PACK else set( missed_ids( args.control_report ) )
+    rows, undrafted = build_rows( pairs, missed, needs, pair_labels( pairs, key, first, second, third ) )
     return pairs, rows, undrafted
 
 
@@ -350,7 +447,7 @@ def _run( args, root, deps ):
         - a live run closes the spend-ledger run when an error ends it, and an error from that close never replaces the first error
     """
     pairs, rows, undrafted = deps[ "rows" ]( args, root ) if "rows" in deps else collect_rows( args, root, deps )
-    plan = { **plan_of( rows, undrafted, args.budget ), "control_report": str( args.control_report ) }
+    plan = { **plan_of( rows, undrafted, args.budget, args.variant ), "control_report": str( args.control_report ) }
     if not args.live: return { "live": False, "plan": plan }
     os.environ.update( { **expansion_run.read_env_file( f"{args.run_dir}/run-env.sh" ), rt.RUN_NAME_VARIABLE: args.run_name, rt.CEILING_VARIABLE: str( args.ceiling ) } )
     ctx   = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( root )
@@ -382,8 +479,9 @@ def _live( args, ctx, pairs, rows, plan, deps, close ):
         prepared = ( flags, [ *pool, *kept ], hashlib.sha256( f"{sha_}|planted|{ids}".encode( "utf-8" ) ).hexdigest()[ :32 ], gen )
         at       = copy.copy( ctx )
         at.candidate_stage = stage
-        judge    = lambda row: judge_row( row, at, stage, prepared, rt.in_language, ctx.policy if ctx.policy is not None else vd.POLICY )
-    report = run_live( args.run_dir, rows, judge, args.limit, args.budget )
+        ask      = judge_row_in_pack if args.variant == IN_PACK else judge_row
+        judge    = lambda row: ask( row, at, stage, prepared, rt.in_language, ctx.policy if ctx.policy is not None else vd.POLICY )
+    report = run_live( args.run_dir, rows, judge, args.limit, args.budget, summarize_in_pack if args.variant == IN_PACK else summarize )
     try:
         closed, close_error = close( ctx ), None
     except Exception as error:
