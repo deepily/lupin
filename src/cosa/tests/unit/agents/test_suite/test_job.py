@@ -1406,6 +1406,7 @@ def test_clean_eof_still_reports_the_childs_own_exit_code( monkeypatch, no_real_
 # =========================================================================== #
 NOT_RUN_NOTE = "unit: not run here, host tier"
 DOCKER_NOTE  = "docker_smoke: not run here, host tier"
+REUSE_NOTE   = "reuse: not run here, host tier"
 WITHOUT_HOST = [ c for c in ALL_SUITE_COMPONENTS if c not in job_mod.HOST_ONLY_SUITES ]
 
 
@@ -1451,9 +1452,10 @@ def test_execute_of_all_in_a_container_runs_no_unit_and_names_it_in_every_result
     summary = asyncio.run( job._execute() )
 
     assert seen == WITHOUT_HOST
-    assert job.cost_summary[ "suites_not_run" ] == { "unit": "not run here, host tier", "docker_smoke": "not run here, host tier" }
+    assert job.cost_summary[ "suites_not_run" ] == { "unit": "not run here, host tier", "reuse": "not run here, host tier", "docker_smoke": "not run here, host tier" }
     assert NOT_RUN_NOTE in summary and NOT_RUN_NOTE in job.artifacts[ "abstract" ]
     assert DOCKER_NOTE in summary and DOCKER_NOTE in job.artifacts[ "abstract" ]
+    assert REUSE_NOTE in summary and REUSE_NOTE in job.artifacts[ "abstract" ]
     assert NOT_RUN_NOTE in pathlib.Path( job.report_path ).read_text()
     assert "ALL PASSED." not in summary, "a pyramid without unit must not read as a bare full green"
 
@@ -1476,8 +1478,8 @@ def test_a_dry_run_of_all_in_a_container_says_what_the_real_run_would_leave_out(
     job = _make_job( test_types=[ "all" ], dry_run=True )
     monkeypatch.setattr( job_mod, "running_in_container", lambda: True )
     summary = asyncio.run( job._execute() )
-    assert NOT_RUN_NOTE in summary and DOCKER_NOTE in summary
-    assert job.cost_summary[ "suites_not_run" ] == { "unit": "not run here, host tier", "docker_smoke": "not run here, host tier" }
+    assert NOT_RUN_NOTE in summary and DOCKER_NOTE in summary and REUSE_NOTE in summary
+    assert job.cost_summary[ "suites_not_run" ] == { "unit": "not run here, host tier", "reuse": "not run here, host tier", "docker_smoke": "not run here, host tier" }
 
 
 def test_run_suite_tells_the_runner_which_tiers_were_left_out( monkeypatch, no_real_log ):
@@ -1517,10 +1519,22 @@ def test_a_caller_cannot_clear_the_left_out_tiers_by_env_var( monkeypatch, no_re
 def test_suites_left_out_names_a_host_suite_only_when_all_drops_it_in_a_container():
     """The left-out list names each host-only suite only when all drops it in a container."""
     here = job_mod.NOT_RUN_HERE
-    assert job_mod.suites_left_out( [ "all" ], True ) == { "unit": here, "docker_smoke": here }
+    assert job_mod.suites_left_out( [ "all" ], True ) == { "unit": here, "reuse": here, "docker_smoke": here }
     assert job_mod.suites_left_out( [ "all" ], False ) == {}
     assert job_mod.suites_left_out( [ "coverage" ], True ) == {}
     assert job_mod.suites_left_out( [ "unit" ], True ) == {}
-    assert job_mod.suites_left_out( [ "all", "unit" ], True ) == { "docker_smoke": here }
-    assert job_mod.suites_left_out( [ "all", "docker_smoke" ], True ) == { "unit": here }
-    assert job_mod.suites_left_out( [ "all", "unit", "docker_smoke" ], True ) == {}
+    assert job_mod.suites_left_out( [ "all", "unit" ], True ) == { "reuse": here, "docker_smoke": here }
+    assert job_mod.suites_left_out( [ "all", "docker_smoke" ], True ) == { "unit": here, "reuse": here }
+    assert job_mod.suites_left_out( [ "all", "reuse" ], True ) == { "unit": here, "docker_smoke": here }
+    assert job_mod.suites_left_out( [ "all", "unit", "reuse", "docker_smoke" ], True ) == {}
+
+
+def test_the_reuse_gate_is_a_host_tier_a_container_refuses_by_name_and_leaves_out_of_all( monkeypatch ):
+    """A container reports the reuse gate as not run here."""
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: True )
+    assert "reuse" in job_mod.HOST_ONLY_SUITES
+    assert "reuse" not in _expand_all( [ "all" ], True ) and "reuse" in _expand_all( [ "all" ], False )
+    why = job_mod.container_refusal( [ "reuse" ] )
+    assert why is not None and "src/tests/run-reuse-gate.sh" in why and "reuse" not in why.split( "Suites offered here:" )[ 1 ]
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: False )
+    assert job_mod.container_refusal( [ "reuse" ] ) is None

@@ -173,6 +173,7 @@ export function captureHistoryScroll( mount: HTMLElement ): HistoryScroll {
  *   - a pane that still exists under the same card and day gets its remembered offset
  *   - a pane that is gone is skipped
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line; the body below is fully covered.
 export function restoreHistoryScroll( mount: HTMLElement, remembered: HistoryScroll ): void {
   if ( remembered.size === 0 ) return;
   for ( const card of Array.from(mount.children) as HTMLElement[] ) {

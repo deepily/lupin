@@ -7,6 +7,7 @@ Requires:
 Ensures:
     - The three toggles share one row inside the focus bar.
     - That row sits below the persona badges, inside the focus bar.
+    - Each toggle is as tall as a persona badge.
 """
 
 import pytest
@@ -41,6 +42,21 @@ GEOMETRY_JS = """
 """
 
 
+HEIGHT_JS = """
+( ids ) => {
+    // A real persona badge, built the way the broadcast card builds one, so its height comes from the shipped CSS.
+    const chip = document.createElement( "button" );
+    chip.className = "broadcast-chip";
+    chip.innerHTML = '<span class="broadcast-chip-icon">🌿</span><span>Cheech</span>';
+    chip.style.cssText = "position:fixed;top:0;left:0;visibility:hidden";
+    document.body.appendChild( chip );
+    const badge = chip.getBoundingClientRect().height;
+    chip.remove();
+    return { badge : badge, toggles : ids.map( ( id ) => ( { id : id, height : document.getElementById( id ).getBoundingClientRect().height } ) ) };
+}
+"""
+
+
 @pytest.fixture( scope="function" )
 def strip_page( logged_in_page ):
     """The classic page with one session card, so the focus bar is showing."""
@@ -69,3 +85,13 @@ class TestFocusBarTogglesRow:
         tops = [ t[ "top" ] for t in geo[ "toggles" ] ]
         assert max( tops ) - min( tops ) < 2, f"the toggles are not on one line: {tops}"
         assert geo[ "row" ][ "bottom" ] <= geo[ "strip" ][ "bottom" ] + 1, "the toggles row spills out of the focus bar"
+
+    def test_each_toggle_is_as_tall_as_a_persona_badge( self, strip_page ):
+        """
+        Ensures:
+            - every toggle's height is within a tenth of a pixel of a persona badge's height
+        """
+        got = strip_page.evaluate( HEIGHT_JS, TOGGLE_IDS )
+        assert got[ "badge" ] > 0, f"the badge probe has no height: {got}"
+        for toggle in got[ "toggles" ]:
+            assert abs( toggle[ "height" ] - got[ "badge" ] ) < 0.1, f"{toggle[ 'id' ]} is not as tall as a persona badge: {got}"
