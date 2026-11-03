@@ -247,7 +247,23 @@ def test_a_session_that_stops_on_its_own_twice_in_a_row_has_finished_and_a_timeo
 
 def test_a_timed_out_slice_is_not_a_failure():
     sessions, _ = make( ( 127, "TimeoutExpired: ran out" ) )
-    assert sessions.work( WITH, "/wt/run1", HANDLE, 10 ) == { "seat_hours" : 1.0, "finished" : False }
+    assert sessions.work( WITH, "/wt/run1", HANDLE, 10 ) == { "seat_hours" : 1.0, "finished" : False, "seats" : 1 }
+
+
+def agent_calls( *names ):
+    """Return an assistant event that makes the named tool calls in one message."""
+    return { "type" : "assistant", "message" : { "content" : [ { "type" : "tool_use", "id" : f"a{n}", "name" : name, "input" : {} } for n, name in enumerate( names ) ] } }
+
+
+def test_seats_are_the_configured_seats_plus_the_most_subagent_calls_made_in_one_message():
+    output = stream( agent_calls( "Agent" ), agent_calls( "Agent", "Task", "Bash" ), agent_calls( "Task" ) )
+    sessions, _ = make( ( 0, output ), seats=2 )
+    assert sessions.work( WITH, "/wt/run1", HANDLE, 10 )[ "seats" ] == 4
+
+
+def test_a_slice_with_no_subagent_calls_reports_the_configured_seats():
+    sessions, _ = make( ( 0, stream( agent_calls( "Bash" ) ) ), seats=3 )
+    assert sessions.work( WITH, "/wt/run1", HANDLE, 10 )[ "seats" ] == 3
 
 
 def test_a_slice_that_ends_with_an_error_before_its_time_is_refused_with_the_output_tail():

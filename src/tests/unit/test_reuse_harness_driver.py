@@ -7,6 +7,7 @@ The acceptance port reads a junit report that a stub client's progress decides.
 The session is a stub that gains one passing test per slice.
 So the stop conditions, the per-run database and the tamper check are shown through the real ports.
 """
+import datetime
 import json
 import os
 import runpy
@@ -23,6 +24,7 @@ from lupin_mcp.reuse_harness import driver
 from lupin_mcp.reuse_harness import errors as err
 from lupin_mcp.reuse_harness import freeze
 from lupin_mcp.reuse_harness import log
+from lupin_mcp.reuse_harness import measure
 from lupin_mcp.reuse_harness import run as harness
 from lupin_mcp.reuse_harness import server
 from lupin_mcp.reuse_harness import session
@@ -83,7 +85,23 @@ class StubSession:
         """Gain one passing test; optionally edit a frozen test."""
         if self.tamper: open( os.path.join( path, TEST_FILE ), "a" ).write( "\n# edited by the run\n" )
         self.progress = min( self.progress + 1, self.ceiling )
-        return { "seat_hours" : 1.0, "finished" : False }
+        return { "seat_hours" : 1.0, "finished" : False, "seats" : 1 }
+
+
+class StubMeter:
+    """A meter that reports fixed figures."""
+
+    def read( self ):
+        """Report 5 CPU seconds and a 2000 byte largest process."""
+        return { "cpu_seconds" : 5.0, "peak_rss_bytes" : 2000 }
+
+
+class StubClock:
+    """A clock that stands still."""
+
+    def now( self ):
+        """Return a Monday."""
+        return datetime.datetime( 2026, 11, 2, 12, 0, tzinfo=datetime.timezone.utc )
 
 
 def wire( repo, spec, session_stub, tmp_path ):
@@ -109,6 +127,8 @@ def wire( repo, spec, session_stub, tmp_path ):
         session  = session_stub,
         tests    = acceptance.Acceptance( repo[ "commit" ], "ck_live_key", os.path.join( run_dir, "reports" ), runner=runner, environ={},
                                           removed=arms.build_session_config( spec[ "arm" ], spec[ "model_id" ] )[ "remove_paths" ] ),
+        meter    = StubMeter(),
+        clock    = StubClock(),
         log      = log.RunLog( run_dir ) )
     return ports, docker, databases, run_dir
 
@@ -306,3 +326,47 @@ def test_build_ports_tells_the_test_port_which_paths_the_arm_removed( repo, monk
     monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD", "pw" )
     ports = driver.build_ports( make_spec( repo, arm=arm ), str( repo[ "root" ] ), str( repo[ "data" ] ), "i", environ={ "JWT_SECRET_KEY" : "k" } )
     assert ports.tests.removed == removed
+
+
+def pilot_argv( repo, *extra ):
+    """Return the command line of a pilot: --pilot in place of --cap-seat-hours."""
+    return [ "--repo-root", str( repo[ "root" ] ), "--data-root", str( repo[ "data" ] ), "--run-id", "run1", "--arm", "with", "--model-id", "claude-opus-5-5",
+             "--frozen-sha", repo[ "commit" ], *extra ]
+
+
+def test_parse_reads_a_pilot_as_no_cap_and_a_scored_run_as_its_cap( repo ):
+    assert driver.parse( pilot_argv( repo, "--pilot" ) ).pilot is True
+    assert driver.parse( pilot_argv( repo, "--pilot" ) ).cap_seat_hours is None
+    scored = driver.parse( pilot_argv( repo, "--cap-seat-hours", "7.5" ) )
+    assert ( scored.pilot, scored.cap_seat_hours ) == ( False, 7.5 )
+
+
+@pytest.mark.parametrize( "extra", [ [], [ "--pilot", "--cap-seat-hours", "5" ] ] )
+def test_parse_needs_exactly_one_of_the_pilot_flag_and_a_cap( repo, extra, capsys ):
+    with pytest.raises( SystemExit ): driver.parse( pilot_argv( repo, *extra ) )
+    assert "--pilot" in capsys.readouterr().err
+
+
+def test_main_runs_a_pilot_with_no_cap_and_prints_a_result_that_says_so( repo, tmp_path, capsys ):
+    def factory( spec, repo_root, data_root, image, mcp_config, environ ):
+        assert spec[ "cap_seat_hours" ] is None
+        return wire( repo, spec, StubSession(), tmp_path )[ 0 ]
+    assert driver.main( pilot_argv( repo, "--pilot" ), factory=factory ) == driver.EXIT_DONE
+    result = json.loads( capsys.readouterr().out )
+    assert ( result[ "stop" ], result[ "pilot" ], result[ "cpu_seconds" ], result[ "peak_rss_bytes" ], result[ "peak_seats" ] ) == ( harness.STOP_ALL_PASS, True, 5.0, 2000, 1 )
+    assert result[ "server_peak_rss_bytes" ] == int( 12.5 * 1024 ** 2 )
+
+
+def test_result_json_holds_the_measurements_the_cap_report_reads( repo, tmp_path ):
+    spec = make_spec( repo, cap=None )
+    ports, _, _, run_dir = wire( repo, spec, StubSession(), tmp_path )
+    driver.execute( spec, ports, run_dir )
+    saved = json.load( open( os.path.join( run_dir, driver.RESULT_FILE ) ) )
+    assert { "working_days", "wall_hours", "cpu_seconds", "peak_rss_bytes", "server_peak_rss_bytes", "server_peak_cpu_percent", "peak_seats", "pilot", "time_to_all_pass_working_days" } <= set( saved )
+
+
+def test_build_ports_hands_the_run_a_real_meter_and_clock( repo, monkeypatch ):
+    monkeypatch.setenv( "LUPIN_TEST_DB_USER", "tester" )
+    monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD", "pw" )
+    ports = driver.build_ports( make_spec( repo, run_id="run9" ), str( repo[ "root" ] ), str( repo[ "data" ] ), "i", environ={ "JWT_SECRET_KEY" : "k" } )
+    assert isinstance( ports.meter, measure.Meter ) and isinstance( ports.clock, measure.Clock )

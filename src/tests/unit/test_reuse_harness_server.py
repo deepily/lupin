@@ -56,9 +56,10 @@ class Databases:
 class Docker:
     """A docker simulator that records every command and the environment it ran in."""
 
-    def __init__( self, run_code=0, rm_code=0, rm_text="", running="true" ):
-        """Choose the answers of run, rm and inspect."""
+    def __init__( self, run_code=0, rm_code=0, rm_text="", running="true", stats_code=0, stats_text="12.5MiB / 31GiB|1.50%" ):
+        """Choose the answers of run, rm, inspect and stats."""
         self.run_code, self.rm_code, self.rm_text, self.running = run_code, rm_code, rm_text, running
+        self.stats_code, self.stats_text = stats_code, stats_text
         self.calls      = []
         self.containers = set()
 
@@ -70,6 +71,7 @@ class Docker:
             if self.run_code == 0: self.containers.add( argv[ argv.index( "--name" ) + 1 ] )
             return self.run_code, "container-id" if self.run_code == 0 else "port is already allocated"
         if verb == "inspect": return 0, self.running
+        if verb == "stats": return self.stats_code, self.stats_text
         if verb == "logs": return 0, "Traceback: boot failed"
         if verb == "rm":
             name = argv[ -1 ]
@@ -324,3 +326,17 @@ def test_seed_gives_the_runs_own_database_the_sender_key_after_the_fresh_check()
     servers.seed( handle )
     assert databases.history[ -1 ] == ( "provision", harness.db_name( "r1" ), "sender-key-value" )
     assert servers.db_is_fresh( handle ) is False
+
+
+def test_sample_reads_the_containers_memory_and_cpu_from_docker_stats():
+    servers, _, docker = make()
+    handle = servers.start( "r1", "/wt" )
+    assert servers.sample( handle ) == { "mem_bytes" : int( 12.5 * 1024 ** 2 ), "cpu_percent" : 1.5 }
+    argv, _ = docker.calls[ -1 ]
+    assert argv[ :4 ] == [ "docker", "stats", "--no-stream", "--format" ] and argv[ -1 ] == handle[ "container" ]
+
+
+def test_sample_is_none_when_docker_does_not_answer_or_the_answer_cannot_be_read():
+    handle = { "container" : "c", "db_name" : "d" }
+    assert make( docker=Docker( stats_code=1, stats_text="Error: no such container" ) )[ 0 ].sample( handle ) is None
+    assert make( docker=Docker( stats_text="not a stats line" ) )[ 0 ].sample( handle ) is None

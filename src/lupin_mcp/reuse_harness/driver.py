@@ -22,6 +22,7 @@ from lupin_mcp.reuse_harness import errors as err
 from lupin_mcp.reuse_harness import freeze
 from lupin_mcp.reuse_harness import gitrepo
 from lupin_mcp.reuse_harness import log
+from lupin_mcp.reuse_harness import measure
 from lupin_mcp.reuse_harness import run as harness
 from lupin_mcp.reuse_harness import server
 from lupin_mcp.reuse_harness import session
@@ -89,6 +90,8 @@ def build_ports( spec, repo_root, data_root, image, mcp_config=None, environ=Non
         session  = session.Sessions( key, mcp_config=mcp_config, environ=environ ),
         tests    = acceptance.Acceptance( spec[ "server_commit" ], key, os.path.join( run_dir, "reports" ), environ=environ,
                                           removed=arms.build_session_config( spec[ "arm" ], spec[ "model_id" ] )[ "remove_paths" ] ),
+        meter    = measure.Meter(),
+        clock    = measure.Clock(),
         log      = log.RunLog( run_dir ) )
 
 
@@ -148,7 +151,9 @@ def parse( argv ):
     parser.add_argument( "--arm", required=True, choices=arms.ARMS )
     parser.add_argument( "--model-id", required=True )
     parser.add_argument( "--frozen-sha", required=True )
-    parser.add_argument( "--cap-seat-hours", required=True, type=float )
+    cap = parser.add_mutually_exclusive_group( required=True )
+    cap.add_argument( "--cap-seat-hours", type=float, help="the seat-hour cap of a scored run" )
+    cap.add_argument( "--pilot", action="store_true", help="the unscored pilot: no cap, stopped by the 10-working-day guard" )
     parser.add_argument( "--mcp-config" )
     parser.add_argument( "--dry-run", action="store_true" )
     return parser.parse_args( argv )
@@ -171,7 +176,7 @@ def main( argv, factory=build_ports, environ=None ):
     args = parse( argv )
     try:
         git     = gitrepo.GitRepo( args.repo_root )
-        spec    = freeze.build_spec( git, args.run_id, args.arm, args.model_id, args.frozen_sha, args.cap_seat_hours )
+        spec    = freeze.build_spec( git, args.run_id, args.arm, args.model_id, args.frozen_sha, None if args.pilot else args.cap_seat_hours )
         with open( os.path.join( args.repo_root, COMPOSE_FILE ), encoding="utf-8" ) as f: image = image_of( f.read() )
         ports   = factory( spec, args.repo_root, args.data_root, image, args.mcp_config, environ )
         outcome = dry_run( spec, ports ) if args.dry_run else execute( spec, ports, run_dir_of( args.data_root, spec ) )
