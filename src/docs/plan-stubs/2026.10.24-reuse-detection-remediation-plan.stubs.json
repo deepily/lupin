@@ -554,7 +554,7 @@
                     "acceptance": "12.4 track B passes: a real malformed line is refused and a definition with no line is refused, by an actual run; changed files 100% lines/branches/functions",
                     "owner_role": "implementer",
                     "depends_on": [
-                        "ph9-s2"
+                        "ph9-s1"
                     ]
                 },
                 {
