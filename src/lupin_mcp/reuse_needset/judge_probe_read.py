@@ -8,11 +8,10 @@ It decides nothing beyond the labels the mark defines. It prints the figures, th
 """
 import argparse
 import json
-import math
 import pathlib
 
-from lupin_mcp.reuse_e2e import wilson
 from lupin_mcp.reuse_needset import judge_probe as jp
+from lupin_mcp.reuse_needset import stage_c_score
 
 ACCEPT_AT      = 0.30
 SIZE_MOVED     = 0.40
@@ -54,12 +53,8 @@ def newcombe( k1, n1, k2, n2 ):
     Ensures:
         - returns ( D, low, high ), each rounded to six places
     """
-    p1, p2         = k1 / n1, k2 / n2
-    l1, u1         = wilson( k1, n1 )
-    l2, u2         = wilson( k2, n2 )
-    d              = p1 - p2
-    low, high      = d - math.sqrt( ( p1 - l1 ) ** 2 + ( u2 - p2 ) ** 2 ), d + math.sqrt( ( u1 - p1 ) ** 2 + ( p2 - l2 ) ** 2 )
-    return round( d, 6 ), round( low, 6 ), round( high, 6 )
+    got = stage_c_score.newcombe( k1, n1, k2, n2 )
+    return round( got[ "d" ], 6 ), round( got[ "low" ], 6 ), round( got[ "high" ], 6 )
 
 
 def index_results( results ):
