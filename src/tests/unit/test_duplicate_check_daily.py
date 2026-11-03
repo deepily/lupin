@@ -691,3 +691,13 @@ def test_the_live_notifier_falls_back_to_the_live_post_key_recipient_and_environ
 def test_the_reinstall_command_quotes_the_branch_for_the_shell():
     command = dd.reinstall_command( "/main", "/py", 300, "/bin/claude", "wip; rm -rf x" )
     assert command.endswith( "--branch 'wip; rm -rf x'" ) and command.startswith( "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --install --cap 300" )
+
+
+def test_an_idle_pinned_branch_with_only_older_branches_beside_it_is_not_refused( repo, tmp_path ):
+    commit( repo, { "m.txt": "m" }, "base", 300 )
+    branched( repo, "wip-older", 150 )
+    branched( repo, "wip-pinned", 100 )
+    assert dd.branch_guard( repo, "wip-pinned", NOW ) is None, "the pin is idle 100 hours but nothing beside it is newer"
+    assert dd.branch_guard( repo, "wip-pinned", NOW + datetime.timedelta( days=10 ) ) is None, "idle for days, still the newest work there is"
+    branched( repo, "wip-newer", 2 )
+    assert dd.branch_guard( repo, "wip-pinned", NOW )[ "newest" ] == "wip-newer", "the same pin is refused once a newer branch exists"
