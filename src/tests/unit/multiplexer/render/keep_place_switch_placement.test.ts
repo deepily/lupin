@@ -33,10 +33,10 @@ test("the toggles row follows the persona badges and holds Focus, All and Keep p
   const doc  = page();
   const row  = doc.getElementById("cc-strip-toggles")!;
   const icons = doc.getElementById("cc-strip-icons")!;
-  assert.equal(icons.nextElementSibling, row, "the row sits directly under the badges");
-  assert.equal(icons.querySelector(".cc-strip-toggle"), null, "the badge row holds no toggle");
+  assert.ok( icons.nextElementSibling === row, "the row sits directly under the badges" );
+  assert.ok( icons.querySelector(".cc-strip-toggle") === null, "the badge row holds no toggle" );
   assert.deepEqual(Array.from(row.children).map(c => c.id), [ "cc-strip-toggle", "cc-hide-inactive-toggle", "cc-keep-place-toggle" ]);
-  assert.equal(doc.getElementById("sender-cards-container")!.previousElementSibling, doc.getElementById("cc-session-strip"));
+  assert.ok( doc.getElementById("sender-cards-container")!.previousElementSibling === doc.getElementById("cc-session-strip"), "the cards container sits directly under the session strip" );
 });
 
 test("the switch starts off", () => {
