@@ -8,13 +8,18 @@ Every new definition the branch adds must also have an outcome line. The list co
 changed files), or from a symbol index diff when one is given with --diff.
 A branch that adds no definitions and no outcome lines passes. It sends nothing and runs no model.
 
+The base is the merge base with the nearest of the branches in the key `reuse merge gate base`, else main and origin/main.
+The key `reuse merge gate since`, a commit, moves the base up to it, so earlier lines and definitions are exempt.
+A rename is followed: a function in a renamed file is new only when it is absent under the old path.
+
 The flag `reuse review gating` is read fresh on every run:
 
     - false: refusals are reported under "Report-only" and the run exits 0.
     - true: any refusal or missing definition exits 1.
 
 Exit 3 means the gate could not check. Either the flag is absent, doubled or garbled, or git named no base.
-It also means the list of new definitions could not be built, or a given diff reports `algorithm_changed`.
+It also means `since` is not a known commit, the list of new definitions could not be built,
+or a given diff reports `algorithm_changed`.
 That is not a pass, in either phase.
 The summary block (Total Tests, Passed, Failed, Errors) is the one the test-suite job reads.
 Its unit is checks: one for the scan itself, one per outcome line, one per new definition in the diff.
@@ -30,6 +35,7 @@ from cosa.repo.duplicate_check import errors as dc_errors
 from cosa.repo.duplicate_check import extract
 from cosa.repo.symindex import build, py_index, spec as sp
 from lupin_mcp import duplicate_check_daily as daily
+from lupin_mcp import fleet_cap_ini_io
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_outcome as ro
 from lupin_mcp import reuse_refusals as rr
@@ -39,7 +45,10 @@ from lupin_mcp.reuse_needset import source_at
 
 WORKTREE_PREFIX  = "reuse-gate-"                                    # the detached worktrees of this gate, beside the daily check's
 UNREADABLE       = ( OSError, ValueError, RuntimeError, SyntaxError, needset_errors.NeedsetError, dc_errors.DuplicateCheckError )     # what makes a run "could not check"
-BASE_CANDIDATES  = ( "main", "origin/main" )                    # tried in this order when --base is not given
+BASE_CANDIDATES  = ( "main", "origin/main" )                    # the branches a branch is merged into, when --base and the key `reuse merge gate base` are both absent
+SINCE_KEY        = "reuse merge gate since"                  # a commit; only definitions and lines added after it are checked
+BASE_KEY         = "reuse merge gate base"                   # the branches to measure from, separated by spaces; the nearest merge base wins
+SHA_RE           = re.compile( r"[0-9a-f]{7,40}" )
 HUNK_RE          = re.compile( r"^@@ -\S+ \+(\d+)(?:,\d+)? @@" )          # the first line a hunk adds, in the new file
 EXIT_REFUSED     = 1
 EXIT_NOT_CHECKED = rr.NOT_CHECKED                               # 3, the same code the reviewer's gate and the refusal record use
@@ -59,20 +68,77 @@ def _git( root, args ):
     return done.returncode, done.stdout
 
 
-def resolve_base( root, base=None ):
+def read_names( ini ):
+    """
+    Read the branches to measure from.
+
+    Requires:
+        - ini is a configuration file path, or None for the default file
+    Ensures:
+        - returns the names the key `reuse merge gate base` holds, split on spaces
+        - returns BASE_CANDIDATES when the key is absent, doubled, unreadable or empty
+    """
+    raw = fleet_cap_ini_io.read_value_from_disk( ini if ini is not None else gate.ini_path(), BASE_KEY )
+    return raw.split() if raw and raw.strip() else list( BASE_CANDIDATES )
+
+
+def read_since( ini ):
+    """
+    Read the commit after which definitions and lines are checked.
+
+    Requires:
+        - ini is a configuration file path, or None for the default file
+    Ensures:
+        - returns the commit text the key `reuse merge gate since` holds, or None when the key is absent, doubled, unreadable or empty
+    Raises:
+        - ValueError when the key holds something that is not a hexadecimal commit
+    """
+    raw = fleet_cap_ini_io.read_value_from_disk( ini if ini is not None else gate.ini_path(), SINCE_KEY )
+    if raw is None or not raw.strip(): return None
+    if not SHA_RE.fullmatch( raw.strip() ): raise ValueError( f"`{SINCE_KEY}` holds {raw!r}, which is not a commit" )
+    return raw.strip()
+
+
+def resolve_base( root, names=None ):
     """
     Name the commit the branch is measured from.
 
     Requires:
-        - root is a git working tree
+        - root is a git working tree; names is a branch name, a list of them, or None for BASE_CANDIDATES
     Ensures:
-        - returns the merge base of HEAD and `base`, or of HEAD and the first of BASE_CANDIDATES that git knows
-        - returns None when no candidate has a merge base with HEAD
+        - returns the merge base of HEAD and the named branch that lies nearest HEAD, by the commits between them
+        - a name git does not know, or one with no merge base, is passed over
+        - returns None when no name has a merge base with HEAD
     """
-    for name in ( [ base ] if base else list( BASE_CANDIDATES ) ):
+    names = list( BASE_CANDIDATES ) if not names else ( [ names ] if isinstance( names, str ) else list( names ) )
+    best  = None
+    for name in names:
         code, out = _git( root, [ "merge-base", name, "HEAD" ] )
-        if code == 0 and out.strip(): return out.strip()
-    return None
+        if code != 0 or not out.strip(): continue
+        sha = out.strip()
+        code, count = _git( root, [ "rev-list", "--count", f"{sha}..HEAD" ] )
+        if best is None or int( count ) < best[ 0 ]: best = ( int( count ), sha )
+    return best[ 1 ] if best else None
+
+
+def effective_base( root, sha, since ):
+    """
+    Move the base up to the `since` commit when that commit lies between the base and HEAD.
+
+    Requires:
+        - sha is a commit; since is a commit text or None
+    Ensures:
+        - returns the full sha of `since` when it is a descendant of sha and an ancestor of HEAD, so earlier definitions and lines are exempt
+        - returns sha when since is None, or lies outside that stretch (a branch cut before `since` is checked from its merge base)
+    Raises:
+        - ValueError when git does not know the `since` commit
+    """
+    if since is None: return sha
+    code, full = _git( root, [ "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}" ] )
+    if code != 0 or not full.strip(): raise ValueError( f"`{SINCE_KEY}` names {since}, which git does not know" )
+    full = full.strip()
+    inside = _git( root, [ "merge-base", "--is-ancestor", sha, full ] )[ 0 ] == 0 and _git( root, [ "merge-base", "--is-ancestor", full, "HEAD" ] )[ 0 ] == 0
+    return full if inside else sha
 
 
 def added_text_by_file( root, base_sha ):
@@ -109,6 +175,7 @@ def added_definition_ids( root, base_sha ):
         - the window and the changed files are the daily check's own (`window_of`, `changed_files`)
         - a file the symbol index does not hold (a test file, a skipped folder) lists nothing, by the indexer's own rule (`is_indexed`)
         - a definition is new when its file and name are absent at base_sha; a definition whose text changed is not new
+        - a renamed file is read against the path it had at base_sha, so a function counts as new only when it is absent under the old path
         - ids follow the symbol index's rule (module and name, the repository prefix, `#2` for a repeat), so they match a ruling's symbol
         - the two detached worktrees are removed whether the call ends or fails
         - returns the ids sorted
@@ -123,9 +190,11 @@ def added_definition_ids( root, base_sha ):
     stem   = pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}"
     tree   = source_at.ensure_worktree( root, window[ "end" ], stem )
     try:
-        old = source_at.ensure_worktree( root, base_sha, stem.with_name( f"{stem.name}-base" ) )
+        was  = daily.old_paths( root, window )
+        back = { was.get( f, f ): f for f in files }
+        old  = source_at.ensure_worktree( root, base_sha, stem.with_name( f"{stem.name}-base" ) )
         try:
-            held = { ( d[ "file" ], d[ "name" ] ) for d in extract.extract_tree( old, [ pathlib.Path( old ) / f for f in files if ( pathlib.Path( old ) / f ).exists() ], "new" )[ "definitions" ] }
+            held = { ( back[ d[ "file" ] ], d[ "name" ] ) for d in extract.extract_tree( old, [ pathlib.Path( old ) / o for o in back if ( pathlib.Path( old ) / o ).exists() ], "new" )[ "definitions" ] }
         finally: daily.release( root, old )
         report = extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )
         if report[ "skipped_python" ]: raise ValueError( f"{', '.join( report[ 'skipped_python' ] )} did not parse, so its definitions cannot be listed" )
@@ -141,22 +210,25 @@ def added_definition_ids( root, base_sha ):
     return sorted( r[ "id" ] for r in records )
 
 
-def run( root, base, diff_path, data_dir, log_dir, gating ):
+def run( root, base, diff_path, data_dir, log_dir, gating, since=None ):
     """
     Judge the outcome lines the branch adds, and the new definitions of a given diff.
 
     Requires:
-        - gating is True or False
+        - gating is True or False; since is a commit text or None
+        - base is a branch name, a list of names, or None
         - diff_path is a symbol index diff file, or None for the definitions added_definition_ids finds
     Ensures:
         - returns { "refusals": [ { path, n, line, reasons } ], "missing": [ { symbol, reason } ], "lines": int, "definitions": int, "appended": int }
         - returns { "error": text } when the gate could not check: an unreadable or ill-shaped diff file, an unreadable call log, a diff with `algorithm_changed`, no base, or a record that could not be written
         - refusals.jsonl in data_dir gains one record per judged line, once per document text
         - the call log, searches and exclusions are read once for all documents
+        - with `since` inside the branch, lines and definitions added before it are not read
     """
     sha = resolve_base( root, base )
     if sha is None: return { "error": "git names no merge base for HEAD; pass --base" }
     try:
+        sha = effective_base( root, sha, since )
         diff = json.loads( pathlib.Path( diff_path ).read_text( encoding="utf-8" ) ) if diff_path else { "added": added_definition_ids( root, sha ) }
         if not isinstance( diff, dict ) or not isinstance( diff.get( "added", [] ), list ): raise ValueError( f"{diff_path} is not a symbol index diff" )
         if "algorithm_changed" in diff: raise ValueError( f"{diff_path}: the pin algorithm changed, so the diff lists no definitions to check" )
@@ -216,7 +288,7 @@ def main( argv=None, out=None ):
     """
     ap = argparse.ArgumentParser( description="Judge the REUSE-OUTCOME lines a branch adds, for the merge pyramid." )
     ap.add_argument( "--root", default="." )
-    ap.add_argument( "--base", default=None, help="the branch or commit to measure from; default is main, then origin/main" )
+    ap.add_argument( "--base", default=None, help="the branch or commit to measure from; default is the branches of `reuse merge gate base`, else main and origin/main" )
     ap.add_argument( "--diff", default=None, help="a symbol index diff to use in place of the definitions found from git" )
     ap.add_argument( "--data-dir", default=None )
     ap.add_argument( "--log-dir", default=None )
@@ -228,12 +300,16 @@ def main( argv=None, out=None ):
     if flag is None:
         print( f"REFUSING: `{gate.GATING_KEY}` could not be read. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
+    try: since = read_since( a.ini )
+    except ValueError as e:
+        print( f"REFUSING: {e}. Nothing was checked.", file=out )
+        return EXIT_NOT_CHECKED
     data = pathlib.Path( a.data_dir or rr.default_data_dir( root ) )
     try: data.mkdir( parents=True, exist_ok=True )
     except OSError as e:
         print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED
-    result = run( root, a.base, a.diff, data, a.log_dir or data / "call-log", flag )
+    result = run( root, a.base or read_names( a.ini ), a.diff, data, a.log_dir or data / "call-log", flag, since )
     if "error" in result:
         print( f"REFUSING: {result[ 'error' ]}. Nothing was checked.", file=out )
         return EXIT_NOT_CHECKED

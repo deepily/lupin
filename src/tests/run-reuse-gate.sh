@@ -3,12 +3,12 @@
 #
 # Usage:
 #   run-reuse-gate.sh                       # this tree's HEAD against the merge base with main
-#   run-reuse-gate.sh --base REV            # measure from REV instead of main
+#   run-reuse-gate.sh --base REV            # measure from REV instead of the branches of the key `reuse merge gate base`
 #   run-reuse-gate.sh --diff FILE           # use a symbol index diff as the list of new definitions, in place of the one built from git
 #
 # What it reads: the Markdown lines HEAD adds since the merge base, the call log, the search records, the
 # definitions HEAD adds to indexed files (found from git, each needs an outcome line) and the key
-# `reuse review gating` in the main checkout's lupin-app.ini. It sends nothing and runs no model.
+# `reuse review gating`, `reuse merge gate since` and `reuse merge gate base` in the main checkout's lupin-app.ini. It sends nothing and runs no model.
 # With the key false it reports and exits 0. With the key true any refused line or any definition with no
 # outcome line exits 1.
 #

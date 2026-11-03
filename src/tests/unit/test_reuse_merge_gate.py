@@ -48,10 +48,10 @@ def data( tmp_path ):
     return folder
 
 
-def ini( tmp_path, value="true" ):
-    """Ensures: returns the path of an ini file holding the gating key with this value."""
+def ini( tmp_path, value="true", extra="" ):
+    """Ensures: returns an ini file path holding the gating key, then the extra lines."""
     path = tmp_path / "lupin-app.ini"
-    path.write_text( f"[x]\nreuse review gating = {value}\n", encoding="utf-8" )
+    path.write_text( f"[x]\nreuse review gating = {value}\n{extra}", encoding="utf-8" )
     return str( path )
 
 
@@ -63,10 +63,10 @@ def commit_doc( repo, name, *lines, rulings=True ):
     git( repo, "commit", "-q", "-m", f"add {name}" )
 
 
-def run( repo, data, tmp_path, *extra, value="true" ):
+def run( repo, data, tmp_path, *extra, value="true", lines="" ):
     """Ensures: returns ( exit code, printed text ) of the command on repo."""
     out  = io.StringIO()
-    code = mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, value ), *extra ], out=out )
+    code = mg.main( [ "--root", str( repo ), "--data-dir", str( data ), "--ini", ini( tmp_path, value, lines ), *extra ], out=out )
     return code, out.getvalue()
 
 
@@ -344,3 +344,113 @@ def test_a_branch_that_changes_no_indexed_file_makes_no_worktree( repo, data, tm
     monkeypatch.setattr( mg.source_at, "ensure_worktree", boom )
     commit_doc( repo, "review.md", GOOD )
     assert run( repo, data, tmp_path )[ 0 ] == 0
+
+
+def sha_of( repo, rev="HEAD" ):
+    """Ensures: returns the full sha of a revision."""
+    return git( repo, "rev-parse", rev ).strip()
+
+
+def test_the_base_is_the_nearest_merge_base_among_the_branches_named( repo, data, tmp_path ):
+    commit_doc( repo, "old.md", NOT_IN_LOG )
+    git( repo, "branch", "-f", "integration", "HEAD" )
+    commit_doc( repo, "new.md", GOOD )
+    assert mg.resolve_base( repo, [ "main", "integration" ] ) == sha_of( repo, "integration" ), "integration lies nearer HEAD than the stale main"
+    assert mg.resolve_base( repo, [ "integration", "main" ] ) == sha_of( repo, "integration" ), "the order of the names does not matter"
+    assert mg.resolve_base( repo, [ "nope", "main" ] ) == sha_of( repo, "main" ), "a name git does not know is passed over"
+    assert mg.resolve_base( repo, "integration" ) == sha_of( repo, "integration" )
+    code, text = run( repo, data, tmp_path, lines="reuse merge gate base = main integration\n" )
+    assert code == 0 and "REFUSED" not in text, "the key makes the branch be measured from integration, so old.md is not part of it"
+    assert run( repo, data, tmp_path )[ 0 ] == 1, "without the key the stale main is the base and old.md's bad line counts"
+    assert run( repo, data, tmp_path, "--base", "main", lines="reuse merge gate base = integration\n" )[ 0 ] == 1, "--base wins over the key"
+
+
+def test_the_base_names_default_when_the_key_is_absent_empty_or_doubled( tmp_path ):
+    assert mg.read_names( ini( tmp_path ) ) == list( mg.BASE_CANDIDATES )
+    assert mg.read_names( ini( tmp_path, extra="reuse merge gate base =\n" ) ) == list( mg.BASE_CANDIDATES )
+    assert mg.read_names( ini( tmp_path, extra="reuse merge gate base = a\nreuse merge gate base = b\n" ) ) == list( mg.BASE_CANDIDATES )
+    assert mg.read_names( ini( tmp_path, extra="reuse merge gate base = a  b\n" ) ) == [ "a", "b" ]
+
+
+def test_the_since_key_reads_a_commit_or_nothing_and_refuses_text_that_is_not_a_commit( tmp_path ):
+    assert mg.read_since( ini( tmp_path ) ) is None, "absent"
+    assert mg.read_since( ini( tmp_path, extra="reuse merge gate since =\n" ) ) is None, "empty"
+    assert mg.read_since( ini( tmp_path, extra="reuse merge gate since = abc1234\n" ) ) == "abc1234"
+    with pytest.raises( ValueError, match="not a commit" ): mg.read_since( ini( tmp_path, extra="reuse merge gate since = latest\n" ) )
+
+
+def test_lines_and_definitions_added_before_the_since_commit_are_exempt( repo, data, tmp_path ):
+    commit_doc( repo, "old.md", NOT_IN_LOG )
+    commit_code( repo, "pkg/old.py", "def early():\n    return 1\n" )
+    since = sha_of( repo )
+    commit_code( repo, "pkg/late.py", "def late():\n    return 2\n" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "MISSING repo:pkg.old.early" in text and "MISSING repo:pkg.late.late" in text and "REFUSED old.md" in text
+    code, text = run( repo, data, tmp_path, lines=f"reuse merge gate since = {since}\n" )
+    assert code == 1 and "MISSING repo:pkg.late.late" in text and "early" not in text and "REFUSED" not in text, "only what came after since is checked"
+    assert ( count( text, "Total Tests" ), count( text, "Failed" ) ) == ( 2, 1 )
+
+
+def test_a_since_commit_the_branch_does_not_contain_exempts_nothing( repo, data, tmp_path ):
+    git( repo, "checkout", "-q", "-b", "other", "main" )
+    commit_doc( repo, "other.md", GOOD )
+    elsewhere = sha_of( repo )
+    git( repo, "checkout", "-q", "feat" )
+    commit_doc( repo, "old.md", NOT_IN_LOG )
+    code, text = run( repo, data, tmp_path, lines=f"reuse merge gate since = {elsewhere}\n" )
+    assert code == 1 and "REFUSED old.md" in text, "a branch cut before the since commit is checked from its merge base"
+
+
+def test_the_effective_base_is_the_later_of_the_merge_base_and_since( repo ):
+    commit_doc( repo, "one.md", GOOD )
+    middle = sha_of( repo )
+    commit_doc( repo, "two.md", GOOD )
+    tip, root_sha = sha_of( repo ), sha_of( repo, "main" )
+    assert mg.effective_base( repo, root_sha, None ) == root_sha, "no since, no move"
+    assert mg.effective_base( repo, root_sha, middle[ :9 ] ) == middle, "since lies between the base and HEAD: the base moves up to it, as a full sha"
+    assert mg.effective_base( repo, tip, middle ) == tip, "since older than the base moves nothing"
+    git( repo, "checkout", "-q", "-b", "side", root_sha )
+    commit_doc( repo, "side.md", GOOD )
+    assert mg.effective_base( repo, root_sha, sha_of( repo ) ) == sha_of( repo ), "a side commit that is HEAD itself is inside"
+    git( repo, "checkout", "-q", "feat" )
+    assert mg.effective_base( repo, root_sha, sha_of( repo, "side" ) ) == root_sha, "a commit HEAD does not contain moves nothing"
+
+
+def test_a_since_commit_git_does_not_know_could_not_be_checked( repo, data, tmp_path ):
+    commit_doc( repo, "review.md", GOOD )
+    code, text = run( repo, data, tmp_path, lines="reuse merge gate since = deadbee\n" )
+    assert code == 3 and "`reuse merge gate since` names deadbee, which git does not know. Nothing was checked." in text and "Total Tests" not in text
+
+
+def test_a_since_value_that_is_not_a_commit_could_not_be_checked( repo, data, tmp_path ):
+    commit_doc( repo, "review.md", GOOD )
+    code, text = run( repo, data, tmp_path, lines="reuse merge gate since = latest\n" )
+    assert code == 3 and "which is not a commit. Nothing was checked." in text and "Total Tests" not in text
+
+
+def test_a_renamed_file_makes_only_its_new_functions_new( repo, data, tmp_path ):
+    both = "def same():\n    return 1\n\n\ndef keep():\n    return 2\n"
+    commit_code( repo, "pkg/m.py", both )
+    git( repo, "branch", "-f", "main", "HEAD" )
+    git( repo, "mv", "pkg/m.py", "pkg/n.py" )
+    ( repo / "pkg" / "n.py" ).write_text( both + "\n\ndef fresh():\n    return 3\n", encoding="utf-8" )
+    git( repo, "add", "pkg/n.py" )
+    git( repo, "commit", "-q", "-m", "rename and add" )
+    code, text = run( repo, data, tmp_path )
+    assert code == 1 and "MISSING repo:pkg.n.fresh is new in the diff" in text, "the function added in the renamed file is new"
+    assert "pkg.n.same" not in text and "pkg.n.keep" not in text, "the functions the old path held are not new under the new one"
+    assert ( count( text, "Total Tests" ), count( text, "Failed" ) ) == ( 2, 1 )
+
+
+@pytest.mark.parametrize( "key", [ mg.SINCE_KEY, mg.BASE_KEY ] )
+def test_the_shipped_ini_defines_each_new_key_once_empty_and_the_explainer_describes_it( key ):
+    root = pathlib.Path( mg.__file__ ).resolve().parents[ 2 ]
+    for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ):
+        text = ( root / "src" / "conf" / name ).read_text( encoding="utf-8" )
+        rows = [ l for l in text.splitlines() if l.startswith( f"{key} " ) ]
+        assert len( rows ) == 1, f"{key} is defined {len( rows )} times in {name}"
+        if name == "lupin-app.ini": assert rows[ 0 ].split( "=", 1 )[ 1 ].strip() == "", "it ships empty, so nothing is exempt and the default branches apply"
+        else: assert "Keep it defined exactly once." in rows[ 0 ] and len( rows[ 0 ] ) > 200
+    ini_path = str( root / "src" / "conf" / "lupin-app.ini" )
+    assert mg.read_since( ini_path ) is None and mg.read_names( ini_path ) == list( mg.BASE_CANDIDATES )
+    assert gate.read_gating( ini_path, quiet=True ) is False, "the longer key names do not make the gating key read as doubled"
