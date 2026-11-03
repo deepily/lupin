@@ -15,27 +15,34 @@ APPROVE_LINK_PATH  = "/app/tasks/approve?row="
 APPROVE_LINK_LABEL = "approve ☐"
 VIEW_LINK_PATH     = "/app/tasks/view?row="
 VIEW_LINK_LABEL    = "📋"
+PRIORITY_LINK_PARAM = "&priority="
+PRIORITY_LINK_ICON  = "⏫"
+PRIORITIES          = ( "P0", "P1", "P2", "P3", "P4", "P5" )
 
 # A full, canonical, lowercase row id. Short ids and braced or unhyphenated forms are
 # refused: the click handlers send exactly this string to the server.
 _ROW_ID_RE = re.compile( r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" )
 
 
-def approve_link_line( row_id, title ):
+def approve_link_line( row_id, title, priority=None ):
     """
     Write the card bullet for one held row: its title, its approve link, then its 📋 view link.
 
     Requires:
         - row_id is a full lowercase hyphenated UUID string
         - title is a string with at least one non-blank character
+        - priority is None, or one of P0..P5
 
     Ensures:
         - returns one line, `- <title> [approve ☐](/app/tasks/approve?row=<row_id>) [📋](/app/tasks/view?row=<row_id>)`
+        - with no priority the line is the two-link line, unchanged
+        - with a priority a third link sits between them, `[⏫ P0](/app/tasks/approve?row=<row_id>&priority=P0)`,
+          which admits the row at that level; the server honours it for Rick's login only, and only when it raises the row
         - whitespace runs in the title (newlines included) collapse to single spaces
         - `[` and `]` in the title are backslash-escaped so a title cannot form a link
 
     Raises:
-        - ValueError if row_id is not a full lowercase UUID, or title is blank
+        - ValueError if row_id is not a full lowercase UUID, title is blank, or priority is not None or one of P0..P5
         - TypeError if row_id or title is not a string
     """
     if not isinstance( row_id, str ): raise TypeError( f"row_id must be a string, got {type( row_id ).__name__}" )
@@ -45,7 +52,9 @@ def approve_link_line( row_id, title ):
     flat = " ".join( title.split() )
     if flat == "": raise ValueError( "title must not be blank" )
     flat = flat.replace( "[", "\\[" ).replace( "]", "\\]" )
-    return f"- {flat} [{APPROVE_LINK_LABEL}]({APPROVE_LINK_PATH}{row_id}) [{VIEW_LINK_LABEL}]({VIEW_LINK_PATH}{row_id})"
+    if priority is not None and priority not in PRIORITIES: raise ValueError( f"priority must be None or one of {PRIORITIES}, got {priority!r}" )
+    raised = "" if priority is None else f" [{PRIORITY_LINK_ICON} {priority}]({APPROVE_LINK_PATH}{row_id}{PRIORITY_LINK_PARAM}{priority})"
+    return f"- {flat} [{APPROVE_LINK_LABEL}]({APPROVE_LINK_PATH}{row_id}){raised} [{VIEW_LINK_LABEL}]({VIEW_LINK_PATH}{row_id})"
 
 
 BATCH_APPROVE_PATH = "/app/tasks/approve?rows="

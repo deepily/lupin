@@ -272,6 +272,7 @@ class TaskTransitionIn( BaseModel ):
     # `extra="forbid"` above means that until this field existed, an `asynchronous` key
     # was a 422 for everybody. That protection ends the moment the field is declared,
     # which is exactly why `StrictBool` lands in the same edit rather than after it.
+    promote_priority : Optional[str]    = Field( default=None, max_length=8, description="P0..P5: admits a held row to queued at that higher priority in one store event. Honoured only for the operator's login on not_approved -> queued, and only when it raises the row; anything else is a 403." )
     asynchronous  : Optional[StrictBool] = Field( default=None, description="opt in to the asynchronous promotion path (202 + ticket). Boolean ONLY — a string is refused. Ignored unless the operator flag 'task approval promotion ask asynchronous' is on." )
 
 
@@ -1477,6 +1478,16 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
     # stranded edge past this the way a read-then-write would.
     _reject_unsatisfiable_blockers( repo, blocked_by )
 
+    # ── One-click priority promotion ──
+    # Asked of the validated login, never of `payload.actor`: the same `caller_is_operator`
+    # the priority firewall's rule 1 uses. Runs before every other policy gate so a caller
+    # who may not do this is told so, and nothing below can write for them.
+    promote_refusal = priority_firewall.refusal_for_promote_priority(
+        payload.promote_priority, item.priority, item.status, payload.to_status, account_email,
+    )
+    if promote_refusal is not None:
+        raise HTTPException( status_code=403, detail=promote_refusal )
+
     # ── THE HOLDING-AREA APPROVAL GATE (Rick's P0, 2026-09-02) ──────────────
     #
     # Admission OUT of `not_approved` onto a board is the one transition that
@@ -1842,6 +1853,14 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
         # promotion would then be distinguishable from a synchronous one on the
         # row, for no reason any reader could guess. One method, two callers.
         transition_reason = promotion_approval.reason_with_suffix( payload.reason )
+
+    if payload.promote_priority is not None:
+        # The priority change and the admission are a single store event: the priority is set on the
+        # locked row just before `apply_transition` appends its single event, and that event's
+        # reason names the authority (the operator's validated login) and the old priority.
+        transition_reason = ( f"promoted to {payload.promote_priority} (was {item.priority}) by the operator login "
+                              f"{identity_for_account( account_email )}" + ( f" · {transition_reason}" if transition_reason else "" ) )
+        item.priority = payload.promote_priority
 
     event = repo.apply_transition(
         item          = item,

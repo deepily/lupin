@@ -36,5 +36,5 @@ A manager who asks Rick to approve held rows writes each as a card bullet with a
 - The link's landing page, for a browser that follows it, is `page_tasks_approve`, and the 📋 link's is `page_tasks_view` ([[rest-routers-page-shells-and-stats]]). Opening either changes nothing; the view page has no button.
 
 ## Don't
-- Don't type the link by hand. Take it from `task_approve_line`, or from `task_approve_batch_line` for many rows ([[task-approve-batch-link]]).
+- Don't type the link by hand. Take it from `task_approve_line`, or from `task_approve_batch_line` for many rows ([[task-approve-batch-link]]). For the priority link see [[task-approve-priority-link]].
 - Don't send the move through `TaskListStore.transitionTask` from a link handler.

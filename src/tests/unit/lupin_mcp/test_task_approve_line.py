@@ -51,6 +51,21 @@ class TestApproveLinkLine:
     def test_exact_format_for_a_real_row_id( self ):
         assert approve_link_line( ROW, "Fix the thing" ) == f"- Fix the thing [approve ☐](/app/tasks/approve?row={ROW}) [📋](/app/tasks/view?row={ROW})"
 
+    def test_a_priority_adds_the_third_link_between_approve_and_view( self ):
+        assert approve_link_line( ROW, "Fix the thing", "P0" ) == (
+            f"- Fix the thing [approve ☐](/app/tasks/approve?row={ROW}) "
+            f"[⏫ P0](/app/tasks/approve?row={ROW}&priority=P0) [📋](/app/tasks/view?row={ROW})" )
+        assert "&priority=P2" in approve_link_line( ROW, "t", "P2" )
+
+    def test_no_priority_is_exactly_the_two_link_line( self ):
+        assert approve_link_line( ROW, "t", None ) == approve_link_line( ROW, "t" )
+        assert "priority" not in approve_link_line( ROW, "t" )
+
+    @pytest.mark.parametrize( "bad", [ "P6", "p0", "", "P0 ", 0 ] )
+    def test_a_priority_outside_P0_to_P5_is_refused( self, bad ):
+        with pytest.raises( ValueError, match = "priority must be" ):
+            approve_link_line( ROW, "t", bad )
+
     def test_title_whitespace_collapses_and_brackets_are_escaped( self ):
         line = approve_link_line( ROW, "[LUPIN] Fix:\n  two   lines" )
         assert line == f"- \\[LUPIN\\] Fix: two lines [approve ☐](/app/tasks/approve?row={ROW}) [📋](/app/tasks/view?row={ROW})"
@@ -79,6 +94,16 @@ class TestTaskApproveLineImpl:
         asked = server( _Resp( 200, { "id": ROW, "title": "Fix the thing" } ) )
         assert task_approve_line_impl( BASE, KEY, ROW ) == { "line": approve_link_line( ROW, "Fix the thing" ) }
         assert asked == [ f"{BASE}/api/tasks/{ROW}" ], "the title came from the by-id row fetch"
+
+    def test_a_priority_reaches_the_line( self, server ):
+        server( _Resp( 200, { "id": ROW, "title": "Fix the thing" } ) )
+        assert task_approve_line_impl( BASE, KEY, ROW, priority = "P1" ) == { "line": approve_link_line( ROW, "Fix the thing", "P1" ) }
+
+    def test_a_bad_priority_asks_the_server_nothing( self, server ):
+        asked  = server( _Resp( 200, { "title": "x" } ) )
+        result = task_approve_line_impl( BASE, KEY, ROW, priority = "P7" )
+        assert result[ "error" ] == "invalid_priority"
+        assert asked == []
 
     def test_a_malformed_id_asks_the_server_nothing( self, server ):
         asked  = server( _Resp( 200, { "title": "x" } ) )
@@ -110,4 +135,7 @@ class TestTaskApproveLineVerb:
         monkeypatch.setattr( cv, "_mcp_outbound_api_key", lambda: "ck_live_stub" )
         monkeypatch.setattr( cv, "task_approve_line_impl", lambda **kw: captured.update( kw ) or { "line": "L" } )
         assert cv.task_approve_line.fn( task_id = ROW ) == { "line": "L" }
-        assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "task_id": ROW }
+        assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "task_id": ROW, "priority": None }
+        captured.clear()
+        cv.task_approve_line.fn( task_id = ROW, priority = "P0" )
+        assert captured[ "priority" ] == "P0"

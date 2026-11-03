@@ -34,7 +34,7 @@ import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
-import { handleApproveLinkClick, handleBatchApproveLinkClick, handleBatchViewLinkClick, handleViewLinkClick, observeApproveLinks, type ApproveSender, type TaskReader } from "./approveLink";
+import { handleApproveLinkClick, handleApprovePriorityLinkClick, handleBatchApproveLinkClick, handleBatchViewLinkClick, handleViewLinkClick, observeApproveLinks, type ApproveSender, type TaskReader } from "./approveLink";
 import { buildConsolePageHref } from "../console/consolePageUrl";
 import { bindPodcastLinks } from "./podcastLinks";
 
@@ -561,6 +561,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     // surface (the action-required card) the doc-link branch opens a new tab for what it claims,
     // and an approve link must never navigate anywhere.
     if (this.approveSender !== null && handleApproveLinkClick(ev, target, this.approveSender)) return;
+    if (this.approveSender !== null && handleApprovePriorityLinkClick(ev, target, this.approveSender)) return;
     if (this.approveSender !== null && handleBatchApproveLinkClick(ev, target, this.approveSender)) return;
     if (this.taskReader !== null && handleViewLinkClick(ev, target, this.taskReader, (a, text, title) => this.showAbstractFor(a, text, title))) return;
     if (this.taskReader !== null && handleBatchViewLinkClick(ev, target, this.taskReader, (a, text, title) => this.showAbstractFor(a, text, title))) return;
