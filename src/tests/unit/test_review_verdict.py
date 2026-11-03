@@ -60,6 +60,33 @@ def test_the_check_refuses_a_merge_that_carries_failures():
     with pytest.raises( ValueError, match = "Merge with 0 failed and 1 errors" ): rv.check_line( errored, SHA )
 
 
+def test_only_a_pytest_shaped_summary_line_counts_and_a_stray_in_seconds_line_cannot_zero_a_red_census():
+    red = f"[tree-state] sha=abc1234 x\n2 failed, 5 passed in 1s\nwaiting in 5s\n"
+    assert rv.parse_census( red ) == { "sha": "abc1234", "passed": 5, "failed": 2, "errors": 0 }
+    banner = "[tree-state] sha=abc1234 x\n=== 1578 passed, 11 skipped, 52 warnings in 157.13s (0:02:37) ===\n"
+    assert rv.parse_census( banner )[ "passed" ] == 1578
+    with pytest.raises( ValueError, match = "no pytest summary" ): rv.parse_census( "[tree-state] sha=abc1234 x\nno tests ran in 0.01s\nretry in 5s\n" )
+
+
+def test_with_two_summary_lines_the_last_pytest_one_counts():
+    text = "[tree-state] sha=abc1234 x\n2 failed in 1.0s\n5 passed in 1.0s\n"
+    got  = rv.parse_census( text )
+    assert ( got[ "passed" ], got[ "failed" ] ) == ( 5, 0 )
+
+
+def test_merge_needs_at_least_one_passed_test_in_the_census():
+    empty = rv.parse_census( f"[tree-state] sha={SHA[ :9 ]} x\n3 skipped in 1s\n" )
+    assert empty[ "passed" ] == 0
+    with pytest.raises( ValueError, match = "Merge with no passed tests" ): rv.verdict_line( SHA, empty, "Merge" )
+    assert rv.verdict_line( SHA, empty, "Fix" ).endswith( "census=0p/0f/0e verdict=Fix" )
+    with pytest.raises( ValueError, match = "Merge with no passed tests" ): rv.check_line( f"REVIEW-VERDICT sha={SHA[ :12 ]} census=0p/0f/0e verdict=Merge", SHA )
+
+
+def test_the_check_wants_a_full_twelve_character_hex_sha():
+    for short in ( SHA[ :7 ], SHA[ :11 ], SHA[ :13 ], "4832d5a1d01g" ):
+        with pytest.raises( ValueError, match = "no census" ): rv.check_line( f"REVIEW-VERDICT sha={short} census=43p/0f/0e verdict=Merge", SHA )
+
+
 def run_with( out, dirty="", head=SHA, census=GOOD, census_rc=0 ):
     """Return a runner stand-in answering git rev-parse, git status and the census script."""
     def run( cmd ):

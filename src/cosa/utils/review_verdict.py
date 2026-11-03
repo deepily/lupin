@@ -17,9 +17,9 @@ from functools import partial
 from lupin_mcp.reuse_harness.commands import run_command
 
 VERDICTS    = ( "Merge", "Fix" )
-LINE_SHAPE  = re.compile( r"^REVIEW-VERDICT sha=([0-9a-f]+) census=(\d+)p/(\d+)f/(\d+)e verdict=(Merge|Fix)$" )
+LINE_SHAPE  = re.compile( r"^REVIEW-VERDICT sha=([0-9a-f]{12}) census=(\d+)p/(\d+)f/(\d+)e verdict=(Merge|Fix)$" )
 TREE_SHAPE  = re.compile( r"\[tree-state\] sha=([0-9a-f]+)" )
-SUMMARY     = re.compile( r"\bin \d+(?:\.\d+)?s\b" )
+SUMMARY     = re.compile( r"^=*\s*\d+ [a-z]+(?:, \d+ [a-z]+)* in \d+(?:\.\d+)?s(?: \(\d+:\d{2}:\d{2}\))?\s*=*$" )
 COUNT       = re.compile( r"(\d+) (passed|failed|errors?)\b" )
 SHA_LENGTH  = 12
 CENSUS_SECONDS = 1800
@@ -40,15 +40,16 @@ def parse_census( text ):
     """
     tree = TREE_SHAPE.search( text )
     if tree is None: raise ValueError( "the census output has no tree-state line, so it names no tree" )
-    summaries = [ l for l in text.splitlines() if SUMMARY.search( l ) ]
+    summaries = [ l for l in text.splitlines() if SUMMARY.match( l.strip() ) ]
     if not summaries: raise ValueError( "the census output has no pytest summary line, so the guards may not have run" )
     counts = { "passed": 0, "failed": 0, "errors": 0 }
     for n, word in COUNT.findall( summaries[ -1 ] ): counts[ "errors" if word.startswith( "error" ) else word ] += int( n )
     return { "sha": tree.group( 1 ), **counts }
 
 
-def require_clean_for_merge( verdict, failed, errors ):
-    """Raises: ValueError when verdict is Merge and the census had failures or errors."""
+def require_clean_for_merge( verdict, passed, failed, errors ):
+    """Raises: ValueError when Merge is given over a census that is empty or red."""
+    if verdict == "Merge" and passed == 0: raise ValueError( "Merge with no passed tests in the census is refused; a census that ran nothing proves nothing" )
     if verdict == "Merge" and ( failed or errors ): raise ValueError( f"Merge with {failed} failed and {errors} errors in the census is refused; the verdict is Fix" )
 
 
@@ -67,7 +68,7 @@ def verdict_line( head, census, verdict ):
     """
     if verdict not in VERDICTS: raise ValueError( f"verdict must be one of {VERDICTS}, got {verdict!r}" )
     if not ( head.startswith( census[ "sha" ] ) or census[ "sha" ].startswith( head ) ): raise ValueError( f"the census ran on {census[ 'sha' ]}, the tree under review is {head[ :SHA_LENGTH ]}" )
-    require_clean_for_merge( verdict, census[ "failed" ], census[ "errors" ] )
+    require_clean_for_merge( verdict, census[ "passed" ], census[ "failed" ], census[ "errors" ] )
     return f"REVIEW-VERDICT sha={head[ :SHA_LENGTH ]} census={census[ 'passed' ]}p/{census[ 'failed' ]}f/{census[ 'errors' ]}e verdict={verdict}"
 
 
@@ -85,7 +86,7 @@ def check_line( line, head ):
     if shape is None: raise ValueError( "the verdict carries no census count in the REVIEW-VERDICT line shape" )
     sha, passed, failed, errors, verdict = shape.groups()
     if not head.startswith( sha ): raise ValueError( f"the verdict is for {sha}, the tree is {head[ :SHA_LENGTH ]}" )
-    require_clean_for_merge( verdict, int( failed ), int( errors ) )
+    require_clean_for_merge( verdict, int( passed ), int( failed ), int( errors ) )
     return { "sha": sha, "passed": int( passed ), "failed": int( failed ), "errors": int( errors ), "verdict": verdict }
 
 
