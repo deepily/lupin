@@ -89,9 +89,9 @@ class TestFocusBarTogglesRow:
     def test_each_toggle_is_as_tall_as_a_persona_badge( self, strip_page ):
         """
         Ensures:
-            - every toggle's height is within half a pixel of a persona badge's height
+            - every toggle's height is within a tenth of a pixel of a persona badge's height
         """
         got = strip_page.evaluate( HEIGHT_JS, TOGGLE_IDS )
         assert got[ "badge" ] > 0, f"the badge probe has no height: {got}"
         for toggle in got[ "toggles" ]:
-            assert abs( toggle[ "height" ] - got[ "badge" ] ) < 0.5, f"{toggle[ 'id' ]} is not as tall as a persona badge: {got}"
+            assert abs( toggle[ "height" ] - got[ "badge" ] ) < 0.1, f"{toggle[ 'id' ]} is not as tall as a persona badge: {got}"
