@@ -430,6 +430,7 @@ class ClaudeCodeDispatcher:
         """
         options = ClaudeAgentOptions(
             cwd=task.working_dir,
+            max_turns=task.max_turns,
             permission_mode="acceptEdits",
             allowed_tools=[
                 "Read", "Write", "Bash",
@@ -455,7 +456,7 @@ Voice tools available:
 Use notify() for progress. Use converse() when you need input."""
         )
 
-        try:
+        async def session():
             # Import MessageHistory here to avoid circular imports
             from cosa.orchestration.claude_code.message_history import MessageHistory
 
@@ -529,6 +530,17 @@ Use notify() for progress. Use converse() when you need input."""
                         error="No result received"
                     )
 
+        try:
+            # The whole session, injected follow-ups included, shares one deadline, as _run_bounded does
+            return await asyncio.wait_for( session(), timeout=task.timeout_seconds )
+        except asyncio.TimeoutError:
+            self.active_sessions.pop( task.id, None )
+            return TaskResult(
+                task_id=task.id,
+                success=False,
+                error=f"Task timed out after {task.timeout_seconds}s",
+                exit_code=-1
+            )
         except Exception as e:
             if task.id in self.active_sessions:
                 del self.active_sessions[task.id]
