@@ -9,6 +9,9 @@ A dry run with publishing on never builds or calls the publisher. A real run cal
 with each language mp3 and the source path joined to the project root. The done card then
 carries the folder link.
 
+The config is built from the PodcastConfig defaults plus CONFIG_FLAGS.
+CONFIG_FLAGS pins `drive_upload_users` to "all", so the outcome ignores the INI value.
+
 The fake replaces the hook's publisher builder. The hook is shared by PodcastGeneratorJob
 and DeepResearchToPodcastJob.
 """
@@ -30,6 +33,7 @@ CONFIG_FLAGS = {
     "drive_folder_name"            : "Lupin Podcasts",
     "drive_upload_script"          : False,
     "drive_upload_source_document" : True,
+    "drive_upload_users"           : "all",     # pinned: the hook refuses u@test.com under the INI/default "owner"
 }
 
 
@@ -38,9 +42,11 @@ class FakePublisher:
 
     def __init__( self ):
         self.publish_calls = []
+        self.titles        = []
 
-    def publish_job( self, job_folder_name, files ):
+    def publish_job( self, job_folder_name, files, title=None ):
         self.publish_calls.append( ( job_folder_name, list( files ) ) )
+        self.titles.append( title )
         return {
             "folder_link" : FOLDER_LINK,
             "files"       : [ { "path": str( p ), "file_id": f"id{i}", "error": None,
@@ -139,6 +145,14 @@ def _pg_job( **kw ):
 def _dr_job( **kw ):
     return DeepResearchToPodcastJob( query="q", user_id="u1", user_email="u@test.com",
                                      session_id="s1", **kw )
+
+
+# ---------------------------------------------------------------- the fake keeps the real signature
+def test_the_fake_publisher_takes_the_same_arguments_as_the_real_one():
+    """The fake takes the real publish_job parameters."""
+    import inspect
+    from cosa.utils.drive_publisher import DrivePublisher
+    assert list( inspect.signature( FakePublisher.publish_job ).parameters ) == list( inspect.signature( DrivePublisher.publish_job ).parameters )
 
 
 # ---------------------------------------------------------------- (a) dry run never publishes
