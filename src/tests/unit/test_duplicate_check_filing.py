@@ -167,6 +167,12 @@ def test_any_other_422_in_the_real_body_shape_is_refused_and_not_retried( tmp_pa
     assert len( got[ "refused" ] ) == 1 and got[ "queued_for_retry" ] == [ ] and not ( tmp_path / ff.PENDING_FILE ).exists()
 
 
+@pytest.mark.parametrize( "body, expected", [ ( { "detail": f"{ff.GATED_PHRASE}: x" }, True ), ( { "error": f"{ff.GATED_PHRASE}: x" }, True ), ( { "detail": [ f"{ff.GATED_PHRASE}: x" ] }, True ),
+                                              ( { "detail": { "errors": [ "other" ] } }, False ), ( { "detail": [ "other" ] }, False ), ( { }, False ) ] )
+def test_gated_reads_the_text_of_detail_or_error_whatever_its_shape( body, expected ):
+    assert ff.gated( body ) is expected
+
+
 def test_the_phrase_under_any_other_status_is_refused_not_queued( tmp_path ):
     got = run_once( tmp_path, [ finding() ], Store( create=( False, 403, { "detail": f"{ff.GATED_PHRASE}: a worker may not." } ) ) )
     assert len( got[ "refused" ] ) == 1 and got[ "queued_for_retry" ] == [ ]

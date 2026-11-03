@@ -125,7 +125,8 @@ def gated( body ):
         - body is the dict a store client returns for a refusal
     Ensures:
         - returns True when GATED_PHRASE is in the body's `detail`, where the store puts a 422's text, or in its `error`, where the client wraps a body that is not an object
-        - returns False for any other body, including a `detail` that holds a list of errors
+        - the test is on the text of the value, so a `detail` list or dict whose text holds the phrase counts, and one that does not hold it does not
+        - returns False for any other body
     """
     return any( GATED_PHRASE in str( body.get( key, "" ) ) for key in ( "detail", "error" ) )
 
