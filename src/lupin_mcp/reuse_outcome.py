@@ -13,7 +13,7 @@ Nothing here reads the log, sends anything, or runs a model.
 import re
 
 TEMPLATE_RECEIPT = "<receipt id>"                                   # the receipt slot of the skill's template line
-STEP_PATTERN     = r"\d+(?:\.\d+)*-[A-Za-z0-9]+"                    # a section, a dash, then the step id, such as 12.3-D1
+STEP_PATTERN     = r"\d+(?:\.\d+)*-[A-Za-z0-9]+|diff"                # a section, a dash, then the step id such as 12.3-D1, or diff for a task row with no plan
 
 OUTCOME_LEAD_RE = re.compile( r"^\s*REUSE-OUTCOME\b" )
 TEMPLATE_RE     = re.compile( r"^\s*REUSE-OUTCOME\s+" + re.escape( TEMPLATE_RECEIPT ) + r"(?=\s)" )
