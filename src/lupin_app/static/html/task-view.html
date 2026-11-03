@@ -79,8 +79,10 @@
                 }
                 const listEl = document.getElementById( "task-view-batch" );
                 const rows   = await Promise.all( ids.map( async ( id ) => {
-                    const resp = await authedGet( "/api/tasks/" + encodeURIComponent( id ) );
-                    return resp.ok ? await resp.json() : null;
+                    try {
+                        const resp = await authedGet( "/api/tasks/" + encodeURIComponent( id ) );
+                        return resp.ok ? await resp.json() : null;
+                    } catch ( e ) { return null; }
                 } ) );
                 rows.forEach( ( row, i ) => {
                     const li = document.createElement( "li" );

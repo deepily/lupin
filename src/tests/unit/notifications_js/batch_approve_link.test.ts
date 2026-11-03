@@ -143,12 +143,19 @@ test( "a click on any other link is not claimed, and a click off any link does n
   assert.equal( calls.length, 1 );
 } );
 
-test( "an untrusted batch link is claimed, sends nothing and stays in place", async () => {
+test( "an untrusted batch link is claimed, sends nothing, is left untouched and the handler does not throw", async () => {
   const a = plant( OK( [ ROW_A, ROW_A ] ) );
+  const ev = new MouseEvent( "click", { cancelable: true } );
+  Object.defineProperty( ev, "target", { value: a } );
+  await ( ui._handleBatchApproveLinkClick as ( e: Event ) => Promise<void> ).call( ui, ev );
+  assert.equal( ev.defaultPrevented, true );
   assert.equal( click( a ), true );
   await settle();
   assert.deepEqual( calls, [] );
   assert.equal( a.isConnected, true );
+  assert.equal( a.dataset.approveState, undefined, "not marked pending" );
+  assert.equal( a.getAttribute( "aria-disabled" ), null, "not greyed" );
+  assert.equal( a.style.opacity, "", "not dimmed" );
   assert.deepEqual( tabOpens, [] );
 } );
 
@@ -162,6 +169,13 @@ test( "one click applies every row, then shows 'N of N applied' and one line per
   assert.ok( out.classList.contains( "approve-link-approved" ) );
   assert.equal( document.querySelector( "#action-required-content a" ), null );
   assert.deepEqual( tabOpens, [] );
+} );
+
+test( "a queued link that carries a reason sends no reason", async () => {
+  assert.deepEqual( link( OK( [ ROW_A ], "queued", "&reason=x" ) ), { ids: [ ROW_A ], move: "queued", reason: null } );
+  click( plant( OK( [ ROW_A ], "queued", "&reason=x" ) ) );
+  await settle();
+  assert.deepEqual( calls, [ { id: ROW_A, status: "queued", extras: {} } ] );
 } );
 
 test( "one refusal marks the summary refused and the other row still reads applied", async () => {
