@@ -400,6 +400,38 @@ else
     echo -e "${CYAN}Installing cosa-voice MCP (user scope)...${NC}"
     echo ""
 
+    # ── Carry the reuse-check settings across the re-add ─────────────
+    # The remove-then-add below rebuilds the entry from scratch, so a value that was only in the old entry
+    # would be dropped (plan 3 section 12.3 D3, first caution). Each setting is taken from this shell if set.
+    # The pack size is otherwise kept from the registration about to be removed. The token ceiling is otherwise
+    # the one constant the capacity check reads, reuse_ledger.LOOKUP_CEILING_TOKENS, so the live ceiling and
+    # the checked one cannot drift apart; an older value in the old entry is not carried over. Each is checked
+    # here, before anything is removed: a wrong value makes every reuse lookup fail with BAD_SPEND_LIMIT, and
+    # an install that stops leaves the old entry whole.
+    REUSE_PASSTHROUGH_VARS="LUPIN_REUSE_JEV_PACK_SIZE LUPIN_REUSE_JEV_TOKEN_CEILING"
+    REUSE_ENV_ARGS=()
+    for var in $REUSE_PASSTHROUGH_VARS; do
+        value="${!var:-}"
+        if [ -z "$value" ] && [ "$var" = "LUPIN_REUSE_JEV_TOKEN_CEILING" ]; then
+            value="$( PYTHONPATH="$LUPIN_ROOT/src" python3 -c "from lupin_mcp import reuse_ledger as rl; print( rl.LOOKUP_CEILING_TOKENS )" 2>/dev/null || true )"
+            [ -z "$value" ] && warn_check "could not read reuse_ledger.LOOKUP_CEILING_TOKENS, so no token ceiling is written"
+        elif [ -z "$value" ] && [ "$HAS_USER" = true ]; then
+            value="$( python3 -c "
+import json, sys
+with open( sys.argv[1] ) as f:
+    env = json.load( f ).get( 'mcpServers', {} ).get( 'cosa-voice', {} ).get( 'env', {} )
+print( env.get( sys.argv[2], '' ) )
+" "$USER_CONFIG_FILE" "$var" 2>/dev/null || true )"
+        fi
+        [ -z "$value" ] && continue
+        if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+            fail_check "$var must be a positive whole number, got '$value' (nothing was changed)"
+            exit 1
+        fi
+        REUSE_ENV_ARGS+=( -e "$var=$value" )
+        pass_check "$var = $value (kept in the registration)"
+    done
+
     # Remove stale local-scope registration if present
     if [ "$HAS_LOCAL" = true ]; then
         echo "  Removing local-scope registration..."
@@ -424,6 +456,7 @@ else
         -e "PYTHONPATH=$LUPIN_ROOT/src" \
         -e "LUPIN_ROOT=$LUPIN_ROOT" \
         -e "LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_CLI_ARGS" \
+        "${REUSE_ENV_ARGS[@]}" \
         -- "$VENV_PYTHON" "$MCP_SERVER" 2>/dev/null; then
         pass_check "cosa-voice registered at user scope (global)"
     else

@@ -28,6 +28,12 @@ install-cosa-voice.sh --check-only  # Report without writing
 install-cosa-voice.sh --uninstall   # Remove cosa-voice
 ```
 
+Re-running the installer keeps the reuse-check settings in the registration.
+`LUPIN_REUSE_JEV_PACK_SIZE` is taken from your shell if set, otherwise from the entry it is about to replace.
+`LUPIN_REUSE_JEV_TOKEN_CEILING` is taken from your shell if set, otherwise from `reuse_ledger.LOOKUP_CEILING_TOKENS`, the constant the capacity check reads.
+An older ceiling in the old entry is not carried over, so the two cannot drift apart.
+A value that is not a positive whole number stops the install before anything is removed.
+
 ## How It Works
 
 ### Project Auto-Detection
