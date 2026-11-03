@@ -156,3 +156,55 @@ test( "Keep place is off when nothing was ever stored, on only for the stored wo
   localStorage.setItem( "notifications_keep_place", "true" );
   assert.equal( read(), true );
 } );
+
+// ---------------------------------------------------------------------------
+// The card's own notification history. Moving a node resets the scroll of every scroller inside it, so
+// a card that jumps to the top lost the place held in its history pane. happy-dom has no such reset, so
+// the mutate callback plays the browser's part and zeroes the pane.
+// ---------------------------------------------------------------------------
+
+function cardWithHistoryScroll( top: number ): { card: HTMLElement; pane: HTMLElement } {
+  const card = document.createElement( "div" );
+  const pane = document.createElement( "div" );
+  pane.className = "date-accordion-messages";
+  card.appendChild( pane );
+  document.body.appendChild( card );
+  pane.scrollTop = top;
+  return { card, pane };
+}
+
+test( "keep place on: a moved card's history pane gets its scroll back", () => {
+  const ui   = makeUI( true );
+  const { card, pane } = cardWithHistoryScroll( 140 );
+  ( ui as unknown as { _keepPlaceWhile: ( m: HTMLElement | null, f: () => void ) => void } )
+    ._keepPlaceWhile( card, () => { pane.scrollTop = 0; } );
+  assert.equal( pane.scrollTop, 140 );
+} );
+
+test( "keep place on: only the pane that was scrolled is written back; one at the top is left alone", () => {
+  const ui   = makeUI( true );
+  const { card, pane } = cardWithHistoryScroll( 140 );
+  const idle = document.createElement( "div" );
+  idle.className = "date-accordion-messages";
+  card.appendChild( idle );
+  ( ui as unknown as { _keepPlaceWhile: ( m: HTMLElement | null, f: () => void ) => void } )
+    ._keepPlaceWhile( card, () => { pane.scrollTop = 0; idle.scrollTop = 7; } );
+  assert.equal( pane.scrollTop, 140 );
+  assert.equal( idle.scrollTop, 7 );
+} );
+
+test( "keep place off: the moved card's history pane keeps the browser's reset", () => {
+  const ui   = makeUI( false );
+  const { card, pane } = cardWithHistoryScroll( 140 );
+  ( ui as unknown as { _keepPlaceWhile: ( m: HTMLElement | null, f: () => void ) => void } )
+    ._keepPlaceWhile( card, () => { pane.scrollTop = 0; } );
+  assert.equal( pane.scrollTop, 0 );
+} );
+
+test( "keep place on with no card to move: only the mutation runs", () => {
+  const ui = makeUI( true );
+  let ran  = false;
+  ( ui as unknown as { _keepPlaceWhile: ( m: HTMLElement | null, f: () => void ) => void } )
+    ._keepPlaceWhile( null, () => { ran = true; } );
+  assert.equal( ran, true );
+} );
