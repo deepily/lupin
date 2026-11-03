@@ -27,13 +27,15 @@ CONFIDENCE     = 0.95
 MATCHING       = ( "REUSE", "EXTEND" )
 NO_MATCH       = "NO_MATCH"
 OUTCOMES       = ( "miss", "ok", "inconclusive" )
-ITEM_FIELDS    = ( "id", "need", "language", "generation", "index_sha", "live", "queued_on", "attempts", "known_miss" )
+ITEM_FIELDS    = ( "id", "need", "language", "generation", "index_sha", "live", "queued_on", "attempts", "known_miss", "exclude_id", "tie" )
 TEMP_PREFIX    = ".tmp-"
 RECEIPT_FIELDS = ( "kind", "id", "need_hash", "language", "generation", "index_sha", "live_verdict", "full_verdict",
-                   "candidate_count", "causal_ids", "outcome", "missed_ids", "audited_on", "known_miss" )
+                   "candidate_count", "causal_ids", "outcome", "missed_ids", "audited_on", "known_miss", "exclude_id", "tie" )
 NEW_FIELD            = "known_miss"                                  # added after the first files were written; a file without it reads as False
-OLD_ITEM_FIELDS      = tuple( f for f in ITEM_FIELDS if f != NEW_FIELD )
-OLD_RECEIPT_FIELDS   = tuple( f for f in RECEIPT_FIELDS if f != NEW_FIELD )
+LATER_FIELDS         = { "exclude_id": None, "tie": None }           # added after known_miss; a file without one reads as the default shown
+OLD_ITEM_FIELDS      = tuple( f for f in ITEM_FIELDS if f != NEW_FIELD and f not in LATER_FIELDS )
+OLD_RECEIPT_FIELDS   = tuple( f for f in RECEIPT_FIELDS if f != NEW_FIELD and f not in LATER_FIELDS )
+TIES                 = ( "ruling", "heuristic" )
 UNKNOWN_ENTRY        = "UNKNOWN_ENTRY"                               # the code a sweep refusal carries when the index lacks the excluded id
 UNKNOWN_ENTRY_TRIES  = 3                                             # failed attempts after which an item that keeps answering it is dropped
 WEEK_DAYS            = 7
@@ -113,9 +115,10 @@ def compare( live_verdict, full_verdict, causal_ids, candidate_ids, full_cause=N
     return "ok"
 
 
-def _receipt_id( digest, generation, index_sha ):
-    """Return the 16 character receipt id of a need hash, generation and index sha."""
-    return hashlib.sha256( f"{digest}\n{generation}\n{index_sha}".encode( "utf-8" ) ).hexdigest()[ :16 ]
+def _receipt_id( digest, generation, index_sha, exclude_id=None ):
+    """Return the 16 character receipt id of a need, generation, index sha and excluded id."""
+    text = f"{digest}\n{generation}\n{index_sha}" + ( f"\n{exclude_id}" if exclude_id is not None else "" )
+    return hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()[ :16 ]
 
 
 def _receipt_shape_ok( receipt ):
@@ -123,7 +126,7 @@ def _receipt_shape_ok( receipt ):
     return isinstance( receipt, dict ) and all( key in receipt for key in OLD_RECEIPT_FIELDS ) and receipt[ "outcome" ] in OUTCOMES
 
 
-def audit_receipt( need, language, generation, index_sha, live, sweep, today, known_miss=False ):
+def audit_receipt( need, language, generation, index_sha, live, sweep, today, known_miss=False, exclude_id=None, tie=None ):
     """
     Build the receipt of one audit.
 
@@ -132,20 +135,21 @@ def audit_receipt( need, language, generation, index_sha, live, sweep, today, kn
         - sweep holds verdict and causal_ids of the full sweep, and the cause when it has one
         - today is an ISO date string
         - known_miss is True for an audit of a lookup behind a found duplicate, False for a random-sample audit
+        - exclude_id is the id the sweep left out, or None; tie is "ruling" or "heuristic" for a known-miss audit, else None
 
     Ensures:
-        - returns a dict whose keys are RECEIPT_FIELDS, with known_miss as given
-        - the id is a 16 character hash of the need hash, generation and index sha, so a repeat is one receipt
+        - returns a dict whose keys are RECEIPT_FIELDS, with known_miss, exclude_id and tie as given
+        - the id is a 16 character hash of the need hash, generation, index sha and excluded id, so a repeat is one receipt
         - the need's words are not kept, only its hash
     """
     candidates = set( live[ "candidate_ids" ] )
     outcome    = compare( live[ "verdict" ], sweep[ "verdict" ], sweep[ "causal_ids" ], candidates, sweep[ "cause" ] if "cause" in sweep else None )
     digest     = need_hash( need )
-    rid        = _receipt_id( digest, generation, index_sha )
+    rid        = _receipt_id( digest, generation, index_sha, exclude_id )
     missed     = sorted( set( sweep[ "causal_ids" ] ) - candidates ) if outcome == "miss" else []
     return { "kind": KIND, "id": rid, "need_hash": digest, "language": language, "generation": generation, "index_sha": index_sha,
              "live_verdict": live[ "verdict" ], "full_verdict": sweep[ "verdict" ], "candidate_count": len( candidates ),
-             "causal_ids": sorted( sweep[ "causal_ids" ] ), "outcome": outcome, "missed_ids": missed, "audited_on": today, "known_miss": known_miss }
+             "causal_ids": sorted( sweep[ "causal_ids" ] ), "outcome": outcome, "missed_ids": missed, "audited_on": today, "known_miss": known_miss, "exclude_id": exclude_id, "tie": tie }
 
 
 def _folder( data_dir, name ):
@@ -166,11 +170,12 @@ def _item_ok( item ):
 
     Ensures:
         - the id and the queued date are text, so the drain can sort on them
-        - a file written before known_miss existed is accepted, and a known_miss that is not True or False is not
+        - a file written before known_miss, exclude_id or tie existed is accepted
+        - a known_miss that is not True or False, an exclude_id that is not text or None, and a tie that is not ruling, heuristic or None are not
     """
     return isinstance( item, dict ) and all( key in item for key in OLD_ITEM_FIELDS ) and isinstance( item[ "attempts" ], int ) \
            and isinstance( item[ "live" ], dict ) and isinstance( item[ "id" ], str ) and isinstance( item[ "queued_on" ], str ) \
-           and isinstance( item.get( NEW_FIELD, False ), bool )
+           and isinstance( item.get( NEW_FIELD, False ), bool ) and isinstance( item.get( "exclude_id" ), ( str, type( None ) ) ) and item.get( "tie" ) in ( None, *TIES )
 
 
 def _write_once( path, text ):
@@ -214,7 +219,7 @@ def _read_receipt_file( path ):
     Read one receipt file.
 
     Ensures:
-        - a receipt written before known_miss existed comes back with known_miss False
+        - a receipt written before known_miss, exclude_id or tie existed comes back with the defaults: False, None, None
 
     Raises:
         - CandidateError AUDIT_RECEIPT_CORRUPT when the file is not JSON or is not a receipt
@@ -222,7 +227,7 @@ def _read_receipt_file( path ):
     try: receipt = json.loads( path.read_text( encoding="utf-8" ) )
     except ValueError as exc: raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: {exc}" ) from exc
     if not _receipt_shape_ok( receipt ): raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: wrong shape" )
-    return { NEW_FIELD: False, **receipt }
+    return { NEW_FIELD: False, **LATER_FIELDS, **receipt }
 
 
 def load_receipts( data_dir ):
@@ -242,7 +247,7 @@ def load_receipts( data_dir ):
     return out
 
 
-def tally( receipts, language, generation, known_miss=False ):
+def tally( receipts, language, generation, known_miss=False, tie=None ):
     """
     Count audits for one language and one vector-set generation.
 
@@ -251,8 +256,9 @@ def tally( receipts, language, generation, known_miss=False ):
         - audits counts conclusive audits only, and the bound is audit_bound( misses, audits )
         - a receipt of another language or generation is not counted
         - only receipts whose known_miss equals the argument are counted, so the random-sample bound is never mixed with the audits of found duplicates
+        - with tie given, only known-miss receipts of that tie are counted, so a heuristic tie has its own figures
     """
-    held         = [ r for r in receipts if r[ "language" ] == language and r[ "generation" ] == generation and r[ NEW_FIELD ] == known_miss ]
+    held         = [ r for r in receipts if r[ "language" ] == language and r[ "generation" ] == generation and r[ NEW_FIELD ] == known_miss and ( tie is None or r[ "tie" ] == tie ) ]
     inconclusive = sum( 1 for r in held if r[ "outcome" ] == "inconclusive" )
     misses       = sum( 1 for r in held if r[ "outcome" ] == "miss" )
     audits       = len( held ) - inconclusive
@@ -282,7 +288,7 @@ def count_lookup( data_dir, today ):
     return len( path.read_text( encoding="utf-8" ).splitlines() )
 
 
-def enqueue_pending( data_dir, need, language, generation, index_sha, live, today, known_miss=False ):
+def enqueue_pending( data_dir, need, language, generation, index_sha, live, today, known_miss=False, exclude_id=None, tie=None ):
     """
     Put one lookup in the audit queue, without counting it and without sampling.
 
@@ -291,15 +297,34 @@ def enqueue_pending( data_dir, need, language, generation, index_sha, live, toda
         - need is the redacted need, because the queue file keeps its words so the sweep can read them
 
     Ensures:
-        - returns the queue id, a hash of the need, generation and index sha
-        - a file in shadow-pending/ holds the item with attempts 0 and the known_miss given, and the same lookup queues once
+        - returns the queue id, a hash of the need, generation and index sha, and of the excluded id when there is one
+        - a file in shadow-pending/ holds the item with attempts 0 and the known_miss, exclude_id and tie given, and the same lookup queues once
+        - the same lookup queued with and without an excluded id is two items, because the sweeps ask different questions
+        - a known-miss call for a lookup already queued as a random-sample item upgrades that item to known-miss, keeping its attempts, so it drains first
         - the day's lookup count does not change
     """
-    key  = hashlib.sha256( f"{need_hash( need )}\n{generation}\n{index_sha}".encode( "utf-8" ) ).hexdigest()[ :16 ]
+    key  = _receipt_id( need_hash( need ), generation, index_sha, exclude_id )
     item = { "id": key, "need": need, "language": language, "generation": generation, "index_sha": index_sha, "live": live, "queued_on": today,
-             "attempts": 0, "known_miss": known_miss }
-    _write_once( _folder( data_dir, "shadow-pending" ) / f"{key}.json", json.dumps( item, sort_keys=True ) + "\n" )
+             "attempts": 0, "known_miss": known_miss, "exclude_id": exclude_id, "tie": tie }
+    path = _folder( data_dir, "shadow-pending" ) / f"{key}.json"
+    if not _write_once( path, json.dumps( item, sort_keys=True ) + "\n" ) and known_miss: _mark_known_miss( path, tie )
     return key
+
+
+def _mark_known_miss( path, tie ):
+    """
+    Raise a queued item to known-miss when a found duplicate points at the same lookup.
+
+    Ensures:
+        - an item that is not yet known-miss is rewritten whole with known_miss True and the tie given, its attempts kept
+        - an item already known-miss, one that is not JSON, and one that is not an item are left as they are
+    """
+    try: held = json.loads( path.read_text( encoding="utf-8" ) )
+    except ValueError: return
+    if not _item_ok( held ) or held.get( NEW_FIELD, False ): return
+    temp = _temp_name( path )
+    temp.write_text( json.dumps( { **held, NEW_FIELD: True, "tie": tie }, sort_keys=True ) + "\n", encoding="utf-8" )
+    os.replace( temp, path )
 
 
 def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, today, rate=SAMPLE_RATE ):
@@ -355,10 +380,11 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
         - a sweep answer that lacks verdict or causal_ids counts as a failure of that item, like a raised error
         - a temporary file of a write in progress is never read
         - at most limit items are taken, known-miss items first, then fewest attempts, then oldest queued date, then queue id
-        - an item whose sweep raises a CandidateError naming UNKNOWN_ENTRY stays queued like any failure, until its third failed attempt; then its file is removed and it counts as dropped
+        - an item whose sweep raises a CandidateError whose detail is exactly UNKNOWN_ENTRY, the code the sweep gives, stays queued like any failure, until its third failed attempt; then its file is removed and it counts as dropped
         - an item queued before known_miss existed is read as known_miss False
         - with weekly_cap, the run stops before the audit that would make the audits stored in the seven days ending today pass the cap; the rest stay queued
         - with pass_language the sweep is called as sweep_fn( need, language ), else as sweep_fn( need )
+        - an item with an exclude_id adds the keyword exclude_id=<that id> to the call, so the sweep leaves the duplicate's own definition out; an item without one is called as before
         - with max_tokens, each sweep answer must carry a whole-number tokens count (a sweep without one fails like a raised error), and the run
           stops before a sweep when the tokens spent so far plus the largest sweep seen would pass max_tokens; the rest stay queued
         - with max_tokens or weekly_cap the result also holds stopped_by, "ceiling" or "weekly_cap" when the run stopped for that reason, else None; with max_tokens it also holds spent_tokens
@@ -372,7 +398,7 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
             path.rename( path.with_name( path.name + ".corrupt" ) )
             corrupt += 1
             continue
-        queued.append( ( { NEW_FIELD: False, **item }, path ) )
+        queued.append( ( { NEW_FIELD: False, **LATER_FIELDS, **item }, path ) )
     queued.sort( key=lambda pair: ( not pair[ 0 ][ NEW_FIELD ], pair[ 0 ][ "attempts" ], pair[ 0 ][ "queued_on" ], pair[ 0 ][ "id" ] ) )
     if limit is not None: queued = queued[ :limit ]
     receipts, failed, dropped, spent, biggest, stopped = [], 0, 0, 0, 0, None
@@ -385,16 +411,17 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
             stopped = "ceiling"
             break
         try:
-            held = _folder( data_dir, "receipts" ) / f"shadow-{_receipt_id( need_hash( item[ 'need' ] ), item[ 'generation' ], item[ 'index_sha' ] )}.json"
+            held = _folder( data_dir, "receipts" ) / f"shadow-{_receipt_id( need_hash( item[ 'need' ] ), item[ 'generation' ], item[ 'index_sha' ], item[ 'exclude_id' ] )}.json"
             if held.exists(): _read_receipt_file( held )                       # a damaged receipt file fails the item before any sweep is spent
-            sweep   = sweep_fn( item[ "need" ], item[ "language" ] ) if pass_language else sweep_fn( item[ "need" ] )
+            extra   = { "exclude_id": item[ "exclude_id" ] } if item[ "exclude_id" ] is not None else {}
+            sweep   = sweep_fn( item[ "need" ], item[ "language" ], **extra ) if pass_language else sweep_fn( item[ "need" ], **extra )
             tokens  = sweep[ "tokens" ] if max_tokens is not None else 0
             if type( tokens ) is not int or tokens < 0: raise ValueError( f"tokens {tokens!r}" )
-            receipt = audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ], item[ "live" ], sweep, today, item[ NEW_FIELD ] )
+            receipt = audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ], item[ "live" ], sweep, today, item[ NEW_FIELD ], item[ "exclude_id" ], item[ "tie" ] )
             stored  = store_receipt( data_dir, receipt )
         except Exception as exc:               # a transport failure, a malformed answer or a damaged receipt file leaves the item queued, behind the fresh ones
             failed += 1
-            if isinstance( exc, CandidateError ) and UNKNOWN_ENTRY in exc.detail and item[ "attempts" ] + 1 >= UNKNOWN_ENTRY_TRIES:
+            if isinstance( exc, CandidateError ) and exc.detail == UNKNOWN_ENTRY and item[ "attempts" ] + 1 >= UNKNOWN_ENTRY_TRIES:
                 os.remove( path )
                 dropped += 1
                 continue

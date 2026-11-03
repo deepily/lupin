@@ -16,6 +16,22 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-02 evening (Cheech 🌿, crew John, Pocholo, Sam, Rachel, Chloé; times Eastern)
+
+- **Plan 3's rollout section, from Rick's cards 17:26 to 17:50.** His first nine rulings are in the rollout section's table of `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.24-reuse-detection-remediation-plan.md`. María's workflow (track A) landed first, as Rick asked at 17:53.
+- **The tenth ruling** (card, 18:13). Fix the lookups next and keep the partial lookups in use meanwhile. Track D moved to right after track A.
+- **The eleventh ruling** (card, by 18:37). Budget the shadow audits now and decide the lifetime limit later. The limit stays open until the first real shadow audit has measured its token cost.
+- **The twelfth ruling** (card, 19:19). The reuse check runs as a merge gate on every diff, and it must stay the fast check. It makes no model call.
+- **The thirteenth ruling** (card, 19:28). The daily duplicate check runs by host cron and on demand, for example at last call. The first live pass is run by hand and timed.
+- **The fourteenth ruling** (card, 19:30). Enforcement switches on once the checker, the gate's blocking kinds and the skill's finding labels are merged and tested.
+- **The fifteenth ruling** (card, 19:30). Cheech changes the cosa-voice environment once and restarts the seats one at a time.
+- **The judge question** (row `2558794c`, closed). Rick: "Measure it in real conditions first". Its two follow-up rows wait on track D.
+- **Rick's fleet cap line** (card, 20:23). The cap moved from 15 to 16 and was committed alone as `391e95a49`.
+- **Two standing rules, now in the root CLAUDE.md.** `src/conf/lupin-app.ini` is always committed when modified and never asked about (`e1395a64d`). Token spend is the manager's call, recorded on the row (`8e08fa499`).
+- **The lookup token ceiling is 64,000** (Cheech, question 5). It is the worst fast lookup in the five-lookup test, 42,360 tokens, times a margin of 1.5, rounded up. Merged as `002a54423`.
+- **Question 3: weekly fleet counts, nobody named** (Rick, card, 21:49). One weekly page covers lookups, audits, outcomes by kind and refusals by reason. John builds the form step on row `97d11149`.
+- **Nothing is pushed.** Every question on row `4bb2f7fb` is answered, and the row is closed.
+
 ## 📚 Decisions log 2026-11-01 night to 2026-11-02 morning (Cheech 🌿, crew John, Pocholo, Rachel, Chloé; times Eastern)
 
 - **The first-thousand rerun ran the full plan** (Rick, voice card, about 22:55 on 1 Nov). He raised the call cap from 1,314 to 2,314. Spend is not the constraint: "we have tokens to burn". A cap raise is sized to the plan and announced, not asked.

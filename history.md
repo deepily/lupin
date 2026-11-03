@@ -8,6 +8,30 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.02 - Session ade365b2 (Mr. Radio 🦉, manager; crew Clayton, Rio, Maya, all reaped) | One 1.1.6 image on :7999, :8000 and the test VM; Keep place fixed in both clients; the SDK bump reviewed
+
+### Checkpoint | 2026.11.02 22:45 | 📷 for Rick's 22:45 ritual
+
+- **Image 1.1.6 (row eded549d, done)**: a full Dockerfile rebuild, `lupin:1.1.6-candidate`, carrying both the Google libraries and python-pptx. Both :7999 and :8000 were recreated on it while idle (commit 74ce6b5c2). It was pushed to Artifact Registry `lupin-images` (digest 99f002c5). The VM's cloud-gpu.env now names it as `LUPIN_IMAGE` (backup `.bak-2026.11.02-pre-1.1.6`). Deployed the branch: VM HEAD matched local, post-preflight 74 passed and 0 blocking. The first build stalled for two hours on a model download and was restarted.
+- **:8000 Claude login (row b75c084a, done)**: Rick ran `/login`, and `check-claude-login.sh` exits 0.
+- **Keep place (row 492b8ecc, done) and the toggles row (row 532225c1, merged)**: Rio built both; Maya reviewed them over four rounds. Cause: Keep place guarded only the page scroll. A legacy card moved by insertBefore, or a multiplexer card replaced by a progress-group arrival, reset its history pane to 0. Tests-only commit 28a60b89f: run ts-bc1532eb gave 7 failed and 3 passed (every pinned case 100 → 0; the controls passed). After merge d92b42d89 and a bundle rebuild, run ts-04450565 gave 10 of 10.
+- **SDK bump (row 3e906d57, open, mine)**: Clayton moved claude-agent-sdk from 0.2.88 to 0.2.177, so the bundled CLI is 2.1.317, the host's version (it was 2.1.161). He also added a parity check. Maya approved 59d3c1d5a; it is held at tag `hold/3e906d57-clayton-sdk-bump`, not merged.
+- **Owed next session**:
+  - Read the full TypeScript and E2E run ts-68194a6f. It was still running at 22:45; it is the snapshot check that closes 532225c1.
+  - For 3e906d57, first: uv-synced unit, cosa and coverage tiers, because Clayton's ran on a PYTHONPATH overlay.
+  - Then: the 1.1.7 rebuild, one live bounded job, the :8000 pyramid, the merge and the deploy.
+  - VM items found before the deploy: an empty CLAUDE_CODE_OAUTH_TOKEN, and a 336h flow-ratio window where the ruling is 24h.
+- Mementos: `io/mementos/clayton-8ec6a36c.md`, `rio-565a1f75.md`, `maya-61e5c423.md`.
+
+## 2026.11.02 afternoon to night - Session 7e4810a2 (Cheech 🌿, manager; crew John, Pocholo, Sam, Rachel, Chloé) | Plan 3's rollout ruled, reviewed and mostly built; the daily duplicate check's first timed pass
+
+- **Rulings.** Rick ruled Plan 3's rollout section by card, fifteen rulings from 17:26 to 19:30, and question 3 at 21:49. The cascaded review closed at revision 8 (`095d2d2a6`). The reviewed plan merged as `0f179c8aa`.
+- **Built and merged, all reviewed.** Track A, María's workflow. Track B, the outcome checker. Track C, the gate and its weekly report. Track D, the run names, the token ceiling and the install script. Track E, the daily duplicate job and its filing. Track F, the tie and both parts. The closing merges were `621639bf5`, `18b032d81`, `8b4aa8838`, `c7c456cb6`, `b1fe08aa0`, `ae3047506`, `b365b9240` and `ff3f3875f`. Census guards passed 1,579 at `ff3f3875f`.
+- **Two standing rules** went into the root CLAUDE.md: the config file is always committed (`e1395a64d`), and token spend is the manager's call (`8e08fa499`).
+- **The daily check's first timed pass.** The first pass failed on GPU refusals and was fixed (`9016c6a24`). The second embedded 12,834 texts in about 32 minutes from a cold start, then stopped while judging. One definition naming the reuse tools tripped the judge's leak check (row `9311c904`).
+- **The unit tier needs 12 GB.** It cannot fit a seat's 8 GiB, so it gets its own 16 GB scope (row `d0b369af`).
+- **Files**: history.md, TODO.md, the remediation plan, and the root CLAUDE.md.
+
 ## 2026.11.01 to 11.02 - Sessions b3670c7d and 7e4810a2 (Cheech 🌿, manager; crew John, Pocholo, Rachel, Chloé, still seated) | First-thousand trial Parts 1 and 2; the plants reached the judge without their purpose line; an explainer for program managers
 
 - **Part 1, 1 Nov by day.** Rick ruled that a seed can be its own test item. The method change landed in seven reviewed merges, `f01a270ae` to `b6d5a5cb2`. The first control run found 5 of 17 planted rewrites.

@@ -368,7 +368,7 @@ class TestKnownMissAndCaps:
     def test_enqueue_pending_writes_the_item_without_a_count_or_a_sample( self, tmp_path ):
         key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
         assert self.pending( tmp_path )[ key ] == { "id": key, "need": "n1", "language": "py", "generation": GEN, "index_sha": INDEX, "live": LIVE,
-                                                    "queued_on": "2026-10-14", "attempts": 0, "known_miss": True }
+                                                    "queued_on": "2026-10-14", "attempts": 0, "known_miss": True, "exclude_id": None, "tie": None }
         assert not ( tmp_path / "receipts" ).exists(), "no lookup count was added"
         assert sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" ) == key and len( self.pending( tmp_path ) ) == 1, "the same lookup queues once"
 
@@ -464,3 +464,84 @@ class TestKnownMissAndCaps:
 
     def test_without_a_cap_or_a_ceiling_there_is_no_stopped_by( self, tmp_path ):
         assert "stopped_by" not in sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )
+
+    def test_an_old_item_and_receipt_without_exclude_id_or_tie_read_as_none( self, tmp_path ):
+        key  = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        path = tmp_path / "shadow-pending" / f"{key}.json"
+        path.write_text( json.dumps( { k: v for k, v in json.loads( path.read_text() ).items() if k not in ( "exclude_id", "tie" ) } ) )
+        out = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )
+        assert out[ "audited" ] == 1 and ( out[ "receipts" ][ 0 ][ "exclude_id" ], out[ "receipts" ][ 0 ][ "tie" ] ) == ( None, None )
+        stored = tmp_path / "receipts" / f"shadow-{out[ 'receipts' ][ 0 ][ 'id' ]}.json"
+        stored.write_text( json.dumps( { k: v for k, v in out[ "receipts" ][ 0 ].items() if k not in ( "exclude_id", "tie" ) } ) )
+        assert ( sa.load_receipts( tmp_path )[ 0 ][ "exclude_id" ], sa.load_receipts( tmp_path )[ 0 ][ "tie" ] ) == ( None, None )
+
+    @pytest.mark.parametrize( "field, value", [ ( "exclude_id", 5 ), ( "tie", "guess" ) ] )
+    def test_an_exclude_id_that_is_not_text_or_a_tie_that_is_unknown_makes_the_item_corrupt( self, tmp_path, field, value ):
+        key  = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        path = tmp_path / "shadow-pending" / f"{key}.json"
+        path.write_text( json.dumps( { **json.loads( path.read_text() ), field: value } ) )
+        assert sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )[ "corrupt" ] == 1
+
+    def test_an_excluded_id_gives_the_item_and_its_receipt_ids_of_their_own( self, tmp_path ):
+        plain, excl = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "d" ), sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "d", exclude_id="x" )
+        assert plain != excl and len( list( ( tmp_path / "shadow-pending" ).glob( "*.json" ) ) ) == 2
+        out = sa.run_pending( tmp_path, lambda need, **extra: sweep_of( "NEW" ), "2026-10-15" )
+        assert out[ "audited" ] == 2 and len( { r[ "id" ] for r in out[ "receipts" ] } ) == 2
+
+    def test_a_damaged_receipt_of_the_excluded_sweep_fails_that_item_before_any_sweep( self, tmp_path ):
+        sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "d", exclude_id="x" )
+        held = tmp_path / "receipts" / f"shadow-{sa._receipt_id( sa.need_hash( 'n1' ), GEN, INDEX, 'x' )}.json"
+        held.parent.mkdir()
+        held.write_text( "{" )
+        out = sa.run_pending( tmp_path, lambda need, **extra: pytest.fail( "no sweep" ), "2026-10-15" )
+        assert out[ "failed" ] == 1
+
+    def test_a_known_miss_enqueue_for_a_lookup_already_pending_raises_its_marker_and_keeps_its_attempts( self, tmp_path ):
+        key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        sa.run_pending( tmp_path, lambda need: ( _ for _ in () ).throw( TimeoutError( "x" ) ), "2026-10-15" )
+        assert sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-16", known_miss=True, tie="ruling" ) == key
+        held = self.pending( tmp_path )[ key ]
+        assert ( held[ "known_miss" ], held[ "tie" ], held[ "attempts" ], held[ "queued_on" ] ) == ( True, "ruling", 1, "2026-10-14" )
+        assert list( ( tmp_path / "shadow-pending" ).glob( ".tmp-*" ) ) == []
+
+    def test_a_plain_enqueue_never_lowers_a_known_miss_item_and_a_second_known_miss_changes_nothing( self, tmp_path ):
+        key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True, tie="ruling" )
+        before = ( tmp_path / "shadow-pending" / f"{key}.json" ).read_text()
+        sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True, tie="heuristic" )
+        assert ( tmp_path / "shadow-pending" / f"{key}.json" ).read_text() == before
+
+    @pytest.mark.parametrize( "text", [ "{", json.dumps( [ 1 ] ) ] )
+    def test_a_pending_file_that_is_not_an_item_is_left_alone_by_a_known_miss_enqueue( self, tmp_path, text ):
+        key  = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        path = tmp_path / "shadow-pending" / f"{key}.json"
+        path.write_text( text )
+        sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        assert path.read_text() == text
+
+    def test_the_item_a_known_miss_enqueue_raised_drains_before_an_older_random_one( self, tmp_path ):
+        sa.enqueue_pending( tmp_path, "older", "py", GEN, INDEX, LIVE, "2026-10-01" )
+        sa.enqueue_pending( tmp_path, "later", "py", GEN, INDEX, LIVE, "2026-10-14" )
+        sa.enqueue_pending( tmp_path, "later", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True, tie="heuristic" )
+        seen = []
+        sa.run_pending( tmp_path, lambda need: seen.append( need ) or sweep_of( "NEW" ), "2026-10-15", limit=1 )
+        assert seen == [ "later" ]
+
+    def test_a_plain_enqueue_over_a_pending_random_item_leaves_it_random( self, tmp_path ):
+        key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", tie=None )
+        sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-15" )
+        assert self.pending( tmp_path )[ key ][ "known_miss" ] is False
+
+    def test_the_id_with_no_excluded_id_is_pinned_to_the_value_receipts_already_stored_carry( self, tmp_path ):
+        old = "5f0495f826ec004a"                       # sha256 of need hash, generation and index sha as the first receipts were named
+        assert sa._receipt_id( sa.need_hash( "n1" ), GEN, INDEX ) == old
+        assert receipt_for( "n1", "NEW", [] )[ "id" ] == old
+        assert sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" ) == old
+        assert sa._receipt_id( sa.need_hash( "n1" ), GEN, INDEX, "x" ) != old
+
+    @pytest.mark.parametrize( "detail", [ "INDEX_STALE: UNKNOWN_ENTRY was named in passing", "UNKNOWN_ENTRY_X", "unknown_entry", "" ] )
+    def test_a_detail_that_only_mentions_unknown_entry_never_drops_an_item( self, tmp_path, detail ):
+        key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", known_miss=True )
+        def refuse( need ): raise CandidateError( "AUDIT_SWEEP_REFUSED", detail )
+        outs = [ sa.run_pending( tmp_path, refuse, "2026-10-15" ) for _ in range( sa.UNKNOWN_ENTRY_TRIES + 1 ) ]
+        assert [ o[ "dropped" ] for o in outs ] == [ 0 ] * ( sa.UNKNOWN_ENTRY_TRIES + 1 ) and self.pending( tmp_path )[ key ][ "attempts" ] == sa.UNKNOWN_ENTRY_TRIES + 1

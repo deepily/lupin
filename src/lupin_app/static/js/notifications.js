@@ -20245,8 +20245,30 @@ class NotificationsUI {
         const anchor = this.keepPlace && this._readerIsScrolledAway()
             ? this._captureCenterScrollAnchor( moving )
             : null;
+        // Moving a node in the DOM resets the scroll offset of every scroller inside it to zero, so a
+        // card that jumps to the top loses the place held in its own notification history.
+        const panes = this.keepPlace && moving ? this._captureHistoryPaneScroll( moving ) : [];
         mutate();
         if ( anchor ) this._restoreCenterScrollAnchor( anchor );
+        for ( const pane of panes ) pane.el.scrollTop = pane.top;
+    }
+
+    /**
+     * Record where each notification-history pane inside a card is scrolled to.
+     *
+     * Requires:
+     *   - card is a sender card element
+     *
+     * Ensures:
+     *   - returns [ { el, top } ] for each .date-accordion-messages pane that is scrolled away from its top
+     *   - returns [] when no pane is scrolled, so the caller has nothing to restore
+     */
+    _captureHistoryPaneScroll( card ) {
+        const found = [];
+        for ( const el of card.querySelectorAll( ".date-accordion-messages" ) ) {
+            if ( el.scrollTop > 0 ) found.push( { el, top: el.scrollTop } );
+        }
+        return found;
     }
 
     /**

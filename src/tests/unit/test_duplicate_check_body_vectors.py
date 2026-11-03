@@ -166,3 +166,31 @@ def test_two_writes_of_the_same_text_use_different_temporary_names_that_carry_th
     bv._write( tmp_path, "abc", [ 2.0 ] )
     assert len( set( sources ) ) == 2 and all( f".{bv.os.getpid()}." in s and s.endswith( ".tmp" ) for s in sources )
     assert json.loads( ( tmp_path / "abc.json" ).read_text() ) == [ 2.0 ] and sorted( p.name for p in tmp_path.iterdir() ) == [ "abc.json" ]
+
+
+class DiesOnBatch:
+    """Embeds like FakeClient, then fails from the Nth embed call on, as a lost server does."""
+
+    def __init__( self, die_on ):
+        self.inner, self.die_on, self.calls = FakeClient(), die_on, 0
+
+    def embed( self, texts, content_type, role ):
+        self.calls += 1
+        if self.calls >= self.die_on: raise ConnectionError( "model server gone" )          # gone for good, so the halves fail too
+        return self.inner.embed( texts, content_type, role )
+
+    def info( self ): return self.inner.info()
+
+
+def test_a_crash_part_way_keeps_the_vectors_of_the_batches_already_done_and_the_next_run_embeds_only_the_rest( tmp_path, monkeypatch ):
+    monkeypatch.setattr( bv.vb, "BATCH_SIZE", 2 )
+    defs   = [ definition( f"f{n}", f"alpha {'beta ' * n}" ) for n in range( 1, 7 ) ]
+    client = DiesOnBatch( die_on=3 )
+    with pytest.raises( ConnectionError ):
+        bv.ensure_vectors( defs, client, tmp_path, 1000, sleep=lambda s: None )
+    folder = next( p for p in tmp_path.iterdir() if p.is_dir() )
+    assert len( list( folder.glob( "*.json" ) ) ) == 4, "two batches of two were written before the third failed"
+    assert list( folder.glob( "*.tmp" ) ) == []
+    again = FakeClient()
+    out   = bv.ensure_vectors( defs, again, tmp_path, 1000, sleep=lambda s: None )
+    assert ( out[ "embedded" ], out[ "reused" ] ) == ( 2, 4 ) and sum( len( c[ 0 ] ) for c in again.calls ) == 2

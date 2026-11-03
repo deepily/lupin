@@ -57,6 +57,7 @@ SUITE_SCRIPTS = {
     "typecheck"      : "src/tests/run-typecheck-gate.sh", # the three tsc projects as a BLOCKING merge gate (row 7bc67019, Rick 2026-09-09 02:35 UTC: "Yes, blocking gate", answered on a direct ask, default_used: false). Runs FIRST in ALL_SUITE_COMPONENTS: it is ~3s of static analysis (MEASURED 3.00s wall, 2026-09-09), so a type-red branch fails in seconds instead of after the ~25min TypeScript tier.
     "stylelint"      : "src/tests/run-stylelint-gate.sh", # every git-tracked .css file as a BLOCKING merge gate (row d3d4a18c, Rick's ruling 2026-09-18 21:06). Runs SECOND, right after typecheck: MEASURED 1.5s wall for 32 files (2026-09-18), static like typecheck, so a style-red branch also fails in seconds. Its summary counts FILES, not tests.
     "doclint"        : "src/tests/run-doclint-gate.sh", # every swept-scope Python file's docstrings as a blocking merge gate (row 2c48c717, Rick's ruling). Runs third, after the two other static gates: measured 4.6s wall for 862 files. Its second step is the metrics dashboard check. Its summary counts the swept files plus one for that check, and its "Errors:" line counts findings plus the lines that check printed.
+    "reuse"          : "src/tests/run-reuse-gate.sh",   # the outcome lines a branch adds, judged against the call log, as a blocking merge gate (Plan 3 step C3, ruling 12). Runs fourth, after the three other static gates, and makes no model call. Its summary counts checks: one for the scan, one per outcome line, one per new definition in a symbol index diff. With `reuse review gating` false it reports and passes.
     "coverage"       : "src/tests/run-coverage-gate.sh", # the Python coverage gate (row e2099400, 2026-08-29). Until it existed, pyproject's fail_under was invoked by NOTHING — no addopts, no runner, no injection here — so the 100% mandate had teeth on the TypeScript side only. Runs AFTER unit+cosa have appended to one data file; pass --run-tiers to make it run them itself.
                                                         # 🔴 EXIT-CODE CONTRACT, documented at this call site rather than only where it is
                                                         # raised (row 73ebccb1, Mr. Radio's ruling 2026-09-05): a code is a contract, a
@@ -117,6 +118,7 @@ SUITE_TIMEOUTS_SECONDS = {
     "stylelint"    : 300,    #  5 min. MEASURED 1.5s wall for 32 files (2026-09-18, row d3d4a18c) — the typecheck gate's reasoning: a static gate that has run for five minutes has hung, and the budget is the only thing that says so.
     "docker_smoke" : 600,    # 10 min. The three files took about 90s together on a loaded host (28.4s rollback, 59.3s grants); a step that runs for ten minutes has hung.
     "doclint"      : 300,    #  5 min. Measured 4.6s wall for 862 files (row 2c48c717). The typecheck gate's reasoning applies: a static gate that has run for five minutes has hung.
+    "reuse"        : 300,    #  5 min. A static gate over the lines one branch adds and a call log read; it takes seconds, and a run of five minutes has hung (Plan 3 step C3).
     "coverage"     : 2400,   # 40 min. As a pyramid STEP it is a report + a frame check, ~1 min; the budget covers the standalone --run-tiers form, which re-runs unit (936s) + cosa (301s) itself.
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
@@ -226,13 +228,16 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # "doclint" is third (row 2c48c717, Rick's ruling), for the same reason: 4.6s of
 # static analysis (measured), so a branch with a docstring lint finding in a swept file fails
 # before any tier runs.
+# "reuse" is fourth (Plan 3 step C3, ruling 12), for the same reason: it reads the outcome lines a branch
+# adds and the call log, makes no model call, and takes seconds, so a branch with a refused outcome
+# line fails before any tier runs.
 # 🔴 E2E RUNS AS TWO HALVES, "e2e_a" THEN "e2e_b" (row 2818dad7, Rick's ruling on decision row
 # 4103ea0f, 2026-09-14). The whole suite measured 3038.1s and grows ~5.39 s/day, and one timeout
 # threw away every result in the run (09-10: 633 passed, none written to JUnit). As two entries here,
 # each half gets its own timeout, junit and log, and a timeout loses one half. They run one after
 # the other, not side by side — see run-e2e-ui-tests.sh's header for why they cannot overlap. "e2e"
 # stays registered for a deliberate whole-suite run.
-ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "doclint", "unit", "cosa", "coverage", "typescript", "smoke", "docker_smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "doclint", "reuse", "unit", "cosa", "coverage", "typescript", "smoke", "docker_smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
 
 # Suites a container does not offer: they run on the host. The unit tier ran inside the :8000 container
@@ -776,6 +781,11 @@ class TestSuiteJob( AgenticJobBase ):
         crash_output = result.get( "startup_crash_output" )
         if crash_output:
             line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
+
+        # The unit tier's own scope exits 72 when the kernel killed a process for memory. Say so,
+        # because the counts alone read as failing tests (row d0b369af).
+        if suite_type == "unit" and result.get( "exit_code" ) == 72:
+            line += "\n  **OUT OF MEMORY**: the unit scope was killed for memory (exit 72); this is not a test failure"
 
         # A FAIL next to "0 failed" reads as a harness bug unless the card says why (row 1a11fe96).
         coverage_misses = result.get( "coverage_threshold_failures" ) or []
@@ -2077,6 +2087,8 @@ class TestSuiteJob( AgenticJobBase ):
         # The doclint gate (row 2c48c717). Its stdout names every
         # finding as file:line: rule, and that is the only record this gate produces.
         "doclint"      : "doclint-gate-latest.log",
+        # The reuse gate (Plan 3 step C3). Its stdout names every refused outcome line and every definition with none.
+        "reuse"        : "reuse-gate-latest.log",
         # The docker smoke step. Its stdout names each skipped test with the reason, and that is the
         # only record this step produces.
         "docker_smoke" : "docker-smoke-gate-latest.log",
@@ -2558,7 +2570,10 @@ class TestSuiteJob( AgenticJobBase ):
         # "doclint" (row 2c48c717) prints the same three lines. Its unit is files, plus one for the
         # dashboard check that is its second step. That check failing adds one to "Failed:".
         # Its refusals exit 2 or 3 with no summary, so they read not executed, never passed.
-        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint", "doclint", "docker_smoke" ):
+        # "reuse" (Plan 3 step C3) prints the same lines, and its unit is checks. With gating off it prints
+        # "Failed: 0" and its would-be refusals under "Report-only:", so the suite reads as passed.
+        # A run that could not check exits 3 with no summary, so it reads not executed, never passed.
+        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint", "doclint", "reuse", "docker_smoke" ):
             return None
         if not stdout:
             return None

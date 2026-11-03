@@ -97,6 +97,7 @@ def ensure_vectors( defs, client, cache_dir, body_chars, sleep=time.sleep ):
           counts of distinct texts embedded now and read from the cache
         - texts are embedded with the code engine and the document role, on both sides of a comparison
         - a text shared by several definitions is embedded once
+        - each batch of new vectors is written to the cache as it returns, so a crash part way keeps the batches already done
         - a second call over the same texts and the same engine makes no embed call
         - vectors cached under another engine or revision are not used
         - every vector has the same length
@@ -117,9 +118,11 @@ def ensure_vectors( defs, client, cache_dir, body_chars, sleep=time.sleep ):
     found   = { sha: _read( folder, sha ) for sha in texts }
     missing = sorted( sha for sha, vector in found.items() if vector is None )
     if missing:
-        fresh = vb.embed_all( client, [ texts[ sha ] for sha in missing ], CONTENT_TYPE, ROLE, vb.BATCH_SIZE, vb.PAUSE_SECONDS, sleep )
-        for sha, vector in zip( missing, fresh ):
-            found[ sha ] = [ float( x ) for x in vector ]
-            _write( folder, sha, found[ sha ] )
+        def keep( start, vectors ):
+            """Ensures: writes the vectors of the batch that began at start to the cache."""
+            for sha, vector in zip( missing[ start: ], vectors ):
+                found[ sha ] = [ float( x ) for x in vector ]
+                _write( folder, sha, found[ sha ] )
+        vb.embed_all( client, [ texts[ sha ] for sha in missing ], CONTENT_TYPE, ROLE, vb.BATCH_SIZE, vb.PAUSE_SECONDS, sleep, on_batch=keep )
     if len( { len( v ) for v in found.values() } ) > 1: raise CandidateError( EMBEDDING_SHAPE, "the cached and new vectors differ in length" )
     return { "vectors": { i: found[ sha ] for i, sha in sha_of.items() }, "truncated": truncated, "embedded": len( missing ), "reused": len( texts ) - len( missing ) }

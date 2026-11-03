@@ -114,7 +114,7 @@ def _embed_halving( client, batch, content_type, role, pause_seconds, sleep ):
         return first + _embed_halving( client, batch[ mid: ], content_type, role, pause_seconds, sleep )
 
 
-def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sleep ):
+def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sleep, on_batch=None ):
     """
     Embed every text in batches, one batch at a time, with a pause between batches.
 
@@ -123,6 +123,7 @@ def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sle
         - a batch holds at most batch_size texts, and at most CHAR_BUDGET characters counted as
           rows times the longest text, except a single text longer than the budget, sent alone
         - a batch the server refuses is retried in halves, down to one text, so a GPU shared with another process still gets every text
+        - with on_batch, it is called as on_batch( start, vectors ) the moment each batch returns, start being the index of the batch's first text, so a caller can keep the work done if a later batch fails
         - every vector has the length of the first
 
     Raises:
@@ -141,6 +142,7 @@ def embed_all( client, texts, content_type, role, batch_size, pause_seconds, sle
         if len( out ) != len( batch ):
             raise CandidateError( EMBEDDING_SHAPE, f"asked for {len( batch )} vectors and got {len( out )}" )
         vectors.extend( out )
+        if on_batch is not None: on_batch( i, out )
         i = end
         if i < len( texts ): sleep( pause_seconds )
     if len( { len( v ) for v in vectors } ) > 1: raise CandidateError( EMBEDDING_SHAPE, "the vectors differ in length" )
