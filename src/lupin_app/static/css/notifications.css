@@ -1979,8 +1979,9 @@
            ======================================== */
         .cc-session-strip {
             display: flex;
-            align-items: center;
-            gap: 12px;
+            flex-direction: column;   /* persona badges on the first row, the toggles on their own row below */
+            align-items: stretch;
+            gap: 8px;
             padding: 10px 16px;   /* more internal room inside the focus bar (Rick 2026-06-08) */
             margin-bottom: 12px;
             background: linear-gradient( to bottom, #fff, #f8f9fa );
@@ -2218,6 +2219,13 @@
             50% {
                 box-shadow: 0 0 0 6px rgb( 220, 53, 69, 0.00 );
             }
+        }
+
+        .cc-strip-toggles {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 0 0 auto;
         }
 
         .cc-strip-toggle {

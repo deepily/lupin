@@ -127,3 +127,60 @@ export function restoreKeepPlace( mount: HTMLElement, candidates: PlaceCandidate
     return;
   }
 }
+
+/** Where each notification-history pane was scrolled, keyed by sender card and day. */
+export type HistoryScroll = Map<string, number>;
+
+/** The key one pane is remembered under: its sender card's key, then its day's key. */
+function historyKey( cardKey: string, dayKey: string | null ): string {
+  return `${cardKey}|${dayKey ?? ""}`;
+}
+
+/**
+ * Remember how far each card's history is scrolled, before the cards are merged.
+ *
+ * Requires:
+ *   - mount is the element whose children are the sender cards, each carrying data-id-hash
+ *
+ * Ensures:
+ *   - returns an entry for each .date-accordion-messages pane that is scrolled away from its top
+ *   - returns an empty map when nothing is scrolled, so there is nothing to restore
+ */
+export function captureHistoryScroll( mount: HTMLElement ): HistoryScroll {
+  const found: HistoryScroll = new Map();
+  for ( const card of Array.from(mount.children) as HTMLElement[] ) {
+    const cardKey = card.getAttribute("data-id-hash");
+    if ( cardKey === null ) continue;
+    for ( const pane of Array.from(card.querySelectorAll<HTMLElement>(".date-accordion-messages")) ) {
+      if ( pane.scrollTop > 0 ) {
+        found.set(historyKey(cardKey, pane.closest(".date-accordion")?.getAttribute("data-date-key") ?? null), pane.scrollTop);
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Put each history pane back where it was scrolled to.
+ *
+ * Moving a card in the DOM, or replacing it with a fresh render, sets every scroller inside it back to the
+ * top. So the offsets are written again after the merge, onto whichever pane now stands for that day.
+ *
+ * Requires:
+ *   - remembered came from captureHistoryScroll on the same mount, before the merge
+ *
+ * Ensures:
+ *   - a pane that still exists under the same card and day gets its remembered offset
+ *   - a pane that is gone is skipped
+ */
+export function restoreHistoryScroll( mount: HTMLElement, remembered: HistoryScroll ): void {
+  if ( remembered.size === 0 ) return;
+  for ( const card of Array.from(mount.children) as HTMLElement[] ) {
+    const cardKey = card.getAttribute("data-id-hash");
+    if ( cardKey === null ) continue;
+    for ( const pane of Array.from(card.querySelectorAll<HTMLElement>(".date-accordion-messages")) ) {
+      const top = remembered.get(historyKey(cardKey, pane.closest(".date-accordion")?.getAttribute("data-date-key") ?? null));
+      if ( top !== undefined && pane.scrollTop !== top ) pane.scrollTop = top;
+    }
+  }
+}

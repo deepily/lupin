@@ -45,7 +45,7 @@ import type { TtsInteractionMode } from "./templates/senderCard";
 // A-2 #4 — the shared reveal helper, whose own header names TTS playback as a
 // consumer (scrollReveal.ts:6). It was built for this caller and never wired to one.
 import { scrollRevealElement } from "./scrollReveal";
-import { captureKeepPlace, keepPlaceIsOn, restoreKeepPlace } from "./keepPlace";
+import { captureHistoryScroll, captureKeepPlace, keepPlaceIsOn, restoreHistoryScroll, restoreKeepPlace } from "./keepPlace";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 import * as debugSink from "../shared/debugSink";
@@ -664,6 +664,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // Keep place: remember which cards the reader is looking at, so a card arriving at the top does not
     // shift them. Null when the reader is at the top or the preference is off.
     const place = keepPlaceIsOn() ? captureKeepPlace(this.senderCardsMount, document, window) : null;
+    // Moving or replacing a card sets the scrollers inside it back to the top, so each card's own history
+    // scroll is remembered too. Null when the preference is off.
+    const history = keepPlaceIsOn() ? captureHistoryScroll(this.senderCardsMount) : null;
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
@@ -693,6 +696,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       },
     });
     if (place !== null) restoreKeepPlace(this.senderCardsMount, place, document, window);
+    if (history !== null) restoreHistoryScroll(this.senderCardsMount, history);
     restoreCardFocus(this.senderCardsMount, focusBefore);
 
     // Re-mark expanded progress groups after the render (state preserved
