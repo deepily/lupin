@@ -401,7 +401,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
     found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ] )
-    if "filer" in parts: doc[ "findings" ] = [ filing.for_record( f ) for f in found ]       # kept in the file, so duplicate_check_refile can file them again after a filing error
+    doc[ "findings" ] = [ filing.for_record( f ) for f in found ]       # kept on every run, filer or not: the weekly page counts them, and duplicate_check_refile files them again after a filing error
     for hook, key in ( ( "filer", "filing" ), ( "auditor", "audit" ) ):
         if hook not in parts: continue
         try: doc[ key ] = parts[ hook ]( found, folder )
