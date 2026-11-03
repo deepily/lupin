@@ -6,6 +6,7 @@ A sampled lookup is queued, and a scheduled run drains the queue through a trans
 Each audit leaves a receipt of its own kind in the same data folder, and the receipts give a bound on missed matches.
 Nothing here makes a live call: the transport is passed in.
 """
+import datetime
 import hashlib
 import json
 import math
@@ -26,10 +27,16 @@ CONFIDENCE     = 0.95
 MATCHING       = ( "REUSE", "EXTEND" )
 NO_MATCH       = "NO_MATCH"
 OUTCOMES       = ( "miss", "ok", "inconclusive" )
-ITEM_FIELDS    = ( "id", "need", "language", "generation", "index_sha", "live", "queued_on", "attempts" )
+ITEM_FIELDS    = ( "id", "need", "language", "generation", "index_sha", "live", "queued_on", "attempts", "known_miss" )
 TEMP_PREFIX    = ".tmp-"
 RECEIPT_FIELDS = ( "kind", "id", "need_hash", "language", "generation", "index_sha", "live_verdict", "full_verdict",
-                   "candidate_count", "causal_ids", "outcome", "missed_ids", "audited_on" )
+                   "candidate_count", "causal_ids", "outcome", "missed_ids", "audited_on", "known_miss" )
+NEW_FIELD            = "known_miss"                                  # added after the first files were written; a file without it reads as False
+OLD_ITEM_FIELDS      = tuple( f for f in ITEM_FIELDS if f != NEW_FIELD )
+OLD_RECEIPT_FIELDS   = tuple( f for f in RECEIPT_FIELDS if f != NEW_FIELD )
+UNKNOWN_ENTRY        = "UNKNOWN_ENTRY"                               # the code a sweep refusal carries when the index lacks the excluded id
+UNKNOWN_ENTRY_TRIES  = 3                                             # failed attempts after which an item that keeps answering it is dropped
+WEEK_DAYS            = 7
 
 
 def audit_bound( misses, n ):
@@ -113,10 +120,10 @@ def _receipt_id( digest, generation, index_sha ):
 
 def _receipt_shape_ok( receipt ):
     """Return True when a parsed receipt holds every receipt field and a known outcome."""
-    return isinstance( receipt, dict ) and all( key in receipt for key in RECEIPT_FIELDS ) and receipt[ "outcome" ] in OUTCOMES
+    return isinstance( receipt, dict ) and all( key in receipt for key in OLD_RECEIPT_FIELDS ) and receipt[ "outcome" ] in OUTCOMES
 
 
-def audit_receipt( need, language, generation, index_sha, live, sweep, today ):
+def audit_receipt( need, language, generation, index_sha, live, sweep, today, known_miss=False ):
     """
     Build the receipt of one audit.
 
@@ -124,9 +131,10 @@ def audit_receipt( need, language, generation, index_sha, live, sweep, today ):
         - live holds verdict and candidate_ids of the lookup that was served
         - sweep holds verdict and causal_ids of the full sweep, and the cause when it has one
         - today is an ISO date string
+        - known_miss is True for an audit of a lookup behind a found duplicate, False for a random-sample audit
 
     Ensures:
-        - returns a dict whose keys are RECEIPT_FIELDS
+        - returns a dict whose keys are RECEIPT_FIELDS, with known_miss as given
         - the id is a 16 character hash of the need hash, generation and index sha, so a repeat is one receipt
         - the need's words are not kept, only its hash
     """
@@ -137,7 +145,7 @@ def audit_receipt( need, language, generation, index_sha, live, sweep, today ):
     missed     = sorted( set( sweep[ "causal_ids" ] ) - candidates ) if outcome == "miss" else []
     return { "kind": KIND, "id": rid, "need_hash": digest, "language": language, "generation": generation, "index_sha": index_sha,
              "live_verdict": live[ "verdict" ], "full_verdict": sweep[ "verdict" ], "candidate_count": len( candidates ),
-             "causal_ids": sorted( sweep[ "causal_ids" ] ), "outcome": outcome, "missed_ids": missed, "audited_on": today }
+             "causal_ids": sorted( sweep[ "causal_ids" ] ), "outcome": outcome, "missed_ids": missed, "audited_on": today, "known_miss": known_miss }
 
 
 def _folder( data_dir, name ):
@@ -158,9 +166,11 @@ def _item_ok( item ):
 
     Ensures:
         - the id and the queued date are text, so the drain can sort on them
+        - a file written before known_miss existed is accepted, and a known_miss that is not True or False is not
     """
-    return isinstance( item, dict ) and all( key in item for key in ITEM_FIELDS ) and isinstance( item[ "attempts" ], int ) \
-           and isinstance( item[ "live" ], dict ) and isinstance( item[ "id" ], str ) and isinstance( item[ "queued_on" ], str )
+    return isinstance( item, dict ) and all( key in item for key in OLD_ITEM_FIELDS ) and isinstance( item[ "attempts" ], int ) \
+           and isinstance( item[ "live" ], dict ) and isinstance( item[ "id" ], str ) and isinstance( item[ "queued_on" ], str ) \
+           and isinstance( item.get( NEW_FIELD, False ), bool )
 
 
 def _write_once( path, text ):
@@ -203,13 +213,16 @@ def _read_receipt_file( path ):
     """
     Read one receipt file.
 
+    Ensures:
+        - a receipt written before known_miss existed comes back with known_miss False
+
     Raises:
         - CandidateError AUDIT_RECEIPT_CORRUPT when the file is not JSON or is not a receipt
     """
     try: receipt = json.loads( path.read_text( encoding="utf-8" ) )
     except ValueError as exc: raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: {exc}" ) from exc
     if not _receipt_shape_ok( receipt ): raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: wrong shape" )
-    return receipt
+    return { NEW_FIELD: False, **receipt }
 
 
 def load_receipts( data_dir ):
@@ -229,7 +242,7 @@ def load_receipts( data_dir ):
     return out
 
 
-def tally( receipts, language, generation ):
+def tally( receipts, language, generation, known_miss=False ):
     """
     Count audits for one language and one vector-set generation.
 
@@ -237,8 +250,9 @@ def tally( receipts, language, generation ):
         - returns { audits, misses, inconclusive, bound, generation, language }
         - audits counts conclusive audits only, and the bound is audit_bound( misses, audits )
         - a receipt of another language or generation is not counted
+        - only receipts whose known_miss equals the argument are counted, so the random-sample bound is never mixed with the audits of found duplicates
     """
-    held         = [ r for r in receipts if r[ "language" ] == language and r[ "generation" ] == generation ]
+    held         = [ r for r in receipts if r[ "language" ] == language and r[ "generation" ] == generation and r[ NEW_FIELD ] == known_miss ]
     inconclusive = sum( 1 for r in held if r[ "outcome" ] == "inconclusive" )
     misses       = sum( 1 for r in held if r[ "outcome" ] == "miss" )
     audits       = len( held ) - inconclusive
@@ -268,6 +282,26 @@ def count_lookup( data_dir, today ):
     return len( path.read_text( encoding="utf-8" ).splitlines() )
 
 
+def enqueue_pending( data_dir, need, language, generation, index_sha, live, today, known_miss=False ):
+    """
+    Put one lookup in the audit queue, without counting it and without sampling.
+
+    Requires:
+        - live holds verdict and candidate_ids of the lookup that was served
+        - need is the redacted need, because the queue file keeps its words so the sweep can read them
+
+    Ensures:
+        - returns the queue id, a hash of the need, generation and index sha
+        - a file in shadow-pending/ holds the item with attempts 0 and the known_miss given, and the same lookup queues once
+        - the day's lookup count does not change
+    """
+    key  = hashlib.sha256( f"{need_hash( need )}\n{generation}\n{index_sha}".encode( "utf-8" ) ).hexdigest()[ :16 ]
+    item = { "id": key, "need": need, "language": language, "generation": generation, "index_sha": index_sha, "live": live, "queued_on": today,
+             "attempts": 0, "known_miss": known_miss }
+    _write_once( _folder( data_dir, "shadow-pending" ) / f"{key}.json", json.dumps( item, sort_keys=True ) + "\n" )
+    return key
+
+
 def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, today, rate=SAMPLE_RATE ):
     """
     Count a served lookup and queue it for audit when it is in the sample.
@@ -279,21 +313,32 @@ def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, t
     Ensures:
         - the day's lookup count goes up by one, sampled or not
         - returns the queue id of a sampled lookup, or None
-        - a sampled lookup is a file in shadow-pending/, and the same lookup queues once
+        - a sampled lookup is a file in shadow-pending/ with known_miss False, and the same lookup queues once
 
     Raises:
         - CandidateError AUDIT_RATE_INVALID from is_sampled
     """
     count_lookup( data_dir, today )
     if not is_sampled( need, generation, rate ): return None
-    key  = hashlib.sha256( f"{need_hash( need )}\n{generation}\n{index_sha}".encode( "utf-8" ) ).hexdigest()[ :16 ]
-    item = { "id": key, "need": need, "language": language, "generation": generation, "index_sha": index_sha, "live": live, "queued_on": today,
-             "attempts": 0 }
-    _write_once( _folder( data_dir, "shadow-pending" ) / f"{key}.json", json.dumps( item, sort_keys=True ) + "\n" )
-    return key
+    return enqueue_pending( data_dir, need, language, generation, index_sha, live, today )
 
 
-def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_language=False ):
+def audits_in_week( data_dir, today ):
+    """
+    Count the audits stored in the seven days that end on today.
+
+    Requires:
+        - today is an ISO date string
+
+    Ensures:
+        - returns the number of receipts whose audited_on is from six days before today to today, both included
+    """
+    end   = datetime.date.fromisoformat( today )
+    first = end - datetime.timedelta( days=WEEK_DAYS - 1 )
+    return sum( v[ "audits" ] for day, v in daily_volume( data_dir ).items() if first <= datetime.date.fromisoformat( day ) <= end )
+
+
+def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_language=False, weekly_cap=None ):
     """
     Drain the audit queue through the full-sweep transport.
 
@@ -301,7 +346,7 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
         - sweep_fn takes a need and returns { verdict, causal_ids }, and the cause when the verdict is uncertain
 
     Ensures:
-        - returns { audited, failed, corrupt, receipts }
+        - returns { audited, failed, corrupt, dropped, receipts }
         - each audited item leaves a receipt and its queue file is removed
         - an item whose sweep raises stays queued with its attempt count up by one, and counts as failed
         - a queue file that is not JSON, lacks a queue field, or holds an id or queued date that is not text, is renamed to <name>.corrupt and counted, and the run goes on
@@ -309,12 +354,15 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
         - that check comes before the sweep, so a damaged receipt file never spends a sweep
         - a sweep answer that lacks verdict or causal_ids counts as a failure of that item, like a raised error
         - a temporary file of a write in progress is never read
-        - at most limit items are taken, fewest attempts first, then oldest queued date, then queue id
+        - at most limit items are taken, known-miss items first, then fewest attempts, then oldest queued date, then queue id
+        - an item whose sweep raises a CandidateError naming UNKNOWN_ENTRY stays queued like any failure, until its third failed attempt; then its file is removed and it counts as dropped
+        - an item queued before known_miss existed is read as known_miss False
+        - with weekly_cap, the run stops before the audit that would make the audits stored in the seven days ending today pass the cap; the rest stay queued
         - with pass_language the sweep is called as sweep_fn( need, language ), else as sweep_fn( need )
         - with max_tokens, each sweep answer must carry a whole-number tokens count (a sweep without one fails like a raised error), and the run
           stops before a sweep when the tokens spent so far plus the largest sweep seen would pass max_tokens; the rest stay queued
-        - with max_tokens the result also holds spent_tokens and stopped_by, "ceiling" when the run stopped for that reason, else None
-        - without max_tokens the result keeps its four keys
+        - with max_tokens or weekly_cap the result also holds stopped_by, "ceiling" or "weekly_cap" when the run stopped for that reason, else None; with max_tokens it also holds spent_tokens
+        - without either the result keeps its five keys
     """
     queued, corrupt = [], 0
     for path in sorted( p for p in _folder( data_dir, "shadow-pending" ).glob( "*.json" ) if not p.name.startswith( TEMP_PREFIX ) ):
@@ -324,11 +372,15 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
             path.rename( path.with_name( path.name + ".corrupt" ) )
             corrupt += 1
             continue
-        queued.append( ( item, path ) )
-    queued.sort( key=lambda pair: ( pair[ 0 ][ "attempts" ], pair[ 0 ][ "queued_on" ], pair[ 0 ][ "id" ] ) )
+        queued.append( ( { NEW_FIELD: False, **item }, path ) )
+    queued.sort( key=lambda pair: ( not pair[ 0 ][ NEW_FIELD ], pair[ 0 ][ "attempts" ], pair[ 0 ][ "queued_on" ], pair[ 0 ][ "id" ] ) )
     if limit is not None: queued = queued[ :limit ]
-    receipts, failed, spent, biggest, stopped = [], 0, 0, 0, None
+    receipts, failed, dropped, spent, biggest, stopped = [], 0, 0, 0, 0, None
+    room = None if weekly_cap is None else weekly_cap - audits_in_week( data_dir, today )
     for item, path in queued:
+        if room is not None and len( receipts ) >= room:
+            stopped = "weekly_cap"
+            break
         if max_tokens is not None and spent + max( biggest, 1 ) > max_tokens:
             stopped = "ceiling"
             break
@@ -338,10 +390,14 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
             sweep   = sweep_fn( item[ "need" ], item[ "language" ] ) if pass_language else sweep_fn( item[ "need" ] )
             tokens  = sweep[ "tokens" ] if max_tokens is not None else 0
             if type( tokens ) is not int or tokens < 0: raise ValueError( f"tokens {tokens!r}" )
-            receipt = audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ], item[ "live" ], sweep, today )
+            receipt = audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ], item[ "live" ], sweep, today, item[ NEW_FIELD ] )
             stored  = store_receipt( data_dir, receipt )
-        except Exception:                      # a transport failure, a malformed answer or a damaged receipt file leaves the item queued, behind the fresh ones
+        except Exception as exc:               # a transport failure, a malformed answer or a damaged receipt file leaves the item queued, behind the fresh ones
             failed += 1
+            if isinstance( exc, CandidateError ) and UNKNOWN_ENTRY in exc.detail and item[ "attempts" ] + 1 >= UNKNOWN_ENTRY_TRIES:
+                os.remove( path )
+                dropped += 1
+                continue
             temp = _temp_name( path )
             temp.write_text( json.dumps( dict( item, attempts=item[ "attempts" ] + 1 ), sort_keys=True ) + "\n", encoding="utf-8" )
             os.replace( temp, path )
@@ -349,8 +405,9 @@ def run_pending( data_dir, sweep_fn, today, limit=None, max_tokens=None, pass_la
         receipts.append( stored )
         os.remove( path )
         spent, biggest = spent + tokens, max( biggest, tokens )
-    out = { "audited": len( receipts ), "failed": failed, "corrupt": corrupt, "receipts": receipts }
-    if max_tokens is not None: out.update( spent_tokens=spent, stopped_by=stopped )
+    out = { "audited": len( receipts ), "failed": failed, "corrupt": corrupt, "dropped": dropped, "receipts": receipts }
+    if max_tokens is not None: out.update( spent_tokens=spent )
+    if max_tokens is not None or weekly_cap is not None: out.update( stopped_by=stopped )
     return out
 
 

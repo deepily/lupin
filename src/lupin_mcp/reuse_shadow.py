@@ -127,8 +127,9 @@ def drain( data_dir, ctx_factory, ask, today, ceiling ):
     Ensures:
         - returns run_pending's result with spent_tokens and stopped_by
         - the run stops before a sweep that could pass the ceiling, and the rest of the queue waits for the next drain
+        - the run also stops when the audits of the last seven days reach SHADOW_AUDIT_WEEKLY_CAP, the constant the budget test reads
     """
-    return sa.run_pending( data_dir, sweep_of( ctx_factory, ask ), today, max_tokens=ceiling, pass_language=True )
+    return sa.run_pending( data_dir, sweep_of( ctx_factory, ask ), today, max_tokens=ceiling, pass_language=True, weekly_cap=reuse_ledger.SHADOW_AUDIT_WEEKLY_CAP )
 
 
 def cron_lines( root, python, log_path, carried=None ):
@@ -234,7 +235,7 @@ def main( argv=None, environ=None, now=None, out=None, err=None, crontab_cmd=Non
         log( f"drain refused: {error}" )
         print( json.dumps( { "error": error.code, "detail": error.detail } ), file=out )
         return EXIT_NAMED
-    summary = { key: result[ key ] for key in ( "audited", "failed", "corrupt", "spent_tokens", "stopped_by" ) }
+    summary = { key: result[ key ] for key in ( "audited", "failed", "corrupt", "dropped", "spent_tokens", "stopped_by" ) }
     log( f"drain done: {json.dumps( summary, sort_keys=True )}" )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return EXIT_FAILED if result[ "failed" ] and not result[ "audited" ] else EXIT_OK
