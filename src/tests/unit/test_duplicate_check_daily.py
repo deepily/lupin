@@ -409,6 +409,16 @@ def test_a_run_with_a_filer_files_the_findings_and_records_the_answer_and_withou
     assert "filing" not in plain
 
 
+def test_a_run_with_no_filer_still_writes_every_finding_with_the_eight_fields_the_refile_reads( repo, tmp_path ):
+    history( repo )
+    doc   = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    saved = json.loads( results( tmp_path )[ 0 ].read_text() )
+    assert "filing" not in saved and len( saved[ "findings" ] ) == 3 and saved[ "findings" ] == doc[ "findings" ]
+    for f in saved[ "findings" ]:
+        assert all( k in f for k in ( "id", "name", "file", "line", "session_id", "others", "window", "correlation_key" ) )
+        assert f[ "correlation_key" ].startswith( "epic:dupcheck-" ) and "text" not in f
+
+
 def test_the_live_filer_files_with_the_configured_manager_the_roster_and_the_live_store( monkeypatch, tmp_path ):
     import cosa.config.configuration_manager as cm
     import cosa.rest.voice_persona_helpers as vh

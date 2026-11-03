@@ -48,11 +48,14 @@ def test_the_daily_run_keeps_its_findings_without_their_text_and_with_their_stor
     assert len( { f[ "correlation_key" ] for f in kept } ) == 3 and all( set( rf.NEEDED ) <= set( f ) for f in kept )
 
 
-def test_a_run_with_no_filer_keeps_no_findings_and_cannot_be_refiled( repo, tmp_path ):
+def test_a_file_with_no_findings_list_cannot_be_refiled_and_a_run_with_no_filer_now_keeps_them( repo, tmp_path ):
     history( repo )
     dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
     path = results( tmp_path )[ 0 ]
-    assert "findings" not in json.loads( path.read_text() )
+    doc  = json.loads( path.read_text() )
+    assert len( doc[ "findings" ] ) == 3, "a run with no filer keeps its findings"
+    del doc[ "findings" ]
+    path.write_text( json.dumps( doc ) )
     out = io.StringIO()
     assert rf.main( [ str( path ) ], out=out, filer=broken_filer ) == 3 and "holds no findings list" in out.getvalue() and "Nothing was filed." in out.getvalue()
 

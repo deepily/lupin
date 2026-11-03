@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.Counting@006524b7c4
   - lupin_mcp.duplicate_check_daily.findings_of@25bb8dd399
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
-  - lupin_mcp.duplicate_check_daily.run@80d3827127
+  - lupin_mcp.duplicate_check_daily.run@eb6385c87c
   - lupin_mcp.duplicate_check_daily.cron_lines@832050592a
   - lupin_mcp.duplicate_check_daily.install_mode@920cbf8687
   - lupin_mcp.duplicate_check_daily.live_parts@2818695534
@@ -25,7 +25,7 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - An error while building the pool, embedding or judging writes status `failed`, stage `judging`. `last-success.json` does not move.
 - Otherwise status is `ok`, or `carried` when the cap left definitions. `last-success.json` advances to the last commit fully judged.
 - A filer or auditor that raises is caught and recorded as `filing` or `audit` with an `error`. The run still advances.
-- When a filer is present, the findings are kept in the file so [[duplicate-check-refile]] can file them again.
+- The findings are kept in the file on every run, filer or not. The weekly page counts them and [[duplicate-check-refile]] can file them again.
 - The detached worktrees are removed whether the run ends or fails.
 - `cron_lines` returns a daily line at 12:07 and a reboot line 300 seconds after boot. A branch other than `main` is added to both as `--branch`, shell-quoted; the default adds nothing. `install_mode` prints, installs, removes or reports them through the librarian's locked crontab editor.
 - `live_parts` builds the real parts and makes no call. `live_filer` files rows over HTTP. `live_auditor` queues known-miss audits (see [[duplicate-check-audit]]), with no model call.

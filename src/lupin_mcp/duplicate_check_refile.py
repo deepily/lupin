@@ -54,11 +54,11 @@ def read_result( path ):
         - returns the parsed document
     Raises:
         - OSError when the file cannot be read, ValueError when it is not JSON
-        - RefileError when it is not a result document, holds no findings list (a run with no filer, or one written before findings were kept), or a finding lacks a field the row needs
+        - RefileError when it is not a result document, holds no findings list (a file written before findings were kept on every run), or a finding lacks a field the row needs
     """
     doc = json.loads( pathlib.Path( path ).read_text( encoding="utf-8" ) )
     if not isinstance( doc, dict ) or not isinstance( doc.get( "findings" ), list ):
-        raise RefileError( f"{path} holds no findings list: it was written by a run with no filer, or before the findings were kept" )
+        raise RefileError( f"{path} holds no findings list: it was written before the findings were kept on every run" )
     for i, found in enumerate( doc[ "findings" ] ):
         missing = [ k for k in NEEDED if not isinstance( found, dict ) or k not in found ]
         if missing: raise RefileError( f"finding {i} of {path} lacks {', '.join( missing )}" )

@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_refile.RefileError@db8c97d407
   - lupin_mcp.duplicate_check_refile.FilingFailed@96b99fba14
   - lupin_mcp.duplicate_check_refile.RecordNotWritten@181aef2b24
-  - lupin_mcp.duplicate_check_refile.read_result@1260aade68
+  - lupin_mcp.duplicate_check_refile.read_result@d4d66d4973
   - lupin_mcp.duplicate_check_refile.refile@4a8131b863
   - lupin_mcp.duplicate_check_refile.main@bbdf347fd0
 ---
@@ -14,7 +14,7 @@ pins:
 
 ## What it does
 - `read_result( path )` parses the file and checks it. It raises `RefileError` when there is no findings list or a finding lacks `id`, `name`, `file`, `line`, `session_id`, `others`, `window` or `correlation_key`.
-- A file from a run with no filer, or from before findings were kept, has no findings list and is refused.
+- A file written before findings were kept on every run has no findings list and is refused.
 - `refile( path, filer, now )` hands the findings and the file's folder to the filer, where the spool lives. The default filer is `live_filer` from the daily check.
 - After the filer returns, the file gains one `refilings` entry, `{ at, answer }`. Nothing is written before that, so a failed run leaves the file as it was.
 - A finding whose row exists is not filed again, and one already in the spool is not spooled twice. The store key holds no date.
