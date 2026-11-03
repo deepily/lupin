@@ -144,6 +144,7 @@ test( "the plain approve link sends no P0 flag and the two hrefs are not confuse
 test( "success draws approved at <level> ✅, disabled; a refusal shows the server's words", async () => {
   const [ a, b ] = plantCard( [ `/app/tasks/approve?row=${ ROW_A }&priority=P2`, P0LINK( ROW_B ) ] );
   click( a! ); click( b! );
+  assert.deepEqual( calls.map( ( c ) => [ c.id, c.extras ] ), [ [ ROW_A, { promote_priority: "P2" } ], [ ROW_B, { promote_priority: "P0" } ] ], "each request carries its own link's level" );
   release[ 0 ]!( { ok: true } );
   release[ 1 ]!( { ok: false, message: "Promote-to-P0 is honoured only for Rick's login." } );
   await settle();

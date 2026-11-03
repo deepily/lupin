@@ -534,3 +534,19 @@ def test_promote_p0_multiplexer_real_server_refuses_a_login_that_is_not_the_oper
 
     expect( card.locator( ".approve-link-refused" ) ).to_contain_text( "only for Rick's login", timeout=TIMEOUT_MS )
     assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * ROWS
+
+
+def test_promote_priority_landing_page_sends_the_links_own_level_not_p0( logged_in_page, held ):
+    page   = logged_in_page
+    posted = []
+    _operator_door( page, posted )
+    _login_tokens( page )
+    row = held[ 0 ]
+
+    page.goto( f"{BASE_URL}/app/tasks/approve?row={row[ 'id' ]}&priority=P2", wait_until="networkidle", timeout=15_000 )
+    button = page.get_by_test_id( "task-approve-button" )
+    expect( button ).to_have_text( "Approve at P2", timeout=TIMEOUT_MS )
+    button.click()
+
+    expect( page.get_by_test_id( "task-approve-result" ) ).to_have_text( "approved at P2 ✅", timeout=TIMEOUT_MS )
+    assert [ ( i, b[ "to_status" ], b.get( "promote_priority" ) ) for i, b in posted ] == [ ( row[ "id" ], "queued", "P2" ) ]

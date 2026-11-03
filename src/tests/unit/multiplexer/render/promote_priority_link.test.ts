@@ -160,6 +160,7 @@ test( "success draws approved at <level> ✅, disabled", async () => {
   const host  = shell.querySelector( "#action-required-content" ) as Element;
   const [ a ] = plant( host, [ `/app/tasks/approve?row=${ ROW_A }&priority=P2` ] );
   click( a! );
+  assert.deepEqual( calls, [ { id: ROW_A, status: "queued", extras: { promote_priority: "P2" } } ], "the request carries the link's own level, not a fixed P0" );
   release[ 0 ]!( { ok: true } );
   await settle();
   assert.ok( host.querySelector( "a" ) === null );
