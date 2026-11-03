@@ -65,18 +65,16 @@ def _from_ruling( symbol, rows, records ):
     return None
 
 
-def _writer( message, records ):
+def _writers( message, records ):
     """
-    Name the persona the commit message gives, among those that made lookups.
+    Name the personas the commit message gives, among those that made lookups.
 
     Ensures:
-        - returns the persona key whose name appears first in the message as whole words, or None
+        - returns the sorted persona keys that appear in the message as whole words
         - only personas that appear as a caller in the call log are looked for
     """
-    text  = f" {canonical_persona_key( message )} "
-    found = { key: text.find( f" {key} " ) for key in { _persona_of( r ) for r in records } - { "" } }
-    found = { key: at for key, at in found.items() if at >= 0 }
-    return min( found, key=found.get ) if found else None
+    text = f" {canonical_persona_key( message )} "
+    return sorted( key for key in { _persona_of( r ) for r in records } - { "" } if f" {key} " in text )
 
 
 def _from_commit( records, facts ):
@@ -85,13 +83,15 @@ def _from_commit( records, facts ):
 
     Ensures:
         - returns the tie dict marked heuristic, or a `none` tie that says what was missing
+        - a message that names no lookup persona, or more than one, gives `none`, since the writer cannot be told from a reviewer
         - a lookup counts only if it is a `check_exists` that logged no error, has a receipt id, and was made before the commit time
-        - the writer is the first persona the message names, which is a guess: a message that names a reviewer first ties the reviewer's lookups
     """
-    persona = _writer( facts[ "message" ], records )
-    if persona is None: return { "tie": NO_TIE, "reason": "the commit message names no persona that made a lookup in the call log" }
-    before = [ r for r in records if r.get( "tool" ) == HEURISTIC_TOOL and not r.get( "error" ) and r.get( "receipt_id" ) and _persona_of( r ) == persona
-               and datetime.datetime.fromisoformat( r[ "ts" ] ) < facts[ "time" ] ]
+    names = _writers( facts[ "message" ], records )
+    if not names: return { "tie": NO_TIE, "reason": "the commit message names no persona that made a lookup in the call log" }
+    if len( names ) > 1: return { "tie": NO_TIE, "reason": f"the commit message names more than one lookup persona ({', '.join( names )}), so the writer is not certain" }
+    persona = names[ 0 ]
+    before  = [ r for r in records if r.get( "tool" ) == HEURISTIC_TOOL and not r.get( "error" ) and r.get( "receipt_id" ) and _persona_of( r ) == persona
+                and datetime.datetime.fromisoformat( r[ "ts" ] ) < facts[ "time" ] ]
     if not before: return { "tie": NO_TIE, "reason": f"{persona} made no {HEURISTIC_TOOL} lookup before the commit" }
     last = max( before, key=lambda r: datetime.datetime.fromisoformat( r[ "ts" ] ) )
     return { "tie": HEURISTIC, "receipt_id": last[ "receipt_id" ], "session": last[ "session" ], "tool": last[ "tool" ], "persona": persona }

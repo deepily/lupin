@@ -80,20 +80,27 @@ def test_a_token_in_the_receipt_place_is_not_a_receipt_and_falls_through_to_the_
 
 
 def test_the_heuristic_takes_the_writers_latest_check_exists_receipt_before_the_commit( repo ):
-    sha = commit( repo, "[LUPIN] Feat: x (John; checked and approved by Chloé)", NOON )
+    sha = commit( repo, "[LUPIN] Feat: x (John; checked and approved by Rachel)", NOON )
     got = rt.find_tie( "m.new", [], LOG, repo, sha )
     assert got == { "tie": "heuristic", "receipt_id": RID_B, "session": "j2222222", "tool": "check_exists", "persona": "john" }
     for other in ( "e" * 16, RID_C, RID_D, "f" * 16 ): assert got[ "receipt_id" ] != other, "not after the commit, not fetch_similar, not failed, not another persona"
 
 
-def test_the_first_persona_the_message_names_is_taken_as_the_writer_and_accents_and_spaces_are_normalised( repo ):
-    sha = commit( repo, "[LUPIN] Fix: y (Chloé; reviewed with Mr. Radio and John)", NOON )
+def test_accents_and_spaces_are_normalised_and_a_longer_word_is_not_a_persona( repo ):
+    sha = commit( repo, "[LUPIN] Fix: y (Chloé)", NOON )
     assert rt.find_tie( "m.new", [], LOG, repo, sha )[ "persona" ] == "chloe"
-    sha = commit( repo, "[LUPIN] Fix: z (Mr. Radio, then Chloé)", NOON )
+    sha = commit( repo, "[LUPIN] Fix: z (Mr. Radio)", NOON )
     got = rt.find_tie( "m.new", [], LOG, repo, sha )
     assert got[ "persona" ] == "mr radio" and got[ "receipt_id" ] == "9" * 16 and got[ "session" ] == "m4444444"
     sha = commit( repo, "[LUPIN] Fix: w (Johnson)", NOON )
     assert rt.find_tie( "m.new", [], LOG, repo, sha )[ "tie" ] == "none", "a longer word that contains a persona's name is not that persona"
+
+
+def test_a_message_that_names_more_than_one_lookup_persona_gives_no_tie_with_a_reason( repo ):
+    for message in ( "[LUPIN] Fix: y (John; checked and approved by Chloé)", "[LUPIN] Fix: z (Mr. Radio, then Chloé)", "[LUPIN] Fix: v (Chloé; reviewed with Mr. Radio and John)" ):
+        got = rt.find_tie( "m.new", [], LOG, repo, commit( repo, message, NOON ) )
+        assert got[ "tie" ] == "none" and "names more than one lookup persona" in got[ "reason" ] and "receipt_id" not in got, message
+    assert "chloe, john" in rt.find_tie( "m.new", [], LOG, repo, commit( repo, "[LUPIN] Fix: u (John and Chloé)", NOON ) )[ "reason" ], "the reason names them, sorted"
 
 
 def test_no_persona_in_the_message_gives_no_tie_with_a_reason( repo ):
