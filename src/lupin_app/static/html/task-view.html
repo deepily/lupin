@@ -22,6 +22,8 @@
             </p>
             <pre id="task-view-body" data-testid="task-view-body" style="white-space: pre-wrap;"></pre>
         </section>
+        <!-- A batch view link (?rows=a,b): one line per row, its status and title. Read-only like the single page. -->
+        <ul id="task-view-batch" data-testid="task-view-batch" hidden></ul>
     </main>
     <script>
         ( function () {
@@ -68,7 +70,28 @@
                 return String( resp.status );
             }
 
+            async function loadBatch() {
+                const list = new URLSearchParams( window.location.search ).get( "rows" );
+                const ids  = list ? list.split( "," ) : [];
+                if ( ids.length === 0 || ids.some( ( id ) => !ROW_ID_RE.test( id ) ) || new Set( ids ).size !== ids.length ) {
+                    showError( "This link does not name a clean list of full ticket ids." );
+                    return;
+                }
+                const listEl = document.getElementById( "task-view-batch" );
+                const rows   = await Promise.all( ids.map( async ( id ) => {
+                    const resp = await authedGet( "/api/tasks/" + encodeURIComponent( id ) );
+                    return resp.ok ? await resp.json() : null;
+                } ) );
+                rows.forEach( ( row, i ) => {
+                    const li = document.createElement( "li" );
+                    li.textContent = ids[ i ].slice( 0, 8 ) + " · " + ( row === null ? "could not be read" : row.status + " · " + row.title );
+                    listEl.appendChild( li );
+                } );
+                listEl.hidden = false;
+            }
+
             async function load() {
+                if ( new URLSearchParams( window.location.search ).has( "rows" ) ) { await loadBatch(); return; }
                 if ( !rowId || !ROW_ID_RE.test( rowId ) ) { showError( "This link does not name a full ticket id." ); return; }
                 const resp = await authedGet( "/api/tasks/" + encodeURIComponent( rowId ) );
                 if ( !resp.ok ) { showError( await failureText( resp ) ); return; }

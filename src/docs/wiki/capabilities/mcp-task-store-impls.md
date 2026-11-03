@@ -31,7 +31,7 @@ Nine functions in `task_store_tools.py` carry the verbs [[mcp-task-store-tools]]
 - A filtered query that comes back empty does not prove a row is absent, so use this call to check one.
 - `task_approve_line_impl` writes the card bullet for one held row. It fetches the title with `task_get_impl` and builds the line with `approve_link_line`, so the verb and the Python caller write the same link ([[task-approve-link]]).
 - It returns `{ line }`. A malformed id returns `invalid_row_id` and asks the server nothing. A row the server could not return comes back as that error dict. A blank title returns `blank_title`, and it never raises.
-- When you ask Rick to approve rows, put one `task_approve_line` result per row in the action-required card.
+- To ask Rick to approve many rows, send one `task_approve_batch_line` result instead ([[task-approve-batch-link]]).
 - `task_query_impl` drops every unset filter and canonicalizes `project`. It returns the server envelope unchanged: `count` is the page length and `has_more` says whether to keep paging.
 - `blocked_by_persona` lists rows waiting on that persona, whoever owns them. `id_prefix` takes the short id form and counts as a scoping filter.
 - Parked rows are hidden by default. Pass `include_parked`, or ask for `status="parked"`.

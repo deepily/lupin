@@ -55,6 +55,7 @@ src/tests/e2e_ui/test_multiplexer_task_list_group_accordion.py
 src/tests/e2e_ui/test_multiplexer_tts_slider_governs_speech.py
 src/tests/e2e_ui/test_multiplexer_worker_badge_silencing.py
 src/tests/e2e_ui/test_one_click_approve_link_both_clients.py
+src/tests/e2e_ui/test_one_click_batch_approve_link_both_clients.py
 src/tests/e2e_ui/test_prediction_hint_vote_e2e.py
 src/tests/e2e_ui/test_qa_submission.py
 src/tests/e2e_ui/test_resume_overrides.py

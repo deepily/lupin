@@ -15,7 +15,7 @@ pins:
 Thirteen MCP tools let a session read and write the task store over HTTP. The tools live in `cosa_voice_mcp.py`; `task_store_tools.py` holds the transport. [[task-store]] owns the rules.
 
 ## What it does
-- Write tools: `task_create`, `task_transition`, `task_correlate`, `task_reassign`, `task_amend`, `task_request`, `task_ask_unpark`, `task_edit`, `podcast_for_rick` (asks Rick, waits for his answer, starts the podcast job). Read tools: `task_query`, `task_get`, `task_promotion_status`. `task_approve_line` is a read tool that writes a held row's card bullet with its approve link ([[task-approve-link]]).
+- Write tools: `task_create`, `task_transition`, `task_correlate`, `task_reassign`, `task_amend`, `task_request`, `task_ask_unpark`, `task_edit`, `podcast_for_rick` (asks Rick, waits for his answer, starts the podcast job). Read tools: `task_query`, `task_get`, `task_promotion_status`. `task_approve_line` is a read tool that writes a held row's card bullet with its approve link ([[task-approve-link]]). `task_approve_batch_line` does the same for a list of rows ([[task-approve-batch-link]]).
 - Every call goes through `task_store_request` to `/api/tasks/...` with the outbound `X-API-Key`. A 2xx body comes back unchanged.
 - `session_spawner.py` also calls `task_transition_impl` and `task_reassign_impl` directly, bypassing the tool layer.
 

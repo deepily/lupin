@@ -11,7 +11,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.inlineThinking@dae4212c87
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.folded@6bbcf6a191
   - src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.createSessionTranscriptRenderer@eb73d026b3
-  - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.ReadingPaneRendererImpl@d56e4c7338
+  - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.ReadingPaneRendererImpl@422c765851
   - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.req@dd208cc4ab
   - src.lupin_app.static.js.multiplexer.render.ReadingPaneRenderer.reqId@f912a21288
   - src.lupin_app.static.js.multiplexer.render.QaPaneRenderer.formatMetric@d058d31430

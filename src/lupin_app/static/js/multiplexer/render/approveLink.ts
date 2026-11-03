@@ -16,6 +16,7 @@
 import type { HoldingAreaStore } from "../stores/HoldingAreaStore";
 import { normalizeDocLinkHref } from "./docLink";
 import type { TaskItem } from "./taskListModel";
+import type { TransitionExtras } from "./taskVerbs";
 
 /** Every approve link starts here, after loopback normalization. */
 export const APPROVE_LINK_PREFIX = "/app/tasks/approve?row=";
@@ -193,4 +194,132 @@ export function observeApproveLinks( root: Element, reader: TaskReader ): () => 
   } );
   observer.observe( root, { childList: true, subtree: true } );
   return (): void => observer.disconnect();
+}
+
+// ---------------------------------------------------------------------------
+// Batch links: one click applies one move to a whole list of held rows
+// ---------------------------------------------------------------------------
+//
+// `/app/tasks/approve?rows=<id>,<id>&move=queued|dropped[&reason=...]` and its 📋 partner
+// `/app/tasks/view?rows=<id>,<id>`. The click is the same user_direct move the single link sends,
+// once per row, and the answer names every row: a refusal of one never hides the others.
+
+/** Every batch approve link starts here, after loopback normalization. */
+export const BATCH_APPROVE_PREFIX = "/app/tasks/approve?rows=";
+
+/** Every batch view link starts here, after loopback normalization. */
+export const BATCH_VIEW_PREFIX = "/app/tasks/view?rows=";
+
+/** What a batch link asks for: the ids, the move, and the reason a drop carries. */
+export interface BatchLink { ids: string[]; move: "queued" | "dropped"; reason: string | null }
+
+/**
+ * A comma list of full row ids as an array, or null when the list cannot be trusted.
+ *
+ * Ensures: null for an empty list, a short or malformed id, or the same id twice, so nothing is sent for it.
+ */
+export function parseBatchIds( list: string | null ): string[] | null {
+  if ( list === null || list === "" ) return null;
+  const ids = list.split( "," );
+  if ( ids.some( ( id ) => !ROW_ID_RE.test( id ) ) ) return null;
+  if ( new Set( ids ).size !== ids.length ) return null;
+  return ids;
+}
+
+/** The query of a link whose normalized href starts with `prefix`, or null. */
+function batchParams( prefix: string, href: string | null ): URLSearchParams | null {
+  const normalized = normalizeDocLinkHref( href );
+  if ( normalized === null || !normalized.startsWith( prefix ) ) return null;
+  return new URLSearchParams( normalized.slice( prefix.indexOf( "?" ) + 1 ) );
+}
+
+/**
+ * What a batch approve-link href asks for, or null when it is not one or cannot be trusted.
+ *
+ * Ensures: null for a bad id list, a move other than queued or dropped, or a drop with a blank reason.
+ */
+export function batchLinkOf( href: string | null ): BatchLink | null {
+  const params = batchParams( BATCH_APPROVE_PREFIX, href );
+  if ( params === null ) return null;
+  const ids  = parseBatchIds( params.get( "rows" ) );
+  const move = params.get( "move" );
+  if ( ids === null || ( move !== "queued" && move !== "dropped" ) ) return null;
+  const reason = ( params.get( "reason" ) ?? "" ).trim();
+  if ( move === "dropped" && reason === "" ) return null;
+  return { ids, move, reason: move === "dropped" ? reason : null };
+}
+
+/** The ids a batch 📋 view-link href names, or null when it is not one or the list is bad. */
+export function batchViewIds( href: string | null ): string[] | null {
+  const params = batchParams( BATCH_VIEW_PREFIX, href );
+  return params === null ? null : parseBatchIds( params.get( "rows" ) );
+}
+
+/**
+ * Apply one move to every listed row, all requests out together.
+ *
+ * Ensures: returns one line per row in the order given, `<first 8> applied ✅` or `<first 8> refused: <server words>`.
+ */
+export async function applyBatch( link: BatchLink, sender: ApproveSender ): Promise<string[]> {
+  const extras: TransitionExtras = link.reason === null ? {} : { reason: link.reason };
+  const results = await Promise.all( link.ids.map( ( id ) => sender.transitionTask( id, link.move, extras ) ) );
+  return results.map( ( r, i ) => `${ link.ids[ i ]!.slice( 0, 8 ) } ${ r.ok ? "applied ✅" : `refused: ${ r.message }` }` );
+}
+
+/**
+ * Handle a click that may be on a batch approve link. Returns true if it claimed it.
+ *
+ * Ensures:
+ *   - a click on anything else is untouched and reports false
+ *   - a batch link that cannot be trusted (bad, short or repeated id, empty list, odd move, drop without a reason)
+ *     is claimed so the browser does not navigate, but sends nothing
+ *   - one run per link: a second click while it is out sends nothing
+ *   - the link is replaced by a summary line and one line per row
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line.
+export function handleBatchApproveLinkClick( ev: Event, target: Element, sender: ApproveSender ): boolean {
+  const anchor = target.closest( "a[href]" );
+  if ( anchor === null ) return false;
+  const href = anchor.getAttribute( "href" );
+  if ( normalizeDocLinkHref( href )?.startsWith( BATCH_APPROVE_PREFIX ) !== true ) return false;
+  ev.preventDefault();
+  const link = batchLinkOf( href );
+  if ( link === null || anchor.getAttribute( "data-approve-state" ) === "pending" ) return true;
+  anchor.setAttribute( "data-approve-state", "pending" );
+  anchor.setAttribute( "aria-disabled", "true" );
+  ( anchor as HTMLElement ).style.opacity = "0.5";
+  void applyBatch( link, sender ).then( ( lines ) => {
+    const done    = lines.filter( ( l ) => l.endsWith( "applied ✅" ) ).length;
+    const outcome = anchor.ownerDocument.createElement( "span" );
+    outcome.className = done === lines.length ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
+    outcome.textContent = [ `${ done } of ${ lines.length } applied`, ...lines ].join( "\n" );
+    ( outcome as HTMLElement ).style.whiteSpace = "pre-line";
+    anchor.replaceWith( outcome );
+  } );
+  return true;
+}
+
+/**
+ * Handle a click that may be on a batch 📋 view link. Returns true when it claimed the click.
+ *
+ * Ensures:
+ *   - a click on anything else is untouched and reports false
+ *   - the browser does not follow the link
+ *   - every row is read and `show` gets one line per row, its status and title, in the order given;
+ *     a row that could not be read says so, and the rest still show
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line.
+export function handleBatchViewLinkClick( ev: Event, target: Element, reader: TaskReader, show: AbstractShower ): boolean {
+  const anchor = target.closest( "a[href]" );
+  if ( anchor === null ) return false;
+  const href = anchor.getAttribute( "href" );
+  if ( normalizeDocLinkHref( href )?.startsWith( BATCH_VIEW_PREFIX ) !== true ) return false;
+  ev.preventDefault();
+  const ids = batchViewIds( href );
+  if ( ids === null ) { show( anchor, "This link does not name a clean list of full ticket ids.", "Held rows" ); return true; }
+  void Promise.all( ids.map( reader ) ).then( ( rows ) => {
+    const lines = rows.map( ( row, i ) => `${ ids[ i ]!.slice( 0, 8 ) } · ${ row === null ? "could not be read" : `${ row.status ?? "—" } · ${ row.title ?? "(no title)" }` }` );
+    show( anchor, lines.join( "\n" ), `${ ids.length } held rows` );
+  } );
+  return true;
 }
