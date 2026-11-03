@@ -63,6 +63,7 @@ EXEMPT = {
     "list_spawned_sessions" : "read-only (docstring tag READ)",
     "task_get"              : "read-only (docstring tag READ)",
     "task_approve_line"     : "read-only (docstring tag READ); fetches one row and writes nothing",
+    "task_approve_batch_line": "read-only (docstring tag Read tier); builds a link string and asks the server nothing",
     "task_promotion_status" : "read-only (docstring tag READ)",
     "task_query"            : "read-only (docstring tag READ)",
     "get_session_info"      : "returns this session's own identity and writes nothing",

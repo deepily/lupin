@@ -20908,6 +20908,8 @@ class NotificationsUI {
         document.addEventListener( "click", ( ev ) => this._handleApproveLinkClick( ev ) );
         // Row 192fecdf — the 📋 view link beside it, and the redraw check on drawn approve links.
         document.addEventListener( "click", ( ev ) => this._handleViewLinkClick( ev ) );
+        document.addEventListener( "click", ( ev ) => this._handleBatchApproveLinkClick( ev ) );
+        document.addEventListener( "click", ( ev ) => this._handleBatchViewLinkClick( ev ) );
         this._observeApproveLinks( document.body );
 
         // Doc-link click interception — EVERY layout mode (row 47759aa3; this
@@ -21130,6 +21132,99 @@ class NotificationsUI {
         outcome.textContent = result.ok ? "approved ✅" : result.message;
         if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
         anchor.replaceWith( outcome );
+    }
+
+    /**
+     * A comma list of full row ids as an array, or null when the list cannot be trusted.
+     *
+     * Ensures: null for an empty list, a short or malformed id, or the same id twice.
+     */
+    _parseBatchIds( list ) {
+        if ( !list ) return null;
+        const ids = list.split( "," );
+        if ( ids.some( ( id ) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test( id ) ) ) return null;
+        if ( new Set( ids ).size !== ids.length ) return null;
+        return ids;
+    }
+
+    /** The query of a link whose normalized href starts with `prefix`, or null. */
+    _batchParams( prefix, href ) {
+        const normalized = this._normalizeDocLinkHref( href );
+        if ( !normalized || !normalized.startsWith( prefix ) ) return null;
+        return new URLSearchParams( normalized.slice( prefix.indexOf( "?" ) + 1 ) );
+    }
+
+    /**
+     * What a batch approve-link href asks for: { ids, move, reason }, or null.
+     *
+     * Ensures: null for a bad id list, a move other than queued or dropped, or a drop with a blank reason.
+     */
+    _batchLinkOf( href ) {
+        const params = this._batchParams( "/app/tasks/approve?rows=", href );
+        if ( params === null ) return null;
+        const ids  = this._parseBatchIds( params.get( "rows" ) );
+        const move = params.get( "move" );
+        if ( ids === null || ( move !== "queued" && move !== "dropped" ) ) return null;
+        const reason = ( params.get( "reason" ) || "" ).trim();
+        if ( move === "dropped" && reason === "" ) return null;
+        return { ids, move, reason: move === "dropped" ? reason : null };
+    }
+
+    /**
+     * Document-level click handler for a batch approve link: one move for every listed row.
+     *
+     * Ensures:
+     *     - any other click is left untouched
+     *     - the browser does not follow the link; an untrusted list sends nothing
+     *     - one run per link: a second click while it is out sends nothing
+     *     - the link becomes a summary line and one line per row, applied or refused with the server's words
+     */
+    async _handleBatchApproveLinkClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        const href = anchor.getAttribute( "href" );
+        const normalized = this._normalizeDocLinkHref( href );
+        if ( !normalized || !normalized.startsWith( "/app/tasks/approve?rows=" ) ) return;
+        ev.preventDefault();
+        const link = this._batchLinkOf( href );
+        if ( link === null || anchor.dataset.approveState === "pending" ) return;
+        anchor.dataset.approveState = "pending";
+        anchor.setAttribute( "aria-disabled", "true" );
+        anchor.style.opacity = "0.5";
+        const extras  = link.reason === null ? {} : { reason: link.reason };
+        const results = await Promise.all( link.ids.map( ( id ) => this._transitionTask( id, link.move, extras ) ) );
+        const lines   = results.map( ( r, i ) => `${link.ids[ i ].slice( 0, 8 )} ${r.ok ? "applied ✅" : `refused: ${r.message}`}` );
+        const done    = results.filter( ( r ) => r.ok ).length;
+        const outcome = document.createElement( "span" );
+        outcome.className = done === lines.length ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
+        outcome.style.whiteSpace = "pre-line";
+        outcome.textContent = [ `${done} of ${lines.length} applied`, ...lines ].join( "\n" );
+        anchor.replaceWith( outcome );
+    }
+
+    /**
+     * Document-level click handler for a batch 📋 view link: one line per row.
+     *
+     * Ensures:
+     *     - any other click is left untouched; the browser does not follow the link
+     *     - every row is read; a row that could not be read says so and the rest still show
+     *     - the text is shown the way the abstract 📋 shows text
+     */
+    async _handleBatchViewLinkClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        const href = anchor.getAttribute( "href" );
+        const normalized = this._normalizeDocLinkHref( href );
+        if ( !normalized || !normalized.startsWith( "/app/tasks/view?rows=" ) ) return;
+        ev.preventDefault();
+        const ids = this._parseBatchIds( this._batchParams( "/app/tasks/view?rows=", href ).get( "rows" ) );
+        if ( ids === null ) {
+            this._showAbstractFor( anchor, "This link does not name a clean list of full ticket ids.", "Held rows", true );
+            return;
+        }
+        const rows  = await Promise.all( ids.map( ( id ) => this._readTask( id ) ) );
+        const lines = rows.map( ( row, i ) => `${ids[ i ].slice( 0, 8 )} · ${row === null ? "could not be read" : `${row.status ?? "—"} · ${row.title ?? "(no title)"}`}` );
+        this._showAbstractFor( anchor, lines.join( "\n" ), `${ids.length} held rows`, true );
     }
 
     /**

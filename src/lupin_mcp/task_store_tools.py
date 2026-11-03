@@ -942,3 +942,27 @@ def task_approve_line_impl( api_base_url, api_key, task_id ):
         return { "line": approve_link_line( task_id, row[ "title" ] ) }
     except ( ValueError, TypeError ) as err:
         return { "error": "blank_title", "detail": str( err ) }
+
+
+def task_approve_batch_line_impl( task_ids, move="queued", reason=None ):
+    """
+    Write the card bullet for a list of held rows, with one link for the whole list.
+
+    Builds the line with `approve_batch_line`, so the verb and the Python caller write the same link.
+    It asks the server nothing: the 📋 link shows each row's title when it is clicked.
+
+    Requires:
+        - task_ids is a non-empty list of distinct full lowercase UUIDs
+        - move is "queued" or "dropped"; a drop carries a reason
+
+    Ensures:
+        - on success returns { "line": "- <N> held rows [approve all N ☐](/app/tasks/approve?rows=...&move=queued) [📋](/app/tasks/view?rows=...)" }
+        - an empty list, a short or malformed id, a duplicate id, a bad move or a missing drop reason
+          returns { "error": "invalid_batch", "detail": ... }
+        - never raises
+    """
+    from cosa.rest.task_approve_link import approve_batch_line
+    try:
+        return { "line": approve_batch_line( task_ids, move, reason ) }
+    except ( ValueError, TypeError ) as err:
+        return { "error": "invalid_batch", "detail": str( err ) }

@@ -4197,7 +4197,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_ask_unpark_impl, task_edit_impl, task_get_impl, task_approve_line_impl, task_promotion_status_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_ask_unpark_impl, task_edit_impl, task_get_impl, task_approve_line_impl, task_approve_batch_line_impl, task_promotion_status_impl
 from lupin_mcp.podcast_for_rick import podcast_for_rick_impl
 
 
@@ -4509,6 +4509,27 @@ def task_approve_line( task_id: str ) -> dict:
         api_key      = _mcp_outbound_api_key(),
         task_id      = task_id,
     )
+
+
+@mcp.tool
+def task_approve_batch_line( task_ids: list[str], move: str = "queued", reason: str | None = None ) -> dict:
+    """
+    **[Read tier, always allowed]** Write one card bullet that moves a list of held rows.
+
+    Use it instead of `task_approve_line` whenever you ask Rick to act on more than one row: one line, one click, never a row-by-row list. The 📋 link beside it lists every row's title first, so the click is never blind. After the click the card reads, per row, applied or refused with the reason; one refusal does not hide the others.
+
+    Args:
+        task_ids: Full lowercase UUIDs, at least one, no duplicates. A short or malformed id is refused here without asking the server.
+        move: "queued" approves (default); "dropped" drops.
+        reason: Required for a drop, refused for an approve.
+
+    Returns:
+        { "line": "- <N> held rows [approve all N ☐](/app/tasks/approve?rows=<ids>&move=queued) [📋](/app/tasks/view?rows=<ids>)" }, or { "error": "invalid_batch", "detail": ... }.
+
+    Example:
+        task_approve_batch_line(task_ids=["a3975cf4-c640-4659-9247-0a99fa8a5f4a", "0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8"], move="dropped", reason="duplicate refile")
+    """
+    return task_approve_batch_line_impl( task_ids = task_ids, move = move, reason = reason )
 
 
 @mcp.tool

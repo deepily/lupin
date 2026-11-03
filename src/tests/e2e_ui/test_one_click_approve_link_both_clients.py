@@ -115,10 +115,6 @@ def _set_body( row_id, body ):
         session.get( TaskItem, uuid.UUID( row_id ) ).body = body
 
 
-def _set_queued( row_id ):
-    _set_status( row_id, "queued" )
-
-
 @pytest.fixture( scope="function" )
 def held():
     _require_test_db()
@@ -150,7 +146,7 @@ def _operator_door( page, posted ):
         match = re.search( r"/api/tasks/([0-9a-f-]{36})/transition", route.request.url )
         body  = json.loads( route.request.post_data or "{}" )
         posted.append( ( match.group( 1 ), body ) )
-        if body.get( "to_status" ) == "queued": _set_queued( match.group( 1 ) )
+        _set_status( match.group( 1 ), body[ "to_status" ] )
         route.fulfill( status=200, content_type="application/json", body=json.dumps( { "item": { "status": "queued" } } ) )
 
     page.route( re.compile( r".*/api/tasks/[0-9a-f-]{36}/transition$" ), handle )
@@ -171,12 +167,13 @@ def _login_tokens( page ):
 
 
 
-def _show_card_legacy( page, rows, horizontal=True ):
+def _show_card_legacy( page, rows, horizontal=True, abstract=None ):
     """
     Draw the card in the legacy client and open its abstract tooltip.
 
     Ensures:
         - `horizontal` True switches to the horizontal layout, so the card is lifted into the shared pane
+        - `abstract` replaces the per-row bullets when given (the batch tests pass their batch line)
         - returns the tooltip content locator
     """
     if horizontal: page.locator( "#layout-mode-toggle" ).click()
@@ -187,7 +184,7 @@ def _show_card_legacy( page, rows, horizontal=True ):
                 response_type: 'yes_no', message: 'Approve these tickets?', title: 'Approve these tickets?',
                 abstract: args.abstract, timeout_seconds: 300, sender_id: args.sender } } );
         }""",
-        { "nid": CARD_ID, "abstract": _abstract_for( rows ), "sender": SENDER },
+        { "nid": CARD_ID, "abstract": abstract if abstract is not None else _abstract_for( rows ), "sender": SENDER },
     )
     # Name the planted card's own indicator by the row id inside its abstract; ids are uuids, so the
     # attribute value carries them unescaped and no peer's card can match.
@@ -195,12 +192,13 @@ def _show_card_legacy( page, rows, horizontal=True ):
     return page.locator( "#abstract-tooltip .abstract-tooltip-content" )
 
 
-def _show_card_multiplexer( page, rows, horizontal=False ):
+def _show_card_multiplexer( page, rows, horizontal=False, abstract=None ):
     """
     Open the multiplexer and draw the card.
 
     Ensures:
         - `horizontal` True switches to the horizontal layout after the card is drawn
+        - `abstract` replaces the per-row bullets when given (the batch tests pass their batch line)
         - returns the card locator
     """
     _login_tokens( page )
@@ -219,7 +217,7 @@ def _show_card_multiplexer( page, rows, horizontal=False ):
                     timestamp: '2026-10-31T18:00:00.000Z', response_requested: true, response_type: 'yes_no',
                     timeout_seconds: 300, abstract: args.abstract } } } );
         }""",
-        { "nid": CARD_ID, "abstract": _abstract_for( rows ), "sender": SENDER },
+        { "nid": CARD_ID, "abstract": abstract if abstract is not None else _abstract_for( rows ), "sender": SENDER },
     )
     card = page.locator( f'[data-testid="multiplexer-action-required"][data-id-hash="{CARD_ID}"]' )
     if horizontal:

@@ -312,6 +312,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[mcp-task-store-tools]] — the thirteen MCP tools a session uses to read and write the task store over HTTP. `lupin_mcp` (task_store_tools, cosa_voice_mcp)
 - [[mcp-task-store-impls]] — the nine task-store tool implementations: create, correlate, reassign, amend, request, unpark ask, get, query and approve line. `lupin_mcp` (task_store_tools)
 - [[task-approve-link]] — the one-click approve link in a card: the line writer and both clients' click handlers. `cosa.rest` (task_approve_link) and `src/lupin_app/static/js/multiplexer` (render)
+- [[task-approve-batch-link]] — one card link that moves a whole list of held rows: the line writer, the MCP verb and both clients' handlers. `cosa.rest` (task_approve_link), `lupin_mcp` and `src/lupin_app/static/js/multiplexer` (render)
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
 - [[mcp-commons-ask-async]] — the polling-mode question post behind the `commons_ask_async` tool. `lupin_mcp` (commons_ask)
 - [[mcp-commons-archiver]] — the rotation of aged commons entries into daily archive files. `lupin_mcp` (commons_archival)
