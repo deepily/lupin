@@ -611,34 +611,158 @@ class TestPeftTrainer( unittest.TestCase ):
             - Saves quantized model to appropriate directory
             - Updates quantized model directory attribute
         """
-        with patch( 'cosa.training.peft_trainer.du.print_banner' ), \
-             patch( 'builtins.print' ), \
-             patch( 'cosa.training.peft_trainer.Quantizer' ) as mock_quantizer_class:
-            
-            mock_quantizer = Mock()
-            mock_quantizer_class.return_value = mock_quantizer
-            mock_quantizer.save.return_value = "/path/to/quantized"
-            
-            trainer = PeftTrainer( 
-                model_hf_id=self.test_model_hf_id,
-                model_name=self.test_model_name,
-                test_train_path=self.test_train_path
-            )
-            
+        with self._quantize_patches( num_gpus=1 ) as ( mock_quantizer_class, mock_quantizer, mock_torch, _wait ):
+            trainer = self._make_trainer()
+
             test_merged_dir = "/path/to/merged"
             result = trainer.quantize_merged_adapter( merged_adapter_dir=test_merged_dir )
-            
-            # Verify quantizer creation with additional parameters
-            mock_quantizer_class.assert_called_once()
-            
-            # Verify quantization process
-            mock_quantizer.quantize_model.assert_called_once()
-            mock_quantizer.save.assert_called_once()
-            
-            # Verify return value and attribute update
+
+            mock_quantizer_class.assert_called_once_with( test_merged_dir, device_map="cuda:0", local_files_only=True )
+            mock_quantizer.quantize_model.assert_called_once_with( batch_size=1, bits=4 )
+            mock_quantizer.save.assert_called_once_with( test_merged_dir, include_model_name=False )
+            mock_quantizer.release_gpu_memory.assert_called_once_with()
+            mock_torch.cuda.empty_cache.assert_called_once_with()
+
             self.assertEqual( result, "/path/to/quantized" )
             self.assertEqual( trainer.quantized_model_dir, "/path/to/quantized" )
-    
+            self.assertEqual( trainer.quantized_model_dirs[ 4 ], "/path/to/quantized" )
+
+    def _make_trainer( self ):
+        """
+        Build a PeftTrainer with the standard test arguments.
+
+        Requires:
+            - called inside the patches of the test, as the constructor prints
+
+        Ensures:
+            - returns a PeftTrainer for the test model
+        """
+        return PeftTrainer(
+            model_hf_id=self.test_model_hf_id,
+            model_name=self.test_model_name,
+            test_train_path=self.test_train_path
+        )
+
+    def _quantize_patches( self, num_gpus=1, wait_result=True, quantizer_error=None ):
+        """
+        Patch everything quantize_merged_adapter touches that could reach a GPU.
+
+        Requires:
+            - num_gpus is an int; wait_result is a bool
+
+        Ensures:
+            - returns a context manager yielding ( quantizer_class, quantizer, torch, wait )
+            - torch, print_gpu_memory, time.sleep and _wait_for_gpu_memory_release are mocked
+            - quantizer_class raises quantizer_error when it is not None
+        """
+        import contextlib
+
+        @contextlib.contextmanager
+        def _ctx():
+            with patch( 'cosa.training.peft_trainer.du.print_banner' ), \
+                 patch( 'builtins.print' ), \
+                 patch( 'cosa.training.peft_trainer.time.sleep' ), \
+                 patch( 'cosa.training.peft_trainer.torch' ) as mock_torch, \
+                 patch( 'cosa.training.peft_trainer.print_gpu_memory' ), \
+                 patch.object( PeftTrainer, '_wait_for_gpu_memory_release', return_value=wait_result ) as mock_wait, \
+                 patch( 'cosa.training.peft_trainer.Quantizer' ) as mock_quantizer_class:
+                mock_torch.cuda.device_count.return_value = num_gpus
+                mock_quantizer = Mock()
+                mock_quantizer.save.return_value = "/path/to/quantized"
+                if quantizer_error is not None: mock_quantizer_class.side_effect = quantizer_error
+                else: mock_quantizer_class.return_value = mock_quantizer
+                yield mock_quantizer_class, mock_quantizer, mock_torch, mock_wait
+
+        return _ctx()
+
+    def test_quantize_merged_adapter_zero_gpus_raises( self ):
+        """
+        Zero GPUs: raises RuntimeError and never builds a Quantizer.
+        """
+        with self._quantize_patches( num_gpus=0 ) as ( mock_quantizer_class, _q, _t, _w ):
+            trainer = self._make_trainer()
+            with self.assertRaisesRegex( RuntimeError, "No GPUs available for quantization" ):
+                trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
+            mock_quantizer_class.assert_not_called()
+
+    def test_quantize_merged_adapter_two_gpus_maps_cuda0( self ):
+        """
+        Two GPUs: still maps to cuda:0 only.
+        """
+        with self._quantize_patches( num_gpus=2 ) as ( mock_quantizer_class, _q, _t, _w ):
+            trainer = self._make_trainer()
+            trainer.debug = True
+            trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
+            mock_quantizer_class.assert_called_once_with( "/path/to/merged", device_map="cuda:0", local_files_only=True )
+
+    def test_quantize_merged_adapter_single_gpu_debug_branch( self ):
+        """
+        One GPU with debug on: same cuda:0 mapping.
+        """
+        with self._quantize_patches( num_gpus=1 ) as ( mock_quantizer_class, _q, _t, _w ):
+            trainer = self._make_trainer()
+            trainer.debug = True
+            trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
+            mock_quantizer_class.assert_called_once_with( "/path/to/merged", device_map="cuda:0", local_files_only=True )
+
+    def test_quantize_merged_adapter_failed_release_wait_forces_clear( self ):
+        """
+        A False release wait forces a second cache clear and creates the dirs dict.
+        """
+        with self._quantize_patches( num_gpus=1, wait_result=False ) as ( _qc, _q, mock_torch, mock_wait ):
+            trainer = self._make_trainer()
+            del trainer.quantized_model_dirs
+            trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged", bits=8 )
+            mock_wait.assert_called_once_with()
+            self.assertEqual( mock_torch.cuda.empty_cache.call_count, 2 )
+            self.assertEqual( trainer.quantized_model_dirs, { 8: "/path/to/quantized" } )
+
+    def test_quantize_merged_adapter_no_merged_dir_raises_value_error( self ):
+        """
+        No directory given and none stored: ValueError.
+        """
+        with self._quantize_patches() as ( mock_quantizer_class, _q, _t, _w ):
+            trainer = self._make_trainer()
+            trainer.merged_adapter_dir = None
+            with self.assertRaisesRegex( ValueError, "merged_adapter_dir is neither provided nor found" ):
+                trainer.quantize_merged_adapter()
+            mock_quantizer_class.assert_not_called()
+
+    def test_quantize_merged_adapter_uses_stored_merged_dir( self ):
+        """
+        No argument but a stored directory: the stored one is used.
+        """
+        with self._quantize_patches() as ( mock_quantizer_class, _q, _t, _w ):
+            trainer = self._make_trainer()
+            trainer.merged_adapter_dir = "/stored/merged"
+            trainer.quantize_merged_adapter()
+            mock_quantizer_class.assert_called_once_with( "/stored/merged", device_map="cuda:0", local_files_only=True )
+
+    def test_quantize_merged_adapter_quantizer_error_wrapped( self ):
+        """
+        A Quantizer exception becomes RuntimeError, with debug traceback path covered.
+        """
+        with self._quantize_patches( quantizer_error=OSError( "boom" ) ), \
+             patch( 'traceback.print_exc' ) as mock_print_exc:
+            trainer = self._make_trainer()
+            trainer.debug = True
+            with self.assertRaisesRegex( RuntimeError, "Quantization failed: boom" ) as ctx:
+                trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
+            self.assertIsInstance( ctx.exception.__cause__, OSError )
+            mock_print_exc.assert_called_once_with()
+
+    def test_quantize_merged_adapter_quantizer_error_wrapped_without_debug( self ):
+        """
+        Same wrapping with debug off: no traceback printed.
+        """
+        with self._quantize_patches( quantizer_error=OSError( "boom" ) ), \
+             patch( 'traceback.print_exc' ) as mock_print_exc:
+            trainer = self._make_trainer()
+            trainer.debug = False
+            with self.assertRaisesRegex( RuntimeError, "Quantization failed: boom" ):
+                trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
+            mock_print_exc.assert_not_called()
+
     def test_get_training_prompt_stats_success( self ):
         """
         Test successful training prompt statistics gathering.
