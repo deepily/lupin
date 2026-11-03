@@ -24,32 +24,32 @@ def test_read_gating_clean_values( tmp_path, capsys, body, expected ):
     assert capsys.readouterr().err == ""
 
 
-def test_absent_key_reads_false_and_says_so( tmp_path, capsys ):
-    assert gate.read_gating( _ini( tmp_path, "other = 1\n" ) ) is False
+def test_absent_key_could_not_check_and_says_so( tmp_path, capsys ):
+    assert gate.read_gating( _ini( tmp_path, "other = 1\n" ) ) is None
     assert gate.LOG_TAG in capsys.readouterr().err
 
 
 def test_absent_key_quiet_prints_nothing( tmp_path, capsys ):
-    assert gate.read_gating( _ini( tmp_path, "" ), quiet=True ) is False
+    assert gate.read_gating( _ini( tmp_path, "" ), quiet=True ) is None
     assert capsys.readouterr().err == ""
 
 
-def test_doubled_key_reads_false( tmp_path ):
-    assert gate.read_gating( _ini( tmp_path, "reuse review gating = true\nreuse review gating = true\n" ), quiet=True ) is False
+def test_doubled_key_could_not_check( tmp_path ):
+    assert gate.read_gating( _ini( tmp_path, "reuse review gating = true\nreuse review gating = true\n" ), quiet=True ) is None
 
 
-def test_garbled_value_reads_false_and_says_so( tmp_path, capsys ):
-    assert gate.read_gating( _ini( tmp_path, "reuse review gating = maybe\n" ) ) is False
+def test_garbled_value_could_not_check_and_says_so( tmp_path, capsys ):
+    assert gate.read_gating( _ini( tmp_path, "reuse review gating = maybe\n" ) ) is None
     assert "'maybe'" in capsys.readouterr().err
 
 
 def test_garbled_value_quiet( tmp_path, capsys ):
-    assert gate.read_gating( _ini( tmp_path, "reuse review gating = maybe\n" ), quiet=True ) is False
+    assert gate.read_gating( _ini( tmp_path, "reuse review gating = maybe\n" ), quiet=True ) is None
     assert capsys.readouterr().err == ""
 
 
-def test_unreadable_file_reads_false( tmp_path ):
-    assert gate.read_gating( str( tmp_path / "missing.ini" ), quiet=True ) is False
+def test_unreadable_file_could_not_check( tmp_path ):
+    assert gate.read_gating( str( tmp_path / "missing.ini" ), quiet=True ) is None
 
 
 def test_ini_path_env_override( monkeypatch ):
@@ -108,3 +108,116 @@ def test_main_writes_to_given_stream( tmp_path ):
     buf = io.StringIO()
     assert gate.main( [ "--findings", str( findings ), "--ini", _ini( tmp_path, "reuse review gating = true\n" ) ], out=buf ) == 0
     assert json.loads( buf.getvalue() )[ "reject" ] is False
+
+
+# ---- C1: finding kinds, fail closed, exit 3 (Plan 3 section 12.3) ----
+
+import io
+import pathlib
+
+REAL_LINTER_RECORDS = pathlib.Path( __file__ ).parent / "docstring_lint_real_records.json"      # printed by the real linter with --json on a probe file
+
+
+def _real_records():
+    return json.loads( REAL_LINTER_RECORDS.read_text( encoding="utf-8" ) )
+
+
+def test_the_real_linter_record_has_exactly_the_keys_the_gate_calls_linter_shaped():
+    # red when: LINTER_KEYS is a guess. The fixture is the linter's own output, so a key it adds or drops shows here.
+    records = _real_records()
+    assert len( records ) > 1
+    assert all( set( r ) == gate.LINTER_KEYS for r in records )
+
+
+def test_linter_shaped_record_is_docstring_lint():
+    # the named test of the linter-shape rule, fed with records printed by the real linter
+    for record in _real_records(): assert gate.kind_of( record ) == gate.ADVISORY_KIND
+    verdict = gate.evaluate( _real_records(), True )
+    assert ( verdict[ "mode" ], verdict[ "reject" ], verdict[ "blocking" ] ) == ( "reject", False, [] )
+
+
+@pytest.mark.parametrize( "record", [
+    { "path": "a.py", "line": 3, "rule": "", "message": "m" },                       # no rule id
+    { "path": "a.py", "line": 3, "rule": 7, "message": "m" },                        # a rule id that is not text
+    { "path": "a.py", "line": 3, "rule": "summary-length" },                         # a key short
+    { "path": "a.py", "line": 3, "rule": "summary-length", "message": "m", "x": 1 }, # a key over
+    "summary is 99 characters",                                                      # a bare string
+    { },
+] )
+def test_a_finding_with_no_kind_fails_closed_when_gating_is_on( record ):
+    assert gate.kind_of( record ) is None and gate.blocks( record )
+    assert gate.evaluate( [ record ], True )[ "reject" ] is True
+    assert gate.evaluate( [ record ], False )[ "reject" ] is False                   # the same finding only reports when the gate is off
+
+
+@pytest.mark.parametrize( "kind", gate.REUSE_KINDS )
+def test_every_reuse_evidence_kind_blocks( kind ):
+    finding = { "kind": kind, "detail": "x" }
+    assert gate.kind_of( finding ) == kind and gate.blocks( finding )
+    verdict = gate.evaluate( [ finding ], True )
+    assert ( verdict[ "mode" ], verdict[ "reject" ], verdict[ "blocking" ] ) == ( "reject", True, [ finding ] )
+
+
+def test_one_ignored_ruling_is_refused_with_gating_on_and_only_reported_with_it_off():
+    # ruling 9's words: a diff that ignores a reviewer's DUPLICATE or EXTEND ruling is refused
+    finding = { "kind": "ignored_ruling", "symbol": "m.f", "ruling": "EXTEND m.g" }
+    assert gate.evaluate( [ finding ], True )[ "reject" ] is True
+    off = gate.evaluate( [ finding ], False )
+    assert ( off[ "mode" ], off[ "reject" ], off[ "count" ] ) == ( "report-only", False, 1 )
+
+
+def test_a_kind_the_gate_does_not_know_blocks():
+    assert gate.blocks( { "kind": "banana" } ) and not gate.blocks( { "kind": "docstring_lint" } )
+    assert gate.kind_of( { "kind": "" } ) is None                                      # an empty kind is no kind
+
+
+def test_only_docstring_lint_findings_never_reject_and_one_reuse_finding_among_them_does():
+    lint = { "kind": "docstring_lint", "path": "a.py" }
+    mixed = gate.evaluate( [ lint, _real_records()[ 0 ], { "kind": "no_receipt", "symbol": "m.f" } ], True )
+    assert mixed[ "reject" ] is True and mixed[ "blocking" ] == [ { "kind": "no_receipt", "symbol": "m.f" } ]
+    assert mixed[ "count" ] == 3 and len( mixed[ "findings" ] ) == 3                   # advisory findings are still reported
+    assert gate.evaluate( [ lint, _real_records()[ 0 ] ], True )[ "reject" ] is False
+
+
+def test_evaluate_with_gating_none_is_neither_a_pass_nor_a_refusal():
+    verdict = gate.evaluate( [ { "kind": "no_receipt" } ], None )
+    assert ( verdict[ "mode" ], verdict[ "reject" ], verdict[ "count" ] ) == ( "could-not-check", None, 1 )
+
+
+@pytest.mark.parametrize( "body", [
+    "other = 1\n",                                                                      # absent
+    "reuse review gating = true\nreuse review gating = true\n",                       # doubled
+    "reuse review gating = maybe\n",                                                   # garbled
+] )
+def test_main_exits_3_for_an_absent_doubled_or_garbled_key_even_with_no_findings( tmp_path, capsys, body ):
+    findings = tmp_path / "f.json"; findings.write_text( "[]", encoding="utf-8" )
+    assert gate.main( [ "--findings", str( findings ), "--ini", _ini( tmp_path, body ) ] ) == gate.EXIT_COULD_NOT_CHECK == 3
+    captured = capsys.readouterr()
+    out      = json.loads( captured.out )
+    assert ( out[ "mode" ], out[ "reject" ] ) == ( "could-not-check", None )
+    assert gate.LOG_TAG in captured.err                                                 # the tagged line goes to stderr
+
+
+def test_main_exits_3_and_says_so_for_a_file_that_is_not_there( tmp_path, capsys ):
+    # the test container mounts only src, so the main checkout's ini can be missing there
+    findings = tmp_path / "f.json"; findings.write_text( "[]", encoding="utf-8" )
+    assert gate.main( [ "--findings", str( findings ), "--ini", str( tmp_path / "missing.ini" ) ] ) == 3
+    captured = capsys.readouterr()
+    assert gate.LOG_TAG in captured.err and "could not check" in captured.err
+
+
+def test_main_exit_codes_for_the_three_answers( tmp_path ):
+    findings = tmp_path / "f.json"; findings.write_text( json.dumps( [ { "kind": "ignored_ruling" } ] ), encoding="utf-8" )
+    ini = lambda v: _ini( tmp_path, f"reuse review gating = {v}\n" )
+    assert gate.main( [ "--findings", str( findings ), "--ini", ini( "true" ) ], out=io.StringIO() ) == 1
+    assert gate.main( [ "--findings", str( findings ), "--ini", ini( "false" ) ], out=io.StringIO() ) == 0
+
+
+def test_the_ini_path_resolver_finds_the_main_checkouts_file_from_a_worktree( monkeypatch ):
+    # the path is derived by the resolver (git's common directory); the expected one comes from the git command itself
+    import subprocess
+    import cosa.utils.util as cu
+    monkeypatch.delenv( gate.INI_OVERRIDE, raising=False )
+    root   = cu.get_project_root()
+    common = subprocess.run( [ "git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir" ], capture_output=True, text=True, check=True ).stdout.strip()
+    assert gate.ini_path() == str( pathlib.Path( common ).parent / "src" / "conf" / "lupin-app.ini" )
