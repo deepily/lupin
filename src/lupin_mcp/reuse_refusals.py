@@ -114,6 +114,18 @@ def default_data_dir( root ):
     return os.environ.get( "LUPIN_REUSE_DATA_DIR" ) or str( rt.data_dir( pathlib.Path( root ) ) )
 
 
+def not_checked( error, out ):
+    """
+    Report a run that could not read or write what it needed.
+
+    Ensures:
+        - prints one JSON object with the error's class and message on `out`
+        - returns NOT_CHECKED, which is neither a pass nor a refusal
+    """
+    print( json.dumps( { "error": f"{type( error ).__name__}: {error}" } ), file=out )
+    return NOT_CHECKED
+
+
 def main( argv=None, out=None ):
     """
     Command line: a document path, then --diff, --root, --data-dir, --log-dir.
@@ -122,7 +134,7 @@ def main( argv=None, out=None ):
         - judges the outcome lines of the named document, appends the records, and prints a JSON summary
         - the summary holds the document hash, the lines scanned, the lines refused, the records appended, and the new definitions with no outcome line
         - returns 0 when every line is accepted and no definition is missing, 1 otherwise
-        - returns 3 with the reason printed when the diff reports algorithm_changed, since it then lists no definitions to check
+        - returns 3 with the reason printed when a file cannot be read or written, when the diff is not a symbol index diff, or when it reports algorithm_changed, which lists no definitions to check
     """
     ap = argparse.ArgumentParser( description="Judge the REUSE-OUTCOME lines of one document and keep a record of each." )
     ap.add_argument( "document" )
@@ -134,17 +146,20 @@ def main( argv=None, out=None ):
     out  = out if out is not None else sys.stdout
     root = pathlib.Path( a.root ).resolve()
     data = pathlib.Path( a.data_dir or default_data_dir( root ) )
-    diff = json.loads( pathlib.Path( a.diff ).read_text( encoding="utf-8" ) ) if a.diff else { "added": [] }
-    if "algorithm_changed" in diff:
-        print( json.dumps( { "error": f"{a.diff}: the pin algorithm changed, so the diff lists no definitions to check" } ), file=out )
-        return NOT_CHECKED
-    text            = pathlib.Path( a.document ).read_text( encoding="utf-8" )
-    records, _bad   = eg.merge_call_logs( a.log_dir or data / "call-log" )
-    rulings         = eg.parse_rulings( text )
-    verdicts        = judge( text, eg.receipts_by_id( records ), eg.searches_by_receipt( records, data ), eg.exclusions_by_symbol( records ), rulings, root )
-    missing         = ro.missing_outcome_refusals( diff[ "added" ], ro.parse_outcomes( text ), rulings )
-    refused         = [ v for v in verdicts if v[ "status" ] == "refused" ]
-    print( json.dumps( { "document": document_hash( text ), "scanned": len( verdicts ), "refused": len( refused ), "appended": record( data, text, verdicts ),
+    try:
+        diff = json.loads( pathlib.Path( a.diff ).read_text( encoding="utf-8" ) ) if a.diff else { "added": [] }
+        if not isinstance( diff, dict ) or not isinstance( diff.get( "added", [] ), list ): raise ValueError( f"{a.diff} is not a symbol index diff" )
+        if "algorithm_changed" in diff: raise ValueError( f"{a.diff}: the pin algorithm changed, so the diff lists no definitions to check" )
+        text          = pathlib.Path( a.document ).read_text( encoding="utf-8" )
+        records, _bad = eg.merge_call_logs( a.log_dir or data / "call-log" )
+    except ( OSError, ValueError ) as e: return not_checked( e, out )
+    rulings  = eg.parse_rulings( text )
+    verdicts = judge( text, eg.receipts_by_id( records ), eg.searches_by_receipt( records, data ), eg.exclusions_by_symbol( records ), rulings, root )
+    missing  = ro.missing_outcome_refusals( diff.get( "added", [] ), ro.parse_outcomes( text ), rulings )
+    refused  = [ v for v in verdicts if v[ "status" ] == "refused" ]
+    try: appended = record( data, text, verdicts )
+    except OSError as e: return not_checked( e, out )
+    print( json.dumps( { "document": document_hash( text ), "scanned": len( verdicts ), "refused": len( refused ), "appended": appended,
                          "refusals": [ { "n": v[ "n" ], "reasons": v[ "reasons" ] } for v in refused ], "missing": missing }, indent=2 ), file=out )
     return 1 if refused or missing else 0
 
