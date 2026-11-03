@@ -158,3 +158,23 @@ def test_control_unpinned_history_is_scrolled_to_the_top_by_the_same_stream( pag
     card_a = _scrolled_history( page, keep_place=False )
     after  = _stream_progress_group( page, card_a )
     assert after[ "scrollTop" ] == 0, f"with Keep place off the history should be at the top: { after }"
+
+
+def test_pinned_history_is_not_scrolled_to_the_top_when_a_plain_message_raises_the_card( page ):
+    """
+    Pinned history survives a plain message that moves its card above another.
+
+    Ensures:
+        - with Keep place on, a message with no progress group raises card A to the top
+        - A's history is still scrolled afterwards
+        - there is no unpinned control: this browser keeps the scroll on a card move by itself, so the test guards the path but cannot fail
+    """
+    card_a = _scrolled_history( page, keep_place=True )
+    _emit( page, SENDER_A, 200, age_ms=0 )
+    page.wait_for_function(
+        "( id ) => document.querySelector( '#notifications-pane .sender-card' ).getAttribute( 'data-sender-id' ) === id",
+        arg=SENDER_A, timeout=5_000,
+    )
+    page.wait_for_function( "( sel ) => document.querySelector( sel + ' [data-id-hash=\"mv-keep-a-200\"]' ) !== null", arg=card_a, timeout=5_000 )
+    top = page.evaluate( "( sel ) => document.querySelector( sel + ' .date-accordion-messages' ).scrollTop", card_a )
+    assert top >= 100, f"the pinned history went back toward the top: 100 -> { top }"

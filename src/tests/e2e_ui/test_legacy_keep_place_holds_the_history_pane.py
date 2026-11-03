@@ -11,8 +11,6 @@ Ensures:
     - The cause was insertBefore, which detaches the card and resets every list inside it.
 """
 
-import pytest
-
 from .conftest import BASE_URL
 
 KEEP_PLACE_KEY = "notifications_keep_place"

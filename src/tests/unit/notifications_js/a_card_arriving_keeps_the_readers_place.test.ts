@@ -181,6 +181,18 @@ test( "keep place on: a moved card's history pane gets its scroll back", () => {
   assert.equal( pane.scrollTop, 140 );
 } );
 
+test( "keep place on: only the pane that was scrolled is written back; one at the top is left alone", () => {
+  const ui   = makeUI( true );
+  const { card, pane } = cardWithHistoryScroll( 140 );
+  const idle = document.createElement( "div" );
+  idle.className = "date-accordion-messages";
+  card.appendChild( idle );
+  ( ui as unknown as { _keepPlaceWhile: ( m: HTMLElement | null, f: () => void ) => void } )
+    ._keepPlaceWhile( card, () => { pane.scrollTop = 0; idle.scrollTop = 7; } );
+  assert.equal( pane.scrollTop, 140 );
+  assert.equal( idle.scrollTop, 7 );
+} );
+
 test( "keep place off: the moved card's history pane keeps the browser's reset", () => {
   const ui   = makeUI( false );
   const { card, pane } = cardWithHistoryScroll( 140 );

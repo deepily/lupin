@@ -100,3 +100,11 @@ test("restoreHistoryScroll: a card with no key, or a pane with no remembered off
   restoreHistoryScroll(m, new Map([ [ "zzz|d1", 99 ] ]));
   assert.equal(paneOf(m.firstElementChild!, "d1").scrollTop, 0);
 });
+
+test("restoreHistoryScroll: a pane outside any day accordion is restored under the card-only key", () => {
+  const m = mount(card("a", [ { day: null, top: 40 } ]));
+  const found = captureHistoryScroll(m);
+  paneOf(m.firstElementChild!).scrollTop = 0;
+  restoreHistoryScroll(m, found);
+  assert.equal(paneOf(m.firstElementChild!).scrollTop, 40);
+});
