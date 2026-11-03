@@ -363,9 +363,9 @@ def test_the_command_prints_to_standard_output_by_default( tmp_path, utc, capsys
 
 def test_the_cron_lines_are_the_weekly_line_and_the_reboot_line_built_like_the_daily_checks():
     weekly, reboot = rb.cron_lines( "/r", "/r/.venv/bin/python", "/r/io/weekly.log", carried={ "DEEPILY_DATA_DIR": "/d d" } )
-    run = "cd /r && LUPIN_ROOT=/r PYTHONPATH=/r/src DEEPILY_DATA_DIR='/d d' /r/.venv/bin/python -m lupin_mcp.reuse_behaviour --write >> /r/io/weekly.log 2>&1 # reuse-behaviour-weekly"
-    assert weekly == f"17 12 * * 1 {run}" and reboot == f"@reboot sleep 360 && {run}"
-    assert rb.cron_lines( "/r", "py", "/l" )[ 0 ] == "17 12 * * 1 cd /r && LUPIN_ROOT=/r PYTHONPATH=/r/src py -m lupin_mcp.reuse_behaviour --write >> /l 2>&1 # reuse-behaviour-weekly"
+    run = "cd /r && LUPIN_ROOT=/r PYTHONPATH=/r/src DEEPILY_DATA_DIR='/d d' /r/.venv/bin/python -m lupin_mcp.reuse_behaviour --write --skip-if-saved >> /r/io/weekly.log 2>&1 # reuse-behaviour-weekly"
+    assert weekly == f"0 18 * * * {run}" and reboot == f"@reboot sleep 360 && {run}"
+    assert rb.cron_lines( "/r", "py", "/l" )[ 0 ] == "0 18 * * * cd /r && LUPIN_ROOT=/r PYTHONPATH=/r/src py -m lupin_mcp.reuse_behaviour --write --skip-if-saved >> /l 2>&1 # reuse-behaviour-weekly"
 
 
 def test_print_cron_shows_the_two_lines_and_installs_nothing( tmp_path, monkeypatch ):
@@ -373,7 +373,7 @@ def test_print_cron_shows_the_two_lines_and_installs_nothing( tmp_path, monkeypa
     out = io.StringIO()
     assert rb.main( [ "--print-cron", "--log-path", "/l", "--python", "py" ], out=out ) == 0
     lines = out.getvalue().splitlines()
-    assert len( lines ) == 2 and lines[ 0 ].startswith( "17 12 * * 1 cd " ) and lines[ 1 ].startswith( "@reboot sleep 360 && cd " ) and all( l.endswith( rb.CRON_TAG ) for l in lines )
+    assert len( lines ) == 2 and lines[ 0 ].startswith( "0 18 * * * cd " ) and lines[ 1 ].startswith( "@reboot sleep 360 && cd " ) and all( l.endswith( rb.CRON_TAG ) for l in lines )
     refused = io.StringIO()
     assert rb.main( [ "--print-cron" ], out=refused ) == 3 and "--print-cron needs --log-path" in refused.getvalue()
 
@@ -382,3 +382,54 @@ def test_a_compact_end_date_is_saved_under_the_dashed_date( tmp_path, utc ):
     seed( tmp_path, calls(), rows() )
     assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "20261102", "--write" ], out=io.StringIO() ) == 0
     assert [ p.name for p in ( tmp_path / rb.PAGE_FOLDER ).iterdir() ] == [ "reuse-behaviour-2026-11-02.txt" ]
+
+
+def test_the_cron_runs_every_day_at_six_pm_and_never_on_a_seven_day_timer():
+    weekly = rb.cron_lines( "/r", "py", "/l" )[ 0 ]
+    assert weekly.split( " cd ", 1 )[ 0 ] == "0 18 * * *" == rb.CRON_SCHEDULE, "minute 0, hour 18, every day of the month, month and week"
+
+
+def test_skip_if_saved_makes_no_page_and_leaves_the_saved_one_untouched( tmp_path, utc ):
+    seed( tmp_path, calls(), rows() )
+    args  = [ "--data-dir", str( tmp_path ), "--end", "2026-11-02", "--write", "--skip-if-saved" ]
+    first = io.StringIO()
+    assert rb.main( args, out=first ) == 0 and first.getvalue().startswith( TITLE ), "no page is saved yet, so the first run writes"
+    page  = tmp_path / rb.PAGE_FOLDER / "reuse-behaviour-2026-11-02.txt"
+    page.write_text( "kept by hand", encoding="utf-8" )
+    before = page.stat().st_mtime_ns
+    again  = io.StringIO()
+    assert rb.main( args, out=again ) == 0
+    assert again.getvalue() == f"SKIPPED: the page for 2026-11-02 is already saved at {page}.\n" and page.read_text( encoding="utf-8" ) == "kept by hand" and page.stat().st_mtime_ns == before
+
+
+def test_skip_if_saved_reads_no_data_so_a_corrupt_receipt_does_not_stop_the_skip( tmp_path, utc ):
+    seed( tmp_path, calls(), rows() )
+    page = tmp_path / rb.PAGE_FOLDER / "reuse-behaviour-2026-11-02.txt"
+    page.parent.mkdir( parents=True )
+    page.write_text( "saved\n", encoding="utf-8" )
+    ( tmp_path / "receipts" ).mkdir( exist_ok=True )
+    ( tmp_path / "receipts" / "bad.json" ).write_text( "{", encoding="utf-8" )
+    assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02", "--write", "--skip-if-saved" ], out=io.StringIO() ) == 0
+
+
+def test_an_empty_saved_file_is_not_a_saved_page_and_is_written_over( tmp_path, utc ):
+    seed( tmp_path, calls(), rows() )
+    page = tmp_path / rb.PAGE_FOLDER / "reuse-behaviour-2026-11-02.txt"
+    page.parent.mkdir( parents=True )
+    page.write_text( "", encoding="utf-8" )
+    assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02", "--write", "--skip-if-saved" ], out=io.StringIO() ) == 0
+    assert page.read_text( encoding="utf-8" ).startswith( TITLE )
+
+
+def test_skip_if_saved_skips_only_the_week_that_is_saved( tmp_path, utc ):
+    seed( tmp_path, calls(), rows() )
+    base = [ "--data-dir", str( tmp_path ), "--write", "--skip-if-saved" ]
+    assert rb.main( [ *base, "--end", "2026-11-02" ], out=io.StringIO() ) == 0
+    other = io.StringIO()
+    assert rb.main( [ *base, "--end", "2026-11-09" ], out=other ) == 0 and not other.getvalue().startswith( "SKIPPED" )
+    assert sorted( p.name for p in ( tmp_path / rb.PAGE_FOLDER ).iterdir() ) == [ "reuse-behaviour-2026-11-02.txt", "reuse-behaviour-2026-11-09.txt" ]
+
+
+def test_skip_if_saved_without_write_is_refused_as_a_usage_error( tmp_path ):
+    with pytest.raises( SystemExit ) as stop: rb.main( [ "--data-dir", str( tmp_path ), "--skip-if-saved" ], out=io.StringIO() )
+    assert stop.value.code == 2 and not ( tmp_path / rb.PAGE_FOLDER ).exists()

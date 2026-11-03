@@ -35,7 +35,7 @@ AUDIT_ROWS     = ( "known-miss audits", "random-sample audits" )
 UNDATED_ROW    = "left out: time not readable"
 PAGE_FOLDER    = "reuse-behaviour"                                  # under the data folder; one file per end date
 CRON_TAG       = "# reuse-behaviour-weekly"
-CRON_SCHEDULE  = "17 12 * * 1"                                      # Mondays 12:17, ten minutes after the daily check's 12:07, an hour the host is on
+CRON_SCHEDULE  = "0 18 * * *"                                       # every day at 18:00, an hour the host is on; the run skips when the last complete week's page is saved
 BOOT_DELAY     = 360                                                # seconds after a boot, after the daily check's 300
 OUTCOME_KINDS  = ( "REUSED", "EXTENDED", "WROTE_NEW" )
 UNPARSED       = "unparsed"
@@ -253,12 +253,13 @@ def cron_lines( root, python, log_path, carried=None ):
         - carried maps environment names to values, copied into both lines and shell-quoted
     Ensures:
         - returns [ weekly line, reboot line ], each ending with CRON_TAG
-        - the weekly line runs at CRON_SCHEDULE; the reboot line BOOT_DELAY seconds after a boot, so a Monday the host slept through is made at the next boot
+        - the first line runs daily at CRON_SCHEDULE; the reboot line BOOT_DELAY seconds after a boot, so a day the host slept through is made up at the next boot
         - both read the same week and write the same file, because the page's default end date is the same on every day of one week
-        - both run from root with LUPIN_ROOT and PYTHONPATH set, write the page with --write and append to log_path
+        - both run from root with LUPIN_ROOT and PYTHONPATH set, write the page with --write --skip-if-saved and append to log_path
+        - so the page is made on the first run after its week closes, and every later run skips
     """
     extra = "".join( f"{name}={shlex.quote( value )} " for name, value in ( carried or {} ).items() )
-    run   = f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {extra}{python} -m lupin_mcp.reuse_behaviour --write >> {log_path} 2>&1 {CRON_TAG}"
+    run   = f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {extra}{python} -m lupin_mcp.reuse_behaviour --write --skip-if-saved >> {log_path} 2>&1 {CRON_TAG}"
     return lt.cron_lines_for( run, CRON_SCHEDULE, BOOT_DELAY )
 
 
@@ -270,6 +271,7 @@ def main( argv=None, out=None ):
         - prints the weekly page for the seven days that end on --end, which defaults to the last complete week's Sunday
         - --data-dir holds refusals.jsonl, the receipts folder and, unless --log-dir says otherwise, the call-log folder; it defaults to the lookup tools' choice
         - --write also saves the page as <data dir>/reuse-behaviour/reuse-behaviour-<end>.txt, replacing that day's file
+        - --skip-if-saved, with --write, makes no page and prints one line saying so when that file already exists and is not empty; it returns 0
         - --print-cron prints the two cron lines and nothing else; it installs nothing
         - returns 0 when the page was made, 3 with the reason printed when it could not be
     """
@@ -278,10 +280,12 @@ def main( argv=None, out=None ):
     ap.add_argument( "--data-dir", default=None )
     ap.add_argument( "--log-dir", default=None, help="the call log folder; default is <data dir>/call-log" )
     ap.add_argument( "--write", action="store_true", help="also save the page under the data folder" )
+    ap.add_argument( "--skip-if-saved", action="store_true", help="with --write: do nothing when the page for the end date is already saved" )
     ap.add_argument( "--print-cron", action="store_true", help="print the weekly and reboot cron lines" )
     ap.add_argument( "--log-path", default=None, help="the file the cron lines append to; needed with --print-cron" )
     ap.add_argument( "--python", default=sys.executable )
     a    = ap.parse_args( argv )
+    if a.skip_if_saved and not a.write: ap.error( "--skip-if-saved needs --write" )
     out  = out if out is not None else sys.stdout
     root = cu.get_project_root()
     if a.print_cron:
@@ -294,12 +298,15 @@ def main( argv=None, out=None ):
         end   = a.end if a.end is not None else last_complete_week_end( datetime.datetime.now().astimezone().date() ).isoformat()
         end   = week_of( end )[ 1 ].isoformat()
         data  = pathlib.Path( a.data_dir or rr.default_data_dir( root ) )
+        saved = data / PAGE_FOLDER / f"reuse-behaviour-{end}.txt"
+        if a.skip_if_saved and saved.is_file() and saved.stat().st_size > 0:
+            print( f"SKIPPED: the page for {end} is already saved at {saved}.", file=out )
+            return 0
         records, _bad = eg.merge_call_logs( a.log_dir or data / "call-log" )
         page  = weekly_report( records, read_refusals( data ), sa.load_receipts( data ), end )
         if a.write:
-            folder = data / PAGE_FOLDER
-            folder.mkdir( parents=True, exist_ok=True )
-            ( folder / f"reuse-behaviour-{end}.txt" ).write_text( page + "\n", encoding="utf-8" )
+            saved.parent.mkdir( parents=True, exist_ok=True )
+            saved.write_text( page + "\n", encoding="utf-8" )
     except ( OSError, ValueError, CandidateError ) as e:
         print( f"REFUSING: {type( e ).__name__}: {e}. Nothing was made.", file=out )
         return EXIT_NOT_MADE
