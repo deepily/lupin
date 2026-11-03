@@ -23,7 +23,12 @@ from cosa.repo.duplicate_check import errors as err
 from cosa.repo.duplicate_check.proof import label_prep, proof_cli
 from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import vector_build
+from lupin_mcp import duplicate_check_audit as audit
 from lupin_mcp import duplicate_check_filing as filing
+from lupin_mcp import reuse_behaviour as behaviour
+from lupin_mcp import reuse_exit_gate as eg
+from lupin_mcp import reuse_tie as tie_mod
+from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import source_at
 
 FOLDER            = ( "duplicate-check-daily", )
@@ -175,21 +180,22 @@ def write_json( path, doc ):
     return path
 
 
-def findings_of( groups, fresh, pool, window, parts ):
+def findings_of( groups, fresh, pool, window, parts, commit_of=None ):
     """
     Turn the duplicate clusters into one finding per new definition.
 
     Requires:
         - groups are the clusters of more than one definition; fresh and pool are the definitions of the run
         - parts may hold session_of, a function from a definition to the writing seat's session id or None
+        - commit_of, when given, maps a definition id to the commit that added it
     Ensures:
-        - returns { id, name, file, line, text, session_id, others, window } for each new definition in a cluster, others being the rest of its cluster
+        - returns { id, name, file, line, text, session_id, commit, others, window } for each new definition in a cluster, others being the rest of its cluster
         - without session_of the session is None, so the finding is unresolved to a seat
     """
     by_id  = { d[ "id" ]: d for d in [ *fresh, *pool ] }
     new    = { d[ "id" ] for d in fresh }
     return [ { "id": i, "name": by_id[ i ][ "name" ], "file": by_id[ i ][ "file" ], "line": by_id[ i ][ "line" ], "text": by_id[ i ][ "text" ],
-               "session_id": parts[ "session_of" ]( by_id[ i ] ) if "session_of" in parts else None, "window": window,
+               "session_id": parts[ "session_of" ]( by_id[ i ] ) if "session_of" in parts else None, "commit": commit_of[ i ] if commit_of is not None else None, "window": window,
                "others": [ { "id": o, "name": by_id[ o ][ "name" ], "file": by_id[ o ][ "file" ] } for o in g if o != i ] }
              for g in groups for i in g if i in new ]
 
@@ -223,6 +229,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
         - a filer that raises is caught: the result holds filing { error } and the run ends as if it had filed nothing
+        - the same holds for an auditor, whose answer is kept as audit
         - the detached worktrees are removed whether the run ends or fails
         - returns the result document
     Raises:
@@ -264,9 +271,11 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     doc.update( status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
-    if "filer" in parts:
-        try: doc[ "filing" ] = parts[ "filer" ]( findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts ), folder )
-        except Exception as e: doc[ "filing" ] = { "error": f"{type( e ).__name__}: {e}" }     # a broken store client or config must not stop last-success, or the next run re-judges and re-spends the cap
+    found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ] )
+    for hook, key in ( ( "filer", "filing" ), ( "auditor", "audit" ) ):
+        if hook not in parts: continue
+        try: doc[ key ] = parts[ hook ]( found, folder )
+        except Exception as e: doc[ key ] = { "error": f"{type( e ).__name__}: {e}" }       # a broken store client or config must not stop last-success, or the next run re-judges and re-spends the cap
     write_json( folder / LAST_SUCCESS, { "commit": moved[ "advanced_to" ], "at": now.isoformat() } )
     write_json( folder / f"{stem}.json", doc )
     return doc
@@ -336,12 +345,13 @@ def live_parts():
     Ensures:
         - returns the embedding client, the Claude Code backend, the staged structural source, verify_frozen over the live file, cli_version, the data root and the filer
         - the filer files the findings' rows over HTTP; it builds its store client, reads the roster and the configured manager only when it is called
+        - the auditor queues known-miss audits in the lookup tool's data folder, reading it only when it is called
         - writes nothing and makes no call
     """
     base = proof_cli.base_wiring( ".", lambda defs: [], 1, vector_build.EndpointClient() )
     return { "client": base[ "client" ], "backend": base[ "backend" ], "data_dir": base[ "data_dir" ], "version_fn": model_transport.cli_version,
              "verify": lambda: cfg_mod.verify_frozen( base[ "frozen_path" ], base[ "live" ] ),
-             "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer }
+             "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor }
 
 
 def live_filer( findings, folder ):
@@ -357,6 +367,24 @@ def live_filer( findings, folder ):
     from cosa.config.configuration_manager import ConfigurationManager
     declared = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty"
     return filing.file_findings( findings, folder, filing.LiveStore(), declared, pick_declared_managers_from_env( filing.PROJECT ) )
+
+
+def live_auditor( findings, folder ):
+    """
+    Queue a known-miss audit for each finding that ties to a lookup receipt.
+
+    Requires:
+        - the environment is the lookup tool's: its data folder holds the receipts, the call log and refusals.jsonl
+    Ensures:
+        - returns queue_audits' answer, made with find_tie over the refusal pairs and the merged call logs
+        - the audit queue and the receipts are read from and written to the lookup tool's own data folder
+        - makes no model call
+    """
+    ctx = rt.context_from_environment()
+    records, _bad = eg.merge_call_logs( ctx.data / "call-log" )
+    rows = behaviour.read_refusals( ctx.data )
+    tie  = lambda finding: tie_mod.find_tie( finding[ "id" ], rows, records, ctx.root, finding[ "commit" ] )
+    return audit.queue_audits( findings, tie, lambda rid: rt.load_receipt( ctx, rid ), ctx.data, datetime.date.today().isoformat() )
 
 
 def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, crontab_cmd=None ):
