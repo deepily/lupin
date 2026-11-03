@@ -398,3 +398,18 @@ def test_the_live_filer_files_with_the_configured_manager_the_roster_and_the_liv
     seen[ "value" ] = "real-manager"
     assert dd.live_filer( [ "f" ], tmp_path )[ 3 ] == "real-manager"
     assert seen[ "env" ] == "LUPIN_CONFIG_MGR_CLI_ARGS" and seen[ "key" ] == "arbiter manager on duty"
+
+
+def test_a_filer_that_raises_is_recorded_and_the_run_still_writes_its_file_and_advances_last_success( repo, tmp_path ):
+    c1, c2, c3 = history( repo )
+    def broken( findings, folder ): raise ConnectionError( "store down" )
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, filer=broken ) )
+    assert doc[ "filing" ] == { "error": "ConnectionError: store down" } and doc[ "status" ] == "ok" and doc[ "advanced_to" ] == c3
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    assert json.loads( ( folder / dd.LAST_SUCCESS ).read_text() )[ "commit" ] == c3, "the next run does not re-judge the day"
+    assert json.loads( results( tmp_path )[ 0 ].read_text() )[ "filing" ] == doc[ "filing" ]
+
+
+def test_the_cron_lines_carry_the_manager_roster_variable_when_the_installer_has_it():
+    assert dd.CARRIED == ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR", "COSA_VOICE_MANAGERS__LUPIN" )
+    assert "COSA_VOICE_MANAGERS__LUPIN=" in lines_of( carried={ "COSA_VOICE_MANAGERS__LUPIN": "a,b" } )[ 0 ]

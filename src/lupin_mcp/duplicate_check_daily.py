@@ -220,6 +220,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - writes <data_dir>/duplicate-check-daily/<date>-<time>-<trigger>.json: the verdicts' clusters, the window, the judge calls and elapsed_seconds
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
+        - a filer that raises is caught: the result holds filing { error } and the run ends as if it had filed nothing
         - the detached worktrees are removed whether the run ends or fails
         - returns the result document
     Raises:
@@ -257,7 +258,9 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     doc.update( status="carried" if moved[ "carried" ] else "ok", judged=len( fresh[ "defs" ] ) - len( moved[ "carried" ] ), judge_calls=count.calls,
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
-    if "filer" in parts: doc[ "filing" ] = parts[ "filer" ]( findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts ), folder )
+    if "filer" in parts:
+        try: doc[ "filing" ] = parts[ "filer" ]( findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts ), folder )
+        except Exception as e: doc[ "filing" ] = { "error": f"{type( e ).__name__}: {e}" }     # a broken store client or config must not stop last-success, or the next run re-judges and re-spends the cap
     write_json( folder / LAST_SUCCESS, { "commit": moved[ "advanced_to" ], "at": now.isoformat() } )
     write_json( folder / f"{stem}.json", doc )
     return doc
