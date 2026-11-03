@@ -4,7 +4,7 @@ import asyncio
 from cosa.repo.duplicate_check import blind, body_vectors, candidates, judge
 
 
-def judge_all( judged, all_defs, cfg, wiring, slot ):
+def judge_all( judged, all_defs, cfg, wiring, slot, max_calls=None ):
     """
     Embed the pool, pick each definition's candidates and judge them once.
 
@@ -13,6 +13,7 @@ def judge_all( judged, all_defs, cfg, wiring, slot ):
         - cfg is the frozen configuration
         - wiring holds client, cache_dir, scrub, structural_pairs (a callable taking all definitions), backend, ledger and parallel
         - slot is the pass number
+        - max_calls is None for no cap, or judge_run's cap on backend calls
 
     Ensures:
         - returns judge_run's { verdicts, unjudged } for the judged definitions, each ruled against its fused candidates, and dropped:
@@ -31,5 +32,5 @@ def judge_all( judged, all_defs, cfg, wiring, slot ):
     rows     = candidates.candidate_rows( judged, pool, candidates.word_index( pool ), partners, cfg )
     by_id    = { d[ "id" ]: d for d in pool[ "defs" ] }
     cands    = { row[ "id" ]: [ by_id[ c[ "id" ] ] for c in row[ "candidates" ] ] for row in rows }
-    outcome  = asyncio.run( judge.judge_run( judged, cands, wiring[ "backend" ], wiring[ "ledger" ], slot, cfg, wiring[ "scrub" ], wiring[ "parallel" ] ) )
+    outcome  = asyncio.run( judge.judge_run( judged, cands, wiring[ "backend" ], wiring[ "ledger" ], slot, cfg, wiring[ "scrub" ], wiring[ "parallel" ], max_calls ) )
     return { **outcome, "dropped": { "count": len( dropped ), "ids": dropped } }

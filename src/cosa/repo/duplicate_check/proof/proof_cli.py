@@ -342,6 +342,23 @@ def read_supplement( key, labels, trial=False, third=None ):
     return { "key": key, "labels": list( labels ), **( { "third": third } if third is not None else {} ) }
 
 
+def base_wiring( cache_dir, structural_pairs, parallel, client ):
+    """
+    Build the wiring the proof and the daily check share, short of the ledger.
+
+    Requires:
+        - cache_dir is the vectors folder; structural_pairs is the callable judge_all takes; parallel is an int of 1 or more; client embeds bodies
+
+    Ensures:
+        - returns { client, cache_dir, scrub, structural_pairs, backend, parallel, frozen_path, live, data_dir, clock }
+        - the backend is the Claude Code one, the scrub list is the frozen arm labels' own, and the data root is the project's io folder
+        - writes nothing
+    """
+    return { "client": client, "cache_dir": pathlib.Path( cache_dir ), "scrub": blind.scrub_tokens( frozen.ARM_LABELS ), "structural_pairs": structural_pairs,
+             "backend": judge.MaxPlanBackend(), "parallel": parallel, "frozen_path": frozen.frozen_path(), "live": frozen.live_config(),
+             "data_dir": cu.get_project_root() + DATA_RELATIVE, "clock": lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }
+
+
 def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring, monolith=label_prep.monolith_definitions, jscpd=structural.run_jscpd ):
     """
     Build everything the proof needs from the real tree, short of the labels.
@@ -359,11 +376,7 @@ def live_parts( root, run_dir, cfg, parallel, prep_wiring=label_prep.live_wiring
     prep      = prep_wiring( root, pathlib.Path( run_dir ) / VECTORS_DIR )
     tmp, mono = monolith( root, cfg[ "min_nodes" ] )
     tmp.cleanup()
-    data_dir  = cu.get_project_root() + DATA_RELATIVE
-    wiring    = { "client": prep[ "client" ], "cache_dir": pathlib.Path( run_dir ) / VECTORS_DIR, "scrub": blind.scrub_tokens( frozen.ARM_LABELS ),
-                  "structural_pairs": structural_source( root, rewrite_sources( run_dir, run[ "planted" ] ), cfg, jscpd ), "backend": judge.MaxPlanBackend(),
-                  "parallel": parallel, "frozen_path": frozen.frozen_path(),
-                  "live": frozen.live_config(), "data_dir": data_dir, "clock": lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }
+    wiring    = base_wiring( pathlib.Path( run_dir ) / VECTORS_DIR, structural_source( root, rewrite_sources( run_dir, run[ "planted" ] ), cfg, jscpd ), parallel, prep[ "client" ] )
     return { "run": run, "mono_defs": mono, "distractors": [ *prep[ "server_defs" ], *prep[ "client_defs" ] ], "wiring": wiring }
 
 
