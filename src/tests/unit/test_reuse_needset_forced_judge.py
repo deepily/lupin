@@ -6,6 +6,7 @@ The in_pack variant asks about every drafted pair's plant inside the 128 places,
 """
 import json
 import os
+import threading
 import types
 from unittest import mock
 
@@ -14,6 +15,7 @@ import pytest
 from cosa.repo.doc_lint import jev_transport as jt
 from cosa.repo.doc_lint import model_transport
 from lupin_mcp import reuse_ledger as rl
+from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import errors as er
 from lupin_mcp.reuse_needset import forced_judge as fj
@@ -345,7 +347,7 @@ def test_the_row_records_where_the_plant_fell_and_how_it_fared_against_the_real_
     ratings = { "pz": YES, "py0": SURE, "py1": SURE, "py2": { "reuse": 0.1, "extend": 0.1, "unrelated": 0.8 } }
     row, ctx, stage, prepared, calls = in_pack_world( "pz", ratings )
     out = fj.judge_row_in_pack( row, ctx, stage, prepared, rt.in_language )
-    assert out == { "id": "pz", "label": fj.SAME_JOB, "lang": "py", "was_in_shortlist": False, "answered": True, "p_overlap": 0.8, "confidence": 0.6, "choice": "reuse", "accepted": True,
+    assert out == { "id": "pz", "label": fj.SAME_JOB, "lang": "py", "was_in_shortlist": False, "arm": "baseline", "answered": True, "p_overlap": 0.8, "confidence": 0.6, "choice": "reuse", "accepted": True,
                     "survives": True, "rank": 3, "wrong_at_threshold": 2, "pack_index": 3, "pack_position": 7, "position": 127, "asked": 128 }
 
 
@@ -384,15 +386,19 @@ def test_in_pack_figures_read_the_cut_shortlist_the_rank_and_the_wrong_places_at
     assert fj.in_pack_figures( tie, "z", policy )[ "rank" ] == 2, "equal p_overlap goes by id, as the verdict orders it"
 
 
-def test_summarize_in_pack_counts_accepts_and_survivors_by_label():
-    results = [ { "label": "same_job", "answered": True, "accepted": True, "survives": True }, { "label": "same_job", "answered": True, "accepted": True, "survives": False },
-                { "label": "not_same", "answered": False, "accepted": False, "survives": False }, { "label": "same_job", "answered": True, "accepted": False, "survives": False } ]
-    assert fj.summarize_in_pack( results ) == { "not_same": { "pairs": 1, "answered": 0, "accepted": 0, "survived": 0 }, "same_job": { "pairs": 3, "answered": 3, "accepted": 2, "survived": 1 } }
+def test_summarize_in_pack_counts_accepts_and_survivors_by_arm_repeat_and_label_and_never_pools_cells():
+    cell = lambda arm, repeat, label, answered, accepted, survives: { "arm": arm, "repeat": repeat, "label": label, "answered": answered, "accepted": accepted, "survives": survives }
+    results = [ cell( "baseline", 1, "same_job", True, True, True ), cell( "baseline", 1, "same_job", True, True, False ), cell( "baseline", 1, "not_same", False, False, False ),
+                cell( "baseline", 1, "same_job", True, False, False ), cell( "plant_line", 2, "same_job", True, True, True ) ]
+    assert fj.summarize_in_pack( results ) == { "baseline/1": { "not_same": { "pairs": 1, "answered": 0, "accepted": 0, "survived": 0 }, "same_job": { "pairs": 3, "answered": 3, "accepted": 2, "survived": 1 } },
+                                                "plant_line/2": { "same_job": { "pairs": 1, "answered": 1, "accepted": 1, "survived": 1 } } }
 
 
 def test_the_in_pack_plan_needs_three_requests_for_each_pair_and_names_its_variant():
     rows = [ { "label": "same_job" }, { "label": "not_same" } ]
     assert fj.plan_of( rows, [ ], 100, fj.IN_PACK ) == { "pairs": 2, "by_label": { "not_same": 1, "same_job": 1 }, "undrafted": [ ], "requests_needed": 6, "stage_budget": 100, "variant": "in_pack" }
+    assert fj.plan_of( rows, [ ], 100, fj.IN_PACK, jobs=[ 1 ] * 8 )[ "requests_needed" ] == 24, "with jobs the count is over the jobs, three requests each"
+    assert fj.plan_of( rows, [ ], 100, fj.ALONE, jobs=[ 1 ] * 8 )[ "requests_needed" ] == 8, "the alone variant counts pairs, four requests each"
 
 
 def test_run_live_counts_the_report_with_the_summary_it_is_given( tmp_path ):
@@ -405,10 +411,10 @@ def test_the_variant_is_alone_unless_in_pack_is_asked_for( tmp_path ):
     with pytest.raises( SystemExit ): fj.parse_args( argv( tmp_path, "--variant", "other" ) )
 
 
-def test_the_in_pack_variant_keeps_every_drafted_pair_and_not_only_the_missed_ones( tmp_path, monkeypatch ):
+def test_the_in_pack_variant_keeps_every_drafted_pair_and_gives_each_its_plant_line( tmp_path, monkeypatch ):
     old = tmp_path / "old"; old.mkdir()
     ( old / "key.json" ).write_text( json.dumps( { "items": { "pair-1": { "a": "d-r1", "b": "d-o1" }, "pair-2": { "a": "d-r2", "b": "d-o2" } } } ), encoding="utf-8" )
-    ( old / "report.json" ).write_text( json.dumps( { "stages": { "control": { "report": { "missed": [ "d-r2" ] } } } } ), encoding="utf-8" )
+    ( old / "report.json" ).write_text( json.dumps( { "stages": { "control": { "report": { "missed": [ "d-r2" ], "rows": [ { "rewrite": "d-r1", "purpose_line": "Reads a feed." }, { "rewrite": "d-r2", "purpose_line": "" }, { "rewrite": "d-r3" } ] } } } } ), encoding="utf-8" )
     for name in ( "labels-rick.jsonl", "labels-rick-redo.jsonl", "labels-reviewer-2.jsonl", "labels-jason.jsonl" ):
         ( old / name ).write_text( "".join( json.dumps( { "item_id": i, "choice": "A", "note": "", "ts": "t" } ) + "\n" for i in ( "pair-1", "pair-2" ) ), encoding="utf-8" )
     monkeypatch.setattr( fj.positive_control, "load_pairs", lambda path, sha: [ pair( 1 ), pair( 2 ), pair( 3 ) ] )
@@ -416,24 +422,132 @@ def test_the_in_pack_variant_keeps_every_drafted_pair_and_not_only_the_missed_on
     monkeypatch.setattr( fj, "frozen_needs", lambda pairs, ledger, strip_fn: { "d-r1": "n1", "d-r2": "n2" } )
     args = types.SimpleNamespace( planted = "p", answer_key = str( old / "key.json" ), labels_dir = str( old ), control_report = str( old / "report.json" ), run_dir = str( tmp_path ), cli_path = "c", server = "s", variant = fj.IN_PACK )
     _pairs, got, undrafted = fj.collect_rows( args, str( tmp_path ), { "planted_sha": "x" } )
-    assert [ r[ "id" ] for r in got ] == [ "d-r1", "d-r2" ] and undrafted == [ "d-r3" ]
+    assert [ ( r[ "id" ], r[ "plant_line" ] ) for r in got ] == [ ( "d-r1", "Reads a feed." ), ( "d-r2", None ) ] and undrafted == [ "d-r3" ]
     args.variant = fj.ALONE
-    assert [ r[ "id" ] for r in fj.collect_rows( args, str( tmp_path ), { "planted_sha": "x" } )[ 1 ] ] == [ "d-r2" ]
+    alone = fj.collect_rows( args, str( tmp_path ), { "planted_sha": "x" } )[ 1 ]
+    assert [ r[ "id" ] for r in alone ] == [ "d-r2" ] and "plant_line" not in alone[ 0 ]
 
 
-def test_an_in_pack_plan_names_the_variant_and_a_live_in_pack_run_judges_with_the_in_pack_judge_and_summary( tmp_path, old_run, monkeypatch ):
-    plan = fj.main( argv( tmp_path, "--cli-path", old_run, "--variant", "in_pack" ), deps_for( tmp_path ) )[ "plan" ]
-    assert plan[ "variant" ] == "in_pack" and plan[ "requests_needed" ] == 3
-    seen = { }
+def row_with_line( n, line ): return { "pair": pair( n ), "id": f"d-r{n}", "lang": "ts", "label": fj.SAME_JOB, "need": "n", "plant_line": line }
+
+
+def test_expand_jobs_makes_a_job_for_each_pair_arm_and_repeat_in_pair_arm_repeat_order_and_skips_a_missing_line():
+    jobs, skipped = fj.expand_jobs( [ row_with_line( 1, "A line." ), row_with_line( 2, None ) ] )
+    assert [ ( j[ "id" ], j[ "arm" ], j[ "repeat" ] ) for j in jobs ] == [ ( "d-r1", "baseline", 1 ), ( "d-r1", "baseline", 2 ), ( "d-r1", "plant_line", 1 ), ( "d-r1", "plant_line", 2 ),
+                                                                              ( "d-r2", "baseline", 1 ), ( "d-r2", "baseline", 2 ) ]
+    assert skipped == [ { "pair": "d-r2", "arm": "plant_line", "reason": "plant_has_no_line" } ] and jobs[ 0 ][ "plant_line" ] == "A line." and jobs[ 0 ][ "need" ] == "n"
+    one, none = fj.expand_jobs( [ row_with_line( 1, "A line." ) ], arms=( fj.ARM_BASELINE, ), repeats=( 3, ) )
+    assert [ ( j[ "arm" ], j[ "repeat" ] ) for j in one ] == [ ( "baseline", 3 ) ] and none == [ ]
+
+
+def test_sixteen_pairs_with_lines_make_192_requests_of_three_packs_each_two_arms_two_repeats():
+    jobs, _ = fj.expand_jobs( [ row_with_line( n, "L." ) for n in range( 16 ) ] )
+    assert len( jobs ) == 64 and fj.plan_of( [ ], [ ], fj.IN_PACK_BUDGET, fj.IN_PACK, jobs )[ "requests_needed" ] == fj.IN_PACK_BUDGET == 192
+
+
+def test_each_arm_and_repeat_has_a_run_index_of_its_own_and_one_or_more():
+    assert [ fj.in_pack_run_index( a, r ) for a in fj.IN_PACK_ARMS for r in fj.IN_PACK_REPEATS ] == [ 1, 2, 101, 102 ]
+
+
+def test_with_plant_line_changes_only_the_plant_and_leaves_the_pool_it_was_given_alone():
+    pool  = [ { "id": "a", "pin": "pa" }, { "id": "pz", "pin": "pz-pin", "doc": "d" }, { "id": "b", "pin": "pb" } ]
+    after = fj.with_plant_line( pool, { "id": "pz", "plant_line": "Does the thing." } )
+    assert after[ 1 ] == { "id": "pz", "pin": "pz-pin", "doc": "d", "purpose": "Does the thing." } and after[ 0 ] is pool[ 0 ] and after[ 2 ] is pool[ 2 ] and "purpose" not in pool[ 1 ]
+
+
+# ---- arms and repeats through the real sweep: a stand-in transport that answers every question it is sent ----
+
+class Echo:
+    """A transport that answers every question in a body, and records the body."""
+    def __init__( self ): self.bodies, self.lock = [ ], threading.Lock()
+    def post_with_meta( self, body ):
+        with self.lock: self.bodies.append( body )
+        return { "answers": { key: { "probabilities": dict( YES ) } for key in body[ "questions" ] }, "model": body[ "model" ], "usage": { "input_tokens": 100, "output_tokens": 20 } }, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 3 }
+
+
+def real_world( tmp_path, echo ):
+    """
+    Build a job row, a context, a stage and a pool for the real sweep.
+
+    The pool holds 127 real places and a plant with a pin, and echo answers them.
+    """
+    place = lambda i, lang="py": { "id": i, "lang": lang, "sig": "()", "doc": f"Does {i}.", "pin": f"pin-{i}" }
+    pool  = [ place( f"py{n}" ) for n in range( 200 ) ] + [ place( "seed" ), place( "ts0", "ts" ), place( "pz" ) ]
+    row   = { "pair": { **pair( 1 ), "original": { **pair( 1 )[ "original" ], "id": "seed" }, "rewrite": { **pair( 1 )[ "rewrite" ], "id": "pz" } }, "id": "pz", "lang": "py", "label": fj.SAME_JOB, "need": "a need", "plant_line": "Reads a feed." }
+    ctx   = rt.ReuseContext( tmp_path, tmp_path / "data", out_dir=tmp_path / "out", transport=echo, pack_size=40 )
+    return row, ctx, FakeStage( [ "ts0" ] + [ f"py{n}" for n in range( 200 ) ] ), ( set(), pool, "sha", None )
+
+
+def test_a_repeat_really_posts_its_packs_even_when_the_production_answers_are_cached( tmp_path ):
+    echo = Echo()
+    row, ctx, stage, prepared = real_world( tmp_path, echo )
+    production = rp.packed_sweeper( 40, shape=rp.SHAPE_WHOLE )
+    ctx.sweeper = production
+    fj.judge_row_in_pack( row, ctx, stage, prepared, rt.in_language )
+    warm = len( echo.bodies )
+    assert warm == 4, "128 places in packs of 40 are 4 posts"
+    fj.judge_row_in_pack( row, ctx, stage, prepared, rt.in_language )
+    assert len( echo.bodies ) == warm, "control: the same question asked the production way again is served from the cache and posts nothing"
+    cells = [ ( "baseline", 1 ), ( "baseline", 2 ), ( "plant_line", 1 ), ( "plant_line", 2 ) ]
+    for n, ( arm, repeat ) in enumerate( cells, start=1 ):
+        out = fj.judge_job( { **row, "arm": arm, "repeat": repeat }, ctx, stage, prepared, rt.in_language )
+        assert len( echo.bodies ) == warm + 4 * n, f"{arm} repeat {repeat} must post its 4 packs"
+        assert out[ "arm" ] == arm and out[ "repeat" ] == repeat and out[ "answered" ] is True and out[ "asked" ] == 128
+    assert ctx.sweeper is production, "the context it was given is not changed"
+    hashes = [ rp.pack_key( b ) for b in echo.bodies[ warm: ] ]
+    assert len( hashes ) == 16 and len( set( hashes ) ) == 16, "no two cells post the same body"
+
+
+def test_the_plant_line_arm_sends_the_plant_with_its_line_and_the_baseline_arm_does_not( tmp_path ):
+    echo = Echo()
+    row, ctx, stage, prepared = real_world( tmp_path, echo )
+    fj.judge_job( { **row, "arm": "baseline", "repeat": 1 }, ctx, stage, prepared, rt.in_language )
+    plain = len( echo.bodies )
+    fj.judge_job( { **row, "arm": "plant_line", "repeat": 1 }, ctx, stage, prepared, rt.in_language )
+    sent = lambda bodies: json.dumps( bodies, sort_keys=True )
+    assert "Reads a feed." not in sent( echo.bodies[ :plain ] ) and "Reads a feed." in sent( echo.bodies[ plain: ] )
+    assert "purpose: Reads a feed." in sent( echo.bodies[ plain: ] )
+
+
+def test_a_cell_is_asked_with_a_pack_template_that_ends_in_its_run_index_and_the_reading_is_in_the_row( tmp_path ):
+    echo = Echo()
+    row, ctx, stage, prepared = real_world( tmp_path, echo )
+    out = fj.judge_job( { **row, "arm": "plant_line", "repeat": 2 }, ctx, stage, prepared, rt.in_language )
+    assert all( "(repeat 102)" in json.dumps( b ) for b in echo.bodies ) and out[ "pack_index" ] == 3 and out[ "pack_position" ] == 7 and out[ "position" ] == 127
+    assert out[ "accepted" ] is True and out[ "survives" ] is False and out[ "wrong_at_threshold" ] == 127
+
+
+def fake_in_pack_rows( args, root ): return [ pair( 1 ) ], [ row_with_line( 1, "A line." ), row_with_line( 2, None ) ], [ "u1" ]
+
+
+def test_the_in_pack_defaults_are_a_budget_and_cap_of_192_and_a_named_value_wins( tmp_path ):
+    assert fj.parse_args( argv( tmp_path, "--variant", "in_pack" ) ).budget == fj.parse_args( argv( tmp_path, "--variant", "in_pack" ) ).limit == 192
+    named = fj.parse_args( argv( tmp_path, "--variant", "in_pack", "--budget", "50", "--limit", "60" ) )
+    assert ( named.budget, named.limit ) == ( 50, 60 )
+    assert fj.parse_args( argv( tmp_path, "--budget", "7" ) ).budget == 7 and fj.parse_args( argv( tmp_path ) ).limit == 100
+
+
+def test_an_in_pack_plan_lists_the_arms_repeats_jobs_and_what_it_skipped_and_counts_192_style_requests( tmp_path, old_run ):
+    plan = fj.main( argv( tmp_path, "--cli-path", old_run, "--variant", "in_pack" ), deps_for( tmp_path, rows=fake_in_pack_rows ) )[ "plan" ]
+    assert plan[ "variant" ] == "in_pack" and plan[ "arms" ] == [ "baseline", "plant_line" ] and plan[ "repeats" ] == [ 1, 2 ]
+    assert plan[ "jobs" ] == 6 and plan[ "requests_needed" ] == 18 and plan[ "stage_budget" ] == 192 and plan[ "pairs" ] == 2
+    assert plan[ "skipped" ] == [ { "pair": "d-r2", "arm": "plant_line", "reason": "plant_has_no_line" } ]
+    alone = fj.main( argv( tmp_path, "--cli-path", old_run ), deps_for( tmp_path ) )[ "plan" ]
+    assert "arms" not in alone and "jobs" not in alone
+
+
+def test_a_live_in_pack_run_judges_each_job_with_the_job_judge_and_reports_by_arm_and_repeat( tmp_path, old_run, monkeypatch ):
+    seen = [ ]
     class Ctx:
         candidate_stage = "live"; policy = None; pages = [ ]
     monkeypatch.setattr( rt, "context_from_environment", lambda root: Ctx() )
     monkeypatch.setattr( rt, "prepare", lambda ctx: ( set(), [ ], "sha", None ) )
     monkeypatch.setattr( rt, "sendable_report", lambda entries: ( [ ], { } ) )
     monkeypatch.setattr( fj.planted_pool, "planted_entry", lambda rec: { "id": rec[ "id" ] } )
-    def in_pack( row, at, stage, prepared, entries_of, policy ): seen[ "in_pack" ] = True; return { "label": row[ "label" ], "id": row[ "id" ], "answered": True, "accepted": True, "survives": True }
+    def job_judge( job, at, stage, prepared, entries_of, policy ): seen.append( ( job[ "id" ], job[ "arm" ], job[ "repeat" ] ) ); return { "label": job[ "label" ], "id": job[ "id" ], "arm": job[ "arm" ], "repeat": job[ "repeat" ], "answered": True, "accepted": True, "survives": True }
     def alone( *a, **k ): raise AssertionError( "the alone judge must not run for the in_pack variant" )
-    monkeypatch.setattr( fj, "judge_row_in_pack", in_pack )
+    monkeypatch.setattr( fj, "judge_job", job_judge )
     monkeypatch.setattr( fj, "judge_row", alone )
-    out = fj.main( argv( tmp_path, "--cli-path", old_run, "--live", "--run-name", "r6", "--variant", "in_pack" ), deps_for( tmp_path, stage=lambda live, entries, cache: "stage", close_run=lambda c: None ) )
-    assert seen == { "in_pack": True } and out[ "report" ][ "summary" ] == { "same_job": { "pairs": 1, "answered": 1, "accepted": 1, "survived": 1 } }
+    out = fj.main( argv( tmp_path, "--cli-path", old_run, "--live", "--run-name", "r6", "--variant", "in_pack" ), deps_for( tmp_path, rows=fake_in_pack_rows, stage=lambda live, entries, cache: "stage", close_run=lambda c: None ) )
+    assert seen == [ ( "d-r1", "baseline", 1 ), ( "d-r1", "baseline", 2 ), ( "d-r1", "plant_line", 1 ), ( "d-r1", "plant_line", 2 ), ( "d-r2", "baseline", 1 ), ( "d-r2", "baseline", 2 ) ]
+    assert sorted( out[ "report" ][ "summary" ] ) == [ "baseline/1", "baseline/2", "plant_line/1", "plant_line/2" ] and out[ "report" ][ "summary" ][ "baseline/1" ][ "same_job" ][ "pairs" ] == 2

@@ -101,6 +101,38 @@ def test_judge_rows_count_by_label_with_already_in_excluded_from_answered():
     assert rows == [ [ "not_same", 1, 0, 0, "0/0 (n/a)" ], [ "same_job", 3, 1, 2, "1/2 (50.0%, 9.5-90.5%)" ] ]
 
 
+def in_pack_result( rid, label, arm, repeat, was_in=False, answered=True, accepted=False ):
+    """Ensures: returns one in_pack result row, asked even when the real shortlist held it."""
+    return { "id": rid, "label": label, "lang": "python", "was_in_shortlist": was_in, "answered": answered, "accepted": accepted, "arm": arm, "repeat": repeat }
+
+
+def test_an_in_pack_row_that_was_already_in_the_128_counts_as_already_in_and_as_answered():
+    rows = [ in_pack_result( "r1", "same_job", "baseline", 1, was_in=True, accepted=True ), in_pack_result( "r2", "same_job", "baseline", 1, accepted=True ),
+             in_pack_result( "r3", "same_job", "baseline", 1, was_in=True, answered=False ) ]
+    assert rr.judge_rows( rows, "label" ) == [ [ "same_job", 3, 2, 2, "2/2 (100.0%, 34.2-100.0%)" ] ]
+
+
+def test_an_alone_row_that_was_never_asked_is_already_in_and_not_answered_even_beside_an_in_pack_row():
+    rows = [ forced_result( "r3", "same_job", "python", was_in=True ), in_pack_result( "r4", "same_job", "baseline", 1, was_in=True, accepted=True ) ]
+    assert rr.judge_rows( rows, "label" ) == [ [ "same_job", 2, 2, 1, "1/1 (100.0%, 20.7-100.0%)" ] ]
+
+
+def test_in_pack_results_get_a_pair_of_tables_for_each_arm_and_repeat_and_are_never_pooled():
+    results = [ in_pack_result( "r1", "same_job", "baseline", 1, accepted=True ), in_pack_result( "r1", "same_job", "baseline", 2 ),
+                in_pack_result( "r1", "same_job", "plant_line", 1, accepted=True ), in_pack_result( "r2", "not_same", "baseline", 1, was_in=True, accepted=True ) ]
+    blocks  = rr.forced_tables( results )
+    assert [ b for b in blocks if b.startswith( "Arm and repeat" ) ] == [ "Arm and repeat baseline/1:", "Arm and repeat baseline/2:", "Arm and repeat plant_line/1:" ]
+    assert len( blocks ) == 9 and "| same_job | 1 | 0 | 1 | 1/1 (100.0%, 20.7-100.0%) |" in blocks[ 1 ] and "| not_same | 1 | 1 | 1 | 1/1 (100.0%, 20.7-100.0%) |" in blocks[ 1 ]
+    assert "| same_job | 1 | 0 | 1 | 0/1 (0.0%, 0.0-79.3%) |" in blocks[ 4 ]
+    text = rr.forced_section( { "live": True, "plan": FORCED_PLAN[ "plan" ], "report": { "used": 1, "limit": 2, "status": "done", "results": results } } )
+    assert "Arm and repeat plant_line/1:" in text
+
+
+def test_results_without_an_arm_get_one_pair_of_tables_and_no_cell_line():
+    blocks = rr.forced_tables( FORCED_RUN[ "results" ] )
+    assert len( blocks ) == 2 and not any( b.startswith( "Arm and repeat" ) for b in blocks )
+
+
 def test_forced_run_has_label_and_language_tables():
     text = rr.forced_section( FORCED_RUN )
     assert "| resolved label |" in text and "| language |" in text

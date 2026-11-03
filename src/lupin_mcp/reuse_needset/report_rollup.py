@@ -154,17 +154,39 @@ def judge_rows( results, key ):
     Ensures:
         - returns table rows [ value, pairs, already in, answered, accepted share ] sorted by value
         - the accepted share is over the pairs the judge answered
+        - a result the real shortlist already held counts in already in
+        - answered and the accepted share count a result by its own answer: an alone result that was already in carries none (answered None) and adds to neither, while an in_pack result that was already in the 128 was still asked and counts in both
     """
     groups = { }
     for r in results:
         g = groups.setdefault( r[ key ], { "pairs": 0, "already_in": 0, "answered": 0, "accepted": 0 } )
         g[ "pairs" ] += 1
-        if r[ "was_in_shortlist" ]:
-            g[ "already_in" ] += 1
-            continue
+        if r[ "was_in_shortlist" ]: g[ "already_in" ] += 1
         g[ "answered" ]  += bool( r[ "answered" ] )
         g[ "accepted" ]  += bool( r[ "accepted" ] )
     return [ [ v, g[ "pairs" ], g[ "already_in" ], g[ "answered" ], share( g[ "accepted" ], g[ "answered" ] ) ] for v, g in sorted( groups.items() ) ]
+
+
+def forced_tables( results ):
+    """
+    Render the forced judge's label and language tables, one pair for each arm and repeat.
+
+    Requires:
+        - results are forced_judge result rows; an in_pack row has arm and repeat
+
+    Ensures:
+        - returns a list of text blocks: the label table, then the language table
+        - results without an arm give one pair of tables; results with an arm give a pair for each "arm/repeat" cell under a line naming it, so cells are never pooled
+    """
+    headers = [ "pairs", "already in the 128", "answered", "accepted of answered (Wilson 95%)" ]
+    cells   = { }
+    for r in results: cells.setdefault( f"{r[ 'arm' ]}/{r[ 'repeat' ]}" if "arm" in r else "", [ ] ).append( r )
+    out = [ ]
+    for cell, rows in sorted( cells.items() ):
+        if cell: out.append( f"Arm and repeat {cell}:" )
+        out.append( table( [ "resolved label" ] + headers, judge_rows( rows, "label" ) ) )
+        out.append( table( [ "language" ] + headers, judge_rows( rows, "lang" ) ) )
+    return out
 
 
 def forced_section( doc ):
@@ -186,9 +208,7 @@ def forced_section( doc ):
                 counts_table( "resolved label", plan[ "by_label" ] ), f"Judge recall: {NOT_RUN}." ]
         return "\n\n".join( head + out )
     out     = [ f"Run status {run[ 'status' ]}, {run[ 'used' ]} of {run[ 'limit' ]} calls used." ]
-    headers = [ "pairs", "already in the 128", "answered", "accepted of answered (Wilson 95%)" ]
-    out.append( table( [ "resolved label" ] + headers, judge_rows( run[ "results" ], "label" ) ) )
-    out.append( table( [ "language" ] + headers, judge_rows( run[ "results" ], "lang" ) ) )
+    out    += forced_tables( run[ "results" ] )
     out.append( "On the not_same row an accept is a false accept." )
     return "\n\n".join( head + out )
 

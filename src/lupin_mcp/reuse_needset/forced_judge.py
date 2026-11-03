@@ -15,7 +15,10 @@ import os
 import pathlib
 
 from cosa.repo.doc_lint import model_transport
+from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex import verdict as vd
+from lupin_mcp import reuse_flip as rf
+from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_redact
 from lupin_mcp import reuse_tools as rt
 from lupin_mcp.reuse_needset import call_cap, draft, expansion_run, first_thousand, planted_pool, positive_control, source_at, stage3, strip, yield_trace
@@ -41,6 +44,12 @@ ALONE        = "alone"             # the plant is asked in a pack of its own, af
 IN_PACK      = "in_pack"           # the plant is asked inside the 128 places, in the packs the real run would cut
 VARIANTS     = ( ALONE, IN_PACK )
 IN_PACK_REQUESTS_PER = 3           # 128 places are packs of up to 50: 50, 50 and 28
+ARM_BASELINE = "baseline"          # the plant as id and signature, the unchanged template (the names are judge_probe's; that module imports this one)
+ARM_PLANT_LINE = "plant_line"      # the plant carries its purpose line, as the index gives a real entry its line
+IN_PACK_ARMS = ( ARM_BASELINE, ARM_PLANT_LINE )
+IN_PACK_REPEATS = ( 1, 2 )
+ARM_STRIDE   = 100                 # run indexes: arm n, repeat r is n * 100 + r, so no two cells share a cache key
+IN_PACK_BUDGET = 192               # 16 pairs, 2 arms, 2 repeats and 3 packs
 
 
 def missed_ids( report_path ):
@@ -254,7 +263,20 @@ def in_pack_figures( routed, plant_id, policy ):
              "wrong_at_threshold": sum( 1 for r in rows if r[ "id" ] != plant_id and r[ "p_overlap" ] >= policy[ "threshold" ] ) }
 
 
-def judge_row_in_pack( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, route=rt._route ):
+def with_plant_line( pool, row ):
+    """
+    Give the row's plant its purpose line in the pool.
+
+    Requires:
+        - pool holds the plant, with a pin; row has plant_line
+
+    Ensures:
+        - returns a new list in which the plant is a copy carrying the line as `purpose`, as attach_purposes gives a real entry its line; every other entry is the same object
+    """
+    return [ sx_build.attach_purposes( [ e ], { e[ "pin" ]: row[ "plant_line" ] } )[ 0 ] if e[ "id" ] == row[ "id" ] else e for e in pool ]
+
+
+def judge_row_in_pack( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, route=rt._route, arm=ARM_BASELINE, template=None ):
     """
     Ask the judge about one plant placed among the 127 real places, in one question.
 
@@ -266,30 +288,68 @@ def judge_row_in_pack( row, ctx, stage, prepared, entries_of, policy=vd.POLICY, 
         - the real places are the ones places_for chooses, as judge_row takes them
         - the 127 best of them and the plant are asked in a single route call, so the plant is never asked alone and nothing is widened
         - a plant the real shortlist already held is asked all the same, and was_in_shortlist says so
-        - returns the row's id, label and language, was_in_shortlist, plant_answer's figures, in_pack_figures' figures and pack_place's place
+        - the plant_line arm asks the plant with its purpose line; the baseline arm asks it as the control built it
+        - template is the pack template the question is asked with; None is the production template
+        - returns the row's id, label and language, was_in_shortlist, the arm, plant_answer's figures, in_pack_figures' figures and pack_place's place
     """
     sent, flags, pool, real, head = places_for( row, ctx, stage, prepared, entries_of )
+    if arm == ARM_PLANT_LINE: pool = with_plant_line( pool, row )
     asked    = real + [ row[ "id" ] ]
-    routed   = route( ctx, sent, pool, flags, policy=policy, candidate_ids=asked )
-    return { **head, **plant_answer( routed, row[ "id" ], policy ), **in_pack_figures( routed, row[ "id" ], policy ), **pack_place( asked, row[ "id" ], ctx.pack_size ) }
+    routed   = route( ctx, sent, pool, flags, template=template, policy=policy, candidate_ids=asked )
+    return { **head, "arm": arm, **plant_answer( routed, row[ "id" ], policy ), **in_pack_figures( routed, row[ "id" ], policy ), **pack_place( asked, row[ "id" ], ctx.pack_size ) }
+
+
+def in_pack_run_index( arm, repeat ):
+    """
+    Number one arm's repeat, so its answers are cached under a key of its own.
+
+    Requires:
+        - arm is one of IN_PACK_ARMS; repeat is a whole number from 1 to ARM_STRIDE minus 1
+
+    Ensures:
+        - returns the arm's position times ARM_STRIDE plus the repeat, a run index of 1 or more that no other arm and repeat share
+    """
+    return IN_PACK_ARMS.index( arm ) * ARM_STRIDE + repeat
+
+
+def judge_job( job, ctx, stage, prepared, entries_of, policy=vd.POLICY, route=rt._route, sweeper_for=rf.replay_sweeper ):
+    """
+    Ask one arm and repeat of an in_pack question, posting its packs fresh.
+
+    Requires:
+        - job is one of expand_jobs' jobs; ctx has a pack_size
+
+    Ensures:
+        - the question is swept with sweeper_for( pack_size, workers, run index, shape ) under the whole shape, so its answers are keyed by arm and repeat
+        - the key holds the arm and repeat, so the cell never reads another cell's or the production answers, and its packs are posted
+        - the template ends with the cell's run index, as judge_probe.repeat_template makes it, so no two cells post the same body
+        - the argument ctx is not changed
+        - returns judge_row_in_pack's result with the repeat added
+    """
+    from lupin_mcp.reuse_needset import judge_probe                            # imported here: it imports this module
+    index      = in_pack_run_index( job[ "arm" ], job[ "repeat" ] )
+    at         = copy.copy( ctx )
+    at.sweeper = sweeper_for( ctx.pack_size, rp.WORKERS_DEFAULT, index, shape=rp.SHAPE_WHOLE )
+    return { **judge_row_in_pack( job, at, stage, prepared, entries_of, policy, route, job[ "arm" ], judge_probe.repeat_template( rt.PROMPT_TEMPLATE, index ) ), "repeat": job[ "repeat" ] }
 
 
 def summarize_in_pack( results ):
     """
-    Count the judge's accepts, and the plants that survive the cap, by the pairs' human label.
+    Count the accepts and the plants that survive the cap, by arm, repeat and label.
 
     Ensures:
-        - returns { label: { pairs, answered, accepted, survived } } sorted by label
+        - returns { "arm/repeat": { label: { pairs, answered, accepted, survived } } }, each level sorted
+        - the cells are never pooled: an arm's repeats stay apart, as do the arms
         - every pair was asked, so there is no already_in count; survived counts the plants in the verdict's cut shortlist
     """
     out = { }
     for r in results:
-        g = out.setdefault( r[ "label" ], { "pairs": 0, "answered": 0, "accepted": 0, "survived": 0 } )
+        g = out.setdefault( f"{r[ 'arm' ]}/{r[ 'repeat' ]}", { } ).setdefault( r[ "label" ], { "pairs": 0, "answered": 0, "accepted": 0, "survived": 0 } )
         g[ "pairs" ]    += 1
         g[ "answered" ] += bool( r[ "answered" ] )
         g[ "accepted" ] += bool( r[ "accepted" ] )
         g[ "survived" ] += bool( r[ "survives" ] )
-    return dict( sorted( out.items() ) )
+    return { cell: dict( sorted( labels.items() ) ) for cell, labels in sorted( out.items() ) }
 
 
 def summarize( results ):
@@ -312,17 +372,39 @@ def summarize( results ):
     return dict( sorted( out.items() ) )
 
 
-def plan_of( rows, undrafted, budget, variant=ALONE ):
+def expand_jobs( rows, arms=IN_PACK_ARMS, repeats=IN_PACK_REPEATS ):
+    """
+    List the questions an in_pack run asks: one for each pair, arm and repeat.
+
+    Requires:
+        - rows are build_rows' rows, each with plant_line (the plant's purpose line, or None)
+
+    Ensures:
+        - returns ( jobs, skipped ): a job is its row with arm and repeat added, in the order pair, arm, repeat, so a stopped run leaves whole pairs
+        - skipped lists { pair, arm, reason } for each plant_line arm of a pair with no purpose line; it has no job
+    """
+    jobs, skipped = [ ], [ ]
+    for row in rows:
+        for arm in arms:
+            if arm == ARM_PLANT_LINE and row[ "plant_line" ] is None:
+                skipped.append( { "pair": row[ "id" ], "arm": arm, "reason": "plant_has_no_line" } )
+                continue
+            jobs += [ { **row, "arm": arm, "repeat": n } for n in repeats ]
+    return jobs, skipped
+
+
+def plan_of( rows, undrafted, budget, variant=ALONE, jobs=None ):
     """
     Describe what a live run would do.
 
     Ensures:
         - returns { pairs, by_label, undrafted, requests_needed, stage_budget, variant }
-        - requests_needed is REQUESTS_PER for each pair, or IN_PACK_REQUESTS_PER for the in_pack variant, counted against the cap as one call each
+        - requests_needed is REQUESTS_PER for each pair, or IN_PACK_REQUESTS_PER for each job of the in_pack variant, counted against the cap as one call each
+        - jobs, when given, are expand_jobs' jobs, and the in_pack count is over them in place of the pairs
     """
     by_label = { }
     for r in rows: by_label[ r[ "label" ] ] = by_label.get( r[ "label" ], 0 ) + 1
-    return { "pairs": len( rows ), "by_label": dict( sorted( by_label.items() ) ), "undrafted": undrafted, "requests_needed": ( REQUESTS_PER if variant == ALONE else IN_PACK_REQUESTS_PER ) * len( rows ), "stage_budget": budget, "variant": variant }
+    return { "pairs": len( rows ), "by_label": dict( sorted( by_label.items() ) ), "undrafted": undrafted, "requests_needed": ( REQUESTS_PER * len( rows ) if variant == ALONE else IN_PACK_REQUESTS_PER * len( rows if jobs is None else jobs ) ), "stage_budget": budget, "variant": variant }
 
 
 def run_live( run_dir, rows, judge, limit, budget, summary=summarize ):
@@ -370,20 +452,23 @@ def parse_args( argv ):
         - the source tree, this run's folder, the earlier run's folder, the planted file, the answer key, the labels folder, the control report, the seed and the source commit are required
         - live is false unless --live is given, and a live run also needs --run-name, a fresh spend-ledger run name
         - the variant is alone unless --variant in_pack is given
-        - the stage budget is 100 calls and the run's cap equal to it unless named; the token ceiling is 8,000,000 unless named
+        - the stage budget is 100 calls and the run's cap equal to it unless named, 192 for the in_pack variant; the token ceiling is 8,000,000 unless named
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     for name in ( "root", "run_dir", "from_run", "planted", "answer_key", "labels_dir", "control_report", "seed", "source_commit" ):
         ap.add_argument( "--" + name.replace( "_", "-" ), required=True, type=int if name == "seed" else str )
-    ap.add_argument( "--limit", type=int, default=BUDGET )
-    ap.add_argument( "--budget", type=int, default=BUDGET )
+    ap.add_argument( "--limit", type=int, default=None )
+    ap.add_argument( "--budget", type=int, default=None )
     ap.add_argument( "--ceiling", type=int, default=8_000_000 )
     ap.add_argument( "--run-name", default=None )
     ap.add_argument( "--cli-path", default=None )
     ap.add_argument( "--server", default="max-plan" )
     ap.add_argument( "--live", action="store_true" )
     ap.add_argument( "--variant", choices=VARIANTS, default=ALONE )
-    return ap.parse_args( argv )
+    args = ap.parse_args( argv )
+    fallback = IN_PACK_BUDGET if args.variant == IN_PACK else BUDGET
+    args.limit, args.budget = fallback if args.limit is None else args.limit, fallback if args.budget is None else args.budget
+    return args
 
 
 def collect_rows( args, root, deps ):
@@ -394,6 +479,7 @@ def collect_rows( args, root, deps ):
         - returns ( pairs, rows, undrafted ) and has built no reuse context
         - the labels are the first rater's, then the second's, with the third rater for a disagreement
         - the alone variant keeps the pairs retrieval missed; the in_pack variant keeps every pair with a frozen draft, since a plant asked among the real places needs no miss
+        - the in_pack rows also carry plant_line, the purpose line the control report holds for the plant, or None
     """
     pairs  = positive_control.load_pairs( args.planted, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
     key    = json.loads( pathlib.Path( args.answer_key ).read_text( encoding="utf-8" ) )[ "items" ]
@@ -405,6 +491,10 @@ def collect_rows( args, root, deps ):
     needs  = frozen_needs( pairs, ledger, lambda rec: strip.strip_member( rec, root ) )
     missed  = { p[ "rewrite" ][ "id" ] for p in pairs } if args.variant == IN_PACK else set( missed_ids( args.control_report ) )
     rows, undrafted = build_rows( pairs, missed, needs, pair_labels( pairs, key, first, second, third ) )
+    if args.variant == IN_PACK:
+        report = json.loads( pathlib.Path( args.control_report ).read_text( encoding="utf-8" ) )[ "stages" ][ "control" ][ "report" ]
+        lines  = { r[ "rewrite" ]: r[ "purpose_line" ] for r in report[ "rows" ] if "purpose_line" in r and r[ "purpose_line" ] }
+        rows   = [ { **r, "plant_line": lines[ r[ "id" ] ] if r[ "id" ] in lines else None } for r in rows ]
     return pairs, rows, undrafted
 
 
@@ -451,13 +541,15 @@ def _run( args, root, deps ):
         - a live run closes the spend-ledger run when an error ends it, and an error from that close never replaces the first error
     """
     pairs, rows, undrafted = deps[ "rows" ]( args, root ) if "rows" in deps else collect_rows( args, root, deps )
-    plan = { **plan_of( rows, undrafted, args.budget, args.variant ), "control_report": str( args.control_report ) }
+    jobs, skipped = expand_jobs( rows ) if args.variant == IN_PACK else ( None, None )
+    plan = { **plan_of( rows, undrafted, args.budget, args.variant, jobs ), "control_report": str( args.control_report ) }
+    if jobs is not None: plan.update( arms=list( IN_PACK_ARMS ), repeats=list( IN_PACK_REPEATS ), jobs=len( jobs ), skipped=skipped )
     if not args.live: return { "live": False, "plan": plan }
     os.environ.update( { **expansion_run.read_env_file( f"{args.run_dir}/run-env.sh" ), rt.RUN_NAME_VARIABLE: args.run_name, rt.CEILING_VARIABLE: str( args.ceiling ) } )
     ctx   = ( deps[ "context" ] if "context" in deps else rt.context_from_environment )( root )
     close = deps[ "close_run" ] if "close_run" in deps else rt.close_run
     try:
-        return _live( args, ctx, pairs, rows, plan, deps, close )
+        return _live( args, ctx, pairs, rows if jobs is None else jobs, plan, deps, close )
     except BaseException:
         try: close( ctx )
         except Exception as error: print( f"close_run failed while another error was raised: {error!r}" )
@@ -483,7 +575,7 @@ def _live( args, ctx, pairs, rows, plan, deps, close ):
         prepared = ( flags, [ *pool, *kept ], hashlib.sha256( f"{sha_}|planted|{ids}".encode( "utf-8" ) ).hexdigest()[ :32 ], gen )
         at       = copy.copy( ctx )
         at.candidate_stage = stage
-        ask      = judge_row_in_pack if args.variant == IN_PACK else judge_row
+        ask      = judge_job if args.variant == IN_PACK else judge_row
         judge    = lambda row: ask( row, at, stage, prepared, rt.in_language, ctx.policy if ctx.policy is not None else vd.POLICY )
     report = run_live( args.run_dir, rows, judge, args.limit, args.budget, summarize_in_pack if args.variant == IN_PACK else summarize )
     try:

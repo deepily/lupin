@@ -86,6 +86,17 @@ class TestSweeperFactory:
             builder( 4, 5, 0 )
         sent.assert_not_called()
 
+    def test_a_shape_is_passed_on_and_checked_with_the_kind_and_a_missing_shape_is_not_passed( self, sent ):
+        assert rf.replay_sweeper( 4, 5, 3, shape=rp.SHAPE_WHOLE )( "ctx", "need", [ "e" ] ) == "SWEPT"
+        assert sent.call_args.kwargs[ "shape" ] == rp.SHAPE_WHOLE
+        rf.replay_sweeper( 4, 5, 3 )( "ctx", "need", [ "e" ] )
+        assert "shape" not in sent.call_args.kwargs
+        with patch.object( rp, "_check_sweep_args" ) as check:
+            rf.replay_sweeper( 4, 5, 1, shape=rp.SHAPE_WHOLE )
+            rf.replay_pair_sweeper( 4, 5, 1, shape=rp.SHAPE_WHOLE )
+        assert [ c.args for c in check.call_args_list ] == [ ( 4, 5, "replay", 1, "choice", rp.SHAPE_WHOLE ), ( 4, 5, "replay", 1, "pair", rp.SHAPE_WHOLE ) ]
+        with pytest.raises( ValueError, match="shape" ): rf.replay_pair_sweeper( 4, 5, 1, shape=rp.SHAPE_WHOLE )
+
     def test_the_checker_is_given_the_key_mode_and_kind( self ):
         with patch.object( rp, "_check_sweep_args" ) as check:
             rf.replay_pair_sweeper( 4, 5, 1 )
