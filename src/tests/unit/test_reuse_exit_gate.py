@@ -546,7 +546,10 @@ def test_searches_by_receipt_keys_each_search_by_the_receipt_id_in_its_record_fi
     _write_record( tmp_path, "rs-2222222222", [ "m.c4" ], entry="m.noReceipt" )                   # no receipt id: nothing to key on
     _write_record( tmp_path, "rs-3333333333", [ "m.c5" ], receipt_id="not-a-receipt-id" )         # an id the gate would never turn into a path
     _write_record( tmp_path, "rs-6666666666", [ "m.c6" ], entry="aaaaaaaaaaaaaaaa" )              # an entry that looks like a receipt id is still an entry
+    for n, bad in enumerate( ( 12345, [ "0123456789abcdef" ], { "id": "0123456789abcdef" }, True ) ):     # a receipt id that is not text must not crash the reader
+        _write_record( tmp_path, f"rs-{n + 7}777777777", [ "m.c7" ], receipt_id=bad )
     recs = [ _search_call( "a", s ) for s in ( SID, SID2, "rs-1111111111", "rs-2222222222", "rs-3333333333", "rs-6666666666" ) ]
+    recs += [ _search_call( "a", f"rs-{n + 7}777777777" ) for n in range( 4 ) ]
     recs += [ _search_call( "a", "rs-4444444444", error="BAD_SEARCH_KEY" ), _search_call( "a", "rs-5555555555", tool="fetch_similar" ) ]
     assert eg.searches_by_receipt( recs, tmp_path ) == { rid: { SID: [ "m.c1", "m.c2" ], SID2: [ ] }, other: { "rs-1111111111": [ "m.c3" ] } }
 
