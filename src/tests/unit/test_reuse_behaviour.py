@@ -125,3 +125,16 @@ def test_every_reason_the_checkers_can_give_has_its_own_label():
     assert len( verdicts ) == len( lines ) and all( v[ "status" ] == "refused" for v in verdicts ), "every seeded line was refused, for a reason"
     assert rb.OTHER_REASON not in labels, [ r for r in reasons if rb.reason_label( r ) == rb.OTHER_REASON ]
     assert labels == {label for _, label in rb.REASON_LABELS}, "each label is the real wording of at least one checker"
+
+
+def test_two_lookups_that_share_a_receipt_id_count_as_two():
+    again = lambda tool: { "ts": "2026-11-02T10:00:00+00:00", "tool": tool, "caller": "p x", "session": "x", "receipt_id": "0123456789abcdef", "error": None, "args": "{}" }
+    got   = rb.count_lookups( [ again( "check_exists" ), again( "check_exists" ), again( "fetch_similar" ) ] )
+    assert got == { "check_exists": 2, "fetch_similar": 1, "failed (any lookup tool)": 0 }, "the same receipt id twice is two lookups, not one"
+
+
+def test_a_failed_search_record_is_not_counted_as_a_failed_lookup():
+    search = { "ts": "2026-11-02T10:00:00+00:00", "tool": "record_search", "caller": "p x", "session": "x", "search_id": SID, "error": "BAD_SEARCH_KEY", "args": "{}" }
+    lookup = { "ts": "2026-11-02T10:00:00+00:00", "tool": "check_exists", "caller": "p x", "session": "x", "receipt_id": None, "error": "CALL_FAILED", "args": "{}" }
+    assert rb.count_lookups( [ search ] ) == { "check_exists": 0, "fetch_similar": 0, "failed (any lookup tool)": 0 }
+    assert rb.count_lookups( [ search, lookup ] )[ "failed (any lookup tool)" ] == 1, "only the lookup tool's failure counts"
