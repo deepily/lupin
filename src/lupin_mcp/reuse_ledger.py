@@ -23,8 +23,9 @@ STAGE1_CEILING_TOKENS       = 71_000_000   # three dollars at the price above, r
 LEDGER_NAME                 = "jev-spend-ledger.jsonl"
 RUN_NAME_RANDOM_BYTES       = 4            # a name's random part is this many bytes, in hex
 SEATS_AT_ONCE               = 5            # seats expected to look up at the same moment (plan 3 section 12.3 D2)
-LOOKUP_CEILING_TOKENS       = 35_000_000   # a placeholder until D4 measures the worst fast lookup; the largest round ceiling that fits with the audits below
+WORST_FAST_LOOKUP_TOKENS    = 42_360       # the largest of five fast lookups measured on 2 November 2026 (io/cascade-plan3-s12/d4-report-2026.11.02.json: 37,937 to 42,360)
 CEILING_MARGIN              = 1.5          # the final ceiling is the worst measured lookup times this
+LOOKUP_CEILING_TOKENS       = 64_000       # 42,360 x 1.5 = 63,540, rounded up to the next thousand: 51 percent above the worst lookup measured
 SHADOW_AUDIT_CEILING_TOKENS = 5_000_000    # the ceiling a drain run holds; an unmeasured estimate until D5 records an audit's real cost
 SHADOW_AUDIT_WEEKLY_CAP     = 4            # audits a week; the shadow audit's cap reads this same constant
 ANCHOR_BYTES                = 256          # the last bytes read, compared on the next read to catch a rewrite in place
