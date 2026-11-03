@@ -92,8 +92,8 @@ def cells( page, which ):
     return [ [ c.strip() for c in l.strip( "|" ).split( "|" ) ][ which ] for l in lines[ 2: ] ]
 
 
-def page_of( folder, bodies=BODIES, **kw ):
-    return rb.weekly_report( [], [], [], "2026-11-08", tz=UTC, check_dir=folder, store=live( bodies ), **kw )
+def page_of( folder, bodies=None ):
+    return rb.weekly_report( [], [], [], "2026-11-08", tz=UTC, check_dir=folder, store=live( BODIES if bodies is None else bodies ) )
 
 
 COLUMNS = [ ( "date",           0, [ "2026-11-02", "2026-11-03", "2026-11-03", "2026-11-04", "total" ] ),
