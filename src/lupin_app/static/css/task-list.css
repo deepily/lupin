@@ -1960,3 +1960,30 @@ tbody.task-group.collapsed .task-row {
     font-weight : 600;
     opacity     : 1;
 }
+
+/* Status filter chips (row 8eb71f8e), in the task-list bar beside Find and ＋ New.
+   Both the pressed state and the selected class are set by renderTaskStatusChips();
+   aria-pressed is the source and .is-selected is its visible mirror. */
+.task-status-chips {
+    display     : inline-flex;
+    align-items : center;
+    gap         : 4px;
+    flex-wrap   : wrap;
+}
+.task-status-chip {
+    background    : transparent;
+    border        : 1px solid var( --border-subtle, #444 );
+    border-radius : 999px;
+    color         : var( --text-secondary, #aaa );
+    cursor        : pointer;
+    font-size     : 0.8rem;
+    line-height   : 1;
+    padding       : 0.25rem 0.55rem;
+    white-space   : nowrap;
+}
+.task-status-chip:hover { color: var( --text-primary, #eee ); }
+.task-status-chip.is-selected {
+    background   : var( --accent, #2f6fdf );
+    border-color : var( --accent, #2f6fdf );
+    color        : #fff;
+}

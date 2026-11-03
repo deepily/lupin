@@ -57,6 +57,7 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/js/shared/task-list-query.js",
     "/static/js/shared/task-verbs.js",
     "/static/js/shared/task-lookup.js",
+    "/static/js/shared/task-status-filter.js",
     "/static/js/shared/task-create.js",
     "/static/js/shared/task-request.js",
     "/static/js/shared/agent-select.js",
