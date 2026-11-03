@@ -122,16 +122,26 @@
     margin-right: 4px;
 }
 
+/* The persona badge's box. The CC-session strip toggles read the same four values, so the toggle
+   row is exactly as tall as the badges above it. Change a number here and both follow. */
+:root {
+    --persona-badge-padding     : 3px 8px;
+    --persona-badge-radius      : 12px;
+    --persona-badge-font-size   : 12px;
+    --persona-badge-line-height : 1.2;
+    --persona-badge-icon-size   : 13px;
+}
+
 .broadcast-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 3px 8px;
-    border-radius: 12px;
+    padding: var( --persona-badge-padding );
+    border-radius: var( --persona-badge-radius );
     background: #f1f3f5;
     border: 1px solid #dee2e6;
-    font-size: 12px;
-    line-height: 1.2;
+    font-size: var( --persona-badge-font-size );
+    line-height: var( --persona-badge-line-height );
     color: inherit;
     font-family: inherit;
 }
@@ -166,7 +176,7 @@ button.broadcast-chip[data-token="all"]:hover {
 }
 
 .broadcast-chip-icon {
-    font-size: 13px;
+    font-size: var( --persona-badge-icon-size );
 }
 
 .broadcast-chip.no-recipients {
