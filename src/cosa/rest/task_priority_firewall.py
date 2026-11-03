@@ -114,18 +114,18 @@ def caller_is_operator( account_email ):
     ]
 
 
-# The one-click "promote to P0" move: an admission out of the holding area that also sets P0.
-PROMOTE_P0_VALUE       = "P0"
-PROMOTE_P0_FROM_STATUS = "not_approved"
-PROMOTE_P0_TO_STATUS   = "queued"
+# The one-click "raise priority" move: an admission out of the holding area that also raises the row.
+PROMOTE_FROM_STATUS = "not_approved"
+PROMOTE_TO_STATUS   = "queued"
 
 
-def refusal_for_promote_p0( promote_priority, from_status, to_status, account_email ):
+def refusal_for_promote_priority( promote_priority, current_priority, from_status, to_status, account_email ):
     """
-    The refusal for a one-click promote-to-P0 request, or None when it may proceed.
+    The refusal for a one-click raise-and-admit request, or None when it may proceed.
 
     Requires:
         - promote_priority is the request's `promote_priority` value, or None when absent
+        - current_priority is the row's priority now
         - from_status / to_status are the row's current status and the requested one
         - account_email is the email on a validated access token, or None (API key)
 
@@ -134,19 +134,27 @@ def refusal_for_promote_p0( promote_priority, from_status, to_status, account_em
         - returns a refusal naming the operator login when `caller_is_operator( account_email )` is False;
           this is the same predicate rule 1 uses, so there is no second spelling of who Rick is
         - returns a refusal when the move is anything but not_approved -> queued
-        - returns None only for the operator on not_approved -> queued with the value P0
+        - returns a refusal when the value is not one of P0..P5
+        - returns a refusal when the value does not raise the row: a lower or equal level is refused
+        - returns None only for the operator on not_approved -> queued with a value that raises the row
         - never consults a caller-declared string such as `actor`
         - never raises
     """
     if promote_priority is None: return None
     if not caller_is_operator( account_email ):
-        return ( "Promote-to-P0 is honoured only for Rick's login. This request came from "
+        return ( "Promoting a ticket's priority is honoured only for Rick's login. This request came from "
                  + ( "an API key with no login account" if not isinstance( account_email, str ) or not account_email.strip()
                      else f"the login {account_email.strip()}, which is not mapped to the operator" )
                  + ", so the row was not changed." )
-    if promote_priority != PROMOTE_P0_VALUE or from_status != PROMOTE_P0_FROM_STATUS or to_status != PROMOTE_P0_TO_STATUS:
-        return ( f"Promote-to-P0 is only the move {PROMOTE_P0_FROM_STATUS} -> {PROMOTE_P0_TO_STATUS} with "
-                 f"promote_priority {PROMOTE_P0_VALUE}; this row is {from_status} and the request was {to_status}, so the row was not changed." )
+    if from_status != PROMOTE_FROM_STATUS or to_status != PROMOTE_TO_STATUS:
+        return ( f"A priority promotion is only the move {PROMOTE_FROM_STATUS} -> {PROMOTE_TO_STATUS}; "
+                 f"this row is {from_status} and the request was {to_status}, so the row was not changed." )
+    wanted  = normalize_priority( promote_priority )
+    current = normalize_priority( current_priority )
+    if wanted is None or promote_priority != wanted:
+        return f"promote_priority must be one of {tuple( PRIORITY_RANK )}, got {promote_priority!r}, so the row was not changed."
+    if current is not None and PRIORITY_RANK[ wanted ] >= PRIORITY_RANK[ current ]:
+        return f"{wanted} does not raise this row, which is already {current}; a promotion only raises, so the row was not changed."
     return None
 
 

@@ -24,11 +24,10 @@ export const APPROVE_LINK_PREFIX = "/app/tasks/approve?row=";
 // A full lowercase hyphenated row id, the only thing sent to the server.
 const ROW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** What the P0 link adds after the row id. The server honours the move for Rick's login only. */
-export const P0_LINK_SUFFIX = "&priority=P0";
+/** A priority link ends with this and a level. The server honours it for Rick's login only. */
+export const PRIORITY_LINK_PARAM = "&priority=";
 
-/** What a row promoted at P0 reads once the move lands. */
-export const APPROVED_P0_TEXT = "approved at P0 ✅";
+const PRIORITY_RE = /^P[0-5]$/;
 
 /** Every 📋 view link starts here, after loopback normalization. */
 export const VIEW_LINK_PREFIX = "/app/tasks/view?row=";
@@ -52,15 +51,23 @@ export function approveRowId( href: string | null ): string | null {
   return rowIdAfter( APPROVE_LINK_PREFIX, href );
 }
 
+/** What a priority link names: the row and the level it admits the row at. */
+export interface PriorityLink { rowId: string; priority: string }
+
 /**
- * The row id a P0 link href names (`/app/tasks/approve?row=<id>&priority=P0`), or null.
+ * The row and level a priority-link href names, or null.
  *
- * Ensures: the plain approve link is null here, and the P0 link is null for `approveRowId`, so each click has one handler.
+ * The href is `/app/tasks/approve?row=<id>&priority=P0`.
+ * Ensures: the plain approve link is null here, and a priority link is null for `approveRowId`, so each click has one handler.
  */
-export function approveP0RowId( href: string | null ): string | null {
+export function approvePriorityLink( href: string | null ): PriorityLink | null {
   const normalized = normalizeDocLinkHref( href );
-  if ( normalized === null || !normalized.endsWith( P0_LINK_SUFFIX ) ) return null;
-  return rowIdAfter( APPROVE_LINK_PREFIX, normalized.slice( 0, -P0_LINK_SUFFIX.length ) );
+  if ( normalized === null ) return null;
+  const at = normalized.lastIndexOf( PRIORITY_LINK_PARAM );
+  if ( at < 0 ) return null;
+  const priority = normalized.slice( at + PRIORITY_LINK_PARAM.length );
+  const rowId    = rowIdAfter( APPROVE_LINK_PREFIX, normalized.slice( 0, at ) );
+  return rowId !== null && PRIORITY_RE.test( priority ) ? { rowId, priority } : null;
 }
 
 /** The row id a 📋 view-link href names, or null when the href is not a view link. */
@@ -108,30 +115,30 @@ export function handleApproveLinkClick( ev: Event, target: Element, sender: Appr
 }
 
 /**
- * Handle a click that may be on a P0 link. Returns true when the click was claimed.
+ * Handle a click that may be on a priority link. Returns true when the click was claimed.
  *
  * Ensures:
- *   - a non-P0 click is untouched and reports false
+ *   - a non-priority click is untouched and reports false
  *   - the browser does not follow the link
  *   - one request per link: a second click while it is out sends nothing
- *   - the request is the approve move plus `promote_priority: "P0"`; the server decides who may
- *   - success replaces the link with a disabled "approved at P0 ✅"; a refusal or pending answer with the server's words
+ *   - the request is the approve move plus `promote_priority`; the server decides who may
+ *   - success replaces the link with a disabled "approved at <level> ✅"; a refusal or pending answer with the server's words
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line.
-export function handleApproveP0LinkClick( ev: Event, target: Element, sender: ApproveSender ): boolean {
+export function handleApprovePriorityLinkClick( ev: Event, target: Element, sender: ApproveSender ): boolean {
   const anchor = target.closest( "a[href]" );
   if ( anchor === null ) return false;
-  const rowId = approveP0RowId( anchor.getAttribute( "href" ) );
-  if ( rowId === null ) return false;
+  const link = approvePriorityLink( anchor.getAttribute( "href" ) );
+  if ( link === null ) return false;
   ev.preventDefault();
   if ( anchor.getAttribute( "data-approve-state" ) === "pending" ) return true;
   anchor.setAttribute( "data-approve-state", "pending" );
   anchor.setAttribute( "aria-disabled", "true" );
   ( anchor as HTMLElement ).style.opacity = "0.5";
-  void sender.transitionTask( rowId, "queued", { promote_priority: "P0" } ).then( ( result ) => {
+  void sender.transitionTask( link.rowId, "queued", { promote_priority: link.priority } ).then( ( result ) => {
     const outcome = anchor.ownerDocument.createElement( "span" );
     outcome.className   = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
-    outcome.textContent = result.ok ? APPROVED_P0_TEXT : result.message;
+    outcome.textContent = result.ok ? `approved at ${ link.priority } ✅` : result.message;
     if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
     anchor.replaceWith( outcome );
   } );
@@ -206,7 +213,7 @@ export async function markApproveLinks( roots: Iterable<Element>, reader: TaskRe
   for ( const root of roots ) {
     const found = root.matches( "a[href]" ) ? [ root ] : Array.from( root.querySelectorAll( "a[href]" ) );
     for ( const anchor of found ) {
-      const id = approveRowId( anchor.getAttribute( "href" ) ) ?? approveP0RowId( anchor.getAttribute( "href" ) );
+      const id = approveRowId( anchor.getAttribute( "href" ) ) ?? approvePriorityLink( anchor.getAttribute( "href" ) )?.rowId ?? null;
       if ( id === null || anchor.hasAttribute( "data-approve-checked" ) ) continue;
       anchor.setAttribute( "data-approve-checked", "1" );
       byRow.set( id, [ ...( byRow.get( id ) ?? [] ), anchor ] );

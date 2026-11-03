@@ -4487,7 +4487,7 @@ def task_get( task_id: str ) -> dict:
 
 
 @mcp.tool
-def task_approve_line( task_id: str, with_p0: bool = False ) -> dict:
+def task_approve_line( task_id: str, priority: str | None = None ) -> dict:
     """
     **[Read tier, always allowed]** Write the card bullet for one held row.
 
@@ -4497,10 +4497,10 @@ def task_approve_line( task_id: str, with_p0: bool = False ) -> dict:
 
     Args:
         task_id: The row's full lowercase UUID. A short or malformed id is refused here without asking the server.
-        with_p0: True adds a `[P0 ⏫]` link that admits the row to queued at P0 in one click. The server honours it for Rick's login only; anyone else gets a 403. Use it on cards for Rick.
+        priority: Optional, P0..P5. Adds a `[⏫ P0]` link that admits the row to queued at that higher level in one click. With none, the line is exactly as before and admission keeps the row's own priority. The server honours it for Rick's login only, and only when it raises the row; anything else is a 403.
 
     Returns:
-        { "line": "- <title> [approve ☐](/app/tasks/approve?row=<id>) [P0 ⏫](/app/tasks/approve?row=<id>&priority=P0) [📋](/app/tasks/view?row=<id>)" } (the P0 link only with with_p0), or an error dict: `invalid_row_id`, `blank_title`, or the server's own error for a row it could not return (404, auth, transport).
+        { "line": "- <title> [approve ☐](/app/tasks/approve?row=<id>) [⏫ P0](/app/tasks/approve?row=<id>&priority=P0) [📋](/app/tasks/view?row=<id>)" } (the middle link only with a priority), or an error dict: `invalid_row_id`, `blank_title`, or the server's own error for a row it could not return (404, auth, transport).
 
     Example:
         task_approve_line(task_id="a3975cf4-c640-4659-9247-0a99fa8a5f4a")
@@ -4509,7 +4509,7 @@ def task_approve_line( task_id: str, with_p0: bool = False ) -> dict:
         api_base_url = _get_server_url(),
         api_key      = _mcp_outbound_api_key(),
         task_id      = task_id,
-        with_p0      = with_p0,
+        priority     = priority,
     )
 
 

@@ -30,8 +30,9 @@
         ( function () {
             const ROW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
             const rowId     = new URLSearchParams( window.location.search ).get( "row" );
-            // A P0 link (?row=<id>&priority=P0,): the same one button, but it admits the row at P0. Only Rick's login is honoured; the server says so to anyone else.
-            const promoteP0 = new URLSearchParams( window.location.search ).get( "priority" ) === "P0";
+            // A priority link (?row=<id>&priority=P0): the same one button, but it admits the row at that level. Only Rick's login is honoured; the server says so to anyone else.
+            const priorityParam = new URLSearchParams( window.location.search ).get( "priority" );
+            const promoteTo     = /^P[0-5]$/.test( priorityParam || "" ) ? priorityParam : null;
             const errorEl   = document.getElementById( "task-approve-error" );
             const rowEl     = document.getElementById( "task-approve-row" );
             const button    = document.getElementById( "task-approve-button" );
@@ -141,7 +142,7 @@
                 const row = await resp.json();
                 document.getElementById( "task-approve-title" ).textContent  = row.title;
                 document.getElementById( "task-approve-status" ).textContent = row.status;
-                if ( promoteP0 ) button.textContent = "Approve at P0";
+                if ( promoteTo !== null ) button.textContent = "Approve at " + promoteTo;
                 button.disabled = row.status !== "not_approved";
                 if ( button.disabled ) resultEl.textContent = "Nothing to approve: this ticket is not waiting for approval.";
                 rowEl.hidden = false;
@@ -152,13 +153,13 @@
                 const resp = await authedFetch( "/api/tasks/" + encodeURIComponent( rowId ) + "/transition", {
                     method  : "POST",
                     headers : { "Content-Type": "application/json" },
-                    body    : JSON.stringify( promoteP0
-                        ? { to_status: "queued", actor: "operator approve-landing-page", authority: "user_direct", promote_priority: "P0" }
+                    body    : JSON.stringify( promoteTo !== null
+                        ? { to_status: "queued", actor: "operator approve-landing-page", authority: "user_direct", promote_priority: promoteTo }
                         : { to_status: "queued", actor: "operator approve-landing-page", authority: "user_direct" } )
                 } );
                 resultEl.textContent = resp.status === 202
                     ? "Waiting on Rick — he has not been asked yet."
-                    : resp.ok ? ( promoteP0 ? "approved at P0 ✅" : "approved ✅" ) : await failureText( resp );
+                    : resp.ok ? ( promoteTo !== null ? "approved at " + promoteTo + " ✅" : "approved ✅" ) : await failureText( resp );
             } );
 
             load();

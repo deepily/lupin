@@ -471,7 +471,7 @@ def test_task_view_landing_page_refuses_a_short_id( logged_in_page ):
 
 
 # ---------------------------------------------------------------------------
-# The promote-to-P0 link (row 54d62c0e), both clients
+# The priority link (row 54d62c0e), both clients
 #
 # The :8000 login is not Rick's, so the success arm answers the request itself and proves what the
 # browser sent (the approve move plus promote_priority P0) and drew. The refusal arm uses the REAL
@@ -482,7 +482,7 @@ def _p0_abstract( rows ):
     """The card abstract with the P0 link, written by the shipped helper."""
     from cosa.rest.task_approve_link import approve_link_line
 
-    return "\n".join( approve_link_line( r[ "id" ], r[ "title" ], with_p0=True ) for r in rows )
+    return "\n".join( approve_link_line( r[ "id" ], r[ "title" ], priority="P0" ) for r in rows )
 
 
 def test_promote_p0_legacy_click_sends_the_flag_and_draws_approved_at_p0( notifications_page, held ):
@@ -493,7 +493,7 @@ def test_promote_p0_legacy_click_sends_the_flag_and_draws_approved_at_p0( notifi
     content = _show_card_legacy( page, held, abstract=_p0_abstract( held ) )
     links = content.locator( "a[href$='&priority=P0']" )
     expect( links ).to_have_count( ROWS, timeout=TIMEOUT_MS )
-    expect( links.nth( 1 ) ).to_have_text( "P0 ⏫" )
+    expect( links.nth( 1 ) ).to_have_text( "⏫ P0" )
     links.nth( 1 ).click()
 
     expect( content.locator( ".approve-link-approved" ) ).to_have_text( "approved at P0 ✅", timeout=TIMEOUT_MS )
