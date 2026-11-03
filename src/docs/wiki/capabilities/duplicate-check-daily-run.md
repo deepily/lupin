@@ -30,3 +30,4 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - `cron_lines` returns a daily line at 12:07 and a reboot line 300 seconds after boot. A branch other than `main` is added to both as `--branch`, shell-quoted; the default adds nothing. `install_mode` prints, installs, removes or reports them through the librarian's locked crontab editor.
 - `live_parts` builds the real parts and makes no call. `live_filer` files rows over HTTP. `live_auditor` queues known-miss audits (see [[duplicate-check-audit]]), with no model call.
 - `main` needs `--cap`, which has no default, unless it only removes or reports the cron lines. It exits 3 when the branch guard refused, 1 when anything else failed, else 0. (argparse's usage errors are 2.)
+- A night's findings are ruled on with verdict lines; the writer is described in [[duplicate-check-verdict-lines]].
