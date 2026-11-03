@@ -3,7 +3,7 @@
 // The invariant under test: All is the default; the four chips are additive; all four
 // selected is All; clearing the last chip is All, never an empty list. The statuses each
 // chip stands for are pinned to literals below, so a silent edit to the table fails here.
-// The claimed and review mapping is provisional until Rick rules; two tests name it.
+// The claimed and review mapping is Rick's ruling; two tests name it.
 //
 // Coverage: this module is under shared/*.js, which the c8 denominator in
 // run-typescript-tests.sh does not include. Its 100% lines, branches and functions were
@@ -49,7 +49,7 @@ test( "each of the four named statuses belongs to exactly one chip", () => {
   assert.deepEqual( owners( "queued" ),      [ "queued" ] );
 } );
 
-test( "Provisional: claimed and review count as In progress until Rick rules", () => {
+test( "claimed and review count as In progress, by Rick's ruling", () => {
   const owners = ( status: string ) => TASK_STATUS_CHIPS.filter( ( c ) => c.statuses.includes( status ) ).map( ( c ) => c.key );
   assert.deepEqual( owners( "claimed" ), [ "in_progress" ] );
   assert.deepEqual( owners( "review" ),  [ "in_progress" ] );
@@ -100,7 +100,7 @@ test( "filterTasksByChips: each chip alone shows only its own statuses", () => {
   assert.deepEqual( ids( filterTasksByChips( ROWS, [ "parked" ] ) ),  [ "p" ] );
   assert.deepEqual( ids( filterTasksByChips( ROWS, [ "blocked" ] ) ), [ "b" ] );
   assert.deepEqual( ids( filterTasksByChips( ROWS, [ "queued" ] ) ),  [ "q" ] );
-  // Provisional: claimed and review ride with In progress.
+  // Claimed and review ride with In progress.
   assert.deepEqual( ids( filterTasksByChips( ROWS, [ "in_progress" ] ) ), [ "i", "c", "r" ] );
 } );
 

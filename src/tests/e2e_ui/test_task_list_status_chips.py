@@ -49,7 +49,7 @@ BOARD_ROWS = [ PARKED, BLOCKED, ACTIVE, CLAIMED, REVIEW, QUEUED ]
 
 TITLES = [ r[ "title" ] for r in BOARD_ROWS ]
 
-# What each chip shows. Claimed and review under In progress are provisional until Rick rules.
+# What each chip shows. Claimed and review count as In progress (Rick's ruling).
 EXPECTED = {
     "parked"      : [ PARKED ],
     "blocked"     : [ BLOCKED ],

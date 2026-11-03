@@ -10,7 +10,7 @@ export interface TaskStatusChip {
     statuses : string[];
 }
 
-/** The table of chips. The claimed and review mapping is provisional. */
+/** The table of chips. Claimed and review map to In progress. */
 export declare const TASK_STATUS_CHIPS: TaskStatusChip[];
 
 /** The chips that really filter, in table order. An empty list means All. */

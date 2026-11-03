@@ -8,16 +8,15 @@
  *
  * The table below is the whole policy. Nothing else in the page or the tests names a status.
  *
- * Provisional, until Rick rules: claimed and review are open statuses that All shows and
- * that no chip named. They are mapped to In progress, which is Mr. Radio's recommendation.
- * Rick's answer is a one-line change to the statuses of the chip concerned.
+ * Claimed and review are open statuses that All shows and that no chip named. Rick ruled
+ * that they count as In progress, so they are listed under that chip.
  * Held not_approved rows are not in the table, because the board query never returns them.
  */
 
 export const TASK_STATUS_CHIPS = [
     { key: "parked",      label: "Parked",      statuses: [ "parked" ] },
     { key: "blocked",     label: "Blocked",     statuses: [ "blocked" ] },
-    { key: "in_progress", label: "In progress", statuses: [ "in_progress", "claimed", "review" ] },   // claimed and review are provisional
+    { key: "in_progress", label: "In progress", statuses: [ "in_progress", "claimed", "review" ] },   // claimed and review: Rick's ruling
     { key: "queued",      label: "Queued",      statuses: [ "queued" ] },
 ];
 

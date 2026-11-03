@@ -125,7 +125,7 @@ test( "each chip alone shows only its own rows", () => {
     parked      : [ "Title pk" ],
     blocked     : [ "Title bl" ],
     queued      : [ "Title qu" ],
-    in_progress : [ "Title ip", "Title cl", "Title rv" ],   // claimed + review: provisional until Rick rules
+    in_progress : [ "Title ip", "Title cl", "Title rv" ],   // claimed and review ride with In progress
   };
   for ( const key of Object.keys( expected ) ) {
     ui.clearTaskStatusChips();
