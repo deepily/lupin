@@ -201,6 +201,13 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "and restored with `readlink` read before and after, the interpreter pinned to the main "
         "checkout so only the target moved: 12 passed with a `.venv`, 12 passed without, "
         "12 passed with again.",
+    "test_reuse_behaviour.py":
+        "the two `/r/.venv/bin/python` strings are the interpreter argument the cron-line test hands "
+        "to `cron_lines` and expects back inside the line it builds. Nothing opens, runs or checks "
+        "that path, so it is text in the test and never a property of the tree running the suite. "
+        "Measured BOTH ways at c7c456cb6 in one worktree, the `.venv` symlink moved aside and "
+        "restored, the interpreter pinned to the main checkout so only the target moved: 33 passed "
+        "with a `.venv`, 33 passed without, 33 passed with again.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "
