@@ -163,7 +163,7 @@ def test_a_rollback_that_cannot_run_says_the_line_is_still_in_the_file( folder, 
     def broken( self, *a, **k ): raise PermissionError( "read-only" )
 
     monkeypatch.setattr( dv.pathlib.Path, "unlink", broken )
-    with pytest.raises( dv.VerdictRefused, match="still in .*could not be taken out" ): dv.write_verdict( LINE_OK, folder, ROW, Amender( ok=False ) )
+    with pytest.raises( dv.VerdictRefused, match="still in .*could not be taken out \\(PermissionError: read-only\\)" ): dv.write_verdict( LINE_OK, folder, ROW, Amender( ok=False ) )
     monkeypatch.setattr( dv.pathlib.Path, "unlink", real )
     assert len( lines( folder ) ) == 1
 

@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_verdicts.parse_line@aaba3c7c88
   - lupin_mcp.duplicate_check_verdicts.finding_ids@2bce6f3244
-  - lupin_mcp.duplicate_check_verdicts.write_verdict@4e3755992e
+  - lupin_mcp.duplicate_check_verdicts.write_verdict@f1844da0d1
   - lupin_mcp.duplicate_check_verdicts.main@6507b26c37
 ---
 # Duplicate check: verdict lines and their writer
