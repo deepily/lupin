@@ -67,9 +67,9 @@ def folder( tmp_path ):
     out.mkdir()
     ( out / "2026-11-02-211352-hand.json" ).write_text( REAL_JUDGING_FAILURE, encoding="utf-8" )
     ( out / "2026-11-03-111106-hand.json" ).write_text( REAL_PREREQUISITE_FAILURE, encoding="utf-8" )
-    write_run( out, "2026-11-03-111218", "hand", judged=100, judge_calls=100, elapsed_seconds=679.838,
+    write_run( out, "2026-11-03-111218", "hand", judged=100, judge_calls=100, elapsed_seconds=679.838, window={ "commits": 73, "end": "b", "start": "a" },
                findings=[ finding( "a1" ), finding( "a2" ), finding( "a3", "extend" ), finding( "a4" ), finding( "a5", "maybe" ) ] )
-    write_run( out, "2026-11-04-180000", "cron", judged=7, judge_calls=9, elapsed_seconds=90.0, findings=[ finding( "b1" ), finding( "b2" ) ] )
+    write_run( out, "2026-11-04-180000", "cron", judged=7, judge_calls=9, elapsed_seconds=90.0, window={ "commits": 12, "end": "b", "start": "a" }, findings=[ finding( "b1" ), finding( "b2" ) ] )
     write_run( out, "2026-10-20-180000", "cron", judged=50, judge_calls=50, elapsed_seconds=600.0, findings=[ finding( "old" ) ] )
     ( out / "last-success.json" ).write_text( '{"commit": "2713f32dbb4bf4c4a004770d77e50f9f4d0876dc"}', encoding="utf-8" )
     ( out / "notes.json" ).write_text( "not a run", encoding="utf-8" )
@@ -82,7 +82,7 @@ BODIES = { "epic:dupcheck-a1": [ "The daily check judged x." + amendment( "DUPLI
            "epic:dupcheck-b1": [ "The daily check judged w." + amendment( "DISTINCT" ) ],
            "epic:dupcheck-b2": [ "The daily check judged v." + amendment( "DISTINCT" ) ] }
 
-HEAD = "| date | trigger | commits judged | judge calls | minutes | findings | real duplicates | not duplicates | no verdict yet | precision (real of ruled) |"
+HEAD = "| date | trigger | commits judged | definitions judged | judge calls | minutes | findings | real duplicates | not duplicates | no verdict yet | precision (real of ruled) |"
 
 
 def cells( page, which ):
@@ -98,14 +98,15 @@ def page_of( folder, bodies=None ):
 
 COLUMNS = [ ( "date",           0, [ "2026-11-02", "2026-11-03", "2026-11-03", "2026-11-04", "total" ] ),
             ( "trigger",        1, [ "hand", "hand", "hand", "cron", "" ] ),
-            ( "commits judged", 2, [ "0", "0", "100", "7", "107" ] ),
-            ( "judge calls",    3, [ "100", "0", "100", "9", "209" ] ),
-            ( "minutes",        4, [ "46.1", "0.0", "11.3", "1.5", "58.9" ] ),
-            ( "findings",       5, [ "0", "0", "5", "2", "7" ] ),
-            ( "real",           6, [ "0", "0", "2", "0", "2" ] ),
-            ( "not",            7, [ "0", "0", "1", "2", "3" ] ),
-            ( "no verdict yet", 8, [ "0", "0", "2", "0", "2" ] ),
-            ( "precision",      9, [ "0/0 (n/a)", "0/0 (n/a)", "2/3 (66.7%, 20.8-93.9%)", "0/2 (0.0%, 0.0-65.8%)", "2/5 (40.0%, 11.8-76.9%)" ] ) ]
+            ( "commits judged", 2, [ "3", "0", "73", "12", "88" ] ),
+            ( "definitions judged", 3, [ "0", "0", "100", "7", "107" ] ),
+            ( "judge calls",    4, [ "100", "0", "100", "9", "209" ] ),
+            ( "minutes",        5, [ "46.1", "0.0", "11.3", "1.5", "58.9" ] ),
+            ( "findings",       6, [ "0", "0", "5", "2", "7" ] ),
+            ( "real",           7, [ "0", "0", "2", "0", "2" ] ),
+            ( "not",            8, [ "0", "0", "1", "2", "3" ] ),
+            ( "no verdict yet", 9, [ "0", "0", "2", "0", "2" ] ),
+            ( "precision",     10, [ "0/0 (n/a)", "0/0 (n/a)", "2/3 (66.7%, 20.8-93.9%)", "0/2 (0.0%, 0.0-65.8%)", "2/5 (40.0%, 11.8-76.9%)" ] ) ]
 
 
 @pytest.mark.parametrize( "name, which, expected", COLUMNS, ids=[ c[ 0 ] for c in COLUMNS ] )
@@ -115,18 +116,18 @@ def test_column_( folder, name, which, expected ):
 
 def test_a_run_with_no_findings_stays_as_a_row_of_zeros_and_the_run_outside_the_week_and_the_files_that_are_not_runs_do_not_appear( folder ):
     page = page_of( folder )
-    assert "| 2026-11-02 | hand | 0 | 100 | 46.1 | 0 | 0 | 0 | 0 | 0/0 (n/a) |" in page
+    assert "| 2026-11-02 | hand | 3 | 0 | 100 | 46.1 | 0 | 0 | 0 | 0 | 0/0 (n/a) |" in page
     assert "2026-10-20" not in page and "last-success" not in page and len( cells( page, 0 ) ) == 5
 
 
 def test_the_total_precision_is_taken_from_the_summed_counts_not_averaged_from_the_rows( folder ):
-    assert cells( page_of( folder ), 9 )[ -1 ] == "2/5 (40.0%, 11.8-76.9%)", "rows read 2/3 and 0/2, whose mean would be 33.3%"
+    assert cells( page_of( folder ), 10 )[ -1 ] == "2/5 (40.0%, 11.8-76.9%)", "rows read 2/3 and 0/2, whose mean would be 33.3%"
 
 
 def test_the_table_follows_the_audits_and_a_week_with_no_runs_is_the_total_row_alone( tmp_path ):
     ( tmp_path / "duplicate-check-daily" ).mkdir()
     page = rb.weekly_report( [], [], [], "2026-11-08", tz=UTC, check_dir=tmp_path / "duplicate-check-daily" )
-    assert page.endswith( f"Daily duplicate check\n\n{HEAD}\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| total |  | 0 | 0 | 0.0 | 0 | 0 | 0 | 0 | 0/0 (n/a) |" )
+    assert page.endswith( f"Daily duplicate check\n\n{HEAD}\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| total |  | 0 | 0 | 0 | 0.0 | 0 | 0 | 0 | 0 | 0/0 (n/a) |" )
     assert page.index( "| Audits |" ) < page.index( "Daily duplicate check" )
     assert "Left out" not in page, "nothing unreadable, so no left-out table"
 
@@ -185,13 +186,13 @@ def test_a_report_with_no_check_dir_has_no_such_table_and_no_extra_left_out_row(
 def test_the_command_prints_the_table_from_the_data_folder_and_the_check_dir_flag_moves_it( tmp_path, folder ):
     out = io.StringIO()
     assert rb.main( [ "--data-dir", str( folder.parent ), "--end", "2026-11-08" ], out=out, store=live( BODIES ) ) == 0
-    assert cells( out.getvalue(), 6 ) == [ "0", "0", "2", "0", "2" ]
+    assert cells( out.getvalue(), 7 ) == [ "0", "0", "2", "0", "2" ]
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     write_run( elsewhere, "2026-11-06-180000", "cron", judged=1, judge_calls=1, findings=[ finding( "c1", "duplicate" ) ] )
     out2 = io.StringIO()
     assert rb.main( [ "--data-dir", str( folder.parent ), "--check-dir", str( elsewhere ), "--end", "2026-11-08" ], out=out2, store=live( { } ) ) == 0
-    assert cells( out2.getvalue(), 6 ) == [ "1", "1" ]
+    assert cells( out2.getvalue(), 7 ) == [ "1", "1" ]
 
 
 def test_the_command_builds_the_live_store_when_none_is_given( folder, monkeypatch ):
@@ -199,3 +200,9 @@ def test_the_command_builds_the_live_store_when_none_is_given( folder, monkeypat
     store = live( BODIES )
     monkeypatch.setattr( rb.ff, "LiveStore", lambda: made.append( 1 ) or store )
     assert rb.main( [ "--data-dir", str( folder.parent ), "--end", "2026-11-08" ], out=io.StringIO() ) == 0 and made == [ 1 ]
+
+
+def test_a_run_with_no_window_has_zero_commits_and_the_definitions_judged_do_not_stand_in_for_them( tmp_path ):
+    write_run( tmp_path, "2026-11-05-180000", "cron", judged=100, judge_calls=100 )
+    runs, _ = rb.read_check_runs( tmp_path, WEEK )
+    assert runs[ 0 ][ "commits" ] == 0 and runs[ 0 ][ "judged" ] == 100

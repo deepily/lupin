@@ -47,7 +47,7 @@ CHECK_NAME     = re.compile( r"^\d{4}-\d{2}-\d{2}-\d{6}-.+\.json$" )   # <date>-
 VERDICT_LINE   = re.compile( r"\[amendment [^\]]*\]\s*VERDICT (DUPLICATE|EXTEND|DISTINCT)" )
 REAL_VERDICTS  = ( "DUPLICATE", "EXTEND" )
 NOT_VERDICTS   = ( "DISTINCT", )
-CHECK_HEADERS  = ( "date", "trigger", "commits judged", "judge calls", "minutes", "findings", "real duplicates", "not duplicates", "no verdict yet", "precision (real of ruled)" )
+CHECK_HEADERS  = ( "date", "trigger", "commits judged", "definitions judged", "judge calls", "minutes", "findings", "real duplicates", "not duplicates", "no verdict yet", "precision (real of ruled)" )
 CHECK_TITLE    = "Daily duplicate check"
 BAD_CHECK_ROW  = "duplicate-check result files that cannot be read"
 OUTCOME_KINDS  = ( "REUSED", "EXTENDED", "WROTE_NEW" )
@@ -242,13 +242,14 @@ def read_check_run( path ):
     Requires:
         - path is a file named like <date>-<time>-<trigger>.json
     Ensures:
-        - returns { day, trigger, judged, calls, seconds, findings } where findings is a list of ( verdict field or None, correlation key or None )
+        - returns { day, trigger, commits, judged, calls, seconds, findings } where findings is a list of ( verdict field or None, correlation key or None )
+        - commits is the window's commit count, 0 for a run with no window; judged is the number of definitions judged
         - a run that judged nothing, or never reached judging, has judged 0 and no findings
         - returns None when the file cannot be read, is not a JSON object, or lacks a readable date, trigger, judge_calls or elapsed_seconds
     """
     try:
         doc = json.loads( path.read_text( encoding="utf-8" ) )
-        return { "day": datetime.date.fromisoformat( doc[ "date" ] ), "trigger": str( doc[ "trigger" ] ), "judged": int( doc.get( "judged", 0 ) ), "calls": int( doc[ "judge_calls" ] ),
+        return { "day": datetime.date.fromisoformat( doc[ "date" ] ), "trigger": str( doc[ "trigger" ] ), "commits": int( doc.get( "window", { } ).get( "commits", 0 ) ), "judged": int( doc.get( "judged", 0 ) ), "calls": int( doc[ "judge_calls" ] ),
                  "seconds": float( doc[ "elapsed_seconds" ] ), "findings": [ ( f.get( "verdict" ), f.get( "correlation_key" ) ) for f in doc.get( "findings", [] ) ] }
     except ( OSError, ValueError, KeyError, TypeError, AttributeError ):
         return None
@@ -316,12 +317,12 @@ def check_table( runs, store ):
         - precision is real duplicates out of those ruled, real plus not; findings with no verdict are in their own column and in neither side
         - the total row sums every column, and its precision is the sum's, not an average of the rows'
     """
-    rows, sums = [], { "judged": 0, "calls": 0, "seconds": 0.0, "findings": 0, "real": 0, "not_dup": 0, "open": 0 }
+    rows, sums = [], { "commits": 0, "judged": 0, "calls": 0, "seconds": 0.0, "findings": 0, "real": 0, "not_dup": 0, "open": 0 }
     for run in runs:
-        got  = check_counts( run, store ) | { "judged": run[ "judged" ], "calls": run[ "calls" ], "seconds": run[ "seconds" ], "findings": len( run[ "findings" ] ) }
+        got  = check_counts( run, store ) | { "commits": run[ "commits" ], "judged": run[ "judged" ], "calls": run[ "calls" ], "seconds": run[ "seconds" ], "findings": len( run[ "findings" ] ) }
         for k in sums: sums[ k ] += got[ k ]
-        rows.append( [ run[ "day" ].isoformat(), run[ "trigger" ], got[ "judged" ], got[ "calls" ], f"{got[ 'seconds' ] / 60:.1f}", got[ "findings" ], got[ "real" ], got[ "not_dup" ], got[ "open" ], share( got[ "real" ], got[ "real" ] + got[ "not_dup" ] ) ] )
-    rows.append( [ "total", "", sums[ "judged" ], sums[ "calls" ], f"{sums[ 'seconds' ] / 60:.1f}", sums[ "findings" ], sums[ "real" ], sums[ "not_dup" ], sums[ "open" ], share( sums[ "real" ], sums[ "real" ] + sums[ "not_dup" ] ) ] )
+        rows.append( [ run[ "day" ].isoformat(), run[ "trigger" ], got[ "commits" ], got[ "judged" ], got[ "calls" ], f"{got[ 'seconds' ] / 60:.1f}", got[ "findings" ], got[ "real" ], got[ "not_dup" ], got[ "open" ], share( got[ "real" ], got[ "real" ] + got[ "not_dup" ] ) ] )
+    rows.append( [ "total", "", sums[ "commits" ], sums[ "judged" ], sums[ "calls" ], f"{sums[ 'seconds' ] / 60:.1f}", sums[ "findings" ], sums[ "real" ], sums[ "not_dup" ], sums[ "open" ], share( sums[ "real" ], sums[ "real" ] + sums[ "not_dup" ] ) ] )
     return CHECK_TITLE + "\n\n" + table( list( CHECK_HEADERS ), rows )
 
 

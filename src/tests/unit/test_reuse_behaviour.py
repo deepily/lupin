@@ -94,7 +94,7 @@ def test_a_report_from_a_seeded_refusals_file_and_call_log_equals_the_stated_tab
 
 
 AUDITS_ZERO = "| Audits | count |\n| --- | --- |\n| known-miss audits | 0 |\n| random-sample audits | 0 |"
-NO_RUNS     = "Daily duplicate check\n\n| date | trigger | commits judged | judge calls | minutes | findings | real duplicates | not duplicates | no verdict yet | precision (real of ruled) |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| total |  | 0 | 0 | 0.0 | 0 | 0 | 0 | 0 | 0/0 (n/a) |"
+NO_RUNS     = "Daily duplicate check\n\n| date | trigger | commits judged | definitions judged | judge calls | minutes | findings | real duplicates | not duplicates | no verdict yet | precision (real of ruled) |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| total |  | 0 | 0 | 0 | 0.0 | 0 | 0 | 0 | 0 | 0/0 (n/a) |"
 TITLE       = "Reuse behaviour, 2026-10-27 to 2026-11-02 (seven days, the whole fleet, no seat named)"
 
 
