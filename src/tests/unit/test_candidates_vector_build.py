@@ -498,3 +498,17 @@ def test_a_crash_on_a_later_batch_leaves_the_earlier_batches_already_handed_to_o
     with pytest.raises( ConnectionError ):
         vb.embed_all( DiesOnThird(), [ "a", "b", "c", "d", "e", "f" ], "code", "document", 2, 0, lambda s: None, on_batch=lambda start, vectors: seen.append( start ) )
     assert seen == [ 0, 2 ]
+
+
+def test_a_short_reply_raises_before_its_batch_reaches_on_batch_so_nothing_is_cached_under_the_wrong_texts():
+    class ShortOnSecond:
+        def __init__( self ): self.n = 0
+        def embed( self, texts, content_type, role ):
+            self.n += 1
+            out = [ [ float( len( t ) ), 0.0 ] for t in texts ]
+            return out[ :-1 ] if self.n == 2 else out                               # the second batch comes back one vector short
+    seen = []
+    with pytest.raises( CandidateError ) as caught:
+        vb.embed_all( ShortOnSecond(), [ "a", "bb", "ccc", "dddd" ], "code", "document", 2, 0, lambda s: None, on_batch=lambda start, vectors: seen.append( start ) )
+    assert caught.value.code == EMBEDDING_SHAPE and "asked for 2 vectors and got 1" in str( caught.value )
+    assert seen == [ 0 ], "only the whole first batch was handed on; the short one never was"
