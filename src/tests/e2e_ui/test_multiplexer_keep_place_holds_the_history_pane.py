@@ -70,7 +70,7 @@ def _get_credentials() -> tuple[ str, str ]:
     return email, password
 
 
-def _open( page, keep_place ):
+def _open( page, keep_place, no_move_before=False ):
     """Seed auth on the managed page fixture, navigate, wait for the test hook."""
     email, password = _get_credentials()
     resp = requests.post( f"{BASE_URL}/auth/login", json={ "email": email, "password": password }, timeout=10 )
@@ -81,6 +81,8 @@ def _open( page, keep_place ):
         f"window.localStorage.setItem('lupin_access_token', { json.dumps( tokens[ 'access_token' ] ) });"
         f"window.localStorage.setItem('lupin_refresh_token', { json.dumps( tokens[ 'refresh_token' ] ) });"
     )
+    if no_move_before:
+        page.context.add_init_script( "delete Element.prototype.moveBefore;" )
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     page.wait_for_function(
         "() => window.__multiplexerTestHook !== undefined && window.__multiplexerTestHook.eventBus !== undefined",
@@ -98,9 +100,9 @@ def _emit( page, sender_id: str, n: int, age_ms: int, group=None ):
     } )
 
 
-def _scrolled_history( page, keep_place ):
+def _scrolled_history( page, keep_place, no_move_before=False ):
     """Seed card A below card B, scrolled; return its selector."""
-    _open( page, keep_place )
+    _open( page, keep_place, no_move_before )
     for n in range( 20 ):
         _emit( page, SENDER_A, n, age_ms=120_000 - n * 1_000 )
     _emit( page, SENDER_B, 0, age_ms=30_000 )
@@ -160,21 +162,37 @@ def test_control_unpinned_history_is_scrolled_to_the_top_by_the_same_stream( pag
     assert after[ "scrollTop" ] == 0, f"with Keep place off the history should be at the top: { after }"
 
 
-def test_pinned_history_is_not_scrolled_to_the_top_when_a_plain_message_raises_the_card( page ):
-    """
-    Pinned history survives a plain message that moves its card above another.
-
-    Ensures:
-        - with Keep place on, a message with no progress group raises card A to the top
-        - A's history is still scrolled afterwards
-        - this guards a browser behaviour (the scroll survives a card move) and has no unpinned control
-    """
-    card_a = _scrolled_history( page, keep_place=True )
+    """Raise card A with a plain message, moveBefore removed; return its list scroll."""
+    """Raise card A with a plain message, with moveBefore removed so the insertBefore fallback runs."""
+    card_a = _scrolled_history( page, keep_place=keep_place, no_move_before=True )
+    assert page.evaluate( "() => typeof Element.prototype.moveBefore" ) == "undefined", "precondition: moveBefore is removed"
     _emit( page, SENDER_A, 200, age_ms=0 )
     page.wait_for_function(
         "( id ) => document.querySelector( '#notifications-pane .sender-card' ).getAttribute( 'data-sender-id' ) === id",
         arg=SENDER_A, timeout=5_000,
     )
     page.wait_for_function( "( sel ) => document.querySelector( sel + ' [data-id-hash=\"mv-keep-a-200\"]' ) !== null", arg=card_a, timeout=5_000 )
-    top = page.evaluate( "( sel ) => document.querySelector( sel + ' .date-accordion-messages' ).scrollTop", card_a )
+    return page.evaluate( "( sel ) => document.querySelector( sel + ' .date-accordion-messages' ).scrollTop", card_a )
+
+
+def test_pinned_history_is_not_scrolled_to_the_top_when_a_plain_message_raises_the_card( page ):
+    """
+    Pinned history survives a plain message that moves its card above another.
+
+    Ensures:
+        - with moveBefore removed, the card move falls back to insertBefore, which resets the list
+        - with Keep place on, A's history is still scrolled afterwards
+    """
+    top = _plain_message_raises_the_card( page, keep_place=True )
     assert top >= 100, f"the pinned history went back toward the top: 100 -> { top }"
+
+
+def test_control_unpinned_history_is_scrolled_to_the_top_when_a_plain_message_raises_the_card( page ):
+    """
+    Control: unpinned history returns to the top on the fallback.
+
+    Ensures:
+        - with moveBefore removed and Keep place off, the same message resets A's history to 0
+    """
+    top = _plain_message_raises_the_card( page, keep_place=False )
+    assert top == 0, f"with Keep place off the history should be at the top, got { top }"
