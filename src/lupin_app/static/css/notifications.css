@@ -2232,10 +2232,12 @@
             flex: 0 0 auto;
             background: rgb( 108, 117, 125, 0.15 );
             border: 1px solid rgb( 108, 117, 125, 0.3 );
-            border-radius: 16px;
+            border-radius: var( --persona-badge-radius );
             cursor: pointer;
-            padding: 5px 12px;
-            font-size: 13px;
+            padding: var( --persona-badge-padding );
+            font-size: var( --persona-badge-font-size );
+            /* A badge's box is as tall as its icon line, so the toggles take the icon's line height. */
+            line-height: calc( var( --persona-badge-icon-size ) * var( --persona-badge-line-height ) );
             font-weight: 500;
             color: #495057;
             opacity: 0.9;
