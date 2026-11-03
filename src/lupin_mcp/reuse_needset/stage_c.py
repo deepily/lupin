@@ -251,16 +251,19 @@ def plan_of( rows, refused, sides, budgets ):
     Describe the run without making a call.
 
     Ensures:
-        - returns { pairs_total, pairs_judged, refused, by_stratum, by_label, ambiguous, calls, budgets, audit, shown }
-        - calls holds drafts_min and drafts_max (one to two per judged pair) and posts (one two-question post per pair and repeat)
+        - returns { pairs_total, pairs_judged, refused, by_stratum, by_label, ambiguous, calls, would_share, budgets, audit, shown }
+        - calls holds drafts_min and drafts_max (one to two per judged pair), posts (one two-question post per pair and repeat) and posts_if_shared (the posts left when twin_pairs' later pairs are not posted again)
+        - would_share lists each pair twin_pairs would fold into an earlier one, as { pair, with }; the live run folds by the drafted body, so this is the most it can fold
         - budgets is budgets_for's answer, so the planned and the budgeted figures print together
         - shown lists, for every judged pair and side, the id and the purpose line the judge text carries
         - refused is the full list of refused pairs with their reasons
     """
+    posting, shared = twin_pairs( rows )
     shown = [ { "pair": r[ "pair" ], "side": s, "id": r[ f"side_{s}" ][ "record" ][ "id" ], "purpose_line": r[ f"side_{s}" ][ "record" ][ "purpose" ] } for r in rows for s in ( "a", "b" ) ]
     return { "pairs_total": len( rows ) + len( refused ), "pairs_judged": len( rows ), "refused": refused, "by_stratum": dict( collections.Counter( r[ "stratum" ] for r in rows ) ),
              "by_label": dict( collections.Counter( r[ "label" ] for r in rows ) ), "ambiguous": [ r[ "pair" ] for r in rows if r[ "ambiguous" ] ],
-             "calls": { "drafts_min": len( rows ), "drafts_max": 2 * len( rows ), "posts": len( rows ) * len( REPEATS ) }, "budgets": budgets, "audit": audit_sides( sides ), "shown": shown }
+             "calls": { "drafts_min": len( rows ), "drafts_max": 2 * len( rows ), "posts": len( rows ) * len( REPEATS ), "posts_if_shared": len( posting ) * len( REPEATS ) },
+             "would_share": [ { "pair": r[ "pair" ], "with": p } for p, rs in shared.items() for r in rs ], "budgets": budgets, "audit": audit_sides( sides ), "shown": shown }
 
 
 def cue_of( need, side_b ):
@@ -558,14 +561,40 @@ def share_bodies( rows, needs ):
         - the body is judge_probe's hash of the first repeat, so two pairs on one record pair in one order with one drafted need count as one
         - a pair without a draft is in neither
     """
+    def body_of( row ):
+        if row[ "pair" ] not in needs: return None
+        return jp.body_hash( request_for( row, needs[ row[ "pair" ] ], REPEATS[ 0 ] ) )
+    return group_rows( rows, body_of )
+
+
+def twin_pairs( rows ):
+    """
+    Find the pairs that sit on one record pair in one order, which needs no model output.
+
+    Ensures:
+        - returns ( posting, shared ) as share_bodies does, grouping on side b's record id and side a's record id
+        - the plan calls this before any draft; share_bodies makes the same grouping on the posted body once the needs exist, so two pairs here may still differ by their drafted need
+    """
+    return group_rows( rows, lambda row: ( row[ "side_b" ][ "record" ][ "id" ], row[ "side_a" ][ "record" ][ "id" ] ) )
+
+
+def group_rows( rows, key_of ):
+    """
+    Group rows that have one key, keeping the first of each.
+
+    Requires:
+        - key_of( row ) returns a hashable key, or None for a row to leave out
+
+    Ensures:
+        - returns ( posting, shared ): posting lists the first row of each distinct key, in order, and shared is { posting pair: [ later rows with that key ] }
+    """
     posting, shared, first = [], {}, {}
     for row in rows:
-        if row[ "pair" ] not in needs: continue
-        request = request_for( row, needs[ row[ "pair" ] ], REPEATS[ 0 ] )
-        digest  = jp.body_hash( request )
-        if digest in first: shared[ first[ digest ] ].append( row )
+        key = key_of( row )
+        if key is None: continue
+        if key in first: shared[ first[ key ] ].append( row )
         else:
-            first[ digest ] = row[ "pair" ]
+            first[ key ] = row[ "pair" ]
             shared[ row[ "pair" ] ] = []
             posting.append( row )
     return posting, shared

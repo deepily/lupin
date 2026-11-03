@@ -200,7 +200,7 @@ def test_the_plan_counts_calls_shows_every_purpose_line_and_lists_the_refused():
     rows, refused, sides = sc.split_pairs( [ pair( 1, 1, 2 ), pair( 2, 3, 1, label=sc.NOT_SAME, stratum="monolith:neighbour" ), pair( 3, 1, 9 ) ], index, by_id, purposes )
     plan = sc.plan_of( rows, refused, sides, sc.budgets_for( rows ) )
     assert ( plan[ "pairs_total" ], plan[ "pairs_judged" ] ) == ( 3, 2 ) and plan[ "by_stratum" ] == { "flag": 1, "monolith:neighbour": 1 } and plan[ "by_label" ] == { "same_job": 1, "not_same": 1 }
-    assert plan[ "calls" ] == { "drafts_min": 2, "drafts_max": 4, "posts": 6 } and plan[ "ambiguous" ] == [ ]
+    assert plan[ "calls" ] == { "drafts_min": 2, "drafts_max": 4, "posts": 6, "posts_if_shared": 6 } and plan[ "ambiguous" ] == [ ]
     assert plan[ "budgets" ] == sc.budgets_for( rows ) and plan[ "budgets" ][ "drafts_planned" ] == 4 and plan[ "budgets" ][ "posts_planned" ] == 6
     assert plan[ "refused" ] == [ { "pair": "pair-3", "stratum": "flag", "label": sc.SAME_JOB, "reasons": [ "side b text matches no index record" ] } ]
     assert plan[ "shown" ][ 0 ] == { "pair": "pair-1", "side": "a", "id": "src.m1.f1", "purpose_line": "line pin1" } and len( plan[ "shown" ] ) == 4
@@ -603,6 +603,31 @@ def test_pairs_on_the_same_records_in_the_same_order_share_one_body_and_the_reve
     assert [ r[ "pair" ] for r in posting ] == [ "pair-2", "pair-3" ] and shared == { "pair-2": [ ], "pair-3": [ ] }
     different, _s = sc.share_bodies( rows, { "pair-1": "One need.", "pair-2": "A different need." } )
     assert [ r[ "pair" ] for r in different ] == [ "pair-1", "pair-2" ]
+
+
+def test_the_plan_counts_pairs_on_one_record_pair_as_would_share_before_any_draft():
+    rows = twin_rows()
+    posting, shared = sc.twin_pairs( rows )
+    assert [ r[ "pair" ] for r in posting ] == [ "pair-1", "pair-3", "pair-4" ]
+    assert { p: [ r[ "pair" ] for r in rs ] for p, rs in shared.items() } == { "pair-1": [ "pair-2" ], "pair-3": [ ], "pair-4": [ ] }
+    plan = sc.plan_of( rows, [ ], [ ], sc.budgets_for( rows ) )
+    assert plan[ "would_share" ] == [ { "pair": "pair-2", "with": "pair-1" } ]
+    assert plan[ "calls" ][ "posts" ] == 12 and plan[ "calls" ][ "posts_if_shared" ] == 9
+
+
+def test_the_plan_with_no_twins_lists_none_and_posts_every_pair():
+    _records, index, by_id, purposes = world( 4 )
+    rows, _r, _s = sc.split_pairs( [ pair( 1, 1, 2 ), pair( 2, 3, 4 ) ], index, by_id, purposes )
+    plan = sc.plan_of( rows, [ ], [ ], sc.budgets_for( rows ) )
+    assert plan[ "would_share" ] == [ ] and plan[ "calls" ][ "posts_if_shared" ] == plan[ "calls" ][ "posts" ] == 6
+
+
+def test_the_plan_and_the_live_run_group_through_one_function():
+    rows = twin_rows()
+    with mock.patch.object( sc, "group_rows", wraps=sc.group_rows ) as g:
+        sc.twin_pairs( rows )
+        sc.share_bodies( rows, { "pair-1": "One need." } )
+    assert g.call_count == 2
 
 
 def test_fan_out_gives_each_sharing_pair_the_posted_results_under_its_own_label():
