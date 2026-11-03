@@ -129,7 +129,8 @@ def write_verdict( line, folder, row_id, amender ):
             raise
         if not ok:
             failed = f"the store refused the amend onto row {row_id} (HTTP {status}): {body}"
-            raise VerdictRefused( f"{failed}; the file was put back as it was" if put_back( path, existed, before ) is None else f"{failed}; the line is still in {path} and could not be taken out" )
+            stuck  = put_back( path, existed, before )
+            raise VerdictRefused( f"{failed}; the file was put back as it was" if stuck is None else f"{failed}; the line is still in {path} and could not be taken out ({stuck})" )
     return rec
 
 
