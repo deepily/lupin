@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=e49fc8430eb4">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=1faeb24503c1">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=9572f302493b">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=e130f2059619">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=864498666830">
 </head>
 <body>
@@ -963,6 +963,13 @@
                             data-testid="task-new-ticket"
                             onclick="window.notificationsUI.openNewTicketCard()"
                             title="Create a new ticket">＋ New</button>
+                    <!-- Status filter (Rick, row 8eb71f8e): All is the default and shows the whole
+                         list; the four chips are additive and show the union of those selected.
+                         All four selected, or none, is All. The chips are built by
+                         renderTaskStatusChips() from the table in shared/task-status-filter.js,
+                         so the words and the statuses each stands for live in one place. -->
+                    <div id="task-status-chips" class="task-status-chips" data-testid="task-status-chips"
+                         role="group" aria-label="Filter the task list by status"></div>
                     <!-- role=status announces the answer to a screen reader without
                          stealing focus back from the input mid-typing. -->
                     <div id="task-lookup-result" class="task-lookup-result"
@@ -1540,6 +1547,8 @@
          window.LUPIN_TASK_LOOKUP_PATH for the classic script below, read at CALL
          time so module execution order cannot matter. -->
     <script type="module" src="/static/js/shared/task-lookup.js?v=0a01055b00f8"></script>
+    <!-- Row 8eb71f8e: the task-list status chips table. Publishes window.LUPIN_TASK_STATUS_FILTER, read at CALL time. -->
+    <script type="module" src="/static/js/shared/task-status-filter.js?v=cd9d6ced0666"></script>
     <!-- Row c9fafb9d — a manager's promote/demote REQUEST: the chip's words, the verdict body
          and the badge text, shared with the multiplexer so the two clients cannot drift.
          Publishes window.LUPIN_TASK_REQUEST for the classic script below, read at CALL time. -->
@@ -1578,7 +1587,7 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=75a2b0c08f85"></script>
+    <script src="/static/js/notifications.js?v=9f717c057913"></script>
     <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
     <script src="/static/js/broadcast-panel.js?v=02bdb607cf2a"></script>

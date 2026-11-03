@@ -1019,6 +1019,7 @@ class NotificationsUI {
         this._taskListFetchInFlight     = false;       // debounce guard: manual ⟳ vs the interval tick
         this._finishedTasksTimer        = null;        // setInterval handle; set once by startFinishedTasksPolling and never cleared (the pane has no stop)
         this._finishedTasksPushPending  = false;       // row 8796333b: a task_store_changed push landed during a finished-tasks read
+        this._taskStatusChips           = [];          // selected status-chip keys; [] is All (shared/task-status-filter.js)
         this._taskListLastGoodTasks     = null;        // last successfully-fetched OPEN rows — replayed under the "store unreachable" indicator (degrade-safe, never blank)
         // Per-persona accordion (2026-06-17): each owner group collapses/expands
         // independently; the collapsed set persists across reload. The key shape +
@@ -14199,6 +14200,7 @@ class NotificationsUI {
         // Wire the per-persona accordion delegation once. The listener lives on the
         // persistent container element (innerHTML is replaced each render, the element
         // is not), so a single delegated listener survives every re-render.
+        this.renderTaskStatusChips();
         this._wireTaskListAccordion();
 
         // CLEAR THE NOTICE MOUNT ON EVERY FULL-PANEL STATE. The notices now live
@@ -14243,7 +14245,10 @@ class NotificationsUI {
         // two after Rick applied it and read as a bug in the box.
         if ( this._taskLookupPinned ) { this._renderPinnedTaskRow( container, countEl ); return; }
 
-        if ( countEl ) countEl.textContent = this._taskListCountText( openTasks );
+        // The status chips narrow the rows on screen. `openTasks` stays whole, so the replay
+        // under "store unreachable" and the lookup's ✕ never lose rows to a chip.
+        const shownTasks = this.filterTasksByStatusChips( openTasks );
+        if ( countEl ) countEl.textContent = this._taskListCountText( shownTasks );
 
         if ( this._taskListPressInFlight ) {
             // Held, not dropped: _releaseTaskListPress replays this composite the instant
@@ -14260,8 +14265,10 @@ class NotificationsUI {
         const operatorState = this._captureOperatorState( container );
         if ( openTasks.length === 0 ) {
             container.innerHTML = `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
+        } else if ( shownTasks.length === 0 ) {
+            container.innerHTML = `<p class="task-list-message task-list-empty" data-testid="task-status-filter-empty">No tasks match the selected statuses — press All to see the whole list.</p>`;
         } else {
-            const model = this.groupTasksByOwner( openTasks );
+            const model = this.groupTasksByOwner( shownTasks );
             container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         }
         this._restoreOperatorState( container, operatorState );
@@ -14309,6 +14316,100 @@ class NotificationsUI {
         this._restoreOperatorState( container, operatorState );
         this._hydrateRequestChips( container );
         if ( countEl ) countEl.textContent = "Live: 1";
+    }
+
+    /**
+     * The rows the status chips show, from a list of open rows.
+     *
+     * Returns the list unchanged when the shared module did not load, so a missing script shows All and never an empty list.
+     */
+    filterTasksByStatusChips( tasks ) {
+        /**
+         * Requires:
+         *     - tasks is an array of rows
+         *
+         * Ensures:
+         *     - All (no chips, or every chip) returns the rows unchanged
+         *     - a missing window.LUPIN_TASK_STATUS_FILTER returns the rows unchanged
+         */
+        const filter = window.LUPIN_TASK_STATUS_FILTER;
+        if ( !filter ) return tasks;
+        return filter.filterTasksByChips( tasks, this._taskStatusChips );
+    }
+
+    /**
+     * Handles a click on a status chip and repaints from the rows already held.
+     */
+    toggleTaskStatusChip( key ) {
+        /**
+         * Requires:
+         *     - key is a chip key from the shared table
+         *
+         * Ensures:
+         *     - the chip is added or removed; the last one cleared, or all four, is All
+         *     - repaints from _taskListLastGoodTasks, with no fetch
+         *     - a missing shared module is a no-op
+         */
+        const filter = window.LUPIN_TASK_STATUS_FILTER;
+        if ( !filter ) return;
+        this._taskStatusChips = filter.toggleChip( this._taskStatusChips, key );
+        this.renderTaskList( { status: "ok", tasks: this._taskListLastGoodTasks || [] }, false );
+    }
+
+    /**
+     * Handles a click on the All button: drops every chip and repaints.
+     */
+    clearTaskStatusChips() {
+        /**
+         * Ensures:
+         *     - the selection becomes [] (All); repaints from the held rows
+         */
+        this._taskStatusChips = [];
+        this.renderTaskList( { status: "ok", tasks: this._taskListLastGoodTasks || [] }, false );
+    }
+
+    /**
+     * Draws the All button and four chips into #task-status-chips, or updates their state.
+     */
+    renderTaskStatusChips() {
+        /**
+         * Requires:
+         *     - window.LUPIN_TASK_STATUS_FILTER carries the chip table (else nothing is drawn)
+         *
+         * Ensures:
+         *     - the buttons are built once, then only their aria-pressed and class change, so a 60s
+         *       poll never rebuilds a button the operator is hovering or tabbing through
+         *     - All is pressed exactly when no chip is active
+         *     - a missing host element or shared module is a no-op
+         */
+        const host   = document.getElementById( "task-status-chips" );
+        const filter = window.LUPIN_TASK_STATUS_FILTER;
+        if ( !host || !filter ) return;
+
+        if ( host.children.length === 0 ) {
+            const make = ( key, label, handler ) => {
+                const button = document.createElement( "button" );
+                button.type = "button";
+                button.className = "task-status-chip";
+                button.setAttribute( "data-chip", key );
+                button.setAttribute( "data-testid", `task-status-chip-${ key }` );
+                button.textContent = label;
+                button.addEventListener( "click", handler );
+                host.appendChild( button );
+            };
+            make( "all", "All", () => this.clearTaskStatusChips() );
+            for ( const chip of filter.TASK_STATUS_CHIPS ) {
+                make( chip.key, chip.label, () => this.toggleTaskStatusChip( chip.key ) );
+            }
+        }
+
+        const active = filter.activeChips( this._taskStatusChips );
+        for ( const button of host.children ) {
+            const key     = button.getAttribute( "data-chip" );
+            const pressed = key === "all" ? active.length === 0 : active.includes( key );
+            button.setAttribute( "aria-pressed", pressed ? "true" : "false" );
+            button.classList.toggle( "is-selected", pressed );
+        }
     }
 
     /**
