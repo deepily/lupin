@@ -1,0 +1,14 @@
+[
+  {
+    "path": "src/tmp_linter_probe/probe.py",
+    "line": 2,
+    "rule": "summary-length",
+    "message": "summary is 99 characters, limit 90"
+  },
+  {
+    "path": "src/tmp_linter_probe/probe.py",
+    "line": 2,
+    "rule": "tic",
+    "message": "tic phrase 'deliberately'"
+  }
+]
