@@ -177,8 +177,8 @@ class AccountLedger:
         if row[ "kind" ] == "limit":
             self._limit = row[ "tokens" ]
             return
-        run = self._runs.setdefault( row[ "run" ], { "ceiling": 0, "spent": 0, "closed": False } )
-        if row[ "kind" ] == "begin": run[ "ceiling" ] = row[ "tokens" ]
+        run = self._runs.setdefault( row[ "run" ], { "ceiling": 0, "spent": 0, "closed": False, "began": None } )
+        if row[ "kind" ] == "begin": run[ "ceiling" ], run[ "began" ] = row[ "tokens" ], row.get( "at" )
         elif row[ "kind" ] == "spend": run[ "spent" ] += row[ "tokens" ]
         else: run[ "closed" ] = True
 
@@ -257,6 +257,19 @@ class AccountLedger:
         """
         with self._locked() as f: runs = self._state( f )[ 2 ]
         return run in runs and not runs[ run ][ "closed" ]
+
+    def open_runs( self ):
+        """
+        List the runs that began and have no end row yet.
+
+        Ensures:
+            - returns one { run, ceiling, spent, began } dict per open run, in the order the runs began
+            - began is the begin row's time stamp, or None for a hand-typed row that carries none
+        Raises:
+            - LedgerUnreadable as snapshot does
+        """
+        with self._locked() as f: runs = self._state( f )[ 2 ]
+        return [ { "run": name, "ceiling": r[ "ceiling" ], "spent": r[ "spent" ], "began": r[ "began" ] } for name, r in runs.items() if not r[ "closed" ] ]
 
     def limit_tokens( self ):
         """Ensures: returns the latest account limit in tokens."""
