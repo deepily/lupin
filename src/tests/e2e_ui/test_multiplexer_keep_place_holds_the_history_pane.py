@@ -167,7 +167,7 @@ def test_pinned_history_is_not_scrolled_to_the_top_when_a_plain_message_raises_t
     Ensures:
         - with Keep place on, a message with no progress group raises card A to the top
         - A's history is still scrolled afterwards
-        - there is no unpinned control: this browser keeps the scroll on a card move by itself, so the test guards the path but cannot fail
+        - this guards a browser behaviour (the scroll survives a card move) and has no unpinned control
     """
     card_a = _scrolled_history( page, keep_place=True )
     _emit( page, SENDER_A, 200, age_ms=0 )
