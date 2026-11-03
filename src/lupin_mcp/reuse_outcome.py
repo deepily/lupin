@@ -181,9 +181,11 @@ def missing_outcome_refusals( added, outcomes, rulings ):
     Ensures:
         - a definition has an outcome line when a ruling on it cites a receipt that an outcome line cites
         - or when an `excluded` outcome line names it as the first word of its text
+        - the receipt ids counted are real ones; a ruling that cites a token is not met by some other definition's token line
         - returns [ { symbol, reason } ] in the order of added, one per definition with neither
         - a definition with no ruling line is refused too, since nothing ties it to an outcome line
     """
-    with_outcome = { o[ "receipt" ] for o in outcomes } | { o[ "detail" ].split()[ 0 ] for o in outcomes if o[ "receipt" ] == EXCLUDED_TOKEN }
+    tokens       = ( EXCLUDED_TOKEN, UNINDEXED_TOKEN )
+    with_outcome = { o[ "receipt" ] for o in outcomes if o[ "receipt" ] not in tokens } | { o[ "detail" ].split()[ 0 ] for o in outcomes if o[ "receipt" ] == EXCLUDED_TOKEN }
     return [ { "symbol": sym, "reason": f"{sym} is new in the diff and has no outcome line" }
              for sym in added if sym not in with_outcome and not any( row[ "receipt" ] in with_outcome for row in rulings.get( sym, [] ) ) ]

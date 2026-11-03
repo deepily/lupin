@@ -307,3 +307,10 @@ def test_a_real_search_that_belongs_to_another_receipt_is_refused( tmp_path ):
     assert [ r[ "line" ] for r in out ] == [ "A cites B's search", "B cites A's search" ] and all( "is not in the log for receipt" in r[ "reason" ] for r in out )
     anywhere = { sid for found in searches.values() for sid in found }
     assert all( c[ "search" ] in anywhere for c in cross ), "each cited search is in the log, so a check that only asks whether the search exists anywhere would pass both lines"
+
+
+def test_a_token_line_for_one_definition_does_not_cover_another_that_cites_the_same_token():
+    rulings = pair_text( ( "m.d1", "DISTINCT it differs", "excluded" ), ( "m.d2", "DISTINCT it differs", "excluded" ), ( "m.d3", "DISTINCT it differs", "unindexed" ), ( "m.d4", "DISTINCT it differs", "unindexed" ) )
+    one     = outcome_lines( ( "excluded", "WROTE_NEW m.d1 is refused" ), ( "unindexed", "WROTE_NEW src/rnd/x.md is a note" ) )
+    out     = ro.missing_outcome_refusals( [ "m.d1", "m.d2", "m.d3", "m.d4" ], one, rulings )
+    assert [ r[ "symbol" ] for r in out ] == [ "m.d2", "m.d3", "m.d4" ], "only the definition the excluded line names is covered; an unindexed line names a file, not a definition"
