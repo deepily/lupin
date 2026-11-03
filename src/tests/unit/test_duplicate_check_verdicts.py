@@ -109,10 +109,42 @@ def test_a_second_line_for_the_same_finding_is_refused_and_a_second_finding_is_t
     assert [ r[ "finding" ] for r in lines( folder ) ] == [ "d-a1", "d-a2" ] and len( store.sent ) == 2, "the file and the row hold the same two lines"
 
 
-def test_a_store_that_refuses_the_amend_leaves_the_file_unwritten_so_file_and_row_cannot_disagree( folder ):
+def test_a_store_that_refuses_the_amend_leaves_no_file_when_there_was_none_so_file_and_row_cannot_disagree( folder ):
     store = Amender( ok=False )
-    with pytest.raises( dv.VerdictRefused, match=r"refused the amend onto row .* \(HTTP 404\)" ): dv.write_verdict( LINE_OK, folder, ROW, store )
+    with pytest.raises( dv.VerdictRefused, match=r"refused the amend onto row .* \(HTTP 404\).*put back as it was" ): dv.write_verdict( LINE_OK, folder, ROW, store )
     assert not ( folder / "verdicts.jsonl" ).exists() and store.sent == [ ( ROW, LINE_OK ) ]
+
+
+def test_a_store_that_refuses_the_amend_puts_an_existing_file_back_byte_for_byte( folder ):
+    dv.write_verdict( swap( "finding", "d-a2" ), folder, ROW, Amender() )
+    before = ( folder / "verdicts.jsonl" ).read_bytes()
+    with pytest.raises( dv.VerdictRefused, match="put back as it was" ): dv.write_verdict( LINE_OK, folder, ROW, Amender( ok=False ) )
+    assert ( folder / "verdicts.jsonl" ).read_bytes() == before
+
+
+def test_a_file_that_cannot_be_appended_is_refused_with_the_row_untouched_and_says_so( folder ):
+    ( folder / "verdicts.jsonl" ).mkdir()
+    store = Amender()
+    with pytest.raises( dv.VerdictRefused, match="could not append.*IsADirectoryError.*row was not amended" ): dv.write_verdict( LINE_OK, folder, ROW, store )
+    assert store.sent == [ ]
+
+
+def test_a_rollback_that_cannot_run_says_the_line_is_still_in_the_file( folder, monkeypatch ):
+    real = dv.pathlib.Path.unlink
+
+    def broken( self, *a, **k ): raise PermissionError( "read-only" )
+
+    monkeypatch.setattr( dv.pathlib.Path, "unlink", broken )
+    with pytest.raises( dv.VerdictRefused, match="still in .*could not be taken out.*PermissionError" ): dv.write_verdict( LINE_OK, folder, ROW, Amender( ok=False ) )
+    monkeypatch.setattr( dv.pathlib.Path, "unlink", real )
+    assert len( lines( folder ) ) == 1
+
+
+def test_the_command_turns_a_file_that_cannot_be_written_into_exit_3_naming_what_was_not_written( folder ):
+    ( folder / "verdicts.jsonl" ).mkdir()
+    out = io.StringIO()
+    assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=out, amender=Amender() ) == 3
+    assert "REFUSING" in out.getvalue() and "row was not amended" in out.getvalue()
 
 
 def test_a_file_only_back_fill_never_asks_the_store_and_makes_the_folder_if_it_is_absent( tmp_path ):

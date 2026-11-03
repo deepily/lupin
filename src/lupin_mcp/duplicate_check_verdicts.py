@@ -76,27 +76,42 @@ def finding_ids( folder, run ):
 
 def write_verdict( line, folder, row_id, amender ):
     """
-    Check a verdict line, amend it onto the triage row, then append it to verdicts.jsonl.
+    Check a verdict line, append it to verdicts.jsonl, then amend it onto the triage row.
 
     Requires:
         - folder is the check's result folder; row_id is the triage row's uuid, or None for a file-only back-fill
         - amender has amend( row_id, note ) returning ( ok, status, body ), and is read only when row_id is given
     Ensures:
         - returns the record written: { run, finding, verdict, class, by, ts }
-        - the row is amended before the file is touched, so a failed amend leaves both unchanged
+        - the file is written first and the row amended second; if the amend fails, the file is put back to what it was
+        - so a failed append leaves the row unamended, and a failed amend leaves the file as it was
         - the file's line is the record as JSON, one per line, the folder made if absent
     Raises:
-        - VerdictRefused for a malformed line, a missing run file, a finding id not in that run, a finding that already has a line, or an amend the store did not accept
+        - VerdictRefused for a malformed line, a missing run file, a finding id not in that run, a finding that already has a line, an amend the store did not accept, or a file that cannot be written
+        - the message says what was and was not written
     """
     rec = parse_line( line )
     if rec[ "finding" ] not in finding_ids( folder, rec[ "run" ] ): raise VerdictRefused( f"finding {rec[ 'finding' ]} is not in run {rec[ 'run' ]}" )
     if ( rec[ "run" ], rec[ "finding" ] ) in rb.read_verdicts( folder ): raise VerdictRefused( f"finding {rec[ 'finding' ]} of run {rec[ 'run' ]} already has a verdict line" )
+    folder  = pathlib.Path( folder )
+    path    = folder / rb.VERDICTS_FILE
+    existed = path.exists()
+    before  = path.stat().st_size if existed else 0
+    try:
+        folder.mkdir( parents=True, exist_ok=True )
+        with path.open( "a", encoding="utf-8" ) as f: f.write( json.dumps( rec ) + "\n" )
+    except OSError as e:
+        raise VerdictRefused( f"could not append to {path} ({type( e ).__name__}: {e}); the row was not amended and the file holds what it held before" ) from e
     if row_id is not None:
         ok, status, body = amender.amend( row_id, line )
-        if not ok: raise VerdictRefused( f"the store refused the amend onto row {row_id} (HTTP {status}): {body}" )
-    folder = pathlib.Path( folder )
-    folder.mkdir( parents=True, exist_ok=True )
-    with ( folder / rb.VERDICTS_FILE ).open( "a", encoding="utf-8" ) as f: f.write( json.dumps( rec ) + "\n" )
+        if not ok:
+            try:
+                if existed:
+                    with path.open( "r+b" ) as f: f.truncate( before )
+                else: path.unlink()
+            except OSError as e:
+                raise VerdictRefused( f"the store refused the amend onto row {row_id} (HTTP {status}): {body}; the line is still in {path} and could not be taken out ({type( e ).__name__}: {e})" ) from e
+            raise VerdictRefused( f"the store refused the amend onto row {row_id} (HTTP {status}): {body}; the file was put back as it was" )
     return rec
 
 
