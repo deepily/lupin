@@ -8,6 +8,7 @@ Ensures:
     - A click flips data-keep-place and aria-checked on the toggle.
     - On, the toggle's computed background is the Active toggle's on background.
     - Off, the toggle has the same background as the Active toggle when it is off.
+    - Hovered, on and off, it has the same background as the Active toggle.
     - Snapshots of the toggles row, on and off.
 """
 
@@ -78,6 +79,18 @@ class TestKeepPlaceToggleStyle:
         assert keep_off == active_off, f"off: keep {keep_off} vs active {active_off}"
         assert keep_on == active_on, f"on: keep {keep_on} vs active {active_on}"
         assert keep_on != keep_off, f"Keep place looks the same on and off: {keep_on}"
+
+    def test_keep_place_hovered_has_the_active_toggles_hover_background( self, strip_page ):
+        page = strip_page
+        for on in ( False, True ):
+            _set( page, KEEP_ID, "data-keep-place", on )
+            _set( page, ACTIVE_ID, "data-hide-inactive", on )
+            colours = []
+            for toggle_id in ( KEEP_ID, ACTIVE_ID ):
+                page.hover( f"#{toggle_id}" )
+                page.wait_for_timeout( 400 )
+                colours.append( page.evaluate( COLOUR_JS, toggle_id ) )
+            assert colours[ 0 ] == colours[ 1 ], f"hover, on={on}: keep {colours[ 0 ]} vs active {colours[ 1 ]}"
 
     @pytest.mark.parametrize( "state", [ "off", "on" ] )
     def test_toggles_row_visual( self, strip_page, assert_snapshot, state ):

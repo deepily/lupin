@@ -8,6 +8,7 @@ Ensures:
     - A click flips data-keep-place and aria-checked on the toggle.
     - On, the toggle's computed background is the Active toggle's on background.
     - Off, the toggle has the same background as the Active toggle when it is off.
+    - Hovered, on and off, it has the same background as the Active toggle.
     - Snapshots of the toggles row, on and off.
 """
 
@@ -108,6 +109,29 @@ def test_keep_place_on_has_the_active_toggles_on_background( strip_page ):
     assert keep_off == active_off, f"off: keep { keep_off } vs active { active_off }"
     assert keep_on == active_on, f"on: keep { keep_on } vs active { active_on }"
     assert keep_on != keep_off, f"Keep place looks the same on and off: { keep_on }"
+
+
+def _hovered_colour( page, toggle_id: str ) -> str:
+    """Return the toggle's background with the mouse over it, once the transition has run."""
+    page.hover( f"#{ toggle_id }" )
+    page.wait_for_timeout( 400 )
+    return page.evaluate( _COLOUR_JS, toggle_id )
+
+
+def test_keep_place_hovered_has_the_active_toggles_hover_background( strip_page ):
+    """
+    Keep place matches Active under the mouse, on and off.
+
+    Ensures:
+        - on, hovering each gives the same computed background
+        - off, hovering each gives the same computed background
+    """
+    page = strip_page
+    for on in ( False, True ):
+        _set( page, KEEP_ID, "data-keep-place", on )
+        _set( page, ACTIVE_ID, "data-hide-inactive", on )
+        keep, active = _hovered_colour( page, KEEP_ID ), _hovered_colour( page, ACTIVE_ID )
+        assert keep == active, f"hover, on={ on }: keep { keep } vs active { active }"
 
 
 @pytest.mark.parametrize( "state", [ "off", "on" ] )
