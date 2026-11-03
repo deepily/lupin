@@ -397,12 +397,23 @@ def live_like( tmp_path ):
     return led
 
 
-def test_the_ceiling_constants_are_the_plan_values_and_the_shadow_cap_is_four_a_week():
-    assert ( rl.SEATS_AT_ONCE, rl.SHADOW_AUDIT_WEEKLY_CAP, rl.SHADOW_AUDIT_CEILING_TOKENS, rl.CEILING_MARGIN ) == ( 5, 4, 5_000_000, 1.5 )
+AUDIT = 5_000_000      # the shipped INI values, passed in: the ledger module holds no audit constant
+WEEK  = 4
+
+
+def test_the_ceiling_constants_are_the_plan_values_and_the_audit_numbers_are_not_constants():
+    assert ( rl.SEATS_AT_ONCE, rl.CEILING_MARGIN ) == ( 5, 1.5 )
+    assert not hasattr( rl, "SHADOW_AUDIT_CEILING_TOKENS" ) and not hasattr( rl, "SHADOW_AUDIT_WEEKLY_CAP" )
+
+
+def test_the_audit_numbers_have_no_default_and_changing_them_changes_the_answer():
+    with pytest.raises( TypeError ): rl.capacity( 100 )
+    assert rl.capacity( 100, 10, 2, 10, 1 )[ "audit_week_tokens" ] == 20 and rl.capacity( 100, 10, 3, 10, 1 )[ "audit_week_tokens" ] == 30
+    assert rl.capacity( 100, 10, 2, 10, 1 )[ "open_tokens" ] == 20 and rl.capacity( 100, 20, 2, 10, 1 )[ "open_tokens" ] == 30
 
 
 def test_the_measured_headroom_admits_three_runs_at_the_old_ceiling_and_does_not_fit_five_seats_with_audits( live_like ):
-    got = rl.account_capacity( live_like, lookup_ceiling=60_000_000 )
+    got = rl.account_capacity( live_like, AUDIT, WEEK, lookup_ceiling=60_000_000 )
     assert got[ "headroom" ] == 200_739_884 and got[ "lookups_at_once" ] == 3 and got[ "fits" ] is False
     assert got[ "open_tokens" ] == 5 * 60_000_000 + 5_000_000 and got[ "spare_tokens" ] == 200_739_884 - 305_000_000 - 20_000_000
 
@@ -415,27 +426,27 @@ def test_the_final_ceiling_is_the_d4_worst_lookup_times_the_margin_rounded_up_to
 
 
 def test_the_final_ceiling_fits_the_live_limit_row_with_the_audits_included( live_like ):
-    got = rl.account_capacity( live_like )
+    got = rl.account_capacity( live_like, AUDIT, WEEK )
     assert got == { "headroom": 200_739_884, "lookups_at_once": 3_136, "open_tokens": 5 * 64_000 + 5_000_000, "audit_week_tokens": 4 * 5_000_000,
                     "spare_tokens": 200_739_884 - 5_320_000 - 20_000_000, "fits": True }, "five seats and an audit open together, and a week of audits, all fit"
 
 
 def test_the_ceiling_constants_fit_the_measured_headroom_with_the_audits_included( live_like ):
-    got = rl.account_capacity( live_like )
+    got = rl.account_capacity( live_like, AUDIT, WEEK )
     assert got[ "fits" ] is True and got[ "lookups_at_once" ] >= rl.SEATS_AT_ONCE
-    assert got[ "audit_week_tokens" ] == rl.SHADOW_AUDIT_WEEKLY_CAP * rl.SHADOW_AUDIT_CEILING_TOKENS
-    assert got[ "spare_tokens" ] == 200_739_884 - ( rl.SEATS_AT_ONCE * rl.LOOKUP_CEILING_TOKENS + rl.SHADOW_AUDIT_CEILING_TOKENS ) - got[ "audit_week_tokens" ]
+    assert got[ "audit_week_tokens" ] == WEEK * AUDIT
+    assert got[ "spare_tokens" ] == 200_739_884 - ( rl.SEATS_AT_ONCE * rl.LOOKUP_CEILING_TOKENS + AUDIT ) - got[ "audit_week_tokens" ]
 
 
 def test_the_ledger_admits_the_seats_and_one_audit_at_the_constants_and_a_next_lookup_still_fits( live_like ):
     for seat in range( rl.SEATS_AT_ONCE ): live_like.begin_run( f"lookup-{seat}", rl.LOOKUP_CEILING_TOKENS )
-    live_like.begin_run( "audit", rl.SHADOW_AUDIT_CEILING_TOKENS )
+    live_like.begin_run( "audit", AUDIT )
     live_like.begin_run( "one-more", rl.LOOKUP_CEILING_TOKENS )
-    assert live_like.total() == LIVE_SPENT + ( rl.SEATS_AT_ONCE + 1 ) * rl.LOOKUP_CEILING_TOKENS + rl.SHADOW_AUDIT_CEILING_TOKENS
+    assert live_like.total() == LIVE_SPENT + ( rl.SEATS_AT_ONCE + 1 ) * rl.LOOKUP_CEILING_TOKENS + AUDIT
 
 
 def test_the_ledger_refuses_the_lookup_after_the_last_one_the_headroom_admits_at_the_final_ceiling( live_like ):
-    fits = rl.account_capacity( live_like )[ "lookups_at_once" ]
+    fits = rl.account_capacity( live_like, AUDIT, WEEK )[ "lookups_at_once" ]
     for n in range( fits ): live_like.begin_run( f"lookup-{n}", rl.LOOKUP_CEILING_TOKENS )
     with pytest.raises( rl.AccountLimitReached ):
         live_like.begin_run( "one-too-many", rl.LOOKUP_CEILING_TOKENS )
@@ -443,8 +454,8 @@ def test_the_ledger_refuses_the_lookup_after_the_last_one_the_headroom_admits_at
 
 def test_capacity_fits_at_exactly_zero_spare_and_not_one_token_under():
     open_and_week = 5 * 10 + 7 + 3 * 7
-    assert rl.capacity( open_and_week, 10, 5, 7, 3 )[ "fits" ] is True and rl.capacity( open_and_week, 10, 5, 7, 3 )[ "spare_tokens" ] == 0
-    assert rl.capacity( open_and_week - 1, 10, 5, 7, 3 )[ "fits" ] is False
+    assert rl.capacity( open_and_week, 7, 3, 10, 5 )[ "fits" ] is True and rl.capacity( open_and_week, 7, 3, 10, 5 )[ "spare_tokens" ] == 0
+    assert rl.capacity( open_and_week - 1, 7, 3, 10, 5 )[ "fits" ] is False
 
 
 def test_the_final_ceiling_is_the_worst_lookup_times_the_margin_rounded_up():
@@ -453,4 +464,4 @@ def test_the_final_ceiling_is_the_worst_lookup_times_the_margin_rounded_up():
 
 
 def test_lookups_at_once_counts_whole_ceilings_and_a_run_that_exactly_fills_the_headroom():
-    assert rl.capacity( 20, 10 )[ "lookups_at_once" ] == 2 and rl.capacity( 19, 10 )[ "lookups_at_once" ] == 1 and rl.capacity( 9, 10 )[ "lookups_at_once" ] == 0
+    assert rl.capacity( 20, 1, 1, 10 )[ "lookups_at_once" ] == 2 and rl.capacity( 19, 1, 1, 10 )[ "lookups_at_once" ] == 1 and rl.capacity( 9, 1, 1, 10 )[ "lookups_at_once" ] == 0
