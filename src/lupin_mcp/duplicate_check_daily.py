@@ -320,24 +320,27 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     return doc
 
 
-def cron_lines( root, python, log_path, cap, cli_path, carried=None ):
+def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRANCH ):
     """
     Build the two cron lines of the daily check.
 
     Requires:
         - root is the main checkout path; python is the interpreter path; cap is a whole number of judge calls; cli_path is the Claude Code binary
         - carried maps environment names to values, copied into both lines and shell-quoted
+        - branch is the branch the check judges
     Ensures:
         - returns [ daily line, reboot line ], each ending with CRON_TAG
         - the daily line runs at CRON_SCHEDULE with trigger cron, the reboot line BOOT_DELAY seconds after a boot with trigger reboot
         - both run from root with LUPIN_ROOT and PYTHONPATH set, append to log_path, and carry the cap and the binary
+        - a branch other than the default is added as --branch, shell-quoted, after the trigger; the default adds nothing, so those lines are unchanged
     """
     extra = "".join( f"{name}={shlex.quote( value )} " for name, value in ( carried or {} ).items() )
+    named = "" if branch == BRANCH else f" --branch {shlex.quote( branch )}"
 
     def run( trigger ):
         """Ensures: returns the shell command of one line, its trigger named."""
         return ( f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {extra}{python} -m lupin_mcp.duplicate_check_daily "
-                 f"--cap {cap} --claude-cli-path {cli_path} --trigger {trigger} >> {log_path} 2>&1 {CRON_TAG}" )
+                 f"--cap {cap} --claude-cli-path {cli_path} --trigger {trigger}{named} >> {log_path} 2>&1 {CRON_TAG}" )
 
     return [ lt.cron_lines_for( run( "cron" ), CRON_SCHEDULE, BOOT_DELAY )[ 0 ], lt.cron_lines_for( run( "reboot" ), CRON_SCHEDULE, BOOT_DELAY )[ 1 ] ]
 
@@ -365,7 +368,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
             lt.edit_crontab( [], environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
             out( "uninstalled" )
             return 0
-        lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) } )
+        lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) }, args.branch )
         if args.print_install:
             out( "\n".join( lines ) )
             return 0
