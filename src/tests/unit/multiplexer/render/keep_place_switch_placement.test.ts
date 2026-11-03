@@ -1,4 +1,4 @@
-// The multiplexer page puts the Keep place switch at the top of the notification history.
+// The multiplexer page puts the Keep place switch on the strip's toggles row.
 //
 // Run via `npx tsx --test src/tests/unit/multiplexer/render/keep_place_switch_placement.test.ts`.
 
@@ -20,21 +20,27 @@ function page(): Document {
   return doc;
 }
 
-test("the switch is in the notification history pane, not in the CC session strip", () => {
+test("the switch is on the strip's toggles row, in the notification history pane", () => {
   const doc    = page();
   const toggle = doc.getElementById("cc-keep-place-toggle");
   assert.ok(toggle !== null, "the switch is on the page");
-  assert.equal(toggle!.closest("#cc-session-strip"), null);
+  assert.equal(toggle!.parentElement!.id, "cc-strip-toggles");
+  assert.ok(toggle!.closest("#cc-session-strip") !== null);
   assert.ok(toggle!.closest("#notifications-pane") !== null);
 });
 
-test("it is the first thing in the pane, above the broadcast card, and starts off", () => {
-  const doc    = page();
-  const pane   = doc.getElementById("notifications-pane")!;
-  const toggle = doc.getElementById("cc-keep-place-toggle")!;
-  const first  = Array.from(pane.children).find(c => c.tagName !== "SCRIPT")!;
-  assert.ok(first.contains(toggle), "the first element of the pane holds the switch");
-  assert.ok(pane.querySelector("#broadcast-card-mount") !== null);
+test("the toggles row follows the persona badges and holds Focus, All and Keep place in that order", () => {
+  const doc  = page();
+  const row  = doc.getElementById("cc-strip-toggles")!;
+  const icons = doc.getElementById("cc-strip-icons")!;
+  assert.equal(icons.nextElementSibling, row, "the row sits directly under the badges");
+  assert.equal(icons.querySelector(".cc-strip-toggle"), null, "the badge row holds no toggle");
+  assert.deepEqual(Array.from(row.children).map(c => c.id), [ "cc-strip-toggle", "cc-hide-inactive-toggle", "cc-keep-place-toggle" ]);
+  assert.equal(doc.getElementById("sender-cards-container")!.previousElementSibling, doc.getElementById("cc-session-strip"));
+});
+
+test("the switch starts off", () => {
+  const toggle = page().getElementById("cc-keep-place-toggle")!;
   assert.equal(toggle.getAttribute("data-keep-place"), "false");
   assert.equal(toggle.getAttribute("role"), "switch");
   assert.equal(toggle.getAttribute("aria-checked"), "false");
