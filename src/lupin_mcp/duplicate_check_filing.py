@@ -139,11 +139,11 @@ def send_row( payload, store ):
         - store has query( correlation_key ) and create( payload ), each returning ( ok, status, body ) and never raising
     Ensures:
         - returns { outcome, status }: already_filed when the key has a row, filed on a 201, queued_for_retry on a transport failure or a ratio gate refusal (see gated), refused on any other verdict
-        - a transport failure on the probe queues the row, because a row filed twice is worse than one filed late
+        - a probe that did not answer ok, whatever the cause, queues the row, because a row filed twice is worse than one filed late
     """
     ok, status, body = store.query( payload[ "correlation_key" ] )
-    if status is None: return { "outcome": QUEUED, "status": None }
-    if ok and body.get( "count", 0 ) > 0: return { "outcome": ALREADY, "status": status }
+    if not ok: return { "outcome": QUEUED, "status": status }
+    if body.get( "count", 0 ) > 0: return { "outcome": ALREADY, "status": status }
     ok, status, body = store.create( payload )
     if ok: return { "outcome": FILED, "status": status }
     if status is None or ( status == 422 and gated( body ) ): return { "outcome": QUEUED, "status": status }
@@ -183,8 +183,15 @@ class LiveStore:
         self.api_key  = client.read_api_key() if api_key is None else api_key
 
     def query( self, key ):
-        """Ensures: returns ( ok, status, body ) of the correlation key probe; never raises."""
-        return self.client.query_by_correlation_key( self.settings, self.api_key, key )
+        """
+        Look for any row that carries the correlation key, whatever its state.
+
+        Ensures:
+            - returns ( ok, status, body ) of one read that asks for every state, held rows included
+            - every row this job files is held, so a plain read never sees its own earlier rows
+            - never raises
+        """
+        return self.client.query_by_correlation_key( self.settings, self.api_key, key, every_state=True )
 
     def create( self, payload ):
         """Ensures: returns ( ok, status, body ) of the create; never raises."""

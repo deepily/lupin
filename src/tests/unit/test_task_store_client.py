@@ -177,6 +177,11 @@ class TestWireShape:
         assert req.full_url == "http://test:7999/api/tasks?correlation_key=cc-task%3Asid%3A1"
         assert ok is True
 
+    def test_query_for_every_state_adds_the_terminal_and_parked_switches( self, capture ):
+        capture[ "outcome" ] = FakeResponse( 200, '{"tasks": [], "count": 0}' )
+        tc.query_by_correlation_key( SETTINGS, "k", "cc-task:sid:1", every_state=True )
+        assert capture[ "request" ].full_url == "http://test:7999/api/tasks?correlation_key=cc-task%3Asid%3A1&include_terminal=true&hide_parked=false"
+
 
 class TestQueryBlockedUserRows:
     """be56bff8 — the per-USER gate-deferral source: full `blocked` rows for one

@@ -259,18 +259,23 @@ def query_tasks( settings, api_key, params ):
     return _request( "GET", f"{settings['api_base_url']}/api/tasks?{urllib.parse.urlencode( params )}", api_key, settings[ "timeout_seconds" ] )
 
 
-def query_by_correlation_key( settings, api_key, correlation_key ):
+def query_by_correlation_key( settings, api_key, correlation_key, every_state=False ):
     """
     GET /api/tasks?correlation_key=... (spool-replay idempotency probe).
 
     Requires:
         - correlation_key is a non-empty string
+        - every_state is a bool
 
     Ensures:
         - Returns ( ok, status_code, body ) — body is { tasks, count } on 200
+        - by default the store answers as it does for any un-status'd read: it withholds held (`not_approved`), terminal and park-active rows
+        - every_state adds include_terminal=true and hide_parked=false, so the read returns every row, the held ones included
         - Never raises
     """
-    query = urllib.parse.urlencode( { "correlation_key": correlation_key } )
+    params = { "correlation_key": correlation_key }
+    if every_state: params.update( include_terminal="true", hide_parked="false" )
+    query = urllib.parse.urlencode( params )
     return _request( "GET", f"{settings['api_base_url']}/api/tasks?{query}", api_key, settings[ "timeout_seconds" ] )
 
 
