@@ -208,6 +208,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-exit-review-gates-and-verdict-fit]] — the exit gate on reviewer rulings, the reuse review gating flag, and the verdict threshold receipt. `lupin_mcp` (reuse_exit_gate, reuse_review_gate, reuse_verdict_fit)
 - [[reuse-ledger-capacity-and-run-names]] — ledger run names, the run ceiling from a measured worst lookup, the seat capacity check, and the read-only ledger queries. `lupin_mcp` (reuse_ledger)
 - [[reuse-behaviour-weekly-page]] — the weekly fleet page of reuse lookups, outcome lines, refusals and audits, its week rules and cron lines. `lupin_mcp` (reuse_behaviour)
+- [[reuse-behaviour-duplicate-check-table]] — the daily duplicate check table on the weekly page: runs, judge calls, minutes, real against not duplicates and precision. `lupin_mcp` (reuse_behaviour)
 - [[duplicate-check-refile]] — files again the findings a saved daily-check result file holds, and records the answer in the file. `lupin_mcp` (duplicate_check_refile)
 - [[duplicate-check-filing]] — the store row for each duplicate the daily check finds: the date-free key, manager lookup, the retry spool and the live store client. `lupin_mcp` (duplicate_check_filing)
 - [[duplicate-check-daily-window]] — the daily check's commit window, the definitions new in it, the pool without their earlier versions, and how far a run advanced. `lupin_mcp` (duplicate_check_daily)

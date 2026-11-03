@@ -94,6 +94,7 @@ def test_a_report_from_a_seeded_refusals_file_and_call_log_equals_the_stated_tab
 
 
 AUDITS_ZERO = "| Audits | count |\n| --- | --- |\n| known-miss audits | 0 |\n| random-sample audits | 0 |"
+NO_RUNS     = "Daily duplicate check\n\n| date | trigger | commits judged | judge calls | minutes | findings | real duplicates | not duplicates | no verdict yet | precision (real of ruled) |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| total |  | 0 | 0 | 0.0 | 0 | 0 | 0 | 0 | 0/0 (n/a) |"
 TITLE       = "Reuse behaviour, 2026-10-27 to 2026-11-02 (seven days, the whole fleet, no seat named)"
 
 
@@ -107,7 +108,7 @@ def test_the_command_prints_the_same_report_from_the_two_files( tmp_path, utc ):
     seed( tmp_path, calls(), rows() )
     out = io.StringIO()
     assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02" ], out=out ) == 0
-    assert out.getvalue().strip() == f"{TITLE}\n\n{EXPECTED}\n\n{AUDITS_ZERO}"
+    assert out.getvalue().strip() == f"{TITLE}\n\n{EXPECTED}\n\n{AUDITS_ZERO}\n\n{NO_RUNS}"
     out2 = io.StringIO()
     elsewhere = tmp_path / "logs-elsewhere"
     ( tmp_path / "call-log" ).rename( elsewhere )
