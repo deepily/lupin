@@ -113,3 +113,25 @@ def test_the_skill_names_every_blocking_kind_the_gate_knows_and_the_could_not_ch
     for kind in gate.REUSE_KINDS: assert f"`{kind}`" in text
     assert "`docstring_lint`" in text and "Exit code 3 means the gate could not check" in text and str( gate.EXIT_COULD_NOT_CHECK ) in text
     assert "A finding with no kind blocks" in text
+
+
+def test_the_skill_tells_the_reader_to_read_reject_and_what_the_gate_prints_for_an_empty_or_lint_only_list( tmp_path ):
+    text = SKILL.read_text( encoding="utf-8" )
+    assert "**Read the `reject` field, not `mode`.**" in text
+    flat = " ".join( text.split() )
+    assert "an empty list and a list of linter findings only both print the mode `reject` with `reject` false. Both exit 0." in flat
+    lint = [ f for f in _sample_findings() if gate.kind_of( f ) == gate.ADVISORY_KIND ]
+    assert lint
+    for findings in ( [ ], lint ):                                                   # the two cases the skill describes
+        path = tmp_path / "findings.json"; path.write_text( json.dumps( findings ), encoding="utf-8" )
+        out  = io.StringIO()
+        assert gate.main( [ "--findings", str( path ), "--ini", _ini( tmp_path, "true" ) ], out=out ) == 0
+        verdict = json.loads( out.getvalue() )
+        assert ( verdict[ "mode" ], verdict[ "reject" ] ) == ( "reject", False )
+
+
+def test_the_skill_pins_the_sentences_that_say_what_exit_3_and_a_linter_finding_do():
+    text = SKILL.read_text( encoding="utf-8" )
+    assert "Treat exit 3 as not passed: the diff does not go through" in text
+    assert "A linter finding is advisory." in text
+    assert "A linter finding blocks" not in text and "Treat exit 3 as a pass" not in text

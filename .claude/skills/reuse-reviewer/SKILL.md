@@ -174,10 +174,11 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    python -m lupin_mcp.reuse_review_gate --findings findings.json
    ```
 
-   It prints JSON with `mode`, `reject`, `count`, `blocking` and `findings`. With the flag false the mode is
-   `report-only`: list the findings in the review and reject nothing. With the flag true and a blocking
-   finding left, the mode is `reject`. Exit code 1 means reject. A list of linter findings only is never rejected;
-   an empty list `[]` is valid and answers `report-only`, `count` 0.
+   It prints JSON with `mode`, `reject`, `count`, `blocking` and `findings`. **Read the `reject` field, not `mode`.**
+   The `mode` only says how the flag read. It is `report-only` for false and `reject` for true. The `reject` field is true only
+   when the flag is true and a blocking finding is left. With the flag true, an empty list and a list of linter findings
+   only both print the mode `reject` with `reject` false. Both exit 0. With the flag false, list the findings in the review
+   and reject nothing. Exit code 1 means reject. An empty list `[]` is valid input, with `count` 0.
 
    **Exit code 3 means the gate could not check.** The key is absent, doubled, unreadable or not `true` or `false`.
    The output says `could-not-check`. Treat exit 3 as not passed: the diff does not go through, before and after the flip alike.
