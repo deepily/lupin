@@ -117,6 +117,20 @@ def write_pending( folder, payloads ):
     path.write_text( "".join( json.dumps( p, sort_keys=True ) + "\n" for p in payloads ), encoding="utf-8" )
 
 
+def gated( body ):
+    """
+    Say whether a store answer is the ratio gate's refusal.
+
+    Requires:
+        - body is the dict a store client returns for a refusal
+    Ensures:
+        - returns True when GATED_PHRASE is in the body's `detail`, where the store puts a 422's text, or in its `error`, where the client wraps a body that is not an object
+        - the test is on the text of the value, so a `detail` list or dict whose text holds the phrase counts, and one that does not hold it does not
+        - returns False for any other body
+    """
+    return any( GATED_PHRASE in str( body.get( key, "" ) ) for key in ( "detail", "error" ) )
+
+
 def send_row( payload, store ):
     """
     Put one row in the store unless its key is already there.
@@ -124,7 +138,7 @@ def send_row( payload, store ):
     Requires:
         - store has query( correlation_key ) and create( payload ), each returning ( ok, status, body ) and never raising
     Ensures:
-        - returns { outcome, status }: already_filed when the key has a row, filed on a 201, queued_for_retry on a transport failure or a ratio gate refusal, refused on any other verdict
+        - returns { outcome, status }: already_filed when the key has a row, filed on a 201, queued_for_retry on a transport failure or a ratio gate refusal (see gated), refused on any other verdict
         - a transport failure on the probe queues the row, because a row filed twice is worse than one filed late
     """
     ok, status, body = store.query( payload[ "correlation_key" ] )
@@ -132,7 +146,7 @@ def send_row( payload, store ):
     if ok and body.get( "count", 0 ) > 0: return { "outcome": ALREADY, "status": status }
     ok, status, body = store.create( payload )
     if ok: return { "outcome": FILED, "status": status }
-    if status is None or ( status == 422 and GATED_PHRASE in str( body.get( "error", "" ) ) ): return { "outcome": QUEUED, "status": status }
+    if status is None or ( status == 422 and gated( body ) ): return { "outcome": QUEUED, "status": status }
     return { "outcome": REFUSED, "status": status, "detail": str( body )[ :300 ] }
 
 
