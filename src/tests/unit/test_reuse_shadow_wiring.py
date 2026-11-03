@@ -19,6 +19,8 @@ from lupin_mcp import reuse_shadow as rs
 from lupin_mcp import reuse_tools
 
 from test_librarian_tick import cron  # noqa: F401  (fixture: the fake crontab and the fake lock)
+from tests.unit.test_reuse_pack_route import env, no_jev_key  # noqa: F401  (fixtures: a fixture repository with its data and index folders, and no Jev key)
+from tests.unit.test_reuse_tools import NEED, Recorder, ctx_for
 
 SET_ID   = "gen-1"
 INDEX = "idx-1"
@@ -406,3 +408,27 @@ class TestMain:
         monkeypatch.setenv( "LUPIN_ROOT", world[ "root" ] )
         assert rs.main( [ "--print-install" ] ) == 0
         assert rs.CRON_TAG in capsys.readouterr().out
+
+
+class TestTheRealUnknownEntryAnswer:
+    """The drop rule against the real lookup tool's words, not an error written by hand."""
+
+    def test_the_real_unknown_entry_answer_through_sweep_of_drops_the_item_on_its_third_attempt( self, env, tmp_path ):
+        data     = tmp_path / "audit"
+        sweep    = rs.sweep_of( lambda name: ctx_for( env, Recorder() ), reuse_tools.unstored_need_impl )
+        real     = reuse_tools.unstored_need_impl( NEED, "no.such.id", ctx_for( env, Recorder() ), language="py" )
+        assert real == { "status": "error", "error": "UNKNOWN_ENTRY", "entry": "no.such.id" }, "the tool's own answer, before any request"
+        sa.enqueue_pending( data, NEED, "py", SET_ID, INDEX, LIVE, DAY, known_miss=True, exclude_id="no.such.id", tie="ruling" )
+        outs = [ sa.run_pending( data, sweep, DAY, pass_language=True ) for _ in range( sa.UNKNOWN_ENTRY_TRIES ) ]
+        assert [ o[ "dropped" ] for o in outs ] == [ 0, 0, 1 ] and [ o[ "failed" ] for o in outs ] == [ 1, 1, 1 ]
+        assert queue_files( data ) == [], "gone on the third attempt, with no receipt"
+
+    def test_the_drop_is_red_when_sweep_of_wraps_the_error_text_differently( self, env, tmp_path, monkeypatch ):
+        data  = tmp_path / "audit"
+        real  = reuse_tools.unstored_need_impl
+        wrapped = lambda need, exclude, ctx, **kw: { **real( need, exclude, ctx, **kw ), "error": "error: UNKNOWN_ENTRY" }
+        sweep = rs.sweep_of( lambda name: ctx_for( env, Recorder() ), wrapped )
+        sa.enqueue_pending( data, NEED, "py", SET_ID, INDEX, LIVE, DAY, known_miss=True, exclude_id="no.such.id" )
+        outs = [ sa.run_pending( data, sweep, DAY, pass_language=True ) for _ in range( sa.UNKNOWN_ENTRY_TRIES + 1 ) ]
+        assert [ o[ "dropped" ] for o in outs ] == [ 0 ] * ( sa.UNKNOWN_ENTRY_TRIES + 1 ) and len( queue_files( data ) ) == 1, "a different wording is never dropped"
+
