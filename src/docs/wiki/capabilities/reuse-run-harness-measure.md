@@ -20,7 +20,8 @@ The pilot pair sizes the cap and says how many pairs one machine can run (plan 3
 - `working_days` and `wall_hours` since the first slice began. The clock starts after the arm proof, so set-up is not counted.
 - `cpu_seconds` and `peak_rss_bytes` from `Meter.read`. They cover the commands the harness has finished. The memory figure is the largest single process, not a sum of overlapping ones.
 - `server_peak_rss_bytes` and `server_peak_cpu_percent`: the largest `Servers.sample` reading so far. A reading that failed leaves the peak as it was. A run with no reading logs `None`.
-- `peak_seats`: the largest `seats` any slice reported. It is a lower bound, because a background subagent that spans messages is not counted. The tool names `Agent` and `Task` are an assumption until a live pilot shows them.
+- `peak_seats`: the largest `seats` any slice reported. It is a lower bound: a background subagent that spans messages is not counted. A slice cut off by its limit counts the calls it printed. The tool names `Agent` and `Task` are an assumption until a live pilot shows them.
+- The stop record names `working_zone` and carries `measure.NOTES`, so the log states its own limits.
 
 ## Working days
 - `working_seconds` counts the seconds that fall on a weekday in the `app timezone` zone. A Saturday or Sunday adds nothing. Nights count, because the harness cannot pause a run and cannot know when the host was off.

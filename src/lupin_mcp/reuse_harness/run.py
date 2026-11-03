@@ -156,7 +156,7 @@ def run_one( spec, ports ):
         - the session never starts before the arm is proven and the database is the run's own and fresh
         - the clock starts after the arm proof, so the time measured is the time to build, not to set up
         - a scored slice is given the seat hours that remain under the cap; a pilot slice is given the working hours that remain under the guard
-        - one log record per verdict, with the run, arm label, model id, server commit, seat hours so far, the pass count and the measurements so far, and one stop record
+        - one log record per verdict, with the run, arm label, model id, server commit, seat hours so far, the pass count and the measurements so far, and one stop record that also names working_zone and the notes of measure.NOTES
         - the run stops at the first verdict where every test passes (all_pass), else for a pilot when GUARD_WORKING_DAYS are used (guard_working_days), else for a scored run when the seat hours reach the cap (cap), else when the session reports it has finished (session_ended)
         - the server and its database are stopped on every exit, including a failure
         - returns { run, passing_tests, pass_rate, client_builds, stop, seat_hours, pilot, working_days, time_to_all_pass_working_days, wall_hours, cpu_seconds, peak_rss_bytes, server_peak_rss_bytes, server_peak_cpu_percent, peak_seats }
@@ -212,7 +212,8 @@ def run_one( spec, ports ):
                 continue
             break
         to_pass = measured[ "working_days" ] if stop == STOP_ALL_PASS else None
-        ports.log.write( _record( spec, config, "stop", stop=stop, seat_hours=seat_hours, pilot=pilot, time_to_all_pass_working_days=to_pass, **measured ) )
+        ports.log.write( _record( spec, config, "stop", stop=stop, seat_hours=seat_hours, pilot=pilot, time_to_all_pass_working_days=to_pass,
+                                  working_zone=ports.clock.zone, notes=list( measure.NOTES ), **measured ) )
         return { "run" : spec[ "run_id" ], "passing_tests" : passing, "pass_rate" : passing / len( test_ids ), "client_builds" : outcome[ "client_builds" ],
                  "stop" : stop, "seat_hours" : seat_hours, "pilot" : pilot, "time_to_all_pass_working_days" : to_pass, **measured }
     finally:

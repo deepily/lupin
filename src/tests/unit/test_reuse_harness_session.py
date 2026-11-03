@@ -368,3 +368,23 @@ def test_the_real_init_event_offers_no_reuse_tool_because_that_environment_had_n
     for surface in arms.SURFACES[ :3 ]:
         assert session.surface_listed( REAL_INIT, surface ) is False
         assert session.surface_answered( json.dumps( REAL_INIT ), surface ) is False
+
+
+SLOW_CLAUDE = '''#!{python}
+import json, sys, time
+print( json.dumps( {{ "type" : "system", "subtype" : "init", "tools" : [], "skills" : [] }} ), flush=True )
+calls = [ {{ "type" : "tool_use", "id" : f"a{{n}}", "name" : "Agent", "input" : {{}} }} for n in range( 3 ) ]
+print( json.dumps( {{ "type" : "assistant", "message" : {{ "content" : calls }} }} ), flush=True )
+time.sleep( 30 )
+'''
+
+
+def test_a_slice_cut_off_by_its_time_limit_still_counts_the_subagents_it_started_before_the_cut( tmp_path ):
+    """A subprocess prints three parallel Agent calls, then overruns: seats read 1 + 3."""
+    script = tmp_path / "claude"
+    script.write_text( SLOW_CLAUDE.format( python=sys.executable ) )
+    script.chmod( script.stat().st_mode | stat.S_IXUSR )
+    sessions = session.Sessions( "k", claude=str( script ), environ=dict( os.environ ), slice_hours=2.0 / 3600 )
+    sessions.bind( str( tmp_path ), HANDLE )
+    work = sessions.work( WITH, str( tmp_path ), HANDLE, 10 )
+    assert work[ "seats" ] == 4 and work[ "finished" ] is False and sessions.stops == 0

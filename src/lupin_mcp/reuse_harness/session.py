@@ -194,7 +194,7 @@ class Sessions:
             - the first slice starts the session with the brief; each later slice resumes it
             - the slice is stopped at min( slice length, remaining hours )
             - returns { seat_hours, finished, seats }; seat_hours is the wall time times the seats
-            - seats is the configured seats plus the most subagent calls the slice made in one message (the output of a slice cut off by its time limit holds no stream, so it adds none)
+            - seats is the configured seats plus the most subagent calls the slice made in one message (a slice cut off by its time limit counts the calls it printed before the cut)
             - finished is true once the session has stopped on its own STOPS_TO_FINISH times in a row; a slice stopped by its time limit resets the count
 
         Raises:
