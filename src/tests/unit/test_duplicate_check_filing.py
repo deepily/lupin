@@ -116,12 +116,60 @@ def test_a_failed_probe_queues_the_row_without_creating_one_so_a_row_is_never_fi
     assert len( got[ "queued_for_retry" ] ) == 1 and store.created == [ ]
 
 
-def test_a_ratio_gate_refusal_keeps_the_row_for_the_next_run( tmp_path ):
-    gated = Store( create=( False, 422, { "error": f"{ff.GATED_PHRASE}: in the last window the fleet created 9 and closed 0." } ) )
+def store_422( detail ):
+    """
+    Ensures: returns the body of a real 422 raised as the task router raises it.
+
+    A minimal FastAPI app raises HTTPException( 422, detail ) exactly as routers/tasks.py does, and FastAPI
+    serialises it. The body is read back from the response, never written by hand.
+    """
+    from fastapi import FastAPI, HTTPException
+    from fastapi.testclient import TestClient
+    app = FastAPI()
+
+    @app.post( "/create" )
+    def create():
+        """Ensures: raises the 422 the router raises."""
+        raise HTTPException( status_code=422, detail=detail )
+
+    reply = TestClient( app ).post( "/create" )
+    assert reply.status_code == 422
+    return reply.json()
+
+
+def gated_text():
+    """Ensures: returns the refusal text the store's ratio gate gives."""
+    return rules.ratio_gate_advisory( 377, 314, allow_below=1.20 )
+
+
+def test_the_real_gated_422_body_carries_the_phrase_under_detail_as_the_live_result_file_shows():
+    body = store_422( gated_text() )
+    assert list( body ) == [ "detail" ] and str( body ).startswith( "{'detail': 'New tickets are gated: in the last window THE FLEET created 377 and closed 314" )
+
+
+def test_a_gated_422_in_the_real_body_shape_keeps_the_row_for_the_next_run( tmp_path ):
+    gated = Store( create=( False, 422, store_422( gated_text() ) ) )
     got   = run_once( tmp_path, [ finding() ], gated )
-    assert len( got[ "queued_for_retry" ] ) == 1 and got[ "queued_for_retry" ][ 0 ][ "status" ] == 422 and len( ff.read_pending( tmp_path ) ) == 1
+    assert len( got[ "queued_for_retry" ] ) == 1 and got[ "queued_for_retry" ][ 0 ][ "status" ] == 422 and got[ "refused" ] == [ ] and len( ff.read_pending( tmp_path ) ) == 1
     again = run_once( tmp_path, [ finding() ], Store() )
     assert len( again[ "filed" ] ) == 1 and not ( tmp_path / ff.PENDING_FILE ).exists()
+
+
+def test_a_gated_422_the_client_wrapped_under_error_keeps_the_row_for_the_next_run( tmp_path ):
+    gated = Store( create=( False, 422, { "error": f"{ff.GATED_PHRASE}: in the last window the fleet created 9 and closed 0." } ) )
+    got   = run_once( tmp_path, [ finding() ], gated )
+    assert len( got[ "queued_for_retry" ] ) == 1 and got[ "refused" ] == [ ] and len( ff.read_pending( tmp_path ) ) == 1
+
+
+@pytest.mark.parametrize( "detail", [ { "errors": [ "owner_persona is not a persona" ] }, "a title is required", "Rows are gated by something else" ] )
+def test_any_other_422_in_the_real_body_shape_is_refused_and_not_retried( tmp_path, detail ):
+    got = run_once( tmp_path, [ finding() ], Store( create=( False, 422, store_422( detail ) ) ) )
+    assert len( got[ "refused" ] ) == 1 and got[ "queued_for_retry" ] == [ ] and not ( tmp_path / ff.PENDING_FILE ).exists()
+
+
+def test_the_phrase_under_any_other_status_is_refused_not_queued( tmp_path ):
+    got = run_once( tmp_path, [ finding() ], Store( create=( False, 403, { "detail": f"{ff.GATED_PHRASE}: a worker may not." } ) ) )
+    assert len( got[ "refused" ] ) == 1 and got[ "queued_for_retry" ] == [ ]
 
 
 def test_the_store_ratio_gate_still_opens_its_refusal_with_the_phrase_the_filing_looks_for():
