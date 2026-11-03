@@ -12,6 +12,7 @@ from cosa.repo.duplicate_check import judge as jd
 from cosa.repo.duplicate_check.proof import proof_cli
 from lupin_mcp import duplicate_check_daily as dd
 from tests.unit.test_duplicate_check_score_run import JSCPD, SCRUB, FakeBackend, FakeClient, function
+from tests.unit.test_librarian_tick import cron   # noqa: F401  (fixture: the fake crontab and the fake lock)
 
 NOW = datetime.datetime( 2026, 11, 3, 12, 0, tzinfo=datetime.timezone.utc )
 
@@ -268,3 +269,88 @@ def test_git_names_the_command_when_it_fails( tmp_path ):
 def test_the_live_parts_are_built_without_a_call():
     parts = dd.live_parts()
     assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural" } and callable( parts[ "structural" ] )
+
+
+def lines_of( **over ):
+    """Ensures: returns the cron lines for a fixed root, interpreter, log, cap and binary."""
+    args = dict( root="/main", python="/py", log_path="/log/daily.log", cap=40, cli_path="/bin/claude" )
+    return dd.cron_lines( **{ **args, **over } )
+
+
+def test_the_daily_line_runs_at_twelve_oh_seven_with_trigger_cron_and_the_reboot_line_waits_after_a_boot_with_trigger_reboot():
+    daily, reboot = lines_of()
+    tail = "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --cap 40 --claude-cli-path /bin/claude --trigger {} >> /log/daily.log 2>&1 # duplicate-check-daily"
+    assert daily == "7 12 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
+
+
+def test_the_cron_lines_carry_the_named_environment_shell_quoted_and_nothing_else():
+    daily, reboot = lines_of( carried={ "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/c block=Lupin:+Dev x", "DEEPILY_DATA_DIR": "/mnt/d" } )
+    for line in ( daily, reboot ):
+        assert "LUPIN_CONFIG_MGR_CLI_ARGS='config_path=/c block=Lupin:+Dev x' DEEPILY_DATA_DIR=/mnt/d /py -m" in line
+    assert "DEEPILY_DATA_DIR" not in lines_of()[ 0 ]
+
+
+def test_the_schedule_is_thirty_minutes_after_the_shadow_audit_drain():
+    from lupin_mcp import reuse_shadow
+    assert reuse_shadow.CRON_SCHEDULE == "37 11 * * *" and dd.CRON_SCHEDULE == "7 12 * * *"
+
+
+def cron_main( tmp_path, argv, cron, environ=None ):
+    """Ensures: runs main in a cron mode and returns ( code, stdout lines, stderr lines )."""
+    out, err = [], []
+    code = dd.main( argv, environ={ "LUPIN_ROOT": str( tmp_path ), **( environ or { } ) }, out=out.append, err=err.append, crontab_cmd=cron[ "cmd" ] )
+    return code, out, err
+
+
+def test_print_install_prints_both_lines_and_changes_nothing( tmp_path, cron ):
+    code, out, _ = cron_main( tmp_path, [ "--print-install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron, { "LUPIN_CONFIG_MGR_CLI_ARGS": "a b" } )
+    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 2 and "LUPIN_CONFIG_MGR_CLI_ARGS='a b'" in out[ 0 ] and not cron[ "file" ].exists()
+
+
+def test_install_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron ):
+    cron[ "file" ].write_text( "0 * * * * other\n" )
+    argv = [ "--install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ]
+    assert cron_main( tmp_path, argv, cron, cron[ "env" ] )[ :2 ] == ( 0, [ "installed: 2 lines" ] )
+    assert "lock-enter " + dd.LOCK_OWNER in cron[ "log" ].read_text()
+    assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 2 lines" ]
+    assert cron_main( tmp_path, [ "--uninstall" ], cron, cron[ "env" ] )[ 1 ] == [ "uninstalled" ]
+    text = cron[ "file" ].read_text()
+    assert text.strip() == "0 * * * * other", "only the other line is left, and nothing was added"
+    assert list( ( tmp_path / "io" / "duplicate-check-daily" / "crontab-backups" ).iterdir() ), "a backup is written before each change"
+
+
+def test_status_says_not_installed_when_there_is_no_crontab( tmp_path, cron ):
+    assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "not installed" ]
+
+
+def test_an_install_without_the_shared_lock_is_refused_with_one_and_the_reason( tmp_path, cron ):
+    code, out, err = cron_main( tmp_path, [ "--install", "--cap", "40", "--claude-cli-path", "/bin/claude" ], cron, { } )
+    assert code == 1 and err[ 0 ].startswith( "duplicate-check-daily:" ) and out == [ ] and not cron[ "file" ].exists()
+
+
+def test_the_cron_modes_that_build_lines_need_a_cap_and_status_and_uninstall_do_not( tmp_path, cron ):
+    for mode in ( "--print-install", "--install" ):
+        with pytest.raises( SystemExit ):
+            cron_main( tmp_path, [ mode ], cron, cron[ "env" ] )
+    assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 0 ] == 0
+
+
+def test_the_cron_modes_never_run_the_check( tmp_path, cron, monkeypatch ):
+    monkeypatch.setattr( dd, "run", lambda *a, **k: pytest.fail( "the check ran" ) )
+    monkeypatch.setattr( dd, "live_parts", lambda: pytest.fail( "the live parts were built" ) )
+    assert cron_main( tmp_path, [ "--print-install", "--cap", "1", "--claude-cli-path", "/b" ], cron )[ 0 ] == 0
+
+
+def test_the_root_of_the_cron_lines_falls_back_to_the_working_directory( tmp_path, cron, monkeypatch ):
+    monkeypatch.chdir( tmp_path )
+    out = []
+    assert dd.main( [ "--print-install", "--cap", "1", "--claude-cli-path", "/b" ], environ={ }, out=out.append ) == 0 and f"cd {tmp_path} &&" in out[ 0 ]
+
+
+def test_the_default_err_goes_to_standard_error_and_the_default_cron_command_is_crontab( tmp_path, cron, capsys, monkeypatch ):
+    monkeypatch.setattr( dd.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess( cmd, 0, stdout="", stderr="" ) if cmd[ 0 ] == "crontab" else pytest.fail( cmd ) )
+    out = []
+    assert dd.main( [ "--status" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append ) == 0 and out == [ "not installed" ]
+    assert dd.main( [ "--install", "--cap", "1", "--claude-cli-path", "/b" ], environ={ "LUPIN_ROOT": str( tmp_path ) }, out=out.append, crontab_cmd=cron[ "cmd" ] ) == 1
+    assert "duplicate-check-daily:" in capsys.readouterr().err
+

@@ -9,7 +9,9 @@ import argparse
 import contextlib
 import datetime
 import json
+import os
 import pathlib
+import shlex
 import subprocess
 import sys
 import time
@@ -19,6 +21,7 @@ from cosa.repo.duplicate_check import cluster, extract, pipeline
 from cosa.repo.duplicate_check import config as cfg_mod
 from cosa.repo.duplicate_check import errors as err
 from cosa.repo.duplicate_check.proof import label_prep, proof_cli
+from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import vector_build
 from lupin_mcp.reuse_needset import source_at
 
@@ -34,6 +37,12 @@ PREREQ_EMBEDDINGS = "embedding_endpoint"
 PREREQ_BINARY     = "claude_binary"
 PREREQ_FROZEN     = "frozen_config"
 UNREADABLE        = "unreadable"
+CRON_TAG          = "# duplicate-check-daily"
+CRON_SCHEDULE     = "7 12 * * *"      # 12:07, 30 minutes after the 11:37 shadow audit drain
+BOOT_DELAY        = 300               # seconds the host waits after a boot before the reboot line runs
+LOG_NAME          = "daily.log"
+LOCK_OWNER        = "duplicate-check-daily"
+CARRIED           = ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR" )     # names copied into the cron lines from the installer's environment
 
 
 class Counting:
@@ -233,6 +242,63 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     return doc
 
 
+def cron_lines( root, python, log_path, cap, cli_path, carried=None ):
+    """
+    Build the two cron lines of the daily check.
+
+    Requires:
+        - root is the main checkout path; python is the interpreter path; cap is a whole number of judge calls; cli_path is the Claude Code binary
+        - carried maps environment names to values, copied into both lines and shell-quoted
+    Ensures:
+        - returns [ daily line, reboot line ], each ending with CRON_TAG
+        - the daily line runs at CRON_SCHEDULE with trigger cron, the reboot line BOOT_DELAY seconds after a boot with trigger reboot
+        - both run from root with LUPIN_ROOT and PYTHONPATH set, append to log_path, and carry the cap and the binary
+    """
+    extra = "".join( f"{name}={shlex.quote( value )} " for name, value in ( carried or {} ).items() )
+
+    def run( trigger ):
+        """Ensures: returns the shell command of one line, its trigger named."""
+        return ( f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {extra}{python} -m lupin_mcp.duplicate_check_daily "
+                 f"--cap {cap} --claude-cli-path {cli_path} --trigger {trigger} >> {log_path} 2>&1 {CRON_TAG}" )
+
+    return [ lt.cron_lines_for( run( "cron" ), CRON_SCHEDULE, BOOT_DELAY )[ 0 ], lt.cron_lines_for( run( "reboot" ), CRON_SCHEDULE, BOOT_DELAY )[ 1 ] ]
+
+
+def install_mode( args, environ, now, out, err, crontab_cmd ):
+    """
+    Print, install, remove or report the cron lines.
+
+    Requires:
+        - args holds the parsed flags; exactly one of print_install, install, uninstall or status is set; out and err take one line of text
+    Ensures:
+        - --print-install prints the two lines and changes nothing; --install and --uninstall go through the librarian's locked crontab editor with this job's tag and owner
+        - --status says whether the lines are present
+        - returns 0, or 1 with the reason on err when the install is refused or the crontab call fails
+    """
+    root    = args.root or environ.get( "LUPIN_ROOT" ) or str( pathlib.Path.cwd() )
+    log_dir = f"{root}{proof_cli.DATA_RELATIVE}/{FOLDER[ 0 ]}"
+    cmd     = crontab_cmd or [ environ.get( "DUPLICATE_CHECK_DAILY_CRONTAB", "crontab" ) ]
+    try:
+        if args.status:
+            read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
+            out( lt.status_text( read.stdout if read.returncode == 0 else "", CRON_TAG ) )
+            return 0
+        if args.uninstall:
+            lt.edit_crontab( [], environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
+            out( "uninstalled" )
+            return 0
+        lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) } )
+        if args.print_install:
+            out( "\n".join( lines ) )
+            return 0
+        lt.edit_crontab( lines, environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
+        out( "installed: 2 lines" )
+        return 0
+    except ( lt.InstallRefused, RuntimeError ) as e:
+        err( f"duplicate-check-daily: {e}" )
+        return 1
+
+
 def live_parts():
     """
     Build the parts a real run uses.
@@ -247,23 +313,31 @@ def live_parts():
              "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ) }
 
 
-def main( argv=None, parts=None, now=None, out=print ):
+def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, crontab_cmd=None ):
     """
     Run the daily check from the command line.
 
     Requires:
-        - argv holds --cap ( judge calls, required, no default ), --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch and --parallel
+        - argv holds --cap ( judge calls, no default, needed to run or to print or install the cron lines ) and --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch and --parallel
+        - one of --print-install, --install, --uninstall or --status, with --python, works on the cron lines instead of running
     Ensures:
         - prints the result document as JSON and returns 0, or 1 when a prerequisite failed
+        - the cron modes never run the check
     """
     ap = argparse.ArgumentParser( description="Judge the day's new definitions for duplicates." )
-    ap.add_argument( "--cap", type=int, required=True )
+    ap.add_argument( "--cap", type=int, default=None )
     ap.add_argument( "--claude-cli-path", default=None )
     ap.add_argument( "--root", default=None )
     ap.add_argument( "--trigger", default="hand", choices=TRIGGERS )
     ap.add_argument( "--branch", default=BRANCH )
     ap.add_argument( "--parallel", type=int, default=proof_cli.DEFAULT_PARALLEL )
+    ap.add_argument( "--python", default=sys.executable )
+    mode = ap.add_mutually_exclusive_group()
+    for flag in ( "--install", "--uninstall", "--status", "--print-install" ): mode.add_argument( flag, action="store_true" )
     args = ap.parse_args( argv )
+    cron = args.install or args.uninstall or args.status or args.print_install
+    if args.cap is None and not ( args.uninstall or args.status ): ap.error( "--cap is required: the daily check has no default cap" )
+    if cron: return install_mode( args, os.environ if environ is None else environ, now or datetime.datetime.now(), out, err or ( lambda line: print( line, file=sys.stderr ) ), crontab_cmd )
     model_transport.configure( args.claude_cli_path )
     root = args.root or git( ".", "rev-parse", "--show-toplevel" )
     with contextlib.redirect_stdout( sys.stderr ):
