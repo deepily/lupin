@@ -5,6 +5,7 @@ The counts come from three places.
 The call log shows what lookups were made. The file refusals.jsonl shows what each outcome line was and why it was refused.
 The audit receipts of the shadow audit show the audits; the receipt's own flag tells known-miss from random-sample.
 One report is one week: the seven calendar days that end on a given date, read in the host's time zone.
+With no date given, the week is the last complete Monday-to-Sunday one, so pages follow one another with no lookup between them.
 A record whose time cannot be read is left out of every count and listed on its own row, never guessed into a week.
 No table has a column for a seat or a person; the page counts the fleet.
 The tables are drawn by report_rollup.counts_table in its plain form. Nothing here sends anything or runs a model.
@@ -161,6 +162,19 @@ def week_of( end ):
     return last - datetime.timedelta( days=WEEK_DAYS - 1 ), last
 
 
+def last_complete_week_end( today ):
+    """
+    Name the Sunday that closes the last complete Monday-to-Sunday week.
+
+    Requires:
+        - today is a date
+    Ensures:
+        - returns the latest Sunday before today, so a Sunday is not its own week's end: that week is not over until the day ends
+        - every day from one Monday to the next Sunday gives the same answer, so a boot on any of them reports the week the cron run reports
+    """
+    return today - datetime.timedelta( days=( today.weekday() + 1 ) % 7 or 7 )
+
+
 def day_of( stamp, tz ):
     """
     Read the calendar day of an ISO time stamp in a time zone.
@@ -240,6 +254,7 @@ def cron_lines( root, python, log_path, carried=None ):
     Ensures:
         - returns [ weekly line, reboot line ], each ending with CRON_TAG
         - the weekly line runs at CRON_SCHEDULE; the reboot line BOOT_DELAY seconds after a boot, so a Monday the host slept through is made at the next boot
+        - both read the same week and write the same file, because the page's default end date is the same on every day of one week
         - both run from root with LUPIN_ROOT and PYTHONPATH set, write the page with --write and append to log_path
     """
     extra = "".join( f"{name}={shlex.quote( value )} " for name, value in ( carried or {} ).items() )
@@ -252,14 +267,14 @@ def main( argv=None, out=None ):
     Run the weekly page from the command line.
 
     Ensures:
-        - prints the weekly page for the seven days that end on --end, which defaults to today
+        - prints the weekly page for the seven days that end on --end, which defaults to the last complete week's Sunday
         - --data-dir holds refusals.jsonl, the receipts folder and, unless --log-dir says otherwise, the call-log folder; it defaults to the lookup tools' choice
         - --write also saves the page as <data dir>/reuse-behaviour/reuse-behaviour-<end>.txt, replacing that day's file
         - --print-cron prints the two cron lines and nothing else; it installs nothing
         - returns 0 when the page was made, 3 with the reason printed when it could not be
     """
     ap = argparse.ArgumentParser( description="The weekly fleet page of the reuse checks." )
-    ap.add_argument( "--end", default=None, help="the last of the seven days, as YYYY-MM-DD; default is today" )
+    ap.add_argument( "--end", default=None, help="the last of the seven days, as YYYY-MM-DD; default is the Sunday that closes the last complete week" )
     ap.add_argument( "--data-dir", default=None )
     ap.add_argument( "--log-dir", default=None, help="the call log folder; default is <data dir>/call-log" )
     ap.add_argument( "--write", action="store_true", help="also save the page under the data folder" )
@@ -276,7 +291,7 @@ def main( argv=None, out=None ):
         print( "\n".join( cron_lines( root, a.python, a.log_path ) ), file=out )
         return 0
     try:
-        end   = a.end if a.end is not None else datetime.datetime.now().astimezone().date().isoformat()
+        end   = a.end if a.end is not None else last_complete_week_end( datetime.datetime.now().astimezone().date() ).isoformat()
         end   = week_of( end )[ 1 ].isoformat()
         data  = pathlib.Path( a.data_dir or rr.default_data_dir( root ) )
         records, _bad = eg.merge_call_logs( a.log_dir or data / "call-log" )

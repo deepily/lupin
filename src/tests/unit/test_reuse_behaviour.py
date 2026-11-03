@@ -282,15 +282,48 @@ def test_write_saves_the_page_under_the_data_folder_by_its_end_date_and_replaces
     assert page.read_text( encoding="utf-8" ) == out.getvalue() and "| known-miss audits | 1 |" in out.getvalue() and "| random-sample audits | 1 |" in out.getvalue()
     page.write_text( "stale", encoding="utf-8" )
     assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02", "--write" ], out=io.StringIO() ) == 0 and page.read_text( encoding="utf-8" ) != "stale"
-    assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02" ], out=io.StringIO() ) == 0 and len( list( ( tmp_path / rb.PAGE_FOLDER ).iterdir() ) ) == 1, "without --write nothing more is saved"
+    assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "2026-11-02" ], out=io.StringIO() ) == 0 and len( list( ( tmp_path / rb.PAGE_FOLDER ).iterdir() ) ) == 1, "a run without --write adds no page"
 
 
-def test_the_end_date_defaults_to_today( tmp_path, utc ):
+def test_the_end_date_defaults_to_the_sunday_that_closes_the_last_complete_week( tmp_path, utc ):
     seed( tmp_path, calls(), rows() )
-    before = datetime.datetime.now().astimezone().date().isoformat()
+    before = rb.last_complete_week_end( datetime.datetime.now().astimezone().date() ).isoformat()
     assert rb.main( [ "--data-dir", str( tmp_path ), "--write" ], out=io.StringIO() ) == 0
-    after  = datetime.datetime.now().astimezone().date().isoformat()
-    assert [ p.name for p in ( tmp_path / rb.PAGE_FOLDER ).iterdir() ] in ( [ f"reuse-behaviour-{before}.txt" ], [ f"reuse-behaviour-{after}.txt" ] )
+    after  = rb.last_complete_week_end( datetime.datetime.now().astimezone().date() ).isoformat()
+    names  = [ p.name for p in ( tmp_path / rb.PAGE_FOLDER ).iterdir() ]
+    assert names in ( [ f"reuse-behaviour-{before}.txt" ], [ f"reuse-behaviour-{after}.txt" ] )
+    assert datetime.date.fromisoformat( names[ 0 ][ 16:26 ] ).weekday() == 6, "the page is named by a Sunday"
+
+
+@pytest.mark.parametrize( "today, end", [ ( "2026-11-02", "2026-11-01" ),      # Monday: the week that ended yesterday
+                                          ( "2026-11-03", "2026-11-01" ), ( "2026-11-04", "2026-11-01" ), ( "2026-11-05", "2026-11-01" ),
+                                          ( "2026-11-06", "2026-11-01" ), ( "2026-11-07", "2026-11-01" ),
+                                          ( "2026-11-08", "2026-11-01" ),      # Sunday: this week is not over
+                                          ( "2026-11-09", "2026-11-08" ) ] )  # the next Monday: the week ending 11-08 is complete
+def test_the_last_complete_week_ends_on_the_latest_sunday_before_today( today, end ):
+    assert rb.last_complete_week_end( datetime.date.fromisoformat( today ) ) == datetime.date.fromisoformat( end )
+
+
+def test_a_boot_on_any_day_of_the_week_reads_the_same_week_as_the_monday_cron_run():
+    monday = datetime.date( 2026, 11, 9 )
+    days   = [ monday + datetime.timedelta( days=i ) for i in range( 7 ) ]
+    assert len( { rb.last_complete_week_end( d ) for d in days[ :6 ] } ) == 1 and rb.last_complete_week_end( days[ 0 ] ) == datetime.date( 2026, 11, 8 )
+    assert all( rb.week_of( rb.last_complete_week_end( d ) )[ 0 ].weekday() == 0 for d in days ), "every default week starts on a Monday"
+    ends = [ rb.last_complete_week_end( datetime.date( 2026, 10, 5 ) + datetime.timedelta( days=i ) ) for i in range( 28 ) ]
+    firsts = sorted( { e for e in ends } )
+    assert all( b - a == datetime.timedelta( days=7 ) for a, b in zip( firsts, firsts[ 1: ] ) ), "the default weeks follow one another with no gap and no overlap"
+
+
+def test_nothing_is_saved_without_write( tmp_path, utc ):
+    seed( tmp_path, calls(), rows() )
+    sa.store_receipt( tmp_path, receipt_of( "q1", "2026-11-01", True ) )
+    before = sorted( p.relative_to( tmp_path ).as_posix() for p in tmp_path.rglob( "*" ) )
+    sizes  = { p: p.stat().st_size for p in tmp_path.rglob( "*" ) if p.is_file() }
+    for args in ( [ "--end", "2026-11-02" ], [] ):
+        out = io.StringIO()
+        assert rb.main( [ "--data-dir", str( tmp_path ), *args ], out=out ) == 0 and out.getvalue().startswith( "Reuse behaviour," )
+    assert sorted( p.relative_to( tmp_path ).as_posix() for p in tmp_path.rglob( "*" ) ) == before, "no file or folder was made"
+    assert not ( tmp_path / rb.PAGE_FOLDER ).exists() and { p: p.stat().st_size for p in tmp_path.rglob( "*" ) if p.is_file() } == sizes, "and none was changed"
 
 
 def test_a_date_that_is_not_a_date_makes_no_page( tmp_path, utc ):
