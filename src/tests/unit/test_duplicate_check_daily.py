@@ -121,6 +121,16 @@ def test_a_function_changed_on_two_days_is_judged_once_by_its_latest_text( repo,
     assert doc[ "judged" ] == 1 and doc[ "judge_calls" ] == 1
 
 
+def test_an_unchanged_function_in_a_touched_file_is_not_judged_again_and_a_changed_and_a_new_one_are( repo, tmp_path ):
+    commit( repo, { "client/m.py": function( "same", [ "MARKA" ], 2 ) + "\n\n" + function( "edit", [ "MARKB" ], 3 ) }, "base", 48 )
+    commit( repo, { "client/m.py": function( "same", [ "MARKA" ], 2 ) + "\n\n" + function( "edit", [ "MARKB", "MARKC" ], 4 ) + "\n\n" + function( "added", [ "MARKD" ], 5 ) }, "touch", 2 )
+    window = dd.window_of( repo, None, NOW )
+    tree   = dd.source_at.ensure_worktree( repo, window[ "end" ], repo / ".wt-test" )
+    try: names = sorted( d[ "name" ] for d in dd.new_definitions( tree, repo, window )[ "defs" ] )
+    finally: dd.release( repo, tree )
+    assert names == [ "added", "edit" ], "the function the window's start already held is left out"
+
+
 def test_a_function_brought_in_by_a_merged_branch_belongs_to_the_merge_commit_on_the_first_parent_line( repo, tmp_path ):
     c1 = commit( repo, { "server/s1.py": function( "s1", [ "MARKB" ], 50 ) }, "old", 48 )
     git( repo, "checkout", "-q", "-b", "side" )
