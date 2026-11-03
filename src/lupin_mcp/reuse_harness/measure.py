@@ -24,6 +24,11 @@ SECONDS_PER_DAY    = 86400
 KB_TO_BYTES        = 1024
 FIRST_WEEKEND_DAY  = 5
 AGENT_TOOLS        = ( "Agent", "Task" )
+# Printed in each stop record, so a reader of the log sees how its figures were measured without opening the code.
+NOTES              = ( "a working day is Monday to Friday in working_zone; nights count and only the weekend is taken out",
+                       "peak_rss_bytes is the largest single finished child of the harness, not a sum of overlapping processes",
+                       "server_peak_rss_bytes and server_peak_cpu_percent are the largest of the samples taken at each verdict",
+                       "peak_seats is a lower bound: the session plus the most Agent or Task calls in one message, and a slice cut off by its time limit counts only what it printed" )
 UNIT_BYTES         = { "B" : 1, "kB" : 1000, "KiB" : 1024, "MB" : 1000 ** 2, "MiB" : 1024 ** 2, "GB" : 1000 ** 3, "GiB" : 1024 ** 3, "TiB" : 1024 ** 4 }
 STATS_PATTERN      = re.compile( r"^\s*([0-9.]+)\s*([A-Za-z]+)\s*/.*\|\s*([0-9.]+)%\s*$" )
 

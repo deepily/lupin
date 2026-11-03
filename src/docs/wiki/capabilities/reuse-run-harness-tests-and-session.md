@@ -9,9 +9,9 @@ pins:
   - lupin_mcp.reuse_harness.session.init_of@2a5948dc75
   - lupin_mcp.reuse_harness.session.surface_listed@0ce85043be
   - lupin_mcp.reuse_harness.session.surface_answered@7a7b53f83f
-  - lupin_mcp.reuse_harness.session.Sessions@2a39d636bf
+  - lupin_mcp.reuse_harness.session.Sessions@3537f9bf05
   - lupin_mcp.reuse_harness.session.Sessions.bind@8cb4a647b1
-  - lupin_mcp.reuse_harness.session.Sessions.probe@3edfcd37a2
+  - lupin_mcp.reuse_harness.session.Sessions.probe@f60015607c
   - lupin_mcp.reuse_harness.session.Sessions.work@9c1a1c2f78
 ---
 # Reuse run harness: the tests and the session

@@ -31,3 +31,15 @@ def test_run_command_runs_in_the_given_folder(tmp_path):
 def test_run_command_reports_a_timeout_as_127_and_not_as_an_exception():
     code, output = commands.run_command( [ sys.executable, "-c", "import time; time.sleep( 5 )" ], timeout=0.2 )
     assert code == 127 and "TimeoutExpired" in output
+
+
+def test_a_timeout_keeps_what_the_command_printed_before_it_was_cut_off():
+    # the text is computed, because the error line echoes the command and would otherwise hold a literal
+    code = "import sys, time\nprint( 'out-' + str( 6 * 7 ), flush=True )\nprint( 'err-' + str( 7 * 8 ), file=sys.stderr, flush=True )\ntime.sleep( 30 )"
+    status, output = commands.run_command( [ sys.executable, "-c", code ], timeout=1.5 )
+    assert status == 127 and output.startswith( "TimeoutExpired:" ) and "out-42" in output and "err-56" in output
+
+
+def test_a_timeout_of_a_command_that_printed_nothing_is_only_the_error_line():
+    status, output = commands.run_command( [ sys.executable, "-c", "import time; time.sleep( 30 )" ], timeout=0.5 )
+    assert status == 127 and output.startswith( "TimeoutExpired:" ) and "\n" not in output

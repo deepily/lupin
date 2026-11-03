@@ -7,7 +7,7 @@ pins:
   - lupin_mcp.reuse_harness.worktree.Worktrees.remove@0d83c693c1
   - lupin_mcp.reuse_harness.worktree.Worktrees.client_entries@f5937877a2
   - lupin_mcp.reuse_harness.worktree.Worktrees.exists@9bb45c96b6
-  - lupin_mcp.reuse_harness.commands.run_command@911f8f20a6
+  - lupin_mcp.reuse_harness.commands.run_command@79bf6d82e5
 ---
 # Reuse run harness: the worktree
 

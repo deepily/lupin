@@ -60,6 +60,7 @@ class Docker:
         """Choose the answers of run, rm, inspect and stats."""
         self.run_code, self.rm_code, self.rm_text, self.running = run_code, rm_code, rm_text, running
         self.stats_code, self.stats_text = stats_code, stats_text
+        self.stats_needs_container       = False
         self.calls      = []
         self.containers = set()
 
@@ -71,7 +72,9 @@ class Docker:
             if self.run_code == 0: self.containers.add( argv[ argv.index( "--name" ) + 1 ] )
             return self.run_code, "container-id" if self.run_code == 0 else "port is already allocated"
         if verb == "inspect": return 0, self.running
-        if verb == "stats": return self.stats_code, self.stats_text
+        if verb == "stats":
+            if self.stats_needs_container and argv[ -1 ] not in self.containers: return 1, f"Error: No such container: {argv[ -1 ]}"
+            return self.stats_code, self.stats_text
         if verb == "logs": return 0, "Traceback: boot failed"
         if verb == "rm":
             name = argv[ -1 ]

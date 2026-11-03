@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.reuse_harness.arms.build_session_config@5288cd90e4
   - lupin_mcp.reuse_harness.arms.verify_arm@25226f86a8
   - lupin_mcp.reuse_harness.errors.HarnessError@4673bfbe26
-  - lupin_mcp.reuse_harness.run.run_one@e418cf9d26
+  - lupin_mcp.reuse_harness.run.run_one@495bad0d32
   - lupin_mcp.reuse_harness.run.check_spec@6e70cb38b6
   - lupin_mcp.reuse_harness.run.db_name@dc02553094
   - lupin_mcp.reuse_harness.run.container_name@ecf0d7e0ca

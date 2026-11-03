@@ -149,6 +149,7 @@ class Sessions:
         self.session_id      = None
         self.slices          = 0
         self.stops           = 0
+        self.last_output     = None
 
     def bind( self, path, handle ):
         """
@@ -173,6 +174,7 @@ class Sessions:
 
         Ensures:
             - the probe is not stored as a session and uses the arm's flags
+            - last_output keeps the output of the latest probe that started, so a caller can keep its init event
             - returns whether surface_answered holds for the session's output
 
         Raises:
@@ -181,6 +183,7 @@ class Sessions:
         argv = self._argv( config, PROBE_PROMPTS[ surface ] ) + [ "--no-session-persistence" ]
         code, output = self.runner( argv, env=self._env(), cwd=self.path, timeout=PROBE_TIMEOUT )
         self._check_started( code, output )
+        self.last_output = output
         return surface_answered( output, surface )
 
     def work( self, config, path, handle, remaining_hours ):
@@ -194,7 +197,7 @@ class Sessions:
             - the first slice starts the session with the brief; each later slice resumes it
             - the slice is stopped at min( slice length, remaining hours )
             - returns { seat_hours, finished, seats }; seat_hours is the wall time times the seats
-            - seats is the configured seats plus the most subagent calls the slice made in one message (the output of a slice cut off by its time limit holds no stream, so it adds none)
+            - seats is the configured seats plus the most subagent calls the slice made in one message (a slice cut off by its time limit counts the calls it printed before the cut)
             - finished is true once the session has stopped on its own STOPS_TO_FINISH times in a row; a slice stopped by its time limit resets the count
 
         Raises:

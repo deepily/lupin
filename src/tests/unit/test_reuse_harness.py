@@ -578,7 +578,8 @@ def test_one_verdict_record_per_slice_and_one_stop_record_each_with_the_model_se
                 for record in verdicts )
     assert ports.log.records[ -1 ] == { "event" : "stop", "run" : "pair01-a", "arm_label" : "arm-label-without-9c41e7", "stop" : "all_pass", "seat_hours" : 4.0, "pilot" : False,
                                         "time_to_all_pass_working_days" : 4 / 24, "working_days" : 4 / 24, "wall_hours" : 4.0, "cpu_seconds" : 40.0, "peak_rss_bytes" : 4000,
-                                        "server_peak_rss_bytes" : None, "server_peak_cpu_percent" : None, "peak_seats" : 1 }
+                                        "server_peak_rss_bytes" : None, "server_peak_cpu_percent" : None, "peak_seats" : 1,
+                                        "working_zone" : "America/New_York", "notes" : list( measure.NOTES ) }
     assert len( ports.log.records ) == 5
 
 
@@ -713,3 +714,13 @@ def test_the_sender_key_is_seeded_after_the_fresh_check_and_before_the_session_i
     dirty = StubServer( preload=[ "x" ] )
     with pytest.raises( err.HarnessError ): harness.run_one( spec(), Ports( server=dirty ) )
     assert not any( entry[ 0 ] == "seed" for entry in dirty.history )
+
+
+def test_the_stop_record_names_the_zone_and_the_notes_on_how_the_figures_were_measured():
+    """A reader of the log alone sees the working-day rule and the lower-bound notes."""
+    ports = Ports()
+    harness.run_one( spec(), ports )
+    stop = ports.log.records[ -1 ]
+    assert stop[ "working_zone" ] == "America/New_York" and stop[ "notes" ] == list( measure.NOTES )
+    assert any( "Monday to Friday" in note for note in measure.NOTES ) and any( "lower bound" in note for note in measure.NOTES )
+    assert all( "notes" not in record for record in ports.log.records[ :-1 ] )
