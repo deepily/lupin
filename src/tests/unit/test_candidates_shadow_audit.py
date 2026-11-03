@@ -531,3 +531,10 @@ class TestKnownMissAndCaps:
         key = sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", tie=None )
         sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-15" )
         assert self.pending( tmp_path )[ key ][ "known_miss" ] is False
+
+    def test_the_id_with_no_excluded_id_is_pinned_to_the_value_receipts_already_stored_carry( self, tmp_path ):
+        old = "5f0495f826ec004a"                       # sha256 of need hash, generation and index sha as the first receipts were named
+        assert sa._receipt_id( sa.need_hash( "n1" ), GEN, INDEX ) == old
+        assert receipt_for( "n1", "NEW", [] )[ "id" ] == old
+        assert sa.enqueue_pending( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14" ) == old
+        assert sa._receipt_id( sa.need_hash( "n1" ), GEN, INDEX, "x" ) != old
