@@ -13,10 +13,11 @@ Nothing here reads the log, sends anything, or runs a model.
 import re
 
 TEMPLATE_RECEIPT = "<receipt id>"                                   # the receipt slot of the skill's template line
+TEMPLATE_SEARCH  = "<search id>"                                    # the search slot of the same line
 STEP_PATTERN     = r"\d+(?:\.\d+)*-[A-Za-z0-9]+|diff"                # a section, a dash, then the step id such as 12.3-D1, or diff for a task row with no plan
 
 OUTCOME_LEAD_RE = re.compile( r"^\s*REUSE-OUTCOME\b" )
-TEMPLATE_RE     = re.compile( r"^\s*REUSE-OUTCOME\s+" + re.escape( TEMPLATE_RECEIPT ) + r"(?=\s)" )
+TEMPLATE_RE     = re.compile( r"^\s*REUSE-OUTCOME\s+" + re.escape( TEMPLATE_RECEIPT ) + r"\s+::\s+" + re.escape( TEMPLATE_SEARCH ) + r"(?=\s)" )
 OUTCOME_RE      = re.compile(
     r"^\s*REUSE-OUTCOME\s+(?P<receipt>[0-9a-f]{16}|excluded|unindexed)\s+::\s+(?P<search>rs-[0-9a-f]{10}|unindexed)\s+::\s+"
     r"(?:(?P<kind>REUSED|EXTENDED)\s+(?P<symbol>(?!::\s)\S+)|(?P<new>WROTE_NEW)\s+(?P<difference>\S(?:(?!\s::\s).)*?))"
@@ -51,7 +52,7 @@ def unparsed_outcome_lines( text ):
         - text is a string
     Ensures:
         - returns the stripped text of every line that opens with the keyword, is not a template line, and that OUTCOME_RE does not match, in document order
-        - a template line is one whose receipt slot is the template text alone; nothing else is skipped
+        - a template line is one whose receipt slot and search slot are both the template text; a line with only one placeholder is refused and listed
         - a line that does not open with the keyword is never returned
     """
     return [ line.strip() for line in text.splitlines() if OUTCOME_LEAD_RE.match( line ) and not TEMPLATE_RE.match( line ) and not OUTCOME_RE.match( line ) ]

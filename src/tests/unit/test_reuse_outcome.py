@@ -70,6 +70,13 @@ def test_a_template_line_is_skipped_and_a_real_line_beside_it_is_checked():
     assert ro.unparsed_outcome_lines( text ) == [ bad ], "only the template is skipped"
 
 
+def test_a_half_filled_template_is_refused_and_listed_not_skipped():
+    half_receipt = f"REUSE-OUTCOME <receipt id> :: rs-bc3ca2c901 :: REUSED a.b :: {PLAN}#12.3-D1"
+    half_search  = f"REUSE-OUTCOME 5d37236290c7d93f :: <search id> :: REUSED a.b :: {PLAN}#12.3-D1"
+    text         = f"{half_receipt}\n{half_search}\n"
+    assert ro.unparsed_outcome_lines( text ) == [ half_receipt, half_search ] and ro.parse_outcomes( text ) == []
+
+
 def test_prose_that_mentions_the_keyword_is_not_a_line():
     text = "Write a REUSE-OUTCOME line for each lookup.\nSee `REUSE-OUTCOME` in the skill.\nREUSE-OUTCOMES are checked later.\n- REUSE-OUTCOME in a list item\n"
     assert ro.parse_outcomes( text ) == [] and ro.unparsed_outcome_lines( text ) == []
