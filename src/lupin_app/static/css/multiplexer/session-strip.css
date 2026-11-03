@@ -212,6 +212,14 @@
   color : #fff;
 }
 
+/* Keep place, on: the same look as Active, on. The hover rule holds that look, since the shared hover has the same weight. */
+.cc-strip-toggle[data-keep-place="true"],
+.cc-strip-toggle[data-keep-place="true"]:hover {
+  background : rgb(80, 160, 255, 0.28);
+  border-color : rgb(255, 255, 255, 0.4);
+  color : #fff;
+}
+
 /* ----------------------------------------------------------------------------
    WP10 / F3 — focus-mode card height boost, matching legacy (250px → 500px).
 
