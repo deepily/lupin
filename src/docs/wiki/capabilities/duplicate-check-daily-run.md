@@ -6,8 +6,8 @@ pins:
   - lupin_mcp.duplicate_check_daily.findings_of@25bb8dd399
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
   - lupin_mcp.duplicate_check_daily.run@c271ba4808
-  - lupin_mcp.duplicate_check_daily.cron_lines@2f36b1fdd1
-  - lupin_mcp.duplicate_check_daily.install_mode@29fb4b6ed4
+  - lupin_mcp.duplicate_check_daily.cron_lines@832050592a
+  - lupin_mcp.duplicate_check_daily.install_mode@920cbf8687
   - lupin_mcp.duplicate_check_daily.live_parts@e52091d0c2
   - lupin_mcp.duplicate_check_daily.live_filer@832dcfdc1a
   - lupin_mcp.duplicate_check_daily.live_auditor@46c2ce1135
@@ -27,6 +27,6 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - A filer or auditor that raises is caught and recorded as `filing` or `audit` with an `error`. The run still advances.
 - When a filer is present, the findings are kept in the file so [[duplicate-check-refile]] can file them again.
 - The detached worktrees are removed whether the run ends or fails.
-- `cron_lines` returns a daily line at 12:07 and a reboot line 300 seconds after boot. `install_mode` prints, installs, removes or reports them through the librarian's locked crontab editor.
+- `cron_lines` returns a daily line at 12:07 and a reboot line 300 seconds after boot. A branch other than `main` is added to both as `--branch`, shell-quoted; the default adds nothing. `install_mode` prints, installs, removes or reports them through the librarian's locked crontab editor.
 - `live_parts` builds the real parts and makes no call. `live_filer` files rows over HTTP. `live_auditor` queues known-miss audits (see [[duplicate-check-audit]]), with no model call.
 - `main` needs `--cap`, which has no default, unless it only removes or reports the cron lines. It exits 1 when status is `failed`, else 0.

@@ -290,6 +290,31 @@ def test_the_cron_lines_carry_the_named_environment_shell_quoted_and_nothing_els
     assert "DEEPILY_DATA_DIR" not in lines_of()[ 0 ]
 
 
+def test_the_default_branch_adds_nothing_to_the_cron_lines():
+    assert lines_of( branch=dd.BRANCH ) == lines_of() and "--branch" not in "".join( lines_of( branch=dd.BRANCH ) )
+
+
+def test_a_given_branch_goes_into_both_cron_lines_after_the_trigger():
+    daily, reboot = lines_of( branch="wip-v0.2.2" )
+    tail = "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --cap 40 --claude-cli-path /bin/claude --trigger {} --branch wip-v0.2.2 >> /log/daily.log 2>&1 # duplicate-check-daily"
+    assert daily == "7 12 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
+
+
+def test_a_branch_name_with_shell_characters_is_quoted_in_both_cron_lines():
+    for line in lines_of( branch="feature/a b;rm -rf x" ):
+        assert "--branch 'feature/a b;rm -rf x' >> /log/daily.log" in line
+
+
+def test_print_install_and_install_carry_the_branch_given_on_the_command_line( tmp_path, cron ):
+    base = [ "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py", "--branch", "wip-x" ]
+    code, out, _ = cron_main( tmp_path, [ "--print-install", *base ], cron )
+    assert code == 0 and out[ 0 ].count( "--branch wip-x >> " ) == 2
+    assert cron_main( tmp_path, [ "--install", *base ], cron, cron[ "env" ] )[ 0 ] == 0
+    assert cron[ "file" ].read_text().count( "--branch wip-x >> " ) == 2
+    plain = cron_main( tmp_path, [ "--print-install", *base[ :-2 ] ], cron )[ 1 ][ 0 ]
+    assert "--branch" not in plain
+
+
 def test_the_schedule_is_thirty_minutes_after_the_shadow_audit_drain():
     from lupin_mcp import reuse_shadow
     assert reuse_shadow.CRON_SCHEDULE == "37 11 * * *" and dd.CRON_SCHEDULE == "7 12 * * *"
