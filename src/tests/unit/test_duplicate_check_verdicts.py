@@ -142,32 +142,10 @@ def test_the_command_files_a_back_fill_with_file_only_and_needs_exactly_one_of_r
         with pytest.raises( SystemExit ): dv.main( [ LINE_OK, "--data-dir", str( folder.parent ), *extra ], out=io.StringIO() )
 
 
-def test_the_command_builds_the_live_amender_when_a_row_is_given_and_none_is_passed( folder, monkeypatch ):
+def test_the_command_builds_the_live_store_when_a_row_is_given_and_none_is_passed( folder, monkeypatch ):
     store = Amender()
-    monkeypatch.setattr( dv, "LiveAmender", lambda: store )
+    monkeypatch.setattr( dv.ff, "LiveStore", lambda: store )
     assert dv.main( [ LINE_OK, "--row", ROW, "--data-dir", str( folder.parent ) ], out=io.StringIO() ) == 0 and store.sent == [ ( ROW, LINE_OK ) ]
-
-
-def test_the_live_amender_posts_the_line_as_the_note_through_the_hooks_client():
-    seen = [ ]
-
-    class Client:
-        def amend_task( self, settings, api_key, item_id, payload ):
-            seen.append( ( settings, api_key, item_id, payload ) )
-            return True, 200, { }
-
-    live        = dv.LiveAmender( settings={ "api_base_url": "http://x" }, api_key="k" )
-    live.client = Client()
-    assert live.amend( ROW, LINE_OK ) == ( True, 200, { } )
-    assert seen == [ ( { "api_base_url": "http://x" }, "k", ROW, { "note": LINE_OK, "reason": dv.AMEND_REASON, "authority": "standing" } ) ]
-
-
-def test_the_live_amender_builds_its_settings_and_key_when_none_are_given( monkeypatch ):
-    from lupin_cli.claude_code.hooks.lib import task_store_client as client, task_store_settings
-    monkeypatch.setattr( task_store_settings, "load_task_store_settings", lambda: { "api_base_url": "http://y" } )
-    monkeypatch.setattr( client, "read_api_key", lambda: "key" )
-    live = dv.LiveAmender()
-    assert live.settings == { "api_base_url": "http://y" } and live.api_key == "key" and live.client is client
 
 
 # ---- the weekly table's side ----

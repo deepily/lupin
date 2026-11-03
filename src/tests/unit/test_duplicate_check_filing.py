@@ -269,3 +269,17 @@ def test_a_probe_that_did_not_answer_ok_queues_the_row_and_creates_nothing( tmp_
 
 def test_the_key_is_pinned_to_a_literal_so_a_change_of_its_recipe_cannot_slip_by():
     assert ff.correlation_key( "abc123", "def f(): pass" ) == "epic:dupcheck-c58ddd83a49e5bba", "sha256 of id, a colon and the text's sha256, first 16 hex digits"
+
+
+def test_the_live_store_amends_a_row_with_the_line_as_the_note_through_the_hooks_client():
+    seen = [ ]
+
+    class Client:
+        def amend_task( self, settings, api_key, item_id, payload ):
+            seen.append( ( settings, api_key, item_id, payload ) )
+            return True, 200, { "item": { } }
+
+    live        = ff.LiveStore( settings={ "api_base_url": "http://x" }, api_key="k" )
+    live.client = Client()
+    assert live.amend( "row-1", "a note" ) == ( True, 200, { "item": { } } )
+    assert seen == [ ( { "api_base_url": "http://x" }, "k", "row-1", { "note": "a note", "reason": ff.AMEND_REASON, "authority": "standing" } ) ]

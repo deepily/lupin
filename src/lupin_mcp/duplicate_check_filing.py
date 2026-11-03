@@ -19,6 +19,7 @@ PROJECT       = "lupin"
 PRIORITY      = "P5"
 ITEM_CLASS    = "task"
 PENDING_FILE  = "pending-rows.jsonl"
+AMEND_REASON  = "daily duplicate check verdict line"
 GATED_PHRASE  = "New tickets are gated"          # how the store's ratio gate opens its refusal; the filing keeps such a row and tries again
 RUNG_LINEAGE  = "lineage"
 RUNG_DECLARED = "declared"
@@ -196,3 +197,14 @@ class LiveStore:
     def create( self, payload ):
         """Ensures: returns ( ok, status, body ) of the create; never raises."""
         return self.client.create_task( self.settings, self.api_key, payload )
+
+    def amend( self, row_id, note ):
+        """
+        Append a note to a row's body.
+
+        Requires:
+            - row_id is the row's uuid text; note is the text to append
+        Ensures:
+            - returns ( ok, status, body ) of the amend; never raises
+        """
+        return self.client.amend_task( self.settings, self.api_key, row_id, { "note": note, "reason": AMEND_REASON, "authority": "standing" } )

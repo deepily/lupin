@@ -20,13 +20,13 @@ import re
 import sys
 
 import cosa.utils.util as cu
+from lupin_mcp import duplicate_check_filing as ff
 from lupin_mcp import reuse_behaviour as rb
 from lupin_mcp import reuse_refusals as rr
 
 PREFIX       = "DUPCHECK-VERDICT"
 FIELDS       = ( "run", "finding", "verdict", "class", "by", "ts" )
 EXIT_REFUSED = 3
-AMEND_REASON = "daily duplicate check verdict line"
 # DUPCHECK-VERDICT run=<result file stem> finding=<findings[].id> verdict=<verdict word> class=<kebab-case reason> by=<persona key> ts=<ISO-8601 UTC>
 LINE         = re.compile(
     rf"^{PREFIX} run=(?P<run>\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}}-[a-z]+) finding=(?P<finding>[A-Za-z0-9_-]+) verdict=(?P<verdict>{'|'.join( rb.REAL_VERDICTS + rb.NOT_VERDICTS )})"
@@ -35,20 +35,6 @@ LINE         = re.compile(
 
 class VerdictRefused( ValueError ):
     """A verdict line that was not written, with the reason in the message."""
-
-
-class LiveAmender:
-    """The task store over HTTP with the hooks' own client, needing no MCP session."""
-
-    def __init__( self, settings=None, api_key=None ):
-        from lupin_cli.claude_code.hooks.lib import task_store_client as client, task_store_settings
-        self.client   = client
-        self.settings = task_store_settings.load_task_store_settings() if settings is None else settings
-        self.api_key  = client.read_api_key() if api_key is None else api_key
-
-    def amend( self, row_id, note ):
-        """Ensures: returns ( ok, status, body ) of the amend; never raises."""
-        return self.client.amend_task( self.settings, self.api_key, row_id, { "note": note, "reason": AMEND_REASON, "authority": "standing" } )
 
 
 def parse_line( line ):
@@ -133,7 +119,7 @@ def main( argv=None, out=None, amender=None ):
     out = out if out is not None else sys.stdout
     folder = pathlib.Path( a.data_dir or rr.default_data_dir( cu.get_project_root() ) ) / rb.CHECK_FOLDER
     try:
-        rec = write_verdict( a.line, folder, a.row, amender if amender is not None or a.row is None else LiveAmender() )
+        rec = write_verdict( a.line, folder, a.row, amender if amender is not None or a.row is None else ff.LiveStore() )
     except ValueError as e:
         print( f"REFUSING: {e}. Nothing was written.", file=out )
         return EXIT_REFUSED

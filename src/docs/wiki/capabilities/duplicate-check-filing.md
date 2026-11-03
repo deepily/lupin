@@ -12,7 +12,7 @@ pins:
   - lupin_mcp.duplicate_check_filing.send_row@2f4f15f5b4
   - lupin_mcp.duplicate_check_filing.gated@eaa079cb6c
   - lupin_mcp.duplicate_check_filing.file_findings@a001bff541
-  - lupin_mcp.duplicate_check_filing.LiveStore@7381688f06
+  - lupin_mcp.duplicate_check_filing.LiveStore@0eca9a45b2
 ---
 # Duplicate check filing
 `lupin_mcp.duplicate_check_filing` files one store row for each duplicate the daily check finds, once per definition text. To file a saved result again, see [[duplicate-check-refile]].
@@ -28,4 +28,4 @@ pins:
 - A probe that does not answer ok queues the row, whatever the cause. A create with no status, a transport failure, queues it too. So does a 422 whose `detail` or `error` text contains `New tickets are gated`. `gated( body )` makes that test. The store puts a 422's text under `detail`.
 - `file_findings` tries the spooled rows first, then new ones. The spool, `pending-rows.jsonl` in the record folder, afterwards holds only the queued rows.
 - `read_pending` and `write_pending` read and write the spool. An empty list removes the file.
-- `LiveStore` is the store over HTTP with the hooks' own client. It needs no MCP session, and its `query` and `create` never raise. `query` asks for every state, held rows included, because every row this job files is held.
+- `LiveStore` is the store over HTTP with the hooks' own client. It needs no MCP session, and its `query` and `create` never raise. `query` asks for every state, held rows included, because every row this job files is held. `amend( row_id, note )` appends a note to a row; [[duplicate-check-verdict-lines]] uses it.

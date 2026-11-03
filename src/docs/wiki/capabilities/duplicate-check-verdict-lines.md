@@ -5,8 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_verdicts.parse_line@aaba3c7c88
   - lupin_mcp.duplicate_check_verdicts.finding_ids@2bce6f3244
   - lupin_mcp.duplicate_check_verdicts.write_verdict@fed99252a1
-  - lupin_mcp.duplicate_check_verdicts.LiveAmender@eda00319f1
-  - lupin_mcp.duplicate_check_verdicts.main@e7f577b7f9
+  - lupin_mcp.duplicate_check_verdicts.main@6507b26c37
 ---
 # Duplicate check: verdict lines and their writer
 The triage seat rules on each finding of a run with one line. `python -m lupin_mcp.duplicate_check_verdicts` writes it. The run is in [[duplicate-check-daily-run]]. The weekly page that counts the lines is in [[reuse-behaviour-duplicate-check-table]].
@@ -24,7 +23,7 @@ The triage seat rules on each finding of a run with one line. `python -m lupin_m
 - It amends the line onto the triage row (`--row <uuid>`) first. Then it appends the record to `verdicts.jsonl` in the result folder.
 - A store that refuses the amend leaves the file unwritten, so the file and the row cannot disagree.
 - `--file-only` writes the file alone, for a back-fill. The command needs exactly one of `--row` and `--file-only`.
-- `LiveAmender` posts the line as the amendment note over HTTP, with the hooks' own client.
+- The amend goes through `LiveStore.amend` of [[duplicate-check-filing]], the hooks' own client over HTTP.
 - Exit 0 means the line was written. Exit 3 means it was refused and nothing was written.
 
 ## Back-fill
