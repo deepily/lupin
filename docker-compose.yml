@@ -168,7 +168,7 @@ services:
     # 1.1.5 (no pptx) and 1.1.4 (no google_auth_oauthlib) each lacked. Checked in the built
     # image by import: pptx, playwright, pytest, googleapiclient, google_auth_oauthlib; and
     # chromium-1208 present. Rollback: lupin:1.1.5-gdrive-candidate plus a force-recreate.
-    image: lupin:1.1.6-candidate
+    image: lupin:1.1.7-candidate  # rollback: lupin:1.1.6-candidate
     container_name: lupin-rest-dev
     # Row 3c86391e (2026-09-30): the server is PID 1 here, so without an init the Playwright
     # chrome and pytest orphans of a finished test-suite job reparent to it and sit as
@@ -481,7 +481,7 @@ services:
     # 2026-11-02 (Mr. Radio, Rick user_direct, row eded549d): the dev-stays-behind note above
     # is superseded; dev and test now share 1.1.6-candidate (see lupin-rest-dev for the
     # receipts). Rollback: lupin:1.1.4-pptx-candidate plus a force-recreate.
-    image: lupin:1.1.6-candidate
+    image: lupin:1.1.7-candidate  # rollback: lupin:1.1.6-candidate
     container_name: lupin-rest-test
     # Row 3c86391e (2026-09-30): the server is PID 1 here, so without an init the Playwright
     # chrome and pytest orphans of a finished test-suite job reparent to it and sit as
