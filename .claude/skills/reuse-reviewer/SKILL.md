@@ -5,8 +5,9 @@ description: Review a diff for code reuse. For every new definition, fetch its s
 
 # Reuse reviewer
 
-Advisory today. The key `reuse review gating` in `src/conf/lupin-app.ini` is `false`, so this
-skill reports and never rejects. It rejects only when Rick sets the key to `true` (the recall bar from the baseline run).
+Advisory until the key `reuse review gating` in `src/conf/lupin-app.ini` is flipped to `true`. While it is `false`
+this skill reports and never rejects. Rick ruled that enforcement switches on once the checker pieces are built and
+tested; Cheech flips the key and notes the date. After the flip a blocking finding rejects the diff.
 Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-reuse-review-implementation-plan.md`, section 8.
 
 ## What to do
@@ -86,10 +87,12 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    task row id and `#diff`: `<task row id>#diff`. The section's pattern accepts any token like `<text>#<text>` with no spaces.
    It names no plan-less form, so this is the skill's own convention.
 
-   **What the gate enforces today.** `src/lupin_mcp/reuse_exit_gate.py` requires the search only for a
+   **What the gates enforce today.** `src/lupin_mcp/reuse_exit_gate.py` requires the search only for a
    `DISTINCT` ruling. It does not yet require one for `DUPLICATE` or `EXTEND`, and it does not read
-   `REUSE-OUTCOME` lines. The search and the outcome line are still required of you for every new definition;
-   the gate changes only when a later track changes it.
+   `REUSE-OUTCOME` lines. The review gate reads findings by kind (see "Report or reject" below).
+   The checker for `REUSE-OUTCOME` lines (track B) turns a missing or refused line into a `no_outcome_line`
+   or `refused_outcome_line` finding. Until the checker is merged, write those findings yourself.
+   The search and the outcome line are required of you for every new definition.
 
 5. **Rule**, one line per new definition, in the review document, in this exact shape:
 
@@ -145,17 +148,40 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    and `model_transport`. If you cannot assemble that call, write "prose_judge: not run" and the
    reason in the review document; never leave it out silently.
 
-7. **Report or reject.** Save the findings (linters plus any ruling you challenge) as a JSON
-   list and ask the flag:
+7. **Report or reject.** Save the findings as a JSON list. **Every finding carries a `kind`.**
+   Then ask the flag. When it is true, these kinds block the diff:
+
+   - `no_receipt`: a new definition has no `fetch_similar` or `check_exists` receipt.
+   - `no_search_id`: a new definition has no `record_search` id.
+   - `no_outcome_line`: a new definition has no `REUSE-OUTCOME` line.
+   - `refused_outcome_line`: the checker refused a `REUSE-OUTCOME` line; put its reason in `detail`.
+   - `ignored_ruling`: the diff does not follow a `DUPLICATE` or `EXTEND` ruling. No program can tell this, so you name it.
+
+   A linter finding is advisory. Paste the record as the linter printed it, or give it the kind `docstring_lint`.
+   The linter's keys are `path`, `line`, `rule` and `message`.
+   A finding with no kind blocks when the flag is true, and so does an unknown kind.
+   A finding about a definition names it in `symbol`; put the reason in `detail`. For example:
+
+   ```json
+   [
+     { "kind": "no_outcome_line", "symbol": "lupin_mcp.example.new_helper", "detail": "receipt 0123456789abcdef has no outcome line" },
+     { "kind": "ignored_ruling", "symbol": "lupin_mcp.example.other_helper", "detail": "ruled EXTEND lupin_mcp.example.helper; the diff adds a copy" },
+     { "path": "src/lupin_mcp/example.py", "line": 12, "rule": "summary-length", "message": "summary is 99 characters, limit 90" }
+   ]
+   ```
 
    ```bash
    python -m lupin_mcp.reuse_review_gate --findings findings.json
    ```
 
-   It prints JSON with `mode`, `reject`, `count` and `findings`. With the flag false the mode is
-   `report-only`: list the findings in the review and reject nothing. With the flag true and a
-   finding left, the mode is `reject`. Exit code 1 means reject. A finding is one object in the
-   list; an empty list `[]` is a valid input and answers `report-only`, `count` 0.
+   It prints JSON with `mode`, `reject`, `count`, `blocking` and `findings`. With the flag false the mode is
+   `report-only`: list the findings in the review and reject nothing. With the flag true and a blocking
+   finding left, the mode is `reject`. Exit code 1 means reject. A list of linter findings only is never rejected;
+   an empty list `[]` is valid and answers `report-only`, `count` 0.
+
+   **Exit code 3 means the gate could not check.** The key is absent, doubled, unreadable or not `true` or `false`.
+   The output says `could-not-check`. Treat exit 3 as not passed: the diff does not go through, before and after the flip alike.
+   Tell the manager, who fixes the key. Exit 3 is neither a pass nor a refusal of the diff's content.
 
 ## The three vocabularies
 

@@ -1,11 +1,14 @@
 """
 Pins the reuse-reviewer skill to the plan and to the exit-gate script that enforces it.
 """
+import io
+import json
 import pathlib
 import re
 
 import cosa.utils.util as cu
 from lupin_mcp import reuse_exit_gate
+from lupin_mcp import reuse_review_gate as gate
 
 ROOT  = pathlib.Path( cu.get_project_root() )
 SKILL = ROOT / ".claude" / "skills" / "reuse-reviewer" / "SKILL.md"
@@ -69,3 +72,44 @@ def test_the_skill_asks_for_a_recorded_search_and_one_searched_line_per_candidat
     assert text.index( "record_search" ) < text.index( "5. **Rule**" )                 # the search comes before the ruling
     assert text.index( "SEARCHED <symbol id>" ) < text.index( "RULING <symbol id>" )   # and the ruling line stays the first RULING line of the shape
     assert text.count( ":: search: <search id>" ) == 1                                # the DISTINCT form cites its search, and only that form does
+
+
+# ---- C2: the skill writes a kind on every finding (Plan 3 section 12.3) ----
+
+def _sample_findings():
+    """Ensures: returns the findings list of the skill's own example."""
+    text   = SKILL.read_text( encoding="utf-8" )
+    blocks = re.findall( r"```json\n(.*?)\n   ```", text, re.S )
+    assert len( blocks ) == 1
+    return json.loads( "\n".join( line[ 3: ] if line.startswith( "   " ) else line for line in blocks[ 0 ].splitlines() ) )
+
+
+def _ini( tmp_path, value ):
+    path = tmp_path / "lupin-app.ini"
+    path.write_text( f"[default]\nreuse review gating = {value}\n", encoding="utf-8" )
+    return str( path )
+
+
+def test_the_skills_example_findings_file_runs_through_the_gate_and_blocks_on_its_reuse_findings( tmp_path ):
+    findings = _sample_findings()
+    path     = tmp_path / "findings.json"; path.write_text( json.dumps( findings ), encoding="utf-8" )
+    out      = io.StringIO()
+    assert gate.main( [ "--findings", str( path ), "--ini", _ini( tmp_path, "true" ) ], out=out ) == 1
+    verdict  = json.loads( out.getvalue() )
+    assert ( verdict[ "mode" ], verdict[ "count" ] ) == ( "reject", 3 )
+    assert [ f[ "kind" ] for f in verdict[ "blocking" ] ] == [ "no_outcome_line", "ignored_ruling" ]     # the linter record in the example is advisory and is not among them
+    report = io.StringIO()
+    assert gate.main( [ "--findings", str( path ), "--ini", _ini( tmp_path, "false" ) ], out=report ) == 0     # the same file only reports while the flag is false
+    assert json.loads( report.getvalue() )[ "count" ] == 3
+
+
+def test_every_finding_in_the_skills_example_has_a_kind_the_gate_knows_or_is_a_linter_record():
+    for finding in _sample_findings():
+        assert gate.kind_of( finding ) in gate.REUSE_KINDS + ( gate.ADVISORY_KIND, )
+
+
+def test_the_skill_names_every_blocking_kind_the_gate_knows_and_the_could_not_check_exit():
+    text = SKILL.read_text( encoding="utf-8" )
+    for kind in gate.REUSE_KINDS: assert f"`{kind}`" in text
+    assert "`docstring_lint`" in text and "Exit code 3 means the gate could not check" in text and str( gate.EXIT_COULD_NOT_CHECK ) in text
+    assert "A finding with no kind blocks" in text
