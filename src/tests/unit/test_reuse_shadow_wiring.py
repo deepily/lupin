@@ -15,6 +15,7 @@ import pytest
 from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import shadow_audit as sa
 from cosa.repo.symindex.candidates.errors import CandidateError
+from lupin_mcp import reuse_ledger
 from lupin_mcp import reuse_shadow as rs
 from lupin_mcp import reuse_tools
 
@@ -26,7 +27,7 @@ SET_ID   = "gen-1"
 INDEX = "idx-1"
 LIVE  = { "verdict": "UNCERTAIN_READ_SOURCE", "candidate_ids": [ "a", "b" ] }
 DAY   = "2026-10-25"
-ON    = { rs.ENABLED_KEY: "true", rs.CEILING_KEY: "5000" }
+ON    = { rs.ENABLED_KEY: "true", rs.CEILING_KEY: "5000", rs.LIFETIME_KEY: "100000000", rs.WEEKLY_CAP_KEY: "4", rs.BUDGETS_KEY: "true" }
 
 
 def reader_of( values ):
@@ -112,10 +113,9 @@ class TestRunPendingCeiling:
         receipt = { "tool": "check_exists", "query": "q", "language": "py", "index_sha": "i", "verdict": "NEW", "candidate_stage": { "ids": [ "a" ], "manifest_hash": "g" } }
         assert rs.audit_inputs( receipt ) == ( "q", "py", "g", "i", { "verdict": "NEW", "candidate_ids": [ "a" ] } )
 
-    def test_the_drain_reads_the_weekly_cap_from_the_ledger_constant( self, tmp_path, monkeypatch ):
-        monkeypatch.setattr( rs.reuse_ledger, "SHADOW_AUDIT_WEEKLY_CAP", 1 )
+    def test_the_drain_stops_at_the_weekly_cap_it_is_given( self, tmp_path ):
         queue_up( tmp_path, [ "n1", "n2" ] )
-        out = rs.drain( tmp_path, lambda name: None, lambda *a, **k: result_of( ids=( "z", ) ), DAY, 10_000 )
+        out = rs.drain( tmp_path, lambda name: None, lambda *a, **k: result_of( ids=( "z", ) ), DAY, 10_000, 1 )
         assert ( out[ "audited" ], out[ "stopped_by" ] ) == ( 1, "weekly_cap" )
 
     def test_without_a_ceiling_the_result_keeps_its_five_keys_and_tokens_are_ignored( self, tmp_path ):
@@ -153,12 +153,12 @@ class TestReadCeiling:
         import cosa.utils.util as cu
         lines = { line.split( "=", 1 )[ 0 ].strip(): line.split( "=", 1 )[ 1 ].strip() for line in open( cu.get_project_root() + "/src/conf/lupin-app.ini", encoding="utf-8" )
                   if line.startswith( "reuse shadow audit" ) }
-        assert lines == { rs.ENABLED_KEY: "true", rs.CEILING_KEY: "5000000" }
+        assert lines == { rs.ENABLED_KEY: "true", rs.CEILING_KEY: "5000000", rs.LIFETIME_KEY: "100000000", rs.WEEKLY_CAP_KEY: "4", rs.BUDGETS_KEY: "true" }
 
     def test_both_keys_are_explained_in_the_splainer_file( self ):
         import cosa.utils.util as cu
         text = open( cu.get_project_root() + "/src/conf/lupin-app-splainer.ini", encoding="utf-8" ).read()
-        assert f"\n{rs.ENABLED_KEY}" in text and f"\n{rs.CEILING_KEY}" in text
+        assert all( f"\n{key}" in text for key in ( rs.ENABLED_KEY, rs.CEILING_KEY, rs.LIFETIME_KEY, rs.WEEKLY_CAP_KEY, rs.BUDGETS_KEY ) )
 
 
 class TestQueueLookup:
@@ -273,7 +273,7 @@ class TestDrain:
 
     def test_a_drain_audits_under_the_ceiling_and_stores_receipts( self, tmp_path ):
         queue_up( tmp_path, [ "n1", "n2", "n3" ] )
-        out = rs.drain( tmp_path, lambda name: None, lambda *a, **k: result_of( ids=( "z", ) ), DAY, 250 )
+        out = rs.drain( tmp_path, lambda name: None, lambda *a, **k: result_of( ids=( "z", ) ), DAY, 250, 4 )
         assert ( out[ "audited" ], out[ "spent_tokens" ], out[ "stopped_by" ] ) == ( 2, 200, "ceiling" )
         assert len( sa.load_receipts( tmp_path ) ) == 2 and len( queue_files( tmp_path ) ) == 1
 
@@ -333,6 +333,9 @@ class FakeOut:
 def world( tmp_path, monkeypatch ):
     """The data folder is a temporary folder."""
     monkeypatch.setattr( reuse_tools, "data_dir", lambda root: tmp_path / "data" )
+    ledger_file = tmp_path / "ledger.jsonl"
+    reuse_ledger.AccountLedger.create( ledger_file, 10**9, "test", "empty fleet ledger for main" )
+    monkeypatch.setattr( reuse_ledger, "ledger_path", lambda root: ledger_file )
     return { "root": str( tmp_path / "repo" ), "data": tmp_path / "data" }
 
 
@@ -379,6 +382,11 @@ class TestMain:
         rc, out, _ = run_main( world, [ ], reader=reader_of( { rs.ENABLED_KEY: "true" } ), factory=lambda name: pytest.fail( "no context" ), ask=lambda *a, **k: pytest.fail( "no sweep" ) )
         assert rc == rs.EXIT_NAMED and json.loads( out )[ "error" ] == rs.AUDIT_CEILING_UNSET
         assert len( queue_files( world[ "data" ] ) ) == 1
+
+    def test_a_blank_lifetime_limit_is_exit_two_with_its_own_code_and_no_sweep( self, world ):
+        queue_up( world[ "data" ], [ "n1" ] )
+        rc, out, _ = run_main( world, [ ], reader=reader_of( { **ON, rs.LIFETIME_KEY: "" } ), factory=lambda name: pytest.fail( "no context" ), ask=lambda *a, **k: pytest.fail( "no sweep" ) )
+        assert rc == rs.EXIT_NAMED and json.loads( out )[ "error" ] == rs.AUDIT_LIFETIME_UNSET and len( queue_files( world[ "data" ] ) ) == 1
 
     def test_a_drain_prints_its_summary_and_returns_zero( self, world ):
         queue_up( world[ "data" ], [ "n1", "n2" ] )
@@ -432,3 +440,192 @@ class TestTheRealUnknownEntryAnswer:
         outs = [ sa.run_pending( data, sweep, DAY, pass_language=True ) for _ in range( sa.UNKNOWN_ENTRY_TRIES + 1 ) ]
         assert [ o[ "dropped" ] for o in outs ] == [ 0 ] * ( sa.UNKNOWN_ENTRY_TRIES + 1 ) and len( queue_files( data ) ) == 1, "a different wording is never dropped"
 
+
+
+FIXTURE = os.path.join( os.path.dirname( __file__ ), "..", "fixtures", "reuse_shadow_audit", "real-shadow-audit-ledger-lines.jsonl" )
+REAL_SPEND = 3_324_735                     # the one real audit, run 2f6b83a1, as the ledger held it on 3 Nov 2026
+CEILING    = 5_000_000
+
+
+def real_ledger( tmp_path ):
+    """The lines captured from the real ledger: its limit row and every shadow-audit row."""
+    path = tmp_path / "real-ledger.jsonl"
+    path.write_text( open( FIXTURE, encoding="utf-8" ).read() )
+    return reuse_ledger.AccountLedger( path )
+
+
+def spent_row( run, tokens ):
+    """One spend row on a run, in the shape the real ledger writes."""
+    return json.dumps( { "at": "2026-11-03T12:00:00-0500", "kind": "spend", "run": run, "tokens": tokens }, sort_keys=True ) + "\n"
+
+
+def add_audit_spend( ledger, tokens, closed=True ):
+    """Add one more shadow-audit run to a ledger, so its total reaches a chosen figure."""
+    run = reuse_ledger.make_run_name( rs.SWEEP_RUN_PREFIX )
+    ledger.begin_run( run, 1 )
+    ledger.spend( run, tokens )
+    if closed: ledger.end_run( run )
+
+
+class TestLifetimeLimit:
+    """Rick's 3 Nov ruling: a drain refuses once lifetime audit spend would pass the INI limit."""
+
+    def test_the_fixture_holds_real_lines_and_totals_the_measured_spend( self, tmp_path ):
+        kinds = [ json.loads( line )[ "kind" ] for line in open( FIXTURE, encoding="utf-8" ) ]
+        assert kinds.count( "limit" ) == 1 and kinds.count( "begin" ) == 1 and kinds.count( "end" ) == 1 and kinds.count( "spend" ) == 203
+        assert real_ledger( tmp_path ).held_by_prefix( rs.LEDGER_RUN_PREFIX ) == REAL_SPEND
+
+    def test_a_drain_just_under_the_limit_runs( self, tmp_path ):
+        led = real_ledger( tmp_path )
+        assert rs.check_lifetime_limit( led, REAL_SPEND + CEILING, CEILING ) == REAL_SPEND          # spent + ceiling equals the limit: it does not pass it
+
+    def test_a_drain_at_the_limit_is_refused( self, tmp_path ):
+        led = real_ledger( tmp_path )
+        with pytest.raises( CandidateError ) as caught: rs.check_lifetime_limit( led, REAL_SPEND, CEILING )     # spent equals the limit
+        assert caught.value.code == rs.AUDIT_LIFETIME_REACHED and str( REAL_SPEND ) in caught.value.detail and rs.LIFETIME_KEY in caught.value.detail
+
+    def test_a_ceiling_that_would_cross_the_limit_is_refused_though_the_spend_is_under_it( self, tmp_path ):
+        led = real_ledger( tmp_path )
+        with pytest.raises( CandidateError ) as caught: rs.check_lifetime_limit( led, REAL_SPEND + CEILING - 1, CEILING )   # one token short of room
+        assert caught.value.code == rs.AUDIT_LIFETIME_REACHED
+
+    def test_an_open_audit_run_counts_at_its_ceiling( self, tmp_path ):
+        led = real_ledger( tmp_path )
+        add_audit_spend( led, 10, closed=False )                       # begun at ceiling 1, spent 10: counts at 10
+        with pytest.raises( CandidateError ): rs.check_lifetime_limit( led, REAL_SPEND + 10 + CEILING - 1, CEILING )
+        assert rs.check_lifetime_limit( led, REAL_SPEND + 10 + CEILING, CEILING ) == REAL_SPEND + 10
+
+    def test_only_shadow_audit_runs_are_counted( self, tmp_path ):
+        led = real_ledger( tmp_path )
+        other = reuse_ledger.make_run_name( "s1-q1-single" )
+        led.begin_run( other, 1 )
+        led.spend( other, 9_000_000 )
+        led.end_run( other )
+        assert rs.check_lifetime_limit( led, REAL_SPEND + CEILING, CEILING ) == REAL_SPEND
+
+    @pytest.mark.parametrize( "raw", [ None, "", "   ", "0", "-5", "1e8", "100M", "2.5" ] )
+    def test_a_blank_or_garbled_limit_is_a_named_error_never_unlimited( self, raw ):
+        with pytest.raises( CandidateError ) as caught: rs.read_lifetime_limit( reader_of( { rs.LIFETIME_KEY: raw } ) )
+        assert caught.value.code == rs.AUDIT_LIFETIME_UNSET and rs.LIFETIME_KEY in caught.value.detail
+
+    def test_a_good_limit_is_read_and_an_unreadable_file_names_the_read_error( self ):
+        assert rs.read_lifetime_limit( reader_of( { rs.LIFETIME_KEY: " 100000000 " } ) ) == 100_000_000
+        def broken( key ): raise OSError( "disk gone" )
+        with pytest.raises( CandidateError ) as caught: rs.read_lifetime_limit( broken )
+        assert caught.value.code == rs.AUDIT_LIFETIME_UNSET and "disk gone" in caught.value.detail
+
+    def test_a_ledger_that_cannot_be_read_refuses_by_name( self, tmp_path ):
+        with pytest.raises( CandidateError ) as caught: rs.check_lifetime_limit( reuse_ledger.AccountLedger( tmp_path / "missing.jsonl" ), 10**9, CEILING )
+        assert caught.value.code == rs.AUDIT_LEDGER_UNREADABLE
+
+    def test_there_is_no_constant_for_the_limit_in_the_module( self ):
+        source = open( rs.__file__, encoding="utf-8" ).read()
+        assert "100000000" not in source and "100_000_000" not in source
+
+    def test_changing_only_the_ini_value_changes_the_decision( self, world, tmp_path ):
+        led = real_ledger( tmp_path )
+        queue_up( world[ "data" ], [ "n1" ] )
+        keep = { **ON, rs.CEILING_KEY: str( CEILING ) }
+        refused = run_main( world, [ ], reader=reader_of( { **keep, rs.LIFETIME_KEY: str( REAL_SPEND + CEILING - 1 ) } ), ledger=led, factory=lambda name: pytest.fail( "no context" ), ask=lambda *a, **k: pytest.fail( "no sweep" ) )
+        allowed = run_main( world, [ ], reader=reader_of( { **keep, rs.LIFETIME_KEY: str( REAL_SPEND + CEILING ) } ), ledger=led, factory=lambda name: name, ask=lambda *a, **k: result_of() )
+        assert refused[ 0 ] == rs.EXIT_NAMED and json.loads( refused[ 1 ] )[ "error" ] == rs.AUDIT_LIFETIME_REACHED
+        assert allowed[ 0 ] == 0 and json.loads( allowed[ 1 ] )[ "audited" ] == 1
+
+    def test_a_refused_drain_spends_nothing_logs_one_line_and_leaves_the_queue_and_ledger_alone( self, world, tmp_path ):
+        led = real_ledger( tmp_path )
+        before = led.path.read_bytes()
+        queue_up( world[ "data" ], [ "n1", "n2" ] )
+        rc, out, _ = run_main( world, [ ], reader=reader_of( { **ON, rs.LIFETIME_KEY: str( REAL_SPEND ) } ), ledger=led, factory=lambda name: pytest.fail( "no context" ), ask=lambda *a, **k: pytest.fail( "no sweep" ) )
+        assert rc == rs.EXIT_NAMED and json.loads( out )[ "error" ] == rs.AUDIT_LIFETIME_REACHED
+        assert len( queue_files( world[ "data" ] ) ) == 2 and led.path.read_bytes() == before
+        assert "drain refused" in ( world[ "data" ] / "shadow-audit" / rs.LOG_NAME ).read_text()
+
+    def test_main_builds_the_fleet_ledger_from_the_root_when_none_is_given( self, world ):
+        rc, out, _ = run_main( world, [ ], reader=reader_of( ON ), factory=lambda name: name, ask=lambda *a, **k: result_of() )       # world points ledger_path at an empty ledger
+        assert rc == 0 and json.loads( out )[ "audited" ] == 0
+
+
+class TestWeeklyCapAndCapacityFollowTheIni:
+    """The weekly cap and the capacity arithmetic read the drain's INI keys, with no fallback."""
+
+    @pytest.mark.parametrize( "raw", [ None, "", "0", "-1", "four", "4.0" ] )
+    def test_a_bad_weekly_cap_is_a_named_error_never_unlimited( self, raw ):
+        with pytest.raises( CandidateError ) as caught: rs.read_weekly_cap( reader_of( { rs.WEEKLY_CAP_KEY: raw } ) )
+        assert caught.value.code == rs.AUDIT_WEEKLY_CAP_UNSET and rs.WEEKLY_CAP_KEY in caught.value.detail
+
+    def test_a_blank_weekly_cap_stops_the_drain_before_any_sweep( self, world ):
+        queue_up( world[ "data" ], [ "n1" ] )
+        rc, out, _ = run_main( world, [ ], reader=reader_of( { **ON, rs.WEEKLY_CAP_KEY: "" } ), factory=lambda name: pytest.fail( "no context" ), ask=lambda *a, **k: pytest.fail( "no sweep" ) )
+        assert rc == rs.EXIT_NAMED and json.loads( out )[ "error" ] == rs.AUDIT_WEEKLY_CAP_UNSET and len( queue_files( world[ "data" ] ) ) == 1
+
+    def test_changing_only_the_weekly_cap_in_the_ini_changes_how_many_audits_run( self, world ):
+        queue_up( world[ "data" ], [ "n1", "n2" ], day=DAY )
+        first  = run_main( world, [ ], reader=reader_of( { **ON, rs.WEEKLY_CAP_KEY: "1" } ), factory=lambda name: name, ask=lambda *a, **k: result_of() )
+        second = run_main( world, [ ], reader=reader_of( { **ON, rs.WEEKLY_CAP_KEY: "2" } ), factory=lambda name: name, ask=lambda *a, **k: result_of() )
+        assert ( json.loads( first[ 1 ] )[ "audited" ], json.loads( first[ 1 ] )[ "stopped_by" ] ) == ( 1, "weekly_cap" )       # cap 1: one audit, one left queued
+        assert ( json.loads( second[ 1 ] )[ "audited" ], json.loads( second[ 1 ] )[ "stopped_by" ] ) == ( 1, None )             # cap raised to 2 in the INI alone: the other one runs
+
+    def test_capacity_takes_the_audit_ceiling_and_weekly_cap_from_the_ini( self, tmp_path ):
+        led = real_ledger( tmp_path )
+        few  = rs.live_capacity( led, reader=reader_of( { rs.CEILING_KEY: "1000", rs.WEEKLY_CAP_KEY: "2" } ) )
+        more = rs.live_capacity( led, reader=reader_of( { rs.CEILING_KEY: "2000", rs.WEEKLY_CAP_KEY: "3" } ) )
+        assert few[ "audit_week_tokens" ] == 2000 and more[ "audit_week_tokens" ] == 6000
+        assert few[ "open_tokens" ] == reuse_ledger.SEATS_AT_ONCE * reuse_ledger.LOOKUP_CEILING_TOKENS + 1000
+
+    def test_capacity_refuses_a_bad_key_by_name_and_passes_its_other_settings_on( self, tmp_path ):
+        led = real_ledger( tmp_path )
+        with pytest.raises( CandidateError ) as caught: rs.live_capacity( led, reader=reader_of( { rs.CEILING_KEY: "", rs.WEEKLY_CAP_KEY: "2" } ) )
+        assert caught.value.code == rs.AUDIT_CEILING_UNSET
+        with pytest.raises( CandidateError ) as caught: rs.live_capacity( led, reader=reader_of( { rs.CEILING_KEY: "1000" } ) )
+        assert caught.value.code == rs.AUDIT_WEEKLY_CAP_UNSET
+        assert rs.live_capacity( led, { "seats": 1, "lookup_ceiling": 10 }, reader_of( { rs.CEILING_KEY: "5", rs.WEEKLY_CAP_KEY: "1" } ) )[ "open_tokens" ] == 15
+
+
+class TestBudgetsSwitch:
+    """Rick's toggle: true applies both budgets; the drain ceiling holds either way."""
+
+    @pytest.mark.parametrize( "raw, expected", [ ( "true", True ), ( " TRUE ", True ), ( "False", False ), ( "false", False ) ] )
+    def test_true_and_false_are_read_in_any_case( self, raw, expected ):
+        assert rs.read_budgets_enabled( reader_of( { rs.BUDGETS_KEY: raw } ) ) is expected
+
+    @pytest.mark.parametrize( "raw", [ None, "", "  ", "yes", "0", "1", "ture", "off" ] )
+    def test_a_missing_or_garbled_switch_is_a_named_error_never_false( self, raw ):
+        with pytest.raises( CandidateError ) as caught: rs.read_budgets_enabled( reader_of( { rs.BUDGETS_KEY: raw } ) )
+        assert caught.value.code == rs.AUDIT_BUDGETS_SWITCH and rs.BUDGETS_KEY in caught.value.detail
+
+    def test_an_unreadable_file_names_the_read_error( self ):
+        def broken( key ): raise OSError( "disk gone" )
+        with pytest.raises( CandidateError ) as caught: rs.read_budgets_enabled( broken )
+        assert caught.value.code == rs.AUDIT_BUDGETS_SWITCH and "disk gone" in caught.value.detail
+
+    def test_a_garbled_switch_stops_the_drain_before_any_sweep( self, world ):
+        queue_up( world[ "data" ], [ "n1" ] )
+        rc, out, _ = run_main( world, [ ], reader=reader_of( { **ON, rs.BUDGETS_KEY: "" } ), factory=lambda name: pytest.fail( "no context" ), ask=lambda *a, **k: pytest.fail( "no sweep" ) )
+        assert rc == rs.EXIT_NAMED and json.loads( out )[ "error" ] == rs.AUDIT_BUDGETS_SWITCH and len( queue_files( world[ "data" ] ) ) == 1
+
+    def test_flipping_only_the_switch_changes_a_lifetime_refusal_into_a_run( self, world, tmp_path ):
+        led   = real_ledger( tmp_path )
+        tight = { **ON, rs.LIFETIME_KEY: str( REAL_SPEND ) }                     # at the limit: refused while the budgets are on
+        queue_up( world[ "data" ], [ "n1" ] )
+        on  = run_main( world, [ ], reader=reader_of( tight ), ledger=led, factory=lambda name: pytest.fail( "no context" ), ask=lambda *a, **k: pytest.fail( "no sweep" ) )
+        off = run_main( world, [ ], reader=reader_of( { **tight, rs.BUDGETS_KEY: "false" } ), ledger=led, factory=lambda name: name, ask=lambda *a, **k: result_of() )
+        assert on[ 0 ] == rs.EXIT_NAMED and json.loads( on[ 1 ] )[ "error" ] == rs.AUDIT_LIFETIME_REACHED
+        assert off[ 0 ] == 0 and json.loads( off[ 1 ] )[ "audited" ] == 1
+
+    def test_switched_off_the_weekly_cap_is_not_applied_and_the_drain_logs_one_line( self, world ):
+        queue_up( world[ "data" ], [ "n1", "n2", "n3" ] )
+        rc, out, _ = run_main( world, [ ], reader=reader_of( { **ON, rs.BUDGETS_KEY: "false", rs.WEEKLY_CAP_KEY: "1" } ), factory=lambda name: name, ask=lambda *a, **k: result_of() )
+        assert rc == 0 and json.loads( out )[ "audited" ] == 3 and json.loads( out )[ "stopped_by" ] is None
+        assert ( world[ "data" ] / "shadow-audit" / rs.LOG_NAME ).read_text().count( "budgets are off" ) == 1
+
+    def test_switched_off_the_lifetime_and_weekly_keys_are_not_even_read( self, world ):
+        blank = { rs.ENABLED_KEY: "true", rs.CEILING_KEY: "5000", rs.BUDGETS_KEY: "false" }
+        rc, out, _ = run_main( world, [ ], reader=reader_of( blank ), factory=lambda name: name, ask=lambda *a, **k: result_of() )
+        assert rc == 0 and json.loads( out )[ "audited" ] == 0
+
+    def test_switched_off_the_per_drain_ceiling_still_stops_the_drain( self, world ):
+        queue_up( world[ "data" ], [ "n1", "n2" ] )
+        rc, out, _ = run_main( world, [ ], reader=reader_of( { **ON, rs.BUDGETS_KEY: "false", rs.CEILING_KEY: "150" } ), factory=lambda name: name, ask=lambda *a, **k: result_of() )
+        assert rc == 0 and json.loads( out )[ "audited" ] == 1 and json.loads( out )[ "stopped_by" ] == "ceiling"
+        rc, out, _ = run_main( world, [ ], reader=reader_of( { **ON, rs.BUDGETS_KEY: "false", rs.CEILING_KEY: "" } ), factory=lambda name: pytest.fail( "no context" ) )
+        assert rc == rs.EXIT_NAMED and json.loads( out )[ "error" ] == rs.AUDIT_CEILING_UNSET

@@ -26,8 +26,6 @@ SEATS_AT_ONCE               = 5            # seats expected to look up at the sa
 WORST_FAST_LOOKUP_TOKENS    = 42_360       # the largest of five fast lookups measured on 2 November 2026 (io/cascade-plan3-s12/d4-report-2026.11.02.json: 37,937 to 42,360)
 CEILING_MARGIN              = 1.5          # the final ceiling is the worst measured lookup times this
 LOOKUP_CEILING_TOKENS       = 64_000       # 42,360 x 1.5 = 63,540, rounded up to the next thousand: 51 percent above the worst lookup measured
-SHADOW_AUDIT_CEILING_TOKENS = 5_000_000    # the ceiling a drain run holds; an unmeasured estimate until D5 records an audit's real cost
-SHADOW_AUDIT_WEEKLY_CAP     = 4            # audits a week; the shadow audit's cap reads this same constant
 ANCHOR_BYTES                = 256          # the last bytes read, compared on the next read to catch a rewrite in place
 
 
@@ -90,13 +88,14 @@ def ceiling_for( worst_tokens, margin=CEILING_MARGIN ):
     return math.ceil( worst_tokens * margin )
 
 
-def capacity( headroom, lookup_ceiling=LOOKUP_CEILING_TOKENS, seats=SEATS_AT_ONCE, audit_ceiling=SHADOW_AUDIT_CEILING_TOKENS, weekly_cap=SHADOW_AUDIT_WEEKLY_CAP ):
+def capacity( headroom, audit_ceiling, weekly_cap, lookup_ceiling=LOOKUP_CEILING_TOKENS, seats=SEATS_AT_ONCE ):
     """
     Work out whether a ceiling lets the expected seats look up at once beside the audits.
 
     Requires:
         - headroom is the tokens left under the account limit, zero or more
         - the other arguments are positive whole numbers
+        - audit_ceiling and weekly_cap have no default here: they come from the INI keys the drain reads (reuse_shadow.live_capacity)
     Ensures:
         - returns { lookups_at_once, open_tokens, audit_week_tokens, spare_tokens, fits }
         - lookups_at_once is how many runs at lookup_ceiling the headroom admits alone
@@ -110,17 +109,17 @@ def capacity( headroom, lookup_ceiling=LOOKUP_CEILING_TOKENS, seats=SEATS_AT_ONC
              "spare_tokens": headroom - open_tokens - week_tokens, "fits": headroom - open_tokens - week_tokens >= 0 }
 
 
-def account_capacity( ledger, **settings ):
+def account_capacity( ledger, audit_ceiling, weekly_cap, **settings ):
     """
     Run capacity against the headroom a ledger holds now.
 
     Requires:
-        - ledger is an AccountLedger; settings are capacity's keyword arguments
+        - ledger is an AccountLedger; audit_ceiling and weekly_cap are required; settings are capacity's other keyword arguments
     Ensures:
         - returns capacity's answer plus headroom, the limit less the total, from one read of the ledger
     """
     limit, total = ledger.snapshot()
-    return { "headroom": limit - total, **capacity( limit - total, **settings ) }
+    return { "headroom": limit - total, **capacity( limit - total, audit_ceiling, weekly_cap, **settings ) }
 
 
 def ledger_path( index_root ):

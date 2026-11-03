@@ -5,6 +5,8 @@
 # It runs the queued audits through the full search, under the token ceiling in the INI key
 # `reuse shadow audit max tokens per drain`. The job is off until the INI key `reuse shadow audit enabled`
 # is true, and it refuses to run while the ceiling key is blank.
+# It also refuses once the lifetime audit spend plus the ceiling would pass `reuse shadow audit lifetime token limit`,
+# unless `reuse shadow audit budgets enabled` is false. The weekly cap is the key `reuse shadow audit weekly cap`.
 #
 # Usage:  reuse-shadow-audit.sh [--install | --uninstall | --status | --print-install]
 #   --print-install  print the two cron lines and change nothing
