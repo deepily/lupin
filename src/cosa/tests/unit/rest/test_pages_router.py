@@ -22,6 +22,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import asyncio
 import os
+import re
 import time
 
 from fastapi.routing import APIRoute
@@ -334,13 +335,62 @@ class TestTaskApproveLandingPage( unittest.TestCase ):
         self.assertIn( 'id="task-approve-button"', response.text )
         self.assertIn( 'id="task-approve-row"', response.text )
 
-    def test_opening_the_page_cannot_send_the_approve_move( self ):
+    @staticmethod
+    def _click_handler_spans( html ):
         """
-        Opening the page cannot send the approve move.
+        Find the body of every click handler the page registers.
+
+        Requires:
+            - html is the page text; each handler is written `addEventListener( "click", <fn with no braces in its signature> {`
+            - no brace appears inside a string or comment of a handler
 
         Ensures:
-            - the only `/transition` request in the page sits inside the button's click handler,
-              after the `load()` function that runs on open has ended
+            - returns a list of ( start, end ) offsets, one per handler, covering the braces of its body
+            - braces are matched by depth, so a nested object literal does not end the span early
+
+        Raises:
+            - AssertionError if a handler has no body brace or its braces never balance
+        """
+        spans = []
+        for registration in re.finditer( r'addEventListener\( "click"', html ):
+            opening = re.compile( r"function[^{]*\{" ).search( html, registration.end() )
+            assert opening is not None, "click handler without a function body"
+            depth = 0
+            for offset in range( opening.end() - 1, len( html ) ):
+                if html[ offset ] == "{": depth += 1
+                elif html[ offset ] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        spans.append( ( opening.end() - 1, offset ) )
+                        break
+            else:
+                raise AssertionError( "click handler braces never balance" )
+        return spans
+
+    def test_click_handler_spans_match_nested_braces_and_refuse_malformed_pages( self ):
+        """
+        The span finder survives nested braces and refuses a handler it cannot bound.
+
+        Ensures:
+            - a nested object literal does not end the span early
+            - a handler with no body, or with unbalanced braces, raises AssertionError
+        """
+        html  = 'a.addEventListener( "click", function () { x( { k: 1 } ); } ); tail'
+        spans = self._click_handler_spans( html )
+        self.assertEqual( len( spans ), 1 )
+        self.assertEqual( html[ spans[ 0 ][ 0 ] : spans[ 0 ][ 1 ] + 1 ], "{ x( { k: 1 } ); }" )
+        with self.assertRaisesRegex( AssertionError, "without a function body" ):
+            self._click_handler_spans( 'a.addEventListener( "click", handler );' )
+        with self.assertRaisesRegex( AssertionError, "never balance" ):
+            self._click_handler_spans( 'a.addEventListener( "click", function () { x(' )
+
+    def test_opening_the_page_cannot_send_the_approve_move( self ):
+        """
+        Opening the page cannot send an approve move.
+
+        Ensures:
+            - the page has exactly two `/transition` requests, the single and the batch button
+            - each one sits inside the body of a click handler, never on a load path
         """
         from cosa.rest.routers.pages import _ROUTE_TABLE, _static_dir
 
@@ -350,8 +400,13 @@ class TestTaskApproveLandingPage( unittest.TestCase ):
         load_body = html[ html.index( "async function load()" ) : html.index( 'button.addEventListener( "click"' ) ]
         self.assertNotIn( "/transition", load_body, "the load path must not send the approve move" )
         self.assertNotIn( 'method  : "POST"', load_body )
-        self.assertEqual( html.count( "/transition" ), 1 )
-        self.assertGreater( html.index( "/transition" ), html.index( 'button.addEventListener( "click"' ) )
+
+        spans   = self._click_handler_spans( html )
+        calls   = [ m.start() for m in re.finditer( "/transition", html ) ]
+        self.assertEqual( len( spans ), 2, "the single and the batch click handler" )
+        self.assertEqual( len( calls ), 2, "one /transition request per button" )
+        for call in calls:
+            self.assertTrue( any( start < call < end for start, end in spans ), f"/transition at offset {call} is outside every click handler" )
 
 
 class TestTaskViewLandingPage( unittest.TestCase ):
