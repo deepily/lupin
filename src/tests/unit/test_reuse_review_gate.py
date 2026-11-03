@@ -2,9 +2,11 @@
 Unit tests for the `reuse review gating` flag: report-only when false, reject when true.
 """
 import json
+import pathlib
 
 import pytest
 
+import cosa.utils.util as cu
 from lupin_mcp import reuse_review_gate as gate
 
 
@@ -221,3 +223,33 @@ def test_the_ini_path_resolver_finds_the_main_checkouts_file_from_a_worktree( mo
     root   = cu.get_project_root()
     common = subprocess.run( [ "git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir" ], capture_output=True, text=True, check=True ).stdout.strip()
     assert gate.ini_path() == str( pathlib.Path( common ).parent / "src" / "conf" / "lupin-app.ini" )
+
+
+def conf_text( name ):
+    """Ensures: returns the text of a file in the project's conf folder."""
+    return ( pathlib.Path( cu.get_project_root() ) / "src" / "conf" / name ).read_text( encoding="utf-8" )
+
+
+def explainer_of_the_gating_key():
+    """Ensures: returns the explainer line of the gating key, exactly one."""
+    lines = [ l for l in conf_text( "lupin-app-splainer.ini" ).splitlines() if l.startswith( gate.GATING_KEY ) ]
+    assert len( lines ) == 1
+    return lines[ 0 ]
+
+
+def test_the_explainer_names_every_blocking_finding_kind_and_the_advisory_one():
+    line = explainer_of_the_gating_key()
+    for kind in ( *gate.REUSE_KINDS, gate.ADVISORY_KIND ): assert f"`{kind}`" in line, kind
+
+
+def test_the_explainer_states_rulings_switch_on_rule_and_the_could_not_check_exit():
+    line = explainer_of_the_gating_key()
+    assert "ruling 14" in line and "merged with tests passing" in line and "the manager flips it" in line
+    assert "exits 3" in line and "no kind" in line and "does not know" in line
+
+
+def test_neither_the_explainer_nor_the_ini_comment_keeps_the_stale_rule():
+    stale = ( "until Rick sets a recall bar", "Stays false until", "carries any finding", "reads as false" )
+    for text in ( explainer_of_the_gating_key(), conf_text( "lupin-app.ini" ).split( "reuse review gating  " )[ 0 ].rsplit( "# REUSE REVIEW GATING", 1 )[ 1 ] ):
+        for phrase in stale: assert phrase not in text, phrase
+
