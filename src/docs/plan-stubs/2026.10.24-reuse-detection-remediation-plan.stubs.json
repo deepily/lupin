@@ -522,6 +522,99 @@
                 "ph3",
                 "ph7"
             ]
+        },
+        {
+            "phase": 9,
+            "name": "Section 12 rollout and the plan-time workflow",
+            "steps": [
+                {
+                    "key": "ph9-s1",
+                    "name": "12.3 A: the workflow text (done)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Already done: A1 merged at 3ee7a00 plus 8810c4a and 4ba1151 in planning-is-prompting; A2 merged at 762d72753. Create this row closed, as a record",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph9-s2",
+                    "name": "12.3 D: fast lookups on (D1, D6, D2, D4, D3, D5)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track D passes: D4's Pass line met on 5 lookups and D5's Pass line met, results in a row comment on 2f6b83a1; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s1"
+                    ]
+                },
+                {
+                    "key": "ph9-s3",
+                    "name": "12.3 B: the REUSE-OUTCOME checker (B1 to B6)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track B passes: a real malformed line is refused and a definition with no line is refused, by an actual run; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s2"
+                    ]
+                },
+                {
+                    "key": "ph9-s4",
+                    "name": "12.3 C: gate scope, then turning enforcement on (C1 to C5)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track C passes: the gate exits 3 on an unreadable key and refuses a diff missing its receipt; the flip (C3) happens only after B, C1 and C2 merge, with Cheech's go as a row comment; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s3"
+                    ]
+                },
+                {
+                    "key": "ph9-s5",
+                    "name": "12.3 E: the daily duplicate-check job (E1 to E3)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track E passes: the job ran unattended on days 2 and 3 with dated result files; E3 starts only after Open sub-question 3 is answered; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s1"
+                    ]
+                },
+                {
+                    "key": "ph9-s6",
+                    "name": "12.3 F: shadow audit rule and two-week checkpoint (F1 to F3)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track F passes: F2's branch tests pass; a store row on 2f6b83a1 is chased at the flip date plus 14 days; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s2",
+                        "ph9-s5"
+                    ]
+                },
+                {
+                    "key": "ph9-s7",
+                    "name": "12.3 G: re-size the diagnostic set (deferred)",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Deferred: no work until D is live and two weeks of enforced use have gone by. Create this row not approved until then",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph9-s2",
+                        "ph9-s6"
+                    ]
+                },
+                {
+                    "key": "ph9-s8",
+                    "name": "12.3 H: record only",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Record only, no code: ruling 7's two findings stand (owner Chloe). Create this row closed, as a record",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s1"
+                    ]
+                }
+            ]
         }
     ]
 }
