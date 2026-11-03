@@ -709,10 +709,11 @@ class TestPeftTrainer( unittest.TestCase ):
         """
         A False release wait forces a second cache clear and creates the dirs dict.
         """
-        with self._quantize_patches( num_gpus=1, wait_result=False ) as ( _qc, _q, mock_torch, mock_wait ):
+        with self._quantize_patches( num_gpus=1, wait_result=False ) as ( _qc, mock_quantizer, mock_torch, mock_wait ):
             trainer = self._make_trainer()
             del trainer.quantized_model_dirs
             trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged", bits=8 )
+            mock_quantizer.quantize_model.assert_called_once_with( batch_size=1, bits=8 )
             mock_wait.assert_called_once_with()
             self.assertEqual( mock_torch.cuda.empty_cache.call_count, 2 )
             self.assertEqual( trainer.quantized_model_dirs, { 8: "/path/to/quantized" } )
