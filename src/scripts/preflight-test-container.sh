@@ -127,6 +127,11 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/lib/claude-login-probe.sh"
 probe_claude_login "${CONTAINER}"
 
+# Warn when the container's bundled Claude Code is far behind the host's (it only moves with the SDK pin).
+# shellcheck source=lib/claude-cli-parity-probe.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/claude-cli-parity-probe.sh"
+probe_claude_cli_parity "${CONTAINER}" || true
+
 # ── 5c. Session bridge mount resolves a live persona ─────────────────────
 # The task request door resolves a requester's persona from the host's session bridges
 # (Sword of Damocles, row ab8c5728). No mount means every pledged admit request 403s.
