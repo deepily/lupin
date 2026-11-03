@@ -113,6 +113,43 @@ def test_the_boot_check_removes_the_server_the_database_and_the_tree_when_the_te
     assert docker.containers == set() and databases.dbs == {} and not os.path.exists( present[ "path" ] )
 
 
+def booted_ports( repo, tmp_path ):
+    """Run a whole check, then hand back the boot run's spec and ports for one more boot."""
+    seen = []
+    live_check.main( argv_of( repo, tmp_path, "--execute" ), factory=factory_of( repo, tmp_path, LiveSession(), seen ) )
+    return seen[ -1 ]
+
+
+def test_the_boot_seeds_the_sender_key_into_the_runs_own_database_after_the_fresh_check( repo, tmp_path ):
+    spec, ports, docker, databases, _ = booted_ports( repo, tmp_path )
+    kinds = [ entry[ 0 ] for entry in databases.history if entry[ 1 ] == harness_db( spec ) ]
+    assert kinds == [ "create", "provision", "drop" ]
+
+
+def harness_db( spec ):
+    """Return the database name a run id gets."""
+    from lupin_mcp.reuse_harness import run as harness
+    return harness.db_name( spec[ "run_id" ] )
+
+
+def test_a_database_that_is_not_fresh_is_reported_as_not_fresh_by_the_boot( repo, tmp_path ):
+    spec, ports, *_ = booted_ports( repo, tmp_path )
+    ports.server.db_is_fresh = lambda handle: False
+    assert live_check.boot_check( spec | { "run_id" : "livecheck-dirty" }, ports )[ "fresh" ] is False
+
+
+def test_the_boot_runs_the_arm_with_the_tools_so_its_tree_keeps_the_skill_folder( repo, tmp_path ):
+    spec, ports, *_ = booted_ports( repo, tmp_path )
+    seen = {}
+    real = ports.tests.run
+    def spy( handle, path, test_ids ):
+        seen[ "skill" ] = os.path.exists( os.path.join( path, arms.SKILL_PATH ) )
+        return real( handle, path, test_ids )
+    ports.tests.run = spy
+    live_check.boot_check( spec | { "run_id" : "livecheck-skill" }, ports )
+    assert spec[ "arm" ] == arms.ARM_WITH and seen[ "skill" ] is True
+
+
 def test_the_module_entry_point_exits_with_the_checks_code( repo, tmp_path, monkeypatch, capsys ):
     monkeypatch.setattr( sys, "argv", [ "live_check", *argv_of( repo, tmp_path ) ] )
     monkeypatch.delitem( sys.modules, "lupin_mcp.reuse_harness.live_check" )
