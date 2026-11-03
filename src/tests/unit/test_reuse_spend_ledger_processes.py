@@ -38,6 +38,18 @@ except rl.AccountLimitReached:
 """
 
 
+NAMER = """
+import os, sys, time
+from lupin_mcp import reuse_ledger as rl
+from lupin_mcp import reuse_ceiling as rc
+led, ceiling, go = rl.AccountLedger( sys.argv[ 1 ] ), int( sys.argv[ 2 ] ), sys.argv[ 3 ]
+name = rl.make_run_name( "lookup", today="2026-11-02", pid=4242 )
+while not os.path.exists( go ): time.sleep( 0.005 )
+rc.TokenBudget( 10, ceiling, ledger=led, run=name )
+print( name )
+"""
+
+
 def spawn( code, *args ):
     env = { **os.environ, "PYTHONPATH": os.pathsep.join( p for p in ( SRC, os.environ.get( "PYTHONPATH", "" ) ) if p ) }
     return subprocess.Popen( [ sys.executable, "-c", code, *map( str, args ) ], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True )
@@ -133,3 +145,26 @@ def test_stage_one_plus_stage_two_plus_end_to_end_fits_the_account_limit_with_ro
     """The 11.2 table sums to 487M tokens; the 40 dollar limit holds 952M, so about half is left."""
     total = 56_000_000 + 11_000_000 + 420_000_000
     assert total < rl.ACCOUNT_LIMIT_TOKENS and rl.ACCOUNT_LIMIT_TOKENS - total > 400_000_000
+
+
+def test_two_processes_looking_up_at_once_get_different_names_and_both_are_admitted( ledger, tmp_path ):
+    go = tmp_path / "go"
+    procs = [ spawn( NAMER, ledger.path, 10_000, go ) for _ in range( 2 ) ]
+    go.write_text( "go" )
+    outs = [ p.communicate( timeout=60 ) for p in procs ]
+    names = [ out.strip() for out, _ in outs ]
+    assert [ p.returncode for p in procs ] == [ 0, 0 ], outs
+    assert len( set( names ) ) == 2 and ledger.total() == 20_000, "both processes used the same date, process id and count, so only the random part differs"
+
+
+def test_a_seat_that_restarts_with_a_recycled_process_id_and_a_count_back_at_one_still_gets_a_new_name( ledger, tmp_path ):
+    names = []
+    for round_ in range( 2 ):
+        go = tmp_path / f"go{round_}"
+        go.write_text( "go" )
+        proc = spawn( NAMER, ledger.path, 10_000, go )
+        out, err = proc.communicate( timeout=60 )
+        assert proc.returncode == 0, err
+        names.append( out.strip() )
+    assert names[ 0 ].rsplit( "-", 1 )[ 0 ] == names[ 1 ].rsplit( "-", 1 )[ 0 ], "the same day, process id and count of 1: only the random part tells them apart"
+    assert names[ 0 ] != names[ 1 ] and ledger.total() == 20_000

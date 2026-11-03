@@ -8,6 +8,7 @@ Venue: :7999-eligible.
 """
 import json
 import os
+import re
 
 import pytest
 
@@ -240,7 +241,7 @@ class TestSweepAdapter:
         sweep = rs.sweep_of( lambda name: names.append( name ), lambda *a, **k: result_of() )
         sweep( "n1", "py" )
         sweep( "n2", "py" )
-        assert len( set( names ) ) == 2 and all( name.startswith( "shadow-audit-" ) for name in names )
+        assert len( set( names ) ) == 2 and all( re.fullmatch( rf"{rs.SWEEP_RUN_PREFIX}-\d{{4}}-\d{{2}}-\d{{2}}-{os.getpid()}-\d+-[0-9a-f]{{8}}", name ) for name in names )
 
     def test_an_error_answer_is_refused_by_name( self ):
         sweep = rs.sweep_of( lambda name: None, lambda *a, **k: { "status": "error", "error": "INDEX_STALE" } )
