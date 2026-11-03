@@ -206,6 +206,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-end-to-end-run]] — the end-to-end run: frozen inputs, one search read against its twins, the figures, and the runner with its canary. `lupin_mcp` (reuse_e2e, reuse_e2e_run)
 - [[reuse-need-check-and-stage-client]] — the mechanical check of need sentences, and the client of the resident candidate search. `lupin_mcp` (reuse_need_check, reuse_candidates)
 - [[reuse-exit-review-gates-and-verdict-fit]] — the exit gate on reviewer rulings, the reuse review gating flag, and the verdict threshold receipt. `lupin_mcp` (reuse_exit_gate, reuse_review_gate, reuse_verdict_fit)
+- [[reuse-ledger-capacity-and-run-names]] — ledger run names, the run ceiling from a measured worst lookup, the seat capacity check, and the read-only ledger queries. `lupin_mcp` (reuse_ledger)
 - [[reuse-merge-gate]] — the merge-pyramid reuse gate: the base it measures from, the outcome lines and new definitions it checks, and its exit codes. `lupin_mcp` (reuse_merge_gate)
 - [[reuse-record-search]] — the `record_search` MCP tool: a fixed-string search of the tree for the nearest existing definitions, recorded under a search id. `lupin_mcp` (cosa_voice_mcp, reuse_search)
 - [[reuse-search-terms-and-grep]] — reuse_search term derivation, the fixed-string git grep, the freshness check and the receipt and entry text sources. `lupin_mcp` (reuse_search)
