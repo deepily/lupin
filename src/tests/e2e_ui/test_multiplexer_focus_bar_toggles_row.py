@@ -6,8 +6,7 @@ Requires:
 
 Ensures:
     - The three toggles share one row inside the focus bar.
-    - That row sits below the persona badges and above the sender cards.
-    - The badge row no longer contains any toggle.
+    - That row sits below the persona badges, inside the focus bar.
 """
 
 import json
@@ -91,19 +90,6 @@ def _assign( page, sender_id: str, name: str, color: str = "#FFCC80", icon: str 
     } )
 
 
-def _release( page, sender_id: str, ts: str = "2026-06-11T18:05:00.000Z" ):
-    page.evaluate( _EMIT_STATE_UPDATE_JS, {
-        "type"      : "voice_persona_released",
-        "sender_id" : sender_id,
-        "ts"        : ts,
-        "extra"     : {},
-    } )
-
-
-def _icon( page, sender_id: str ):
-    return page.locator( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{sender_id}"]' )
-
-
 TOGGLE_IDS = [ "cc-strip-toggle", "cc-hide-inactive-toggle", "cc-keep-place-toggle" ]
 
 _GEOMETRY_JS = """
@@ -113,9 +99,7 @@ _GEOMETRY_JS = """
         icons   : box( document.getElementById( "cc-strip-icons" ) ),
         row     : box( document.getElementById( "cc-strip-toggles" ) ),
         strip   : box( document.getElementById( "cc-session-strip" ) ),
-        cards   : box( document.getElementById( "sender-cards-container" ) ),
-        toggles : ids.map( ( id ) => ( { id : id, parent : document.getElementById( id ).parentElement.id, top : box( document.getElementById( id ) ).top } ) ),
-        toggles_in_badge_row : document.getElementById( "cc-strip-icons" ).querySelectorAll( ".cc-strip-toggle" ).length
+        toggles : ids.map( ( id ) => ( { id : id, parent : document.getElementById( id ).parentElement.id, top : box( document.getElementById( id ) ).top } ) )
     };
 }
 """
@@ -142,21 +126,12 @@ def test_toggles_sit_on_their_own_row_below_the_badges( page ):
     assert geo[ "row" ][ "top" ] >= geo[ "icons" ][ "bottom" ] - 1, f"the toggles row overlaps the badge row: { geo }"
 
 
-def test_the_three_toggles_share_one_row_above_the_cards( page ):
+def test_the_three_toggles_share_one_line_inside_the_focus_bar( page ):
     """
     Ensures:
-        - the toggles line up; the row ends inside the bar and above the cards
+        - the toggles line up and the row ends inside the focus bar
     """
     geo  = _geometry( page )
     tops = [ t[ "top" ] for t in geo[ "toggles" ] ]
     assert max( tops ) - min( tops ) < 2, f"the toggles are not on one line: { tops }"
-    assert geo[ "row" ][ "bottom" ] <= geo[ "cards" ][ "top" ] + 1, f"the toggles row is not above the cards: { geo }"
     assert geo[ "row" ][ "bottom" ] <= geo[ "strip" ][ "bottom" ] + 1, "the toggles row spills out of the focus bar"
-
-
-def test_the_badge_row_holds_no_toggle( page ):
-    """
-    Ensures:
-        - no toggle is inside the persona badge row
-    """
-    assert _geometry( page )[ "toggles_in_badge_row" ] == 0

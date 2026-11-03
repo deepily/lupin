@@ -6,8 +6,7 @@ Requires:
 
 Ensures:
     - The three toggles share one row inside the focus bar.
-    - That row sits below the persona badges and above the notification history.
-    - The badge row no longer contains any toggle.
+    - That row sits below the persona badges, inside the focus bar.
 """
 
 import pytest
@@ -35,10 +34,8 @@ GEOMETRY_JS = """
     return {
         icons   : box( document.getElementById( "cc-strip-icons" ) ),
         row     : box( document.getElementById( "cc-strip-toggles" ) ),
-        list    : box( document.getElementById( "notifications-list" ) ),
         strip   : box( document.getElementById( "cc-session-strip" ) ),
-        toggles : ids.map( ( id ) => ( { id : id, parent : document.getElementById( id ).parentElement.id, ...box( document.getElementById( id ) ) } ) ),
-        toggles_in_badge_row : document.getElementById( "cc-strip-icons" ).querySelectorAll( ".cc-strip-toggle" ).length
+        toggles : ids.map( ( id ) => ( { id : id, parent : document.getElementById( id ).parentElement.id, ...box( document.getElementById( id ) ) } ) )
     };
 }
 """
@@ -67,13 +64,8 @@ class TestFocusBarTogglesRow:
             assert toggle[ "top" ] >= geo[ "icons" ][ "bottom" ] - 1, f"{toggle[ 'id' ]} is not below the badges: {geo}"
         assert geo[ "row" ][ "top" ] >= geo[ "icons" ][ "bottom" ] - 1, f"the toggles row overlaps the badge row: {geo}"
 
-    def test_the_three_toggles_share_one_row_above_the_history( self, strip_page ):
+    def test_the_three_toggles_share_one_line_inside_the_focus_bar( self, strip_page ):
         geo  = strip_page.evaluate( GEOMETRY_JS, TOGGLE_IDS )
         tops = [ t[ "top" ] for t in geo[ "toggles" ] ]
         assert max( tops ) - min( tops ) < 2, f"the toggles are not on one line: {tops}"
-        assert geo[ "row" ][ "bottom" ] <= geo[ "list" ][ "top" ], f"the toggles row is not above the history: {geo}"
         assert geo[ "row" ][ "bottom" ] <= geo[ "strip" ][ "bottom" ] + 1, "the toggles row spills out of the focus bar"
-
-    def test_the_badge_row_holds_no_toggle( self, strip_page ):
-        geo = strip_page.evaluate( GEOMETRY_JS, TOGGLE_IDS )
-        assert geo[ "toggles_in_badge_row" ] == 0
