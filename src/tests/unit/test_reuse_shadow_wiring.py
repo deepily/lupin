@@ -99,6 +99,17 @@ class TestRunPendingCeiling:
         assert ( out[ "audited" ], out[ "failed" ] ) == ( 0, 1 )
         assert json.loads( queue_files( tmp_path )[ 0 ].read_text() )[ "attempts" ] == 1
 
+    def test_the_sweep_leaves_out_the_given_id_and_audit_inputs_reads_a_shortlist_receipt( self, tmp_path ):
+        asked = []
+        def ask( need, exclude, ctx, **kw ):
+            asked.append( exclude )
+            return result_of()
+        rs.sweep_of( lambda name: None, ask )( "n1", "py", exclude_id="d1" )
+        rs.sweep_of( lambda name: None, ask )( "n1", "py" )
+        assert asked == [ "d1", None ]
+        receipt = { "tool": "check_exists", "query": "q", "language": "py", "index_sha": "i", "verdict": "NEW", "candidate_stage": { "ids": [ "a" ], "manifest_hash": "g" } }
+        assert rs.audit_inputs( receipt ) == ( "q", "py", "g", "i", { "verdict": "NEW", "candidate_ids": [ "a" ] } )
+
     def test_the_drain_reads_the_weekly_cap_from_the_ledger_constant( self, tmp_path, monkeypatch ):
         monkeypatch.setattr( rs.reuse_ledger, "SHADOW_AUDIT_WEEKLY_CAP", 1 )
         queue_up( tmp_path, [ "n1", "n2" ] )

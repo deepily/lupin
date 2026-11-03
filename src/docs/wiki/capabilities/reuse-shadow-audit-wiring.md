@@ -3,11 +3,11 @@ capability: reuse-shadow-audit-wiring
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_shadow.read_ceiling@c22b1dffd6
-  - lupin_mcp.reuse_shadow.queue_lookup@41edf225f7
-  - lupin_mcp.reuse_shadow.sweep_of@98d5f7e604
+  - lupin_mcp.reuse_shadow.queue_lookup@1316129eec
+  - lupin_mcp.reuse_shadow.sweep_of@f2b1218847
   - lupin_mcp.reuse_shadow.drain@b1bc9d9b80
   - lupin_mcp.reuse_shadow.cron_lines@074a604b39
-  - lupin_mcp.reuse_shadow.main@8af0b204d2
+  - lupin_mcp.reuse_shadow.main@3c982f6d52
 ---
 # Reuse shadow audit wiring
 

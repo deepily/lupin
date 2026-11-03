@@ -268,7 +268,7 @@ def test_git_names_the_command_when_it_fails( tmp_path ):
 
 def test_the_live_parts_are_built_without_a_call():
     parts = dd.live_parts()
-    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer" } and callable( parts[ "structural" ] )
+    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor" } and callable( parts[ "structural" ] )
 
 
 def lines_of( **over ):
@@ -364,7 +364,7 @@ def test_findings_are_one_per_new_definition_with_the_rest_of_the_cluster_and_no
     pool  = [ { "id": "p1", "name": "b", "file": "f2.py", "line": 2, "text": "tb" } ]
     win   = { "start": "s", "end": "e", "commits": 1 }
     got   = dd.findings_of( [ [ "n1", "p1" ], [ "p1", "x" ] ], fresh, pool, win, {} )
-    assert got == [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta", "session_id": None, "window": win,
+    assert got == [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta", "session_id": None, "commit": None, "window": win,
                       "others": [ { "id": "p1", "name": "b", "file": "f2.py" } ] } ], "pool-only members get no finding"
     seen = dd.findings_of( [ [ "n1", "p1" ] ], fresh, pool, win, { "session_of": lambda d: "sess-" + d[ "id" ] } )
     assert seen[ 0 ][ "session_id" ] == "sess-n1"
@@ -428,3 +428,39 @@ def test_a_failure_while_building_the_pool_or_judging_writes_a_failed_file_with_
     assert len( worktrees( repo ) ) == 1, "the detached worktrees are gone"
     again = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path ) )
     assert again[ "status" ] == "ok" and again[ "judged" ] == 3, "a later run with a working setup judges the same window"
+
+
+def test_findings_carry_the_commit_that_added_each_definition_when_the_map_is_given():
+    fresh = [ { "id": "n1", "name": "a", "file": "f1.py", "line": 1, "text": "ta" } ]
+    got   = dd.findings_of( [ [ "n1", "p1" ] ], fresh, [ { "id": "p1", "name": "b", "file": "f2.py", "line": 2, "text": "tb" } ], {}, {}, { "n1": "abc123" } )
+    assert got[ 0 ][ "commit" ] == "abc123"
+
+
+def test_a_run_with_an_auditor_records_its_answer_and_a_raising_auditor_is_recorded_without_stopping_the_run( repo, tmp_path ):
+    c1, c2, c3 = history( repo )
+    seen = []
+    def auditor( findings, folder ):
+        seen.append( ( [ f[ "commit" ] for f in findings ], folder ) )
+        return { "queued": len( findings ) }
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, auditor=auditor ) )
+    assert doc[ "audit" ] == { "queued": 3 } and "filing" not in doc and sorted( seen[ 0 ][ 0 ] ) == sorted( [ c2, c2, c3 ] )
+    def broken( findings, folder ): raise OSError( "disk full" )
+    bad = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts_of( tmp_path, auditor=broken, filer=lambda f, d: { "filed": 0 } ) )
+    assert bad[ "audit" ] == { "error": "OSError: disk full" } and bad[ "filing" ] == { "filed": 0 } and bad[ "status" ] == "ok"
+
+
+def test_the_live_auditor_ties_each_finding_with_the_lookup_tools_logs_and_queues_in_its_data_folder( tmp_path, monkeypatch ):
+    class Ctx: root, data = tmp_path / "root", tmp_path / "data"
+    seen = {}
+    monkeypatch.setattr( dd.rt, "context_from_environment", lambda: Ctx )
+    monkeypatch.setattr( dd.eg, "merge_call_logs", lambda folder: ( seen.setdefault( "logs", folder ) and [ "rec" ], [] ) )
+    monkeypatch.setattr( dd.behaviour, "read_refusals", lambda data: [ "row" ] )
+    monkeypatch.setattr( dd.tie_mod, "find_tie", lambda sid, rows, records, root, sha: ( sid, rows, records, root, sha ) )
+    monkeypatch.setattr( dd.rt, "load_receipt", lambda ctx, rid: ( ctx, rid ) )
+    def queue( findings, tie_of, receipt_of, data_dir, today ):
+        seen.update( tie=tie_of( findings[ 0 ] ), receipt=receipt_of( "r1" ), data_dir=data_dir, today=today )
+        return "queued"
+    monkeypatch.setattr( dd.audit, "queue_audits", queue )
+    assert dd.live_auditor( [ { "id": "d1", "commit": "abc" } ], tmp_path ) == "queued"
+    assert seen[ "logs" ] == Ctx.data / "call-log" and seen[ "tie" ] == ( "d1", [ "row" ], [ "rec" ], Ctx.root, "abc" )
+    assert seen[ "receipt" ] == ( Ctx, "r1" ) and seen[ "data_dir" ] == Ctx.data and seen[ "today" ] == datetime.date.today().isoformat()

@@ -81,11 +81,26 @@ def queue_lookup( data_dir, receipt, today, reader=None ):
         - CandidateError or OSError from the queue write
     """
     if not lt.read_enabled( reader=reader, key=ENABLED_KEY ): return None
+    inputs = audit_inputs( receipt )
+    return None if inputs is None else sa.enqueue_if_sampled( data_dir, *inputs, today )
+
+
+def audit_inputs( receipt ):
+    """
+    Read the fields the audit queue needs from a stored lookup receipt.
+
+    Requires:
+        - receipt is a stored receipt dict
+
+    Ensures:
+        - returns ( need, language, generation, index_sha, live ), the arguments the queue writes take after data_dir, or None
+        - None for a receipt that is not a shortlist answer of check_exists: a sweep-only, test-including, pair or exclusion lookup, or one whose candidate stage failed or is absent
+        - the need is the receipt's query, which the redactor has already cleaned
+    """
     if receipt[ "tool" ] != "check_exists" or any( key in receipt for key in ( "sweep_only", "include_tests", "question", "exclude_id" ) ): return None
     stage = receipt[ "candidate_stage" ] if "candidate_stage" in receipt else None
     if stage is None or "error" in stage: return None
-    live  = { "verdict": receipt[ "verdict" ], "candidate_ids": stage[ "ids" ] }
-    return sa.enqueue_if_sampled( data_dir, receipt[ "query" ], receipt[ "language" ], stage[ "manifest_hash" ], receipt[ "index_sha" ], live, today )
+    return receipt[ "query" ], receipt[ "language" ], stage[ "manifest_hash" ], receipt[ "index_sha" ], { "verdict": receipt[ "verdict" ], "candidate_ids": stage[ "ids" ] }
 
 
 def sweep_of( ctx_factory, ask ):
@@ -97,7 +112,7 @@ def sweep_of( ctx_factory, ask ):
         - ask is reuse_tools.unstored_need_impl or a stand-in with its signature
 
     Ensures:
-        - returns a function ( need, language ) giving { verdict, causal_ids, tokens } and the cause when the verdict is uncertain
+        - returns a function ( need, language, exclude_id=None ) giving { verdict, causal_ids, tokens } and the cause when the verdict is uncertain
         - causal_ids are the ids of the full sweep's shortlist
         - tokens are the sweep's tokens in plus tokens out
         - every sweep gets its own run name, from reuse_ledger.make_run_name
@@ -105,9 +120,9 @@ def sweep_of( ctx_factory, ask ):
     Raises:
         - CandidateError AUDIT_SWEEP_REFUSED from the returned function when the sweep answers an error
     """
-    def sweep( need, language ):
-        """Ensures: returns the audit's view of one full sweep of the need."""
-        result = ask( need, None, ctx_factory( reuse_ledger.make_run_name( SWEEP_RUN_PREFIX ) ), language=language )
+    def sweep( need, language, exclude_id=None ):
+        """Ensures: returns the audit's view of one full sweep, leaving out exclude_id if given."""
+        result = ask( need, exclude_id, ctx_factory( reuse_ledger.make_run_name( SWEEP_RUN_PREFIX ) ), language=language )
         if result[ "status" ] != "ok": raise CandidateError( AUDIT_SWEEP_REFUSED, f"{result[ 'error' ]}" )
         out = { "verdict": result[ "verdict" ], "causal_ids": [ row[ "id" ] for row in result[ "shortlist" ] ],
                 "tokens": result[ "stats" ][ "tokens_in" ] + result[ "stats" ][ "tokens_out" ] }
