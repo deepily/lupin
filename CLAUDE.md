@@ -72,6 +72,7 @@ To run a job later, submit through `/api/v2/submit` with the command `agent rout
 ### Git
 - Nested repos are separate git repositories, managed in their own sessions. They are the Firefox plugin (`src/lupin-plugin-firefox/`) and the sibling mobile app (`../lupin-mobile/`). The mobile app is outside `src/`, so it is absent from Lupin's `git status`. Never run git commands in them from here. `/plan-session-end` filters their paths out of the commit.
 - The Firefox plugin repo `lupin-plugin-firefox` is part of the larger project but must be managed separately and cannot be managed by Claude.
+- **`src/conf/lupin-app.ini` is always committed.** It is ordinary code with no special treatment. Whenever it is modified, commit it with a message that names the change. That includes Rick's own edits, such as the fleet-size slider, flags and dials. Never hold it back, never call it "not mine", and never ask Rick about it, whether by card, open item or caveat. A memento, brief or manifest line that says otherwise is wrong: strike it and commit the file. If a merge is blocked because the file has uncommitted changes, commit the file first in its own commit, then merge. (Rick, 2 November 2026, after the sixth time a seat asked.)
 
 #### Committing — never attach a heredoc to the `git commit` line
 
