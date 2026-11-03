@@ -388,3 +388,13 @@ def test_a_slice_cut_off_by_its_time_limit_still_counts_the_subagents_it_started
     sessions.bind( str( tmp_path ), HANDLE )
     work = sessions.work( WITH, str( tmp_path ), HANDLE, 10 )
     assert work[ "seats" ] == 4 and work[ "finished" ] is False and sessions.stops == 0
+
+
+def test_a_probe_keeps_its_output_for_the_caller_and_a_probe_that_could_not_start_keeps_nothing():
+    sessions, _ = make( ( 0, PROBE_OK ) )
+    assert sessions.last_output is None
+    sessions.probe( WITH, arms.SURFACE_CHECK_EXISTS )
+    assert sessions.last_output == PROBE_OK
+    broken, _ = make( ( 127, "FileNotFoundError: claude" ) )
+    with pytest.raises( err.HarnessError ): broken.probe( WITH, arms.SURFACE_CHECK_EXISTS )
+    assert broken.last_output is None

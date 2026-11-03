@@ -226,6 +226,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-run-harness-server]] — a run's own server container and database, and the seeded sender key. `lupin_mcp.reuse_harness`
 - [[reuse-run-harness-tests-and-session]] — a run's acceptance tests with the tamper check, and each arm's headless session. `lupin_mcp.reuse_harness`
 - [[reuse-run-harness-measure]] — what a run records (working days, CPU, peak memory, seats) and the pilot with its 10-working-day guard. `lupin_mcp.reuse_harness`
+- [[reuse-run-harness-live-check]] — the one-off live check: real CLI probes of both arms and one real server boot, printed as a plan until --execute. `lupin_mcp.reuse_harness`
 - [[reuse-stage-one-probe-plan]] — stage-one probe choice, neighbour lists and the six position packs, written once. `lupin_mcp` (reuse_stage1_probe)
 - [[reuse-stage-one-runner]] — the stage-one run-sheet command, its stand-in and live modes, and refusals. `lupin_mcp` (reuse_stage1_run)
 - [[reuse-stage-one-arm-driver]] — the stage-one measurement driver: arms, run names, attempts, the stage budget and the canary. `lupin_mcp` (reuse_stage1)
