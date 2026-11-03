@@ -321,7 +321,7 @@ def in_pack_world( plant, ratings, policy=None ):
     """
     calls = [ ]
     row   = { "pair": { **pair( 1 ), "original": { **pair( 1 )[ "original" ], "id": "seed" }, "rewrite": { **pair( 1 )[ "rewrite" ], "id": plant } }, "id": plant, "lang": "py", "label": fj.SAME_JOB, "need": "a need" }
-    ctx   = types.SimpleNamespace( pages=[ ], pack_size=50, sweeper=swept_with( ratings, calls ) )
+    ctx   = types.SimpleNamespace( pages=[ ], pack_size=40, sweeper=swept_with( ratings, calls ) )
     stage = FakeStage( [ "ts0" ] + [ f"py{n}" for n in range( 200 ) ] )
     pool  = entries_of_pool()
     if plant not in { e[ "id" ] for e in pool }: pool.append( { "id": plant, "lang": "py" } )
@@ -346,7 +346,7 @@ def test_the_row_records_where_the_plant_fell_and_how_it_fared_against_the_real_
     row, ctx, stage, prepared, calls = in_pack_world( "pz", ratings )
     out = fj.judge_row_in_pack( row, ctx, stage, prepared, rt.in_language )
     assert out == { "id": "pz", "label": fj.SAME_JOB, "lang": "py", "was_in_shortlist": False, "answered": True, "p_overlap": 0.8, "confidence": 0.6, "choice": "reuse", "accepted": True,
-                    "survives": True, "rank": 3, "wrong_at_threshold": 2, "pack_index": 2, "pack_position": 27, "position": 127, "asked": 128 }
+                    "survives": True, "rank": 3, "wrong_at_threshold": 2, "pack_index": 3, "pack_position": 7, "position": 127, "asked": 128 }
 
 
 def test_a_plant_that_ranks_below_the_cap_is_accepted_but_does_not_survive_it():
@@ -378,6 +378,8 @@ def test_in_pack_figures_read_the_cut_shortlist_the_rank_and_the_wrong_places_at
     assert fj.in_pack_figures( { **routed, "d": { "shortlist": [ { "id": "a" } ] } }, "p", policy )[ "survives" ] is False
     assert fj.in_pack_figures( routed, "c", policy ) == { "survives": False, "rank": 4, "wrong_at_threshold": 3 }
     assert fj.in_pack_figures( routed, "bad", policy ) == { "survives": False, "rank": None, "wrong_at_threshold": 3 }
+    edge = { "sw": { "answers": [ answer( "p", 0.6, 0.2, 0.2 ), answer( "at", 0.3, 0.0, 0.7 ), answer( "under", 0.29, 0.0, 0.71 ) ] }, "d": { "shortlist": [ ] } }
+    assert fj.in_pack_figures( edge, "p", policy )[ "wrong_at_threshold" ] == 1, "0.30 counts, 0.29 does not"
     tie = { "sw": { "answers": [ answer( "z", 0.5, 0.5, 0 ), answer( "m", 0.5, 0.5, 0 ) ] }, "d": { "shortlist": [ ] } }
     assert fj.in_pack_figures( tie, "z", policy )[ "rank" ] == 2, "equal p_overlap goes by id, as the verdict orders it"
 
