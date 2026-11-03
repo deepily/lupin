@@ -10,7 +10,9 @@ pins:
   - lupin_mcp.reuse_exit_gate.unparsed_ruling_lines@3c1558bacb
   - lupin_mcp.reuse_exit_gate.parse_searched@9a7451667b
   - lupin_mcp.reuse_exit_gate.unparsed_searched_lines@28d8aa2698
-  - lupin_mcp.reuse_exit_gate.searches_by_symbol@39f6a638ca
+  - lupin_mcp.reuse_exit_gate.searches_by_symbol@c87c268745
+  - lupin_mcp.reuse_exit_gate.receipts_by_id@cd2cf66444
+  - lupin_mcp.reuse_exit_gate.searches_by_receipt@fc5ca31798
   - lupin_mcp.reuse_exit_gate.check_run@118d627e6c
   - lupin_mcp.reuse_exit_gate.run_gate@f77e9796fe
   - lupin_mcp.reuse_exit_gate.main@d1b539ae76
@@ -27,8 +29,7 @@ Three small tools around the reuse review: did the reviewer look before ruling (
 ## Exit gate
 - The gate takes two crew runs together. Each run has a diff of added definitions and a review document of `RULING` and `SEARCHED` lines. It passes only when the pair adds at least the minimum new definitions and every row is `OK` or `EXCLUDED`.
 - `merge_call_logs( log_dir )` merges every per-session call log and counts lines that are not JSON objects. `entry_of` reads the `entry` argument of a logged call.
-- `receipts_by_symbol` collects the receipts each symbol was asked about, from `fetch_similar` calls that logged no error. `exclusions_by_symbol` collects the definitions the tool refused to send, by cause.
-- `searches_by_symbol` collects the recorded searches each symbol was searched under, from `record_search` calls that logged no error and a well-formed search id.
+- `receipts_by_symbol` collects the receipts each symbol was asked about, from `fetch_similar` calls that logged no error. `exclusions_by_symbol` collects the definitions the tool refused to send, by cause. `receipts_by_id` keeps each receipt id with its tool, over `check_exists` and `fetch_similar` calls that logged no error, so it needs no `entry`. `searches_by_symbol` collects the recorded searches each symbol was searched under, from `record_search` calls that logged no error and a well-formed search id. `searches_by_receipt` keys the same searches by the receipt id in each record file instead.
 - `parse_rulings` and `parse_searched` read the ruling and `SEARCHED` lines. `unparsed_ruling_lines` and `unparsed_searched_lines` return lines that open as one but do not read as one.
 - `check_run( added, receipts, rulings, ... )` gives each added symbol a status. `OK` needs a ruling citing the symbol's own receipt. A `DISTINCT` ruling also needs a recorded search whose every candidate has a `SEARCHED` line that is not `SAME_JOB`.
 - `run_gate` runs it over the crew runs. `main` prints the result as JSON and returns 0 on a pass, 1 on a fail and 2 on a malformed `--run`.
