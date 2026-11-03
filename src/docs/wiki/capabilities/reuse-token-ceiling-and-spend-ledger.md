@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_ledger.AccountLimitReached@16e94115cf
   - lupin_mcp.reuse_ledger.usd_to_tokens@003b0079f8
   - lupin_mcp.reuse_ledger.ledger_path@5741220769
-  - lupin_mcp.reuse_ledger.AccountLedger@5f9e2f3132
+  - lupin_mcp.reuse_ledger.AccountLedger@747d05bd94
   - lupin_mcp.reuse_tools.close_run@d5374ff2aa
 ---
 # Jev token ceiling and spend ledger
