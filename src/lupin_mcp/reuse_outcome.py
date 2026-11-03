@@ -7,10 +7,17 @@ The line ties a lookup to what the diff did with it. It reads:
 REUSE-OUTCOME <receipt id> :: <search id> :: REUSED <symbol> | EXTENDED <symbol> | WROTE_NEW <difference> :: <plan path>#<step>
 ```
 `REUSED` and `EXTENDED` take one symbol token and no free text after it. `WROTE_NEW` takes text with no " :: " in it.
-This module reads the shape only. Whether the receipt and the search are in the call log is a later step.
+This module reads the shape, and gives the two tokens `excluded` and `unindexed` their meaning.
+Whether a real receipt and search are in the call log is a later step.
 Nothing here reads the log, sends anything, or runs a model.
 """
+import pathlib
 import re
+
+from cosa.repo.symindex.spec import SCRIPT_SUFFIXES, skipped, spec_for
+from lupin_mcp.reuse_exit_gate import EXCLUDED_PREFIX, EXCLUDED_TOKEN
+
+UNINDEXED_TOKEN  = "unindexed"                                      # the receipt and search token for a file outside the index
 
 TEMPLATE_RECEIPT = "<receipt id>"                                   # the receipt slot of the skill's template line
 TEMPLATE_SEARCH  = "<search id>"                                    # the search slot of the same line
@@ -31,8 +38,9 @@ def parse_outcomes( text ):
     Requires:
         - text is a string
     Ensures:
-        - returns, in document order, one { receipt, search, outcome, detail, plan, step } dict per line that matches OUTCOME_RE
+        - returns, in document order, one { receipt, search, outcome, detail, plan, step, line } dict per line that matches OUTCOME_RE
         - outcome is `REUSED`, `EXTENDED` or `WROTE_NEW`; detail is the symbol token, or the difference text for `WROTE_NEW`
+        - line is the stripped text, so a later check can name it
         - lines inside a code fence are read like any other line
         - a template line and every line that does not open with the keyword are ignored
     """
@@ -40,7 +48,7 @@ def parse_outcomes( text ):
     for line in text.splitlines():
         m = OUTCOME_RE.match( line )
         if m: out.append( { "receipt": m.group( "receipt" ), "search": m.group( "search" ), "outcome": m.group( "kind" ) or m.group( "new" ),
-                            "detail": m.group( "symbol" ) or m.group( "difference" ), "plan": m.group( "plan" ), "step": m.group( "step" ) } )
+                            "detail": m.group( "symbol" ) or m.group( "difference" ), "plan": m.group( "plan" ), "step": m.group( "step" ), "line": line.strip() } )
     return out
 
 
@@ -56,3 +64,52 @@ def unparsed_outcome_lines( text ):
         - a line that does not open with the keyword is never returned
     """
     return [ line.strip() for line in text.splitlines() if OUTCOME_LEAD_RE.match( line ) and not TEMPLATE_RE.match( line ) and not OUTCOME_RE.match( line ) ]
+
+
+def is_indexed( path, root ):
+    """
+    Say whether the symbol index holds a file, by the indexer's own rule.
+
+    Requires:
+        - root is a repository root; path is a file path, relative to root or absolute
+    Ensures:
+        - returns True when the path lies under a Python root with a .py suffix, a script root with a script suffix, or a Dart root with a .dart suffix
+        - and the indexer's skip rule (a skipped directory name or a skipped suffix) does not drop it
+        - the roots, suffixes and skip rule are spec_for's and iter_files's own, so a file in a root that the index drops is not indexed
+        - a path outside the tree is not indexed; the path need not exist
+        - reads only the paths, not the tests scope, which the index builds separately
+    """
+    spec  = spec_for( root )
+    where = ( spec.root / path ).resolve()
+    if not where.is_relative_to( spec.root.resolve() ): return False
+    if skipped( where.relative_to( spec.root.resolve() ).as_posix(), spec.skip_parts ): return False
+    kinds = ( ( spec.py_roots, ( ".py", ) ), ( spec.js_roots, SCRIPT_SUFFIXES ), ( spec.dart_roots, ( ".dart", ) ) )
+    return any( where.suffix in suffixes and where.is_relative_to( base.resolve() ) for bases, suffixes in kinds for base in bases )
+
+
+def token_refusals( outcomes, exclusions, root ):
+    """
+    Refuse the `excluded` and `unindexed` lines that have no backing.
+
+    Requires:
+        - outcomes comes from parse_outcomes
+        - exclusions is what reuse_exit_gate.exclusions_by_symbol returns for the call log
+        - root is a repository root
+    Ensures:
+        - the key of a line is the first word of its detail text
+        - an `excluded` receipt passes only when the log holds an `EXCLUDED_` refusal for exactly that key
+        - an `unindexed` receipt passes only with `unindexed` in the search slot and a key the symbol index does not hold
+        - an `unindexed` search beside any other receipt is refused
+        - returns [ { line, reason } ] in document order; every other line is left alone
+        - the reason for a missing refusal says to re-run the lookup and check the log folder, because a swallowed log write looks the same
+    """
+    out = []
+    for o in outcomes:
+        key = o[ "detail" ].split()[ 0 ]
+        if o[ "receipt" ] == EXCLUDED_TOKEN:
+            if key not in exclusions: out.append( { "line": o[ "line" ], "reason": f"{key} has no {EXCLUDED_PREFIX} refusal in the log; re-run the lookup and check the log folder, since a failed log write looks the same" } )
+        elif o[ "receipt" ] == UNINDEXED_TOKEN:
+            if o[ "search" ] != UNINDEXED_TOKEN: out.append( { "line": o[ "line" ], "reason": f"{UNINDEXED_TOKEN} goes in both id slots" } )
+            elif is_indexed( key, root ): out.append( { "line": o[ "line" ], "reason": f"{key} is a file the symbol index holds, so look it up instead" } )
+        elif o[ "search" ] == UNINDEXED_TOKEN: out.append( { "line": o[ "line" ], "reason": f"{UNINDEXED_TOKEN} in the search slot needs {UNINDEXED_TOKEN} in the receipt slot" } )
+    return out
