@@ -912,7 +912,7 @@ def task_get_impl( api_base_url, api_key, task_id ):
     return task_store_request( "GET", f"/api/tasks/{task_id}", api_base_url, api_key )
 
 
-def task_approve_line_impl( api_base_url, api_key, task_id ):
+def task_approve_line_impl( api_base_url, api_key, task_id, with_p0=False ):
     """
     Write the card bullet for one held row: its title and its two links.
 
@@ -922,9 +922,11 @@ def task_approve_line_impl( api_base_url, api_key, task_id ):
 
     Requires:
         - task_id is the row's full lowercase UUID
+        - with_p0 is a bool
 
     Ensures:
         - on success returns { "line": "- <title> [approve ☐](/app/tasks/approve?row=<id>) [📋](/app/tasks/view?row=<id>)" }
+        - with_p0 adds `[P0 ⏫](/app/tasks/approve?row=<id>&priority=P0)` between them (Rick's login only)
         - a malformed id returns { "error": "invalid_row_id", "detail": ... } and asks the server nothing
         - a row the server could not return (404, auth, transport) returns that error dict
           verbatim, never a line built from nothing
@@ -939,7 +941,7 @@ def task_approve_line_impl( api_base_url, api_key, task_id ):
     row = task_get_impl( api_base_url, api_key, task_id )
     if "title" not in row: return row
     try:
-        return { "line": approve_link_line( task_id, row[ "title" ] ) }
+        return { "line": approve_link_line( task_id, row[ "title" ], with_p0 ) }
     except ( ValueError, TypeError ) as err:
         return { "error": "blank_title", "detail": str( err ) }
 

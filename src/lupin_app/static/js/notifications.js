@@ -20906,6 +20906,7 @@ class NotificationsUI {
         // action-required card would never reach a branch added after it; this one claims
         // the click first and stops the browser from following it.
         document.addEventListener( "click", ( ev ) => this._handleApproveLinkClick( ev ) );
+        document.addEventListener( "click", ( ev ) => this._handleApproveP0LinkClick( ev ) );
         // Row 192fecdf — the 📋 view link beside it, and the redraw check on drawn approve links.
         document.addEventListener( "click", ( ev ) => this._handleViewLinkClick( ev ) );
         document.addEventListener( "click", ( ev ) => this._handleBatchApproveLinkClick( ev ) );
@@ -20995,6 +20996,18 @@ class NotificationsUI {
     }
 
     /**
+     * The row id a P0 link href names, or null.
+     *
+     * The href is `/app/tasks/approve?row=<id>&priority=P0`.
+     * The plain approve link is null here and the P0 link is null for `_approveLinkRowId`, so each click has one handler.
+     */
+    _approveP0LinkRowId( href ) {
+        const normalized = this._normalizeDocLinkHref( href );
+        if ( !normalized || !normalized.endsWith( "&priority=P0" ) ) return null;
+        return this._rowIdAfter( "/app/tasks/approve?row=", normalized.slice( 0, -"&priority=P0".length ) );
+    }
+
+    /**
      * Reads the row id out of a 📋 view-link href, or returns null when it is not one.
      *
      * The href is `/app/tasks/view?row=<full lowercase uuid>`, relative or with a loopback origin.
@@ -21069,7 +21082,7 @@ class NotificationsUI {
         for ( const root of roots ) {
             const found = root.matches( "a[href]" ) ? [ root ] : Array.from( root.querySelectorAll( "a[href]" ) );
             for ( const anchor of found ) {
-                const id = this._approveLinkRowId( anchor.getAttribute( "href" ) );
+                const id = this._approveLinkRowId( anchor.getAttribute( "href" ) ) ?? this._approveP0LinkRowId( anchor.getAttribute( "href" ) );
                 if ( id === null || anchor.hasAttribute( "data-approve-checked" ) ) continue;
                 anchor.setAttribute( "data-approve-checked", "1" );
                 byRow.set( id, [ ...( byRow.get( id ) || [] ), anchor ] );
@@ -21130,6 +21143,33 @@ class NotificationsUI {
         const outcome = document.createElement( "span" );
         outcome.className = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
         outcome.textContent = result.ok ? "approved ✅" : result.message;
+        if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
+        anchor.replaceWith( outcome );
+    }
+
+    /**
+     * Document-level click handler for the one-click promote-to-P0 link.
+     *
+     * Ensures:
+     *     - any other click is left untouched; the browser does not follow the link
+     *     - one request per link: a second click while it is out sends nothing
+     *     - the request is the approve move plus `promote_priority: "P0"`; the server decides who may
+     *     - success becomes the disabled text "approved at P0 ✅"; a refusal or pending answer becomes the server's words
+     */
+    async _handleApproveP0LinkClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        const rowId = this._approveP0LinkRowId( anchor.getAttribute( "href" ) );
+        if ( rowId === null ) return;
+        ev.preventDefault();
+        if ( anchor.dataset.approveState === "pending" ) return;
+        anchor.dataset.approveState = "pending";
+        anchor.setAttribute( "aria-disabled", "true" );
+        anchor.style.opacity = "0.5";
+        const result = await this._transitionTask( rowId, "queued", { promote_priority: "P0" } );
+        const outcome = document.createElement( "span" );
+        outcome.className = result.ok ? "approve-link-result approve-link-approved" : "approve-link-result approve-link-refused";
+        outcome.textContent = result.ok ? "approved at P0 ✅" : result.message;
         if ( result.ok ) outcome.setAttribute( "aria-disabled", "true" );
         anchor.replaceWith( outcome );
     }

@@ -51,6 +51,11 @@ class TestApproveLinkLine:
     def test_exact_format_for_a_real_row_id( self ):
         assert approve_link_line( ROW, "Fix the thing" ) == f"- Fix the thing [approve ☐](/app/tasks/approve?row={ROW}) [📋](/app/tasks/view?row={ROW})"
 
+    def test_with_p0_adds_the_third_link_between_approve_and_view( self ):
+        assert approve_link_line( ROW, "Fix the thing", with_p0 = True ) == (
+            f"- Fix the thing [approve ☐](/app/tasks/approve?row={ROW}) "
+            f"[P0 ⏫](/app/tasks/approve?row={ROW}&priority=P0) [📋](/app/tasks/view?row={ROW})" )
+
     def test_title_whitespace_collapses_and_brackets_are_escaped( self ):
         line = approve_link_line( ROW, "[LUPIN] Fix:\n  two   lines" )
         assert line == f"- \\[LUPIN\\] Fix: two lines [approve ☐](/app/tasks/approve?row={ROW}) [📋](/app/tasks/view?row={ROW})"
@@ -79,6 +84,10 @@ class TestTaskApproveLineImpl:
         asked = server( _Resp( 200, { "id": ROW, "title": "Fix the thing" } ) )
         assert task_approve_line_impl( BASE, KEY, ROW ) == { "line": approve_link_line( ROW, "Fix the thing" ) }
         assert asked == [ f"{BASE}/api/tasks/{ROW}" ], "the title came from the by-id row fetch"
+
+    def test_with_p0_reaches_the_line( self, server ):
+        server( _Resp( 200, { "id": ROW, "title": "Fix the thing" } ) )
+        assert task_approve_line_impl( BASE, KEY, ROW, with_p0 = True ) == { "line": approve_link_line( ROW, "Fix the thing", True ) }
 
     def test_a_malformed_id_asks_the_server_nothing( self, server ):
         asked  = server( _Resp( 200, { "title": "x" } ) )
@@ -110,4 +119,7 @@ class TestTaskApproveLineVerb:
         monkeypatch.setattr( cv, "_mcp_outbound_api_key", lambda: "ck_live_stub" )
         monkeypatch.setattr( cv, "task_approve_line_impl", lambda **kw: captured.update( kw ) or { "line": "L" } )
         assert cv.task_approve_line.fn( task_id = ROW ) == { "line": "L" }
-        assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "task_id": ROW }
+        assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "task_id": ROW, "with_p0": False }
+        captured.clear()
+        cv.task_approve_line.fn( task_id = ROW, with_p0 = True )
+        assert captured[ "with_p0" ] is True

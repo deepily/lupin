@@ -15,22 +15,27 @@ APPROVE_LINK_PATH  = "/app/tasks/approve?row="
 APPROVE_LINK_LABEL = "approve ☐"
 VIEW_LINK_PATH     = "/app/tasks/view?row="
 VIEW_LINK_LABEL    = "📋"
+P0_LINK_SUFFIX     = "&priority=P0"
+P0_LINK_LABEL      = "P0 ⏫"
 
 # A full, canonical, lowercase row id. Short ids and braced or unhyphenated forms are
 # refused: the click handlers send exactly this string to the server.
 _ROW_ID_RE = re.compile( r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" )
 
 
-def approve_link_line( row_id, title ):
+def approve_link_line( row_id, title, with_p0=False ):
     """
     Write the card bullet for one held row: its title, its approve link, then its 📋 view link.
 
     Requires:
         - row_id is a full lowercase hyphenated UUID string
         - title is a string with at least one non-blank character
+        - with_p0 is a bool
 
     Ensures:
         - returns one line, `- <title> [approve ☐](/app/tasks/approve?row=<row_id>) [📋](/app/tasks/view?row=<row_id>)`
+        - with_p0 puts a third link between them, `[P0 ⏫](/app/tasks/approve?row=<row_id>&priority=P0)`, which admits
+          the row at P0; the server honours it for Rick's login only
         - whitespace runs in the title (newlines included) collapse to single spaces
         - `[` and `]` in the title are backslash-escaped so a title cannot form a link
 
@@ -45,7 +50,8 @@ def approve_link_line( row_id, title ):
     flat = " ".join( title.split() )
     if flat == "": raise ValueError( "title must not be blank" )
     flat = flat.replace( "[", "\\[" ).replace( "]", "\\]" )
-    return f"- {flat} [{APPROVE_LINK_LABEL}]({APPROVE_LINK_PATH}{row_id}) [{VIEW_LINK_LABEL}]({VIEW_LINK_PATH}{row_id})"
+    p0 = f" [{P0_LINK_LABEL}]({APPROVE_LINK_PATH}{row_id}{P0_LINK_SUFFIX})" if with_p0 else ""
+    return f"- {flat} [{APPROVE_LINK_LABEL}]({APPROVE_LINK_PATH}{row_id}){p0} [{VIEW_LINK_LABEL}]({VIEW_LINK_PATH}{row_id})"
 
 
 BATCH_APPROVE_PATH = "/app/tasks/approve?rows="

@@ -468,3 +468,69 @@ def test_task_view_landing_page_refuses_a_short_id( logged_in_page ):
     page.goto( f"{BASE_URL}/app/tasks/view?row=a3975cf4", wait_until="networkidle", timeout=15_000 )
     expect( page.get_by_test_id( "task-view-error" ) ).to_contain_text( "full ticket id", timeout=TIMEOUT_MS )
     expect( page.get_by_test_id( "task-view-row" ) ).to_be_hidden()
+
+
+# ---------------------------------------------------------------------------
+# The promote-to-P0 link (row 54d62c0e), both clients
+#
+# The :8000 login is not Rick's, so the success arm answers the request itself and proves what the
+# browser sent (the approve move plus promote_priority P0) and drew. The refusal arm uses the REAL
+# server: this login is not the operator, so the door must say so and the row must stay held.
+# ---------------------------------------------------------------------------
+
+def _p0_abstract( rows ):
+    """The card abstract with the P0 link, written by the shipped helper."""
+    from cosa.rest.task_approve_link import approve_link_line
+
+    return "\n".join( approve_link_line( r[ "id" ], r[ "title" ], with_p0=True ) for r in rows )
+
+
+def test_promote_p0_legacy_click_sends_the_flag_and_draws_approved_at_p0( notifications_page, held ):
+    page   = notifications_page
+    posted = []
+    _operator_door( page, posted )
+
+    content = _show_card_legacy( page, held, abstract=_p0_abstract( held ) )
+    links = content.locator( "a[href$='&priority=P0']" )
+    expect( links ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    expect( links.nth( 1 ) ).to_have_text( "P0 ⏫" )
+    links.nth( 1 ).click()
+
+    expect( content.locator( ".approve-link-approved" ) ).to_have_text( "approved at P0 ✅", timeout=TIMEOUT_MS )
+    assert [ ( i, b[ "to_status" ], b.get( "promote_priority" ) ) for i, b in posted ] == [ ( held[ 1 ][ "id" ], "queued", "P0" ) ]
+
+
+def test_promote_p0_multiplexer_click_sends_the_flag_and_draws_approved_at_p0( logged_in_page, held ):
+    page   = logged_in_page
+    posted = []
+    _operator_door( page, posted )
+
+    card  = _show_card_multiplexer( page, held, abstract=_p0_abstract( held ) )
+    links = card.locator( "a[href$='&priority=P0']" )
+    expect( links ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    links.nth( 1 ).click()
+
+    expect( card.locator( ".approve-link-approved" ) ).to_have_text( "approved at P0 ✅", timeout=TIMEOUT_MS )
+    assert [ ( i, b[ "to_status" ], b.get( "promote_priority" ) ) for i, b in posted ] == [ ( held[ 1 ][ "id" ], "queued", "P0" ) ]
+
+
+def test_promote_p0_legacy_real_server_refuses_a_login_that_is_not_the_operator( notifications_page, held ):
+    page    = notifications_page
+    content = _show_card_legacy( page, held, abstract=_p0_abstract( held ) )
+    links   = content.locator( "a[href$='&priority=P0']" )
+    expect( links ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    links.nth( 0 ).click()
+
+    expect( content.locator( ".approve-link-refused" ) ).to_contain_text( "only for Rick's login", timeout=TIMEOUT_MS )
+    assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * ROWS
+
+
+def test_promote_p0_multiplexer_real_server_refuses_a_login_that_is_not_the_operator( logged_in_page, held ):
+    page  = logged_in_page
+    card  = _show_card_multiplexer( page, held, abstract=_p0_abstract( held ) )
+    links = card.locator( "a[href$='&priority=P0']" )
+    expect( links ).to_have_count( ROWS, timeout=TIMEOUT_MS )
+    links.nth( 0 ).click()
+
+    expect( card.locator( ".approve-link-refused" ) ).to_contain_text( "only for Rick's login", timeout=TIMEOUT_MS )
+    assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * ROWS
