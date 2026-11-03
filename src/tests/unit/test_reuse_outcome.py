@@ -4,6 +4,7 @@ The REUSE-OUTCOME line reader (plan section 12.3, the second step of track B).
 The good lines are two real ones from the remediation plan and the template is the real one from the reviewer skill.
 Nothing here reads a call log or runs a model.
 """
+import json
 import pathlib
 import subprocess
 
@@ -284,3 +285,25 @@ def test_the_excluded_and_unindexed_lines_are_skipped_by_pairing_not_refused_and
     assert ro.pairing_refusals( tokens, rulings ) == [] and ro.pairing_refusals( tokens, {} ) == [], "no ruling pairs them and nothing is refused, even with a kind that would not pair"
     out = ro.token_refusals( tokens, {}, ROOT )
     assert [ r[ "line" ] for r in out ] == [ t[ "line" ] for t in tokens ], "the token check judges both: no log refusal for the first, and the second lacks unindexed in its search slot"
+
+
+def two_receipts( tmp_path ):
+    """Ensures: returns ( receipts, searches ) for two lookups, each with its own search record."""
+    ( tmp_path / "search-records" ).mkdir()
+    calls = []
+    for rid, sid in ( ( R_A, "rs-aaaaaaaaaa" ), ( R_B, "rs-bbbbbbbbbb" ) ):
+        ( tmp_path / "search-records" / f"{sid}.json" ).write_text( json.dumps( { "id": sid, "receipt_id": rid, "candidates": [ { "id": "m.c" } ] } ), encoding="utf-8" )
+        calls += [ { "tool": "check_exists", "receipt_id": rid, "error": None }, { "tool": "record_search", "search_id": sid, "receipt_id": rid, "error": None } ]
+    return eg.receipts_by_id( calls ), eg.searches_by_receipt( calls, tmp_path )
+
+
+def test_a_real_search_that_belongs_to_another_receipt_is_refused( tmp_path ):
+    receipts, searches = two_receipts( tmp_path )
+    base  = outcome_lines( ( R_A, "REUSED m.q" ), ( R_B, "REUSED m.q" ) )
+    own   = [ dict( base[ 0 ], search="rs-aaaaaaaaaa" ), dict( base[ 1 ], search="rs-bbbbbbbbbb" ) ]
+    cross = [ dict( base[ 0 ], search="rs-bbbbbbbbbb", line="A cites B's search" ), dict( base[ 1 ], search="rs-aaaaaaaaaa", line="B cites A's search" ) ]
+    assert ro.log_refusals( own, receipts, searches ) == [], "each receipt with its own search passes"
+    out = ro.log_refusals( cross, receipts, searches )
+    assert [ r[ "line" ] for r in out ] == [ "A cites B's search", "B cites A's search" ] and all( "is not in the log for receipt" in r[ "reason" ] for r in out )
+    anywhere = { sid for found in searches.values() for sid in found }
+    assert all( c[ "search" ] in anywhere for c in cross ), "each cited search is in the log, so a check that only asks whether the search exists anywhere would pass both lines"
