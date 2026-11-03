@@ -340,3 +340,8 @@ def test_sample_is_none_when_docker_does_not_answer_or_the_answer_cannot_be_read
     handle = { "container" : "c", "db_name" : "d" }
     assert make( docker=Docker( stats_code=1, stats_text="Error: no such container" ) )[ 0 ].sample( handle ) is None
     assert make( docker=Docker( stats_text="not a stats line" ) )[ 0 ].sample( handle ) is None
+
+
+def test_sample_is_none_when_docker_fails_even_if_its_output_looks_like_a_stats_line():
+    servers, _, _ = make( docker=Docker( stats_code=1, stats_text="12.5MiB / 31GiB|1.50%" ) )
+    assert servers.sample( { "container" : "c", "db_name" : "d" } ) is None

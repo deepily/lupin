@@ -289,10 +289,13 @@ def test_main_dry_run_prints_the_answers_per_surface_and_exits_zero( repo, tmp_p
 
 
 def test_main_runs_an_arm_and_prints_its_result( repo, tmp_path, capsys ):
+    seen = {}
     def factory( spec, repo_root, data_root, image, mcp_config, environ ):
+        seen[ "cap" ] = spec[ "cap_seat_hours" ]
         return wire( repo, spec, StubSession(), tmp_path )[ 0 ]
     assert driver.main( argv_of( repo ), factory=factory ) == driver.EXIT_DONE
-    assert json.loads( capsys.readouterr().out )[ "stop" ] == harness.STOP_ALL_PASS
+    result = json.loads( capsys.readouterr().out )
+    assert ( result[ "stop" ], result[ "pilot" ], seen[ "cap" ] ) == ( harness.STOP_ALL_PASS, False, 5.0 )
 
 
 def test_main_turns_a_refusal_into_exit_code_two_and_prints_its_code( repo, capsys ):

@@ -194,7 +194,7 @@ class Sessions:
             - the first slice starts the session with the brief; each later slice resumes it
             - the slice is stopped at min( slice length, remaining hours )
             - returns { seat_hours, finished, seats }; seat_hours is the wall time times the seats
-            - seats is the configured seats plus the most subagent calls the slice made in one message (a slice that was cut off by its time limit reports the configured seats, since its stream was not read)
+            - seats is the configured seats plus the most subagent calls the slice made in one message (the output of a slice cut off by its time limit holds no stream, so it adds none)
             - finished is true once the session has stopped on its own STOPS_TO_FINISH times in a row; a slice stopped by its time limit resets the count
 
         Raises:
@@ -212,7 +212,7 @@ class Sessions:
             if code != 0: raise err.HarnessError( err.SESSION_FAILED, f"the session ended with {code}: {' | '.join( output.splitlines()[ -TAIL: ] )}" )
         self.slices += 1
         self.stops   = 0 if timed_out else self.stops + 1
-        agents  = 0 if timed_out else measure.peak_agents( events_of( output ) )
+        agents  = measure.peak_agents( events_of( output ) )
         return { "seat_hours" : elapsed / 3600 * self.seats, "finished" : self.stops >= STOPS_TO_FINISH, "seats" : self.seats + agents }
 
     def _argv( self, config, prompt ):
