@@ -183,6 +183,14 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "restored between the arms with `readlink` read before and after, the interpreter "
         "pinned to the main checkout so only the target moved: 39 passed with a `.venv`, "
         "39 passed without, 39 passed with again.",
+    "test_install_cosa_voice_keeps_reuse_settings.py":
+        "the `.venv/bin/python` it names is planted BY THE FIXTURE (`home` writes an empty file "
+        "at `root / \".venv/bin/python\"` inside a tmp_path tree the installer is pointed at), so "
+        "the path is a property of the temp tree it builds and never of the tree running the "
+        "suite. Measured BOTH ways at 3aae6575b in one worktree, the `.venv` symlink moved aside "
+        "and restored with `readlink` read before and after, the interpreter pinned to the main "
+        "checkout so only the target moved: 12 passed with a `.venv`, 12 passed without, "
+        "12 passed with again.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "
