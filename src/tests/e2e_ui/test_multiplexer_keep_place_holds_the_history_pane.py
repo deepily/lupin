@@ -162,8 +162,8 @@ def test_control_unpinned_history_is_scrolled_to_the_top_by_the_same_stream( pag
     assert after[ "scrollTop" ] == 0, f"with Keep place off the history should be at the top: { after }"
 
 
+def _plain_message_raises_the_card( page, keep_place ):
     """Raise card A with a plain message, moveBefore removed; return its list scroll."""
-    """Raise card A with a plain message, with moveBefore removed so the insertBefore fallback runs."""
     card_a = _scrolled_history( page, keep_place=keep_place, no_move_before=True )
     assert page.evaluate( "() => typeof Element.prototype.moveBefore" ) == "undefined", "precondition: moveBefore is removed"
     _emit( page, SENDER_A, 200, age_ms=0 )
