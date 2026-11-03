@@ -209,6 +209,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-ledger-capacity-and-run-names]] — ledger run names, the run ceiling from a measured worst lookup, the seat capacity check, and the read-only ledger queries. `lupin_mcp` (reuse_ledger)
 - [[reuse-behaviour-weekly-page]] — the weekly fleet page of reuse lookups, outcome lines, refusals and audits, its week rules and cron lines. `lupin_mcp` (reuse_behaviour)
 - [[duplicate-check-refile]] — files again the findings a saved daily-check result file holds, and records the answer in the file. `lupin_mcp` (duplicate_check_refile)
+- [[duplicate-check-filing]] — the store row for each duplicate the daily check finds: the date-free key, manager lookup, the retry spool and the live store client. `lupin_mcp` (duplicate_check_filing)
 - [[reuse-merge-gate]] — the merge-pyramid reuse gate: the base it measures from, the outcome lines and new definitions it checks, and its exit codes. `lupin_mcp` (reuse_merge_gate)
 - [[reuse-record-search]] — the `record_search` MCP tool: a fixed-string search of the tree for the nearest existing definitions, recorded under a search id. `lupin_mcp` (cosa_voice_mcp, reuse_search)
 - [[reuse-search-terms-and-grep]] — reuse_search term derivation, the fixed-string git grep, the freshness check and the receipt and entry text sources. `lupin_mcp` (reuse_search)
