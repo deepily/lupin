@@ -7,12 +7,14 @@ with --census-log. It refuses a census that ran on another tree and prints one `
 The merger runs `--check "<line>"`. That refuses a verdict with no census count, one for another tree,
 and Merge over a red census.
 
-Standard library only. Venue: :7999-eligible apart from the census run, which has its own rules.
+Reuses lupin_mcp.reuse_harness.commands.run_command for every command. Venue: :7999-eligible apart from the census run, which has its own rules.
 """
 import argparse
 import os
 import re
-import subprocess
+from functools import partial
+
+from lupin_mcp.reuse_harness.commands import run_command
 
 VERDICTS    = ( "Merge", "Fix" )
 LINE_SHAPE  = re.compile( r"^REVIEW-VERDICT sha=([0-9a-f]+) census=(\d+)p/(\d+)f/(\d+)e verdict=(Merge|Fix)$" )
@@ -20,6 +22,7 @@ TREE_SHAPE  = re.compile( r"\[tree-state\] sha=([0-9a-f]+)" )
 SUMMARY     = re.compile( r"\bin \d+(?:\.\d+)?s\b" )
 COUNT       = re.compile( r"(\d+) (passed|failed|errors?)\b" )
 SHA_LENGTH  = 12
+CENSUS_SECONDS = 1800
 
 
 def parse_census( text ):
@@ -86,24 +89,13 @@ def check_line( line, head ):
     return { "sha": sha, "passed": int( passed ), "failed": int( failed ), "errors": int( errors ), "verdict": verdict }
 
 
-def run_command( cmd ):
-    """
-    Run cmd and return its exit code with its output.
-
-    Ensures:
-        - runs in LUPIN_ROOT, or the current directory when that is unset
-        - stdout and stderr come back together as one string
-    """
-    done = subprocess.run( cmd, cwd=os.environ.get( "LUPIN_ROOT" ), capture_output=True, text=True, check=False )
-    return done.returncode, done.stdout + done.stderr
-
-
-def main( argv=None, run=run_command, out=print ):
+def main( argv=None, run=None, out=print ):
     """
     Print the verdict line for the tree at HEAD, or check a line given with --check.
 
     Ensures:
         - returns 0 after printing the line; returns 2 after printing the refusal, which names the cause
+        - run is None for lupin_mcp.reuse_harness.commands.run_command in LUPIN_ROOT with a CENSUS_SECONDS timeout, or a stand-in taking one command list
         - building a verdict refuses a tree with tracked changes, since the census would describe other bytes
     """
     parser = argparse.ArgumentParser( description="Print or check a review verdict line." )
@@ -112,6 +104,7 @@ def main( argv=None, run=run_command, out=print ):
     group.add_argument( "--check", metavar="LINE" )
     parser.add_argument( "--census-log" )
     args = parser.parse_args( argv )
+    if run is None: run = partial( run_command, cwd=os.environ.get( "LUPIN_ROOT" ), timeout=CENSUS_SECONDS )
     head = run( [ "git", "rev-parse", "HEAD" ] )[ 1 ].strip()
     try:
         if args.check is not None: line = args.check.strip(); check_line( line, head )

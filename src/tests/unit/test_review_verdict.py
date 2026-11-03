@@ -102,10 +102,16 @@ def test_main_check_accepts_a_line_for_this_tree_and_refuses_the_rest():
     assert "no census" in out[ -1 ]
 
 
-def test_the_default_runner_runs_a_command_and_returns_its_status_and_output():
-    assert rv.run_command( [ "python3", "-c", "print( 'hi' )" ] ) == ( 0, "hi\n" )
-    code, text = rv.run_command( [ "python3", "-c", "import sys; print( 'x' ); sys.exit( 3 )" ] )
-    assert ( code, text ) == ( 3, "x\n" )
+def test_the_default_runner_is_the_harness_run_command_in_the_repo_root_with_the_census_timeout( monkeypatch ):
+    monkeypatch.setenv( "LUPIN_ROOT", "/the/root" )
+    calls = [ ]
+    def fake( argv, env=None, cwd=None, timeout=None ):
+        calls.append( ( argv, cwd, timeout ) )
+        return ( 0, SHA + "\n" ) if argv[ :2 ] == [ "git", "rev-parse" ] else ( 0, "" if argv[ 0 ] == "git" else GOOD )
+    monkeypatch.setattr( rv, "run_command", fake )
+    out = [ ]
+    assert rv.main( [ "--verdict", "Fix" ], out=out.append ) == 0
+    assert [ c[ 1: ] for c in calls ] == [ ( "/the/root", rv.CENSUS_SECONDS ) ] * 3 and calls[ 2 ][ 0 ] == [ "bash", "src/tests/run-census-guards.sh" ]
 
 
 def test_the_wrapper_script_hands_its_arguments_to_the_module():

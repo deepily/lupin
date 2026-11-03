@@ -615,6 +615,21 @@ def test_the_plan_counts_pairs_on_one_record_pair_as_would_share_before_any_draf
     assert plan[ "calls" ][ "posts" ] == 12 and plan[ "calls" ][ "posts_if_shared" ] == 9
 
 
+def test_twin_pairs_with_one_side_b_and_different_side_a_are_not_twins():
+    _records, index, by_id, purposes = world( 4 )
+    rows, _r, _s = sc.split_pairs( [ pair( 1, 1, 2 ), pair( 2, 3, 2 ) ], index, by_id, purposes )
+    posting, shared = sc.twin_pairs( rows )
+    assert [ r[ "pair" ] for r in posting ] == [ "pair-1", "pair-2" ] and shared == { "pair-1": [ ], "pair-2": [ ] }
+
+
+def test_three_pairs_on_one_record_pair_all_fold_into_the_first():
+    _records, index, by_id, purposes = world( 2 )
+    rows, _r, _s = sc.split_pairs( [ pair( 1, 1, 2 ), pair( 2, 1, 2 ), pair( 3, 1, 2 ) ], index, by_id, purposes )
+    posting, shared = sc.twin_pairs( rows )
+    assert [ r[ "pair" ] for r in posting ] == [ "pair-1" ]
+    assert { p: [ r[ "pair" ] for r in rs ] for p, rs in shared.items() } == { "pair-1": [ "pair-2", "pair-3" ] }
+
+
 def test_the_plan_with_no_twins_lists_none_and_posts_every_pair():
     _records, index, by_id, purposes = world( 4 )
     rows, _r, _s = sc.split_pairs( [ pair( 1, 1, 2 ), pair( 2, 3, 4 ) ], index, by_id, purposes )
