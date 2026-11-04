@@ -22,6 +22,32 @@
 - **PR body draft** (strategic style, gate table empty): `/tmp/claude-1001/-mnt-DATA01-include-www-deepily-ai-projects-lupin/daeedcae-ec34-4635-b1f9-09eb30025393/scratchpad/pr-body-v0.2.2-draft.md`, copied to `io/mementos/cheech-pr-body-v0.2.2-draft.md`.
 - **Owed next session**: the :8000 coverage run with e2e_a and integration in the same pass, the three smoke rows, then the PR on Rick's word.
 
+## 2026.11.03 - Session b7d7515e (Mr. Radio 🦉, manager; crew Clayton, Rio, Krishna, Pocholo, Rachel, Sam, Maya, Chloé) | 1.1.7 rolled out; approve links gained a status filter, a P0 promote and a gc-proof test; the decision-proxy explainer; the PR's flake fixes merged
+
+### Checkpoint | 2026.11.03 23:35 | 📷 for Rick's end-of-session ritual
+
+- **1.1.7 rollout (row 3e906d57, done)**: claude-agent-sdk 0.2.177 merged as 1113d2e06. Smoke ts-96471716 was green with 496 passed. Clayton ran the runbook through to Cloud Run at 0 and the VM stopped.
+- **No GPU in unit tests**: Rick ruled that no unit test may need a free GPU. The peft quantize tests now mock CUDA (row 14cd7040, merged 8ecbc6e6b).
+- **Merged today**:
+  - Duplicate check table on the weekly fleet page: f32f645b, 4f6612e6e.
+  - Duplicate check verdict lines: 63c83b3c, 3fcca7a2f, follow-up acd44f007.
+  - Keep place toggle styling: c278c339, 0328f99e6.
+  - Task list status filter: 8eb71f8e, 49184cc09, baselines f25a14c1a.
+  - One-click P0 promote link: 54d62c0e, fa1abf79b.
+  - Approve-page test: 5007e43e, 46a25f848.
+  - Approve-link GC flake: 93ecdd14, ac1f8c86b.
+  - Nine PR-gate unit reds: 2ae9a5f4, 3a2ffcbc6.
+- **For Cheech's v0.2.2 PR**: the e2e tooltip race fix (496cfcff) merged as dd2f102bb. The v2_ask replay now waits on the 180 s hang guard, per Rick (3b78303b, 189018592). Before the fix, the solo :8000 run at 210e13d00 failed 1 of 2.
+- **Decision-proxy explainer (row 55e451bf, done)**: Pocholo wrote 756 lines, merged as d8747550c. It lives in `src/rnd/v0.2.2/2026.11.03-online-preference-learning/`, the folder Rick named. Its section 8 lists 18 defects, gathered in held row 10691b4f.
+- **The presentation job Rick saw**: a $0 dry run on the test account, from `test_presentation_dry_run_smoke.py` in Sam's smoke tier.
+- **Owed next session**:
+  - Run the 496cfcff and 3b78303b files on :8000 after Cheech's coverage run.
+  - e8b9b428, speech says "URL omitted": Krishna approved 713daa6c1; unit, census and merge remain.
+  - 526bfd86: reproduce on the legacy page.
+  - 21b96c4f, compose drift probe: Rio's draft is 16e46365e on a hold tag. A fixture briefly held the .env postgres password; it was redacted before any commit.
+  - Cheech's held smoke rows 61c7123f and 72d25810, for Chloé.
+  - The crew post-game, still owed.
+
 ## 2026.11.02 - Session ade365b2 (Mr. Radio 🦉, manager; crew Clayton, Rio, Maya, all reaped) | One 1.1.6 image on :7999, :8000 and the test VM; Keep place fixed in both clients; the SDK bump reviewed
 
 ### Checkpoint | 2026.11.02 22:45 | 📷 for Rick's 22:45 ritual
