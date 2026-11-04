@@ -71,3 +71,72 @@ export const PANE_RESIDENT_SELECTOR = "#action-required-content, #action-require
 export function isPaneResidentAnchor( anchor: Element ): boolean {
   return anchor.closest(PANE_RESIDENT_SELECTOR) !== null;
 }
+
+// An href that names its own scheme (`https:`, `mailto:`, `data:`) or is protocol-relative (`//host`).
+const SCHEME_OR_NETWORK_RE = /^([a-z][a-z0-9+.-]*:|\/\/)/i;
+
+/**
+ * Turn a relative markdown href into a doc-viewer link.
+ *
+ * A markdown file's own links are written for GitHub: `src/rnd/x.md` means "next to this file".
+ * The viewer left them alone, so the browser resolved them against `/app/` and landed on `/app/src/rnd/x.md`,
+ * a 404, even though the target exists. This function is the only place that resolves them.
+ *
+ * Requires:
+ *   - `href` is the raw `href` attribute, or null
+ *   - `docPath` is the open document's viewer path, `<scope>/<rel>` (the page's own `?path=` value)
+ *
+ * Ensures:
+ *   - returns `/app/docs?path=<scope>/<resolved>` (plus any `#fragment`) for a relative href
+ *   - returns null, meaning "leave this link alone", for an empty href, a bare `#anchor`, a scheme or
+ *     protocol-relative URL, a root-absolute path (this includes existing `/app/docs?path=` links), and a
+ *     `../` that would climb out of the document's scope
+ */
+export function resolveRelativeDocHref( href: string | null, docPath: string ): string | null {
+  if (href === null || href === "" || href.startsWith("#") || href.startsWith("/")) return null;
+  if (SCHEME_OR_NETWORK_RE.test(href)) return null;
+
+  const hashAt   = href.indexOf("#");
+  const fragment = hashAt === -1 ? "" : href.slice(hashAt);
+  const noHash   = hashAt === -1 ? href : href.slice(0, hashAt);
+  const queryAt  = noHash.indexOf("?");
+  const rel      = queryAt === -1 ? noHash : noHash.slice(0, queryAt);
+
+  let decoded: string;
+  try { decoded = decodeURIComponent(rel); } catch (_e) { return null; }
+
+  // The first segment is the scope; it is the floor a `..` may not go below.
+  const stack = docPath.split("/").filter((s) => s !== "");
+  if (stack.length < 2) return null; // no scope segment, so nothing to resolve inside
+  stack.pop();
+  for (const seg of decoded.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      if (stack.length <= 1) return null;
+      stack.pop();
+    } else {
+      stack.push(seg);
+    }
+  }
+  return DOC_LINK_PREFIX + encodeURIComponent(stack.join("/")).replace(/%2F/g, "/") + fragment;
+}
+
+/**
+ * Rewrite relative links under a root to their doc-viewer form.
+ *
+ * Anchors, absolute URLs and links already pointing at the viewer are left exactly as they were.
+ *
+ * Requires: `root` is the element holding the rendered markdown; `docPath` is as for {@link resolveRelativeDocHref}.
+ * Ensures: only `href` attributes of links that resolve are changed; returns how many were.
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line (same as isPaneResidentAnchor above); the body below is fully covered.
+export function rewriteRelativeDocLinks( root: ParentNode, docPath: string ): number {
+  let changed = 0;
+  root.querySelectorAll("a[href]").forEach((a) => {
+    const resolved = resolveRelativeDocHref(a.getAttribute("href"), docPath);
+    if (resolved === null) return;
+    a.setAttribute("href", resolved);
+    changed++;
+  });
+  return changed;
+}
