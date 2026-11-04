@@ -677,3 +677,18 @@ def test_main_runs_the_proof_with_the_supplement_third_file_in_the_provenance( v
     rc                       = pc.main( [ "--run-dir", str( venue.run_dir ), "--claude-cli-path", "/bin/claude", *[ x for p in paths for x in ( "--labels", p ) ], *argv ], make_parts=lambda *a: venue.parts(), run_proof=run_proof )
     assert rc == 0 and ran[ 0 ][ "labels" ][ split ] is True
     assert ran[ 0 ][ "provenance" ][ "supplement" ][ "third_labels" ] == ll.fingerprints( paths, None, None, venue.key, cu.get_project_root(), supp )[ "supplement" ][ "third_labels" ]
+
+
+def test_staged_pairs_survives_two_identical_script_definitions_in_one_file_the_4_nov_daily_check_failure( tmp_path ):
+    """The real file at 8277bb7ee holds one arrow twice; dups numbers both, extraction keeps one."""
+    toy    = Toy( tmp_path )
+    root   = tmp_path / "repo"
+    ( root / "src" ).mkdir( parents=True )
+    real   = pathlib.Path( __file__ ).parent / "fixtures" / "duplicate_check" / "task_status_filter.test.ts.txt"
+    ( root / "src" / "task_status_filter.test.ts" ).write_text( real.read_text( encoding="utf-8" ), encoding="utf-8" )
+    report = ex.extract_tree( root, [ root / "src" / "task_status_filter.test.ts" ], "server" )
+    assert [ r[ "name" ] for r in report[ "repeated_ids" ] ] == [ "owners" ], "the fixture must still hold the repeated definition"
+    pool   = [ d for d in report[ "definitions" ] if d[ "nodes" ] >= toy.cfg[ "min_nodes" ] ]
+    assert pool
+    pairs  = pc.staged_pairs( root, pool, {}, toy.cfg, NO_JSCPD )
+    assert isinstance( pairs, list )

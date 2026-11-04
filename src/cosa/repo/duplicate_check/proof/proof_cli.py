@@ -219,7 +219,8 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
         base   = pathlib.Path( tmp.name )
         files  = sorted( { rel for rel, _, _ in where } )
         paths  = [ base / f for f in files ]
-        every  = extract.extract_tree( tmp.name, paths, "server" )[ "definitions" ]
+        report = extract.extract_tree( tmp.name, paths, "server" )
+        every  = report[ "definitions" ]
         staged = [ d for d in every if d[ "nodes" ] >= cfg[ "min_nodes" ] ]
         found  = { ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) for d in staged }
         check_found( where, found, defs, cfg[ "min_nodes" ] )
@@ -230,8 +231,8 @@ def staged_pairs( root, defs, rewrites, cfg, jscpd=structural.run_jscpd ):
         py_at  = [ p for p in paths if p.name.endswith( ".py" ) ]
         js_at  = [ p for p in paths if p.name.endswith( extract.SCRIPT_SUFFIXES ) ]
         merged = structural.clone_pairs( structural.parse_jscpd( jscpd( tmp.name, [ TREE_PREFIX, NEW_PREFIX ], cfg ), js, cfg[ "clone_cover" ] ),
-                                         structural.python_clones( spec, py_at, py, cfg[ "min_nodes" ] ),
-                                         structural.script_clones( spec, js_at, js_all, cfg[ "min_nodes" ] ) )
+                                         structural.python_clones( spec, py_at, py, cfg[ "min_nodes" ], repeated=report[ "repeated_ids" ] ),
+                                         structural.script_clones( spec, js_at, js_all, cfg[ "min_nodes" ], repeated=report[ "repeated_ids" ] ) )
     to_pool = { d[ "id" ]: where.get( ( d[ "file" ], d[ "line" ], d[ "end_line" ] ) ) for d in every }
     out     = []
     for p in merged:
