@@ -78,7 +78,7 @@ def compose_tmpfs( service ):
     return entries
 
 
-def compose_mounts( service, volume_names ):
+def compose_mounts( service, volume_names, secret_files=None ):
     """
     Normalize compose's long-form volumes to a set of ( type, source, target, read_only ).
 
@@ -86,8 +86,12 @@ def compose_mounts( service, volume_names ):
         - service is one rendered compose service dict (`docker compose config` always
           emits the long form)
         - volume_names maps a compose volume key to its rendered top-level `name`
+        - secret_files maps a compose secret key to its host file, or is None
 
     Ensures:
+        - a file-backed compose secret is a read-only bind mount at /run/secrets/<target>.
+          Compose lists it under the service's `secrets:`, never under `volumes:`, so before
+          this the container's own secret mounts read as drift on every container that has one
         - read_only defaults to False, as compose does
         - a tmpfs mount has no source: compose omits it, docker reports an empty string. Both read as
           "", so a tmpfs mount never reads as drift on that difference alone
@@ -102,6 +106,12 @@ def compose_mounts( service, volume_names ):
         if v[ "type" ] == "volume": source = volume_names.get( source, source )
         if v[ "type" ] == "tmpfs":  source = ""
         mounts.add( ( v[ "type" ], source, v[ "target" ], bool( v.get( "read_only", False ) ) ) )
+    for secret in service.get( "secrets" ) or [ ]:
+        host_file = ( secret_files or { } ).get( secret[ "source" ] )
+        if host_file is None: continue
+        target = secret.get( "target" ) or secret[ "source" ]
+        if not target.startswith( "/" ): target = "/run/secrets/" + target
+        mounts.add( ( "bind", host_file, target, True ) )
     return mounts
 
 
@@ -139,15 +149,19 @@ def inspect_env( container ):
     return env
 
 
-def drifted_fields( service, container, volume_names ):
+def drifted_fields( service, container, volume_names, secret_files=None ):
     """
     Name every compose value the running container does not carry.
 
     Requires:
         - service is the rendered compose service; container is its `docker inspect` object
         - volume_names maps each compose volume key to its rendered `name`
+        - secret_files maps each compose secret key to its host file, or is None
 
     Ensures:
+        - an environment key compose renders empty is not compared when the container holds a
+          value: compose rendered it from a shell variable this caller did not export
+          (`${GH_TOKEN:-}`), so the blank says nothing about what compose asks for
         - returns a sorted list of human-readable field names, empty when nothing drifted
         - a mount the container has and compose no longer declares counts as drift too,
           since a recreate would remove it
@@ -161,14 +175,16 @@ def drifted_fields( service, container, volume_names ):
         if want_tmpfs.get( path ) != have_tmpfs.get( path ):
             fields.append( f"tmpfs {path}" )
 
-    want_mounts = compose_mounts( service, volume_names )
+    want_mounts = compose_mounts( service, volume_names, secret_files )
     have_mounts = inspect_mounts( container )
     for target in sorted( { m[ 2 ] for m in want_mounts ^ have_mounts } ):
         fields.append( f"mount {target}" )
 
     have_env = inspect_env( container )
     for key, value in sorted( ( service.get( "environment" ) or { } ).items() ):
-        if have_env.get( key ) != ( "" if value is None else str( value ) ):
+        want = "" if value is None else str( value )
+        if want == "" and have_env.get( key ): continue
+        if have_env.get( key ) != want:
             fields.append( f"env {key}" )
 
     return fields
@@ -247,7 +263,8 @@ def probe( container_name, runner=run_json, environ=None ):
         prefix    = compose_argv( labels )
         rendered  = runner( prefix + [ "config", "--format", "json", service ], env=environ )
         names     = { key: spec[ "name" ] for key, spec in ( rendered.get( "volumes" ) or { } ).items() }
-        fields    = drifted_fields( rendered[ "services" ][ service ], container, names )
+        secrets   = { key: spec[ "file" ] for key, spec in ( rendered.get( "secrets" ) or { } ).items() if "file" in spec }
+        fields    = drifted_fields( rendered[ "services" ][ service ], container, names, secrets )
     except ( OSError, ValueError, RuntimeError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired ) as e:
         return EXIT_UNKNOWN, [ f"{type( e ).__name__}: {e}" ], [ ]
     recreate = prefix + [ "up", "-d", "--force-recreate", "--no-deps", service ]
