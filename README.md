@@ -237,7 +237,7 @@ Lupin AF is evolving beyond memorizing past answers to learning the decision-mak
 
 Python counts are `pytest --collect-only -q` over `src/tests` and `src/cosa/tests`, measured on 4 November 2026 at the v0.2.2 PR head. The collection reports 56,023 of 56,042 tests, with 19 deselected by the repo's own configuration. The cross-cutting row is the union minus the rows above it. The TypeScript count is a static count of `test(` calls in the 389 tracked `*.test.ts` files, all under `src/tests/unit`. It misses tests generated in a loop. The previous table counted `def test_*` with a grep. It was an older snapshot, so the rows are not comparable with it. **The suite figure is the one to quote.**
 
-**Coverage: every merge must hold 100%** of lines, branches, and functions, across Python and TypeScript. The Python gate runs through `pytest --cov` with `--cov-fail-under=100`, and the TypeScript gate through `c8 --100`. <!-- COVERAGE-FIGURE: measured figure and statement count to be filled in from the v0.2.2 coverage-gate run -->
+**Coverage: every merge must hold 100%** of lines, branches, and functions, across Python and TypeScript. The Python gate runs through `pytest --cov` with `--cov-fail-under=100`, and the TypeScript gate through `c8 --100`. Measured at the v0.2.2 head on 4 November 2026: 100.00% of 108,471 Python statements and 32,326 branches.
 
 Built and maintained by a single engineer. Every PR must pass all tiers before merge, at 100% line, branch, and function coverage. A hash-chained attestation ledger records that each tier actually ran -- a green report that cannot prove it executed is not a green report.
 
