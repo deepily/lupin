@@ -94,6 +94,12 @@ def test_one_click_batch_legacy_a_refused_row_does_not_hide_the_other( notificat
     assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved", "queued", "not_approved" ]
 
 
+def _expect_tip_lists_only( tip, listed, unlisted ):
+    # One retrying expect per claim. Waiting on one title and then calling inner_text() is a second look that does not wait.
+    expect( tip ).to_contain_text( re.compile( "".join( f"(?=.*{re.escape( r[ 'title' ] )})" for r in listed ), re.DOTALL ), timeout=TIMEOUT_MS )
+    expect( tip ).not_to_contain_text( unlisted[ "title" ], timeout=TIMEOUT_MS )
+
+
 def test_one_click_batch_legacy_view_link_lists_every_title_before_the_click( notifications_page, held ):
     page    = notifications_page
     posted  = []
@@ -103,10 +109,7 @@ def test_one_click_batch_legacy_view_link_lists_every_title_before_the_click( no
     content.locator( "a[href*='/app/tasks/view?rows=']" ).click()
 
     tip = page.locator( "#abstract-tooltip .abstract-tooltip-content" )
-    expect( tip ).to_contain_text( held[ 1 ][ "title" ], timeout=TIMEOUT_MS )
-    for row in held[ :2 ]:
-        assert row[ "title" ] in tip.inner_text()
-    assert held[ 2 ][ "title" ] not in tip.inner_text(), "only the listed rows are shown"
+    _expect_tip_lists_only( tip, held[ :2 ], held[ 2 ] )
     assert posted == [] and _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * 3, "viewing moves nothing"
 
 
@@ -171,8 +174,7 @@ def test_one_click_batch_multiplexer_view_link_lists_every_title_before_the_clic
     card.locator( "a[href*='/app/tasks/view?rows=']" ).click()
 
     tip = page.locator( "#abstract-tooltip .abstract-tooltip-content" )
-    expect( tip ).to_contain_text( held[ 1 ][ "title" ], timeout=TIMEOUT_MS )
-    assert held[ 0 ][ "title" ] in tip.inner_text() and held[ 2 ][ "title" ] not in tip.inner_text()
+    _expect_tip_lists_only( tip, held[ :2 ], held[ 2 ] )
     assert _statuses( [ r[ "id" ] for r in held ] ) == [ "not_approved" ] * 3, "viewing moves nothing"
 
 
