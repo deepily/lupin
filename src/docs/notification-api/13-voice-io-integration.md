@@ -158,6 +158,7 @@ With that distinction it can retry or switch modes.
 
 Speech never says a link's address, and never drops a link silently. `[approve](/app/tasks/approve?row=...)` is spoken as "approve, URL omitted". A bare `http` or `https` address is spoken as "URL omitted" (Rick's ruling, 3 November 2026).
 
+- **Where it happens**: on the server, in both speech routes (`POST /api/get-speech` and `POST /api/get-speech-elevenlabs`). The shared function is `cosa.utils.speech_text.strip_markdown_links_for_speech`. Every client is covered, including the mobile app.
 - **The length cap**: `_enforce_spoken_brevity` counts the same spoken text, marker included. A line of approve links is measured by its labels plus one marker each. A long label still counts in full.
 - **Covered forms**: a markdown link with a label, and an image (its alt text is the label). A target may be followed by a quoted title. A label may hold one level of nested brackets, and a target one level of nested parentheses. An empty label is spoken as "URL omitted".
 - **Left alone**: reference-style links, addresses that are not http or https (such as ftp), and text without links.
