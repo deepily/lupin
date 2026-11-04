@@ -67,6 +67,7 @@ if lupin_root:
 import pytest
 import requests
 import cosa.utils.util as cu
+from tests.smoke.utilities.proxy_opt_in import skip_unless_proxy_opt_in
 
 from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
 from tests.helpers.mock_job_v2 import submit_body, legacy_response
@@ -431,10 +432,7 @@ def test_swe_team_proxy( request ):
           "notification dispatch" and the file failed the :7999 smoke tier (row 72d25810)
         - otherwise the result is that of quick_smoke_test()
     """
-    if not request.config.getoption( "--auto-proxy", default=False ):
-        pytest.skip( "needs a notification proxy: run with --auto-proxy (see the module docstring for the :8000 venue)" )
-    if os.environ.get( "LUPIN_INTERACTIVE_TESTS", "" ).lower() != "true":
-        pytest.skip( "needs LUPIN_INTERACTIVE_TESTS=true" )
+    skip_unless_proxy_opt_in( request )
     assert quick_smoke_test()
 
 
