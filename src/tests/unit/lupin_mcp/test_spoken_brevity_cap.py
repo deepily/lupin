@@ -113,6 +113,27 @@ class TestSpokenBrevityCap:
         )
 
 
+class TestSpokenCapCountsLinkLabelsOnly:
+    """A markdown link is spoken as its label, so the cap counts the label alone."""
+
+    @pytest.fixture( autouse=True )
+    def _force_enforce_on( self, monkeypatch ):
+        monkeypatch.setattr( cv, "_get_spoken_enforce", lambda: True )
+
+    def test_long_target_short_label_passes( self ):
+        raw = "[approve](/app/tasks/approve?row=" + "a" * ( CAP * 2 ) + ")"
+        assert len( raw ) > CAP
+        _enforce_spoken_brevity( raw, False )
+
+    def test_long_label_still_raises( self ):
+        with pytest.raises( ValueError ):
+            _enforce_spoken_brevity( "[" + "x" * ( CAP + 1 ) + "](http://x.test)", False )
+
+    def test_question_list_counts_label_only( self ):
+        raw = "[ok](/" + "a" * ( CAP * 2 ) + ")"
+        _enforce_spoken_brevity( [ { "question": raw } ], False, field="questions" )
+
+
 class TestEnforceKillSwitch:
     """Global enforce flag (Rick 2026-06-09): False disables the guard for everyone."""
 

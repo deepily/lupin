@@ -722,6 +722,13 @@ class TestGetTtsAudio( unittest.IsolatedAsyncioTestCase ):
             await self._call( { "session_id": "s", "text": "    " } )
         self.assertEqual( c.exception.status_code, 400 )
 
+    async def test_link_only_text_has_nothing_to_speak_400( self ):
+        # An empty-label link strips to nothing: a 400, like the empty-text check
+        with self.assertRaises( HTTPException ) as c:
+            await self._call( { "session_id": "s", "text": "[](http://x.test/a)" } )
+        self.assertEqual( c.exception.status_code, 400 )
+        self.assertIn( "nothing to speak", c.exception.detail )
+
     async def test_not_connected_404_with_debug( self ):
         with self.assertRaises( HTTPException ) as c:
             await self._call( { "session_id": "s", "text": "hi" }, ws_connected=False, debug=True )
@@ -739,6 +746,19 @@ class TestGetTtsAudio( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( resp.status_code, 200 )
         self.assertIn( "s", tasks )
         ws.register_session_user.assert_called_once_with( "s", "u1" )
+
+    async def test_link_target_is_not_sent_to_the_stream( self ):
+        stream = MagicMock( return_value="CORO" )
+        ws = MagicMock(); ws.is_connected.return_value = True; ws.active_connections = { }
+        main = MagicMock(); main.app_debug = False; main.app_verbose = False
+        with _patch_fastapi_main( main ), \
+             patch( f"{P}.stream_tts_hybrid", new=stream ), \
+             patch.object( speech.asyncio, "create_task", return_value="TASK" ):
+            await get_tts_audio(
+                request=self._request( { "session_id": "s", "text": "Done [approve](/app/tasks/approve?row=abc) ok" } ),
+                ws_manager=ws, active_tasks={ }, current_user_id="u1",
+            )
+        self.assertEqual( stream.call_args.args[ 1 ], "Done approve ok" )
 
     async def test_generic_error_500( self ):
         with self.assertRaises( HTTPException ) as c:
@@ -818,6 +838,25 @@ class TestGetTtsAudioElevenlabs( unittest.IsolatedAsyncioTestCase ):
         with self.assertRaises( HTTPException ) as c:
             await self._call( self._ok( text="   " ) )
         self.assertEqual( c.exception.status_code, 400 )
+
+    async def test_link_only_text_has_nothing_to_speak_400( self ):
+        with self.assertRaises( HTTPException ) as c:
+            await self._call( self._ok( text="[](http://x.test/a)" ) )
+        self.assertEqual( c.exception.status_code, 400 )
+        self.assertIn( "nothing to speak", c.exception.detail )
+
+    async def test_link_target_is_not_sent_to_the_stream( self ):
+        stream = MagicMock( return_value="CORO" )
+        ws = MagicMock(); ws.is_connected.return_value = True; ws.active_connections = { }
+        main = MagicMock(); main.app_debug = False; main.app_verbose = False
+        with _patch_fastapi_main( main ), \
+             patch( f"{P}.stream_tts_elevenlabs", new=stream ), \
+             patch.object( speech.asyncio, "create_task", return_value="TASK" ):
+            await get_tts_audio_elevenlabs(
+                request=self._request( self._ok( text="Done [approve](/app/tasks/approve?row=abc) ok" ) ),
+                ws_manager=ws, active_tasks={ }, config_mgr=MagicMock(), current_user_id="u1",
+            )
+        self.assertEqual( stream.call_args.args[ 1 ], "Done approve ok" )
 
     async def test_not_connected_404( self ):
         with self.assertRaises( HTTPException ) as c:

@@ -25,6 +25,7 @@ import torch
 # Import dependencies
 from openai import OpenAI
 import cosa.utils.util as du
+from cosa.utils.speech_text import strip_markdown_links_for_speech
 # from lib.clients import lupin_client as gc
 from cosa.rest.websocket_manager import WebSocketManager
 from cosa.memory.input_and_output_table import InputAndOutputTable
@@ -690,6 +691,11 @@ async def get_tts_audio(
         if not msg:
             raise HTTPException(status_code=400, detail="Text message cannot be empty after trimming whitespace")
 
+        # Speech says a markdown link's label, never its address
+        msg = strip_markdown_links_for_speech( msg ).strip()
+        if not msg:
+            raise HTTPException(status_code=400, detail="Text message has nothing to speak after removing link targets")
+
         # Register session with authenticated user
         if app_debug and app_verbose: print(f"[TTS-DEBUG] Registering session {session_id} for user {current_user_id}")
         ws_manager.register_session_user(session_id, current_user_id)
@@ -839,6 +845,11 @@ async def get_tts_audio_elevenlabs(
         msg = msg.strip()
         if not msg:
             raise HTTPException(status_code=400, detail="Text message cannot be empty after trimming whitespace")
+
+        # Speech says a markdown link's label, never its address
+        msg = strip_markdown_links_for_speech( msg ).strip()
+        if not msg:
+            raise HTTPException(status_code=400, detail="Text message has nothing to speak after removing link targets")
 
         if app_debug and app_verbose:
             print(f"[TTS-ELEVENLABS-DEBUG] Extracted - session_id: '{session_id}', text: '{msg}', voice_id: '{voice_id}'")
