@@ -1,0 +1,686 @@
+[
+  {
+    "Id": "59579752442cf1c91883d93778f51fb4267e0aa8ea0bc17b67c442936ce50f51",
+    "Created": "2026-11-03T18:18:13.736646064Z",
+    "Path": "/bin/bash",
+    "Args": [
+      "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"
+    ],
+    "State": {
+      "Status": "running",
+      "Running": true,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 3869231,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-11-03T23:19:40.064141007Z",
+      "FinishedAt": "2026-11-03T23:19:39.259828432Z",
+      "Health": {
+        "Status": "healthy",
+        "FailingStreak": 0,
+        "Log": [
+          {
+            "Start": "2026-11-03T22:52:49.916902628-05:00",
+            "End": "2026-11-03T22:52:50.037350997-05:00",
+            "ExitCode": 0,
+            "Output": ""
+          },
+          {
+            "Start": "2026-11-03T22:53:20.045642812-05:00",
+            "End": "2026-11-03T22:53:20.161262615-05:00",
+            "ExitCode": 0,
+            "Output": ""
+          },
+          {
+            "Start": "2026-11-03T22:53:50.164719629-05:00",
+            "End": "2026-11-03T22:53:50.276462129-05:00",
+            "ExitCode": 0,
+            "Output": ""
+          },
+          {
+            "Start": "2026-11-03T22:54:20.284898284-05:00",
+            "End": "2026-11-03T22:54:20.404691166-05:00",
+            "ExitCode": 0,
+            "Output": ""
+          },
+          {
+            "Start": "2026-11-03T22:54:50.41249285-05:00",
+            "End": "2026-11-03T22:54:50.520899287-05:00",
+            "ExitCode": 0,
+            "Output": ""
+          }
+        ]
+      }
+    },
+    "Image": "sha256:00f87a7b1893b9a4ea2b6120a1c3777e9070fb65be7e725551337fd6b91283c6",
+    "ResolvConfPath": "/var/lib/docker/containers/59579752442cf1c91883d93778f51fb4267e0aa8ea0bc17b67c442936ce50f51/resolv.conf",
+    "HostnamePath": "/var/lib/docker/containers/59579752442cf1c91883d93778f51fb4267e0aa8ea0bc17b67c442936ce50f51/hostname",
+    "HostsPath": "/var/lib/docker/containers/59579752442cf1c91883d93778f51fb4267e0aa8ea0bc17b67c442936ce50f51/hosts",
+    "LogPath": "/var/lib/docker/containers/59579752442cf1c91883d93778f51fb4267e0aa8ea0bc17b67c442936ce50f51/59579752442cf1c91883d93778f51fb4267e0aa8ea0bc17b67c442936ce50f51-json.log",
+    "Name": "/lupin-rest-test",
+    "RestartCount": 0,
+    "Driver": "overlay2",
+    "Platform": "linux",
+    "MountLabel": "",
+    "ProcessLabel": "",
+    "AppArmorProfile": "docker-default",
+    "ExecIDs": null,
+    "HostConfig": {
+      "Binds": [
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.gitleaks.toml:/var/lupin/.gitleaks.toml:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.diagnostic.json:/var/lupin/tsconfig.diagnostic.json:ro",
+        "/home/rruiz/.lora_env:/home/rruiz/.lora_env:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/pytest.ini:/var/lupin/pytest.ini:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin:/var/lupin:rw",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees:/var/lupin/.claude/worktrees:rw",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.stylelintrc.json:/var/lupin/.stylelintrc.json:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.nav.json:/var/lupin/tsconfig.nav.json:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.yml:/var/lupin/docker-compose.yml:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio:/var/lupin/flow-ratio:rw",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src:/var/lupin/src:rw",
+        "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus:rw",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/io:/var/lupin/io:rw",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/package-lock.json:/var/lupin/package-lock.json:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/package.json:/var/lupin/package.json:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects:rw",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.docview.yml:/var/lupin/.docview.yml:ro",
+        "/dev/null:/var/lupin/.env:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker:/var/lupin/docker:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.json:/var/lupin/tsconfig.json:ro",
+        "/home/rruiz/.claude/plans:/var/external-claude/plans:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.dockerignore:/var/lupin/.dockerignore:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/alembic.ini:/var/lupin/alembic.ini:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/pyproject.toml:/var/lupin/pyproject.toml:ro",
+        "/home/rruiz/.lupin:/home/rruiz/.lupin:ro",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.git:/var/lupin/.git:rw",
+        "/mnt/DATA01/include/www.deepily.ai/projects/lupin/node_modules:/var/lupin/node_modules:ro"
+      ],
+      "ContainerIDFile": "",
+      "LogConfig": {
+        "Type": "json-file",
+        "Config": {}
+      },
+      "NetworkMode": "2ff56905135b927ad001b4b76d7f06096c4ab606e9c6a3ce275db51f99efc8c9",
+      "PortBindings": {
+        "7999/tcp": [
+          {
+            "HostIp": "",
+            "HostPort": "8000"
+          }
+        ]
+      },
+      "RestartPolicy": {
+        "Name": "unless-stopped",
+        "MaximumRetryCount": 0
+      },
+      "AutoRemove": false,
+      "VolumeDriver": "",
+      "VolumesFrom": null,
+      "ConsoleSize": [
+        0,
+        0
+      ],
+      "CapAdd": null,
+      "CapDrop": null,
+      "CgroupnsMode": "private",
+      "Dns": null,
+      "DnsOptions": null,
+      "DnsSearch": null,
+      "ExtraHosts": [
+        "host.docker.internal:host-gateway"
+      ],
+      "GroupAdd": [
+        "1002"
+      ],
+      "IpcMode": "private",
+      "Cgroup": "",
+      "Links": null,
+      "OomScoreAdj": 0,
+      "PidMode": "",
+      "Privileged": false,
+      "PublishAllPorts": false,
+      "ReadonlyRootfs": false,
+      "SecurityOpt": null,
+      "Tmpfs": {
+        "/tmp/lupin-stt": "size=256m,uid=1001,gid=1001,mode=1777"
+      },
+      "UTSMode": "",
+      "UsernsMode": "",
+      "ShmSize": 67108864,
+      "Runtime": "runc",
+      "Isolation": "",
+      "CpuShares": 0,
+      "Memory": 12884901888,
+      "NanoCpus": 0,
+      "CgroupParent": "",
+      "BlkioWeight": 0,
+      "BlkioWeightDevice": null,
+      "BlkioDeviceReadBps": null,
+      "BlkioDeviceWriteBps": null,
+      "BlkioDeviceReadIOps": null,
+      "BlkioDeviceWriteIOps": null,
+      "CpuPeriod": 0,
+      "CpuQuota": 0,
+      "CpuRealtimePeriod": 0,
+      "CpuRealtimeRuntime": 0,
+      "CpusetCpus": "",
+      "CpusetMems": "",
+      "Devices": null,
+      "DeviceCgroupRules": null,
+      "DeviceRequests": [
+        {
+          "Driver": "nvidia",
+          "Count": -1,
+          "DeviceIDs": null,
+          "Capabilities": [
+            [
+              "gpu"
+            ]
+          ],
+          "Options": null
+        }
+      ],
+      "MemoryReservation": 0,
+      "MemorySwap": 12884901888,
+      "MemorySwappiness": null,
+      "OomKillDisable": null,
+      "PidsLimit": null,
+      "Ulimits": null,
+      "CpuCount": 0,
+      "CpuPercent": 0,
+      "IOMaximumIOps": 0,
+      "IOMaximumBandwidth": 0,
+      "Mounts": [
+        {
+          "Type": "bind",
+          "Source": "/etc/lupin/secrets/db_app_password",
+          "Target": "/run/secrets/db_app_password",
+          "ReadOnly": true
+        },
+        {
+          "Type": "bind",
+          "Source": "/etc/lupin/secrets/db_test_password",
+          "Target": "/run/secrets/db_test_password",
+          "ReadOnly": true
+        },
+        {
+          "Type": "bind",
+          "Source": "/home/rruiz/.claude/sessions-test",
+          "Target": "/home/rruiz/.claude/sessions",
+          "BindOptions": {}
+        },
+        {
+          "Type": "volume",
+          "Source": "lupin_claude-creds-test",
+          "Target": "/home/rruiz/.claude",
+          "VolumeOptions": {}
+        },
+        {
+          "Type": "tmpfs",
+          "Target": "/var/lupin/.venv"
+        }
+      ],
+      "MaskedPaths": [
+        "/proc/asound",
+        "/proc/acpi",
+        "/proc/kcore",
+        "/proc/keys",
+        "/proc/latency_stats",
+        "/proc/timer_list",
+        "/proc/timer_stats",
+        "/proc/sched_debug",
+        "/proc/scsi",
+        "/sys/firmware"
+      ],
+      "ReadonlyPaths": [
+        "/proc/bus",
+        "/proc/fs",
+        "/proc/irq",
+        "/proc/sys",
+        "/proc/sysrq-trigger"
+      ],
+      "Init": true
+    },
+    "GraphDriver": {
+      "Data": {
+        "LowerDir": "/var/lib/docker/overlay2/b789d3f1bdf0a90e54a090c6fbec6e39677e5f19b6d3bab8584611315cb2e857-init/diff:/var/lib/docker/overlay2/qo6outd5x94nw4qujatrr4e3f/diff:/var/lib/docker/overlay2/juc1upm1b0oyq6qdzrs0pr71e/diff:/var/lib/docker/overlay2/4vhbjuqqaxj3fj1rxx20saiba/diff:/var/lib/docker/overlay2/mlzcx79icg4svgxuk774vgs4z/diff:/var/lib/docker/overlay2/v8j38o9jajgky53kyefg3ve3l/diff:/var/lib/docker/overlay2/ulws3od15vkpwq91xoa0o9g7c/diff:/var/lib/docker/overlay2/98upglpivwd2qahxhiavuy068/diff:/var/lib/docker/overlay2/k5tx1r6ptl2cmxgtnbgss1u6e/diff:/var/lib/docker/overlay2/fqdkimcpkvzex7sj7tld6gt2j/diff:/var/lib/docker/overlay2/vb8ct5v2zw7ybgexrkvv9b9wk/diff:/var/lib/docker/overlay2/xj85n1403tad68l8gqxyllvrp/diff:/var/lib/docker/overlay2/8huhop8uu5lz7bdbs6r8kxuzj/diff:/var/lib/docker/overlay2/p4yk73l7zsufq755jalp7dbj0/diff:/var/lib/docker/overlay2/sceltaus16uaklz6vo9frtcls/diff:/var/lib/docker/overlay2/nq7sk6gx73452rhyrx7jkb7a0/diff:/var/lib/docker/overlay2/l6295ab5lt1vv4qiklyagzkr1/diff:/var/lib/docker/overlay2/noze838lhz5znh1fls4ooaune/diff:/var/lib/docker/overlay2/yvy5dj3zbz6b59nfgyte8crdu/diff:/var/lib/docker/overlay2/mril4xnh4s89rpl14pnbtxwv1/diff:/var/lib/docker/overlay2/7hbp6orh8expvtcrhsnzotj8w/diff:/var/lib/docker/overlay2/01ik27qcloor3cvqkhb900kfm/diff:/var/lib/docker/overlay2/zxd04virzsffuudhl4twuwqr2/diff:/var/lib/docker/overlay2/u5a6sl21enqagmuf53fuw4dik/diff:/var/lib/docker/overlay2/nrjn52vh518v2ytzgth3zu1q1/diff:/var/lib/docker/overlay2/ydswkadq6e20d3d0fbnz2vo70/diff:/var/lib/docker/overlay2/u87qkslo9ti92jrjf6juan8tu/diff:/var/lib/docker/overlay2/9933ebe82160aad515adf3dd295328480413f7c7970ad39b46ea7447f46014f4/diff:/var/lib/docker/overlay2/2249bd3c1ca5be49831aa731682645887c321fa43f1c648b270588e1a0cb0a7d/diff:/var/lib/docker/overlay2/3fdd0241bc6d2b9d939d0d915f423612e0e9c6c40478616b3397de499f61f184/diff:/var/lib/docker/overlay2/1abe78ebdd2c00abd8b9a286a77bf0570887eb1f24f019591634cf642d098663/diff:/var/lib/docker/overlay2/645128048ef04af78fd5e434458bc5e9b71524acbf8b3db91e12ebe5eb8541f4/diff",
+        "MergedDir": "/var/lib/docker/overlay2/b789d3f1bdf0a90e54a090c6fbec6e39677e5f19b6d3bab8584611315cb2e857/merged",
+        "UpperDir": "/var/lib/docker/overlay2/b789d3f1bdf0a90e54a090c6fbec6e39677e5f19b6d3bab8584611315cb2e857/diff",
+        "WorkDir": "/var/lib/docker/overlay2/b789d3f1bdf0a90e54a090c6fbec6e39677e5f19b6d3bab8584611315cb2e857/work"
+      },
+      "Name": "overlay2"
+    },
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review",
+        "Destination": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/pytest.ini",
+        "Destination": "/var/lupin/pytest.ini",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin",
+        "Destination": "/var/lupin",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/package.json",
+        "Destination": "/var/lupin/package.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.cloud-gpu.yml",
+        "Destination": "/var/lupin/docker-compose.cloud-gpu.yml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/node_modules",
+        "Destination": "/var/lupin/node_modules",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/rruiz/.claude/sessions-test",
+        "Destination": "/home/rruiz/.claude/sessions",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/io",
+        "Destination": "/var/lupin/io",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.dockerignore",
+        "Destination": "/var/lupin/.dockerignore",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "volume",
+        "Name": "lupin_claude-creds-test",
+        "Source": "/var/lib/docker/volumes/lupin_claude-creds-test/_data",
+        "Destination": "/home/rruiz/.claude",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.nav.json",
+        "Destination": "/var/lupin/tsconfig.nav.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.docview.yml",
+        "Destination": "/var/lupin/.docview.yml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/rruiz/.claude/plans",
+        "Destination": "/var/external-claude/plans",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/alembic.ini",
+        "Destination": "/var/lupin/alembic.ini",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/rruiz/.lupin",
+        "Destination": "/home/rruiz/.lupin",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus",
+        "Destination": "/var/lupin/dm-corpus",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker",
+        "Destination": "/var/lupin/docker",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "tmpfs",
+        "Source": "",
+        "Destination": "/var/lupin/.venv",
+        "Mode": "",
+        "RW": true,
+        "Propagation": ""
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.diagnostic.json",
+        "Destination": "/var/lupin/tsconfig.diagnostic.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/rruiz/.lora_env",
+        "Destination": "/home/rruiz/.lora_env",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src",
+        "Destination": "/var/lupin/src",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects",
+        "Destination": "/var/external-projects",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/dev/null",
+        "Destination": "/var/lupin/.env",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.json",
+        "Destination": "/var/lupin/tsconfig.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/etc/lupin/secrets/db_test_password",
+        "Destination": "/run/secrets/db_test_password",
+        "Mode": "",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.gitleaks.toml",
+        "Destination": "/var/lupin/.gitleaks.toml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.stylelintrc.json",
+        "Destination": "/var/lupin/.stylelintrc.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.yml",
+        "Destination": "/var/lupin/docker-compose.yml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/package-lock.json",
+        "Destination": "/var/lupin/package-lock.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/pyproject.toml",
+        "Destination": "/var/lupin/pyproject.toml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees",
+        "Destination": "/var/lupin/.claude/worktrees",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio",
+        "Destination": "/var/lupin/flow-ratio",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.git",
+        "Destination": "/var/lupin/.git",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/etc/lupin/secrets/db_app_password",
+        "Destination": "/run/secrets/db_app_password",
+        "Mode": "",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "Config": {
+      "Hostname": "59579752442c",
+      "Domainname": "",
+      "User": "1001:1001",
+      "AttachStdin": false,
+      "AttachStdout": true,
+      "AttachStderr": true,
+      "ExposedPorts": {
+        "7999/tcp": {}
+      },
+      "Tty": false,
+      "OpenStdin": false,
+      "StdinOnce": false,
+      "Env": [
+        "LUPIN_ROOT=REDACTED-LUPIN_ROOT",
+        "DB_USER=REDACTED-DB_USER",
+        "LUPIN_MODEL_SERVER_API_KEY_NAME=",
+        "LUPIN_TEST_ADMIN_EMAIL=REDACTED-LUPIN_TEST_ADMIN_EMAIL",
+        "LUPIN_MODEL_SERVER_API_KEY_FILE=",
+        "PYTHONUNBUFFERED=REDACTED-PYTHONUNBUFFERED",
+        "LUPIN_FLOW_RATIO_DIR=REDACTED-LUPIN_FLOW_RATIO_DIR",
+        "LUPIN_SKELETON_CREW_INI=REDACTED-LUPIN_SKELETON_CREW_INI",
+        "CHROME_PATH=REDACTED-CHROME_PATH",
+        "LUPIN_ENV=REDACTED-LUPIN_ENV",
+        "LUPIN_CONFIG_MGR_CLI_ARGS=REDACTED-LUPIN_CONFIG_MGR_CLI_ARGS",
+        "LUPIN_TEST_ADMIN_PASSWORD=",
+        "DB_PASSWORD_FILE=",
+        "LUPIN_INTERACTIVE_TESTS=REDACTED-LUPIN_INTERACTIVE_TESTS",
+        "LUPIN_SERVER_COVERAGE=REDACTED-LUPIN_SERVER_COVERAGE",
+        "LUPIN_DEV_EMAIL=REDACTED-LUPIN_DEV_EMAIL",
+        "LUPIN_TEST_DB_PASSWORD_FILE=",
+        "DB_HOST=REDACTED-DB_HOST",
+        "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL=REDACTED-LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL",
+        "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD=",
+        "LUPIN_DM_CORPUS_DIR=REDACTED-LUPIN_DM_CORPUS_DIR",
+        "LUPIN_HEARTBEAT_POKE_MUTE_FILE=REDACTED-LUPIN_HEARTBEAT_POKE_MUTE_FILE",
+        "GH_TOKEN=REDACTED-GH_TOKEN",
+        "LUPIN_API_KEY_FILE=",
+        "PYTHONPYCACHEPREFIX=REDACTED-PYTHONPYCACHEPREFIX",
+        "LUPIN_REUSE_REVIEW_DATA_ROOT=REDACTED-LUPIN_REUSE_REVIEW_DATA_ROOT",
+        "LUPIN_SERVER_PORT=REDACTED-LUPIN_SERVER_PORT",
+        "JWT_SECRET_KEY=",
+        "LUPIN_MODEL_SERVER_URL=REDACTED-LUPIN_MODEL_SERVER_URL",
+        "LUPIN_TEST_DB_USER=REDACTED-LUPIN_TEST_DB_USER",
+        "LUPIN_API_URL=REDACTED-LUPIN_API_URL",
+        "PATH=/opt/venv/bin:/opt/python/bin:/home/rruiz/.local/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "NVARCH=x86_64",
+        "NVIDIA_REQUIRE_CUDA=cuda>=12.4 brand=tesla,driver>=470,driver<471 brand=unknown,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=geforce,driver>=470,driver<471 brand=geforcertx,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=titan,driver>=470,driver<471 brand=titanrtx,driver>=470,driver<471 brand=tesla,driver>=525,driver<526 brand=unknown,driver>=525,driver<526 brand=nvidia,driver>=525,driver<526 brand=nvidiartx,driver>=525,driver<526 brand=geforce,driver>=525,driver<526 brand=geforcertx,driver>=525,driver<526 brand=quadro,driver>=525,driver<526 brand=quadrortx,driver>=525,driver<526 brand=titan,driver>=525,driver<526 brand=titanrtx,driver>=525,driver<526 brand=tesla,driver>=535,driver<536 brand=unknown,driver>=535,driver<536 brand=nvidia,driver>=535,driver<536 brand=nvidiartx,driver>=535,driver<536 brand=geforce,driver>=535,driver<536 brand=geforcertx,driver>=535,driver<536 brand=quadro,driver>=535,driver<536 brand=quadrortx,driver>=535,driver<536 brand=titan,driver>=535,driver<536 brand=titanrtx,driver>=535,driver<536",
+        "NV_CUDA_CUDART_VERSION=12.4.127-1",
+        "NV_CUDA_COMPAT_PACKAGE=cuda-compat-12-4",
+        "CUDA_VERSION=12.4.1",
+        "LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64",
+        "NVIDIA_VISIBLE_DEVICES=all",
+        "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+        "DEBIAN_FRONTEND=noninteractive",
+        "TZ=UTC",
+        "HOME=/home/rruiz",
+        "HF_HOME=/home/rruiz/.cache/huggingface",
+        "UV_PYTHON_INSTALL_DIR=/opt/python",
+        "UV_PYTHON_PREFERENCE=only-managed",
+        "UV_LINK_MODE=copy",
+        "UV_COMPILE_BYTECODE=1",
+        "UV_PROJECT_ENVIRONMENT=/opt/venv"
+      ],
+      "Cmd": [
+        "/bin/bash",
+        "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"
+      ],
+      "Healthcheck": {
+        "Test": [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""
+        ],
+        "Interval": 30000000000,
+        "Timeout": 10000000000,
+        "StartPeriod": 60000000000,
+        "Retries": 3
+      },
+      "Image": "lupin:1.1.7-candidate",
+      "Volumes": null,
+      "WorkingDir": "/var/lupin/src",
+      "Entrypoint": null,
+      "OnBuild": null,
+      "Labels": {
+        "com.docker.compose.config-hash": "cfc9ba22f4ff433f476b4f83fa84cd26cc5575f58a889aa1568c52dcee079b4a",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "",
+        "com.docker.compose.image": "sha256:00f87a7b1893b9a4ea2b6120a1c3777e9070fb65be7e725551337fd6b91283c6",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "lupin",
+        "com.docker.compose.project.config_files": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.yml,/tmp/claude-1001/-mnt-DATA01-include-www-deepily-ai-projects-lupin--claude-worktrees-seat-cc-author-mr-radio-2/e16869d9-a98a-4e32-bd44-52aa606cdfb8/scratchpad/override-1.1.7.yml",
+        "com.docker.compose.project.working_dir": "/mnt/DATA01/include/www.deepily.ai/projects/lupin",
+        "com.docker.compose.replace": "5d486d2974780b6c0ef51c5d2f83d576ba3b0653d4db88ca3e7c1c90ea25c50e",
+        "com.docker.compose.service": "lupin-rest-test",
+        "com.docker.compose.version": "2.19.1",
+        "maintainer": "NVIDIA CORPORATION <cudatools@nvidia.com>",
+        "org.opencontainers.image.ref.name": "ubuntu",
+        "org.opencontainers.image.version": "22.04"
+      }
+    },
+    "NetworkSettings": {
+      "Bridge": "",
+      "SandboxID": "66e07acfdb8b0fdc38ede99565a74b0cf356d8b91793212d48376864e8a2b6a6",
+      "HairpinMode": false,
+      "LinkLocalIPv6Address": "",
+      "LinkLocalIPv6PrefixLen": 0,
+      "Ports": {
+        "7999/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "8000"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "8000"
+          }
+        ]
+      },
+      "SandboxKey": "/var/run/docker/netns/66e07acfdb8b",
+      "SecondaryIPAddresses": null,
+      "SecondaryIPv6Addresses": null,
+      "EndpointID": "",
+      "Gateway": "",
+      "GlobalIPv6Address": "",
+      "GlobalIPv6PrefixLen": 0,
+      "IPAddress": "",
+      "IPPrefixLen": 0,
+      "IPv6Gateway": "",
+      "MacAddress": "",
+      "Networks": {
+        "lupin-dev-network": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": [
+            "lupin-rest-test",
+            "lupin-rest-test",
+            "59579752442c"
+          ],
+          "NetworkID": "2ff56905135b927ad001b4b76d7f06096c4ab606e9c6a3ce275db51f99efc8c9",
+          "EndpointID": "d31c851f1ec1170bf1aa1446b4aa31afcbd057615e00693e22d64148eb1fd15d",
+          "Gateway": "172.19.0.1",
+          "IPAddress": "172.19.0.4",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "MacAddress": "02:42:ac:13:00:04",
+          "DriverOpts": null
+        }
+      }
+    }
+  }
+]

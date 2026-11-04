@@ -319,6 +319,61 @@ class TestNormalizers( unittest.TestCase ):
         self.assertEqual( probe_module.compose_mounts( service, { } ), { ( "volume", "external-vol", "/data", False ) } )
 
 
+class TestComposeSecretsAndShellPassThroughs( unittest.TestCase ):
+    # Row 21b96c4f. The fixtures are `docker compose config` and `docker inspect` of lupin-rest-test,
+    # captured 2026-11-03 22:55 EST (values redacted as above, GH_TOKEN kept non-empty in the container).
+    # That container mounts two compose secrets and holds a GH_TOKEN its compose file renders as "".
+
+    def _pair( self ):
+        return _load( "compose-config-lupin-rest-test.json" ), _load( "inspect-lupin-rest-test.json" )
+
+    def _verdict( self, rendered, inspected ):
+        return probe_module.probe( "lupin-rest-test", runner=_runner_for( rendered, inspected ) )[ :2 ]
+
+    def test_the_captured_pair_has_no_drift( self ):
+        rendered, inspected = self._pair()
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_NO_DRIFT, [ ] ) )
+
+    def test_the_capture_really_has_the_two_secret_mounts_and_the_blank_pass_through( self ):
+        rendered, inspected = self._pair()
+        secret_mounts = sorted( m[ "Destination" ] for m in inspected[ 0 ][ "Mounts" ] if m[ "Destination" ].startswith( "/run/secrets/" ) )
+        self.assertEqual( secret_mounts, [ "/run/secrets/db_app_password", "/run/secrets/db_test_password" ] )
+        self.assertEqual( len( rendered[ "services" ][ "lupin-rest-test" ][ "secrets" ] ), 2 )
+        self.assertEqual( rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "GH_TOKEN" ], "" )
+        self.assertNotEqual( probe_module.inspect_env( inspected[ 0 ] )[ "GH_TOKEN" ], "" )
+
+    def test_a_secret_compose_dropped_is_drift_because_a_recreate_would_remove_its_mount( self ):
+        rendered, inspected = self._pair()
+        rendered[ "services" ][ "lupin-rest-test" ][ "secrets" ].pop()
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /run/secrets/db_test_password" ] ) )
+
+    def test_a_secret_mount_the_container_lacks_is_drift( self ):
+        rendered, inspected = self._pair()
+        inspected[ 0 ][ "Mounts" ] = [ m for m in inspected[ 0 ][ "Mounts" ] if m[ "Destination" ] != "/run/secrets/db_app_password" ]
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /run/secrets/db_app_password" ] ) )
+
+    def test_a_secret_whose_host_file_moved_is_drift( self ):
+        rendered, inspected = self._pair()
+        rendered[ "secrets" ][ "db_app_password" ][ "file" ] = "/etc/lupin/secrets/elsewhere"
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /run/secrets/db_app_password" ] ) )
+
+    def test_a_blank_pass_through_is_not_drift_but_a_real_compose_value_still_is( self ):
+        rendered, inspected = self._pair()
+        rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "GH_TOKEN" ] = "a-value-compose-now-sets"
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_ENV_DRIFT, [ "env GH_TOKEN" ] ) )
+
+    def test_a_key_blank_in_compose_and_missing_in_the_container_is_still_drift( self ):
+        rendered, inspected = self._pair()
+        rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "LUPIN_BLANK_AND_ABSENT" ] = ""
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_ENV_DRIFT, [ "env LUPIN_BLANK_AND_ABSENT" ] ) )
+
+    def test_compose_mounts_reads_a_secret_target_alias_and_skips_a_secret_with_no_host_file( self ):
+        service = { "secrets": [ { "source": "a", "target": "renamed" }, { "source": "b", "target": "/abs/path" }, { "source": "from_env" } ] }
+        files   = { "a": "/host/a", "b": "/host/b" }
+        self.assertEqual( probe_module.compose_mounts( service, { }, files ),
+                          { ( "bind", "/host/a", "/run/secrets/renamed", True ), ( "bind", "/host/b", "/abs/path", True ) } )
+
+
 class TestTheProbeNeverRaises( unittest.TestCase ):
 
     def _unknown( self, runner ):
