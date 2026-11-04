@@ -10,11 +10,11 @@
 >
 > -- R. P. Ruiz, *[Prompt, Skim, Ship, and Hope](https://medium.com/@ricardo.felipe.ruiz/lupin-af-how-i-turned-claude-code-into-an-agent-factory-that-proves-itself-fc6f09bafadd)*
 
-**A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back**. It has Bayesian trust learning, fine-tuned intent routing, and solution caching built in.
+**A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back**. It has fine-tuned intent routing and solution caching built in.
 
-`FastAPI` | `Voice I/O` | `PEFT/LoRA` | `PostgreSQL + pgvector` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
+`FastAPI` | `Voice I/O` | `PEFT/LoRA` | `PostgreSQL + pgvector` | `Claude Agent SDK` | `MCP Protocol`
 
-Current version: **v0.2.0** (dev) | License: Apache 2.0 (the `LICENSE` file)
+Current version: **v0.2.2** (dev) | License: Apache 2.0 (the `LICENSE` file)
 
 ---
 
@@ -34,7 +34,7 @@ I can't type. That constraint is why this isn't a position paper. Since March 20
 
 - **The workflow corpus** -- 51 canonical workflow documents in [planning-is-prompting](https://github.com/deepily/planning-is-prompting/tree/main/workflow), the methodology repo this one runs on. In-repo: [agentic-voice-workflow.md](src/workflow/agentic-voice-workflow.md).
 - **The SWE team role definitions** -- `.claude/skills/spin-up-swe-team/SKILL.md` is the activation. The per-role charters it slices from are [workflow/swe-team-roles.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/swe-team-roles.md).
-- **Escalation and human-in-the-loop** -- two different ladders. The agent one is the Decision Proxy's five trust levels, in the [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md). The fleet one -- what a manager may do without asking me, and what it may never do -- is [workflow/manager-autonomy.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/manager-autonomy.md).
+- **Escalation and human-in-the-loop** -- two different ladders. The agent one is the Decision Proxy's five trust levels, in the [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md) (deprecated; replaced in v0.2.3). The fleet one -- what a manager may do without asking me, and what it may never do -- is [workflow/manager-autonomy.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/manager-autonomy.md).
 - **The cascade reviews** -- [plan-review-cascaded.md](.claude/commands/plan-review-cascaded.md) is the procedure; the transcripts of real cascades, findings and all, are in [src/rnd/v0.2.0/](src/rnd/v0.2.0/).
 
 ---
@@ -43,7 +43,7 @@ I can't type. That constraint is why this isn't a position paper. Since March 20
 
 Every agentic AI platform needs human oversight. Most implement it as a modal dialog: click approve, type feedback, wait. Lupin takes a fundamentally different approach -- **voice-first human-in-the-loop**.
 
-Agents speak to you. You speak back. A Bayesian trust engine learns your preferences over time, escalating only when confidence is low and auto-approving when it has earned your trust. The result: human oversight that works **from across the room**, while you're multitasking, or even from your phone -- no screen required.
+Agents speak to you. You speak back. The result: human oversight that works **from across the room**, while you're multitasking, or even from your phone -- no screen required.
 
 This is the missing piece in agentic AI: not just making agents smarter, but making **human oversight effortless**.
 
@@ -65,7 +65,7 @@ Even the simplest vox-in and vox-out UX -- especially when coupled with agentic 
 
 ### Lupin's approach
 
-Fine-tune small models for cheap, fast intent routing -- not prompt engineering, actual PEFT/LoRA fine-tuning. Escalate to frontier models only when complexity demands it. Cache solutions via vector search so agents never solve the same problem twice. Layer Bayesian trust learning so the system earns autonomy over time, minimizing human interruptions without sacrificing oversight. And voice-enable *everything*. That runs from the browser UI, through agent execution, into [Claude Code developer sessions](https://www.linkedin.com/pulse/slow-expensive-erratic-problem-whats-solution-r-p-ruiz/) via 6 system hooks and an MCP voice server. And back again.
+Fine-tune small models for cheap, fast intent routing -- not prompt engineering, actual PEFT/LoRA fine-tuning. Escalate to frontier models only when complexity demands it. Cache solutions via vector search so agents never solve the same problem twice. And voice-enable *everything*. That runs from the browser UI, through agent execution, into [Claude Code developer sessions](https://www.linkedin.com/pulse/slow-expensive-erratic-problem-whats-solution-r-p-ruiz/) via 8 system hooks and an MCP voice server. And back again.
 
 ---
 
@@ -90,14 +90,14 @@ flowchart TD
     end
 
     SYNC --> TTS
-    ASYNC --> PROXY["Decision Proxy<br/>(Bayesian Trust · L1-L5)"]
+    ASYNC --> PROXY["Decision Proxy<br/>(deprecated; replaced in v0.2.3)"]
     PROXY --> TTS
 
     TTS --> WS["WebSocket<br/>(queue + audio channels)"]
     WS --> BROWSER["Browser UI"]
 
     subgraph Claude Code Voice Loop
-        HOOKS["6 System Hooks<br/>(PreToolUse · PostToolUse · Notification<br/>Stop · PermissionRequest · UserPromptSubmit)"] --> MCP["cosa-voice<br/>MCP Server"]
+        HOOKS["8 System Hooks<br/>(SessionStart · PreToolUse · PostToolUse · Notification<br/>Stop · PermissionRequest · UserPromptSubmit · SessionEnd)"] --> MCP["cosa-voice<br/>MCP Server"]
         MCP --> ROUTER
     end
 
@@ -111,7 +111,7 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 
 ## What's new in v0.2.2
 
-v0.2.2 ran from 30 September to 3 November 2026. It asked one question: before a seat writes a new function, can it find out whether the code base already has one? It built a wiki of about 674 capability pages written from the code, and lookup tools that search it. It also built a **reuse gate** that refuses a merge whose new definitions carry no lookup record. Enforcement began on 3 November. A daily duplicate check now files what it finds, and coverage reached 100% across the whole frame. A docstring sweep took 29,838 lint findings to 0 behind a new `doclint` gate. The measurements of the checker itself were reported as found, including the negative ones.
+v0.2.2 ran from 30 September to 3 November 2026. It asked one question: before a seat writes a new function, can it find out whether the code base already has one? It built a wiki of 676 capability pages written from the code, and lookup tools that search it. It also built a **reuse gate** that refuses a merge whose new definitions carry no lookup record. Enforcement began on 3 November. A daily duplicate check now files what it finds, and coverage reached 100% across the whole frame. A docstring sweep took 29,838 lint findings to 0 behind a new `doclint` gate. The measurements of the checker itself were reported as found, including the negative ones.
 
 Full highlights: [WHATS-NEW.md](WHATS-NEW.md) · per-version summaries: [VERSION-HISTORY.md](VERSION-HISTORY.md) · per-feature detail: [CHANGELOG.md](CHANGELOG.md)
 
@@ -147,7 +147,7 @@ One counting note, because the articles use a different unit. The 23 below are a
 | PresentationGeneratorAgent | Multi-phase pipeline: outline → elaborate → render → deliver (eight phases) |
 | ResearchToPresentationAgent | Chained research-to-presentation pipeline |
 | ClaudeCodeAgent | Claude Agent SDK tasks (bounded or interactive mode) |
-| SWETeamAgent | 4-phase dev team: Lead, Coder, Tester, Trust Proxy |
+| SWETeamAgent | 4-phase dev team: Lead, Coder, Tester, Trust Proxy (the Trust Proxy phase is deprecated; replaced in v0.2.3) |
 
 ### Auto-recovery agents (self-healing via Claude Agent SDK + worktree isolation)
 
@@ -162,7 +162,7 @@ One counting note, because the articles use a different unit. The 23 below are a
 | Agent | Purpose |
 |-------|---------|
 | NotificationProxyAgent | Phi-4 fuzzy script matching for automated interactive testing |
-| DecisionProxyAgent | Universal Prediction Engine (7 slices) · Bayesian Beta-Bernoulli trust · Thompson Sampling · Conformal prediction · five-level escalation · Circuit breaker |
+| DecisionProxyAgent (deprecated; replaced in v0.2.3) | Bayesian trust decision proxy with five-level escalation and a circuit breaker |
 | HeartbeatArbiter | Fleet liveness detectors — session staleness, tap-ACK, whole-fleet stall — with per-family advisory cooldown |
 | DMQualityJudge | Scores peer-to-peer session messages to drive down cross-session token burn |
 
@@ -175,8 +175,8 @@ One counting note, because the articles use a different unit. The 23 below are a
 No other platform closes the voice loop this completely:
 
 - **Browser to agents**: Dual-channel WebSocket architecture (queue events + audio streaming) with ASR (Whisper) to TTS pipeline, end to end
-- **Agents to developer tools**: 6 Claude Code system hooks (`PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `PermissionRequest`, `UserPromptSubmit`) bridge voice into every coding session
-- **Developer tools back to browser**: cosa-voice MCP server provides 5 voice tools (`notify`, `converse`, `ask_yes_no`, `ask_multiple_choice`, `ask_open_ended_batch`)
+- **Agents to developer tools**: 8 Claude Code system hooks (`SessionStart`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `PermissionRequest`, `UserPromptSubmit`, `SessionEnd`) bridge voice into every coding session
+- **Developer tools back to browser**: cosa-voice MCP server provides 41 tools, five of them voice tools (`notify`, `converse`, `ask_yes_no`, `ask_multiple_choice`, `ask_open_ended_batch`)
 - **Session continuity**: Stable session IDs survive context clears via write-once atomic lockfile -- no identity drift
 - **Stop hook gisting**: Ultra-short TTS summaries of completed work via frontier model distillation
 - **Voice injection**: tmux-based voice input into idle Claude Code sessions -- speak and it types
@@ -211,37 +211,33 @@ Local GPU embeddings (CodeRankEmbed + nomic-embed-text-v1.5) vs OpenAI API:
 | Batch (3) | prose | 8 ms | 2,989 ms | **374x** |
 | Batch (3) | code | 8 ms | 3,183 ms | **398x** |
 
-### Trust-aware decision proxy -- Bayesian autonomy that earns your confidence
+### Decision proxy -- deprecated
 
-The first decision proxy for AI agents with academic-grade statistical rigor:
+The Bayesian trust decision proxy is deprecated and is replaced in the v0.2.3 series. The code still ships in v0.2.2, and its admin guide is linked under [For operators](#for-operators).
 
-- **Universal Prediction Engine**: 7 prediction slices with 87 unit tests and 21 end-to-end tests
-- **Bayesian Beta-Bernoulli trust model**: Per-agent trust learning with conjugate prior updates
-- **Thompson Sampling**: Exploration-exploitation balance for when to auto-approve vs. escalate
-- **Conformal prediction**: Calibrated confidence intervals -- not guesses, statistical guarantees
-- **LanceDB-backed preference embeddings**: Semantic similarity with response_type filtering
-- **Five-level trust escalation**: Five trust levels from "always ask" to "full autonomy" with circuit breaker pattern
-- **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
-- **Ratification API**: Post-hoc approval with trust feedback loop
+### Coming Soon: Context-Aware Online Preference Learning
 
-### Battle-tested -- 29,000+ automated tests
+Lupin AF is evolving beyond memorizing past answers to learning the decision-making principles behind human preferences. Each human-in-the-loop decision is analyzed to extract its underlying rationale, constraints, and applicability. These are consolidated into structured preference memories and continuously refined through subsequent feedback. When similar questions arise, Lupin retrieves relevant preferences and uses LLM-based reasoning to generate contextually appropriate answers rather than parroting previous responses.
+
+### Battle-tested -- 62,000+ automated tests
 
 | Suite | Count | Coverage |
 |-------|-------|----------|
-| Unit tests (Python, app tree) | 16,247 | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators, task store, arbiter |
-| Unit tests (Python, in-tree CoSA) | 8,853 | The agent framework: queues, routers, agents, memory, config |
-| Unit tests (TypeScript) | 2,424 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
-| E2E UI (Playwright) | 663 | Full browser-driven flows including visual regression |
-| Integration tests | 421 | End-to-end API workflows against a dedicated dual-container test server |
-| Smoke tests | 404 | Fast sanity sweeps across the app and the Lupin smoke suite |
-| Top-level and cross-cutting suites | 148 | Parity oracle, cutover E2E, websocket bridge, targeted end-to-end checks |
-| WebSocket multiplexer transport | 7 | Connection, auth, event routing, session management |
-| **Total authored test cases** | **29,167** | 26,743 Python + 2,424 TypeScript |
+| Unit tests (Python, `src/tests/unit`) | 43,822 | Core logic, hooks, credentials, agentic orchestrators, task store, arbiter, the reuse gate |
+| Unit tests (Python, in-tree CoSA, `src/cosa/tests`) | 9,848 | The agent framework: queues, routers, agents, memory, config |
+| Unit tests (TypeScript) | 6,345 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
+| E2E UI (Playwright) | 1,058 | Full browser-driven flows including visual regression |
+| Integration tests | 519 | End-to-end API workflows against a dedicated dual-container test server |
+| Smoke tests | 619 | Fast sanity sweeps: 581 in `src/tests/smoke` and 38 in the Lupin smoke suite |
+| Parity oracle and other cross-cutting suites | 151 | Parity oracle, cutover E2E, targeted end-to-end checks |
+| WebSocket multiplexer transport (pytest) | 6 | Handshake, reconnect, close codes |
+| **Total test cases** | **62,368** | 56,023 Python + 6,345 TypeScript |
+| WebSocket smoke runner | 50 | Connection, auth, event routing, session management; run by `src/scripts/run-websocket-smoke-tests.sh`, not counted above |
 | Interactive proxy scenarios | 12 | Calculator, CRUD, and Expediter agents via auto-proxy (script-driven, not counted above) |
 
-Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`. They were **re-derived** for this table, and the previous table was an older snapshot. Rows are grouped by directory so anyone can reproduce the number. WebSocket coverage is no longer a single row because those tests now live where the code they exercise lives. A repo-wide grep returns a slightly larger number. The extra matches are self-test functions embedded in production modules, which are not part of any suite. **The suite figure is the one to quote.**
+Python counts are `pytest --collect-only -q` over `src/tests` and `src/cosa/tests`, measured on 4 November 2026 at the v0.2.2 PR head. The collection reports 56,023 of 56,042 tests, with 19 deselected by the repo's own configuration. The cross-cutting row is the union minus the rows above it. The TypeScript count is a static count of `test(` calls in the 389 tracked `*.test.ts` files, all under `src/tests/unit`. It misses tests generated in a loop. The previous table counted `def test_*` with a grep. It was an older snapshot, so the rows are not comparable with it. **The suite figure is the one to quote.**
 
-**Coverage: 98.46%**, lines and branches, over 62,225 statements — measured across the unit and CoSA tiers, with the gate floor set at 98. The floor is set at the integer *below* the measurement: a gate set above the truth is a gate that is red about nothing. The remaining 960 uncovered statements are concentrated in the server runtime. Its paths execute under the test-server tiers that are not yet folded into this figure. So the number is honest about the half of the system it can see, and explicit that a whole-system figure does not yet exist.
+**Coverage: every merge must hold 100%** of lines, branches, and functions, across Python and TypeScript. The Python gate runs through `pytest --cov` with `--cov-fail-under=100`, and the TypeScript gate through `c8 --100`. <!-- COVERAGE-FIGURE: measured figure and statement count to be filled in from the v0.2.2 coverage-gate run -->
 
 Built and maintained by a single engineer. Every PR must pass all tiers before merge, at 100% line, branch, and function coverage. A hash-chained attestation ledger records that each tier actually ran -- a green report that cannot prove it executed is not a green report.
 
@@ -262,10 +258,10 @@ src/scripts/lupin_config.py init
 src/scripts/run-fastapi-lupin.sh          # FastAPI on port 7999
 
 # Run tests
-pytest src/tests/unit/                     # 16,247 unit tests (see the table above)
+pytest src/tests/unit/                     # 43,822 unit tests (see the table above)
 src/scripts/run-websocket-smoke-tests.sh   # 50 WebSocket tests
 src/tests/run-integration-tests.sh --bg -v # Integration gate (dual-container, :8000)
-src/scripts/run-e2e-ui-tests.sh --bg -v    # 663 Playwright tests incl. visual regression
+src/scripts/run-e2e-ui-tests.sh --bg -v    # 1,058 Playwright tests incl. visual regression
 
 # Install cosa-voice MCP server (for Claude Code voice I/O)
 claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py
@@ -304,13 +300,13 @@ Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure aut
 
 ### For operators
 
-- [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md) — Trust Dashboard and ratification how-to
+- [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md) (deprecated; replaced in v0.2.3) — Trust Dashboard and ratification how-to
 - [Automated Interactive Testing](src/docs/automated-interactive-testing.md) — proxy auto-answer testing guide
 - [WebSocket Troubleshooting](src/docs/websocket-troubleshooting.md) — common issues and debugging procedures
 
 ### R&D archive
 
-Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.md).
+856 dated planning and research documents (Markdown files) in [`src/rnd/`](src/rnd/README.md).
 
 **Codebase metrics**: the Lupin parent vs CoSA comparison was a snapshot of LoC distribution with a mermaid diagram and a 60/40 Python split. It also covered docstring-ratio observations and the operational implications of the CoSA-never-commit rule. Rick's R&D cut removed that document from the tree (the git history has it).
 
@@ -328,7 +324,7 @@ Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.
 
 ## Project status
 
-Lupin is an active research platform at v0.2.0 (dev). Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack. The stack is backed by 29,167 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle). It has full CI discipline and a FastAPI + PostgreSQL + pgvector architecture. Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP. The refactorings were ambitious and were made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology.
+Lupin is an active research platform at v0.2.2 (dev). Developed by a solo engineer, it combines voice-first agent orchestration and PEFT fine-tuning into a production-grade stack. The stack is backed by 62,368 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle). It has full CI discipline and a FastAPI + PostgreSQL + pgvector architecture. Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP. The refactorings were ambitious and were made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology.
 
 ---
 
@@ -339,7 +335,7 @@ capability boast. It's a map of the talks that aren't being given.
 
 **Every item on it is something that had to be learned, chosen, measured, or thrown away**.
 
-Semantic Caching · Mimetic Drift · PEFT/LoRA fine-tuning. Synthetic Training Data Generation · Mistral 8B · Phi-4. Human in the Loop · vLLM · Whisper ASR · streaming TTS · dual-channel WebSockets · server-sent events (SSE). FastAPI · PostgreSQL · pgvector · LanceDB · CodeRankEmbed · nomic-embed. Bayesian Beta-Bernoulli trust · Thompson Sampling · conformal prediction · circuit breakers. Claude Agent SDK · MCP servers · six Claude Code system hooks · tmux orchestration · git worktree isolation. Playwright visual regression · Docker · Cloud Run. Cloud SQL · GCS · Terraform · GitHub Actions. Firebase push · Marp rendering · hash-chained attestation ledgers. Alembic migrations · JWT/OAuth · Phi-4 fuzzy script matching
+Semantic Caching · Mimetic Drift · PEFT/LoRA fine-tuning. Synthetic Training Data Generation · Mistral 8B · Phi-4. Human in the Loop · vLLM · Whisper ASR · streaming TTS · dual-channel WebSockets · server-sent events (SSE). FastAPI · PostgreSQL · pgvector · LanceDB · CodeRankEmbed · nomic-embed. Claude Agent SDK · MCP servers · eight Claude Code system hooks · tmux orchestration · git worktree isolation. Playwright visual regression · Docker · Cloud Run. Cloud SQL · GCS · Terraform · GitHub Actions. Firebase push · Marp rendering · hash-chained attestation ledgers. Alembic migrations · JWT/OAuth · Phi-4 fuzzy script matching
 
 **the automate-everything test pyramid**
 
@@ -401,17 +397,6 @@ Each band below is a talk that could exist.
 - scheduled jobs surviving server bounces
 
 
-**Trust and autonomy**
-
-- Bayesian Beta-Bernoulli trust model with conjugate prior updates
-- Thompson Sampling for explore/exploit
-- conformal prediction for calibrated confidence
-- five-level escalation with circuit breaker
-- Universal Prediction Engine across seven slices
-- morning-coffee batch review of non-urgent decisions
-- post-hoc ratification with a trust feedback loop
-
-
 **Self-healing**
 
 - Bug Fix Expediter (diagnose, propose, fix, commit, retry)
@@ -450,7 +435,7 @@ Each band below is a talk that could exist.
 
 **The automate-everything test pyramid**
 
-- 29,167 authored test cases across seven tiers
+- 62,368 test cases across seven tiers
 - Python unit
 - TypeScript unit
 - integration

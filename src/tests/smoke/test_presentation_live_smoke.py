@@ -89,6 +89,7 @@ if lupin_root:
         sys.path.insert( 0, src_path )
 
 from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
+from tests.smoke.utilities.proxy_opt_in import skip_unless_proxy_opt_in
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -627,12 +628,14 @@ def quick_smoke_test( argv=None ):
     return test.run( argv )
 
 
-def test_presentation_live_endpoint():
+def test_presentation_live_endpoint( request ):
     """
-    Pytest entry point. Forwards any sys.argv beyond the script name to the
+    Pytest entry point. Skips unless the run passes --auto-proxy and sets
+    LUPIN_INTERACTIVE_TESTS=true (real LLM spend: the :8000 scheduled tier). Forwards any sys.argv beyond the script name to the
     argparser so `pytest_args` from the test-suite scheduling endpoint can
     pass --auto-proxy, --cost-cap-usd, etc.
     """
+    skip_unless_proxy_opt_in( request )
     # When invoked by the test-suite agentic job, pytest_args are passed as
     # sys.argv. Filter out pytest's own args (starting with the test file path).
     argv = sys.argv[ 1: ] if len( sys.argv ) > 1 else []
