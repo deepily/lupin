@@ -176,7 +176,7 @@ test( "a good click applies every row, then shows 'N of N applied' and one line 
   const out = document.querySelector( ".approve-link-result" ) as HTMLElement;
   assert.equal( out.textContent, "2 of 2 applied\na3975cf4 applied ✅\n0b1c2d3e applied ✅" );
   assert.ok( out.classList.contains( "approve-link-approved" ) );
-  assert.equal( document.querySelector( "a" ), null, "the link is gone" );
+  assert.equal( document.querySelectorAll( "a" ).length, 0, "the link is gone" );
 } );
 
 test( "one refusal marks the summary refused and the other row still reads applied", async () => {

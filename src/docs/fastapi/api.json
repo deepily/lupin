@@ -17213,6 +17213,19 @@
                         "title": "Park Reason",
                         "description": "REQUIRED non-blank for ->parked; MUST quote the row's OWN decisive sentence, not a paraphrase"
                     },
+                    "promote_priority": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 8
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Promote Priority",
+                        "description": "P0..P5: admits a held row to queued at that higher priority in one store event. Honoured only for the operator's login on not_approved -> queued, and only when it raises the row; anything else is a 403."
+                    },
                     "asynchronous": {
                         "anyOf": [
                             {

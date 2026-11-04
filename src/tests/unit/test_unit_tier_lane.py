@@ -161,6 +161,7 @@ class TestTheRunnerReachesTheScopeOnceAndPytestOnce:
         env[ "PATH" ] = "%s:%s" % ( bin_dir, env[ "PATH" ] )
         env.pop( "LUPIN_UNIT_SCOPED", None )
         env.pop( "LUPIN_UNIT_SCOPE", None )
+        env.pop( "LUPIN_COVERAGE", None )   # a gate run exports it; with a peer's pytest alive the runner's contention guard then exits 6 before the fake pytest
         if extra_env: env.update( extra_env )
         r = subprocess.run( [ "bash", str( RUNNER ) ] + self.ARGS, capture_output=True, text=True, env=env, timeout=240 )
         calls = log.read_text( encoding="utf-8" ).count( "call" ) if log.exists() else 0

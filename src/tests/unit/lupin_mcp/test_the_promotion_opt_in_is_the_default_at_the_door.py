@@ -373,6 +373,7 @@ def _assert_transition_extras_carries_no_boolean():
     os.path.join( "render", "HoldingAreaRenderer.ts" ),
     os.path.join( "render", "taskRowController.ts" ),  # parity A-2 #0: the shared row dispatcher
     os.path.join( "render", "EpicBoardRenderer.ts" ),  # parity A-2 #9: the Epic Board's row writer
+    os.path.join( "render", "approveLink.ts" ),        # row 54d62c0e: the one-click approve link's writer
 ] )
 def test_every_client_transition_DECLARATION_types_its_extras_string_only( relative_path ):
     """
@@ -483,6 +484,7 @@ def test_the_transition_surface_is_still_SEVEN_FILES():
         if name.endswith( ".ts" ) and "testkit" not in where
         and ANNOTATION_RE.search( open( os.path.join( where, name ), encoding="utf-8" ).read() )
     )
+    # EIGHT files since row 54d62c0e (approveLink.ts); the function keeps its SEVEN name because rows cite it.
     expected = sorted( [
         os.path.join( "render", "taskVerbs.ts" ),
         os.path.join( "stores", "TaskListStore.ts" ),
@@ -491,6 +493,7 @@ def test_the_transition_surface_is_still_SEVEN_FILES():
         os.path.join( "render", "HoldingAreaRenderer.ts" ),
         os.path.join( "render", "taskRowController.ts" ),
         os.path.join( "render", "EpicBoardRenderer.ts" ),
+        os.path.join( "render", "approveLink.ts" ),
     ] )
     assert declaring == expected, (
         f"the client transition surface changed.\n  on disk : {declaring}\n  watched : "
