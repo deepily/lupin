@@ -9,18 +9,18 @@ pins:
   - lupin_mcp.reuse_needset.forced_judge.build_rows@da73db5463
   - lupin_mcp.reuse_needset.forced_judge.forced_ids@5b9935f831
   - lupin_mcp.reuse_needset.forced_judge.plant_answer@9f6d1f5b45
-  - lupin_mcp.reuse_needset.forced_judge.judge_row@5794a35b72
+  - lupin_mcp.reuse_needset.forced_judge.judge_row@9b9a0c6bd9
   - lupin_mcp.reuse_needset.forced_judge.summarize@353b54053b
-  - lupin_mcp.reuse_needset.forced_judge.plan_of@df18f18554
-  - lupin_mcp.reuse_needset.forced_judge.run_live@d8d692b617
-  - lupin_mcp.reuse_needset.forced_judge.parse_args@f213645d71
-  - lupin_mcp.reuse_needset.forced_judge.collect_rows@f8f39bc929
+  - lupin_mcp.reuse_needset.forced_judge.plan_of@0f4bab37b0
+  - lupin_mcp.reuse_needset.forced_judge.run_live@e9326e122c
+  - lupin_mcp.reuse_needset.forced_judge.parse_args@ef4fafef56
+  - lupin_mcp.reuse_needset.forced_judge.collect_rows@cd0d8b143b
   - lupin_mcp.reuse_needset.forced_judge.main@598bdd817c
   - lupin_mcp.reuse_needset.forced_judge.run_cli@2b9e55e56d
 ---
 # Need set: forced judge
 
-Asks the judge about each planted rewrite that retrieval missed, with the plant placed in the shortlist of 128. It shows whether the judge would have accepted what the search never showed it. The control it follows is [[needset-positive-control]].
+Asks the judge about each planted rewrite that retrieval missed, with the plant placed in the shortlist of 128. It shows whether the judge would have accepted what the search never showed it. The control it follows is [[needset-positive-control]]. The `in_pack` variant is on [[needset-forced-judge-in-pack]].
 
 ## Rows
 - `missed_ids` reads the control's missed pairs from a stage report. `frozen_needs` reads each pair's draft from the saved control ledger and never asks a model.
@@ -33,6 +33,6 @@ Asks the judge about each planted rewrite that retrieval missed, with the plant 
 - `summarize` counts accepts by human label.
 
 ## Running
-- `plan_of` counts the pairs by label and four requests for each.
-- `run_live` charges every request to the `forced_judge` stage and writes `forced-judge-report.json`. A cap or budget stop keeps the finished rows.
-- `main` without `--live` reads files only and builds no context, so the spend ledger is untouched. A live run needs `--run-name`, a fresh spend run name, and `--ceiling`; it closes its spend run when it ends. `collect_rows`, `parse_args` and `run_cli` read the files, the line and print the result.
+- `plan_of` counts the pairs by label. It plans four requests per pair, or three per job of the in_pack variant.
+- `run_live` charges every request to the `forced_judge` stage and writes `forced-judge-report.json`. A cap or budget stop keeps the finished rows, and the variant supplies the summary.
+- `main` without `--live` reads files only and builds no context, so the spend ledger is untouched. A live run needs `--run-name`, a fresh spend run name, and `--ceiling`; it closes its spend run when it ends. `collect_rows` reads the files, `parse_args` reads the line including `--variant`, and `run_cli` prints the result.

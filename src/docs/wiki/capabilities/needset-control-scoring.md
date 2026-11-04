@@ -9,7 +9,7 @@ pins:
   - lupin_mcp.reuse_needset.planted_purposes.main@ac7a5240ed
   - lupin_mcp.reuse_needset.control_report.same_job_labels@e0e07ae12b
   - lupin_mcp.reuse_needset.control_report.ranks_of@036d420ae3
-  - lupin_mcp.reuse_needset.control_report.pair_row@250db2c6b5
+  - lupin_mcp.reuse_needset.control_report.pair_row@fae561963e
   - lupin_mcp.reuse_needset.control_report.figures@12494561e3
   - lupin_mcp.reuse_needset.control_report.scored@812d8bd008
   - lupin_mcp.reuse_needset.planted_purposes.lines_path@458ba28195
@@ -32,7 +32,7 @@ The control plants 20 rewrites and scores whether the checker finds them. A real
 
 ## The scored report
 - `same_job_labels` settles each pair from the two reviewers, with the third rater on disputes. It refuses a not-same set other than the five pinned ones, and records the label files' hashes.
-- `pair_row` builds one pair's row from the checker's receipt. Retrieved means in the ids sent to the judge. Accepted means retrieved and rated relevant.
+- `pair_row` builds one pair's row from the checker's receipt. Retrieved means in the ids sent to the judge. Accepted means retrieved and rated relevant. Given the live check's judge sweeps, the plant and original also carry `fusion` and `judge` ([[needset-judge-readings]]).
 - `ranks_of` gives a plant's place in each source list and in the merged list, read to its end. `position` is the place of one id in one list.
 - `figures` scores one population: retrieval, judge given retrieval and end to end, each a `count` with a Wilson interval. Undrafted pairs count as misses in the intention-to-treat figures.
 - `word_overlap` measures the leakage audit over each text's `content_words`: the share a need and a purpose line share. `file_sha` hashes the label files.
