@@ -354,6 +354,61 @@ def test_proof_ledger_makes_the_proof_folder_and_binds_the_ledger_to_the_binary(
     assert jd.ledger_binding( "claude_cli=/bin/claude|version=9.9", backend ) in first and first.count( "max-plan" ) >= 2
 
 
+# ---- rotate_ledger_for_new_cli (row 589102de) ----------------------------------------------------------------------
+
+def ledger_at( tmp_path, monkeypatch, version, cli="/bin/claude" ):
+    """Make the proof ledger as Claude Code `version` would; returns ( backend, ledger path )."""
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda path: version )
+    backend = jd.MaxPlanBackend()
+    pc.proof_ledger( str( tmp_path ), cli, backend )
+    return backend, tmp_path.joinpath( *pr.PROOF_FOLDER ) / pc.LEDGER_NAME
+
+
+def test_rotate_ledger_moves_a_ledger_of_another_cli_version_aside_and_proof_ledger_then_starts_a_new_one( tmp_path, monkeypatch, capsys ):
+    backend, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
+    old_text      = path.read_text( encoding="utf-8" )
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.318" )
+    done          = pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend )
+    kept          = path.with_name( "judge-ledger.claude-2.1.317.jsonl" )
+    assert done == { "from": "judge-ledger.jsonl", "to": kept.name, "old_version": "2.1.317", "new_version": "2.1.318" }
+    assert kept.read_text( encoding="utf-8" ) == old_text and not path.exists()
+    assert "[ledger-rotated] Claude Code 2.1.317 -> 2.1.318" in capsys.readouterr().err
+    pc.proof_ledger( str( tmp_path ), "/bin/claude", backend )
+    assert "version=2.1.318" in path.read_text( encoding="utf-8" ) and "version=2.1.317" not in path.read_text( encoding="utf-8" )
+
+
+def test_rotate_ledger_leaves_a_ledger_of_the_same_version_alone( tmp_path, monkeypatch, capsys ):
+    backend, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
+    before        = path.read_text( encoding="utf-8" )
+    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend ) is None
+    assert path.read_text( encoding="utf-8" ) == before and [ p.name for p in path.parent.iterdir() ] == [ pc.LEDGER_NAME ] and capsys.readouterr().err == ""
+
+
+def test_rotate_ledger_does_nothing_without_a_ledger_or_a_recorded_binding( tmp_path ):
+    backend = jd.MaxPlanBackend()
+    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend ) is None
+    folder  = tmp_path.joinpath( *pr.PROOF_FOLDER )
+    folder.mkdir( parents=True )
+    ( folder / pc.LEDGER_NAME ).write_text( "", encoding="utf-8" )
+    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend ) is None and ( folder / pc.LEDGER_NAME ).exists()
+
+
+def test_rotate_ledger_refuses_to_hide_a_change_of_binary_or_of_binding_shape( tmp_path, monkeypatch ):
+    backend, path = ledger_at( tmp_path, monkeypatch, "2.1.317", cli="/old/claude" )
+    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/new/claude", backend ) is None and path.exists()
+    with pytest.raises( pc.harness_runner.LedgerBindingError ): pc.proof_ledger( str( tmp_path ), "/new/claude", backend )
+    path.write_text( json.dumps( { "binding": "something else entirely" } ) + "\n", encoding="utf-8" )
+    assert pc.rotate_ledger_for_new_cli( str( tmp_path ), "/new/claude", backend ) is None and path.exists()
+
+
+def test_rotate_ledger_numbers_the_aside_name_when_the_version_name_is_taken( tmp_path, monkeypatch ):
+    backend, path = ledger_at( tmp_path, monkeypatch, "2.1.317" )
+    path.with_name( "judge-ledger.claude-2.1.317.jsonl" ).write_text( "earlier\n", encoding="utf-8" )
+    monkeypatch.setattr( pc.model_transport, "cli_version", lambda p: "2.1.318" )
+    done          = pc.rotate_ledger_for_new_cli( str( tmp_path ), "/bin/claude", backend )
+    assert done[ "to" ] == "judge-ledger.claude-2.1.317-2.jsonl" and path.with_name( "judge-ledger.claude-2.1.317.jsonl" ).read_text( encoding="utf-8" ) == "earlier\n"
+
+
 # ---- main ---------------------------------------------------------------------------------------------------------
 
 def test_main_check_prints_the_sizes_computes_the_pairs_once_and_never_runs_the_proof( venue, capsys ):

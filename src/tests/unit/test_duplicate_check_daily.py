@@ -207,6 +207,23 @@ def test_the_run_uses_the_one_shared_wiring_builder_and_its_own_ledger_folder( r
     assert ( tmp_path / "io" / "duplicate-check-daily" / "judge-ledger.jsonl" ).exists() and not ( tmp_path / "io" / "proof" ).exists()
 
 
+@pytest.mark.parametrize( "old, rotates", [ ( "2.1.317", True ), ( "2.1.318", False ) ] )
+def test_a_ledger_of_another_claude_version_is_rotated_aside_and_the_run_goes_on_row_589102de( repo, tmp_path, monkeypatch, old, rotates ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: old )
+    proof_cli.proof_ledger( parts[ "data_dir" ], "/bin/claude", parts[ "backend" ], dd.FOLDER )
+    monkeypatch.setattr( proof_cli.model_transport, "cli_version", lambda p: "2.1.318" )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    doc    = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts )
+    assert doc[ "status" ] == "ok", "a version bump must not fail the run"
+    if rotates:
+        assert doc[ "ledger_rotated" ][ "to" ] == "judge-ledger.claude-2.1.317.jsonl" and ( folder / "judge-ledger.claude-2.1.317.jsonl" ).exists()
+        assert "version=2.1.318" in ( folder / "judge-ledger.jsonl" ).read_text( encoding="utf-8" )
+    else:
+        assert "ledger_rotated" not in doc and not ( folder / "judge-ledger.claude-2.1.318.jsonl" ).exists()
+
+
 def test_the_window_starts_at_the_first_commit_when_no_commit_is_a_day_old( repo ):
     c = commit( repo, { "client/a1.py": function( "a1", [ "MARKA" ], 2 ) }, "only", 1 )
     w = dd.window_of( repo, None, NOW )
