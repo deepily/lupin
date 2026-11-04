@@ -200,3 +200,31 @@ test( "a drawn P0 link for a row that already left the holding area reads approv
   await markApproveLinks( [ host ], async () => ( { status: "queued" } as never ) );
   assert.equal( host.querySelector( ".approve-link-approved" )?.textContent, "approved ✅" );
 } );
+
+// Row 526bfd86: the click carried no promote_priority. These draw the line the way the shipped helper writes it
+// and the way each surface renders it, then click the middle link. Message surface: notificationItem's inline render.
+const REAL_LINE = ( id: string ): string =>
+  `- Decision proxy explainer [approve ☐](${ APPROVE( id ) }) [⏫ P0](${ P0LINK( id ) }) [📋](/app/tasks/view?row=${ id })`;
+
+test( "526bfd86: the P0 link in a notification MESSAGE (inline render, outside the card) sends promote_priority", async () => {
+  const { renderMarkdownInline } = await import( "../../../../lupin_app/static/js/multiplexer/render/markdown" );
+  const shell = setup( recorder() );
+  const host  = shell.querySelector( "#sender-cards-container" ) as Element;
+  const span  = document.createElement( "span" );
+  span.innerHTML = ( renderMarkdownInline( REAL_LINE( ROW_A ) ) as { __raw: string } ).__raw;
+  host.replaceChildren( span );
+  const anchors = Array.from( span.querySelectorAll( "a" ) );
+  assert.equal( anchors.length, 3, "three links drawn" );
+  assert.equal( click( anchors[ 1 ]! ), true, "the P0 link is claimed" );
+  assert.deepEqual( calls, [ { id: ROW_A, status: "queued", extras: { promote_priority: "P0" } } ] );
+} );
+
+test( "526bfd86: the P0 link in an ABSTRACT (block render in the pane) sends promote_priority", async () => {
+  const { renderMarkdown } = await import( "../../../../lupin_app/static/js/multiplexer/render/markdown" );
+  const shell = setup( recorder() );
+  const host  = shell.querySelector( "#content-pane-body" ) as Element;
+  host.innerHTML = ( renderMarkdown( REAL_LINE( ROW_A ) ) as { __raw: string } ).__raw;
+  const anchors = Array.from( host.querySelectorAll( "a" ) );
+  assert.equal( click( anchors[ 1 ]! ), true, "the P0 link is claimed" );
+  assert.deepEqual( calls, [ { id: ROW_A, status: "queued", extras: { promote_priority: "P0" } } ] );
+} );
