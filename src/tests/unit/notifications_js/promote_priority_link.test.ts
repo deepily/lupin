@@ -169,3 +169,23 @@ test( "a drawn P0 link for a row that already left the holding area reads approv
   const host = document.getElementById( "action-required-content" ) as Element;
   assert.equal( host.querySelector( ".approve-link-approved" )?.textContent, "approved ✅" );
 } );
+
+// Row 526bfd86: the P0 link, drawn by the real renderers, in the message and in the abstract.
+const REAL_LINE = ( id: string ): string =>
+  `- Decision proxy explainer [approve ☐](${ APPROVE( id ) }) [⏫ P0](${ P0LINK( id ) }) [📋](/app/tasks/view?row=${ id })`;
+
+for ( const [ surface, render ] of [ [ "MESSAGE (inline)", "renderMarkdownInline" ], [ "ABSTRACT (block)", "renderMarkdown" ] ] as const ) {
+  test( `526bfd86: legacy P0 link in a notification ${ surface } sends promote_priority`, async () => {
+    const vendor = resolve( HERE, "../../../lupin_app/static/js/vendor" );
+    if ( typeof ( globalThis as Record<string, unknown> ).marked === "undefined" ) {
+      vm.runInThisContext( readFileSync( resolve( vendor, "marked.min.js" ), "utf8" ) );
+      vm.runInThisContext( readFileSync( resolve( vendor, "purify.min.js" ), "utf8" ) );
+    }
+    const host = document.getElementById( "action-required-content" ) as Element;
+    host.innerHTML = ( ui as Record<string, ( t: string ) => string> )[ render ]!( REAL_LINE( ROW_A ) );
+    const anchors = Array.from( host.querySelectorAll( "a" ) );
+    assert.equal( anchors.length, 3, "three links drawn" );
+    assert.equal( click( anchors[ 1 ]! ), true, "the P0 link is claimed" );
+    assert.deepEqual( calls, [ { id: ROW_A, status: "queued", extras: { promote_priority: "P0" } } ] );
+  } );
+}
