@@ -8,6 +8,7 @@ pins:
   - lupin_mcp.reuse_shadow.read_budgets_enabled@8b9dd2715f
   - lupin_mcp.reuse_shadow.check_lifetime_limit@e6b8f02438
   - lupin_mcp.reuse_shadow.live_capacity@3f7d917b5c
+  - lupin_mcp.reuse_shadow.audit_inputs@d02f6f2200
   - lupin_mcp.reuse_shadow.queue_lookup@1316129eec
   - lupin_mcp.reuse_shadow.sweep_of@f2b1218847
   - lupin_mcp.reuse_shadow.drain@05b5be5ffb
@@ -21,6 +22,7 @@ pins:
 ## Queueing
 - `check_exists_impl` offers each served lookup to `queue_lookup`, and a queue failure goes to stderr without changing the answer ([[reuse-tools-question-entry-points]]).
 - `queue_lookup` returns the queue id, or None when the audit is off, the lookup is not sampled, or it is not a plain shortlist answer. Sweep-only, test-including, pair and excluded lookups are never queued. Neither is a lookup whose candidate stage failed.
+- `audit_inputs( receipt )` reads the queue's fields from a stored receipt: need, language, generation, index sha and the live verdict with its candidate ids. It returns None for anything but a plain `check_exists` shortlist answer, which is how `queue_lookup` decides.
 - The queued need is the receipt's query, which the redactor has already cleaned.
 
 ## Draining
