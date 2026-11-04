@@ -2,10 +2,10 @@
 capability: needset-first-thousand-command
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_needset.first_thousand.run_first_thousand@08a196efe8
+  - lupin_mcp.reuse_needset.first_thousand.run_first_thousand@f0048216c1
   - lupin_mcp.reuse_needset.first_thousand.control_job@da8024fd0c
   - lupin_mcp.reuse_needset.first_thousand.planted_stage_for@53b5acdf08
-  - lupin_mcp.reuse_needset.first_thousand.control_stage_live@5fe9e2a006
+  - lupin_mcp.reuse_needset.first_thousand.control_stage_live@4660164c51
   - lupin_mcp.reuse_needset.first_thousand.tracked_files@0eecf6442d
   - lupin_mcp.reuse_needset.first_thousand.write_seed_lists@480a3dd8ba
   - lupin_mcp.reuse_needset.first_thousand.live_parts@6bdad27106
@@ -37,4 +37,4 @@ The live control, the command line and the capped run. The planted pool and the 
 - `main` closes the Jev spend-ledger run when the stages end, by any ending after the context is built (`reuse_tools.close_run`). It returns `closed_run`. A close that raises during another error never replaces that error. After a clean finish it is returned as `close_error` and the exit status is 1.
 - `exit_status` gives 1 when any stage failed, 3 when the cap or a stage's own budget ended a stage and none failed, else 0. The argument parser keeps 2 for a usage error. A stop on a finding exits 0. `run_cli` prints the report as JSON first.
 - The control runs `CONTROL_PASSES` (two) times. `live_control` gives each later pass its own query-cache folder and the first pass's drafting ledger, so every pass judges the same sentences. The report is the first pass's plus `passes` and `consistent`. The control stage has no stop: a plant miss and a low originals rate are reported figures. A pass ended by the stage budget leaves the finished passes in `passes`, with `budget_reached`.
-- `run_first_thousand` installs the cap over `call-ledger.jsonl` in the run folder, with each stage's budget, runs the four stages and writes `stage-reports.json`. It writes it also when a stage crashes. A resumed run keeps the calls already spent.
+- `run_first_thousand` installs the cap over `call-ledger.jsonl` in the run folder, with each stage's budget. It runs the four stages and writes `stage-reports.json`, also when a stage crashes. Each write is followed by `judge-readings.json` ([[needset-judge-readings]]). A resumed run keeps the calls already spent.
