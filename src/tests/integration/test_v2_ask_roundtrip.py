@@ -55,7 +55,7 @@ import pytest
 import requests
 
 from tests.integration.v2_queued import (
-    DRAIN_XFAIL_TIMEOUT, assert_handed_off,
+    assert_handed_off,
     assert_queued_in_todo, drop_from_todo, snapshot_id_for_question, wait_for_done,
 )
 
@@ -176,8 +176,7 @@ def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_hea
     `test_v2_ask_serves_a_confirmed_row.py` still reports the unconfirmed case as `replay`
     in the same run. Treat a later red here as a real regression, not a parked claim.
 
-    Its waits are bounded well under the usual ladder (DRAIN_XFAIL_TIMEOUT) — a body that
-    runs every gate costs every gate. Everything else below is the original test, unchanged.
+    Its waits use the standard hang guard, with no latency assertion. Everything else below is the original test, unchanged.
     """
     question, _expected_sum = _unique_math_question()
     body       = _with_lineage( { "question": question, "speak": False, "interactive": False } )
@@ -194,7 +193,7 @@ def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_hea
         )
 
         # ── the queue runs it. Landing in the done queue means the write-back has landed.
-        done = wait_for_done( BASE_URL, first[ "job_id" ], auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
+        done = wait_for_done( BASE_URL, first[ "job_id" ], auth_headers )
         assert done, f"first job completed with no metadata: {done}"
 
         snapshot_id = snapshot_id_for_question( question )
@@ -210,7 +209,7 @@ def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_hea
         queued_ids.append( assert_handed_off( second, expect_cache_hit=True, expect_path="replay" ) )
 
         # ── and the replay itself reaches a terminal answer, which is the point of a cache.
-        replayed = wait_for_done( BASE_URL, second[ "job_id" ], auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
+        replayed = wait_for_done( BASE_URL, second[ "job_id" ], auth_headers )
         assert replayed.get( "response_text" ) or replayed.get( "answer" ), (
             f"the replay completed with no answer — a cache hit that serves nothing is a "
             f"miss with extra steps: {replayed}"

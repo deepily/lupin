@@ -112,9 +112,10 @@ REPLAY_NEEDS_DRAIN_AND_CONFIRMATION = (
 # still RUNS, so the day the box gains a consumer that is not the test itself, it XPASSes
 # and goes red, and somebody comes and removes the mark. A skip would stay quiet forever.
 #
-# But a body that runs every gate costs every gate, so the wait is bounded well below the
-# 180s ladder: two tests, under a minute each, rather than a hang nobody budgeted for.
-DRAIN_XFAIL_TIMEOUT = 25
+# This constant bounds an EXPECTED hang: a body that runs every gate costs every gate, so its
+# wait is cut well below the 180s ladder. Only the strict-xfail resume test still uses it; the
+# replay test passes, so it waits on the standard hang guard.
+XFAIL_EXPECTED_HANG_TIMEOUT = 25
 
 
 def assert_queued_in_todo( base_url, job_id, headers, timeout=30 ):
