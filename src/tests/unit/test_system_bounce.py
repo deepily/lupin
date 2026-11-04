@@ -79,8 +79,12 @@ class TestBounceEndpoint( unittest.TestCase ):
         # get_project_root() + "/io/bounce" must equal self.base.
         self._patch = patch.object( system.du, "get_project_root", return_value=self.tmp )
         self._patch.start()
+        # The temp root has no INI, so the zone the timestamps need is pinned; the zone is not under test.
+        self._zone_patch = patch( "cosa.utils.util._resolve_tz_name", lambda tz_name: "America/New_York" )
+        self._zone_patch.start()
 
     def tearDown( self ):
+        self._zone_patch.stop()
         self._patch.stop()
         import shutil
         shutil.rmtree( self.tmp, ignore_errors=True )

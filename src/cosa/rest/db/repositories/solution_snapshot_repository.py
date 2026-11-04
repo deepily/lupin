@@ -1,14 +1,10 @@
 """
-SolutionSnapshotRepository — Postgres+pgvector storage for the
-``solution_snapshots`` table.
+Postgres and pgvector storage for the ``solution_snapshots`` table.
 
-DISTINCT from ``input_and_output``. Two of its seven vector columns are
-ANN-searched (HNSW dot): ``question_embedding`` + ``code_embedding``
-(``solution_embedding`` is also searched by the solution-similarity path). PK is
-the natural ``id_hash``. Storage-only: embeddings arrive on the field dict; the
-Lane-C memory layer keeps SolutionSnapshot marshalling + embedding generation.
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+Distinct from ``input_and_output``. Two of its seven vector columns are ANN-searched (HNSW dot):
+``question_embedding`` and ``code_embedding``. ``solution_embedding`` is also searched by the
+solution-similarity path. The primary key is the natural ``id_hash``. Storage only: embeddings arrive on the
+field dict, and the memory layer keeps SolutionSnapshot marshalling and embedding generation.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -100,6 +96,26 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
             return None
         return SolutionSnapshot.id_hash != exclude_id_hash
 
+    def _cosine_topk( self, column, query_embedding: List[float], threshold: float,
+                      limit: int, exclude_id_hash: Optional[str] ) -> List[Tuple[float, SolutionSnapshot]]:
+        """
+        Cosine nearest-k over one embedding column.
+
+        Requires:
+            - column is a Vector column of SolutionSnapshot
+            - query_embedding is a dim-768 list; limit is a positive int
+            - threshold is a similarity percentage in [0,100]
+
+        Ensures:
+            - returns up to limit ``( similarity_pct, entity )`` tuples >= threshold,
+              strongest cosine first; excludes exclude_id_hash when given
+        """
+        return dot_topk(
+            self.session, SolutionSnapshot, column,
+            query_embedding, limit=limit, exclude_filter=self._exclude_filter( exclude_id_hash ),
+            threshold_pct=threshold, metric="cosine",
+        )
+
     def get_snapshots_by_question( self, query_embedding: List[float],
                                    threshold: float = 90.0, limit: int = 7,
                                    exclude_id_hash: Optional[str] = None ) -> List[Tuple[float, SolutionSnapshot]]:
@@ -114,11 +130,7 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
             - returns up to limit ``( similarity_pct, entity )`` tuples >= threshold,
               strongest cosine first; excludes exclude_id_hash when given
         """
-        return dot_topk(
-            self.session, SolutionSnapshot, SolutionSnapshot.question_embedding,
-            query_embedding, limit=limit, exclude_filter=self._exclude_filter( exclude_id_hash ),
-            threshold_pct=threshold, metric="cosine",
-        )
+        return self._cosine_topk( SolutionSnapshot.question_embedding, query_embedding, threshold, limit, exclude_id_hash )
 
     def get_snapshots_by_code_similarity( self, query_embedding: List[float],
                                           threshold: float = 85.0, limit: int = 20,
@@ -134,11 +146,7 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
             - returns up to limit ``( similarity_pct, entity )`` tuples >= threshold,
               strongest cosine first; excludes exclude_id_hash when given
         """
-        return dot_topk(
-            self.session, SolutionSnapshot, SolutionSnapshot.code_embedding,
-            query_embedding, limit=limit, exclude_filter=self._exclude_filter( exclude_id_hash ),
-            threshold_pct=threshold, metric="cosine",
-        )
+        return self._cosine_topk( SolutionSnapshot.code_embedding, query_embedding, threshold, limit, exclude_id_hash )
 
     def get_snapshots_by_solution_similarity( self, query_embedding: List[float],
                                               threshold: float = 85.0, limit: int = 20,
@@ -154,11 +162,7 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
             - returns up to limit ``( similarity_pct, entity )`` tuples >= threshold,
               strongest cosine first; excludes exclude_id_hash when given
         """
-        return dot_topk(
-            self.session, SolutionSnapshot, SolutionSnapshot.solution_embedding,
-            query_embedding, limit=limit, exclude_filter=self._exclude_filter( exclude_id_hash ),
-            threshold_pct=threshold, metric="cosine",
-        )
+        return self._cosine_topk( SolutionSnapshot.solution_embedding, query_embedding, threshold, limit, exclude_id_hash )
 
     def get_gists( self ) -> List[str]:
         """
@@ -174,18 +178,11 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
 
     def get_all_snapshots( self ) -> List[SolutionSnapshot]:
         """
-        Return every snapshot row.
+        Return every snapshot row, for the time-saved stats endpoint.
 
-        Added 2026-09-23 (row 8631144b): `/api/stats/time-saved` has called
-        `snapshot_mgr.get_all_snapshots()` since it was written, and no such method
-        existed anywhere in the tree — not on the manager, not on this repository, not
-        on the interface. The endpoint 500'd on every request.
-
-        ⚠️ WHOLE-TABLE SCAN, and deliberately so: both stats endpoints aggregate
-        `replay_history` across every snapshot, which is what they are for. The columns
-        that make a snapshot row heavy are its seven embeddings, so if this grows into a
-        problem the fix is a projection of the few columns the stats path reads — not a
-        LIMIT, which would silently under-report the totals.
+        `/api/stats/time-saved` reaches this through `snapshot_mgr.get_all_snapshots()`. The whole-table scan is deliberate: both stats endpoints aggregate `replay_history` across every snapshot.
+        Rows are heavy because of their seven embeddings. If the scan grows costly, the fix is a projection of the
+        few columns the stats path reads. A `LIMIT` would silently under-report the totals.
 
         Ensures:
             - returns every row in the table, unordered

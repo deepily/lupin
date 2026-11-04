@@ -14,6 +14,7 @@ variable "secret_ids" {
   default = [
     "lupin-jwt-secret-key",
     "lupin-db-password",
+    "lupin-db-test-password",   # row 80513825: the lupin_test role, for tests that create databases
     "lupin-anthropic-api-key-firewalled",
     "lupin-openai-api-key",
     "lupin-groq-api-key",
@@ -39,7 +40,7 @@ variable "secret_ids" {
     # it had been minted into the VM's own database, which was correct for the
     # other consumer.
     #
-    # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+    # Decision record: src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the model server no longer shares the notification key)
     "lupin-model-server-api",
   ]
 }

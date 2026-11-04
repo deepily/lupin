@@ -20,8 +20,7 @@ Usage:
     context = history.get_context_prompt()
     new_prompt = f"{context}New message: Also check refresh tokens"
 
-Created: 2026-01-07
-Purpose: Enable "polite queue" semantics on top of SDK session restarts
+Purpose: enable "polite queue" semantics on top of SDK session restarts.
 """
 
 from typing import List, Dict

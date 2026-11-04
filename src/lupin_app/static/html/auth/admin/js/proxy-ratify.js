@@ -34,6 +34,7 @@ document.addEventListener( "DOMContentLoaded", async function() {
         if ( user && user.email ) {
             userEmail = user.email;
         }
+        await LupinAppZone.load();
         await loadPending();
     } catch ( error ) {
         hideLoading( "loading" );
@@ -621,7 +622,7 @@ function showDecisionDetail( id ) {
         </div>
         <div class="detail-row">
             <span class="detail-label">Created:</span>
-            <span class="detail-value">${decision.created_at ? new Date( decision.created_at ).toLocaleString() : "—"}</span>
+            <span class="detail-value">${decision.created_at ? LupinAppZone.dateTime( new Date( decision.created_at ) ) : "—"}</span>
         </div>
         <div class="detail-row">
             <span class="detail-label">Reason:</span>

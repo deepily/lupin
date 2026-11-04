@@ -1,60 +1,63 @@
 """
-Kill guard — an unscoped process sweep can reach another seat's CLI (row cd332d2b).
+Denies Bash process sweeps that can signal another seat's Claude CLI.
 
-WHAT IT COSTS, measured: on 2026-08-21 at 15:27:03Z a worker ran
-`pkill -f "pytest src/tests/unit"`. The CLI's own shadow-`pkill` shell function
-REFUSED it, verbatim: "this pattern matches the Claude CLI process (PID
-127519)". Ten seconds later the same worker reproduced the sweep by hand as
-`ps -eo pid,args | grep "[p]ytest src/tests/unit" | ... | while read p; do kill
-$p; done` — a shape the shadow function does not see — and its own output names
-the damage: "killed 125491 killed 127519 killed 171103 ..." — eight processes,
-INCLUDING the 127519 the refusal had just named. Three worker seats stopped
-within 612 ms; the author's was one of them. A fourth seat survived only
-because its command line did not happen to match the pattern.
+Why a pattern that looks like a test path matches a seat: a seat launches as
+`claude --model ... <its entire spawn brief>`. So the brief is in its argv.
+Any brief that mentions `src/tests/unit` makes that seat match a grep aimed at pytest.
+The pattern does not have to be careless to be lethal; it only has to be a phrase
+somebody wrote down. The CLI's own shadow-`pkill` function refuses a pattern that
+matches the CLI's own process.
+It does not see a hand-built `ps | grep | while read p; do kill $p; done`.
+One such sweep stopped three worker seats within 612 ms.
 
-⇒ WHY A PATTERN THAT LOOKS LIKE A TEST PATH MATCHES A SEAT: a seat is launched
-as `claude --model … <its entire spawn brief>`, so the brief is in its argv.
-Any brief that so much as mentions `src/tests/unit` makes that seat a match for
-a grep aimed at pytest. The pattern does not have to be careless to be lethal —
-it only has to be a phrase somebody wrote down.
+What is denied, and nothing wider:
+  - Shape A: `kill <pid>` (any signal) naming a PID that /proc says is a live `claude` process.
+    It is checked against /proc at hook time, so it is a fact about the box.
+  - Shape B: a system-wide process listing (`ps -e`, `ps aux`, `pgrep`) feeding a kill
+    downstream in the same command.
+  - Shape C: a `pkill` or `killall` pattern with no own-children scoping.
+    The shadow `pkill` refuses only a pattern matching your own pid.
+    A pattern that matches another seat and not you goes through it untouched.
+    It also refuses a pattern matching a process that is provably not the caller's;
+    the ownership rule sits above `_ProcFs`.
+  - Shape D: `kill $(pgrep ...)`, identical in behaviour to the piped form B denies.
+    It is refused before any PID is known. That is the only moment it can still be
+    refused, since the PIDs are not in the command text.
 
-WHAT IS DENIED, and nothing wider:
-  · SHAPE A — `kill <pid>` (any signal) naming a PID that /proc says is a LIVE
-    `claude` process. Verified against /proc at hook time, so this is a fact
-    about the box rather than a guess about the string.
-  · SHAPE B — a system-wide process listing (`ps -e`/`ps aux`/`pgrep`) feeding a
-    kill downstream in the same command.
-  · SHAPE C — a `pkill`/`killall` PATTERN with no own-children scoping. The
-    CLI's own shadow-`pkill` refuses only a pattern matching YOUR pid; one
-    that matches another seat and not you goes through it untouched.
-  · SHAPE D — `kill $(pgrep …)`, identical in behaviour to the piped form B
-    already denies. This is the shape above, refused
-    BEFORE any PID is known — which is the only moment it can still be refused,
-    since the PIDs are not in the command text.
+Heredoc bodies are stripped before matching: a file that documents a sweep is data, as this module's test file is.
 
-Heredoc BODIES are stripped before matching — a file that DOCUMENTS a sweep\nis data, not a sweep. (This module's own test file is such a file, and the\nguard denied it on first wiring, which is how the exclusion got written.)\n\nWHAT STAYS ALLOWED: killing your OWN children — `pkill -P $$`, `pgrep -P $$ |
-xargs kill`, `ps --ppid $$`, `kill $!`, `kill %1` — and any listing with no kill
-downstream. Read-only `ps`/`pgrep` are how you find out what is running.
+What stays allowed: any listing with no kill downstream, and killing your own children.
+A pattern sweep is allowed while every process it matches is yours.
+Own-children forms: `pkill -P $$`, `pgrep -P $$ | xargs kill`, `ps --ppid $$`, `kill $!`, `kill %1`.
+Read-only `ps` and `pgrep` stay allowed; they are how you find out what is running.
 
-SAFETY — this runs inside the hot-path PreToolUse hook (every tool call, every
-session), so two non-negotiables:
-  • FAIL-OPEN: ANY error → allow (return None). A guard must never break a tool
-    call.
-  • ESCAPE HATCH: LUPIN_ALLOW_UNSCOPED_KILL=1 disables the guard for a session
-    that genuinely must sweep — after it has read the PIDs and confirmed none is
-    a seat.
+This runs inside the hot-path PreToolUse hook (every tool call, every session), so two
+requirements are not negotiable:
+  - The guard fails open: any error means allow (return None), so it never breaks a tool call.
+  - The escape hatch is LUPIN_ALLOW_UNSCOPED_KILL=1. It disables the guard for a session that
+    must sweep, after it has read the PIDs and confirmed none is a seat.
 
-⚠️ DEFAULT-ON, deliberately. The rule this replaces already existed as advice
-("narrow the pattern"), was delivered to the author ten seconds before the
-event, and did not survive contact with a hurry.
+The guard is on by default. The earlier rule was advice ("narrow the pattern"), and advice
+did not survive a hurry.
 """
 import os
 import re
 import shlex
+import signal
 import subprocess
-from typing import List, Optional
+from bisect import bisect_left, bisect_right
+from functools import lru_cache
+from typing import List, Optional, Tuple
 
 
+# What this guard does not see, kept as documented gaps. The test file pins each as allowed,
+# so a change to this list is a decision. Seeing them would mean parsing arbitrary shell.
+#   ssh, eval, systemd-run, docker exec, watch, find -exec, parallel, python -c, a second level of
+#   `bash -c`, a quoted-split name (p""kill, pk\ill), a variable holding the command name
+#   ($PKILL, $(which pkill)), an alias, and a pid list or pattern read from stdin by xargs.
+# Handled: one level of `bash|sh|dash|zsh [-flags] -c '<literal>'` is judged by running this guard over the
+# literal, and `xargs` in front of kill, pkill or killall is read as a wrapper of that verb. A redirection before the command word (`2>&1 pkill ...`) is a transparent
+# prefix, and a `<<` inside a comment or a quoted span opens no heredoc.
 # Bash tool name as it appears in the PreToolUse hook payload.
 BASH_TOOL_NAMES = ( "Bash", )
 
@@ -93,11 +96,78 @@ _TRUE_VALUES = ( "1", "true", "on", "yes" )
 # greedy value backtrack INTO the program name, so `FOO=barkill 123` would match a
 # `kill` that is part of a value — a false allow traded for a false deny. Pinning the
 # value to a real token end does neither.
-_WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|setsid|ionice)"
-_PREFIXES = rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*"
+# Horizontal whitespace, or a backslash-newline continuation. A bare newline ends a command and is
+# a command start of its own, so no prefix may cross one: a run of newlines would be re-scanned
+# from each of them, and the guard went quadratic on it (measured: 8000 newlines took 15 s).
+_WS = r"(?:[ \t]|\\\n)"
+# One quoted span or one escaped character: part of a shell word, so a space inside it does not end the word.
+_QUOTED_OR_ESCAPED = r"""\\.|"[^"]*"|'[^']*'"""
+# The value of an assignment (`FOO="a b"`, `FOO=a\ b`): a shell word that ends at a separator.
+_ASSIGN_VALUE = r"""(?:""" + _QUOTED_OR_ESCAPED + r"""|[^\s;&|"'\\])*"""
+_WRAPPERS = r"(?:env|command|builtin|exec|sudo|doas|nohup|time|nice|stdbuf|setsid|ionice|unbuffer|taskset|chrt|xargs)"
+# A wrapper may carry options, each with at most one value: `nice -n 5`, `sudo -u root`,
+# `env -i`, `ionice -c3`. A value is never a wrapper, a verb or an assignment, so every
+# word has exactly one reading and the pattern cannot backtrack exponentially: a command
+# of fifty nested wrappers took more than ten seconds before this was pinned.
+_WRAPPER_VALUE    = (
+    r"(?!(?:[\w./+-]*/)?(?:" + _WRAPPERS[ 3: -1 ] + r"|pkill|killall|kill)\b)"
+    r"(?![A-Za-z_][A-Za-z0-9_]*=)(?:" + _QUOTED_OR_ESCAPED + r"|[^\s;&|()`\"'\\-])(?:" + _QUOTED_OR_ESCAPED + r"|[^\s;&|()`\"'\\])*"
+)
+_WRAPPER_OPERANDS = r"(?:" + _WS + r"+-[^\s;&|()`]+(?:" + _WS + r"+" + _WRAPPER_VALUE + r")?)*"
+# `timeout` takes a duration (and options) before the command it wraps, so it is
+# not a bare word like the others: `timeout 5 pkill ...`, `timeout -s KILL 5 pkill ...`.
+_TIMEOUT_SPAN = (
+    r"timeout(?:" + _WS + r"+(?:-[sk]" + _WS + r"+\w+|-\S+))*" + _WS + r"""+["']?\d+(?:\.\d*)?[smhd]?["']?(?=\s)"""
+)
+# A command word is judged by its basename: `/usr/bin/pkill`, `\pkill`, `"pkill"` all name pkill.
+_WORD_PRE  = r"""\\?["']?(?:[\w./+~-]*/)?"""
+_WORD_POST = r"""["']?(?![\w./-])"""
 
-# A signal flag on a kill verb: `-9`, `-KILL`, `-SIGTERM`. Not a selector.
-_SIGNAL_FLAG_RE = re.compile( r"-\d+|-(?:SIG)?[A-Z]+" )
+# `env 'A=b' cmd`: env takes the assignment as one quoted word, so it can only follow `env`.
+_ENV_QUOTED_ASSIGN = (
+    rf"{_WORD_PRE}env{_WORD_POST}{_WRAPPER_OPERANDS}"
+    rf"""(?:{_WS}+(?:"[A-Za-z_][A-Za-z0-9_]*=[^"]*"|'[A-Za-z_][A-Za-z0-9_]*=[^']*'))+"""
+)
+# A redirection written before the command word: `2>&1 pkill`, `>/dev/null pkill`, `{fd}>f pkill`, `<<< text pkill`.
+# Bash performs it and then runs the verb, so it is one more transparent prefix.
+# The target is required, which keeps every start unambiguous and linear.
+_REDIRECT_PREFIX = (
+    rf"(?:\d*|&|\{{[A-Za-z_][A-Za-z0-9_]*\}})(?:>>?|<{{1,3}})&?{_WS}*(?:{_QUOTED_OR_ESCAPED}|[^\s;&|()`\"'\\<>])+"
+)
+# One link of a prefix chain: an assignment, a redirection, `timeout N`, or a transparent wrapper with its options.
+_PREFIX_ELEMENT = (
+    rf"[A-Za-z_][A-Za-z0-9_]*={_ASSIGN_VALUE}(?=[\s;&|]|$)"
+    rf"|{_REDIRECT_PREFIX}"
+    rf"|{_TIMEOUT_SPAN}|{_ENV_QUOTED_ASSIGN}"
+    rf"|{_WORD_PRE}{_WRAPPERS}{_WORD_POST}{_WRAPPER_OPERANDS}"
+)
+_PREFIXES = rf"(?:{_WS}*(?:{_PREFIX_ELEMENT}))*"
+
+# Where a command can start: a line, a separator, a group, a keyword, a negation or a case arm.
+_CMD_START = r"(?:^|[;&|(`{)]|\n|(?<![^\s;&|(`{])!|\b(?:do|then|else|elif|if|while|until)\b)"
+# The same without `)`. The hatch must sit in the assignment prefix of the command it overrides, and a `)`
+# also closes `$(pgrep -f T)`, after which a trailing word is an argument, not a prefix.
+_HATCH_START = r"(?:^|[;&|(`{]|\n|(?<![^\s;&|(`{])!|\b(?:do|then|else|elif|if|while|until)\b)"
+
+
+# A signal given as an option: `-9`, `-KILL`, `-SIGTERM`. The names come from the
+# platform's own table, so `-P`, `-U` and `-G` stay options that select processes.
+_SIGNAL_NAMES = frozenset(
+    name[ 3: ] for name in signal.Signals.__members__ if name.startswith( "SIG" )
+) | { "RTMIN", "RTMAX" }
+_SIGNAL_FLAG_RE = re.compile( r"-(?:\d+|(?:SIG)?[A-Z][A-Z0-9]*(?:[+-]\d+)?)" )
+
+
+def _is_signal_option( token: str ) -> bool:
+    """True iff the token is a signal given as an option: `-9`, `-KILL`, `-SIGHUP`."""
+    if not _SIGNAL_FLAG_RE.fullmatch( token ):
+        return False
+    body = token[ 1: ]
+    if body.isdigit():
+        return True
+    body = re.sub( r"[+-]\d+$", "", body )
+    return ( body[ 3: ] if body.startswith( "SIG" ) else body ) in _SIGNAL_NAMES
+
 
 # What /proc/<pid>/comm reads for a Claude Code CLI process.
 CLAUDE_COMM = "claude"
@@ -109,11 +179,11 @@ CLAUDE_COMM = "claude"
 # about a PID the author typed.
 _KILL_LITERAL_RE = re.compile(
     r"""
-    (?:^|[;&|(`]|\n)             # command position
+    """ + _CMD_START + r"""       # command position
     """ + _PREFIXES + r"""       # env assignments / transparent wrappers (row 084adbaf)
-    \s*
-    kill\b                       # the verb (not pkill/killall — different shapes)
-    (?P<args>(?:\s+[^\s;&|)`\n]+)*)   # the remainder of THIS command only
+    """ + _WS + r"""*
+    """ + _WORD_PRE + r"""kill""" + _WORD_POST + r"""   # the verb (not pkill/killall — different shapes)
+    (?P<args>(?:""" + _WS + r"""+[^\s;&|)`\n]+)*)   # the remainder of THIS command only
     """,
     re.VERBOSE,
 )
@@ -122,10 +192,12 @@ _KILL_LITERAL_RE = re.compile(
 # an all-processes selector; `pgrep` is fleet-wide unless told otherwise.
 _UNSCOPED_LISTING_RE = re.compile(
     r"""
-    (?:^|[;&|(`]|\n)
-    """ + _PREFIXES + r"""\s*
+    """ + _CMD_START + r"""
+    """ + _PREFIXES + r"""
+    """ + _WS + r"""*
+    """ + _WORD_PRE + r"""
     (?:
-        ps\b(?=(?:\s+[^\s;&|)`\n]+)*\s+-?[aAe])   # ps -e / ps -A / ps aux / ps ax
+        ps\b(?=(?:""" + _WS + r"""+[^\s;&|)`\n]+)*""" + _WS + r"""+-?[aAe])   # ps -e / ps -A / ps aux / ps ax
       | pgrep\b
     )
     """,
@@ -133,12 +205,15 @@ _UNSCOPED_LISTING_RE = re.compile(
 )
 
 # Scoping that makes a listing safe: it can only ever return our own children.
-_OWN_CHILDREN_RE = re.compile( r"(?:-P|--parent|--ppid)\s*=?\s*\S" )
+# Only the shell's own pid scopes a listing to its children. A literal pid (`-P 1`, the
+# subreaper every orphan reparents to) scopes it to somebody else's.
+_OWN_PID = r"""["']?(?:\$\$|\$\{\$\}|\$PPID|\$\{PPID\}|\$BASHPID|\$\{BASHPID\}|\$!|\$\{!\})["']?"""
+_OWN_CHILDREN_RE = re.compile( rf"(?:-P|--parent|--ppid)[ \t]*=?[ \t]*{_OWN_PID}" )
 
 # Quoted spans, removed before any structural test. `pgrep -f "node|esbuild"`
 # carries a pipe INSIDE an argument; reading that as a pipeline is how the guard
 # first mis-flagged a real monitoring loop that killed only its own `$!`.
-_QUOTED_RE = re.compile( r'''\'[^\']*\'|"[^"]*"''' )
+_QUOTED_RE = re.compile( r'''\'[^\']*\'|"[^"]*"''' )  # legacy pairing; kept for importers, the guard reads `_quote_spans`
 
 # A single `|` — the pipeline operator. `||` is control flow and pipes nothing.
 _PIPE_RE = re.compile( r"(?<!\|)\|(?!\|)" )
@@ -158,35 +233,113 @@ _FOR_SUBST_RE = re.compile( r"\bfor\s+(?P<var>\w+)\s+in\s+(?:\$\(|`)" )
 # matching ITS OWN pid, and that is narrower than the hazard: a pattern matching
 # ANOTHER seat and not yours sails straight through it. Found by Krishna
 # 2026-08-24 while reviewing this guard, together with SHAPE D below.
+# An argument is a run of quoted spans and unquoted characters that end the command.
+# A quoted span may hold `|`, `;`, `&`, `)` or a backtick: those are data inside it.
+# A backslash takes the next character (`foo\ bar`). A lone quote with no partner falls
+# through to the plain character class.
+_ARG_CHAR = r"""(?:\\.|"[^"]*"|'[^']*'|[^\s;&|)`\n])"""
 _PATTERN_SWEEP_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?:pkill|killall)\b(?P<args>(?:\s+[^\s;&|)`\n]+)*)"
+    rf"{_CMD_START}{_PREFIXES}{_WS}*{_WORD_PRE}(?P<verb>pkill|killall){_WORD_POST}(?P<args>(?:{_WS}+(?!#){_ARG_CHAR}+)*)"
 )
+
+# One raw (still quoted) argument, and the two redirection shapes. A redirection is
+# the shell's, and pkill never sees it: `2>/dev/null`, `>/dev/null`, `2>&1`, `< in`.
+_RAW_ARG_RE        = re.compile( r"""(?:\\.|"[^"]*"|'[^']*'|[^\s"'])+""" )
+_REDIRECT_ATTACHED = re.compile( r"(?:\d*|&)(?:>>?|<{1,3})&?\S+" )
+_REDIRECT_BARE     = re.compile( r"(?:\d*|&)(?:>>?|<{1,3})&?" )
 
 # SHAPE D — a substitution feeding a kill DIRECTLY: `kill $(pgrep …)` has the
 # exact semantics of `pgrep … | xargs kill`, which SHAPE B already denies.
 # Denying one and not the other draws an arbitrary line through identical
 # behaviour.
 _KILL_SUBST_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*kill(?:all)?\b[^;&|\n]*?"
+    rf"{_CMD_START}{_PREFIXES}{_WS}*{_WORD_PRE}kill(?:all)?{_WORD_POST}[^;&|\n]*?"
     r"(?:\$\(|`)(?P<subst>[^)`]*)"
 )
 
 # `sudo` can sit before `xargs` OR between it and the kill (`xargs sudo kill`),
 # so it is optional in BOTH slots rather than only the first.
 _KILL_VERB_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?:xargs\s+(?:-[^\s]+\s+)*{_PREFIXES}\s*)?kill(?:all)?\b"
+    rf"{_CMD_START}{_PREFIXES}{_WS}*(?:xargs{_WS}+(?:-[^\s]+{_WS}+)*{_PREFIXES}{_WS}*)?{_WORD_PRE}kill(?:all)?{_WORD_POST}"
 )
 
 
 # A heredoc body is DATA, not commands. Writing a file that documents a sweep —
 # this module's own test file does exactly that — must not read as running one.
 # Caught by the guard denying its own test file's heredoc on first wiring.
-_HEREDOC_RE = re.compile( r"<<-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1" )
+_HEREDOC_RE = re.compile( r"(?<!<)<<(?!<)-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1" )
+
+
+# The head of a one-line `case WORD in`: what follows, up to the first `)`, is a pattern list and not a command.
+_CASE_HEAD_RE = re.compile( r"[ \t]*case\b.*?\bin\b" )
+
+
+def _heredoc_marker_in( line: str ) -> Optional[ str ]:
+    """
+    The tag of the first real heredoc marker on one line, or None.
+
+    A marker inside a quoted span, `$(( ))`, `(( ))`, `${ }`, a one-line case pattern list, or after a comment `#`, is text.
+    Treating it as one dropped the next line, which is where a sweep could sit.
+
+    Requires:
+        - line is one line of the command, without its newline
+
+    Ensures:
+        - quotes opened and closed on this line, and a backslash-escaped character, are skipped
+        - `#` starts a comment only at the start of a word
+        - returns None when every marker on the line is text
+    """
+    quote         = None
+    index         = 0
+    start_of_word = True
+    arith         = 0
+    braces        = 0
+    markers       = [ match.start() for match in _HEREDOC_RE.finditer( line ) ]
+    case_head     = _CASE_HEAD_RE.match( line )
+    case_text     = ( case_head.end(), line.find( ")", case_head.end() ) ) if case_head else ( 0, 0 )
+    position      = 0
+    while position < len( line ) and index < len( markers ):
+        char = line[ position ]
+        if position == markers[ index ]:
+            is_text = quote is not None or arith > 0 or braces > 0 or case_text[ 0 ] <= position < case_text[ 1 ]
+            if not is_text:
+                return _HEREDOC_RE.match( line, position ).group( "tag" )
+            index += 1
+            continue
+        if char == "\\" and quote != "'":
+            position += 2
+            start_of_word = False
+            continue
+        if quote is not None:
+            if char == quote: quote = None
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and start_of_word:
+            return None
+        elif line.startswith( "$((", position ) or ( start_of_word and line.startswith( "((", position ) ):
+            arith    += 1
+            position += 3 if char == "$" else 2
+            start_of_word = False
+            continue
+        elif arith > 0 and line.startswith( "))", position ):
+            arith    -= 1
+            position += 2
+            continue
+        elif line.startswith( "${", position ):
+            braces   += 1
+            position += 2
+            start_of_word = False
+            continue
+        elif char == "}" and braces > 0:
+            braces -= 1
+        start_of_word = quote is None and char in " \t;&|(`{"
+        position += 1
+    return None
 
 
 def _strip_heredocs( command: str ) -> str:
     """
-    Remove heredoc BODIES, keeping the lines that carry real commands.
+    Remove heredoc bodies, keeping the lines that carry real commands.
 
     Requires:
         - command is the shell command string
@@ -198,8 +351,7 @@ def _strip_heredocs( command: str ) -> str:
           data no matter where it ends)
         - a command with no heredoc is returned unchanged
     """
-    match = _HEREDOC_RE.search( command )
-    if not match:
+    if not _HEREDOC_RE.search( command ):
         return command
     lines = command.split( "\n" )
     kept  = []
@@ -207,56 +359,328 @@ def _strip_heredocs( command: str ) -> str:
     for line in lines:
         if tag is None:
             kept.append( line )
-            found = _HEREDOC_RE.search( line )
-            if found:
-                tag = found.group( "tag" )
+            tag = _heredoc_marker_in( line )
         elif line.strip() == tag:
             kept.append( line )
             tag = None
     return "\n".join( kept )
 
 
-def _sweep_selector( args: str ) -> List[ str ]:
+def _drop_redirections( raw_tokens: List[ str ] ) -> List[ str ]:
     """
-    The `pgrep` selector equivalent to a `pkill`/`killall` argument list.
+    The raw arguments with shell redirections removed.
 
     Requires:
-        - args is the text following the pkill/killall verb
+        - raw_tokens are whole arguments with their quotes still on
 
     Ensures:
-        - signal flags are dropped — `-9`, `-KILL`, `-TERM`, `-s TERM`,
-          `--signal=9`, `--signal 9` — because pgrep rejects them
-        - `--signal`'s and `-s`'s separate VALUE is dropped with it
-        - every other token is kept in order, so the selector matches exactly
-          what the sweep would have matched
-        - the split is SHELL-AWARE, so a quoted pattern containing spaces stays
-          one token — `pkill -f "pytest src/tests/unit"` selects on the whole
-          phrase, exactly as the shell would have handed it to pkill
-        - unbalanced quotes fall back to a whitespace split rather than giving up
+        - an attached form (`2>/dev/null`, `>out`, `2>&1`, `<in`) is dropped
+        - a bare operator (`>`, `>>`, `2>`, `<`, `>&`) is dropped with the token after it
+        - a quoted argument is never a redirection, whatever it starts with
+        - every other argument is kept in order
     """
-    # shlex, NOT split() — `pkill -f "pytest src/tests/unit"` is ONE pattern with
-    # spaces in it. Splitting on whitespace hands pgrep three patterns, pgrep
-    # refuses more than one, the probe comes back empty, and the guard allows the
-    # exact command that killed three seats. Caught by replaying real traffic.
-    try:
-        tokens = shlex.split( args )
-    except ValueError:
-        tokens = args.split()   # unbalanced quotes — fall back rather than refuse to look
     kept = []
     skip = False
-    for token in tokens:
+    for token in raw_tokens:
         if skip:
             skip = False
             continue
-        if token in ( "--signal", "-s" ):
+        if _REDIRECT_BARE.fullmatch( token ):
             skip = True
             continue
-        if token.startswith( "--signal=" ):
-            continue
-        if _SIGNAL_FLAG_RE.fullmatch( token ):
+        if _REDIRECT_ATTACHED.fullmatch( token ):
             continue
         kept.append( token )
     return kept
+
+
+# Options of pkill (procps-ng) mapped to the pgrep spelling. Selecting options pass
+# through; options that only change output or signalling are dropped.
+_PKILL_VALUED   = frozenset( "gGOPstuUFr" )      # selecting options that take a value
+_PKILL_DROP_VAL = frozenset( "dq" )              # delimiter and queue value: not selectors
+_PKILL_DROP     = frozenset( "celawVh" )         # output, signalling, help
+_PKILL_LONG     = {
+    "parent": "P", "pgroup": "g", "group": "G", "session": "s", "terminal": "t",
+    "euid": "u", "uid": "U", "pidfile": "F", "runstates": "r", "older": "O",
+    "full": "f", "exact": "x", "ignore-case": "i", "newest": "n", "oldest": "o",
+    "inverse": "v", "logpidfile": "L",
+    "count": "c", "echo": "e", "list-name": "l", "list-full": "a", "lightweight": "w",
+    "version": "V", "help": "h", "delimiter": "d", "queue": "q",
+}
+_PKILL_LONG_PLAIN = frozenset( ( "ns", "nslist" ) )   # long-only, valued, kept as given
+
+# Options of killall (psmisc). Names are matched exactly against the command name.
+# The kernel keeps 15 characters of a command name, so a longer name is probed on its first 15.
+_COMM_LENGTH = 15
+_KILLALL_VALUED   = frozenset( "suyoZn" )
+_KILLALL_DROP     = frozenset( "egilqvwV" )
+_KILLALL_LONG     = {
+    "signal": "s", "user": "u", "younger-than": "y", "older-than": "o", "context": "Z",
+    "ns": "n", "exact": "e", "process-group": "g", "interactive": "i", "list": "l",
+    "quiet": "q", "verbose": "v", "wait": "w", "version": "V",
+    "ignore-case": "I", "regexp": "r",
+}
+
+
+def _split_args( args: str ) -> List[ str ]:
+    """
+    The words of a sweep's argument text, shell-aware, with redirections removed.
+
+    Ensures:
+        - a quoted span or a backslash-escaped character stays inside one word
+        - redirections are dropped; unbalanced quotes fall back to a whitespace split
+    """
+    args = args.replace( "\\\n", " " )
+    try:
+        shlex.split( args )
+        words = []
+        for raw in _drop_redirections( _RAW_ARG_RE.findall( args ) ):
+            words.extend( shlex.split( raw ) )
+        return words
+    except ValueError:
+        return args.split()
+
+
+def _pkill_selector( words: List[ str ] ) -> List[ str ]:
+    """
+    The pgrep selector equivalent to a pkill argument list.
+
+    Ensures:
+        - a signal option (`-9`, `-KILL`, `--signal X`) is dropped
+        - `-P`, `-U`, `-G`, `-u`, `-g`, `-s`, `-t`, `-F`, `-r`, `-O` keep their value, attached or separate
+        - output-only options (`-e -l -a -c -w`) and `-q`/`-d` with their values are dropped
+        - a word no table knows is kept, so pgrep decides and the guard refuses what it rejects
+        - after `--` every word is a pattern
+    """
+    kept  = []
+    index = 0
+    while index < len( words ):
+        word  = words[ index ]
+        index += 1
+        if word == "--":
+            if words[ index: ]:
+                kept.append( "--" )
+                kept.extend( words[ index: ] )
+            break
+        if word.startswith( "--" ):
+            name, equals, value = word[ 2: ].partition( "=" )
+            if name == "signal":
+                if not equals and index < len( words ):
+                    index += 1
+                continue
+            if name in _PKILL_LONG_PLAIN:
+                if not equals and index < len( words ):
+                    value  = words[ index ]
+                    index += 1
+                kept.extend( [ f"--{name}", value ] )
+                continue
+            short = _PKILL_LONG.get( name )
+            if short is None:
+                kept.append( word )
+                continue
+            if short in _PKILL_DROP:
+                continue
+            if short in _PKILL_DROP_VAL or short in _PKILL_VALUED:
+                if not equals and index < len( words ):
+                    value  = words[ index ]
+                    index += 1
+                if short in _PKILL_VALUED:
+                    kept.extend( [ f"-{short}", value ] )
+                continue
+            kept.append( f"-{short}" )
+            continue
+        if word.startswith( "-" ) and len( word ) > 1:
+            if _is_signal_option( word ):
+                continue
+            cluster = word[ 1: ].lstrip( "0123456789" )          # `-9f`: a signal, then flags
+            position = 0
+            while position < len( cluster ):
+                char      = cluster[ position ]
+                position += 1
+                if char in _PKILL_VALUED or char in _PKILL_DROP_VAL:
+                    value = cluster[ position: ]
+                    if not value and index < len( words ):
+                        value  = words[ index ]
+                        index += 1
+                    if char in _PKILL_VALUED:
+                        kept.extend( [ f"-{char}", value ] )
+                    break
+                if char in _PKILL_DROP:
+                    continue
+                kept.append( f"-{char}" )
+            continue
+        kept.append( word )
+    return kept
+
+
+def _killall_selectors( words: List[ str ] ) -> List[ List[ str ] ]:
+    """
+    One pgrep selector per name in a killall argument list.
+
+    Ensures:
+        - a name is an exact command-name match (`-x`), unless `-r` makes it a regexp
+        - `-I` adds `-i`; `-u USER` is kept; signal, age, context, namespace and
+          output options are dropped with their values
+        - a killall with no name gives no selector
+    """
+    exact   = True
+    ignore  = False
+    user    = None
+    names   = []
+    index   = 0
+    options_done = False
+    while index < len( words ):
+        word  = words[ index ]
+        index += 1
+        if options_done or not word.startswith( "-" ) or word == "-":
+            names.append( word )
+            continue
+        if word == "--":
+            options_done = True
+            continue
+        if word.startswith( "--" ):
+            name, equals, value = word[ 2: ].partition( "=" )
+            short = _KILLALL_LONG.get( name )
+            if short is None:
+                continue
+            if short in _KILLALL_VALUED and not equals and index < len( words ):
+                value  = words[ index ]
+                index += 1
+            if short == "u":
+                user = value
+            elif short == "I":
+                ignore = True
+            elif short == "r":
+                exact = False
+            continue
+        if _is_signal_option( word ):
+            continue
+        cluster  = word[ 1: ]
+        position = 0
+        while position < len( cluster ):
+            char      = cluster[ position ]
+            position += 1
+            if char in _KILLALL_VALUED:
+                value = cluster[ position: ]
+                if not value and index < len( words ):
+                    value  = words[ index ]
+                    index += 1
+                if char == "u":
+                    user = value
+                break
+            if char == "I":
+                ignore = True
+            elif char == "r":
+                exact = False
+    selectors = []
+    for name in names:
+        selector = []
+        if exact:
+            selector.append( "-x" )
+            name = name[ :_COMM_LENGTH ]
+        if ignore:
+            selector.append( "-i" )
+        if user:
+            selector.extend( [ "-u", user ] )
+        selector.append( name )
+        selectors.append( selector )
+    return selectors
+
+
+def _has_expansion( word: str ) -> bool:
+    """
+    True iff a raw (still quoted) shell word holds an expansion the guard cannot read.
+
+    Ensures:
+        - `$NAME`, `${..}`, `$(..)`, `$1`, `$$`, `$'..'`, `$".."` and backticks count, quoted or not
+        - a single-quoted span, a backslash-escaped `$`, and a `$` that ends the word or
+          is followed by anything else (a regexp anchor) do not
+    """
+    in_single = False
+    in_double = False
+    index     = 0
+    while index < len( word ):
+        char = word[ index ]
+        if char == "\\" and not in_single:
+            index += 2
+            continue
+        if in_single:
+            in_single = char != "'"
+        elif char == "'" and not in_double:
+            in_single = True
+        elif char == '"':
+            in_double = not in_double
+        elif char == "`":
+            return True
+        elif char == "$":
+            following = word[ index + 1 : index + 2 ]
+            if following and ( following.isalnum() or following in "_{(@*#?!$" or ( following in "'\"" and not in_double ) ):
+                return True
+        index += 1
+    return False
+
+
+def _sweep_selectors( verb: str, args: str ) -> List[ List[ str ] ]:
+    """
+    The pgrep selectors equivalent to a `pkill`/`killall` argument list.
+
+    Requires:
+        - verb is `pkill` or `killall`; args is the text following the verb
+
+    Ensures:
+        - returns [] when nothing selects (a bare verb, only a signal), so the
+          guard has nothing to probe
+        - a pkill gives at most one selector; a killall gives one per name
+        - raises `_SelectorRejected` when a word holds a variable, a substitution or an
+          ANSI-C string: its value is unknown to a guard that runs before the shell does
+        - the split is shell-aware and redirection-free (see `_split_args`)
+    """
+    for raw in _drop_redirections( _RAW_ARG_RE.findall( args ) ):
+        if _has_expansion( raw ):
+            raise _SelectorRejected( [ raw ], None, "expansion" )
+    words = _split_args( args )
+    if verb == "killall":
+        return _killall_selectors( words )
+    selector = _pkill_selector( words )
+    return [ selector ] if selector else []
+
+
+def _sweep_selector( args: str, verb: str = "pkill" ) -> List[ str ]:
+    """The first selector of `_sweep_selectors`, or [] when there is none."""
+    selectors = _sweep_selectors( verb, args )
+    return selectors[ 0 ] if selectors else []
+
+
+class _SelectorRejected( Exception ):
+    """pgrep rejected the guard's selector, so the sweep's reach cannot be named."""
+
+    def __init__( self, selector, exit_code, why="pgrep" ):
+        super().__init__( f"{why} rejected {selector!r} (exit {exit_code})" )
+        self.selector  = list( selector )
+        self.exit_code = exit_code
+        self.why       = why
+
+
+def _log_probe_failure( selector: List[ str ], reason: str, exit_code: Optional[ int ] ) -> None:
+    """
+    Record that the pgrep probe could not answer, so failures can be counted.
+
+    Requires:
+        - selector is the argument list handed to pgrep, reason a short phrase
+
+    Ensures:
+        - appends one `kill_guard_probe_failed` line to the hook event stream
+          (`<root>/io/claude_code_hooks/logs/hook-events.jsonl`)
+        - never raises: a log that cannot be written must not break a tool call
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
+        log_to_stream(
+            "kill_guard_probe_failed", None,
+            extra={ "selector": list( selector ), "exit_code": exit_code, "reason": reason },
+        )
+    except Exception:                    # pragma: no cover - logging backstop; the stream writer already swallows its own errors
+        pass
 
 
 def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
@@ -268,8 +692,12 @@ def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
 
     Ensures:
         - returns the matching PIDs as strings, or [] when pgrep matches nothing
-        - returns [] on any failure (pgrep missing, timeout, OSError) — a probe
-          that cannot answer must not manufacture a refusal
+        - exit 1 is "no match" and is silent
+        - exit 2 (a usage error: the selector is not one pgrep accepts) writes one log
+          line and raises `_SelectorRejected`, so the caller refuses the sweep
+        - exit 3 or more, a timeout, or a pgrep that cannot run returns [] and writes
+          one log line: a probe that cannot answer must not manufacture a refusal,
+          and must not pass for "no match" without a trace
     """
     if not selector:
         return []
@@ -277,12 +705,22 @@ def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
         result = subprocess.run(
             [ "pgrep", *selector ], capture_output=True, text=True, timeout=5
         )
-        return [ line.strip() for line in result.stdout.split( "\n" ) if line.strip().isdigit() ]
-    except ( OSError, subprocess.SubprocessError ):
+    except subprocess.TimeoutExpired:
+        _log_probe_failure( selector, "pgrep timeout after 5s", None )
         return []
+    except ( OSError, subprocess.SubprocessError ) as error:
+        _log_probe_failure( selector, f"pgrep could not run: {error}", None )
+        return []
+    if result.returncode == 2:
+        _log_probe_failure( selector, "pgrep rejected the selector", 2 )
+        raise _SelectorRejected( selector, 2 )
+    if result.returncode >= 3:
+        _log_probe_failure( selector, "pgrep failed", result.returncode )
+        return []
+    return [ line.strip() for line in result.stdout.split( "\n" ) if line.strip().isdigit() ]
 
 
-def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str ]:
+def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader, verb: str = "pkill" ) -> List[ str ]:
     """
     The live `claude` PIDs a `pkill`/`killall` pattern currently matches.
 
@@ -293,19 +731,18 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str
 
     Ensures:
         - returns the matching PIDs whose /proc comm is `claude`, in pgrep order
-        - returns [] when the pattern matches no seat — which is the ordinary
-          case and must stay ALLOWED: 21 of 6,492 real fleet commands are this
-          shape, nearly all of them a seat stopping its OWN superseded test run.
-          Refusing all of them is how a guard gets routed around, and routing
-          around the refusal is exactly what killed three seats on 2026-08-21.
-        - the reading is a SNAPSHOT: a seat that starts matching between this
-          check and the command running is not covered. That race is accepted —
-          it is far narrower than the hazard, and no PreToolUse check can close it
+        - returns [] when the pattern matches no seat. This is the claude-only view,
+          used when the payload carries no cwd to judge ownership by; with a cwd the
+          caller is `_sweep_hits_with_owner`, which also refuses a match that is
+          provably not the caller's
+        - the reading is a snapshot: a seat that starts matching between this
+          check and the command running is not covered. That race is accepted;
+          it is far narrower than the risk, and no PreToolUse check can close it
     """
-    selector = _sweep_selector( args )
-    if not selector:
-        return []
-    return [ pid for pid in pgrep_probe( selector ) if comm_reader( pid ) == CLAUDE_COMM ]
+    hits = []
+    for selector in _sweep_selectors( verb, args ):
+        hits.extend( pid for pid in pgrep_probe( selector ) if comm_reader( pid ) == CLAUDE_COMM )
+    return hits
 
 
 # 🔴 CLOSING THE BYPASS CLOSED THE DOCUMENTED HATCH WITH IT, and this repairs that.
@@ -330,24 +767,123 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str
 # way the documented instruction ever worked. stash_guard learned this same lesson the
 # expensive way and carries the same carve-out; this is copied from there deliberately.
 _INLINE_FLAG_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b)"
-    rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*?"
-    rf"\s*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
+    rf"{_HATCH_START}"
+    rf"(?:{_WS}*(?:{_PREFIX_ELEMENT}))*?"
+    rf"{_WS}*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
 )
+
+
+# `bash -c '<literal>'` and its siblings: the literal is a whole command line the shell runs. One level
+# is read, by running this guard over the literal. Anything deeper stays unseen.
+_SHELL_NAMES    = r"(?:bash|sh|dash|zsh)"
+_SHELL_FLAG     = rf"{_WS}+(?:--[A-Za-z][A-Za-z-]*|[-+][A-Za-z]+)"
+_SHELL_C_RE     = re.compile(
+    rf"{_CMD_START}{_PREFIXES}{_WS}*{_WORD_PRE}{_SHELL_NAMES}{_WORD_POST}"
+    rf"(?P<flags>(?:{_SHELL_FLAG})*?(?:{_WS}+-[A-Za-z]*c[A-Za-z]*))"
+    rf"{_WS}+(?:'(?P<single>[^']*)'|\"(?P<double>(?:\\.|[^\"\\])*)\")"
+)
+
+
+def _shell_c_literals( command: str ) -> List[ str ]:
+    """
+    The literal command lines handed to `bash|sh|dash|zsh [-flags] -c`.
+
+    Requires:
+        - command is the shell command string, heredoc bodies already removed
+
+    Ensures:
+        - returns each single- or double-quoted literal that follows a flag group ending in a
+          cluster containing `c`, in order of appearance
+        - a double-quoted literal has its backslash escapes resolved
+        - a bare `-c` with no literal after it, and a script run, return nothing
+    """
+    found = []
+    for match in _SHELL_C_RE.finditer( command ):
+        if match.group( "single" ) is not None:
+            found.append( match.group( "single" ) )
+        else:
+            found.append( re.sub( r"\\(.)", r"\1", match.group( "double" ) ) )
+    return found
+
+
+# A wrapper runs the text it is given, so a kill verb in its arguments is a kill the
+# guard cannot place. The rule reads the literal argument text only; it parses no shell.
+_SHELL_WRAPPERS = ( "bash", "sh", "dash", "zsh", "ksh" )
+_WRAPPER_NAMES  = (
+    r"(?P<name>bash|sh|dash|zsh|ksh|eval|ssh|docker|podman|kubectl|systemd-run"
+    r"|python[\d.]*|perl|ruby|node|xargs|watch|parallel|find|su|flock)"
+)
+_WRAPPED_RE = re.compile(
+    rf"{_CMD_START}{_PREFIXES}{_WS}*{_WORD_PRE}{_WRAPPER_NAMES}{_WORD_POST}"
+    rf"(?P<args>(?:{_WS}+{_ARG_CHAR}+)*)"
+)
+_XARGS_WORD_RE = re.compile( r"\bxargs\b" )
+_KILL_WORD_RE  = re.compile( r"(?<![\w.-])(?:kill|pkill|killall)(?![\w-])" )
+
+
+_TWO_STAGE_RE = re.compile(
+    r"^[ \t]*(?:\w+=\S*[ \t]+)*(?:pgrep|ps)(?![\w./-])(?P<first>[^|;&\n]*)"
+    r"\|[ \t]*xargs(?:[ \t]+-r)?[ \t]+kill(?:[ \t]+-[A-Za-z0-9]+)?[ \t]*$"
+)
+
+
+def _is_own_children_pipe( command: str ) -> bool:
+    """
+    True iff the whole command is an own-children `pgrep` or `ps` piped into `xargs kill`.
+
+    Ensures:
+        - exactly two stages; any other `|`, `||`, `&&`, `;`, `&` or newline refuses
+        - the first stage carries -P, --parent or --ppid with the caller's own pid
+    """
+    found = _TWO_STAGE_RE.match( command.strip() )
+    return found is not None and _OWN_CHILDREN_RE.search( found.group( "first" ) ) is not None
+
+
+def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]:
+    """
+    The name of a wrapper whose argument text names a kill verb as a word, or None.
+
+    Requires:
+        - command is the shell command string, heredoc bodies already removed
+        - nested is True when the command is a literal taken from a shell -c
+
+    Ensures:
+        - matches a wrapper in command position only; a quoted mention is skipped
+        - a top-level shell whose `-c` literal was extracted is skipped, because that
+          literal is judged on its own; inside a literal every shell is judged
+        - the argument text ends at the first unquoted separator
+        - an xargs is skipped only when the whole command is exactly two stages,
+          a pgrep or ps scoped to own children piped into `xargs [-r] kill [-SIGNAL]`
+          with no other argument or redirection (the guard's recommended substitute)
+        - never raises
+    """
+    extracted = { match.start() for match in _SHELL_C_RE.finditer( command ) }
+    for match in _WRAPPED_RE.finditer( command ):
+        if _is_mention( command, match.start() ):
+            continue
+        before = command[ match.start():match.start( "name" ) ]
+        if match.group( "name" ) in _SHELL_WRAPPERS and not nested and match.start() in extracted \
+                and _XARGS_WORD_RE.search( before ) is None:
+            continue
+        if match.group( "name" ) == "xargs" and _is_own_children_pipe( command ):
+            continue
+        if _KILL_WORD_RE.search( match.group( "args" ) ):
+            return match.group( "name" )
+    return None
 
 
 def _hatch_in_prefix( command ) -> bool:
     """
-    True iff the hatch flag is assigned truthy in a COMMAND-POSITION prefix.
+    True iff the hatch flag is assigned truthy in a command-position prefix.
 
     Requires:
         - command is the raw shell command string
 
     Ensures:
-        - reads the flag from the COMMAND, never from os.environ — see the note
+        - reads the flag from the command, never from os.environ — see the note
           above for why an env read cannot honour an inline prefix
         - only an env-assignment prefix at a command slot counts, so a flag that
-          merely appears elsewhere in the line (`echo FLAG=1; pkill …`) does NOT
+          merely appears elsewhere in the line (`echo FLAG=1; pkill …`) does not
           unlock the sweep that follows it
         - a FALSY value does not open it — the property whose absence proved the
           old "allow" was the matcher rather than the hatch
@@ -355,10 +891,11 @@ def _hatch_in_prefix( command ) -> bool:
     """
     if not command: return False
 
-    found = _INLINE_FLAG_RE.search( command )
-    if not found: return False
-
-    return found.group( "value" ).strip().strip( "'\"" ).lower() in _TRUE_VALUES
+    for found in _INLINE_FLAG_RE.finditer( command ):
+        if _is_mention( command, found.start() ):
+            continue
+        return found.group( "value" ).strip().strip( "'\"" ).lower() in _TRUE_VALUES
+    return False
 
 
 def _guard_disabled( env=None ) -> bool:
@@ -420,10 +957,208 @@ def _claude_pids_targeted( command: str, comm_reader ) -> list:
     """
     hits = []
     for match in _KILL_LITERAL_RE.finditer( command ):
+        if _is_mention( command, match.start() ):
+            continue
         for pid in _literal_pids( match.group( "args" ) ):
             if comm_reader( pid ) == CLAUDE_COMM:
                 hits.append( pid )
     return hits
+
+
+@lru_cache( maxsize=8 )
+def _quote_spans( command: str ) -> tuple:
+    """
+    The quoted spans of a command, read the way the shell reads quotes.
+
+    Requires:
+        - command is the shell command string
+
+    Ensures:
+        - returns ( start, end, quote, live ) tuples in order; start is the opening quote,
+          end is one past the closing quote, quote is `'` or `"`, and live is True for a
+          double-quoted span that holds `$(` or a backtick, which the shell runs
+        - a backslash outside single quotes takes the next character, so an escaped quote is no quote
+        - a `#` that begins a word comments out the rest of the line, quotes included
+        - `$'...'` is a single-quoted span in which a backslash takes the next character
+        - an opening quote with no partner is a plain character, not a span
+    """
+    spans = []
+    size  = len( command )
+    index = 0
+    while index < size:
+        char = command[ index ]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "#" and ( index == 0 or command[ index - 1 ] in " \t\n;&|(" ):
+            newline = command.find( "\n", index )
+            index   = size if newline < 0 else newline
+            continue
+        if char == "'":
+            ansi = index > 0 and command[ index - 1 ] == "$"
+            end  = index + 1
+            while end < size:
+                if ansi and command[ end ] == "\\":
+                    end += 2
+                    continue
+                if command[ end ] == "'":
+                    break
+                end += 1
+            if end < size:
+                spans.append( ( index, end + 1, "'", False ) )
+                index = end + 1
+            else:
+                index += 1
+            continue
+        if char == '"':
+            end  = index + 1
+            live = False
+            while end < size:
+                inner = command[ end ]
+                if inner == "\\":
+                    end += 2
+                    continue
+                if inner == '"':
+                    break
+                if inner == "`" or ( inner == "$" and command[ end + 1 : end + 2 ] == "(" ):
+                    live = True
+                end += 1
+            if end < size:
+                spans.append( ( index, end + 1, '"', live ) )
+                index = end + 1
+            else:
+                index += 1
+            continue
+        index += 1
+    return tuple( spans )
+
+
+@lru_cache( maxsize=8 )
+def _span_starts( command: str ) -> tuple:
+    """The opening offsets of `_quote_spans( command )`, for bisection."""
+    return tuple( span[ 0 ] for span in _quote_spans( command ) )
+
+
+def _is_mention( command: str, position: int ) -> bool:
+    """
+    True iff the text at `position` is only quoted text, never a command.
+
+    Requires:
+        - command is the shell command string; position is an offset into it
+
+    Ensures:
+        - a position strictly inside a single-quoted span is a mention: the shell never runs it
+        - a position strictly inside a double-quoted span is a mention too, unless the span
+          holds `$(` or a backtick, in which case it is live and is judged like any command
+        - a position outside every span, or at a span's opening quote, is not a mention
+        - there is no size limit: a commit message or a pasted document of any length is
+          one span and costs one lookup
+    """
+    found = bisect_right( _span_starts( command ), position ) - 1
+    if found < 0:
+        return False
+    start, end, quote, live = _quote_spans( command )[ found ]
+    return start < position < end and not live
+
+
+_STOP_RE        = re.compile( r"[;\n)]" )
+_CLOSER_RE      = re.compile( r"\bdone\b|\}" )
+_CLOSE_CHARS_RE = re.compile( r"[)`]" )
+
+
+class _CommandIndex:
+    """
+    One pass over a command that answers every window question in logarithmic time.
+
+    Each listing once sliced and searched the rest of the command, which is quadratic in
+    the number of listings. Here every position is found once, then looked up by bisection.
+    """
+
+    def __init__( self, command: str ):
+        """
+        Index every position the window questions need, in one pass.
+
+        Requires:
+            - command is the shell command string
+
+        Ensures:
+            - quoted spans are blanked, so a `|` or `;` inside an argument is data
+            - every list below is sorted by position
+        """
+        self.command     = command
+        pieces           = []
+        cursor           = 0
+        for start, end, _, live in _quote_spans( command ):
+            if live:
+                continue                                       # the shell runs it: keep it visible
+            pieces.append( command[ cursor : start ] )
+            pieces.append( " " * ( end - start ) )
+            cursor = end
+        pieces.append( command[ cursor: ] )
+        blanked          = "".join( pieces )
+        self.blanked     = blanked
+        self.stops       = [ match.start() for match in _STOP_RE.finditer( blanked ) ]
+        self.compounds   = [ match.start() for match in _COMPOUND_RE.finditer( blanked ) ]
+        closers          = list( _CLOSER_RE.finditer( blanked ) )
+        self.closer_starts = [ match.start() for match in closers ]
+        self.closer_ends   = [ match.end() for match in closers ]
+        self.pipes       = [ match.start() for match in _PIPE_RE.finditer( blanked ) ]
+        self.own         = [ match.start() for match in _OWN_CHILDREN_RE.finditer( blanked ) ]
+        self.verbs       = [ match.end() for match in _KILL_VERB_RE.finditer( blanked ) ]
+        fors             = list( _FOR_SUBST_RE.finditer( command ) )
+        self.for_ends    = [ match.end() for match in fors ]
+        self.for_vars    = [ match.group( "var" ) for match in fors ]
+        self.closes      = [ match.start() for match in _CLOSE_CHARS_RE.finditer( command ) ]
+
+    def window_end( self, start: int ) -> int:
+        """
+        The offset where the pipeline that begins at `start` ends.
+
+        Ensures:
+            - the first `;`, newline or `)` ends it, unless a compound keyword opens first, in
+              which case it runs to the next `done` or `}` or to the end of the command
+        """
+        found = bisect_left( self.stops, start )
+        if found == len( self.stops ):
+            return len( self.blanked )
+        stop     = self.stops[ found ]
+        compound = bisect_left( self.compounds, start )
+        if compound == len( self.compounds ) or self.compounds[ compound ] >= stop:
+            return stop
+        closer = bisect_left( self.closer_starts, start )
+        return self.closer_ends[ closer ] if closer < len( self.closer_ends ) else len( self.blanked )
+
+    def loop_variable( self, listing_end: int ) -> Optional[ str ]:
+        """
+        The variable of the `for X in $(` loop that this listing's output feeds, or None.
+
+        Ensures:
+            - a loop counts when it opens at or before the listing and nothing closed it since
+            - of several, the earliest is returned
+        """
+        found      = bisect_left( self.closes, listing_end ) - 1
+        last_close = self.closes[ found ] if found >= 0 else -1
+        loop       = bisect_right( self.for_ends, last_close )
+        if loop < len( self.for_ends ) and self.for_ends[ loop ] <= listing_end:
+            return self.for_vars[ loop ]
+        return None
+
+    @staticmethod
+    def _within( positions: List[ int ], low: int, high: int ) -> bool:
+        """True iff some position p has low <= p < high."""
+        found = bisect_left( positions, low )
+        return found < len( positions ) and positions[ found ] < high
+
+    def window_scoped( self, low: int, high: int ) -> bool:
+        """True iff the window [low, high) names the shell's own children."""
+        return self._within( self.own, low, high )
+
+    def window_reaches_a_kill( self, low: int, high: int ) -> bool:
+        """True iff the window holds a pipe and a kill verb: the listing feeds a kill."""
+        if not self._within( self.pipes, low, high ):
+            return False
+        found = bisect_right( self.verbs, low )
+        return found < len( self.verbs ) and self.verbs[ found ] <= high
 
 
 def _pipeline_window( tail: str ) -> str:
@@ -436,19 +1171,12 @@ def _pipeline_window( tail: str ) -> str:
     Ensures:
         - quoted spans are blanked first, so a `|` inside an argument is not read
           as a pipeline operator
-        - the window ends at the first `;`, newline, or `)` — EXCEPT when a
+        - the window ends at the first `;`, newline, or `)`, except when a
           compound keyword (`while`/`for`/`until`/`do`/`{`) opens before it, in
           which case it runs to `done`/`}` or to the end of the string
     """
-    blanked = _QUOTED_RE.sub( lambda m: " " * len( m.group( 0 ) ), tail )
-    stop    = re.search( r"[;\n)]", blanked )
-    if stop is None:
-        return blanked
-    head = blanked[ : stop.start() ]
-    if not _COMPOUND_RE.search( head ):
-        return head
-    closer = re.search( r"\bdone\b|\}", blanked )
-    return blanked[ : closer.end() ] if closer else blanked
+    index = _CommandIndex( tail )
+    return index.blanked[ : index.window_end( 0 ) ]
 
 
 def _loop_variable_fed_by( command: str, listing_end: int ) -> Optional[ str ]:
@@ -464,22 +1192,16 @@ def _loop_variable_fed_by( command: str, listing_end: int ) -> Optional[ str ]:
           the listing and has not closed before it
         - returns None when no such loop introduces this listing
     """
-    for match in _FOR_SUBST_RE.finditer( command, 0, listing_end ):
-        between = command[ match.end() : listing_end ]
-        if ")" in between or "`" in between:
-            continue
-        return match.group( "var" )
-    return None
+    return _CommandIndex( command ).loop_variable( listing_end )
 
 
 def _sweeps_unscoped( command: str ) -> bool:
     """
-    True iff the command lists processes fleet-wide and KILLS WHAT IT FINDS.
+    True iff the command lists processes fleet-wide and kills what it finds.
 
-    A kill that merely appears later is not enough — `kill $!` after a `pgrep -c`
-    counter kills a background job the shell already owns, and reading that as a
-    sweep is a false positive against real, safe code. The listing's output must
-    actually reach the kill: down a pipeline, or through a `for … in $(…)` loop.
+    A kill that merely appears later is not enough: `kill $!` after a `pgrep -c` counter kills a job the shell owns.
+    Reading that as a sweep is a false positive against safe code.
+    The listing's output must reach the kill: down a pipeline, or through a `for … in $(…)` loop.
 
     Requires:
         - command is the shell command string
@@ -490,19 +1212,31 @@ def _sweeps_unscoped( command: str ) -> bool:
         - False when every listing is scoped to the caller's own children
         - False for a listing whose output no kill consumes
     """
+    index   = _CommandIndex( command )
+    checked = {}
     for listing in _UNSCOPED_LISTING_RE.finditer( command ):
-        tail   = command[ listing.end(): ]
-        window = _pipeline_window( tail )
-        if _OWN_CHILDREN_RE.search( window ):
+        if _is_mention( command, listing.start() ):
             continue
-        if _PIPE_RE.search( window ) and _KILL_VERB_RE.search( window ):
+        end  = listing.end()
+        high = index.window_end( end )
+        if index.window_scoped( end, high ):
+            continue
+        if index.window_reaches_a_kill( end, high ):
             return True
-        variable = _loop_variable_fed_by( command, listing.end() )
-        if variable and re.search( r"kill\b[^;&|\n]*\$\{?" + re.escape( variable ) + r"\b", command ):
+        variable = index.loop_variable( end )
+        if variable is None:
+            continue
+        if variable not in checked:
+            checked[ variable ] = bool(
+                re.search( r"kill\b[^;&|\n]*\$\{?" + re.escape( variable ) + r"\b", command )
+            )
+        if checked[ variable ]:
             return True
 
     # SHAPE D — the listing sits inside a substitution that IS the kill's argument.
     for subst in _KILL_SUBST_RE.finditer( command ):
+        if _is_mention( command, subst.start() ):
+            continue
         inner = subst.group( "subst" )
         if _UNSCOPED_LISTING_RE.search( "\n" + inner ) and not _OWN_CHILDREN_RE.search( inner ):
             return True
@@ -512,7 +1246,7 @@ def _sweeps_unscoped( command: str ) -> bool:
 
 def _sweep_seat_hits( command: str, pgrep_probe, comm_reader ) -> List[ str ]:
     """
-    SHAPE C — the live seats a `pkill`/`killall` in this command would kill.
+    Shape C: the live seats a `pkill`/`killall` in this command would kill.
 
     Requires:
         - command is the shell command string
@@ -524,13 +1258,258 @@ def _sweep_seat_hits( command: str, pgrep_probe, comm_reader ) -> List[ str ]:
           bare `pkill` with no selector, and for any pattern matching no seat
     """
     for sweep in _PATTERN_SWEEP_RE.finditer( command ):
+        if _is_mention( command, sweep.start() ):
+            continue
         args = sweep.group( "args" )
         if not args.strip() or _OWN_CHILDREN_RE.search( args ):
             continue
-        hits = _seats_a_sweep_would_hit( args, pgrep_probe, comm_reader )
+        hits = _seats_a_sweep_would_hit( args, pgrep_probe, comm_reader, sweep.group( "verb" ) )
         if hits:
             return hits
     return []
+
+
+# Ownership. Which processes a pattern reaches is only half the question; whose they
+# are is the other half. Every read below answers None when the process cannot be
+# read, and None is never evidence of anything.
+#
+# A process is the caller's iff it descends from the caller's `claude`, or its cwd is
+# inside the caller's tree and that tree is a linked worktree. The main checkout is
+# shared by several seats, so a cwd there proves nothing. A pattern kill from one
+# seat's tree has stopped a unit tier running in another worktree.
+_MAX_ANCESTOR_HOPS = 64
+_MAX_FOREIGN_NAMED = 5
+
+
+class _ProcFs:
+    """The two /proc reads the ownership rule needs, behind one seam so tests can fake them."""
+
+    def ppid( self, pid ) -> Optional[ int ]:
+        """
+        The parent pid of `pid`, or None when it is gone or unreadable.
+
+        Requires:
+            - pid is an int or a decimal string
+
+        Ensures:
+            - parses the field after the final `)`, because comm may hold spaces and parentheses
+            - returns None on OSError or a malformed line, never raises
+        """
+        try:
+            with open( f"/proc/{pid}/stat", "r" ) as handle:
+                line = handle.read()
+            return int( line[ line.rindex( ")" ) + 2 : ].split()[ 1 ] )
+        except ( OSError, ValueError, IndexError ):
+            return None
+
+    def cwd( self, pid ) -> Optional[ str ]:
+        """The working directory of `pid`, or None when it is gone or unreadable (other uid, zombie)."""
+        try:
+            return os.readlink( f"/proc/{pid}/cwd" )
+        except OSError:
+            return None
+
+
+def _nearest_claude( start: int, comm_reader, proc ) -> Optional[ int ]:
+    """
+    The pid of the nearest `claude` at or above `start`, or None.
+
+    Requires:
+        - start is a pid, comm_reader( pid_str ) -> comm or None, proc has ppid( pid )
+
+    Ensures:
+        - walks at most 64 hops and stops at init or an unreadable parent
+        - returns None when no ancestor reads `claude`
+    """
+    current = start
+    for _ in range( _MAX_ANCESTOR_HOPS ):
+        if comm_reader( str( current ) ) == CLAUDE_COMM:
+            return current
+        parent = proc.ppid( current )
+        if parent is None or parent <= 1:
+            return None
+        current = parent
+    return None
+
+
+class _Ownership:
+    """Answers, for a pid, whether it is provably not the caller's."""
+
+    def __init__( self, caller_pid: int, tree_root: str, tree_is_worktree: bool, proc ):
+        self.caller_pid       = caller_pid
+        self.tree_root        = tree_root
+        self.tree_is_worktree = tree_is_worktree
+        self.proc             = proc
+
+    def _descends_from_caller( self, pid ) -> Optional[ bool ]:
+        """True/False when the walk reached an answer; None when a link was unreadable."""
+        current = int( pid )
+        for _ in range( _MAX_ANCESTOR_HOPS ):
+            if current == self.caller_pid:
+                return True
+            parent = self.proc.ppid( current )
+            if parent is None:
+                return None
+            if parent <= 1:
+                return False
+            current = parent
+        return False
+
+    def foreign_cwd( self, pid ) -> Optional[ str ]:
+        """
+        The pid's cwd when it is provably not the caller's, else None.
+
+        Ensures:
+            - None for a descendant of the caller's claude
+            - None when any read fails: not evidence, so not counted
+            - None for a cwd inside the tree when the tree is a linked worktree
+            - the cwd string otherwise
+        """
+        descends = self._descends_from_caller( pid )
+        if descends is None or descends:
+            return None
+        cwd = self.proc.cwd( pid )
+        if cwd is None:
+            return None
+        inside = cwd == self.tree_root or cwd.startswith( self.tree_root + os.sep )
+        if inside and self.tree_is_worktree:
+            return None
+        return cwd
+
+
+def _tree_root_of( cwd: str ) -> Tuple[ Optional[ str ], bool ]:
+    """
+    The nearest directory at or above `cwd` holding a `.git`, and whether it is a worktree.
+
+    Ensures:
+        - ( None, False ) when no `.git` exists above cwd
+        - the flag is True iff `.git` is a plain file (a linked worktree), False for a directory
+    """
+    current = os.path.realpath( cwd )
+    while True:
+        marker = os.path.join( current, ".git" )
+        if os.path.exists( marker ):
+            return current, os.path.isfile( marker )
+        parent = os.path.dirname( current )
+        if parent == current:
+            return None, False
+        current = parent
+
+
+def _resolve_ownership( cwd, caller_pid, comm_reader, proc ) -> Optional[ _Ownership ]:
+    """
+    Build the ownership view, or None when the caller or its tree cannot be established.
+
+    Requires:
+        - cwd is the payload's working directory (any value; non-strings and "" give None)
+        - caller_pid is the caller's claude pid, or None to find it from this process
+
+    Ensures:
+        - None means "skip the ownership check", never "deny"
+    """
+    if not isinstance( cwd, str ) or not cwd:
+        return None
+    if caller_pid is None:
+        caller_pid = _nearest_claude( os.getpid(), comm_reader, proc )
+    if caller_pid is None:
+        return None
+    root, is_worktree = _tree_root_of( cwd )
+    if root is None:
+        return None
+    return _Ownership( caller_pid, root, is_worktree, proc )
+
+
+def _sweep_hits_with_owner( command: str, pgrep_probe, comm_reader, owner: _Ownership ) -> Tuple[ list, list ]:
+    """
+    Shape C with ownership: ( claude pids, foreign rows ) for the first sweep that hits.
+
+    Requires:
+        - command is the shell command string; owner answers foreign_cwd( pid )
+
+    Ensures:
+        - claude pids win: when a sweep matches a live claude the foreign list is []
+        - a foreign row is ( pid, comm, cwd )
+        - ( [], [] ) for scoped sweeps, empty selectors, and matches that are all the caller's
+    """
+    for sweep in _PATTERN_SWEEP_RE.finditer( command ):
+        if _is_mention( command, sweep.start() ):
+            continue
+        args = sweep.group( "args" )
+        if not args.strip() or _OWN_CHILDREN_RE.search( args ):
+            continue
+        pids = []
+        for selector in _sweep_selectors( sweep.group( "verb" ), args ):
+            pids.extend( pid for pid in pgrep_probe( selector ) if pid not in pids )
+        claude = [ pid for pid in pids if comm_reader( pid ) == CLAUDE_COMM ]
+        if claude:
+            return claude, []
+        foreign = []
+        for pid in pids:
+            cwd = owner.foreign_cwd( pid )
+            if cwd is not None:
+                foreign.append( ( pid, comm_reader( pid ) or "?", cwd ) )
+        if foreign:
+            return [], foreign
+    return [], []
+
+
+def _rejected_deny_reason( rejected: "_SelectorRejected" ) -> str:
+    """Compose the deny text for a sweep whose selector pgrep rejected."""
+    shown = " ".join( shlex.quote( word ) for word in rejected.selector )
+    if rejected.why == "expansion":
+        return (
+            f"This `pkill`/`killall` holds an expansion the guard cannot read: `{rejected.selector[ 0 ]}`. "
+            "A variable, a command substitution or a `$'..'` string has no value yet when this check "
+            "runs, so the guard cannot say what the pattern or option value reaches.\n"
+            "USE INSTEAD:\n"
+            "  · write the literal value (`-u rruiz`, not `-u $USER`);\n"
+            "  · kill YOUR OWN children — `pkill -P $$ -f <pattern>`;\n"
+            "  · read first, then kill by a PID you have checked: `cat /proc/<pid>/comm` and "
+            "`readlink /proc/<pid>/cwd` must show a process that is yours.\n"
+            "If you have read the PIDs and confirmed none is another seat's, re-run with "
+            "LUPIN_ALLOW_UNSCOPED_KILL=1."
+        )
+    return (
+        "This `pkill`/`killall` could not be checked: pgrep rejected the selector the guard "
+        f"built from it (`pgrep {shown}`, exit {rejected.exit_code}). A selector pgrep cannot "
+        "read is a command whose reach the guard cannot name, and a seat's unit tier has "
+        "been stopped by exactly such a sweep (row 7479a389).\n"
+        "Usual causes: a variable or backtick in the pattern, two patterns, or an option "
+        "pgrep does not take.\n"
+        "USE INSTEAD:\n"
+        "  · kill YOUR OWN children — `pkill -P $$ -f <pattern>`, or "
+        "`pgrep -P $$ -f <pattern> | xargs -r kill`;\n"
+        "  · read first, then kill by a PID you have checked: `cat /proc/<pid>/comm` and "
+        "`readlink /proc/<pid>/cwd` must show a process that is yours.\n"
+        "If you have read the PIDs and confirmed none is another seat's, re-run with "
+        "LUPIN_ALLOW_UNSCOPED_KILL=1."
+    )
+
+
+def _foreign_deny_reason( foreign: list ) -> str:
+    """Compose the deny text for a pattern that reaches processes the caller does not own."""
+    shown = foreign[ : _MAX_FOREIGN_NAMED ]
+    lines = [ f"  pid {pid}  comm={comm}  cwd={cwd}" for pid, comm, cwd in shown ]
+    more  = len( foreign ) - len( shown )
+    if more > 0:
+        lines.append( f"  ... and {more} more" )
+    listing = "\n".join( lines )
+    return (
+        "This `pkill`/`killall` pattern matches process(es) that this session did not "
+        "start and that are not in this tree:\n"
+        f"{listing}\n"
+        "They belong to another seat or another job. On 2026-10-09 "
+        "`pkill -f \"pytest src/tests/unit/\"` from one seat's tree stopped a unit tier "
+        "running in another worktree (row 7479a389).\n"
+        "USE INSTEAD:\n"
+        "  · kill YOUR OWN children — `pkill -P $$ -f <pattern>`, or "
+        "`pgrep -P $$ -f <pattern> | xargs -r kill`;\n"
+        "  · a job you started in this shell — `kill %1`, `kill $!`;\n"
+        "  · read first, then kill by a PID you have checked: `cat /proc/<pid>/comm` and "
+        "`readlink /proc/<pid>/cwd` must show a process that is yours.\n"
+        "If you have read the PIDs and confirmed none is another seat's, re-run with "
+        "LUPIN_ALLOW_UNSCOPED_KILL=1."
+    )
 
 
 def _deny_reason_for( claude_pids: list ) -> str:
@@ -567,6 +1546,63 @@ def _deny_reason_for( claude_pids: list ) -> str:
     )
 
 
+def _judge_command( command, comm_reader, pgrep_probe, cwd, proc, caller_pid, nested=False ) -> Optional[ str ]:
+    """
+    The deny reason for one command line whose heredoc bodies are already removed, or None.
+
+    Requires:
+        - command is a non-empty string without heredoc bodies
+        - the other arguments are those of `kill_deny_reason`
+
+    Ensures:
+        - None when the command carries the escape hatch in the prefix of its own command
+        - otherwise the reason `kill_deny_reason` documents for Shapes A to D
+        - a `_SelectorRejected` selector yields its refusal reason
+    """
+    # The hatch, read from the command text. Placed after the heredoc strip so a flag
+    # quoted inside a heredoc body is data and cannot unlock anything.
+    if _hatch_in_prefix( command ):
+        return None
+    reader      = comm_reader if comm_reader is not None else _default_comm_reader
+    claude_pids = _claude_pids_targeted( command, reader )
+    if claude_pids:
+        return _deny_reason_for( claude_pids )
+    prober      = pgrep_probe if pgrep_probe is not None else _default_pgrep_probe
+    owner       = None
+    if _PATTERN_SWEEP_RE.search( command ):
+        owner = _resolve_ownership( cwd, caller_pid, reader, proc if proc is not None else _ProcFs() )
+    try:
+        if owner is not None:
+            sweep_hits, foreign = _sweep_hits_with_owner( command, prober, reader, owner )
+            if foreign:
+                return _foreign_deny_reason( foreign )
+        else:
+            sweep_hits = _sweep_seat_hits( command, prober, reader )
+    except _SelectorRejected as rejected:
+        return _rejected_deny_reason( rejected )
+    if sweep_hits:
+        return _deny_reason_for( sweep_hits )
+    if _sweeps_unscoped( command ):
+        return _deny_reason_for( [] )
+    wrapper = _wrapper_naming_a_kill_verb( command, nested )
+    if wrapper is not None:
+        return _wrapper_deny_reason( wrapper )
+    return None
+
+
+def _wrapper_deny_reason( wrapper: str ) -> str:
+    """Compose the deny text for a wrapper whose arguments name a kill verb."""
+    return (
+        f"`{wrapper}` runs the text it is given, and that text names kill, pkill or "
+        "killall. The guard cannot tell which process it would signal, and a seat "
+        "killed this way loses its context with no memento.\n"
+        "USE INSTEAD: run the kill directly so the guard can judge it, on a PID whose "
+        "`/proc/<pid>/comm` you have read, or on your own children with `pkill -P $$`. "
+        "If you have confirmed none of the targets is a seat, re-run with "
+        "LUPIN_ALLOW_UNSCOPED_KILL=1."
+    )
+
+
 def kill_deny_reason(
     tool_name,
     tool_input,
@@ -575,6 +1611,9 @@ def kill_deny_reason(
     env         = None,
     comm_reader = None,
     pgrep_probe = None,
+    cwd         = None,
+    proc        = None,
+    caller_pid  = None,
 ) -> Optional[ str ]:
     """
     Return a deny-reason string iff a Bash call can signal a seat it does not own.
@@ -585,13 +1624,20 @@ def kill_deny_reason(
           key carries the shell command, when present
         - enabled is None (resolved from env) or injected for testing
         - comm_reader is None (real /proc) or injected for testing
+        - cwd is the payload's working directory; None skips the ownership check
+        - proc is None (real /proc) or an object with ppid( pid ) and cwd( pid )
+        - caller_pid is None (found by walking up from this process) or the caller's claude pid
 
     Ensures:
-        - None unless the guard is enabled AND tool_name is Bash AND the command
-          matches SHAPE A (kills a PID /proc reports as `claude`) or SHAPE B (an
-          unscoped listing with a kill downstream)
-        - SHAPE A is reported in preference to SHAPE B — it can name the victims
+        - None unless the guard is enabled and tool_name is Bash and the command
+          matches Shape A (kills a PID /proc reports as `claude`), Shape B (an
+          unscoped listing with a kill downstream), Shape C (a pkill/killall
+          pattern reaching a live `claude`, or, given a cwd, any process that is
+          provably not the caller's) or Shape D (a kill fed by a listing)
+        - Shape A is reported in preference to Shape B — it can name the victims
         - None for own-children sweeps and for listings with no kill downstream
+        - None for a sweep that is only mentioned: text inside a single-quoted span, or inside
+          a double-quoted span with no `$(` or backtick, is never judged; see `_is_mention`
         - FAIL-OPEN: any unexpected error → None
     """
     try:
@@ -606,21 +1652,17 @@ def kill_deny_reason(
         command = tool_input.get( "command", "" )
         if not isinstance( command, str ) or not command:
             return None
-        command     = _strip_heredocs( command )
-        # The hatch, read from the COMMAND. Placed after the heredoc strip so a flag
-        # quoted inside a heredoc body is data and cannot unlock anything.
+        command = _strip_heredocs( command )
+        reason  = _judge_command( command, comm_reader, pgrep_probe, cwd, proc, caller_pid )
+        if reason is not None:
+            return reason
         if _hatch_in_prefix( command ):
             return None
-        reader      = comm_reader if comm_reader is not None else _default_comm_reader
-        claude_pids = _claude_pids_targeted( command, reader )
-        if claude_pids:
-            return _deny_reason_for( claude_pids )
-        prober      = pgrep_probe if pgrep_probe is not None else _default_pgrep_probe
-        sweep_hits  = _sweep_seat_hits( command, prober, reader )
-        if sweep_hits:
-            return _deny_reason_for( sweep_hits )
-        if _sweeps_unscoped( command ):
-            return _deny_reason_for( [] )
+        for literal in _shell_c_literals( command ):
+            reason = _judge_command( _strip_heredocs( literal ), comm_reader, pgrep_probe, cwd, proc, caller_pid,
+                                     nested=True )
+            if reason is not None:
+                return reason
         return None
     except Exception:                    # pragma: no cover - fail-open backstop; NOT decorative: a missing `import subprocess` in the probe path landed here on 2026-08-24 and turned every verdict into a silent allow, which is why the guard is replayed against real traffic rather than trusted to its unit tests
         return None

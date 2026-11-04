@@ -308,6 +308,26 @@ def test_dry_run_keeps_HOME_unexpanded( staged_tree ):
         assert str( env[ "HOME" ] ) not in line, f"dev-box HOME baked into: {line}"
 
 
+@pytest.mark.parametrize( "tool, status", [ ( "awk", 7 ), ( "cut", 9 ) ] )
+def test_a_failing_awk_or_cut_kills_push_env_naming_the_tool( staged_tree, tmp_path, tool, status ):
+    """
+    A failed awk or cut makes push-env die naming the tool, not a missing row.
+
+    Before this, a failed subshell dropped a contract row and the death blamed the row.
+    """
+    script, _, env = staged_tree
+    fake_bin = tmp_path / f"fake-{tool}"
+    fake_bin.mkdir()
+    shim = fake_bin / tool
+    shim.write_text( f"#!/bin/bash\nexit {status}\n" )
+    shim.chmod( 0o755 )
+    env[ "PATH" ] = f"{fake_bin}:{env[ 'PATH' ]}"
+    r = _push_env_dry_run( script, env )
+    assert r.returncode != 0
+    assert f"pfv_row_field: {tool} failed (exit {status})" in r.stderr
+    assert "no row in" not in r.stderr
+
+
 def test_contract_row_without_a_value_is_fatal( staged_tree ):
     """Direction 1: the contract declares a push-env var lupin-vm.sh cannot write."""
     script, contract, env = staged_tree

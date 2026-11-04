@@ -16,7 +16,7 @@ Each category defines:
     - description: Human-readable description
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or decision_proxy.
+    This module never imports from notification_proxy or decision_proxy.
 """
 
 from cosa.agents.swe_team.proxy.config import (

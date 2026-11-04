@@ -1,31 +1,28 @@
 """
-Sample the resident memory of live Claude Code processes and name the ones that
-run away (store row df5c3696).
+Sample resident memory of live Claude Code processes and name the runaways.
 
-THE GAP THIS CLOSES. On 2026-08-22 the kernel killed two node processes at 229 GB
-and 124 GB, and nobody could say which session they were: the listener LOGS under
-~/.claude/sessions do not record the owner pid in a form that greps back, and with
-roughly two dozen sessions live, timing is not evidence.
+When the kernel kills a runaway node process, nobody can say which session it was.
+The listener logs under ~/.claude/sessions do not record the owner pid in a form that
+greps back. With two dozen sessions live, timing is not evidence.
 
-But the listener PROCESS does carry it. Its command line reads:
+The listener process does carry the mapping. Its command line reads:
 
-    python3 -m …cc_notification_listener --session-id 0b7675fc --owner-pid 751918 …
+    python3 -m …cc_notification_listener --session-id <id> --owner-pid <pid> …
 
-So the mapping from a Claude Code pid to a session id was sitting in the process
-table the whole time — it was only ever missing from the files anyone thought to
-grep. This module reads it from there, which means attribution works for sessions
-ALREADY RUNNING, with no change to how they were launched.
+So the mapping from a Claude Code pid to a session id sits in the process table, and
+this module reads it from there. Attribution therefore works for sessions that are
+already running, with no change to how they were launched.
 
-Three resolvers, tried in order, because each covers a different population:
+Three resolvers are tried in order, because each covers a different population:
   1. the listener's --owner-pid → --session-id   (any session with a listener)
   2. /proc/<pid>/cgroup → lupin-cc-<name>.scope  (sessions launched under the cap)
   3. /proc/<pid>/environ → TMUX_PANE → tmux      (anything in a tmux pane)
-A process that answers to none of the three is reported with what IS known — the
-pid and the command line — rather than dropped.
+A process that answers to none of the three is reported with what is known, the pid
+and the command line, rather than dropped.
 
-Deliberately does no killing and no notifying: it writes a line. The point is that
-the NEXT time this happens somebody can name the session and read its transcript
-back to the tool call that allocated.
+It does no killing and no notifying; it writes a line. The next time a process runs
+away, somebody can name the session and read its transcript back to the tool call
+that allocated the memory.
 """
 
 import os
@@ -149,6 +146,8 @@ def parse_scope_unit( cgroup_text ):
 
 def parse_cgroup_path( cgroup_text ):
     """
+    Extract the cgroup-v2 path from the text of /proc/<pid>/cgroup.
+
     Ensures:
         - returns the cgroup-v2 path a process sits in (the part after `0::`), or None
         - never raises
@@ -160,19 +159,11 @@ def parse_cgroup_path( cgroup_text ):
 
 def read_scope_anon_kb( cgroup_path, read_fn ):
     """
-    The number the cap is actually enforced against, read from the cap's OWN accounting.
+    Read the anon memory of a cgroup scope in KB, from the cap's own accounting.
 
-    WHY THIS EXISTS (row 117ed1b6, measured 2026-08-25). Every other figure this module
-    produces is per-PROCESS VmRSS, and a cgroup ceiling acts on the whole process TREE.
-    On a live seat: claude alone 0.53 GiB against scope anon 2.12 GiB across 15
-    processes. Summing VmRSS does NOT recover it either — VmRSS counts shared pages
-    once per process while the cgroup counts them once, so the sum overshoots. There is
-    no arithmetic over per-process samples that yields this; it has to be read.
-
-    ⚠️ anon, NOT memory.current. memory.current includes reclaimable page cache, and one
-    seat measured 0.68 GiB anon against 15.78 GiB memory.current — 23x apart. Under a
-    ceiling the kernel drops that cache rather than killing; with MemorySwapMax=0 anon
-    is what it CANNOT reclaim, so anon is what decides a kill.
+    A cgroup ceiling acts on the whole tree, so summed VmRSS overshoots. This reads anon,
+    not memory.current, because the kernel drops page cache instead of killing; with
+    MemorySwapMax=0, anon is what it cannot reclaim.
 
     Requires:
         - cgroup_path is a cgroup-v2 path (from parse_cgroup_path), or None
@@ -213,9 +204,8 @@ def parse_listener_owner_map( listener_cmdlines ):
     """
     Build owner-pid → session-id from the notification listeners' command lines.
 
-    THIS IS THE ATTRIBUTION FIX. The listener log files do not record the owner
-    pid in a greppable form, which is why the 08-22 kills could not be pinned to
-    a session — but the listener's own argv carries both ids.
+    This is the attribution fix. The listener log files do not record the owner pid in a
+    greppable form, but the listener's own argv carries both ids.
 
     Requires:
         - listener_cmdlines is an iterable of argv lists
@@ -299,9 +289,9 @@ class AlertTracker:
     """
     Decide when a sample deserves a line.
 
-    Emits on the crossing, then stays quiet until the process grows another
-    `restep_kb` — otherwise one runaway writes a line every interval for as long
-    as it lives, and the log stops being readable exactly when it matters.
+    Emits on the crossing, then stays quiet until the process grows another `restep_kb`.
+    Otherwise one runaway writes a line every interval for as long as it lives. The log
+    would stop being readable when it matters most.
     """
 
     def __init__( self, threshold_kb, restep_kb ):

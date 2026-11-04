@@ -35,7 +35,7 @@ def _make_table( debug=False, verbose=False ):
     provider = Mock()
     provider.generate_embedding.return_value = _EMBEDDING
 
-    with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ), \
+    with patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=cfg ), \
          patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ), \
          patch( "cosa.memory.question_embeddings_table.get_embedding_provider", return_value=provider ):
         table = QuestionEmbeddingsTable( debug=debug, verbose=verbose )
@@ -60,11 +60,16 @@ def _patch_repo():
 class TestInitialization( unittest.TestCase ):
     """__init__ wires config + deps and opens no connection of its own."""
 
+    def test_debug_and_verbose_land_on_their_own_attributes( self ):
+        table, _ = _make_table( debug=True, verbose=False )
+        self.assertIs( table.debug, True )
+        self.assertIs( table.verbose, False )
+
     def test_init_wires_dependencies( self ):
         cfg = Mock()
         cfg.get.side_effect = _cfg_get
 
-        with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ) as cfg_cls, \
+        with patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=cfg ) as cfg_cls, \
              patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ) as em_cls, \
              patch( "cosa.memory.question_embeddings_table.get_embedding_provider" ) as gep:
             table = QuestionEmbeddingsTable( debug=True, verbose=True )

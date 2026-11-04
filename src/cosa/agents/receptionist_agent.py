@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 import cosa.utils.util as du
@@ -15,16 +14,11 @@ _UNBOUNDED_ENTRIES_BUDGET = 10 ** 9
 
 def fit_fragments_to_budget( fragments: list, budget: int, count_tokens ) -> str:
     """
-    Join as many of the NEWEST fragments as fit `budget` tokens, oldest last dropped.
+    Join as many of the newest fragments as fit `budget` tokens, dropping the oldest first.
 
-    Row a203d91d: the memory block was bounded by a ROW COUNT (50), which cannot bound
-    a token budget because rows vary in size — 50 rows measured 3,345 tokens on one
-    night and could be half or double that on another with the same cap. The bound has
-    to be the thing the server actually checks.
-
-    `fragments` arrives newest-first, matching the repository's ORDER BY id DESC. The
-    returned block is chronological, oldest first, because that is how the prompt reads
-    as a conversation.
+    A row count cannot bound a token budget, because rows vary in size. The bound is
+    what the server checks. `fragments` arrives newest-first, matching `ORDER BY id DESC`.
+    The returned block is oldest first, as the prompt reads as a conversation.
 
     Requires:
         - fragments is a list of strings, newest first
@@ -172,11 +166,9 @@ class ReceptionistAgent( AgentBase ):
         """
         How many tokens the memory block may spend.
 
-        Half the model's window, less what the prompt template already costs. Half is
-        not a tuned constant — it is the split that leaves the other half for the
-        completion, so this scales with whatever model is loaded instead of encoding
-        one server's numbers. The clamp in llm_completion then sizes the completion
-        against whatever the prompt actually turned out to be.
+        Half the model's window, less what the prompt template already costs. The other
+        half is left for the completion, so this scales with the loaded model. The clamp
+        in llm_completion then sizes the completion against the actual prompt.
 
         Requires:
             - the agent's llm client exposes base_url and model_name
@@ -339,25 +331,7 @@ class ReceptionistAgent( AgentBase ):
             - KeyError if required fields missing
         """
         
-        print( f"Restoring from {file_path}..." )
-        
-        # Read the file and parse JSON
-        with open( file_path, 'r' ) as file:
-            data = json.load( file )
-        
-        # Create a new object instance with the parsed data
-        restored_agent = ReceptionistAgent(
-            data[ "question" ], debug=data[ "debug" ], verbose=data[ "verbose" ], auto_debug=data[ "auto_debug" ], inject_bugs=data[ "inject_bugs" ]
-        )
-        # Set the remaining attributes from the parsed data, skipping the ones that we've already set
-        keys_to_skip = [ "question", "debug", "verbose", "auto_debug", "inject_bugs"]
-        for k, v in data.items():
-            if k not in keys_to_skip:
-                setattr( restored_agent, k, v )
-            else:
-                print( f"Skipping key [{k}], it's already been set" )
-        
-        return restored_agent
+        return AgentBase._restore_from_file( ReceptionistAgent, file_path, ( "question", ), ( "debug", "verbose", "auto_debug", "inject_bugs" ) )
     
 def quick_smoke_test():
     """Quick smoke test to validate ReceptionistAgent functionality."""

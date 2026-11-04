@@ -47,6 +47,7 @@
     <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
     <link rel="stylesheet" href="/static/css/multiplexer/session-strip.css">
     <link rel="stylesheet" href="/static/css/multiplexer/reading-pane.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/podcast-overlay.css">
     <link rel="stylesheet" href="/static/css/multiplexer/session-transcript.css">
     <link rel="stylesheet" href="/static/css/multiplexer/commons-activity.css">
     <!-- Lane C (v0.1.9): broadcast-to-all-CC compose card. -->
@@ -232,12 +233,24 @@
                  data-phase6-pending="true" hidden>
                 <div id="cc-strip-icons"
                      data-testid="multiplexer-cc-strip-icons"></div>
-                <button id="cc-strip-toggle" type="button" class="cc-strip-toggle"
-                        data-testid="multiplexer-cc-strip-focus-toggle"
-                        data-phase6-pending="true" data-focus-active="false">👁 Focus</button>
-                <button id="cc-hide-inactive-toggle" type="button" class="cc-strip-toggle"
-                        data-testid="multiplexer-cc-hide-inactive-toggle"
-                        data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
+                <!-- The Focus, Active and Keep place toggles sit on their own row under the persona
+                     badges (Rick 2026-11-02). Keep place is off by default, so an arriving card scrolls
+                     the list to the top as it always did; on, it holds the card being read.
+                     SessionStripRenderer owns all three and lifts the markers. -->
+                <div id="cc-strip-toggles" class="cc-strip-toggles"
+                     data-testid="multiplexer-cc-strip-toggles">
+                    <button id="cc-strip-toggle" type="button" class="cc-strip-toggle"
+                            data-testid="multiplexer-cc-strip-focus-toggle"
+                            data-phase6-pending="true" data-focus-active="false">👁 Focus</button>
+                    <button id="cc-hide-inactive-toggle" type="button" class="cc-strip-toggle"
+                            data-testid="multiplexer-cc-hide-inactive-toggle"
+                            data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
+                    <button id="cc-keep-place-toggle" type="button" class="cc-strip-toggle"
+                            role="switch" aria-checked="false"
+                            data-testid="multiplexer-cc-keep-place-toggle"
+                            data-phase6-pending="true" data-keep-place="false"
+                            title="Keep place: stop new cards from scrolling the list back to the top while you read">📌 Keep place</button>
+                </div>
             </div>
 
             <!-- WP2 retire (2026-06-10): the #focus-mode-toggle (FocusTrayRenderer)

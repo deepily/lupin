@@ -1,7 +1,7 @@
 """
 AC-D4 / AC-D4b / AC-D8 / AC-D9a — the §6a sound oracle.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md §6a
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md (decision 5)
 
 THE POINT OF THIS FILE, STATED PLAINLY: these four ACs would otherwise have been written
 against `google.cloud.monitoring_v3`, WHICH IS NOT INSTALLED — behind an `importorskip`,
@@ -139,6 +139,21 @@ def test_ac_d4_tolerates_a_series_with_no_resource_container():
     entry = _series()
     entry[ "resource" ][ "labels" ].pop( "resource_container" )
     oracle, _ = _oracle( [ { "timeSeries": [ entry ] } ] )
+    assert oracle.verify_ran_on_vertex( REGION, MODEL, 0, 100 )[ 0 ] == Verdict.PASS
+
+
+@pytest.mark.parametrize( "container", [ f"projects/{PROJECT}1", f"projects/other-{PROJECT}", f"other-{PROJECT}", f"projects/{PROJECT}/x", f"folders/{PROJECT}", f"projects/{PROJECT}/" ] )
+def test_ac_d4_a_longer_project_id_that_contains_ours_is_not_our_project( container ):
+    """An id that merely contains ours belongs to another project."""
+    oracle, _ = _oracle( [ { "timeSeries": [ _series( container=container ) ] } ] )
+    verdict, detail = oracle.verify_ran_on_vertex( REGION, MODEL, 0, 100 )
+    assert verdict == Verdict.FAIL
+    assert "not our project" in detail
+
+
+@pytest.mark.parametrize( "container", [ PROJECT, f"projects/{PROJECT}" ] )
+def test_ac_d4_accepts_the_bare_id_and_the_projects_form( container ):
+    oracle, _ = _oracle( [ { "timeSeries": [ _series( container=container ) ] } ] )
     assert oracle.verify_ran_on_vertex( REGION, MODEL, 0, 100 )[ 0 ] == Verdict.PASS
 
 

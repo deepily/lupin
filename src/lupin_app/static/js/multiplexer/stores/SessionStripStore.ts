@@ -90,18 +90,11 @@ interface ServerManagerPersona {
   [k: string] : unknown;
 }
 
-// WP9 cold-reload hydration — one entry from GET
-// /api/notifications/senders-visible/{user_email}. The server already
-// resolves voice_persona + manager_persona per sender for exactly this gap
-// (notifications.py get_visible_senders → _voice_persona_for_sender_id +
-// _manager_persona_for_sender_id). `voice_persona` carries `assigned_at`.
-// A null voice_persona means no persona assigned → no strip icon (skipped).
-//
-// Cold-load notification hydration (2026-06-11): this interface is the ONE
-// typed shape for a senders-visible row — SenderStore.hydrate and
-// NotificationStore.hydrateHistory consume the SAME records from the single
-// boot fetch (see boot.ts), so the activity/count fields are typed here
-// rather than reached through the index signature.
+/**
+ * One row of the senders-visible response, as the strip and the sender store read it.
+ *
+ * The server resolves the voice and manager personas for each sender. A null voice persona means no strip icon.
+ */
 export interface ServerSenderHydrationRecord {
   sender_id       ?: string;
   last_activity   ?: string;    // ISO timestamp of the sender's newest visible notification
@@ -116,6 +109,7 @@ export interface ServerSenderHydrationRecord {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The sessions shown on the strip, with the two hydrate calls that load them from a snapshot. */
 export interface SessionStripStore {
   get(senderId: string): StripSession | undefined;
   list(): ReadonlyArray<StripSession>;
@@ -145,6 +139,7 @@ export interface SessionStripStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createSessionStripStore`: the bus and a clock for tests. */
 export interface SessionStripStoreOptions {
   bus    : EventBus;
   nowFn? : () => number;
@@ -154,6 +149,9 @@ export interface SessionStripStoreOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Tracks one strip icon per session sender.
+ */
 class SessionStripStoreImpl implements SessionStripStore {
   private readonly bus   : EventBus;
   private readonly nowFn : () => number;
@@ -162,6 +160,9 @@ class SessionStripStoreImpl implements SessionStripStore {
 
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Builds the store from a bus and an optional clock, then subscribes to bus events.
+   */
   constructor(opts: SessionStripStoreOptions) {
     this.bus = opts.bus;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
@@ -169,14 +170,23 @@ class SessionStripStoreImpl implements SessionStripStore {
     this.subscribe();
   }
 
+  /**
+   * Returns the strip session for a sender ID, or undefined when none is tracked.
+   */
   get(senderId: string): StripSession | undefined {
     return this.sessions.get(senderId);
   }
 
+  /**
+   * Returns every tracked strip session as an array.
+   */
   list(): ReadonlyArray<StripSession> {
     return Array.from(this.sessions.values());
   }
 
+  /**
+   * Unsubscribes from all bus events so a test can finish cleanly.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
@@ -286,12 +296,18 @@ class SessionStripStoreImpl implements SessionStripStore {
     return nullPersona;
   }
 
+  /**
+   * Adds or updates sessions from a server snapshot without removing any.
+   */
   hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
     this.upsertRecords(records);   // additive — the null-persona set is not pruned (cold-boot stays additive)
     // Single emission for the whole snapshot — renderer reconciles from list().
     this.emit("hydrated");
   }
 
+  /**
+   * Applies a server snapshot and removes sessions it reports as persona-less.
+   */
   reconcile(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
     const nullPersona = this.upsertRecords(records);
     // Prune the sessions the snapshot AUTHORITATIVELY reports as persona-less
@@ -379,6 +395,11 @@ class SessionStripStoreImpl implements SessionStripStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the store.
+ *
+ * It subscribes to the bus at once, and `disposeForTesting` removes the subscriptions.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createSessionStripStore(opts: SessionStripStoreOptions): SessionStripStore {
   return new SessionStripStoreImpl(opts);

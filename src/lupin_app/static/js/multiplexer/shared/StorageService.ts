@@ -1,8 +1,9 @@
 /* c8 ignore next */
 // Multiplexer Phase 2 — StorageService. Typed JSON wrapper around localStorage
 // with `lupin:` key prefix, schema versioning, corrupt-payload recovery, and
-// first-class session-ID accessors (DC2 resolution: StorageService owns ALL
-// storage; no raw localStorage elsewhere in the multiplexer tree).
+// first-class session-ID accessors. It owns the `lupin:` keys and the two auth tokens.
+// It is not the only way in: other files, such as epicBoardCollapse.ts, taskListCollapse.ts,
+// podcastLinks.ts and boot.ts, read `localStorage` directly.
 
 import { eventBus, createEventBusForTesting } from "./EventBus";
 import type { EventBus } from "./EventBus";
@@ -24,12 +25,17 @@ const SESSION_ID_SCHEMA    = 1;
 // (auth.js, notifications.js, lupin-nav.js, broadcast-panel.js). The WP0 token
 // migration routes the multiplexer onto these same keys (no dual-read) so a
 // user authenticated via /app/auth/login is authenticated in the multiplexer.
-// StorageService still owns the access (DC2 — no raw localStorage elsewhere).
+// StorageService owns access to them.
 const ACCESS_TOKEN_KEY  = "lupin_access_token";
 const REFRESH_TOKEN_KEY = "lupin_refresh_token";
 
 // Minimal Storage shape for dependency injection. `localStorage` satisfies
 // this in browser; tests provide an in-memory implementation.
+/**
+ * The part of `localStorage` the service uses.
+ *
+ * A test passes `InMemoryStorage` or any object with these members.
+ */
 export interface StorageBackend {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -38,6 +44,13 @@ export interface StorageBackend {
   readonly length: number;
 }
 
+/**
+ * The multiplexer's store for its own state and its auth tokens.
+ *
+ * It is not the only way in. Other files read `localStorage` directly and do not go through it.
+ * `getJSON` and `setJSON` keep values under `lupin:` keys with a schema version. A value that fails to read emits `storage_corrupt` and returns null.
+ * The two auth tokens are stored raw under their own unprefixed keys, shared with the other clients.
+ */
 export interface StorageService {
   getJSON<T>(key: string, expectedSchemaVersion: number): T | null;
   setJSON<T>(key: string, value: T, schemaVersion: number): void;
@@ -59,12 +72,25 @@ export interface StorageService {
   clearTokens(): void;
 }
 
+/**
+ * Reads and writes versioned JSON envelopes in a storage backend under a key prefix.
+ *
+ * It also exposes session ID and auth token accessors, and reports corrupt entries on the bus.
+ */
 class StorageServiceImpl implements StorageService {
+  /**
+   * Keeps the event bus and the storage backend this service reads and writes through.
+   */
   constructor(
     private readonly bus: EventBus,
     private readonly backend: StorageBackend,
   ) {}
 
+  /**
+   * Reads a stored JSON envelope and returns its payload, or null if unusable.
+   *
+   * A missing key gives null quietly. Bad JSON, a malformed envelope or a schema version mismatch emits a corrupt event.
+   */
   getJSON<T>(key: string, expectedSchemaVersion: number): T | null {
     const fullKey = KEY_PREFIX + key;
     const raw = this.backend.getItem(fullKey);
@@ -95,6 +121,9 @@ class StorageServiceImpl implements StorageService {
     return parsed.payload as T;
   }
 
+  /**
+   * Stores a value as JSON inside an envelope with a schema version and timestamp.
+   */
   setJSON<T>(key: string, value: T, schemaVersion: number): void {
     const envelope: StorageEnvelope<T> = {
       schemaVersion,
@@ -104,10 +133,16 @@ class StorageServiceImpl implements StorageService {
     this.backend.setItem(KEY_PREFIX + key, JSON.stringify(envelope));
   }
 
+  /**
+   * Deletes the entry stored under the given key.
+   */
   remove(key: string): void {
     this.backend.removeItem(KEY_PREFIX + key);
   }
 
+  /**
+   * Lists stored keys without the service prefix, optionally filtered by a prefix.
+   */
   keys(prefix?: string): string[] {
     const out: string[] = [];
     const filter = prefix ?? "";
@@ -122,41 +157,65 @@ class StorageServiceImpl implements StorageService {
     return out;
   }
 
+  /**
+   * Returns the saved page session ID, or null when none is stored.
+   */
   getSessionId(): string | null {
     const env = this.getJSON<SessionIdEnvelope>(SESSION_ID_KEY, SESSION_ID_SCHEMA);
     return env ? env.sessionId : null;
   }
 
+  /**
+   * Saves a session ID with the time it was generated.
+   */
   setSessionId(sessionId: string): void {
     const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
     this.setJSON<SessionIdEnvelope>(SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
   }
 
+  /**
+   * Returns the saved ID for the audio socket's own session, or null when none is stored.
+   */
   getAudioSessionId(): string | null {
     const env = this.getJSON<SessionIdEnvelope>(AUDIO_SESSION_ID_KEY, SESSION_ID_SCHEMA);
     return env ? env.sessionId : null;
   }
 
+  /**
+   * Saves the ID for the audio socket's own session with the time it was generated.
+   */
   setAudioSessionId(sessionId: string): void {
     const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
     this.setJSON<SessionIdEnvelope>(AUDIO_SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
   }
 
-  // Raw cross-client token accessors — read/write the unprefixed canonical
-  // `lupin_access_token` / `lupin_refresh_token` keys directly (no envelope).
+  /**
+   * Returns the raw access token from the shared cross-client key, or null.
+   *
+   * The token is stored without an envelope and without the service prefix.
+   */
   getAccessToken(): string | null {
     return this.backend.getItem(ACCESS_TOKEN_KEY);
   }
 
+  /**
+   * Returns the raw refresh token from the shared cross-client key, or null.
+   */
   getRefreshToken(): string | null {
     return this.backend.getItem(REFRESH_TOKEN_KEY);
   }
 
+  /**
+   * Stores the access and refresh tokens under the shared cross-client keys.
+   */
   setTokens(accessToken: string, refreshToken: string): void {
     this.backend.setItem(ACCESS_TOKEN_KEY, accessToken);
     this.backend.setItem(REFRESH_TOKEN_KEY, refreshToken);
   }
 
+  /**
+   * Removes both the access and refresh tokens from storage.
+   */
   clearTokens(): void {
     this.backend.removeItem(ACCESS_TOKEN_KEY);
     this.backend.removeItem(REFRESH_TOKEN_KEY);
@@ -176,6 +235,9 @@ class StorageServiceImpl implements StorageService {
   }
 }
 
+/**
+ * Tells whether a parsed value has the envelope shape of version, payload and time.
+ */
 function isEnvelope(v: unknown): v is StorageEnvelope<unknown> {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
@@ -188,12 +250,18 @@ function isEnvelope(v: unknown): v is StorageEnvelope<unknown> {
 
 // Production singleton. Browsers expose `localStorage` on `window`; the
 // `dom` lib in tsconfig types it.
+/** The shared storage service, backed by the page's `localStorage`. */
 export const storage: StorageService = new StorageServiceImpl(
   eventBus,
   globalThis.localStorage,
 );
 
 // Test-only factory. Pass a custom EventBus + backend for isolation.
+/**
+ * Build a storage service for a test.
+ *
+ * It gets its own bus and an in-memory backend unless the caller passes them.
+ */
 export function createStorageServiceForTesting(
   bus: EventBus = createEventBusForTesting(),
   backend?: StorageBackend,
@@ -204,22 +272,38 @@ export function createStorageServiceForTesting(
 
 // Test-only in-memory backend. Mirrors the parts of the Web Storage API the
 // service uses; tests can also pass any other backend that matches the shape.
+/** A storage backend that holds keys in a map and forgets them with the page, for tests. */
 export class InMemoryStorage implements StorageBackend {
   private readonly store = new Map<string, string>();
 
+  /**
+   * Returns how many entries the in-memory store holds.
+   */
   get length(): number {
     return this.store.size;
   }
+  /**
+   * Returns the stored string for a key, or null when the key is absent.
+   */
   getItem(key: string): string | null {
     /* c8 ignore next */ // defensive: setItem(key, value) only stores string values, and Map.get(k) for a present key returns the stored value (string); the `?? null` fallback is unreachable from this class's API surface. Belt-and-suspenders for any future extension that might allow undefined values.
     return this.store.has(key) ? (this.store.get(key) ?? null) : null;
   }
+  /**
+   * Stores a string value under a key.
+   */
   setItem(key: string, value: string): void {
     this.store.set(key, value);
   }
+  /**
+   * Deletes a key from the in-memory store.
+   */
   removeItem(key: string): void {
     this.store.delete(key);
   }
+  /**
+   * Returns the key at the given position in insertion order, or null when out of range.
+   */
   key(index: number): string | null {
     if (index < 0 || index >= this.store.size) return null;
     let i = 0;

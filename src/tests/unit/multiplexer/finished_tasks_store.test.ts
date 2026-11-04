@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createFinishedTasksStore,
+  type FinishedTasksApiClient,
   FINISHED_TASKS_ENDPOINT,
 } from "../../../lupin_app/static/js/multiplexer/stores/FinishedTasksStore";
 import {
@@ -316,4 +317,122 @@ test( "startPolling twice clears the first handle — no orphaned timer", async 
   await new Promise( ( r ) => setImmediate( r ) );
   assert.deepEqual( cleared, [ 1 ], "a second startPolling left the first interval running" );
   store.stopPolling();
+} );
+
+// ---------------------------------------------------------------------------
+// Row 8796333b slice 2 — `task_store_changed` push re-reads through refreshAfterWrite()
+// ---------------------------------------------------------------------------
+
+const settle = (): Promise<void> => new Promise( ( r ) => setImmediate( r ) );
+
+function pushedStore( api = fakeApi().api ) {
+  const bus   = createEventBusForTesting();
+  const store = createFinishedTasksStore( { bus, api, nowFn : () => NOW, setIntervalFn : () => 1, clearIntervalFn : () => {} } );
+  const push  = (): void => bus.emit( { type: "task_store_changed", payload: { count: 1 } } as never );
+  return { bus, store, push };
+}
+
+test( "task_store_changed: a push while polling re-reads all three statuses", async () => {
+  const f = fakeApi();
+  const { store, push } = pushedStore( f.api );
+  store.startPolling();
+  await settle();
+  assert.equal( f.urls.length, 3 );
+  push();
+  await settle();
+  assert.equal( f.urls.length, 6, "the push re-read every status" );
+  store.stopPolling();
+} );
+
+test( "task_store_changed: a burst of pushes costs two reads, not one per push", async () => {
+  const f = fakeApi();
+  const { store, push } = pushedStore( f.api );
+  store.startPolling();
+  await settle();
+  f.urls.length = 0;
+  push(); push(); push(); push();
+  for ( let i = 0; i < 4; i++ ) await settle();
+  assert.equal( f.urls.length, 6, "four pushes: one read starts, the other three share one trailing read" );
+  store.stopPolling();
+} );
+
+test( "task_store_changed: a push DURING a read is not dropped — a second read starts after the first ends", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>( ( r ) => { release = r; } );
+  const order: string[] = [];
+  let calls = 0;
+  const api: FinishedTasksApiClient = {
+    async get<T>(): Promise<T> {
+      const n = ++calls;
+      order.push( `start ${ n }` );
+      if ( n === 1 ) await gate;
+      order.push( `end ${ n }` );
+      return { events: [], count: 0 } as T;
+    },
+  };
+  const { store, push } = pushedStore( api );
+  store.startPolling();                // read 1 begins, held at the gate on its first status
+  await settle();
+  push();
+  await settle();
+  assert.equal( calls, 1, "the push waits for the read in flight" );
+  release();
+  for ( let i = 0; i < 6; i++ ) await settle();
+  assert.equal( calls, 6, "the push got a whole second three-status read" );
+  assert.equal( order.indexOf( "start 4" ) > order.indexOf( "end 3" ), true, "the second read began after the first ended" );
+  store.stopPolling();
+} );
+
+test( "task_store_changed: ignored before polling starts and after it stops", async () => {
+  const f = fakeApi();
+  const { store, push } = pushedStore( f.api );
+  push();
+  await settle();
+  assert.equal( f.urls.length, 0, "not subscribed before startPolling" );
+  store.startPolling();
+  await settle();
+  store.stopPolling();
+  const after = f.urls.length;
+  push();
+  await settle();
+  assert.equal( f.urls.length, after, "unsubscribed after stopPolling" );
+} );
+
+test( "refreshAfterWrite with nothing in flight takes exactly one read", async () => {
+  const f = fakeApi();
+  const { store } = pushedStore( f.api );
+  await store.refreshAfterWrite();
+  assert.equal( f.urls.length, 3 );
+} );
+
+test( "a refresh that throws before its first await does not park the error for later reads", async () => {
+  let throwOnce = true;
+  const f = fakeApi();
+  const store = createFinishedTasksStore( {
+    bus : createEventBusForTesting(), api : f.api,
+    nowFn : () => { if ( throwOnce ) { throwOnce = false; throw new Error( "clock broke" ); } return NOW; },
+  } );
+  await assert.rejects( store.refresh(), /clock broke/ );
+  await store.refreshAfterWrite();   // a stale rejected run left in place would rethrow here
+  assert.equal( f.urls.length, 3, "the read after the failure ran normally" );
+} );
+
+test( "task_store_changed: restarting polling leaves no second subscription behind", async () => {
+  const bus = createEventBusForTesting();
+  let subscribed = 0, unsubscribed = 0;
+  const realOn = bus.on.bind( bus );
+  ( bus as { on: unknown } ).on = ( type: string, listener: never ) => {
+    const off = realOn( type as never, listener );
+    if ( type === "task_store_changed" ) { subscribed++; return () => { unsubscribed++; off(); }; }
+    return off;
+  };
+  const f = fakeApi();
+  const store = createFinishedTasksStore( { bus, api: f.api, nowFn : () => NOW, setIntervalFn : () => 1, clearIntervalFn : () => {} } );
+  store.startPolling();
+  store.startPolling();
+  assert.equal( subscribed, 2 );
+  assert.equal( unsubscribed, 1, "the first subscription was released before the second was taken" );
+  store.stopPolling();
+  assert.equal( unsubscribed, 2 );
+  await settle();
 } );

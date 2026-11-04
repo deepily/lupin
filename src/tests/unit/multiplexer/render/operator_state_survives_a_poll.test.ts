@@ -316,7 +316,8 @@ test( "HOLDING AREA: a batch won't-fix reason typed, a poll, then Won't fix all 
   assert.equal( reasonBox().value, "duplicate of the epic", "the poll wiped a whole group's typing" );
   assert.ok( document.activeElement === reasonBox(), "focus left the batch reason box" );
 
-  ( pane.querySelector( ".holding-wont-fix-all" ) as HTMLButtonElement ).click();
+  ( pane.querySelector( ".holding-wont-fix-all" ) as HTMLButtonElement ).click();    // arms
+  ( pane.querySelector( ".holding-wont-fix-all" ) as HTMLButtonElement ).click();    // confirms
   await settle();
   const transitions = posts.filter( ( p ) => p.path.endsWith( "/transition" ) );
   assert.equal( transitions.length, 2, "the batch refused — the reason was blank to the handler" );

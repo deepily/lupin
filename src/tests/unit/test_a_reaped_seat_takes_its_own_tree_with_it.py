@@ -259,6 +259,59 @@ def test_every_git_failure_keeps_the_tree( dirs, fail, reason ):
     assert ( out[ "removed" ], out[ "kept_reason" ] ) == ( False, reason )
 
 
+def _other_door_retires( repo, tree ):
+    """A liveness check that plays the SessionEnd waiter and removes the tree mid-wait."""
+    def alive( name, path ):
+        """Remove the tree through git on the first poll, then report the seat gone."""
+        if tree.exists():
+            assert _git( repo, "worktree", "unlock", str( tree ) ).returncode == 0
+            assert _git( repo, "worktree", "remove", str( tree ) ).returncode == 0
+        return False
+    return alive
+
+
+def test_a_tree_the_other_door_removed_during_the_wait_counts_as_removed_not_status_failed( repo, capsys ):
+    # Row 7da8908a: the hook waiter (120s) removes the tree inside dismiss's 10s wait; `git status` then hit ENOENT.
+    """The other door removing the tree mid-wait is a removal, not a status failure."""
+    tree = _seat_tree( repo )
+    out  = st.retire_seat_worktree( str( tree ), SEAT, alive_fn=_other_door_retires( repo, tree ), wait_seconds=0, debug=True )
+    assert ( out[ "removed" ], out[ "kept_reason" ], out[ "errors" ] ) == ( True, None, [] )
+    assert not tree.exists() and not _registered( repo, tree )
+    assert "already removed by the other door" in capsys.readouterr().out
+    assert st.teardown_notice( { SEAT: out } ) is None
+
+
+def test_a_directory_that_vanished_while_git_still_registers_it_is_kept_and_named( dirs ):
+    """A bare rmdir leaves the registration behind, so the tree is not claimed as removed."""
+    tree, main = dirs
+    git = _Git( tree, main )
+    def alive( name, path ):
+        """Delete the directory behind git's back on the first poll."""
+        os.rmdir( tree )
+        return False
+    out = st.retire_seat_worktree( tree, SEAT, run=git, alive_fn=alive, wait_seconds=0 )
+    assert ( out[ "removed" ], out[ "kept_reason" ] ) == ( False, "tree_missing" )
+    assert not any( c[ 1:3 ] == [ "worktree", "remove" ] for c in git.calls )
+
+
+def test_a_vanished_directory_with_an_unreadable_registry_is_a_failure_not_a_removal( dirs ):
+    """When git cannot list worktrees, a gone directory proves nothing about the registration."""
+    tree, main = dirs
+    git, lists = _Git( tree, main ), []
+    def run( argv, cwd=None, timeout=60 ):
+        if argv[ 1:3 ] == [ "worktree", "list" ]:
+            lists.append( argv )
+            if len( lists ) > 1:
+                return SimpleNamespace( returncode=128, stdout="", stderr="registry unreadable" )
+        return git( argv, cwd=cwd, timeout=timeout )
+    def alive( name, path ):
+        """Delete the directory behind git's back on the first poll."""
+        os.rmdir( tree )
+        return False
+    out = st.retire_seat_worktree( tree, SEAT, run=run, alive_fn=alive, wait_seconds=0 )
+    assert ( out[ "removed" ], out[ "kept_reason" ], out[ "errors" ] ) == ( False, "worktree_list_failed", [ "registry unreadable" ] )
+
+
 def test_a_failed_removal_puts_the_lock_back( dirs ):
     tree, main = dirs
     git = _Git( tree, main, fail=[ "worktree remove" ] )
@@ -507,3 +560,43 @@ def test_a_tag_named_like_the_seat_branch_never_loses_its_commit( repo, tmp_path
 
     assert ( out[ "removed" ], out[ "kept_reason" ] ) == ( False, "unmerged" )
     assert tree.exists() and _has_branch( repo, "feat-s" )
+
+
+# ---- the result stays small (row f25c0608) ------------------------------------------------
+
+def _many_blockers( n ): return [ f"io/run-output/file-{i:06d}.json" for i in range( n ) ]
+
+
+def test_a_tree_kept_for_ignored_files_reports_their_count_and_a_capped_sample():
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr = _setup( tmp, "/seats/rio" )
+        blockers = _many_blockers( 40000 )
+        res = ss.dismiss_sessions( mgr, session_names=[ SEAT ], runner=_OK_RUNNER, session_dir=sd,
+                                   seat_teardown_fn=lambda n, c: { "removed": False, "kept_reason": "ignored_files_present",
+                                                                   "path": c, "ignored_blockers": blockers, "errors": [] }, **_NOOP )
+        tree = res[ "seat_trees" ][ SEAT ]
+        assert tree[ "kept_reason" ] == "ignored_files_present" and tree[ "path" ] == "/seats/rio"
+        assert tree[ "ignored_blockers_count" ] == 40000
+        assert tree[ "ignored_blockers_sample" ] == blockers[ :st.SAMPLE_LIMIT ] and len( tree[ "ignored_blockers_sample" ] ) == st.SAMPLE_LIMIT
+        assert "ignored_blockers" not in tree
+        assert len( json.dumps( res ) ) < 20_000
+        assert "ignored_files_present at /seats/rio" in res[ "seat_tree_notice" ]
+
+
+def test_summarise_outcome_keeps_a_short_list_whole_and_counts_it():
+    got = st.summarise_outcome( { "removed": False, "ignored_blockers": [ "a", "b" ], "errors": [ "e1" ] } )
+    assert got == { "removed": False, "ignored_blockers_count": 2, "ignored_blockers_sample": [ "a", "b" ],
+                    "errors_count": 1, "errors_sample": [ "e1" ] }
+
+
+def test_summarise_outcome_caps_errors_too_and_does_not_touch_the_input():
+    original = { "errors": _many_blockers( 100 ), "ignored_blockers": [] }
+    got      = st.summarise_outcome( original )
+    assert got[ "errors_count" ] == 100 and len( got[ "errors_sample" ] ) == st.SAMPLE_LIMIT
+    assert got[ "ignored_blockers_count" ] == 0 and got[ "ignored_blockers_sample" ] == []
+    assert len( original[ "errors" ] ) == 100 and "errors_count" not in original
+
+
+def test_summarise_outcome_passes_a_raised_teardown_string_and_a_dict_without_the_lists_through():
+    assert st.summarise_outcome( "RuntimeError: git gone" ) == "RuntimeError: git gone"
+    assert st.summarise_outcome( { "removed": True } ) == { "removed": True }

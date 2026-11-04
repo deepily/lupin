@@ -71,8 +71,8 @@ class TestPodcastCompletionReport:
         assert "/app/audio?path=podcasts/user1/final.mp3" in abstract
         assert "/api/io/file?path=podcasts/user1/final.mp3&download=true" in abstract
         assert "Listen" in abstract and "Download" in abstract
-        # Script: in-app docs viewer link
-        assert "/app/docs?path=podcasts/user1/script.md" in abstract
+        # Script: doc viewer link in the lupin scope, which serves io/podcasts/<email>/ to its owner only
+        assert "[📝 Script](/app/docs?path=lupin/io/podcasts/user1/script.md)" in abstract
         assert "~3.5 min" in abstract
 
         # Artifacts must store RELATIVE paths (UI job-card builds URLs from these,
@@ -163,7 +163,7 @@ class TestPodcastCompletionReport:
         abstract = completion_call.kwargs[ "abstract" ]
         assert "/app/audio?path=podcasts/u/final.mp3"             in abstract
         assert "/api/io/file?path=podcasts/u/final.mp3&download=true" in abstract
-        assert "/app/docs?path=podcasts/u/script.md"              in abstract
+        assert "/app/docs?path=lupin/io/podcasts/u/script.md" in abstract
 
     @pytest.mark.asyncio
     async def test_completion_notify_not_called_on_cancellation( self ):

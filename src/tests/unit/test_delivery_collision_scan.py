@@ -26,6 +26,7 @@ cases below assert exit 2, never 0.
 import importlib.util
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -206,9 +207,27 @@ def test_zero_branches_REFUSES_rather_than_reporting_clean( scan, repo ):
     question nobody asked.
     """
     _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    _age_branch( repo, "wt-alpha", days=40 )
 
     with pytest.raises( LookupError, match="ZERO branches" ):
-        scan.scan( "target", max_tip_age_days=0.0000001 )
+        scan.scan( "target", max_tip_age_days=7 )
+
+
+@pytest.mark.parametrize( "phase", [ 0.0, 0.004, 0.0085, 0.5 ] )
+def test_zero_branches_refusal_holds_at_every_clock_phase( scan, repo, monkeypatch, phase ):
+    """
+    The refusal must not depend on the moment within the second at which the scan runs.
+
+    A 7-day window never admits a branch that is 40 days old, at any phase.
+    The clock is pinned 40 days and `phase` seconds after the tip.
+    """
+    _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    _age_branch( repo, "wt-alpha", days=40 )
+    tip = int( _git( repo, "log", "-1", "--format=%ct", "wt-alpha" ).strip() )
+    monkeypatch.setattr( scan, "time", types.SimpleNamespace( time=lambda: tip + 40 * 86400 + phase ) )
+
+    with pytest.raises( LookupError, match="ZERO branches" ):
+        scan.scan( "target", max_tip_age_days=7 )
 
 
 def test_zero_candidate_commits_REFUSES_rather_than_reporting_clean( scan, repo ):
@@ -256,9 +275,25 @@ def test_exit_codes_are_three_distinct_answers( scan, repo, case, expected, caps
         argv = [ "--target", "target", "--max-tip-age-days", "365" ]
     else:
         _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
-        argv = [ "--target", "target", "--max-tip-age-days", "0.0000001" ]
+        _age_branch( repo, "wt-alpha", days=40 )
+        argv = [ "--target", "target", "--max-tip-age-days", "7" ]
 
     assert scan.main( argv + [ "--quiet" ] ) == expected
+
+
+@pytest.mark.parametrize( "phase", [ 0.0, 0.004, 0.0085, 0.5 ] )
+def test_the_vacuous_exit_code_holds_at_every_clock_phase( scan, repo, monkeypatch, phase ):
+    """
+    The vacuous run exits 2 whatever the moment within the second at which the scan starts.
+
+    The branch is 40 days old against a 7-day window. The clock is pinned 40 days and `phase` seconds after its tip.
+    """
+    _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    _age_branch( repo, "wt-alpha", days=40 )
+    tip = int( _git( repo, "log", "-1", "--format=%ct", "wt-alpha" ).strip() )
+    monkeypatch.setattr( scan, "time", types.SimpleNamespace( time=lambda: tip + 40 * 86400 + phase ) )
+
+    assert scan.main( [ "--target", "target", "--max-tip-age-days", "7", "--quiet" ] ) == 2
 
 
 def test_the_scan_states_its_own_denominator( scan, repo, capsys ):
@@ -413,3 +448,86 @@ def test_main_actually_prints_the_not_examined_line( scan, repo, capsys ):
     assert "NOT EXAMINED" in out, "main() must surface the exclusion, not just be able to"
     assert "wt-old" in out
     assert "INVISIBLE, not absent" in out
+
+
+# ── coverage of the helper edges (row e1a36bb4) ─────────────────────────────
+
+def test_git_helper_returns_empty_on_failure_unless_check_is_set( scan ):
+    """`check=False` swallows a failing git; `check=True` raises with git's own exit code."""
+    assert scan._git( "rev-parse", "--verify", "no-such-ref-anywhere" ) == ""
+    with pytest.raises( subprocess.CalledProcessError ) as caught:
+        scan._git( "rev-parse", "--verify", "no-such-ref-anywhere", check=True )
+    assert caught.value.returncode != 0
+
+
+def test_discover_branches_skips_blank_lines_in_git_output( scan, monkeypatch ):
+    """A blank line in for-each-ref output is not a branch; the real ones around it still are."""
+    raw = "wt-a\t2000000000\n\n   \nwt-b\t1\ntarget\t2000000000\n"
+    monkeypatch.setattr( scan, "_git", lambda *a, **k: raw )
+    monkeypatch.setattr( scan.time, "time", lambda: 2000000000 + 86400 )
+    inside, excluded = scan.discover_branches( "target", 7 )
+    assert inside   == [ ( "wt-a", 2000000000 ) ]
+    assert excluded == [ ( "wt-b", 1 ) ]
+
+
+def test_code_files_of_returns_only_sorted_code_suffixes( scan, repo ):
+    """A commit touching two code files and a doc reports only the code files, sorted."""
+    ( repo / "docs" ).mkdir()
+    ( repo / "docs" / "note.md" ).write_text( "prose\n" )
+    ( repo / "z_last.sh" ).write_text( "echo z\n" )
+    ( repo / "a_first.py" ).write_text( "x = 1\n" )
+    _git( repo, "add", "-A" )
+    _git( repo, "commit", "-q", "-m", "mixed" )
+    sha = _git( repo, "rev-parse", "HEAD" ).strip()
+    assert scan.code_files_of( sha ) == [ "a_first.py", "z_last.sh" ]
+
+
+def test_a_commit_with_only_short_added_lines_is_unprobeable_not_absent( scan, repo ):
+    """No line clears MIN_PROBE_LINE, so there is no evidence of absence: the verdict is False."""
+    sha = _branch_with( repo, "wt-short", "src/shared.py", "def base():\n    return 1\n", "short" )
+    assert scan.is_absent_from( sha, "target", "src/shared.py" ) is False
+
+
+def test_a_short_added_line_is_skipped_and_the_next_long_one_is_probed( scan, repo ):
+    """Short lines are skipped, so the later long line decides, and target lacks it."""
+    sha = _branch_with( repo, "wt-mixed", "src/shared.py", f"def base():\n    return 1\n{LONG_A}\n", "mixed" )
+    assert scan.is_absent_from( sha, "target", "src/shared.py" ) is True
+
+
+def test_scan_reports_progress_every_25_contested_files( scan, repo ):
+    """With 25 contested files the progress callback fires once, naming 25/25."""
+    for name, long_line in ( ( "wt-alpha", LONG_A ), ( "wt-beta", LONG_B ) ):
+        _git( repo, "checkout", "-q", "-b", name, "target" )
+        for i in range( 25 ):
+            ( repo / "src" / f"f{i:02d}.py" ).write_text( f"def f():\n{long_line} {i}\n" )
+        _git( repo, "add", "-A" )
+        _git( repo, "commit", "-q", "-m", name )
+        _git( repo, "checkout", "-q", "target" )
+    seen = []
+    collisions, stats = scan.scan( "target", max_tip_age_days=365, progress=seen.append )
+    assert stats[ "contested_cheap" ] == 25
+    assert len( collisions ) == 25
+    assert len( seen ) == 1
+    assert "25/25 contested files probed" in seen[ 0 ]
+    assert "(48 probes, 24 confirmed)" in seen[ 0 ]      # progress fires before the 25th file is probed
+
+
+def test_main_exits_2_and_says_incomplete_when_the_deadline_passes( scan, repo, capsys ):
+    """A blown deadline is a refusal (exit 2) that names the scan as incomplete, never a clean 0."""
+    _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    _branch_with( repo, "wt-beta",  "src/shared.py", f"def base():\n{LONG_B}\n", "beta" )
+    rc = scan.main( [ "--target", "target", "--max-tip-age-days", "365", "--quiet", "--deadline-seconds", "-1" ] )
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "the scan is INCOMPLETE" in err
+
+
+@pytest.mark.parametrize( "mine, expected_rc, expected_count", [ ( "wt-alpha", 1, 1 ), ( "wt-elsewhere", 0, 0 ) ] )
+def test_mine_filter_only_fails_for_collisions_involving_that_branch( scan, repo, capsys, mine, expected_rc, expected_count ):
+    """--mine narrows the report: a party to the collision exits 1, a bystander exits 0."""
+    _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    _branch_with( repo, "wt-beta",  "src/shared.py", f"def base():\n{LONG_B}\n", "beta" )
+    rc  = scan.main( [ "--target", "target", "--max-tip-age-days", "365", "--quiet", "--mine", mine ] )
+    out = capsys.readouterr().out
+    assert rc == expected_rc
+    assert f"filtered to collisions involving {mine}: {expected_count}" in out

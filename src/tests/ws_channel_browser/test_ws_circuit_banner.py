@@ -22,9 +22,9 @@ is unrelated to these `:7999`-routed banner-DOM tests.
 
 import json
 import os
-import urllib.request
 
 import pytest
+from tests.helpers import app_login
 
 
 BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
@@ -51,23 +51,8 @@ def jwt_token():
     if not email or not password:
         pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_{EMAIL,PASSWORD} env vars not set" )
 
-    body = json.dumps( { "email" : email, "password" : password } ).encode( "utf-8" )
-    req  = urllib.request.Request(
-        f"{BASE_URL}/auth/login",
-        data    = body,
-        headers = { "Content-Type" : "application/json" },
-        method  = "POST"
-    )
-    try:
-        with urllib.request.urlopen( req, timeout=10 ) as resp:
-            data = json.loads( resp.read() )
-    except Exception as e:
-        pytest.skip( f"auth/login failed against {BASE_URL}: {e}" )
-
-    token = data.get( "tokens", {} ).get( "access_token" )
-    if not token:
-        pytest.skip( f"unexpected /auth/login response shape: {list( data.keys() )}" )
-    return { "token" : token, "user" : data.get( "user", {} ) }
+    data = app_login.login( BASE_URL, email, password )
+    return { "token" : data[ "tokens" ][ "access_token" ], "user" : data.get( "user", {} ) }
 
 
 # ---------------------------------------------------------------------------

@@ -231,6 +231,18 @@ class TestTheStreamingDoorIsBoundedToo( unittest.IsolatedAsyncioTestCase ):
     are not.
     """
 
+    async def asyncSetUp( self ):
+        """
+        Stub the tokenize probe. `_stream_async` calls `_clamped_max_tokens` first, which POSTs to
+        `BASE` — a real LAN host — unless `count_tokens` is patched, as every other test in this
+        file already does. Unpatched, four streaming tests opened a real socket to
+        192.168.1.21:3001 and the cosa tier's network guard (block mode) failed the run, while the
+        module docstring promised "Nothing here opens a socket".
+        """
+        probe = patch( "cosa.agents.model_window.count_tokens", return_value=( 10, 8192 ) )
+        probe.start()
+        self.addCleanup( probe.stop )
+
     async def test_aiohttp_timeouts_already_are_the_builtin( self ):
         """The premise that lets the streaming path skip a translation."""
         import asyncio
@@ -398,6 +410,18 @@ class TestTheStreamEndsWithoutADoneMarker( unittest.IsolatedAsyncioTestCase ):
     non-conforming response looks like, and the generator must still finish cleanly
     rather than hang or raise.
     """
+
+    async def asyncSetUp( self ):
+        """
+        Stub the tokenize probe. `_stream_async` calls `_clamped_max_tokens` first, which POSTs to
+        `BASE` — a real LAN host — unless `count_tokens` is patched, as every other test in this
+        file already does. Unpatched, four streaming tests opened a real socket to
+        192.168.1.21:3001 and the cosa tier's network guard (block mode) failed the run, while the
+        module docstring promised "Nothing here opens a socket".
+        """
+        probe = patch( "cosa.agents.model_window.count_tokens", return_value=( 10, 8192 ) )
+        probe.start()
+        self.addCleanup( probe.stop )
 
     def _session_yielding( self, lines, status=200 ):
         response = MagicMock()

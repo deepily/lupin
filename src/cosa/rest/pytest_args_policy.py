@@ -1,40 +1,36 @@
 """
-Allowlist policy for caller-supplied pytest arguments (row 60f04102).
+Allowlist policy for caller-supplied pytest arguments.
 
-THE DEFECT THIS CLOSES: `POST /api/v2/submit` accepts a free-form
-`pytest_args` string, shlex-parses it, and hands the tokens to
-`subprocess.Popen( [ "bash", script_path ] + args )` with only `--bg` stripped
-(job.py:1134, :1184). There is no `shell=True`, so shell metacharacters are NOT
-the vector and a metacharacter denylist would buy nothing — that was this
-author's first proposed control, and Maria refuted it before it was written.
+The defect this closes: `POST /api/v2/submit` accepts a free-form `pytest_args` string.
+It shlex-parses the string and hands the tokens to
+`subprocess.Popen( [ "bash", script_path ] + args )`, with only `--bg` stripped.
+There is no `shell=True`, so shell metacharacters are not the vector.
+A metacharacter denylist would buy nothing.
 
-THE ACTUAL VECTOR, and it needs no shell at all: **pytest imports every path it
-is asked to collect.** A caller who can put an arbitrary path into `pytest_args`
-gets that file imported by the runner, as the server's OS user, with no sandbox
-and no import allowlist. `pytest /tmp/evil.py` is arbitrary code execution
-spelled as a test run.
+The actual vector needs no shell at all: **pytest imports every path it is asked to
+collect**. A caller who can put an arbitrary path into `pytest_args` gets that file
+imported by the runner, as the server's OS user. There is no sandbox and no import
+allowlist. `pytest /tmp/evil.py` is arbitrary code execution spelled as a test run.
 
-=> THE CONTROL IS AN ALLOWLIST, NOT A DENYLIST. Every token must be a flag this
-policy recognises, a value bound to a flag that takes one, or a test path that
-resolves inside a permitted test root. Anything else is refused. A denylist has
-to anticipate the attack; an allowlist only has to enumerate the legitimate
-surface, which is small and already known — the flag sets below come from a
+The control is an allowlist, not a denylist. Every token must be one of three things.
+It is a flag this policy recognises, or a value bound to a flag that takes one.
+Otherwise it is a test path that resolves inside a permitted test root.
+Anything else is refused.
+A denylist has to anticipate the attack. An allowlist only has to enumerate the
+legitimate surface, which is small and already known. The flag sets below come from a
 census of every `pytest_args` usage in the tree.
 
-WHERE THIS IS ENFORCED, and the ordering is Maria's call, not a preference:
-**job build is the authoritative point**, because every path into execution runs
-through it — HTTP submits, jobs rehydrated from persistence
-(job_persistence.py:765), and side channels such as capture-bounce-resubmit.py.
-A submit-only check would leave all of those unguarded. The router calls the
-same function so a bad request is refused at the door with a clear 400, but that
-is USABILITY; it is not the control. One function serves both so the two cannot
-drift apart.
+Where this is enforced: **job build is the authoritative point**, because every path
+into execution runs through it. That covers HTTP submits, jobs rehydrated from
+persistence, and side channels such as capture-bounce-resubmit.py. A submit-only check
+would leave all of those unguarded. The router calls the same function, so a bad request
+is refused at the door with a clear 400. That is usability, not the control.
+One function serves both so the two cannot drift apart.
 
-WHAT THIS POLICY DELIBERATELY DOES NOT DO: it does not decide WHO may submit.
-That is a role question and genuinely separate. Admin is very likely the wrong
-grain — every seat account holds `['user']`, so an admin gate would lock out the
-only legitimate submitter — and that decision belongs to Rick, not here. This
-module is the control that holds even for a caller who is authorised and wrong.
+What this policy does not do: it does not decide who may submit. That is a separate
+role question. Admin is very likely the wrong grain, because every seat account holds
+`['user']`, and an admin gate would lock out the only legitimate submitter.
+This module is the control that holds even for a caller who is authorised and wrong.
 """
 
 import os
@@ -138,6 +134,8 @@ def _flag_name( token ):
 
 def _path_is_confined( raw_path, project_root ):
     """
+    Return True if a caller's test path resolves inside an allowed test root.
+
     Requires:
         - raw_path is a caller token, possibly carrying a `::nodeid` suffix
         - project_root is an absolute path to the repository root
@@ -147,7 +145,7 @@ def _path_is_confined( raw_path, project_root ):
           ALLOWED_TEST_ROOTS after symlink and `..` resolution
         - an absolute path outside those roots returns False
         - traversal ("../../etc/passwd") returns False, because resolution
-          happens BEFORE the prefix check rather than after it
+          happens before the prefix check rather than after it
         - never raises
     """
     # A pytest node id is "<path>::<class>::<test>" — only the path half is a file.
@@ -310,10 +308,10 @@ def find_per_test_timeout( tokens ):
         - tokens is a list of already-shlex-split argument strings
 
     Ensures:
-        - handles BOTH spellings: `--timeout 5400` and `--timeout=5400`
+        - handles both spellings: `--timeout 5400` and `--timeout=5400`
         - returns a float, or None when the flag is absent
         - returns None for a non-numeric value rather than raising — the
-          allowlist owns argument WELL-FORMEDNESS; this function owns only the
+          allowlist owns argument well-formedness; this function owns only the
           budget contradiction, and two guards that both police the same thing
           drift apart
     """
@@ -335,14 +333,14 @@ def validate_timeout_against_suite_budget( tokens, test_types, suite_budgets, de
 
     Requires:
         - tokens is a list of already-shlex-split argument strings
-        - test_types is a comma-separated string OR a list of suite names
+        - test_types is a comma-separated string or a list of suite names
         - suite_budgets maps suite name -> whole-suite timeout in seconds
         - default_budget is the seconds applied to a suite absent from the map
 
     Ensures:
         - returns None when there is no `--timeout`, or when it is >= every
           budget it runs under (the common case costs one dict lookup)
-        - raises PytestArgsRejected naming BOTH numbers, the suite they clash
+        - raises PytestArgsRejected naming both numbers, the suite they clash
           on, and the two ways forward — a refusal that does not say what to do
           instead just gets worked around
 

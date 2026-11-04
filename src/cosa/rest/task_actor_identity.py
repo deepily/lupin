@@ -1,45 +1,32 @@
 """
-Who the audit trail SAYS did it, when the server knows who actually did.
+Who the audit trail says did it, when the server knows who actually did.
 
-🔴 THE CLAIM THIS MODULE EXISTS TO MAKE TRUE. `task_approval_settings`'s docstring
-says, of the caller-declared actor: "The authenticated user id IS recorded alongside,
-so a false claim is attributable after the fact — accountability rather than
-prevention." **That was false when written.** Measured 2026-09-04 at `3862c0b9`:
-`authenticated_user_id` is bound in `routers/tasks.py` TWELVE times and appears in no
-function body — bound everywhere, read nowhere. (Verified with a positive control: the
-same search shape finds three real uses in `routers/commons.py`, so the empty result is
-a true zero rather than a broken search.)
+The caller-declared actor can be false. `task_approval_settings` relies on the authenticated
+user id being recorded alongside it, so a false claim is attributable afterwards. That only
+holds if something writes the identity down, and this module is that record.
 
-⇒ Nothing was recorded alongside anything. The store's entire accountability story
-rested on a sentence, and a sentence is not a control. This module is the record.
+It refuses nobody. The edit door keeps its 404 behaviour exactly as it is, and only the
+attribution is corrected. A gate on the edit door would be new policy about who may
+reassign somebody else's work. Refusal is a separate proposal, not made here.
 
-WHAT IT DOES NOT DO, AND THE LINE IS RICK'S TO MOVE, NOT MINE. It REFUSES NOBODY.
-María's ruling, 2026-09-04: "Correct the attribution so the edit door records the real
-identity the P0 mechanism establishes. Leave the 404 behavior exactly as it is." A gate
-on the edit door would be new policy — who may reassign somebody else's work — and this
-row is filed as a bug. Attribution is the bug; refusal is a proposal, and it is written
-up as one rather than smuggled in here.
-
-THE FORMAT, AND WHY THE IDENTITY GOES FIRST.
+The format puts the identity first:
 
     rick (operator foolish goat)
     somebody@example.com (operator wise penguin)
 
-Two properties earn that order, and neither is cosmetic:
+Two properties earn that order.
 
-  1. THE EXISTING ALLOWLIST STILL PARSES IT. `is_approver` walks progressively shorter
-     LEADING word-runs, so "rick (operator foolish goat)" matches "rick" on the first
-     take. An identity appended at the END would be invisible to every reader that
-     already exists.
-  2. THE DECLARED STRING SURVIVES, which is the repo's add-never-overwrite rule. The
-     session id in "operator foolish goat" is the only thing that says WHICH tab; the
-     email is the only thing that says WHICH PERSON. Discarding either loses a fact
+  1. The existing allowlist still parses it. `is_approver` walks progressively shorter
+     leading word-runs, so "rick (operator foolish goat)" matches "rick" on the first
+     take. An identity appended at the end would be invisible to every existing reader.
+  2. The declared string survives, following the repo's add-never-overwrite rule. The
+     session id in "operator foolish goat" is the only thing that says which tab; the
+     email is the only thing that says which person. Discarding either loses a fact
      nothing else carries.
 
-⚠️ AN API-KEY CALLER IS UNCHANGED, DELIBERATELY. Every seat in the fleet authenticates
-by API key and has no login account, so `account_email` is None for them and the
-declared actor is returned untouched. A change that rewrote every seat's audit actor
-would be a migration wearing a bug fix's clothes.
+An API-key caller is unchanged. Every seat in the fleet authenticates by API key.
+Seats have no login account, so `account_email` is None for them and the declared
+actor is returned untouched. Rewriting every seat's audit actor would be a migration, not a bug fix.
 """
 
 from cosa.rest.task_approval_settings import approver_persona_for_account
@@ -60,15 +47,14 @@ def identity_for_account( account_email ):
     The name an authenticated account should be recorded under, or None.
 
     Requires:
-        - account_email is the email off a VALIDATED access token, or None
+        - account_email is the email off a validated access token, or None
 
     Ensures:
-        - returns the mapped approver PERSONA when the account has one — the store
+        - returns the mapped approver persona when the account has one — the store
           speaks personas, and "rick" is more use to a reader than a UUID or an address
-        - otherwise returns the EMAIL itself for any non-blank account, so an ordinary
+        - otherwise returns the email itself for any non-blank account, so an ordinary
           logged-in user is still named. Attribution is not a privilege: an account
-          that cannot approve anything is exactly the one whose edits you most want
-          traceable
+          that cannot approve anything is the one whose edits most need to be traceable
         - returns None for None/blank/non-string — an API-key caller has no account
         - never raises
     """
@@ -79,20 +65,20 @@ def identity_for_account( account_email ):
 
 def recorded_actor( declared_actor, account_email ):
     """
-    The actor string to WRITE, given what the caller claimed and who they really are.
+    The actor string to write, given what the caller claimed and who they really are.
 
     Requires:
         - declared_actor is the caller's `payload.actor` (a non-empty string per the
           request models)
-        - account_email is the email off a VALIDATED access token, or None
+        - account_email is the email off a validated access token, or None
 
     Ensures:
-        - with NO account (API-key caller): returns `declared_actor` UNCHANGED. This is
-          today's behaviour written down, and it is why the whole fleet is untouched
-        - with an account: returns "<identity> (<declared>)", identity FIRST so leading
+        - with no account (API-key caller): returns `declared_actor` unchanged. This is
+          the existing behaviour, and it is why the whole fleet is untouched
+        - with an account: returns "<identity> (<declared>)", identity first so leading
           word-run matchers still resolve it
-        - NEVER exceeds ACTOR_COLUMN_LIMIT, and when it must cut, it cuts the DECLARED
-          half and SAYS SO — the identity is the load-bearing part and is never the
+        - never exceeds ACTOR_COLUMN_LIMIT, and when it must cut, it cuts the declared
+          half and says so — the identity is the part that must survive and is never the
           thing dropped
         - returns `declared_actor` unchanged if the identity alone cannot fit, because
           a truncated identity is worse than an honest un-upgraded one: it would name

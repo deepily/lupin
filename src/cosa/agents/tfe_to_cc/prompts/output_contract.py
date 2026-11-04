@@ -4,14 +4,14 @@ Output-contract parsers for the TFE-to-CC engine variant.
 Claude Code emits diagnosis results as a fenced JSON block at end-of-run:
 
     ```tfe-diagnosis
-    { "clusters": { "C1": {...} } }
+    { "clusters": { "C<n>": {...} } }
     ```
 
 The primary parser extracts that block. A defensive fallback parser does
 best-effort markdown-regex recovery when the fenced block is missing or
 malformed.
 
-Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md
+Design: src/docs/decisions/2026.04.19-tfe-to-cc-parallel-claude-code-engine.md
 """
 
 import json
@@ -37,6 +37,41 @@ _VALID_CATEGORIES = (
 _VALID_VERDICTS = ( "fixed", "failed", "unclear" )
 
 
+def _parse_fenced_clusters_block( text: Optional[ str ], fence: "re.Pattern" ) -> Optional[ dict ]:
+    """
+    Parse one fenced block of text as a JSON object that holds a 'clusters' dict.
+
+    Requires:
+        - text is a string (or None)
+        - fence is a compiled pattern with a named group "body"
+
+    Ensures:
+        - Returns the parsed dict when the fence matches, the body is JSON, and it is an object
+          whose 'clusters' value is a dict
+        - Returns None in every other case
+        - Never raises
+    """
+    if not text:
+        return None
+
+    m = fence.search( text )
+    if not m:
+        return None
+
+    body = m.group( "body" ).strip()
+    try:
+        parsed = json.loads( body )
+    except ( json.JSONDecodeError, ValueError ):
+        return None
+
+    if not isinstance( parsed, dict ):
+        return None
+    if "clusters" not in parsed or not isinstance( parsed[ "clusters" ], dict ):
+        return None
+
+    return parsed
+
+
 def parse_diagnosis_block( text: Optional[ str ] ) -> Optional[ dict ]:
     """
     Extract + parse the `tfe-diagnosis` fenced JSON block from Claude Code output.
@@ -53,25 +88,7 @@ def parse_diagnosis_block( text: Optional[ str ] ) -> Optional[ dict ]:
             - top-level 'clusters' key missing
         - Never raises
     """
-    if not text:
-        return None
-
-    m = _DIAGNOSIS_FENCE.search( text )
-    if not m:
-        return None
-
-    body = m.group( "body" ).strip()
-    try:
-        parsed = json.loads( body )
-    except ( json.JSONDecodeError, ValueError ):
-        return None
-
-    if not isinstance( parsed, dict ):
-        return None
-    if "clusters" not in parsed or not isinstance( parsed[ "clusters" ], dict ):
-        return None
-
-    return parsed
+    return _parse_fenced_clusters_block( text, _DIAGNOSIS_FENCE )
 
 
 def validate_diagnosis_payload( payload: Optional[ dict ] ) -> tuple:
@@ -147,7 +164,7 @@ def validate_diagnosis_payload( payload: Optional[ dict ] ) -> tuple:
 
 def parse_result_block( text: Optional[ str ] ) -> Optional[ dict ]:
     """
-    Extract + parse the `tfe-result` fenced JSON block from Claude Code Phase 3 output.
+    Extract and parse the `tfe-result` fenced JSON block from the apply-fixes output.
 
     Requires:
         - text is a string (or None)
@@ -157,25 +174,7 @@ def parse_result_block( text: Optional[ str ] ) -> Optional[ dict ]:
         - Returns None if no fence, no JSON, or schema-invalid at top level
         - Never raises
     """
-    if not text:
-        return None
-
-    m = _RESULT_FENCE.search( text )
-    if not m:
-        return None
-
-    body = m.group( "body" ).strip()
-    try:
-        parsed = json.loads( body )
-    except ( json.JSONDecodeError, ValueError ):
-        return None
-
-    if not isinstance( parsed, dict ):
-        return None
-    if "clusters" not in parsed or not isinstance( parsed[ "clusters" ], dict ):
-        return None
-
-    return parsed
+    return _parse_fenced_clusters_block( text, _RESULT_FENCE )
 
 
 def validate_result_payload( payload: Optional[ dict ] ) -> tuple:
@@ -187,7 +186,7 @@ def validate_result_payload( payload: Optional[ dict ] ) -> tuple:
         - is_valid iff:
             - payload is a dict with 'clusters' key
             - every cluster has 'verdict' in valid set
-            - commit_sha present on verdict=='fixed' clusters (or explicitly null)
+            - commit_sha is a non-empty string on verdict=='fixed' clusters
             - pytest_passed is bool when present
     """
     issues: list = []
@@ -260,7 +259,7 @@ def parse_result_from_git_log( git_log_output: Optional[ str ], expected_cluster
           without the JSON)
 
     Ensures:
-        - Returns a dict with 'clusters' + 'summary' OR None if input is empty
+        - Returns a dict with 'clusters' + 'summary' or None if input is empty
         - Never raises
     """
     if not git_log_output or not git_log_output.strip():
@@ -334,7 +333,7 @@ def parse_diagnosis_fallback( text: Optional[ str ] ) -> Optional[ dict ]:
         - text is a string (or None)
 
     Ensures:
-        - Returns dict matching the schema OR None
+        - Returns dict matching the schema or None
         - Never raises
     """
     if not text:

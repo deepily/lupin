@@ -34,6 +34,7 @@
 
 import type { AuthManager } from "../auth/AuthManager";
 import type { EventBus } from "../shared/EventBus";
+import { formatClock } from "./time";
 import type { ConnectionState, ConnectionStateChangePayload } from "../shared/types";
 import {
   renderSectionHeader,
@@ -41,9 +42,10 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 
-/** The one thing this pane asks a transport: what state is it in right now. */
+/** What this pane asks a transport: what state is it in, and (Retry-now) restart from `failed`. */
 export interface TransportStateLike {
   readonly state: ConnectionState;
+  restart(): void;
 }
 
 /** A status pill: the words, and the class that colours them. */
@@ -96,8 +98,13 @@ export const SEEDED = Object.freeze( {
 
 /** The health line's four texts (S7), verbatim from notifications.js:1125-1160. */
 export const HEALTH_MONITORING = "Monitoring (90s interval)";
+/** The health line text after the renderer is unmounted. */
 export const HEALTH_STOPPED    = "Stopped";
+/** The health line text when the queue or the audio socket has failed. */
 export const HEALTH_CIRCUIT    = "Circuit open — click Retry-now";
+
+/** The Retry-now button's label, verbatim from the legacy banner's button. */
+export const RETRY_NOW_LABEL   = "Retry now";
 
 /** The readout interval. Legacy's watchdog cadence, and its words say so. */
 export const HEALTH_INTERVAL_MS = 90_000;
@@ -105,6 +112,11 @@ export const HEALTH_INTERVAL_MS = 90_000;
 /** How long the 📋 shows its checkmark before reverting (notifications.js:1607). */
 export const COPY_FEEDBACK_MS = 1_200;
 
+/**
+ * The System Status pane: socket pills, auth, session codes, health line, config reload.
+ *
+ * The ↻ button runs one refresh pass over the sockets, auth, sessions and health line. The config reload has its own button.
+ */
 export interface SystemStatusRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -112,6 +124,11 @@ export interface SystemStatusRenderer {
   refreshForTesting(): Promise<void>;
 }
 
+/**
+ * Options for `createSystemStatusRenderer`.
+ *
+ * The bus, auth, transports, session ids and the config reload call are required. The clock, clipboard and timer hooks are for tests.
+ */
 export interface SystemStatusRendererOptions {
   eventBus : EventBus;
   auth     : Pick<AuthManager, "getToken" | "getCurrentUserEmail" | "isCurrentUserAdmin">;
@@ -126,6 +143,8 @@ export interface SystemStatusRendererOptions {
   reinitConfig: () => Promise<{ status?: string; message?: string }>;
   /** Test injection — where a refresh failure is reported. Defaults to the console. */
   logFn?          : ( message: string ) => void;
+  /** The server zone, read at each stamp; UTC (labelled) while it is unset. */
+  appTimezoneFn?  : () => string | undefined;
   // Test injection.
   nowDateFn?      : () => Date;
   clipboardFn?    : ( text: string ) => Promise<void>;
@@ -137,6 +156,11 @@ export interface SystemStatusRendererOptions {
 
 interface Row { labelText: string; valueEl: HTMLElement; root: HTMLElement }
 
+/**
+ * Builds a status row with a bold label and a value span carrying a test ID and class.
+ *
+ * Returns the row root, the value element and the label text.
+ */
 function statusRow( label: string, testid: string, seeded: string, seededCls: string ): Row {
   const root = document.createElement( "div" );
   root.className = "status-item";
@@ -153,6 +177,11 @@ function statusRow( label: string, testid: string, seeded: string, seededCls: st
   return { labelText: label, valueEl: value, root };
 }
 
+/**
+ * Draws the System Status pane: socket pills, auth, user, sessions, health, config reload.
+ *
+ * It repaints on connection state events and a health timer.
+ */
 class SystemStatusRendererImpl implements SystemStatusRenderer {
   private readonly bus         : EventBus;
   private readonly auth        : SystemStatusRendererOptions[ "auth" ];
@@ -161,6 +190,7 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
   private readonly reinitConfig: SystemStatusRendererOptions[ "reinitConfig" ];
   private readonly logFn       : ( message: string ) => void;
   private readonly nowDateFn   : () => Date;
+  private readonly appTimezoneFn : () => string | undefined;
   private readonly clipboardFn : ( text: string ) => Promise<void>;
   private readonly setTimeoutFn   : ( cb: () => void, ms: number ) => number;
   private readonly clearTimeoutFn : ( handle: number ) => void;
@@ -178,12 +208,16 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
   private queueCodeEl : HTMLElement | null = null;
   private audioCodeEl : HTMLElement | null = null;
   private healthEl    : HTMLElement | null = null;
+  private retryBtn    : HTMLButtonElement | null = null;
   private configEl    : HTMLElement | null = null;
   private reinitBtn   : HTMLButtonElement | null = null;
   private refreshBtn  : HTMLButtonElement | null = null;
   private healthTimer : number | null = null;
   private mounted     = false;
 
+  /**
+   * Creates the renderer from bus, auth, transports and session IDs, with default helpers.
+   */
   constructor( opts: SystemStatusRendererOptions ) {
     this.bus          = opts.eventBus;
     this.auth         = opts.auth;
@@ -193,6 +227,7 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     /* c8 ignore start */ // production-default fallbacks: the console, runtime clock, clipboard and timers; tests inject all seven.
     this.logFn           = opts.logFn           ?? ( ( m ) => console.warn( m ) );
     this.nowDateFn       = opts.nowDateFn       ?? ( () => new Date() );
+    this.appTimezoneFn   = opts.appTimezoneFn   ?? ( () => undefined );
     this.clipboardFn     = opts.clipboardFn     ?? ( ( t ) => navigator.clipboard.writeText( t ) );
     this.setTimeoutFn    = opts.setTimeoutFn    ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) as unknown as number );
     this.clearTimeoutFn  = opts.clearTimeoutFn  ?? ( ( h ) => globalThis.clearTimeout( h ) );
@@ -201,6 +236,11 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     /* c8 ignore stop */
   }
 
+  /**
+   * Builds the pane's header and rows in the root, wires events and starts the health timer.
+   *
+   * Throws if already mounted.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "SystemStatusRenderer already mounted" );
 
@@ -252,6 +292,19 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
 
     const healthRow = statusRow( "Health Monitor", "multiplexer-ws-health-status", SEEDED.health, "status-info" );
     this.healthEl = healthRow.valueEl;
+
+    // Retry-now (row 5a8bd0c6, Rick 2026-10-07): the one way out of `failed`. Hidden unless a
+    // transport is failed; paintHealth shows and hides it with the circuit line it belongs to.
+    const retryBtn = document.createElement( "button" );
+    retryBtn.type = "button";
+    retryBtn.className = "ws-circuit-retry-btn";
+    retryBtn.setAttribute( "data-testid", "multiplexer-ws-retry-now-btn" );
+    retryBtn.setAttribute( "title", "Restart every socket that has given up reconnecting" );
+    retryBtn.textContent = RETRY_NOW_LABEL;
+    retryBtn.hidden = true;
+    retryBtn.addEventListener( "click", () => { this.retryNow(); } );
+    this.retryBtn = retryBtn;
+    healthRow.root.append( retryBtn );
 
     // --- the Config row (S8 / B-5L) -----------------------------------------
     const configRoot = document.createElement( "div" );
@@ -306,6 +359,9 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     this.healthTimer = this.setIntervalFn( () => this.paintHealth(), HEALTH_INTERVAL_MS );
   }
 
+  /**
+   * Removes subscriptions and timers, marks the health line as stopped and empties the root.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -322,11 +378,14 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     if ( this.root !== null ) this.root.replaceChildren();
     this.root = null;
     this.queuePillEl = this.audioPillEl = this.authEl = this.userEl = null;
-    this.queueCodeEl = this.audioCodeEl = this.healthEl = this.configEl = null;
+    this.queueCodeEl = this.audioCodeEl = this.healthEl = this.configEl = this.retryBtn = null;
     this.reinitBtn = this.refreshBtn = null;
     this.mounted = false;
   }
 
+  /**
+   * Runs the full status refresh and returns its promise; used by tests.
+   */
   refreshForTesting(): Promise<void> {
     return this.refreshAll();
   }
@@ -495,12 +554,27 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     const queue = this.transports.queue?.state;
     const audio = this.transports.audio?.state;
 
+    if ( this.retryBtn !== null ) this.retryBtn.hidden = !( queue === "failed" || audio === "failed" );
+
     if ( queue === "connected" && audio === "connected" ) {
-      this.setHealth( `✓ Healthy (checked ${ this.nowDateFn().toLocaleTimeString() })`, "status-success" );
+      this.setHealth( `✓ Healthy (checked ${ formatClock( this.nowDateFn(), this.appTimezoneFn() ) })`, "status-success" );
     } else if ( queue === "failed" || audio === "failed" ) {
       this.setHealth( HEALTH_CIRCUIT, "status-error" );
     } else {
       this.setHealth( `Watchdog: queue=${ queue ?? "none" } audio=${ audio ?? "none" }`, "status-warning" );
+    }
+  }
+
+  /**
+   * Retry-now — restart each transport that is in `failed`, and only those.
+   *
+   * Ensures:
+   *   - a transport in any other state is not touched (restart is also a no-op there)
+   *   - the pane repaints from the transports' own `connection_state_change` events, not here
+   */
+  private retryNow(): void {
+    for ( const transport of [ this.transports.queue, this.transports.audio ] ) {
+      if ( transport?.state === "failed" ) transport.restart();
     }
   }
 
@@ -561,6 +635,11 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 export function createSystemStatusRenderer( opts: SystemStatusRendererOptions ): SystemStatusRenderer {
   return new SystemStatusRendererImpl( opts );

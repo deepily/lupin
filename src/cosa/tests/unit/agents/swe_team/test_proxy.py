@@ -92,6 +92,24 @@ class TestProxyConfigFactory( unittest.TestCase ):
         result = proxy_config.swe_proxy_config_from_config_mgr( cfg_mgr )
         self.assertEqual( result[ "accepted_senders" ], [ "a@x.ai", "b@x.ai" ] )
 
+    def test_ask_before_act_defaults_off( self ):
+        cfg_mgr = MagicMock()
+        cfg_mgr.get.side_effect = lambda key, default=None, return_type=None: default
+        result = proxy_config.swe_proxy_config_from_config_mgr( cfg_mgr )
+        self.assertIs( result[ "ask_before_act" ], False )
+
+    def test_ask_before_act_reads_ini_boolean( self ):
+        cfg_mgr = MagicMock()
+
+        def _get( key, default=None, return_type=None ):
+            if key == "swe engineering proxy ask before act":
+                self.assertEqual( return_type, "boolean" )
+                return True
+            return default
+        cfg_mgr.get.side_effect = _get
+        result = proxy_config.swe_proxy_config_from_config_mgr( cfg_mgr )
+        self.assertIs( result[ "ask_before_act" ], True )
+
     def test_reads_int_cap_levels_from_ini( self ):
         cfg_mgr = MagicMock()
 

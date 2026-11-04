@@ -290,6 +290,27 @@ class TestPushJobRejectionAndCache( _TFQBase ):
             r = self.queue.push_job( "what time is it", "ws1", "u1", "u@x.com" )
         self.assertEqual( r[ "job_id" ], "ag1" )
 
+    def test_out_of_range_similarity_is_rejected_and_routed_to_the_llm_not_the_cache( self ):
+        # A score outside 0..100 is a broken measurement. Bug 78f21b1b read 1024.15 as a perfect match.
+        for bad_score in ( 1024.15, -3.0 ):
+            with self.subTest( score=bad_score ):
+                snap = Mock(); snap.id_hash = "snap1"; snap.question = "q?"
+                self.snap_mgr.get_snapshots_by_question.return_value = [ ( bad_score, snap ) ]
+                agent = Mock(); agent.id_hash = "ag1"
+                with patch.object( self.queue, "_queue_best_snapshot" ) as cached, \
+                     patch.object( tfq, "notify_user_sync" ) as asked, \
+                     patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
+                     _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                                     self.queue._crud_agents_enabled() ), \
+                     patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
+                     patch.object( self.queue, "_dump_code" ), patch( "builtins.print" ) as printed:
+                    r = self.queue.push_job( "what time is it", "ws1", "u1", "u@x.com" )
+                self.assertEqual( r[ "job_id" ], "ag1" )
+                cached.assert_not_called()
+                asked.assert_not_called()
+                said = " ".join( str( c.args[ 0 ] ) for c in printed.call_args_list if c.args )
+                self.assertIn( f"REJECTING out-of-range similarity {bad_score:.1f}%", said )
+
     def test_similarity_confirmation_disabled_auto_accept( self ):
         snap = Mock(); snap.id_hash = "snap1"; snap.question = "q?"
         self.snap_mgr.get_snapshots_by_question.return_value = [ ( 95.0, snap ) ]

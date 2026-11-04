@@ -35,6 +35,7 @@ from cosa.rest.db.embedding_regeneration import (
     remaining_ids,
     save_checkpoint,
     should_proceed,
+    current_hour_in_configured_zone,
     split_batch,
     summarize_verification,
     validate_fresh_vector,
@@ -222,6 +223,36 @@ class TestIsOffPeak:
         # editing the module.
         assert is_off_peak( 5, end_hour=4 ) is False
         assert is_off_peak( 3, end_hour=4 ) is True
+
+
+class TestCurrentHourInConfiguredZone:
+
+    class _Cfg:
+        config_block_id = "Lupin:+Stub"
+
+        def __init__( self, zone ):
+            self.zone = zone
+
+        def get_required( self, key, **_kwargs ):
+            return self.zone
+
+    def _hour( self, monkeypatch, zone, now ):
+        monkeypatch.setattr( "cosa.config.configuration_manager.ConfigurationManager", lambda *a, **k: self._Cfg( zone ) )
+        return current_hour_in_configured_zone( now )
+
+    def test_the_hour_is_the_configured_zones_not_utc_or_new_york( self, monkeypatch ):
+        import datetime as dt
+        utc_noon = dt.datetime( 2026, 10, 30, 12, 0, tzinfo=dt.timezone.utc )
+        assert self._hour( monkeypatch, "Asia/Kolkata", utc_noon ) == 17        # 17:30 in Kolkata
+        assert self._hour( monkeypatch, "America/Los_Angeles", utc_noon ) == 5
+
+    def test_with_no_now_it_reads_the_clock_in_the_configured_zone( self, monkeypatch ):
+        assert 0 <= self._hour( monkeypatch, "Asia/Kolkata", None ) <= 23
+
+    def test_a_missing_or_unknown_zone_stops_it( self, monkeypatch ):
+        from cosa.config.app_timezone import InvalidAppTimezoneError
+        with pytest.raises( InvalidAppTimezoneError ):
+            self._hour( monkeypatch, "Mars/Olympus_Mons", None )
 
 
 class TestShouldProceed:

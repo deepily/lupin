@@ -156,6 +156,6 @@ test( "voice_persona_assigned with no voice_persona is skipped (guard) — no ba
   );
 
   const newIcon = document.getElementById( ui._stripIconIdFor( NEWBIE ) );
-  assert.equal( newIcon, null, "no badge added when the persona is missing" );
+  assert.ok( newIcon === null, "no badge added when the persona is missing" );
   assert.equal( refreshCalls.length, 0, "no broadcast refresh when the guard skips" );
 } );

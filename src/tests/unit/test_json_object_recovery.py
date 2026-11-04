@@ -9,15 +9,34 @@ unchanged) and `recover_json_object` (fence-preference + loud-None logging).
 
 import json
 import logging
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cosa.agents.io_models.utils.json_object_recovery import (
     extract_json_object,
     recover_json_object,
+    save_raw_response,
 )
 
 _FIXTURE_DIR = Path( __file__ ).parent / "fixtures"
+
+_ROOT_PATCH = "cosa.utils.util.get_project_root"
+
+
+def setUpModule():
+    """Point every failure dump at a temp root so the suite never writes into the real io/."""
+    global _TMP, _PATCHER
+    _TMP     = tempfile.TemporaryDirectory()
+    _PATCHER = patch( _ROOT_PATCH, return_value=_TMP.name )
+    _PATCHER.start()
+
+
+def tearDownModule():
+    _PATCHER.stop()
+    _TMP.cleanup()
 
 
 class TestExtractJsonObject( unittest.TestCase ):
@@ -106,6 +125,25 @@ class TestRecoverJsonObject( unittest.TestCase ):
         self.assertNotIn( "x" * 5000, joined )         # the middle is not logged
 
 
+class TestBareQuotesInBreakTags( unittest.TestCase ):
+    """A break tag copied with bare quotes inside a JSON string."""
+
+    BARE = '{"text": "Wait. <break time="1.5s"/> Now. <break time="1.0s"/> Go."}'
+
+    def test_bare_quotes_in_a_break_tag_are_recovered( self ):
+        self.assertEqual( recover_json_object( self.BARE ), { "text": 'Wait. <break time="1.5s"/> Now. <break time="1.0s"/> Go.' } )
+
+    def test_escaped_quotes_are_left_alone( self ):
+        escaped = '{"text": "Wait. <break time=\\"1.5s\\"/> Go."}'
+        self.assertEqual( recover_json_object( escaped ), { "text": 'Wait. <break time="1.5s"/> Go.' } )
+
+    def test_other_corruption_still_fails_loudly( self ):
+        self.assertIsNone( recover_json_object( '{"text": "Wait. <break time="1.5s"/> Go." "next": }' ) )
+
+    def test_an_unrelated_bare_quote_is_not_guessed_at( self ):
+        self.assertIsNone( recover_json_object( '{"text": "He said "hello" to me."}' ) )
+
+
 class TestWhitespaceGatedRecovery( unittest.TestCase ):
     """
     Regression for bug e0bb5a94 defect A: a bounded-CC podcast script completion
@@ -191,6 +229,57 @@ class TestWhitespaceGatedRecovery( unittest.TestCase ):
             "cosa.agents.io_models.utils.json_object_recovery", level="ERROR"
         ):
             self.assertIsNone( recover_json_object( body ) )
+
+
+class TestRawResponseDump( unittest.TestCase ):
+    """An unrecoverable response is saved in full; the path is logged and returned."""
+
+    LOGGER = "cosa.agents.io_models.utils.json_object_recovery"
+
+    def test_failure_saves_the_full_body_and_reports_the_path( self ):
+        big  = "y" * 9000
+        info = {}
+        with self.assertLogs( self.LOGGER, level="ERROR" ) as cm:
+            self.assertIsNone( recover_json_object( big, label="podcast-abc", dump_info=info ) )
+        path = info[ "path" ]
+        self.assertTrue( path.startswith( f"{_TMP.name}/io/json-recovery-failures/" ) )
+        self.assertTrue( path.endswith( "-podcast-abc.txt" ) )
+        self.assertEqual( Path( path ).read_text(), big )     # all 9000 chars, not the bounded 4000
+        self.assertTrue( any( path in line for line in cm.output ) )
+
+    def test_recovered_body_writes_nothing( self ):
+        info = {}
+        self.assertEqual( recover_json_object( '{"a": 1}', dump_info=info ), { "a": 1 } )
+        self.assertEqual( info, {} )
+
+    def test_dump_info_is_optional( self ):
+        with self.assertLogs( self.LOGGER, level="ERROR" ):
+            self.assertIsNone( recover_json_object( "no json", label="x" ) )
+
+    def test_no_label_means_no_file( self ):
+        info = {}
+        with tempfile.TemporaryDirectory() as fresh, patch( _ROOT_PATCH, return_value=fresh ):
+            with self.assertLogs( self.LOGGER, level="ERROR" ):
+                self.assertIsNone( recover_json_object( "no json", dump_info=info ) )
+            self.assertEqual( os.listdir( fresh ), [] )        # not even the io/ directory was made
+        self.assertEqual( info, {} )
+
+    def test_label_is_made_filename_safe( self ):
+        path = save_raw_response( "body", "a/b c" )
+        self.assertTrue( path.endswith( "-a-b-c.txt" ) )
+
+    def test_unwritable_target_returns_none_and_logs( self ):
+        with patch( "os.makedirs", side_effect=OSError( "disk full" ) ):
+            with self.assertLogs( self.LOGGER, level="ERROR" ) as cm:
+                self.assertIsNone( save_raw_response( "body", "x" ) )
+        self.assertTrue( any( "disk full" in line for line in cm.output ) )
+
+    def test_unwritable_target_still_returns_none_from_recover_and_reports_none( self ):
+        info = {}
+        with patch( "os.makedirs", side_effect=OSError( "disk full" ) ):
+            with self.assertLogs( self.LOGGER, level="ERROR" ):
+                self.assertIsNone( recover_json_object( "no json", label="x", dump_info=info ) )
+        self.assertIsNone( info[ "path" ] )
 
 
 if __name__ == "__main__":

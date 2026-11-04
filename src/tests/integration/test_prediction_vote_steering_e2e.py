@@ -239,7 +239,8 @@ class TestPredictionVoteSteeringE2E:
 
         response = requests.post(
             f"{BASE_URL}/api/notify/response",
-            json = { "notification_id": notification_id, "response_value": response_value }
+            json    = { "notification_id": notification_id, "response_value": response_value },
+            headers = self.auth_headers,
         )
         assert response.status_code == 200, f"Response submission failed: {response.text}"
 

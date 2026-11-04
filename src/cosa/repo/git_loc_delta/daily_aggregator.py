@@ -7,15 +7,15 @@ Consumes the dict stream from `GitLogParser.iter_changes()` and emits two views:
 2. **Daily totals**: `dict[date] → {added, deleted, files_touched, commits, by_file_type}`
 
 The aggregator classifies each file's type using `branch_analyzer.FileTypeClassifier`,
-loaded from the sibling package's `ConfigLoader().load()` (reuse R1).
+loaded from the sibling package's `ConfigLoader().load()`.
 
 Design Principles:
 - Single-pass over the input stream (no second iteration)
-- `files_touched` per (date, file_type) counts UNIQUE paths within that bucket
-- `commits` per (date, file_type) counts UNIQUE SHAs touching at least one file of that type
+- `files_touched` per (date, file_type) counts unique paths within that bucket
+- `commits` per (date, file_type) counts unique SHAs touching at least one file of that type
 - Totals view is derived from the by-type view after the pass completes
 
-Usage:
+Example:
     from cosa.repo.git_loc_delta.daily_aggregator import DailyAggregator
 
     agg = DailyAggregator( debug=False, verbose=False )
@@ -72,6 +72,7 @@ class DailyAggregator:
 
         Requires:
             - change is a dict with keys: date, sha, author, path, added, deleted
+              (the aggregator reads date, sha, path, added and deleted; author is not read)
 
         Ensures:
             - Bucket counters updated (added/deleted summed)
@@ -127,7 +128,7 @@ class DailyAggregator:
             - Returns a fresh dict keyed by date (YYYY-MM-DD)
             - Each value: {added, deleted, files_touched, commits, by_file_type: [{file_type, added, deleted, files_touched, commits}, ...]}
             - by_file_type sorted by `added` descending for consistent display
-            - files_touched and commits at the date level count UNIQUE entries across all file types
+            - files_touched and commits at the date level count unique entries across all file types
         """
         # Collapse by-type buckets into per-date rollups
         per_date_added: Dict[str, int] = {}
@@ -199,19 +200,18 @@ class DailyAggregator:
 
     def all_shas( self ) -> Set[str]:
         """
-        Return the set of UNIQUE commit SHAs recorded across every bucket.
+        Return the set of unique commit SHAs recorded across every bucket.
 
-        This is the counted-commit set the coverage guard reconciles against an
-        independent `git rev-list --count` oracle (bug 37a8beeb, 2026-07-13).
-
-        NEVER derive a commit count by summing the per-(date, file_type) `commits`
-        column: those buckets OVERLAP by construction — one commit touching a .py
-        and a .md file appears in both buckets. Summing them double-counts, which is
-        precisely defect C. Commit counts are only ever a `len()` over a SHA set, or
-        a sum along an axis a SHA cannot straddle (a SHA has exactly one date and
-        belongs to exactly one repo; it does NOT have exactly one file_type).
+        The coverage guard reconciles this counted-commit set against an independent
+        `git rev-list` oracle.
 
         Ensures:
+            - A commit count is only ever a `len()` over a SHA set, or a sum along an axis
+              a SHA cannot straddle: a SHA has exactly one date and belongs to exactly one
+              repo, but may touch several file types
+            - A commit count is never the sum of the per-(date, file_type) `commits` column.
+              Those buckets overlap: one commit touching a .py and a .md file appears in
+              both, so summing them double-counts
             - Returns a fresh set (caller may mutate without affecting state)
             - Empty set iff record() has never been called successfully
         """

@@ -279,13 +279,17 @@ class FakeTailer:
         self.has_watchers  = has_watchers
         self.started_at    = None
         self.stopped       = False
+        self.running       = False
+        self.file_epoch    = ""
         FakeTailer.instances.append( self )
 
     def start( self, from_offset=0 ):
         self.started_at = from_offset
+        self.running    = True
 
     async def stop( self ):
         self.stopped = True
+        self.running = False
 
 
 @pytest.fixture
@@ -324,7 +328,15 @@ async def test_a_non_admin_watch_is_refused_and_registers_nothing( router_module
     await router_module.handle_cc_transcript_verb(
         socket, BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
 
-    assert socket.of_type( "error" ), "a non-admin watch produced no refusal"
+    # The refusal is the contract's own frame, pinned whole: state "refused", reason
+    # "admin_only", no epoch. A generic "error" frame is what no transcript screen reads.
+    assert socket.sent == [ {
+        "type"          : "cc_transcript_state",
+        "cc_session_id" : SEAT,
+        "file_epoch"    : None,
+        "state"         : "refused",
+        "reason"        : "admin_only",
+    } ], f"a non-admin watch was not refused in the contract's frame: {socket.sent}"
     assert manager.cc_transcript_watchers_of( SEAT ) == set(), "a non-admin was registered"
     assert fake_tailer.instances == [ ], "a non-admin watch started a tailer"
 
@@ -339,7 +351,8 @@ async def test_a_session_with_no_admin_entry_at_all_is_refused( router_module, m
     socket = FakeSocket()
     await router_module.handle_cc_transcript_verb(
         socket, "a-session-nobody-registered", { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
-    assert socket.of_type( "error" )
+    assert [ ( f[ "type" ], f[ "state" ], f[ "reason" ] ) for f in socket.sent ] == \
+           [ ( "cc_transcript_state", "refused", "admin_only" ) ]
     assert manager.cc_transcript_watchers == { }
 
 
@@ -403,6 +416,134 @@ async def test_a_second_admin_watching_the_same_seat_shares_one_tailer( router_m
             FakeSocket(), browser, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
 
     assert len( fake_tailer.instances ) == 1, "a second watcher started a second tailer"
+    assert manager.cc_transcript_watchers_of( SEAT ) == { BROWSER, BROWSER_2 }
+
+
+@pytest.mark.asyncio
+async def test_a_first_watcher_after_the_tailer_stopped_itself_gets_a_new_tailer( router_module, manager, fake_tailer, epoch_is ):
+    """
+    A tailer that ends its own loop must not shadow the next first watcher.
+
+    The self-stop leaves its entry in the registry. A first watcher arriving afterwards would
+    find the entry, start nothing, and sit on a seat that sends no frames.
+    """
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    first = fake_tailer.instances[ 0 ]
+    manager.drop_all_cc_transcript_watches( BROWSER )
+    first.running = False
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER_2, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+
+    assert len( fake_tailer.instances ) == 2, "the second first-watcher got no tailer"
+    assert router_module._cc_transcript_tailers[ SEAT ] is fake_tailer.instances[ 1 ]
+    assert fake_tailer.instances[ 1 ].running is True
+
+
+@pytest.mark.asyncio
+async def test_a_first_watcher_while_the_old_tailer_still_runs_shares_it( router_module, manager, fake_tailer, epoch_is ):
+    """
+    A tailer that has not stopped is kept when a new first watcher arrives.
+
+    The last watcher can drop with no reaper run yet. Replacing a running tailer would leave two
+    polling the same file and emitting every block twice.
+    """
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    first = fake_tailer.instances[ 0 ]
+    manager.drop_all_cc_transcript_watches( BROWSER )
+    assert first.running is True, "precondition failed"
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER_2, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+
+    assert len( fake_tailer.instances ) == 1, "a running tailer was replaced"
+    assert router_module._cc_transcript_tailers[ SEAT ] is first
+
+
+@pytest.mark.asyncio
+async def test_a_watch_naming_the_tailers_truncation_epoch_is_accepted( router_module, manager, fake_tailer, epoch_is ):
+    """
+    After an in-place truncation the tailer stamps frames with name#unixtime.
+
+    A client holding that epoch from a frame is accepted on reconnect.
+    Judged against the bare name, it was refused and the pane cleared on every append.
+    """
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    fake_tailer.instances[ 0 ].file_epoch = f"{SEAT}#1760000000"
+
+    socket = FakeSocket()
+    await router_module.handle_cc_transcript_verb( socket, BROWSER_2, {
+        "type": "cc_transcript_watch", "cc_session_id": SEAT, "file_epoch": f"{SEAT}#1760000000" } )
+
+    assert socket.of_type( "cc_transcript_state" ) == [ ]
+    assert manager.cc_transcript_watchers_of( SEAT ) == { BROWSER, BROWSER_2 }
+
+
+@pytest.mark.asyncio
+async def test_a_mismatch_reply_carries_the_tailers_truncation_epoch( router_module, manager, fake_tailer, epoch_is ):
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    fake_tailer.instances[ 0 ].file_epoch = f"{SEAT}#1760000000"
+
+    socket = FakeSocket()
+    await router_module.handle_cc_transcript_verb( socket, BROWSER_2, {
+        "type": "cc_transcript_watch", "cc_session_id": SEAT, "file_epoch": "an-older-epoch" } )
+
+    assert socket.of_type( "cc_transcript_state" )[ 0 ][ "file_epoch" ] == f"{SEAT}#1760000000"
+
+
+def test_the_live_epoch_ignores_a_tailer_that_is_not_running_or_names_another_file( router_module, fake_tailer ):
+    tailer = fake_tailer( SEAT, None )
+    router_module._cc_transcript_tailers[ SEAT ] = tailer
+    tailer.file_epoch = f"{SEAT}#1760000000"
+
+    tailer.running = False
+    assert router_module.live_cc_transcript_epoch( SEAT, SEAT ) == SEAT, "a stopped tailer's epoch was used"
+
+    tailer.running = True
+    assert router_module.live_cc_transcript_epoch( SEAT, "another-file" ) == "another-file", (
+        "a tailer one poll behind a /clear overrode the current file"
+    )
+    assert router_module.live_cc_transcript_epoch( SEAT, SEAT ) == f"{SEAT}#1760000000"
+    assert router_module.live_cc_transcript_epoch( OTHER_SEAT, OTHER_SEAT ) == OTHER_SEAT
+
+
+@pytest.mark.asyncio
+async def test_a_second_watcher_never_starts_a_tailer_even_if_the_old_one_is_not_running( router_module, manager, fake_tailer, epoch_is ):
+    """
+    Only the first watcher of a seat may start its tailer.
+
+    A later watcher joins whatever is there. Starting one for every watcher would put a second
+    poll loop on a seat that already has a watcher served by the first.
+    """
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    fake_tailer.instances[ 0 ].running = False
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER_2, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+
+    assert len( fake_tailer.instances ) == 1, "a second watcher started a tailer"
     assert manager.cc_transcript_watchers_of( SEAT ) == { BROWSER, BROWSER_2 }
 
 
@@ -678,7 +819,6 @@ async def test_a_real_tailer_stops_itself_once_its_seat_has_no_watchers( tmp_pat
         "coalesce_window_ms"    : 0,
         "backlog_tail_bytes"    : 65536,
         "block_budget_bytes"    : 0,
-        "ring_buffer_bytes"     : 4096,
     }
 
     async def emit( *args, **kwargs ):
@@ -717,7 +857,7 @@ async def test_a_tailer_with_no_predicate_keeps_running( tmp_path ):
     tailer = CcTranscriptTailer(
         SEAT, emit,
         settings = { "poll_interval_seconds": 0.01, "grace_seconds": 0, "coalesce_window_ms": 0,
-                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0, "ring_buffer_bytes": 4096 },
+                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0 },
         bridge_reader = lambda _: { "transcript_path": str( path ) },
         has_watchers  = None,
     )
@@ -792,7 +932,7 @@ async def test_the_grace_period_is_a_real_wait_not_an_immediate_stop( tmp_path )
     tailer = CcTranscriptTailer(
         SEAT, emit,
         settings = { "poll_interval_seconds": 0.01, "grace_seconds": 0.5, "coalesce_window_ms": 0,
-                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0, "ring_buffer_bytes": 4096 },
+                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0 },
         bridge_reader = lambda _: { "transcript_path": str( path ) },
         has_watchers  = lambda: watched[ "value" ],
     )
@@ -831,7 +971,7 @@ async def test_a_watcher_returning_inside_the_grace_window_cancels_the_teardown(
     tailer = CcTranscriptTailer(
         SEAT, emit,
         settings = { "poll_interval_seconds": 0.01, "grace_seconds": 0.3, "coalesce_window_ms": 0,
-                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0, "ring_buffer_bytes": 4096 },
+                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0 },
         bridge_reader = lambda _: { "transcript_path": str( path ) },
         has_watchers  = lambda: watched[ "value" ],
     )
@@ -946,8 +1086,16 @@ async def test_both_verbs_are_dispatched_from_the_receive_loop( queue_endpoint_e
 
     await websocket_queue_endpoint( websocket=socket, session_id=BROWSER )
 
-    refusals = [ frame for frame in socket.sent
-                 if frame.get( "type" ) == "error" and frame.get( "event" ) == verb ]
+    # Each verb's own refusal frame, both produced only by the handler: a refused watch is a
+    # `cc_transcript_state {state: refused}` frame for this seat, a refused unwatch a generic
+    # error naming the verb.
+    if verb == "cc_transcript_watch":
+        refusals = [ frame for frame in socket.sent
+                     if frame.get( "type" ) == "cc_transcript_state" and frame.get( "state" ) == "refused"
+                     and frame.get( "cc_session_id" ) == SEAT ]
+    else:
+        refusals = [ frame for frame in socket.sent
+                     if frame.get( "type" ) == "error" and frame.get( "event" ) == verb ]
     assert refusals, f"{verb} never reached the handler; frames were {socket.sent}"
 
 

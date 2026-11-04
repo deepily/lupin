@@ -1,8 +1,9 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 2 — EventBus singleton.
 // EventTarget-backed pub/sub with per-listener error isolation.
-// All cross-module communication routes through this bus (per Phase 1 ESLint
-// no-globals rule + Phase 0 Q2 directory layout).
+// Most cross-module communication goes through this bus (per Phase 1 ESLint
+// no-globals rule + Phase 0 Q2 directory layout). The connection state machine
+// also hands state changes straight to its subscribers.
 
 import type {
   LupinEvent,
@@ -12,6 +13,12 @@ import type {
 
 type AnyListener = (e: LupinEvent<unknown>) => void;
 
+/**
+ * The pub/sub bus the stores, renderers and transports share.
+ *
+ * `on` returns the function that removes the listener. A listener that throws is reported as a
+ * `listener_error` event and does not stop the other listeners.
+ */
 export interface EventBus {
   on<T = unknown>(
     type: LupinEventType,
@@ -21,6 +28,11 @@ export interface EventBus {
   emit<T>(event: LupinEvent<T>): void;
 }
 
+/**
+ * Delivers typed events to listeners through a DOM event target.
+ *
+ * A listener that throws is reported as a listener error event instead of breaking other listeners.
+ */
 class EventBusImpl implements EventBus {
   private readonly target = new EventTarget();
   // Map every (type, listener) pair to the wrapper actually registered on the
@@ -31,6 +43,11 @@ class EventBusImpl implements EventBus {
     Map<AnyListener, EventListener>
   >();
 
+  /**
+   * Subscribes a listener to an event type and returns a function that unsubscribes it.
+   *
+   * An error thrown by the listener is caught and re-emitted as a listener error event.
+   */
   on<T = unknown>(
     type: LupinEventType,
     listener: (e: LupinEvent<T>) => void,
@@ -55,6 +72,9 @@ class EventBusImpl implements EventBus {
     return () => this.off(type, listener as AnyListener);
   }
 
+  /**
+   * Removes a listener from an event type. Unknown listeners are ignored.
+   */
   off(type: LupinEventType, listener: AnyListener): void {
     const perType = this.wrappers.get(type);
     if (!perType) return;
@@ -65,6 +85,9 @@ class EventBusImpl implements EventBus {
     if (perType.size === 0) this.wrappers.delete(type);
   }
 
+  /**
+   * Dispatches an event to every listener subscribed to its type.
+   */
   emit<T>(event: LupinEvent<T>): void {
     this.target.dispatchEvent(
       new CustomEvent<LupinEvent<T>>(event.type, { detail: event }),
@@ -94,11 +117,13 @@ class EventBusImpl implements EventBus {
 
 // Singleton instance — every module imports from here. ESLint no-globals rule
 // (Phase 1) prevents creating ad-hoc EventTargets elsewhere.
+/** The one shared bus. Production modules import it rather than creating their own. */
 export const eventBus: EventBus = new EventBusImpl();
 
 // Test-only factory. Production code MUST use the singleton above. Exposed so
 // unit tests can build isolated buses without singleton state leaking between
 // test cases.
+/** Build a separate bus for a test, so no listeners leak between test cases. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createEventBusForTesting(): EventBus {
   return new EventBusImpl();

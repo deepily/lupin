@@ -10,11 +10,39 @@
 
 import { priorityRank, taskTitleLabel, type TaskItem, type TaskListComposite } from "./taskListModel";
 import { personaLabel } from "../shared/personaLabel";
+import { EPIC_UNASSIGNED_KEY } from "./epicBoardModel";
 
-/** One filer's bucket of held rows. */
-export interface HeldFilerGroup {
-  filer : string;
+/** One plan inside one filer's group: the key its rows share, a readable title, those rows and their ids. */
+export interface HeldPlan {
+  key   : string;
+  title : string;
   tasks : TaskItem[];
+  ids   : string[];
+}
+
+/**
+ * One group of held rows: every row, split into plans and the rows that are in none.
+ *
+ * `filer` is the group's identity and keys every set and data attribute downstream.
+ * `label` is the text the operator reads. In creator mode the two are equal. In assignee mode
+ * the identity carries a prefix, so "Maria" the creator and "Maria" the assignee never share state.
+ */
+export interface HeldFilerGroup {
+  filer     : string;
+  label     : string;
+  by        : HoldingGroupBy;
+  tasks     : TaskItem[];
+  plans     : HeldPlan[];
+  ungrouped : TaskItem[];
+}
+
+/**
+ * The one identity of a plan on this pane: the filer it sits under plus its key. A key alone is
+ * not enough — two filers can hold rows under the same key, and each gets its own plan, its own
+ * open state and its own report.
+ */
+export function holdingPlanId( filer: string, key: string ): string {
+  return `${ filer }\u0001${ key }`;
 }
 
 /**
@@ -51,9 +79,55 @@ export function taskFilerLabel( task: TaskItem | null | undefined ): string {
   // title-cases its filer labels; the Finished-Tasks WHO column does not. Folding the
   // casing into the shared helper would silently re-case a column that reads the
   // store's own spelling today.
-  const stripped = personaLabel( task && task.created_by ? String( task.created_by ) : null, "—" );
-  if ( stripped === "—" ) return stripped;
-  return stripped.replace( /\b[a-z]/g, ( c ) => c.toUpperCase() );
+  return personaDisplay( task && task.created_by ? String( task.created_by ) : null, "—" );
+}
+
+/**
+ * A persona string as the pane shows it: session id stripped, each word capitalised.
+ *
+ * Both group labels go through this, so the strip and the casing exist once.
+ *
+ * Ensures:
+ *   - returns `fallback` (capitalised) for a blank or absent value
+ *   - never throws
+ */
+function personaDisplay( raw: string | null, fallback: string ): string {
+  return personaLabel( raw, fallback ).replace( /\b[a-z]/g, ( c ) => c.toUpperCase() );
+}
+
+/** What the pane groups on: the creator (`created_by`) or the assignee (`owner_persona`). */
+export type HoldingGroupBy = "creator" | "assignee";
+
+/** The label of the group that holds rows with no assignee. */
+export const HOLDING_UNASSIGNED_LABEL = "Unassigned";
+
+/**
+ * The assignee's display name, from `owner_persona`.
+ *
+ * `taskFilerLabel` answers who created a row; this answers who would do it.
+ * A blank `owner_persona` reads "Unassigned" because a dash heading names nobody.
+ *
+ * Ensures:
+ *   - "maria"       → "Maria"
+ *   - "mr radio"    → "Mr Radio"
+ *   - absent/blank  → "Unassigned"
+ *   - never throws
+ */
+export function taskAssigneeLabel( task: TaskItem | null | undefined ): string {
+  return personaDisplay( task && task.owner_persona ? String( task.owner_persona ) : null, HOLDING_UNASSIGNED_LABEL );
+}
+
+/** The mark that opens every assignee group's identity. No creator label can start with it. */
+const ASSIGNEE_ID_PREFIX = "\u0001assignee\u0001";
+
+/**
+ * A group's identity from its mode and label.
+ *
+ * Creator groups keep the bare label. Assignee groups carry a prefix, so the same name
+ * under the two modes is two groups with separate open, armed and in-flight state.
+ */
+export function heldGroupId( by: HoldingGroupBy, label: string ): string {
+  return by === "assignee" ? `${ ASSIGNEE_ID_PREFIX }${ label }` : label;
 }
 
 /**
@@ -72,35 +146,106 @@ export function taskFilerLabel( task: TaskItem | null | undefined ): string {
  * definition. (This is the one place the holding area's comparator diverges
  * from `groupTasksByOwner`, which DOES rank by status first.)
  *
+ * 🔴 A PLAN LIVES INSIDE ONE FILER AND NEVER ABOVE IT. Within a filer, rows sharing a
+ * `correlation_key` form a plan; the same key under two filers is TWO plans, one under each,
+ * so an "approve all" can never reach a row another person filed.
+ *
+ * `keep` names plan ids (see holdingPlanId) whose last run left a report to show; such a plan
+ * stays while it has one row left.
+ *
+ * Reproduces notifications.js `_groupHeldRowsByFiler` as observational equivalence.
+ *
  * Ensures:
- *   - returns [ { filer, tasks } ], filers sorted alphabetically
- *   - within a filer, rows sort by priority then title
+ *   - returns [ { filer, tasks, plans, ungrouped } ], filers sorted alphabetically
+ *   - `tasks` is EVERY row of the filer, sorted by priority then title
+ *   - `plans` is [ { key, title, tasks, ids } ], keys sorted alphabetically; `tasks` keep the
+ *     filer's row order and `ids` are those rows' ids
+ *   - a key forms a plan only with two or more of THIS filer's rows (each with an id), except a
+ *     plan named in `keep`
+ *   - a blank key, "epic:unassigned" and a row with no id are never in a plan
+ *   - `ungrouped` is the filer's rows in no plan
  *   - a falsy / non-array tasks argument yields []
  *   - pure: no DOM, no side effects; never throws
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-export function groupHeldRowsByFiler( tasks: unknown ): HeldFilerGroup[] {
-  const rows = Array.isArray( tasks ) ? tasks : [];
+export function groupHeldRowsByFiler( tasks: unknown, keep: ReadonlySet<string> = new Set() ): HeldFilerGroup[] {
+  return groupHeldRows( tasks, "creator", keep );
+}
 
-  const byFiler = new Map<string, TaskItem[]>();
+/**
+ * Group held rows by creator or by assignee.
+ *
+ * Creator mode is `groupHeldRowsByFiler` exactly. Assignee mode buckets on `owner_persona`.
+ * The bucket label lands in the `filer` field in both modes.
+ * That field is the group's identity downstream: its data attribute, open state and plan ids.
+ *
+ * Ensures:
+ *   - everything `groupHeldRowsByFiler` ensures, with "filer" read as "the group identity"
+ *   - `label` is the display text and `by` is the mode, creator for any unknown value
+ *   - an unknown `by` is treated as "creator"
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function groupHeldRows( tasks: unknown, by: HoldingGroupBy, keep: ReadonlySet<string> = new Set() ): HeldFilerGroup[] {
+  const rows      = Array.isArray( tasks ) ? tasks : [];
+  const labelFor  = by === "assignee" ? taskAssigneeLabel : taskFilerLabel;
+
+  const mode    : HoldingGroupBy = by === "assignee" ? "assignee" : "creator";
+  const byFiler = new Map<string, { label: string; tasks: TaskItem[] }>();
   rows.forEach( ( raw ) => {
     const task   = ( raw ?? {} ) as TaskItem;
-    const filer  = taskFilerLabel( task );
+    const label  = labelFor( task );
+    const filer  = heldGroupId( mode, label );
     const bucket = byFiler.get( filer );
-    if ( bucket ) bucket.push( task );
-    else byFiler.set( filer, [ task ] );
+    if ( bucket ) bucket.tasks.push( task );
+    else byFiler.set( filer, { label, tasks: [ task ] } );
   } );
 
   return Array.from( byFiler.keys() )
-    .sort( ( a, b ) => a.localeCompare( b ) )
-    .map( ( filer ) => ( {
-      filer,
-      tasks : ( byFiler.get( filer ) as TaskItem[] ).slice().sort( ( a, b ) => {
+    .sort( ( a, b ) => ( byFiler.get( a ) as { label: string } ).label.localeCompare( ( byFiler.get( b ) as { label: string } ).label ) )
+    .map( ( filer ) => {
+      const sorted = ( byFiler.get( filer ) as { tasks: TaskItem[] } ).tasks.slice().sort( ( a, b ) => {
         const pr = priorityRank( a.priority ) - priorityRank( b.priority );
         if ( pr !== 0 ) return pr;
         return taskTitleLabel( a ).localeCompare( taskTitleLabel( b ) );
-      } ),
-    } ) );
+      } );
+      const byKey = new Map<string, TaskItem[]>();
+      for ( const task of sorted ) {
+        const key = task.correlation_key ? String( task.correlation_key ) : "";
+        // "epic:unassigned" is the deliberate no-plan answer, a bucket and not a plan.
+        if ( key === "" || key === EPIC_UNASSIGNED_KEY || !task.id ) continue;
+        const bucket = byKey.get( key );
+        if ( bucket ) bucket.push( task );
+        else byKey.set( key, [ task ] );
+      }
+      const plans: HeldPlan[] = Array.from( byKey.keys() )
+        .filter( ( key ) => ( byKey.get( key ) as TaskItem[] ).length >= ( keep.has( holdingPlanId( filer, key ) ) ? 1 : 2 ) )
+        .sort( ( a, b ) => a.localeCompare( b ) )
+        .map( ( key ) => ( {
+          key,
+          title : planTitle( key ),
+          tasks : byKey.get( key ) as TaskItem[],
+          ids   : ( byKey.get( key ) as TaskItem[] ).map( ( t ) => String( t.id ) ),
+        } ) );
+      const planned   = new Set( plans.map( ( p ) => p.key ) );
+      const ungrouped = sorted.filter( ( t ) => !( t.correlation_key && t.id && planned.has( String( t.correlation_key ) ) ) );
+      return { filer, label : ( byFiler.get( filer ) as { label: string } ).label, by : mode, tasks : sorted, plans, ungrouped };
+    } );
+}
+
+/**
+ * A plan key as a readable title: "epic:v022-docs-and-reuse" → "v022 docs and reuse".
+ *
+ * The key is an identifier, not a name. Strips a leading "epic:", turns hyphens and
+ * underscores into spaces.
+ *
+ * Ensures:
+ *   - never returns the empty string for a non-empty key: a key that is only a prefix stays as is
+ *   - pure; never throws
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function planTitle( key: string ): string {
+  const title = key.replace( /^epic:/, "" ).replace( /[-_]+/g, " " ).trim();
+  return title === "" ? key : title;
 }
 
 /**

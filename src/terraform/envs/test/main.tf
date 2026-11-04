@@ -98,9 +98,13 @@ module "cloud_run_model_server" {
   project_id = var.project_id
   region     = var.region
 
-  image = "${module.artifact_registry.image_path_prefix}/lupin-model-server:${var.model_server_image_tag}"
+  # A digest wins over the tag: the live service was deployed by digest.
+  image = var.model_server_image_digest != "" ? "${module.artifact_registry.image_path_prefix}/lupin-model-server@${var.model_server_image_digest}" : "${module.artifact_registry.image_path_prefix}/lupin-model-server:${var.model_server_image_tag}"
 
   min_instances         = var.model_server_min_instances
+  max_instances         = var.model_server_max_instances
+  scaling_mode          = var.model_server_scaling_mode
+  manual_instance_count = var.model_server_manual_instance_count
   ingress               = var.model_server_ingress
   allow_unauthenticated = var.model_server_allow_unauthenticated
 

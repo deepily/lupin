@@ -29,6 +29,10 @@
 //     mux     HoldingAreaStore   transitionTask      POST  /api/tasks/{id}/transition
 //     mux     HoldingAreaStore   patchTask           PATCH /api/tasks/{id}      (parity A-2 #0)
 //
+// One read is also driven (row 192fecdf), because a card's 📄 link must reach the same row door:
+//     legacy  notifications.js   _readTask           GET   /api/tasks/{id}
+//     mux     approveLink.ts     taskReaderFor       GET   /api/tasks/{id}
+//
 // The `/api/tasks/flow-ratio*` sites in notifications.js are deliberately OUT of scope:
 // they are a header widget, not a row control, and no accordion surface reaches them.
 //
@@ -149,11 +153,13 @@ import type { TaskListComposite } from "../../../lupin_app/static/js/multiplexer
 import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 import { transitionExtras, TASK_VERBS as MUX_TASK_VERBS } from "../../../lupin_app/static/js/multiplexer/render/taskVerbs";
 import { holdingBatchExtras } from "../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch";
+import { taskReaderFor } from "../../../lupin_app/static/js/multiplexer/render/approveLink";
 import { createEpicBoardRenderer } from "../../../lupin_app/static/js/multiplexer/render/EpicBoardRenderer";
 
 const HERE               = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS   = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
 const TASK_LIST_STORE_TS = resolve( HERE, "../../../lupin_app/static/js/multiplexer/stores/TaskListStore.ts" );
+const APPROVE_LINK_TS    = resolve( HERE, "../../../lupin_app/static/js/multiplexer/render/approveLink.ts" );
 const HOLDING_STORE_TS   = resolve( HERE, "../../../lupin_app/static/js/multiplexer/stores/HoldingAreaStore.ts" );
 
 
@@ -178,6 +184,10 @@ const TRANSITION_PATH   = `/api/tasks/${ENC_ID}/transition`;
 /** CONTRACT LITERAL — the field-edit door, a DIFFERENT endpoint on purpose. */
 const PATCH_METHOD      = "PATCH";
 const PATCH_PATH        = `/api/tasks/${ENC_ID}`;
+
+/** Contract literal: the read door behind a card's 📄 link, a GET on the row's own path. */
+const READ_METHOD       = "GET";
+const READ_PATH         = `/api/tasks/${ENC_ID}`;
 
 /** CONTRACT LITERAL — the authority every operator-driven control records. */
 const AUTHORITY = "user_direct";
@@ -290,14 +300,19 @@ function holdingStore(): { store: any; issued: Issued[] } {
 // run, so a NEW mutating call site added to either client reddens here instead of
 // shipping unwatched.
 
-test( "CENSUS: the legacy card's mutating row-request surface is exactly the two doors driven below", () => {
+test( "CENSUS: the legacy card's per-row request surface is the two mutating doors and two reads, all driven", () => {
   const src = readFileSync( NOTIFICATIONS_JS, "utf8" );
   // Every authedFetch against a task ROW — the `${` is what distinguishes a per-row
   // endpoint from the flow-ratio singletons, which are out of scope by construction.
   const sites = [ ...src.matchAll( /authedFetch\(\s*`\/api\/tasks\/\$\{[^`]*`/g ) ].map( m => m[ 0 ] );
-  assert.equal( sites.length, 2,
-    `the legacy card now has ${ sites.length } per-row request sites, not 2. A new one has ` +
-    `appeared and nothing in this file drives it:\n  ${ sites.join( "\n  " ) }` );
+  // Row 71a11ed7: the third site is `_rowIsAlreadyAt`, a bare GET that re-reads one row after a 422.
+  // It mutates nothing, so it is counted here and driven by
+  // a_refused_approve_on_a_row_already_queued_is_a_success.test.ts, not below.
+  // Row 192fecdf: the fourth is `_readTask`, the GET behind a card's 📄 link and the redraw check.
+  // It is driven by the read cell below, against the multiplexer's `taskReaderFor`.
+  assert.equal( sites.length, 4,
+    `the legacy card now has ${ sites.length } per-row request sites, not 4 (two mutating doors, the ` +
+    `row re-read and the card's read). A new one has appeared and nothing in this file drives it:\n  ${ sites.join( "\n  " ) }` );
   // Both must encode. This is asserted on the SOURCE as well as driven below, because the
   // drive can only ever speak for the paths it exercises.
   for ( const site of sites ) {
@@ -320,6 +335,13 @@ test( "CENSUS: the multiplexer's mutating row-request surface is exactly the fou
   }
 } );
 
+test( "CENSUS: the multiplexer's one row read is built in one place and encodes the id", () => {
+  const src   = readFileSync( APPROVE_LINK_TS, "utf8" );
+  const sites = [ ...src.matchAll( /api\.get<[^>]*>\(\s*`\/api\/tasks\/[^`]*`/g ) ].map( m => m[ 0 ] );
+  assert.equal( sites.length, 1, `approveLink.ts has ${ sites.length } row-read sites, not 1:\n  ${ sites.join( "\n  " ) }` );
+  assert.match( sites[ 0 ]!, /encodeURIComponent/, `the multiplexer's row read builds its URL without encoding the id: ${ sites[ 0 ] }` );
+} );
+
 test( "CENSUS: no verb's extras can collide with the keys the two clients spread in opposite order", () => {
   const seen = new Set<string>();
   for ( const spec of Object.values( TASK_VERB_SPECS as Record<string, any> ) ) {
@@ -333,6 +355,34 @@ test( "CENSUS: no verb's extras can collide with the keys the two clients spread
       `"actor" or "authority", the two clients spread the body in OPPOSITE order and will ` +
       `silently disagree — see the coincidence note in this file's header` );
   }
+} );
+
+
+// ═══════════════════ CELL 0: the read door behind a card's 📄 link ═══════════════════
+
+test( "READ — the legacy card reads a row with a GET on the row's own path, id encoded", async () => {
+  const { ui, issued } = legacy();
+  const row = await ui._readTask( RAW_ID );
+  assert.deepEqual( row, {}, "the legacy read must hand back the parsed body" );
+  assert.equal( issued.length, 1, "the legacy card issued no request at all" );
+  assert.equal( issued[ 0 ]!.method, READ_METHOD );
+  assert.equal( issued[ 0 ]!.path,   READ_PATH );
+  assert.deepEqual( issued[ 0 ]!.body, {}, "a read carries no body" );
+} );
+
+test( "READ — the multiplexer's reader issues the SAME GET on the SAME path", async () => {
+  const asked: string[] = [];
+  const reader = taskReaderFor( { get: async <T,>( path: string ): Promise<T> => { asked.push( path ); return { status: "queued" } as unknown as T; } } );
+  assert.deepEqual( await reader( RAW_ID ), { status: "queued" }, "the multiplexer read must hand back the parsed body" );
+  assert.deepEqual( asked, [ READ_PATH ], "one GET, on the path the legacy card reads" );
+} );
+
+test( "READ — both clients answer a failed read with null, never a throw", async () => {
+  const failing = taskReaderFor( { get: async (): Promise<never> => { throw new Error( "down" ); } } );
+  assert.equal( await failing( RAW_ID ), null );
+  const { ui } = legacy();
+  ui.authedFetch = async () => ( { ok: false, status: 404, json: async () => ( {} ) } );
+  assert.equal( await ui._readTask( RAW_ID ), null );
 } );
 
 

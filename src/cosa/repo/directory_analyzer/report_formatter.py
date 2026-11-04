@@ -31,8 +31,10 @@ Usage:
 import json
 from typing import Dict, Any
 
+from cosa.repo.branch_analyzer.report_formatter import BaseReportFormatter
 
-class DirectoryReportFormatter:
+
+class DirectoryReportFormatter( BaseReportFormatter ):
     """
     Formats directory statistics in multiple output formats.
 
@@ -40,49 +42,20 @@ class DirectoryReportFormatter:
     formats with configuration-driven formatting options.
     """
 
-    def __init__( self, config: Dict, debug: bool = False, verbose: bool = False ):
+    def _read_column_widths( self, col_widths: Dict ) -> None:
         """
-        Initialize report formatter.
+        Read the directory report's column widths onto self.
 
         Requires:
-            - config is dict with formatting settings
-            - debug is boolean
-            - verbose is boolean
+            - col_widths is the configured column_widths dict, possibly empty
 
         Ensures:
-            - Formatter initialized and ready to format statistics
-
-        Raises:
-            - Never raises
+            - sets col_file_type, col_lines, col_files and col_percent, with defaults 18, 12, 8 and 8
         """
-        self.debug   = debug
-        self.verbose = verbose
-        self.config  = config
-
-        # Extract formatting settings
-        self.fmt_config      = config.get( 'formatting', {} )
-        self.output_config   = config.get( 'output', {} )
-        self.json_config     = config.get( 'json_output', {} )
-        self.markdown_config = config.get( 'markdown_output', {} )
-
-        # Column widths
-        col_widths         = self.fmt_config.get( 'column_widths', {} )
         self.col_file_type = col_widths.get( 'file_type', 18 )
         self.col_lines     = col_widths.get( 'lines', 12 )
         self.col_files     = col_widths.get( 'files', 8 )
         self.col_percent   = col_widths.get( 'percent', 8 )
-
-        # Formatting characters
-        self.border_char    = self.fmt_config.get( 'border_char', '=' )
-        self.separator_char = self.fmt_config.get( 'separator_char', '-' )
-        self.border_width   = self.fmt_config.get( 'section_border_width', 80 )
-
-        # Number formatting
-        self.show_percentages = self.output_config.get( 'show_percentages', True )
-        self.decimal_places   = self.output_config.get( 'decimal_places', 1 )
-
-        if self.debug:
-            print( "[DirectoryReportFormatter] Initialized with console/JSON/markdown support" )
 
     def format_console( self, stats: Dict[str, Any], directory_path: str,
                         scan_stats: Dict[str, Any] = None ) -> str:

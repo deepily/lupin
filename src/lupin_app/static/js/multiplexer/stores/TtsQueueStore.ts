@@ -72,7 +72,7 @@ import type {
 // Parity A-1c3 — the queue survives a reload (legacy saveTTSQueueState /
 // restoreTTSQueueState, notifications.js:23045-23147, key
 // `notifications_tts_queue` at :209). Spec ruling 3: StorageService, injected
-// `| null` (src/rnd/v0.2.1/2026.09.15-operator-state-preservation-spec.md §8).
+// `| null` (the R&D write-up "operator state preservation spec" §8).
 //
 // POLARITY: the payload is `{ pending, focusModeActive, focusModeNotificationId }`.
 // `pending` holds the items still WAITING to be spoken, in order. The item that
@@ -88,7 +88,9 @@ import type {
 // `StorageService.keys()` never sees them. It is a separate key from
 // `lupin:operatorState` (A-1c2), whose whole payload is Action Required prompts.
 // ---------------------------------------------------------------------------
+/** The key the speech queue is saved under in the storage service. */
 export const TTS_STORAGE_KEY    = "ttsQueue";
+/** The schema version of the saved speech queue. */
 export const TTS_STORAGE_SCHEMA = 1;
 
 interface PersistedTtsQueue {
@@ -101,6 +103,7 @@ interface PersistedTtsQueue {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The queue of notifications waiting to be spoken, and the one being spoken now. */
 export interface TtsQueueStore {
   /**
    * F0-a active id — the `id_hash` of the notification whose TTS is currently
@@ -162,6 +165,7 @@ export interface TtsQueueStore {
 // would create a second place the slider's default lives without adding meaning.
 const UNGATED_FRACTION = 1;
 
+/** Options for `createTtsQueueStore`: the bus, the storage, focus and preview fraction hooks. */
 export interface TtsQueueStoreOptions {
   bus    : EventBus;
   nowFn ?: () => number;
@@ -187,6 +191,11 @@ export interface TtsQueueStoreOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Models the speech queue: one active item and a first-in first-out list of pending items.
+ *
+ * It supports focus mode, which pauses the roll while an action-required item awaits a response.
+ */
 class TtsQueueStoreImpl implements TtsQueueStore {
   private readonly bus   : EventBus;
   private readonly nowFn : () => number;
@@ -229,6 +238,9 @@ class TtsQueueStoreImpl implements TtsQueueStore {
 
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Creates the queue from a bus and options, restores saved items, listens for audio.
+   */
   constructor(opts: TtsQueueStoreOptions) {
     this.bus = opts.bus;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
@@ -243,26 +255,46 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.subscribe();
   }
 
+  /**
+   * Returns the ID of the item being spoken, or null when nothing is active.
+   */
   current(): string | null {
     return this.active === null ? null : this.active.id_hash;
   }
 
+  /**
+   * Returns the item being spoken, or null when nothing is active.
+   */
   activeItem(): TtsQueueItem | null {
     return this.active;
   }
 
+  /**
+   * Reports whether an item is currently active.
+   */
   isPlaying(): boolean {
     return this.active !== null;
   }
 
+  /**
+   * Returns a copy of the pending items waiting behind the active one.
+   */
   pending(): ReadonlyArray<TtsQueueItem> {
     return this.queue.slice();
   }
 
+  /**
+   * Returns how many items are waiting behind the active one.
+   */
   itemQueueLength(): number {
     return this.queue.length;
   }
 
+  /**
+   * Adds an item to the queue, active at once only if nothing speaks and no hold is set.
+   *
+   * Drops automatic items when the live volume fraction is zero; user-initiated items still pass. While a restore hold is set, the item is appended to the pending queue even if nothing is active. Emits a change event unless the item was dropped.
+   */
   enqueue(item: TtsQueueItem): void {
     // 🔴 ROW aa13fdd7 — 0% MEANS SILENT, AND THIS IS THE ONE PLACE THAT DECIDES IT.
     //
@@ -297,6 +329,12 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.emit();
   }
 
+  /**
+   * Discards the spoken item and promotes the next pending one, then emits a change.
+   *
+   * Does nothing in focus mode, or when nothing is active and nothing is pending.
+   * With an active item and none pending, it clears the active item.
+   */
   advance(): void {
     // 70cbff3e — pause-the-ROLL belt: while focused, advance() is a hard no-op.
     // The PRIMARY hold is that onAudioEnded enters focus instead of advancing;
@@ -311,6 +349,11 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.emit();
   }
 
+  /**
+   * Removes the item with the given ID, promoting the next pending item if it was active.
+   *
+   * Does nothing when the ID is not queued.
+   */
   removeById(idHash: string): void {
     if (this.active !== null && this.active.id_hash === idHash) {
       // Removing the current item — resync: promote the next pending to active.
@@ -324,6 +367,11 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.emit();
   }
 
+  /**
+   * Empties the active item and the pending list and leaves focus mode, then emits a change.
+   *
+   * Does nothing when everything is already empty and not focused.
+   */
   clear(): void {
     // No-op when already empty AND not focused (avoids a spurious null→null
     // emission). 70cbff3e: a focused-but-empty queue (active discarded at enter,
@@ -338,10 +386,18 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.emit();
   }
 
+  /**
+   * Reports whether the queue is paused in focus mode awaiting a response.
+   */
   focusMode(): boolean {
     return this.focusModeActive;
   }
 
+  /**
+   * Leaves focus mode early so the queue rolls on, as when the user presses Resume.
+   *
+   * Harmless when not focused.
+   */
   resumeFocus(): void {
     // Manual Resume (the focus Resume button) — the user chooses to resume the
     // queue early (legacy toggleTTSFocusMode :17348 → exitTTSFocusMode :17309).
@@ -349,6 +405,9 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.exitFocus();
   }
 
+  /**
+   * Unsubscribes every bus listener the store registered; used by tests for cleanup.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
@@ -606,6 +665,11 @@ class TtsQueueStoreImpl implements TtsQueueStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the store.
+ *
+ * It restores a saved queue from storage and subscribes to the bus at once.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createTtsQueueStore(opts: TtsQueueStoreOptions): TtsQueueStore {
   return new TtsQueueStoreImpl(opts);

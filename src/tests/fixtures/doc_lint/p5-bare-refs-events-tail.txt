@@ -1,0 +1,25 @@
+
+Heartbeat Arbiter — fleet event glob/tail (Rachel's wiring lane).
+
+The Arbiter consumes the local Hook's exhaust: per-session append-only JSONL
+event files under the fleet dir `~/.claude/heartbeat-events/<session>.jsonl`
+(canonical design §0.2; arbiter design `03` §3). This module is the
+read/sense I/O: glob the dir + tail each session file from a tracked byte
+offset, returning only the NEW records since the last poll.
+
+Design choices (arbiter `03` §3 "track a per-file read offset"):
+    - **Byte-offset tail** (not full re-read): seek to the last offset, read
+      only new bytes → O(new data) per poll, not O(file). Bounded latency as
+      event files grow.
+    - **Partial-line safe**: a trailing line still being written (no closing
+      newline yet) is NOT consumed — the offset advances only to the last
+      complete newline, so the partial line is re-read intact next poll.
+    - **Rotation/truncation safe**: if a file SHRANK below the tracked offset
+      (rotated or recreated), reset to offset 0 and re-read from the top.
+    - **Never raises** (the §0 #2 observer invariant): a missing dir, an
+      unreadable file, or a malformed line yields empty/partial results, never
+      an exception — the Arbiter degrades safe, the Hooks are unaffected.
+    - **`:7999`-free**: pure local filesystem reads.
+
+This is the same never-raises discipline as the `transcript_reader` /
+`heartbeat_events.read_events` modules.

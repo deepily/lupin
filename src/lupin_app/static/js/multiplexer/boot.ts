@@ -28,6 +28,7 @@ import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
 import { createAuthManager } from "./auth/AuthManager";
 import { redirectToLoginIfUnauthenticated, bounceToLoginOnDeadSession, logout } from "./auth/authGuard";
+import { createPokeMuteSwitch } from "./render/pokeMuteSwitch";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
@@ -36,6 +37,7 @@ import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrato
 import { createSessionTranscriptStore } from "./stores/SessionTranscriptStore";
 import { createSessionTranscriptRoster } from "./stores/SessionTranscriptRoster";
 import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
+import { createAwaitingResponseHydration } from "./stores/awaitingResponseHydration";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { wireTtsPlayback } from "./wireTtsPlayback";
@@ -93,14 +95,12 @@ import { recordingManager } from "./audio/recordingManager";
 import { createQaPaneRenderer } from "./render/QaPaneRenderer";
 import { createSubmitJobsPaneRenderer } from "./render/SubmitJobsPaneRenderer";
 import { createActionRequiredMic } from "./render/actionRequiredMic";
+import { taskReaderFor } from "./render/approveLink";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
-// Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
-// sender whose `conversation_mode_active === true` above the default
-// most-recent-activity-first ordering; ties within the same conversation-mode
-// state fall back to activity-based sort. Per F-Arnold-D3: sender-level
-// signature (NOT entry-level). The default sort (no opts override) preserves
-// Phase 5 behavior; this override only activates when wired here at boot.
+/**
+ * Orders senders with conversation mode active first, then by most recent activity.
+ */
 const phase6cSenderSort: SenderSortComparator = (a, b) =>
   (Number(b.conversation_mode_active) - Number(a.conversation_mode_active))
   || (b.last_active_ts - a.last_active_ts);
@@ -123,6 +123,9 @@ const SESSION_ID_ANIMALS = [
   "bear",    "lion",    "hawk",  "fox",   "owl",
 ];
 
+/**
+ * Returns a random element of a non-empty array.
+ */
 function pickRandom<T>(arr: ReadonlyArray<T>): T {
   // arr is non-empty by construction (ADJECTIVES / ANIMALS literal arrays).
   // The non-null assertion is justified: noUncheckedIndexedAccess returns
@@ -131,15 +134,24 @@ function pickRandom<T>(arr: ReadonlyArray<T>): T {
   return arr[Math.floor(Math.random() * arr.length)] as T;
 }
 
+/**
+ * Builds a fallback session ID from a random adjective and animal.
+ */
 function generateSessionId(): string {
   return `${pickRandom(SESSION_ID_ADJECTIVES)} ${pickRandom(SESSION_ID_ANIMALS)}`;
 }
 
+/**
+ * Returns this page's WebSocket base URL, using wss on HTTPS pages.
+ */
 function buildWebSocketBaseUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}`;
 }
 
+/**
+ * Emits a page or network lifecycle event on the event bus with the current time.
+ */
 function emitLifecycle(type: "page_hidden" | "page_visible" | "network_online" | "network_offline", extra?: { bfcache?: true }): void {
   const ts = Date.now();
   const payload: LifecyclePayload = { ts };
@@ -152,6 +164,9 @@ function emitLifecycle(type: "page_hidden" | "page_visible" | "network_online" |
   });
 }
 
+/**
+ * Turns visibility, online, offline and page restore events into lifecycle events.
+ */
 function attachLifecycleListeners(): void {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
@@ -171,6 +186,9 @@ function attachLifecycleListeners(): void {
   });
 }
 
+/**
+ * Starts the multiplexer page: login check, API client, transports and renderers.
+ */
 function bootMultiplexer(): void {
   document.title = "Multiplexer";
 
@@ -267,9 +285,16 @@ function bootMultiplexer(): void {
     DEFAULT_TTS_FRACTION,
   );
 
+  // The server zone, handed over when /api/config/client answers (see the fetch below).
+  // Everything that stamps a time reads it through a getter, so a stamp taken before the
+  // answer shows labelled UTC rather than the browser's zone.
+  const appZone: { name: string | undefined } = { name: undefined };
+  const appTimezoneFn = (): string | undefined => appZone.name;
+
   const stores = createStores({
     eventBus,
     storage,
+    appTimezoneFn,
     // Row aa13fdd7 — 0% means silent, gated inside TtsQueueStore.enqueue so every
     // automatic producer is covered by one check rather than each remembering.
     ttsLiveFraction     : readLiveTtsFraction,
@@ -324,7 +349,7 @@ function bootMultiplexer(): void {
   // the renderer always exists before the answer arrives. It is handed over when
   // it lands, and `setAppTimezone` drops the render caches so the cards actually
   // repaint. On a failed fetch nothing is handed over and the behaviour is
-  // exactly today's: browser-local.
+  // exactly today's: times show in labelled UTC.
   const ttsPreviewConfig = { enabled: false, minChars: 100 };
   // Parity B-2 J20 — the SAME fetch now also resolves the test-suite card's auto-fix
   // box. §6 item 14 called for exactly this: the seam already existed and read only
@@ -353,11 +378,19 @@ function bootMultiplexer(): void {
     .then((c) => {
       ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
       ttsPreviewConfig.minChars = c.tts_preview_min_chars || 100;
-      if (c.app_timezone) renderer.setAppTimezone(c.app_timezone);
+      if (c.app_timezone) {
+        appZone.name = c.app_timezone;
+        renderer.setAppTimezone(c.app_timezone);
+      } else {
+        console.error("multiplexer: /api/config/client carries no app_timezone, so times show in UTC");
+      }
       stores.submitJobs.setAutoFixDefault(!!c.test_fix_expediter_auto_fix_enabled);
       renderer.setTtsInteractionMode(c.tts_interaction_mode === "solo" ? "solo" : "chorus");
     })
-    .catch(() => { /* keep legacy's defaults: disabled, 100 chars, browser-local zone, chorus icons */ });
+    .catch((err) => {
+      // Keep legacy's defaults (disabled, 100 chars, chorus icons). With no app_timezone, times show in UTC.
+      console.error("multiplexer: the client config fetch failed, so app_timezone is unset and times show in UTC", err);
+    });
   wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({
     fraction : readLiveTtsFraction(),
     enabled  : ttsPreviewConfig.enabled,
@@ -526,6 +559,12 @@ function bootMultiplexer(): void {
     isAdmin : () => authManager.isCurrentUserAdmin(),
     // Parity A-2 #11 — the badge reveals Queue Filter Settings.
     revealFilterSettings,
+    // Row 3526fb95 — the stop poke switch: an indicator for everyone, a toggle for admins.
+    pokeMuteSwitch : createPokeMuteSwitch({
+      api     : apiClient,
+      isAdmin : () => authManager.isCurrentUserAdmin(),
+      onError : ( message, error ) => console.error( message, error ),
+    }),
   });
   const notificationsHeaderMountEl = document.getElementById("notifications-header-mount");
   if (notificationsHeaderMountEl === null) throw new Error("multiplexer: #notifications-header-mount not found");
@@ -575,6 +614,9 @@ function bootMultiplexer(): void {
   const actionRequiredRenderer = createActionRequiredRenderer({
     eventBus,
     stores        : { actionRequired: stores.actionRequired },
+    // Row ed6db05a — the thumbs on a card's prediction hint POST through the same store the
+    // notification cards use. Without it the controls are not mounted at all (row 2650df28).
+    predictionVoteStore : stores.predictionVote,
     revealSection : () => sectionToolbarRenderer.showSection("action-required-section"),
     // A-2 #2j/#2k/#2l — the card 🎤s upload with the operator's token, as every other mic does.
     getAuthToken  : () => cachedAccessToken,
@@ -587,6 +629,7 @@ function bootMultiplexer(): void {
   // (canonical AC9 order: notifications → jobs → actionRequired → ttsChrome).
   const ttsChromeRenderer = createTtsChromeRenderer({
     eventBus,
+    appTimezoneFn,
     stores : { audio: stores.audio, ttsQueue: stores.ttsQueue },   // WP4 — item queue
   });
   const ttsMountEl = document.getElementById("tts-pane");
@@ -747,12 +790,15 @@ function bootMultiplexer(): void {
     api               : apiClient,
     stores            : { sessionStrip: stores.sessionStrip, senders: stores.senders, notifications: stores.notifications },
     getEmail          : () => authManager.getCurrentUserEmail(),
-    getEffectiveHours : () => effectiveHoursForQuery(stores.notifications.historyWindow(), new Date()),
+    getEffectiveHours : () => effectiveHoursForQuery(stores.notifications.historyWindow(), new Date(), appZone.name),
     // Row 98305d96 — legacy's admin "Not Mine": only an admin in mode "others" asks the
     // server to drop notifications from their own jobs. Everyone else sends nothing extra.
     getExcludeOwnJobs : () => authManager.isCurrentUserAdmin() && stores.notifications.filterMode() === "others",
   });
   void coldHistoryHydration.run();
+  // Row 4ca5776c — a response card filed while this page was closed is not in the history above as a
+  // card. Ask the server for the ones still waiting and let the store add them as a push would.
+  void createAwaitingResponseHydration({ api: apiClient, stores: { actionRequired: stores.actionRequired } }).run();
   // v0.1.9 focus-bar eager re-hydrate (option 2) — the cold hydrate above runs
   // ONCE at boot; after a long silent window the host prune reaps stale sessions
   // and the strip only lazily refills (~15-20min) as sessions re-announce a
@@ -772,10 +818,16 @@ function bootMultiplexer(): void {
   // #layout-mode-toggle). Reads the readingPane store (gesture/AR-driven) and
   // the actionRequired store (count only, for the WP5 lift/drain).
   // Row 27760534 — consoleSeat lets bust-out pop the console out to its own /app/console tab.
+  const abstractTooltip = createAbstractTooltip({ getLayoutMode: () => stores.readingPane.getLayoutMode() });
   const readingPaneRenderer = createReadingPaneRenderer({
     eventBus,
     stores      : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
     consoleSeat : () => sessionTranscriptRenderer.showingSeat(),
+    approveSender : stores.holdingArea,
+    // Row 192fecdf — a card's 📋 view link and the redraw check on its approve links read one row.
+    // A failed read is null, which leaves the link live and the overlay saying so.
+    taskReader    : taskReaderFor(apiClient),
+    tooltip       : abstractTooltip,
   });
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
@@ -787,7 +839,7 @@ function bootMultiplexer(): void {
   sessionTranscriptRenderer.mount(sessionTranscriptMountEl);
   // Row fff605be — the 📋 indicator in VERTICAL layout. The Reading Pane owns
   // horizontal; this floating tooltip (legacy parity) owns vertical.
-  createAbstractTooltip({ getLayoutMode: () => stores.readingPane.getLayoutMode() }).mount();
+  abstractTooltip.mount();
   // Lane C (v0.1.9) — broadcast-to-all-CC compose card. Recipient auto-refresh
   // rides the existing store_session_strip_changed event (no new EventBus event).
   // B1 (01-A): mounted FIRST so its rendered subtree hosts the re-nested commons
@@ -914,6 +966,7 @@ function bootMultiplexer(): void {
   // the two are independent.
   const finishedTasksRenderer = createFinishedTasksRenderer({
     eventBus,
+    appTimezoneFn,
     store : stores.finishedTasks,
     // Parity A-2 #6 — the ONE section whose collapse survives a reload, matching
     // legacy's `LUPIN_ACCORDION_PERSIST_KEYS['finished-tasks-section']`. The
@@ -1088,6 +1141,7 @@ function bootMultiplexer(): void {
   if (systemStatusMountEl === null) throw new Error("multiplexer: #system-status-pane not found");
   const systemStatusRenderer = createSystemStatusRenderer({
     eventBus,
+    appTimezoneFn,
     auth       : authManager,
     transports : { queue: transports.queue, audio: transports.audio },
     sessionIds : { queue: queueSessionId, audio: audioSessionId },
@@ -1100,7 +1154,7 @@ function bootMultiplexer(): void {
   // is markup that exists before the writers do. No store, no poll, no timer.
   const debugPaneMountEl = document.getElementById("debug-pane");
   if (debugPaneMountEl === null) throw new Error("multiplexer: #debug-pane not found");
-  const debugPanelRenderer = createDebugPanelRenderer({});
+  const debugPanelRenderer = createDebugPanelRenderer({ appTimezoneFn });
   debugPanelRenderer.mount(debugPaneMountEl);
   // Parity B-7 — Direct TTS Test. The cache-first play is the point (D4): a hit
   // plays the blob HERE, with no POST and no /ws/audio round trip; a miss is an

@@ -1,29 +1,26 @@
 """
-CJ Flow v2 — the single command→agent registry (plan §3, §3a; revised by cascade
-handoff §3.A, R-A1/R-A2/R-A3; agentic set folded in by the 2026.08.15
-single-source design, phase 1).
+CJ Flow v2: the single command-to-agent registry.
 
-Replaces the three v1 routing mechanisms the survey found drifting apart — the
-LLM-routing if/elif chain reached from `push_job()` / `get_routing_command()` in
-`todo_fifo_queue.py`, the `MODE_TO_AGENT` map in `todo_fifo_queue.py`, and the
-command if/elif in `create_agentic_job()` in `agentic_job_factory.py`. (Symbols,
-not line numbers — grep the name; line numbers drift and mislead.) One map, keyed on
-the FULL routing string, is what the §9 registry-guard test defends so that drift
-cannot reappear.
+One table maps every routing command to the agent or job that handles it. It replaces three
+routing mechanisms that had drifted apart in v1:
 
-Resolution order for `required_args` is the MIGRATION PATH, not a fallback chain
-(§3a): the agent declares its own args first (phase 2), then the `JOB_ARG_CONTRACTS`
-table (today, for the agentic commands), then the spec's literal tuple (today, for
-the conversational agents). In phase 1 no agent declares, so every lookup lands on
-a table exactly as it does now.
+- the LLM-routing if/elif chain reached from `push_job()` and `get_routing_command()` in
+  `todo_fifo_queue.py`
+- the `MODE_TO_AGENT` map in `todo_fifo_queue.py`
+- the command if/elif in `create_agentic_job()` in `agentic_job_factory.py`
 
-Phase 1 of the single-source design (2026.08.15-agent-registration-single-source.md
-§5.1 / §7): the registry now OWNS the agentic set. Every command carries a
-`CommandClass`, and the four template buckets are DERIVED from that label (§5.1.2)
-rather than hand-maintained. `resolve()` stays scoped to CONVERSATIONAL so this
-bookkeeping change does not silently widen what the router-facing resolver returns
-(§5.1.3); agentic commands are reached through the separate `resolve_agentic()`.
-No behaviour change: `resolve()` returns exactly what it did before.
+The map is keyed on the full routing string. The registry-guard test defends that one map so
+the drift cannot come back.
+
+The registry owns the agentic set. Every command carries a `CommandClass`. The four template
+buckets are derived from that label, not maintained by hand. `resolve()` stays scoped to the
+conversational class, so adding the agentic commands does not widen what the router-facing
+resolver returns. Agentic commands are reached through the separate `resolve_agentic()`.
+
+A spec's `required_args` resolve along a migration path, not a fallback chain. The agent
+declares its own args first. Then the `JOB_ARG_CONTRACTS` table is read, which today covers
+the agentic commands. Last is the spec's literal tuple, which today covers the conversational
+agents. No agent declares its own args yet, so every lookup lands on one of the two tables.
 """
 
 from dataclasses import dataclass, replace
@@ -44,9 +41,10 @@ from cosa.agents.runtime_argument_expeditor.expeditor      import ArgSpec
 
 class CommandClass( Enum ):
     """
-    What a router command IS — the label the derived buckets (§5.1.2) and the
-    phase-2 class-aware drift guard read instead of inferring class from a
-    command's absence from one list or another.
+    The kind of router command a spec describes.
+
+    The derived template buckets and the class-aware drift guard read this label. They do not
+    infer class from a command's absence from one list or another.
     """
     CONVERSATIONAL = "conversational"   # fast-lane agent, no job, no CLI
     AGENTIC        = "agentic"          # builds a job; has an argument contract
@@ -57,24 +55,24 @@ class CommandClass( Enum ):
 @dataclass( frozen=True )
 class AgentSpec:
     """
-    One command's binding: the full routing string, its class, the factory that
-    builds its agent (conversational only), its short-form aliases, whether its
-    results are snapshotable, its literal required-args fallback, and — for the
-    agentic set — the CLI module and the typed `ArgSpec` carrier.
+    One command's binding: routing string, class, agent factory, aliases and argument source.
+
+    A spec also records whether its results are snapshotable and its literal required-args
+    fallback. For the agentic set it carries the CLI module and the typed `ArgSpec`.
 
     Requires:
-        - command is the FULL routing string (e.g. "agent router go to weather");
-          short forms live in aliases (R-A1)
-        - factory constructs a CONVERSATIONAL agent (the executor calls it with
+        - command is the full routing string (e.g. "agent router go to weather");
+          short forms live in aliases
+        - factory constructs a conversational agent (the executor calls it with
           the bare question and the shared 11-kwarg signature); it is None for
-          agentic / control / none commands, which resolve() never returns
+          agentic, control and none commands, which resolve() never returns
 
     Ensures:
         - required_args resolves agent-first (declared_args), then JOB_ARG_CONTRACTS,
-          then the literal _required_args tuple (§3a migration path)
+          then the literal _required_args tuple
         - frozen: specs are immutable table data
-        - arg_spec, when present, is an ArgSpec built via ArgSpec.from_entry so the
-          expeditor's copy semantics come along and no field is re-declared (§5.1.1)
+        - arg_spec, when present, is an ArgSpec built via ArgSpec.from_entry, so the
+          expeditor's copy semantics come along and no field is re-declared
     """
     command       : str
     factory       : Optional[ Callable[ ..., Any ] ] = None
@@ -124,14 +122,14 @@ class AgentSpec:
     @property
     def required_args( self ) -> tuple[ str, ... ]:
         """
-        Resolve this command's required arguments along the §3a migration path.
+        Resolve this command's required arguments along the migration path.
 
         Requires:
             - JOB_ARG_CONTRACTS is importable
 
         Ensures:
             - Returns the agent's own declared required args when its factory
-              implements declared_args() (phase 2 destination)
+              implements declared_args()
             - Else the JOB_ARG_CONTRACTS entry's required_user_args when present
             - Else this spec's literal _required_args, or () when unset
         """
@@ -184,18 +182,17 @@ _CONVERSATIONAL = (
 
 def _agentic_spec( command, entry ):
     """
-    Build an AGENTIC AgentSpec from a raw JOB_ARG_CONTRACTS entry (§5.1 / §5.1.1).
+    Build an agentic AgentSpec from a raw JOB_ARG_CONTRACTS entry.
 
     Ensures:
-        - arg_spec is ArgSpec.from_entry( entry ) — the eight expeditor fields are
-          reused, not re-declared, so the copy semantics (bug 8aa89f42) come along
+        - arg_spec is ArgSpec.from_entry( entry ). The eight expeditor fields are
+          reused, not re-declared, so the copy semantics come along
         - cli_module is the entry's, or None (test_suite is API-invoked)
-        - cli_style is "module" for a *.cli module-with-__main__-guard, "package"
+        - cli_style is "module" for a *.cli module with a __main__ guard, "package"
           for a package needing __main__.py, or None when there is no CLI. It is
-          documentation only in phase 1 — no guard branches on it (§6 assertion 5′)
-        - job_factory is the command's builder from agentic_job_factory.JOB_BUILDERS
-          (row d2e23ecb, phase 5 step 2), or None if the table has no entry — which
-          test_1b_factory_branches_equal_the_owned_agentic_set makes a red test
+          documentation only; no guard branches on it
+        - job_factory is the command's builder from agentic_job_factory.JOB_BUILDERS,
+          or None if the table has no entry. A test turns that gap into a failure
     """
     cli_module = entry.get( "cli_module" )
     if cli_module is None:
@@ -353,16 +350,11 @@ AUTO_ROUTE_DESCRIPTION = "Normal LLM-based routing"
 # ── The one table (§5.1) ──────────────────────────────────────────────────────
 def _build_registry( *groups ):
     """
-    Build the command→spec table, FAILING LOUD on a duplicate command (M4).
+    Build the command-to-spec table, failing loudly on a duplicate command.
 
-    A dict comprehension over the spec tuples silently drops a duplicate — last
-    one wins, no error — so a command declared twice in two different class groups
-    would vanish, and the partition guard would pass on a corrupted table because
-    the dedup already happened. Raise instead: a command is declared exactly once,
-    in exactly one class. The invariant is now ENFORCED at construction, not
-    ASSERTED by a test — so no count-comparison guard sits over it (a violation
-    raises at import, before any test could observe an inequality; that guard would
-    be vacuous). The falsifiable check that survives is "a dup RAISES".
+    A dict comprehension silently drops a duplicate, because the last one wins. A command declared
+    twice would vanish and the partition guard would pass on a corrupted table. So this raises.
+    The rule is enforced at construction, so a count comparison over the result would be vacuous.
 
     Requires:
         - each group is an iterable of AgentSpec
@@ -425,28 +417,11 @@ USER_INITIABLE_COMMANDS = frozenset( c for c, s in REGISTRY.items() if s.user_in
 
 def resolve( command, crud_enabled ):
     """
-    Resolve a routing command to its CONVERSATIONAL AgentSpec, or None, WITH the
-    CRUD fork already applied.
+    Resolve a routing command to its conversational AgentSpec, or None, with the CRUD fork.
 
-    ONE resolver, and it is the only thing that applies the fork. There used to be
-    two — this one pinned to the non-CRUD class, and resolve_voice() which forked —
-    and the pin existed to protect ONE thing: cache-hit REPORTING. CRUD agents are
-    never snapshotted, so a v2 report that counted forked calendar and todo traffic
-    read 0% cache-hit and looked like a v2 bug. Rick ruled on 2026-08-21 that a
-    reporting constraint does not get to shape the table every request routes
-    through: the exclusion moved to whatever READS cache-hit counts, and the fork
-    moved here, where a caller cannot reach the wrong class by forgetting which
-    resolver to call.
-
-    `crud_enabled` is REQUIRED, not defaulted, for the same reason. A default would
-    restore the old failure by another name — a caller that forgets the argument
-    would silently get the un-forked class, which is exactly the bug the fold
-    removes.
-
-    Scoped to CONVERSATIONAL on purpose (§5.1.3): registering the agentic set must
-    not silently change what this router-facing function returns. Agentic commands
-    still resolve to None here and the flow routes None to the receptionist,
-    exactly as before phase 1; agentic specs are reached via resolve_agentic().
+    This is the only place that applies the CRUD fork, so a caller cannot pick the wrong resolver.
+    CRUD agents are never snapshotted, so forked traffic reads 0% cache-hit. That exclusion
+    belongs in the reader of the counts. `crud_enabled` has no default, so a caller cannot forget it.
 
     Requires:
         - command is a routing string: a full form ("agent router go to weather")
@@ -455,18 +430,16 @@ def resolve( command, crud_enabled ):
 
     Ensures:
         - Returns the AgentSpec for a conversational command or one of its aliases
-        - Applies the CRUD fork ONLY when crud_enabled is True AND the spec declares
-          a crud_factory — so a flag flip changes calendar and todo and nothing else
-        - Forks BOTH user-facing strings together: `label` (heard) and `display_name`
-          (read). Forking one and not the other would leave a user reading "Todo List"
-          while hearing "todo (CRUD)" about the same request
-        - A forked spec carries snapshotable=False, because the writer refuses to
-          serialize CRUD agents (running_fifo_queue:1563). The table used to say
-          "cache this" about a class the writer would not cache — two sources of
-          truth that disagreed by construction.
-        - Returns None for every non-conversational command — agentic, deferred,
-          control, receptionist, none, or unknown — which the flow routes to the
-          receptionist (§4, route_reason="unknown_command")
+        - Applies the CRUD fork only when crud_enabled is True and the spec declares
+          a crud_factory, so a flag flip changes calendar and todo and nothing else
+        - Forks both user-facing strings together: `label` (heard) and `display_name`
+          (read), not one without the other, so a user never reads "Todo List" while hearing "todo (CRUD)"
+        - A forked spec carries snapshotable=False, because the snapshot writer refuses to
+          serialize CRUD agents
+        - Returns None for every non-conversational command (agentic, deferred,
+          control, receptionist, none or unknown), which the flow routes to the
+          receptionist with route_reason="unknown_command". Agentic specs come from
+          resolve_agentic(), so registering them does not change this function's result
         - Never raises on an unknown command
 
     Args:
@@ -492,33 +465,20 @@ def resolve( command, crud_enabled ):
 
 def canonical_command( command ):
     """
-    Map a routing command OR one of its aliases to the registry's canonical spelling.
+    Map a routing command or one of its aliases to the registry's canonical spelling.
 
-    WHY THIS EXISTS (row 759a895b, María 🌸's finding). `math` is a registered alias of
-    `agent router go to math` (this file, the conversational table), and `resolve()`
-    honours aliases — so a router emitting the short form ROUTES CORRECTLY. What did not
-    happen is the record adopting the canonical name: `v2/flow.py:_emit` copied the raw
-    router string into `payload.command`, so one route reached the output vocabulary under
-    two spellings. Every downstream count grouped by that field then split silently, and an
-    exact-match routing score marked a CORRECT route as a miss.
-
-    Measured in `io/v2-flow/eval-2026-08-25-19-31-31/records.jsonl`: 50 records spell it
-    `agent router go to math` and 2 spell it `math`, same `route_reason`, and both bare
-    records are the same utterance in the cold and warm passes.
-
-    Scoped to the WHOLE registry, not just the conversational class, because the output
-    vocabulary is the whole registry — an agentic alias would split a count exactly the
-    same way. `resolve()` cannot serve here: it is deliberately conversational-only and
-    returns None for every agentic command.
+    A router may emit an alias such as `math`, and the flow copies it into `payload.command`.
+    One route then appears under two spellings, counts split, and exact-match scoring misses it.
+    It covers the whole registry, since `resolve()` is conversational-only and cannot serve.
 
     Requires:
         - command is a string, or None
 
     Ensures:
         - returns the canonical command when `command` is a registry command or an alias
-        - returns `command` UNCHANGED when it is neither, and when it is None — an unknown
-          string is not this function's business to invent a spelling for, and callers pass
-          None on paths that never had a command
+        - returns `command` unchanged when it is neither, and when it is None. An unknown
+          string is not given an invented spelling, and callers pass None on paths that never had
+          a command
         - never raises
     """
     if not command:
@@ -533,18 +493,17 @@ def canonical_command( command ):
 
 def resolve_agentic( command ):
     """
-    Resolve a routing command to its AGENTIC AgentSpec, or None.
+    Resolve a routing command to its agentic AgentSpec, or None.
 
-    Separate reader on the same table (§5.1.3). No caller uses it in phase 1 —
-    phase 5's factory dispatch will (§5.5). Alias resolution for agentic commands
-    is a phase-1 open (§6 assertion 3 note): agentic specs carry no aliases today,
-    so this is a full-string lookup.
+    This is a separate reader on the same table, kept apart from `resolve()` so that
+    registering the agentic set does not change the router-facing resolver. The v2 flow uses it
+    to reach agentic specs. Agentic specs carry no aliases today, so this is a full-string lookup.
 
     Requires:
         - command is a full routing string
 
     Ensures:
-        - Returns the AGENTIC AgentSpec for the command, or None when it is not a
+        - Returns the agentic AgentSpec for the command, or None when it is not a
           registered agentic command
         - Never raises on an unknown command
 

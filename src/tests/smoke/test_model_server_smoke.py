@@ -48,8 +48,8 @@ LUPIN_ROOT       = Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) )
 # memory/speech_to_text_provider.py:156) default to "model-server-api" for
 # exactly that reason. The two key files hold DIFFERENT keys, so this test was
 # presenting the wrong one and getting `401 Invalid X-API-Key` on all four
-# authenticated probes. Decoupling design:
-# src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+# authenticated probes. Decision record:
+# src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the key names)
 #
 # Read the env var, same as the clients, so the three ends cannot drift again.
 API_KEY_NAME     = os.environ.get( "LUPIN_MODEL_SERVER_API_KEY_NAME", "model-server-api" )

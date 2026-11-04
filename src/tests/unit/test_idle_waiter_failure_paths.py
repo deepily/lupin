@@ -45,6 +45,7 @@ WHAT IS PINNED:
 See: row e2099400
 """
 
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -271,3 +272,28 @@ class TestTheTestModeSleepOverride:
     def test_no_override_anywhere_leaves_the_real_schedule_in_charge( self ):
         run = self._main( self._ARGV, {} )
         assert run.call_args.kwargs[ "sleep_secs_override" ] is None
+
+
+class TestSourcePathAndSignalHandlers:
+    """The PYTHONPATH-prepend arm and the SIGTERM/SIGINT handler."""
+
+    def test_a_bare_pythonpath_gets_the_source_path_prepended( self ):
+        popen = MagicMock( return_value=MagicMock( pid=4242 ) )
+        env   = { k: v for k, v in os.environ.items() if k != "PYTHONPATH" }
+        with patch.dict( os.environ, env, clear=True ), patch( f"{MODULE}.subprocess.Popen", popen ):
+            iw._spawn_successor( SID, 999, 1 )
+        assert popen.call_args.kwargs[ "env" ][ "PYTHONPATH" ] == iw._src_path + ":"
+
+    def test_sigterm_and_sigint_log_then_exit_zero( self ):
+        handlers = { }
+        argv     = [ "idle_waiter", "--session-id", SID, "--cc-pid", "999", "--backoff-index", "0" ]
+        with patch( f"{MODULE}.sys.argv", argv ), \
+             patch( f"{MODULE}.signal.signal", side_effect=lambda sig, h: handlers.__setitem__( sig, h ) ), \
+             patch( f"{MODULE}._log" ) as log, \
+             patch( f"{MODULE}.run_waiter" ):
+            iw.main()
+            assert set( handlers ) == { iw.signal.SIGTERM, iw.signal.SIGINT }
+            with pytest.raises( SystemExit ) as exc:
+                handlers[ iw.signal.SIGTERM ]( iw.signal.SIGTERM, None )
+            assert exc.value.code == 0
+            assert log.call_args.args == ( SID, f"received signal {int( iw.signal.SIGTERM )}; exiting" )

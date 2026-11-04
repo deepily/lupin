@@ -7,13 +7,11 @@ bridging the async orchestrator with the blocking notification API.
 
 Uses AgentNotificationDispatcher for shared async dispatch logic.
 
-Per-task isolation (OOS Phase 4 backlog #1, 2026-04-29):
-    Module-level SENDER_ID / SESSION_NAME / TARGET_USER are kept for the CLI
-    path and for backward compatibility, but agentic-pool jobs MUST use
-    `set_dispatch_context()` (defined below) to isolate per-task state via
-    ContextVars. The dispatcher reads ContextVar in priority over instance
-    state, so concurrent DR jobs in the agentic pool no longer leak each
-    other's sender_id through the shared module-global dispatcher instance.
+Per-task isolation:
+    The module-level `SENDER_ID`, `SESSION_NAME` and `TARGET_USER` serve the CLI path.
+    Agentic-pool jobs must use `set_dispatch_context()` (defined below) to keep
+    per-task state in ContextVars. The dispatcher reads a ContextVar before instance
+    state, so concurrent jobs do not leak one sender_id through the shared dispatcher.
 """
 
 import logging
@@ -39,9 +37,12 @@ from cosa.agents.utils.feedback_analysis import (
 )
 from cosa.agents.utils.agent_notification_dispatcher import (
     AgentNotificationDispatcher,
+    make_interface_functions,
     ctx_sender_id,
     ctx_target_user,
     ctx_session_name,
+    set_dispatch_context,
+    reset_dispatch_context,
 )
 
 logger = logging.getLogger( __name__ )
@@ -88,190 +89,11 @@ SESSION_NAME: Optional[ str ] = None
 TARGET_USER: Optional[ str ] = None
 
 
-def set_dispatch_context(
-    sender_id    : Optional[ str ] = None,
-    target_user  : Optional[ str ] = None,
-    session_name : Optional[ str ] = None,
-) -> dict:
-    """
-    Set the per-task dispatch context for this asyncio task / thread.
-
-    Use this instead of mutating module-level SENDER_ID / TARGET_USER /
-    SESSION_NAME when running inside the agentic pool — concurrent DR jobs
-    share module globals (and the shared `_dispatcher` instance), so writing
-    to module globals leaks state across jobs. ContextVars isolate per-task.
-
-    Requires:
-        - At least one of sender_id, target_user, session_name is provided.
-          (None values are skipped — only set what's provided.)
-
-    Ensures:
-        - Each provided value is stored in its corresponding ContextVar.
-        - Returns a dict of {var_name: token} that callers can pass to
-          `reset_dispatch_context()` for explicit teardown.
-
-    Args:
-        sender_id    : Per-task sender_id override (None = leave ContextVar unchanged).
-        target_user  : Per-task target_user override.
-        session_name : Per-task session_name override.
-
-    Returns:
-        dict[str, contextvars.Token]: Tokens for resetting the ContextVars
-            via `reset_dispatch_context()`. Pool workers running a single
-            job typically don't need to reset (the asyncio.run() context
-            ends when the worker finishes), but explicit cleanup is good
-            hygiene.
-    """
-    tokens = { }
-    if sender_id is not None:
-        tokens[ "sender_id" ] = ctx_sender_id.set( sender_id )
-    if target_user is not None:
-        tokens[ "target_user" ] = ctx_target_user.set( target_user )
-    if session_name is not None:
-        tokens[ "session_name" ] = ctx_session_name.set( session_name )
-    return tokens
-
-
-def reset_dispatch_context( tokens: dict ) -> None:
-    """
-    Reset the per-task dispatch context to its prior state.
-
-    Args:
-        tokens: dict returned by `set_dispatch_context()`.
-
-    Ensures:
-        - Each ContextVar is reset to the value it held before the matching
-          set_dispatch_context() call.
-        - Missing keys in `tokens` are silently skipped.
-    """
-    if "sender_id" in tokens:
-        ctx_sender_id.reset( tokens[ "sender_id" ] )
-    if "target_user" in tokens:
-        ctx_target_user.reset( tokens[ "target_user" ] )
-    if "session_name" in tokens:
-        ctx_session_name.reset( tokens[ "session_name" ] )
-
-
 # =============================================================================
 # Primary Interface Functions
 # =============================================================================
 
-async def notify_progress(
-    message: str,
-    priority: str = "medium",
-    abstract: Optional[ str ] = None,
-    session_name: Optional[ str ] = None,
-    job_id: Optional[ str ] = None,
-    queue_name: Optional[ str ] = None,
-    progress_group_id: Optional[ str ] = None
-) -> None:
-    """
-    Send fire-and-forget progress notification.
-
-    Non-blocking — runs in thread pool to avoid blocking event loop.
-
-    Args:
-        message: Progress message to announce
-        priority: "low", "medium", "high", or "urgent"
-        abstract: Optional supplementary context (markdown, URLs, details)
-        session_name: Optional human-readable session name for UI display
-        job_id: Optional agentic job ID for routing to job cards
-        queue_name: Optional queue where job is running
-        progress_group_id: Optional progress group ID for in-place DOM updates
-    """
-    _dispatcher.sender_id    = SENDER_ID
-    _dispatcher.session_name = SESSION_NAME
-    _dispatcher.target_user  = TARGET_USER
-    await _dispatcher.notify_progress(
-        message, priority=priority, abstract=abstract,
-        session_name=session_name, job_id=job_id,
-        queue_name=queue_name, progress_group_id=progress_group_id
-    )
-
-
-async def ask_confirmation(
-    question: str,
-    default: str = "no",
-    timeout: int = 60,
-    abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
-) -> bool:
-    """
-    Ask a yes/no question and return boolean result.
-
-    Args:
-        question: The yes/no question to ask
-        default: Default answer if timeout ("yes" or "no")
-        timeout: Seconds to wait for response
-        abstract: Optional supplementary context
-        job_id: Optional job ID for routing to job card
-
-    Returns:
-        bool: True if user said yes, False otherwise
-    """
-    _dispatcher.sender_id   = SENDER_ID
-    _dispatcher.target_user = TARGET_USER
-    return await _dispatcher.ask_confirmation(
-        question, default=default, timeout=timeout, abstract=abstract, job_id=job_id
-    )
-
-
-async def get_feedback(
-    prompt: str,
-    timeout: int = 300,
-    job_id: Optional[ str ] = None
-) -> Optional[ str ]:
-    """
-    Get open-ended feedback from user via voice.
-
-    Args:
-        prompt: Text to speak to the user
-        timeout: Maximum seconds to wait for response
-        job_id: Optional job ID for routing to job card
-
-    Returns:
-        str or None: User's transcribed voice response
-    """
-    _dispatcher.sender_id   = SENDER_ID
-    _dispatcher.target_user = TARGET_USER
-    return await _dispatcher.get_feedback( prompt, timeout=timeout, job_id=job_id )
-
-
-async def present_choices(
-    questions: list,
-    timeout: int = 120,
-    title: Optional[ str ] = None,
-    abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None,
-    priority: Optional[ str ] = None
-) -> dict:
-    """
-    Present multiple-choice questions and get user's selection.
-
-    Args:
-        questions: List of question objects with options
-        timeout: Seconds to wait for response
-        title: Optional title for the notification
-        abstract: Optional supplementary context
-        job_id: Optional job ID for routing to job card
-        priority: Optional notification priority. Forwarded to the dispatcher
-            when the caller set one; a blocking gate passes priority="high" so
-            the gate notification reaches the user's TTS channel. Accepting this
-            kwarg brings deep_research to parity with podcast/presentation:
-            voice_io.present_choices forwards it here, and without the parameter
-            a gate that passes priority would raise TypeError and fail-open
-            before it could ever dispatch to a human. deep_research gates do not
-            pass priority today (this closes the latent gap, not a live one).
-
-    Returns:
-        dict: {"answers": {...}} with selections keyed by header
-    """
-    _dispatcher.sender_id   = SENDER_ID
-    _dispatcher.target_user = TARGET_USER
-    return await _dispatcher.present_choices(
-        questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id,
-        priority=priority
-    )
+notify_progress, ask_confirmation, get_feedback, present_choices = make_interface_functions( globals(), notify_extras=( "progress_group_id", ), choices_extras=( "priority", ) )
 
 
 # =============================================================================

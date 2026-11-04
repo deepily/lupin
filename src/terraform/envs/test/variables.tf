@@ -45,8 +45,32 @@ variable "vm_sa_account_id" {
 #     defaults. See 01-design.md § "Ratified Decisions (2026-07-01)". ----------
 variable "model_server_image_tag" {
   type        = string
-  description = "Image tag (or :digest) of the lupin-model-server image in Artifact Registry to deploy to Cloud Run."
-  default     = "latest"
+  description = "Image tag of the lupin-model-server image in Artifact Registry. Used only when model_server_image_digest is empty. Default is the tag that accepts role 'document' (row 2f4fd59e); the older 0.1.0 rejects it with a 422."
+  default     = "20261030-role-document"
+}
+
+variable "model_server_image_digest" {
+  type        = string
+  description = "Image digest (sha256:...) of the lupin-model-server image. When set it wins over model_server_image_tag, because the live service was deployed by digest and Cloud Run reports the image back in that form. Default is the digest of 20261030-role-document (row 2f4fd59e)."
+  default     = "sha256:fe60f72445174909ad9bf2c9cd8720e5878bc6b0c2c673e474d0487205a1f8ae"
+}
+
+variable "model_server_max_instances" {
+  type        = number
+  description = "Cloud Run model-server max instances (template scaling). 3 matches the live service (Rick 2026-10-30, row 2f4fd59e: keep live settings)."
+  default     = 3
+}
+
+variable "model_server_scaling_mode" {
+  type        = string
+  description = "Service-level scaling mode. MANUAL matches the live service, set from the console (Rick 2026-10-30, row 2f4fd59e: keep live settings). Empty omits the block."
+  default     = "MANUAL"
+}
+
+variable "model_server_manual_instance_count" {
+  type        = number
+  description = "Instance count under MANUAL scaling. 1 matches the live service."
+  default     = 1
 }
 
 variable "model_server_api_key_secret_version" {

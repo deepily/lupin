@@ -355,6 +355,13 @@ class TestFindPersonaInPool( unittest.TestCase ):
     def test_no_match_returns_none( self ):
         self.assertIsNone( _find_persona_in_pool( self._POOL, "zelda" ) )
 
+    def test_a_display_spelling_that_differs_from_the_key_still_matches( self ):
+        """Only the display branch can match here: the key form is "zed", the request is "zed prime"."""
+        pool = [ { "name": "zed", "voice_id": "v9", "icon": "x", "color": "c", "profile": "" } ]
+        self.assertIsNone( _find_persona_in_pool( pool, "Zed Prime" ) )
+        with patch( "cosa.rest.voice_persona_helpers.display_name_for", return_value="Zed Prime" ):
+            self.assertEqual( _find_persona_in_pool( pool, "Zed Prime" )[ "name" ], "zed" )
+
 
 class TestPickRequestedPersona( unittest.TestCase ):
     _POOL = [

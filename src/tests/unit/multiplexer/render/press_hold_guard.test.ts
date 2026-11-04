@@ -247,7 +247,8 @@ test( "Holding Area: Approve all pressed across a poll still posts, and the held
   assert.ok( approve.isConnected );
 
   press( approve, "mouseup" );
-  approve.click();
+  approve.click();                       // arms
+  approve.click();                       // confirms
   await settle();
   assert.deepEqual( h.posts, [ "/api/tasks/a/transition" ], "the click never reached the batch" );
 

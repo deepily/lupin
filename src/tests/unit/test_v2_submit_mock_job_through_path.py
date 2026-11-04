@@ -154,8 +154,10 @@ def expeditor():
     _FakeExpeditor.instances = [ ]
     _FakeExpeditor.answer    = { "test_types": "unit" }
     _FakeExpeditor.status    = "answered"
+    config = MagicMock()
+    config.get_required.return_value = "America/New_York"          # the job stamps its time in the configured zone
     with patch( "cosa.agents.runtime_argument_expeditor.expeditor.RuntimeArgumentExpeditor", _FakeExpeditor ), \
-         patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=MagicMock() ):
+         patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=config ):
         yield _FakeExpeditor
 
 

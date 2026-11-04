@@ -56,10 +56,14 @@
  * shows up, widen this and the guard together.
  */
 
+/** The fewest hex characters a pasted ticket id may have and still be searched as a prefix. */
 export const MIN_TASK_REF_PREFIX_LEN = 4;
 
+/** The `kind` of a whole ticket id, a canonical UUID or 32 bare hex characters. */
 export const TASK_REF_FULL    = "full";
+/** The `kind` of a partial ticket id of at least the minimum length. */
 export const TASK_REF_PREFIX  = "prefix";
+/** The `kind` of text that is neither a whole id nor a long enough prefix. */
 export const TASK_REF_INVALID = "invalid";
 
 /** Canonical 8-4-4-4-12. */

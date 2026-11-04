@@ -1,21 +1,19 @@
 """
 Embedding generation API endpoints.
 
-Exposes the server's already-warm GPU embedding model via HTTP so that
-external scripts (e.g. seed_proxy_decisions.py) can generate embeddings
-without loading a second copy of the model into VRAM.
-
-Generated on: 2026-02-24
+Exposes the server's already-warm GPU embedding model via HTTP. External scripts, such
+as seed_proxy_decisions.py, can then generate embeddings without loading a second copy
+of the model into VRAM.
 """
 
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Annotated, List
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
-from cosa.memory.embedding_provider import get_embedding_provider
+from cosa.memory.embedding_provider import get_embedding_provider, EmbeddingRoleUnsupported
 
 router = APIRouter( prefix="/api/embeddings", tags=[ "embeddings" ] )
 
@@ -25,15 +23,25 @@ router = APIRouter( prefix="/api/embeddings", tags=[ "embeddings" ] )
 # ============================================================================
 
 class EmbedRequest( BaseModel ):
-    """Request body for single-text embedding generation."""
+    """
+    Request body for single-text embedding generation.
+
+    role is "query" or "document" and picks the encoder's prefix.
+    Left out, the result is what the endpoint returned before role existed.
+    A code text then has no prefix, and a prose text has the query prefix.
+    """
+
     text         : str
     content_type : str = "prose"    # "prose" or "code"
+    role         : Optional[ Literal[ "query", "document" ] ] = None
 
 
 class EmbedBatchRequest( BaseModel ):
-    """Request body for batch embedding generation."""
+    """Request body for batch embedding generation. role is as in EmbedRequest."""
+
     texts        : List[ str ]
     content_type : str = "prose"
+    role         : Optional[ Literal[ "query", "document" ] ] = None
 
 
 class EmbedResponse( BaseModel ):
@@ -54,6 +62,7 @@ class EmbedInfoResponse( BaseModel ):
     provider   : str
     dimensions : int
     status     : str
+    engines    : Dict[ str, Any ]
 
 
 # ============================================================================
@@ -80,7 +89,10 @@ async def generate_embedding(
     # never freezes the loop — which would otherwise self-deadlock against the
     # caller and stall /health.
     provider  = get_embedding_provider()
-    embedding = await asyncio.to_thread( provider.generate_embedding, request.text, content_type=request.content_type )
+    try:
+        embedding = await asyncio.to_thread( provider.generate_embedding, request.text, content_type=request.content_type, role=request.role )
+    except EmbeddingRoleUnsupported as e:
+        raise HTTPException( status_code=422, detail=str( e ) )
 
     return EmbedResponse(
         embedding  = embedding,
@@ -109,7 +121,10 @@ async def generate_embeddings_batch(
     # FM-7 event-loop offload: batch GPU inference is blocking; run it OFF the
     # event loop so this endpoint never freezes the loop.
     provider   = get_embedding_provider()
-    embeddings = await asyncio.to_thread( provider.generate_embeddings_batch, request.texts, content_type=request.content_type )
+    try:
+        embeddings = await asyncio.to_thread( provider.generate_embeddings_batch, request.texts, content_type=request.content_type, role=request.role )
+    except EmbeddingRoleUnsupported as e:
+        raise HTTPException( status_code=422, detail=str( e ) )
 
     return EmbedBatchResponse(
         embeddings = embeddings,
@@ -122,20 +137,30 @@ async def generate_embeddings_batch(
     "/info",
     response_model = EmbedInfoResponse,
     summary        = "Get embedding info",
-    description    = "Return provider name, dimensions, and readiness status of the embedding model."
+    description    = "Return provider name, dimensions, readiness status and the engines block: model, revision, dtype, device and prefixes of each local engine."
 )
 async def get_info(
     authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ] = None
 ):
     """
     Return metadata about the active embedding provider.
+
+    The engines block is what a stored vector set must be checked against. It
+    never loads a model, so a revision of None means that engine is not loaded.
+    Answers 503 with the reason when the model server that holds the engines cannot be read.
     """
     provider = get_embedding_provider()
 
+    try:
+        engines = provider.describe_engines()
+    except RuntimeError as e:
+        raise HTTPException( status_code=503, detail=f"engines info unavailable: {e}" )
+
     return EmbedInfoResponse(
-        provider   = provider.provider_name,
+        provider   = provider.provider,
         dimensions = provider.dimensions,
-        status     = "ready"
+        status     = "ready",
+        engines    = engines
     )
 
 
@@ -183,7 +208,8 @@ def quick_smoke_test():
         info_resp = EmbedInfoResponse(
             provider="local_nomic",
             dimensions=768,
-            status="ready"
+            status="ready",
+            engines={}
         )
         assert info_resp.provider == "local_nomic"
         print( "✓ EmbedInfoResponse works" )

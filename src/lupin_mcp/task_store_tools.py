@@ -651,6 +651,31 @@ def task_request_impl(
     return task_store_request( "POST", f"/api/tasks/{task_id}/request", api_base_url, api_key, json_body=payload )
 
 
+def task_ask_unpark_impl(
+    api_base_url,
+    api_key,
+    actor,
+    task_id,
+):
+    """
+    Ask the server to make the card a manager cites to un-park one parked row.
+
+    This is POST /api/tasks/{task_id}/unpark-ask. The row does not move. After the operator
+    answers yes, the manager sends the parked-to-queued transition with the card id as the
+    approval_card receipt.
+
+    Requires:
+        - actor is the bridge-stamped identity, set by the caller and never a tool parameter
+        - task_id is the item's UUID string, which the server validates
+
+    Ensures:
+        - returns { card_id, task_id, expires_at, pushed } on success
+          pushed is false when the card is saved but the push to the operator failed
+        - 403, 404 and 409 surface the server's detail verbatim
+    """
+    return task_store_request( "POST", f"/api/tasks/{task_id}/unpark-ask", api_base_url, api_key, json_body={ "actor": actor } )
+
+
 def task_edit_impl(
     api_base_url,
     api_key,
@@ -725,6 +750,7 @@ def task_query_impl(
     item_class          = None,
     correlation_key     = None,
     id_prefix           = None,
+    blocked_by_persona  = None,
     limit               = None,
     offset              = None,
     terse               = False,
@@ -746,6 +772,10 @@ def task_query_impl(
           call is "everything, newest first" — the manager board glance
         - `correlation_key` exact-match filter passes through (spec amendment
           2026-06-12 / Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
+        - `blocked_by_persona` returns the rows whose `blocked_by` holds a persona ref with that
+          exact name, whoever owns them: "what waits on me", so a handover lists owed work and the
+          rows other seats hold for you. A row minted before the write seam canonicalized
+          `blocked_by` ids may hold a non-canonical name and will not match.
         - `id_prefix` filters BY IDENTITY and accepts the 8-hex form every brief,
           DM and cross-reference in this fleet is written in — or a full UUID,
           which is normalized server-side (row f45b37a9 remedy 2, closing
@@ -756,7 +786,7 @@ def task_query_impl(
           id lookup into a search surface. It counts as a SCOPING filter, so an
           id_prefix query is never rejected by the unscoped-size guard.
         - terse=True (§G token win) requests the at-a-glance projection
-          (id/title/status/blocked_by/next_chase_ts/priority/park_reason_stale
+          (id/title/item_class/status/blocked_by/next_chase_ts/priority/park_reason_stale
           /owner_persona/accountable_manager — body dropped). The two ownership
           fields joined 2026-09-05 (row d254c397): terse is the view a board glance
           actually reads, and without them it could not answer "is this mine" —
@@ -828,6 +858,7 @@ def task_query_impl(
         "item_class"          : item_class,
         "correlation_key"     : correlation_key,
         "id_prefix"           : id_prefix,
+        "blocked_by_persona"  : blocked_by_persona,
         "limit"               : limit,
         "offset"              : offset,
     }
@@ -879,3 +910,64 @@ def task_get_impl( api_base_url, api_key, task_id ):
           two is the defect `4d4f3fd8` was filed for
     """
     return task_store_request( "GET", f"/api/tasks/{task_id}", api_base_url, api_key )
+
+
+def task_approve_line_impl( api_base_url, api_key, task_id, priority=None ):
+    """
+    Write the card bullet for one held row: its title and its two links.
+
+    The links are the one-click approve link and the 📋 view link.
+    Reuses `task_get_impl` for the title and `approve_link_line` for the format, so the
+    MCP verb and the Python caller cannot write two different links.
+
+    Requires:
+        - task_id is the row's full lowercase UUID
+        - priority is None, or one of P0..P5
+
+    Ensures:
+        - on success returns { "line": "- <title> [approve ☐](/app/tasks/approve?row=<id>) [📋](/app/tasks/view?row=<id>)" }
+        - a priority adds `[⏫ P0](/app/tasks/approve?row=<id>&priority=P0)` between them (Rick's login only, and only a raise)
+        - a priority outside P0..P5 returns { "error": "invalid_priority", "detail": ... } and asks the server nothing
+        - a malformed id returns { "error": "invalid_row_id", "detail": ... } and asks the server nothing
+        - a row the server could not return (404, auth, transport) returns that error dict
+          verbatim, never a line built from nothing
+        - a row with a blank title returns { "error": "blank_title", "detail": ... }
+        - never raises
+    """
+    from cosa.rest.task_approve_link import approve_link_line, PRIORITIES
+    if priority is not None and priority not in PRIORITIES:
+        return { "error": "invalid_priority", "detail": f"priority must be None or one of {PRIORITIES}, got {priority!r}" }
+    try:
+        approve_link_line( task_id, "x" )
+    except ( ValueError, TypeError ) as err:
+        return { "error": "invalid_row_id", "detail": str( err ) }
+    row = task_get_impl( api_base_url, api_key, task_id )
+    if "title" not in row: return row
+    try:
+        return { "line": approve_link_line( task_id, row[ "title" ], priority ) }
+    except ( ValueError, TypeError ) as err:
+        return { "error": "blank_title", "detail": str( err ) }
+
+
+def task_approve_batch_line_impl( task_ids, move="queued", reason=None ):
+    """
+    Write the card bullet for a list of held rows, with one link for the whole list.
+
+    Builds the line with `approve_batch_line`, so the verb and the Python caller write the same link.
+    It asks the server nothing: the 📋 link shows each row's title when it is clicked.
+
+    Requires:
+        - task_ids is a non-empty list of distinct full lowercase UUIDs
+        - move is "queued" or "dropped"; a drop carries a reason
+
+    Ensures:
+        - on success returns { "line": "- <N> held rows [approve all N ☐](/app/tasks/approve?rows=...&move=queued) [📋](/app/tasks/view?rows=...)" }
+        - an empty list, a short or malformed id, a duplicate id, a bad move or a missing drop reason
+          returns { "error": "invalid_batch", "detail": ... }
+        - never raises
+    """
+    from cosa.rest.task_approve_link import approve_batch_line
+    try:
+        return { "line": approve_batch_line( task_ids, move, reason ) }
+    except ( ValueError, TypeError ) as err:
+        return { "error": "invalid_batch", "detail": str( err ) }

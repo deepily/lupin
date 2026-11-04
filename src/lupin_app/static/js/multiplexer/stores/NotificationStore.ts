@@ -79,6 +79,7 @@ const PERSIST_DEBOUNCE_MS    = 250;
 // localStorage key, shared with it like the history window.
 // It REPLACES the 2026-06-29 message-DIRECTION predicate, which hid every reply bubble
 // under the default "own" (parity doc C2, second cause). Nothing filters in the browser.
+/** The storage key of the Mine switch, shared with the legacy client. */
 export const FILTER_MODE_KEY = "notifications_filter_preference";
 const DEFAULT_FILTER_MODE: NotificationFilterMode = "own";
 
@@ -87,13 +88,12 @@ const DEFAULT_FILTER_MODE: NotificationFilterMode = "own";
 // Design: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md
 // ---------------------------------------------------------------------------
 
-// Loose ApiClient surface for hydrateHistory — this store only needs `get<T>`
-// (mirrors JobStore's JobHistoryApiClient). Production passes the canonical
-// ApiClient; tests pass a stub.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface NotificationHistoryApiClient {
   get<T>(path: string): Promise<T>;
 }
 
+/** The inputs of a history load: the user's email, the hours to look back and the senders. */
 export interface HydrateHistoryOptions {
   userEmail      : string;
   // Hours to look back (historyWindow.effectiveHoursForQuery). null = "All
@@ -127,10 +127,14 @@ interface ServerHistoryRow {
 // Re-exported so existing importers keep working.
 export { DEFAULT_HISTORY_WINDOW_HOURS } from "./historyWindow";
 
-// P0 5ebd2aff — cold-load hydration lifecycle (see NotificationStore.historyHydrationState).
+/** The cold-load lifecycle of the history: idle, loading, done or failed. */
 export type HistoryHydrationState = "idle" | "loading" | "done" | "failed";
 
-// A rejection reason as a human-readable string (Error → message; anything else → String).
+/**
+ * Turns a rejection reason into a readable string.
+ *
+ * An Error gives its message; anything else is converted with String.
+ */
 function describeRejection(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);
 }
@@ -139,6 +143,7 @@ function describeRejection(reason: unknown): string {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The notifications the page shows: the active list, the history and the unread count. */
 export interface NotificationStore {
   /** Active notifications (not expired, not in history). */
   list(): ReadonlyArray<Notification>;
@@ -253,6 +258,7 @@ export interface NotificationStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createNotificationStore`: bus, storage, test hooks and the admin flag. */
 export interface NotificationStoreOptions {
   bus     : EventBus;
   storage : StorageService;
@@ -352,16 +358,20 @@ interface ExpiredPayload {
   notification_id ?: string;
 }
 
-// F0-d — TTS message contextualizer. Ported VERBATIM from legacy
-// `notifications.js:4176-4187` (formatNotificationTTSMessage), the single source
-// of notification→TTS text formatting: prefix "Urgent! " for urgent priority,
-// otherwise the message unchanged. Kept module-private (the sole caller is the
-// store_notification_tts_intent emit below); `message` is pre-nullish-coalesced
-// by the caller so this fn has exactly one branch (urgent vs not).
+/**
+ * Builds the spoken text for a notification, prefixing urgent ones with "Urgent!".
+ *
+ * Other priorities return the message unchanged. Only the TTS intent emit uses it.
+ */
 function formatTtsMessage( priority: string | undefined, message: string ): string {
   return priority === "urgent" ? `Urgent! ${message}` : message;
 }
 
+/**
+ * Holds the page's notifications: active list, archive, read state and history.
+ *
+ * It listens on the event bus, persists read state to storage, and emits change events.
+ */
 class NotificationStoreImpl implements NotificationStore {
   private readonly bus            : EventBus;
   private readonly storage        : StorageService;
@@ -395,6 +405,11 @@ class NotificationStoreImpl implements NotificationStore {
   // by the lifetime-of-store assumption).
   private readonly unsubscribers : Array<() => void> = [];
 
+  /**
+   * Sets up the store from bus, storage, clock, timer and admin-check options.
+   *
+   * It restores the saved history window, loads persisted state and subscribes to bus events.
+   */
   constructor(opts: NotificationStoreOptions) {
     this.bus            = opts.bus;
     this.storage        = opts.storage;
@@ -414,18 +429,32 @@ class NotificationStoreImpl implements NotificationStore {
     this.subscribe();
   }
 
+  /**
+   * Returns the active notifications, which are not expired or archived.
+   */
   list(): ReadonlyArray<Notification> {
     return this.active;
   }
 
+  /**
+   * Returns the expired or archived notifications.
+   */
   history(): ReadonlyArray<Notification> {
     return this.archived;
   }
 
+  /**
+   * Returns how many notifications the user has not yet marked as read.
+   */
   unreadCount(): number {
     return this.unread;
   }
 
+  /**
+   * Marks one notification as read and lowers the unread count.
+   *
+   * Unknown or already-read IDs are ignored. Otherwise it schedules a save and emits an update.
+   */
   markRead(idHash: string): void {
     if (this.readSet.has(idHash)) return;
     if (!this.byId.has(idHash))   return;
@@ -435,6 +464,11 @@ class NotificationStoreImpl implements NotificationStore {
     this.emit("updated", idHash);
   }
 
+  /**
+   * Marks every active notification as read and sets the unread count to zero.
+   *
+   * It does nothing when none are unread, and emits one bulk update event.
+   */
   markAllRead(): void {
     if (this.unread === 0) return;
     for (const n of this.active) {
@@ -455,14 +489,25 @@ class NotificationStoreImpl implements NotificationStore {
   // Row 98305d96 — the admin Mine switch (a server-side filter) + clear-all primitive
   // -------------------------------------------------------------------------
 
+  /**
+   * Returns the notifications the panes should draw, which is the active list.
+   */
   visibleEntries(): ReadonlyArray<Notification> {
     return this.active;
   }
 
+  /**
+   * Returns the current view mode of the admin Mine switch.
+   */
   filterMode(): NotificationFilterMode {
     return this.filterModeState;
   }
 
+  /**
+   * Changes the admin view mode, saves it and emits a change event so panes reload.
+   *
+   * A non-admin caller is refused with a console warning and gets false back.
+   */
   setFilterMode(mode: NotificationFilterMode): boolean {
     if ( !this.isAdmin() ) {
       // One line, not a throw: a refused mode change is an expected outcome of a
@@ -483,10 +528,18 @@ class NotificationStoreImpl implements NotificationStore {
     return true;
   }
 
+  /**
+   * Reports whether the view mode is "others", meaning the filter is in effect.
+   */
   isFilterActive(): boolean {
     return this.filterModeState === "others";
   }
 
+  /**
+   * Removes the given notifications from the active list and read bookkeeping.
+   *
+   * Unknown IDs are skipped. It emits and saves only when something was removed.
+   */
   removeByIdHashes(idHashes: ReadonlyArray<string>): void {
     let removedAny = false;
     for (const idHash of idHashes) {
@@ -509,6 +562,12 @@ class NotificationStoreImpl implements NotificationStore {
     });
   }
 
+  /**
+   * Loads each in-window sender's history from the server and seeds it into the active list.
+   *
+   * It fetches per sender, skips failed fetches, and reports failure when all of them fail. Live items win over history rows.
+   * It emits one hydrated event and leaves unread counts alone.
+   */
   async hydrateHistory(api: NotificationHistoryApiClient, opts: HydrateHistoryOptions): Promise<void> {
     if (this.historyHydrated) return;
 
@@ -597,6 +656,9 @@ class NotificationStoreImpl implements NotificationStore {
     });
   }
 
+  /**
+   * Reports whether the history has been loaded into the store.
+   */
   isHistoryHydrated(): boolean {
     return this.historyHydrated;
   }
@@ -605,20 +667,32 @@ class NotificationStoreImpl implements NotificationStore {
   private hydrationState : HistoryHydrationState = "idle";
   private hydrationError : string | null         = null;
 
+  /**
+   * Returns the cold-load state of the history: idle, loading, done or failed.
+   */
   historyHydrationState(): HistoryHydrationState {
     return this.hydrationState;
   }
 
+  /**
+   * Returns the failure reason of the last history load, or null when there is none.
+   */
   historyHydrationError(): string | null {
     return this.hydrationError;
   }
 
+  /**
+   * Sets the hydration state to loading, clears any error and emits a state change.
+   */
   markHistoryHydrationLoading(): void {
     this.hydrationState = "loading";
     this.hydrationError = null;
     this.emitHydrationState();
   }
 
+  /**
+   * Sets the hydration state to failed with the given reason and emits a state change.
+   */
   markHistoryHydrationFailed(reason: string): void {
     this.hydrationState = "failed";
     this.hydrationError = reason;
@@ -635,10 +709,18 @@ class NotificationStoreImpl implements NotificationStore {
   }
 
   // P0 5ebd2aff, ruling 1 — history window (see the interface docstrings).
+  /**
+   * Returns the current history time window the user has chosen.
+   */
   historyWindow(): HistoryWindow {
     return this.windowState;
   }
 
+  /**
+   * Changes the history window, saves it to shared storage and emits a change event.
+   *
+   * Setting the value already in force does nothing.
+   */
   setHistoryWindow(w: HistoryWindow): void {
     if (w === this.windowState) return;   // legacy: unchanged → skip the reload
     this.windowState = w;
@@ -651,6 +733,11 @@ class NotificationStoreImpl implements NotificationStore {
     });
   }
 
+  /**
+   * Drops the active list and returns hydration to idle so history can load again.
+   *
+   * It emits a history reset event.
+   */
   resetHistoryHydration(): void {
     for (const n of this.active) this.byId.delete(n.id_hash);
     this.active          = [];
@@ -665,6 +752,9 @@ class NotificationStoreImpl implements NotificationStore {
     });
   }
 
+  /**
+   * Writes any pending delayed save to storage immediately, for tests.
+   */
   flushPersistenceForTesting(): void {
     if (this.persistTimer !== null) {
       this.clearTimeoutFn(this.persistTimer);
@@ -673,6 +763,9 @@ class NotificationStoreImpl implements NotificationStore {
     }
   }
 
+  /**
+   * Cancels the pending save timer and unsubscribes from the bus, for tests.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     if (this.persistTimer !== null) {
@@ -1054,6 +1147,11 @@ class NotificationStoreImpl implements NotificationStore {
 // Factory — production code constructs via createNotificationStore.
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the store.
+ *
+ * It reads the saved filter mode and history window and subscribes to the bus at once.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createNotificationStore(opts: NotificationStoreOptions): NotificationStore {
   return new NotificationStoreImpl(opts);

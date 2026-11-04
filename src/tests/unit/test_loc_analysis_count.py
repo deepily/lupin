@@ -19,6 +19,7 @@ Run: LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/test_loc_analys
 import importlib.util
 import json
 import os
+import runpy
 import sys
 
 import pytest
@@ -142,6 +143,36 @@ def test_count_python_does_not_call_an_assigned_string_a_docstring():
     assert doc == 0 and code == 1
 
 
+@pytest.mark.parametrize( "src", [
+    '"abc".upper()\n',                      # a call on a string: the statement does not end at the string
+    '"abc" + suffix\n',                     # an operator after it
+    '"abc"[ 0 ]\n',                         # a subscript after it
+    '"abc" if flag else "def"\n',           # a conditional expression that starts with a string
+    '"abc"; x = 1\n',                       # a second statement shares the line
+    '"abc" % ( 1, )\n',                     # a formatting expression
+] )
+def test_count_python_does_not_call_a_statement_that_merely_starts_with_a_string_a_docstring( src ):
+    # row 201f6c8a: only a bare string expression is documentation; anything else that opens with a string is code
+    code, _comment, doc, _blank = count.count_python( src )
+    assert doc == 0 and code == 1
+
+
+def test_count_python_counts_a_bare_string_with_a_trailing_comment_as_a_docstring():
+    code, comment, doc, _blank = count.count_python( '"""d"""  # why\nx = 1\n' )
+    assert doc == 1 and code == 1 and comment == 0
+
+
+def test_count_python_counts_every_line_of_adjacent_string_literals_as_one_docstring():
+    # implicit concatenation across a backslash is one bare string expression, so both literals are documentation
+    code, _comment, doc, _blank = count.count_python( '"a" \\\n"b"\nx = 1\n' )
+    assert doc == 2 and code == 1
+
+
+def test_count_python_counts_a_bare_string_on_the_last_line_without_a_newline():
+    code, _comment, doc, _blank = count.count_python( "x = 1\n'''tail'''" )
+    assert doc == 1 and code == 1
+
+
 def test_count_python_falls_back_to_the_heuristic_on_unparseable_source():
     # tokenize raises → the comment-prefix fallback, which cannot see docstrings at all
     code, comment, doc, blank = count.count_python( "def broken( :\n# a comment\n\nx = 1\n" )
@@ -231,6 +262,30 @@ def test_main_writes_one_row_per_tracked_file( tmp_path, monkeypatch, capsys ):
     assert rows[ "logo.png" ][ "excluded" ] is True
 
     assert "scanned 5 tracked files" in capsys.readouterr().out
+
+
+def test_running_the_file_as_a_script_calls_main( tmp_path, monkeypatch, capsys ):
+    """
+    The `__main__` guard is the one line `count.main()` never reaches.
+
+    runpy executes the file afresh under the name `__main__`. It imports the same
+    stdlib `os` and `subprocess` objects, so patching them here reaches that fresh copy.
+    """
+    import subprocess
+
+    class _Done:
+        stdout = b""
+
+    out = tmp_path / "rows.json"
+    monkeypatch.chdir( tmp_path )
+    monkeypatch.setattr( os,         "chdir", lambda _p: None )
+    monkeypatch.setattr( subprocess, "run",   lambda *a, **k: _Done() )
+    monkeypatch.setattr( sys,        "argv",  [ "count.py", str( out ) ] )
+
+    runpy.run_path( count.__file__, run_name="__main__" )
+
+    assert json.load( open( out ) ) == []
+    assert "scanned 0 tracked files" in capsys.readouterr().out
 
 
 def test_main_survives_a_tracked_file_that_is_not_utf8( tmp_path, monkeypatch, capsys ):

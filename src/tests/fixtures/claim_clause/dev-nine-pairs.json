@@ -1,0 +1,296 @@
+{
+ "p012": [
+  {
+   "text": "The stream emits an event on every pause-state transition.",
+   "quote": "Emits on every pause-state transition"
+  },
+  {
+   "text": "A new subscriber immediately receives the current pause value (replay on subscribe).",
+   "quote": "replays the current value on subscribe."
+  },
+  {
+   "text": "Calling pause or resume when already in that state (idempotent calls) does not emit again.",
+   "quote": "Idempotent [pause] and [resume] calls do not re-emit."
+  },
+  {
+   "text": "A plain broadcast controller would give a new listener nothing until the next transition.",
+   "quote": "A plain broadcast controller tells a new listener\nnothing until the next transition."
+  },
+  {
+   "text": "Without replay, a control mounted while speech is held would show 'not paused' over a held queue until someone toggles.",
+   "quote": "A control mounted while speech is already held would then show\n\"not paused\" over a held queue until somebody toggles."
+  },
+  {
+   "text": "The hold is global and Quick Ask mounts its own controls, so subscribing mid-hold is the ordinary case.",
+   "quote": "The hold is global and Quick Ask mounts its own controls, so\narriving mid-hold is the ordinary case."
+  },
+  {
+   "text": "Consumers also seed their initial state from the synchronous isPaused getter via initialData, and this should be kept.",
+   "quote": "Consumers also seed from the synchronous [isPaused] getter through `initialData`. Keep that."
+  },
+  {
+   "text": "initialData paints the first frame, while the replayed value arrives one microtask later.",
+   "quote": "`initialData` paints the first frame and the replay lands one microtask later."
+  },
+  {
+   "text": "Dropping initialData would trade a silent wrong state for a one-frame flash.",
+   "quote": "Dropping it trades\na silent wrong state for a one-frame flash."
+  },
+  {
+   "text": "This stream mirrors connectionStream in websocket_service.dart, which has the same three properties.",
+   "quote": "It mirrors `connectionStream` in `websocket_service.dart`, which has the same three properties."
+  },
+  {
+   "text": "The two streams have the same shape and could share one helper, to be extracted by whoever next owns both files.",
+   "quote": "The two are\nthe same shape and could share one helper, to be extracted by whoever next owns both files."
+  }
+ ],
+ "p030": [
+  {
+   "text": "The Firebase bootstrap is gated behind the compile-time flag ENABLE_FCM.",
+   "quote": "Firebase bootstrap, gated behind the compile-time flag `ENABLE_FCM`."
+  },
+  {
+   "text": "To enable FCM, build the APK with --dart-define=ENABLE_FCM=true.",
+   "quote": "Build with `flutter build apk --dart-define=ENABLE_FCM=true`."
+  },
+  {
+   "text": "FCM is off by default.",
+   "quote": "The default is off"
+  },
+  {
+   "text": "Builds without the flag carry no hard dependency on google-services.json.",
+   "quote": "so builds without it carry no\nhard dependency on `google-services.json`."
+  },
+  {
+   "text": "streaming_tts_player.dart sets the precedent for this compile-time gating approach.",
+   "quote": "`streaming_tts_player.dart` sets the precedent."
+  },
+  {
+   "text": "Provisioning the Firebase project is a human, laptop-side step, documented in a runbook.",
+   "quote": "Provisioning the Firebase project is a human, laptop-side step (`src/rnd/2026.06.11-focus-mode-voice-chat/91-osq7-firebase-console-runbook.md`)."
+  },
+  {
+   "text": "The same provisioning pass completes wiring that this file expects but does not require.",
+   "quote": "The same pass completes the wiring this file expects but does not require:"
+  },
+  {
+   "text": "One wiring step is to place google-services.json in android/app/.",
+   "quote": "Drop `google-services.json` into `android/app/`."
+  },
+  {
+   "text": "Another wiring step is to apply the google-services gradle plugin (com.google.gms.google-services) in android/app/build.gradle.kts, with its classpath in android/settings.gradle.kts.",
+   "quote": "Apply the google-services gradle plugin (`com.google.gms.google-services`) in `android/app/build.gradle.kts`,\n     with its classpath in `android/settings.gradle.kts`."
+  },
+  {
+   "text": "Neither the google-services.json nor the gradle wiring is committed.",
+   "quote": "Neither is committed."
+  },
+  {
+   "text": "Applying the google-services plugin without the json breaks every build.",
+   "quote": "Applying the plugin without the json breaks every build"
+  },
+  {
+   "text": "Because of that breakage, the gradle wiring is done in the same pass as provisioning, as described in the FCM probe runbook.",
+   "quote": "so the gradle wiring rides that pass\n(see `src/rnd/2026.06.11-focus-mode-voice-chat/92-s5-phase0-fcm-probe-runbook.md`)."
+  }
+ ],
+ "p063": [
+  {
+   "text": "A posted Android notification carries a payload that allows a tap to be routed back to its message.",
+   "quote": "What a posted Android notification carries so a tap can be routed back to its message."
+  },
+  {
+   "text": "The payload crosses a process boundary, so it must be treated as untrusted input when read back.",
+   "quote": "The payload crosses a process boundary, so it is untrusted input on the way back."
+  },
+  {
+   "text": "The payload string may be written by the background isolate or by a build that is no longer installed.",
+   "quote": "The background isolate, or a build no longer installed, writes the string."
+  },
+  {
+   "text": "Android stores the payload in the notification's intent.",
+   "quote": "Android stores it in the notification's intent"
+  },
+  {
+   "text": "The payload is read by a fresh main isolate, possibly days after it was written.",
+   "quote": "a fresh main isolate reads it, possibly days later."
+  },
+  {
+   "text": "There is no guarantee that the payload's shape survives between writing and reading.",
+   "quote": "Nothing guarantees the shape survives"
+  },
+  {
+   "text": "decode is total: it never throws, and returns null for any malformed, empty, legacy or truncated payload.",
+   "quote": "[decode] is total: every malformed, empty, legacy or\ntruncated payload returns null instead of throwing."
+  },
+  {
+   "text": "A tap whose payload cannot be decoded results in a plain app launch rather than a crash on the launch path.",
+   "quote": "A tap that cannot be decoded degrades to a plain app launch, never a crash on the launch path."
+  }
+ ],
+ "p068": [
+  {
+   "text": "One wake shows at most a capped number of the most unplayed items.",
+   "quote": "The most unplayed items one wake shows."
+  },
+  {
+   "text": "The server wakes the app only when a new notification arrives.",
+   "quote": "The server wakes only for a new notification"
+  },
+  {
+   "text": "Without a cap, a backlog of unplayed items would sit unseen behind the first item until the app was opened.",
+   "quote": "so a backlog would otherwise sit unseen behind the first item\nuntil the app opened."
+  },
+  {
+   "text": "The cap exists to stop a long backlog from flooding the notification shade.",
+   "quote": "The cap stops a long backlog flooding the shade"
+  },
+  {
+   "text": "The cap exists to stop a long backlog from outrunning the handler window.",
+   "quote": "outrunning the handler window"
+  },
+  {
+   "text": "Items beyond the cap remain unplayed after the wake.",
+   "quote": "Whatever is past the cap stays unplayed."
+  },
+  {
+   "text": "The design rationale is recorded in src/docs/decisions/README.md under R-PUSH-drain-each.",
+   "quote": "Design: src/docs/decisions/README.md (R-PUSH-drain-each)"
+  }
+ ],
+ "p027": [
+  {
+   "text": "The value is a share (fraction) of the pane's width that a bubble may use, acting as a maximum width.",
+   "quote": "Share of the pane's width a bubble may use."
+  },
+  {
+   "text": "Previously bubbles were capped at a fixed width of 320 px.",
+   "quote": "A fixed 320 px cap"
+  },
+  {
+   "text": "The fixed 320 px cap left bubbles at only about half the width of an unfolded Pixel Fold.",
+   "quote": "left bubbles at about half the width of an unfolded Pixel Fold."
+  },
+  {
+   "text": "The header spanned the full width of the pane, which contrasted with the narrower bubbles.",
+   "quote": "The header spanned all of it"
+  },
+  {
+   "text": "The bubble cap now scales with the screen width instead of being a fixed pixel value.",
+   "quote": "so the cap now follows the screen."
+  }
+ ],
+ "p062": [
+  {
+   "text": "An event is emitted whenever the stop-list (gate 1) suppresses an item on the enqueueAlways path.",
+   "quote": "Emits whenever the stop-list (gate 1) suppresses an item on the [enqueueAlways] path."
+  },
+  {
+   "text": "Suppression is made observable because an early return with no signal looks like a hang.",
+   "quote": "Suppression is observable: an early return with no signal looks like a hang."
+  },
+  {
+   "text": "For a response_requested question, the server is blocked while the user hears and sees nothing if suppression is silent.",
+   "quote": "For a `response_requested`\nquestion the server is blocked while the user hears and sees nothing."
+  },
+  {
+   "text": "The event carries the matched rule, so a caller can name it.",
+   "quote": "The event carries the matched rule,\nso a caller can name it."
+  },
+  {
+   "text": "The event carries enough of the original call to re-issue it through speakAnyway.",
+   "quote": "It also carries enough of the original call to re-issue it through [speakAnyway]."
+  },
+  {
+   "text": "The event is not emitted on the legacy enqueueIfSpeakable path.",
+   "quote": "It is not emitted on the legacy [enqueueIfSpeakable] path."
+  },
+  {
+   "text": "The legacy enqueueIfSpeakable path is pinned byte-identical.",
+   "quote": "That path is pinned byte-identical"
+  },
+  {
+   "text": "The legacy path's production dispatch is withdrawn at the DI seam.",
+   "quote": "its production\ndispatch is withdrawn at the DI seam"
+  },
+  {
+   "text": "Nothing the user must act on arrives through the legacy path, which is why no event is emitted there.",
+   "quote": "nothing the user must act on arrives through it."
+  }
+ ],
+ "p070": [
+  {
+   "text": "The check returns true when the fraction is zero or less.",
+   "quote": "True when [fraction] is zero or less"
+  },
+  {
+   "text": "A slider set to 0% means silence, which is the reason for the rule.",
+   "quote": "the slider at 0% means silence"
+  },
+  {
+   "text": "The zero-silence rule is not exempted for the first sentence, a short message spoken whole, a title, or an answer the user asked for; all of these are silenced too.",
+   "quote": "It is not the first sentence, a short message spoken whole, a title or an answer the user asked for."
+  },
+  {
+   "text": "Every speech path performs this check before it enqueues speech.",
+   "quote": "Every speech path checks this before it enqueues"
+  },
+  {
+   "text": "The background FCM speech path is also covered by this check.",
+   "quote": "the background FCM path included"
+  },
+  {
+   "text": "The design rationale is documented in src/docs/decisions/README.md under R-TTS-zero-silence.",
+   "quote": "Design: src/docs/decisions/README.md (R-TTS-zero-silence)"
+  }
+ ],
+ "p075": [
+  {
+   "text": "The documented component can pause and resume the server's push notifications to the phone.",
+   "quote": "Pause and resume the server's push notifications to the phone."
+  },
+  {
+   "text": "It makes its requests through the shared Dio instance.",
+   "quote": "It uses the shared Dio"
+  },
+  {
+   "text": "The shared Dio's auth interceptor supplies the Bearer token for the requests, so callers do not add it themselves.",
+   "quote": "whose auth interceptor supplies the Bearer token"
+  },
+  {
+   "text": "The pause state is held only in server memory.",
+   "quote": "The pause lives in server memory"
+  },
+  {
+   "text": "A server restart clears the pause.",
+   "quote": "a restart clears it"
+  },
+  {
+   "text": "Callers should re-read the state with getState instead of trusting a cached value, because the pause can be cleared by a restart.",
+   "quote": "so callers re-read\n[getState] rather than trust a cached value."
+  }
+ ],
+ "p078": [
+  {
+   "text": "This sender has no persona.",
+   "quote": "Persona-less sender"
+  },
+  {
+   "text": "Every question sent to `/api/v2/flow` is sent from this sender.",
+   "quote": "that every `/api/v2/flow` question is sent from"
+  },
+  {
+   "text": "`TtsSender.isPersona` is false for this sender.",
+   "quote": "`TtsSender.isPersona` is false for it"
+  },
+  {
+   "text": "`_systemSenderMuted` drops this sender's messages whenever `speakSystemSenders` is off.",
+   "quote": "`_systemSenderMuted` drops it whenever `speakSystemSenders`\nis off"
+  },
+  {
+   "text": "If the sender were muted via `speakSystemSenders` being off, the question would be lost without any notice (silently); this is the reason the sender needs to be handled.",
+   "quote": "That setting would lose the question silently."
+  }
+ ]
+}

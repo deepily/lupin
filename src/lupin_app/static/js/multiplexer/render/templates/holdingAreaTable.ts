@@ -32,9 +32,16 @@
 // src/tests/unit/multiplexer/render/holding_area_table.test.ts, which slices
 // both strings out of the legacy source and compares the substituted result.
 
-import type { HeldFilerGroup } from "../holdingAreaModel";
+import { holdingPlanId, type HeldFilerGroup, type HeldPlan, type HoldingGroupBy } from "../holdingAreaModel";
+import type { TaskItem } from "../taskListModel";
 import { renderRowTableHead } from "./rowDisclosure";
 import { renderDisclosedRow } from "./taskRowDisclosed";
+import { groupRequestBadgeText, groupRequestBadgeLabel } from "../../../shared/task-request.js";
+
+/** The tooltip phrase for whose rows a group holds: "Rachel filed", or "assigned to Rachel". */
+function holdingGroupWhose( label: string, by: HoldingGroupBy ): string {
+  return by === "assignee" ? `assigned to ${ label }` : `${ label } filed`;
+}
 
 /**
  * The batch-approve tooltip for one filer. Carbon copy of
@@ -44,8 +51,8 @@ import { renderDisclosedRow } from "./taskRowDisclosed";
  * justified to the operator: it is the non-destructive direction, so an
  * over-approved row can be demoted straight back.
  */
-export function holdingApproveAllTitle( filer: string ): string {
-  return `Approve every row ${ filer } filed — reversible, a row approved by mistake can be demoted straight back`;
+export function holdingApproveAllTitle( filer: string, by: HoldingGroupBy = "creator" ): string {
+  return `Approve every row ${ holdingGroupWhose( filer, by ) } — reversible, a row approved by mistake can be demoted straight back`;
 }
 
 /**
@@ -58,8 +65,8 @@ export function holdingApproveAllTitle( filer: string ): string {
  * the right tool whenever the reasons differ; this one is deliberately the
  * blunt instrument and is labelled as such.
  */
-export function holdingWontFixAllTitle( filer: string ): string {
-  return `Close every row ${ filer } filed as won't-fix. TERMINAL, and every row gets the SAME reason — use the per-row control when the reasons differ`;
+export function holdingWontFixAllTitle( filer: string, by: HoldingGroupBy = "creator" ): string {
+  return `Close every row ${ holdingGroupWhose( filer, by ) } as won't-fix. TERMINAL, and every row gets the SAME reason — use the per-row control when the reasons differ`;
 }
 
 /** The batch reason box's placeholder. Carbon copy. */
@@ -76,6 +83,9 @@ export function holdingGroupChevron( expanded: boolean ): string {
   return expanded ? "▼" : "▶";
 }
 
+/**
+ * Builds a task action button carrying the filer name, class, label and tooltip.
+ */
 function batchButton( cls: string, filer: string, label: string, title: string ): HTMLButtonElement {
   const btn = document.createElement( "button" );
   btn.type      = "button";
@@ -111,7 +121,7 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
 
   const filerEl = document.createElement( "span" );
   filerEl.className   = "holding-area-filer";
-  filerEl.textContent = group.filer;
+  filerEl.textContent = group.label;
   header.appendChild( filerEl );
 
   const countEl = document.createElement( "span" );
@@ -119,10 +129,23 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
   countEl.textContent = String( group.tasks.length );
   header.appendChild( countEl );
 
+  // The persona's pending requests, visible with the group closed. Absent, not a zero, when
+  // the persona has none.
+  const requestText = groupRequestBadgeText( group.tasks );
+  if ( requestText !== "" ) {
+    const badge = document.createElement( "span" );
+    badge.className     = "task-request-badge holding-area-group-request-badge";
+    badge.dataset.filer = group.filer;
+    badge.setAttribute( "role", "img" );
+    badge.setAttribute( "aria-label", groupRequestBadgeLabel( group.tasks ) );
+    badge.textContent   = requestText;
+    header.appendChild( badge );
+  }
+
   header.appendChild( batchButton(
-    "holding-approve-all", group.filer, "Approve all", holdingApproveAllTitle( group.filer ) ) );
+    "holding-approve-all", group.filer, "Approve all", holdingApproveAllTitle( group.label, group.by ) ) );
   header.appendChild( batchButton(
-    "holding-wont-fix-all", group.filer, "Won't fix all", holdingWontFixAllTitle( group.filer ) ) );
+    "holding-wont-fix-all", group.filer, "Won't fix all", holdingWontFixAllTitle( group.label, group.by ) ) );
 
   const reason = document.createElement( "input" );
   reason.type        = "text";
@@ -138,6 +161,115 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
   header.appendChild( status );
 
   return header;
+}
+
+/** A table of held rows in the shared row shape — the filer's own, or one plan's. */
+function renderRowTable(
+  tasks           : ReadonlyArray<TaskItem>,
+  ianaZone        : string | null | undefined,
+  reassignTargets : ReadonlyArray<string>,
+): HTMLTableElement {
+  const table = document.createElement( "table" );
+  table.className = "task-list-table holding-area-table";
+  table.appendChild( renderRowTableHead() );
+
+  const tbody = document.createElement( "tbody" );
+  for ( const task of tasks ) {
+    tbody.appendChild( renderDisclosedRow( task, "holding-area", ianaZone, reassignTargets ) );
+  }
+  table.appendChild( tbody );
+  return table;
+}
+
+/** The plan group header's tooltip. Carbon copy of notifications.js `_renderHoldingPlanGroup`. */
+export const HOLDING_PLAN_TOGGLE_TITLE = "Click to show or hide the rows of this plan";
+
+/** The plan approve button's label. Carbon copy of notifications.js `_renderHoldingPlanGroup`. */
+export function holdingPlanApproveLabel( n: number ): string {
+  return `Approve all ${ n }`;
+}
+
+/** The plan approve button's tooltip. Carbon copy of notifications.js `_renderHoldingPlanGroup`. */
+export function holdingPlanApproveTitle( n: number ): string {
+  return `Approve the ${ n } rows listed under this plan — reversible, a row approved by mistake can be demoted straight back`;
+}
+
+/** The plan group's chevron glyph — ▼ open, ▶ closed, as the filer group's. */
+export function holdingPlanChevron( expanded: boolean ): string {
+  return holdingGroupChevron( expanded );
+}
+
+/**
+ * One plan sub-group inside a filer's group: a header (chevron, "Plan: <title>", count,
+ * ONE approve control, status span) and a table of exactly the plan's rows.
+ *
+ * ⚠️ THE IDS RIDE ON THE BUTTON (`data-task-ids`), built from the same rows as the table
+ * beneath it. The press acts on what the operator was shown, and a row a peer has since
+ * moved is refused by the server and counted as refused, never skipped.
+ *
+ * Ensures:
+ *   - returns a `.holding-plan-group` <div> carrying data-filer and data-plan, and carrying
+ *     `.collapsed` exactly when expanded is false
+ *   - the label reads "Plan: <title>"; the raw key is only the tooltip and a data attribute
+ *   - the header is a keyboard-reachable button whose aria-expanded and chevron agree with expanded
+ *   - the button, the label and the status span carry the plan's identity; the button's label
+ *     and its data-task-ids carry the same N, the number of rows in the table
+ */
+export function renderHoldingPlanGroup(
+  filer           : string,
+  plan            : HeldPlan,
+  ianaZone        : string | null | undefined,
+  reassignTargets : ReadonlyArray<string>,
+  expanded        : boolean,
+): HTMLDivElement {
+  const wrapper = document.createElement( "div" );
+  wrapper.className     = expanded ? "holding-plan-group" : "holding-plan-group collapsed";
+  wrapper.dataset.filer = filer;
+  wrapper.dataset.plan  = plan.key;
+
+  const header = document.createElement( "div" );
+  header.className = "holding-plan-header";
+  header.setAttribute( "role", "button" );
+  header.setAttribute( "tabindex", "0" );
+  header.setAttribute( "aria-expanded", expanded ? "true" : "false" );
+  header.title = HOLDING_PLAN_TOGGLE_TITLE;
+
+  const chevron = document.createElement( "span" );
+  chevron.className   = "holding-plan-chevron";
+  chevron.setAttribute( "aria-hidden", "true" );
+  chevron.textContent = holdingPlanChevron( expanded );
+  header.appendChild( chevron );
+
+  const label = document.createElement( "span" );
+  label.className   = "holding-plan-label";
+  label.textContent = `Plan: ${ plan.title }`;
+  label.title       = plan.key;
+  header.appendChild( label );
+
+  const countEl = document.createElement( "span" );
+  countEl.className   = "holding-plan-count";
+  countEl.textContent = String( plan.ids.length );
+  header.appendChild( countEl );
+
+  const btn = document.createElement( "button" );
+  btn.type      = "button";
+  btn.className = "task-action-btn holding-plan-approve-all";
+  btn.dataset.filer   = filer;
+  btn.dataset.plan    = plan.key;
+  btn.dataset.taskIds = plan.ids.join( "," );
+  btn.title       = holdingPlanApproveTitle( plan.ids.length );
+  btn.textContent = holdingPlanApproveLabel( plan.ids.length );
+  header.appendChild( btn );
+
+  const status = document.createElement( "span" );
+  status.className = "holding-plan-status";
+  status.dataset.filer = filer;
+  status.dataset.plan  = plan.key;
+  header.appendChild( status );
+
+  wrapper.appendChild( header );
+  wrapper.appendChild( renderRowTable( plan.tasks, ianaZone, reassignTargets ) );
+  return wrapper;
 }
 
 /**
@@ -158,6 +290,9 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
  *     interactive/keyed elements carrying data-filer
  *   - the table is `.task-list-table.holding-area-table` with the SHARED
  *     ROW_SCHEMA head, so its column count cannot drift from the row's
+ *   - each plan sub-group (see renderHoldingPlanGroup) is listed first, then the
+ *     filer's ungrouped rows in the filer's own table, which is omitted when there
+ *     are none
  *   - each task emits the shared three-row disclosed row with pane
  *     "holding-area"
  */
@@ -166,6 +301,7 @@ export function renderHoldingAreaGroup(
   ianaZone        : string | null | undefined,
   reassignTargets : ReadonlyArray<string> = [],
   expanded        : boolean = false,
+  expandedPlans   : ReadonlySet<string> = new Set(),
 ): HTMLDivElement {
   const wrapper = document.createElement( "div" );
   wrapper.className = expanded ? "holding-area-group" : "holding-area-group collapsed";
@@ -173,16 +309,13 @@ export function renderHoldingAreaGroup(
 
   wrapper.appendChild( renderGroupHeader( group, expanded ) );
 
-  const table = document.createElement( "table" );
-  table.className = "task-list-table holding-area-table";
-  table.appendChild( renderRowTableHead() );
-
-  const tbody = document.createElement( "tbody" );
-  for ( const task of group.tasks ) {
-    tbody.appendChild( renderDisclosedRow( task, "holding-area", ianaZone, reassignTargets ) );
+  for ( const plan of group.plans ) {
+    wrapper.appendChild( renderHoldingPlanGroup(
+      group.filer, plan, ianaZone, reassignTargets, expandedPlans.has( holdingPlanId( group.filer, plan.key ) ) ) );
   }
-  table.appendChild( tbody );
-  wrapper.appendChild( table );
+  if ( group.ungrouped.length > 0 ) {
+    wrapper.appendChild( renderRowTable( group.ungrouped, ianaZone, reassignTargets ) );
+  }
 
   return wrapper;
 }
@@ -205,10 +338,12 @@ export function renderHoldingAreaGroups(
   ianaZone        : string | null | undefined,
   reassignTargets : ReadonlyArray<string> = [],
   expandedFilers  : ReadonlySet<string> = new Set(),
+  expandedPlans   : ReadonlySet<string> = new Set(),
 ): DocumentFragment {
   const frag = document.createDocumentFragment();
   for ( const group of groups ) {
-    frag.appendChild( renderHoldingAreaGroup( group, ianaZone, reassignTargets, expandedFilers.has( group.filer ) ) );
+    frag.appendChild( renderHoldingAreaGroup( group, ianaZone, reassignTargets, expandedFilers.has( group.filer ), expandedPlans ) );
   }
   return frag;
 }
+

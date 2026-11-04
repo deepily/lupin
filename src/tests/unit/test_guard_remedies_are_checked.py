@@ -58,6 +58,7 @@ from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
 )
 from lupin_cli.claude_code.hooks.lib.kill_guard import (
     _deny_reason_for as _kill_deny,
+    _foreign_deny_reason as _kill_foreign_deny,
 )
 from lupin_cli.claude_code.hooks.lib.merge_head_guard import (
     KIND_SQUASH, KIND_MERGE, _deny_reason_for as _merge_head_deny,
@@ -179,12 +180,13 @@ _MESSAGES = {
     "commit_scope_guard.deny.pathspec": lambda: _commit_scope_deny( _FOREIGN, [], [ _PEER ], scope=SCOPE_PATHSPEC ),
     "kill_guard.deny.pids"            : lambda: _kill_deny( [ "123" ] ),
     "kill_guard.deny.sweep"           : lambda: _kill_deny( [] ),
+    "kill_guard.deny.foreign"         : lambda: _kill_foreign_deny( [ ( "123", "pytest", "/other/tree" ) ] ),
 }
 
 # True  = names a table hazard, so a [] from the caveat check is EVIDENCE
 # False = names none, so a [] means NOTHING WAS MEASURED - do not assert on it
 #
-# Seven of nine are False today. That ratio is the honest state of this check, and
+# Eight of ten are False today. That ratio is the honest state of this check, and
 # it is worth seeing: the caveat table is a floor built from three measured incidents,
 # so most guard messages recommend operations nobody has been burned by yet.
 _CHECKABLE = {
@@ -197,6 +199,7 @@ _CHECKABLE = {
     "commit_scope_guard.deny.pathspec": False,   # "drop it from the paths you name"
     "kill_guard.deny.pids"            : False,   # every substitute is own-children scoped
     "kill_guard.deny.sweep"           : False,   # same three substitutes
+    "kill_guard.deny.foreign"         : False,   # same own-children substitutes, plus read-first-by-pid
 }
 
 

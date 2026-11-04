@@ -1,0 +1,157 @@
+"""
+Member text for the need set: stripped names, raw bodies and named failures.
+"""
+import collections
+import pathlib
+import re
+
+import pytest
+
+from cosa.repo.symindex import js_index
+from cosa.repo.symindex import spec as sp
+from lupin_mcp.reuse_needset import errors as er
+from lupin_mcp.reuse_needset import strip
+
+REPO_ROOT = sp.git_toplevel( pathlib.Path( __file__ ).resolve().parent )
+JS_FILE   = "src/lupin_app/static/js/notifications.js"
+JS_NAME   = "ccConsoleCanWatch"
+
+
+@pytest.fixture( autouse=True )
+def _typescript_lookup( monkeypatch ):
+    monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
+
+
+def js_line( name ):
+    """Return the 1-based line where a top-level function of the monolith starts."""
+    lines = ( REPO_ROOT / JS_FILE ).read_text( encoding="utf-8" ).splitlines()
+    return next( i for i, l in enumerate( lines, 1 ) if l.startswith( f"function {name}(" ) )
+
+
+PY_FUNCTION = { "id": "cosa.repo.symindex.dups.jaccard", "file": "src/cosa/repo/symindex/dups.py", "name": "jaccard", "lang": "py", "line": 0 }
+PY_METHOD   = { "id": "cosa.repo.symindex.spec.IndexSpec.__init__", "file": "src/cosa/repo/symindex/spec.py", "name": "IndexSpec.__init__", "lang": "py", "line": 0 }
+
+
+def monolith():
+    """Return the index record of the monolith function."""
+    return { "id": "src.lupin_app.static.js.notifications." + JS_NAME, "file": JS_FILE, "name": JS_NAME, "lang": "ts", "line": js_line( JS_NAME ) }
+
+
+def whole_word( name, text ):
+    """Say whether a name appears in text as a whole identifier."""
+    return re.search( r"(?<![A-Za-z0-9_$])" + re.escape( name ) + r"(?![A-Za-z0-9_$])", text ) is not None
+
+
+@pytest.mark.parametrize( "rec, kind", [ ( PY_FUNCTION, "function" ), ( PY_METHOD, "method" ), ( None, "function" ) ], ids=[ "python function", "python method", "monolith function" ] )
+def test_a_real_member_strips_to_text_without_its_own_names( rec, kind ):
+    rec  = monolith() if rec is None else rec
+    got  = strip.strip_member( rec, REPO_ROOT )
+    raw  = strip.bodies_for( [ rec ], REPO_ROOT )[ rec[ "id" ] ]
+    assert got[ "kind" ] == kind
+    assert got[ "forbidden" ], "a member with a name, parameters or a class has names to remove"
+    assert not any( whole_word( n, got[ "text" ] ) for n in got[ "forbidden" ] )
+    assert any( whole_word( n, raw ) for n in got[ "forbidden" ] ), "positive control: the unstripped text holds them"
+    assert rec[ "name" ].split( "." )[ -1 ] in got[ "forbidden" ] or rec[ "name" ].endswith( "__init__" )
+
+
+def test_the_monolith_member_keeps_its_doc_comment_and_names_become_placeholders():
+    got = strip.strip_member( monolith(), REPO_ROOT )
+    assert "NAME" in got[ "text" ] or "ARG1" in got[ "text" ]
+    assert JS_NAME in strip.bodies_for( [ monolith() ], REPO_ROOT )[ monolith()[ "id" ] ]
+
+
+def test_mixed_records_come_back_together_and_script_members_share_one_node_start( monkeypatch ):
+    starts = []
+    real   = js_index._run
+    monkeypatch.setattr( js_index, "_run", lambda *a, **k: starts.append( k[ "script" ] ) or real( *a, **k ) )
+    other  = dict( monolith(), name="ccConsoleBuildPageHref", id="src.lupin_app.static.js.notifications.ccConsoleBuildPageHref", line=js_line( "ccConsoleBuildPageHref" ) )
+    recs   = [ monolith(), PY_FUNCTION, other ]
+    assert sorted( strip.bodies_for( recs, REPO_ROOT ) ) == sorted( r[ "id" ] for r in recs )
+    assert sorted( strip.strip_members( recs, REPO_ROOT ) ) == sorted( r[ "id" ] for r in recs )
+    assert starts == [ strip.STRIP_SCRIPT, strip.STRIP_SCRIPT ]
+
+
+def test_python_only_records_never_start_node( monkeypatch ):
+    monkeypatch.setattr( js_index, "_run", lambda *a, **k: pytest.fail( "node was started for Python records" ) )
+    assert strip.script_results( REPO_ROOT, [], strip.MODE_TEXT ) == []
+    assert list( strip.strip_members( [ PY_FUNCTION ], REPO_ROOT ) ) == [ PY_FUNCTION[ "id" ] ]
+
+
+def test_module_and_source_root_come_from_the_id_and_the_file():
+    assert strip.module_of( PY_METHOD ) == "cosa.repo.symindex.spec"
+    assert strip.module_of( { "id": "a.b.f#2", "name": "f" } ) == "a.b"
+    assert strip.dotted_id( { "id": "a.b.f#2" } ) == "a.b.f"
+    assert strip.src_root_of( "/r", PY_FUNCTION ) == pathlib.Path( "/r/src" )
+    assert strip.src_root_of( "/r", { "id": "mod.f", "name": "f", "file": "mod.py" } ) == pathlib.Path( "/r" )
+    assert strip.src_root_of( "/r", { "id": "pkg.f", "name": "f", "file": "pkg/__init__.py" } ) == pathlib.Path( "/r" )
+
+
+def test_a_python_member_that_cannot_be_found_is_strip_failed_by_name( tmp_path ):
+    ( tmp_path / "bad.py" ).write_text( "def (:\n", encoding="utf-8" )
+    ( tmp_path / "ok.py" ).write_text( "def here():\n    return 1\n", encoding="utf-8" )
+    for rec in ( { "id": "ghost.f", "name": "f", "file": "ghost.py", "lang": "py" }, { "id": "bad.f", "name": "f", "file": "bad.py", "lang": "py" },
+                 { "id": "ok.absent", "name": "absent", "file": "ok.py", "lang": "py" } ):
+        for call in ( strip.strip_members, strip.bodies_for ):
+            with pytest.raises( er.NeedsetError ) as e: call( [ rec ], tmp_path )
+            assert e.value.code == er.STRIP_FAILED and rec[ "id" ] in e.value.detail
+
+
+def test_a_script_member_that_cannot_be_found_is_strip_failed_by_name():
+    wrong_line = dict( monolith(), line=1 )
+    no_file    = { "id": "nofile.f", "name": "f", "file": "src/lupin_app/static/js/no-such-file.js", "lang": "ts", "line": 1 }
+    for rec, words in ( ( wrong_line, "starts on line 1" ), ( no_file, "no such file" ) ):
+        with pytest.raises( er.NeedsetError ) as e: strip.script_results( REPO_ROOT, [ rec ], strip.MODE_TEXT )
+        assert e.value.code == er.STRIP_FAILED and words in e.value.detail and rec[ "id" ] in e.value.detail
+
+
+def test_decorators_are_part_of_a_python_members_raw_body( tmp_path ):
+    ( tmp_path / "deco.py" ).write_text( "import functools\n\n\n@functools.cache\ndef cached( aaa ):\n    return aaa\n", encoding="utf-8" )
+    rec = { "id": "deco.cached", "file": "deco.py", "name": "cached", "lang": "py", "line": 5 }
+    assert strip.bodies_for( [ rec ], tmp_path )[ rec[ "id" ] ].startswith( "@functools.cache\ndef cached" )
+
+
+def test_a_script_members_module_parts_are_stripped_from_its_text( tmp_path ):
+    ( tmp_path / "util" ).mkdir()
+    ( tmp_path / "util" / "helpers.ts" ).write_text( "export function helperThing( aaa: number ) { return helpers + aaa; }\n", encoding="utf-8" )
+    rec = { "id": "util.helpers.helperThing", "file": "util/helpers.ts", "name": "helperThing", "lang": "ts", "line": 1 }
+    got = strip.strip_member( rec, tmp_path )
+    assert "helpers" in got[ "forbidden" ] and got[ "text" ] == "export function NAME( ARG1: number ) { return MODULE + ARG1; }"
+
+
+def test_the_shape_mode_agrees_with_the_duplicate_finders_kinds_for_function_like_members( tmp_path ):
+    src = ( "export function plain( aaa: number, bbb = 'x' ) { const t = `y${aaa}`; return /re/.test( t ) ? 1n : 2.5; }\n"
+            "export class Box {\n    #hidden = 1;\n    constructor( public vvv: number ) {}\n    get size() { return this.#hidden; }\n"
+            "    set size( n ) { this.#hidden = n; }\n    async run<T>( x: T ): Promise<T> { return await x; }\n}\n" )
+    ( tmp_path / "s.ts" ).write_text( src, encoding="utf-8" )
+    lines  = src.splitlines()
+    at     = lambda text: next( i for i, l in enumerate( lines, 1 ) if text in l )
+    wanted = [ ( "plain", at( "function plain" ) ), ( "Box.constructor", at( "constructor(" ) ), ( "Box.size", at( "get size" ) ), ( "Box.size", at( "set size" ) ), ( "Box.run", at( "async run" ) ) ]
+    recs   = [ { "id": f"s.{n}@{ln}", "file": "s.ts", "name": n, "line": ln, "lang": "ts", "kind": "function" } for n, ln in wanted ]
+    mine   = [ r[ "kinds" ] for r in strip.script_results( tmp_path, recs, strip.MODE_SHAPE ) ]
+    theirs = collections.defaultdict( list )
+    for d in js_index.extract_js_shapes( tmp_path, [ tmp_path / "s.ts" ] )[ "defs" ]: theirs[ d[ "name" ] ].append( d[ "kinds" ] )
+    for ( name, _ ), kinds in zip( wanted, mine ): assert kinds in theirs[ name ], name
+    assert len( mine ) == 5 and all( len( k ) > 3 for k in mine )
+
+
+def planted_like( rec, ident ):
+    """Return the record as the planted file writes it, under an id that is no module path."""
+    return { **rec, "id": ident }
+
+
+@pytest.mark.parametrize( "rec", [ PY_FUNCTION, PY_METHOD ], ids=[ "function", "method" ] )
+def test_a_planted_python_record_strips_and_reads_exactly_as_the_same_member_under_its_dotted_id( rec ):
+    planted = planted_like( rec, "d-114b2124d0" )
+    assert strip.dotted_id( planted ) == rec[ "id" ] and strip.module_of( planted ) == strip.module_of( rec ) and strip.src_root_of( "/r", planted ) == strip.src_root_of( "/r", rec )
+    assert strip.strip_member( planted, REPO_ROOT ) == strip.strip_member( rec, REPO_ROOT )
+    assert strip.bodies_for( [ planted ], REPO_ROOT )[ "d-114b2124d0" ] == strip.bodies_for( [ rec ], REPO_ROOT )[ rec[ "id" ] ]
+
+
+def test_the_dotted_id_of_a_python_record_is_kept_when_it_fits_its_file_and_derived_when_it_does_not():
+    assert strip.dotted_id( PY_FUNCTION ) == PY_FUNCTION[ "id" ] and strip.dotted_id( dict( PY_FUNCTION, id=PY_FUNCTION[ "id" ] + "#2" ) ) == PY_FUNCTION[ "id" ]
+    assert strip.dotted_id( planted_like( PY_FUNCTION, "d-0c4d1f3292" ) ) == "cosa.repo.symindex.dups.jaccard"
+    assert strip.dotted_id( { "id": "d-x", "file": "src/cosa/pkg/__init__.py", "name": "build", "lang": "py" } ) == "cosa.pkg.build"
+    assert strip.dotted_id( { "id": "d-x", "file": "mod.py", "name": "f", "lang": "py" } ) == "mod.f"                                  # a file at the root has no src to drop
+    assert strip.dotted_id( { "id": "other.pkg.f", "file": "src/cosa/m.py", "name": "f", "lang": "py" } ) == "cosa.m.f"                # an id for another module is not trusted
+    assert strip.dotted_id( { "id": "x.m.f", "file": "src/cosa/m.py", "name": "f", "lang": "py" } ) == "cosa.m.f"                    # a matching last segment is not enough
+    assert strip.dotted_id( { "id": "a.b.f#2" } ) == "a.b.f" and strip.dotted_id( { "id": "d-x", "file": "src/a.ts", "name": "f", "lang": "ts" } ) == "d-x"

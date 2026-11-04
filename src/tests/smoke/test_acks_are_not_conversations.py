@@ -43,18 +43,20 @@ rather than fails when Postgres is unreachable.
 
 import os
 import uuid
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
 
 import cosa.rest.commons_ack_watcher as watcher_module
 from cosa.rest.commons_ack_watcher import CommonsAckWatcher
-from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
+import tests.helpers.template_database as td
 from cosa.rest.db.repositories.notification_repository import NotificationRepository
 
 
@@ -66,36 +68,49 @@ _SESSION_ID   = "f19a8996-2fdc-425d-82bc-0e99f3cd8db2"
 # conversation reads are keyed by sender_id, so the query has to be asked about THIS one.
 _ACK_SENDER   = "claude.code@unknown.deepily.ai#f19a8996"
 _REAL_SENDER  = "claude.code@lupin.deepily.ai#deadbeef"
+# The repository methods take the zone from the caller. This test names its own.
+_ZONE         = "America/New_York"
+
+
+def _today_in_repo_zone( now_utc ):
+    """
+    Return the date string the repository method reads as today.
+
+    Requires:
+        - now_utc is a timezone-aware datetime
+
+    Ensures:
+        - the zone is the one the calls below pass, as the method has no default
+        - the process zone is never consulted
+    """
+    return now_utc.astimezone( ZoneInfo( _ZONE ) ).strftime( "%Y-%m-%d" )
 
 
 def _server_url():
     """Borrow a credential-correct server URL; every write lands in the throwaway DB."""
-    db_module.swap_database( "testing" )
-    return db_module.engine.url
+    return make_url( td.clone_server_url() )
 
 
 @pytest.fixture( scope="module" )
 def throwaway_db_url():
     server_url = _server_url()
     try:
-        eng = create_engine( server_url, isolation_level="AUTOCOMMIT" )
-        with eng.connect() as conn:
-            conn.execute( text( f'DROP DATABASE IF EXISTS "{_THROWAWAY_DB}"' ) )
-            conn.execute( text( f'CREATE DATABASE "{_THROWAWAY_DB}"' ) )
-        eng.dispose()
+        td.drop_database( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
+        td.create_from_template( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
     except OperationalError as e:
         pytest.skip( f"Postgres unreachable — skipping the acks-are-not-conversations check: {e}" )
 
     url = server_url.set( database=_THROWAWAY_DB )
-    command.upgrade( build_alembic_config( database_url=url.render_as_string( hide_password=False ) ), "head" )
+    try:
+        command.upgrade( build_alembic_config( database_url=url.render_as_string( hide_password=False ) ), "head" )
+    except BaseException:
+        td.drop_database( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
+        raise
     yield url
 
     eng = create_engine( server_url, isolation_level="AUTOCOMMIT" )
     with eng.connect() as conn:
-        conn.execute( text(
-            "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity "
-            "WHERE datname = :db AND pid <> pg_backend_pid()"
-        ), { "db": _THROWAWAY_DB } )
+        conn.execute( text( td.terminate_sessions_sql( td.uses_template() ) ), { "n": _THROWAWAY_DB } )
         conn.execute( text( f'DROP DATABASE IF EXISTS "{_THROWAWAY_DB}"' ) )
     eng.dispose()
 
@@ -198,7 +213,7 @@ class TestASavedAckIsNotAConversation:
         _save_one_ack( recipient, db )
         session = db()
         try:
-            groups = NotificationRepository( session ).get_sender_conversations_by_date( _ACK_SENDER, recipient )
+            groups = NotificationRepository( session ).get_sender_conversations_by_date( _ACK_SENDER, recipient, timezone_name=_ZONE )
         finally:
             session.close()
         # `get_sender_conversations_by_date` returns a DICT of date -> rows. The first
@@ -212,7 +227,7 @@ class TestASavedAckIsNotAConversation:
         _save_one_ack( recipient, db )
         session = db()
         try:
-            summaries = NotificationRepository( session ).get_sender_date_summaries( _ACK_SENDER, recipient )
+            summaries = NotificationRepository( session ).get_sender_date_summaries( _ACK_SENDER, recipient, timezone_name=_ZONE )
         finally:
             session.close()
         assert summaries == [], f"an ack must not create a date summary, got {summaries!r}"
@@ -257,7 +272,7 @@ class TestTheExclusionIsNARROWAndNotAGeneralBlackout:
         session = db()
         try:
             repo = self._save_ordinary( session, recipient )
-            summaries = repo.get_sender_date_summaries( _REAL_SENDER, recipient )
+            summaries = repo.get_sender_date_summaries( _REAL_SENDER, recipient, timezone_name=_ZONE )
             assert len( summaries ) == 1 and summaries[ 0 ][ "count" ] == 1
         finally:
             session.close()
@@ -363,8 +378,8 @@ class TestTheStructurALLYImmunePathsAreMeasuredNotAssumed:
         session = db()
         try:
             repo   = NotificationRepository( session )
-            today  = _dt.datetime.now( _dt.timezone.utc ).astimezone().strftime( "%Y-%m-%d" )
-            hidden = repo.soft_delete_by_date( _ACK_SENDER, recipient, today )
+            today  = _today_in_repo_zone( _dt.datetime.now( _dt.timezone.utc ) )
+            hidden = repo.soft_delete_by_date( _ACK_SENDER, recipient, today, timezone_name=_ZONE )
             session.commit()
             assert hidden == 1, (
                 f"a write path MUST be able to reach an ack, or the user can never clear "
@@ -450,7 +465,7 @@ class TestTheWINDOWQueryExcludesItToo:
         session = db()
         try:
             groups = NotificationRepository( session ).get_sender_conversations_by_date(
-                _ACK_SENDER, recipient, anchor=self._anchor() )
+                _ACK_SENDER, recipient, anchor=self._anchor(), timezone_name=_ZONE )
         finally:
             session.close()
         assert not groups, (
@@ -476,7 +491,7 @@ class TestTheWINDOWQueryExcludesItToo:
             assert len( rows ) == 1, (
                 f"CONTROL FAILED — this anchor/window returns nothing at all, so the two "
                 f"empty answers above proved nothing. Got {rows!r}" )
-            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, anchor=anchor )
+            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, anchor=anchor, timezone_name=_ZONE )
             assert groups, "CONTROL FAILED — the anchored date read is empty for a real message too"
         finally:
             session.close()
@@ -634,7 +649,7 @@ class TestTheANCHORLookupClauseDoesWorkToo:
         session = db()
         try:
             repo, old, _ = self._one_sender_with_both( session, recipient, real_age_days=10 )
-            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, window_hours=168 )
+            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, window_hours=168, timezone_name=_ZONE )
             found  = [ n.id for rows in groups.values() for n in rows ]
             assert found == [ old.id ], (
                 f"the ack dragged the anchor forward and the real message fell out of the "

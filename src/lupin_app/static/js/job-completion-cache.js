@@ -16,6 +16,11 @@
  */
 
 class JobCompletionCache {
+    /**
+     * Sets up a cache of job completion messages with size, age and entry limits.
+     *
+     * Holds an in-memory map, IndexedDB handle and analytics counters. Takes its limits from options.
+     */
     constructor(options = {}) {
         // Configuration options
         this.cacheEnabled = options.cacheEnabled !== false; // Default true
@@ -50,43 +55,26 @@ class JobCompletionCache {
         }
     }
     
-    async generateCacheKey(text) {
-        // Use SHA-256 hash for consistent cache keys
-        const encoder = new TextEncoder();
-        const data = encoder.encode(text);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-    
+    /**
+     * Opens the IndexedDB database and creates the job messages store if it is missing.
+     *
+     * Resolves when the database is ready.
+     */
     async initializeIndexedDB() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.dbVersion);
-            
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                this.db = request.result;
-                console.log('JobCompletionCache: IndexedDB initialized');
-                resolve();
-            };
-            
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-                if (!db.objectStoreNames.contains('jobMessages')) {
-                    const store = db.createObjectStore('jobMessages', { keyPath: 'jobId' });
-                    store.createIndex('timestamp', 'timestamp', { unique: false });
-                    store.createIndex('textHash', 'textHash', { unique: false });
-                    store.createIndex('userId', 'userId', { unique: false });
-                }
-            };
-        });
+        this.db = await LupinIdbKit.openStore(this.dbName, this.dbVersion, 'jobMessages', 'jobId', ['timestamp', 'textHash', 'userId']);
+        console.log('JobCompletionCache: IndexedDB initialized');
     }
     
+    /**
+     * Saves a job's completion text in memory and IndexedDB, keyed by job ID.
+     *
+     * Records the text hash, size and replay counters, then evicts old entries. Does nothing when caching is off.
+     */
     async store(jobId, text, timestamp = null, userId = null, metadata = {}) {
         if (!this.cacheEnabled) return;
         
         const ts = timestamp || new Date().toISOString();
-        const textHash = await this.generateCacheKey(text);
+        const textHash = await LupinIdbKit.sha256Hex(text);
         
         const cacheEntry = {
             jobId,
@@ -120,6 +108,11 @@ class JobCompletionCache {
         console.log(`JobCompletionCache: Stored job ${jobId} (${cacheEntry.size} bytes)`);
     }
     
+    /**
+     * Returns the cached entry for a job ID, or null when missing or expired.
+     *
+     * Checks memory first, then IndexedDB. A hit raises the entry's replay count.
+     */
     async get(jobId) {
         if (!this.cacheEnabled) return null;
         
@@ -146,7 +139,7 @@ class JobCompletionCache {
         
         // Check IndexedDB
         if (this.db) {
-            const cached = await this.getFromIndexedDB(jobId);
+            const cached = await LupinIdbKit.getOne(this.db, 'jobMessages', jobId);
             if (cached && !this.isCacheExpired(cached)) {
                 // Add back to in-memory cache
                 this.messageCache.set(jobId, cached);
@@ -165,10 +158,15 @@ class JobCompletionCache {
         return null;
     }
     
+    /**
+     * Finds a cached, unexpired entry whose text matches the given text, or returns null.
+     *
+     * Searches memory first, then IndexedDB.
+     */
     async getByText(text) {
         if (!this.cacheEnabled) return null;
         
-        const textHash = await this.generateCacheKey(text);
+        const textHash = await LupinIdbKit.sha256Hex(text);
         
         // Search in-memory cache
         for (const [jobId, entry] of this.messageCache) {
@@ -202,6 +200,9 @@ class JobCompletionCache {
         return null;
     }
     
+    /**
+     * Removes one job's entry from memory and IndexedDB and lowers the cache size count.
+     */
     async delete(jobId) {
         const entry = this.messageCache.get(jobId);
         if (entry) {
@@ -217,17 +218,9 @@ class JobCompletionCache {
         console.log(`JobCompletionCache: Deleted job ${jobId}`);
     }
     
-    async getFromIndexedDB(jobId) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['jobMessages'], 'readonly');
-            const store = transaction.objectStore('jobMessages');
-            const request = store.get(jobId);
-            
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-    }
-    
+    /**
+     * Writes one entry to the IndexedDB job messages store and resolves when done.
+     */
     async saveToIndexedDB(entry) {
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['jobMessages'], 'readwrite');
@@ -239,10 +232,18 @@ class JobCompletionCache {
         });
     }
     
+    /**
+     * Returns true when an entry is older than the maximum cache age.
+     */
     isCacheExpired(entry) {
         return Date.now() - entry.timestampMs > this.cacheMaxAge;
     }
     
+    /**
+     * Drops expired entries from memory, then removes the oldest until limits are met.
+     *
+     * Expired entries stay in IndexedDB; only entries removed for size or count are also deleted there. Updates the cache size count.
+     */
     async evictOldEntries() {
         let totalSize = 0;
         const entries = Array.from(this.messageCache.values());
@@ -277,6 +278,9 @@ class JobCompletionCache {
     }
     
     // Analytics Methods
+    /**
+     * Adds one to the count kept for this text, after lowercasing and trimming it.
+     */
     updatePhraseFrequency(text) {
         // Normalize text for phrase frequency tracking
         const normalizedText = text.toLowerCase().trim();
@@ -284,6 +288,9 @@ class JobCompletionCache {
         this.analytics.popularPhrases.set(normalizedText, count + 1);
     }
     
+    /**
+     * Returns cache statistics, including hit rate, popular phrases and top jobs.
+     */
     getAnalytics() {
         const hitRate = this.analytics.totalRetrieves > 0 
             ? (this.analytics.cacheHits / this.analytics.totalRetrieves * 100).toFixed(2) 
@@ -320,6 +327,11 @@ class JobCompletionCache {
         };
     }
     
+    /**
+     * Returns the unexpired cached jobs, newest first, optionally only those of one user.
+     *
+     * Reads IndexedDB only when fewer than 50 jobs are in memory.
+     */
     async getAllJobs(userId = null) {
         const jobs = [];
         
@@ -358,6 +370,9 @@ class JobCompletionCache {
         return jobs.sort((a, b) => b.timestampMs - a.timestampMs);
     }
     
+    /**
+     * Empties the in-memory cache and the IndexedDB store.
+     */
     clearCache() {
         // Clear in-memory cache
         this.messageCache.clear();
@@ -376,7 +391,9 @@ class JobCompletionCache {
         console.log('JobCompletionCache: Cache cleared');
     }
     
-    // Clean up method
+    /**
+     * Clears the cache and closes the IndexedDB connection.
+     */
     destroy() {
         this.clearCache();
         if (this.db) {

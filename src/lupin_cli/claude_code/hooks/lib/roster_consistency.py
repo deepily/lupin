@@ -1,41 +1,41 @@
 """
 Cross-check the two env-var families that both answer "who is a manager".
 
-THE DEFECT THIS EXISTS FOR (2026-08-18, Rick's ruling). Two independent
-environment-variable families answer the same question, are read by DIFFERENT
-consumers, and nothing compared them:
+Two independent environment-variable families answer the same question and are
+read by different consumers, and nothing compared them:
 
-    COSA_VOICE_MANAGERS__<PROJECT>          — the declared-manager roster.
-        Consumers: the :8001 arbiter's fleet-status render + escalation
+    `COSA_VOICE_MANAGERS__<PROJECT>` is the declared-manager roster.
+        Consumers: the :8001 arbiter's fleet-status render and escalation
         fan-out, reserve-from-random at persona allocation, the crontab tick
-        installer. Decides who APPEARS to be a manager.
+        installer. It decides who appears to be a manager.
 
-    COSA_VOICE_PREFERRED_PERSONA__<PROJECT> — the per-repo persona chain.
+    `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` is the per-repo persona chain.
         Consumer: manager_figure.resolve_implicit_manager_figure(), the
-        implicit half of is_manager_figure() — which gates task-store WRITES,
-        fail-closed. Decides who can RECORD OWED WORK.
+        implicit half of is_manager_figure(), which gates task-store writes
+        and is fail-closed. It decides who can record owed work.
 
-They drifted apart (`"Mr. Radio, Tiberius"` vs `"Mr. Radio,Cheech,*"`) and the
-disagreement surfaced only when a human read a retired name off a status card.
-Nothing failed; that is the whole problem.
+They drifted apart (`"Mr. Radio, Tiberius"` against `"Mr. Radio,Cheech,*"`).
+The disagreement surfaced only when a human read a retired name off a status
+card. Nothing failed, which is the whole problem.
 
-THE PRIMARY FIX IS DERIVATION, NOT THIS CHECK. src/scripts/start-cc-with-tmux.sh
-now BUILDS every COSA_VOICE_PREFERRED_PERSONA__<PROJECT> chain from the sourced
-COSA_VOICE_MANAGERS__<PROJECT> roster (`<roster>,*`), so on the launcher path the
-two families cannot disagree — there is one source, ~/.claude/fleet-roster.env.
+The primary fix is derivation, not this check. src/scripts/start-cc-with-tmux.sh
+builds every `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` chain from the sourced
+`COSA_VOICE_MANAGERS__<PROJECT>` roster (`<roster>,*`). On the launcher path the
+two families therefore cannot disagree, because there is one source,
+~/.claude/fleet-roster.env.
 
-This module is the belt for the paths derivation does NOT own: a bare terminal
-that exported a chain by hand, a session already alive when the roster changed,
-a copy-pasted `export COSA_VOICE_PREFERRED_PERSONA__LUPIN=…` out of a stale doc.
-register_session (the SessionStart hook) runs it against the real launch env on
-every boot and renders any disagreement into `additionalContext`, where the
+This module is the belt for the paths derivation does not own.
+Examples are a bare terminal that exported a chain by hand.
+Others are a session already alive when the roster changed.
+A copy-pasted `export` line from a stale doc is a third.
+The SessionStart hook register_session runs it against the real launch env on
+every boot. It renders any disagreement into `additionalContext`, where the
 session itself reads it.
 
-**Degrade direction: SILENT (no disagreements).** This is an advisory alarm, not
-a permission predicate — a crash here must never take a SessionStart down.
+Degrade direction: silent (no disagreements). This is an advisory alarm, not
+a permission predicate, so a crash here must never take a SessionStart down.
 
-Design authority: this module's own header + the task-store row that commissioned
-it (a1a84682). Roster semantics: src/conf/fleet-roster.env.template.
+See: src/conf/fleet-roster.env.template (roster semantics)
 """
 
 from cosa.rest.voice_persona_helpers import parse_declared_managers
@@ -54,23 +54,21 @@ REASON_NO_CHAIN     = "roster_without_chain"
 
 def _collect( environ, prefix ):
     """
-    Map project suffix → declared persona names for one env-var family.
+    Map project suffix to declared persona names for one env-var family.
 
-    Both families are parsed by the SAME parser (parse_declared_managers), which
-    drops the `*` wildcard and de-duplicates on the canonical identity key. One
-    parser for both sides is what makes the comparison meaningful: a difference
-    in the OUTPUT can only come from a difference in the DECLARATION.
+    Both families go through parse_declared_managers, which drops the `*` wildcard and de-duplicates on the canonical key.
+    One parser for both sides means a difference in the output can only come from the declaration.
 
     Requires:
-        - environ is a Mapping of env-var name → value
+        - environ is a Mapping of env-var name to value
         - prefix is one of ROSTER_PREFIX / PREFERRED_PREFIX
 
     Ensures:
-        - Returns { "<PROJECT>": [ names… ] } for every var carrying the prefix
+        - Returns { "<PROJECT>": [ names... ] } for every var carrying the prefix
           whose value is non-blank. A non-blank value that parses to zero names
-          (a `*`-only chain) is KEPT with an empty list — it declares no manager
+          (a `*`-only chain) is kept with an empty list: it declares no manager
           and that is itself comparable.
-        - Blank / whitespace-only values are treated as UNSET and omitted, matching
+        - Blank / whitespace-only values are treated as unset and omitted, matching
           pick_persona_chain_from_env / pick_declared_managers_from_env.
         - Non-string values are omitted (an env Mapping should not hold them, but
           a test double might).
@@ -94,22 +92,21 @@ def find_roster_disagreements( environ=None ):
     """
     Find every project whose two manager declarations do not match.
 
-    Comparison is ORDERED on canonical identity keys, because order is load-
-    bearing in both families: the roster HEAD is the declared fallback manager
-    and the chain is walked first-free-wins. Two declarations that name the same
-    people in a different order are two different declarations.
+    Comparison is ordered on canonical identity keys, because order matters in both families.
+    The roster head is the declared fallback manager and the chain is walked first-free-wins.
+    Two declarations naming the same people in a different order are different declarations.
 
     Requires:
-        - environ is a Mapping or None (None → os.environ)
+        - environ is a Mapping or None (None means os.environ)
 
     Ensures:
-        - Returns [] when EITHER family is entirely absent. That is not drift,
+        - Returns [] when either family is entirely absent. That is not drift,
           it is a legitimate deployment shape: the :8001 arbiter's systemd unit
           loads only the roster, and the lupin-rest container carries neither.
           Firing there would train every reader to ignore the alarm.
         - Otherwise returns one dict per disagreeing project, sorted by project:
-          { "project", "roster", "chain", "reason" } — `roster`/`chain` are the
-          VERBATIM parsed names (display form, for a human to read) and `reason`
+          { "project", "roster", "chain", "reason" }. The `roster` and `chain` values are the
+          verbatim parsed names (display form, for a human to read) and `reason`
           is one of the REASON_* constants.
         - Never raises on a well-formed Mapping.
     """
@@ -144,9 +141,9 @@ def format_roster_drift_block( findings ):
     """
     Render disagreements as a SessionStart `additionalContext` block.
 
-    Same channel as the persona-failure and memento blocks: the session reads it
+    This is the same channel as the persona-failure and memento blocks: the session reads it
     at boot, at zero interrupt cost. A drift printed only to stderr is a drift
-    nobody reads — that is how this one survived.
+    nobody reads, which is how the original drift survived.
 
     Requires:
         - findings is the list returned by find_roster_disagreements

@@ -51,6 +51,12 @@ pytestmark = pytest.mark.integration
 # ones; only the storage and the socket are doubles.
 
 
+# The one user in this harness: the card is addressed to this id and the credential dependency
+# answers as this id. The door answers 403 to anyone else (row 5a1e018c), so the two must agree.
+ITEST_USER_ID  = "0f3c9a52-7b1e-4c6d-8a21-5d9e4b7f6a10"
+ITEST_STRANGER = "9d2b7e41-3c58-4f06-b1a9-6e8d0c4a2f73"
+
+
 class _FakeNotification:
     """Stand-in for the Notification ORM row the repository returns."""
     def __init__( self, state="delivered", expires_at=None, job_id=None,
@@ -61,7 +67,7 @@ class _FakeNotification:
         self.job_id         = job_id
         self.sender_id      = sender_id
         self.sender_persona = sender_persona
-        self.recipient_id   = recipient_id or _uuid.uuid4()
+        self.recipient_id   = recipient_id or _uuid.UUID( ITEST_USER_ID )
 
 
 class _FakeNotificationRepository:
@@ -106,9 +112,21 @@ class _FakeAsyncEvent:
         self.was_set = True
 
 
+# What the door stores for a UI answer, exactly. `answered_by` is the SERVER's account of the caller
+# (row e20e249a): the harness overrides `require_api_key_or_jwt` to return ITEST_USER_ID (the card's addressee), and posts
+# with neither an X-API-Key nor a Bearer token, so the method is "jwt" and there is no account email.
+ITEST_ANSWERED_BY = { "user_id": ITEST_USER_ID, "account_email": None, "method": "jwt" }
+
+
+def stored_ui_answer( value ):
+    """The dict `_stored_response_dict` hands the repository for a bare-string answer from this harness."""
+    return { "value": value, "source": "ui", "answered_by": ITEST_ANSWERED_BY }
+
+
 class _NotificationHarness:
     """Everything a test needs to drive POST /api/notify/response."""
-    def __init__( self, client, ws_manager, notification ):
+    def __init__( self, client, ws_manager, notification, app=None ):
+        self.app          = app
         self.client       = client
         self.ws_manager   = ws_manager
         self.notification = notification
@@ -170,6 +188,7 @@ def notification_harness( request ):
 
     import cosa.rest.routers.notifications as notifications_module
     from cosa.rest.routers.notifications import router as notifications_router, get_websocket_manager
+    from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
     params = getattr( request, "param", { } ) or { }
 
@@ -208,6 +227,9 @@ def notification_harness( request ):
     app = FastAPI()
     app.include_router( notifications_router )
     app.dependency_overrides[ get_websocket_manager ] = lambda: ws_manager
+    # The door asks for a credential since row e20e249a. These tests are about what
+    # happens AFTER the door, so the caller is named here; the refusal has its own tests.
+    app.dependency_overrides[ require_api_key_or_jwt ] = lambda: ITEST_USER_ID
 
     saved_pending = dict( notifications_module.pending_responses )
     notifications_module.pending_responses.clear()
@@ -217,7 +239,7 @@ def notification_harness( request ):
          patch.dict( "sys.modules", { "lupin_app.main": fake_main } ), \
          patch.object( notifications_module, "get_formatted_time_display", lambda: "3:00 PM" ), \
          patch.object( notifications_module, "get_formatted_date_display", lambda: "Monday" ):
-        yield _NotificationHarness( TestClient( app ), ws_manager, notification )
+        yield _NotificationHarness( TestClient( app ), ws_manager, notification, app )
 
     notifications_module.pending_responses.clear()
     notifications_module.pending_responses.update( saved_pending )
@@ -276,7 +298,7 @@ class TestSSEBlockingFlow:
         assert body[ "status" ]         == "success"
         assert body[ "response_value" ] == "yes"
 
-        assert notification_harness.persisted == { "value": "yes", "source": "ui" }, \
+        assert notification_harness.persisted == stored_ui_answer( "yes" ), \
             f"a bare string must be wrapped for storage, got {notification_harness.persisted!r}"
 
         assert waiter[ "event" ].was_set, "the waiting SSE stream was never woken"
@@ -315,7 +337,7 @@ class TestSSEBlockingFlow:
         assert response.status_code == 200, f"expected 200, got {response.status_code}: {response.text}"
         assert response.json()[ "response_value" ] == "The server is down"
         assert notification_harness.persisted == {
-            "value": "The server is down", "source": "ui"
+            "value": "The server is down", "source": "ui", "answered_by": ITEST_ANSWERED_BY
         }
 
     def test_open_ended_response_is_stripped_of_markup( self, notification_harness ):
@@ -393,7 +415,7 @@ class TestSSEBlockingFlow:
         response = notification_harness.respond( "no" )
 
         assert response.status_code == 200, f"expected 200, got {response.status_code}: {response.text}"
-        assert notification_harness.persisted == { "value": "no", "source": "ui" }
+        assert notification_harness.persisted == stored_ui_answer( "no" )
 
     @pytest.mark.parametrize(
         "notification_harness",
@@ -567,7 +589,7 @@ class TestMultiDeviceSync:
         """
         first = notification_harness.respond( "yes" )
         assert first.status_code == 200
-        assert notification_harness.persisted == { "value": "yes", "source": "ui" }
+        assert notification_harness.persisted == stored_ui_answer( "yes" )
 
         # The row is now answered, exactly as the database would have it.
         notification_harness.notification.state = "responded"
@@ -576,8 +598,34 @@ class TestMultiDeviceSync:
 
         assert second.status_code == 400, f"expected 400, got {second.status_code}"
         assert "already responded" in second.json()[ "detail" ].lower()
-        assert notification_harness.persisted == { "value": "yes", "source": "ui" }, \
+        assert notification_harness.persisted == stored_ui_answer( "yes" ), \
             "the losing tab must not overwrite the answer that was accepted first"
+
+    def test_a_different_login_cannot_answer_the_card( self, notification_harness ):
+        """
+        Test that a login other than the addressee is refused and the card stays unanswered.
+
+        Ensures:
+            - the stranger gets 403 naming the rule
+            - nothing is persisted, no waiter is woken and nothing is broadcast
+            - the addressee can still answer the same card afterwards
+        """
+        from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+
+        notification_harness.app.dependency_overrides[ require_api_key_or_jwt ] = lambda: ITEST_STRANGER
+        refused = notification_harness.respond( "yes" )
+
+        assert refused.status_code == 403, f"expected 403, got {refused.status_code}"
+        assert "addressee" in refused.json()[ "detail" ].lower()
+        assert notification_harness.persisted is None
+        assert notification_harness.broadcasts( "notification_responded" ) == []
+        assert notification_harness.notification.state == "delivered"
+
+        notification_harness.app.dependency_overrides[ require_api_key_or_jwt ] = lambda: ITEST_USER_ID
+        accepted = notification_harness.respond( "yes" )
+
+        assert accepted.status_code == 200, f"expected 200, got {accepted.status_code}"
+        assert notification_harness.persisted == stored_ui_answer( "yes" )
 
     def test_unknown_notification_is_404_not_500( self, notification_harness ):
         """
@@ -637,27 +685,42 @@ class TestOfflineDetection:
         response = notification_harness.respond( "yes" )
 
         assert response.status_code == 200
-        assert notification_harness.persisted == { "value": "yes", "source": "ui" }
+        assert notification_harness.persisted == stored_ui_answer( "yes" )
         assert not notification_harness.answer_marked_delivered, \
             "with no live waiter the answer must stay owed, or catch-up will never re-hand it"
 
-    def test_answer_is_marked_delivered_only_when_someone_is_waiting( self, notification_harness ):
+    def test_a_registered_waiter_is_woken_with_the_answer_and_the_stamp_is_left_to_the_stream( self, notification_harness ):
         """
-        The other arm of the receipt-gated stamp, so the assertion above cannot
-        pass merely because the stamp never happens at all.
+        The other arm of the receipt-gated stamp, so the test above cannot pass merely because
+        nothing ever happens at the door.
+
+        This test used to assert that the door stamped `answer_delivered_at` when a waiter was
+        registered. Mr. Radio's ruling of 2026-09-05 (row 97ff4426, option B) moved that stamp
+        into the SSE generator, after the `responded` yield: waking a waiter predicts that the
+        stream will resume, it does not prove it did. So the door's part is now: wake the waiter,
+        hand it the response and the server's account of who answered, and stamp nothing.
+        The stream's own stamp is not reachable from this harness (no real stream), so it is
+        not asserted here.
 
         Ensures:
-            - a registered SSE waiter causes answer_delivered_at to be stamped
+            - the registered waiter's event was set
+            - the waiter carries the response and `answered_by`
+            - the door did not stamp answer_delivered_at
         """
         import cosa.rest.routers.notifications as notifications_module
 
+        waiter = _FakeAsyncEvent()
         notifications_module.pending_responses[ str( notification_harness.notification.id ) ] = {
-            "event": _FakeAsyncEvent()
+            "event": waiter
         }
 
         assert notification_harness.respond( "yes" ).status_code == 200
-        assert notification_harness.answer_marked_delivered, \
-            "a woken waiter is a receipt; the answer must be stamped delivered"
+        entry = notifications_module.pending_responses[ str( notification_harness.notification.id ) ]
+        assert waiter.was_set, "a registered SSE waiter must be woken by the answer"
+        assert entry[ "response_data" ] == "yes"
+        assert entry[ "answered_by" ] == ITEST_ANSWERED_BY
+        assert not notification_harness.answer_marked_delivered, \
+            "the door must not stamp delivered on a wake: that moved to the stream (row 97ff4426)"
 
 
 # Three unimplemented Phase 2.1 fixtures used to sit here: `test_database`,

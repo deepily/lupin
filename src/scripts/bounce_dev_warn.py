@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Host-side warning broadcaster for the managed `:7999` bounce (R4, sanctioned path).
+Host-side warning broadcaster for the managed `:7999` bounce (sanctioned path).
 
-POSTs the pre-bounce warning to the running server, reads `recipients` from the
-200 body, then polls `io/commons/broadcast-acks.md` until every recipient has
-acked (deduped by distinct session) or a deadline. This is the ONLY proof the
-warning was DELIVERED, not merely queued: a 200 means the fanout was SCHEDULED
-(`emit_to_user_sync` never awaits its push future — websocket_manager.py:553),
-so counting on 200 alone races the restart and can warn nobody.
+POSTs the pre-bounce warning to the running server and reads `recipients` from the 200 body.
+It then polls `io/commons/broadcast-acks.md` until every recipient has acked, deduped by
+distinct session, or a deadline passes. This is the only proof the warning was delivered,
+not merely queued. A 200 means the fanout was scheduled, because `emit_to_user_sync` never
+awaits its push future (websocket_manager.py:553). Counting on 200 alone races the restart
+and can warn nobody.
 
 Exit codes:
-    0 — warning confirmed reached every recipient (or zero active sessions)
-    1 — partial reach at the deadline (some recipients never acked)
+    0 — warning confirmed reached every recipient (or zero active sessions).
+    1 — partial reach at the deadline (some recipients never acked).
     2 — transport / HTTP failure posting the warning (server likely wedged)
 
-Invoked by `src/scripts/bounce-dev-server.sh` BEFORE it restarts the container.
+Invoked by `src/scripts/bounce-dev-server.sh` before it restarts the container.
 The pure poll + dedupe logic lives in `cosa.rest.managed_bounce_broadcast` and is
 unit-tested there; this file is the I/O boundary (HTTP + filesystem + clock).
 """
@@ -50,10 +50,10 @@ def _ack_timing():
     """
     Resolve the warning ack deadline + poll interval from config.
 
-    The resolve LOGIC lives in the measured module (resolve_ack_timing); this
-    function is only the fail-soft BOUNDARY — building a ConfigurationManager can
-    raise in a bare host context, and the bounce must never be blocked by config
-    plumbing, so on any failure it falls back to the module defaults and says so.
+    The resolve logic lives in the measured module (resolve_ack_timing). This function
+    is only the fail-soft boundary. Building a ConfigurationManager can raise in a bare
+    host context, and the bounce must never be blocked by config plumbing. So on any
+    failure it falls back to the module defaults and says so.
     """
     try:
         from cosa.config.configuration_manager import ConfigurationManager

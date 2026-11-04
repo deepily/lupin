@@ -1,0 +1,15 @@
+{
+ "entries": {
+  "pair": {
+   "file": "13d40d8626116f128de7207d29991261bde8b02c.json",
+   "sha256": "af6a5f491862733db8912784595959287cd0b080c6abe3aa7dbe08924c70a00f",
+   "text": "{\"request_hash\":\"13d40d8626116f128de7207d29991261bde8b02c\",\"response\":{\"answers\":{\"fit\":{\"confidence\":0.62,\"coverage\":1.0,\"probabilities\":{\"0\":0.0,\"1\":0.0,\"2\":0.38,\"3\":0.62},\"provides\":0.73,\"score\":2.61}},\"model\":\"jev-1.13.0\",\"pack\":{\"request_hash\":\"3b7a315ac8a3105c781f5a579c2b0c0909192f7e\",\"size\":50}},\"response_sha\":\"30aa194636a12f14a6335ed6496e9fa6c3a5e3aa\"}\n"
+  },
+  "three_way": {
+   "file": "105903a2844fa0941455b534e06af0573fcd8b0c.json",
+   "sha256": "e1291f23a095b0d9040f18f95952dfc0d09c414eac66582f4ef2b5b9c0b90662",
+   "text": "{\"request_hash\":\"105903a2844fa0941455b534e06af0573fcd8b0c\",\"response\":{\"answers\":{\"fit\":{\"probabilities\":{\"extend\":0.29,\"reuse\":0.71,\"unrelated\":0.0}}},\"model\":\"jev-1.13.0\",\"pack\":{\"request_hash\":\"93d5e10ff0ea5c3c4d4d896b6a1b64b677715306\",\"size\":1}},\"response_sha\":\"5c217694b2dc75805e20a0548536c4bad6f01a28\"}\n"
+  }
+ },
+ "source": "jev-cache of the live runs of 2026-10-09, entries copied byte for byte"
+}

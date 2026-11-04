@@ -260,6 +260,7 @@ class TestTaskQueryWrapper:
             "project"             : None,
             "item_class"          : None,
             "correlation_key"     : None,
+            "blocked_by_persona"  : None,
             "limit"               : None,
             "offset"              : None,
             "terse"               : False,                     # §G: defaults off (full rows)
@@ -273,7 +274,7 @@ class TestTaskQueryWrapper:
         monkeypatch.setattr( cv, "task_query_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
         cv.task_query.fn( owner_persona="sam", status="queued", gate_class="operator",
                           accountable_manager="tiberius", project="lupin", item_class="gate",
-                          correlation_key="todo:abc123", limit=7, offset=14 )
+                          correlation_key="todo:abc123", blocked_by_persona="tiffany", limit=7, offset=14 )
         assert captured[ "owner_persona" ]       == "sam"
         assert captured[ "status" ]              == "queued"
         assert captured[ "gate_class" ]          == "operator"
@@ -281,6 +282,7 @@ class TestTaskQueryWrapper:
         assert captured[ "project" ]             == "lupin"
         assert captured[ "item_class" ]          == "gate"
         assert captured[ "correlation_key" ]     == "todo:abc123"
+        assert captured[ "blocked_by_persona" ]  == "tiffany"
         assert captured[ "limit" ]               == 7
         assert captured[ "offset" ]              == 14
         assert captured[ "terse" ]               is False     # default when unset
@@ -451,6 +453,28 @@ class TestTaskRequestWrapper:
     def test_actor_is_not_a_parameter( self ):
         import inspect
         assert "actor" not in inspect.signature( cv.task_request.fn ).parameters
+
+
+class TestTaskAskUnparkWrapper:
+
+    def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
+        # `actor` is the bridge identity, never a tool parameter, for the reason task_request gives.
+        captured = { }
+        monkeypatch.setattr( cv, "task_ask_unpark_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_ask_unpark.fn( task_id="abc-uuid" )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url" : "http://stub:7999",
+            "api_key"      : "ck_live_stub",
+            "actor"        : "krishna 38d15e3b",
+            "task_id"      : "abc-uuid",
+        }
+
+    def test_actor_is_not_a_parameter( self ):
+        import inspect
+        assert "actor" not in inspect.signature( cv.task_ask_unpark.fn ).parameters
 
 
 class TestTaskEditWrapper:

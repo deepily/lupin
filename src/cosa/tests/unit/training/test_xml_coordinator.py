@@ -78,6 +78,16 @@ class TestXmlCoordinator( unittest.TestCase ):
         """
         self.mock_manager.reset_mocks()
     
+    def test_the_project_root_is_read_per_instance_not_at_import( self ):
+        """Two coordinators built without a path_prefix get the root as it is at each construction."""
+        with patch( "cosa.training.xml_coordinator.XmlPromptGenerator" ) as generator, \
+             patch( "cosa.training.xml_coordinator.XmlResponseValidator" ), \
+             patch( "cosa.training.xml_coordinator.du.get_project_root", side_effect=[ "/A", "/B" ] ):
+            first, second = XmlCoordinator( init_prompt_templates=False ), XmlCoordinator( init_prompt_templates=False )
+            mine = XmlCoordinator( path_prefix="/mine", init_prompt_templates=False )
+        self.assertEqual( [ first.path_prefix, second.path_prefix, mine.path_prefix ], [ "/A", "/B", "/mine" ] )
+        self.assertEqual( [ c.kwargs[ "path_prefix" ] for c in generator.call_args_list ], [ "/A", "/B", "/mine" ] )
+
     def test_initialization_success( self ):
         """
         Test successful XmlCoordinator initialization.

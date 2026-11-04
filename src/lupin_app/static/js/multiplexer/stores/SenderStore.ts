@@ -115,6 +115,7 @@ interface ServerVoicePersona {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The sender records, with the bulk hydrate that fills them from the boot snapshot. */
 export interface SenderStore {
   get(senderId: string): SenderRecord | undefined;
   list(): ReadonlyArray<SenderRecord>;
@@ -148,6 +149,7 @@ export interface SenderStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createSenderStore`: the bus, a clock for tests and an optional storage. */
 export interface SenderStoreOptions {
   bus      : EventBus;
   nowFn?   : () => number;
@@ -166,6 +168,11 @@ const SESSION_NAMES_SCHEMA_VERSION = 1;
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Keeps one record per notification sender, with activity, counts and session names.
+ *
+ * It updates from queue events and server hydration, and emits change events.
+ */
 class SenderStoreImpl implements SenderStore {
   private readonly bus     : EventBus;
   private readonly nowFn   : () => number;
@@ -181,6 +188,11 @@ class SenderStoreImpl implements SenderStore {
 
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Sets up the store from the bus, clock and optional storage.
+   *
+   * It restores saved session names and subscribes to bus events.
+   */
   constructor(opts: SenderStoreOptions) {
     this.bus     = opts.bus;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
@@ -190,14 +202,25 @@ class SenderStoreImpl implements SenderStore {
     this.subscribe();
   }
 
+  /**
+   * Returns the record for a sender ID, or undefined when unknown.
+   */
   get(senderId: string): SenderRecord | undefined {
     return this.senders.get(senderId);
   }
 
+  /**
+   * Returns all sender records as a new array.
+   */
   list(): ReadonlyArray<SenderRecord> {
     return Array.from(this.senders.values());
   }
 
+  /**
+   * Seeds or updates sender records from the server's sender list.
+   *
+   * Each record takes its last activity, new count and worker flag. It emits one hydrated event.
+   */
   hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
     for (const rec of records) {
       const senderId = rec.sender_id;
@@ -265,6 +288,9 @@ class SenderStoreImpl implements SenderStore {
     this.emit("hydrated");
   }
 
+  /**
+   * Unsubscribes the store from the bus, for tests.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
@@ -313,6 +339,11 @@ class SenderStoreImpl implements SenderStore {
     this.setSessionName(payload.sender_id, payload.session_name);
   }
 
+  /**
+   * Sets a sender's session name and saves the name map.
+   *
+   * An existing record is updated and announced. Otherwise the name waits until the record is created.
+   */
   setSessionName(senderId: string, name: string): void {
     this.sessionNames.set(senderId, name);
     this.persistSessionNames();
@@ -532,6 +563,11 @@ class SenderStoreImpl implements SenderStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the store.
+ *
+ * It subscribes to the bus at once, and restores saved session names when a storage service is given.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createSenderStore(opts: SenderStoreOptions): SenderStore {
   return new SenderStoreImpl(opts);

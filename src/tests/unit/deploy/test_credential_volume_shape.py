@@ -124,6 +124,45 @@ def test_sessions_bind_is_declared_after_the_volume( compose, service ):
     )
 
 
+def _sessions_source( compose, service ):
+    """The host-side source of the bind at SESSIONS_DIR, or None when there is none."""
+    sources = [ src for src, tgt in _entries( compose, service ) if tgt == SESSIONS_DIR ]
+    return sources[ 0 ] if sources else None
+
+
+def test_the_test_server_has_its_own_sessions_folder( compose ):
+    """
+    Row d849a6d9: the fleet-size census counts every manager bridge under the host's
+    ~/.claude/sessions, and the integration fixtures write manager-seat bridges into the
+    folder the test server reads. If :8000 binds the host's real folder, a test seat is
+    counted as a live manager. So its bind source must be its own variable and its own default,
+    and must not be the dev server's.
+    """
+    test_src = _sessions_source( compose, "lupin-rest-test" )
+    dev_src  = _sessions_source( compose, "lupin-rest-dev" )
+    assert test_src is not None, "lupin-rest-test has no sessions bind"
+    assert "LUPIN_TEST_SESSIONS_DIR" in test_src, test_src
+    assert test_src.endswith( "/.claude/sessions-test}" ), test_src
+    assert test_src != dev_src, f"test and dev share one sessions source {test_src!r}"
+    assert "LUPIN_HOST_SESSIONS_DIR" not in test_src, (
+        f"the test server's sessions bind reads the host-folder variable again: {test_src!r}"
+    )
+
+
+def test_the_dev_server_still_binds_the_hosts_real_sessions_folder( compose ):
+    """The other side: dev reads live seats, so its bind must stay the host's real folder."""
+    dev_src = _sessions_source( compose, "lupin-rest-dev" )
+    assert dev_src == "${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/sessions}", dev_src
+
+
+def test_the_test_sessions_bind_still_fails_loud_on_a_missing_host_folder( compose ):
+    """create_host_path stays false: a missing folder must abort the recreate, not become an empty root-owned one."""
+    binds = [ v for v in compose[ "services" ][ "lupin-rest-test" ][ "volumes" ]
+              if isinstance( v, dict ) and v.get( "target" ) == SESSIONS_DIR ]
+    assert len( binds ) == 1, binds
+    assert binds[ 0 ][ "bind" ][ "create_host_path" ] is False, binds[ 0 ]
+
+
 def test_the_two_services_do_not_share_one_credential_volume( compose ):
     """
     Separate grants on purpose.

@@ -809,3 +809,78 @@ test( "🔴 THE LEGACY DEADLINE IS FIVE MINUTES, NOT THIRTY SECONDS", async () =
   renderer.track( BCAST );
   assert.deepEqual( delays, [ 5 * 60 * 1000 ] );
 } );
+
+// ===========================================================================
+// Row a08dfa48 — a roster that failed or landed late
+// ===========================================================================
+
+test( "🔴 a FAILED roster fetch says it could not load the list, with no denominator", async () => {
+  const { renderer, root, hydrated } = setup();
+  await hydrated;
+  renderer.mount( root ); renderer.recipientsChanged( false ); renderer.track( BCAST );
+  assert.equal( txt( root, "broadcast-ack-summary" ), "0 acknowledged — could not load the recipient list" );
+  assert.equal( root.querySelectorAll( '[data-testid="broadcast-ack-pending"]' ).length, 0, "an unknown roster names nobody" );
+} );
+
+test( "a roster that loads after a failed one replaces the failure line with the count", async () => {
+  const { renderer, root, hydrated } = setup();
+  await hydrated;
+  renderer.mount( root ); renderer.recipientsChanged( false ); renderer.track( BCAST );
+  renderer.recipientsChanged();
+  assert.equal( txt( root, "broadcast-ack-summary" ), "0/3 complete" );
+} );
+
+test( "a refresh that fails AFTER a roster was loaded keeps the loaded roster", async () => {
+  const { renderer, root, hydrated } = setup();
+  await hydrated;
+  renderer.mount( root ); renderer.recipientsChanged(); renderer.track( BCAST );
+  renderer.recipientsChanged( false );
+  assert.equal( txt( root, "broadcast-ack-summary" ), "0/3 complete" );
+} );
+
+test( "🔴 a roster that lands AFTER the deadline times a partial tally out", async () => {
+  const { bus, ackStore, renderer, root, timers, hydrated } = setup();
+  await hydrated;
+  const stop = ackStore.start();
+  renderer.mount( root ); renderer.track( BCAST );
+  liveAck( bus, { session_id: "s1aaaaaa-1111" } );
+  timers.fire();                                   // the deadline fires with the roster unknown
+  assert.equal( root.querySelector( '[data-testid="broadcast-ack-tally"]' )!.getAttribute( "data-timed-out" ), null, "unknown roster: no verdict yet" );
+  renderer.recipientsChanged();                    // the roster lands late
+  assert.equal( txt( root, "broadcast-ack-summary" ), "1/3 sessions acknowledged — 2 timed out" );
+  stop();
+} );
+
+test( "a roster that lands after the deadline dismisses a tally everyone had answered", async () => {
+  const { bus, ackStore, renderer, root, timers, hydrated } = setup();
+  await hydrated;
+  const stop = ackStore.start();
+  renderer.mount( root ); renderer.track( BCAST );
+  THREE.forEach( r => liveAck( bus, { session_id: r.session_id } ) );
+  timers.fire();
+  renderer.recipientsChanged();
+  assert.equal( renderer.trackedBroadcastId(), null );
+  assert.equal( root.querySelectorAll( '[data-testid="broadcast-ack-tally"]' ).length, 0 );
+  stop();
+} );
+
+test( "a roster that FAILS after the deadline passed gives no verdict and keeps the failure line", async () => {
+  const { renderer, root, timers, hydrated } = setup();
+  await hydrated;
+  renderer.mount( root ); renderer.track( BCAST );
+  timers.fire();
+  renderer.recipientsChanged( false );
+  assert.equal( txt( root, "broadcast-ack-summary" ), "0 acknowledged — could not load the recipient list" );
+  assert.equal( root.querySelector( '[data-testid="broadcast-ack-tally"]' )!.getAttribute( "data-timed-out" ), null );
+} );
+
+test( "a passed deadline does not leak into the next broadcast", async () => {
+  const { renderer, root, timers, hydrated } = setup();
+  await hydrated;
+  renderer.mount( root ); renderer.track( BCAST );
+  timers.fire();                                   // deadline passed for the first broadcast, roster unknown
+  renderer.track( "33333333-cccc-4ddd-8eee-444444444444" );
+  renderer.recipientsChanged();                    // the roster lands: the NEW broadcast has not reached its own deadline
+  assert.equal( txt( root, "broadcast-ack-summary" ), "0/3 complete" );
+  assert.equal( root.querySelector( '[data-testid="broadcast-ack-tally"]' )!.getAttribute( "data-timed-out" ), null );
+} );

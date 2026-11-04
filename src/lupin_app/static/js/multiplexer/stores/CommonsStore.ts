@@ -28,6 +28,7 @@
 // renderer owns "decide when to fetch".
 
 import type { EventBus } from "../shared/EventBus";
+import { hoursSinceMidnight } from "../render/time";
 import type { StorageService } from "../shared/StorageService";
 import type {
   CommonsActivityEntry,
@@ -49,6 +50,9 @@ const STORAGE_SCHEMA_VERSION = 1;
 const DEFAULT_WINDOW : CommonsActivityWindow = "today";
 const HISTORY_LIMIT  = 200;
 
+/**
+ * Returns the default commons filter with no direction or persona and all kinds.
+ */
 function defaultFilter(): CommonsActivityFilter {
   return { direction: null, kind: "all", persona: null };
 }
@@ -79,8 +83,7 @@ interface BroadcastHistoryResponse {
   disabled ?: boolean;
 }
 
-// Loose ApiClient surface for hydrate — CommonsStore only needs `get<T>`.
-// Production passes the canonical ApiClient; tests pass a stub.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface CommonsHistoryApiClient {
   get<T>(path: string): Promise<T>;
 }
@@ -89,6 +92,7 @@ export interface CommonsHistoryApiClient {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The cache of commons activity entries with its filter, time window and disabled flag. */
 export interface CommonsStore {
   /** Raw cached entries, newest-first (unfiltered). */
   entries(): ReadonlyArray<CommonsActivityEntry>;
@@ -119,21 +123,28 @@ export interface CommonsStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createCommonsStore`: the bus, the storage service and a clock for tests. */
 export interface CommonsStoreOptions {
   bus     : EventBus;
   storage : StorageService;
   // Test injection — production uses Date.now.
   nowFn?  : () => number;
+  // The server zone, read when the "today" window is resolved; UTC while it is unset.
+  appTimezoneFn? : () => string | undefined;
 }
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Holds cached commons entries with their filter, window, and disabled flag.
+ */
 class CommonsStoreImpl implements CommonsStore {
   private readonly bus     : EventBus;
   private readonly storage : StorageService;
   private readonly nowFn   : () => number;
+  private readonly appTimezoneFn : () => string | undefined;
 
   private rawEntries : CommonsActivityEntry[] = [];
   private filter     : CommonsActivityFilter;
@@ -142,11 +153,15 @@ class CommonsStoreImpl implements CommonsStore {
 
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Creates the store, restores the saved filter, and subscribes to live events.
+   */
   constructor(opts: CommonsStoreOptions) {
     this.bus     = opts.bus;
     this.storage = opts.storage;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn   = opts.nowFn ?? (() => Date.now());
+    this.appTimezoneFn = opts.appTimezoneFn ?? (() => undefined);
     this.filter  = this.hydrateFilter();
     this.subscribe();
   }
@@ -155,22 +170,37 @@ class CommonsStoreImpl implements CommonsStore {
   // Read API
   // -------------------------------------------------------------------------
 
+  /**
+   * Returns the raw cached entries, newest first, with no filter applied.
+   */
   entries(): ReadonlyArray<CommonsActivityEntry> {
     return this.rawEntries;
   }
 
+  /**
+   * Returns the cached entries that pass the active filter.
+   */
   visibleEntries(): ReadonlyArray<CommonsActivityEntry> {
     return this.rawEntries.filter(e => this.matchesFilter(e));
   }
 
+  /**
+   * Returns a copy of the current filter.
+   */
   getFilter(): CommonsActivityFilter {
     return { ...this.filter };
   }
 
+  /**
+   * Returns the current time window selection.
+   */
   getWindow(): CommonsActivityWindow {
     return this.window;
   }
 
+  /**
+   * Returns true when any filter setting is away from its default.
+   */
   isFilterActive(): boolean {
     return (
       this.filter.direction !== null ||
@@ -179,6 +209,9 @@ class CommonsStoreImpl implements CommonsStore {
     );
   }
 
+  /**
+   * Returns true when the server reported commons as off on the last load.
+   */
   isDisabled(): boolean {
     return this.disabled;
   }
@@ -189,6 +222,9 @@ class CommonsStoreImpl implements CommonsStore {
   // contributes no constraint.
   // -------------------------------------------------------------------------
 
+  /**
+   * Tests whether an entry passes the kind, direction, and persona filter.
+   */
   matchesFilter(entry: CommonsActivityEntry): boolean {
     const topic       = entry.topic || "";
     const meta        = entry.metadata || {};
@@ -228,6 +264,9 @@ class CommonsStoreImpl implements CommonsStore {
   // Hydration from REST
   // -------------------------------------------------------------------------
 
+  /**
+   * Loads commons history for the window from the server and replaces the cache.
+   */
   async hydrate(api: CommonsHistoryApiClient, window?: CommonsActivityWindow): Promise<void> {
     if (window !== undefined) this.window = window;
 
@@ -252,14 +291,12 @@ class CommonsStoreImpl implements CommonsStore {
 
   // Map window → `hours` query param (port of the legacy dropdown→query shape).
   //   "all"   → null  (no cutoff)
-  //   "today" → hours since local midnight (min 1)
+  //   "today" → hours since midnight in the server zone, UTC without one (min 1)
   //   "<n>"   → n
   private windowToHours(window: CommonsActivityWindow): number | null {
     if (window === "all") return null;
     if (window === "today") {
-      const now      = new Date(this.nowFn());
-      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      return Math.max(1, Math.ceil((now.getTime() - midnight) / 3_600_000));
+      return hoursSinceMidnight(new Date(this.nowFn()), this.appTimezoneFn());
     }
     return Number(window);
   }
@@ -268,24 +305,36 @@ class CommonsStoreImpl implements CommonsStore {
   // Filter mutators
   // -------------------------------------------------------------------------
 
+  /**
+   * Sets the direction filter, saves it, and emits a filter-changed event.
+   */
   setDirection(value: CommonsActivityDirection): void {
     this.filter.direction = value;
     this.persistFilter();
     this.emit({ changeKind: "filter-changed" });
   }
 
+  /**
+   * Sets the kind filter, saves it, and emits a filter-changed event.
+   */
   setKind(value: CommonsActivityKind): void {
     this.filter.kind = value;
     this.persistFilter();
     this.emit({ changeKind: "filter-changed" });
   }
 
+  /**
+   * Sets the persona filter, saves it, and emits a filter-changed event.
+   */
   setPersona(value: string | null): void {
     this.filter.persona = value ? value.toLowerCase() : null;
     this.persistFilter();
     this.emit({ changeKind: "filter-changed" });
   }
 
+  /**
+   * Detaches the bus listeners so a test can clean up.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
@@ -351,6 +400,11 @@ class CommonsStoreImpl implements CommonsStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the store.
+ *
+ * It restores the saved filter from storage and subscribes to the bus at once.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createCommonsStore(opts: CommonsStoreOptions): CommonsStore {
   return new CommonsStoreImpl(opts);

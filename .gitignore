@@ -103,6 +103,9 @@ src/terraform/**/crash.log
 # re-include a path whose parent directory is excluded as a whole.
 io/**
 
+# Generated symbol index for code-reuse review (python -m cosa.repo.symindex build); never committed.
+src/docs/index/
+
 # EXCEPTION — playwright visual-regression baselines are git-TRACKED so they
 # round-trip into a fresh :8000 / CI test container (CI-portable; no host-resident
 # dependency). Scoped carve: re-include ONLY io/test-suite/visual-baselines/ — the

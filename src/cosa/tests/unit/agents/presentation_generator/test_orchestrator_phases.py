@@ -217,6 +217,24 @@ class TestDoAllAsyncEmptyResultGuards:
         assert agent.state == OrchestratorState.FAILED
 
 
+class TestDoAllAsyncAnalyzeApiFailure:
+    """An API error in the analyze step fails the job with that error."""
+
+    def test_api_error_in_analyze_fails_job_with_real_cause( self, _silence_voice_io ):
+        agent = _agent(); _wire_doall( agent )
+        del agent._analyze_async                      # use the REAL _analyze_async
+        agent._api_client = MagicMock()
+        agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "claude code is down" ) )
+        agent._presentation_state[ "raw_sections" ] = [ ( "H", "body", 1 ) ]
+        with patch( "cosa.agents.presentation_generator.prompts.narrative.get_narrative_analysis_prompt", return_value="P" ):
+            with pytest.raises( RuntimeError, match="claude code is down" ):
+                _run( agent.do_all_async() )
+        assert agent.state == OrchestratorState.FAILED
+        sent = " ".join( str( c.args[ 0 ] ) for c in _silence_voice_io[ "notify" ].await_args_list )
+        assert "claude code is down" in sent
+        assert "produced no sections" not in sent
+
+
 # ===========================================================================
 # render_from_yaml_async
 # ===========================================================================

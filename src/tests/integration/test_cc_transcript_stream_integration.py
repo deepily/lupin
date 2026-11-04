@@ -63,6 +63,7 @@ never ahead of it, or the integration gate reddens for a reason that is not a de
 That sequencing is the Manager's to hold.
 """
 
+import glob
 import json
 import os
 import shutil
@@ -136,7 +137,7 @@ class QueueSocket:
     def __init__( self, access_token, subscribed_events, session_id=None ):
         self.access_token      = access_token
         self.subscribed_events = subscribed_events
-        self.session_id        = session_id or f"itest {uuid.uuid4().hex[ :8 ]}"
+        self.session_id        = session_id or f"itest-{uuid.uuid4().hex[ :8 ]}"
         self._socket           = None
         self.auth_frame        = None
 
@@ -225,7 +226,10 @@ class SeatFixture:
         self.cc_session_id   = str( uuid.uuid4() )
         self.root            = root
         self.transcript_path = os.path.join( root, f"{self.cc_session_id}.jsonl" )
-        self.bridge_path     = os.path.join( root, f"cc-itest-{self.cc_session_id[ :8 ]}.json" )
+        # The bridge lookup (`session_bridge.find_session_by_id`) globs `cc-*.json` in the sessions
+        # directory ITSELF and does not descend: a bridge in the `cc-transcript-itest` subdirectory is
+        # never found and the server answers `refused / not_found`. Only the transcript lives in `root`.
+        self.bridge_path     = os.path.join( HOST_SESSIONS_DIR, f"cc-itest-{self.cc_session_id[ :8 ]}.json" )
 
     # ── transcript ────────────────────────────────────────────────────────────
 
@@ -320,8 +324,34 @@ class SeatFixture:
             if os.path.exists( path ): os.remove( path )
 
 
+@pytest.fixture( scope="session" )
+def swept_cc_itest_bridges():
+    """
+    Remove `cc-itest-*.json` bridges a crashed earlier run left in the live sessions directory.
+
+    The fixture bridge lives in the sessions directory itself (see `SeatFixture`), carries no
+    cc_pid and no tmux_session, and so is never reaped by `orphan_bridge_reaper` (it needs a
+    confirmed-dead pid) and reads as real contact to the serial bridge guard. Teardown removes it
+    on a normal run; this removes what a killed run could not.
+
+    Ensures:
+        - every `cc-itest-*.json` directly under HOST_SESSIONS_DIR is gone once per pytest session
+        - returns the list of paths it removed
+        - a file that vanishes between listing and removal is not an error
+    """
+    removed = [ ]
+    if os.path.isdir( HOST_SESSIONS_DIR ):
+        for path in glob.glob( os.path.join( HOST_SESSIONS_DIR, "cc-itest-*.json" ) ):
+            try:
+                os.remove( path )
+                removed.append( path )
+            except FileNotFoundError:
+                pass
+    return removed
+
+
 @pytest.fixture( scope="function" )
-def seat_fixture():
+def seat_fixture( swept_cc_itest_bridges ):
     """
     A fixtured seat under the bind-mounted sessions directory, cleaned up afterwards.
 
@@ -411,28 +441,28 @@ def admin_socket_events():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_an_admin_authenticates_on_the_real_socket_and_its_subscription_survives(
-    create_test_admin, admin_socket_events
+    create_test_admin, seat_fixture, admin_socket_events
 ):
     """
     The real handshake, and the T3 failure mode asserted rather than assumed.
 
     T3: a name absent from `websocket available events` is dropped at subscribe time,
     SILENTLY — a client whose whole list validates to `[]` has every frame dropped while
-    auth reports success. So `auth_success` alone does not establish that the four
-    cc_transcript names were accepted. This asserts the server echoes them back as
-    subscribed; the INI-side half is the unit tier's A2.6.
+    auth reports success. So `auth_success` alone does not establish that the
+    cc_transcript names were accepted.
+
+    The proof is a frame, not an echo. The plan never asked `auth_success` to list the
+    accepted subscriptions and the server does not (the plan owner's answer, 2026-10-03),
+    so this watches a seat and requires the `live` state frame to ARRIVE: the send path
+    drops any frame whose type the session is not subscribed to, so a `cc_transcript_state`
+    name that validated away would leave this waiting until it times out.
     """
     with QueueSocket( create_test_admin[ "access_token" ], admin_socket_events ) as socket:
         assert socket.auth_frame[ "type" ] == "auth_success", socket.auth_frame
 
-        echoed = socket.auth_frame.get( "subscribed_events" )
-        assert echoed is not None, (
-            "auth_success did not report the accepted subscription list, so a client "
-            "cannot tell an accepted name from a silently dropped one — the exact "
-            "condition the in-place comment at websocket_manager.py:207-219 describes"
-        )
-        missing = [ name for name in CC_TRANSCRIPT_EVENTS if name not in echoed ]
-        assert not missing, f"these names validated away silently: {missing}"
+        watch( socket, seat_fixture, from_offset=0 )
+        frame = socket.recv_frame( expect=STATE_EVENT )
+        assert frame[ "state" ] == "live", frame
 
 
 def test_a_non_admin_watch_is_refused_and_no_blocks_follow( create_test_user, seat_fixture, admin_socket_events ):
@@ -453,7 +483,7 @@ def test_a_non_admin_watch_is_refused_and_no_blocks_follow( create_test_user, se
 
         states = [ f for f in frames if f.get( "type" ) == STATE_EVENT ]
         assert states, "the watch was neither honoured nor refused — a silent drop"
-        assert any( "denied" in str( f.get( "state" ) ) or "forbidden" in str( f.get( "state" ) ) for f in states ), (
+        assert [ ( f.get( "state" ), f.get( "reason" ) ) for f in states ] == [ ( "refused", "admin_only" ) ], (
             f"the refusal does not name itself: {states}"
         )
 

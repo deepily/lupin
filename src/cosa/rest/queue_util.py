@@ -1,9 +1,8 @@
 """
 Queue utility functions for state transition events.
 
-These functions are standalone because state transitions happen in disparate
-locations (job submission, queue consumer, running queue) - not behaviors
-inherently owned by any single queue class.
+These functions are standalone because state transitions happen in several
+places (job submission, queue consumer, running queue). No single queue class owns them.
 """
 from datetime import datetime
 from typing import Any, Optional

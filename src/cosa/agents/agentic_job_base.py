@@ -16,6 +16,7 @@ Examples:
     - PodcastGenerationJob: Audio generation from content (future)
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 import uuid
 from datetime import datetime
@@ -239,18 +240,74 @@ class AgenticJobBase( ABC ):
     @abstractmethod
     def do_all( self ) -> str:
         """
-        Execute the job and return result.
+        Execute the job and return the result; the main entry point called by RunningFifoQueue.
 
-        This is the main entry point called by RunningFifoQueue.
-        Must be overridden by subclasses to implement job logic.
-
-        For async jobs, this method should use asyncio.run() to
-        bridge to the async _execute() method.
+        Subclasses must override it. Async jobs should use asyncio.run() to bridge
+        to the async _execute() method.
 
         Returns:
             str: Conversational answer for the queue system
         """
         pass
+
+    def _run_execute( self, label: str, subject: str, failure_prefix: str ) -> str:
+        """
+        Run the async _execute() to completion, keeping the job state and timestamps current.
+
+        The shared body of do_all for jobs whose work is one async _execute().
+
+        Requires:
+            - label is the job's name for debug lines, such as "SweTeamJob"
+            - subject is the short text shown after "Starting do_all() for:"
+            - failure_prefix starts the stored answer when the run fails
+            - the subclass implements _execute() as a coroutine function
+
+        Ensures:
+            - state is the running state, with started_at set, while _execute() runs
+            - on success: state is the completed state, completed_at set, result and
+              answer_conversational hold the returned text, which is returned
+            - on failure: state is the failed state, completed_at set, error holds str( e ),
+              answer_conversational is "<failure_prefix>: <error>", and the
+              exception is raised again so the pool future sees it
+            - with debug on, prints a start line, then the duration or the failure and its traceback
+
+        Raises:
+            - whatever _execute() raises
+        """
+        if self.debug:
+            print( f"[{label}] Starting do_all() for: {subject}..." )
+
+        self.state      = JobState.RUNNING
+        self.started_at = cu.get_current_datetime_iso()
+
+        try:
+            result = asyncio.run( self._execute() )
+
+            self.state        = JobState.COMPLETED
+            self.completed_at = cu.get_current_datetime_iso()
+            self.result       = result
+            self.answer_conversational = result
+
+            if self.debug:
+                duration = self.get_execution_duration_seconds()
+                print( f"[{label}] Completed in {duration:.1f}s" )
+
+            return result
+
+        except Exception as e:
+            self.state        = JobState.FAILED
+            self.completed_at = cu.get_current_datetime_iso()
+            self.error        = str( e )
+            self.answer_conversational = f"{failure_prefix}: {str( e )}"
+
+            if self.debug:
+                print( f"[{label}] Failed: {e}" )
+                import traceback
+                traceback.print_exc()
+
+            # Re-raise so the agentic-pool Future captures the exception.
+            # Backlog item 5: canonical Future contract.
+            raise
 
     @abstractmethod
     async def _execute( self ) -> str:
@@ -268,12 +325,10 @@ class AgenticJobBase( ABC ):
     @property
     def is_cacheable( self ) -> bool:
         """
-        Whether this job type should be cached.
+        Whether this job type should be cached; agentic jobs never are.
 
-        Agentic jobs are never cached because:
-        - Each research query depends on current web content
-        - Podcast content may be updated
-        - Results are inherently time-sensitive
+        Research depends on current web content, podcast content may be updated,
+        and results are time-sensitive.
 
         Returns:
             bool: Always False for agentic jobs
@@ -284,10 +339,8 @@ class AgenticJobBase( ABC ):
         """
         Request graceful cancellation. Thread-safe (boolean assignment under GIL).
 
-        Sets the cancel flag on this job. If an orchestrator reference is stored,
-        also signals the orchestrator to stop at its next checkpoint.
-
-        Subclasses may override to add additional cancellation logic.
+        Sets the cancel flag and signals a stored orchestrator to stop at its next
+        checkpoint. Subclasses may override to add more cancellation logic.
 
         Ensures:
             - self._cancel_requested is set to True
@@ -411,18 +464,11 @@ class AgenticJobBase( ABC ):
 
     async def _raise_forced_failure( self, voice_io ) -> None:
         """
-        Phase 6 dry-run repair-loop hook — deliberately fail the job.
+        Dry-run repair-loop hook that fails the job with the error `force_failure_mode` names.
 
-        Subclasses that support the Phase 6 dry-run repair loop accept a
-        `force_failure_mode` constructor parameter and store it as
-        `self.force_failure_mode`. When that flag is set, their `_execute_dry_run()`
-        path calls this method at the end of the simulated breadcrumbs to raise
-        a matching exception so the job lands in the dead queue with a realistic
-        error signature. The dead-queue watchdog then classifies the failure
-        and triggers the Bug Fix Expediter auto-fix pipeline.
-
-        This method NEVER runs during live execution — it is gated behind
-        `self.dry_run == True` in the caller.
+        Subclasses that support the dry-run repair loop accept a `force_failure_mode` constructor parameter. Their `_execute_dry_run()` calls this after the simulated breadcrumbs, so the job lands
+        in the dead queue with a realistic error. The watchdog then classifies it and
+        starts the Bug Fix Expediter pipeline. It never runs during live execution.
 
         Requires:
             - self.force_failure_mode in { "code_bug", "infra_timeout", "rate_limit" }

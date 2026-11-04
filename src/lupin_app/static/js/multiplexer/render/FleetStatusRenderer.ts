@@ -19,6 +19,11 @@
 // wiring). It is built ONCE at mount, between the header and the table container,
 // and repainted in place on `store_fleet_size_cap_changed`; the table repaint never
 // touches it, so a drag is never interrupted by a poll.
+//
+// Row 6f72dc83: the skeleton crew switch sits in that same cluster, beside the dial, and
+// is painted by the same call from the same payload (`skeleton_crew`). It says its state
+// in text, is disabled while its write is in flight, and is hidden when the server sends
+// no such field, so there is never a switch that does nothing.
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreFleetSizeCapChangedPayload, StoreFleetStatusChangedPayload } from "../shared/types";
@@ -39,7 +44,13 @@ import {
   wireSectionCollapse,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { teardownScaffold, messageEl } from "./dom";
 
+/**
+ * The slice of the fleet store the renderer uses.
+ *
+ * It is the composite, the offline flag, refresh, and the size cap and skeleton crew reads and writes.
+ */
 export interface FleetStoreLike {
   composite(): FleetComposite | null;
   showOfflineFlag(): boolean;
@@ -48,18 +59,31 @@ export interface FleetStoreLike {
   sizeCap(): FleetSizeCap | null;
   sizeCapSaving(): number | null;
   setSizeCap( cap: number ): Promise<void>;
+  skeletonCrewSaving(): boolean | null;
+  setSkeletonCrew( on: boolean ): Promise<void>;
 }
 
+/** The stores the fleet pane reads: only the fleet store. */
 export interface FleetStatusRendererStores {
   fleet : FleetStoreLike;
 }
 
+/**
+ * The Fleet Status pane: fleet table, live count, updated stamp and cap dial.
+ *
+ * It repaints on each fleet store change.
+ */
 export interface FleetStatusRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createFleetStatusRenderer`.
+ *
+ * The bus and the stores are required. The clock for the updated stamp is for tests.
+ */
 export interface FleetStatusRendererOptions {
   eventBus   : EventBus;
   stores     : FleetStatusRendererStores;
@@ -72,6 +96,10 @@ interface SizeCapEls {
   slider : HTMLInputElement;
   value  : HTMLOutputElement;
   status : HTMLSpanElement;
+  crewField  : HTMLSpanElement;
+  crewToggle : HTMLInputElement;
+  crewState  : HTMLSpanElement;
+  crewWarning: HTMLSpanElement;
 }
 
 /**
@@ -122,17 +150,49 @@ function buildSizeCapControls(): SizeCapEls {
   status.className = "fleet-size-cap-status";
   status.setAttribute( "data-testid", "multiplexer-fleet-size-cap-status" );
 
-  root.append( field, status );
-  return { root, slider, value, status };
+  // The skeleton crew switch: a checkbox with role=switch, named by its own visible state
+  // text. Hidden until a payload carries a boolean `skeleton_crew`.
+  const crewField = document.createElement( "span" );
+  crewField.className = "fleet-skeleton-crew-field";
+  crewField.setAttribute( "data-testid", "multiplexer-skeleton-crew-field" );
+  crewField.hidden = true;
+
+  const crewLabel = document.createElement( "label" );
+  crewLabel.className = "fleet-skeleton-crew-label";
+
+  const crewState = document.createElement( "span" );
+  crewState.id = "multiplexer-skeleton-crew-state";
+  crewState.className = "fleet-skeleton-crew-state";
+  crewState.setAttribute( "data-testid", "multiplexer-skeleton-crew-state" );
+
+  const crewToggle = document.createElement( "input" );
+  crewToggle.type = "checkbox";
+  crewToggle.setAttribute( "role", "switch" );
+  crewToggle.setAttribute( "aria-labelledby", crewState.id );
+  crewToggle.setAttribute( "data-testid", "multiplexer-skeleton-crew-toggle" );
+  crewToggle.title = "Skeleton crew. On: managers may not spawn seats or ask for them, and the heartbeat "
+    + "stop poke is muted. Off: managers may spawn inside the fleet cap. The state is written to "
+    + "`cc session skeleton crew enabled` in the configuration file and survives a restart.";
+
+  crewLabel.append( crewToggle, crewState );
+  crewField.append( crewLabel );
+
+  // Shown only while the settings.json mute is set and the switch is off: the poke stays
+  // muted although the switch says it should not be.
+  const crewWarning = document.createElement( "span" );
+  crewWarning.className = "fleet-skeleton-crew-warning";
+  crewWarning.setAttribute( "data-testid", "multiplexer-skeleton-crew-warning" );
+  crewWarning.hidden = true;
+  crewWarning.textContent = "Warning: the stop poke is still muted by ~/.claude/settings.json "
+    + "while skeleton crew is off.";
+
+  root.append( field, crewField, crewWarning, status );
+  return { root, slider, value, status, crewField, crewToggle, crewState, crewWarning };
 }
 
-function messageEl( className: string, text: string ): HTMLParagraphElement {
-  const p = document.createElement( "p" );
-  p.className = `fleet-status-message ${className}`;
-  p.textContent = text;
-  return p;
-}
-
+/**
+ * Renders the fleet status panel with a header, size cap controls, and sessions.
+ */
 class FleetStatusRendererImpl implements FleetStatusRenderer {
   private readonly bus       : EventBus;
   private readonly stores    : FleetStatusRendererStores;
@@ -149,6 +209,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
   private collapseOff: ( () => void ) | null = null;
   private mounted   = false;
 
+  /**
+   * Creates the renderer from its bus and stores, with a clock that defaults to now.
+   */
   constructor( opts: FleetStatusRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
@@ -156,6 +219,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
   }
 
+  /**
+   * Builds the header, size cap controls, and body inside the root and paints them.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "FleetStatusRenderer already mounted" );
@@ -219,17 +285,13 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     );
   }
 
+  /**
+   * Removes the subscriptions and collapse listener and empties the root.
+   */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.countEl = null;
     this.updatedEl = null;
@@ -238,6 +300,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the panel from the store at once, for tests, when mounted.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }
@@ -252,13 +317,13 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     const composite = this.stores.fleet.composite();
 
     if ( composite && composite.status === "auth_required" ) {
-      this.container.replaceChildren( messageEl( "fleet-status-signin", "🔒 Sign-in required." ) );
+      this.container.replaceChildren( messageEl( "fleet-status", "fleet-status-signin", "🔒 Sign-in required." ) );
       this.setCount( 0 );
       return;
     }
 
     if ( !composite || composite.status === "unreachable" || !composite.fleet_arbiter ) {
-      this.container.replaceChildren( messageEl( "fleet-status-offline", "🛰️ Arbiter offline — last known: none." ) );
+      this.container.replaceChildren( messageEl( "fleet-status", "fleet-status-offline", "🛰️ Arbiter offline — last known: none." ) );
       this.setCount( 0 );
       return;
     }
@@ -278,10 +343,10 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     }
 
     if ( sessions.length === 0 ) {
-      children.push( messageEl( "fleet-status-empty", "No active sessions." ) );
+      children.push( messageEl( "fleet-status", "fleet-status-empty", "No active sessions." ) );
     } else if ( visible.length === 0 ) {
       // Sessions exist but every one is offline and currently hidden.
-      children.push( messageEl( "fleet-status-empty", "No live sessions." ) );
+      children.push( messageEl( "fleet-status", "fleet-status-empty", "No live sessions." ) );
     } else {
       const model    = groupFleetByManager( visible );
       const personas : FleetPersonaMap =
@@ -313,6 +378,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     } );
     els.slider.addEventListener( "change", () => {
       void this.stores.fleet.setSizeCap( Number( els.slider.value ) );
+    } );
+    els.crewToggle.addEventListener( "change", () => {
+      void this.stores.fleet.setSkeletonCrew( els.crewToggle.checked );
     } );
   }
 
@@ -351,6 +419,36 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     els.status.textContent = ( live && Number.isFinite( live.total ) )
       ? `${live.total} live — ${live.managers} manager(s), ${live.workers} worker(s)`
       : "";
+
+    this.paintSkeletonCrew( els, payload as FleetSizeCap );
+  }
+
+  /**
+   * Paint the skeleton crew switch from the same payload as the dial.
+   *
+   * While its write is in flight the switch shows the requested state and is disabled, so a
+   * second click cannot race the first. Once the store answers, the paint comes from the
+   * server's re-read, so a refused flip lands back on the enforced state.
+   */
+  private paintSkeletonCrew( els: SizeCapEls, payload: FleetSizeCap ): void {
+    const crew = payload.skeleton_crew;
+    if ( !crew || typeof crew.on !== "boolean" ) {
+      els.crewField.hidden   = true;
+      els.crewWarning.hidden = true;
+      return;
+    }
+    const on = crew.on;
+    const saving  = this.stores.fleet.skeletonCrewSaving();
+    const shown   = saving ?? on;
+
+    els.crewField.hidden      = false;
+    els.crewWarning.hidden    = !( crew.settings_mute_while_off === true && !on );
+    els.crewToggle.checked    = shown;
+    els.crewToggle.disabled   = saving !== null;
+    els.crewToggle.setAttribute( "aria-checked", String( shown ) );
+    els.crewState.textContent = saving !== null
+      ? `Skeleton crew: turning ${saving ? "ON" : "OFF"}…`
+      : `Skeleton crew: ${on ? "ON" : "OFF"}`;
   }
 
   private setCount( n: number ): void {
@@ -364,6 +462,11 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFleetStatusRenderer( opts: FleetStatusRendererOptions ): FleetStatusRenderer {
   return new FleetStatusRendererImpl( opts );

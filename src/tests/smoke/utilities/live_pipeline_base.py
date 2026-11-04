@@ -69,11 +69,16 @@ class LivePipelineTestBase:
 
     TEST_NAME       = "Live Pipeline"
     SCENARIOS       = []
-    BASE_URL        = "http://localhost:7999"
+    BASE_URL        = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:7999" )
     DEFAULT_TIMEOUT = 120
     POLL_INTERVAL   = 2
     REQUEST_TIMEOUT = 60
     SUBMIT_ENDPOINT = "/api/v2/ask"
+
+    # Scripted replies to the questions a parked ask puts to the human: argument name -> answer.
+    # Empty means a parked ask fails the scenario, which is the right default for tests that
+    # expect to be asked nothing.
+    PARKED_ANSWERS  = {}
 
     # Credential env var prefix — override for tests using different accounts
     CREDENTIAL_ENV_PREFIX = "LUPIN_TEST_INTERACTIVE_MOCK_JOBS"
@@ -146,16 +151,28 @@ class LivePipelineTestBase:
 
         Requires:
             - headers contains valid auth token
+            - LUPIN_TEST_ADMIN_EMAIL and LUPIN_TEST_ADMIN_PASSWORD are set
 
         Ensures:
             - Returns session_id string on success
-            - Returns "smoke-test-session" as fallback
+            - Returns "smoke-test-session" when no session is registered
+
+        Raises:
+            - RuntimeError if the admin credentials are unset or the admin sign-in
+              or the state request is refused with 401 or 403
         """
+        # The debug route is admin-only; the suite's own account is not admin.
+        from tests.smoke.utilities.embedded_proxy import admin_auth_headers
+        admin_headers = admin_auth_headers( self.BASE_URL )
+
         resp = requests.get(
             f"{self.BASE_URL}/api/debug/websocket-state",
-            headers=headers,
+            headers=admin_headers,
             timeout=10
         )
+
+        if resp.status_code in ( 401, 403 ):
+            raise RuntimeError( f"WebSocket state refused the admin account: {resp.status_code}" )
 
         if resp.status_code != 200:
             print( f"  WebSocket state endpoint failed: {resp.status_code}" )
@@ -321,6 +338,27 @@ class LivePipelineTestBase:
             "websocket_id" : ws_id,
         }
 
+    def _with_tier_lineage( self, payload ):
+        """
+        Add the tier's id to a payload as parent_id_hash, unless the payload already has one.
+
+        Inside a monopolizing test-suite job the runner exports its own id as
+        LUPIN_TEST_MONOPOLIZE_PARENT_ID. Sending it as parent_id_hash makes the queue
+        consumer admit this job through the monopoly hold instead of deferring it as foreign.
+
+        Requires:
+            - payload is the dict an override of get_submit_payload returned
+
+        Ensures:
+            - returns a copy; the dict it was given is never written to
+            - the copy equals payload when the variable is unset or empty
+            - the copy equals payload when it already carries parent_id_hash
+        """
+        tagged    = dict( payload )
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id and "parent_id_hash" not in tagged: tagged[ "parent_id_hash" ] = parent_id
+        return tagged
+
     def get_submit_headers( self, headers, ws_id ):
         """
         Build request headers for submit call.
@@ -337,6 +375,41 @@ class LivePipelineTestBase:
     # The statuses that mean the work is OVER when the response arrives. "waiting" is
     # deliberately absent: it means the job went to a queue and must still be polled.
     V2_TERMINAL_STATUSES = ( "done", "failed", "needs_input", "parked" )
+
+    def _answer_parked( self, push_data, headers, ws_id ):
+        """
+        Answer the questions a parked ask puts to the human, from PARKED_ANSWERS.
+
+        Requires:
+            - push_data is the decoded body of a submit or resume response
+
+        Ensures:
+            - Returns ( push_data, None ) unchanged when it is not a parked ask with a pending id
+            - Returns it unchanged when the first missing argument has no scripted answer, so
+              the caller reports the park as it would have
+            - Otherwise posts each scripted answer to /api/v2/resume and returns the last body
+            - Returns ( None, error_msg ) on a non-200 reply from resume
+            - Answers at most len( PARKED_ANSWERS ) questions, so a flow that keeps asking ends
+        """
+        for _ in range( len( self.PARKED_ANSWERS ) ):
+            missing = push_data.get( "args_missing" ) or []
+            if push_data.get( "status" ) != "parked" or not push_data.get( "pending_id" ): break
+            if not missing or missing[ 0 ] not in self.PARKED_ANSWERS: break
+            answer = self.PARKED_ANSWERS[ missing[ 0 ] ]
+            print( f"    Flow asked for {missing[ 0 ]!r}; answering {answer!r} via /api/v2/resume" )
+            try:
+                resp = requests.post(
+                    f"{self.BASE_URL}/api/v2/resume",
+                    json = { "pending_id": push_data[ "pending_id" ], "answer": answer, "websocket_id": ws_id },
+                    headers = self.get_submit_headers( headers, ws_id ),
+                    timeout = self.REQUEST_TIMEOUT
+                )
+            except Exception as e:
+                return None, f"Resume error: {e}"
+            if resp.status_code != 200:
+                return None, f"Resume HTTP {resp.status_code}: {resp.text[ :200 ]}"
+            push_data = resp.json()
+        return push_data, None
 
     def _terminal_result_or_none( self, push_data ):
         """
@@ -395,7 +468,7 @@ class LivePipelineTestBase:
             timeout = scenario.get( "timeout", self.DEFAULT_TIMEOUT )
 
         endpoint    = self.get_submit_endpoint()
-        payload     = self.get_submit_payload( scenario, ws_id )
+        payload     = self._with_tier_lineage( self.get_submit_payload( scenario, ws_id ) )
         req_headers = self.get_submit_headers( headers, ws_id )
 
         # Submit
@@ -414,7 +487,8 @@ class LivePipelineTestBase:
         if resp.status_code != 200:
             return None, f"HTTP {resp.status_code}: {resp.text[ :200 ]}"
 
-        push_data = resp.json()
+        push_data, error = self._answer_parked( resp.json(), headers, ws_id )
+        if error: return None, error
 
         # BRANCH ON THE RESPONSE, NOT ON THE ENDPOINT (Cheech's ruling, 2026-08-21).
         #

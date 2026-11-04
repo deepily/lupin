@@ -138,11 +138,7 @@ class LineClassifier:
         """
         Classify Python line.
 
-        Handles:
-        - Single-line comments (#)
-        - Docstrings (triple quotes)
-        - Multiline docstrings
-        - Code lines
+        Handles single-line comments (#), docstrings (triple quotes), multiline docstrings and code lines.
 
         Requires:
             - line is full line string
@@ -201,11 +197,7 @@ class LineClassifier:
         """
         Classify JavaScript/TypeScript line.
 
-        Handles:
-        - Single-line comments (//)
-        - Block comments (/* */)
-        - Multiline block comments
-        - Code lines
+        Handles single-line comments (//), block comments (/* */), multiline block comments and code lines.
 
         Requires:
             - line is full line string

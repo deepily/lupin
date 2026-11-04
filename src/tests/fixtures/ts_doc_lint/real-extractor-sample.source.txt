@@ -1,0 +1,7 @@
+Source file: src/lupin_app/static/js/shared/arg-interview.js
+Git blob sha: 8204680cb855e70d01f37b7b759bc6b105bf5d4b (git rev-parse HEAD:src/lupin_app/static/js/shared/arg-interview.js)
+Seat tree HEAD when captured: aa4b7d6e041486d4eb7f6fcc3fe79ee777f26b63
+Extractor: src/scripts/ts_doc_extract.mjs, TypeScript 5.9.3
+Command: node src/scripts/ts_doc_extract.mjs --repo-root <repo root> src/lupin_app/static/js/shared/arg-interview.js
+Captured 2026-10-06 by the extractor itself, unedited: one file record then 15 comment records.
+Purpose: a fixture from the real producer, for the tsdoc_lint tests; it holds jsdoc, block, line-run and trailing records, a file header and a directive.

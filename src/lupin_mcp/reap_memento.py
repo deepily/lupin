@@ -85,7 +85,8 @@ from lupin_mcp.memento_merge_claim   import refuted_merge_claim
 
 # ── Defaults (the MCP wrapper overrides these from INI at the live call) ───────
 DEFAULT_WINDOW_SECONDS    = 20 * 60   # 1200 — freshness floor AND ceiling (see module doc)
-DEFAULT_MIN_BYTES         = 1000      # completeness floor — a header-only stub fails this
+DEFAULT_MIN_BYTES         = 200       # byte floor — catches only an empty or near-empty write (row cc86889e)
+SHORT_MEMENTO_BYTES       = 1000      # below this a verified memento is called "short" in the reason
 DEFAULT_ASK_TIMEOUT_SEC   = 45        # total wait after the ask, shared across all asked seats
 DEFAULT_POLL_INTERVAL_SEC = 3         # re-check cadence while polling for a written memento
 
@@ -180,9 +181,15 @@ def verify_seat_memento_at_any_readable_slot(
     min_bytes      = DEFAULT_MIN_BYTES,
     merge_claim_fn = None,
     verify_fn      = None,
+    list_dir_fn    = None,
 ):
     """
-    Prove a reapable memento exists for this seat at EITHER readable location.
+    Prove a reapable memento exists for this seat at any readable location.
+
+    The third place is a record in the io directory whose own header names this
+    seat's session, whatever the file is called. Seats write `<name>-<session>.md`,
+    and `<name>` need not be the persona the reap derives. Only a header naming this
+    session is adopted, so a prior holder's record is never taken.
 
     THE DEFECT THIS CLOSES (row 8068c65e): the verb offers `--slot root` as an
     ordinary documented option and the reap read `--slot io` only, so a correct call
@@ -228,7 +235,54 @@ def verify_seat_memento_at_any_readable_slot(
                        f"({reason}) — usable, but write it with `--slot io` next time so the reap "
                        f"finds it first: {root_reason}" ), root_record
 
+    sibling = _find_record_by_header_session(
+        io_slot.parent, seat_sid8, read_text_fn,
+        list_dir_fn if list_dir_fn is not None else _default_list_dir )
+    if sibling is not None:
+        sib_usable, sib_reason = verify_fn( sibling, seat_sid8, now, read_text_fn=read_text_fn,
+                                            window_seconds=window_seconds, min_bytes=min_bytes,
+                                            repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+        if sib_usable:
+            return True, ( f"found by header session_id at {sibling}, not the io slot {io_slot} "
+                           f"({reason}) — usable: {sib_reason}" ), sibling
+
     return False, reason, io_slot
+
+
+def _find_record_by_header_session( directory, seat_sid8, read_text_fn, list_dir_fn ):
+    """
+    Find the record in `directory` that names this seat's session.
+
+    Ensures:
+        - returns a `.md` file in `directory` whose header names this seat's session, or None
+        - when several name it, returns the one with the newest `written_at`; a tie goes
+          to the first name in sorted order, and an unparseable stamp counts as oldest
+        - a pointer is resolved to its record, so a pointer and its record both match
+        - never raises
+    """
+    seat8 = ( seat_sid8 or "" )[ :8 ].lower()
+    if not seat8:
+        return None
+    oldest = datetime.datetime.min.replace( tzinfo=datetime.timezone.utc )
+    best   = None
+    best_t = None
+    for name in sorted( n for n in list_dir_fn( directory ) if n.endswith( ".md" ) ):
+        path   = Path( directory ) / name
+        header = slot_record_header( path, read_text_fn )
+        if ( header.get( "session_id" ) or "" )[ :8 ].lower() != seat8:
+            continue
+        stamp = _parse_iso_aware( header.get( "written_at" ) ) or oldest
+        if best is None or stamp > best_t:
+            best, best_t = path, stamp
+    return best
+
+
+def _default_list_dir( directory ):
+    """Return the file names in `directory`, or [] when it is missing."""
+    try:
+        return os.listdir( directory )
+    except OSError:
+        return []
 
 
 def _nearest_existing_ancestor( cwd, exists_fn ):
@@ -410,6 +464,31 @@ def _parse_iso_aware( raw ):
 
 
 # ── The verify predicate (pure) — ALL-OR-ASK ──────────────────────────────────
+def memento_body_lines( text ):
+    """
+    Count the content lines of a memento: lines that are not blank, headings or comments.
+
+    A deliberate choice: completeness is whether the file says anything, not how many
+    bytes it takes. A short job leaves a short, complete memento. Section headings are
+    not consulted by name, because they change with the workflow and would go stale.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - returns the number of non-blank lines that do not start with `#` or `<!--`
+        - a file of headings and comments alone counts zero
+        - never raises
+    """
+    count = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith( "#" ) or stripped.startswith( "<!--" ):
+            continue
+        count += 1
+    return count
+
+
 def verify_seat_memento(
     path,
     seat_sid8,
@@ -432,7 +511,8 @@ def verify_seat_memento(
 
     Ensures:
         - ( True, reason ) ONLY when ALL hold: file readable; byte length >= min_bytes;
-          a parseable memento-record header is present; header session_id's 8-char
+          at least one content line that is not a heading or a comment (so a short,
+          complete memento passes and a skeleton does not); a parseable memento-record header is present; header session_id's 8-char
           prefix == seat_sid8; header written_at is aware, not future, and its age
           <= window_seconds
         - ( False, reason ) otherwise, the reason naming which gate failed — every
@@ -469,6 +549,8 @@ def verify_seat_memento(
     n_bytes = len( text.encode( "utf-8" ) )
     if n_bytes < min_bytes:
         return False, f"memento too small ({n_bytes}B < {min_bytes}B floor) — empty or partial write"
+    if memento_body_lines( text ) == 0:
+        return False, f"memento is a header-only stub ({n_bytes}B, no content line beyond headings and comments)"
 
     header = parse_memento_header( text )
     if not header:
@@ -505,6 +587,8 @@ def verify_seat_memento(
         if refuted:
             return False, refuted
 
+    if n_bytes < SHORT_MEMENTO_BYTES:
+        return True, f"verified: short, has content lines, session-matched, fresh ({int( age )}s old)"
     return True, f"verified: complete, session-matched, fresh ({int( age )}s old)"
 
 
@@ -971,14 +1055,14 @@ def coordinate_mementos(
         now = now_fn()
         for name in list( pending ):
             info           = pending[ name ]
-            usable, reason = verify_seat_memento( info[ "slot" ], info[ "session_id" ][ :8 ], now,
-                                                  read_text_fn=read_text_fn,
-                                                  window_seconds=window_seconds, min_bytes=min_bytes,
-                                                  repo_root=info[ "repo_root" ], merge_claim_fn=merge_claim_fn )
+            usable, reason, found = verify_seat_memento_at_any_readable_slot(
+                info[ "repo_root" ], info[ "persona" ], info[ "session_id" ][ :8 ], now,
+                read_text_fn=read_text_fn, window_seconds=window_seconds, min_bytes=min_bytes,
+                merge_claim_fn=merge_claim_fn )
             if usable:
                 outcomes[ name ] = { "status": "written", "reason": f"appeared after ask: {reason}",
                                      "persona": info[ "persona" ], "session_id": info[ "session_id" ],
-                                     "slot": str( info[ "slot" ] ) }
+                                     "slot": str( found ) }
                 del pending[ name ]
 
     # Pass 4 — anything still un-written failed VISIBLY, split by RECOVERABILITY. A file

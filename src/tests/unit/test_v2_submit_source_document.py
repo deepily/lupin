@@ -208,3 +208,51 @@ def test_a_VALID_source_document_reaches_the_factory_as_a_RESOLVED_ABSOLUTE_PATH
     assert os.path.isabs( delivered[ 0 ] ), "the agent was handed a scope-relative string it cannot open"
     assert os.path.isfile( delivered[ 0 ] )
     assert delivered[ 0 ].endswith( "notes.md" )
+
+
+# ── edges of the door check (row e1a36bb4, coverage) ──────────────────────────────
+
+class _ReachedFactory:
+    """A factory that records that it was reached, then stops the submit."""
+
+    def __init__( self ): self.reached = False
+
+    def __call__( self, *args, **kwargs ):
+        self.reached = True
+        raise RuntimeError( "stop here: reaching the factory is the assertion" )
+
+
+@pytest.mark.parametrize( "empty", [ None, "", [ ] ], ids=[ "none", "empty-string", "empty-list" ] )
+def test_an_EMPTY_source_document_is_treated_as_absent_and_reaches_the_factory(
+        empty, tmp_path, notifier, monkeypatch, io_tree ):
+    factory = _ReachedFactory()
+    flow    = _flow( tmp_path, notifier, monkeypatch, factory, io_tree )
+    _submit( flow, { "query": "a topic", SOURCE_DOCUMENT_ARG: empty } )
+    assert factory.reached, "an empty optional argument was refused"
+
+
+@pytest.mark.parametrize( "spelling", [ "Source-Document", "sourceDocument", "source document" ] )
+def test_a_key_that_normalizes_to_the_canonical_spelling_is_REFUSED_as_a_near_miss(
+        spelling, tmp_path, notifier, monkeypatch, io_tree ):
+    """Case, hyphen and space variants are the same argument misspelled."""
+    factory = _CountingFactory()
+    flow    = _flow( tmp_path, notifier, monkeypatch, factory, io_tree )
+
+    result = _submit( flow, { "query": "a topic", spelling: "io/deep-research/notes.md" } )
+
+    assert result[ "status" ] == "needs_input"
+    assert f"'{spelling}'" in result[ "answer" ]
+    assert factory.calls == 0
+
+
+def test_a_non_string_key_is_skipped_by_the_near_miss_check(
+        tmp_path, notifier, monkeypatch, io_tree ):
+    """An int key is not a misspelling: it does not crash the check or hide a real near miss."""
+    factory = _ReachedFactory()
+    flow    = _flow( tmp_path, notifier, monkeypatch, factory, io_tree )
+    _submit( flow, { "query": "a topic", 5: "x" } )
+    assert factory.reached, "an int key was mistaken for a near miss"
+
+    refused = _submit( _flow( tmp_path, notifier, monkeypatch, _CountingFactory(), io_tree ),
+                       { 5: "x", "source_documnet": "io/deep-research/notes.md" } )
+    assert refused[ "status" ] == "needs_input" and "source_documnet" in refused[ "answer" ]

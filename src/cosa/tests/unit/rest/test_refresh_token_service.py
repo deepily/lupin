@@ -432,12 +432,45 @@ class TestRotateRefreshToken( unittest.TestCase ):
     """
     Tests for rotate_refresh_token().
 
+    Tests the order of rotation: new token first, old token revoked last.
+
     Ensures:
-        - Validate-fail, revoke-fail, user-not-found, store-fail, success, exception
+        - The old token is revoked last, so any earlier failure leaves it usable
+        - A failed final revoke takes the new token back, so the caller holds one live token
     """
+
+    def _rotate( self, user=None, create=None, store=None, revoke=None, validate=None ):
+        """
+        Run rotate_refresh_token over mocked seams.
+
+        Run rotate_refresh_token over mocked seams and return ( result, mocks ).
+
+        Ensures:
+            - mocks holds store, revoke and a call-order recorder named order
+            - Each argument overrides one seam; the defaults are a clean rotation
+        """
+        order = MagicMock()
+        mocks = {
+            "order"  : order,
+            "store"  : MagicMock( return_value=store if store is not None else ( True, "stored" ) ),
+            "revoke" : MagicMock( return_value=( True, "ok" ) ) if revoke is None else MagicMock( **revoke ),
+        }
+        order.attach_mock( mocks[ "store" ], "store" )
+        order.attach_mock( mocks[ "revoke" ], "revoke" )
+        with patch( f"{MODULE}.validate_refresh_token",
+                    return_value=validate or ( True, "ok", { "user_id": "u", "jti": "oldjti" } ) ), \
+             patch( f"{MODULE}.revoke_refresh_token", mocks[ "revoke" ] ), \
+             patch( "cosa.rest.user_service.get_user_by_id",
+                    **( user or { "return_value": { "email": "a@b.com" } } ) ), \
+             patch( f"{MODULE}.create_refresh_token", **( create or { "return_value": "newtok" } ) ), \
+             patch( f"{MODULE}.decode_and_validate_token", return_value={ "jti": "newjti" } ), \
+             patch( f"{MODULE}.store_refresh_token", mocks[ "store" ] ):
+            return rotate_refresh_token( "old" ), mocks
 
     def test_validate_fails( self ):
         """
+        An invalid old token fails the rotation.
+
         Ensures:
             - Invalid old token -> (False, "Invalid token...", None)
         """
@@ -446,70 +479,94 @@ class TestRotateRefreshToken( unittest.TestCase ):
             self.assertFalse( ok )
             self.assertIsNone( tok )
 
-    def test_revoke_fails( self ):
+    def test_user_not_found_leaves_the_old_token_alone( self ):
         """
-        Ensures:
-            - Failure to revoke the old token -> (False, "Failed to revoke...", None)
-        """
-        with patch( f"{MODULE}.validate_refresh_token", return_value=( True, "ok", { "user_id": "u", "jti": "j" } ) ), \
-             patch( f"{MODULE}.revoke_refresh_token", return_value=( False, "nope" ) ):
-            ok, msg, tok = rotate_refresh_token( "old" )
-            self.assertFalse( ok )
-            self.assertIn( "Failed to revoke", msg )
+        A missing user fails before the old token is touched.
 
-    def test_user_not_found( self ):
-        """
         Ensures:
-            - Missing user -> (False, "User not found", None)
+            - Missing user -> (False, "User not found", None) and the old token is never revoked
         """
-        with patch( f"{MODULE}.validate_refresh_token", return_value=( True, "ok", { "user_id": "u", "jti": "j" } ) ), \
-             patch( f"{MODULE}.revoke_refresh_token", return_value=( True, "ok" ) ), \
-             patch( "cosa.rest.user_service.get_user_by_id", return_value=None ):
-            ok, msg, tok = rotate_refresh_token( "old" )
-            self.assertFalse( ok )
-            self.assertIn( "User not found", msg )
+        ( ok, msg, tok ), m = self._rotate( user={ "return_value": None } )
+        self.assertFalse( ok )
+        self.assertIn( "User not found", msg )
+        m[ "revoke" ].assert_not_called()
 
-    def test_store_fails( self ):
+    def test_store_fails_leaves_the_old_token_alone( self ):
         """
+        A failed store fails before the old token is touched.
+
         Ensures:
-            - Failure to store the new token -> (False, "Failed to store...", None)
+            - Failure to store the new token -> (False, "Failed to store...", None) and no revoke
         """
-        with patch( f"{MODULE}.validate_refresh_token", return_value=( True, "ok", { "user_id": "u", "jti": "j" } ) ), \
-             patch( f"{MODULE}.revoke_refresh_token", return_value=( True, "ok" ) ), \
-             patch( "cosa.rest.user_service.get_user_by_id", return_value={ "email": "a@b.com" } ), \
-             patch( f"{MODULE}.create_refresh_token", return_value="newtok" ), \
-             patch( f"{MODULE}.decode_and_validate_token", return_value={ "jti": "newjti" } ), \
-             patch( f"{MODULE}.store_refresh_token", return_value=( False, "db full" ) ):
-            ok, msg, tok = rotate_refresh_token( "old" )
-            self.assertFalse( ok )
-            self.assertIn( "Failed to store", msg )
+        ( ok, msg, tok ), m = self._rotate( store=( False, "db full" ) )
+        self.assertFalse( ok )
+        self.assertIn( "Failed to store", msg )
+        m[ "revoke" ].assert_not_called()
 
-    def test_success( self ):
+    def test_create_raises_leaves_the_old_token_alone( self ):
         """
+        An error making the new token leaves the old one alone.
+
+        Ensures:
+            - An error while making the new token -> (False, "Token rotation failed...", None) and no revoke
+        """
+        ( ok, msg, tok ), m = self._rotate( create={ "side_effect": RuntimeError( "boom" ) } )
+        self.assertFalse( ok )
+        self.assertIn( "Token rotation failed", msg )
+        m[ "revoke" ].assert_not_called()
+
+    def test_success_revokes_the_old_token_after_the_new_one_is_stored( self ):
+        """
+        The old token is revoked only after the new one is stored.
+
         Ensures:
             - Full rotation -> (True, "rotated successfully", new_token)
+            - The calls run in the order store(new), revoke(old)
         """
-        with patch( f"{MODULE}.validate_refresh_token", return_value=( True, "ok", { "user_id": "u", "jti": "j" } ) ), \
-             patch( f"{MODULE}.revoke_refresh_token", return_value=( True, "ok" ) ), \
-             patch( "cosa.rest.user_service.get_user_by_id", return_value={ "email": "a@b.com" } ), \
-             patch( f"{MODULE}.create_refresh_token", return_value="newtok" ), \
-             patch( f"{MODULE}.decode_and_validate_token", return_value={ "jti": "newjti" } ), \
-             patch( f"{MODULE}.store_refresh_token", return_value=( True, "stored" ) ):
-            ok, msg, tok = rotate_refresh_token( "old" )
-            self.assertTrue( ok )
-            self.assertEqual( tok, "newtok" )
+        ( ok, msg, tok ), m = self._rotate()
+        self.assertTrue( ok )
+        self.assertEqual( tok, "newtok" )
+        names = [ c[ 0 ] for c in m[ "order" ].mock_calls ]
+        self.assertEqual( names, [ "store", "revoke" ] )
+        m[ "revoke" ].assert_called_once_with( "oldjti" )
 
-    def test_exception( self ):
+    def test_failed_final_revoke_takes_the_new_token_back( self ):
         """
+        A failed final revoke takes the new token back.
+
         Ensures:
-            - An unexpected error during new-token generation -> (False, "Token rotation failed...", None)
+            - Revoke of the old token failing -> (False, "Failed to revoke...", None)
+            - The new token is then revoked, so the caller is left with the old one only
         """
-        with patch( f"{MODULE}.validate_refresh_token", return_value=( True, "ok", { "user_id": "u", "jti": "j" } ) ), \
-             patch( f"{MODULE}.revoke_refresh_token", return_value=( True, "ok" ) ), \
-             patch( "cosa.rest.user_service.get_user_by_id", side_effect=Exception( "boom" ) ):
-            ok, msg, tok = rotate_refresh_token( "old" )
-            self.assertFalse( ok )
-            self.assertIn( "Token rotation failed", msg )
+        ( ok, msg, tok ), m = self._rotate( revoke={ "side_effect": [ ( False, "nope" ), ( True, "ok" ) ] } )
+        self.assertFalse( ok )
+        self.assertIn( "Failed to revoke", msg )
+        self.assertIsNone( tok )
+        self.assertEqual( [ c.args[ 0 ] for c in m[ "revoke" ].call_args_list ], [ "oldjti", "newjti" ] )
+
+    def test_a_failing_take_back_does_not_hide_the_original_failure( self ):
+        """
+        A failing take-back still reports the original failure.
+
+        Ensures:
+            - If taking the new token back also raises, the original revoke failure is still returned
+        """
+        ( ok, msg, tok ), m = self._rotate( revoke={ "side_effect": [ ( False, "nope" ), RuntimeError( "again" ) ] } )
+        self.assertFalse( ok )
+        self.assertIn( "Failed to revoke", msg )
+
+    def test_an_error_after_the_new_token_is_stored_takes_it_back( self ):
+        """
+        An error after the store takes the new token back.
+
+        Ensures:
+            - An exception from the final revoke -> (False, "Token rotation failed...", None)
+            - The stored new token is revoked on the way out
+        """
+        ( ok, msg, tok ), m = self._rotate( revoke={ "side_effect": [ RuntimeError( "boom" ), ( True, "ok" ) ] } )
+        self.assertFalse( ok )
+        self.assertIn( "Token rotation failed", msg )
+        self.assertEqual( [ c.args[ 0 ] for c in m[ "revoke" ].call_args_list ], [ "oldjti", "newjti" ] )
 
 
 if __name__ == "__main__":

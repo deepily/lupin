@@ -1,34 +1,31 @@
 """
 Gate-reachability census for the Lupin test tree.
 
-THE DEFECT THIS EXISTS TO DETECT (board row d97b024e): a test file that no
-runner script, INI key, or `test_suite` test-type references is unreachable by
-every control this project has. It contributes no coverage signal, it cannot
-fail a merge gate, and — the part that matters — **it emits nothing when it
-rots**. `src/tests/store_owed_cutover_e2e/` sat RED for roughly a month in
-exactly that state and was found by hand.
+The defect this detects: a test file that no runner script, INI key, or `test_suite`
+test-type references. Every control this project has cannot reach it. It adds no
+coverage signal, it cannot fail a merge gate, and it emits nothing when it rots.
+A whole test directory once sat red for about a month in exactly that state.
 
 The primitives here recompute, from the tree itself, which test files a gate
 can actually reach. They derive the gate's targets from `SUITE_SCRIPTS` in
 `cosa/agents/test_suite/job.py` and from the literal paths inside each of
-those shell runners — NOT from a hardcoded list, because a hardcoded list rots
+those shell runners. They use no hardcoded list, because a hardcoded list rots
 the same way the suites did.
 
 Two failure shapes are measured, not one:
 
-  · UNREFERENCED — a test file no runner names. Looks like coverage in the
-    directory tree; reaches no gate.
-  · ZERO-COLLECT — a `test_*.py` file that a runner DOES reach but which
+  - Unreferenced: a test file no runner names. Looks like coverage in the
+    directory tree, yet reaches no gate.
+  - Zero-collect: a `test_*.py` file that a runner does reach but which
     defines no test. It is inside the gate, correctly named, and still emits
-    nothing. This is the harder class: the unreferenced files at least look
-    unreferenced.
+    nothing. This is the harder class. Unreferenced files at least look unreferenced.
 
-WHAT THE PREDICATE COUNTS: files on DISK matching pytest's configured
-discovery pattern (`test_*.py`). Not git — an untracked file collects, and a
-deleted-but-cached file does not.
+What the predicate counts: files on disk matching pytest's configured discovery
+pattern (`test_*.py`). It does not read git. An untracked file collects.
+A deleted-but-cached file does not.
 
-WHAT IT CANNOT SEE: whether a reached test ASSERTS anything, and whether a
-file that is merely IMPORTED by a collected file carries tests of its own.
+What it cannot see: whether a reached test asserts anything. It also cannot see whether
+a file merely imported by a collected file carries tests of its own.
 Reachability is a necessary condition for a gate signal, never a sufficient one.
 """
 
@@ -152,11 +149,9 @@ def _resolve_script_dir_tokens( script_dir: Path, line: str ) -> List[ str ]:
     """
     Resolve every `$SCRIPT_DIR/...` token on one runner line to a normalised repo path.
 
-    🔴 `Path` joins keep `..` as text. The cosa runners write `PROJECT_ROOT="$SCRIPT_DIR/../../.."`,
-    which would otherwise become the target `src/cosa/tests/unit/scripts/../../..` — inert only
-    while targets are compared as strings, and the REPO ROOT the moment anyone resolves it, which
-    would make every test file reachable (Tiffany's review of 0e50fc15, 2026-09-15). So each token
-    is collapsed, and one that leaves `src/` is dropped rather than followed.
+    `Path` joins keep `..` as text, so `PROJECT_ROOT="$SCRIPT_DIR/../../.."` would stay a
+    target like `src/cosa/tests/unit/scripts/../../..`, which is the repo root once resolved.
+    That would make every test file reachable, so each token is collapsed and an escape dropped.
 
     Requires:
         - script_dir is the runner's repo-relative directory
@@ -165,6 +160,7 @@ def _resolve_script_dir_tokens( script_dir: Path, line: str ) -> List[ str ]:
     Ensures:
         - returns repo-relative POSIX paths with no `..` or `.` segments
         - returns only paths under `src/`
+        - a token that leaves `src/` is dropped rather than followed
     """
     resolved = []
     for relative in _SCRIPT_DIR_TOKEN_RE.findall( line ):
@@ -179,10 +175,8 @@ def find_gate_targets( project_root: Path ) -> Set[ str ]:
     Collect every repo-relative path a gate-invocable runner names.
 
     Walks the SUITE_SCRIPTS runners, following `.sh` references (run-all-tests.sh
-    delegates to the per-suite runners), and keeps the `src/...` tokens that
-    exist on disk. A `$SCRIPT_DIR/...` token is resolved against the runner's own
-    directory first. Comment lines are skipped — usage examples in a runner's
-    header name paths the runner does not run.
+    delegates to the per-suite runners), and keeps `src/...` tokens that exist on disk.
+    Comment lines are skipped, since header usage examples name paths it does not run.
 
     Requires:
         - project_root is a directory containing SUITE_SCRIPTS_SOURCE
@@ -232,7 +226,7 @@ def find_test_file_population( project_root: Path ) -> Set[ str ]:
     Ensures:
         - returns repo-relative POSIX paths
         - excludes every path containing an EXCLUDED_PATH_PARTS component
-        - reflects DISK state, not git state
+        - reflects disk state, not git state
     """
     population = set()
     for path in ( project_root / "src" ).rglob( "test_*.py" ):
@@ -284,18 +278,11 @@ def find_unreferenced_test_files( project_root: Path, allowlist: Dict[ str, str 
 
 def find_zero_collect_test_files( project_root: Path, allowlist: Dict[ str, str ] ) -> List[ str ]:
     """
-    Reachable `test_*.py` files that define no test — the invisible-visible class.
+    Reachable `test_*.py` files that define no test, the invisible-visible class.
 
-    These sit INSIDE a gated root and are correctly named, so every surface a
-    reader consults says "covered", while the file contributes nothing pytest
-    can run. A gate that catches unreferenced files but misses these answers
-    half its own question.
-
-    Detection is static: a file counts as collectible when it defines a
-    module-level `test_*` function (sync or async) or a `Test*` class, matching
-    pytest.ini's `python_functions` / `python_classes` patterns. A file pytest
-    cannot parse is NOT reported here — a syntax error already fails collection
-    loudly, which is the opposite of the silence this hunts.
+    They sit inside a gated root and are correctly named, so every surface says "covered".
+    Detection is static: a module-level `test_*` function (sync or async) or a `Test*`
+    class counts, matching pytest.ini's `python_functions` / `python_classes` patterns.
 
     Requires:
         - project_root is a directory containing a `src` subdirectory
@@ -305,6 +292,9 @@ def find_zero_collect_test_files( project_root: Path, allowlist: Dict[ str, str 
         - returns a sorted list of repo-relative paths
         - returns only files reachable by a gate-invocable runner
         - returns no path present in allowlist
+        - a file pytest cannot parse is not reported, since a syntax error already
+          fails collection loudly, the opposite of the silence this hunts
+        - a gate that catches unreferenced files but misses these answers half its question
     """
     targets  = find_gate_targets( project_root )
     barren   = []
@@ -322,12 +312,9 @@ def find_stale_allowlist_entries( project_root: Path, allowlist: Dict[ str, str 
     """
     Allowlist entries that no longer describe an unreachable test file.
 
-    The ledger excuses two conditions — UNREFERENCED and ZERO-COLLECT — so an
-    entry earns its place by satisfying either one. It goes stale when it
-    satisfies neither: the file was deleted, or it was both wired into a gate
-    AND given real tests, and the exemption was never withdrawn. Both leave a
-    standing excuse for a condition that no longer holds — the same shape as a
-    doc asserting coverage that stopped existing.
+    The ledger excuses two conditions, unreferenced and zero-collect. An entry goes stale
+    when it satisfies neither. Either the file was deleted, or it was wired into a gate
+    and given real tests while the exemption was never withdrawn. Both leave a false excuse.
 
     Requires:
         - project_root is a directory containing a `src` subdirectory
@@ -371,13 +358,9 @@ def _defines_a_test( path: Path ) -> bool:
     """
     Whether a file defines anything pytest would collect as a test.
 
-    pytest collects by TWO independent rules, and this hunts for files that
-    satisfy NEITHER. The `python_classes = Test*` name prefix is only the first;
-    the second is `unittest.TestCase` inheritance, which pytest collects
-    REGARDLESS of the class name. A detector that knew only the prefix reported
-    every `class FooTests( unittest.TestCase )` file as contributing nothing —
-    three such files, each holding real passing tests, were named as barren on
-    2026-08-01 (row 663433a7).
+    pytest collects by two independent rules, and this hunts for files satisfying neither.
+    One is the `python_classes = Test*` prefix; the other is `unittest.TestCase`
+    inheritance, collected whatever the class name, which a prefix-only detector missed.
 
     Requires:
         - path names an existing file
@@ -386,9 +369,9 @@ def _defines_a_test( path: Path ) -> bool:
         - returns True if a module-level `test_*` function or `Test*` class is defined
         - returns True for a module-level `unittest.TestCase` subclass that defines
           at least one `test_*` method
-        - returns False for a TestCase subclass with NO test method — pytest
-          collects nothing from it, which is exactly the silence this hunts
-        - returns True when the file cannot be parsed — an unparseable file fails
+        - returns False for a TestCase subclass with no test method, since pytest
+          collects nothing from it, which is the silence this hunts
+        - returns True when the file cannot be parsed, because an unparseable file fails
           collection loudly and is not the silent class this hunts
     """
     try:
@@ -409,18 +392,17 @@ def _is_test_case_subclass( node: ast.ClassDef ) -> bool:
     """
     Whether a class declares a `TestCase`-shaped base.
 
-    Keyed on the base's trailing NAME so both import spellings land — bare
-    `TestCase` and dotted `unittest.TestCase` — plus the async variant
-    `IsolatedAsyncioTestCase`. It CANNOT see inheritance through a project-local
-    intermediate base (`class Mine( OurBase )`); such a file still reads as
-    barren and needs a ledger entry. Deliberately narrow: any base at all would
-    admit files pytest does not collect, which is the opposite failure.
+    Keyed on the base's trailing name so bare `TestCase`, dotted `unittest.TestCase` and
+    the async `IsolatedAsyncioTestCase` all land. Accepting any base would admit files
+    pytest skips.
 
     Requires:
         - node is an ast.ClassDef
 
     Ensures:
         - returns True iff some base's trailing identifier ends with "TestCase"
+        - inheritance through a project-local intermediate base (`class Mine( OurBase )`)
+          is not seen, so such a file still reads as barren and needs a ledger entry
     """
     for base in node.bases:
         if   isinstance( base, ast.Name      ) and base.id.endswith(   "TestCase" ): return True
@@ -433,9 +415,8 @@ def _has_a_test_method( node: ast.ClassDef ) -> bool:
     """
     Whether a class body defines at least one `test_*` method.
 
-    The narrowing half of the TestCase rule: a TestCase subclass holding only
-    helpers emits nothing, so accepting it on inheritance alone would let a
-    genuinely barren file through the census.
+    The narrowing half of the TestCase rule. A subclass holding only helpers emits nothing,
+    so accepting it on inheritance alone would let a barren file through.
 
     Requires:
         - node is an ast.ClassDef
@@ -452,18 +433,11 @@ def _has_a_test_method( node: ast.ClassDef ) -> bool:
 
 def _body_is_vacuous( node: ast.FunctionDef ) -> bool:
     """
-    Whether a test function's body asserts NOTHING once its docstring is removed.
+    Whether a test function's body asserts nothing once its docstring is removed.
 
-    THE SHAPE (row ac37dc5a, vacuity shape 5). A test whose whole body is a
-    docstring is collected, runs, passes, and contributes a green result to the
-    number a human reads before merging. Seven of them sit in the integration tier
-    — the FINAL merge gate — each carrying a numbered description of the flow it
-    would exercise, then `pass`. A reviewer scanning names sees timeout handling,
-    duplicate-response prevention and offline defaults covered. None of it is.
-
-    ⚠️ THIS IS WORSE THAN A MISSING TEST, which is why it earns a detector rather
-    than a cleanup. A missing test leaves a gap somebody can notice; a described-
-    but-unwritten one OCCUPIES the slot where the gap would have been noticed.
+    A test whose whole body is a docstring is collected, runs, passes and adds a green
+    result, while covering nothing. That is worse than a missing test: a described-but-
+    unwritten one occupies the slot where the gap would have been noticed.
 
     Requires:
         - node is a FunctionDef / AsyncFunctionDef
@@ -472,16 +446,14 @@ def _body_is_vacuous( node: ast.FunctionDef ) -> bool:
         - returns True when every remaining statement is `pass`, `...`,
           `assert True`, or `raise NotImplementedError`
         - the leading docstring is not counted — describing a test is not testing it
-        - returns True when NOTHING remains after the docstring is dropped. A
-          function whose entire body IS its docstring is legal Python and is the
-          PUREST form of this
-          defect — a description with not even a `pass` under it. This arm read
-          `return False` when first written, on the reasoning that the grammar
-          forbids an empty body; the grammar forbids an empty SOURCE body, but the
-          list left after removing the docstring is empty all the time. The unit
-          test caught it before the detector shipped
+        - returns True when nothing remains after the docstring is dropped. A
+          function whose entire body is its docstring is legal Python and is the
+          purest form of this defect, a description with not even a `pass` under it.
+          The grammar forbids an empty source body, but the list left after
+          removing the docstring is empty all the time, so this arm must not return False
+          before the detector is trusted
         - `assert True` counts as vacuous even when a comment says the real check
-          lives elsewhere (a SQL WHERE clause, a policy). It still passes
+          lives elsewhere (a SQL `WHERE` clause, a policy). It still passes
           unconditionally and still reports green; a documented placeholder is
           honest, not harmless
     """
@@ -511,13 +483,10 @@ def _body_is_vacuous( node: ast.FunctionDef ) -> bool:
 
 def find_stub_bodied_tests( project_root: Path ) -> List[ str ]:
     """
-    Every GATE-REACHABLE test function whose body asserts nothing.
+    Every gate-reachable test function whose body asserts nothing.
 
-    Scoped to gate-reachable files ON PURPOSE (row ac37dc5a amendment). The raw
-    count across the repo was 13, but three of those sit in files no runner names,
-    so they cannot colour any merge gate — reporting 13 overstates the reach. What
-    a merge actually depends on is the ten inside a gate target, and this returns
-    only those.
+    Scoped to gate-reachable files because a raw repo-wide count includes files no runner
+    names. Those cannot colour any merge gate, so counting them overstates the reach.
 
     Requires:
         - project_root is the repo root

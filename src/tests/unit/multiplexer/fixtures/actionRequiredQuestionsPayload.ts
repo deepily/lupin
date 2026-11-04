@@ -14,6 +14,12 @@ import { readFileSync } from "node:fs";
 
 import type { ActionRequiredAnswers } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
+/**
+ * One question set as the server builds it.
+ *
+ * `questions_in` is what the asking tool was given and `response_options` is what the server puts on the queue update.
+ * `answers` is the answer legacy sends, and `wire_value` is that answer as `JSON.stringify` writes it.
+ */
 export interface QuestionsPayloadCase {
   questions_in     : unknown;
   response_options : unknown;
@@ -21,6 +27,12 @@ export interface QuestionsPayloadCase {
   wire_value       : string;
 }
 
+/**
+ * The two cases read from action_required_questions_payload.json.
+ *
+ * One is a multiple-choice case and one is an open-ended batch.
+ * The server's own builders generate the file, and a Python unit test pins it to them.
+ */
 export const QUESTIONS_PAYLOAD = JSON.parse(
   readFileSync(new URL("./action_required_questions_payload.json", import.meta.url), "utf8"),
 ) as { multiple_choice: QuestionsPayloadCase; open_ended_batch: QuestionsPayloadCase };

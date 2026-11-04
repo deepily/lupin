@@ -56,7 +56,7 @@ This skill activates when the user says any of:
 
 **The trap behind "I changed the mount but it's not there":** `docker restart` reuses cached compose config. Any compose-level change (mount, env, port, depends_on, networks) requires `down`/`up` — `restart` will silently apply nothing.
 
-For deeper edge cases (CoSA submodule reloads, Jinja templates, in-memory state loss), see `references/change-impact-matrix.md`.
+For deeper edge cases (CoSA edits, Jinja templates, in-memory state loss), see `references/change-impact-matrix.md`.
 
 ---
 
@@ -239,6 +239,8 @@ carries on running:
 docker exec lupin-rest-dev kill -USR1 1        # in-container PID 1 is the server
 docker logs --tail 200 lupin-rest-dev          # the dump lands on stderr
 ```
+
+The kill guard refuses the `docker exec … kill` line, because a wrapper that names `kill` is refused. The operator runs it by hand after checking the `[BOOT]` line.
 
 Read the `[BOOT] SIGUSR1 thread-dump handler:` line in the startup log first — it prints
 `registered`, `already-registered`, `declined-existing-handler` or `unsupported-platform`,

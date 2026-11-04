@@ -74,6 +74,9 @@ def _repo_with_a_worktree( root, with_script=True ):
         dest = os.path.join( script_dir, "link-worktree-artifacts.sh" )
         shutil.copy2( os.path.join( _SCRIPT_DIR, "link-worktree-artifacts.sh" ), dest )
         os.chmod( dest, 0o755 )
+        # The script sources this library from the folder beside it.
+        os.makedirs( os.path.join( script_dir, "lib" ) )
+        shutil.copy2( os.path.join( _SCRIPT_DIR, "lib", "worktree-link-lib.sh" ), os.path.join( script_dir, "lib", "worktree-link-lib.sh" ) )
     else:
         with open( os.path.join( script_dir, ".keep" ), "w" ) as f: f.write( "" )
 
@@ -186,6 +189,8 @@ class TestTheRealSpawnPathLeavesATierCapableTree:
                 # cloud-run.env is on the borrow list and this stand-in repo has none to
                 # lend — which must read as "nothing to borrow", never as a failure.
                 assert result[ "artifact_provisioning" ][ "artifacts" ][ "src/scripts/cloud-run.env" ] \
+                       == "SOURCE_ABSENT"
+                assert result[ "artifact_provisioning" ][ "artifacts" ][ "src/terraform/envs/test/.terraform/providers" ] \
                        == "SOURCE_ABSENT"
                 assert result[ "artifact_alarm" ] is None
                 assert result[ "spawned" ][ 0 ][ "artifact_alarm" ] is None

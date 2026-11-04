@@ -49,17 +49,32 @@ interface SenderStoreLike {
   list(): ReadonlyArray<SenderRecord>;
 }
 
+/**
+ * The persona popovers, one per sender that has a voice persona.
+ *
+ * They live in `#persona-modal-portal`. `mount` throws when that element is missing.
+ */
 export interface PersonaModalRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createPersonaModalRenderer`.
+ *
+ * The bus and the sender store are required.
+ */
 export interface PersonaModalRendererOptions {
   eventBus : EventBus;
   stores   : { senders: SenderStoreLike };
 }
 
+/**
+ * Keeps one persona popover in the modal portal for each sender that has a voice persona.
+ *
+ * It updates the popovers when the sender store changes.
+ */
 class PersonaModalRendererImpl implements PersonaModalRenderer {
   private readonly bus           : EventBus;
   private readonly stores        : { senders: SenderStoreLike };
@@ -71,11 +86,19 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
   private portal  : HTMLElement | null = null;
   private mounted : boolean = false;
 
+  /**
+   * Creates the renderer from its event bus and sender store.
+   */
   constructor( opts: PersonaModalRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
   }
 
+  /**
+   * Finds the modal portal, subscribes to sender changes and builds popovers for personas.
+   *
+   * Throws if already mounted or the portal is missing.
+   */
   mount( root: HTMLElement ): void {
     if (this.mounted) throw new Error("PersonaModalRenderer.mount: already mounted");
     const portal = root.querySelector<HTMLElement>("#persona-modal-portal");
@@ -100,6 +123,9 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
     }
   }
 
+  /**
+   * Removes subscriptions and all popovers from the portal and clears the mounted state.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -115,6 +141,9 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Rebuilds every popover from the current sender store; used by tests.
+   */
   forceRenderForTesting(): void {
     this.reconcileAll();
   }

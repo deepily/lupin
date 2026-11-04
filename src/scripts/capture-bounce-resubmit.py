@@ -2,55 +2,39 @@
 """
 Capture-bounce-resubmit control for the :8000 test-suite queue.
 
-A bounce of the test container DESTROYS its in-memory todo queue: anything
-queued at bounce time is silently lost, INCLUDING jobs owned by other people
-(bug 2817b0f5, receipt 2026-08-15 — Cheech's and Mr. Radio's queued jobs both
-vanished). The schedule-tests skill used to describe the remedy as a manual
-procedure ("capture every queued job, bounce, resubmit them all"). A step that
-depends on remembering is not a control, so this script IS the control.
+A bounce of the test container destroys its in-memory todo queue. Anything queued is silently
+lost, including jobs owned by other people. A manual procedure depends on remembering, so this
+script is the control.
 
-What it does:
+Steps:
   1. Enumerate the :8000 pending (todo) queue.
   2. Save every pending job's reconstructed submit payload to a JSON file.
   3. Bounce the test container (refresh-test-server.sh).
-  4. Resubmit every recoverable job — including jobs owned by someone else,
-     since those are exactly the ones a human would forget.
+  4. Resubmit every recoverable job, including jobs owned by someone else,
+     since a human would forget those.
   5. Report what it moved, what it could not, and where fidelity was lost.
 
-FIDELITY LIMIT (stated loudly, never silently swallowed): the queue-listing API
-(`GET /api/get-queue/todo`) exposes only `question_text`, `scheduled_at`, and
-`monopolize` for a queued job. It does NOT expose `pytest_args`,
-`auto_fix_on_failure`, or `env_vars`. Those fall back to server/INI defaults on
-resubmit, and every affected job is flagged `fidelity_loss` in the report and
-the capture file. A human can hand-patch from the saved capture file if a lost
-override mattered.
+Fidelity limit: the queue-listing API (`GET /api/get-queue/todo`) exposes only `question_text`,
+`scheduled_at`, and `monopolize` for a queued job. It does not expose `pytest_args`,
+`auto_fix_on_failure`, or `env_vars`. These fall back to server/INI defaults on resubmit.
+Every affected job is flagged `fidelity_loss` in the report and the capture file.
+A human can hand-patch from the capture file if a lost override mattered.
 
-WHAT THIS STILL LOSES (named plainly, because a tool whose job is "don't lose
-queued jobs" must say what it still drops):
-  - THE CAPTURE->BOUNCE RACE. Capture reads the todo queue at one instant; the
-    bounce happens a moment later. Any job submitted in that gap is NOT in the
-    capture, so it is destroyed by the bounce and never resubmitted. This
-    script narrows the loss window from "the whole schedule-tests procedure" to
-    "a few seconds," but it does not close it. A job submitted mid-run is still
-    lost.
-  - RUNNING-QUEUE JOBS ARE NOT CAPTURED. Only the pending (todo) queue is
-    enumerated. A job already executing when the bounce lands is killed by the
-    bounce and cannot be recovered here — a running job has no reconstructable
-    submit payload, and resubmitting it would double-run work already partway
-    done. Do not bounce while a job is running (the :8000 protocol already
-    forbids it); this script does not make that safe.
+What this still loses:
+  - The capture-to-bounce race. Capture reads the todo queue at one instant and the bounce
+    happens a moment later. A job submitted in that gap is not in the capture, so the bounce
+    destroys it. The loss window narrows to a few seconds but does not close.
+  - Running-queue jobs are not captured. Only the pending queue is enumerated. A job executing
+    when the bounce lands is killed and cannot be recovered here: it has no reconstructable
+    submit payload, and resubmitting would double-run work partway done. The :8000 protocol
+    forbids bouncing while a job is running; this script does not make that safe.
 
-Default mode is DRY-RUN (capture + report only, NO bounce, NO resubmit). Pass
-`--apply` to actually bounce and resubmit.
+Default mode is dry-run (capture and report only, no bounce, no resubmit).
+Pass `--apply` to bounce and resubmit.
 
 Usage:
-  # Safe: see what WOULD move, no bounce
-  python src/scripts/capture-bounce-resubmit.py
-
-  # Do it: capture -> bounce -> resubmit -> report
-  python src/scripts/capture-bounce-resubmit.py --apply
-
-  # Override target / capture path
+  python src/scripts/capture-bounce-resubmit.py                # safe: no bounce
+  python src/scripts/capture-bounce-resubmit.py --apply        # capture, bounce, resubmit, report
   python src/scripts/capture-bounce-resubmit.py --apply \
       --base-url http://localhost:8000 --capture-file /tmp/cbr-capture.json
 
@@ -132,8 +116,8 @@ def build_capture_record( job_meta ):
         - returns a dict with keys: job_id, agent_type, owner_email,
           question_text, scheduled_at, resubmittable (bool), reason (str),
           payload (dict or None), fidelity_loss (list[str])
-        - resubmittable is True ONLY when a test-suite payload could be rebuilt
-        - owner jobs (any owner_email) are ALWAYS captured — never filtered out
+        - resubmittable is True only when a test-suite payload could be rebuilt
+        - owner jobs (any owner_email) are always captured — never filtered out
         - payload, when present, is the old-shape test-suite body (submit() re-wraps it for /api/v2/submit)
 
     Raises:
@@ -239,8 +223,10 @@ class QueueClient:
 
     def submit( self, payload ):
         """
-        Submit one test-suite job through /api/v2/submit (the old /api/test-suite/submit is
-        retired); return the reply info dict ( status, job_id, queue_position, message ).
+        Submit one test-suite job through /api/v2/submit and return the reply info dict.
+
+        The reply dict holds ( status, job_id, queue_position, message ). The old
+        /api/test-suite/submit is retired.
 
         Requires:
             - payload is the captured old-shape body dict ( test_types, optional scheduled_at )
@@ -268,7 +254,7 @@ def capture( client ):
         - client exposes fetch_todo() -> list[dict]
 
     Ensures:
-        - returns a list of capture records, ONE PER pending job, in queue order
+        - returns a list of capture records, one per pending job, in queue order
         - jobs owned by other people are included (never filtered by owner)
     """
     records = []
@@ -308,7 +294,7 @@ def resubmit( client, records ):
         - records is a list of capture records from capture()
 
     Ensures:
-        - calls client.submit() once for EACH record where resubmittable is True
+        - calls client.submit() once for each record where resubmittable is True
         - never skips a record on the basis of its owner_email
         - annotates each record in place with resubmit_status ('moved' |
           'failed' | 'skipped') and, on success, new_job_id
@@ -343,18 +329,18 @@ def run_capture_bounce_resubmit( client, bouncer, capture_path, apply=False ):
         - capture_path is a writable path for the capture JSON
 
     Ensures:
-        - the capture file is ALWAYS written (dry-run and apply alike)
-        - in apply mode, bouncer() is called AFTER capture and BEFORE resubmit —
+        - the capture file is always written (dry-run and apply alike)
+        - in apply mode, bouncer() is called after capture and before resubmit —
           resubmitting against the pre-bounce (stale-code) server would defeat
           the whole purpose
-        - in dry-run mode, bouncer() is NOT called and no job is resubmitted
+        - in dry-run mode, bouncer() is not called and no job is resubmitted
         - returns a report dict:
           {apply, capture_path, total, resubmittable, moved, failed,
            unrecoverable, fidelity_loss_jobs, records}
 
     Raises:
         - nothing from capture/resubmit; a bounce failure propagates (an
-          un-bounced server means the resubmit half must NOT run)
+          un-bounced server means the resubmit half must not run)
     """
     records = capture( client )
     save_capture( records, capture_path )

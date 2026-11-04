@@ -91,6 +91,9 @@ export function renderActionRequiredEmpty(): HTMLElement {
   return root;
 }
 
+/**
+ * Builds a small badge naming a response type in readable words, such as yes/no.
+ */
 function responseTypeBadge(responseType: ActionRequiredItem["response_type"]): DocumentFragment {
   // Human-readable label per response type.
   const labelMap: Record<ActionRequiredItem["response_type"], string> = {
@@ -102,6 +105,11 @@ function responseTypeBadge(responseType: ActionRequiredItem["response_type"]): D
   return html`<span class="action-required-response-type-badge">${labelMap[responseType]}</span>` as DocumentFragment;
 }
 
+/**
+ * Builds a read-only preview of an action item's answer options.
+ *
+ * Shows Yes and No, the option labels, or a text-input placeholder depending on the response type.
+ */
 function renderOptionsPreview(item: ActionRequiredItem): DocumentFragment {
   switch (item.response_type) {
     case "yes_no":

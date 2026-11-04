@@ -11,6 +11,12 @@
 // Wire shapes (all fields optional — rendered defensively)
 // ---------------------------------------------------------------------------
 
+/**
+ * How long ago each liveness signal was last seen, in seconds, and the arbiter's verdict.
+ *
+ * The tooltip prints them. `verdict` is the arbiter's own label: "LIVE", "quiet <age>" or "stale <age>".
+ * It is "offline" when there is no signal, or the signal is older than the stale limit.
+ */
 export interface FleetLiveness {
   verdict?           : string;
   bridge_age_s?      : number | null;
@@ -20,6 +26,11 @@ export interface FleetLiveness {
   freshest_age_s?    : number | null;
 }
 
+/**
+ * One session row from the fleet arbiter.
+ *
+ * `manager` names the manager persona a worker reports to. `holding_on` and `stuck` come from the arbiter.
+ */
 export interface FleetSession {
   persona?    : string;
   session_id? : string;
@@ -31,13 +42,20 @@ export interface FleetSession {
   liveness?   : FleetLiveness;
 }
 
+/** One persona's context-window figures: the share used and the window size. */
 export interface FleetContextRecord {
   consumption_pct_of_window? : number | null;
   window_size?               : number | null;
 }
 
+/** Context-window figures keyed by persona name. */
 export type FleetPersonaMap = Record<string, FleetContextRecord>;
 
+/**
+ * One manager with its workers, or the trailing group of workers with no known manager.
+ *
+ * `isUnmanaged` is true only for that last group, where `manager` is null.
+ */
 export interface FleetGroup {
   managerPersona : string | null;
   manager        : FleetSession | null;
@@ -45,11 +63,22 @@ export interface FleetGroup {
   workers        : FleetSession[];
 }
 
+/**
+ * The fleet as groups.
+ *
+ * `totalCount` is the number of session rows. `groups` lists the managers sorted by label, then the unmanaged group.
+ */
 export interface FleetModel {
   totalCount : number;
   groups     : FleetGroup[];
 }
 
+/**
+ * The composite fleet answer the store caches.
+ *
+ * It carries the arbiter's sessions and the context-pressure figures per persona.
+ * The store sets `status` to "auth_required" or "unreachable" when the fetch fails. `app_timezone` formats the updated stamp.
+ */
 export interface FleetComposite {
   status?           : string;
   app_timezone?     : string;
@@ -93,6 +122,9 @@ export function fleetLivenessTooltip( liveness: FleetLiveness | null | undefined
 // Hierarchy grouping + liveness split (accept `unknown` for defensive parity)
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns the value as a list of rows, or an empty list when not an array.
+ */
 function asRows( sessions: unknown ): Array<FleetSession | null | undefined> {
   return Array.isArray( sessions ) ? ( sessions as Array<FleetSession | null | undefined> ) : [];
 }
@@ -239,7 +271,7 @@ export function fleetHeatClass( pct: number | null | undefined ): string {
 
 /**
  * Format a Date as "HH:MM:SS TZ" in the configured IANA zone via
- * Intl.DateTimeFormat (DST-aware). Invalid/absent zone → browser-local. Pure.
+ * Intl.DateTimeFormat (DST-aware). Invalid/absent zone → UTC (the short zone name says so). Pure.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (try/catch default-param interplay).
 export function formatFleetTimestamp( date: Date, ianaZone: string | null | undefined ): string {
@@ -254,8 +286,8 @@ export function formatFleetTimestamp( date: Date, ianaZone: string | null | unde
     try {
       return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: ianaZone } ).format( date );
     } catch {
-      // Invalid IANA zone — degrade to browser-local (never throw).
+      // Invalid IANA zone — degrade to UTC (never throw).
     }
   }
-  return new Intl.DateTimeFormat( undefined, opts ).format( date );
+  return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: "UTC" } ).format( date );
 }

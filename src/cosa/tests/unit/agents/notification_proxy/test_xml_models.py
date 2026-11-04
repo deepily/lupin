@@ -92,6 +92,37 @@ class TestScriptMatcherResponse:
 # ===========================================================================
 # BatchScriptMatcherResponse
 # ===========================================================================
+class TestScriptMatcherResponseCleanNoMatch:
+    """A reply of `none` with an empty answer is a no-match, not an error."""
+
+    NO_MATCH_XML = (
+        "<response><matched_entry>none</matched_entry><answer></answer>"
+        "<confidence>0.0</confidence><reasoning>nothing fits</reasoning></response>"
+    )
+
+    def test_an_empty_answer_with_no_entry_parses_to_a_no_match( self ):
+        r = ScriptMatcherResponse.from_xml( self.NO_MATCH_XML )
+        assert r.answer == ""
+        assert r.is_match() is False
+
+    def test_the_none_marker_is_read_without_regard_to_case( self ):
+        r = ScriptMatcherResponse( matched_entry=" None ", answer=None )
+        assert r.answer == ""
+        assert r.is_match() is False
+
+    def test_a_marker_that_only_starts_with_none_is_not_the_marker( self ):
+        with pytest.raises( ValidationError ):
+            ScriptMatcherResponse( matched_entry="none of these", answer=None )
+
+    def test_an_empty_answer_with_an_entry_is_still_an_error( self ):
+        with pytest.raises( ValidationError ):
+            ScriptMatcherResponse( matched_entry="1", answer=None )
+
+    def test_an_empty_answer_with_no_entry_marker_at_all_is_still_an_error( self ):
+        with pytest.raises( ValidationError ):
+            ScriptMatcherResponse( matched_entry=None, answer=None )
+
+
 class TestBatchScriptMatcherResponse:
 
     def test_construct_with_list_entries( self ):

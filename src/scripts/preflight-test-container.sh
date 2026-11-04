@@ -116,14 +116,33 @@ else
     remedy "docker rm -f ${CONTAINER} && docker compose up -d ${CONTAINER}"
 fi
 
+# ── 5b. Claude Code login not expired ────────────────────────────────────
+# Row d7c018d6. The container keeps its own Claude Code login. Once it expires every Claude Code job
+# in the container fails, and the only cause the SDK reports is the word "success" (measured 2026-10-07:
+# the file was last written 2026-08-26 and its token ran out 2026-08-27). Section 5 above checks that the
+# file exists and nothing more. This reads the expiry field and nothing else: the one-line python in the
+# container prints that number, never a token, and no Claude Code CLI call is made, because a call would
+# refresh the login and hide the cause.
+# shellcheck source=lib/claude-login-probe.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/claude-login-probe.sh"
+probe_claude_login "${CONTAINER}"
+
+# Warn when the container's bundled Claude Code is far behind the host's (it only moves with the SDK pin).
+# shellcheck source=lib/claude-cli-parity-probe.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/claude-cli-parity-probe.sh"
+probe_claude_cli_parity "${CONTAINER}" || true
+
 # ── 5c. Session bridge mount resolves a live persona ─────────────────────
 # The task request door resolves a requester's persona from the host's session bridges
 # (Sword of Damocles, row ab8c5728). No mount means every pledged admit request 403s.
 # Same probe as test_session_bridge_mount_resolves_a_known_persona.
 if run_cmd docker exec "${CONTAINER}" sh -c 'test -d /home/rruiz/.claude/sessions' 2>/dev/null; then
-    known="$(python3 - <<'PY'
-import glob, json, os
-paths = sorted( glob.glob( os.path.expanduser( "~/.claude/sessions/cc-*.json" ) ), key=os.path.getmtime, reverse=True )
+    # Row d849a6d9: the test container's sessions folder is its own. Read the host side
+    # from the running container's mount, not from ~/.claude/sessions.
+    host_sessions="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/home/rruiz/.claude/sessions"}}{{.Source}}{{end}}{{end}}' "${CONTAINER}" 2>/dev/null)"
+    known="$(python3 - "${host_sessions}" <<'PY'
+import glob, json, os, sys
+paths = sorted( glob.glob( os.path.join( sys.argv[ 1 ] or "/nonexistent", "cc-*.json" ) ), key=os.path.getmtime, reverse=True )
 for path in paths:
     try:
         body = json.load( open( path ) )
@@ -186,6 +205,24 @@ else
     say_warn "gh CLI has no valid GitHub auth in container"
     remedy "when Phase 5 needs it: mount ~/.config/gh into the compose services"
 fi
+
+# ── 7. Database grants ───────────────────────────────────────────────────
+# The probe lives in lib/preflight-db-grants-probe.sh so a test can drive it with a stub helper.
+# shellcheck source=lib/preflight-db-grants-probe.sh
+source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-db-grants-probe.sh"
+probe_db_grants
+
+# ── 8. Test login secret ─────────────────────────────────────────────────
+# The test container mounts the second database secret; see lib/preflight-test-secret-probe.sh.
+# shellcheck source=lib/preflight-test-secret-probe.sh
+source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-test-secret-probe.sh"
+probe_test_login_secret
+
+# ── 9. Smoke admin credentials ───────────────────────────────────────────
+# The smoke helpers sign in as an admin; see lib/preflight-smoke-admin-probe.sh.
+# shellcheck source=lib/preflight-smoke-admin-probe.sh
+source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-smoke-admin-probe.sh"
+probe_smoke_admin_credentials
 
 # ── Summary ──────────────────────────────────────────────────────────────
 echo

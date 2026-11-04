@@ -320,3 +320,44 @@ class TestResolveTargetUser:
         monkeypatch.setattr( loader, "get_api_config", boom )
         with pytest.raises( ValueError, match="Cannot resolve target_user" ):
             resolve_target_user()
+
+
+# ── the fire-and-forget request's tail, and the config-file recipient ──
+
+class TestAsyncRequestToApiParams:
+    """Set fields of the async request ride the query string; unset ones are absent."""
+
+    def _async( self, **overrides ):
+        from lupin_cli.notifications.notification_models import AsyncNotificationRequest
+        base = { "message": "Build finished", "target_user": "someone@example.com" }
+        base.update( overrides )
+        return AsyncNotificationRequest( **base )
+
+    def test_an_unresolved_target_user_refuses_to_serialize( self ):
+        req = self._async()
+        object.__setattr__( req, "target_user", None )
+        with pytest.raises( ValueError, match="target_user is None at serialization time" ):
+            req.to_api_params()
+
+    def test_session_name_and_queue_name_are_carried_verbatim( self ):
+        params = self._async( session_name="Mr. Radio", queue_name="todo" ).to_api_params()
+        assert ( params[ "session_name" ], params[ "queue_name" ] ) == ( "Mr. Radio", "todo" )
+
+    def test_suppress_ding_is_the_string_true_and_vanishes_when_false( self ):
+        assert self._async( suppress_ding=True ).to_api_params()[ "suppress_ding" ] == "true"
+        assert "suppress_ding" not in self._async( suppress_ding=False ).to_api_params()
+
+    def test_unset_session_name_and_queue_name_are_absent( self ):
+        params = self._async().to_api_params()
+        assert "session_name" not in params and "queue_name" not in params
+
+
+class TestResolveTargetUserFromConfig:
+
+    def test_the_config_file_recipient_is_used_when_nothing_else_is_set( self, monkeypatch ):
+        from unittest.mock import patch
+        from lupin_cli.notifications.notification_models import resolve_target_user
+        monkeypatch.delenv( "LUPIN_DEV_EMAIL", raising=False )
+        cfg = { "global_notification_recipient": "cfg@example.com" }
+        with patch( "cosa.utils.config_loader.get_api_config", return_value=cfg ):
+            assert resolve_target_user() == "cfg@example.com"

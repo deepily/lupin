@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Drift guard: every `solution snapshots manager type` value the INI ships must be a
-value the STARTUP block in src/lupin_app/main.py actually accepts.
+value the STARTUP block in src/lupin_app/lifespan_steps.py (called from main.py) actually accepts.
 
 THE DEFECT THIS EXISTS FOR (2026-08-17, row 5ff7b8f5). The factory and the startup
 block are two independent authorities on the same key. The factory learned
@@ -12,7 +12,7 @@ because uvicorn reload is off and the running process still held the pre-flip
 config. The next bounce would have failed the server. Nothing in either unit suite
 touched main.py's startup block, which is why it took a human reader to catch.
 
-This test reads the ACCEPTED SET out of main.py's source rather than restating it,
+This test reads the ACCEPTED SET out of lifespan_steps.py source rather than restating it,
 so adding a branch there cannot leave this guard behind, and deleting one cannot
 leave the INI pointing at a value nothing accepts.
 
@@ -31,7 +31,7 @@ _src_path   = str( _LUPIN_ROOT / "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
-_MAIN_PY   = _LUPIN_ROOT / "src" / "lupin_app" / "main.py"
+_MAIN_PY   = _LUPIN_ROOT / "src" / "lupin_app" / "lifespan_steps.py"   # the startup selection moved here from main.py
 _INI       = _LUPIN_ROOT / "src" / "conf" / "lupin-app.ini"
 _SPLAINER  = _LUPIN_ROOT / "src" / "conf" / "lupin-app-splainer.ini"
 _KEY       = "solution snapshots manager type"

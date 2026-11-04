@@ -1,0 +1,45 @@
+/// Group held rows by the PERSONA who filed them.
+///
+/// 🔴 THE GROUPING KEY IS THE PERSONA, SESSION HASH STRIPPED — RICK'S RULING R1=B,
+/// 2026-09-22, AND IT REVERSES WHAT THIS FUNCTION USED TO DO. The old key was the whole
+/// `created_by` string, and the reasoning behind it is worth keeping because it names
+/// the hazard this version has to handle rather than one it gets to ignore:
+///
+/// > *"Stripping the hash to group by bare persona would merge one persona's sessions
+/// > into a single group — fewer, larger groups, and an approve-all whose blast radius
+/// > is WIDER than the name on the button suggests."*
+///
+/// ⚠️ EVERY WORD OF THAT IS STILL TRUE. What changed is that it is now the REQUESTED
+/// behaviour, not an accident to be prevented: *"I want you to group all sessions
+/// without any explicit labeling under each persona."* He also rejected the framing —
+/// *"It's a bug because it does not mirror the behavior or the layout of the
+/// multiplexer or the legacy notification client."*
+///
+/// ⇒ SO THE WIDER BLAST RADIUS IS HANDLED RATHER THAN AVOIDED, AND IT IS HANDLED
+/// SOMEWHERE THIS FUNCTION CAN GUARANTEE: [FilerGroup.ids] and [FilerGroup.count] are
+/// the same rows by construction, and every label the pane prints reads the count off
+/// the group. A caller cannot show one number and send another.
+///
+/// 🔴 DO NOT REACH FOR `created_by.split( " " ).first`. A persona can be TWO WORDS, so
+/// that renders "mr radio 8fa24215" as "mr" — measured wrong on 6 of 13 live rows in the
+/// web client, and those six are exactly the ones this pane is for. The rule lives in
+/// `core/text/persona_label.dart` precisely so it is not re-derived here.
+///
+/// ⚠️ THE KEY IS DISPLAY-CASED, AND THAT IS LOAD-BEARING RATHER THAN COSMETIC. The live
+/// board holds "Krishna" and "maria" side by side — one store, two casing conventions.
+/// Grouping on the raw persona would put "Krishna" and "krishna" in two groups, which is
+/// the exact defect R1=B exists to remove, one level down.
+///
+/// Requires:
+///     - nothing; an empty list yields an empty list
+///
+/// Ensures:
+///     - every session of one persona lands in ONE group, and no session appears in the
+///       label, a subtitle or a count
+///     - groups are ordered by persona name, case-insensitively, so the pane does not
+///       reshuffle between repaints
+///     - a row with no filer lands in a single trailing "Unattributed" group rather
+///       than being dropped — a held row nobody can see is worse than an odd label
+///     - row order WITHIN a group is the server's, untouched. Rows from two sessions
+///       therefore interleave exactly as the server returned them, which is the only
+///       order this function is entitled to claim

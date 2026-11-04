@@ -37,7 +37,7 @@ below takes legacy from the SERVED page and the mux from `_walk_mux_harness`.
 Krishna 🦚 measured all three venues over ONE fixture in COMMIT `aa9851bc`,
 and they do not agree. ⚠️ That commit is in this repo but is NOT an ancestor of
 this branch, so `git show aa9851bc` resolves it while its doc
-`src/rnd/2026.09.06-live-mux-drops-the-epic-story-row.md` is NOT yet on disk here —
+`2026.09.06-live-mux-drops-the-epic-story-row.md (deleted)` is NOT yet on disk here —
 cite the commit, not the path, until the branches meet:
 
     LIVE legacy   /app/notifications?classic=1   epic:alpha story rows = 1
@@ -109,6 +109,7 @@ from pathlib import Path
 
 import pytest
 import requests
+from tests.helpers import app_login
 
 from tests.e2e_ui.parity_oracle import (
     ACCORDION_CLICK_PATH_RELPATHS,
@@ -147,14 +148,7 @@ def tokens():
     password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
     if not email or not password:
         pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD not set" )
-    try:
-        resp = requests.post( f"{BASE_URL}/auth/login",
-                              json={ "email": email, "password": password }, timeout=10 )
-    except requests.RequestException as exc:
-        pytest.skip( f"{BASE_URL} unreachable: {exc}" )
-    if resp.status_code != 200:
-        pytest.skip( f"login failed: {resp.status_code}" )
-    return resp.json()[ "tokens" ]
+    return app_login.login( BASE_URL, email, password )[ "tokens" ]
 
 
 @pytest.fixture( scope="module" )

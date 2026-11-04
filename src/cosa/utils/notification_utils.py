@@ -68,8 +68,8 @@ def format_questions_for_tts( questions: list ) -> str:
     """
     Format questions for TTS playback.
 
-    Returns ONLY the question text. Options are displayed in the UI
-    and should NOT be included in the spoken TTS message.
+    Returns only the question text. Options are displayed in the UI
+    and are not included in the spoken TTS message.
 
     Requires:
         - questions is a list of question dicts
@@ -113,14 +113,10 @@ def format_questions_for_tts( questions: list ) -> str:
 
 def convert_questions_for_api( questions: list ) -> dict:
     """
-    Convert Claude Code's camelCase format to API's snake_case format.
+    Convert Claude Code's camelCase multiSelect to the API's snake_case multi_select.
 
-    Claude Code uses: multiSelect (camelCase)
-    API/Database expects: multi_select (snake_case)
-
-    Frontend rendering depends on multi_select:
-        - multi_select: true -> renders as checkboxes
-        - multi_select: false -> renders as radio buttons
+    The frontend renders checkboxes when multi_select is true and radio buttons
+    when it is false.
 
     Requires:
         - questions is a list of question dicts
@@ -152,10 +148,9 @@ def format_open_ended_batch_for_tts( questions: list ) -> str:
     """
     Format open-ended batch questions for TTS playback.
 
-    For a single question, speaks the question text directly.
-    For multiple questions, speaks only the count preamble — individual
-    questions are already displayed in the UI batch form and should NOT
-    be read aloud (too verbose for voice UX).
+    A single question is spoken directly. Several questions get only a count
+    preamble, because the UI batch form already shows them and reading them
+    aloud is too verbose for voice.
 
     Requires:
         - questions is a non-empty list of question dicts
@@ -164,6 +159,7 @@ def format_open_ended_batch_for_tts( questions: list ) -> str:
     Ensures:
         - Single question: just the question text (no preamble)
         - Multiple questions: count-only preamble ("I have N questions for you.")
+        - An empty list returns an empty string
 
     Args:
         questions: List of question objects with 'question' and 'header' keys
@@ -246,7 +242,7 @@ def extract_qualifier_comment( response_value ):
 
 def format_qualified_response( answer, qualifier ):
     """
-    Format a yes/no/neither answer with qualifier into an enriched string that Claude will act on.
+    Format a yes/no/neither answer and its qualifier into an enriched string for Claude.
 
     Requires:
         - answer is "yes", "no", or "neither"

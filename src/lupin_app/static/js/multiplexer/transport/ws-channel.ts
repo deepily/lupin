@@ -19,8 +19,20 @@
 // invocations from a prior socket cannot mutate state that belongs to the
 // current connection.
 
+/**
+ * The states of a channel's socket.
+ *
+ * A new channel is `closed`. `start` moves it to `connecting`, and the socket's open event moves it to `open`.
+ * `closing` is set inside `stop` and replaced by `closed` before `stop` returns, so a caller never reads it.
+ */
 export type WSChannelState = "connecting" | "open" | "closing" | "closed";
 
+/**
+ * What a channel is built from.
+ *
+ * The `url` is required. A text frame reaches `onMessage` already parsed, and a binary frame reaches `onBinaryMessage`.
+ * `generationToken` is the starting value of the channel's generation counter.
+ */
 export interface WSChannelOptions {
   url             : string;
   protocols?      : string | string[];
@@ -37,6 +49,11 @@ export interface WSChannelOptions {
   WebSocketCtor?  : typeof WebSocket;
 }
 
+/**
+ * A single WebSocket with no reconnect logic of its own.
+ *
+ * `generation` increases on each `start`, and callbacks from an earlier socket are dropped.
+ */
 export interface WSChannel {
   start(): void;
   stop(): void;
@@ -45,6 +62,9 @@ export interface WSChannel {
   readonly generation: number;   // observable for tests + telemetry
 }
 
+/**
+ * Wraps one WebSocket with a state and a generation counter.
+ */
 class WSChannelImpl implements WSChannel {
   private readonly url             : string;
   private readonly protocols?      : string | string[];
@@ -59,6 +79,9 @@ class WSChannelImpl implements WSChannel {
   private gen      : number;
   private _state   : WSChannelState = "closed";
 
+  /**
+   * Stores the socket options and checks a URL and WebSocket constructor exist.
+   */
   constructor(opts: WSChannelOptions) {
     if (typeof opts.url !== "string" || opts.url.length === 0) {
       throw new Error("ws-channel: opts.url is required (non-empty string)");
@@ -80,14 +103,23 @@ class WSChannelImpl implements WSChannel {
     }
   }
 
+  /**
+   * Exposes the channel state: connecting, open, closing or closed.
+   */
   get state(): WSChannelState {
     return this._state;
   }
 
+  /**
+   * Exposes the generation counter, which rises on each start and stop.
+   */
   get generation(): number {
     return this.gen;
   }
 
+  /**
+   * Opens a new socket unless one is already connecting or open.
+   */
   start(): void {
     // Idempotency: if a socket is already CONNECTING or OPEN, do not create
     // another. The caller (ConnectionStateMachine) is responsible for calling
@@ -180,6 +212,9 @@ class WSChannelImpl implements WSChannel {
     };
   }
 
+  /**
+   * Drops pending callbacks, closes the socket and sets the state to closed.
+   */
   stop(): void {
     // Bump generation FIRST so any in-flight callback bound to the current
     // socket is dropped before its handler can run.
@@ -193,6 +228,11 @@ class WSChannelImpl implements WSChannel {
     this._state = "closed";
   }
 
+  /**
+   * Sends a string as is, or any other value as JSON, over the open socket.
+   *
+   * Throws an Error when there is no socket or the channel state is not open, and nothing is sent. JSON.stringify and the socket send can also throw. Returns nothing.
+   */
   send(envelope: unknown): void {
     if (!this.socket || this._state !== "open") {
       throw new Error(`ws-channel: cannot send — channel state is '${this._state}'`);
@@ -214,6 +254,7 @@ class WSChannelImpl implements WSChannel {
   }
 }
 
+/** Build a channel; it throws if `url` is empty or no WebSocket constructor is available. */
 export function createWSChannel(opts: WSChannelOptions): WSChannel {
   return new WSChannelImpl(opts);
 }
@@ -225,6 +266,9 @@ export function createWSChannel(opts: WSChannelOptions): WSChannel {
 // true branch via the "makeCloseEvent uses native CloseEvent" test which
 // polyfills globalThis.CloseEvent before invoking the constructor-failure
 // path. Production browsers always hit the true branch.
+/**
+ * Returns a close event with the given code and reason.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; both real branches inside the body ARE covered — verified via lcov).
 function makeCloseEvent(code: number, reason: string): CloseEvent {
   if (typeof CloseEvent !== "undefined") {

@@ -17,7 +17,7 @@ class Gister:
     templates via the `prompt_key` parameter.
 
     Caching Behavior:
-        Caching is ONLY enabled when using the default prompt template
+        Caching is enabled only when using the default prompt template
         (gist generation for short utterances). Non-default prompts
         bypass the cache entirely. This design:
 
@@ -89,10 +89,10 @@ class Gister:
                        Non-default prompts bypass cache entirely.
 
         Caching Behavior:
-            - DEFAULT prompt (gist generation): Cache ENABLED
+            - Default prompt (gist generation): cache enabled
               Designed for short, repetitive utterances with high hit rates.
 
-            - CUSTOM prompts (session titles, etc.): Cache BYPASSED
+            - Custom prompts (session titles, etc.): cache bypassed
               Prevents pollution and collisions. Custom prompts typically
               process unique content where caching provides no benefit.
 

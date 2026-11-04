@@ -1,8 +1,8 @@
 """
-Async git operations module for Bug Fix Expediter Phase 5.
+Async git operations for the Bug Fix Expediter git strategy step.
 
 Provides commit/branch/push/PR primitives via asyncio.create_subprocess_exec().
-All methods return dicts — NEVER raise. Failures populate an `error` key.
+All methods return dicts and never raise. Failures populate an `error` key.
 
 Design:
     - Low-level `_run_git(*args)` runs `git <args>` with timeout
@@ -21,7 +21,7 @@ from typing import Optional
 
 class GitOps:
     """
-    Async wrapper around git CLI + gh CLI for BFE Phase 5.
+    Async wrapper around the git CLI and gh CLI for the BFE git strategy step.
 
     Requires:
         - cwd is None or an existing directory path
@@ -158,6 +158,26 @@ class GitOps:
             return { "success": False, "commit_hash": commit_result[ "commit_hash" ], "error": f"git push failed: {push_result[ 'stderr' ]}" }
 
         return { "success": True, "commit_hash": commit_result[ "commit_hash" ], "error": None }
+
+    async def push_branch( self, slug: str ) -> dict:
+        """
+        Push the fix branch <slug> to origin with upstream tracking, and nothing else.
+
+        Requires:
+            - slug names a branch that already exists locally, as fix/<name>
+
+        Ensures:
+            - Returns {"success": bool, "error": str|None}
+            - A slug that is not fix/<name> (empty, main, master, HEAD, any other prefix)
+              is refused without running git
+            - Pushes one explicit refspec, so no other branch or tag moves; never forces
+        """
+        if not slug.startswith( "fix/" ) or len( slug ) == len( "fix/" ):
+            return { "success": False, "error": f"refusing to push [{slug}]: only a fix branch named fix/<name> is pushed" }
+        result = await self._run_git( "push", "-u", "origin", f"refs/heads/{slug}:refs/heads/{slug}" )
+        if not result[ "success" ]:
+            return { "success": False, "error": f"git push failed: {result[ 'stderr' ]}" }
+        return { "success": True, "error": None }
 
     async def create_pr( self, branch: str, title: str, body: str ) -> dict:
         """

@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
 """
-Seed proxy decisions for preference learning bootstrap (Phases 0-1).
+Seed proxy decisions into Postgres and pgvector to bootstrap preference learning.
 
-Populates the Postgres proxy_decisions table and its pgvector embedding store
-with 50 realistic decision scenarios across all 6 engineering categories,
-then optionally batch-ratifies them to create training signal for the CBR engine.
-
-Usage:
-    python src/scripts/seed_proxy_decisions.py --dry-run
-    python src/scripts/seed_proxy_decisions.py
-    python src/scripts/seed_proxy_decisions.py --ratify --user-email you@example.com
-    python src/scripts/seed_proxy_decisions.py --verify
-    python src/scripts/seed_proxy_decisions.py --clean
+Populates the Postgres proxy_decisions table and its pgvector embedding store with 50 decision
+scenarios across all 6 engineering categories.
+It can then batch-ratify them to create training signal for the CBR engine.
 
 Requires:
     - LUPIN_ROOT environment variable set
@@ -24,6 +17,13 @@ Ensures:
     - --ratify applies suggested approve/reject to all seed decisions
     - --verify confirms CBR predictions return non-None verdicts
     - --clean removes all seed data (metadata_json.seed_data == True)
+
+Usage:
+    python src/scripts/seed_proxy_decisions.py --dry-run
+    python src/scripts/seed_proxy_decisions.py
+    python src/scripts/seed_proxy_decisions.py --ratify --user-email you@example.com
+    python src/scripts/seed_proxy_decisions.py --verify
+    python src/scripts/seed_proxy_decisions.py --clean
 """
 
 import sys
@@ -723,10 +723,9 @@ def _get_embedding_store():
     """
     Create and return a ProxyDecisionEmbeddings instance using config.
 
-    No storage path is built. The store lives in Postgres+pgvector, so the only
-    thing to resolve is the table name. Passing a path here used to raise: the
-    store's path guard rejects a db_path it would silently ignore, which made
-    this script fail on every invocation after the July cutover.
+    No storage path is built, because the store lives in Postgres+pgvector and only the table
+    name needs resolving. The store's path guard rejects a db_path it would silently ignore,
+    so passing a path here would raise on every invocation.
 
     Ensures:
         - Returns configured ProxyDecisionEmbeddings instance
@@ -911,7 +910,7 @@ def verify():
     Verify seed data is functioning correctly.
 
     Ensures:
-        - Counts PG decisions (pending + ratified)
+        - Counts Postgres decisions (pending + ratified)
         - Tests vector similarity search with a known query
         - Tests CBR prediction returns non-None verdict (if ratified data exists)
         - Prints verification results
@@ -1002,7 +1001,7 @@ def clean_seed_data():
     Remove all seed data from Postgres and the pgvector embedding store.
 
     Ensures:
-        - Deletes PG records where metadata_json.seed_data == True
+        - Deletes Postgres records where metadata_json.seed_data == True
         - Removes the corresponding embedding-store records
         - Prints deletion count
     """

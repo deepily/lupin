@@ -56,6 +56,7 @@ import type {
   ActionRequiredChangeKind,
   ActionRequiredResponse,
   ActionRequiredStep,
+  ConnectionLifecyclePayload,
   ConnectionStateChangePayload,
   LupinEvent,
   PredictionHint,
@@ -124,6 +125,7 @@ export function cancelResponseFor(item: Pick<ActionRequiredItem, "default" | "re
   return "[cancelled]";
 }
 
+/** The slice of the API client the store needs: a `post` that returns the body. */
 export interface ActionRequiredApiClient {
   post<T>(path: string, body: unknown): Promise<T>;
 }
@@ -145,19 +147,29 @@ export interface ActionRequiredApiClient {
 //     (cosa_voice_mcp._parse_multiple_choice_response).
 // ---------------------------------------------------------------------------
 
+/** Turn a response into the server's string: a string as is, anything else as JSON. */
 export function toWireResponseValue(response: ActionRequiredResponse): string {
   return typeof response === "string" ? response : JSON.stringify(response);
 }
 
-// 360de81b — how long a finished ACTIVE card stays before it leaves (legacy notifications.js):
+/** How long a card answered here stays before it leaves, in milliseconds. */
 export const RESPONDED_GRACE_MS = 600;    // showConfirmation's fallback timer (:24295)
+/** How long a card cancelled by another session's answer stays, in milliseconds. */
 export const CANCELLED_GRACE_MS = 1500;   // handleNotificationResponded, "responded in another session" (:24560)
+/** How long a card that expired stays before it leaves, in milliseconds. */
 export const EXPIRED_GRACE_MS   = 600;    // same bound as an answer; legacy animates, or deletes at once (:24462)
+
+/**
+ * The one transport whose state freezes and thaws a card's countdown.
+ *
+ * The countdown runs on the queue socket's clock. The audio socket carries speech, and its drop or return says nothing about whether a card can still be answered.
+ */
+export const FREEZE_TRANSPORT = "QueueTransport";
 
 // ---------------------------------------------------------------------------
 // Parity A-1c2 — the prompts survive a reload (legacy saveActionRequiredState /
 // restoreActionRequiredState, key `notifications_action_required`). Spec rulings 2 and 3,
-// src/rnd/v0.2.1/2026.09.15-operator-state-preservation-spec.md.
+// the R&D write-up "operator state preservation spec".
 //
 // POLARITY: the payload is `{ prompts }` — every card still OWED an answer (isActionRequiredLive),
 // in queue order, so the first is the active card. A card absent from the list is finished.
@@ -170,10 +182,15 @@ export const EXPIRED_GRACE_MS   = 600;    // same bound as an answer; legacy ani
 // `lupin.finishedTasks.shownStatuses` use a DOT, so a sweep over `StorageService.keys()` never
 // sees them.
 // ---------------------------------------------------------------------------
+/** The key the prompt queue is saved under in the storage service. */
 export const AR_STORAGE_KEY      = "operatorState";
+/** The schema version of the saved prompt queue. */
 export const AR_STORAGE_SCHEMA   = 1;
-// A saved expiry that passed more than this long ago is dropped at restore. The grace is on the
-// drop side, so clock steps and timer coarseness can only keep a prompt too long, never lose one.
+/**
+ * How long after its expiry a saved prompt is still kept at restore, in milliseconds.
+ *
+ * The grace is on the drop side, so clock steps and timer coarseness can only keep a prompt too long, never lose one.
+ */
 export const AR_RESTORE_GRACE_MS = 5000;
 
 interface PersistedActionRequired {
@@ -227,7 +244,8 @@ interface QueueUpdatePayload {
   notification?: ServerNotificationFields;
 }
 
-interface ServerNotificationFields {
+/** The fields of a server notification that the store reads to build a card. */
+export interface ServerNotificationFields {
   id_hash             ?: string;
   id                  ?: string;
   message             ?: string;
@@ -261,10 +279,22 @@ interface ExpiredPayload {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The queue of cards that wait for an operator answer. The first card is the active one. */
 export interface ActionRequiredStore {
   /** Arrival order. The first item is the active card; the rest wait in the queue (360de81b). */
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
+  /**
+   * Take in the cards that were filed before this page opened (row 4ca5776c).
+   *
+   * Requires:
+   *   - cards is the `notifications` list of GET /api/notifications/awaiting-response
+   * Ensures:
+   *   - each card the store does not already hold is added, in list order, exactly as a live push adds it
+   *   - a card already held is left alone, so a push that arrived first is kept
+   *   - returns how many cards were added
+   */
+  hydrateAwaiting(cards: ReadonlyArray<ServerNotificationFields>): number;
   /**
    * Non-optimistic respond — Phase 6b per Pass 2 A1. Transitions through
    * "submitting" → "responded" | "failed". Throws on unknown idHash or
@@ -302,6 +332,11 @@ export interface ActionRequiredStore {
   disposeForTesting(): void;
 }
 
+/**
+ * Options for `createActionRequiredStore`: bus, API client, test hooks and optional slots.
+ *
+ * The optional slots are the audio control, the storage service and the speech slot.
+ */
 export interface ActionRequiredStoreOptions {
   bus       : EventBus;
   api       : ActionRequiredApiClient;
@@ -359,6 +394,9 @@ interface ActorEntry {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Tracks pending action-required prompts with countdowns and a response flow.
+ */
 class ActionRequiredStoreImpl implements ActionRequiredStore {
   private readonly bus             : EventBus;
   private readonly api             : ActionRequiredApiClient;
@@ -379,6 +417,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
 
   private readonly unsubscribers : Array<() => void> = [];
 
+  /**
+   * Builds the store from a bus, an API client and optional runtime hooks.
+   */
   constructor(opts: ActionRequiredStoreOptions) {
     this.bus             = opts.bus;
     this.api             = opts.api;
@@ -399,19 +440,23 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.restore();
   }
 
+  /**
+   * Returns the data of every tracked prompt, in insertion order.
+   */
   list(): ReadonlyArray<ActionRequiredItem> {
     return Array.from(this.entries.values()).map(e => e.data);
   }
 
+  /**
+   * Returns the prompt with the given ID hash, or undefined when it is not tracked.
+   */
   getById(idHash: string): ActionRequiredItem | undefined {
     return this.entries.get(idHash)?.data;
   }
 
-  // Phase 6b — non-optimistic path (per Pass 2 A1). Lifecycle:
-  //   pending|failed → submitting → (POST) → responded (terminal) | failed (re-tryable)
-  // Failed entries can be re-driven through respondAndAwait() again. The interval
-  // is stopped when state leaves "pending" (existing tick guard); we do NOT restart
-  // it on failure (countdown is suspended for the duration of the user's retry).
+  /**
+   * Posts the user's answer for a prompt and waits for the server to accept it.
+   */
   async respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void> {
     const entry = this.entries.get(idHash);
     if (!entry) throw new Error(`Unknown action_required id: ${idHash}`);
@@ -447,6 +492,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.retire(entry, RESPONDED_GRACE_MS);
   }
 
+  /**
+   * Stops all listeners, timers and state machines, then clears the entries.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
@@ -480,10 +528,10 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       this.bus.on<ConnectionStateChangePayload>("connection_state_change", (e) => this.onConnectionState(e)),
     );
     this.unsubscribers.push(
-      this.bus.on<unknown>("connection_offline", () => this.freezeAll()),
+      this.bus.on<ConnectionLifecyclePayload>("connection_offline", (e) => { if (e.payload.transport === FREEZE_TRANSPORT) this.freezeAll(); }),
     );
     this.unsubscribers.push(
-      this.bus.on<unknown>("connection_online", () => this.thawAll()),
+      this.bus.on<ConnectionLifecyclePayload>("connection_online", (e) => { if (e.payload.transport === FREEZE_TRANSPORT) this.thawAll(); }),
     );
     // A-2 #2d — the item the waiting card deferred to has left the TTS slot. activateHead is a
     // no-op unless the first card is still unstarted, and only an arrival leaves it that way.
@@ -499,6 +547,29 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   private onQueueUpdate(e: LupinEvent<QueueUpdatePayload>): void {
     const n = e.payload.notification;
     if (!n) return;
+    this.ingest(n);
+  }
+
+  /**
+   * Take in the cards that were filed before this page opened (row 4ca5776c).
+   *
+   * A card reaches the store by a live push, so one filed while the page was closed was never drawn.
+   * The server's list of waiting cards goes through the same path a push takes.
+   *
+   * Requires:
+   *   - cards is the `notifications` list of GET /api/notifications/awaiting-response
+   * Ensures:
+   *   - each card the store does not already hold is added, in list order, exactly as a live push adds it
+   *   - a card already held is left alone, so a push that arrived first is kept
+   *   - returns how many cards were added
+   */
+  hydrateAwaiting(cards: ReadonlyArray<ServerNotificationFields>): number {
+    const before = this.entries.size;
+    for (const card of cards) this.ingest(card);
+    return this.entries.size - before;
+  }
+
+  private ingest(n: ServerNotificationFields): void {
     if (n.response_requested !== true) return;
     const idHash = n.id_hash ?? n.id;
     if (!idHash) return;
@@ -626,6 +697,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.expireEntry(entry);
   }
 
+  /**
+   * Pauses or resumes the head prompt's countdown and returns true while paused.
+   */
   togglePause(idHash: string): boolean {
     const head  = this.entries.values().next().value;
     const entry = this.entries.get(idHash);
@@ -665,6 +739,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     return false;
   }
 
+  /**
+   * Stores the current step on a prompt and saves live prompts.
+   */
   recordStep(idHash: string, step: ActionRequiredStep): void {
     const entry = this.entries.get(idHash);
     if (entry === undefined) return;
@@ -823,6 +900,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   // -------------------------------------------------------------------------
 
   private onConnectionState(e: LupinEvent<ConnectionStateChangePayload>): void {
+    if (e.payload.transport !== FREEZE_TRANSPORT) return;
     const s = e.payload.state;
     if (s === "backoff" || s === "offline" || s === "failed") {
       this.freezeAll();
@@ -910,6 +988,11 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the store.
+ *
+ * It subscribes to the bus at once and restores saved prompts from storage.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createActionRequiredStore(opts: ActionRequiredStoreOptions): ActionRequiredStore {
   return new ActionRequiredStoreImpl(opts);

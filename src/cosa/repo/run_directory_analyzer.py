@@ -1,58 +1,38 @@
 #!/usr/bin/env python3
 """
-Directory Analyzer - Command Line Interface
+Command line interface for the directory analyzer: counts lines of code by file type.
 
-Professional command-line interface for analyzing directory contents and
-counting lines of code by file type.
+Uses argparse, follows POSIX command-line conventions, and prints clear help and error messages. Exit codes: 0 success, 1 error, 2 invalid arguments.
+Supports console, JSON and markdown output and shows progress on long runs.
 
-Design Principles:
-- Clear, helpful error messages
-- Follows POSIX command-line conventions
-- Exit codes: 0=success, 1=error, 2=invalid args
-- Progress feedback for long operations
-- Supports all output formats (console/JSON/markdown)
+Default behavior:
+    With no arguments it analyzes the current directory:
+    - `--path` defaults to . (the current directory).
+    - Common directories such as .git, __pycache__ and node_modules are excluded.
+    - Binary files are skipped automatically.
 
-Default Behavior:
-    By default (no arguments), analyzes the current directory:
-    - --path defaults to . (current directory)
-    - Excludes common directories (.git, __pycache__, node_modules, etc.)
-    - Skips binary files automatically
+Usage examples:
+    python -m cosa.repo.run_directory_analyzer.  Current directory.
+    python -m cosa.repo.run_directory_analyzer --path /path/to/project.
+    python -m cosa.repo.run_directory_analyzer --path cosa.  Run from lupin/src.
+    python -m cosa.repo.run_directory_analyzer --output json > analysis.json.
+    python -m cosa.repo.run_directory_analyzer --save-output report.txt.
+    python -m cosa.repo.run_directory_analyzer --verbose.  Or --debug.
 
-Usage Examples:
-    # Basic usage - analyze current directory
-    python -m cosa.repo.run_directory_analyzer
-
-    # Analyze specific directory
-    python -m cosa.repo.run_directory_analyzer --path /path/to/project
-
-    # Analyze COSA directory from Lupin src
-    cd /path/to/lupin/src
-    python -m cosa.repo.run_directory_analyzer --path cosa
-
-    # JSON output
-    python -m cosa.repo.run_directory_analyzer --output json > analysis.json
-
-    # Save to file
-    python -m cosa.repo.run_directory_analyzer --save-output report.txt
-
-    # Verbose/debug modes
-    python -m cosa.repo.run_directory_analyzer --verbose
-    python -m cosa.repo.run_directory_analyzer --debug
-
-Command Line Arguments:
-    --path PATH           Directory to analyze (default: . = current directory)
-    --config FILE         Configuration file path (default: embedded default_config.yaml)
-    --output FORMAT       Output format: console, json, markdown (default: console)
-    --save-output FILE    Save output to file instead of stdout
-    --verbose, -v         Verbose output (show progress)
-    --debug, -d           Debug mode (show internal operations)
-    --help, -h            Show this help message
+Command line arguments:
+    `--path PATH`         Directory to analyze (default: . = current directory).
+    `--config FILE`       Configuration file path (default: embedded default_config.yaml).
+    `--output FORMAT`     Output format: console, json, markdown (default: console).
+    `--save-output FILE`  Save output to a file instead of stdout.
+    `--verbose`, `-v`     Verbose output (shows progress).
+    `--debug`, `-d`       Debug mode (shows internal operations).
 """
 
 import sys
 import argparse
 from pathlib import Path
 
+from cosa.repo.cli_common import add_common_output_args
 from cosa.repo.directory_analyzer import DirectoryAnalyzer, DirectoryAnalyzerError
 
 
@@ -84,45 +64,11 @@ def create_parser() -> argparse.ArgumentParser:
         help    = 'Directory to analyze (default: . = current directory)'
     )
 
-    # Configuration
-    parser.add_argument(
-        '--config',
-        type    = str,
-        default = None,
-        metavar = 'FILE',
-        help    = 'Configuration file path (default: embedded default_config.yaml)'
-    )
-
-    # Output format
-    parser.add_argument(
-        '--output',
-        type    = str,
-        choices = ['console', 'json', 'markdown'],
-        default = 'console',
-        metavar = 'FORMAT',
-        help    = 'Output format: console, json, markdown (default: console)'
-    )
-
-    # Save output
-    parser.add_argument(
-        '--save-output',
-        type    = str,
-        default = None,
-        metavar = 'FILE',
-        help    = 'Save output to file instead of printing to stdout'
-    )
-
-    # Verbosity
-    parser.add_argument(
-        '--verbose', '-v',
-        action  = 'store_true',
-        help    = 'Verbose output (show progress)'
-    )
-
-    parser.add_argument(
-        '--debug', '-d',
-        action  = 'store_true',
-        help    = 'Debug mode (show internal operations)'
+    add_common_output_args(
+        parser,
+        output_default = 'console',
+        output_help    = 'Output format: console, json, markdown (default: console)',
+        verbose_help   = 'Verbose output (show progress)'
     )
 
     return parser

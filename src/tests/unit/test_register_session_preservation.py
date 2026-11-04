@@ -28,7 +28,7 @@ Plus one additional case verifying Fix 2 + Fix 3 wiring:
        display_name. Wired as part of case 5's xpass path; covered separately
        to lock in the contract.
 
-Design: src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md
+Design: src/docs/decisions/2026.05.02-voice-persona-clear-preservation.md
 """
 
 import json

@@ -69,6 +69,9 @@ interface SectionSpec {
   story      : string;
 }
 
+/**
+ * Build the clickable header row for one epic group with a state chevron.
+ */
 function renderGroupHeader( spec: SectionSpec, isCollapsed: boolean, idSlug: string ): HTMLTableRowElement {
   const row = document.createElement( "tr" );
   row.className = "epic-group-header" + ( spec.extraClass ? ` ${ spec.extraClass }-header` : "" );

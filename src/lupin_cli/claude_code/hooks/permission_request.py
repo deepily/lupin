@@ -101,7 +101,7 @@ def _acknowledge_buffered_messages( messages ):
     """
     Send low-priority acknowledgment for each buffered voice message.
 
-    This is purely an acknowledgment step — does NOT influence the
+    This is purely an acknowledgment step and does not influence the
     permission decision. Each message gets a fire-and-forget TTS
     notification so the sender knows their message was received.
 
@@ -128,34 +128,11 @@ def _acknowledge_buffered_messages( messages ):
 
 def _forward_to_user( tool_description, session_id ):
     """
-    Forward permission request to user via blocking sync notification.
+    Ask the user yes or no, and return the decision with a reason that names the cause.
 
-    🔴 A DEFAULT IS NOT A RULING, AND THIS FUNCTION USED TO ERASE THE DIFFERENCE.
-    It returned the bare string "deny" for outcomes that are not the same thing:
-    the user considered the request and refused it; the user was reached but never
-    answered; the user was never reached at all; and the notification failed to
-    send. The caller then emitted that denial with NO message, so the one place the
-    distinction could still have been recovered discarded it too — leaving a
-    refusal indistinguishable from a decision.
-
-    Not a hypothetical confusion: this fleet has already mistaken a timed-out ask
-    for the user's answer, recorded "[default used] no" as though Rick had ruled,
-    and had to correct the record (row d8d019f6). The response object ALREADY
-    carries what separates these cases — default_used, is_timeout, status,
-    exit_code — so the information was never missing, only thrown away.
-
-    FOUR OUTCOMES, NOT THREE (María, 2026-08-19). default_used and is_timeout are
-    different facts, and collapsing them loses the one a reader most needs:
-      · is_timeout            — the ask REACHED the user and ran out of time.
-                                They may be present and thinking, or stepped away.
-      · default_used, no      — the ask never got an answer path at all (offline /
-        timeout                 undeliverable). Nobody was asked anything.
-    Re-asking is sensible in the first case and pointless in the second until the
-    user is back, so the reason has to say WHICH.
-
-    ⚠️ THE REASON DOES NOT MOVE THE DECISION. DEFAULT_ON_TIMEOUT stays "deny" and
-    every non-yes outcome still denies — Rick's ruling was to weaken no refusal.
-    All that changes is that a denial now says which kind it is.
+    A default is not a ruling, so a denial's reason names its cause. The reason
+    never moves the decision: DEFAULT_ON_TIMEOUT stays "deny" and every non-yes
+    outcome still denies.
 
     Requires:
         - tool_description is a non-empty string
@@ -163,9 +140,11 @@ def _forward_to_user( tool_description, session_id ):
 
     Ensures:
         - Returns ( "allow", None ) if and only if the user answered yes
-        - Returns ( "deny", reason ) otherwise, where reason NAMES the cause:
-          user refused / reached but unanswered / never reached / delivery failed
-        - Denies on every non-yes outcome, unchanged
+        - Returns ( "deny", reason ) otherwise, and the reason names one of five causes:
+          the user answered no; the ask reached the user but timed out (re-asking is
+          reasonable); the ask never reached anyone (re-asking is pointless until the
+          user is back); the answer was not yes or no; the notification failed to send
+        - Denies on every non-yes outcome
         - Blocks for at most SYNC_TIMEOUT_SECONDS + network overhead
         - Never raises exceptions
 
@@ -244,10 +223,9 @@ def main():
     """
     PermissionRequest hook entry point.
 
-    Three-path flow:
-        Path A: Auto-allow (low-risk tools) → immediate allow, no sync
-        Path B: Buffer redirect (voice content) → deny + redirect Claude
-        Path C: Sync forward (buffer empty) → blocking yes/no to user
+    Three paths. A: auto-allow low-risk tools at once. B: deny and redirect
+    Claude when voice content is buffered. C: with an empty buffer, ask the user
+    yes or no and block for the answer.
 
     Ensures:
         - Always emits a valid JSON decision (allow or deny)

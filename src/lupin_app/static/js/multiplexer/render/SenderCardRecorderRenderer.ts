@@ -40,12 +40,22 @@ import type { StoreSendersChangedPayload } from "../shared/types";
 import { recordingManager } from "../audio/recordingManager";
 import { insertTranscriptionText } from "./insertTranscriptionText";
 
+/**
+ * The behavior of the voice input row on each sender card.
+ *
+ * The row holds the mic, send and conversation mode controls. The renderer wires clicks on rows that `senderCard.ts` already drew. The only markup it builds is the error line it adds to a row when recording or sending fails.
+ */
 export interface SenderCardRecorderRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createSenderCardRecorderRenderer`.
+ *
+ * The bus and the current user's email are required. The auth token getter is optional.
+ */
 export interface SenderCardRecorderRendererOptions {
   eventBus         : EventBus;
   currentUserEmail : string;
@@ -73,6 +83,11 @@ interface SessionState {
   caret?    : number | null;
 }
 
+/**
+ * Adds voice recording to sender cards and keeps each row's recording state.
+ *
+ * Re-applies that state whenever the sender cards are re-rendered.
+ */
 class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
   private readonly bus              : EventBus;
   private readonly currentUserEmail : string;
@@ -84,6 +99,11 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
   private clickHandler : ( ( e: Event ) => void ) | null = null;
   private mounted      : boolean = false;
 
+  /**
+   * Stores the event bus, current user email and auth token getter.
+   *
+   * Without a token getter it uses one that returns null.
+   */
   constructor( opts: SenderCardRecorderRendererOptions ) {
     this.bus              = opts.eventBus;
     this.currentUserEmail = opts.currentUserEmail;
@@ -91,6 +111,11 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     this.getAuthToken     = opts.getAuthToken ?? (() => null);
   }
 
+  /**
+   * Attaches a click handler to the root and re-applies recording state on sender changes.
+   *
+   * Throws if already mounted.
+   */
   mount( root: HTMLElement ): void {
     if (this.mounted) throw new Error("SenderCardRecorderRenderer.mount: already mounted");
     this.root    = root;
@@ -122,6 +147,9 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     this.reapplyAll();
   }
 
+  /**
+   * Removes the click handler and subscriptions and clears recording state.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -135,6 +163,9 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Re-applies the recording state to every voice input row now; used by tests.
+   */
   forceRenderForTesting(): void {
     this.reapplyAll();
   }
@@ -401,6 +432,11 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createSenderCardRecorderRenderer(
   opts: SenderCardRecorderRendererOptions,

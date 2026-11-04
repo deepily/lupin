@@ -1,0 +1,38 @@
+
+The retired queue doors, and the one refusal they all share.
+
+RICK'S RULING, 2026-08-21: *"They should be gone permanently with the new door named
+in the error message. Also we should tag each of those disabled doors with an
+expiration date. By the end of 2026 they should be gone. Say it loud and say it
+proud — dead by the end of the year."*
+
+TWO DOORS ARE HERE, NOT SIXTEEN — AND THE REASON IS THE WHOLE POINT OF THIS FILE.
+Eighteen doors put work on the queue. Two survive (`/api/v2/ask`, `/api/v2/submit`),
+one more survives alongside them (`/api/v2/resume`), and sixteen die. But
+`/api/v2/submit` HAS NOT BEEN BUILT YET — at this commit `v2_ask.py` mounts `ask` and
+`resume` and nothing else. Retiring the twelve submit-shaped doors now would point
+twelve refusals at a route that answers 404, which teaches a caller strictly less than
+the 500 it replaced. So this commit retires only the doors whose replacement actually
+answers, and the rest follow the commit that builds `submit`.
+(Cheech's ruling, 2026-08-21: *"a 410 that names a door that does not exist yet is a
+refusal pointing at nothing."*)
+
+WHY 410 AND NOT 404. A tombstone, deliberately. A deleted route is invisible, and
+nothing would stop someone re-adding `/api/podcast-generator/submit` next year
+because the product needs it. 410 Gone says the path existed, was retired on
+purpose, and names its replacement — so a caller reading the failure learns the fix
+instead of filing a bug.
+
+WHY THE DATE IS IN THE MESSAGE AND NOT ONLY IN A COMMENT. A comment is read by
+whoever opens this file. The callers that still hit these paths live in two
+separately-managed repos (`src/lupin-mobile`, `src/lupin-plugin-firefox`) whose
+owners will never open it. The refusal itself has to carry the date.
+
+WHY NO AUTH DEPENDENCY ON A TOMBSTONE. An unauthenticated caller must learn the same
+thing an authenticated one does. If the stub kept `Depends( get_current_user )` the
+answer to a stale client would be 401 — which teaches nobody anything and reads like
+a credentials problem.
+
+Source of the door list: Chloé's repo-wide inventory,
+`src/rnd/v0.2.0/_archive/F/2026.08.21-cascade-resume-artifacts/2026.08.21-queue-entry-point-inventory-corrected.md`,
+each path re-resolved from its `APIRouter` prefix at build time rather than copied.

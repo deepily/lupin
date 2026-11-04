@@ -919,3 +919,19 @@ def test_the_gist_is_computed_when_the_probe_is_actually_reached( wired_wording_
 
     assert result.tier == "exact_gist"
     assert cache._gist_normalizer.calls == [ "What's on my todo list?" ]
+
+
+# ────────────────────────────────────────────────────────────── normalize() / gist() delegation
+
+def test_normalize_and_gist_come_from_the_stores_own_normalizers():
+    # The query log records these two fields; a second normalizer would write a form no lookup could match.
+    gist_normalizer = _FakeGist()
+    cache           = V2Cache(
+        embedding_provider=_FakeProvider( [] ), normalizer=_FakeNormalizer(),
+        gist_normalizer=gist_normalizer, snapshot_factory=_RecordingFactory(),
+        db_scope=_db_scope_for( _Store() ), embedding_dim=4,
+    )
+
+    assert cache.normalize( "  What TIME is it  " ) == "what time is it"     # _FakeNormalizer strips + lowers
+    assert cache.gist( "what time" )                == "gist::what time"    # the gist normalizer's own answer
+    assert gist_normalizer.calls                    == [ "what time" ]      # asked once, through the cache's own instance

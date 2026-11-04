@@ -5,7 +5,9 @@ Follows the SweTeamConfig pattern for INI-driven configuration
 with from_config() classmethod.
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
+
+from cosa.agents.shared.config_loader import load_dataclass_from_ini
 from typing import Optional
 
 
@@ -52,6 +54,7 @@ class BugFixExpediterConfig:
 
     # === Decision Proxy (Phase 5) ===
     trust_mode                : str   = "shadow"   # "shadow" | "suggest" | "active"
+    push_fix_branch_enabled   : bool  = False      # false: nothing is pushed, no PR is opened
 
     # === Feature Flags ===
     enabled                   : bool  = False
@@ -89,32 +92,11 @@ class BugFixExpediterConfig:
             "auto_retry_on_fix"        : "bug fix expediter auto retry on fix",
             "require_user_confirm"     : "bug fix expediter require user confirm",
             "trust_mode"               : "bug fix expediter trust mode",
+            "push_fix_branch_enabled"  : "bug fix expediter push fix branch enabled",
             "enabled"                  : "bug fix expediter enabled",
         }
 
-        kwargs    = {}
-        dc_fields = { f.name: f for f in fields( cls ) }
-
-        for field_name, ini_key in key_map.items():
-            dc_field   = dc_fields[ field_name ]
-            default    = dc_field.default
-            field_type = dc_field.type
-
-            if field_type == "bool" or field_type is bool:
-                return_type = "boolean"
-            elif field_type == "int" or field_type is int:
-                return_type = "int"
-            elif field_type == "float" or field_type is float:
-                return_type = "float"
-            else:
-                return_type = "string"
-
-            value = config_mgr.get( ini_key, default=default, return_type=return_type )
-            kwargs[ field_name ] = value
-
-            if debug: print( f"  [BugFixExpediterConfig] {field_name} = {value} (from INI: {ini_key})" )
-
-        return cls( **kwargs )
+        return load_dataclass_from_ini( cls, config_mgr, key_map, debug=debug )
 
 
 def quick_smoke_test():

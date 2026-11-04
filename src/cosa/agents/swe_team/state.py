@@ -45,7 +45,7 @@ class OrchestratorState( Enum ):
 
 class JobSubState( Enum ):
     """
-    Sub-states for SWE Team jobs within the RUNNING queue.
+    Sub-states for SWE Team jobs within the `running` queue.
 
     These provide finer-grained status for jobs that are in progress
     but may be blocked on various conditions.

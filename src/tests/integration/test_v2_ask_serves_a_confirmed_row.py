@@ -23,11 +23,11 @@ THE TWO ARMS ARE THE POINT — ONE ALONE PROVES NOTHING. The only difference bet
 `answer_is_correct`; everything else, including the seeding path, is identical.
 
     confirmed (True)   -> path="replay", route_reason="exact_hit", cache_hit=True
-    unconfirmed (None) -> path="agent" — the guard refuses and the question is routed
+    marked wrong (False) -> path="agent" — the guard refuses and the question is routed
 
 Without the second arm a green in the first is not evidence the CONFIRMATION did anything: a
 flow that replayed every exact hit regardless of the guard would pass the first arm exactly the
-same way. The unconfirmed arm is what makes the pair discriminate, and it is also the direct
+same way. The marked-wrong arm is what makes the pair discriminate, and it is also the direct
 answer to the question row 734bd1bf could not settle.
 
 THE SEED IS TWO WRITES, AND THAT IS WHY IT GOES THROUGH THE PRODUCTION WRITER. A snapshot row
@@ -81,6 +81,19 @@ from tests.integration.v2_queued import assert_handed_off, drop_from_todo
 
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
+
+def _with_lineage( body ):
+    """
+    Tag an /api/v2/ask body with its monopolizing suite job, when there is one.
+
+    Under a monopoly hold the queue defers every job that is not the monopolizer's own
+    child, so an untagged ask sits in `todo` until the suite ends (row 4cbd4858). The suite
+    job exports its id as LUPIN_TEST_MONOPOLIZE_PARENT_ID; `/api/v2/ask` takes it as
+    `parent_id_hash`. Outside a suite the variable is unset and the body is unchanged.
+    """
+    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+    return { **body, "parent_id_hash": parent_id } if parent_id else body
+
 
 _EMAIL    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
 _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
@@ -141,7 +154,7 @@ def _seed_row( question, answer, answer_is_correct ):
 
     Requires:
         - question is a non-empty string not already present in the cache
-        - answer_is_correct is True or None — the one variable the two arms differ on
+        - answer_is_correct is True or False — the one variable the two arms differ on
 
     Ensures:
         - BOTH writes land: the snapshot row is upserted AND its canonical-synonym row is
@@ -213,7 +226,7 @@ def test_a_confirmed_cached_row_is_served_as_a_replay( auth_headers ):
     try:
         resp = requests.post(
             _ASK,
-            json    = { "question": question, "speak": False, "interactive": False },
+            json    = _with_lineage( { "question": question, "speak": False, "interactive": False } ),
             headers = auth_headers,
             timeout = 120,
         )
@@ -234,8 +247,13 @@ def test_a_confirmed_cached_row_is_served_as_a_replay( auth_headers ):
         _cleanup_snapshot( snapshot_id )
 
 
-def test_an_unconfirmed_cached_row_is_refused_and_the_question_is_routed( auth_headers ):
-    """The SAME seed with answer_is_correct=None is NOT replayed — the read guard refuses it.
+def test_a_cached_row_the_user_marked_wrong_is_refused_and_the_question_is_routed( auth_headers ):
+    """The SAME seed with answer_is_correct=False is NOT replayed — the read guard refuses it.
+
+    The refused value is False, not None. Rick ruled that an exact match with NO verdict is
+    served (the exemption in `AskFlow`'s read guard, `why == "exact_hit" and verdict is not
+    False`); only an answer the user marked wrong is refused on an exact hit. This arm seeded
+    None until 2026-10-03 and was served, as ruled (:8000 job ts-11c25f8a: path="replay").
 
     THE CONTROL THAT MAKES THE TEST ABOVE MEAN SOMETHING. Its green says a confirmed row is
     served; on its own that is equally consistent with a flow that serves every exact hit and
@@ -253,14 +271,14 @@ def test_an_unconfirmed_cached_row_is_refused_and_the_question_is_routed( auth_h
     exit, so the flow falls through to routing and answers on the agent path.
     """
     question, answer = _unique_arithmetic_question()
-    snapshot_id      = _seed_row( question, answer, answer_is_correct=None )
+    snapshot_id      = _seed_row( question, answer, answer_is_correct=False )
     assert snapshot_id, "the seed did not return an id_hash — write-back is off or it failed"
 
     job_id = None
     try:
         resp = requests.post(
             _ASK,
-            json    = { "question": question, "speak": False, "interactive": False },
+            json    = _with_lineage( { "question": question, "speak": False, "interactive": False } ),
             headers = auth_headers,
             timeout = 120,
         )

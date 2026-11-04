@@ -35,7 +35,7 @@ import type {
 } from "../shared/types";
 import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
-import { keyedListMerge } from "./dom";
+import { keyedListMerge, cssEscape } from "./dom";
 import { formatDateKey } from "./time";
 import { projectFromSenderId } from "./senderProject";
 import { openSessionNameEditModal } from "./sessionNameEditModal";
@@ -45,6 +45,7 @@ import type { TtsInteractionMode } from "./templates/senderCard";
 // A-2 #4 — the shared reveal helper, whose own header names TTS playback as a
 // consumer (scrollReveal.ts:6). It was built for this caller and never wired to one.
 import { scrollRevealElement } from "./scrollReveal";
+import { captureHistoryScroll, captureKeepPlace, keepPlaceIsOn, restoreHistoryScroll, restoreKeepPlace } from "./keepPlace";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 import * as debugSink from "../shared/debugSink";
@@ -121,6 +122,11 @@ interface SenderCardApiLike {
   delete<T>(path: string): Promise<T>;
 }
 
+/**
+ * The stores the list renders from.
+ *
+ * The notification and sender stores are required. The prediction vote, view state, speech queue and audio stores are optional, and boot wires them.
+ */
 export interface NotificationsListRendererStores {
   notifications  : NotificationStoreLike;
   senders        : SenderStoreLike;
@@ -139,6 +145,11 @@ export interface NotificationsListRendererStores {
   audio?         : AudioControlsLike;
 }
 
+/**
+ * The notifications list: one card per sender, with an empty state.
+ *
+ * It does not draw action-required cards. The action-required renderer owns those.
+ */
 export interface NotificationsListRenderer {
   /** Attach to a root DOM node. Throws if expected mount points are missing. */
   mount(root: HTMLElement): void;
@@ -163,6 +174,11 @@ export interface NotificationsListRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createNotificationsListRenderer`.
+ *
+ * The bus and the stores are required. The timezone, sort comparator, API and confirm, clipboard and failure hooks are optional.
+ */
 export interface NotificationsListRendererOptions {
   eventBus              : EventBus;
   stores                : NotificationsListRendererStores;
@@ -201,10 +217,14 @@ export interface NotificationsListRendererOptions {
   onCardPatched?        : (senderId: string) => void;
 }
 
-// Default sender sort: most-recent-activity-first. Preserves the Phase 5
-// behavior when no `senderSortComparator` is supplied via options.
+/**
+ * Orders senders by most recent activity first.
+ */
 const DEFAULT_SENDER_SORT: SenderSortComparator = (a, b) => b.last_active_ts - a.last_active_ts;
 
+/**
+ * Renders the sender cards and their notifications into the sender cards container.
+ */
 class NotificationsListRendererImpl implements NotificationsListRenderer {
   private readonly bus                  : EventBus;
   private readonly stores               : NotificationsListRendererStores;
@@ -271,6 +291,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private renderTrigger                      : LupinEvent<unknown> | null = null;
   private closeRenameModal                   : (() => void) | null = null;
 
+  /**
+   * Stores the bus, stores and options, filling defaults for any that are missing.
+   */
   constructor(opts: NotificationsListRendererOptions) {
     this.bus                  = opts.eventBus;
     this.stores               = opts.stores;
@@ -300,6 +323,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         };
   }
 
+  /**
+   * Attaches the renderer to a root, wires clicks and subscriptions, and paints once.
+   */
   mount(root: HTMLElement): void {
     if (this.root !== null) {
       throw new Error("NotificationsListRenderer.mount: already mounted");
@@ -329,6 +355,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.renderSenderSection();
   }
 
+  /**
+   * Adopts the app timezone and repaints cards that show a clock.
+   */
   setAppTimezone(appTimezone: string | undefined): void {
     /**
      * Adopt the app timezone and repaint every card that already carries a clock.
@@ -374,6 +403,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     } as LupinEvent<unknown>);
   }
 
+  /**
+   * Adopts the TTS interaction mode and repaints the conversation mode buttons.
+   */
   setTtsInteractionMode(mode: TtsInteractionMode | undefined): void {
     /**
      * Adopt the server's TTS interaction mode and repaint the conversation-mode buttons.
@@ -410,6 +442,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     } as LupinEvent<unknown>);
   }
 
+  /**
+   * Detaches subscriptions and handlers, empties the cards and clears caches.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -432,6 +467,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.senderCardsMount = null;
   }
 
+  /**
+   * Runs a render immediately, bypassing the scheduled render path, for tests.
+   */
   forceRenderForTesting(): void {
     this.renderAndAnnounce();
   }
@@ -623,6 +661,12 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // and its header is swapped. Legacy adds the row to the existing card; replacing
     // the whole card reset the date list's scroll and restarted its animations.
     const focusBefore = captureCardFocus(this.senderCardsMount);
+    // Keep place: remember which cards the reader is looking at, so a card arriving at the top does not
+    // shift them. Null when the reader is at the top or the preference is off.
+    const place = keepPlaceIsOn() ? captureKeepPlace(this.senderCardsMount, document, window) : null;
+    // Moving or replacing a card sets the scrollers inside it back to the top, so each card's own history
+    // scroll is remembered too. Null when the preference is off.
+    const history = keepPlaceIsOn() ? captureHistoryScroll(this.senderCardsMount) : null;
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
@@ -651,6 +695,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         existing.replaceWith(this.prepareCard(fresh, e.idHash, inputs, signature));
       },
     });
+    if (place !== null) restoreKeepPlace(this.senderCardsMount, place, document, window);
+    if (history !== null) restoreHistoryScroll(this.senderCardsMount, history);
     restoreCardFocus(this.senderCardsMount, focusBefore);
 
     // Re-mark expanded progress groups after the render (state preserved
@@ -758,7 +804,6 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private paintEmptyState(filterActive: boolean): void {
     /* c8 ignore next */ // defensive: senderCardsMount post-mount is always set; renderSenderSection's null-guard would have already returned.
     if (this.senderCardsMount === null) return;
-    /* c8 ignore next */ // defensive: idempotency check — empty-state is only painted from renderSenderSection's notifications.length === 0 branch which calls paintEmptyState exactly once before bailing out. Re-entry from a re-render with the same empty-state already painted is the case this guards against, but renderSenderSection's flow ensures the existing element is removed via removeEmptyState before re-paint in the non-empty branch.
     // P0 5ebd2aff — the empty state distinguishes "still loading" and "could not
     // load" from a genuinely empty inbox. A cold-load hydration that is pending
     // or has failed has measured nothing, so it must never read "No notifications
@@ -1143,7 +1188,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       if (senderId !== undefined) this.viewState?.setAccordionCollapsed(`sender::${senderId}`, false);
     }
 
-    void scrollRevealElement(bubble);
+    // Keep place: the card is open for the reader to find, but the view stays where they put it.
+    if (!keepPlaceIsOn()) void scrollRevealElement(bubble);
   }
 
   // Flip a bubble's corner pause button between ⏸ (playing) and ▶ (paused),
@@ -1324,6 +1370,9 @@ const COPY_FLASH_MS = 1200;
 // S2d — the project label in the delete-all confirm, verbatim to legacy
 // S2a–d / S3 — default failure surface: the console for the record, and an alert
 // so the operator actually sees it. Tests inject a recording reportFailure.
+/**
+ * Logs a failure message and raises an alert so the operator sees it.
+ */
 /* c8 ignore next 4 */ // production-default browser surface; never exercised under node:test.
 function defaultReportFailure(message: string): void {
   debugSink.error(`[NotificationsListRenderer] ${message}`);
@@ -1333,6 +1382,9 @@ function defaultReportFailure(message: string): void {
 // B4 (01-D) — default proxy-ratify page opener. Opens (or focuses) the single
 // ratify admin tab, verbatim to legacy notifications.js:7203. Tests inject a
 // recording opener via options.proxyRatifyOpener (mirrors ApiClient.fetcher).
+/**
+ * Opens, or focuses, the single proxy ratification admin tab.
+ */
 /* c8 ignore next 3 */ // production-default browser page-open; never exercised under node:test (a recording opener is injected).
 function defaultProxyRatifyOpener(): void {
   window.open("/app/admin/proxy-ratify", "lupin-proxy-ratify");
@@ -1346,9 +1398,9 @@ const ACTIVE_CLASS       = "sender-card-active";
 const INDICATOR_SELECTOR = ".sender-active-indicator";
 const STATUS_SELECTOR    = ".sender-status";
 
-// The equality key for "is this card unchanged?": the card's outerHTML with the
-// volatile header parts blanked. Taken on a FRESH, not-yet-inserted render, which
-// is blanked and then restored in place (cheaper than cloning a long card).
+/**
+ * Builds a string identifying a card's content, ignoring time-based header parts.
+ */
 function cardSignature(card: HTMLElement): string {
   const indicator = card.querySelector(INDICATOR_SELECTOR)!;
   const status    = card.querySelector(STATUS_SELECTOR)!;
@@ -1368,8 +1420,9 @@ function cardSignature(card: HTMLElement): string {
   return signature;
 }
 
-// Copy the volatile header parts of a fresh render onto the live card it matched,
-// so a kept card still shows the right active dot and status glyph.
+/**
+ * Copies the active class, indicator and status glyph from a fresh card.
+ */
 function paintVolatileHeader(from: HTMLElement, to: HTMLElement): void {
   to.classList.toggle(ACTIVE_CLASS, from.classList.contains(ACTIVE_CLASS));
   const fromIndicator = from.querySelector(INDICATOR_SELECTOR)!;
@@ -1379,9 +1432,9 @@ function paintVolatileHeader(from: HTMLElement, to: HTMLElement): void {
   to.querySelector(STATUS_SELECTOR)!.textContent = from.querySelector(STATUS_SELECTOR)!.textContent;
 }
 
-// Row 11793820 — the same three header parts, painted on a card that was NOT
-// re-rendered, from the values themselves. Uses the template's own helpers, so a
-// kept card and a fresh render of it cannot disagree (the parity test holds this).
+/**
+ * Sets a card's active class, indicator and status glyph from the given values.
+ */
 function paintVolatileState(to: HTMLElement, isActive: boolean, lastActiveTs: number): void {
   const indicator = activeIndicator(isActive);
   to.classList.toggle(ACTIVE_CLASS, isActive);
@@ -1399,17 +1452,9 @@ interface CardInputs {
   readonly votes         : string;
 }
 
-// Row 11793820 phase 2 — may a card whose inputs moved be patched instead of
-// replaced? Only when nothing but the header and appended rows can differ:
-//   1. the old rows are a strict prefix of the new ones, by identity (rows were
-//      only appended — NotificationStore appends arrivals to its active list)
-//   2. no appended row belongs to a progress group (it can move the group's head)
-//   3. the old rows' cast votes are unchanged: `votes` lists `id=vote;` in row
-//      order, so with the rows a prefix, the old string must be a prefix of the new
-//      one (an appended hint row adds its own entry, rendered fresh)
-//   4. the SenderRecord moved only in unread_count, last_active_ts or session_name,
-//      which render only inside the header. Persona, worker flag, display name and
-//      conversation mode reach the card root, the badge or the voice row.
+/**
+ * Says whether a changed card can be patched in place instead of replaced.
+ */
 function canPatchCard(before: CardInputs | undefined, now: CardInputs): boolean {
   if (before === undefined) return false;
   if (before.senderBody !== now.senderBody || !now.votes.startsWith(before.votes)) return false;
@@ -1426,11 +1471,9 @@ function canPatchCard(before: CardInputs | undefined, now: CardInputs): boolean 
   return true;
 }
 
-// Move what changed from a fresh render into the live card, so the live card ends
-// byte-for-byte equal to the template's output without anything built by hand:
-// the header is swapped whole, each existing day gets the fresh count, and new rows
-// and new days are inserted in fresh order. Existing rows, days, their collapse
-// state, expanded progress groups, TTS classes and the voice row keep their nodes.
+/**
+ * Moves what changed from a fresh render into the live card.
+ */
 function patchCard(fresh: HTMLElement, live: HTMLElement): void {
   live.classList.toggle(ACTIVE_CLASS, fresh.classList.contains(ACTIVE_CLASS));
   live.querySelector(":scope > .sender-card-header")!.replaceWith(fresh.querySelector(":scope > .sender-card-header")!);
@@ -1460,6 +1503,9 @@ interface CardFocus {
   readonly selector : string | null;   // tag + first class, to find a replacement
 }
 
+/**
+ * Records which element inside the cards holds keyboard focus.
+ */
 function captureCardFocus(mount: HTMLElement): CardFocus | null {
   const active = mount.ownerDocument.activeElement as HTMLElement | null;
   if (active === null || active === mount || !mount.contains(active)) return null;
@@ -1478,10 +1524,9 @@ function captureCardFocus(mount: HTMLElement): CardFocus | null {
   };
 }
 
-// Put focus back: on the same node if it is still in the page (it was moved), else
-// on its replacement in the same card — the header, or the element with the same
-// tag and first class inside the same row (or the card, for header and voice-row
-// controls). `preventScroll`, so a message arriving never scrolls the pane.
+/**
+ * Puts keyboard focus back after a render, on the same node or its replacement.
+ */
 function restoreCardFocus(mount: HTMLElement, before: CardFocus | null): void {
   if (before === null || mount.ownerDocument.activeElement === before.element) return;
   let target: HTMLElement | null = before.element.isConnected ? before.element : null;
@@ -1498,11 +1543,9 @@ function restoreCardFocus(mount: HTMLElement, before: CardFocus | null): void {
   target?.focus({ preventScroll: true });
 }
 
-// Walk the fresh container's keyed children from last to first. A child the live
-// container already has stays where it is (and is handed to `patch`); a new one
-// moves out of the fresh render to just before the child that follows it in fresh
-// order. Every live child is also in fresh (rows were only appended), so the live
-// order already agrees with fresh order.
+/**
+ * Merges a fresh container's keyed children into a live one, in fresh order.
+ */
 function mergeInFreshOrder(live: Element, fresh: Element, patch?: (liveChild: Element, freshChild: Element) => void): void {
   const existing = new Map<string, Element>();
   for (const child of Array.from(live.children)) existing.set(child.getAttribute("data-id-hash")!, child);
@@ -1521,6 +1564,9 @@ function mergeInFreshOrder(live: Element, fresh: Element, patch?: (liveChild: El
   }
 }
 
+/**
+ * Says whether a card's sender, votes and notifications match its last render.
+ */
 function sameCardInputs(before: CardInputs | undefined, now: CardInputs): boolean {
   if (before === undefined) return false;
   if (before.sender !== now.sender || before.votes !== now.votes) return false;
@@ -1529,14 +1575,6 @@ function sameCardInputs(before: CardInputs | undefined, now: CardInputs): boolea
     if (before.notifications[i] !== now.notifications[i]) return false;
   }
   return true;
-}
-
-// CSS.escape polyfill for selectors in legacy / Node / older browser contexts.
-function cssEscape(value: string): string {
-  if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
-    return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
-  }
-  return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
 }
 
 /**

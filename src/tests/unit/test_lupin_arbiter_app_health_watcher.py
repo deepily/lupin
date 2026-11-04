@@ -53,6 +53,7 @@ class FakeClock:
         self._sleep_calls      = 0
         self._sleep_stops_after = sleep_stops_after
         self.stop_event        = None      # wired to the loop's _stop after construction
+        self.sleeps            = [ ]       # the seconds each sleep() was asked for
 
     def now( self ):
         self._now_calls += 1
@@ -64,6 +65,7 @@ class FakeClock:
 
     def sleep( self, seconds ):
         self._sleep_calls += 1
+        self.sleeps.append( seconds )
         if ( self._sleep_stops_after is not None
              and self._sleep_calls >= self._sleep_stops_after
              and self.stop_event is not None ):
@@ -286,6 +288,16 @@ def test_run_normal_then_stops():
     clock.stop_event = loop._stop
     loop.run()                                                  # one clean poll, then stop
     assert any( ev == "health_obs" for ev, _ in rec.logs )
+
+
+def test_run_sleeps_for_its_own_interval():
+    rec   = Recorder()
+    clock = FakeClock( sleep_stops_after=2 )
+    loop  = HealthWatcherLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+                               notify_fn=rec.notify, clock=clock, log_fn=rec.log, interval_seconds=17 )
+    clock.stop_event = loop._stop
+    loop.run()
+    assert clock.sleeps == [ 17, 17 ]
 
 
 def test_start_stop_thread_lifecycle():

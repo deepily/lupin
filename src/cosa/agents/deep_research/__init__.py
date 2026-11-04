@@ -4,47 +4,24 @@ COSA Deep Research Agent Package.
 A voice-driven deep research agent integrating COSA voice I/O,
 async orchestration, and Claude for multi-agent research.
 
-BOUNDED-CC MIGRATION (Phase 3 — 2026-06-18)
-===========================================
-The LLM-driven research loop was migrated from the direct firewalled Anthropic
-SDK (`AsyncAnthropic.messages.create` + ApiResourceManager web-search gating) to
-the in-process Claude Agent SDK (`claude_agent_sdk.query`), matching the shipped
-BFE/TFE + Podcast + Presentation bounded-CC pattern (ratified D-DR1 Option X).
-Every research call now runs on the Max-subscription OAuth path — a COST-SHIFT,
-not "free": SDK `total_cost_usd` telemetry is still reported (D8) but is covered
-by the fixed Max plan; the firewalled Anthropic console balance does not move.
-Native `web_search_20250305` → CC WebSearch/WebFetch (lead agent tools=[],
-research subagents tools=[WebSearch, WebFetch]). D6=STRICT parsing — fail-loud on
-unrecoverable JSON, never silent-default. See:
-  - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md (D1–D9 + §2 DR scope)
-  - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
+Research calls run through the in-process Claude Agent SDK (`claude_agent_sdk.query`),
+not the direct firewalled Anthropic SDK, matching the BFE, TFE, Podcast and Presentation pattern.
+They use the Max-subscription OAuth path. This shifts cost rather than removing it:
+SDK `total_cost_usd` telemetry is still reported but is covered by the fixed Max plan.
+Web search uses Claude Code WebSearch and WebFetch (lead agent `tools=[]`, research
+subagents `tools=[WebSearch, WebFetch]`). Parsing is strict: unrecoverable JSON fails loudly,
+never silently defaulting. See `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`.
 
-Phase 1 (Complete): Foundation
-- config.py: ResearchConfig dataclass
-- state.py: Pydantic state schemas, OrchestratorState/JobSubState enums
-- orchestrator.py: ResearchOrchestratorAgent skeleton (async do_all_async)
+Modules:
+- config.py, state.py: `ResearchConfig` dataclass; Pydantic state schemas and enums
+- orchestrator.py: `ResearchOrchestratorAgent` skeleton (async `do_all_async`)
 - cosa_interface.py: Async wrappers for cosa.cli notification functions
-
-Phase 2 (Complete): API Client and Prompts
-- api_client.py: Bounded-CC in-process sdk_query client with CC WebSearch/WebFetch
-- cost_tracker.py: Per-request cost tracking and budget limits
+- api_client.py: Bounded-CC `sdk_query` client; cost_tracker.py: cost tracking and budgets
 - prompts/: Clarification, planning, subagent, synthesis prompts
-- cli.py: Command-line interface for testing
+- cli.py: Command-line interface for testing; nodes/: LangGraph node implementations
 
-Phase 3 (Future): LangGraph Integration
-- graph.py: Optional StateGraph orchestration
-- nodes/: LangGraph node implementations
-
-Phase 4 (Future): Queue Integration
-- Async queue consumer evolution for non-blocking job execution
-
-HISTORICAL — pre-migration firewalled-key pattern (NO LONGER A LIVE CODE PATH):
-    Before the Phase-3 bounded-CC migration the client read a firewalled key
-    (env ANTHROPIC_API_KEY_FIREWALLED or local file). The bounded path
-    authenticates via Claude Code / Max-subscription OAuth inside sdk_query and
-    reads NO key. ENV_VAR_NAME / KEY_FILE_NAME are retained only for export
-    compatibility — they drive no behavior. (And: NEVER use ANTHROPIC_API_KEY —
-    that name is reserved for the Claude Code CLI's own OAuth resolution.)
+The client reads no API key: `ENV_VAR_NAME` and `KEY_FILE_NAME` remain only for export
+compatibility. Never use `ANTHROPIC_API_KEY`, which is reserved for the Claude Code CLI's OAuth.
 
 Usage:
     # CLI Usage (bounded-CC — OAuth via the Claude Code session, no API key)
@@ -61,8 +38,7 @@ Usage:
     config = ResearchConfig( max_subagents_complex=5 )
     cost_tracker = CostTracker( session_id="my-session" )
     api_client = ResearchAPIClient( config=config, cost_tracker=cost_tracker )
-
-    # Use api_client.call_lead_agent(), call_subagent(), etc.
+    # Then use api_client.call_lead_agent(), call_subagent(), etc.
 """
 
 from .config import ResearchConfig

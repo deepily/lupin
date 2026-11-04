@@ -1,13 +1,10 @@
 """
 COSA TestFixExpediter Agent Package.
 
-An agentic job that takes a failed TestSuiteJob's remediation snapshot,
-clusters the failures into K root causes, runs a four-phase forensic
-pipeline (diagnose → propose → fix → validate), and commits fixes via
-the shared GitStrategist.
-
-Session 1cfcdf73 (2026-04-10): Phase 0 package scaffolding. Full pipeline
-lands incrementally in steps 7-12 of the approved plan.
+An agentic job that takes a failed TestSuiteJob's remediation snapshot and
+clusters the failures into K root causes. It runs a four-phase forensic
+pipeline (diagnose, propose, fix, validate) and commits fixes via the shared
+GitStrategist.
 
 Canonical plan: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md
 """

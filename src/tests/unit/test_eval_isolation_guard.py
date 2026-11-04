@@ -264,6 +264,22 @@ def test_git_is_ancestor_reads_the_real_repo_and_refuses_to_guess():
         guard._git_is_ancestor( guard.LEAK_FIX_SHA, "0000000000000000000000000000000000000000" )
 
 
+def test_git_is_ancestor_honours_an_explicit_repo_root_over_the_project_root( tmp_path ):
+    # A throwaway repo with two commits: the explicit repo_root is the one asked, so the
+    # answer follows ITS history (child descends from parent, not the reverse) and an
+    # unresolvable sha raises naming that repo.
+    import subprocess
+    def git( *a ): return subprocess.run( [ "git", "-C", str( tmp_path ), "-c", "user.name=t", "-c", "user.email=t@t", *a ],
+                                         capture_output=True, text=True, check=True ).stdout.strip()
+    git( "init", "-q" )
+    ( tmp_path / "f" ).write_text( "1" ); git( "add", "f" ); git( "commit", "-qm", "one" ); parent = git( "rev-parse", "HEAD" )
+    ( tmp_path / "f" ).write_text( "2" ); git( "commit", "-qam", "two" );                    child  = git( "rev-parse", "HEAD" )
+    assert guard._git_is_ancestor( parent, child,  repo_root=str( tmp_path ) ) is True
+    assert guard._git_is_ancestor( child,  parent, repo_root=str( tmp_path ) ) is False
+    with pytest.raises( RuntimeError, match=str( tmp_path ) ):
+        guard._git_is_ancestor( "0" * 40, child, repo_root=str( tmp_path ) )
+
+
 def test_the_shipped_pin_carries_the_leak_fix_so_the_premise_and_the_pin_agree():
     # THE test the row asked for: goes RED the day someone moves V1_PIN_SHA below bf77852b —
     # at which point the guard would start refusing again and the report's v1_pin_why line

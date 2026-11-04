@@ -28,6 +28,8 @@ reason for existing.
 from __future__ import annotations
 
 import importlib
+import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -166,3 +168,160 @@ def test_an_eligible_bridge_with_no_session_id_writes_nothing( backfill, tmp_pat
     outcome, sid = backfill.classify( { "cwd": str( repo ) } )
     assert sid is None
     assert outcome.startswith( "skipped_" )
+
+
+# ── classify: the last two guards, and main() (row e1a36bb4, coverage to 100%) ──
+
+def test_a_sender_id_the_builder_rejects_is_refused_not_raised( backfill, tmp_path, monkeypatch ):
+    repo = tmp_path / "lupin"
+    ( repo / ".git" ).mkdir( parents=True )
+
+    def _boom( *a, **k ): raise ValueError( "bad suffix" )
+    monkeypatch.setattr( backfill, "build_sender_id", _boom )
+
+    assert backfill.classify( { "cwd": str( repo ), "session_id": "abcd1234" } ) == ( "skipped_no_git_ancestor", None )
+
+
+def test_an_import_failure_exits_3_naming_the_remedy( capsys ):
+    """A missing dependency at import time exits 3 rather than half-importing."""
+    import builtins
+    real_import = builtins.__import__
+
+    def _no_cosa( name, *a, **k ):
+        if name.startswith( "cosa.agents.utils" ): raise ImportError( "simulated absence" )
+        return real_import( name, *a, **k )
+
+    spec = importlib.util.spec_from_file_location( "backfill_import_probe", SCRIPTS_DIR / "backfill_bridge_sender_id.py" )
+    mod  = importlib.util.module_from_spec( spec )
+    builtins.__import__ = _no_cosa
+    try:
+        with pytest.raises( SystemExit ) as caught:
+            spec.loader.exec_module( mod )
+    finally:
+        builtins.__import__ = real_import
+    assert caught.value.code == 3
+    assert "FATAL: import failed" in capsys.readouterr().err
+
+
+@pytest.fixture
+def sessions( backfill, tmp_path, monkeypatch ):
+    """A real sessions dir read through the script's seam, with a helper to add bridges."""
+    sdir = tmp_path / "sessions"
+    sdir.mkdir()
+    monkeypatch.setattr( backfill, "sessions_dir", lambda: str( sdir ) )
+
+    def put( name, data ):
+        p = sdir / f"cc-{name}.json"
+        p.write_text( data if isinstance( data, str ) else json.dumps( data ) )
+        return p
+    put.dir = sdir
+    return put
+
+
+def _run( backfill, monkeypatch, capsys, *argv ):
+    monkeypatch.setattr( sys, "argv", [ "backfill_bridge_sender_id.py", *argv ] )
+    rc = backfill.main()
+    cap = capsys.readouterr()
+    return rc, cap.out, cap.err
+
+
+def _live_repo( tmp_path ):
+    repo = tmp_path / "lupin"
+    ( repo / ".git" ).mkdir( parents=True )
+    return repo
+
+
+def test_dry_run_and_write_together_are_refused_with_exit_2( backfill, monkeypatch, capsys, sessions ):
+    rc, _out, err = _run( backfill, monkeypatch, capsys, "--dry-run", "--write" )
+    assert rc == 2
+    assert "contradict each other" in err
+
+
+def test_an_unreadable_sessions_directory_is_exit_2( backfill, monkeypatch, capsys ):
+    def _boom(): raise OSError( "no such dir" )
+    monkeypatch.setattr( backfill, "sessions_dir", _boom )
+    rc, _out, err = _run( backfill, monkeypatch, capsys )
+    assert rc == 2
+    assert "could not read the sessions directory" in err
+
+
+def test_report_only_names_the_eligible_bridge_and_writes_nothing( backfill, monkeypatch, capsys, sessions, tmp_path ):
+    repo = _live_repo( tmp_path )
+    path = sessions( "a", { "cwd": str( repo ), "stable_session_id": "abcd1234-z" } )
+    before = path.read_text()
+
+    rc, out, _err = _run( backfill, monkeypatch, capsys )
+
+    assert rc == 0
+    assert "bridges found: 1" in out and "REPORT ONLY" in out
+    assert "WOULD WRITE             cc-a.json -> claude.code@lupin.deepily.ai#abcd1234" in out
+    assert "eligible_not_written     1" in out
+    assert path.read_text() == before, "report-only mode modified a bridge"
+
+
+def test_write_mode_adds_the_sender_id_to_the_bridge_on_disk( backfill, monkeypatch, capsys, sessions, tmp_path ):
+    repo = _live_repo( tmp_path )
+    path = sessions( "a", { "cwd": str( repo ), "stable_session_id": "abcd1234-z", "keep": "me" } )
+
+    rc, out, _err = _run( backfill, monkeypatch, capsys, "--write" )
+
+    assert rc == 0 and "mode         : WRITE" in out
+    assert "written                 cc-a.json" in out
+    on_disk = json.loads( path.read_text() )
+    assert on_disk[ "sender_id" ] == "claude.code@lupin.deepily.ai#abcd1234"
+    assert on_disk[ "keep" ] == "me", "the backfill dropped the bridge's other fields"
+    assert "written                  1" in out
+
+
+def test_a_failed_atomic_write_is_counted_unreadable_and_named( backfill, monkeypatch, capsys, sessions, tmp_path ):
+    repo = _live_repo( tmp_path )
+    path = sessions( "a", { "cwd": str( repo ), "stable_session_id": "abcd1234-z" } )
+    before = path.read_text()
+    monkeypatch.setattr( backfill, "atomic_write_json", lambda p, d: False )
+
+    rc, out, _err = _run( backfill, monkeypatch, capsys, "--write" )
+
+    assert rc == 0
+    assert "WRITE FAILED            cc-a.json" in out
+    assert "unreadable               1" in out and "written                  0" in out
+    assert path.read_text() == before
+
+
+def test_unreadable_bridges_are_counted_and_named_only_under_verbose( backfill, monkeypatch, capsys, sessions ):
+    sessions( "garbled", "{ not json" )
+    sessions( "list", "[1, 2]" )                           # valid JSON, not an object
+
+    _rc, quiet, _ = _run( backfill, monkeypatch, capsys )
+    _rc, loud,  _ = _run( backfill, monkeypatch, capsys, "-v" )
+
+    assert "unreadable               2" in quiet and "unreadable              cc-" not in quiet
+    assert "unreadable              cc-garbled.json" in loud
+    assert "unreadable              cc-list.json: ValueError" in loud
+
+
+def test_a_dead_pid_is_skipped_unless_include_dead_is_passed( backfill, monkeypatch, capsys, sessions, tmp_path ):
+    repo = _live_repo( tmp_path )
+    sessions( "dead", { "cwd": str( repo ), "stable_session_id": "abcd1234-z", "cc_pid": 123 } )
+    monkeypatch.setattr( backfill, "_is_pid_alive", lambda pid: False )
+
+    _rc, skipped, _ = _run( backfill, monkeypatch, capsys, "-v" )
+    _rc, included, _ = _run( backfill, monkeypatch, capsys, "--include-dead" )
+
+    assert "skipped_dead            cc-dead.json (pid 123)" in skipped
+    assert "skipped_dead             1" in skipped and "WOULD WRITE" not in skipped
+    assert "WOULD WRITE             cc-dead.json" in included
+
+
+def test_each_refusal_outcome_is_counted_and_verbose_names_the_bridge( backfill, monkeypatch, capsys, sessions, tmp_path ):
+    sessions( "has", { "sender_id": "claude.code@x#1" } )
+    sessions( "nocwd", { } )
+    sessions( "gone", { "cwd": str( tmp_path / "vanished" ) } )
+    bare = tmp_path / "bare"; bare.mkdir()
+    sessions( "nogit", { "cwd": str( bare ) } )
+
+    _rc, out, _ = _run( backfill, monkeypatch, capsys, "-v" )
+
+    for outcome, name in ( ( "already_has_one", "has" ), ( "skipped_no_cwd", "nocwd" ),
+                           ( "skipped_cwd_missing", "gone" ), ( "skipped_no_git_ancestor", "nogit" ) ):
+        assert f"{outcome.ljust( 23 )} cc-{name}.json" in out
+        assert f"{outcome.ljust( 24 )} 1" in out

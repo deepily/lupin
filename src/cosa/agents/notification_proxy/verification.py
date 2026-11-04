@@ -18,6 +18,19 @@ from cosa.agents.notification_proxy.xml_models import VerificationResponse
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 
 
+class NoReplyVerification( VerificationResponse ):
+    """
+    A verification where the model returned no text on every attempt.
+
+    Requires:
+        - built with match "false" and confidence "0.0"
+
+    Ensures:
+        - is a VerificationResponse, so callers that read match and confidence are unchanged
+        - tells a silent model apart from one that judged the pair false
+    """
+
+
 class LlmAnswerVerifier:
     """
     Verify semantic equivalence between expected and actual answers using Phi-4.
@@ -94,6 +107,7 @@ class LlmAnswerVerifier:
             - Returns VerificationResponse with match/confidence/reasoning
             - Exact string matches (case-insensitive) bypass LLM
             - Returns false match on LLM errors
+            - Returns a NoReplyVerification when every attempt came back empty
 
         Args:
             expected: The expected answer string
@@ -144,12 +158,17 @@ class LlmAnswerVerifier:
         # without inflating cost. System-boundary retry policy, not defensive cargo.
         # Bumped from 2-attempt to 3-attempt 2026-04-30 (Session b195a160) after
         # FUZZY_BUDGET_2 failed both attempts on 2026-04-29 17:39 EDT all-test run.
-        last_error = None
-        max_attempts = 3
+        last_error     = None
+        max_attempts   = 3
+        empty_attempts = 0
         for attempt in range( 1, max_attempts + 1 ):
             try:
                 response_text = self._client.run( prompt )
                 if self.debug: print( f"[AnswerVerifier] Raw response (attempt {attempt}): {response_text[ :200 ]}" )
+
+                if not response_text.strip():
+                    empty_attempts += 1
+                    raise ValueError( "model returned an empty reply" )
 
                 parsed = VerificationResponse.from_xml( response_text )
 
@@ -167,6 +186,13 @@ class LlmAnswerVerifier:
                     time.sleep( backoff )
                     continue
                 print( f"[AnswerVerifier] LLM error after {max_attempts} attempts: {e}" )
+
+        if empty_attempts == max_attempts:
+            return NoReplyVerification(
+                match      = "false",
+                confidence = "0.0",
+                reasoning  = f"No reply: the model returned no text on {max_attempts} attempts"
+            )
 
         return VerificationResponse(
             match      = "false",

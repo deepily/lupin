@@ -1,59 +1,42 @@
 #!/usr/bin/env python3
 """
-stale-process-scan.py — link 2 of the delivery chain, made loud.
+stale-process-scan.py: finds long-lived processes running code older than a merge.
 
-WHY THIS EXISTS (row d2dd3ee3). The delivery chain is
-`committed -> merged -> respawned -> cache-busted`. `delivery-collision-scan.py`
-watches the first link. `test_task_body_overlay_cache_bust.py` watches the third.
-**NOTHING watched the second**, and it was found by hand twice on 2026-09-05:
-listeners pin their tree at boot, so a merge changes the file on disk and the
-running process keeps the module it imported at startup. A saved file is not a
-served file, and a merged file is not a running file.
+The delivery chain is committed, merged, respawned, cache-busted. The collision scan
+`delivery-collision-scan.py` watches the first link and
+`test_task_body_overlay_cache_bust.py` watches the third. Nothing watched the second.
+Listeners pin their tree at boot, so a merge changes the file on disk while the running
+process keeps the module it imported at startup. A saved file is not a served file, and a
+merged file is not a running file.
 
-Measured before this was written: no script, no test, and no route in the tree
-detects it. The two commits that mention the symptom (`ceeab632`, `e9ade49e`)
-fix instances; neither detects the class.
+The design is shaped by a defect in the first measurement. Comparing process start time
+with commit time is the obvious instrument and it is not sufficient. It flagged three MCP
+subprocesses as stale and all three were false. The commits touched one file,
+`src/lupin_mcp/fleet_cap_admission.py`, which nothing imports because it runs as a fresh
+subprocess per launch. So the scan runs two stages and reports a process stale only if both fire:
 
-🔴 THE DESIGN IS SHAPED BY THE DEFECT IN MY OWN FIRST MEASUREMENT, AND THAT IS THE
-POINT OF THE FILE. A start-time-versus-commit-time comparison is the obvious
-instrument and it is NOT SUFFICIENT. Run on 2026-09-05 it flagged three MCP
-subprocesses as stale. **All three were false.** The three commits behind them
-touched exactly one file, `src/lupin_mcp/fleet_cap_admission.py`, which NOTHING in
-the tree imports — it runs as a fresh subprocess per launch. The screen was
-correct about the timestamps and wrong about the world.
+    Timing        did a commit touching this process's tree land after it started?
+    Reachability  is a changed module imported, transitively, from its entry point?
 
-⇒ So this scan runs TWO stages and reports a process stale only if BOTH fire:
+Timing alone over-reports, and reachability alone says nothing about freshness. A scan
+that reports on timing alone cries wolf on its first day and gets switched off.
 
-    STAGE 1  TIMING       did a commit touching this process's tree land AFTER
-                          the process started?
-    STAGE 2  REACHABILITY is a changed module actually IMPORTED, transitively,
-                          from the entry point this process is running?
+Exit codes are three, so two failure modes wanting opposite remedies never share one
+(`purge-pycache.sh` and `delivery-collision-scan.py` use the same contract):
 
-Stage 1 alone over-reports. Stage 2 alone cannot tell you anything about
-freshness. Reporting on stage 1 only is how a scan cries wolf on its first day
-and gets switched off — the same failure the collision scan avoids by refusing
-ancestry.
+    0  scanned, nothing stale: a real all-clear
+    1  stale: a process is running superseded code
+    2  refused, nothing was scanned: say so, never report clean
 
-EXIT CODES — three, so two failure modes wanting opposite remedies never share
-one (the local precedent is `purge-pycache.sh`, and `delivery-collision-scan.py`
-uses the same contract):
-
-    0  scanned, nothing stale        — a real all-clear
-    1  STALE: a process is running superseded code
-    2  REFUSED, nothing was scanned  — say so, never report clean
-
-⚠️ WHAT IT CANNOT SEE, STATED HERE RATHER THAN DISCOVERED LATER:
-  · **Unmerged work is invisible to it.** It compares against commits that LANDED.
-    A fix stranded on a branch cannot make a process stale, because the process was
-    never going to have it. That is link 1's job, and link 1 has its own scan.
-  · **Lazy imports move the boundary.** `cosa_voice_mcp.py` does
-    `from lupin_mcp import session_spawner` INSIDE a function, so that module is
-    read at CALL time and picks up post-start merges. Stage 2 walks static imports
-    and counts a function-level import as reachable, which OVER-reports for exactly
-    this shape. The direction is deliberate: a false "check this" is cheaper than a
-    false all-clear.
-  · It reports; it restarts nothing. Bouncing shared infrastructure while jobs run
-    is outside any standing authority.
+What it cannot see:
+  - Unmerged work. It compares against commits that landed, and a fix stranded on a
+    branch cannot make a process stale. The collision scan covers that link.
+  - Lazy imports move the boundary. `cosa_voice_mcp.py` imports `session_spawner` inside
+    a function, so it is read at call time and picks up post-start merges. The scan
+    counts a function-level import as reachable and over-reports for this shape, on
+    purpose: a false "check this" is cheaper than a false all-clear.
+  - It reports and restarts nothing. Bouncing shared infrastructure while jobs run is
+    outside any standing authority.
 """
 
 import argparse
@@ -116,16 +99,15 @@ def running_processes():
     """
     Long-lived python processes executing code from a lupin tree.
 
-    🔴 IDENTIFIED BY `/proc/<pid>/comm`, NEVER BY THE COMMAND LINE. A Claude seat's
-    entire spawn briefing is its argv, so a `pgrep -f` for a module name matches
-    every seat whose instructions merely DISCUSS that module. Measured 2026-08-29:
-    a `pgrep -f pytest` gate matched three live seats that were only reading about
-    testing. `comm` answers what a process IS; argv answers what someone wrote
-    about it.
+    Processes are identified by `/proc/<pid>/comm`, never by the command line, because
+    a Claude seat's whole spawn briefing is its argv.
 
     Ensures:
         - returns [ { pid, comm, cwd, root, started, cmdline }, ... ]
         - excludes processes whose cwd is outside a lupin tree
+        - a `pgrep -f` on a module name matches every seat whose briefing only discusses
+          that module; a `pgrep -f pytest` gate matched three seats just reading about testing
+        - `comm` says what a process is, while argv says what someone wrote about it
     """
     found = []
     for entry in os.listdir( "/proc" ):
@@ -169,7 +151,7 @@ def _container_of( pid ):
     Ensures:
         - returns the container name, or None when the pid is not containerised,
           docker is unavailable, or the id does not resolve
-        - NEVER guesses: an unresolved container yields None so the caller can say
+        - never guesses: an unresolved container yields None so the caller can say
           "unknown" rather than print a confident wrong name
     """
     try:
@@ -194,12 +176,11 @@ def _container_of( pid ):
 
 def classify( proc ):
     """
-    Which known long-lived class is this, if any?
+    Match a process to a known long-lived class and its entry module, if any.
 
-    Two processes can run the byte-identical command line in different containers
-    (:7999 and :8000 both run `python3 -m lupin_app.main`), so the container is
-    resolved from the process's own cgroup and appended to the label. See the note
-    on CONTAINER_LABELS for the live control that caught this.
+    Two containers can run the identical command line, as `:7999` and `:8000` both run
+    `python3 -m lupin_app.main`. The container is resolved from the process's own cgroup
+    and appended to the label; see the note on `CONTAINER_LABELS`.
 
     Ensures:
         - returns ( label, entry_module ) or ( None, None ) for anything transient
@@ -241,18 +222,9 @@ def _module_to_path( module ):
 
 def reachable_modules( entry_path, max_files=4000 ):
     """
-    Every in-repo module transitively imported from entry_path.
+    Every in-repo module transitively imported from entry_path, the reachability stage.
 
-    STAGE 2, AND THE REASON THIS SCAN IS NOT A CRY-WOLF. Walks the static import
-    graph with `ast`, following only modules that resolve to files inside this
-    repo. A changed file outside this set cannot affect the process, however
-    recently it landed — which is precisely the case that made all three of my
-    first measurement's flags false.
-
-    ⚠️ It counts a FUNCTION-LEVEL import as reachable. Those are read at call time,
-    so such a module may already be fresh in a running process. That over-reports,
-    deliberately: a false "go and check" costs a minute, a false all-clear costs a
-    day of chasing a fix that was never running.
+    Walks the static import graph with `ast`, following only modules that resolve to files in this repo.
 
     Requires:
         - entry_path is repo-relative and exists
@@ -260,6 +232,13 @@ def reachable_modules( entry_path, max_files=4000 ):
     Ensures:
         - returns a set of repo-relative paths, including entry_path itself
         - terminates on cycles and stops at max_files
+        - a changed file outside this set cannot affect the process, however recently it
+          landed; this is why the scan does not cry wolf, since all three flags in the
+          first measurement were false
+        - a function-level import counts as reachable although it is read at call time and
+          may already be fresh in a running process
+        - that over-reporting is chosen: a false "go and check" costs a minute, but a
+          false all-clear costs a day chasing a fix that was never running
     """
     seen    = set()
     pending = [ entry_path ]

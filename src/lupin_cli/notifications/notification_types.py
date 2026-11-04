@@ -5,6 +5,8 @@ This module defines the standard notification types and priority levels
 used by the Claude Code notification system.
 """
 
+import os
+import urllib.parse
 from enum import Enum
 from typing import List
 
@@ -101,3 +103,44 @@ DEFAULT_SERVER_URL = "http://localhost:7999"
 # Environment variable names
 ENV_CLI_PATH = "COSA_CLI_PATH"
 ENV_SERVER_URL = "LUPIN_APP_SERVER_URL"
+
+
+def validate_server_environment() -> bool:
+    """
+    Validate the server URL the notification CLIs will post to.
+
+    Requires:
+        - os and urllib.parse are importable
+
+    Ensures:
+        - Reads ENV_SERVER_URL, falling back to DEFAULT_SERVER_URL
+        - Reports a URL that does not start with http:// or https://
+        - Reports a URL with no host, and any urlparse exception
+        - Prints each issue and returns False if any was found
+        - Prints the validated URL and returns True otherwise
+
+    Raises:
+        - None (all exceptions are reported as issues)
+    """
+    issues = []
+
+    server_url = os.getenv( ENV_SERVER_URL, DEFAULT_SERVER_URL )
+    if not server_url.startswith( ( "http://", "https://" ) ):
+        issues.append( f"{ENV_SERVER_URL} must start with http:// or https://" )
+
+    try:
+        parsed = urllib.parse.urlparse( server_url )
+        if not parsed.netloc:
+            issues.append( f"Invalid server URL format: {server_url}" )
+    except Exception as e:
+        issues.append( f"Error parsing server URL: {e}" )
+
+    if issues:
+        print( "❌ Environment validation failed:" )
+        for issue in issues:
+            print( f"  - {issue}" )
+        return False
+
+    print( "✅ Environment validation passed" )
+    print( f"  Server URL: {server_url}" )
+    return True

@@ -1,0 +1,1766 @@
+"""
+Tests of the analysis of the live packing measurement: the rules that read its result.
+
+They are written before any result exists. Every number the plan fixes is pinned to its literal,
+so a changed constant fails a named test. The arms are built by hand with known answers.
+One test reads real answers that the live check wrote to the cache, through the real reader.
+"""
+import json
+import math
+import pathlib
+
+import pytest
+
+from lupin_mcp import reuse_stage1_analysis as an
+
+REAL = pathlib.Path( __file__ ).parent / "fixtures" / "stage1-real-single-answers-sample.json"
+REAL_PLAN = pathlib.Path( __file__ ).parent / "fixtures" / "stage1-real-probe-plan-q1.json"      # written by write_probe_plan at c0fb265b0 from the real answers above
+
+
+def _probs( overlap, extend=0.0 ):
+    """Ensures: returns a valid three-way answer whose reuse plus extend is overlap."""
+    return { "reuse": round( overlap - extend, 6 ), "extend": extend, "unrelated": round( 1.0 - overlap, 6 ) }
+
+
+NO_NAME = object()
+
+
+def _arm( arm, overlaps, question=1, size=1, state="complete", stop_reason=None, run_name=None, **over ):
+    """Ensures: returns one arm record in the stage1-arm-1 format answering every id in overlaps."""
+    rec = { "format": "stage1-arm-1", "question": question, "need": "a need", "arm": arm, "run_name": None if run_name is NO_NAME else run_name or f"s1-q{question}-{arm}",
+            "run_index": 1, "size": size, "model": "jev-test", "template_hash": "abc", "started_at": "t0", "ended_at": "t1",
+            "state": state, "stop_reason": stop_reason, "ceiling_tokens": 1000, "attempt_limit": 8000,
+            "entry_ids": list( overlaps ), "answers": [ { "id": i, "probabilities": _probs( o ) } for i, o in overlaps.items() ],
+            "failed": [], "not_reached": [], "unasked": [], "cache_hits": 0, "rows": [],
+            "totals": { "requests": 0, "calls": 0, "attempts_answered": 0, "attempts_failed": 0, "tokens_in": 0, "tokens_out": 0,
+                        "usage_missing": 0, "refused_422": 0, "stopped_by": None, "spent_tokens": 0, "reserved_tokens": 0, "ceiling_refusals": 0 },
+            "transport_calls": [] }
+    rec.update( over )
+    return rec
+
+
+# --- the numbers the plan fixes ------------------------------------------------------------------------------------------
+
+def test_the_constants_are_the_literals_of_the_plan():
+    assert an.FORMAT == "stage1-arm-1"
+    assert an.BAND == ( 0.35, 0.65 )                          # 10.5: a boundary entry lies from 0.35 to 0.65
+    assert an.MIN_BOUNDARY_POOLED == 90                       # 10.5: ninety pooled; fewer reads inconclusive
+    assert an.STOP_BOUNDARY_AFTER_QUESTION_2 == 50            # 10.5: fewer than 50 after question 2 stops the stage
+    assert an.STOP_SPEND_AFTER_QUESTION_1 == 15_000_000       # 10.5: question 1 above 15,000,000 tokens stops the stage
+    assert an.STAGE_TOKENS == 71_000_000                      # 11.1: the stage ceiling
+    assert an.NOISE_FLOOR_MIN == 0.02                         # 10.5: the policy's own sum_tolerance
+    assert an.PERCENTILE == 0.99
+    assert an.FLIP_ALLOWANCE == 1                             # 10.5: flips of a pack size no more than the noise floor's flips plus 1
+    assert an.THRESHOLD == 0.5
+    assert an.OUTPUT_PER_ENTRY_STOP == 60                     # 10.5, 10.6: above 60 per entry the stage stops and asks
+    assert an.PACK_SIZES == ( 10, 50, 200 )
+    assert an.PRICE_PER_MILLION == 0.042                      # 10.6: the pinned price, input and output at the same rate
+    assert an.PROBE_PLACEMENTS == ( "first", "middle", "last" )
+    assert an.PROBE_NEIGHBOURS == ( "random", "near_duplicate" )
+
+
+# --- reading one arm -----------------------------------------------------------------------------------------------------
+
+def test_an_arm_is_read_into_overlaps_rounded_to_six_places():
+    rec = _arm( "single1", { "a": 0.5 } )
+    rec[ "answers" ][ 0 ][ "probabilities" ] = { "reuse": 0.1234567, "extend": 0.2, "unrelated": 0.6765433 }
+    assert an.read_arm( rec )[ "overlaps" ] == { "a": 0.323457 }
+
+
+def test_the_arm_keeps_the_question_arm_name_size_and_totals():
+    a = an.read_arm( _arm( "pack50", { "a": 0.1 }, question=2, size=50 ) )
+    assert ( a[ "question" ], a[ "arm" ], a[ "size" ], a[ "run_name" ] ) == ( 2, "pack50", 50, "s1-q2-pack50" )
+    assert a[ "totals" ][ "spent_tokens" ] == 0
+
+
+def test_a_record_of_another_format_is_refused():
+    with pytest.raises( ValueError, match="stage1-arm-1" ):
+        an.read_arm( _arm( "single1", { "a": 0.1 }, format="stage1-arm-2" ) )
+
+
+def test_an_answer_for_an_id_the_arm_did_not_ask_is_refused():
+    rec = _arm( "single1", { "a": 0.1 } ); rec[ "answers" ].append( { "id": "stranger", "probabilities": _probs( 0.2 ) } )
+    with pytest.raises( ValueError, match="stranger" ):
+        an.read_arm( rec )
+
+
+def test_two_answers_for_one_id_are_refused():
+    rec = _arm( "single1", { "a": 0.1 } ); rec[ "answers" ].append( rec[ "answers" ][ 0 ] )
+    with pytest.raises( ValueError, match="twice" ):
+        an.read_arm( rec )
+
+
+def test_a_malformed_answer_is_listed_with_its_reason_and_has_no_overlap():
+    rec = _arm( "single1", { "a": 0.1, "b": 0.2 } )
+    rec[ "answers" ][ 1 ][ "probabilities" ] = { "reuse": 0.9, "extend": 0.9, "unrelated": 0.9 }
+    a = an.read_arm( rec )
+    assert a[ "overlaps" ] == { "a": 0.1 } and a[ "malformed" ] == { "b": "sum_not_one" }
+
+
+def test_a_fully_answered_complete_arm_is_clean():
+    assert an.read_arm( _arm( "single1", { "a": 0.1, "b": 0.7 } ) )[ "status" ] == "clean"
+
+
+@pytest.mark.parametrize( "over", [ { "failed": [ "b" ] }, { "unasked": [ "b" ] }, { "not_reached": [ "b" ] } ] )
+def test_an_arm_with_a_failed_unasked_or_unreached_entry_is_inconclusive_whatever_its_state(over):
+    rec = _arm( "single1", { "a": 0.1, "b": 0.2 }, **over )
+    rec[ "answers" ] = rec[ "answers" ][ :1 ]
+    assert an.read_arm( rec )[ "status" ] == "inconclusive"
+
+
+@pytest.mark.parametrize( "over", [ { "failed": [ "a" ] }, { "unasked": [ "a" ] }, { "not_reached": [ "a" ] }, { "state": "incomplete" } ] )
+def test_an_arm_that_lists_a_problem_is_inconclusive_even_when_every_entry_has_an_answer(over):
+    assert an.read_arm( _arm( "single1", { "a": 0.1 }, **over ) )[ "status" ] == "inconclusive"
+
+
+def test_an_arm_with_a_malformed_answer_is_inconclusive():
+    rec = _arm( "single1", { "a": 0.1 } ); rec[ "answers" ][ 0 ][ "probabilities" ] = None
+    assert an.read_arm( rec )[ "status" ] == "inconclusive"
+
+
+def test_an_arm_that_ran_out_of_attempts_is_inconclusive():
+    rec = _arm( "single1", { "a": 0.1, "b": 0.2 }, state="incomplete", stop_reason="attempts", not_reached=[ "b" ] )
+    rec[ "answers" ] = rec[ "answers" ][ :1 ]
+    assert an.read_arm( rec )[ "status" ] == "inconclusive"
+
+
+@pytest.mark.parametrize( "reason", [ "ceiling", "ledger", "consecutive_422", "error: ValueError" ] )
+def test_an_arm_the_ceiling_the_ledger_or_a_refusal_stopped_is_invalid_never_a_pass(reason):
+    rec = _arm( "pack50", { "a": 0.1 }, state="incomplete", stop_reason=reason )
+    assert an.read_arm( rec )[ "status" ] == "invalid"
+
+
+def test_an_arm_in_the_error_state_is_invalid():
+    assert an.read_arm( _arm( "pack50", { "a": 0.1 }, state="error", stop_reason="error: OSError" ) )[ "status" ] == "invalid"
+
+
+def test_an_arm_with_nothing_asked_and_nothing_answered_is_inconclusive_not_clean():
+    assert an.read_arm( _arm( "single1", {} ) )[ "status" ] == "inconclusive"
+
+
+# --- reading the stage ---------------------------------------------------------------------------------------------------
+
+def test_the_stage_groups_arms_by_question_and_name():
+    st = an.read_stage( [ _arm( "single1", { "a": 0.1 } ), _arm( "single2", { "a": 0.1 } ), _arm( "single1", { "a": 0.1 }, question=2 ) ] )
+    assert sorted( st ) == [ 1, 2 ] and sorted( st[ 1 ] ) == [ "single1", "single2" ]
+
+
+def test_the_same_run_name_twice_is_refused():
+    with pytest.raises( ValueError, match="run name" ):
+        an.read_stage( [ _arm( "single1", { "a": 0.1 } ), _arm( "single2", { "a": 0.1 }, run_name="s1-q1-single1" ) ] )
+
+
+def test_arms_without_a_run_name_such_as_the_old_shape_one_may_repeat_across_questions():
+    st = an.read_stage( [ _arm( "old", { "a": 0.1 }, run_name=NO_NAME ), _arm( "old", { "a": 0.1 }, question=2, run_name=NO_NAME ) ] )
+    assert sorted( st ) == [ 1, 2 ]
+
+
+def test_the_same_arm_twice_for_one_question_is_refused():
+    with pytest.raises( ValueError, match="twice" ):
+        an.read_stage( [ _arm( "single1", { "a": 0.1 } ), _arm( "single1", { "a": 0.1 }, run_name="other" ) ] )
+
+
+# --- the percentile and the differences ----------------------------------------------------------------------------------
+
+def test_the_percentile_is_the_nearest_rank_and_empty_gives_none():
+    assert an.percentile( [] ) is None
+    assert an.percentile( [ 0.5 ] ) == 0.5
+    assert an.percentile( list( range( 1, 101 ) ) ) == 99                         # rank ceil( 0.99 * 100 ) = 99
+    assert an.percentile( list( range( 1, 102 ) ) ) == 100                        # rank ceil( 0.99 * 101 ) = 100
+    assert an.percentile( [ 3, 1, 2 ] ) == 3                                      # unsorted input; rank ceil( 2.97 ) = 3
+
+
+def test_differences_cover_only_ids_answered_in_both_arms_and_are_absolute():
+    a = an.read_arm( _arm( "single1", { "x": 0.5, "y": 0.2, "z": 0.9 } ) )
+    b = an.read_arm( _arm( "single2", { "x": 0.45, "y": 0.3 } ) )
+    assert an.differences( a, b ) == { "x": 0.05, "y": 0.1 }
+
+
+def test_boundary_ids_include_both_ends_of_the_band():
+    a = an.read_arm( _arm( "single1", { "lo": 0.35, "hi": 0.65, "under": 0.349999, "over": 0.650001, "mid": 0.5 } ) )
+    assert an.boundary_ids( a ) == [ "hi", "lo", "mid" ]
+
+
+def test_flips_count_ids_that_cross_the_cut_in_either_direction_and_the_cut_itself_counts_as_above():
+    ref   = an.read_arm( _arm( "single1", { "a": 0.5, "b": 0.49, "c": 0.6, "d": 0.4 } ) )
+    other = an.read_arm( _arm( "pack10", { "a": 0.49, "b": 0.5, "c": 0.7, "d": 0.45 } ) )
+    assert an.flips( ref, other, [ "a", "b", "c", "d" ], 0.5 ) == [ "a", "b" ]
+
+
+def test_flips_skip_ids_missing_from_either_arm():
+    ref   = an.read_arm( _arm( "single1", { "a": 0.5, "b": 0.5 } ) )
+    other = an.read_arm( _arm( "pack10", { "a": 0.1 } ) )
+    assert an.flips( ref, other, [ "a", "b", "ghost" ], 0.5 ) == [ "a" ]
+
+
+# --- the real answers ----------------------------------------------------------------------------------------------------
+
+def test_real_answers_read_through_the_real_reader_give_the_counts_the_live_check_had():
+    fx  = json.loads( REAL.read_text() )
+    a   = an.read_arm( _arm( "single1", { r[ "id" ]: 0.0 for r in fx[ "answers" ] }, answers=fx[ "answers" ] ) )
+    assert ( fx[ "total_answers" ], fx[ "in_band_035_065" ], fx[ "in_band_040_060" ] ) == ( 7705, 33, 15 )
+    assert len( a[ "overlaps" ] ) == fx[ "sample" ][ "size" ] == 300 and a[ "malformed" ] == {}
+    assert len( an.boundary_ids( a ) ) == 33                                                   # every in-band answer is in the sample
+    assert sum( .40 <= o <= .60 for o in a[ "overlaps" ].values() ) == 15
+    assert a[ "status" ] == "clean"
+
+
+# --- a whole question, built by hand --------------------------------------------------------------------------------------
+
+def _names( n, prefix="e" ): return [ f"{prefix}{k:03d}" for k in range( n ) ]
+
+
+def _base( n_boundary=100, n_other=20 ):
+    """Ensures: returns n_boundary entries at 0.5 and n_other far outside the band at 0.05."""
+    return { **{ i: 0.5 for i in _names( n_boundary ) }, **{ i: 0.05 for i in _names( n_other, "o" ) } }
+
+
+def _moved( base, shift=0.0, down=(), up=() ):
+    """Ensures: returns base moved by shift, the ids in down at 0.49 and those in up at 0.51."""
+    out = { i: round( min( 1.0, max( 0.0, o + shift ) ), 6 ) for i, o in base.items() }
+    out.update( { i: 0.49 for i in down } ); out.update( { i: 0.51 for i in up } )
+    return out
+
+
+def _probe( question, probe_id, placement, neighbours, overlap, base ):
+    """Ensures: returns a pack-of-200 probe arm in which the probe entry has the given overlap."""
+    name = f"probe-{placement}-{'random' if neighbours == 'random' else 'near'}"
+    rec  = _arm( name, { **base, probe_id: overlap }, question=question, size=200 )
+    rec[ "probe" ] = { "id": probe_id, "placement": placement, "neighbours": neighbours }
+    return rec
+
+
+def _probes( question, probe_id, base, overlap=None ):
+    """Ensures: returns the six probe arms, at the probe's single value unless overlap is given."""
+    o = base[ probe_id ] if overlap is None else overlap
+    return [ _probe( question, probe_id, p, n, o, base ) for p in an.PROBE_PLACEMENTS for n in an.PROBE_NEIGHBOURS ]
+
+
+def _question( question=1, base=None, noise=0.0, packs=None, probes=True, probe_shift=0.0 ):
+    """
+    Build the arms of one question.
+
+    Ensures:
+        - returns single1, single2 moved by noise, one pack arm per size in packs, and six probes
+        - packs maps a size to the keyword arguments of _moved
+    """
+    base = _base() if base is None else base
+    recs = [ _arm( "single1", base, question=question ), _arm( "single2", _moved( base, noise ), question=question ) ]
+    for size, kw in ( { 10: {}, 50: {}, 200: {} } if packs is None else packs ).items():
+        recs.append( _arm( f"pack{size}", _moved( base, **kw ), question=question, size=size ) )
+    if probes: recs += _probes( question, "e000", base, None if not probe_shift else base[ "e000" ] + probe_shift )
+    return recs
+
+
+# --- the noise floor -----------------------------------------------------------------------------------------------------
+
+def test_a_noise_below_the_minimum_reads_as_the_minimum():
+    nf = an.noise_floor( an.read_stage( _question( noise=0.001 ) ) )
+    assert ( nf[ "measured" ], nf[ "floor" ], nf[ "state" ], nf[ "max" ] ) == ( 0.001, 0.02, "ok", 0.001 )
+
+
+def test_a_noise_above_the_minimum_is_the_floor():
+    nf = an.noise_floor( an.read_stage( _question( noise=0.03 ) ) )
+    assert ( nf[ "measured" ], nf[ "floor" ] ) == ( 0.03, 0.03 )
+
+
+def test_the_noise_floor_pools_the_differences_of_every_question_run():
+    one = _question( 1, noise=0.0 ); two = _question( 2, noise=0.04 )
+    nf  = an.noise_floor( an.read_stage( one + two ) )
+    assert nf[ "n" ] == 240 and nf[ "measured" ] == 0.04                       # 120 entries a question; half the pooled differences are 0.04
+
+
+def test_the_noise_floor_is_inconclusive_when_a_single_run_is_missing_or_not_clean():
+    recs = [ r for r in _question() if r[ "arm" ] != "single2" ]
+    assert an.noise_floor( an.read_stage( recs ) )[ "state" ] == "inconclusive"
+    recs = _question(); recs[ 0 ][ "failed" ] = [ "e000" ]
+    assert an.noise_floor( an.read_stage( recs ) )[ "state" ] == "inconclusive"
+
+
+# --- pass 1: the per-entry difference ------------------------------------------------------------------------------------
+
+def test_pass_one_holds_when_the_99th_percentile_difference_equals_the_floor_and_fails_just_above():
+    ok  = an.pass_one( an.read_stage( _question( packs={ 10: { "shift": 0.02 } } ) ), 10, 0.02 )
+    bad = an.pass_one( an.read_stage( _question( packs={ 10: { "shift": 0.020001 } } ) ), 10, 0.02 )
+    assert ( ok[ "state" ], ok[ "p99" ] ) == ( "pass", 0.02 ) and bad[ "state" ] == "fail"
+
+
+def test_pass_one_reads_the_99th_percentile_so_one_wild_entry_in_a_hundred_does_not_fail_it_but_the_maximum_shows_it():
+    base = { i: 0.05 for i in _names( 100 ) }
+    pack = _moved( base ); pack[ "e000" ] = 0.9
+    recs = [ _arm( "single1", base ), _arm( "pack10", pack, size=10 ) ]
+    r = an.pass_one( an.read_stage( recs ), 10, 0.02 )
+    assert ( r[ "state" ], r[ "p99" ], r[ "max" ], r[ "n" ] ) == ( "pass", 0.0, 0.85, 100 )
+
+
+def test_pass_one_pools_the_differences_of_the_questions():
+    st = an.read_stage( _question( 1, packs={ 10: {} } ) + _question( 2, packs={ 10: { "shift": 0.05 } } ) )
+    r  = an.pass_one( st, 10, 0.02 )
+    assert ( r[ "n" ], r[ "p99" ], r[ "state" ] ) == ( 240, 0.05, "fail" )
+
+
+def test_pass_one_is_invalid_when_the_pack_arm_was_stopped_and_inconclusive_when_it_is_partial_or_absent():
+    inv = _question( packs={ 10: {} } ); inv[ 2 ][ "state" ], inv[ 2 ][ "stop_reason" ] = "incomplete", "ceiling"
+    assert an.pass_one( an.read_stage( inv ), 10, 0.02 )[ "state" ] == "invalid"
+    par = _question( packs={ 10: {} } ); par[ 2 ][ "failed" ] = [ "e001" ]
+    assert an.pass_one( an.read_stage( par ), 10, 0.02 )[ "state" ] == "inconclusive"
+    assert an.pass_one( an.read_stage( _question( packs={ 50: {} } ) ), 10, 0.02 )[ "state" ] == "inconclusive"
+
+
+# --- pass 2: flips at the threshold on boundary entries --------------------------------------------------------------------
+
+def test_pass_two_allows_the_noise_floors_flips_plus_one_and_fails_one_more():
+    noise = _question( noise=0.0 )
+    noise[ 1 ] = _arm( "single2", _moved( _base(), down=[ "e001", "e002" ] ) )                          # two flips between the singles
+    three = an.pass_two( an.read_stage( noise[ :2 ] + [ _arm( "pack10", _moved( _base(), down=[ "e003", "e004", "e005" ] ), size=10 ) ] ), 10 )
+    four  = an.pass_two( an.read_stage( noise[ :2 ] + [ _arm( "pack10", _moved( _base(), down=[ "e003", "e004", "e005", "e006" ] ), size=10 ) ] ), 10 )
+    assert ( three[ "pack_flips" ], three[ "noise_flips" ], three[ "state" ] ) == ( 3, 2, "pass" )
+    assert ( four[ "pack_flips" ], four[ "state" ] ) == ( 4, "fail" )
+
+
+def test_pass_two_counts_flips_only_on_boundary_entries():
+    recs = [ _arm( "single1", _base() ), _arm( "single2", _base() ), _arm( "pack10", _moved( _base(), up=[ "o000", "o001", "o002" ] ), size=10 ) ]
+    r = an.pass_two( an.read_stage( recs ), 10 )
+    assert ( r[ "pack_flips" ], r[ "noise_flips" ], r[ "state" ] ) == ( 0, 0, "pass" )
+
+
+def test_pass_two_pools_the_flips_of_the_questions():
+    q1 = _question( 1, packs={ 10: { "down": [ "e001" ] } } ); q2 = _question( 2, packs={ 10: { "down": [ "e001", "e002" ] } } )
+    r  = an.pass_two( an.read_stage( q1 + q2 ), 10 )
+    assert ( r[ "pack_flips" ], r[ "boundary" ] ) == ( 3, 200 )
+
+
+def test_pass_two_is_invalid_or_inconclusive_with_its_arms():
+    inv = _question( packs={ 10: {} } ); inv[ 2 ][ "state" ], inv[ 2 ][ "stop_reason" ] = "incomplete", "ledger"
+    assert an.pass_two( an.read_stage( inv ), 10 )[ "state" ] == "invalid"
+    assert an.pass_two( an.read_stage( _question( packs={ 50: {} } ) ), 10 )[ "state" ] == "inconclusive"
+
+
+# --- pass 3: the probe entry ---------------------------------------------------------------------------------------------
+
+def test_pass_three_holds_when_all_six_placements_are_within_the_floor_and_fails_when_one_is_not():
+    ok  = an.pass_three( an.read_stage( _question( probe_shift=0.02 ) ), 0.02 )
+    bad = an.pass_three( an.read_stage( _question( probe_shift=0.020001 ) ), 0.02 )
+    assert ( ok[ "state" ], ok[ "placements" ], ok[ "worst" ] ) == ( "pass", 6, 0.02 ) and bad[ "state" ] == "fail"
+
+
+def test_pass_three_is_inconclusive_when_a_placement_is_missing_or_the_probe_has_no_single_value():
+    recs = _question(); recs.pop()
+    assert an.pass_three( an.read_stage( recs ), 0.02 )[ "state" ] == "inconclusive"
+    assert an.pass_three( an.read_stage( _question( probes=False ) ), 0.02 )[ "state" ] == "inconclusive"
+    recs = _question(); recs[ 0 ] = _arm( "single1", { k: v for k, v in _base().items() if k != "e000" } )
+    assert an.pass_three( an.read_stage( recs ), 0.02 )[ "state" ] == "inconclusive"
+
+
+def test_pass_three_is_invalid_when_a_probe_arm_was_stopped():
+    recs = _question(); recs[ -1 ][ "state" ], recs[ -1 ][ "stop_reason" ] = "incomplete", "ceiling"
+    assert an.pass_three( an.read_stage( recs ), 0.02 )[ "state" ] == "invalid"
+
+
+def test_pass_three_wants_each_of_the_six_placements_exactly_once_per_question():
+    recs = _question(); recs[ -1 ] = _probe( 1, "e000", "first", "random", 0.5, _base() )
+    recs[ -1 ][ "arm" ], recs[ -1 ][ "run_name" ] = "probe-extra", "s1-q1-probe-extra"
+    st = an.read_stage( recs )
+    with pytest.raises( ValueError, match="placement .* given twice" ):
+        an.pass_three( st, 0.02 )
+    recs[ -1 ][ "arm" ] = "probe-first-random"
+    with pytest.raises( ValueError, match="given twice" ):
+        an.read_stage( recs )
+
+
+def test_pass_three_pools_the_questions_and_reports_the_worst_difference():
+    r = an.pass_three( an.read_stage( _question( 1 ) + _question( 2, probe_shift=0.01 ) ), 0.02 )
+    assert ( r[ "placements" ], r[ "worst" ], r[ "state" ] ) == ( 12, 0.01, "pass" )
+
+
+# --- all the passes, and the default pack size ---------------------------------------------------------------------------
+
+def test_with_every_pass_met_the_default_is_the_largest_size_and_the_verdict_names_it():
+    rep = an.evaluate( an.read_stage( _question() ) )
+    assert ( rep[ "sizes" ][ 10 ][ "state" ], rep[ "sizes" ][ 50 ][ "state" ], rep[ "sizes" ][ 200 ][ "state" ] ) == ( "pass", "pass", "pass" )
+    assert ( rep[ "default_size" ], rep[ "decision" ] ) == ( 200, "default pack size 200" )
+    assert rep[ "boundary_pooled" ] == 100 and rep[ "boundary_by_question" ] == { 1: 100 }
+
+
+def test_the_default_is_the_largest_size_that_passes_even_when_a_larger_one_fails():
+    rep = an.evaluate( an.read_stage( _question( packs={ 10: {}, 50: {}, 200: { "shift": 0.1 } } ) ) )
+    assert ( rep[ "sizes" ][ 200 ][ "state" ], rep[ "default_size" ] ) == ( "fail", 50 )
+
+
+def test_a_failed_probe_fails_only_the_size_the_probe_was_run_at():
+    rep = an.evaluate( an.read_stage( _question( probe_shift=0.1 ) ) )
+    assert ( rep[ "sizes" ][ 10 ][ "state" ], rep[ "sizes" ][ 50 ][ "state" ], rep[ "sizes" ][ 200 ][ "state" ] ) == ( "pass", "pass", "fail" )
+    assert rep[ "default_size" ] == 50
+
+
+def test_fewer_than_ninety_pooled_boundary_entries_turn_a_pass_into_inconclusive_never_a_pass():
+    rep = an.evaluate( an.read_stage( _question( base=_base( 89 ) ) ) )
+    assert rep[ "boundary_pooled" ] == 89
+    assert all( rep[ "sizes" ][ s ][ "state" ] == "inconclusive" for s in an.PACK_SIZES )
+    assert ( rep[ "default_size" ], rep[ "decision" ] ) == ( None, "inconclusive" )
+    assert an.evaluate( an.read_stage( _question( base=_base( 90 ) ) ) )[ "default_size" ] == 200
+
+
+def test_a_fail_still_reads_fail_when_the_boundary_count_is_short():
+    rep = an.evaluate( an.read_stage( _question( base=_base( 89 ), packs={ 10: { "shift": 0.1 }, 50: {}, 200: {} } ) ) )
+    assert rep[ "sizes" ][ 10 ][ "state" ] == "fail" and rep[ "sizes" ][ 50 ][ "state" ] == "inconclusive"
+
+
+def test_when_no_size_passes_the_decision_is_to_stop_and_ask():
+    rep = an.evaluate( an.read_stage( _question( packs={ 10: { "shift": 0.1 }, 50: { "shift": 0.1 }, 200: { "shift": 0.1 } } ) ) )
+    assert ( rep[ "default_size" ], rep[ "decision" ] ) == ( None, "stop and ask: no pack size passes" )
+
+
+def test_an_invalid_arm_anywhere_means_stop_and_ask_even_if_another_size_passes():
+    recs = _question(); recs[ 4 ][ "state" ], recs[ 4 ][ "stop_reason" ] = "incomplete", "ceiling"          # pack200
+    rep = an.evaluate( an.read_stage( recs ) )
+    assert rep[ "sizes" ][ 200 ][ "state" ] == "invalid" and rep[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_an_unfinished_size_beside_a_pass_names_the_pass_and_lists_the_unresolved_size():
+    recs = [ r for r in _question() if r[ "arm" ] != "pack200" ]
+    rep = an.evaluate( an.read_stage( recs ) )
+    assert ( rep[ "default_size" ], rep[ "unresolved_larger" ] ) == ( 50, [ 200 ] )
+
+
+def test_a_noise_floor_that_cannot_be_measured_makes_every_size_inconclusive():
+    rep = an.evaluate( an.read_stage( [ r for r in _question() if r[ "arm" ] != "single2" ] ) )
+    assert all( rep[ "sizes" ][ s ][ "state" ] == "inconclusive" for s in an.PACK_SIZES ) and rep[ "decision" ] == "inconclusive"
+
+
+# --- the rules that stop the stage ---------------------------------------------------------------------------------------
+
+def _spend( question, tokens, arm="single1" ):
+    """Ensures: returns a tiny clean arm of the question that settled the given tokens."""
+    rec = _arm( arm, { "a": 0.1 }, question=question ); rec[ "totals" ][ "spent_tokens" ] = tokens
+    return rec
+
+
+def _with_boundary( question, n ):
+    """Ensures: returns a clean single1 arm holding n boundary entries."""
+    return _arm( "single1", { f"q{question}b{k:03d}": 0.5 for k in range( n ) }, question=question )
+
+
+def test_spend_above_fifteen_million_after_question_one_stops_the_stage_and_exactly_fifteen_million_does_not():
+    over  = an.stop_rules( an.read_stage( [ _spend( 1, 8_000_000 ), _spend( 1, 7_000_001, "single2" ) ] ), check_arms=False )
+    exact = an.stop_rules( an.read_stage( [ _spend( 1, 8_000_000 ), _spend( 1, 7_000_000, "single2" ) ] ), check_arms=False )
+    assert ( over[ "stop" ], over[ "findings" ][ 0 ][ "rule" ] ) == ( True, "spend_after_question_1" )
+    assert exact[ "stop" ] is False and exact[ "spent_by_question" ] == { 1: 15_000_000 }
+
+
+def test_the_spend_of_an_arm_without_a_settled_figure_is_its_reported_tokens():
+    rec = _spend( 1, None ); rec[ "totals" ][ "tokens_in" ], rec[ "totals" ][ "tokens_out" ] = 15_000_000, 1
+    assert an.stop_rules( an.read_stage( [ rec ] ), check_arms=False )[ "stop" ] is True
+
+
+def test_fewer_than_fifty_pooled_boundary_entries_after_question_two_stops_before_question_three():
+    short = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 29 ) ] ), check_arms=False )
+    ok    = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 30 ) ] ), check_arms=False )
+    assert ( short[ "stop" ], short[ "pooled_boundary" ], short[ "next_step" ] ) == ( True, 49, "stop and ask: under 50 pooled boundary entries after question 2" )
+    assert ( ok[ "stop" ], ok[ "next_step" ] ) == ( False, "run question 3" )
+
+
+def test_the_fifty_rule_is_read_only_after_question_two_and_before_question_three():
+    one = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ), check_arms=False )
+    assert one[ "stop" ] is False and one[ "next_step" ] == "run question 2"
+    three = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ), _with_boundary( 2, 3 ), _with_boundary( 3, 90 ) ] ), check_arms=False )
+    assert three[ "stop" ] is False and three[ "next_step" ] == "evaluate"
+
+
+def test_after_question_three_fewer_than_ninety_allows_the_reserve_question_and_ninety_does_not_need_it():
+    short = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 29 ) ] ), check_arms=False )
+    ok    = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 30 ) ] ), check_arms=False )
+    assert ( short[ "pooled_boundary" ], short[ "next_step" ] ) == ( 89, "run the reserve question" )
+    assert ( ok[ "pooled_boundary" ], ok[ "next_step" ] ) == ( 90, "evaluate" )
+
+
+def test_after_the_reserve_question_fewer_than_ninety_is_inconclusive_and_nothing_more_is_run():
+    st = an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 20 ), _with_boundary( 3, 20 ), _with_boundary( 4, 20 ) ] )
+    r  = an.stop_rules( st, check_arms=False )
+    assert ( r[ "pooled_boundary" ], r[ "next_step" ] ) == ( 80, "evaluate: inconclusive, under 90 pooled boundary entries" )
+
+
+def test_a_single_run_that_is_not_clean_gives_no_boundary_count_and_the_rule_says_so():
+    bad = _with_boundary( 2, 49 ); bad[ "failed" ] = [ "x" ]
+    r   = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ), check_arms=False )
+    assert r[ "next_step" ] == "stop and ask: question 2's single run 1 is not clean" and r[ "stop" ] is True
+
+
+def test_the_stage_total_above_seventy_one_million_is_reported_as_a_breach():
+    r = an.stop_rules( an.read_stage( [ _spend( 1, 71_000_001 ) ] ), check_arms=False )
+    assert any( f[ "rule" ] == "stage_ceiling" for f in r[ "findings" ] ) and r[ "stop" ] is True
+    ok = an.stop_rules( an.read_stage( [ _spend( 1, 14_000_000 ), _spend( 2, 57_000_000 ) ] ), check_arms=False )
+    assert not any( f[ "rule" ] == "stage_ceiling" for f in ok[ "findings" ] ) and ok[ "spent_total" ] == 71_000_000
+
+
+# --- the canary ----------------------------------------------------------------------------------------------------------
+
+def _canary( rows, totals=None, tripped=None ):
+    """Ensures: returns ( arm record, canary record ) for rows given as request dicts."""
+    arm = _arm( "canary", { f"c{k}": 0.1 for k in range( 10 ) }, size=10, rows=rows )
+    if totals: arm[ "totals" ].update( totals )
+    return arm, { "format": "stage1-canary-1", "question": 1, "run_name": "s1-q1-canary", "tripped": [] if tripped is None else tripped, "approved": None }
+
+
+def _row( tokens_out=420, tokens_in=1000, reserve=4000, size=10, status="answered", http_status=None, attempts=1 ):
+    return { "request_hash": "h", "size": size, "status": status, "attempts": attempts, "tokens_in": tokens_in, "tokens_out": tokens_out,
+             "reserve_tokens": reserve, "http_status": http_status }
+
+
+def test_sixty_output_tokens_an_entry_is_fine_and_more_trips_the_canary():
+    ok  = an.check_canary( *_canary( [ _row( tokens_out=600 ) ] ) )
+    bad = an.check_canary( *_canary( [ _row( tokens_out=601 ) ] ) )
+    assert ok[ "tripped" ] == [] and bad[ "tripped" ] == [ "output_per_entry_over_60" ]
+    assert bad[ "output_per_entry" ] == [ 60.1 ]
+
+
+def test_usage_equal_to_the_reserve_is_fine_and_one_over_trips_the_canary():
+    ok  = an.check_canary( *_canary( [ _row( tokens_in=3400, tokens_out=600, reserve=4000 ) ] ) )
+    bad = an.check_canary( *_canary( [ _row( tokens_in=3401, tokens_out=600, reserve=4000 ) ] ) )
+    assert ok[ "tripped" ] == [] and bad[ "tripped" ] == [ "usage_over_reserve" ]
+
+
+def test_any_refusal_trips_the_canary_by_status_by_http_422_or_by_the_total():
+    for rows, totals in ( ( [ _row( status="refused" ) ], None ), ( [ _row( http_status=422 ) ], None ), ( [ _row() ], { "refused_422": 1 } ) ):
+        assert an.check_canary( *_canary( rows, totals ) )[ "tripped" ] == [ "refusal" ], rows
+
+
+def test_the_trips_come_in_a_fixed_order_and_a_row_never_sent_is_skipped():
+    r = an.check_canary( *_canary( [ _row( tokens_out=700, tokens_in=9000, status="refused" ), _row( tokens_in=None, tokens_out=None, reserve=None, status="not_reached", attempts=0 ) ] ) )
+    assert r[ "tripped" ] == [ "output_per_entry_over_60", "usage_over_reserve", "refusal" ]
+
+
+def test_an_answered_row_without_usage_cannot_be_checked_and_is_listed_for_a_human():
+    r = an.check_canary( *_canary( [ _row( tokens_in=None, tokens_out=None ) ] ) )
+    assert r[ "tripped" ] == [ "usage_missing" ] and r[ "unverifiable" ] == 1
+
+
+def test_a_disagreement_with_the_drivers_own_list_is_reported_both_ways():
+    r = an.check_canary( *_canary( [ _row( tokens_out=700 ) ], tripped=[ "refusal" ] ) )
+    assert ( r[ "agrees" ], r[ "analysis_only" ], r[ "driver_only" ] ) == ( False, [ "output_per_entry_over_60" ], [ "refusal" ] )
+    assert an.check_canary( *_canary( [ _row() ] ) )[ "agrees" ] is True
+
+
+def test_the_canary_reports_its_failed_unasked_and_unreached_counts():
+    arm, can = _canary( [ _row() ] ); arm[ "failed" ], arm[ "unasked" ], arm[ "not_reached" ] = [ "a" ], [ "b", "c" ], []
+    r = an.check_canary( arm, can )
+    assert ( r[ "failed" ], r[ "unasked" ], r[ "not_reached" ] ) == ( 1, 2, 0 )
+
+
+# --- the page arm --------------------------------------------------------------------------------------------------------
+
+def _pages( s1, s2, pack ):
+    return [ _arm( "page-single1", s1 ), _arm( "page-single2", s2 ), _arm( "page-pack", pack, size=200 ) ]
+
+
+def _two_hundred_pages():
+    """Ensures: returns 200 page overlaps, two of them above the floor."""
+    return { **{ f"p{k:03d}": 0.05 for k in range( 200 ) }, "p000": 0.9, "p001": 0.6 }
+
+
+def test_a_page_arm_that_lost_an_entry_within_the_limit_is_read_over_the_pages_answered_in_all_three():
+    base = _two_hundred_pages()
+    s1   = _arm( "page-single1", base ); s1[ "answers" ] = [ a for a in s1[ "answers" ] if a[ "id" ] != "p150" ]; s1[ "failed" ] = [ "p150" ]
+    r    = an.analyze_pages( an.read_stage( [ s1, _arm( "page-single2", base ), _arm( "page-pack", base, size=200 ) ] ) )[ 1 ]
+    assert ( r[ "state" ], r[ "chosen_single1" ], r[ "chosen_pack" ] ) == ( "pass", [ "p000", "p001" ], [ "p000", "p001" ] )
+
+
+def test_a_chosen_page_lost_from_one_arm_is_left_out_of_all_three_so_the_loss_is_not_read_as_a_change():
+    base = _two_hundred_pages()
+    s1   = _arm( "page-single1", base ); s1[ "answers" ] = [ a for a in s1[ "answers" ] if a[ "id" ] != "p001" ]; s1[ "failed" ] = [ "p001" ]
+    r    = an.analyze_pages( an.read_stage( [ s1, _arm( "page-single2", base ), _arm( "page-pack", base, size=200 ) ] ) )[ 1 ]
+    assert ( r[ "state" ], r[ "chosen_single1" ], r[ "chosen_single2" ], r[ "chosen_pack" ] ) == ( "pass", [ "p000" ], [ "p000" ], [ "p000" ] )
+
+
+@pytest.mark.parametrize( "which", [ "page-single2", "page-pack" ] )
+@pytest.mark.parametrize( "lost", [ "p150", "p001" ] )
+def test_a_page_lost_from_the_second_single_run_or_the_pack_is_left_out_of_all_three_too( which, lost ):
+    base = _two_hundred_pages()
+    arms = { "page-single1": _arm( "page-single1", base ), "page-single2": _arm( "page-single2", base ), "page-pack": _arm( "page-pack", base, size=200 ) }
+    arms[ which ][ "answers" ] = [ a for a in arms[ which ][ "answers" ] if a[ "id" ] != lost ]; arms[ which ][ "failed" ] = [ lost ]
+    r    = an.analyze_pages( an.read_stage( list( arms.values() ) ) )[ 1 ]
+    want = [ "p000" ] if lost == "p001" else [ "p000", "p001" ]
+    assert ( r[ "state" ], r[ "chosen_single1" ], r[ "chosen_single2" ], r[ "chosen_pack" ] ) == ( "pass", want, want, want )
+
+
+def test_pages_chosen_the_same_after_packing_pass_and_the_differences_are_reported():
+    base = { "p1": 0.9, "p2": 0.6, "p3": 0.1 }
+    r = an.analyze_pages( an.read_stage( _pages( base, _moved( base, 0.01 ), _moved( base, 0.03 ) ) ) )[ 1 ]
+    assert r[ "state" ] == "pass" and r[ "chosen_single1" ] == [ "p1", "p2" ] and r[ "chosen_pack" ] == [ "p1", "p2" ]
+    assert ( r[ "pack_p99" ], r[ "pack_max" ], r[ "noise_p99" ], r[ "noise_max" ] ) == ( 0.03, 0.03, 0.01, 0.01 )
+
+
+def test_a_changed_set_of_chosen_pages_is_a_fail_for_packing_the_page_asks():
+    base = { "p1": 0.9, "p2": 0.31, "p3": 0.1 }
+    r = an.analyze_pages( an.read_stage( _pages( base, base, _moved( base, -0.02 ) ) ) )[ 1 ]
+    assert r[ "state" ] == "fail" and r[ "set_changed_by_packing" ] is True and r[ "chosen_pack" ] == [ "p1" ]
+
+
+def test_a_set_that_changes_between_the_two_single_runs_is_reported_as_noise_not_as_a_fail():
+    base = { "p1": 0.9, "p2": 0.31 }
+    r = an.analyze_pages( an.read_stage( _pages( base, _moved( base, -0.02 ), base ) ) )[ 1 ]
+    assert r[ "state" ] == "pass" and r[ "set_changed_by_noise" ] is True
+
+
+def test_the_chosen_pages_are_the_floor_and_the_cap_of_the_tool_itself():
+    base = { f"p{k:02d}": 0.9 - k / 100 for k in range( an.MAX_PAGES + 3 ) }
+    r = an.analyze_pages( an.read_stage( _pages( base, base, base ) ) )[ 1 ]
+    assert len( r[ "chosen_single1" ] ) == an.MAX_PAGES
+
+
+def test_choose_pages_skips_a_malformed_answer_and_a_page_under_the_floor_and_keeps_the_rest():
+    from cosa.repo.symindex import verdict as vd
+    answers = [ { "id": "bad",   "probabilities": { "reuse": 0.9, "extend": 0.9, "unrelated": 0.9 } },      # sums to 2.7: malformed
+                { "id": "low",   "probabilities": _probs( 0.1 ) },
+                { "id": "good",  "probabilities": _probs( 0.8 ) },
+                { "id": "edge",  "probabilities": _probs( vd.POLICY[ "floor" ] ) } ]
+    assert vd.malformed_reason( answers[ 0 ][ "probabilities" ], vd.POLICY ) == "sum_not_one"
+    assert [ c[ "slug" ] for c in an._choose_pages( answers, vd.POLICY ) ] == [ "good", "edge" ]
+
+
+def test_choose_pages_breaks_a_tie_by_slug_whatever_order_the_answers_arrive_in():
+    from cosa.repo.symindex import verdict as vd
+    answers = [ { "id": s, "probabilities": _probs( 0.7 ) } for s in ( "c", "a", "b" ) ]      # three equal overlaps, arriving out of slug order
+    answers.append( { "id": "top", "probabilities": _probs( 0.95 ) } )
+    assert [ c[ "slug" ] for c in an._choose_pages( answers, vd.POLICY ) ] == [ "top", "a", "b", "c" ]
+
+
+def test_choose_pages_reports_the_overlap_rounded_to_six_places_as_a_literal():
+    from cosa.repo.symindex import verdict as vd
+    answers = [ { "id": "r", "probabilities": { "reuse": 0.4234567, "extend": 0.1, "unrelated": 0.4765433 } } ]      # overlap 0.5234567 sums reuse and extend
+    assert an._choose_pages( answers, vd.POLICY ) == [ { "slug": "r", "p_overlap": 0.523457 } ]
+
+
+def test_the_page_arm_is_inconclusive_or_invalid_with_its_arms_and_absent_questions_are_skipped():
+    recs = _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } ); recs[ 2 ][ "failed" ] = [ "p1" ]
+    assert an.analyze_pages( an.read_stage( recs ) )[ 1 ][ "state" ] == "inconclusive"
+    recs = _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } ); recs[ 2 ][ "state" ], recs[ 2 ][ "stop_reason" ] = "incomplete", "ceiling"
+    assert an.analyze_pages( an.read_stage( recs ) )[ 1 ][ "state" ] == "invalid"
+    assert an.analyze_pages( an.read_stage( _question() ) ) == {}
+    assert an.analyze_pages( an.read_stage( _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } )[ :2 ] ) )[ 1 ][ "state" ] == "inconclusive"
+
+
+# --- cases a mutation showed unguarded -----------------------------------------------------------------------------------
+
+def test_exactly_ninety_pooled_after_the_reserve_question_is_enough_to_evaluate():
+    r = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 30 ), _arm( "single1", { "far": 0.05 }, question=4 ) ] ), check_arms=False )
+    assert ( r[ "pooled_boundary" ], r[ "next_step" ] ) == ( 90, "evaluate" )
+
+
+def test_a_question_whose_single_run_is_not_clean_adds_nothing_to_the_pooled_count():
+    bad = _with_boundary( 2, 49 ); bad[ "failed" ] = [ "x" ]
+    assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ), check_arms=False )[ "pooled_boundary" ] == 20
+    recs = _question() + [ dict( r, question=2, run_name=f"s1-q2-{r[ 'arm' ]}" ) for r in _question() if r[ "arm" ] == "single1" ]
+    recs[ -1 ][ "failed" ] = [ "e000" ]
+    assert an.evaluate( an.read_stage( recs ) )[ "boundary_by_question" ] == { 1: 100 }
+
+
+def test_a_stopped_arm_outranks_a_failed_pass_when_the_size_is_named():
+    recs = _question( packs={ 10: {}, 50: {}, 200: { "shift": 0.1 } } ); recs[ -1 ][ "state" ], recs[ -1 ][ "stop_reason" ] = "incomplete", "ceiling"
+    rep = an.evaluate( an.read_stage( recs ) )
+    assert rep[ "sizes" ][ 200 ][ "pass_one" ][ "state" ] == "fail" and rep[ "sizes" ][ 200 ][ "pass_three" ][ "state" ] == "invalid"
+    assert rep[ "sizes" ][ 200 ][ "state" ] == "invalid"
+
+
+def test_an_empty_stage_has_no_noise_floor_and_no_decision_to_make():
+    assert an.noise_floor( {} )[ "state" ] == "inconclusive"
+    assert an.evaluate( {} )[ "decision" ] == "inconclusive"
+
+
+def test_a_stopped_single_run_makes_every_size_invalid_and_the_decision_a_stop():
+    recs = _question(); recs[ 1 ][ "state" ], recs[ 1 ][ "stop_reason" ] = "incomplete", "ledger"
+    rep = an.evaluate( an.read_stage( recs ) )
+    assert rep[ "noise_floor" ][ "state" ] == "invalid" and all( rep[ "sizes" ][ s ][ "state" ] == "invalid" for s in an.PACK_SIZES )
+    assert rep[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_a_row_that_was_refused_without_usage_is_not_counted_unverifiable_but_an_answered_one_is():
+    r = an.check_canary( *_canary( [ _row( tokens_in=None, tokens_out=None, status="refused" ), _row( tokens_in=None, tokens_out=None ) ] ) )
+    assert r[ "unverifiable" ] == 1
+
+
+def test_a_row_with_output_but_no_input_usage_is_skipped_rather_than_crashing_the_reserve_check():
+    r = an.check_canary( *_canary( [ _row( tokens_in=None, tokens_out=600, reserve=1 ) ] ) )
+    assert r[ "tripped" ] == [ "usage_missing" ] and r[ "output_per_entry" ] == [] and r[ "unverifiable" ] == 1
+
+
+# --- the canary also trips on missing usage and on an unfinished arm, as the driver writes it ---------------------------------
+
+def test_the_canary_trips_on_missing_usage_and_on_an_unfinished_arm_in_the_drivers_order():
+    arm, can = _canary( [ _row( tokens_in=None, tokens_out=None ) ] ); arm[ "state" ] = "incomplete"
+    assert an.check_canary( arm, can )[ "tripped" ] == [ "usage_missing", "incomplete" ]
+    assert an.CANARY_TRIPS == ( "output_per_entry_over_60", "usage_over_reserve", "refusal", "usage_missing", "model_mismatch", "incomplete", "nothing_measured" )
+
+
+@pytest.mark.parametrize( "over", [ { "failed": [ "a" ] }, { "unasked": [ "a" ] }, { "not_reached": [ "a" ] } ] )
+def test_a_canary_arm_with_a_failed_unasked_or_unreached_entry_trips_incomplete(over):
+    arm, can = _canary( [ _row() ] ); arm.update( over )
+    assert an.check_canary( arm, can )[ "tripped" ] == [ "incomplete" ]
+
+
+def test_the_drivers_five_names_agree_with_the_recomputed_ones():
+    arm, can = _canary( [ _row() ], tripped=[] )
+    assert an.check_canary( arm, can )[ "agrees" ] is True
+    arm, can = _canary( [ _row( tokens_in=None, tokens_out=None ) ], tripped=[ "usage_missing" ] )
+    assert an.check_canary( arm, can )[ "agrees" ] is True
+
+
+# --- the other policy boundaries ------------------------------------------------------------------------------------------
+
+def _with_probs( arm, probs ):
+    """Ensures: returns an arm record answering each id with the given probabilities."""
+    rec = _arm( arm, { i: 0.0 for i in probs } )
+    rec[ "answers" ] = [ { "id": i, "probabilities": p } for i, p in probs.items() ]
+    return rec
+
+
+def test_the_other_boundaries_are_the_page_floor_and_the_confidence_bar_of_the_policy():
+    assert ( an.FLOOR, an.CONFIDENCE_BAR ) == ( 0.3, 0.9 )
+
+
+def test_flips_at_the_page_floor_are_counted_over_every_entry_for_the_pack_and_for_the_noise():
+    s1 = _arm( "single1", { "x": 0.3, "y": 0.29, "z": 0.8 } )
+    s2 = _arm( "single2", { "x": 0.29, "y": 0.29, "z": 0.8 } )
+    pk = _arm( "pack10", { "x": 0.29, "y": 0.3, "z": 0.2 }, size=10 )
+    r  = an.other_boundaries( an.read_stage( [ s1, s2, pk ] ), 10 )
+    assert r[ 1 ][ "floor" ] == { "pack": 3, "noise": 1 }
+
+
+def test_flips_at_the_confidence_bar_use_the_largest_probability_of_each_answer():
+    hi, lo = { "reuse": 0.9, "extend": 0.0, "unrelated": 0.1 }, { "reuse": 0.89, "extend": 0.0, "unrelated": 0.11 }
+    s1 = _with_probs( "single1", { "x": hi, "y": lo } ); s2 = _with_probs( "single2", { "x": hi, "y": lo } )
+    pk = _with_probs( "pack10", { "x": lo, "y": hi } ); pk[ "size" ] = 10
+    r  = an.other_boundaries( an.read_stage( [ s1, s2, pk ] ), 10 )
+    assert r[ 1 ][ "confidence" ] == { "pack": 2, "noise": 0 }
+
+
+def test_the_other_boundaries_are_none_for_a_question_whose_arms_are_not_clean_or_absent():
+    s1 = _arm( "single1", { "x": 0.3 } ); s2 = _arm( "single2", { "x": 0.3 } )
+    assert an.other_boundaries( an.read_stage( [ s1, s2 ] ), 10 ) == { 1: None }
+    pk = _arm( "pack10", { "x": 0.3 }, size=10, failed=[ "x" ] )
+    assert an.other_boundaries( an.read_stage( [ s1, s2, pk ] ), 10 ) == { 1: None }
+
+
+# --- tokens, retries and cost ----------------------------------------------------------------------------------------------
+
+def _sent( tin, tout, attempts=1, log=None, status="answered" ):
+    return { "request_hash": "h", "size": 10, "status": status, "attempts": attempts, "tokens_in": tin, "tokens_out": tout, "attempt_log": [ { "status": c } for c in ( [ 200 ] if log is None else log ) ] }
+
+
+def test_request_statistics_count_only_requests_that_were_sent_and_their_mean_tokens():
+    rows = [ _sent( 1000, 400 ), _sent( 2000, 600, attempts=3, log=[ 429, 529, 200 ] ), { "request_hash": "n", "size": 10, "status": "not_reached", "attempts": 0, "tokens_in": None, "tokens_out": None, "attempt_log": [] } ]
+    arm  = _arm( "pack10", { "a": 0.1 }, size=10, rows=rows, transport_calls=[] )
+    st   = an.request_stats( an.read_stage( [ arm ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "requests_sent" ], st[ "tokens_in_per_request" ], st[ "tokens_out_per_request" ] ) == ( 2, 1500.0, 500.0 )
+    assert ( st[ "retried_calls" ], st[ "extra_attempts" ], st[ "usage_missing" ] ) == ( 1, 2, 0 )
+    assert st[ "tokens_out_per_entry" ] == 50.0 and ( st[ "attempts_429" ], st[ "attempts_529" ] ) == ( 1, 1 ) and "retry_statuses" not in st
+
+
+def test_the_429_and_529_counts_come_from_every_row_including_a_request_that_failed_outright_and_count_each_attempt_once():
+    rows = [ _sent( 1000, 400, attempts=4, log=[ 429, 429, 500, 200 ] ), _sent( None, None, attempts=4, log=[ 429, 429, 429, 529 ], status="failed" ),
+             _sent( None, None, attempts=3, log=[ 529, 529, 529 ], status="failed" ) ]
+    calls = [ { "attempts": 4, "attempt_log": [ { "status": 429 }, { "status": 429 }, { "status": 500 }, { "status": 200 } ] } ]          # the answered row again; it must not count twice
+    st    = an.request_stats( an.read_stage( [ _arm( "pack10", { "a": 0.1 }, size=10, rows=rows, transport_calls=calls ) ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "attempts_429" ], st[ "attempts_529" ] ) == ( 5, 4 ) and ( st[ "retried_calls" ], st[ "extra_attempts" ] ) == ( 3, 8 )
+
+
+def test_a_row_written_without_an_attempt_log_counts_no_429_or_529_and_the_report_still_reads():
+    row = _sent( 1000, 400, attempts=2 ); del row[ "attempt_log" ]
+    st  = an.request_stats( an.read_stage( [ _arm( "pack10", { "a": 0.1 }, size=10, rows=[ row ], transport_calls=[] ) ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "attempts_429" ], st[ "attempts_529" ], st[ "extra_attempts" ] ) == ( 0, 0, 1 )
+
+
+def test_request_statistics_count_a_sent_request_without_usage_as_missing_and_leave_it_out_of_the_means():
+    arm = _arm( "pack10", { "a": 0.1 }, size=10, rows=[ _sent( 1000, 400 ), _sent( None, None ) ] )
+    st  = an.request_stats( an.read_stage( [ arm ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "requests_sent" ], st[ "usage_missing" ], st[ "tokens_in_per_request" ] ) == ( 2, 1, 1000.0 )
+
+
+def test_an_arm_with_no_request_sent_has_no_means():
+    st = an.request_stats( an.read_stage( [ _arm( "pack10", { "a": 0.1 }, size=10 ) ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "requests_sent" ], st[ "tokens_in_per_request" ], st[ "tokens_out_per_entry" ] ) == ( 0, None, None )
+
+
+def test_the_cost_of_a_search_is_the_default_pack_arm_plus_the_page_pack_at_the_pinned_price():
+    pack = _arm( "pack200", { "a": 0.1 }, size=200 ); pack[ "totals" ][ "spent_tokens" ] = 1_000_000
+    page = _arm( "page-pack", { "p": 0.1 }, size=200 ); page[ "totals" ][ "spent_tokens" ] = 100_000
+    c    = an.cost_per_search( an.read_stage( [ pack, page ] ), 200 )
+    assert c[ 1 ] == { "entry_tokens": 1_000_000, "page_tokens": 100_000, "dollars": 0.0462 }
+    assert c[ "mean_dollars" ] == 0.0462
+
+
+def test_the_cost_is_none_without_a_default_size_and_the_page_part_is_zero_when_there_is_no_page_arm():
+    pack = _arm( "pack50", { "a": 0.1 }, size=50 ); pack[ "totals" ][ "spent_tokens" ] = 2_000_000
+    st   = an.read_stage( [ pack ] )
+    assert an.cost_per_search( st, None ) is None
+    assert an.cost_per_search( st, 50 )[ 1 ] == { "entry_tokens": 2_000_000, "page_tokens": 0, "dollars": 0.084 }
+
+
+# --- the old-shape arm, reported only -------------------------------------------------------------------------------------
+
+def test_the_old_shape_report_compares_only_the_entries_that_were_cache_hits():
+    s1  = _arm( "single1", { "a": 0.5, "b": 0.5, "c": 0.5, "d": 0.9 } )
+    old = _arm( "old", { "a": 0.5, "b": 0.45, "c": 0.4 }, size=1, run_name=NO_NAME, state="incomplete" )
+    r   = an.old_shape_report( an.read_stage( [ s1, old ] ) )[ 1 ]
+    assert ( r[ "hits" ], r[ "p99" ], r[ "max" ], r[ "boundary_flips" ] ) == ( 3, 0.1, 0.1, 2 )
+    assert r[ "note" ] == "reported only, no pass or fail"
+
+
+def test_a_question_with_no_old_shape_arm_or_no_clean_single_run_is_left_out_of_the_old_shape_report():
+    assert an.old_shape_report( an.read_stage( [ _arm( "single1", { "a": 0.5 } ) ] ) ) == {}
+    s1 = _arm( "single1", { "a": 0.5 }, failed=[ "a" ] ); old = _arm( "old", { "a": 0.5 }, run_name=NO_NAME )
+    assert an.old_shape_report( an.read_stage( [ s1, old ] ) ) == { 1: None }
+
+
+def test_the_old_shape_arm_is_read_from_the_cache_through_the_real_request_builder(tmp_path):
+    from lupin_mcp import reuse_tools as rt
+    entries = [ { "id": "m.a", "sig": "()", "doc": "does a" }, { "id": "m.b", "sig": "()", "doc": "does b" }, { "id": "m.c", "sig": "()", "doc": "does c" } ]
+    cache   = rt.JevCache( tmp_path )
+    for rec, probs in ( ( entries[ 0 ], { "reuse": 0.8, "extend": 0.1, "unrelated": 0.1 } ), ( entries[ 1 ], { "reuse": 0.0, "extend": 0.0, "unrelated": 1.0 } ) ):
+        body = rt.build_request( "a need", rt.entry_text( rec ) )
+        cache.put( rt.request_hash( body ), { "answers": { "fit": { "choice": "x", "confidence": 1.0, "probabilities": probs, "type": "choice" } }, "model": "jev-1.13.0" } )
+    rec = an.old_shape_arm( 2, tmp_path, "a need", entries )
+    arm = an.read_arm( rec )
+    assert ( rec[ "arm" ], rec[ "run_name" ], rec[ "question" ], rec[ "size" ], rec[ "cache_hits" ] ) == ( "old", None, 2, 1, 2 )
+    assert rec[ "entry_ids" ] == [ "m.a", "m.b", "m.c" ] and arm[ "overlaps" ] == { "m.a": 0.9, "m.b": 0.0 }
+    assert ( rec[ "state" ], rec[ "not_reached" ] ) == ( "incomplete", [ "m.c" ] ) and arm[ "status" ] == "inconclusive"
+
+
+def test_the_old_shape_arm_is_complete_only_when_every_entry_was_a_hit_and_a_bad_answer_is_malformed(tmp_path):
+    from lupin_mcp import reuse_tools as rt
+    entries = [ { "id": "m.a", "sig": "()", "doc": "does a" } ]
+    body = rt.build_request( "n", rt.entry_text( entries[ 0 ] ) )
+    rt.JevCache( tmp_path ).put( rt.request_hash( body ), { "answers": {}, "model": "jev-1.13.0" } )
+    rec = an.old_shape_arm( 1, tmp_path, "n", entries )
+    assert rec[ "state" ] == "complete" and an.read_arm( rec )[ "malformed" ] == { "m.a": "not_a_mapping" }
+
+
+def _extra_arms( question, overlaps, answers=None ):
+    """Ensures: returns the canary and the three page arms of a question."""
+    ids = list( overlaps )[ :10 ]
+    can = _arm( "canary", { i: overlaps[ i ] for i in ids }, question=question, size=10 )
+    pages = { "p1": 0.9, "p2": 0.6, "p3": 0.1 }
+    return [ can ] + [ _arm( n, pages, question=question, size=s ) for n, s in ( ( "page-single1", 1 ), ( "page-single2", 1 ), ( "page-pack", 200 ) ) ]
+
+
+def _complete( question=1, **kw ):
+    """Ensures: returns the fifteen arms the plan runs for one question."""
+    return _question( question, **kw ) + _extra_arms( question, _base() )
+
+
+# --- the report ----------------------------------------------------------------------------------------------------------
+
+def test_the_report_gathers_every_part_and_the_text_names_the_decision_and_the_next_step():
+    rep = an.build_report( _question(), canaries=[] )
+    assert set( rep ) >= { "decision", "next_step", "evaluate", "stop_rules", "pages", "other_boundaries", "request_stats", "cost", "old_shape", "canaries" }
+    assert rep[ "decision" ] == "default pack size 200"
+    text = an.render( rep )
+    assert "default pack size 200" in text and rep[ "next_step" ] in text and "boundary entries pooled: 100" in text
+
+
+def test_the_report_names_each_size_with_its_three_numbers_and_each_arm_that_was_not_clean():
+    recs = _question(); recs[ 3 ][ "failed" ] = [ "e001" ]
+    text = an.render( an.build_report( recs, canaries=[] ) )
+    assert "pack 50" in text and "inconclusive" in text and "s1-q1-pack50" in text
+    assert "not clean: s1-q1-pack50" in text and "not clean: s1-q1-pack10" not in text and "not clean: s1-q1-single1" not in text   # only arms that are not clean are named as such
+
+
+def test_a_canary_that_disagrees_with_the_driver_is_listed_in_the_report():
+    arm, can = _canary( [ _row( tokens_out=700 ) ], tripped=[] )
+    arm[ "question" ] = 1
+    rep = an.build_report( _question(), canaries=[ ( arm, can ) ] )
+    assert rep[ "canaries" ][ 0 ][ "agrees" ] is False
+    assert "output_per_entry_over_60" in an.render( rep )
+
+
+def test_real_answers_copied_into_three_questions_reach_the_ninety_and_a_default_through_every_function():
+    fx   = json.loads( REAL.read_text() )
+    recs = []
+    for q in ( 1, 2, 3 ):
+        ov = { r[ "id" ]: 0.0 for r in fx[ "answers" ] }
+        for name, size in ( ( "single1", 1 ), ( "single2", 1 ), ( "pack10", 10 ), ( "pack50", 50 ), ( "pack200", 200 ) ):
+            recs.append( _arm( name, ov, question=q, size=size, answers=fx[ "answers" ] ) )
+        recs += [ dict( r, answers=fx[ "answers" ], entry_ids=[ a[ "id" ] for a in fx[ "answers" ] ] ) for r in _probes( q, fx[ "answers" ][ 0 ][ "id" ], ov ) ]
+        recs += _extra_arms( q, ov, fx[ "answers" ] )
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "evaluate" ][ "boundary_pooled" ] == 99 and rep[ "evaluate" ][ "boundary_by_question" ] == { 1: 33, 2: 33, 3: 33 }
+    assert rep[ "decision" ] == "default pack size 200" and rep[ "next_step" ] == "evaluate"
+
+
+def test_real_answers_of_one_question_alone_read_inconclusive_and_ask_for_question_two():
+    fx   = json.loads( REAL.read_text() )
+    ov   = { r[ "id" ]: 0.0 for r in fx[ "answers" ] }
+    recs = [ _arm( n, ov, size=s, answers=fx[ "answers" ] ) for n, s in ( ( "single1", 1 ), ( "single2", 1 ), ( "pack10", 10 ), ( "pack50", 50 ), ( "pack200", 200 ) ) ]
+    recs += _extra_arms( 1, ov, fx[ "answers" ] )
+    rep  = an.build_report( recs, canaries=[] )
+    assert rep[ "evaluate" ][ "boundary_pooled" ] == 33 and rep[ "next_step" ].startswith( "run question 1's remaining arms: probe-first-random" )
+    rep = an.build_report( recs + _probes( 1, next( iter( ov ) ), ov ), canaries=[] )
+    assert rep[ "next_step" ] == "run question 2"
+    assert all( rep[ "evaluate" ][ "sizes" ][ s ][ "state" ] == "inconclusive" for s in an.PACK_SIZES )
+
+
+# --- the command line ----------------------------------------------------------------------------------------------------
+
+def test_the_command_reads_a_folder_of_arm_files_and_canary_files_and_prints_the_report(tmp_path, capsys):
+    for rec in _question():
+        (tmp_path / f"{rec[ 'run_name' ]}.json").write_text( json.dumps( rec ) )
+    arm, can = _canary( [ _row() ] )
+    (tmp_path / "s1-q1-canary.canary.json").write_text( json.dumps( can ) )
+    (tmp_path / "s1-q1-canary.json").write_text( json.dumps( arm ) )
+    assert an.main( [ str( tmp_path ) ] ) == 0
+    out = capsys.readouterr().out
+    assert "default pack size 200" in out and "canary" in out
+
+
+def test_the_command_skips_the_probe_plan_the_driver_writes_beside_the_arms(tmp_path, capsys):
+    recs = _complete()
+    assert len( recs ) == len( an.REQUIRED_ARMS )
+    for rec in recs:
+        (tmp_path / f"{rec[ 'run_name' ]}.json").write_text( json.dumps( rec ) )
+    (tmp_path / "s1-q1-probe-plan.json").write_text( REAL_PLAN.read_text() )
+    assert json.loads( REAL_PLAN.read_text() )[ "question" ] == 1 and "format" not in json.loads( REAL_PLAN.read_text() )
+    assert an.main( [ str( tmp_path ) ] ) == 0
+    out = capsys.readouterr().out
+    assert "Decision:" in out and "probe-plan" not in out and "s1-q1-pack200: lost 0 of limit 0" in out
+
+
+def test_a_folder_holding_only_a_probe_plan_has_no_arm_files(tmp_path, capsys):
+    (tmp_path / "s1-q1-probe-plan.json").write_text( REAL_PLAN.read_text() )
+    assert an.main( [ str( tmp_path ) ] ) == 2
+    assert "no arm files" in capsys.readouterr().out
+
+
+def test_any_other_json_file_that_is_not_an_arm_still_stops_the_command(tmp_path):
+    (tmp_path / "notes.json").write_text( REAL_PLAN.read_text() )
+    with pytest.raises( ValueError, match = "expected format" ):
+        an.main( [ str( tmp_path ) ] )
+
+
+def test_the_command_with_an_empty_folder_says_there_is_nothing_to_read(tmp_path, capsys):
+    assert an.main( [ str( tmp_path ) ] ) == 2
+    assert "no arm files" in capsys.readouterr().out
+
+
+# --- canary retries and the sixth trip -----------------------------------------------------------------------------------
+
+def test_a_canary_that_sent_no_request_trips_nothing_measured():
+    for rows in ( [], [ _row( tokens_in=None, tokens_out=None, reserve=None, status="not_reached", attempts=0 ) ] ):
+        assert an.check_canary( *_canary( rows ) )[ "tripped" ] == [ "nothing_measured" ], rows
+    assert an.check_canary( *_canary( [ _row() ] ) )[ "tripped" ] == []
+
+
+def test_the_canary_attempts_of_one_question_are_read_side_by_side_by_attempt():
+    first  = _arm( "canary", { "a": 0.1 }, size=10 )
+    second = _arm( "canary", { "a": 0.1 }, size=10, run_name="s1-q1-canary-a2", attempt=2, retry_reason="refused" )
+    st = an.read_stage( [ first, second ] )
+    assert sorted( st[ 1 ] ) == [ "canary", "canary-a2" ]
+    assert ( st[ 1 ][ "canary" ][ "attempt" ], st[ 1 ][ "canary-a2" ][ "attempt" ] ) == ( 1, 2 )
+    assert st[ 1 ][ "canary-a2" ][ "retry_reason" ] == "refused" and st[ 1 ][ "canary" ][ "retry_reason" ] is None
+
+
+def test_a_third_attempt_is_a_third_key_and_the_same_attempt_twice_is_refused():
+    recs = [ _arm( "canary", { "a": 0.1 }, size=10, run_name=f"r{a}", attempt=a ) for a in ( 1, 2, 3 ) ]
+    assert sorted( an.read_stage( recs )[ 1 ] ) == [ "canary", "canary-a2", "canary-a3" ]
+    with pytest.raises( ValueError, match="given twice" ):
+        an.read_stage( [ recs[ 1 ], dict( recs[ 1 ], run_name="other" ) ] )
+
+
+def test_the_cost_skips_a_question_with_no_pack_arm_of_the_default_size_and_has_no_mean_without_any():
+    a = _arm( "pack200", { "a": 0.1 }, size=200 ); a[ "totals" ][ "spent_tokens" ] = 1_000_000
+    b = _arm( "pack50", { "a": 0.1 }, question=2, size=50 )
+    c = an.cost_per_search( an.read_stage( [ a, b ] ), 200 )
+    assert sorted( c, key=str ) == [ 1, "mean_dollars" ] and c[ "mean_dollars" ] == 0.042
+    assert an.cost_per_search( an.read_stage( [ b ] ), 200 ) == { "mean_dollars": None }
+
+
+def test_the_command_refuses_a_canary_file_with_no_arm_file_beside_it(tmp_path):
+    (tmp_path / "s1-q1-single1.json").write_text( json.dumps( _arm( "single1", { "a": 0.1 } ) ) )
+    (tmp_path / "s1-q1-canary.canary.json").write_text( json.dumps( { "tripped": [], "run_name": "s1-q1-canary" } ) )
+    with pytest.raises( ValueError, match="no arm file" ):
+        an.main( [ str( tmp_path ) ] )
+
+
+def test_an_old_arm_that_shares_no_entry_with_single_run_one_has_no_percentile_and_no_maximum():
+    s1  = _arm( "single1", { "a": 0.5 } ); old = _arm( "old", { "zzz": 0.5 }, run_name=NO_NAME )
+    r   = an.old_shape_report( an.read_stage( [ s1, old ] ) )[ 1 ]
+    assert ( r[ "hits" ], r[ "p99" ], r[ "max" ], r[ "boundary_flips" ] ) == ( 1, None, None, 0 )
+
+
+# --- ruling R1: lost entries ---------------------------------------------------------------------------------------------
+
+def _lossy( n, lost, arm="single1", **over ):
+    """Ensures: returns an arm of n entries whose first `lost` ids failed with no answer."""
+    ids  = [ f"e{k:05d}" for k in range( n ) ]
+    rec  = _arm( arm, { i: 0.05 for i in ids }, **over )
+    rec[ "answers" ] = rec[ "answers" ][ lost: ]
+    rec[ "failed" ]  = ids[ :lost ]
+    return rec
+
+
+def test_the_lost_entry_limit_is_one_in_two_hundred_rounded_down():
+    assert an.LOST_ONE_IN == 200
+    assert [ an.lost_limit( n ) for n in ( 0, 1, 199, 200, 399, 400, 7705, 7800 ) ] == [ 0, 0, 0, 1, 1, 2, 38, 39 ]
+
+
+def test_an_arm_of_7705_entries_may_lose_38_and_no_more_to_be_judged():
+    ok  = an.read_arm( _lossy( 7705, 38 ) )
+    bad = an.read_arm( _lossy( 7705, 39 ) )
+    assert ( ok[ "status" ], len( ok[ "lost" ] ), ok[ "lost_limit" ] ) == ( "clean", 38, 38 )
+    assert ( bad[ "status" ], len( bad[ "lost" ] ), bad[ "lost_limit" ] ) == ( "inconclusive", 39, 38 )
+
+
+def test_a_lost_entry_is_one_failed_unasked_unreached_malformed_or_simply_without_an_answer_counted_once():
+    rec = _arm( "single1", { f"e{k:03d}": 0.05 for k in range( 1000 ) } )
+    rec[ "answers" ] = rec[ "answers" ][ 5: ]                                          # five ids have no answer: e000 to e004
+    rec[ "failed" ], rec[ "unasked" ], rec[ "not_reached" ] = [ "e000", "e005" ], [ "e000", "e006" ], [ "e007" ]
+    rec[ "answers" ][ 0 ][ "probabilities" ] = None                                    # e005 is malformed (it also sits in `failed`)
+    a = an.read_arm( rec )
+    assert a[ "lost" ] == [ "e000", "e001", "e002", "e003", "e004", "e005", "e006", "e007" ]
+    assert a[ "lost_limit" ] == 5 and a[ "status" ] == "inconclusive"
+
+
+def test_an_id_listed_as_lost_that_the_arm_never_asked_about_still_counts():
+    rec = _arm( "single1", { "a": 0.05 }, failed=[ "ghost" ] )
+    assert an.read_arm( rec )[ "lost" ] == [ "ghost" ]
+
+
+def test_an_arm_that_ran_out_of_attempts_is_judged_by_its_lost_entries_not_by_the_stop():
+    ok  = an.read_arm( _lossy( 400, 2, state="incomplete", stop_reason="attempts" ) )
+    bad = an.read_arm( _lossy( 400, 3, state="incomplete", stop_reason="attempts" ) )
+    assert ( ok[ "status" ], len( ok[ "lost" ] ), ok[ "lost_limit" ] ) == ( "clean", 2, 2 )
+    assert ( bad[ "status" ], len( bad[ "lost" ] ) ) == ( "inconclusive", 3 )
+
+
+def test_an_incomplete_arm_with_no_named_stop_is_inconclusive_however_few_entries_were_lost():
+    assert an.read_arm( _lossy( 400, 0, state="incomplete" ) )[ "status" ] == "inconclusive"
+
+
+def test_a_ceiling_stop_is_invalid_even_when_nothing_was_lost():
+    assert an.read_arm( _lossy( 400, 0, state="incomplete", stop_reason="ceiling" ) )[ "status" ] == "invalid"
+
+
+def test_an_arm_with_nothing_answered_is_inconclusive_whatever_the_limit_says():
+    assert an.read_arm( _lossy( 400, 400 ) )[ "status" ] == "inconclusive"
+    assert an.read_arm( _arm( "single1", {} ) )[ "status" ] == "inconclusive"
+
+
+def test_a_comparison_is_pairwise_over_the_entries_answered_in_both_arms():
+    s1 = _lossy( 400, 1 )                                                                   # loses e00000
+    pk = _lossy( 400, 0, arm="pack10", size=10 ); pk[ "answers" ] = pk[ "answers" ][ :-1 ]; pk[ "failed" ] = [ "e00399" ]       # loses e00399
+    st = an.read_stage( [ s1, pk ] )
+    assert an.pass_one( st, 10, 0.02 )[ "n" ] == 398 and st[ 1 ][ "single1" ][ "status" ] == st[ 1 ][ "pack10" ][ "status" ] == "clean"
+
+
+def test_the_boundary_count_is_taken_after_the_lost_entries_are_dropped():
+    base = { **{ f"b{k:03d}": 0.5 for k in range( 91 ) }, **{ f"o{k:03d}": 0.05 for k in range( 309 ) } }          # 400 entries, 91 on the boundary
+    s1   = _arm( "single1", base ); s1[ "answers" ] = s1[ "answers" ][ 2: ]; s1[ "failed" ] = [ "b000", "b001" ]
+    st   = an.read_stage( [ s1 ] )
+    assert st[ 1 ][ "single1" ][ "status" ] == "clean" and len( an.boundary_ids( st[ 1 ][ "single1" ] ) ) == 89
+    assert an.evaluate( st )[ "boundary_pooled" ] == 89
+
+
+def test_the_report_prints_the_lost_count_and_the_limit_beside_each_other_for_every_arm():
+    text = an.render( an.build_report( _complete(), canaries=[] ) )
+    assert "s1-q1-single1: lost 0 of limit 0" in text and "s1-q1-pack200: lost 0 of limit 0" in text and "s1-q1-page-pack: lost 0 of limit 0" in text
+    lossy = an.render( an.build_report( [ _lossy( 7705, 40, size=1, run_name="s1-q1-single1" ) ], canaries=[] ) )
+    assert "s1-q1-single1: lost 40 of limit 38" in lossy
+
+
+# --- the arms the real driver writes: R1 applies to an arm that attempted every entry and has no stop reason ------------------
+
+def _driver_arm( name ):
+    """Ensures: returns an arm that run_arm wrote on a stand-in transport."""
+    return json.loads( ( pathlib.Path( __file__ ).parent / "fixtures" / f"stage1-driver-arm-{name}.json" ).read_text() )
+
+
+def test_the_driver_marks_an_arm_with_a_lost_entry_incomplete_with_no_stop_reason():
+    for name, lost in ( ( "lost-1-of-200", 1 ), ( "lost-2-of-200", 2 ) ):
+        rec = _driver_arm( name )
+        assert ( rec[ "state" ], rec[ "stop_reason" ], len( rec[ "failed" ] ), rec[ "not_reached" ], len( rec[ "entry_ids" ] ) ) == ( "incomplete", None, lost, [], 200 )
+
+
+def test_a_real_driver_arm_that_lost_one_of_two_hundred_reads_clean_under_the_limit_of_one():
+    arm = an.read_arm( _driver_arm( "lost-1-of-200" ) )
+    assert ( arm[ "status" ], len( arm[ "lost" ] ), arm[ "lost_limit" ] ) == ( "clean", 1, 1 )
+
+
+def test_a_real_driver_arm_that_lost_two_of_two_hundred_reads_inconclusive_over_the_limit():
+    arm = an.read_arm( _driver_arm( "lost-2-of-200" ) )
+    assert ( arm[ "status" ], len( arm[ "lost" ] ), arm[ "lost_limit" ] ) == ( "inconclusive", 2, 1 )
+
+
+def test_a_real_driver_arm_that_ran_out_of_attempts_is_inconclusive_when_the_unreached_pass_the_limit():
+    rec = _driver_arm( "attempts-spent-1-lost" )
+    assert ( rec[ "state" ], rec[ "stop_reason" ], len( rec[ "failed" ] ), len( rec[ "not_reached" ] ) ) == ( "incomplete", "attempts", 1, 50 )
+    arm = an.read_arm( rec )
+    assert ( arm[ "status" ], len( arm[ "lost" ] ), arm[ "lost_limit" ] ) == ( "inconclusive", 51, 1 )
+
+
+def test_a_real_driver_arm_that_ran_out_of_attempts_with_one_unreached_reads_clean_under_the_limit_of_one():
+    rec = _driver_arm( "attempts-spent-1-not-reached" )
+    assert ( rec[ "state" ], rec[ "stop_reason" ], rec[ "failed" ], len( rec[ "not_reached" ] ) ) == ( "incomplete", "attempts", [], 1 )
+    arm = an.read_arm( rec )
+    assert ( arm[ "status" ], arm[ "lost" ], arm[ "lost_limit" ] ) == ( "clean", rec[ "not_reached" ], 1 )
+
+
+def test_an_incomplete_driver_arm_with_every_entry_answered_stays_inconclusive():
+    rec = _driver_arm( "lost-1-of-200" )
+    missing = rec[ "failed" ][ 0 ]
+    rec[ "answers" ].append( { "id": missing, "probabilities": rec[ "answers" ][ 0 ][ "probabilities" ] } ); rec[ "failed" ] = []
+    arm = an.read_arm( rec )
+    assert ( arm[ "lost" ], arm[ "status" ] ) == ( [], "inconclusive" )
+
+
+def test_a_stop_reason_nobody_named_leaves_the_arm_inconclusive_and_the_stops_that_end_a_run_leave_it_invalid():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "stop_reason" ] = "a_stop_nobody_named"
+    assert an.read_arm( rec )[ "status" ] == "inconclusive"
+    for reason in an.INVALID_STOPS:
+        rec = _driver_arm( "lost-1-of-200" ); rec[ "stop_reason" ] = reason
+        assert an.read_arm( rec )[ "status" ] == "invalid", reason
+
+
+def test_the_report_counts_a_real_clean_driver_arm_in_and_prints_its_lost_entry_beside_the_limit():
+    rep = an.build_report( [ _driver_arm( "lost-1-of-200" ) ], canaries=[] )
+    assert rep[ "unclean_arms" ] == [] and rep[ "lost_by_arm" ][ 0 ][ "lost" ] == 1 and rep[ "lost_by_arm" ][ 0 ][ "lost_limit" ] == 1
+    assert "s1-q1-single1: lost 1 of limit 1" in an.render( rep )
+
+
+def test_the_report_prints_each_arms_stop_reason_beside_its_lost_count():
+    none = an.render( an.build_report( [ _driver_arm( "lost-1-of-200" ) ], canaries=[] ) )
+    att  = an.render( an.build_report( [ _driver_arm( "attempts-spent-1-not-reached" ) ], canaries=[] ) )
+    assert "s1-q1-single1: lost 1 of limit 1, stop reason none" in none
+    assert "s1-q1-single1: lost 1 of limit 1, stop reason attempts" in att
+    rep = an.build_report( [ _driver_arm( "attempts-spent-1-not-reached" ) ], canaries=[] )
+    assert rep[ "lost_by_arm" ][ 0 ][ "stop_reason" ] == "attempts"
+
+
+# --- the page arm: plan 11.1 and 11.5 --------------------------------------------------------------------------------------
+
+def _driver_pages( name ):
+    """Ensures: returns the six page arms the driver wrote for one scenario."""
+    return json.loads( ( pathlib.Path( __file__ ).parent / "fixtures" / "stage1-driver-page-arms.json" ).read_text() )[ name ]
+
+
+def _page_arm( name ): return an.page_arm( an.read_stage( _driver_pages( name ) ) )
+
+
+def test_the_page_arm_constants_are_the_plans():
+    assert an.PAGE_ARMS == ( "page-single1", "page-single2", "page-pack" ) and an.PAGE_NEAR == 0.05 and an.PAGE_FLOOR == vd_floor()
+
+
+def vd_floor():
+    from cosa.repo.symindex import verdict as vd
+    return vd.POLICY[ "floor" ]
+
+
+def test_the_driver_wrote_page_arms_that_carry_the_scenario_tables():
+    stage = an.read_stage( _driver_pages( "pack-changes-two" ) )
+    assert sorted( stage ) == [ 1, 2 ] and sorted( stage[ 1 ] ) == [ "page-pack", "page-single1", "page-single2" ]
+    assert ( stage[ 1 ][ "page-single1" ][ "overlaps" ][ "page.04" ], stage[ 1 ][ "page-pack" ][ "overlaps" ][ "page.04" ] ) == ( 0.29, 0.33 )
+    assert all( a[ "status" ] == "clean" for q in stage.values() for a in q.values() )
+
+
+def test_packing_that_changes_no_chosen_page_passes_the_page_arm():
+    r = _page_arm( "same" )
+    assert ( r[ "state" ], r[ "questions" ], r[ "pack_changes" ], r[ "noise_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "pass", [ 1, 2 ], 0, 0, 0.0, 0.02 )
+    assert r[ "near_floor_pages" ] == 4
+
+
+def test_packing_that_changes_the_chosen_pages_on_more_questions_than_noise_does_fails():
+    r = _page_arm( "pack-changes-two" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "noise_changes" ] ) == ( "fail", 2, 0 )
+
+
+def test_packing_that_changes_as_many_questions_as_noise_does_passes():
+    r = _page_arm( "noise-one-pack-one" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "noise_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "pass", 1, 1, 0.04, 0.04 )
+    assert _page_arm( "noise-two-pack-none" )[ "state" ] == "pass"
+
+
+def test_the_set_rule_alone_can_fail_the_page_arm_when_a_page_crosses_the_floor_by_a_hair():
+    r = _page_arm( "set-only" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "noise_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "fail", 2, 0, 0.015, 0.02 )
+
+
+def test_the_per_page_difference_is_held_to_the_noise_floor_read_as_at_least_two_hundredths():
+    r = _page_arm( "overlap-only" )
+    assert ( r[ "pack_changes" ], r[ "pack_p99" ], r[ "noise_floor" ], r[ "overlap_rule" ] ) == ( 0, 0.1, 0.02, "fail" )
+
+
+def test_each_rule_of_the_page_arm_is_reported_beside_the_state():
+    assert [ ( _page_arm( n )[ "set_rule" ], _page_arm( n )[ "overlap_rule" ] ) for n in ( "same", "pack-changes-two", "set-only", "overlap-only", "noise-one-pack-one" ) ] == \
+           [ ( "pass", "pass" ), ( "fail", "fail" ), ( "fail", "pass" ), ( "pass", "fail" ), ( "pass", "pass" ) ]
+
+
+def test_the_page_arm_fails_on_the_set_rule_alone_and_an_overlap_breach_does_not_decide_it():
+    r = _page_arm( "overlap-only" )
+    assert ( r[ "state" ], r[ "set_rule" ], r[ "overlap_rule" ] ) == ( "pass", "pass", "fail" )
+    assert _page_arm( "set-only" )[ "state" ] == "fail" and _page_arm( "pack-changes-two" )[ "state" ] == "fail"
+    assert _page_arm( "same" )[ "state" ] == "pass"
+
+
+def test_an_overlap_breach_with_no_page_near_the_floor_reads_inconclusive_like_any_other_page_arm():
+    recs = _driver_pages( "overlap-only" )
+    for rec in recs:
+        for a in rec[ "answers" ]:
+            if a[ "id" ] in ( "page.03", "page.04" ): a[ "probabilities" ] = { "reuse": 0.5, "extend": 0.0, "unrelated": 0.5 }
+    r = an.page_arm( an.read_stage( recs ) )
+    assert ( r[ "near_floor_pages" ], r[ "overlap_rule" ], r[ "state" ] ) == ( 0, "fail", "inconclusive" )
+
+
+def test_an_overlap_breach_is_printed_on_the_page_arm_line_and_leaves_the_decision_alone():
+    rep  = an.build_report( _driver_pages( "overlap-only" ), canaries=[] )
+    text = an.render( rep )
+    assert "page arm: pass; set rule pass, overlap rule fail;" in text
+    assert "page arm" not in rep[ "decision" ] and "Rick" not in text.split( "page arm:" )[ 1 ]
+    assert not hasattr( an, "PAGE_AMBIGUITY" ) and "ask_rick" not in text
+
+
+def test_the_near_pages_are_counted_in_single_run_one_and_not_in_the_other_runs():
+    r = _page_arm( "near-only-elsewhere" )
+    assert ( r[ "near_floor_pages" ], r[ "set_rule" ], r[ "overlap_rule" ], r[ "state" ] ) == ( 0, "pass", "pass", "inconclusive" )
+    stage = an.read_stage( _driver_pages( "near-only-elsewhere" ) )
+    assert stage[ 1 ][ "page-pack" ][ "overlaps" ][ "page.04" ] == 0.27 and stage[ 1 ][ "page-single1" ][ "overlaps" ][ "page.04" ] == 0.2
+
+
+def test_a_stop_on_an_invalid_entry_arm_still_decides_when_the_page_arm_breaches_only_the_overlap_rule():
+    bad = _question( 1 )[ 0 ]; bad[ "stop_reason" ] = "ceiling"
+    rep = an.build_report( _driver_pages( "overlap-only" ) + [ bad ], canaries=[] )
+    assert rep[ "page_arm" ][ "state" ] == "pass" and rep[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_a_page_arm_with_no_page_near_the_floor_in_any_question_reads_inconclusive_not_pass():
+    r = _page_arm( "no-page-near-the-floor" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "near_floor_pages" ] ) == ( "inconclusive", 0, 0 )
+    assert "page arm fails" not in an.build_report( _driver_pages( "no-page-near-the-floor" ), canaries=[] )[ "decision" ]
+
+
+def test_a_failing_page_arm_stays_a_fail_when_no_page_is_near_the_floor():
+    recs = _driver_pages( "pack-changes-two" )
+    for rec in recs:
+        for a in rec[ "answers" ]:
+            if a[ "id" ] == "page.03": a[ "probabilities" ] = { "reuse": 0.9, "extend": 0.0, "unrelated": 0.1 }
+            if a[ "id" ] == "page.04": a[ "probabilities" ] = { "reuse": 0.1 if rec[ "arm" ] != "page-pack" else 0.9, "extend": 0.0, "unrelated": 0.9 if rec[ "arm" ] != "page-pack" else 0.1 }
+    r = an.page_arm( an.read_stage( recs ) )
+    assert r[ "near_floor_pages" ] == 0 and r[ "state" ] == "fail"
+    assert "no page lies within" not in an.render( an.build_report( recs, canaries=[] ) )
+
+
+@pytest.mark.parametrize( "edge,expect", [ ( 0.35, 1 ), ( 0.25, 1 ), ( 0.3501, 0 ), ( 0.2499, 0 ) ] )
+def test_the_near_band_includes_both_ends_and_nothing_beyond( edge, expect ):
+    base = { "p0": 0.9, "p1": edge, "p2": 0.05 }
+    r = an.page_arm( an.read_stage( [ _arm( "page-single1", base ), _arm( "page-single2", base ), _arm( "page-pack", base, size=200 ) ] ) )
+    assert r[ "near_floor_pages" ] == expect and r[ "state" ] == ( "pass" if expect else "inconclusive" )
+
+
+def test_a_page_arm_with_an_arm_missing_or_unclean_or_stopped_is_not_judged():
+    recs = _driver_pages( "same" )
+    assert an.page_arm( an.read_stage( [ r for r in recs if not ( r[ "question" ] == 2 and r[ "arm" ] == "page-pack" ) ] ) )[ "state" ] == "inconclusive"
+    dirty = _driver_pages( "same" ); dirty[ 0 ][ "failed" ] = [ "page.00", "page.01", "page.02" ]; dirty[ 0 ][ "answers" ] = dirty[ 0 ][ "answers" ][ 3: ]
+    assert an.page_arm( an.read_stage( dirty ) )[ "state" ] == "inconclusive"
+    stopped = _driver_pages( "same" ); stopped[ 2 ][ "stop_reason" ] = "ceiling"
+    assert an.page_arm( an.read_stage( stopped ) )[ "state" ] == "invalid"
+
+
+def test_a_stage_with_no_page_arm_reads_inconclusive_with_no_question():
+    r = an.page_arm( an.read_stage( _question() ) )
+    assert ( r[ "state" ], r[ "questions" ] ) == ( "inconclusive", [] )
+
+
+@pytest.mark.parametrize( "which", [ "page-single1", "page-single2", "page-pack" ] )
+def test_a_page_lost_within_the_limit_from_any_one_arm_is_read_over_the_pages_answered_in_all_three( which ):
+    base = { **{ f"p{k:03d}": 0.05 for k in range( 200 ) }, "p000": 0.9, "p001": 0.31 }
+    arms = { n: _arm( n, base, size=200 if n == "page-pack" else 1 ) for n in an.PAGE_ARMS }
+    arms[ which ][ "answers" ] = [ a for a in arms[ which ][ "answers" ] if a[ "id" ] != "p150" ]; arms[ which ][ "failed" ] = [ "p150" ]
+    r = an.page_arm( an.read_stage( list( arms.values() ) ) )
+    assert r[ "state" ] == "pass" and r[ "pack_changes" ] == 0 and r[ "noise_changes" ] == 0 and r[ "questions" ] == [ 1 ] and r[ "near_floor_pages" ] == 1
+
+
+def test_the_report_carries_the_page_arm_and_prints_one_line_for_it():
+    rep  = an.build_report( _driver_pages( "noise-one-pack-one" ), canaries=[] )
+    assert rep[ "page_arm" ][ "state" ] == "pass"
+    text = an.render( rep )
+    assert "page arm: pass; set rule pass, overlap rule pass; chosen pages changed by packing on 1 of 2 questions against 1 by noise; per-page difference p99 0.04 against floor 0.04; pages within 0.05 of 0.3: 4" in text
+
+
+def test_the_report_says_why_an_inconclusive_page_arm_is_inconclusive():
+    text = an.render( an.build_report( _driver_pages( "no-page-near-the-floor" ), canaries=[] ) )
+    assert "page arm: inconclusive; no page lies within 0.05 of 0.3 in any question; set rule pass, overlap rule pass;" in text
+
+
+def test_a_failing_page_arm_turns_the_decision_into_a_stop_that_goes_back_to_rick():
+    rep = an.build_report( _driver_pages( "pack-changes-two" ), canaries=[] )
+    assert rep[ "page_arm" ][ "state" ] == "fail" and rep[ "decision" ] == "stop and ask: the page arm fails; Rick decides whether the page asks stay packed"
+    assert an.build_report( _driver_pages( "same" ), canaries=[] )[ "decision" ] != rep[ "decision" ]
+
+
+def test_an_invalid_entry_arm_keeps_its_own_stop_ahead_of_the_page_arm():
+    recs = _driver_pages( "pack-changes-two" )
+    bad  = _question( 1 )[ 0 ]; bad[ "stop_reason" ] = "ceiling"
+    assert an.build_report( recs + [ bad ], canaries=[] )[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_a_question_whose_page_arms_were_not_judged_prints_its_state_in_place_of_the_changes():
+    recs = [ r for r in _driver_pages( "same" ) if not ( r[ "question" ] == 2 and r[ "arm" ] == "page-pack" ) ]
+    text = an.render( an.build_report( recs, canaries=[] ) )
+    assert "pages, question 2: inconclusive" in text and "pages, question 1: chosen set changed by packing no, by noise no" in text
+
+
+def test_the_per_question_page_lines_say_what_changed_and_leave_the_verdict_to_the_page_arm():
+    text = an.render( an.build_report( _driver_pages( "noise-one-pack-one" ), canaries=[] ) )
+    assert "pages, question 1: chosen set changed by packing yes, by noise yes" in text and "pages, question 2: chosen set changed by packing no, by noise no" in text
+
+
+# --- a repeated id: the wiki index listed two pages twice --------------------------------------------------------------------
+
+def _duplicate_pages():
+    """Ensures: returns the three page arms the driver wrote over a list that repeats one page."""
+    return json.loads( ( pathlib.Path( __file__ ).parent / "fixtures" / "stage1-driver-duplicate-page-arms.json" ).read_text() )
+
+
+def test_the_driver_asked_the_repeated_page_twice_in_the_one_each_runs_and_refused_the_pack():
+    single1, single2, pack = _duplicate_pages()
+    assert [ r[ "entry_ids" ].count( "page.03" ) for r in ( single1, single2, pack ) ] == [ 2, 2, 2 ]
+    assert [ a[ "id" ] for a in single1[ "answers" ] ].count( "page.03" ) == 2 and ( pack[ "state" ], pack[ "stop_reason" ] ) == ( "error", "error: ValueError" )
+
+
+def test_an_arm_that_asked_an_id_twice_is_invalid_with_the_id_named_and_does_not_raise():
+    arm = an.read_arm( _duplicate_pages()[ 0 ] )
+    assert ( arm[ "status" ], arm[ "duplicate_ids" ] ) == ( "invalid", [ "page.03" ] )
+    assert sorted( arm[ "overlaps" ] ) == sorted( set( _duplicate_pages()[ 0 ][ "entry_ids" ] ) )
+
+
+def test_an_arm_with_no_repeated_id_has_an_empty_duplicate_list():
+    assert an.read_arm( _driver_arm( "lost-1-of-200" ) )[ "duplicate_ids" ] == []
+
+
+def test_an_id_answered_twice_that_was_asked_once_is_still_refused():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "answers" ].append( dict( rec[ "answers" ][ 0 ] ) )
+    with pytest.raises( ValueError, match = "answered twice" ): an.read_arm( rec )
+
+
+def test_the_report_names_the_duplicate_condition_for_each_arm_and_does_not_crash():
+    rep = an.build_report( _duplicate_pages(), canaries=[] )
+    assert rep[ "duplicate_ids" ] == [ { "run_name": "s1-q1-page-single1", "question": 1, "arm": "page-single1", "ids": [ "page.03" ] },
+                                       { "run_name": "s1-q1-page-single2", "question": 1, "arm": "page-single2", "ids": [ "page.03" ] },
+                                       { "run_name": "s1-q1-page-pack", "question": 1, "arm": "page-pack", "ids": [ "page.03" ] } ]
+    text = an.render( rep )
+    assert "duplicate ids: s1-q1-page-single1 asked page.03 more than once" in text and "duplicate ids: s1-q1-page-single2 asked page.03 more than once" in text
+    assert rep[ "page_arm" ][ "state" ] == "invalid"
+
+
+def test_a_repeated_id_turns_the_decision_into_a_stop_that_names_the_condition():
+    rep = an.build_report( _duplicate_pages(), canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: an arm asks the same id twice (duplicate_ids)"
+
+
+def test_a_repeated_id_in_an_entry_arm_keeps_the_invalid_arm_stop_and_still_names_the_condition():
+    rec = _arm( "single1", { "a": 0.1, "b": 0.2 } ); rec[ "entry_ids" ] = [ "a", "b", "a" ]; rec[ "answers" ].append( { "id": "a", "probabilities": rec[ "answers" ][ 0 ][ "probabilities" ] } )
+    rep = an.build_report( [ rec ], canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: an arm is invalid" and rep[ "duplicate_ids" ][ 0 ][ "ids" ] == [ "a" ]
+
+
+def test_a_page_arm_that_is_invalid_for_another_reason_also_stops_the_decision():
+    recs = _driver_pages( "same" ); recs[ 2 ][ "stop_reason" ] = "ceiling"
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "page_arm" ][ "state" ] == "invalid" and rep[ "duplicate_ids" ] == [] and rep[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_a_report_with_no_repeated_id_prints_no_duplicate_line():
+    text = an.render( an.build_report( _driver_pages( "same" ), canaries=[] ) )
+    assert "duplicate ids" not in text
+
+
+# --- ruling R2: pass 3 and a question with no probes -------------------------------------------------------------------------
+
+def test_a_question_with_no_probe_arms_is_skipped_and_named_as_not_probed():
+    r = an.pass_three( an.read_stage( _question( 1 ) + _question( 2, probes=False ) ), 0.02 )
+    assert ( r[ "state" ], r[ "placements" ], r[ "not_probed" ] ) == ( "pass", 6, [ 2 ] )
+
+
+def test_a_question_with_one_to_five_placements_makes_pass_three_inconclusive_even_beside_a_full_one():
+    for kept in range( 1, 6 ):
+        q2 = _question( 2, probes=False ) + _probes( 2, "e000", _base() )[ :kept ]
+        r  = an.pass_three( an.read_stage( _question( 1 ) + q2 ), 0.02 )
+        assert r[ "state" ] == "inconclusive", kept
+
+
+def test_pass_three_reads_pass_only_when_at_least_one_question_has_all_six():
+    assert an.pass_three( an.read_stage( _question( 1, probes=False ) + _question( 2, probes=False ) ), 0.02 )[ "state" ] == "inconclusive"
+    assert an.pass_three( an.read_stage( _question( 1 ) ), 0.02 )[ "state" ] == "pass"
+
+
+def test_beside_the_default_the_report_says_sizes_ten_and_fifty_carry_no_position_evidence():
+    rep  = an.build_report( _complete(), canaries=[] )
+    text = an.render( rep )
+    assert rep[ "decision" ] == "default pack size 200" and "pass 3 was run at size 200 only" in text
+    assert "sizes 10 and 50 carry no position evidence" in text
+
+
+def test_with_no_default_size_the_report_makes_no_claim_about_where_pass_three_ran():
+    recs = _question(); recs[ 0 ][ "failed" ] = [ "e001" ]
+    rep  = an.build_report( recs, canaries=[] )
+    assert rep[ "evaluate" ][ "default_size" ] is None and rep[ "decision" ] != "default pack size 200" and "carry no position evidence" not in an.render( rep )
+
+
+def test_the_report_names_the_questions_that_were_not_probed():
+    text = an.render( an.build_report( _complete( 1 ) + _question( 2, probes=False ) + _extra_arms( 2, _base() ), canaries=[] ) )
+    assert "not probed: question 2" in text
+
+
+# --- ruling R3: the next step looks at the arms ------------------------------------------------------------------------------
+
+ALL_ARMS = [ "single1", "canary", "single2", "pack10", "pack50", "pack200", "page-single1", "page-single2", "page-pack",
+             "probe-first-random", "probe-first-near", "probe-middle-random", "probe-middle-near", "probe-last-random", "probe-last-near" ]
+
+
+def test_the_arms_a_question_must_have_are_the_fifteen_the_plan_runs():
+    assert list( an.REQUIRED_ARMS ) == ALL_ARMS
+
+
+def test_with_only_single_run_one_present_the_next_step_names_the_remaining_arms_in_order():
+    r = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ) )
+    assert r[ "stop" ] is False
+    assert r[ "next_step" ] == "run question 1's remaining arms: " + ", ".join( ALL_ARMS[ 1: ] )
+
+
+def test_a_whole_first_question_gives_run_question_two_and_a_whole_second_gives_run_question_three():
+    one = an.stop_rules( an.read_stage( _complete( 1 ) ) )
+    two = an.stop_rules( an.read_stage( _complete( 1 ) + _complete( 2 ) ) )
+    assert one[ "next_step" ] == "run question 2" and two[ "next_step" ] in ( "run question 3", "stop and ask: under 50 pooled boundary entries after question 2" )
+
+
+def test_the_first_question_with_arms_missing_is_named_even_when_a_later_question_has_started():
+    recs = [ r for r in _complete( 1 ) if r[ "arm" ] != "pack200" ] + [ _with_boundary( 2, 3 ) ]
+    r = an.stop_rules( an.read_stage( recs ) )
+    assert r[ "next_step" ] == "run question 1's remaining arms: pack200"
+
+
+def test_a_canary_retry_is_not_a_required_arm_and_does_not_stand_in_for_one():
+    recs = [ r for r in _complete( 1 ) if r[ "arm" ] != "canary" ] + [ _arm( "canary", { "a": 0.1 }, size=10, run_name="s1-q1-canary-a2", attempt=2 ) ]
+    assert an.stop_rules( an.read_stage( recs ) )[ "next_step" ] == "run question 1's remaining arms: canary"
+
+
+def test_a_spend_stop_and_an_unclean_single_run_come_before_the_remaining_arms():
+    spent = _spend( 1, 16_000_000 )
+    assert an.stop_rules( an.read_stage( [ spent ] ) )[ "next_step" ] == "stop and ask: spend after question 1 above 15,000,000 tokens"
+    bad = _with_boundary( 1, 3 ); bad[ "failed" ] = [ "x" ]
+    assert an.stop_rules( an.read_stage( [ bad ] ) )[ "next_step" ] == "stop and ask: question 1's single run 1 is not clean"
+
+
+def test_the_arm_check_can_be_left_off_to_read_the_rules_alone():
+    assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ), check_arms=False )[ "next_step" ] == "run question 2"
+
+
+# --- the text report prints every figure the report computes (the rehearsal's tokens, retries, other boundaries, old shape, cost) ------------
+
+REQUEST_LINE = "requests, question 1 single1: 200 sent; tokens per request in 500.0 out 40.0; out per entry 40.0; retried calls {r}, extra attempts {e}; usage missing 0; 429s {a}, 529s {b}"
+
+
+def test_the_report_prints_the_tokens_per_request_of_a_real_driver_arm():
+    text = an.render( an.build_report( [ _driver_arm( "lost-1-of-200" ) ], canaries=[] ) )
+    assert REQUEST_LINE.format( r=0, e=0, a=0, b=0 ) in text
+
+
+def test_the_report_prints_the_retried_calls_and_the_extra_attempts_of_a_driver_arm_with_one_call_tried_three_times():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "rows" ][ 0 ][ "attempts" ] = 3
+    assert REQUEST_LINE.format( r=1, e=2, a=0, b=0 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
+
+
+def test_the_report_prints_the_429_and_529_counts_of_a_driver_arm_whose_one_call_was_refused_by_each_in_turn():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "rows" ][ 0 ].update( attempts=3, attempt_log=[ { "status": 429 }, { "status": 529 }, { "status": 200 } ] )
+    assert REQUEST_LINE.format( r=1, e=2, a=1, b=1 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
+
+
+def _flipping_complete( question=1, scale=1 ):
+    """
+    Build a question whose pack200 moves two far entries across the floor.
+
+    Ensures:
+        - each pack arm carries a spend of one million tokens
+    """
+    recs = _complete( question )
+    pack = next( r for r in recs if r[ "arm" ] == "pack200" )
+    for a in pack[ "answers" ]:
+        if a[ "id" ] in ( "o000", "o001" ): a[ "probabilities" ] = _probs( 0.35 )                     # across the floor and the confidence bar
+        if a[ "id" ] in ( "e010", "e011", "e012" ): a[ "probabilities" ] = _probs( 0.25 )             # across the floor only
+    for a in next( r for r in recs if r[ "arm" ] == "single2" )[ "answers" ]:
+        if a[ "id" ] == "o002": a[ "probabilities" ] = _probs( 0.35 )
+        if a[ "id" ] == "e013": a[ "probabilities" ] = _probs( 0.25 )
+    for r in recs:
+        if r[ "arm" ] in ( "pack10", "pack50", "pack200" ): r[ "totals" ][ "spent_tokens" ] = 1_000_000 * scale          # the default size is whichever pack passes, so each carries the spend
+    next( r for r in recs if r[ "arm" ] == "page-pack" )[ "totals" ][ "spent_tokens" ] = 500_000 * scale
+    return recs
+
+
+def test_the_report_prints_the_other_boundaries_for_every_pack_size_and_question():
+    text = an.render( an.build_report( _flipping_complete(), canaries=[] ) )
+    assert "other boundaries, pack 200, question 1: floor flips 5 by packing against 2 by noise; confidence flips 2 by packing against 1 by noise" in text
+    assert "other boundaries, pack 10, question 1: floor flips 0 by packing against 2 by noise; confidence flips 0 by packing against 1 by noise" in text
+    assert "other boundaries, pack 50, question 1: floor flips 0 by packing" in text
+
+
+def test_a_question_whose_other_boundaries_cannot_be_read_says_not_measured():
+    recs = _complete(); next( r for r in recs if r[ "arm" ] == "pack50" )[ "failed" ] = [ "e001" ]
+    assert "other boundaries, pack 50, question 1: not measured" in an.render( an.build_report( recs, canaries=[] ) )
+
+
+def test_the_report_prints_the_old_shape_comparison_beside_its_note():
+    old = _arm( "old", { **_base(), "e000": 0.6, "e001": 0.49, "e002": 0.54 }, size=1, run_name=NO_NAME )         # moves of 0.1, 0.01 and 0.04; only e001 crosses 0.5
+    text = an.render( an.build_report( _complete() + [ old ], canaries=[] ) )
+    assert "old shape, question 1: 120 cached hits, p99 0.04, max 0.1, 1 boundary flips (reported only, no pass or fail)" in text
+
+
+def test_an_old_shape_arm_beside_an_unclean_single_run_says_not_measured():
+    old = _arm( "old", { "e000": 0.5 }, size=1, run_name=NO_NAME )
+    recs = _complete(); next( r for r in recs if r[ "arm" ] == "single1" )[ "failed" ] = [ "e001" ]
+    assert "old shape, question 1: not measured" in an.render( an.build_report( recs + [ old ], canaries=[] ) )
+
+
+def _empty_old_arm( tmp_path, question=1 ):
+    """Ensures: returns the old-shape arm the real reader makes from a cache with no answers."""
+    return an.old_shape_arm( question, tmp_path, "a need", [ { "id": f"m.{c}", "sig": "()", "doc": f"does {c}" } for c in "abc" ] )
+
+
+def test_an_old_shape_arm_with_no_cached_answers_is_named_and_says_so_in_both_lines_and_is_not_called_none(tmp_path):
+    text = an.render( an.build_report( _complete() + [ _empty_old_arm( tmp_path ) ], canaries=[] ) )
+    assert "question 1 old: no cached answers" in text and "not clean: question 1 old is inconclusive (no cached answers)" in text
+    assert "not clean: None" not in text and "stop reason None" not in text and "question 1 old: lost" not in text
+
+
+def test_each_question_names_its_own_old_shape_arm_in_the_not_clean_lines(tmp_path):
+    text = an.render( an.build_report( _complete( 1 ) + _complete( 2 ) + [ _empty_old_arm( tmp_path, 1 ), _empty_old_arm( tmp_path, 2 ) ], canaries=[] ) )
+    assert "not clean: question 1 old is inconclusive" in text and "not clean: question 2 old is inconclusive" in text
+
+
+def test_a_partly_cached_old_shape_arm_keeps_its_lost_count_and_names_the_arm_with_the_stop_reason_none(tmp_path):
+    from lupin_mcp import reuse_tools as rt
+    entries = [ { "id": "m.a", "sig": "()", "doc": "does a" }, { "id": "m.b", "sig": "()", "doc": "does b" } ]
+    body    = rt.build_request( "a need", rt.entry_text( entries[ 0 ] ) )
+    rt.JevCache( tmp_path ).put( rt.request_hash( body ), { "answers": { "fit": { "choice": "x", "confidence": 1.0, "probabilities": { "reuse": 0.8, "extend": 0.1, "unrelated": 0.1 }, "type": "choice" } }, "model": "jev-1.13.0" } )
+    text = an.render( an.build_report( _complete() + [ an.old_shape_arm( 1, tmp_path, "a need", entries ) ], canaries=[] ) )
+    assert "question 1 old: lost 1 of limit 0, stop reason none" in text and "not clean: question 1 old is inconclusive (stop reason none)" in text and "no cached answers" not in text
+
+
+def test_a_named_arm_that_is_not_clean_with_no_stop_reason_prints_the_stop_reason_as_none():
+    bad = _arm( "pack50", _base(), size=50, state="incomplete" ); bad[ "answers" ] = bad[ "answers" ][ 4: ]
+    assert "not clean: s1-q1-pack50 is inconclusive (stop reason none)" in an.render( an.build_report( [ r for r in _complete() if r[ "arm" ] != "pack50" ] + [ bad ], canaries=[] ) )
+
+
+def test_the_report_prints_each_questions_cost_and_the_mean_when_it_has_one():
+    text = an.render( an.build_report( _flipping_complete(), canaries=[] ) )
+    assert "cost, question 1: 1000000 entry tokens + 500000 page tokens = $0.063" in text and "cost per search: mean $0.063" in text
+
+
+def test_the_report_prints_no_cost_line_when_no_pack_size_passes():
+    recs = _question( packs={ 10: { "shift": 0.1 }, 50: { "shift": 0.1 }, 200: { "shift": 0.1 } } ) + _extra_arms( 1, _base() )
+    text = an.render( an.build_report( recs, canaries=[] ) )
+    assert "cost, question" not in text and "cost per search" not in text
+
+
+# --- the decision and the next step never disagree about stopping ---------------------------------------------------------------------------
+
+def _no_size_passes():
+    """Ensures: returns a question in which every pack size moves its entries by 0.1."""
+    return _question( packs={ 10: { "shift": 0.1 }, 50: { "shift": 0.1 }, 200: { "shift": 0.1 } } ) + _extra_arms( 1, _base() )
+
+
+def test_a_decision_that_stops_and_asks_never_sits_above_a_next_step_that_runs_more():
+    rep = an.build_report( _no_size_passes(), canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: no pack size passes" and rep[ "stop_rules" ][ "next_step" ] == "run question 2"
+    assert rep[ "next_step" ] == "stop and ask: see the decision above"
+    assert "Next step: stop and ask: see the decision above" in an.render( rep ) and "run question 2" not in an.render( rep )
+
+
+def test_an_invalid_arm_decision_also_turns_the_next_step_into_a_stop():
+    recs = _complete(); next( r for r in recs if r[ "arm" ] == "pack200" )[ "state" ] = "incomplete"; next( r for r in recs if r[ "arm" ] == "pack200" )[ "stop_reason" ] = "ceiling"
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: an arm is invalid" and rep[ "next_step" ] == "stop and ask: s1-q1-pack200 is invalid (stop reason ceiling)"
+
+
+def test_a_next_step_that_already_stops_keeps_its_own_reason_beside_a_stopping_decision():
+    recs = _complete(); pack = next( r for r in recs if r[ "arm" ] == "pack200" ); pack[ "state" ], pack[ "stop_reason" ] = "incomplete", "ceiling"
+    next( r for r in recs if r[ "arm" ] == "single1" )[ "totals" ][ "spent_tokens" ] = 72_000_000
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "decision" ].startswith( "stop and ask" ) and rep[ "next_step" ] == "stop and ask: stage tokens above 71,000,000"
+
+
+def test_a_decision_that_does_not_stop_leaves_the_next_step_as_the_rules_wrote_it():
+    rep = an.build_report( _question(), canaries=[] )
+    assert rep[ "decision" ] == "default pack size 200" and rep[ "next_step" ] == rep[ "stop_rules" ][ "next_step" ]
+
+
+def test_the_report_prints_the_out_tokens_per_entry_apart_from_those_per_request_when_a_request_held_four_entries():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "rows" ][ 0 ][ "size" ] = 4                           # 40 out for four entries is 10 an entry; the other 199 rows stay at 40
+    assert "tokens per request in 500.0 out 40.0; out per entry 39.85;" in an.render( an.build_report( [ rec ], canaries=[] ) )
+
+
+def test_the_report_prints_a_request_with_no_usage_as_missing_and_leaves_it_out_of_the_means():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "rows" ][ 1 ][ "tokens_in" ] = None
+    assert "200 sent; tokens per request in 500.0 out 40.0; out per entry 40.0; retried calls 0, extra attempts 0; usage missing 1;" in an.render( an.build_report( [ rec ], canaries=[] ) )
+
+
+def test_the_report_prints_one_cost_line_for_each_question_and_the_mean_of_them():
+    recs = _flipping_complete() + _flipping_complete( 2, 2 )                                      # $0.063 and $0.126
+    text = an.render( an.build_report( recs, canaries=[] ) )
+    assert "cost, question 1: 1000000 entry tokens + 500000 page tokens = $0.063" in text
+    assert "cost, question 2: 2000000 entry tokens + 1000000 page tokens = $0.126" in text
+    assert "cost per search: mean $0.0945" in text
+
+
+# --- an arm that another model answered is invalid, and the report stops and asks Rick (R14) ----------------------------------------
+
+def _mismatch_arm( served="jev-other-1.0", stop="model_mismatch", **over ):
+    """
+    Build a real driver arm in which one request was answered by another model.
+
+    Ensures:
+        - starts from the recorded arm that lost one of two hundred, whose one failed row becomes the ModelMismatch row
+        - served is the name that row keeps; None stands for a response that named no model
+    """
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "stop_reason" ] = stop
+    bad = next( r for r in rec[ "rows" ] if r[ "status" ] == "failed" )
+    bad[ "error" ], bad[ "model" ] = "ModelMismatch", served
+    rec.update( over )
+    return rec
+
+
+def test_a_stop_by_model_mismatch_is_invalid_even_when_the_lost_entries_are_within_the_limit():
+    arm = an.read_arm( _mismatch_arm() )
+    assert len( arm[ "lost" ] ) == 1 and arm[ "lost_limit" ] == 1 and arm[ "status" ] == "invalid"
+
+
+def test_a_row_that_failed_as_model_mismatch_makes_the_arm_invalid_with_no_stop_reason_written():
+    assert an.read_arm( _mismatch_arm( stop=None ) )[ "status" ] == "invalid"
+
+
+def test_the_same_arm_with_a_plain_failed_row_and_no_stop_stays_clean():
+    assert an.read_arm( _driver_arm( "lost-1-of-200" ) )[ "status" ] == "clean"
+
+
+def test_an_arm_that_another_model_answered_is_not_judged_by_its_lost_entries():
+    rec = _mismatch_arm(); rec[ "failed" ] = []; rec[ "answers" ].append( { "id": "pkg.mod.fn016", "probabilities": _probs( 0.5 ) } )
+    arm = an.read_arm( rec )
+    assert arm[ "lost" ] == [] and arm[ "status" ] == "invalid"
+
+
+def test_a_second_single_run_that_another_model_answered_leaves_the_noise_floor_invalid_and_pools_nothing():
+    s1  = _arm( "single1", _base() )
+    s2  = _arm( "single2", _base(), stop_reason="model_mismatch", state="incomplete" )
+    nf  = an.noise_floor( an.read_stage( [ s1, s2 ] ) )
+    assert nf == { "measured": None, "floor": None, "max": None, "n": 0, "state": "invalid", "left_out": [ "s1-q1-single2" ] }
+
+
+# --- R11: the pooled floor leaves out the arms another model answered, and does not void the rest ------------------------------------------
+
+def _q2_first_single_from_another_model( question=2 ):
+    """Ensures: returns two single runs, the first answered by another model."""
+    return [ _arm( "single1", _base(), question=question, stop_reason="model_mismatch", state="incomplete" ), _arm( "single2", _base(), question=question ) ]
+
+
+def test_a_later_question_whose_first_single_run_another_model_answered_leaves_question_1s_noise_floor_intact_and_names_the_arm_left_out():
+    nf = an.noise_floor( an.read_stage( _question( 1, noise=0.04 ) + _q2_first_single_from_another_model() ) )
+    assert ( nf[ "state" ], nf[ "n" ], nf[ "measured" ], nf[ "left_out" ] ) == ( "ok", 120, 0.04, [ "s1-q2-single1" ] )
+
+
+def test_every_question_with_an_arm_left_out_is_left_out_of_the_pool_and_a_question_with_none_is_not():
+    nf = an.noise_floor( an.read_stage( _question( 1, noise=0.0 ) + _q2_first_single_from_another_model( 2 ) + _q2_first_single_from_another_model( 3 ) ) )
+    assert ( nf[ "state" ], nf[ "n" ], nf[ "left_out" ] ) == ( "ok", 120, [ "s1-q2-single1", "s1-q3-single1" ] )
+
+
+def test_the_floor_with_nothing_left_out_names_no_arm():
+    assert an.noise_floor( an.read_stage( _question( noise=0.03 ) ) )[ "left_out" ] == []
+
+
+def test_the_floor_stays_inconclusive_when_a_valid_question_lacks_a_single_run_even_with_an_arm_left_out():
+    recs = [ r for r in _question( 1 ) if r[ "arm" ] != "single2" ] + _q2_first_single_from_another_model()
+    nf   = an.noise_floor( an.read_stage( recs ) )
+    assert ( nf[ "state" ], nf[ "n" ], nf[ "left_out" ] ) == ( "inconclusive", 0, [ "s1-q2-single1" ] )
+
+
+def test_the_floor_line_says_which_arms_were_left_out_and_says_nothing_when_none_were():
+    left  = an.render( an.build_report( _question( 1, noise=0.04 ) + _q2_first_single_from_another_model(), canaries=[] ) )
+    whole = an.render( an.build_report( _question( 1, noise=0.04 ), canaries=[] ) )
+    assert "noise floor: ok, measured 0.04, used 0.04 over 120 entries; left out: s1-q2-single1" in left
+    assert "noise floor: ok, measured 0.04, used 0.04 over 120 entries\n" in whole and "left out" not in whole
+
+
+def test_a_mismatch_in_a_later_question_leaves_the_decision_a_stop_and_ask_though_the_floor_survives():
+    rec = _mismatch_arm( question=2, run_name="s1-q2-single1" )
+    rep = an.build_report( _question( 1, noise=0.04 ) + [ rec ], canaries=[] )
+    assert rep[ "decision" ].startswith( "stop and ask: s1-q2-single1 was answered by" ) and rep[ "evaluate" ][ "noise_floor" ][ "state" ] == "ok"
+
+
+def test_the_decision_names_the_arm_and_the_model_that_answered_and_stops_and_asks():
+    rep = an.build_report( [ _mismatch_arm() ], canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: s1-q1-single1 was answered by jev-other-1.0, not jev-1.13.0; Rick decides whether another model is acceptable"
+    assert rep[ "next_step" ].startswith( "stop and ask" ) and "run question" not in an.render( rep ).split( "Next step:" )[ 1 ].splitlines()[ 0 ]
+
+
+def test_a_response_that_named_no_model_is_reported_as_naming_none():
+    rep = an.build_report( [ _mismatch_arm( served=None ) ], canaries=[] )
+    assert "s1-q1-single1 was answered by no named model, not jev-1.13.0" in rep[ "decision" ]
+
+
+def test_a_stop_with_no_mismatch_row_still_names_the_arm_and_says_another_model_answered():
+    rec = _mismatch_arm(); next( r for r in rec[ "rows" ] if r[ "error" ] == "ModelMismatch" )[ "error" ] = "NoAnswers"
+    assert "s1-q1-single1 was answered by another model, not jev-1.13.0" in an.build_report( [ rec ], canaries=[] )[ "decision" ]
+
+
+def test_a_canary_that_another_model_answered_stops_the_decision_though_no_pass_reads_a_canary():
+    recs = _complete(); can = next( r for r in recs if r[ "arm" ] == "canary" ); can[ "stop_reason" ], can[ "state" ] = "model_mismatch", "incomplete"
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "decision" ].startswith( "stop and ask: s1-q1-canary was answered by another model" ) and rep[ "next_step" ].startswith( "stop and ask" )
+
+
+def test_two_arms_that_another_model_answered_are_both_named_in_the_one_decision():
+    recs = _complete(); a, b = ( next( r for r in recs if r[ "arm" ] == n ) for n in ( "pack10", "pack50" ) )
+    for r in ( a, b ): r[ "stop_reason" ], r[ "state" ] = "model_mismatch", "incomplete"
+    decision = an.build_report( recs, canaries=[] )[ "decision" ]
+    assert "s1-q1-pack10 was answered by another model, not jev-test; s1-q1-pack50 was answered by another model, not jev-test" in decision
+
+
+def test_an_arm_that_another_model_answered_beside_a_failing_size_still_gets_the_mismatch_decision():
+    recs = _no_size_passes(); next( r for r in recs if r[ "arm" ] == "pack200" )[ "stop_reason" ] = "model_mismatch"
+    assert "s1-q1-pack200 was answered by another model" in an.build_report( recs, canaries=[] )[ "decision" ]
+
+
+def test_a_report_with_no_mismatch_keeps_its_decision():
+    assert an.build_report( _question(), canaries=[] )[ "decision" ] == "default pack size 200"
+
+
+def test_the_decision_names_the_first_model_that_answered_wrongly_when_two_rows_carry_the_error():
+    rec = _mismatch_arm( served="jev-other-1.0" ); rec[ "rows" ][ 40 ][ "error" ], rec[ "rows" ][ 40 ][ "model" ] = "ModelMismatch", "jev-third-2.0"             # a later row than the failed one at index 16
+    decision = an.build_report( [ rec ], canaries=[] )[ "decision" ]
+    assert "answered by jev-other-1.0," in decision and "jev-third-2.0" not in decision
+
+
+def test_an_arm_with_no_run_name_is_named_by_its_question_and_arm_in_the_decision():
+    rec = _arm( "single1", _base(), run_name=NO_NAME, stop_reason="model_mismatch", state="incomplete" )
+    assert an.build_report( [ rec ], canaries=[] )[ "decision" ].startswith( "stop and ask: question 1 single1 was answered by another model, not jev-test;" )
+
+
+# --- the next step names the arm that is invalid -------------------------------------------------------------------------------------------
+
+def _invalid_canary( question=2, **over ): return _arm( "canary", { "a": 0.1 }, size=10, question=question, stop_reason="model_mismatch", state="incomplete", **over )
+
+
+def test_the_next_step_names_the_invalid_canary_of_a_later_question_not_its_missing_single_run():
+    r = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _invalid_canary() ] ), check_arms=False )
+    assert r[ "stop" ] is True and r[ "next_step" ] == "stop and ask: s1-q2-canary is invalid (stop reason model_mismatch)"
+
+
+def test_the_next_step_names_an_invalid_single_run_by_its_own_name_and_a_nameless_arm_by_question_and_arm():
+    bad = _with_boundary( 2, 49 ); bad[ "stop_reason" ] = "model_mismatch"
+    assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ), check_arms=False )[ "next_step" ] == "stop and ask: s1-q2-single1 is invalid (stop reason model_mismatch)"
+    assert an.stop_rules( an.read_stage( [ _invalid_canary( run_name=NO_NAME ) ] ), check_arms=False )[ "next_step" ] == "stop and ask: question 2 canary is invalid (stop reason model_mismatch)"
+
+
+def test_an_invalid_arm_is_named_ahead_of_a_single_run_that_is_only_not_clean():
+    bad = _with_boundary( 1, 3 ); bad[ "failed" ] = [ "x" ]
+    assert an.stop_rules( an.read_stage( [ bad, _invalid_canary() ] ), check_arms=False )[ "next_step" ] == "stop and ask: s1-q2-canary is invalid (stop reason model_mismatch)"
+
+
+def test_the_report_over_a_clean_question_one_and_an_invalid_question_two_canary_names_that_canary_in_the_next_step_line():
+    text = an.render( an.build_report( _question( 1 ) + [ _invalid_canary() ], canaries=[] ) )
+    assert "Next step: stop and ask: s1-q2-canary is invalid (stop reason model_mismatch)" in text and "single run 1 is not clean" not in text

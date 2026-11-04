@@ -5,7 +5,7 @@ Trust Tracker for the Decision Proxy Agent.
 Manages per-category trust scores with:
   - Rolling window for decision history
   - Time-weighted decay (older decisions count less)
-  - L1-L5 graduated trust levels (count-based, Beta-Bernoulli, or BLR)
+  - Graduated trust levels 1 to 5 (count-based, Beta-Bernoulli, or BLR)
   - Category isolation (bad performance in one category doesn't affect others)
   - Runtime category registration (domain layers add their categories)
 
@@ -15,7 +15,7 @@ Trust Models:
   - "blr":   Bayesian Logistic Regression with 4-feature posterior mean rate
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 import math
@@ -38,12 +38,9 @@ class CategoryTrust:
     """
     Trust state for a single decision category.
 
-    Tracks decision outcomes within a rolling window, applies time-weighted
-    decay, and computes a trust score for level graduation. Supports three
-    trust models:
-      - "count": Original count-based thresholds (effective decision count)
-      - "beta":  Beta-Bernoulli with 95% credible interval + min samples
-      - "blr":   Bayesian Logistic Regression with 4-feature posterior mean rate
+    Tracks outcomes in a rolling window with time-weighted decay and computes a trust score.
+    Trust models: "count" (effective decision count), "beta" (95% credible
+    interval plus min samples), "blr" (4-feature posterior mean rate).
 
     Requires:
         - category_name is a non-empty string
@@ -114,13 +111,11 @@ class CategoryTrust:
         """
         Current trust level (1-5) for this category.
 
-        Dispatches to the appropriate trust model:
-          - "count": Count-based thresholds (original behavior)
-          - "beta":  Beta-Bernoulli with 95% credible interval
-          - "blr":   Bayesian Logistic Regression posterior mean rate
+        Dispatches by trust model: "count" (count-based thresholds), "beta"
+        (Beta-Bernoulli 95% credible interval), "blr" (posterior mean rate).
 
         Ensures:
-            - Returns 1 if below L2 threshold
+            - Returns 1 if below level 2 threshold
             - Returns highest level where threshold is met
             - Capped at cap_level
         """
@@ -154,10 +149,8 @@ class CategoryTrust:
         """
         Beta-Bernoulli trust level computation.
 
-        Uses Beta(alpha, beta) posterior with uniform prior Beta(1,1).
-        Computes 95% credible interval lower bound. Level requires BOTH:
-          - lower bound >= rate_threshold for that level
-          - total observations >= min_samples for that level
+        Uses Beta(alpha, beta) posterior with uniform prior Beta(1,1) and its 95% lower bound.
+        A level needs both: lower bound >= rate_threshold and observations >= min_samples.
 
         Returns:
             int: Trust level 1-5
@@ -220,11 +213,8 @@ class CategoryTrust:
         """
         Build a 4-dimensional feature vector for BLR.
 
-        Features (all normalized to [0, 1]):
-            0: category_index   — ordinal / 6.0
-            1: question_length  — min( word_count / 50, 1.0 )
-            2: hour_of_day      — hour / 24.0
-            3: recent_error_rate — placeholder 0.0 (filled by caller)
+        Features, all in [0, 1]: 0 category_index / 6.0, 1 min( word_count / 50, 1.0 ),
+        2 hour_of_day / 24.0. Feature 3 is recent_error_rate, a 0.0 placeholder the caller fills.
 
         Requires:
             - question is a string

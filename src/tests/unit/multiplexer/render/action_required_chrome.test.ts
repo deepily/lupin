@@ -27,6 +27,8 @@ import {
   abstractBlock,
   predictionHintBox,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredChrome";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createPredictionVoteStore } from "../../../../lupin_app/static/js/multiplexer/stores/PredictionVoteStore";
 import type { VoicePersona } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before( () => {
@@ -262,11 +264,33 @@ test( "with no integration the controls do not mount, rather than mounting with 
     { id_hash: "card-7", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
     undefined,
   );
-  // The controls still render (legacy draws them), but every click routes into the
-  // optional-chain no-op rather than a dead listener — the click must not throw.
-  const up = el.querySelector<HTMLButtonElement>( ".prediction-vote-up" );
-  assert.ok( up !== null );
-  up.click();
+  // The box itself is still drawn (predicted value in it); only the controls are skipped.
+  assert.ok( el.querySelector( ".prediction-hint-label" ) !== null, "the box was drawn — otherwise the absence below is vacuous" );
+  assertAbsent( el.querySelector( ".prediction-hint-vote" ), "no vote controls without an integration" );
+  assertAbsent( el.querySelector( ".prediction-vote-up" ), "no up button without an integration" );
+  assertAbsent( el.querySelector( ".prediction-vote-down" ), "no down button without an integration" );
+} );
+
+test( "with the real vote store the controls mount and a click POSTs this card's vote", async () => {
+  const bus   = createEventBusForTesting();
+  const posts: Array<{ path: string; body: unknown }> = [];
+  const store = createPredictionVoteStore( {
+    bus,
+    api: { post: async <T,>( path: string, body: unknown ): Promise<T> => { posts.push( { path, body } ); return {} as T; } },
+  } );
+  store.setContext( "card-9", { question: "Ship it?", predicted_value: "yes", category: "c", response_type: "yes_no" } );
+  const el = predictionHintBox(
+    { id_hash: "card-9", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
+    { getVote: ( id ) => store.getVote( id ), onVote: ( id, dir ) => { void store.vote( id, dir ); } },
+  );
+  const down = el.querySelector<HTMLButtonElement>( ".prediction-vote-down" );
+  assert.ok( down !== null, "the vote controls mounted — if this is null the rest of the test asserts nothing" );
+  down.click();
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  assert.equal( posts.length, 1 );
+  assert.equal( posts[ 0 ]!.path, "/api/notify/prediction-vote/card-9" );
+  assert.equal( ( posts[ 0 ]!.body as { vote: string } ).vote, "down" );
+  assert.equal( store.getVote( "card-9" ), "down" );
 } );
 
 test( "a hint below the vote gate draws the box but no controls", () => {

@@ -6,7 +6,7 @@ Implements sliding window token tracking with proactive delay enforcement
 to stay within Anthropic's 30,000 tokens/minute web search limit.
 
 Design Principles:
-- Proactive delay (wait BEFORE calling) vs reactive (retry after 429)
+- Proactive delay (wait before calling) rather than reactive (retry after 429)
 - Dynamic delay calculation based on actual token usage (no hardcoded delays)
 - Sliding window for accurate velocity calculation
 - User notification during enforced delays with explanation
@@ -281,8 +281,8 @@ class WebSearchRateLimiter:
         """
         Calculate required delay before next call.
 
-        Uses DYNAMIC calculation based on actual tokens in window.
-        Waits until ENOUGH records expire to get back under limit.
+        Uses a dynamic calculation based on actual tokens in window.
+        Waits until enough records expire to get back under limit.
 
         Returns:
             float: Seconds to wait (0 if no delay needed)

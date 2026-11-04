@@ -11,8 +11,6 @@ Security:
 - Path validation prevents directory traversal
 - Only serves files within io/ directory
 - Validates file extension against content type
-
-Generated on: 2026-01-20
 """
 
 import os
@@ -20,11 +18,13 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.background import BackgroundTask
 
 import cosa.utils.util as cu
 from cosa.rest.auth import get_current_user
 from cosa.rest.routers._dir_listing import list_directory
-from cosa.rest.routers._scope_registry import _is_secrets_path
+from cosa.rest.routers._pinned_open import PROC_FD, PinnedPathGone, open_pinned
+from cosa.rest.routers._scope_registry import _is_secrets_path, landed_relative_path, landed_within_roots
 
 router = APIRouter( tags=[ "io-files" ] )
 
@@ -71,11 +71,6 @@ async def get_io_file(
     """
     Serve files from the io/ directory with security validation.
 
-    Supports serving:
-    - Markdown files (.md) - research reports, podcast scripts
-    - Audio files (.mp3, .wav) - podcast audio
-    - Documents (.pdf, .txt, .json)
-
     Requires:
         - path is a relative path within io/ directory
         - File must exist
@@ -96,6 +91,9 @@ async def get_io_file(
     Raises:
         HTTPException 400: Invalid or unsafe path
         HTTPException 404: File not found
+
+    Supported types are markdown files (.md) for research reports and podcast scripts, audio
+    files (.mp3, .wav) for podcast audio, and documents (.pdf, .txt, .json).
     """
     # Decode the path (FastAPI does this, but be explicit)
     decoded_path = unquote( path )
@@ -129,11 +127,16 @@ async def get_io_file(
     # normpath collapses `..` textually and never follows a symlink, so a link planted
     # inside io/ with an innocent name was judged by the name the caller typed while
     # open() read wherever it pointed. Resolve, then judge where it LANDS.
-    full_path = os.path.realpath( os.path.join( io_base, decoded_path ) )
+    joined    = os.path.join( io_base, decoded_path )
+    full_path = os.path.realpath( joined )
 
-    # Security: ensure the REAL path is within io/. `!= base and not startswith(base + sep)`
-    # rather than a bare startswith, which also admits a sibling such as `io-archive/`.
-    if full_path != io_base and not full_path.startswith( io_base + os.sep ):
+    # Security: ensure the REAL path lands inside io/, judged by DIRECTORY IDENTITY rather than
+    # by spelling (rows cc39cee6, 5dd6baaa). A prefix test refuses a live file reached through a
+    # second mount spelling of io/ — the container mounts the repo at two prefixes — while a
+    # sibling such as `io-archive/` shares a name prefix and no identity, so it stays refused.
+    if not landed_within_roots( full_path, [ io_base ] ):
+        # A link landing outside answers 400 whether or not its target exists (row 9b80ef75):
+        # a second answer would let whoever planted the link probe which outside paths exist.
         raise HTTPException(
             status_code = 400,
             detail      = "Invalid path: must be within io/ directory"
@@ -150,9 +153,7 @@ async def get_io_file(
     # Re-judge on the LANDED path. The check above saw the path as TYPED; a symlink
     # inside io/ can land on a name the blocklist would refuse. `_is_secrets_path`
     # documents POSIX separators, so normalize rather than assume os.sep is "/".
-    landed_rel = os.path.relpath( full_path, io_base ).replace( os.sep, "/" )
-    if landed_rel == ".":
-        landed_rel = ""
+    landed_rel = landed_relative_path( full_path, io_base ).replace( os.sep, "/" )
     if _is_secrets_path( landed_rel ):
         raise HTTPException(
             status_code = 400,
@@ -162,16 +163,26 @@ async def get_io_file(
     # Directory branch (polymorphic response) — must come before isfile check
     if os.path.isdir( full_path ):
         # Compute relative-to-io path (the path callers expect for io scope)
-        rel_to_io = os.path.relpath( full_path, io_base )
-        if rel_to_io == ".":
-            rel_to_io = ""  # at io root
-        listing = list_directory(
-            abs_dir          = full_path,
-            rel_dir          = rel_to_io,
-            scope            = "io",
-            allowed_exts     = set( MEDIA_TYPES.keys() ),
-            parent_validator = lambda p: bool( p ),
-        )
+        rel_to_io = landed_relative_path( full_path, io_base )   # "" at the io root; never a `../..` form
+        # Open the folder first, judge where the descriptor landed, and list through it
+        # (row 147ce846): the isdir above saw a string a peer can swap before the listing reads it.
+        try:
+            dir_fd = open_pinned( full_path, lambda landed: _judge_landed( landed, io_base ), directory=True )
+        except PinnedPathGone:
+            raise HTTPException(
+                status_code = 404,
+                detail      = f"File not found: {decoded_path}"
+            )
+        try:
+            listing = list_directory(
+                abs_dir          = f"{PROC_FD}/{dir_fd}",
+                rel_dir          = rel_to_io,
+                scope            = "io",
+                allowed_exts     = set( MEDIA_TYPES.keys() ),
+                parent_validator = lambda p: bool( p ),
+            )
+        finally:
+            os.close( dir_fd )
         return JSONResponse( content=listing )
 
     # Check if file exists
@@ -193,17 +204,32 @@ async def get_io_file(
 
     media_type = MEDIA_TYPES[ ext ]
 
+    # Open first, judge the opened file, serve through the descriptor (row 1f4b30ce). The string
+    # judged above can be swapped for a symlink before the open below; the descriptor cannot.
+    # The answers stay what they were: 400 for a landing outside io/ or on a blocked name, 404
+    # for a file that is gone or is not a regular file.
+    try:
+        fd = open_pinned( full_path, lambda landed: _judge_landed( landed, io_base ) )
+    except PinnedPathGone:
+        raise HTTPException(
+            status_code = 404,
+            detail      = f"File not found: {decoded_path}"
+        )
+    pinned   = f"{PROC_FD}/{fd}"
+    filename = os.path.basename( full_path )
+
     # Force download: always return FileResponse with attachment Content-Disposition
     if download:
         try:
-            filename = os.path.basename( full_path )
             return FileResponse(
-                path                 = full_path,
+                path                 = pinned,
                 media_type           = media_type,
                 filename             = filename,
-                content_disposition_type = "attachment"
+                content_disposition_type = "attachment",
+                background           = BackgroundTask( os.close, fd )
             )
         except Exception as e:
+            os.close( fd )
             raise HTTPException(
                 status_code = 500,
                 detail      = f"Error serving file: {str( e )}"
@@ -212,7 +238,7 @@ async def get_io_file(
     # For text files, use PlainTextResponse (better encoding handling)
     if ext in [ ".md", ".txt", ".json", ".yaml", ".yml" ]:
         try:
-            with open( full_path, "r", encoding="utf-8" ) as f:
+            with open( pinned, "r", encoding="utf-8" ) as f:
                 content = f.read()
             return PlainTextResponse(
                 content    = content,
@@ -223,11 +249,12 @@ async def get_io_file(
                 status_code = 500,
                 detail      = f"Error reading file: {str( e )}"
             )
+        finally:
+            os.close( fd )
 
     # For binary files (audio, pdf, images), use FileResponse
     else:
         try:
-            filename = os.path.basename( full_path )
             # Inline-renderable types (pdf, png/jpg/gif/webp, mp3/wav) get
             # Content-Disposition: inline so the browser renders/plays them
             # in place. Other binary types (.pptx, etc.) default to attachment
@@ -235,16 +262,45 @@ async def get_io_file(
             # forces attachment regardless of type.
             disposition = "inline" if ext in INLINE_TYPES else "attachment"
             return FileResponse(
-                path                     = full_path,
+                path                     = pinned,
                 media_type               = media_type,
                 filename                 = filename,
                 content_disposition_type = disposition,
+                background               = BackgroundTask( os.close, fd )
             )
         except Exception as e:
+            os.close( fd )
             raise HTTPException(
                 status_code = 500,
                 detail      = f"Error serving file: {str( e )}"
             )
+
+
+def _judge_landed( landed: str, io_base: str ) -> None:
+    """
+    Apply the io door's guards to the path an opened descriptor landed on.
+
+    Requires:
+        - landed is an absolute path read from /proc for an open descriptor
+        - io_base is the resolved io/ directory
+
+    Ensures:
+        - returns None when the landing is inside io/ and its name passes the secrets blocklist
+
+    Raises:
+        - HTTPException 400 for a landing outside io/ or on a blocked name, with the same text
+          the string checks use
+    """
+    if not landed_within_roots( landed, [ io_base ] ):
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Invalid path: must be within io/ directory"
+        )
+    if _is_secrets_path( landed_relative_path( landed, io_base ).replace( os.sep, "/" ) ):
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Path matches secrets blocklist"
+        )
 
 
 @router.get(

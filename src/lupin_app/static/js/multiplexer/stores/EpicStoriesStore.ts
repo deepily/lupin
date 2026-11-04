@@ -30,8 +30,10 @@ export interface EpicStoriesApiClient {
   get<T>( path: string ): Promise<T>;
 }
 
+/** The server path that serves the epic titles and one-line stories. */
 export const EPIC_STORIES_ENDPOINT = "/api/epic-stories";
 
+/** The epic stories map, fetched once and never polled. */
 export interface EpicStoriesStore {
   /** The map, `{}` until a fetch resolves and `{}` forever if one fails. */
   stories(): EpicStories;
@@ -41,6 +43,7 @@ export interface EpicStoriesStore {
   hasAttempted(): boolean;
 }
 
+/** Options for `createEpicStoriesStore`: the API client, an endpoint and a log hook. */
 export interface EpicStoriesStoreOptions {
   api       : EpicStoriesApiClient;
   endpoint? : string;
@@ -52,6 +55,9 @@ interface EpicStoriesBody {
   stories? : unknown;
 }
 
+/**
+ * Caches the map of epic stories fetched from the server, loading it at most once.
+ */
 class EpicStoriesStoreImpl implements EpicStoriesStore {
   private readonly api      : EpicStoriesApiClient;
   private readonly endpoint : string;
@@ -60,6 +66,11 @@ class EpicStoriesStoreImpl implements EpicStoriesStore {
   private cached  : EpicStories = {};
   private fetched = false;
 
+  /**
+   * Creates the store from an API client, defaulting the endpoint and using a silent log.
+   *
+   * It fetches nothing yet.
+   */
   constructor( opts: EpicStoriesStoreOptions ) {
     this.api      = opts.api;
     /* c8 ignore next */ // production-default fallback: the endpoint constant; tests inject a path to assert it is the one asked for.
@@ -68,14 +79,25 @@ class EpicStoriesStoreImpl implements EpicStoriesStore {
     this.logFn    = opts.logFn ?? ( () => { /* silent by default */ } );
   }
 
+  /**
+   * Returns the cached stories map, which is empty until a load succeeds.
+   */
   stories(): EpicStories {
     return this.cached;
   }
 
+  /**
+   * Reports whether a load has been tried.
+   */
   hasAttempted(): boolean {
     return this.fetched;
   }
 
+  /**
+   * Fetches the stories map once and caches it, then returns it.
+   *
+   * On failure or a missing map it logs and keeps the empty cache; later calls do not retry.
+   */
   async load(): Promise<EpicStories> {
     if ( this.fetched ) return this.cached;
     // 🔴 SET BEFORE THE AWAIT, NOT AFTER IT. Setting it on success would retry a
@@ -97,6 +119,7 @@ class EpicStoriesStoreImpl implements EpicStoriesStore {
   }
 }
 
+/** Build the store. It fetches nothing until `load()` is called, and then only once. */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" (the identifier) where a real conditional carries two.
 export function createEpicStoriesStore( opts: EpicStoriesStoreOptions ): EpicStoriesStore {
   return new EpicStoriesStoreImpl( opts );

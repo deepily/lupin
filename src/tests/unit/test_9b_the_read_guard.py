@@ -237,7 +237,8 @@ def test_a_row_missing_the_field_entirely_is_refused( tmp_path, notifier, monkey
     # is now exempt from UNKNOWN, so it could no longer exercise a refusal at all.
     confirmer = v2._FakeConfirmer( response_value="yes" )
     executor = _RecordingExecutor( v2._outcome() )
-    row      = types.SimpleNamespace( routing_command="agent router go to math" )   # no field at all
+    row      = types.SimpleNamespace( routing_command="agent router go to math",
+                                      question="what is 2 plus 2" )   # no verdict field at all; a real row always has its question
     flow     = _flow( tmp_path, notifier, monkeypatch,
                       v2._lookup( is_replay_hit=False, best_candidate=row,
                                    best_score=95.0, similarity=95.0, tier="ann" ),
@@ -260,7 +261,8 @@ def test_the_refusal_says_so_in_the_trace( tmp_path, notifier, monkeypatch ):
     # is now exempt from UNKNOWN, so it could no longer exercise a refusal at all.
     confirmer = v2._FakeConfirmer( response_value="yes" )
     executor = _RecordingExecutor( v2._outcome() )
-    row      = v2._snapshot( routing_command="agent router go to math", answer_is_correct=None )
+    row      = v2._snapshot( routing_command="agent router go to math", answer_is_correct=None,
+                             question="what is 2 plus 2" )
     flow     = _flow( tmp_path, notifier, monkeypatch,
                       v2._lookup( is_replay_hit=False, best_candidate=row,
                                    best_score=95.0, similarity=95.0, tier="ann" ),

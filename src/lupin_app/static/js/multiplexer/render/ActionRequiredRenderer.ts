@@ -68,11 +68,19 @@ import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
 import { projectBadge, personaBadge, abstractIndicator, abstractBlock, predictionHintBox } from "./templates/actionRequiredChrome";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
+import type { PredictionVoteStore } from "../stores/PredictionVoteStore";
+import type { PredictionVoteDir } from "../shared/types";
+import { cssEscape } from "./dom";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
 // ---------------------------------------------------------------------------
 
+/**
+ * The slice of the action-required store the renderer uses.
+ *
+ * It is the list, a lookup by id, respond, pause and step recording.
+ */
 export interface ActionRequiredStoreLike {
   /** Arrival order: the first item is the active card, the rest are queued. */
   list(): ReadonlyArray<ActionRequiredItem>;
@@ -84,14 +92,21 @@ export interface ActionRequiredStoreLike {
   recordStep(idHash: string, step: MultipleChoiceStep): void;
 }
 
-// Parity A-2 #2f — carbon copies of legacy's card header (`renderActionRequiredNotification`,
-// `updatePauseButtonUI`, `showGracePeriodMessage`). The "(P)" names the key A-2 #2h wires.
+/**
+ * The glyph on the pause button while the card runs.
+ *
+ * The button shows `AR_RESUME_GLYPH` while the card is paused.
+ */
 export const AR_PAUSE_GLYPH    = "\u23F8\uFE0F";
+/** The glyph the pause button shows while the card is paused. */
 export const AR_RESUME_GLYPH   = "\u25B6\uFE0F";
+/** The title of the pause button while the card runs. */
 export const AR_PAUSE_TITLE    = "Pause timer and audio (P)";
+/** The title of the pause button while the card is paused. */
 export const AR_RESUME_TITLE   = "Resume timer and audio (P)";
+/** The message shown under the card header while the card is paused. */
 export const AR_PAUSED_MESSAGE = "\u23F8\uFE0F Paused \u2013 5-minute grace period added";
-// Parity A-2 #2g — the ✕. "(Esc)" names the key A-2 #2h wires.
+/** The title of the ✕ button, which answers the card with its default. */
 export const AR_CANCEL_TITLE   = "Cancel and use default (Esc)";
 
 /**
@@ -106,10 +121,16 @@ export function arProgressPercent(remainingMs: number, timeoutMs: number): numbe
   return Math.min(100, Math.max(0, (remainingMs / timeoutMs) * 100));
 }
 
+/** The stores the renderer reads: only the action-required store. */
 export interface ActionRequiredRendererStores {
   actionRequired: ActionRequiredStoreLike;
 }
 
+/**
+ * The renderer of the action-required pane.
+ *
+ * `mount` claims the pane from the read-only list and `unmount` releases it.
+ */
 export interface ActionRequiredRenderer {
   /**
    * Mount onto `root`. Sets `root.dataset.phase6bOwner = "true"` BEFORE any
@@ -126,6 +147,11 @@ export interface ActionRequiredRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createActionRequiredRenderer`.
+ *
+ * The bus and the store are required. The section reveal, recorder, auth token and vote bridge are optional.
+ */
 export interface ActionRequiredRendererOptions {
   eventBus : EventBus;
   stores   : ActionRequiredRendererStores;
@@ -141,12 +167,22 @@ export interface ActionRequiredRendererOptions {
   // threads the PredictionVoteStore in; a storeless harness omits it and the vote
   // controls do not mount, rather than mounting with no handler.
   predictionVote? : PredictionVoteIntegration;
+  // Row ed6db05a — the vote store, for the production wiring. Given this and no
+  // `predictionVote`, the renderer builds the bridge itself (stash the hint context, POST
+  // through the store, repaint the card on a refused or thrown cast), as the notifications
+  // list renderer does for its cards. `predictionVote` wins when both are given.
+  predictionVoteStore? : Pick<PredictionVoteStore, "getVote" | "setContext" | "vote">;
 }
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Draws the action-required section: one active card plus a queue of pending rows.
+ *
+ * It owns the typed drafts, keyboard shortcuts, microphone handler and collapse state.
+ */
 class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private readonly bus    : EventBus;
   private readonly stores : ActionRequiredRendererStores;
@@ -176,19 +212,34 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // A-2 #2h — the detach for the document-level Y/N/C/P/Esc shortcuts, or null when
   // they are not attached. Doubles as legacy's `keyboardListenerActive` latch.
   private keyboardOff : (() => void) | null = null;
+  // Escape asks it whether a card mic is recording (bug da15c818).
+  private readonly recorder : ActionRequiredRecorderLike;
 
+  /**
+   * Creates the renderer from its bus and stores and wires the microphone handler.
+   */
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
     this.revealSection = opts.revealSection;
-    this.predictionVote = opts.predictionVote;
+    const voteStore = opts.predictionVoteStore;
+    this.predictionVote = opts.predictionVote ?? (voteStore === undefined ? undefined : {
+      getVote : (id) => voteStore.getVote(id),
+      onVote  : (id, dir) => this.castPredictionVote(voteStore, id, dir),
+    });
+    /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
+    this.recorder = opts.recorder ?? recordingManager;
     this.onMic = createActionRequiredMic(
-      /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
-      opts.recorder ?? recordingManager,
+      this.recorder,
       opts.getAuthToken ?? (() => null),
     );
   }
 
+  /**
+   * Builds the header, active slot and queue in the root, then paints and subscribes.
+   *
+   * Throws if already mounted.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) {
       throw new Error("ActionRequiredRenderer already mounted");
@@ -241,6 +292,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     );
   }
 
+  /**
+   * Removes listeners and shortcuts and clears the root, leaving the empty message if idle.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -278,8 +332,34 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the whole section when mounted; used by tests.
+   */
   forceRenderForTesting(): void {
     if (this.mounted) this.renderAll();
+  }
+
+  // Row ed6db05a — a thumbs click on a card's prediction hint. The control has already painted
+  // its highlight. The server does not keep the hint, so the context is stashed here from the
+  // card and sent with the vote. A refused or thrown cast repaints the card, which reads
+  // getVote → undefined and drops the highlight; a recorded one keeps what was painted.
+  private castPredictionVote(
+    store : Pick<PredictionVoteStore, "getVote" | "setContext" | "vote">,
+    id    : string,
+    dir   : PredictionVoteDir,
+  ): void {
+    const item = this.stores.actionRequired.list().find((it) => it.id_hash === id);
+    /* c8 ignore next */ // defensive: the control is painted only for a card in the list that carries a hint.
+    if (item === undefined || item.prediction_hint == null) return;
+    const hint = item.prediction_hint;
+    store.setContext(id, {
+      question        : item.prompt,
+      predicted_value : hint.predicted_value,
+      category        : hint.category,
+      response_type   : item.response_type,
+    });
+    const revert = (): void => { this.renderAll(); };
+    void store.vote(id, dir).then((ok) => { if (!ok) revert(); }).catch(revert);
   }
 
   // -------------------------------------------------------------------------
@@ -681,6 +761,10 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       if (e.key !== "Escape") return;
       // Legacy lets Escape out of a text input reach the recorder instead (:25936-25939).
       if (typing()) return;
+      // Escape that stops a recording must not also cancel the card (bug da15c818). Focus is on
+      // the mic button, not an input, so typing() lets it through; the recorder's own Escape
+      // (window, after this document-level one) takes it.
+      if (this.recorder.getActiveContextId() !== null) return;
       const head = headWidget();
       if (head === null) return;
       e.preventDefault();
@@ -766,6 +850,11 @@ function applyPausedUi(widget: HTMLElement, paused: boolean): void {
   header.after(msg);
 }
 
+/**
+ * Turns a recorded response into display text.
+ *
+ * A string passes through; answer maps become header and value pairs joined by semicolons; missing responses read as none recorded.
+ */
 function formatResponse(response: ActionRequiredResponse | undefined): string {
   if (response === undefined) return "(no response recorded)";
   if (typeof response === "string") return response;
@@ -775,19 +864,11 @@ function formatResponse(response: ActionRequiredResponse | undefined): string {
     .join("; ");
 }
 
-/* c8 ignore start */ // CSS.escape polyfill — defensive cross-environment helper (production browsers + happy-dom + Node). c8 reports phantom branches inside the regex character class + the optional-chaining short-circuits which depend on the runtime CSS provider; the cssEscape-fallback test exercises both arms but c8's V8 instrumentation of regex/optional-chaining branches is implementation-dependent. Mirrors NotificationsListRenderer.ts:423 (same defensive helper, same ignore).
-function cssEscape(value: string): string {
-  if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
-    return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
-  }
-  return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
-}
-/* c8 ignore stop */
-
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
+/** Build the renderer. It paints and subscribes to nothing until `mount()` is called. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createActionRequiredRenderer(opts: ActionRequiredRendererOptions): ActionRequiredRenderer {
   return new ActionRequiredRendererImpl(opts);

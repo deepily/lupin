@@ -269,10 +269,9 @@ class LlmClient:
         """
         Send a prompt to the LLM and get the response.
         
-        This method now supports both sync and async contexts. When called
-        from an async context (like FastAPI), it runs the async operation
-        in a separate thread to avoid event loop conflicts. When called from a 
-        sync context, it handles the event loop creation automatically.
+        Works in sync and async contexts. From an async context (like FastAPI) it runs
+        the operation in a separate thread to avoid event loop conflicts. From a sync
+        context it creates the event loop itself.
         
         Requires:
             - prompt: A non-empty string to send to the LLM

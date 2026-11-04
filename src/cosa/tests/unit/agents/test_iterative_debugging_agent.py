@@ -186,7 +186,7 @@ class TestIterativeDebuggingAgent( unittest.TestCase ):
             - successful run sets self.code and stops before the 2nd LLM
         """
         agent = self._make_agent( minimalist=True )
-        agent.available_llms              = [ { "model": "a" }, { "model": "b" } ]
+        agent.llm_model_keys              = [ "a", "b" ]
         agent.run_prompt                  = Mock( return_value={ "success": "True", "code": [ "fixed" ] } )
         agent._patch_code_in_response_dict = Mock()
         agent.is_code_runnable            = Mock( return_value=True )
@@ -211,7 +211,7 @@ class TestIterativeDebuggingAgent( unittest.TestCase ):
             - The un-runnable sentinel output is returned
         """
         agent = self._make_agent( minimalist=True )
-        agent.available_llms = [ { "model": "a" } ]
+        agent.llm_model_keys = [ "a" ]
         agent.run_prompt     = Mock( return_value={ "success": "False" } )
 
         with patch( "cosa.agents.iterative_debugging_agent.ucr.initialize_code_response_dict", return_value={ "output": "init" } ):
@@ -230,7 +230,7 @@ class TestIterativeDebuggingAgent( unittest.TestCase ):
             - The 'moving on' (not last) and 'no more' (last) branches both run
         """
         agent = self._make_agent( minimalist=True )
-        agent.available_llms              = [ { "model": "a" }, { "model": "b" } ]
+        agent.llm_model_keys              = [ "a", "b" ]
         agent.run_prompt                  = Mock( return_value={ "success": "True", "code": [ "c" ] } )
         agent._patch_code_in_response_dict = Mock()
         agent.is_code_runnable            = Mock( return_value=True )
@@ -243,6 +243,40 @@ class TestIterativeDebuggingAgent( unittest.TestCase ):
         self.assertFalse( agent.successfully_debugged )
         self.assertEqual( agent.run_prompt.call_count, 2 )
 
+    def test_run_prompts_asks_each_configured_model_in_turn( self ):
+        """
+        Test each pass of the loop points the agent at that pass's model key.
+
+        Ensures:
+            - run_prompt sees model_name equal to the first key, then the second
+            - A key the factory could not look up is never replaced by the spec dict
+        """
+        agent = self._make_agent( minimalist=False )
+        agent.llm_model_keys = [ "key/a", "key/b" ]
+        seen = []
+        def _record():
+            seen.append( agent.model_name )
+            return { "code": [ "c" ] }
+        agent.run_prompt             = _record
+        agent.is_code_runnable       = Mock( return_value=True )
+        agent.run_code               = Mock( return_value={ "return_code": 1, "output": "err" } )
+        agent.code_ran_to_completion = Mock( return_value=False )
+
+        with patch( "cosa.agents.iterative_debugging_agent.ucr.initialize_code_response_dict", return_value={ "output": "" } ):
+            agent.run_prompts()
+
+        self.assertEqual( seen, [ "key/a", "key/b" ] )
+
+    def test_init_keeps_the_model_keys_beside_their_specs( self ):
+        """
+        Test construction records the configured keys in config order.
+
+        Ensures:
+            - llm_model_keys is the list under the debugger model keys setting
+        """
+        agent = self._make_agent( minimalist=True )
+        self.assertEqual( agent.llm_model_keys, [ "llm_key_1" ] )
+
     def test_run_prompts_non_minimalist_success( self ):
         """
         Test the non-minimalist branch skips the minimalist success/fail handling.
@@ -251,7 +285,7 @@ class TestIterativeDebuggingAgent( unittest.TestCase ):
             - Neither minimalist branch runs; a runnable success sets the flag + code
         """
         agent = self._make_agent( minimalist=False )
-        agent.available_llms         = [ { "model": "a" } ]
+        agent.llm_model_keys         = [ "a" ]
         agent.run_prompt             = Mock( return_value={ "code": [ "ok line" ] } )
         agent.is_code_runnable       = Mock( return_value=True )
         agent.run_code               = Mock( return_value={ "return_code": 0, "output": "done" } )
@@ -308,8 +342,8 @@ class TestIterativeDebuggingAgent( unittest.TestCase ):
              patch( "cosa.agents.iterative_debugging_agent.du.get_project_root", return_value="/root" ), \
              patch( "cosa.agents.iterative_debugging_agent.du.get_file_as_source_code_with_line_numbers", return_value="1: code" ), \
              patch( "cosa.agents.iterative_debugging_agent.du.get_file_as_string", return_value=_TEMPLATE ), \
-             patch( "cosa.agents.iterative_debugging_agent.open", mock_open(), create=True ), \
-             patch( "cosa.agents.iterative_debugging_agent.json.load", return_value=data ):
+             patch( "cosa.agents.agent_base.open", mock_open(), create=True ), \
+             patch( "cosa.agents.agent_base.json.load", return_value=data ):
             restored = IterativeDebuggingAgent.restore_from_serialized_state( "/tmp/idbg_state.json" )
 
         self.assertIsInstance( restored, IterativeDebuggingAgent )

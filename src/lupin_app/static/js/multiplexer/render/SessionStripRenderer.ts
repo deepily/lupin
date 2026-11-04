@@ -56,6 +56,7 @@ import type {
   StripSession,
 } from "../shared/types";
 import { keyedListMerge } from "./dom";
+import { KEEP_PLACE_KEY } from "./keepPlace";
 import {
   renderSessionStripIcon,
   updateSessionStripIcon,
@@ -70,11 +71,24 @@ interface NotificationLookupLike {
 }
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
-// Row d04ff119 — legacy's keys, verbatim (notifications.js:214-215). The focus key
-// holds JSON `{"enabled":…,"focused_sender_id":…}`; the other "true" / "false".
+/**
+ * The storage key of the strip's focus state, shared with the legacy client.
+ *
+ * The value is JSON with `enabled` and `focused_sender_id`.
+ */
 export const FOCUS_STATE_KEY   = "notifications_cc_focus_state";
+/**
+ * The storage key of the hide-inactive toggle, shared with the legacy client.
+ *
+ * The value is the string `true` or `false`.
+ */
 export const HIDE_INACTIVE_KEY = "notifications_cc_hide_inactive_strip";
 
+/**
+ * The CC session strip: persona icons with a focus toggle and a hide-inactive toggle.
+ *
+ * `isCardFocusHidden` tells the list renderer whether focus hides a sender's card.
+ */
 export interface SessionStripRenderer {
   /** Attach to a root containing the four strip elements (see file header). */
   mount(root: HTMLElement): void;
@@ -90,6 +104,11 @@ export interface SessionStripRenderer {
   isCardFocusHidden(senderId: string | null): boolean;
 }
 
+/**
+ * Options for `createSessionStripRenderer`.
+ *
+ * The bus and the strip store are required. Without the notification lookup the unread badge never counts.
+ */
 export interface SessionStripRendererOptions {
   eventBus : EventBus;
   // `notifications` is optional so harnesses without it still mount; without it
@@ -105,6 +124,9 @@ interface StripEntry {
   readonly session: StripSession;
 }
 
+/**
+ * Renders the strip of session icons with focus and hide-inactive toggles.
+ */
 class SessionStripRendererImpl implements SessionStripRenderer {
   private readonly bus     : EventBus;
   private readonly stores  : { strip: SessionStripStoreLike; notifications?: NotificationLookupLike };
@@ -116,12 +138,15 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   private iconsEl         : HTMLElement | null = null;
   private focusToggleEl   : HTMLElement | null = null;
   private hideToggleEl    : HTMLElement | null = null;
+  // Optional: a page without #cc-keep-place-toggle mounts fine; Keep place is then off, the default.
+  private keepPlaceToggleEl: HTMLElement | null = null;
 
   // Page UI state. Focus and hide-inactive are also persisted (row d04ff119);
   // everything here resets on unmount.
   private focusActive     : boolean = false;
   private focusedSenderId : string | null = null;
   private hideInactive    : boolean = false;
+  private keepPlace       : boolean = false;
   private mounted         : boolean = false;
   // Row d04ff119 — a persisted focus whose session is not in the strip yet. It is
   // applied the moment that session arrives (legacy `_maybeReapplyPersistedFocus`),
@@ -133,13 +158,20 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   private iconsClickHandler : ((e: Event) => void) | null = null;
   private focusToggleHandler: (() => void) | null = null;
   private hideToggleHandler : (() => void) | null = null;
+  private keepPlaceHandler   : (() => void) | null = null;
 
+  /**
+   * Creates the renderer from its bus, stores, and storage (localStorage by default).
+   */
   constructor(opts: SessionStripRendererOptions) {
     this.bus     = opts.eventBus;
     this.stores  = opts.stores;
     this.storage = opts.storage === undefined ? defaultStorage() : opts.storage;
   }
 
+  /**
+   * Attaches to the strip elements under the root, wires clicks, and paints.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) throw new Error("SessionStripRenderer.mount: already mounted");
 
@@ -172,6 +204,14 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     focusToggleEl.addEventListener("click", this.focusToggleHandler);
     hideToggleEl.addEventListener("click", this.hideToggleHandler);
 
+    const keepPlaceEl = root.querySelector<HTMLElement>("#cc-keep-place-toggle");
+    if (keepPlaceEl !== null) {
+      this.keepPlaceToggleEl = keepPlaceEl;
+      keepPlaceEl.removeAttribute("data-phase6-pending");
+      this.keepPlaceHandler = (): void => this.onKeepPlaceToggleClick();
+      keepPlaceEl.addEventListener("click", this.keepPlaceHandler);
+    }
+
     this.unsubscribers.push(
       this.bus.on<StoreSessionStripChangedPayload>(
         "store_session_strip_changed",
@@ -189,6 +229,9 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     this.reconcile();
   }
 
+  /**
+   * Removes listeners and subscriptions, clears card focus, and empties the strip.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -202,6 +245,12 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     if (this.hideToggleEl !== null && this.hideToggleHandler !== null) {
       this.hideToggleEl.removeEventListener("click", this.hideToggleHandler);
     }
+    if (this.keepPlaceToggleEl !== null && this.keepPlaceHandler !== null) {
+      this.keepPlaceToggleEl.removeEventListener("click", this.keepPlaceHandler);
+    }
+    this.keepPlaceHandler   = null;
+    this.keepPlaceToggleEl  = null;
+    this.keepPlace          = false;
     this.iconsClickHandler  = null;
     this.focusToggleHandler = null;
     this.hideToggleHandler  = null;
@@ -223,11 +272,16 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     this.unreadCounts.clear();
   }
 
+  /**
+   * Repaints the strip at once, for tests.
+   */
   forceRenderForTesting(): void {
     this.reconcile();
   }
 
-  // `null` = a card with no data-sender-id; it is not the focused card, so it hides.
+  /**
+   * Returns true when focus is on and the card is not the focused sender's.
+   */
   isCardFocusHidden(senderId: string | null): boolean {
     return this.focusActive && this.focusedSenderId !== null && senderId !== this.focusedSenderId;
   }
@@ -318,6 +372,12 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     this.enterFocus(sorted[0]!.sender_id);
   }
 
+  private onKeepPlaceToggleClick(): void {
+    this.keepPlace = !this.keepPlace;
+    this.writeStorage(KEEP_PLACE_KEY, String(this.keepPlace));
+    this.applyToggleVisuals();
+  }
+
   private onHideToggleClick(): void {
     this.hideInactive = !this.hideInactive;
     this.writeStorage(HIDE_INACTIVE_KEY, String(this.hideInactive));
@@ -370,6 +430,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
       }
     }
     this.hideInactive = this.readStorage(HIDE_INACTIVE_KEY) === "true";
+    this.keepPlace    = this.readStorage(KEEP_PLACE_KEY) === "true";
   }
 
   private saveFocus(): void {
@@ -478,6 +539,12 @@ class SessionStripRendererImpl implements SessionStripRenderer {
 
     this.hideToggleEl!.setAttribute("data-hide-inactive", String(this.hideInactive));
     this.hideToggleEl!.textContent = this.hideInactive ? "👁 Active" : "👁 All";
+
+    if (this.keepPlaceToggleEl !== null) {
+      this.keepPlaceToggleEl.setAttribute("data-keep-place", String(this.keepPlace));
+      this.keepPlaceToggleEl.setAttribute("aria-checked", String(this.keepPlace));
+      this.keepPlaceToggleEl.textContent = this.keepPlace ? "📌 Place kept" : "📌 Keep place";
+    }
   }
 
   private applyCardFocus(): void {
@@ -531,8 +598,9 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   }
 }
 
-// Row d04ff119 — the browser's localStorage, or null where reading the property
-// itself throws (some browsers do, with site data blocked).
+/**
+ * Returns the browser's localStorage, or null when reading it throws.
+ */
 function defaultStorage(): StorageLike | null {
   try {
     return globalThis.localStorage ?? null;
@@ -541,6 +609,11 @@ function defaultStorage(): StorageLike | null {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createSessionStripRenderer(opts: SessionStripRendererOptions): SessionStripRenderer {
   return new SessionStripRendererImpl(opts);

@@ -40,10 +40,47 @@ import pytest
 # calls for EVERY consumer. This delegation keeps the name and the signature so
 # src/tests/unit/deploy/test_db_password_seeded_from_dotenv.py — which loads this file BY
 # PATH and reaches in for this attribute — still guards it.
+from cosa.utils import dotenv_password as _dotenv_password
 from cosa.utils.dotenv_password import seed_db_password_from_dotenv as _seed_db_password_from_dotenv
 
 
 _seed_db_password_from_dotenv()
+
+
+# Under xdist a worker inherits the controller's seeded DB_USER / DB_PASSWORD, so its own seeder
+# returns early and its `_SEEDED` stays empty. reselect_seeded_login then reads the inherited login
+# as one the operator exported (row 62777c82). The controller hands what it seeded to each worker
+# through xdist's workerinput, never through os.environ, so no child process inherits it. A worker
+# restores a key only while its environment still holds the handed-off value.
+@pytest.hookimpl( optionalhook=True )
+def pytest_configure_node( node ):
+    """
+    Hand the controller's seeded login to an xdist worker.
+
+    Requires:
+        - node is the xdist WorkerController being configured
+
+    Ensures:
+        - node.workerinput carries a copy of the seeder's record under "lupin_seeded_login"
+        - os.environ is not touched
+    """
+    node.workerinput[ "lupin_seeded_login" ] = dict( _dotenv_password._SEEDED )
+
+
+def _restore_seeded_login( config ):
+    """
+    Restore the seeder's record in an xdist worker from the controller's workerinput.
+
+    Requires:
+        - config is the pytest Config for this session
+
+    Ensures:
+        - does nothing outside an xdist worker
+        - records a handed-off key only while os.environ still holds the handed-off value
+    """
+    handed_off = config.workerinput.get( "lupin_seeded_login", { } ) if hasattr( config, "workerinput" ) else { }
+    for key, value in handed_off.items():
+        if os.environ.get( key ) == value: _dotenv_password._SEEDED[ key ] = value
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -263,6 +300,7 @@ def pytest_configure( config ):
         - returns silently when --cov is inactive, when COVERAGE_FILE is exported,
           or when LUPIN_ALLOW_SHARED_COVERAGE is set
     """
+    _restore_seeded_login( config )
     cov_active = bool( getattr( config.option, "cov_source", None ) ) and \
                  not getattr( config.option, "no_cov", False )
     if not cov_active: return
@@ -309,6 +347,7 @@ from cosa.utils.tree_state import (
     _primary_branch,
     _run_span,
     _tree_state_line,
+    capture_start_bundle,
     capture_start_sha,
     tree_state_line,
 )
@@ -402,6 +441,9 @@ _COVERAGE_FILE_AT_START = _coverage_file_at_start()
 # fetched/dirty at start answer questions nobody asked at eight times the cost. Design:
 # `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
 _TREE_STATE_START_SHA = capture_start_sha( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
+# Row 105ff244: the served-bundle hash at the same moment. dist/ is gitignored, so the sha above is
+# blind to a bundle rebuild inside the run; this is what makes `bundle-span=` in the line.
+_TREE_STATE_START_BUNDLE = capture_start_bundle( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
 
 
 
@@ -416,7 +458,7 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     # FIRST, and outside every early return below: a run that ends before this has
     # printed is a green with no tree attached, which is the whole defect.
     try:
-        terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ), _TREE_STATE_START_SHA ) )
+        terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ), _TREE_STATE_START_SHA, _TREE_STATE_START_BUNDLE ) )
     except Exception:                                    # pragma: no cover - a diagnostic may never fail a run
         terminalreporter.write_line( "[tree-state] UNKNOWN — the tree-state probe itself failed" )
 
@@ -735,3 +777,118 @@ def _redirect_dm_traffic_corpus( tmp_path ):
         return
     with patch.object( dm, "_DM_TRAFFIC_JSONL", str( tmp_path / "dm_traffic.jsonl" ) ):
         yield
+
+
+@pytest.fixture( autouse=True )
+def _isolate_heartbeat_poke_mute_switch( tmp_path, monkeypatch ):
+    """
+    Keep the operator's live poke switch out of every test (row 3526fb95).
+
+    `load_heartbeat_settings` reads the fleet switch file, which on the host is a real
+    file an admin flips from a notification client. Without this, muting the fleet would
+    change the result of every test that loads heartbeat settings.
+
+    Ensures:
+        - during any test, the switch path is a file inside the test's `tmp_path` that
+          does not exist until the test writes it
+    """
+    monkeypatch.setenv( "LUPIN_HEARTBEAT_POKE_MUTE_FILE", str( tmp_path / "heartbeat-poke-mute.json" ) )
+
+
+@pytest.fixture( scope="session" )
+def _respin_credit_folder( tmp_path_factory ):
+    """
+    One folder for the whole run that holds re-spin credits.
+
+    Ensures:
+        - lives in a session temp folder, so no test writes into the live sessions folder
+    """
+    return str( tmp_path_factory.mktemp( "respin-credits" ) )
+
+
+@pytest.fixture( autouse=True )
+def _isolate_respin_credit_folder( _respin_credit_folder, monkeypatch ):
+    """
+    Point the re-spin credit folder at the run's own folder.
+
+    Ensures:
+        - during any test, a dismissal that names a re-spin persona writes no credit into the
+          live sessions folder
+    """
+    monkeypatch.setenv( "LUPIN_RESPIN_CREDIT_DIR", _respin_credit_folder )
+
+
+@pytest.fixture( scope="session" )
+def _skeleton_crew_off_file( tmp_path_factory ):
+    """
+    One configuration file for the whole run that says the skeleton crew switch is off.
+
+    Ensures:
+        - lives in a session temp folder, so no test's own tmp_path gains an extra file
+    """
+    switch_file = tmp_path_factory.mktemp( "skeleton-crew" ) / "switch.ini"
+    switch_file.write_text( "[Lupin: Baseline]\ncc session skeleton crew enabled = false\n", encoding="utf-8" )
+    return str( switch_file )
+
+
+@pytest.fixture( scope="session" )
+def _config_lock_folder( tmp_path_factory ):
+    """
+    One folder for the whole run that holds the configuration write lock.
+
+    Ensures:
+        - lives in a session temp folder, so no test writes under the live data root
+    """
+    return str( tmp_path_factory.mktemp( "config-lock" ) )
+
+
+@pytest.fixture( autouse=True )
+def _isolate_config_lock_folder( _config_lock_folder, monkeypatch ):
+    """
+    Point the configuration writers' lock folder at the run's own folder.
+
+    Ensures:
+        - during any test, a configuration write never touches the live data root
+    """
+    monkeypatch.setenv( "LUPIN_CONFIG_LOCK_DIR", _config_lock_folder )
+
+
+@pytest.fixture( autouse=True )
+def _isolate_skeleton_crew_switch( _skeleton_crew_off_file, monkeypatch ):
+    """
+    Keep the operator's live skeleton crew switch out of every test.
+
+    The gates read the switch from the main configuration file. Without this, the operator
+    turning it on would redden every test that reaches a spawn gate.
+
+    Ensures:
+        - during any test, the switch is read from a file that says it is off
+    """
+    monkeypatch.setenv( "LUPIN_SKELETON_CREW_INI", _skeleton_crew_off_file )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Visual-snapshot failures: run-scoped, and touched only by visual sessions (row d51ffc36)
+# ══════════════════════════════════════════════════════════════════════════════
+# The stock plugin's session autouse fixture of THIS NAME rmtree'd one shared folder at the
+# start of every session that loaded it, so a unit run destroyed the last E2E run's PNGs.
+# A fixture in a conftest shadows the plugin's same-named one. This keeps what the stock
+# fixture set up (SnapshotPaths) and changes only where failures go and when anything is deleted.
+@pytest.fixture( scope="session", autouse=True )
+def cleanup_snapshot_failures( request, pytestconfig ):
+    try:
+        from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
+    except ImportError:                     # the plugin is not installed: nothing to set up
+        yield
+        return
+    from pathlib import Path
+    from cosa.utils import visual_failures as vf
+
+    root_dir = Path( pytestconfig.rootdir )
+    SnapshotPaths.snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
+    base = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    if vf.session_collects_visual( request.session.items ):
+        SnapshotPaths.failures_path = Path( vf.prepare_run_dir( str( base ), vf.make_run_id() ) )
+    else:
+        SnapshotPaths.failures_path = base  # read-only for this session: never created, never wiped
+    yield

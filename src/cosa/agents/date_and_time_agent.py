@@ -1,4 +1,5 @@
-from cosa.agents.agent_base import AgentBase
+from cosa.agents.agent_base import AgentBase, run_agent_smoke
+from cosa.config.app_timezone import get_app_timezone
 
 class DateAndTimeAgent( AgentBase ):
     """
@@ -31,7 +32,7 @@ class DateAndTimeAgent( AgentBase ):
         # generated code reads the RIGHT clock — same `app timezone` key the notification
         # queue and the arbiter journal already read. A named zone, never a fixed offset:
         # an offset is wrong for half the year, which is exactly the bug this closes.
-        self.timezone = self.config_mgr.get( "app timezone", default="America/New_York" )
+        self.timezone = get_app_timezone( self.config_mgr )
         self.prompt   = self.prompt_template.format( question=self.question, timezone=self.timezone )
         self.xml_response_tag_names   = [ "thoughts", "brainstorm", "evaluation", "code", "example", "returns", "explanation" ]
     
@@ -57,38 +58,7 @@ class DateAndTimeAgent( AgentBase ):
     
 def quick_smoke_test():
     """Quick smoke test to validate DateAndTimeAgent functionality."""
-    import cosa.utils.util as du
-    
-    du.print_banner( "DateAndTimeAgent Smoke Test", prepend_nl=True )
-    
-    # Test with a single question for completion
-    question = "What time is it in Washington DC?"
-    
-    try:
-        print( f"Testing question: '{question}'" )
-        date_agent = DateAndTimeAgent( question=question, debug=True, verbose=False, auto_debug=False )
-        print( "✓ DateAndTimeAgent created successfully" )
-        
-        # Run through the complete agent workflow
-        print( "Running prompt..." )
-        date_agent.run_prompt()
-        print( "✓ Prompt execution completed" )
-        
-        print( "Running code..." )
-        date_agent.run_code()
-        print( "✓ Code execution completed" )
-        
-        print( "Running formatter..." )
-        date_agent.run_formatter()
-        print( "✓ Formatter execution completed" )
-        
-        print( f"✓ Final response: {date_agent.answer_conversational}" )
-        
-    except Exception as e:
-        print( f"✗ Error during agent execution: {e}" )
-    
-    print( "\n✓ DateAndTimeAgent smoke test completed" )
-
+    run_agent_smoke( DateAndTimeAgent, "What time is it in Washington DC?", "DateAndTimeAgent", "agent execution" )
 
 if __name__ == "__main__":
     quick_smoke_test()

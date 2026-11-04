@@ -27,6 +27,11 @@
 # Environment:
 #   LUPIN_TEST_PORT     - Test server port (default: 8000)
 #   LUPIN_TEST_BASE_URL - Full test server URL (overrides port if set)
+#   LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES
+#                       - Wall-clock cap per test FILE (default: 15; 0 = no cap). A file that
+#                         runs past it is stopped, reported as a failure naming the file, its
+#                         remaining tests are skipped, and the run goes on to the next file.
+#                         Mechanism and the measurement behind 15: src/tests/helpers/file_budget.py
 #
 # Refactored: 2026-04-12 Session 248e740e (dual-container architecture)
 # Original:   Hot-swap model (swapped dev server config, trap handler restored)
@@ -205,6 +210,9 @@ echo ""
 export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 export LUPIN_ENV="testing"
 export LUPIN_TEST_BASE_URL="$BASE_URL"
+# One named setting, default 15 minutes (see the header). Exported so the pytest process and
+# the banner below read the same value; a value the caller already set wins.
+export LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES="${LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES:-15}"
 # Host-side seed_test_companions.py default DB_HOST is 'lupin-postgres' (docker-internal DNS).
 # Override to localhost so fixtures that re-run the seed from the pytest client process
 # (e.g. clean_test_db in conftest.py) can reach the shared Postgres over the bridged port.
@@ -214,6 +222,7 @@ export DB_HOST="${DB_HOST:-localhost}"
 echo "================================================================"
 echo "  Running Integration Tests"
 echo "================================================================"
+echo "  Per-file cap: $LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES minutes (0 = none)"
 echo ""
 
 cd "$PROJECT_ROOT"

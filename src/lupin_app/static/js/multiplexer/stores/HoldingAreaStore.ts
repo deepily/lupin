@@ -25,12 +25,14 @@
 // refreshes ONCE, after every row has been attempted.
 
 import type { EventBus } from "../shared/EventBus";
+import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor } from "../render/taskListModel";
 import type { TaskPatchFields } from "./TaskListStore";
 import type { TransitionExtras } from "../render/taskVerbs";
 import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
+import { alreadyAtTarget } from "./alreadyAtTarget";
 
 /**
  * Narrowed ApiClient surface. `get` feeds the poll; `post` carries the batch
@@ -50,7 +52,7 @@ export interface HoldingAreaApiClient {
  * after the first refusal.
  */
 export type HoldingTransitionResult =
-  | { ok: true }
+  | { ok: true; alreadyAt?: string }
   | { ok: false; message: string; pending?: false }
   | { ok: false; message: string; pending: true; ticketId: string };
 
@@ -130,9 +132,12 @@ export function holdingRefusalMessage( err: unknown ): string {
   return String( e.status );
 }
 
+/** The server path that lists the tasks in the holding area. */
 export const HOLDING_AREA_ENDPOINT         = HOLDING_AREA_QUERY;
+/** How often the store polls the holding area, in milliseconds. */
 export const HOLDING_AREA_POLL_INTERVAL_MS = 60000;   // 60s, fleet parity
 
+/** The tasks waiting in the holding area, with the reads and the verbs that change them. */
 export interface HoldingAreaStore {
   /** Last fetched composite (any status), or null before the first refresh. */
   composite(): TaskListComposite | null;
@@ -199,6 +204,7 @@ export interface HoldingAreaStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createHoldingAreaStore`: bus, API client, actor provider and timer hooks. */
 export interface HoldingAreaStoreOptions {
   bus              : EventBus;
   api              : HoldingAreaApiClient;
@@ -210,46 +216,52 @@ export interface HoldingAreaStoreOptions {
   clearIntervalFn? : ( handle: number ) => void;
 }
 
+/**
+ * Holds the held-task list and writes task changes back for the holding pane.
+ */
 class HoldingAreaStoreImpl implements HoldingAreaStore {
   private readonly bus      : EventBus;
+  private readonly poller : PushPoller;
   private readonly api      : HoldingAreaApiClient;
   private readonly endpoint : string;
   private readonly nowFn    : () => number;
   private readonly actorProvider : () => string | null;
-  private readonly setIntervalFn   : ( cb: () => void, ms: number ) => number;
-  private readonly clearIntervalFn : ( handle: number ) => void;
 
   private lastComposite : TaskListComposite | null = null;
   private inFlight      : Promise<void> | null = null;
-  private pollHandle    : number | null = null;
 
+  /**
+   * Builds the store from a bus, an API client and optional runtime hooks.
+   */
   constructor( opts: HoldingAreaStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
+    const { nowFn, setIntervalFn, clearIntervalFn } = resolveRuntimeDefaults( opts );
+    this.nowFn = nowFn;
     /* c8 ignore next */ // production-default fallback: the canonical endpoint; tests inject an explicit one.
     this.endpoint = opts.endpoint ?? HOLDING_AREA_ENDPOINT;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? ( () => Date.now() );
     /* c8 ignore next */ // production-default fallback: an unauthenticated construction records "anonymous"; tests inject an explicit provider.
     this.actorProvider = opts.actorProvider ?? ( () => null );
-    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
-    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
-    /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the default above.
-    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+    this.poller = createPushPoller( {
+      bus              : this.bus,
+      setIntervalFn,
+      clearIntervalFn,
+      intervalMs       : HOLDING_AREA_POLL_INTERVAL_MS,
+      refresh          : () => this.refresh(),
+      refreshAfterWrite: () => this.refreshAfterWrite(),
+    } );
   }
 
+  /**
+   * Returns the latest held-task list composite, or null before the first read.
+   */
   composite(): TaskListComposite | null {
     return this.lastComposite;
   }
 
-  // 🔴 THE DEBOUNCE JOINS, IT DOES NOT NO-OP. This used to `return` on a
-  // collision, so `await store.refresh()` resolved having fetched NOTHING and
-  // emitted NOTHING — while reading, at every call site, as "the store is now
-  // up to date". The batch verbs awaited exactly that (Clayton 😎, F1).
-  //
-  // Returning the in-flight promise keeps the whole point of the guard — one
-  // fetch, never two — and makes the await mean what its callers already
-  // believed it meant. `void this.refresh()` from the poll is unaffected.
+  /**
+   * Fetches the held-task list and emits a change event.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight !== null ) return this.inFlight;   // JOIN: one fetch, but the await still waits
     const run = ( async () => {
@@ -264,36 +276,40 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
     return run;
   }
 
-  // 🔴 JOINING IS NOT ENOUGH AFTER A WRITE, AND THAT IS A SEPARATE FACT.
-  // A poll whose fetch STARTED before the batch's transitions landed cannot see
-  // them however patiently you wait for it — so a caller that just wrote needs a
-  // read that BEGAN after its writes, not merely a read that finished after them.
-  // Join the in-flight one so we do not race it or double-fetch alongside it,
-  // then take a fresh one, which is the first read that can observe the write.
+  /**
+   * Waits for any fetch in flight, then fetches again after the caller's write.
+   */
   async refreshAfterWrite(): Promise<void> {
     if ( this.inFlight !== null ) await this.inFlight;
     return this.refresh();
   }
 
+  /**
+   * Refreshes now, then on an interval and on each task-store-changed event.
+   */
   startPolling(): void {
-    this.stopPolling();
-    void this.refresh();
-    this.pollHandle = this.setIntervalFn( () => void this.refresh(), HOLDING_AREA_POLL_INTERVAL_MS );
+    this.poller.start();
   }
 
+  /**
+   * Cancels the poll timer and unsubscribes from the task-store-changed event.
+   */
   stopPolling(): void {
-    if ( this.pollHandle !== null ) {
-      this.clearIntervalFn( this.pollHandle );
-      this.pollHandle = null;
-    }
+    this.poller.stop();
   }
 
+  /**
+   * Stops polling so a test can finish cleanly.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
   }
   /* c8 ignore stop */
 
+  /**
+   * Moves one task to a new status as a direct user action and reports the result.
+   */
   async transitionTask(
     id       : string,
     toStatus : string,
@@ -325,10 +341,15 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
       }
       return { ok: true };
     } catch ( err ) {
+      // Row 71a11ed7: a refused transition on a row already at the target is a success.
+      if ( await alreadyAtTarget( this.api, id, toStatus, err ) ) return { ok: true, alreadyAt: toStatus };
       return { ok: false, message: holdingRefusalMessage( err ) };
     }
   }
 
+  /**
+   * Updates fields on one task as a direct user action and reports the result.
+   */
   async patchTask( id: string, fields: TaskPatchFields ): Promise<HoldingTransitionResult> {
     const body = { ...fields, actor: deriveTaskActor( this.actorProvider() ), authority: "user_direct" };
     try {
@@ -363,6 +384,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   }
 }
 
+/** Build the store. It fetches nothing when it is built. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createHoldingAreaStore( opts: HoldingAreaStoreOptions ): HoldingAreaStore {
   return new HoldingAreaStoreImpl( opts );

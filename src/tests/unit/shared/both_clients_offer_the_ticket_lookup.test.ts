@@ -399,18 +399,11 @@ test( "MENTION: the notifications page carries the lookup markup", () => {
     "the notifications client must offer the box" );
 } );
 
-test( "MENTION: the cache token on notifications.js was bumped past the last release", () => {
-  // 🔴 THE DEFECT THIS CATCHES HAS FIRED TWICE IN ONE DAY (commits 1a958c49 and
-  // 2033c006): a merged fix sat behind a byte-identical URL and every warm
-  // browser held the old copy forever. Rick's ruling is that "fixed" means he
-  // can SEE and USE it, so an unbumped token is an unshipped feature.
-  //
-  // ⚠️ A FLOOR, not a full guard — it cannot tell "bumped correctly" from
-  // "bumped to something arbitrary". The real instrument is the stale-bundle
-  // gate on row 75044ab5.
+test( "MENTION: notifications.js carries a content-hash cache token", () => {
+  // The token is the first 12 hex of the SHA-256 of the file's bytes (lupin_app/asset_tokens.py),
+  // so a changed file cannot keep its old token. That it matches the CURRENT bytes is asserted
+  // once, in test_task_body_overlay_cache_bust.py; this only checks the shape.
   const html  = read( NOTIFICATIONS_HTML );
-  const match = html.match( /notifications\.js\?v=(\w+)/ );
-  assert.ok( match, "notifications.js must carry a cache-busting token at all" );
-  assert.notEqual( match![ 1 ], "20260909a",
-    "notifications.js changed; its token must move or warm browsers keep the old file" );
+  const match = html.match( /notifications\.js\?v=([0-9a-f]{12})"/ );
+  assert.ok( match, "notifications.js must carry a 12-hex content token" );
 } );

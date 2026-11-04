@@ -121,6 +121,16 @@ class TestDateTimeHelpers( unittest.TestCase ):
 class TestNameValuePairs( unittest.TestCase ):
     """get_name_value_pairs() + v2 CLI arg parsing."""
 
+    def test_a_value_containing_equals_is_kept_whole( self ):
+        out = cu.get_name_value_pairs( [ "script", "url=http://h/?a=b&c=d", "k=v" ] )
+        self.assertEqual( out, { "url": "http://h/?a=b&c=d", "k": "v" } )
+
+    def test_v2_a_value_containing_equals_is_kept_whole( self ):
+        out = cu.get_name_value_pairs_v2( [ "script", "q=a=b+c" ] )
+        self.assertEqual( out, { "q": "a=b c" } )
+        out = cu.get_name_value_pairs_v2( [ "script", "q=a=b+c" ], decode_spaces=False )
+        self.assertEqual( out, { "q": "a=b+c" } )
+
     def test_empty_arglist_returns_empty( self ):
         self.assertEqual( cu.get_name_value_pairs( [ "script" ] ), {} )
 
@@ -186,6 +196,12 @@ class TestFileReaders( _TmpFileMixin, unittest.TestCase ):
         self.assertEqual( d[ "key" ], "value" )
         self.assertEqual( d[ "piped" ], "val" )       # pipes stripped
         self.assertNotIn( "loneword", d )
+
+    def test_get_file_as_dictionary_keeps_an_equals_sign_inside_a_value( self ):
+        path = self._write_tmp( "url = http://h/?a = b\nplain = x\n" )
+        d = cu.get_file_as_dictionary( path )
+        self.assertEqual( d[ "url" ], "http://h/?a = b" )
+        self.assertEqual( d[ "plain" ], "x" )
 
     def test_line_numbering_helpers( self ):
         path = self._write_tmp( "alpha\nbeta\n" )

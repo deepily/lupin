@@ -2,27 +2,29 @@
 """
 Shared JSON-object recovery for bounded-CC / SDK completions.
 
-ONE implementation, imported by both the Podcast generator
-(`prompts/script_generation.py`, LENIENT — the parser raises on unrecoverable)
-and the Presentation generator (`prompts/json_recovery.py`, STRICT —
-caller-owns-raise). Their bodies were byte-identical before this de-dup
-(consumer sweep 52cde456); merging them changes no behaviour and follows the
-shared-helper precedent set by Rio's e651bc76 (fuzzy_file_prefilter).
+One implementation, imported by both the Podcast generator and the Presentation generator.
+The Podcast generator (`prompts/script_generation.py`) is lenient: its parser raises on unrecoverable.
+The Presentation generator (`prompts/json_recovery.py`) is strict: the caller owns the raise.
 
-Deep Research keeps its OWN copy for now (it already raises instead of
-returning None; folding it would change a third component's contract during
-demo week — tracked as a separate follow-up).
-
-Fence-preference (P0 4317efd1): the recovery now drops everything at/after the
-CLOSING code fence, so explanatory prose the model appends AFTER a ```json
-block (e.g. "### Explanation: each segment is a {speaker, role, text} object")
-can no longer defeat last-brace extraction. Before this, that trailing brace
-became the "last balanced object", `json.loads` failed on the fragment, and
-recovery returned None — which silently produced an empty (0-segment) podcast.
+Notes:
+    - The two generators' bodies were byte-identical, so merging them changes no behavior.
+      This follows the shared-helper precedent of fuzzy_file_prefilter.
+    - Deep Research keeps its own copy for now. It already raises instead of
+      returning None, and folding it in would change a third component's contract.
+    - Fence preference: recovery drops everything at or after the closing code fence.
+      Explanatory prose appended after a ```json block (for example
+      "### Explanation: each segment is a {speaker, role, text} object")
+      therefore cannot defeat last-brace extraction.
+    - Without that cut, the trailing brace became the "last balanced object",
+      `json.loads` failed on the fragment, and recovery returned None.
+      That silently produced an empty (0-segment) podcast.
 """
 
 import json
 import logging
+import os
+import re
+from datetime import datetime
 from typing import Optional, Any
 
 logger = logging.getLogger( __name__ )
@@ -43,14 +45,10 @@ _BENIGN_WHITESPACE_CTRLS = frozenset( "\n\r\t" )
 
 def _loads_whitespace_tolerant( text: str ) -> Any:
     """
-    json.loads(text) with a NARROW recovery gate.
+    json.loads(text) with a narrow recovery gate.
 
-    Strict parsing first. If it fails ONLY because of unescaped benign whitespace
-    control chars (\\n \\r \\t) inside string values, retry with strict=False and
-    log at WARNING which chars were repaired (so a path carrying real volume is
-    countable, not a whisper). Any OTHER control char, or any structural error,
-    still raises — widening what a check accepts is the same disease as defect B,
-    trading a loud failure for a silent wrong answer.
+    Strict parsing first. If it fails only because of unescaped benign whitespace
+    control chars (\\n \\r \\t) inside string values, retry with strict=False.
 
     Requires:
         - text is a string
@@ -59,6 +57,12 @@ def _loads_whitespace_tolerant( text: str ) -> Any:
         - returns the parsed JSON value on success
         - raises json.JSONDecodeError if strict fails for any reason other than
           benign-whitespace control chars, or if strict=False still fails
+
+    Notes:
+        - The retry logs at warning level which chars were repaired, so a path carrying
+          real volume is countable, not a whisper.
+        - Any other control char, or any structural error, still raises.
+        - Widening what a check accepts would trade a loud failure for a silent wrong answer.
     """
     try:
         return json.loads( text )
@@ -84,15 +88,16 @@ def extract_json_object( text: str ) -> Optional[ str ]:
     Recovers a JSON object embedded in surrounding prose (e.g. "Here's the
     outline: { ... }"). Ports the BFE/TFE forensic-parser approach.
 
-    NOTE: last-brace selection is intentional and unchanged — the Presentation
-    STRICT callers depend on it. The P0 fix lives in `recover_json_object`'s
-    fence handling, which cuts trailing prose BEFORE this is ever reached.
-
     Requires:
         - text is a string
 
     Ensures:
         - returns the substring of the last balanced {...} object, or None
+
+    Notes:
+        - Last-brace selection is intentional: the strict Presentation callers depend on it.
+        - Trailing prose is cut by the fence handling in `recover_json_object`,
+          before this function is reached.
     """
     close_idx = text.rfind( "}" )
     if close_idx == -1:
@@ -110,30 +115,90 @@ def extract_json_object( text: str ) -> Optional[ str ]:
     return None
 
 
-def recover_json_object( response_content: str ) -> Optional[ Any ]:
+# A pause tag the model copied verbatim into a JSON string: <break time="1.5s"/> with the quotes
+# unescaped. Only this one tag shape is repaired; any other bare quote is left to fail loudly.
+_BARE_BREAK_TAG = re.compile( r'(<break time=)"([0-9.]+s?)"(\s*/>)' )
+
+
+def _escape_bare_break_quotes( text: str ) -> str:
+    """
+    Escape the quotes of every unescaped <break time="x.xs"/> tag in a JSON text.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns text with the quotes of each bare-quoted break tag escaped
+        - a tag whose quotes are already escaped is untouched
+    """
+    return _BARE_BREAK_TAG.sub( r'\1\\"\2\\"\3', text )
+
+
+def save_raw_response( body: str, label: str ) -> Optional[ str ]:
+    """
+    Save a full model response to a dated, labelled file under io/.
+
+    Requires:
+        - body is a string
+        - label is a short, non-empty tag such as a job id
+
+    Ensures:
+        - returns the path of the file written, under <project root>/io/json-recovery-failures/<YYYY-MM-DD>/
+        - the file name is <HHMMSS-microseconds>-<label>.txt, with any character outside [A-Za-z0-9._-] in label replaced by "-"
+        - returns None, and logs the cause, if the file cannot be written
+        - never raises
+
+    Notes:
+        - io/** is gitignored, so the dump never reaches a commit.
+    """
+    import cosa.utils.util as cu
+
+    now  = datetime.now()
+    safe = re.sub( r"[^A-Za-z0-9._-]", "-", label )
+    path = f"{cu.get_project_root()}/io/json-recovery-failures/{now:%Y-%m-%d}/{now:%H%M%S-%f}-{safe}.txt"
+    try:
+        os.makedirs( os.path.dirname( path ), exist_ok=True )
+        with open( path, "w", encoding="utf-8" ) as f:
+            f.write( body )
+    except OSError as e:
+        logger.error( "[json-recovery] could not save the raw response to %s: %s", path, e )
+        return None
+
+    return path
+
+
+def recover_json_object(
+    response_content: str, label: Optional[ str ] = None, dump_info: Optional[ dict ] = None
+) -> Optional[ Any ]:
     """
     Best-effort recovery of a JSON value from a (possibly chatty) completion.
 
-    Strategy:
-        1. Strip a leading markdown code fence (``` or ```json) AND drop
-           everything at/after the matching CLOSING fence — trailing prose after
-           the code block otherwise defeats last-brace recovery (P0 4317efd1).
-        2. Try a direct `json.loads`.
-        3. On failure, extract the last balanced {...} object from the prose
-           and retry.
-
-    This helper only RECOVERS — it never raises and never substitutes a default.
-    The failure POSTURE is the caller's: Podcast's `parse_script_response`
-    raises on None; Presentation's four call sites raise on None. On an
-    unrecoverable response this logs the FULL raw body at ERROR (contract-neutral
-    — it changes no return value), so the malformed completion is captured
-    permanently without a staged harness.
-
     Requires:
         - response_content is a string
+        - label is None, or a short tag naming the caller's job, used in the dump file name
+        - dump_info is None or a dict
 
     Ensures:
         - returns the parsed JSON value, or None if nothing can be recovered
+        - never raises and never substitutes a default
+        - on None with a label, the full raw response is saved by `save_raw_response`, the path is
+          logged beside the bounded body, and the path (or None) is stored in dump_info[ "path" ]
+        - on None without a label, nothing is written and the log says so
+
+    Notes:
+        - Strategy: (1) strip a leading markdown code fence (``` or ```json) and drop
+          everything at or after the matching closing fence; (2) try a direct `json.loads`;
+          (3) on failure, extract the last balanced {...} object from the prose and retry.
+        - Trailing prose after the code block would otherwise defeat last-brace recovery.
+        - The failure posture belongs to the caller: Podcast's `parse_script_response`
+          raises on None, and so do Presentation's four call sites.
+        - On an unrecoverable response this logs a bounded raw body at error level.
+        - This function owns the file write because it is the one place that holds the full body at
+          the moment of failure, and every caller (Podcast and Presentation) gets the dump.
+          The write is opt-in: a caller passes a label to get it, so callers that do not
+          (Presentation, and tests feeding bad input) never write into io/.
+        - That log changes no return value, so the malformed completion is captured
+          permanently without a staged harness.
     """
     content = response_content.strip()
 
@@ -158,6 +223,13 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
         except json.JSONDecodeError:
             pass
 
+    # The one repair: pause tags copied with their quotes unescaped (row 3ed25e12).
+    repaired = _escape_bare_break_quotes( extracted if extracted is not None else content )
+    try:
+        return _loads_whitespace_tolerant( repaired )
+    except json.JSONDecodeError:
+        pass
+
     # Unrecoverable: log the raw body LOUDLY so it is captured permanently. Bound
     # it head+tail (the trailing prose after a code fence is the usual culprit, so
     # the TAIL must survive) to keep a multi-thousand-token completion from
@@ -169,8 +241,93 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
         body = (
             f"{body[ :half ]}\n...[{len( response_content ) - cap} chars omitted]...\n{body[ -half: ]}"
         )
+    dump_path = save_raw_response( response_content, label ) if label is not None else None
+    if label is not None and dump_info is not None: dump_info[ "path" ] = dump_path
     logger.error(
-        "[json-recovery] unrecoverable JSON from model response (%d chars); bounded raw body follows:\n%s",
-        len( response_content ), body,
+        "[json-recovery] unrecoverable JSON from model response (%d chars); full raw body saved to %s; "
+        "bounded raw body follows:\n%s",
+        len( response_content ), dump_path, body,
     )
     return None
+
+
+def strip_json_fence( response_text: str, single_leading: bool = False ) -> str:
+    """
+    Remove one leading ```json (or bare ```) marker and one trailing ``` marker.
+
+    Requires:
+        - response_text is a string
+        - single_leading is a bool
+
+    Ensures:
+        - returns the text between the markers, stripped of surrounding whitespace
+        - text without a fence comes back stripped and otherwise unchanged
+        - with single_leading False, a ```json marker followed directly by a bare ``` loses both
+        - with single_leading True, only the ```json marker goes and the bare ``` stays
+        - never raises
+
+    Notes:
+        - The two modes keep the two behaviours the copies had: the Deep Research parsers
+          removed both leading markers, the Presentation metadata extractors only one.
+        - This is a plain strip. It does not drop prose after the closing fence and does not
+          hunt for a balanced object; `recover_json_object` does both.
+    """
+    text = response_text.strip()
+
+    if text.startswith( "```json" ):
+        text = text[ 7: ]
+        if single_leading: return _strip_trailing_fence( text )
+    if text.startswith( "```" ):
+        text = text[ 3: ]
+
+    return _strip_trailing_fence( text )
+
+
+def _strip_trailing_fence( text: str ) -> str:
+    """Drop one trailing ``` marker, then surrounding whitespace."""
+    if text.endswith( "```" ): text = text[ :-3 ]
+
+    return text.strip()
+
+
+def parse_fenced_json( response_text: str, label: str ) -> dict:
+    """
+    Parse a model response that holds one JSON document, optionally fenced.
+
+    Requires:
+        - response_text is a string
+        - label is a short noun for the error message, such as "planning"
+
+    Ensures:
+        - returns whatever `json.loads` returns for the fence-stripped text
+
+    Raises:
+        - ValueError( "Could not parse <label> response as JSON: ..." ) when the text is not JSON
+    """
+    try:
+        return json.loads( strip_json_fence( response_text ) )
+    except json.JSONDecodeError as e:
+        raise ValueError( f"Could not parse {label} response as JSON: {e}" )
+
+
+def extract_json_metadata( response_content: str, defaults: dict ) -> dict:
+    """
+    Pull a few top-level keys out of a fenced JSON response, with a default for each.
+
+    Requires:
+        - response_content is a string
+        - defaults maps each wanted key to the value to use when the key is absent
+
+    Ensures:
+        - returns { key: parsed.get( key, default ) } for every key in defaults, in order
+        - returns {} when the text is not JSON
+
+    Raises:
+        - AttributeError when the JSON is valid but not an object (a list has no `.get`)
+    """
+    try:
+        parsed = json.loads( strip_json_fence( response_content, single_leading=True ) )
+    except json.JSONDecodeError:
+        return {}
+
+    return { key: parsed.get( key, default ) for key, default in defaults.items() }

@@ -47,6 +47,10 @@ import cosa.rest.task_approval_settings as approval
 # The one function permitted to parse a boolean. Everything else must delegate to it.
 THE_ONE_PARSER = "_as_bool_or_none"
 
+# The shared reader that three of the settings go through. It calls the parser itself, so a
+# function that calls it delegates just as one that calls the parser does (row 83fd572c, exact:25).
+THE_SHARED_RESOLVER = "_resolve_bool_setting"
+
 # Words that only ever appear in a boolean parse. Kept here rather than imported from
 # the module so that widening the module's own TRUE_WORDS cannot silently widen what
 # this guard tolerates.
@@ -239,13 +243,14 @@ def test_the_denominator_is_stated_out_loud():
     )
 
     booleans_swept = [ fn.name for fn in functions
-                       if any( isinstance( n, ast.Call ) and _named( n.func ) == THE_ONE_PARSER
+                       if any( isinstance( n, ast.Call ) and _named( n.func ) in ( THE_ONE_PARSER, THE_SHARED_RESOLVER )
                                for n in ast.walk( fn ) ) ]
 
     # The three boolean SETTINGS this module reads. Written out because the count is the
     # claim: three settings, three delegating readers, zero hand-rolled parses.
     assert set( booleans_swept ) >= {
         "get_enforcement_active", "default_mint_status", "get_manager_pull_disabled",
+        "get_sword_of_damocles_active",
     }, (
         f"expected all three boolean readers to delegate; only {booleans_swept} do."
     )
@@ -267,6 +272,53 @@ def test_the_denominator_is_stated_out_loud():
 # other arms died; this one walked. I had fixed three messages and guarded none of them,
 # which is precisely the "green suite over a deleted guard is the finding, not the fix"
 # shape. The arm now kills.
+
+
+def _parser_calls_in( fn ):
+    """
+    The calls to the one parser that a function makes itself.
+
+    Requires:
+        - fn is an ast.FunctionDef / ast.AsyncFunctionDef
+
+    Ensures:
+        - returns the ast.Call nodes whose target is the one parser, under either spelling
+    """
+    return [ node for node in ast.walk( fn )
+             if isinstance( node, ast.Call ) and _named( node.func ) == THE_ONE_PARSER ]
+
+
+def test_the_shared_resolver_itself_calls_the_one_parser_once_per_layer():
+    """
+    The resolver has two layers, the stored override and the INI key, and parses both.
+
+    The denominator test counts a call to the resolver as delegation without looking
+    inside it. A resolver that parsed nothing, or parsed with `== "true"`, stayed green.
+    """
+    resolver = [ fn for fn in _module_functions() if fn.name == THE_SHARED_RESOLVER ]
+    assert len( resolver ) == 1, (
+        f"expected exactly one {THE_SHARED_RESOLVER}, found {len( resolver )}. With none, "
+        f"every reader that calls it delegates to nothing."
+    )
+
+    calls = _parser_calls_in( resolver[ 0 ] )
+    assert len( calls ) == 2, (
+        f"{THE_SHARED_RESOLVER} makes {len( calls )} calls to {THE_ONE_PARSER}; it needs "
+        f"one for the stored override and one for the INI key."
+    )
+
+
+@pytest.mark.parametrize( "source, expected", [
+    ( "def _resolve_bool_setting( k ):\n    return _read_overrides()[ k ]", 0 ),
+    ( 'def _resolve_bool_setting( k ):\n    return _read_overrides()[ k ] == "true"', 0 ),
+    ( "def _resolve_bool_setting( k ):\n    return _as_bool_or_none( _read_overrides()[ k ], 'x' )", 1 ),
+    ( "def _resolve_bool_setting( k ):\n    return approval._as_bool_or_none( raw, 'x' )", 1 ),
+] )
+def test_the_resolver_call_count_sees_a_planted_resolver( source, expected ):
+    """
+    Prove the counter: a resolver with no parser counts zero, one that delegates counts.
+    """
+    assert len( _parser_calls_in( ast.parse( source ).body[ 0 ] ) ) == expected
 
 
 def _refusal_builders():

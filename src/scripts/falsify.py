@@ -1,50 +1,42 @@
 #!/usr/bin/env python3
 """
-Mutation harness that proves WHERE a falsifier bit, not merely THAT something went red.
+Mutation harness that proves where a falsifier bit, not merely that something went red.
 
-THE FAILURE THIS PREVENTS, and it happened here on 2026-08-25 (row d2e23ecb).
+A falsifier proves a test suite can fail: change the product, watch the gate redden.
+A mutation that lands somewhere other than where it was aimed does not fail loudly.
+It still goes red, and that red cannot be told apart from success.
 
-A falsifier is supposed to prove a test suite can fail: change the product, watch the
-gate redden. Phase 5 extracted eleven `if`/`elif` branch bodies into eleven builder
-functions, and the bodies were DEDENTED from eight spaces to four in the move. The
-falsifier's search pattern still carried the original eight-space indent. It therefore
-did NOT match the builder it named -- it matched the LEGACY copy of the same code
-further down the same file, which had kept its original indentation.
+Example: eleven `if`/`elif` bodies were extracted into builder functions and dedented from
+eight spaces to four. A search pattern that kept the eight-space indent missed the builder
+it named. It matched the legacy copy of the same code further down the file.
+The suite went red, but the red only proved the legacy function could break.
+The new path went unexercised, and nothing in the output said so.
 
-The suite went red. The red was real. It was also completely uninformative: it proved
-the legacy function could break, which nobody doubted, while the new path went
-unexercised. Nothing in the output said so.
+How this tool removes that failure mode:
 
-⇒ THAT IS THE WHOLE POINT. A mutation that lands somewhere other than where you aimed it
-does not fail loudly -- it still goes red, and it reads exactly like success. The only
-signal that anything was wrong came from a test written for that mutation staying GREEN,
-which is a thing a person has to notice.
-
-HOW THIS TOOL REMOVES THE FAILURE MODE
-
-  1. The target is resolved STRUCTURALLY, by `ast`, from the function's NAME. Whatever
+  1. The target is resolved structurally, by `ast`, from the function's name. Whatever
      the function is indented to, now or after any future refactor, it is found.
-  2. The pattern is matched line-by-line with LEADING INDENTATION STRIPPED, so a dedent
+  2. The pattern is matched line by line with leading indentation stripped, so a dedent
      cannot break it and cannot silently redirect it.
-  3. The substitution is applied ONLY inside that function's line span.
-  4. The run ABORTS unless EXACTLY ONE match was found inside the named function -- zero
-     matches and two matches are both refusals.
-  5. After writing, the file is RE-PARSED and the mutation is confirmed to sit inside the
+  3. The substitution is applied only inside that function's line span.
+  4. The run aborts unless exactly one match was found inside the named function.
+     Zero matches and two matches are both refusals.
+  5. After writing, the file is re-parsed and the mutation is confirmed to sit inside the
      intended function. A mutation that moved is a hard error.
   6. The original file is always restored, including on failure.
 
-🔴 EVERY ONE OF THOSE REFUSALS IS A HARD ABORT AND MUST STAY ONE. Downgrading any of them
-to a warning reinstates the exact defect this file exists to remove: the run would carry
-on, produce a red, and that red would once again mean nothing in particular. A harness
-that "warns" about mutating blind is a harness that mutates blind.
+Every one of those refusals is a hard abort and must stay one. Downgrading any of them to a
+warning lets the run carry on and produce a red that means nothing in particular.
+A harness that only warns about mutating blind still mutates blind.
 
-USAGE
-    falsify.py --target <file.py> --suite <test_file.py> --func <function_name> \\
-               --old <snippet_file> --new <snippet_file> [--label "..."]
+Usage:
+    falsify.py --target <file.py> --suite <test_file.py> --func <function_name>
+               --old <snippet_file> --new <snippet_file> [--label "..."].
 
-Exit codes: 0 the mutation reddened at least one case (the falsifier fired);
-            1 the mutation applied and NOTHING reddened (the gate is blind to it);
-            2 the mutation was refused (bad target, bad pattern, or it moved).
+Exit codes:
+    0  the mutation reddened at least one case (the falsifier fired).
+    1  the mutation applied and nothing reddened (the gate is blind to it).
+    2  the mutation was refused (bad target, bad pattern, or it moved).
 """
 import argparse
 import ast
@@ -56,15 +48,15 @@ import sys
 
 
 class MutationRefused( Exception ):
-    """Raised when the mutation cannot be placed EXACTLY where it was aimed.
+    """Raised when the mutation cannot be placed exactly where it was aimed.
 
-    Deliberately an exception and not a warning -- see this module's docstring.
+    It is an exception and not a warning, because a warning would let a blind mutation run.
     """
 
 
 def span_of( path, func_name ):
     """
-    Locate a function's line span by NAME, structurally.
+    Locate a function's line span by name, structurally.
 
     Requires:
         - path names a readable, parseable Python file
@@ -75,8 +67,8 @@ def span_of( path, func_name ):
         - the result is independent of how the function is indented
 
     Raises:
-        - MutationRefused if no module-level function of that name exists -- a typo must
-          never silently mutate nothing, or worse, something else
+        - MutationRefused if no module-level function of that name exists, because a typo
+          must never silently mutate nothing, or worse, something else
     """
     tree = ast.parse( open( path ).read() )
     for node in tree.body:
@@ -94,30 +86,30 @@ def norm( block ):
 
     Ensures:
         - returns a list of stripped, non-empty-preserving lines
-        - two snippets that differ ONLY in leading whitespace compare equal
+        - two snippets that differ only in leading whitespace compare equal
     """
     return [ l.strip() for l in block.strip( "\n" ).split( "\n" ) ]
 
 
 def apply_mutation( target, func_name, old_block, new_block ):
     """
-    Replace `old_block` with `new_block` INSIDE `func_name`, and prove it landed there.
+    Replace `old_block` with `new_block` inside `func_name`, and prove it landed there.
 
     Requires:
         - target names a readable, parseable Python file
         - func_name is a module-level function in it
-        - old_block appears EXACTLY ONCE inside that function, ignoring indentation
+        - old_block appears exactly once inside that function, ignoring indentation
 
     Ensures:
         - the file is rewritten with the substitution applied at that one site
         - the replacement is re-indented to match the line it replaced
-        - the file is RE-PARSED and the mutation confirmed inside func_name
+        - the file is re-parsed and the mutation confirmed inside func_name
         - returns the 1-indexed line the mutation was written at
 
     Raises:
         - MutationRefused when the pattern matches zero or more than one time inside the
-          function, or when the mutation is not inside func_name after re-parsing. BOTH
-          are hard refusals ON PURPOSE: a mutation that lands elsewhere still produces a
+          function, or when the mutation is not inside func_name after re-parsing. Both
+          are hard refusals, because a mutation that lands elsewhere still produces a
           red, and that red is indistinguishable from a real one.
     """
     lines  = open( target ).read().split( "\n" )

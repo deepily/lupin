@@ -1,7 +1,6 @@
 # Authentication Architecture Overview
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Target Audience**: Architects, Senior Developers
 
 ---
@@ -25,7 +24,7 @@ The Lupin Authentication System is a JWT-based authentication solution built on 
 
 - **Stateless Authentication**: JWT tokens carry all user information
 - **Token Rotation**: Refresh tokens rotate on each use for enhanced security
-- **Multi-Mode Support**: JWT (production), mock (development), Firebase (future)
+- **Multi-Mode Support**: JWT (production), mock (development); any other mode, Firebase included, is not built and answers 401
 - **Role-Based Access Control**: Admin/user roles with middleware enforcement
 - **Audit Trail**: Comprehensive logging of all authentication events
 - **Backward Compatibility**: Seamless integration with existing mock auth systems
@@ -181,8 +180,8 @@ def validate_password_strength( password: str ) -> Tuple[bool, str]
 def create_refresh_token( user_id: int, token: str ) -> bool
     # Stores SHA-256 hash of token
 
-def validate_refresh_token( token: str ) -> Optional[int]
-    # Returns user_id if valid
+def validate_refresh_token( token: str ) -> Tuple[bool, str, Optional[Dict]]
+    # Returns (success, message, token_data); token_data carries jti, user_id, created_at
 
 def revoke_refresh_token( token: str ) -> bool
 def revoke_all_user_tokens( user_id: int ) -> int
@@ -226,7 +225,7 @@ def get_failed_attempts_count( email: str ) -> int
 **Event Types**:
 - `login_success`, `login_failure`
 - `register`, `logout`
-- `user_self_register` (anonymous `POST /auth/register` created an account; email, resulting roles, source IP), `user_self_register_refused` (403 for asking for a non-`user` role; `success=False`, refused roles in `details`, no user created). Admin-created users log `admin_user_create`
+- `user_self_register` (anonymous `POST /auth/register` created an account; email, resulting roles, source IP). `user_self_register_refused` (403 for asking for a non-`user` role; `success=False`, refused roles in `details`, no user created). Admin-created users log `admin_user_create`
 - `password_changed`, `password_reset_requested`, `password_reset_completed`
 - `email_verification_requested`, `email_verified`
 
@@ -249,11 +248,11 @@ def log_auth_event( event_type: str, user_id: Optional[int], email: str,
 
 **Key Functions**:
 ```python
-def generate_verification_token( user_id: int ) -> Tuple[bool, str, Optional[str]]
-def validate_verification_token( token: str ) -> Tuple[bool, str, Optional[int]]
+def generate_verification_token( user_id: str ) -> Tuple[bool, str, Optional[str]]
+def validate_verification_token( token: str ) -> Tuple[bool, str, Optional[str]]
 
-def generate_password_reset_token( user_id: int ) -> Tuple[bool, str, Optional[str]]
-def validate_password_reset_token( token: str ) -> Tuple[bool, str, Optional[int]]
+def generate_password_reset_token( user_id: str ) -> Tuple[bool, str, Optional[str]]
+def validate_password_reset_token( token: str ) -> Tuple[bool, str, Optional[str]]
 ```
 
 **Token Lifetimes**:
@@ -698,7 +697,7 @@ CREATE INDEX idx_reset_user ON password_reset_tokens(user_id);
    - Password strength requirements
 
 7. **Security Headers**
-   - X-Frame-Options: DENY
+   - X-Frame-Options: `DENY`
    - X-Content-Type-Options: nosniff
    - X-XSS-Protection: 1; mode=block
    - Strict-Transport-Security: max-age=31536000
@@ -761,5 +760,4 @@ engine = create_engine(
 ---
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Maintained By**: Lupin Architecture Team

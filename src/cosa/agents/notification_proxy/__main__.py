@@ -2,9 +2,9 @@
 """
 CLI entry point for the Notification Proxy Agent.
 
-Connects to the Lupin WebSocket, subscribes to notification events,
-and automatically answers expediter questions using a hybrid strategy:
-rules for known patterns, LLM fallback for unknowns.
+Connects to the Lupin WebSocket and subscribes to notification events.
+It answers expediter questions automatically with a hybrid strategy.
+Rules handle known patterns, and an LLM fallback handles unknowns.
 
 Usage:
     python -m cosa.agents.notification_proxy

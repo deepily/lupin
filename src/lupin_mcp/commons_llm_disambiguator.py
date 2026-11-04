@@ -101,7 +101,7 @@ class CommonsLlmDisambiguator:
         self.llm_spec_key      = config_mgr.get( _KEY_SPEC )
         self.confidence_floor  = float( config_mgr.get( _KEY_CONFIDENCE_FLOOR, default=_DEFAULT_CONFIDENCE_FLOOR ) )
         self.timeout_seconds   = float( config_mgr.get( _KEY_TIMEOUT,          default=_DEFAULT_TIMEOUT_SECONDS ) )
-        self.log_decisions     = bool(  config_mgr.get( _KEY_LOG_DECISIONS,    default=False ) )
+        self.log_decisions     = config_mgr.get( _KEY_LOG_DECISIONS, default=False, return_type="boolean" )
 
         self._llm_factory = LlmClientFactory( debug=debug, verbose=verbose )
         self._client      = None  # Lazy — constructed on first call

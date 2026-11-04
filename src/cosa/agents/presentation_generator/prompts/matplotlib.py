@@ -4,13 +4,15 @@ Matplotlib Chart Generation Prompts for Presentation Generator.
 
 System prompt and prompt builder for generating valid, self-contained
 Python plotting code from natural-language chart descriptions. Used by
-MatplotlibRenderer during Phase 7 (Visual Rendering).
+MatplotlibRenderer during the visual rendering phase.
 
 Pattern: Same 3-part structure as visual.py (Mermaid prompts)
   - Chart type hint constants
   - System prompt constant
   - Prompt builder function
 """
+
+from .visual import build_visual_prompt
 
 
 # =============================================================================
@@ -105,19 +107,11 @@ def get_matplotlib_prompt( visual_type: str, visual_description: str, slide_titl
     Returns:
         str: User message for Claude API
     """
-    suggested_type = _suggest_chart_type( visual_description )
-
-    parts = []
-
-    if slide_title:
-        parts.append( f"Slide title: {slide_title}" )
-
-    parts.append( f"Visual type: {visual_type}" )
-    parts.append( f"Suggested chart type: {suggested_type}" )
-    parts.append( f"\nDescription:\n{visual_description}" )
-    parts.append( "\nGenerate Python code using matplotlib to create this chart. Output ONLY the python code block." )
-
-    return "\n".join( parts )
+    return build_visual_prompt(
+        visual_type, visual_description, slide_title,
+        "Suggested chart type", _suggest_chart_type( visual_description ),
+        "Generate Python code using matplotlib to create this chart. Output ONLY the python code block."
+    )
 
 
 def _suggest_chart_type( description: str ) -> str:

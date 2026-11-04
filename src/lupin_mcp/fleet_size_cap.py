@@ -60,6 +60,8 @@ pool to the overflow persona and then to UNBOUNDED `Extra-N` seats. 18 requested
 ⚠️ AND THE POOL'S OWN COUNT IS NOT ITS SEAT COUNT: a pool entry with no `voice id` is
 silently skipped by the loader, so `pool_size()` counts voice ids rather than names.
 """
+import functools
+import os
 from typing import Any, Callable, Dict, Iterable, Optional
 
 # The fleet-wide default. Deliberately the same figure as the per-manager spawn cap so
@@ -348,6 +350,37 @@ def default_counting_classifier( session_id: str, _find_path: Optional[ Callable
     return SEAT_MANAGER if counted_as_manager( *fields ) else SEAT_WORKER
 
 
+def counting_classifier_for( sessions: Iterable ) -> Callable:
+    """
+    A counting classifier that reads each session's OWN bridge file, from the path the
+    census triples already carry.
+
+    Requires:
+        - sessions is a list of (bridge_path, session_id, persona) triples, as returned
+          by `find_active_sessions`. It is walked here and again by `census()`, so a
+          one-shot iterator would be exhausted before the census saw it; a caller holding
+          one must `list()` it first (the spawn gate does)
+
+    Ensures:
+        - returns a one-argument classifier, shaped like `default_counting_classifier`
+        - reads exactly one file per classified session, never rescans the directory
+        - a session id absent from `sessions` (or a bare id with no path) classifies as SEAT_UNKNOWN
+        - never raises
+
+    🔴 WHY: the default classifier resolved every id with `find_session_path_by_id`,
+    which globs and json-loads cc-*.json until it hits — sessions x files reads
+    (measured 248,160 visits at 704 files, row ff85f78f). The triples already name the
+    file, so the scan is redundant.
+
+    ⚠️ THE ONE KNOWN DIFFERENCE: the old lookup matched on the first 8 characters of the
+    id, so two seats sharing a prefix could read each other's file. This reads the exact
+    file of each seat.
+    """
+    paths    = { entry[ 1 ]: entry[ 0 ] for entry in sessions
+                 if isinstance( entry, ( tuple, list ) ) and len( entry ) > 1 }
+    return functools.partial( default_counting_classifier, _find_path=paths.get )
+
+
 def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ],
             unreadable: int = 0 ) -> Dict[ str, int ]:
     """
@@ -470,14 +503,33 @@ def refusal_for_spawn( requested: int, counts: Dict[ str, int ], cap: int ) -> O
         "alone (Rick's ruling), so the fleet drains as sessions finish."
     )
     return " ".join( lines )
+def main_checkout_ini_path() -> str:
+    """
+    The configuration file of the main checkout, whatever tree the process is pinned to.
+
+    Ensures:
+        - returns `<main checkout>/src/conf/lupin-app.ini`, where a worktree resolves to the
+          checkout that owns it (git's common directory), so a seat's tracked copy is never read
+        - a directory that is no repository resolves to its own root, as before; the server
+          container mounts only `src`, so it falls back to `/var/lupin`
+        - resolves at call time and never raises
+        - is the one resolution the fleet cap and the skeleton crew switch share
+    """
+    import cosa.utils.util as cu
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _main_repo_path
+    main = _main_repo_path( cu.get_project_root() )
+    return os.path.join( str( main ), "src", "conf", "lupin-app.ini" )
+
+
 def config_file_path() -> str:
     """
     The configuration FILE the fleet cap is read from and written to.
 
     Ensures:
-        - returns `<project root>/src/conf/lupin-app.ini`
+        - returns the main checkout's `src/conf/lupin-app.ini` (see main_checkout_ini_path)
         - resolves the root at CALL time, so it is correct in the container
           (LUPIN_ROOT=/var/lupin) and on the host (LUPIN_ROOT=<the checkout>)
+        - a process pinned to a worktree reads the live file, not that worktree's committed copy
 
     🔴 THE CONTAINER AND THE HOST RESOLVE TO THE SAME PHYSICAL FILE, and that is
     what makes a browser write reach the spawn path at all. Measured 2026-09-04:
@@ -494,8 +546,7 @@ def config_file_path() -> str:
     rather than quietly deleted, because it is the obvious conclusion and the next
     reader will reach it too.
     """
-    import cosa.utils.util as cu
-    return cu.get_project_root() + "/src/conf/lupin-app.ini"
+    return main_checkout_ini_path()
 
 
 def default_disk_cap_reader() -> Optional[ int ]:

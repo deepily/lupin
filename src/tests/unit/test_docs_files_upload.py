@@ -232,7 +232,7 @@ def test_a_name_taken_between_the_check_and_the_write_is_refused_not_clobbered( 
     real   = docs_files.os.link
 
     def link_after_peer( src, dst ):
-        if dst == str( target ) and not target.exists():
+        if os.path.basename( dst ) == target.name and not target.exists():   # dst is the pinned /proc/self/fd/N path now (row 39b3035b), so match the name
             target.write_text( "# the peer's file\n" )           # the peer wins the race here
         return real( src, dst )
     monkeypatch.setattr( docs_files.os, "link", link_after_peer )
@@ -250,7 +250,7 @@ def test_rename_under_the_race_takes_the_next_name_and_rechecks_it( scopes, monk
     real_gate = docs_files._resolve_scoped
 
     def link_after_peer( src, dst ):
-        if dst == str( docs / "existing-2.md" ) and not ( docs / "existing-2.md" ).exists():
+        if os.path.basename( dst ) == "existing-2.md" and not ( docs / "existing-2.md" ).exists():   # pinned /proc path (row 39b3035b): match the name
             ( docs / "existing-2.md" ).write_text( "peer\n" )
         return real( src, dst )
 

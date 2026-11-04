@@ -2,11 +2,8 @@
 WebSocket and authentication endpoints for the COSA system.
 
 This module provides FastAPI router endpoints for WebSocket connections
-and authentication testing. Supports both audio streaming and queue
-update WebSocket connections with user authentication and session management.
-
-Generated on: 2025-01-24
-Updated: 2025-08-01 - Added Design by Contract documentation
+and authentication testing. Supports audio streaming and queue-event
+WebSocket connections, with user authentication and session management.
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
@@ -121,10 +118,9 @@ def _undelivered_max_age_hours() -> int:
     """
     Resolve the undelivered-drain age cap (hours) from config.
 
-    Storm guard (2026-06-03 incident): the durable-outbox drain must not replay
-    stale rows on reconnect. The cap bounds how far back the "N missed" count and
-    the pull-able inbox reach. Runtime-tunable via the INI key, mirroring the
-    TTS spoken-char-cap pattern.
+    The durable-outbox drain must not replay stale rows on reconnect. The cap bounds how
+    far back the "N missed" count and the pull-able inbox reach. It is runtime-tunable
+    through the INI key, mirroring the TTS spoken-char-cap pattern.
 
     Ensures:
         - returns the configured int cap (default 24 hours)
@@ -134,13 +130,14 @@ def _undelivered_max_age_hours() -> int:
 
 def _compute_undelivered_count( user_id ) -> int:
     """
-    Count the user's undelivered (missed-while-offline) notifications for the
-    auth_success "N missed" surfacing (messaging-coordination plane, lever D).
+    Count the user's undelivered notifications for the auth_success "N missed" surfacing.
+
+    Undelivered means missed while offline. This is part of the messaging-coordination plane.
 
     Ensures:
         - returns the count of notifications in state created/queued for this user,
           bounded by the undelivered age cap (storm guard)
-        - NEVER raises — returns 0 on any error (a count failure must not break auth)
+        - never raises — returns 0 on any error (a count failure must not break auth)
     """
     try:
         import uuid as _uuid
@@ -220,19 +217,19 @@ async def auth_test(current_user: dict = Depends(get_current_user)):
 async def websocket_audio_endpoint(websocket: WebSocket, session_id: str):
     """
     WebSocket endpoint for real-time TTS audio streaming.
-    
+
+    Args:
+        websocket: WebSocket connection object
+        session_id: Unique session identifier for this client
+
     Preconditions:
         - session_id must be a valid session identifier
         - WebSocket connection must be established
-        
+
     Postconditions:
         - Manages WebSocket connection lifecycle
         - Stores connection in websocket_manager for audio streaming
         - Handles disconnection cleanup
-        
-    Args:
-        websocket: WebSocket connection object
-        session_id: Unique session identifier for this client
     """
     # Get dependencies from main module
     import lupin_app.main as main_module
@@ -380,21 +377,21 @@ async def handle_cc_transcript_verb( websocket, session_id, message ):
 
     Requires:
         - websocket is the caller's live socket
-        - session_id is the BROWSER session id (the socket's own id)
+        - session_id is the browser session id (the socket's own id)
         - message carries `type` and, for both verbs, `cc_session_id`
 
     Ensures:
-        - a NON-ADMIN caller is refused, and receives an error frame naming the reason, with
-          no blocks and no watch registered (ruling Q5, the WS half of the gate)
-        - a watch registers the caller and STARTS the seat's tailer only if this was the
-          seat's FIRST watcher; the tailer is shared by every watcher of that seat
+        - a non-admin caller is refused, and receives an error frame naming the reason, with
+          no blocks and no watch registered (the WebSocket half of the admin gate)
+        - a watch registers the caller and starts the seat's tailer only if this was the
+          seat's first watcher; the tailer is shared by every watcher of that seat
         - a watch honours `from_offset`, so the server never silently starts at the current
           end of the file and opens a gap against the client's REST backlog
-        - a non-null `file_epoch` naming a file that is no longer current is REFUSED with
-          `cc_transcript_state {state: epoch_mismatch}` and NO blocks — never silently
+        - a non-null `file_epoch` naming a file that is no longer current is refused with
+          `cc_transcript_state {state: epoch_mismatch}` and no blocks — never silently
           rebased, which would hand the client a whole new file as its own continuation
-        - an unwatch deregisters the caller and STOPS the tailer only when the seat has lost
-          its LAST watcher
+        - an unwatch deregisters the caller and stops the tailer only when the seat has lost
+          its last watcher
         - a missing `cc_session_id` is refused rather than registering a watch on ""
         - never raises out to the receive loop: a bad verb must not drop the socket
     """
@@ -414,6 +411,21 @@ async def handle_cc_transcript_verb( websocket, session_id, message ):
     # 🔴 The WS half of ruling Q5, on state connect() already stores. The REST half is
     # require_admin — a different mechanism, so a test of one proves nothing about the other.
     if not websocket_manager.session_is_admin.get( session_id, False ):
+        # A refused WATCH answers in the contract's own frame, `cc_transcript_state
+        # {state: refused}`, the shape the clients already render for a seat that is not
+        # found (plan §5, "a refused watch is expected, not exceptional"). It was a generic
+        # "error" frame, which no transcript screen reads. An unwatch has no screen waiting
+        # on it and keeps the generic error.
+        if verb == "cc_transcript_watch":
+            from cosa.rest.cc_transcript_tailer import REASON_ADMIN_ONLY, STATE_EVENT, STATE_REFUSED
+            await websocket.send_json( {
+                "type"          : STATE_EVENT,
+                "cc_session_id" : cc_session_id,
+                "file_epoch"    : None,
+                "state"         : STATE_REFUSED,
+                "reason"        : REASON_ADMIN_ONLY,
+            } )
+            return
         await websocket.send_json( {
             "type"          : "error",
             "event"         : verb,
@@ -429,6 +441,28 @@ async def handle_cc_transcript_verb( websocket, session_id, message ):
     await _start_watching_cc_transcript( websocket, session_id, cc_session_id, message )
 
 
+def live_cc_transcript_epoch( cc_session_id, file_epoch ):
+    """
+    Return the epoch the seat's frames carry now, given the epoch its file name gives.
+
+    After an in-place truncation the running tailer stamps frames `<name>#<unixtime>`.
+    Every door that names an epoch must say the same string. Otherwise the client sees a new epoch
+    on each frame and clears its buffer on every append.
+
+    Requires:
+        - file_epoch is the bare epoch of the seat's current transcript file
+
+    Ensures:
+        - returns the running tailer's epoch when it refines file_epoch (starts with `<file_epoch>#`)
+        - otherwise returns file_epoch: no tailer, a stopped tailer, or one still on another file
+        - never raises
+    """
+    tailer = _cc_transcript_tailers.get( cc_session_id )
+    if tailer is not None and tailer.running and tailer.file_epoch.startswith( f"{file_epoch}#" ):
+        return tailer.file_epoch
+    return file_epoch
+
+
 async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, message ):
     """
     Register a watcher and start the seat's tailer if it is the first.
@@ -441,7 +475,8 @@ async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, m
           `cc_transcript_state {state: "refused", reason: "not_found"}` and nothing else: no
           watcher is registered and no tailer is started
         - a stale non-null `file_epoch` is answered with `epoch_mismatch` and nothing else
-        - the tailer is created at most once per seat
+        - the tailer is created at most once per seat while one is running; a tailer that
+          stopped itself is replaced by a new one for the next first watcher
         - the watcher is registered even when the tailer already exists
     """
     websocket_manager = get_websocket_manager()
@@ -473,7 +508,7 @@ async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, m
         } )
         return
 
-    current_epoch   = epoch_for_path( current_path )
+    current_epoch   = live_cc_transcript_epoch( cc_session_id, epoch_for_path( current_path ) )
 
     # A client that does not yet know the epoch sends null and learns it from the first
     # frame, so a FIRST watch needs no prior REST call. A non-null epoch that no longer
@@ -489,7 +524,10 @@ async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, m
 
     is_first = websocket_manager.add_cc_transcript_watcher( cc_session_id, session_id )
 
-    if is_first and cc_session_id not in _cc_transcript_tailers:
+    # A tailer that stopped itself after the grace period keeps its entry, so only a live one
+    # counts as "already there".
+    existing = _cc_transcript_tailers.get( cc_session_id )
+    if is_first and ( existing is None or not existing.running ):
         # The predicate closes the loop the sync `disconnect()` path would otherwise leave
         # open: it can drop a watcher but cannot await a stop, so the tailer checks for
         # itself and terminates after the grace period.
@@ -509,7 +547,7 @@ async def _stop_watching_cc_transcript( session_id, cc_session_id ):
     Deregister a watcher and stop the seat's tailer if it was the last.
 
     Ensures:
-        - the tailer is stopped and forgotten only when NO watcher remains
+        - the tailer is stopped and forgotten only when no watcher remains
         - an unwatch for a seat this session was not watching is a no-op
     """
     websocket_manager = get_websocket_manager()
@@ -535,15 +573,15 @@ async def stop_cc_transcript_tailers_for_disconnect( session_id ):
     """
     Stop the tailers a disconnecting session left with no watchers.
 
-    🔴 THIS IS THE OTHER HALF OF THE SWEEP, AND IT IS ASYNC, WHICH IS WHY IT IS NOT INSIDE
-    `disconnect()`. `WebSocketManager.disconnect()` is synchronous and is called from
-    threads, so it can remove the REGISTRY entries but cannot await a tailer's stop. It
-    therefore drops the watches and this coroutine reaps the tailers those drops emptied.
-
     Ensures:
         - every seat the session was the last watcher of has its tailer stopped
         - a session that was watching nothing costs one dict scan and no awaits
         - never raises
+
+    This is the other half of the sweep, and it is async, which is why it is not inside
+    `disconnect()`. `WebSocketManager.disconnect()` is synchronous and is called from
+    threads, so it can remove the registry entries but cannot await a tailer's stop. It
+    drops the watches, and this coroutine reaps the tailers those drops emptied.
     """
     websocket_manager = get_websocket_manager()
 
@@ -553,7 +591,7 @@ async def stop_cc_transcript_tailers_for_disconnect( session_id ):
 
 async def _emit_to_cc_transcript_watchers( cc_session_id, event_name, payload ):
     """
-    Fan one console frame out to the seat's watchers, and ONLY to them.
+    Fan one console frame out to the seat's watchers, and only to them.
 
     The watcher set is the single filter: `emit_to_session` applies no subscription check, so
     there is exactly one place a frame can be dropped.
@@ -576,22 +614,22 @@ async def _emit_to_cc_transcript_watchers( cc_session_id, event_name, payload ):
 async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
     """
     WebSocket endpoint for real-time queue updates and events.
-    
-    PHASE 2: WebSocket with authentication for user-specific updates.
-    
+
+    The connection authenticates for user-specific updates.
+
+    Args:
+        websocket: WebSocket connection object
+        session_id: Unique session identifier for this client
+
     Preconditions:
         - session_id must be a valid session identifier
         - WebSocket connection must be established
         - First message must contain authentication token
-        
+
     Postconditions:
         - Manages WebSocket connection for queue updates
         - Associates connection with authenticated user
         - Handles disconnection cleanup
-        
-    Args:
-        websocket: WebSocket connection object
-        session_id: Unique session identifier for this client
     """
     # Get dependencies from main module
     import lupin_app.main as main_module

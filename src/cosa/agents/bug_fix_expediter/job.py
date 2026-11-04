@@ -29,15 +29,15 @@ class BugFixExpediterJob( AgenticJobBase ):
     """
     Background job for Bug Fix Expediter execution.
 
-    Runs the three-phase forensic pipeline (diagnose -> propose -> fix)
-    on a dead job's context. Phase 1 foundation: packages dead job context
-    and returns a placeholder (orchestrator pipeline is Phase 2+).
+    Packages a dead job's context, then runs the three-phase forensic pipeline
+    (diagnose, propose, fix) through the orchestrator. After a successful fix
+    it resubmits the original job.
 
     Attributes:
         dead_job_id: The id_hash of the failed/interrupted job to fix
         extra_context: Optional additional context from user
         dead_job_context: Extracted context (set during execution)
-        diagnosis: Root cause analysis (set during execution, Phase 2+)
+        diagnosis: Root cause analysis (set during execution by the diagnose phase)
         cost_summary: Execution cost summary (set after completion)
     """
 
@@ -199,8 +199,9 @@ class BugFixExpediterJob( AgenticJobBase ):
         """
         Internal async bug fix execution.
 
-        Phase 1 foundation: packages dead job context and returns placeholder.
-        Orchestrator pipeline (diagnose -> propose -> fix) is Phase 2+.
+        Packages the dead job context, then runs the orchestrator pipeline
+        (diagnose, propose, fix, git strategy) and resubmits the original job
+        after a successful fix. Dry-run mode takes a separate simulated path.
 
         Returns:
             str: Conversational summary of results
@@ -485,13 +486,13 @@ class BugFixExpediterJob( AgenticJobBase ):
 
     async def _resubmit_original_job( self, voice_io ) -> Optional[ str ]:
         """
-        Phase 6: Resubmit the original failed job after successful fix.
+        Resubmit the original failed job after a successful fix.
 
         Reconstructs the original job using its persisted metadata and
         pushes it to the todo queue as the original user.
 
         Requires:
-            - self.dead_job_context is populated (Phase 0 completed)
+            - self.dead_job_context is populated (packaging completed)
             - Fix was successful (caller must check)
 
         Ensures:
@@ -611,16 +612,11 @@ class BugFixExpediterJob( AgenticJobBase ):
             return None
 
     async def _execute_dry_run( self, voice_io, cosa_interface ) -> str:
-        """
-        Execute dry-run mode with breadcrumb notifications + Phase 6 resubmit.
+        """Run dry-run mode: breadcrumb notifications plus a real resubmit.
 
-        Simulates the three-phase pipeline (packaging → diagnosis → proposal → fix)
-        without calling real agents, then exercises the Phase 6 resubmit path
-        end-to-end so the full repair loop can be validated at $0 cost.
-
-        The dry-run "fix" strips any `force_failure_mode` from the original job's
-        `metadata_json.original_args` so the resubmitted job runs as a clean
-        dry-run. This simulates the BFE "repairing" the mock failure condition.
+        Simulates packaging, diagnosis, proposal and fix without real agents, then runs the resubmit step end to end.
+        The simulated fix strips `force_failure_mode` from `metadata_json.original_args`, so the resubmitted job runs as a clean dry-run.
+        That stands in for BFE repairing the mock failure, so the full repair loop is validated at zero cost.
 
         Requires:
             - self.dead_job_id references a real row in job_history
@@ -738,17 +734,11 @@ class BugFixExpediterJob( AgenticJobBase ):
             voice_io.clear_job_id()
 
     def _write_final_report( self, status: str, summary_line: str ) -> Optional[ str ]:
-        """
-        Write a comprehensive final-report markdown file for this BFE run and
-        store its path in `self.artifacts["report_path"]`.
+        """Write a final-report markdown file for this BFE run and return its path.
 
-        Called at each terminal exit of the BFE pipeline (dry-run dead-job-not-
-        found, live dead-job-not-found, stall, happy path). Never blocks the
-        job on failure — returns None and logs a warning if writing fails.
-
-        The report captures everything the agent accumulated in-memory during
-        the run: dead_job_context, diagnosis, proposed_fixes, selected_fix,
-        fix_result, resubmitted_job_id, and checkpoint (if stalled).
+        Called at each terminal exit (dry-run and live dead-job-not-found, stall, happy path); the path is stored in `self.artifacts["report_path"]`.
+        Never blocks the job on failure: it returns None and logs a warning if writing fails.
+        The report captures all in-memory state of the run: dead_job_context, diagnosis, proposed_fixes, selected_fix, fix_result, resubmitted_job_id, and checkpoint (if stalled).
 
         Args:
             status:       Terminal state ("completed", "stalled", "dead_job_not_found", etc.)

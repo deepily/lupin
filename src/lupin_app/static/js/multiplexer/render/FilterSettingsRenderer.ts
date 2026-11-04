@@ -57,8 +57,14 @@ const MODE_DISPLAY: Readonly<Record<NotificationFilterMode, string>> = {
 // than repeating the literal. Two copies of one id is the hand-list hazard this codebase
 // keeps paying for: B-0 renamed this pane and the cold-hidden set kept the old spelling,
 // which is how row cec9dd43 started.
+/** The DOM id of the Queue Filter Settings pane. Other modules use it to find the pane. */
 export const SECTION_ID = "filter-settings-pane";
 
+/**
+ * The admin-only Queue Filter Settings pane.
+ *
+ * It holds the view-mode switch and the line that names the mode in force.
+ */
 export interface FilterSettingsRenderer {
   /** Build the pane into `root` and subscribe. Throws on a 2nd mount. */
   mount( root: HTMLElement ): void;
@@ -71,6 +77,11 @@ export interface FilterSettingsRenderer {
   unmount(): void;
 }
 
+/**
+ * Options for `createFilterSettingsRenderer`.
+ *
+ * All four are required: the bus, the notification store, the view-state store and an admin check.
+ */
 export interface FilterSettingsRendererOptions {
   eventBus      : EventBus;
   store         : NotificationStore;
@@ -78,6 +89,9 @@ export interface FilterSettingsRendererOptions {
   isAdmin       : () => boolean;
 }
 
+/**
+ * Draws the admin-only Queue Filter Settings pane with view mode buttons.
+ */
 class FilterSettingsRendererImpl implements FilterSettingsRenderer {
   private readonly bus       : EventBus;
   private readonly store     : NotificationStore;
@@ -91,6 +105,9 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
   private unsubscribes : Array<() => void> = [];
   private clickHandler : ( ( e: Event ) => void ) | null = null;
 
+  /**
+   * Keeps the event bus, notification store, view state store and the admin check.
+   */
   constructor( options: FilterSettingsRendererOptions ) {
     this.bus       = options.eventBus;
     this.store     = options.store;
@@ -98,6 +115,9 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
     this.isAdmin   = options.isAdmin;
   }
 
+  /**
+   * Builds the pane with header, mode buttons and status line, and subscribes.
+   */
   mount( root: HTMLElement ): void {
     if ( this.root !== null ) throw new Error( "FilterSettingsRenderer: already mounted" );
     this.root = root;
@@ -169,6 +189,9 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
     this.render();
   }
 
+  /**
+   * Makes the pane visible for an admin and saves that visibility.
+   */
   reveal(): void {
     // B1 — a non-admin reveal is a no-op, and the refusal is the gate's second layer:
     // the pane's own `display` already refuses, and this stops the PREFERENCE being
@@ -187,6 +210,9 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
     this.applyVisibility();
   }
 
+  /**
+   * Unsubscribes, removes the click handler and empties the root.
+   */
   unmount(): void {
     for ( const off of this.unsubscribes ) off();
     this.unsubscribes.length = 0;
@@ -258,6 +284,7 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
   }
 }
 
+/** Build the renderer. It paints nothing until `mount()` is called. */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two.
 export function createFilterSettingsRenderer(
   options: FilterSettingsRendererOptions,

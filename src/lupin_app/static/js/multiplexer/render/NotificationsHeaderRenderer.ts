@@ -35,6 +35,7 @@ import type { HistoryWindow } from "../stores/historyWindow";
 // window with the SAME function the picker paints with, so they cannot word it differently.
 import { historyWindowLabel } from "../stores/historyWindow";
 import { createHistoryWindowDropdown, type HistoryWindowDropdownHandle } from "./historyWindowDropdown";
+import type { PokeMuteSwitchHandle } from "./pokeMuteSwitch";
 import {
   headerClickShouldCollapse,
   renderSectionHeader,
@@ -42,8 +43,11 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 
-// Narrowed NotificationStore surface this renderer consumes (the production
-// NotificationStore satisfies it structurally).
+/**
+ * The slice of the notification store the header uses.
+ *
+ * It is the lists, the visible entries, removal by id, and the history window and filter mode.
+ */
 export interface NotificationsHeaderStoreLike {
   list(): ReadonlyArray<Notification>;
   history(): ReadonlyArray<Notification>;
@@ -57,9 +61,7 @@ export interface NotificationsHeaderStoreLike {
   setFilterMode(mode: NotificationFilterMode): void;
 }
 
-// Narrowed api surface — the generic delete<T> (clear-all) plus the managed
-// bounce (row 1b4211ac R2). Production passes the canonical ApiClient, which
-// satisfies both structurally.
+/** The API calls the header needs: `delete` and the managed dev-server bounce. */
 export interface NotificationDeleteApiLike {
   delete<T>(path: string): Promise<T>;
   // Managed dev-server bounce. On 202 the host-side watcher was handed the job;
@@ -67,13 +69,17 @@ export interface NotificationDeleteApiLike {
   bounceDevServer(): Promise<{ status: string; detail?: string; timestamp: string }>;
 }
 
-// Narrowed sys_time_update payload (server clock loop, main.py:265 →
-// {date, env_label}). Both fields optional — the renderer degrades to empty.
+/** The `sys_time_update` payload: a date and an environment label, both optional. */
 export interface SysTimeUpdatePayload {
   date?      : string;
   env_label? : string;
 }
 
+/**
+ * Options for `createNotificationsHeaderRenderer`.
+ *
+ * The bus, the store and the API are required. The confirm hook, admin check, reveal hook and bounce timers are optional.
+ */
 export interface NotificationsHeaderRendererOptions {
   eventBus  : EventBus;
   store     : NotificationsHeaderStoreLike;
@@ -98,34 +104,38 @@ export interface NotificationsHeaderRendererOptions {
   bouncePollMs? : number;   // health poll interval (default 1500)
   bounceWaitMs? : number;   // give-up timeout      (default 90000)
   bounceGraceMs?: number;   // accept ok after this even if no down-blip was seen (default 25000)
+  // The stop poke switch (row 3526fb95). Boot builds it and passes it in; it sits beside
+  // the bounce button and paints itself on mount. Omitted means no switch in the bar.
+  pokeMuteSwitch? : PokeMuteSwitchHandle;
 }
 
+/**
+ * The notifications section header controls.
+ *
+ * They are the count, the history dropdown and window picker, clear-all and the admin filter switch.
+ */
 export interface NotificationsHeaderRenderer {
   mount(root: HTMLElement): void;
   unmount(): void;
 }
 
-// A-2 #4 — legacy names the COUNT and the WINDOW, not just the act
-// (notifications.js:20952). "Clear all notifications?" is true of every window, so the
-// operator cannot tell a 4-notification "Today" from a 900-notification "All time" — and
-// this button deletes on the SERVER, durably. The two facts that decide whether to press it
-// were the two the sentence left out.
-//
-// `n !== 1` rather than `n > 1`: legacy's own ternary, and the only n that reaches here is
-// ≥ 1 because onClearAll returns early on an empty scope. Written as legacy writes it so a
-// future zero-case does not silently read "0 notification".
+/**
+ * Builds the clear all confirmation naming the notification count and time window.
+ */
 function clearConfirmMessage( count: number, windowLabel: string ): string {
   return `Clear all ${count} notification${count !== 1 ? "s" : ""} (${windowLabel})? This cannot be undone.`;
 }
 
-// Row 98305d96 — legacy's labels, verbatim (notifications.js setFilterMode modeConfig).
-// Exported for the jobs pane (row 83c3ff74): legacy's single control has one set of labels.
+/** The three filter modes with their icons and labels, in switch order. */
 export const FILTER_MODES: ReadonlyArray<{ mode: NotificationFilterMode; icon: string; label: string }> = [
   { mode: "own",    icon: "👤", label: "Mine" },
   { mode: "others", icon: "🚫", label: "Not Mine" },
   { mode: "all",    icon: "👥", label: "All Users" },
 ];
 
+/**
+ * Draws the notifications header controls and keeps them current from store events.
+ */
 class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private readonly bus       : EventBus;
   private readonly store     : NotificationsHeaderStoreLike;
@@ -159,9 +169,13 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private headerClick  : ( ( e: Event ) => void ) | null = null;
   private historyOpen  = false;
   private readonly revealFilterSettings : ( () => void ) | undefined;
+  private readonly pokeMuteSwitch       : PokeMuteSwitchHandle | undefined;
 
   private readonly unsubscribers : Array<() => void> = [];
 
+  /**
+   * Keeps the bus, store, API and options, filling defaults for missing ones.
+   */
   constructor(opts: NotificationsHeaderRendererOptions) {
     if (!opts.store) throw new Error("NotificationsHeaderRenderer requires a store");
     this.bus       = opts.eventBus;
@@ -171,6 +185,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.confirmFn = opts.confirmFn ?? ((m) => globalThis.confirm(m));
     this.isAdmin   = opts.isAdmin ?? ((): boolean => false);
     this.revealFilterSettings = opts.revealFilterSettings;
+    this.pokeMuteSwitch       = opts.pokeMuteSwitch;
     /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime health poll; tests always inject fetchFn.
     this.fetchFn       = opts.fetchFn ?? globalThis.fetch.bind(globalThis);
     this.bouncePollMs  = opts.bouncePollMs  ?? 1500;
@@ -178,6 +193,9 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.bounceGraceMs = opts.bounceGraceMs ?? 25000;
   }
 
+  /**
+   * Builds the header controls into the root and subscribes to store events.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) throw new Error("NotificationsHeaderRenderer already mounted");
     this.root    = root;
@@ -304,10 +322,16 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
       icon    : "",
       title   : "Claude Code Notifications:",
       testid  : "multiplexer-notifications-header",
-      actions : [ this.ttsSlot, this.historyWindowDropdown.element, this.filterSwitchEl, this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
+      actions : [
+        this.ttsSlot, this.historyWindowDropdown.element, this.filterSwitchEl, this.historyBtn, this.clearBtn, this.bounceBtn,
+        ...( this.pokeMuteSwitch !== undefined ? [ this.pokeMuteSwitch.element ] : [] ),
+        this.statusEl,
+      ],
     });
     this.header  = header;
     this.countEl = header.countEl;
+    // Paint the stop poke switch from the server; not awaited, the bar must not wait on it.
+    if ( this.pokeMuteSwitch !== undefined ) void this.pokeMuteSwitch.refresh();
     this.countEl.id = "notifications-count";
     this.countEl.setAttribute("data-testid", "multiplexer-notifications-count");
 
@@ -364,6 +388,9 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.refresh();
   }
 
+  /**
+   * Unsubscribes, removes handlers, empties the root and clears element references.
+   */
   unmount(): void {
     if (!this.mounted) return;
     for (const off of this.unsubscribers) off();
@@ -595,6 +622,11 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It throws when `store` is missing, and paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the factory declaration line.
 export function createNotificationsHeaderRenderer(
   opts: NotificationsHeaderRendererOptions,

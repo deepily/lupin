@@ -85,6 +85,12 @@ interface ConnectionInput {
   graceMs? : number;
 }
 
+/**
+ * The inputs the connection state machine accepts.
+ *
+ * Socket, page-visibility and network events come from the page. `backoff_expire` and `max_attempts_reached`
+ * come from the transport that owns the timers. `permanent_failure` carries an auth close code.
+ */
 export type ConnectionEvent =
   | { type: "socket_open" }
   | { type: "socket_close" }
@@ -123,6 +129,11 @@ const connectionMachine = setup({
     // Stash the permanent-auth reason/code so the subscribe() emit can surface
     // them on the `failed` transition. The action is wired ONLY to
     // `permanent_failure` transitions, so `event` is always that variant here.
+    // A restart starts over: the old failure's reason/code must not ride the events that follow it.
+    clearFailure : assign({
+      failureReason : () => undefined,
+      failureCode   : () => undefined,
+    }),
     recordFailure : assign({
       failureReason : ({ event }) => (event as PermanentFailureEvent).reason,
       failureCode   : ({ event }) => (event as PermanentFailureEvent).code,
@@ -186,7 +197,8 @@ const connectionMachine = setup({
     },
     failed : {
       on : {
-        restart : { target: "connecting" },
+        // A restart gets a fresh retry budget and a clean failure record.
+        restart : { target: "connecting", actions: [ "resetAttempts", "clearFailure" ] },
       },
     },
   },
@@ -196,6 +208,12 @@ const connectionMachine = setup({
 // ConnectionStateMachine class.
 // ---------------------------------------------------------------------------
 
+/**
+ * Tracks one transport's connection state.
+ *
+ * The machine records state only. The transport owns the timers and the socket.
+ * `subscribe` returns the function that removes the listener, and `stop` ends the machine.
+ */
 export interface ConnectionStateMachine {
   send(event: ConnectionEvent): void;
   readonly state    : ConnectionState;
@@ -206,6 +224,12 @@ export interface ConnectionStateMachine {
   stop(): void;
 }
 
+/**
+ * What the machine is built from.
+ *
+ * `transportName` is put in each event's `payload.transport` so listeners can tell machines apart on one bus.
+ * `graceMs` replaces the 100 ms grace period, for tests.
+ */
 export interface ConnectionStateMachineOptions {
   bus           : EventBus;
   // Per-transport identifier ("QueueTransport" / "AudioTransport" etc.).
@@ -219,6 +243,11 @@ export interface ConnectionStateMachineOptions {
 
 const CSM_EVENT_SOURCE = "ConnectionStateMachine";
 
+/**
+ * The connection state machine behind `createConnectionStateMachine`.
+ *
+ * It emits `connection_state_change` and related events on the bus, each with `source` set to ConnectionStateMachine.
+ */
 export class ConnectionStateMachineImpl implements ConnectionStateMachine {
   private readonly bus           : EventBus;
   private readonly transportName : string;
@@ -226,6 +255,11 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
   private readonly listeners     : Set<(state: ConnectionState, prev: ConnectionState) => void> = new Set();
   private prevState              : ConnectionState = "connecting";
 
+  /**
+   * Creates the state machine actor for one transport and starts it.
+   *
+   * Every state change is emitted on the bus and passed to direct subscribers.
+   */
   constructor(opts: ConnectionStateMachineOptions) {
     this.bus           = opts.bus;
     this.transportName = opts.transportName;
@@ -298,18 +332,30 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
     this.actor.start();
   }
 
+  /**
+   * Sends an event to the state machine.
+   */
   send(event: ConnectionEvent): void {
     this.actor.send(event);
   }
 
+  /**
+   * Returns the current connection state.
+   */
   get state(): ConnectionState {
     return this.actor.getSnapshot().value as ConnectionState;
   }
 
+  /**
+   * Returns the number of reconnect attempts recorded so far.
+   */
   get attempts(): number {
     return this.actor.getSnapshot().context.attempts;
   }
 
+  /**
+   * Registers a listener for state changes and returns a function that removes it.
+   */
   subscribe(
     listener: (state: ConnectionState, prev: ConnectionState) => void,
   ): () => void {
@@ -317,12 +363,20 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Removes all listeners and stops the state machine.
+   */
   stop(): void {
     this.listeners.clear();
     this.actor.stop();
   }
 }
 
+/**
+ * Build a connection state machine that reports on the given bus.
+ *
+ * Each transport gets its own, so one socket's backoff does not reset another's.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on factory function declaration line.
 export function createConnectionStateMachine(
   opts: ConnectionStateMachineOptions,
@@ -330,6 +384,12 @@ export function createConnectionStateMachine(
   return new ConnectionStateMachineImpl(opts);
 }
 
+/**
+ * The bus events the machine emits.
+ *
+ * `connection_state_change` fires on every move. `connection_reconnecting` fires just before a new socket opens.
+ * `connection_offline` fires on entering `offline`, and `connection_online` on leaving it.
+ */
 export type ConnectionEventOnBus =
   | LupinEvent<ConnectionStateChangePayload>
   | LupinEvent<ConnectionReconnectingPayload>

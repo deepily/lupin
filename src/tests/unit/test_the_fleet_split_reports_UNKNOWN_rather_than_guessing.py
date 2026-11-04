@@ -211,22 +211,29 @@ def test_the_ENDPOINT_surfaces_a_degraded_read_rather_than_concealing_it(
     lives in the DATA" true rather than aspirational — an operator reading the dial can
     see that a seat could not be classified.
 
-    🔴 THE DEGRADE IS INDUCED AT THE RE-LOCATION STEP, NOT BY CORRUPTING THE FILE, AND
-    THE FIRST CUT OF THIS ARM GOT THAT WRONG. See the test below for what a corrupt
-    bridge actually does. The census reads each seat TWICE by two different routes —
-    the directory scan supplies the session id, then `find_session_path_by_id` re-opens
-    that seat's bridge for its `role` and `spawned_by`. A seat can pass the first and
-    fail the second: renamed, unlinked, or rewritten between the two reads. That is the
-    real path to `unknown`, and it is a plain time-of-check/time-of-use window.
+    🔴 THE DEGRADE IS INDUCED BETWEEN THE SCAN AND THE READ, NOT BY CORRUPTING THE FILE.
+    The census reads each seat TWICE: the directory scan supplies the session id and the
+    bridge path, then the classifier opens that path for `role` and `spawned_by`. A seat
+    can pass the first and fail the second: unlinked or rewritten between the two reads.
+    That is the real path to `unknown`, a plain time-of-check/time-of-use window. (Row
+    ff85f78f: the second read used to re-locate the file by id; it now opens the path the
+    scan already returned, so the window is closed by deleting the file, not by
+    patching a locator.)
     """
     _plant( live_pids[ 0 ], persona="Fine",     role="author", spawned_by="21dff055" )
     _plant( live_pids[ 1 ], persona="Vanished", role="author", spawned_by="21dff055" )
 
     from lupin_cli.claude_code.hooks.lib import session_bridge as sb
-    real_locator = sb.find_session_path_by_id
-    monkeypatch.setattr( sb, "find_session_path_by_id",
-                         lambda sid, *a, **k: None if sid == "seat-Vanished"
-                                              else real_locator( sid, *a, **k ) )
+    real_scan = sb.find_active_sessions
+
+    def scan_then_lose_one( *a, **k ):
+        found = real_scan( *a, **k )
+        for path, sid, _ in found:
+            if sid == "seat-Vanished":
+                path.unlink()
+        return found
+
+    monkeypatch.setattr( sb, "find_active_sessions", scan_then_lose_one )
 
     live = client.get( "/api/arbiter/fleet-size-cap" ).json()[ "live" ]
     assert live[ "total" ] == 2, f"POSITIVE CONTROL: two planted bridges — saw {live}"

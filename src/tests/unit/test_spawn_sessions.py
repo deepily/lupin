@@ -1351,7 +1351,7 @@ class TestResolveManagerIdentity:
 class TestResolveSpawnConfig:
     _NO_MODELS = { "reviewer": None, "author": None, "observer": None, "default": None }
 
-    _MEM_DEFAULTS = { "reap_memento_window_seconds": 1200, "reap_memento_min_bytes": 1000,
+    _MEM_DEFAULTS = { "reap_memento_window_seconds": 1200, "reap_memento_min_bytes": 200,
                       "reap_memento_ask_timeout_sec": 45, "reap_memento_poll_interval_sec": 3 }
 
     def test_defaults_when_none( self ):

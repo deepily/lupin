@@ -2,47 +2,43 @@
 """
 Spine cutover migration drain — one-shot back-fill of owed native Task* items.
 
-The cutover prerequisite (cascade review §Q(d)): before the
-`heartbeat.owed_source_from_store` flag can be flipped on fleet-wide, the
-store's owed-row set must MATCH each live session's transcript reality. Until
-now the PostToolUse mirror's write-gate only passed for lupin-manager sessions
-(bug `9bf1dc4a`), so **worker native Task* items were never mirrored**. A bare
-flag-flip would therefore read 0 owed rows for those sessions and silently
-stop poking them — a correctness regression.
+The cutover prerequisite: before the `heartbeat.owed_source_from_store` flag can
+be flipped on fleet-wide, the store's owed-row set must match each live session's
+transcript reality. The PostToolUse mirror's write-gate used to pass only for
+lupin-manager sessions, so worker native Task* items were never mirrored. A bare
+flag-flip would read 0 owed rows for those sessions and silently stop poking them.
 
-This module replays each ACTIVE session's transcript and IDEMPOTENTLY creates
-a store item for every owed native item it finds, stamping the SAME identity
-the mirror would have stamped:
+This module replays each active session's transcript. It idempotently creates
+a store item for every owed native item found, stamping the same identity
+the mirror would have stamped.
 
-    owner_persona        = the session's canonical voice-persona key
-                           (canonical_persona_key: accent/punct-stripped,
-                           lowercased, internal spaces kept — store-key parity)
-    accountable_manager  = same (mirror's create branch sets both)
-    project              = the session's bridge-cwd-anchored project name
+    owner_persona        = the canonical voice-persona key of the session.
+                           Accent and punctuation stripped, lowercased, internal spaces kept (store-key parity).
+
+    accountable_manager  = Same as owner_persona (the mirror's create branch sets both).
+
+    project              = The bridge-cwd-anchored project name of the session.
+
     correlation_key      = cc-task:<stable_sid>:g<generation>:<harness_id>
-                           (task_store_mirror.build_correlation_key)
+                           (task_store_mirror.build_correlation_key).
 
-Idempotency is store-authoritative: BEFORE every create, the correlation_key
-is probed via `GET /api/tasks?correlation_key=…` — if any item already carries
-it (a manager-mirrored row, or a row from a prior drain pass), the create is
-SKIPPED. So re-running the drain never duplicates, and a session whose items
-were already mirrored is a clean no-op.
+Idempotency is store-authoritative. Before every create, the correlation_key is
+probed via `GET /api/tasks?correlation_key=…`. If any item already carries it, the
+create is skipped. That covers a manager-mirrored row and a row from a prior drain pass.
+So re-running never duplicates, and a session already mirrored is a clean no-op.
 
-A per-session COUNT-PARITY check closes the loop: store owed-count (counted by
-probing each owed correlation_key for a live owed-status item) must equal the
-transcript owed-count. Parity passing per session is the green light that the
-flag is safe to flip.
+A per-session count-parity check closes the loop: the store owed-count must equal
+the transcript owed-count. The store side is counted by probing each owed
+correlation_key for a live owed-status item. Parity passing per session is the
+green light that the flag is safe to flip.
 
-INVARIANTS (mirror's posture): never raises on a single session's failure
-(one bad bridge/transcript is logged + skipped, the pass continues); only the
-store IO (`client.*`) can fail, and those failures degrade-safe to ( ok=False )
-which surfaces in the report — they NEVER fabricate a created/parity result.
+Invariants (the mirror's posture): never raises on a single session's failure.
+One bad bridge or transcript is logged and skipped, and the pass continues. Only the
+store IO (`client.*`) can fail, and those failures degrade safe to ( ok=False ),
+which surfaces in the report. They never fabricate a created or parity result.
 
 Run: `python -m lupin_cli.claude_code.hooks.lib.task_store_drain [--apply]`
-(default is a DRY-RUN preview; `--apply` performs the creates).
-
-Design authority: lupin ->
-    src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md §Q(d).
+(default is a dry-run preview; `--apply` performs the creates).
 """
 
 from datetime import datetime, timezone
@@ -96,7 +92,7 @@ def _read_bridge( path ):
 
     Ensures:
         - Returns the parsed dict, or None on any open/parse error
-        - NEVER raises
+        - never raises
     """
     try:
         with open( path ) as f:
@@ -110,14 +106,9 @@ def _project_from_cwd( bridge_cwd, environ=None ):
     """
     Resolve a project name from a bridge's SessionStart cwd (mirror parity).
 
-    Mirrors session_bridge._resolve_project_from_bridge_cwd's algorithm
-    (walk up to the nearest `.git` ancestor, alias-normalize the basename) but
-    sourced from an ARBITRARY session's bridge cwd rather than the current
-    process's bridge — the drain resolves many sessions in one process, so it
-    cannot use the current-session resolver. Falls back to the LUPIN_ROOT
-    basename (then the live cwd basename) exactly as resolve_project_name does,
-    so a session whose bridge had no usable cwd resolves to the same default
-    the mirror would have stamped.
+    Mirrors session_bridge._resolve_project_from_bridge_cwd (walk up to the nearest `.git` ancestor, alias-normalize
+    the basename), but takes any session's bridge cwd, not the current process's. The drain resolves many sessions
+    in one process, so it cannot use the current-session resolver.
 
     Requires:
         - bridge_cwd is a string path or None
@@ -125,6 +116,8 @@ def _project_from_cwd( bridge_cwd, environ=None ):
 
     Ensures:
         - Returns a lowercase, non-empty project name string
+        - With no bridge_cwd it falls back to the LUPIN_ROOT basename, then the live cwd basename, as
+          resolve_project_name does, so a session with no usable bridge cwd gets the mirror's default
         - A malformed cwd (e.g. an embedded null byte) propagates as ValueError;
           the discover loop is the never-raises boundary that skips such a session
     """
@@ -151,12 +144,11 @@ def discover_active_sessions(
     _read_bridge            = _read_bridge,
 ):
     """
-    Discover the ACTIVE sessions the drain should back-fill.
+    Discover the active sessions the drain should back-fill.
 
-    Reuses the voice-persona occupancy scanner (find_active_voice_persona_sessions
-    — same PID + mtime staleness filters used by the persona pool) so the drain
-    operates on exactly the set of sessions considered live, then re-reads each
-    bridge for its transcript_path + cwd.
+    Reuses the voice-persona occupancy scanner (find_active_voice_persona_sessions, with the PID and mtime
+    staleness filters of the persona pool). So the drain sees the sessions considered live.
+    It then re-reads each bridge for its transcript_path and cwd.
 
     Requires:
         - stale_threshold_seconds is a positive int
@@ -165,11 +157,11 @@ def discover_active_sessions(
     Ensures:
         - Returns a list of session dicts:
           { session_id, transcript_path, persona_lower, project }
-        - A bridge that fails to re-read is SKIPPED (degrade-safe)
-        - A bridge with no transcript_path is SKIPPED (nothing to replay)
-        - A bridge whose cwd is malformed (project resolution raises) is SKIPPED
+        - A bridge that fails to re-read is skipped (degrade-safe)
+        - A bridge with no transcript_path is skipped (nothing to replay)
+        - A bridge whose cwd is malformed (project resolution raises) is skipped
           (this loop is the module's never-raises boundary)
-        - NEVER raises
+        - never raises
     """
     sessions = [ ]
     for path, sid, persona in _find( stale_threshold_seconds ):
@@ -203,8 +195,8 @@ def _owed_harness_ids( transcript_path, _replay ):
         - _replay is replay_task_state (injectable)
 
     Ensures:
-        - Returns a list of harness_id strings whose LATEST status is owed
-        - NEVER raises (replay_task_state never raises)
+        - Returns a list of harness_id strings whose latest status is owed
+        - never raises (replay_task_state never raises)
     """
     state = _replay( transcript_path )
     return [ hid for hid, status in state.items() if status in OWED_STATUSES ]
@@ -224,26 +216,26 @@ def drain_owed_items_for_session(
     _create             = client.create_task,
 ):
     """
-    Idempotently back-fill ONE session's owed native Task* items into the store.
+    Idempotently back-fill one session's owed native Task* items into the store.
 
     Requires:
         - settings is the load_task_store_settings() dict (api_base_url, timeout)
         - api_key is a string (may be empty — server 401s it)
         - session is a discover_active_sessions() dict
-        - apply=True performs creates; apply=False is a DRY-RUN (probe only —
-          counts what WOULD be created without writing)
+        - apply=True performs creates; apply=False is a dry-run (probe only —
+          counts what would be created without writing)
 
     Ensures:
         - For every owed harness id: build its correlation_key, probe the store;
-          a hit (count>0) is SKIPPED (idempotent — never duplicates a
-          manager-mirrored or prior-drained row); a miss is CREATED (apply=True)
+          a hit (count>0) is skipped (idempotent — never duplicates a
+          manager-mirrored or prior-drained row); a miss is created (apply=True)
           or counted as `would_create` (apply=False)
         - Returns a result dict:
           { session_id, persona_lower, project, generation, owed, created,
             skipped, would_create, failed }
         - A store-probe / create transport failure increments `failed` and the
           item is left for a later pass (never a half-written fabrication)
-        - NEVER raises
+        - never raises
     """
     session_id    = session[ "session_id" ]
     transcript    = session[ "transcript_path" ]
@@ -311,11 +303,9 @@ def check_session_parity(
     """
     Per-session count-parity: store owed-count == transcript owed-count.
 
-    Counts the store-owed side PER SESSION by probing each owed correlation_key
-    for a live owed-status item — deliberately NOT via query_owed, whose
-    (owner_persona, project) filter would AGGREGATE across every session that
-    ever held the same persona. The correlation_key is session+generation
-    scoped, so this is the true per-session count.
+    Counts the store-owed side per session by probing each owed correlation_key for a live owed-status item.
+    It does not use query_owed, whose (owner_persona, project) filter would aggregate across every session that
+    ever held the same persona. The correlation_key is session+generation scoped, so this is the true per-session count.
 
     Requires:
         - settings / api_key / session as in drain_owed_items_for_session
@@ -323,16 +313,16 @@ def check_session_parity(
     Ensures:
         - Returns { session_id, transcript_owed, store_owed, query_ok, parity }
           where store_owed counts owed correlation_keys whose probe returned an
-          item in an owed store status, query_ok is True iff EVERY probe
-          answered cleanly, and parity is ( query_ok AND store_owed ==
+          item in an owed store status, query_ok is True iff every probe
+          answered cleanly, and parity is ( query_ok and store_owed ==
           transcript_owed )
         - A failed probe sets query_ok False (parity cannot be asserted on an
           unreachable store) — never a false-green
-        - `now` is an INJECTABLE tz-aware clock (None resolves it once, here, at
+        - `now` is an injectable tz-aware clock (None resolves it once, here, at
           the IO boundary). Explicit so a park-expiry boundary row is reachable
-          in a test without patching module state, and so ONE instant classifies
+          in a test without patching module state, and so one instant classifies
           the whole sweep.
-        - NEVER raises
+        - never raises
     """
     session_id = session[ "session_id" ]
     transcript = session[ "transcript_path" ]
@@ -389,7 +379,7 @@ def run_drain(
           where totals aggregates owed/created/skipped/would_create/failed and
           counts how many sessions reached parity
         - One session's failure never aborts the pass (degrade-safe per session)
-        - NEVER raises
+        - never raises
     """
     settings = _load_settings()
     api_key  = _read_api_key( environ )
@@ -426,7 +416,7 @@ def format_report( report ):
 
     Ensures:
         - Returns a multi-line string (header + one row per session + totals)
-        - NEVER raises
+        - never raises
     """
     mode  = "APPLY" if report[ "apply" ] else "DRY-RUN"
     lines = [ f"Spine cutover drain [{mode}] — {report['sessions']} active session(s)" ]

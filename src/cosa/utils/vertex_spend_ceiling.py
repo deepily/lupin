@@ -1,53 +1,42 @@
 """
-Vertex spend-ceiling arithmetic: convert a DOLLAR budget into a RATE clamp.
+Vertex spend-ceiling arithmetic: convert a dollar budget into a rate clamp.
 
-WHY THIS MODULE EXISTS — the cascade's own law, wearing a finance hat:
+A dollar cap can never be tight, because the dollar oracle lags. A GCP budget is an email, not a
+brake. It does not enforce, so spend sails past 100%. There is no daily budget period
+(`--calendar-period` is month, quarter or year only). Billing export arrives hours late.
+By the time "$50 today" fires, it is already spent.
 
-    A DOLLAR CAP CAN NEVER BE TIGHT, BECAUSE THE DOLLAR ORACLE LAGS.
+Cloud Quotas is the only instant brake. It is enforced at the API layer, per minute, and returns
+429. So enforcement is rate-based and dollars are the alerting layer on top. This module
+turns "$50/day" into a tokens-per-minute number you can clamp.
 
-A GCP budget is an EMAIL, not a brake: it does not enforce, spend sails past
-100%, there is no daily budget period (`--calendar-period` is month|quarter|year
-only), and billing export arrives HOURS late. By the time "$50 today" fires, it
-is already spent.
-
-Cloud Quotas is the only INSTANT brake — enforced at the API layer, per minute,
-returning 429. So ENFORCEMENT is RATE-based and DOLLARS are the ALERTING layer
-on top. This module is the bridge between the two: it turns "$50/day" into a
-tokens-per-minute number you can actually clamp.
-
-=== THE THREE FACTS THE ARITHMETIC RESTS ON (each one falsifiable) ===
-
-1. Anthropic/Claude traffic on Vertex is governed by SHARED MODEL LINEAGE
-   quotas, keyed on the `base_model` dimension (e.g. `anthropic-claude-opus`),
-   scoped per endpoint. This is NOT the `Openapi*` quota family — that family
-   governs the MaaS models (deepseek / gpt-oss) and would not throttle one
-   token of Opus spend. A clamp on the wrong family is a brake bolted to the
+The three facts the arithmetic rests on (each one falsifiable)
+---------------------------------------------------------------
+1. Claude traffic on Vertex is governed by shared model-lineage quotas. They are keyed on the
+   `base_model` dimension (for example `anthropic-claude-opus`) and scoped per endpoint. This is not
+   the `Openapi*` quota family. That family governs the MaaS models (deepseek, gpt-oss) and
+   would not throttle one token of Opus spend. A clamp on the wrong family is a brake on the
    wrong axle.
+2. The quota is expressed in QPM (queries per minute) and TPM (tokens per minute). TPM counts
+   input and output together, in one combined bucket.
+3. Input and output are billed at different rates (Opus 4.8: $5 versus $25 per MTok).
 
-2. The quota is expressed in QPM (queries/min) and TPM (tokens/min), and
-   **TPM COUNTS INPUT AND OUTPUT TOGETHER** — one combined bucket.
+The consequence, which is the whole design
+-------------------------------------------
+One combined TPM bucket meters two differently priced token streams. So the dollar value of a
+token depends on a mix we do not know and cannot control. Picking a mix ratio to make the
+arithmetic prettier would be inventing a number, the same sin as inventing a price.
 
-3. Input and output are billed at DIFFERENT rates (Opus 4.8: $5 vs $25/MTok).
+So the clamp is computed at the output (most expensive) rate. That is the only mix-independent
+guarantee. It bounds spend from above under every possible mix, including the adversarial
+all-output one. On a realistic input-heavy agentic mix the true spend lands well below the cap,
+so the clamp under-permits rather than over-permits.
 
-=== THE CONSEQUENCE — AND IT IS THE WHOLE DESIGN ===
-
-Because one combined TPM bucket meters two differently-priced token streams,
-the dollar value of a token depends on a MIX we do not know and cannot control.
-Picking a mix ratio to make the arithmetic prettier would be inventing a number
-- the same sin as inventing a price.
-
-So the clamp is computed at the OUTPUT (most expensive) rate. That is the ONLY
-mix-independent guarantee: it bounds spend from above under EVERY possible mix,
-including the adversarial 100%-output one. On a realistic input-heavy agentic
-mix the true spend lands well BELOW the cap — the clamp under-permits rather
-than over-permits, and it errs in the direction that cannot hurt you.
-
-=== WHAT THIS MODULE REFUSES TO DO ===
-
-It will not price a model whose per-token price is not published by a primary
-source. An unpriced model cannot be clamped to a dollar figure, and saying so
-is a FINDING, not a failure. `clamp_tpm_for_daily_budget` raises on UNPRICED
-rather than substituting a plausible-looking guess.
+What this module refuses to do
+------------------------------
+It will not price a model whose per-token price is not published by a primary source. An unpriced
+model cannot be clamped to a dollar figure, and saying so is a finding, not a failure.
+`clamp_tpm_for_daily_budget` raises on an unpriced model rather than guess a plausible price.
 """
 
 from dataclasses import dataclass
@@ -64,9 +53,8 @@ class ModelPrice:
     """
     A per-million-token price with its provenance attached.
 
-    `usd_per_mtok_output is None` means NO PRIMARY SOURCE PUBLISHES A PRICE.
-    That is a recorded fact, not a placeholder to be filled in later with a
-    number that looks about right.
+    `usd_per_mtok_output is None` means no primary source publishes a price. That is a recorded
+    fact, not a placeholder to be filled in later with a number that looks about right.
     """
     model_id             : str
     usd_per_mtok_input   : Optional[ float ]
@@ -76,7 +64,7 @@ class ModelPrice:
 
     @property
     def is_priced( self ):
-        """Ensures: True iff BOTH directions carry a primary-sourced price."""
+        """Ensures: True iff both directions carry a primary-sourced price."""
         return self.usd_per_mtok_input is not None and self.usd_per_mtok_output is not None
 
 
@@ -136,11 +124,10 @@ class UnpricedModelError( ValueError ):
 
 def binding_daily_usd( daily_usd, monthly_usd, days_in_month=DAYS_PER_MONTH_WORST_CASE ):
     """
-    Reconcile a daily target against a monthly target and return the one that BINDS.
+    Reconcile a daily target against a monthly target and return the one that binds.
 
-    Rick asked for BOTH "$50/day" AND "max $1,000/month". Those two numbers are
-    not simultaneously satisfiable as hard caps: $50/day sustained across a
-    31-day month is $1,550 — it BLOWS the $1,000 ceiling. Whichever implies the
+    The two numbers are not simultaneously satisfiable as hard caps. For example $50/day sustained
+    across a 31-day month is $1,550, which blows a $1,000 monthly ceiling. Whichever implies the
     lower daily rate is the real ceiling; the other is a burst allowance.
 
     Requires:
@@ -150,7 +137,7 @@ def binding_daily_usd( daily_usd, monthly_usd, days_in_month=DAYS_PER_MONTH_WORS
 
     Ensures:
         - returns min( daily_usd, monthly_usd / days_in_month )
-        - the returned rate, sustained every day, breaches NEITHER target
+        - the returned rate, sustained every day, breaches neither target
 
     Raises:
         - ValueError if any argument is not strictly positive
@@ -168,10 +155,9 @@ def clamp_tpm_for_daily_budget( price, daily_usd, minutes_per_day=MINUTES_PER_DA
     """
     Convert a daily dollar budget into a combined-TPM clamp for the Cloud Quotas override.
 
-    Computed at the OUTPUT rate — the most expensive direction. Because the Vertex
-    TPM bucket counts input and output TOGETHER while they bill at different rates,
-    the output rate is the ONLY assumption that bounds spend from above under EVERY
-    input/output mix. Any cheaper assumption smuggles in a mix ratio we did not measure.
+    The clamp uses the output rate, the most expensive direction. The TPM bucket counts input and
+    output together but they bill differently, so only the output rate bounds spend from above
+    under every mix. Any cheaper assumption smuggles in a mix ratio we did not measure.
 
     Requires:
         - price is a ModelPrice
@@ -181,8 +167,8 @@ def clamp_tpm_for_daily_budget( price, daily_usd, minutes_per_day=MINUTES_PER_DA
 
     Ensures:
         - returns an int TPM such that sustaining it for a full day costs
-          AT MOST daily_usd, under any input/output mix
-        - the result is FLOORED, never rounded up (rounding up would permit
+          at most daily_usd, under any input/output mix
+        - the result is floored, never rounded up (rounding up would permit
           a rate that breaches the budget)
 
     Raises:

@@ -50,6 +50,11 @@ import { renderListenerErrorBadge } from "./templates/listenerErrorBadge";
  *  tees to `console.error` AND the debug panel. */
 export type ListenerErrorSink = ( message: string, ...args: unknown[] ) => void;
 
+/**
+ * A badge that counts errors thrown by event listeners and reports each to a sink.
+ *
+ * The count is the number since the last dismiss.
+ */
 export interface ListenerErrorRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -59,12 +64,20 @@ export interface ListenerErrorRenderer {
   countForTesting(): number;
 }
 
+/**
+ * Options for `createListenerErrorRenderer`.
+ *
+ * The bus is required. The sink defaults to the debug error writer.
+ */
 export interface ListenerErrorRendererOptions {
   eventBus : EventBus;
   /** Defaults to debugSink.error. */
   sink?    : ListenerErrorSink;
 }
 
+/**
+ * Models the pane that counts and shows errors thrown by event listeners.
+ */
 class ListenerErrorRendererImpl implements ListenerErrorRenderer {
   private readonly bus  : EventBus;
   private readonly sink : ListenerErrorSink;
@@ -74,11 +87,17 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
   private mounted = false;
   private count   = 0;
 
+  /**
+   * Stores the event bus and the error sink, defaulting to the debug writer.
+   */
   constructor( opts: ListenerErrorRendererOptions ) {
     this.bus  = opts.eventBus;
     this.sink = opts.sink ?? debugError;
   }
 
+  /**
+   * Attaches to the root and subscribes to listener error events.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "ListenerErrorRenderer already mounted" );
@@ -94,6 +113,9 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
     );
   }
 
+  /**
+   * Unsubscribes, empties the root and resets the error count.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -105,6 +127,9 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Returns the number of errors since the last dismiss; used by tests.
+   */
   countForTesting(): number {
     return this.count;
   }
@@ -159,6 +184,11 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It listens for nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createListenerErrorRenderer(
   opts: ListenerErrorRendererOptions,

@@ -3,8 +3,9 @@ Persona name matcher for inter-session commons broadcasts.
 
 Matches user-input persona references against the active personas list,
 case-insensitive and tolerant of punctuation/whitespace variants. When
-mechanical matching fails, falls back to a stubbed local-LLM disambiguator
-(Phase 1 stub returns None; Phase 3 wires the actual LLM call).
+mechanical matching fails, falls back to an LLM disambiguator. The server
+lifespan installs a CommonsLlmDisambiguator when commons is enabled; until one is
+installed the fallback returns None.
 
 Per AC8 in src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
 """
@@ -20,14 +21,14 @@ _disambiguator_singleton = None
 
 def configure_llm_disambiguator( disambiguator ) -> None:
     """
-    Phase 3 setter: install the LLM disambiguator singleton.
+    Install the LLM disambiguator singleton.
 
     Requires:
         - `disambiguator` is a `CommonsLlmDisambiguator` exposing
           `.disambiguate(active_personas, ambiguous_reference, context=None)`
-          OR None (clears the singleton, restoring Phase 1 stub behavior).
+          OR None (clears the singleton, so the fallback returns None again).
 
-    Called from `main.py` lifespan during Phase 3. Tests reset between cases
+    Called from the `main.py` lifespan when commons is enabled. Tests reset between cases
     via `configure_llm_disambiguator(None)`.
     """
     global _disambiguator_singleton
@@ -46,23 +47,23 @@ def disambiguate_via_llm( input_str: str, candidate_personas: List[ str ] ) -> O
     """
     LLM-fallback hook for persona disambiguation.
 
-    Phase 1: returns None (no LLM call).
-    Phase 3: replace body with actual local-LLM call (voice-routing-classifier-style).
+    Delegates to the installed CommonsLlmDisambiguator (see
+    `configure_llm_disambiguator`). With none installed it makes no LLM call and
+    returns None, which is the default for any caller that never wires one.
 
-    Stable signature per AC8 + Q8 LLM-fallback ratification — Phase 3 upgrade
-    replaces only the body, no caller refactor needed.
+    Stable signature per AC8 + Q8 LLM-fallback ratification.
 
     Requires:
         - input_str is a non-empty string
         - candidate_personas is a non-empty list of display-name strings
 
     Ensures:
-        - Phase 1: always returns None
-        - Phase 3: returns a matched persona display name from candidate_personas, or None
+        - Returns None when no disambiguator is installed or candidate_personas is empty
+        - Otherwise returns the disambiguator's pick, a persona display name from
+          candidate_personas, or None
     """
-    # Phase 3 wiring: route through the configured LLM disambiguator when present.
-    # When the singleton is None (Phase 1 default / unwired startup), preserve
-    # the stub's "always None" contract for backward-compat callers.
+    # Route through the configured LLM disambiguator when present. When the singleton
+    # is None (unwired startup), return None for backward-compat callers.
     if _disambiguator_singleton is None or not candidate_personas:
         return None
     # Convert display-name list to PersonaInfo with placeholder icon.
@@ -79,7 +80,7 @@ def match_persona( input_str: str, candidate_personas: List[ str ] ) -> Optional
     Match a user-input persona reference to a canonical persona from candidate_personas.
 
     Case-insensitive, punctuation/space-tolerant mechanical matching first;
-    falls back to `disambiguate_via_llm` stub on miss.
+    falls back to `disambiguate_via_llm` on miss.
 
     Per AC8 in 02-phase1-file-commons-design.md.
 
@@ -89,7 +90,8 @@ def match_persona( input_str: str, candidate_personas: List[ str ] ) -> Optional
 
     Ensures:
         - Returns the canonical display name from candidate_personas on mechanical match
-        - Returns None when mechanical match misses AND LLM-fallback returns None
+        - Returns None when mechanical match misses AND the LLM fallback returns None
+          (including when no disambiguator is installed)
         - "Mr. Radio" / "mr radio" / "mrradio" / "MR.RADIO" all match candidate "Mr. Radio"
         - Empty input or empty candidate list → returns None
     """

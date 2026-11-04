@@ -20,6 +20,7 @@ by weakening an assertion, and the two gates the plan shipped were both that:
 Run: PYTHONPATH=src .venv/bin/pytest src/tests/unit/test_v2_agents_endpoint.py -v
 """
 
+import copy
 import types
 from unittest import mock
 
@@ -40,13 +41,14 @@ from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRA
 USER = { "uid": "u-1", "email": "someone@example.com" }
 
 
-def _client( crud_enabled=False, current_user=USER ):
+def _client( crud_enabled=False, current_user=None ):
     """Mount the endpoint with a flow that carries nothing but `crud_enabled`.
 
     The endpoint reads exactly one thing off the flow, so the fake declares exactly
     one thing. A fake with more surface than the code uses hides which coupling is
     real.
     """
+    if current_user is None: current_user = copy.deepcopy( USER )
     app = FastAPI()
     app.include_router( v2_ask.router )
     app.dependency_overrides[ v2_ask.get_current_user ] = lambda: current_user

@@ -40,16 +40,11 @@ Create new user account with email and password. Returns user info and JWT token
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 201 | Successful Response | [RegisterResponse](#registerresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 201 | Successful Response | [RegisterResponse](#registerresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/auth/login`
 
 > **User login**
@@ -68,16 +63,11 @@ Authenticate user with email and password. Returns user info and JWT token pair.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [LoginResponse](#loginresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [LoginResponse](#loginresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/auth/refresh`
 
 > **Refresh access token**
@@ -96,16 +86,11 @@ Exchange refresh token for new token pair. Old refresh token is revoked (token r
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [RefreshResponse](#refreshresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [RefreshResponse](#refreshresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/auth/logout`
 
 > **User logout**
@@ -124,16 +109,11 @@ Revoke refresh token to logout user. Access token remains valid until expiration
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [LogoutResponse](#logoutresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [LogoutResponse](#logoutresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/auth/me`
 
 > **Get current user**
@@ -153,16 +133,11 @@ Get current user information from access token. Requires Authorization header.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [UserResponse](#userresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [UserResponse](#userresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PUT `/auth/change-password`
 
 > **Change password**
@@ -186,16 +161,11 @@ Change password for authenticated user. Requires current password verification.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/auth/request-verification`
 
 > **Request email verification**
@@ -215,16 +185,11 @@ Resend email verification link to authenticated user.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/auth/verify-email`
 
 > **Verify email address**
@@ -243,16 +208,11 @@ Verify email address using token from verification email.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/auth/request-password-reset`
 
 > **Request password reset**
@@ -271,16 +231,11 @@ Send password reset email to user. Returns success even if email not found (secu
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/auth/reset-password`
 
 > **Reset password**
@@ -299,16 +254,11 @@ Reset password using token from password reset email.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse)
- |
-| 401 | Unauthorized | [ErrorResponse](#errorresponse)
- |
-| 400 | Bad Request | [ErrorResponse](#errorresponse)
- |
-| 500 | Internal Server Error | [ErrorResponse](#errorresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [cosa__rest__auth_models__MessageResponse](#cosa__rest__auth_models__messageresponse) |
+| 401 | Unauthorized | [ErrorResponse](#errorresponse) |
+| 400 | Bad Request | [ErrorResponse](#errorresponse) |
+| 500 | Internal Server Error | [ErrorResponse](#errorresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/admin/users`
 
 > **List all users**
@@ -333,14 +283,12 @@ Get paginated list of users with optional filters. Requires admin role.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [UserListResponse](#userlistresponse)
- |
+| 200 | Successful Response | [UserListResponse](#userlistresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/admin/users`
 
 > **Create new user**
@@ -364,14 +312,12 @@ Create a new user account with specified roles. Auto-verifies email. Requires ad
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 201 | Successful Response | [CreateUserResponse](#createuserresponse)
- |
+| 201 | Successful Response | [CreateUserResponse](#createuserresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/admin/users/{user_id}`
 
 > **Get user details**
@@ -392,14 +338,12 @@ Get detailed information for specific user. Requires admin role.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [UserDetailsResponse](#userdetailsresponse)
- |
+| 200 | Successful Response | [UserDetailsResponse](#userdetailsresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/admin/users/{user_id}`
 
 > **Delete user**
@@ -424,14 +368,12 @@ Permanently delete user account. Cannot delete self or sole admin. Requires admi
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__routers__admin__MessageResponse](#cosa__rest__routers__admin__messageresponse)
- |
+| 200 | Successful Response | [cosa__rest__routers__admin__MessageResponse](#cosa__rest__routers__admin__messageresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PUT `/admin/users/{user_id}/roles`
 
 > **Update user roles**
@@ -456,14 +398,12 @@ Update roles for specific user. Prevents self-demotion. Requires admin role.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__routers__admin__MessageResponse](#cosa__rest__routers__admin__messageresponse)
- |
+| 200 | Successful Response | [cosa__rest__routers__admin__MessageResponse](#cosa__rest__routers__admin__messageresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PUT `/admin/users/{user_id}/status`
 
 > **Toggle user status**
@@ -488,14 +428,12 @@ Activate or deactivate user account. Prevents self-deactivation. Requires admin 
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__routers__admin__MessageResponse](#cosa__rest__routers__admin__messageresponse)
- |
+| 200 | Successful Response | [cosa__rest__routers__admin__MessageResponse](#cosa__rest__routers__admin__messageresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/admin/users/{user_id}/reset-password`
 
 > **Admin password reset**
@@ -520,14 +458,12 @@ Generate temporary password for user. Password shown once only. Requires admin r
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [ResetPasswordResponse](#resetpasswordresponse)
- |
+| 200 | Successful Response | [ResetPasswordResponse](#resetpasswordresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/admin/users/batch-delete`
 
 > **Batch delete users**
@@ -551,14 +487,12 @@ Delete multiple user accounts at once. Reuses single-user safety checks. Require
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [BatchDeleteUsersResponse](#batchdeleteusersresponse)
- |
+| 200 | Successful Response | [BatchDeleteUsersResponse](#batchdeleteusersresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/admin/snapshots/search`
 
 > **Search solution snapshots**
@@ -581,14 +515,12 @@ Search snapshots by question text using vector similarity. Requires admin role.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [SearchSnapshotsResponse](#searchsnapshotsresponse)
- |
+| 200 | Successful Response | [SearchSnapshotsResponse](#searchsnapshotsresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/admin/snapshots/{id_hash}`
 
 > **Get snapshot details**
@@ -609,14 +541,12 @@ Retrieve full snapshot details by ID. Requires admin role.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [SnapshotDetailResponse](#snapshotdetailresponse)
- |
+| 200 | Successful Response | [SnapshotDetailResponse](#snapshotdetailresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/admin/snapshots/{id_hash}`
 
 > **Delete snapshot**
@@ -637,14 +567,12 @@ Permanently delete snapshot from database. Requires admin role.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [cosa__rest__routers__admin__MessageResponse](#cosa__rest__routers__admin__messageresponse)
- |
+| 200 | Successful Response | [cosa__rest__routers__admin__MessageResponse](#cosa__rest__routers__admin__messageresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/admin/snapshots/{id_hash}/preview`
 
 > **Get snapshot preview**
@@ -665,14 +593,12 @@ Get code and explanation preview for hover display. Requires admin role.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [SnapshotPreviewResponse](#snapshotpreviewresponse)
- |
+| 200 | Successful Response | [SnapshotPreviewResponse](#snapshotpreviewresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/admin/snapshots/{id_hash}/similar`
 
 > **Find similar snapshots**
@@ -697,14 +623,12 @@ Find snapshots with similar code or explanation. Requires admin role.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [SimilarSnapshotsResponse](#similarsnapshotsresponse)
- |
+| 200 | Successful Response | [SimilarSnapshotsResponse](#similarsnapshotsresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/admin/admin/refresh-source`
 
 > **Force test server to reload source (test env only)**
@@ -724,14 +648,12 @@ Re-execs the uvicorn process in place so bind-mounted source edits take effect. 
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 202 | Successful Response | [RefreshSourceResponse](#refreshsourceresponse)
- |
+| 202 | Successful Response | [RefreshSourceResponse](#refreshsourceresponse) |
 | 401 | Unauthorized |  |
 | 403 | Forbidden - Admin role required |  |
 | 404 | Not Found |  |
 | 500 | Internal Server Error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/`
 
 > **Root health check**
@@ -830,8 +752,7 @@ Reload configuration and optionally swap active config block and database connec
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no bearer token |  |
 | 403 | Forbidden — the admin role is required |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/prediction-engine/reset`
 
 > **Reset PredictionEngine singleton**
@@ -855,8 +776,7 @@ Destroy and re-create the PredictionEngine singleton with current config. Used b
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid API key or bearer token |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/get-session-id`
 
 > **Generate session ID**
@@ -928,8 +848,7 @@ Trigger manual cleanup of sessions older than specified max age.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/debug/websocket-state`
 
 > **Debug WebSocket state**
@@ -938,6 +857,11 @@ Expose complete internal WebSocket manager state for troubleshooting. Debug endp
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -945,6 +869,7 @@ Expose complete internal WebSocket manager state for troubleshooting. Debug endp
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/config/client`
 
 > **Get client config**
@@ -994,8 +919,7 @@ Toggle the similarity confirmation feature at runtime. Returns new and previous 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/system/bounce`
 
 > **Bounce the dev server**
@@ -1055,8 +979,7 @@ Dispatch notification to a user via WebSocket. Supports fire-and-forget or SSE b
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/notify/response`
 
 > **Submit notification response**
@@ -1082,8 +1005,7 @@ object
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/undelivered`
 
 > **Get undelivered (missed) notifications**
@@ -1106,8 +1028,29 @@ Pull-able AFK inbox (messaging-coordination plane, lever D): the authenticated u
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/notifications/awaiting-response`
+
+> **Get the response cards still waiting for an answer**
+
+The authenticated user's response-required notifications that are neither answered nor expired, oldest first, in the shape a live push carries. A page that opens after a card was filed draws its Yes/No from this.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/answers-owed`
 
 > **Get answers owed to a persona (late-answer handback pull inbox)**
@@ -1133,8 +1076,7 @@ Persona-keyed pull inbox (§4.4): answered asks not yet handed back to the sessi
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/notifications/answers-owed/ack`
 
 > **Ack a handed-back answer (mark delivered)**
@@ -1160,8 +1102,7 @@ object
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/response/{notification_id}`
 
 > **Read one notification's response state (re-attach poll target)**
@@ -1184,8 +1125,7 @@ PURE READ (§4.5 E-b) of {state, response_value, responded_at} for one notificat
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/notifications/undelivered/dismiss`
 
 > **Dismiss (reset) undelivered notifications**
@@ -1207,8 +1147,7 @@ Reset the 'N missed while away' badge: soft-dismiss (is_hidden=True) the authent
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/notify/prediction-vote/{notification_id}`
 
 > **Vote on a prediction hint (thumbs up/down → training signal)**
@@ -1235,8 +1174,7 @@ Record the user's 👍/👎 on a prediction hint. up→approved (reinforce in fu
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/broadcast-acks/{broadcast_id}`
 
 > **Get the saved acks for one broadcast**
@@ -1260,8 +1198,7 @@ Rebuild one broadcast's ack tally from the SAVED notification rows — which sea
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/{user_id}`
 
 > **Get user notifications**
@@ -1288,8 +1225,7 @@ Retrieve notifications for a user from the in-memory FIFO queue, with an optiona
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/{user_id}/next`
 
 > **Get next notification**
@@ -1312,8 +1248,7 @@ Fetch the next unplayed notification for a user without modifying its played sta
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/notifications/{notification_id}/played`
 
 > **Mark notification played**
@@ -1336,8 +1271,7 @@ Mark a notification as played with timestamp. Persists to the io_tbl database.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/notifications/{notification_id}`
 
 > **Delete notification**
@@ -1360,8 +1294,7 @@ Permanently remove a single notification from the FIFO queue and io_tbl database
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/notifications/bulk/{user_email}`
 
 > **Bulk delete notifications**
@@ -1386,8 +1319,7 @@ Delete all notifications for a user from PostgreSQL with optional time window fi
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/senders/{user_email}`
 
 > **List notification senders**
@@ -1411,8 +1343,7 @@ Return all distinct senders who have sent notifications to a user with last acti
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/conversation/{sender_id}/{user_email}`
 
 > **Get sender conversation**
@@ -1438,8 +1369,7 @@ Retrieve time-windowed conversation thread between a specific sender and recipie
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/notifications/conversation/{sender_id}/{user_email}`
 
 > **Delete sender conversation**
@@ -1463,8 +1393,7 @@ Permanently delete all notifications from a specific sender to a recipient.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/conversation-by-date/{sender_id}/{user_email}`
 
 > **Get conversation by date**
@@ -1491,8 +1420,7 @@ Return notifications grouped by date for accordion-style UI rendering.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/notifications/date/{sender_id}/{user_email}/{date_string}`
 
 > **Soft-delete by date**
@@ -1517,8 +1445,7 @@ Soft-delete all notifications from a sender on a specific date by setting is_hid
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/sender-dates/{sender_id}/{user_email}`
 
 > **Get sender date summaries**
@@ -1543,8 +1470,7 @@ Return lightweight date headers with counts for building accordion UI.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/senders-visible/{user_email}`
 
 > **List visible senders**
@@ -1570,8 +1496,7 @@ Enhanced sender list respecting is_hidden flag with unread counts for notificati
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/active-conversation/{user_email}`
 
 > **Get active conversation**
@@ -1594,8 +1519,7 @@ Return the sender_id of the most recent notification for voice response routing.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/notifications/project-sessions/{project}/{user_email}`
 
 > **List project sessions**
@@ -1619,8 +1543,7 @@ Return all Claude Code sessions for a project with activity counts and active st
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/notifications/generate-gist`
 
 > **Generate session gist**
@@ -1646,8 +1569,7 @@ object
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/upload-and-transcribe-mp3`
 
 > **Transcribe MP3 audio**
@@ -1671,8 +1593,7 @@ Accept base64-encoded MP3 and transcribe via Whisper. An agent request goes to t
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/get-speech`
 
 > **Synthesize speech (OpenAI)**
@@ -1727,8 +1648,7 @@ Accept a WAV file upload, transcribe via Whisper, and return transcription text.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/push`
 
 > **GONE — use /api/v2/ask**
@@ -1795,8 +1715,7 @@ Retrieve jobs from a named queue (todo/run/done/dead) with role-based user filte
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/reset-queues`
 
 > **Reset all queues**
@@ -1805,6 +1724,11 @@ Clear all five queues (todo, run, done, dead, notification) and return items-cle
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1812,6 +1736,7 @@ Clear all five queues (todo, run, done, dead, notification) and return items-cle
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/get-job-interactions/{job_id}`
 
 > **Get job interactions**
@@ -1832,8 +1757,7 @@ Retrieve notification interaction history for a job with progress deduplication.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/jobs/{job_id}/message`
 
 > **Send message to job**
@@ -1854,8 +1778,7 @@ Send a user-initiated message to a running agentic job via WebSocket notificatio
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/jobs/{job_id}/cancel`
 
 > **Cancel a queued or running job**
@@ -1876,8 +1799,7 @@ Cancel a job whether it has started or not. A job still waiting in the todo queu
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/queue/{queue_name}/all`
 
 > **Delete all jobs from a queue**
@@ -1898,8 +1820,7 @@ Bulk remove all jobs from todo, run, done, or dead queue. Admins clear the entir
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/queue/{queue_name}/{job_id}`
 
 > **Remove job from queue**
@@ -1921,8 +1842,7 @@ Forcefully remove a job from todo, run, done, or dead queue.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/job-history`
 
 > **Query job history**
@@ -1949,8 +1869,7 @@ Paginated history of agentic jobs from PostgreSQL persistence. Admin sees all jo
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/job-history/{job_id}`
 
 > **Get job detail**
@@ -1971,8 +1890,7 @@ Retrieve a single job's full history record by ID hash.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/job-history/{job_id}`
 
 > **Delete job from history**
@@ -1993,8 +1911,7 @@ Hard delete a job history record. Admin or job owner only.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/job-history/all`
 
 > **Bulk delete job history**
@@ -2015,8 +1932,7 @@ Delete all job history records matching the given time window. Admins delete acr
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/job-history/{job_id}/retry`
 
 > **GONE — use /api/v2/ask**
@@ -2052,8 +1968,7 @@ Set paused=True on a todo queue job. Consumer skips it until resumed.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PATCH `/api/queue/todo/{job_id}/resume`
 
 > **Resume a paused todo queue job**
@@ -2074,8 +1989,7 @@ Set paused=False and notify consumer to recalculate eligibility.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/jobs/{id_hash}/resume-from-checkpoint`
 
 > **GONE — use /api/v2/resume-job**
@@ -2126,8 +2040,7 @@ Delete a completed job snapshot by ID. Phase 1 stub.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/get-answer/{id}`
 
 > **Get job audio answer**
@@ -2148,8 +2061,7 @@ Return audio for a completed job. Phase 1 stub serving placeholder audio.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/websocket-sessions/stats`
 
 > **Get WebSocket statistics**
@@ -2185,8 +2097,7 @@ Return detailed info for a specific WebSocket session by ID.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/websocket-sessions/{session_id}`
 
 > **Force disconnect session**
@@ -2207,8 +2118,7 @@ Forcefully disconnect a specific WebSocket session.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PUT `/api/websocket-sessions/single-session-policy`
 
 > **Set single-session policy**
@@ -2229,8 +2139,7 @@ Enable or disable the single-session-per-user enforcement policy.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/websocket-events`
 
 > **List available events**
@@ -2300,10 +2209,8 @@ Generate an embedding vector for a single text string using the GPU model.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [EmbedResponse](#embedresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [EmbedResponse](#embedresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/embeddings/batch`
 
 > **Batch generate embeddings**
@@ -2328,15 +2235,13 @@ Generate embedding vectors for multiple texts in a single call.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [EmbedBatchResponse](#embedbatchresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [EmbedBatchResponse](#embedbatchresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/embeddings/info`
 
 > **Get embedding info**
 
-Return provider name, dimensions, and readiness status of the embedding model.
+Return provider name, dimensions, readiness status and the engines block: model, revision, dtype, device and prefixes of each local engine.
 
 
 
@@ -2352,10 +2257,8 @@ Return provider name, dimensions, and readiness status of the embedding model.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [EmbedInfoResponse](#embedinforesponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [EmbedInfoResponse](#embedinforesponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/mode/available`
 
 > **List available modes**
@@ -2370,8 +2273,7 @@ List all selectable agent modes including system mode.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [AvailableModesResponse](#availablemodesresponse)
- |
+| 200 | Successful Response | [AvailableModesResponse](#availablemodesresponse) |
 ## GET `/api/mode/current`
 
 > **Get current mode**
@@ -2386,8 +2288,7 @@ Return the authenticated user's current agent mode.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [ModeResponse](#moderesponse)
- |
+| 200 | Successful Response | [ModeResponse](#moderesponse) |
 ## POST `/api/mode/current`
 
 > **Set current mode**
@@ -2406,10 +2307,8 @@ Set the user's agent mode to a specific key or null for system mode.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [ModeChangeResponse](#modechangeresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [ModeChangeResponse](#modechangeresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/mode/current`
 
 > **Clear current mode**
@@ -2424,8 +2323,7 @@ Clear the user's agent mode back to system default.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [ModeChangeResponse](#modechangeresponse)
- |
+| 200 | Successful Response | [ModeChangeResponse](#modechangeresponse) |
 ## GET `/api/stats/time-saved`
 
 > **Get user time-saved stats**
@@ -2446,8 +2344,7 @@ Return per-user aggregate stats on time saved by cached solution replays.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/stats/time-saved/global`
 
 > **Get global time-saved stats**
@@ -2497,10 +2394,8 @@ Retrieve a research report by local path or GCS URI as raw Markdown.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | string
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | string |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/deep-research/health`
 
 > **Deep research health check**
@@ -2537,8 +2432,7 @@ Serve files from the io/ directory with extension validation and traversal prote
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/io/health`
 
 > **IO files health check**
@@ -2575,8 +2469,7 @@ Polymorphic file/directory endpoint. The `path` query parameter MUST be `<projec
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/docs/scopes`
 
 > **List registered doc-viewer scopes (admin / debugging utility)**
@@ -2616,8 +2509,7 @@ Multipart form: `dir` = `<project>/<rel-dir>` (or `io/<rel-dir>`), `file` = the 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 201 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/docs/health`
 
 > **Docs files health check**
@@ -2633,6 +2525,64 @@ Report registered scopes (with manifest presence + on-disk reachability) plus th
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+## GET `/api/podcast-drive/list`
+
+> **List podcasts in the owner's Drive folder, newest first**
+
+List the job folders in the configured Drive folder with their files.
+
+Requires:
+    - the caller is logged in and is the configured Drive owner
+
+Ensures:
+    - returns [ { job_folder, title, created_ts, files: [ { name, mime, size, drive_file_id, stream_url } ] } ], newest first
+    - a Drive folder that does not exist yet gives an empty list
+
+Raises:
+    - HTTPException 403 for any other user, 503 when Drive cannot be reached
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+## GET `/api/podcast-drive/stream/{drive_file_id}`
+
+> **Stream one Drive podcast file, with Range support**
+
+Stream a file from a job folder in the configured Drive folder.
+
+Requires:
+    - the caller is logged in and is the configured Drive owner
+    - drive_file_id names a file in a job folder directly under the configured folder
+
+Ensures:
+    - the browser's Range header goes to Drive and Drive's answer (200, 206 or 416) comes back with
+      Content-Range, Content-Length and Accept-Ranges passed through
+    - the body is streamed in chunks, never held whole in memory
+
+Raises:
+    - HTTPException 403 for any other user, 404 for any file outside the folder, 503 when Drive cannot be reached
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| drive_file_id | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/mock-job/submit`
 
 > **GONE — use /api/v2/submit**
@@ -2678,6 +2628,130 @@ GONE (410). Use /api/v2/ask. REMOVE BY 2026-12-31.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 410 | Successful Response | ... |
+## POST `/api/podcast-proxy/ask`
+
+> **Ask Rick to approve a podcast of a document**
+
+A seat names a document as <scope>/<path>. The server judges the file with the doc viewer's whole read check, then makes the yes/no card itself, from the file's measured name, size and SHA-256, and pushes it to the operator. After the operator answers yes, the seat calls start with the card id. One waiting card per file and content. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[AskIn](#askin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/podcast-proxy/start`
+
+> **Start the podcast Rick said yes to**
+
+The seat that asked cites the card id. The server re-reads the stored card (a question, answered yes by a person on the operator's own login, written by the server, asked by this session, not older than the INI age), re-reads the file and refuses if its bytes changed, spends the card once, copies the judged bytes, and builds the podcast job for the operator through the v2 submit path. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[StartIn](#startin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/podcast-proxy/card/{card_id}`
+
+> **Where a podcast card stands**
+
+A client that holds only a card id reads the file it was made for, whether Rick has answered, and whether it already started a job. The client compares scope_path with the path it expects. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| card_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/podcast-proxy/from-viewer/check`
+
+> **Can the doc viewer offer a podcast for this file?**
+
+Runs the same judgement the start does (viewer read check, size, credential, extension) without keeping the content. Auth: Bearer JWT of a signed-in person.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| path | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/podcast-proxy/from-viewer`
+
+> **Start a podcast of a document the signed-in person is viewing**
+
+The click, confirmed in the page, is the yes. The server judges the file as the start door does, claims one job per person, file and bytes inside the card max age, and queues the job for the caller. Auth: Bearer JWT of a signed-in person.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[ViewerIn](#viewerin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/presentation-generator/submit`
 
 > **GONE — use /api/v2/submit**
@@ -2790,8 +2864,7 @@ Retire current proxy notification batch and start a new one. Requires a credenti
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid credential |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/proxy/batch-id`
 
 > **Get proxy batch ID**
@@ -2814,8 +2887,7 @@ Return the current proxy batch progress_group_id. Requires a credential.
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid credential |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/proxy/pending/{user_email}`
 
 > **Get pending decisions**
@@ -2843,8 +2915,7 @@ Retrieve pending decisions awaiting ratification for a user with optional domain
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid credential |  |
 | 403 | Forbidden — the path names a different user |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/proxy/ratify/{decision_id}`
 
 > **Ratify decision**
@@ -2872,8 +2943,7 @@ Approve or reject a pending decision. Updates ratification state and trust count
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid credential |  |
 | 403 | Forbidden — the query names a different user |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/proxy/decision/{decision_id}`
 
 > **Delete pending decision**
@@ -2899,8 +2969,7 @@ Hard-delete a decision in pending state. Approved/rejected decisions are protect
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid credential |  |
 | 403 | Forbidden — the query names a different user |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/proxy/trust/{user_email}`
 
 > **Get trust state**
@@ -2926,8 +2995,7 @@ Return all trust state records for a user across domains and categories.
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid credential |  |
 | 403 | Forbidden — the path names a different user |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/proxy/decisions/{domain}/{category}`
 
 > **Get decisions by domain**
@@ -2953,8 +3021,7 @@ Return decision history for a specific domain and category combination. Requires
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 401 | Unauthorized — no valid credential |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/proxy/mode`
 
 > **Get trust mode**
@@ -2989,8 +3056,7 @@ Hot-reload trust mode at runtime. Persists to INI and updates running proxy if a
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/admin/peer-queue/{queue_name}`
 
 > **Proxy a queue read to a peer Lupin server**
@@ -3012,10 +3078,8 @@ Admin-only. Forwards the caller's JWT to the peer's /api/get-queue/{name} and re
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [PeerQueueResponse](#peerqueueresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [PeerQueueResponse](#peerqueueresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/admin/peer-queue-watch/start`
 
 > **Start a background peer-queue drain watcher**
@@ -3039,10 +3103,8 @@ Admin-only. Spawns an asyncio task that polls the peer queue and fires a high-pr
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [WatchActionResponse](#watchactionresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [WatchActionResponse](#watchactionresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/admin/peer-queue-watch/stop`
 
 > **Stop the caller's peer-queue watcher**
@@ -3062,10 +3124,8 @@ Admin-only. Idempotent — returns 'not_active' if no watcher was running.
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [WatchActionResponse](#watchactionresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [WatchActionResponse](#watchactionresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/admin/peer-queue-watch/status`
 
 > **Get current peer-queue watcher status**
@@ -3085,10 +3145,8 @@ Admin-only. Returns live state for this admin's watcher (if any).
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [WatchStatusResponse](#watchstatusresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [WatchStatusResponse](#watchstatusresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/cosa-voice/speakerphone/{session_id}`
 
 > **Get speakerphone flag for a session**
@@ -3111,8 +3169,7 @@ Returns the speakerphone_on flag from the cosa-voice session bridge file.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/cosa-voice/speakerphone/{session_id}`
 
 > **Set speakerphone flag for a session**
@@ -3139,8 +3196,7 @@ Writes speakerphone_on to the bridge file and broadcasts a speakerphone_changed 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/cosa-voice/voice-persona/pool`
 
 > **Pool snapshot — allocatable pool, occupied names, free slots**
@@ -3162,8 +3218,7 @@ Returns the configured pool plus current occupancy. Diagnostics endpoint; does n
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/cosa-voice/voice-persona/{session_id}`
 
 > **Read voice persona for a session**
@@ -3186,8 +3241,7 @@ Returns the voice_persona dict from the cosa-voice session bridge file, or null 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/cosa-voice/voice-persona/{session_id}/allocate`
 
 > **Allocate a voice persona for a session**
@@ -3214,8 +3268,7 @@ Idempotent: if a persona is already set on the bridge and no `requested_persona_
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/cosa-voice/voice-persona/{session_id}/release`
 
 > **Release the voice persona allocated to a session**
@@ -3238,8 +3291,7 @@ Clears the voice_persona field on the bridge and broadcasts a voice_persona_rele
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/cosa-voice/voice-persona/sample`
 
 > **Synthesize a voice sample for the persona-reference page**
@@ -3267,8 +3319,7 @@ Returns audio/mpeg bytes inline. The voice_id MUST belong to the configured pers
 | 200 | Successful Response | ...... |
 | 400 | voice_id is not in the configured persona pool |  |
 | 503 | ElevenLabs API unavailable or returned an error |  |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/multiplexer/config`
 
 > **Multiplexer client-config**
@@ -3283,8 +3334,7 @@ Returns display-tuning values that the multiplexer boot path fetches once at sta
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [MultiplexerConfigResponse](#multiplexerconfigresponse)
- |
+| 200 | Successful Response | [MultiplexerConfigResponse](#multiplexerconfigresponse) |
 ## GET `/api/commons/active-sessions`
 
 > **List active CC sessions belonging to the authenticated user**
@@ -3306,8 +3356,7 @@ Returns same-user-scoped active sessions with persona info for the broadcast rec
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/commons/broadcast-to-cc-sessions`
 
 > **Fan out a broadcast to active CC sessions belonging to the authenticated user**
@@ -3333,8 +3382,7 @@ Posts a per-recipient `broadcasts` entry + a per-session listener notification f
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/commons/broadcast-history`
 
 > **List recent commons traffic for the broadcast-card Recent Activity surface**
@@ -3359,8 +3407,7 @@ Aggregates entries across all commons topics (excluding the configurable blackli
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/arbiter/fleet-snapshot`
 
 > **Heartbeat-arbiter fleet snapshot (direct-state visibility)**
@@ -3382,8 +3429,7 @@ Returns the arbiter's latest full-fleet snapshot: per-session STATE + orthogonal
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/arbiter/fleet-snapshot`
 
 > **Push a fleet snapshot (standalone-arbiter ingress)**
@@ -3409,8 +3455,7 @@ The standalone Heartbeat Arbiter pushes its latest snapshot here; the in-pool ar
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/arbiter/fleet-state`
 
 > **Lupin Arbiter App single-pane (reverse-proxy to :8001/state)**
@@ -3432,8 +3477,7 @@ NEW authoritative surface (L4): PULLS the single-pane composite (health watcher 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/arbiter/context-pressure`
 
 > **Published per-persona context-headroom service (read-only)**
@@ -3455,8 +3499,7 @@ Returns the persona-keyed context-headroom map: per worker, the tokens remaining
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/arbiter/fleet-size-cap`
 
 > **The fleet-size dial: the live cap and the configured ceiling**
@@ -3478,13 +3521,12 @@ Read-only. Returns { cap, ceiling } computed AT CALL TIME from the configuration
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PUT `/api/arbiter/fleet-size-cap`
 
-> **Set the fleet-size cap — writes through to configuration and persists**
+> **Admin: set the fleet-size cap — writes through to configuration and persists**
 
-Writes `cc session fleet size cap` to the configuration FILE and returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a value outside 1..`cc session fleet size cap maximum`. Auth: X-API-Key or Bearer JWT — the same guard as the GET.
+Writes `cc session fleet size cap` to the configuration FILE and returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a value outside 1..`cc session fleet size cap maximum`. Admin login only: an API-key caller is refused with 403 and nothing changes. The GET stays open to an API key or a JWT.
 
 
 
@@ -3505,13 +3547,38 @@ Writes `cc session fleet size cap` to the configuration FILE and returns what it
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## PUT `/api/arbiter/skeleton-crew`
+
+> **Admin: turn skeleton crew on or off**
+
+Body { on: bool }. Writes `cc session skeleton crew enabled` to the configuration file, tells the live sessions, and returns the same body as GET /api/arbiter/fleet-size-cap, re-read from the file. Admin login only: an API-key caller is refused with 403 and nothing changes.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[SkeletonCrewIn](#skeletoncrewin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/tasks`
 
 > **Create a task-store item**
 
-Creates one obligation row (always status=queued) plus its '->queued' creation event. Auth: X-API-Key or Bearer JWT. Design §2.2 (v0.4, Rick-ruled F4: managers-first writes).
+Creates one obligation row with status queued, blocked or not_approved, plus its creation event. An omitted status takes the approval settings' default. Creation is managers-first. Auth: X-API-Key or Bearer JWT.
 
 
 
@@ -3532,8 +3599,7 @@ Creates one obligation row (always status=queued) plus its '->queued' creation e
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 201 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks`
 
 > **Query task-store items**
@@ -3555,6 +3621,7 @@ The deterministic owed-work query (R4): exact-match filters, AND semantics, newe
 | item_class |  | False |  |
 | correlation_key |  | False |  |
 | id_prefix |  | False |  |
+| blocked_by_persona |  | False |  |
 | count_only | boolean | False |  |
 | terse | boolean | False |  |
 | include_terminal | boolean | False |  |
@@ -3575,13 +3642,12 @@ The deterministic owed-work query (R4): exact-match filters, AND semantics, newe
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/tasks/{task_id}/transition`
 
 > **Transition a task-store item**
 
-Applies one state change + appends one audit event. ->done REJECTS without valid receipt_refs (T3, §4.1 AC1); ->blocked REQUIRES next_chase_ts (I3) + typed blocked_by refs; done/dropped are terminal. Auth: X-API-Key or Bearer JWT.
+Applies one state change and appends one audit event. A move to done is rejected without valid receipt_refs. A move to blocked requires typed blocked_by refs, plus next_chase_ts when one is a persona ref. Done and dropped are terminal. Auth: X-API-Key or Bearer JWT.
 
 
 
@@ -3603,8 +3669,7 @@ Applies one state change + appends one audit event. ->done REJECTS without valid
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/tasks/{task_id}/correlate`
 
 > **Re-stamp a task-store item's correlation key**
@@ -3631,8 +3696,34 @@ Phase-2 cross-session respawn adoption: a successor session re-registers its har
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/tasks/{task_id}/unpark-ask`
+
+> **Ask the operator to approve un-parking a parked row**
+
+A manager asks; the server makes the card (bound to this row and the move parked to queued, in a field only the server writes), pushes it, and returns its id. After the operator answers yes, the manager cites the id as the approval_card receipt on the parked-to-queued transition. One unanswered card per row and park. Auth: X-API-Key or Bearer JWT, and a manager seat.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[UnparkAskIn](#unparkaskin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/tasks/{task_id}/amend`
 
 > **Append an amendment to a task-store item's body**
@@ -3659,8 +3750,7 @@ Phase-2.2 append-only body amendment: appends a persona-stamped + UTC-timestampe
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/approval-settings`
 
 > **Read every approval setting in force, and where each came from**
@@ -3682,8 +3772,7 @@ Same auth as /api/tasks. Values are the EFFECTIVE ones the gates will use, not t
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PATCH `/api/tasks/approval-settings`
 
 > **Write an approval setting — Rick only**
@@ -3709,8 +3798,7 @@ Rick's ruling 2026-09-08: "Only the server writes it." Gated on a signature-vali
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/manager-pull`
 
 > **Read whether pulling work into in_progress is currently switched off**
@@ -3732,8 +3820,7 @@ Returns the live toggle state and where it came from. Same auth as /api/tasks.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PATCH `/api/tasks/manager-pull`
 
 > **Switch pulling work into in_progress on or off**
@@ -3758,8 +3845,7 @@ Rick's control (row 458e9947). Admin only. The body must carry a REAL boolean �
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/request-badges`
 
 > **How many pending promote/demote requests each board badge shows**
@@ -3781,8 +3867,7 @@ TWO INDEPENDENT COUNTS, NEVER A SUM (Rick via Mr. Radio, 2026-09-09). The task-a
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/tasks/{task_id}/request`
 
 > **File a manager's request that Rick promote or demote one row**
@@ -3809,8 +3894,7 @@ MANAGERS ONLY, ONE ROW PER CALL (row c9fafb9d, rule 3; Rick 2026-09-04, no batch
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/tasks/{task_id}/request-verdict`
 
 > **Record the operator's verdict on a pending promote/demote request**
@@ -3837,8 +3921,7 @@ RICK ALONE (row c9fafb9d, rules 1 and 2 one layer over). A manager may FILE a re
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PATCH `/api/tasks/{task_id}`
 
 > **Edit a task-store item's mutable fields**
@@ -3865,8 +3948,7 @@ Phase-2.1 item edit: PATCH whitelisted fields (title/body/priority/owner_persona
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/{task_id}`
 
 > **Get one task-store item**
@@ -3889,8 +3971,7 @@ Returns one item by full UUID or by an 8-hex id prefix (the form every brief and
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/events`
 
 > **Query the cross-item event stream**
@@ -3920,8 +4001,7 @@ Fleet-wide audit (design backlog): the append-only event trail across ALL items,
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/flow-ratio`
 
 > **Closed-vs-new ratio over a rolling window**
@@ -3963,8 +4043,7 @@ Auth: X-API-Key or Bearer JWT (same guard as /api/tasks).
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/flow-ratio/settings`
 
 > **Read the operator's live ratio window + threshold**
@@ -3986,8 +4065,7 @@ Returns the live { window_hours, allow_below } and, for each, whether it comes f
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## PATCH `/api/tasks/flow-ratio/settings`
 
 > **Set the operator's ratio window + threshold**
@@ -4012,8 +4090,7 @@ Persists an override for either value. ADMIN ONLY — this moves the threshold t
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## DELETE `/api/tasks/flow-ratio/settings`
 
 > **Clear the operator override, returning to config**
@@ -4034,8 +4111,7 @@ Removes the persisted override so the INI defaults govern again. ADMIN ONLY.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/promotions`
 
 > **List promotion tickets - the visibility surface for pending asks**
@@ -4059,8 +4135,7 @@ Defaults to state=pending: what is waiting on Rick right now. The task row itsel
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/promotions/{ticket_id}`
 
 > **Get one promotion ticket - the caller's poll target**
@@ -4083,8 +4158,7 @@ The outcome of an asynchronous promotion. A resolved ticket carries response_bod
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/tasks/{task_id}/events`
 
 > **Get a task-store item's audit trail**
@@ -4107,8 +4181,7 @@ Returns the append-only per-item event trail (R3): every transition with actor, 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/epic-stories`
 
 > **Get the hand-maintained epic story text**
@@ -4130,8 +4203,7 @@ Returns src/conf/epic-stories.json as-is: a map of `epic:<slug>` -> { title, sto
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/fcm/register-token`
 
 > **Register a mobile device's FCM token for the silent-relay wake channel**
@@ -4157,8 +4229,7 @@ Upsert keyed on token (S6 §3.1): re-registering a known token refreshes its use
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/fcm/unregister-token`
 
 > **Unregister a mobile device's FCM token (best-effort logout path)**
@@ -4184,8 +4255,7 @@ Idempotent: unregistering an unknown token still returns 200 (S6 §3.1 amended 2
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/fcm/push-pause`
 
 > **Admin: pause (or resume) ALL mobile wake pushes, in memory only**
@@ -4210,8 +4280,7 @@ Sets `fcm wake push enabled` False in the ConfigurationManager's memory — neve
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/fcm/push-pause`
 
 > **Admin: read the mobile push pause state**
@@ -4232,8 +4301,55 @@ Returns { paused, resumes_at, set_by, set_at, push_enabled }. `push_enabled` is 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/heartbeat/poke-mute`
+
+> **Read the fleet switch for the heartbeat Stop poke**
+
+Returns { muted, set_by, set_at }. A missing or unreadable switch file reads as not muted.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## PUT `/api/heartbeat/poke-mute`
+
+> **Admin: turn the heartbeat Stop poke off or back on, fleet-wide**
+
+Body { muted: bool }. Takes effect on each seat's next stop. No timer: it stays as set until an admin flips it. API-key callers and non-admin users get 403.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[PokeMuteRequest](#pokemuterequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/dm/send`
 
 > **Send a notification-native AI↔AI direct message (body inline)**
@@ -4259,8 +4375,7 @@ Notification-native peer DM: resolves the recipient persona/session (same-user s
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/dm/respond`
 
 > **Reply to a peer DM in-thread (body inline, reply_to + thread_id required)**
@@ -4286,8 +4401,7 @@ Threaded peer-DM reply: a /api/dm/send whose `reply_to` (message answered) and `
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/dm/get`
 
 > **Fetch a single peer DM by message id**
@@ -4310,8 +4424,7 @@ Returns one direction='ai_to_ai' DM by its message id, scoped to the caller. 404
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/dm/list`
 
 > **List or poll peer DMs — a thread (thread_id) or the inbox**
@@ -4338,8 +4451,7 @@ With `thread_id`, returns that conversation oldest-first; without it, returns pe
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/dm/project-audit`
 
 > **Read the un-projected-DM audit — the step-2 gate evidence**
@@ -4361,8 +4473,7 @@ Returns the live `sender_project` audit counters: `projected`, `un_projected`, t
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/dm/length-audit`
 
 > **Read the DM length audit — evidence for the Phase 1 verbosity A/B**
@@ -4384,8 +4495,7 @@ Returns the live DM body length counters: `count`, `total_chars`, `total_words`,
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/dm/quality-audit`
 
 > **Read the DM quality audit — evidence for the Phase 2 verbosity A/B**
@@ -4407,47 +4517,43 @@ Returns the live DM Quality Judge counters: `count`, the running `total_length_w
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/v2/agents`
 
 > **V2 Agents**
 
-List every command the registry knows — a PURE PROJECTION of REGISTRY.
-
-The read endpoint the front end was missing (2026.08.22 plan §5.1). The Q&A
-card's agent list used to be sixteen hand-typed `<option>` tags in
-notifications.html, one of five hand-maintained lists describing the same set;
-this door is how that list stops being written by hand.
-
-PURE PROJECTION means: every registry command appears, exactly once, carrying
-its own fields. Nothing is filtered here — not the two expediters, not the
-control command, not `none`. A client renders what it should render by reading
-`user_initiable` (the Q&A dropdown) or `speakable` (a voice surface); the door
-does not decide that for them, because the moment it filters, the set-equality
-that proves the door matches the table stops being checkable.
-
-WHY IT DEPENDS ON THE FLOW. It needs `crud_enabled` — the labels must name the
-agent that will ACTUALLY run, so `todo` reads "todo (CRUD)" when the fork is on.
-Reading the INI key here would be a FOURTH read of `crud for dataframes agents
-enabled`, and a fourth read is a fourth thing to drift. The flow already holds
-the value it will itself route with, so the label a user picks and the agent
-they get cannot disagree. The 503 that comes with the dependency is coherent:
-when `v2 flow enabled` is off, /api/v2/submit is off too, and a dropdown that
-drives it has nothing to drive.
+List every command the registry knows, as a pure projection of `REGISTRY`.
 
 Requires:
     - an authenticated user (get_current_user).
 
 Ensures:
-    - `agents` carries one entry per REGISTRY command — set-equal to REGISTRY,
-      which is the §6 gate 1 assertion.
+    - `agents` carries one entry per `REGISTRY` command — set-equal to `REGISTRY`,
+      which is the first gate assertion.
     - the CRUD fork is applied exactly as resolve() applies it, by calling
       resolve() itself rather than reimplementing the fork.
     - `auto_route` carries the sentinel option, so the page hand-writes no
       option at all.
     - never 500s for an unknown-shaped spec: every field read is declared on
       AgentSpec or on the command's JOB_ARG_CONTRACTS entry.
+
+This is the read endpoint the front end needs. The Q&A card's agent list used to be
+sixteen hand-typed `<option>` tags in notifications.html, one of five hand-maintained
+lists describing the same set. This door is how that list stops being written by hand.
+
+Pure projection means every registry command appears exactly once, carrying its own
+fields. Nothing is filtered here, not the two expediters, not the control command and
+not `none`. A client renders what it should by reading `user_initiable` (the Q&A
+dropdown) or `speakable` (a voice surface). If the door filtered, the set-equality
+that proves the door matches the table would stop being checkable.
+
+It depends on the flow because it needs `crud_enabled`. The labels must name the agent
+that will actually run, so `todo` reads "todo (CRUD)" when the fork is on. Reading the
+INI key `crud for dataframes agents enabled` here would be a fourth read, and a fourth
+read is a fourth thing to drift. The flow already holds the value it routes with, so
+the label a user picks and the agent they get cannot disagree. The 503 that comes with
+the dependency is coherent. When `v2 flow enabled` is off, /api/v2/submit is off too,
+and a dropdown that drives it has nothing to drive.
 
 
 
@@ -4457,13 +4563,12 @@ Ensures:
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [AgentsResponse](#agentsresponse)
- |
+| 200 | Successful Response | [AgentsResponse](#agentsresponse) |
 ## POST `/api/v2/ask`
 
 > **V2 Ask**
 
-Route one question through CJ Flow v2 and return the §8 result.
+Route one question through CJ Flow v2 and return the terminal result.
 
 Requires:
     - an authenticated user (get_current_user) carrying uid + email.
@@ -4476,6 +4581,11 @@ Ensures:
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| X-Lupin-Lineage-Token |  | False |  |
 
 
 ### 📦 Request Body 
@@ -4486,10 +4596,9 @@ Ensures:
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [AskResponse](#askresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [AskResponse](#askresponse) |
+| 403 | parent_id_hash names the test-suite job holding the monopoly slot and the caller may not claim its lineage; the body names the reason |  |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/v2/ask-audio`
 
 > **Ask Audio**
@@ -4498,13 +4607,13 @@ Transcribe a spoken question and ask it, in one request with a two-part reply.
 
 Requires:
     - an authenticated user carrying uid + email
-    - file is audio the transcriber reads; websocket_id, when given, is a QUERY parameter
+    - file is audio the transcriber reads; websocket_id, when given, is a query parameter
 
 Ensures:
     - a non-200 means nothing was asked: 401 identity, 503 flow disabled or GPU OOM,
       500 any other failure reading, saving or transcribing the audio, 422 empty speech
     - a 200 body is NDJSON: a transcript line, then exactly one ask or error line
-    - the ask is started BEFORE the response exists, so a client that disconnects after
+    - the ask is started before the response exists, so a client that disconnects after
       line 1 does not cancel it; its answer still reaches the session's WebSocket
     - the uploaded audio is removed on every path
 
@@ -4531,17 +4640,12 @@ Raises:
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/v2/transcribe`
 
 > **Transcribe**
 
-Transcribe spoken audio and return the words, asking nothing (row fcebf532).
-
-For a client that must show the transcript before deciding to send it — the phone's Quick
-Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with the ask removed, so
-it takes no flow dependency and is not behind the `v2 flow enabled` gate.
+Transcribe spoken audio and return the words, asking nothing.
 
 Requires:
     - an authenticated user carrying uid + email
@@ -4557,6 +4661,11 @@ Ensures:
 Raises:
     - HTTPException 401 / 422 / 500 / 503 as above
 
+This serves a client that must show the transcript before deciding to send it, such as
+the phone's Quick Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with
+the ask removed, so it takes no flow dependency and is not behind the `v2 flow enabled`
+gate.
+
 
 
 
@@ -4569,19 +4678,17 @@ Raises:
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [TranscribeResponse](#transcriberesponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [TranscribeResponse](#transcriberesponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/v2/submit`
 
 > **V2 Submit**
 
 Run work whose command is already decided — the door beside /api/v2/ask.
 
-Rick's entry-point ruling, 2026-08-21: two doors survive at v2. `ask` takes a bare
-question and works out what it is; `submit` takes work whose command the caller has
-already chosen, so it skips routing and argument extraction entirely.
+Two doors survive at v2. `ask` takes a bare question and works out what it is.
+`submit` takes work whose command the caller has already chosen, so it skips routing
+and argument extraction entirely.
 
 Requires:
     - an authenticated user (get_current_user) carrying uid + email.
@@ -4593,13 +4700,18 @@ Ensures:
       degrades to the receptionist exactly as it does on `ask`.
     - user_id / user_email come from the token, never the client body.
     - a command missing arguments comes back status='needs_input' with args_missing
-      filled in, and is NEVER parked: there is no human behind a submit to answer it.
+      filled in, and is never parked: there is no human behind a submit to answer it.
     - scheduled_at / monopolize / parent_id_hash reach the built job only on the
       agentic path, which is the only path that builds one; on the other paths the
       flow records that they were dropped rather than discarding them in silence.
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| X-Lupin-Lineage-Token |  | False |  |
 
 
 ### 📦 Request Body 
@@ -4610,10 +4722,9 @@ Ensures:
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [AskResponse](#askresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [AskResponse](#askresponse) |
+| 403 | parent_id_hash names the test-suite job holding the monopoly slot and the caller may not claim its lineage; the body names the reason |  |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/v2/resume`
 
 > **V2 Resume**
@@ -4627,8 +4738,8 @@ Requires:
 Ensures:
     - returns AskResponse; an expired/unknown pending_id degrades to a
       needs_input refusal (status='expired'), never a 500.
-    - resume runs OFF the event loop, in a worker thread. It used to run on
-      the loop itself; that is what made /health time out during a call.
+    - resume runs off the event loop, in a worker thread. Running it on the loop
+      itself would make /health time out during a call.
 
 
 
@@ -4642,10 +4753,8 @@ Ensures:
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [AskResponse](#askresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [AskResponse](#askresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## POST `/api/v2/resume-job`
 
 > **V2 Resume Job**
@@ -4662,7 +4771,7 @@ Ensures:
       factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);
       everything else goes through the TFE resolver (the old
       `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`
-      answer with candidates and NO job pushed).
+      answer with candidates and no job pushed).
     - returns status='resumed' with the new job id and its resume phase, and
       queue_position = the todo queue's size right after the push.
     - the model / thinking-effort overrides reach the reconstructed job; None
@@ -4670,7 +4779,8 @@ Ensures:
 
 Raises:
     - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,
-      or cannot be reconstructed.
+      or cannot be reconstructed — and, on the direct path, when the caller does not own
+      the job and is not an admin (the same text, so a refusal never reveals existence).
 
 
 
@@ -4684,10 +4794,8 @@ Raises:
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [ResumeJobResponse](#resumejobresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 200 | Successful Response | [ResumeJobResponse](#resumejobresponse) |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/cc-transcript-roster`
 
 > **Watchable-seat roster for the CC transcript console (admin)**
@@ -4708,8 +4816,7 @@ A projection of /api/arbiter/fleet-state carrying `project`, `last_ts` and `tran
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/cc-transcript/{cc_session_id}`
 
 > **CC transcript backlog and gap repair (admin)**
@@ -4735,8 +4842,147 @@ Serves display blocks from a seat's transcript in ONE OF THREE DIRECTIONS. `tail
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## PUT `/api/reuse-candidates/stage`
+
+> **Hold a stage**
+
+Build the BM25 indexes for uploaded entries and hold them under a key.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[StageUpload](#stageupload)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/reuse-candidates/search`
+
+> **Search a held stage**
+
+Rank a need against a held stage and the stored vectors, and return the shortlist.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+object
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/pair-labelling/state`
+
+> **Progress of one reviewer**
+
+Report progress.
+
+Ensures:
+    - answers { reviewer, total, labelled, unsure, resume }; resume is the position to open, or null when every pair is labelled and none is unsure
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| reviewer | string | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## GET `/api/pair-labelling/item`
+
+> **One pair**
+
+Send one pair.
+
+Ensures:
+    - answers { position, total, labelled, item_id, a, b, label }; label is null or { same_job, unsure, note }
+
+Raises:
+    - HTTPException 404 for a position outside the packet
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| position | integer | True |  |
+| reviewer | string | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/pair-labelling/label`
+
+> **Write one label**
+
+Write one label to disk before answering.
+
+Ensures:
+    - answers the progress of the reviewer after the write, as state does
+
+Raises:
+    - HTTPException 404 for a pair not in the packet; 422 for a note over the limit
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[LabelUpload](#labelupload)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ---
 
 # 📋 Components
@@ -4779,20 +5025,19 @@ Response for GET /api/v2/agents.
 ## ApprovalSettingsRequest
 
 
-One or more approval settings to write. Every field is optional; omitted means
-LEAVE UNCHANGED, which is what makes this a patch rather than a replace.
+One or more approval settings to write; an omitted field is left unchanged.
 
-🔴 `StrictBool`, NOT `bool`, AND IT IS THE WHOLE SAFETY OF THE DOOR. Pydantic's
-lenient bool coerces the string "false", and "false" is exactly the value this
-module has been bitten by twice — `bool( "false" )` is True, so a lenient model
-would let a caller switch a gate ON by sending the word "off".
+That makes this a patch rather than a replace. Every field is optional.
 
-⚠️ `extra="forbid"` IS DELIBERATE AND IS A CHOICE, not a default. Pydantic IGNORES
-unknown fields unless told otherwise, so a typo'd key — `enforcment_active` — would
-return 200 having changed nothing, and the operator would conclude the switch is
-broken. The alternative (ignore extras, as the rest of this router does) was
-rejected for exactly that reason: a setting ignored in SILENCE is the failure mode
-this file documents at length.
+The fields are `StrictBool`, not `bool`, and that is the whole safety of the door.
+Pydantic's lenient bool coerces the string "false", and `bool( "false" )` is True. A
+lenient model would let a caller switch a gate on by sending the word "off".
+
+`extra="forbid"` is a choice, not a default. Pydantic ignores unknown fields unless told
+otherwise. A typo'd key such as `enforcment_active` would then return 200 having changed
+nothing, and the operator would conclude the switch is broken. The rest of this router
+ignores extras. That was rejected here, because a setting ignored in silence is a
+failure mode this file documents at length.
 
 
 | Field | Type | Description |
@@ -4803,6 +5048,21 @@ this file documents at length.
 | approvers |  | Persona names permitted to admit out of the holding area. |
 | approver_accounts |  | login email -> approver persona. |
 | sword_of_damocles_active |  | True makes an admit request name a deletion ticket the requester owns (row ab8c5728). |
+
+
+## AskIn
+
+
+Body for POST /api/podcast-proxy/ask.
+
+`path` is the document in the doc viewer's form, `<scope>/<path within scope>`. `actor` is the
+caller's persona and session id; only the id is used, and the card names the seat from the bridge.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| path | string |  |
+| actor | string |  |
 
 
 ## AskRequest
@@ -4817,12 +5077,13 @@ Request body for POST /api/v2/ask.
 | websocket_id |  | WebSocket session ID for TTS routing |
 | speak | boolean | Dispatch the answer as a TTS notification |
 | interactive | boolean | Whether a human is there to answer. Two effects: a missing argument parks and asks (else the call returns needs_input), and a near-match cache hit is confirmed before it is replayed (else the match is declined and the question is routed normally) |
+| parent_id_hash |  | id_hash of the monopolize job whose own request this is. When it matches the pool's active monopolizer, the queued executor stamps it on the job as spawned_by_id_hash, so the consumer's Gate B admits the job through the intake hold instead of deferring it as a foreign writer (same field, same meaning as on /api/v2/submit). Absent = today's behaviour exactly |
 
 
 ## AskResponse
 
 
-The §8 terminal result of one v2 request.
+The terminal result of one v2 request.
 
 
 | Field | Type | Description |
@@ -4853,10 +5114,10 @@ The §8 terminal result of one v2 request.
 ## AutoRouteOption
 
 
-The dropdown's 'no command named — let the router decide' entry.
+The dropdown's "no command named, let the router decide" entry.
 
-Carried in the RESPONSE rather than hand-written into the page, so the front end
-holds no agent list of its own at all — not even the one legitimate option. See
+It is carried in the response rather than hand-written into the page. The front end
+then holds no agent list of its own, not even the one legitimate option. See
 registry.AUTO_ROUTE_VALUE for why that is a named sentinel and not an exemption
 written into a guard.
 
@@ -5038,10 +5299,10 @@ Request model for admin user deletion.
 ## DmRespondRequest
 
 
-POST /api/dm/respond request body — a threaded peer-DM reply.
+POST /api/dm/respond request body: a threaded peer-DM reply.
 
-Identical to DmSendRequest except `reply_to` and `thread_id` are REQUIRED:
-a reply must name the message it answers and the conversation it continues.
+Identical to DmSendRequest except `reply_to` and `thread_id` are required.
+A reply must name the message it answers and the conversation it continues.
 
 
 | Field | Type | Description |
@@ -5060,14 +5321,14 @@ a reply must name the message it answers and the conversation it continues.
 ## DmSendRequest
 
 
-POST /api/dm/send request body — notification-native AI↔AI DM.
+POST /api/dm/send request body for a notification-native AI to AI DM.
 
-The recipient is addressed by persona name (preferred) or explicit session
-id; resolution is same-user scoped. The message body travels INLINE (no
-claim-check). Threading is carried by `reply_to` (the message being answered)
-and `thread_id` (conversation correlation; defaults to a fresh id server-side
-when omitted). `sender_persona`/`sender_icon` carry the SENDER's identity so
-the recipient can frame it as "[DM from <persona> <icon>]".
+The recipient is addressed by persona name (preferred) or explicit session id.
+Resolution is same-user scoped. The message body travels inline, with no claim-check.
+Threading is carried by `reply_to` (the message being answered) and `thread_id`
+(conversation correlation, defaulting to a fresh id server-side when omitted).
+`sender_persona` and `sender_icon` carry the sender's identity, so the recipient can
+frame it as "[DM from <persona> <icon>]".
 
 
 | Field | Type | Description |
@@ -5086,13 +5347,14 @@ the recipient can frame it as "[DM from <persona> <icon>]".
 ## EmbedBatchRequest
 
 
-Request body for batch embedding generation.
+Request body for batch embedding generation. role is as in EmbedRequest.
 
 
 | Field | Type | Description |
 |-------|------|-------------|
 | texts | array |  |
 | content_type | string |  |
+| role |  |  |
 
 
 ## EmbedBatchResponse
@@ -5119,6 +5381,7 @@ Response for provider info.
 | provider | string |  |
 | dimensions | integer |  |
 | status | string |  |
+| engines | object |  |
 
 
 ## EmbedRequest
@@ -5126,11 +5389,16 @@ Response for provider info.
 
 Request body for single-text embedding generation.
 
+role is "query" or "document" and picks the encoder's prefix.
+Left out, the result is what the endpoint returned before role existed.
+A code text then has no prefix, and a prose text has the query prefix.
+
 
 | Field | Type | Description |
 |-------|------|-------------|
 | text | string |  |
 | content_type | string |  |
+| role |  |  |
 
 
 ## EmbedResponse
@@ -5164,12 +5432,12 @@ Contains:
 ## FleetSizeCapIn
 
 
-Body for PUT /api/arbiter/fleet-size-cap — the one number the operator is setting.
+Body for PUT /api/arbiter/fleet-size-cap, the one number the operator is setting.
 
-`ge=1` is declared here rather than hand-rolled in the handler, so a nonsense
-value is refused by Pydantic with a 422 naming the field. The UPPER bound is NOT
-declared here and cannot be: the ceiling is `cc session fleet size cap maximum`,
-read at call time, so the handler checks it against the live key.
+`ge=1` is declared here rather than hand-rolled in the handler, so Pydantic refuses
+a nonsense value with a 422 naming the field. The upper bound is not declared here
+and cannot be. The ceiling is `cc session fleet size cap maximum`, read at call time,
+so the handler checks it against the live key.
 
 
 | Field | Type | Description |
@@ -5199,7 +5467,7 @@ is coerced to a non-negative int; `sessions` defaults to an empty list.
 
 A PATCH of the operator's ratio controls. Every field is optional.
 
-⚠️ OMITTING A FIELD LEAVES IT ALONE — it does not reset it. An operator dragging the
+Omitting a field leaves it alone and does not reset it. An operator dragging the
 threshold slider must not silently revert a window someone else set, so this is a
 partial update rather than a replace.
 
@@ -5217,6 +5485,21 @@ partial update rather than a replace.
 | Field | Type | Description |
 |-------|------|-------------|
 | detail | array |  |
+
+
+## LabelUpload
+
+
+One answer: the pair, same job or not, whether the reviewer is unsure, and a note.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| item_id | string |  |
+| same_job | boolean |  |
+| unsure | boolean |  |
+| note | string |  |
+| reviewer | string |  |
 
 
 ## LoginRequest
@@ -5284,14 +5567,14 @@ Contains:
 ## ManagerPullRequest
 
 
-A flip of Rick's manager-pull toggle. One field, and it is REQUIRED.
+A flip of the operator's manager-pull toggle. One field, and it is required.
 
-🔴 `StrictBool`, NOT `bool`. Pydantic's lenient bool accepts the STRING "true", and
-`bool( "false" )` is True — so a lenient field would let a caller sending "false"
-switch the toggle ON while believing they had turned it off. That is the exact
-defect this endpoint exists to make unreachable, and accepting it here would put it
-back one layer up. The reader still PARSES strings, deliberately, for the operator
-who hand-edits the file; nothing should ever ARRIVE as one.
+The field is `StrictBool`, not `bool`. Pydantic's lenient bool accepts the string "true",
+and `bool( "false" )` is True. A lenient field would let a caller sending "false" switch
+the toggle on while believing they had turned it off. This endpoint exists to make that
+defect unreachable, and accepting it here would put it back one layer up. The reader still
+parses strings, for the operator who hand-edits the file, but nothing should ever arrive
+as one.
 
 
 | Field | Type | Description |
@@ -5360,7 +5643,7 @@ Display-tuning values for the multiplexer front-end.
 
 Field names use snake_case to match server convention. Keys here become
 properties on the JSON object that `boot.ts` reads via
-`configureMetaDisplayCap(serverConfig)` per Phase 6a design F20.
+`configureMetaDisplayCap(serverConfig)`.
 
 
 | Field | Type | Description |
@@ -5384,15 +5667,24 @@ One-shot peer queue snapshot.
 | upstream | object | Raw upstream response body |
 
 
+## PokeMuteRequest
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| muted | boolean |  |
+
+
 ## PredictionVoteRequest
 
 
 Body for POST /api/notify/prediction-vote/{notification_id}.
 
 The client supplies the hint context it is voting on. `question` and `response_type`
-are OPTIONAL because the endpoint authoritatively resolves them from the persisted
-notification when the client omits them (the notification.message IS persisted; the
-prediction hint's predicted_value is NOT, so the client must supply predicted_value).
+are optional. The endpoint resolves them from the persisted notification when the client
+omits them, because notification.message is persisted. The prediction hint's
+predicted_value is not persisted, so the client must supply predicted_value.
 
 
 | Field | Type | Description |
@@ -5507,10 +5799,10 @@ Contains:
 ## RequestFileIn
 
 
-A manager's request that Rick promote or demote one row (row c9fafb9d, rule 3).
+A manager's request that the operator promote or demote one row.
 
 `move` is validated for membership in the lifecycle module, for the reason
-`RequestVerdictIn` gives. `actor` carries the session id the manager check reads; it
+`RequestVerdictIn` gives. `actor` carries the session id the manager check reads. It
 is recorded beside the authenticated identity and confers nothing on its own.
 
 
@@ -5538,9 +5830,9 @@ Request to send password reset email.
 
 The operator's answer to a pending promote/demote request.
 
-`verdict` is validated for MEMBERSHIP in the lifecycle module rather than here — a
-second copy of the legal set is a second thing to keep in sync, and the refusal it
-produces there already explains why 'pending' is not a verdict.
+`verdict` is validated for membership in the lifecycle module and not here. A second copy
+of the legal set is a second thing to keep in sync. The refusal it produces there
+already explains why 'pending' is not a verdict.
 
 
 | Field | Type | Description |
@@ -5651,6 +5943,19 @@ Response model for similar snapshots endpoint.
 | enabled | boolean |  |
 
 
+## SkeletonCrewIn
+
+
+Body for PUT /api/arbiter/skeleton-crew.
+
+`on` is a bare JSON boolean. Any other field, and any other type, is a 422.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| on | boolean | True turns skeleton crew on, false turns it off. |
+
+
 ## SnapshotDetailResponse
 
 
@@ -5718,23 +6023,51 @@ Requires:
 | on | boolean |  |
 
 
+## StageUpload
+
+
+The entries of one index, its purpose lines and fusion constants, under the caller's key.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| key | string |  |
+| entries | array |  |
+| purposes |  |  |
+| fusion |  |  |
+
+
+## StartIn
+
+
+Body for POST /api/podcast-proxy/start.
+
+`card_id` is the id the ask door returned. `actor` is the caller's persona and session id; only the id
+is used, and it must be the session that asked.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| card_id | string |  |
+| actor | string |  |
+
+
 ## SubmitRequest
 
 
 Request body for POST /api/v2/submit — work whose command is already decided.
 
-`question` is OPTIONAL here and required on `ask`, which is the whole difference
-between the two doors. `ask` is handed prose and has to work out what it means;
-`submit` is handed the answer to that question up front, so the text is only carried
-along for the record and for anything downstream that shows the user what ran.
+`question` is optional here and required on `ask`, which is the whole difference
+between the two doors. `ask` is handed prose and has to work out what it means.
+`submit` is handed the answer up front. The text is only carried along for the
+record and for anything downstream that shows the user what ran.
 
-THE LAST THREE FIELDS ARE QUEUE DIRECTIVES, NOT ARGUMENTS, and that is why they are
+The last three fields are queue directives, not arguments. That is why they are
 top-level fields rather than keys inside `args`. `args` is checked against the
-command's own argument contract, so a scheduling instruction put in there would have
-to be written into some agent's contract as though the agent took it — and no agent
-does. Each retiring door declared these same three on its own request model and set
-them on the job after building it; they arrive here for the same reason and are
-passed on only when the caller actually set one.
+command's own argument contract. A scheduling instruction put there would have to be
+written into some agent's contract as though the agent took it, and no agent does.
+Each retiring door declared these same three on its own request model. They arrive
+here for the same reason, and are passed on only when the caller actually set one.
 
 
 | Field | Type | Description |
@@ -5752,15 +6085,14 @@ passed on only when the caller actually set one.
 ## TaskAmendIn
 
 
-Body for POST /api/tasks/{id}/amend (Phase 2.2 — append-only body amendment).
+Body for POST /api/tasks/{id}/amend, an append-only body amendment.
 
-Appends a persona-stamped + UTC-timestamped block to a NON-terminal item's
-body WITHOUT rewriting the existing text — the durable-record seam for a
-live item whose scope is legitimately reframed mid-flight (Krishna's
-2026-07-02 friction). Distinct from PATCH `body`, which OVERWRITES: an amend
-can NEVER lose prior spec history. `note` is the text appended; `reason`
-stamps the audit event (mirrors the PATCH reason discipline), falling back to
-an auto-marker when absent. `actor`/`authority` stamp the event, not the item.
+It appends a persona-stamped, UTC-timestamped block to the body of a non-terminal item
+without rewriting the existing text. This is the durable-record seam for a live item whose
+scope is legitimately reframed mid-flight. It differs from PATCH `body`, which overwrites,
+because an amend can never lose prior spec history. `note` is the text appended. `reason`
+stamps the audit event, mirroring the PATCH reason discipline, and falls back to an
+auto-marker when absent. `actor` and `authority` stamp the event, not the item.
 
 
 | Field | Type | Description |
@@ -5774,12 +6106,11 @@ an auto-marker when absent. `actor`/`authority` stamp the event, not the item.
 ## TaskCorrelateIn
 
 
-Body for POST /api/tasks/{id}/correlate (Phase 2 — cross-session respawn
-adoption: re-stamp an item's correlation_key onto a successor session's
-harness task id instead of forking a duplicate item).
+Body for POST /api/tasks/{id}/correlate, the cross-session respawn adoption seam.
 
-Terminal items are rejected in the handler (no re-keying closed history);
-authority enum membership is validated there too (one rules home).
+It re-stamps an item's correlation_key onto a successor session's harness task id instead of
+forking a duplicate item. The handler rejects terminal items, so closed history is never
+re-keyed. It also validates the authority enum there, so the rules live in one place.
 
 
 | Field | Type | Description |
@@ -5794,26 +6125,24 @@ authority enum membership is validated there too (one rules home).
 
 Create body for POST /api/tasks.
 
-Creation DEFAULTS to status=queued (the creation event stamps "->queued");
-enum membership for item_class/gate_class/priority/authority is validated
-by task_store_rules.validate_create in the handler (one rules home, not
-per-layer duplication).
+An omitted status takes the approval settings' default: queued, or not_approved while the
+holding default is on. The creation event stamps "->" and that status. The handler
+validates enum membership for item_class, gate_class, priority and authority through
+`task_store_rules.validate_create`. The rules live in one place and are not duplicated
+per layer.
 
-ONE-CALL BLOCKED MINT (Rick's ruling 2026-07-20): `status` may also be
-"blocked", minting an already-blocked row in a single call. A blocked mint
-carries `blocked_by` (>=1 typed ref) and `next_chase_ts` (kind-aware — a
-persona blocker requires it), enforced by rules.validate_create_status which
-REUSES the same ->blocked invariant a transition applies. A blocked mint is
-additionally MANAGER-ONLY (guarded in the handler via is_manager_figure).
-`status` is otherwise whitelisted to queued|blocked — done/dropped/parked/
-claimed/in_progress/review are NOT mintable.
+`status` may also be "blocked", which mints an already-blocked row in one call. A blocked
+mint carries `blocked_by` (at least one typed ref) and `next_chase_ts`, which a persona
+blocker requires. `rules.validate_create_status` enforces both and reuses the same
+`->blocked` invariant a transition applies. A blocked mint is also manager-only, guarded in
+the handler through `is_manager_figure`. `status` is otherwise limited to queued or
+not_approved (`CREATE_ALLOWED_STATUSES`). The statuses done, dropped, parked, claimed, in_progress and review are not mintable.
 
-⚠️ BOTH PARAGRAPHS ABOVE ARE NARROWED BY THE CREATE DOOR (Rick 2026-09-08, landed
-2026-09-11, row 2d786391). With the holding default ON, an omitted status mints
-`not_approved`, and an EXPLICIT live status (queued or blocked) is refused 403
-unless the row is P0 or the caller is the operator's validated login — see
-`task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is
-therefore retired; the manager guard below still covers the two paths that pass.
+The create door narrows both paragraphs above. With the holding default on, an omitted
+status mints `not_approved`. An explicit live status (queued or blocked) is refused with 403
+unless the row is P0 or the caller is the operator's validated login. See
+`task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is therefore
+retired, and the manager guard still covers the two paths that pass.
 
 
 | Field | Type | Description |
@@ -5839,17 +6168,16 @@ therefore retired; the manager guard below still covers the two paths that pass.
 ## TaskPatchIn
 
 
-Body for PATCH /api/tasks/{id} (Phase 2.1 — item-field edit).
+Body for PATCH /api/tasks/{id}, an item-field edit.
 
-Edits the mutable presentation/ownership fields of a NON-terminal item.
-`status` / `blocked_by` / `next_chase_ts` / `receipt_refs` /
-`correlation_key` are DELIBERATELY ABSENT — they ride the transition oracle
-(validate_transition) and the /correlate seam, NEVER an item-PATCH.
-`extra='forbid'` makes that a HARD wire-level invariant: naming any of them
-is a 422, not a silent drop (reviewer ruling 2026-06-15 — PATCH can never
-bypass the oracle). `actor`/`authority`/`reason` stamp the audit event, not
-the item — `reason` is NOT an editable field (the manager-supplied "why" for
-a reassignment); when absent the event records the auto-generated field delta.
+It edits the mutable presentation and ownership fields of a non-terminal item. `status`,
+`blocked_by`, `next_chase_ts`, `receipt_refs` and `correlation_key` are left out of this body.
+They ride the transition oracle (`validate_transition`) and the /correlate
+seam, never an item PATCH. `extra='forbid'` makes that a hard wire-level invariant, because
+naming any of them is a 422 and not a silent drop. PATCH can therefore never bypass the
+oracle. `actor`, `authority` and `reason` stamp the audit event, not the item. `reason` is
+not an editable field. It is the manager-supplied "why" for a reassignment, and when absent
+the event records the auto-generated field delta.
 
 
 | Field | Type | Description |
@@ -5886,6 +6214,7 @@ validated by task_store_rules.validate_transition in the handler.
 | blocked_by |  |  |
 | reason |  | free-text justification; REQUIRED non-blank for ->dropped (C12) |
 | park_reason |  | REQUIRED non-blank for ->parked; MUST quote the row's OWN decisive sentence, not a paraphrase |
+| promote_priority |  | P0..P5: admits a held row to queued at that higher priority in one store event. Honoured only for the operator's login on not_approved -> queued, and only when it raises the row; anything else is a 403. |
 | asynchronous |  | opt in to the asynchronous promotion path (202 + ticket). Boolean ONLY — a string is refused. Ignored unless the operator flag 'task approval promotion ask asynchronous' is on. |
 
 
@@ -5941,6 +6270,21 @@ Request body for updating trust mode at runtime.
 |-------|------|-------------|
 | mode | string |  |
 | domain | string | Domain (currently only 'swe') |
+
+
+## UnparkAskIn
+
+
+Body for POST /api/tasks/{id}/unpark-ask, a manager asking for the operator's approval.
+
+The row id comes from the path and never from the body. A caller cannot ask about one row
+and have the card bound to another. `actor` is the declared persona and session id, which
+finds the manager session and words the card.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| actor | string |  |
 
 
 ## UnregisterTokenRequest
@@ -6057,6 +6401,17 @@ Request to verify email address with token.
 | token | string | Email verification token from email |
 
 
+## ViewerIn
+
+
+Body for POST /api/podcast-proxy/from-viewer: the document as `<scope>/<path>`.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| path | string |  |
+
+
 ## VoicePersonaSampleRequest
 
 
@@ -6162,4 +6517,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.09.29 19:39:46 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated by `src/scripts/generate-api-docs.sh`_

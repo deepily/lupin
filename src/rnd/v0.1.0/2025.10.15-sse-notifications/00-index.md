@@ -1,7 +1,7 @@
 # SSE Notification System - Master Index
 
 > **NOTE**: For the consolidated Notification API reference, see:
-> **[src/docs/notification-api.md](../../docs/notification-api.md)**
+> **[src/docs/notification-api.md](../../../docs/notification-api.md)**
 >
 > This directory contains historical R&D planning artifacts from the
 > original implementation. They are preserved for reference but are

@@ -45,7 +45,15 @@ set -uo pipefail
 
 export LUPIN_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
 export API_BASE="${ORPHAN_TICK_API_BASE:-http://localhost:7999}"
-TARGET_BRANCH="${CONTEXT_TICK_TARGET_BRANCH:-wip-v0.2.1-2026.08.29-cjflow-v2-followup}"
+# The working line the sweep measures against: the env override, else the branch the main tree
+# is on. There is no fixed fallback name. A stale name gives a confident wrong answer, so with
+# neither source the tick refuses (row b2db7be7).
+TARGET_BRANCH="${CONTEXT_TICK_TARGET_BRANCH:-}"
+[ -n "$TARGET_BRANCH" ] || TARGET_BRANCH="$( git -C "$LUPIN_ROOT" symbolic-ref --short -q HEAD 2>/dev/null )"
+if [ -z "$TARGET_BRANCH" ]; then
+    echo "orphan-sweep-tick: REFUSING — no target branch: CONTEXT_TICK_TARGET_BRANCH is unset and $LUPIN_ROOT is not on a branch. Nothing was scanned."
+    exit 2
+fi
 
 # Resolve the sweep. NAMED explicitly rather than derived from $repo_root — that
 # derivation is cause 2 above, and inheriting it here would reproduce the silent skip.

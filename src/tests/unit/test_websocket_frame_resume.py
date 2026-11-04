@@ -65,6 +65,7 @@ def _manager( buffer_size=DEFAULT_BUFFER_SIZE, max_slots=DEFAULT_MAX_SLOTS ):
     # assertion under test — it would AttributeError from inside the emit path.
     mgr.device_frame_buffers    = OrderedDict()
     mgr.device_seq              = {}
+    mgr.device_buffers_over_cap = False
     mgr.device_buffer_size      = buffer_size
     mgr.device_buffer_max_slots = max_slots
     return mgr
@@ -590,11 +591,65 @@ class TestBounding:
             await mgr.emit_to_session( f"s{i}", "job_state_transition", { "n": i } )
         # Touch phone-0 so phone-1 becomes the least recently used.
         await mgr.emit_to_session( "s0", "job_state_transition", { "n": 99 } )
+        mgr.disconnect( "s1" )                 # eligible: a connected slot is never evicted
         _connect( mgr, "s2", device_id="phone-2" )
         await mgr.emit_to_session( "s2", "job_state_transition", { "n": 2 } )
         assert ( "u1", "phone-0" ) in mgr.device_frame_buffers
         assert ( "u1", "phone-2" ) in mgr.device_frame_buffers
         assert ( "u1", "phone-1" ) not in mgr.device_frame_buffers
+
+
+class TestEvictionNeverTakesAConnectedSlot:
+    """
+    The LRU ranks by emit recency, so a quiet phone that is still connected ranks OLDEST — and was
+    the first slot evicted, taking its seq and backlog with it while its socket was open.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_quiet_connected_device_survives_while_busy_disconnected_ones_are_evicted( self ):
+        mgr = _manager( buffer_size=5, max_slots=2 )
+        _connect( mgr, "quiet", device_id="phone-quiet" )
+        await mgr.emit_to_session( "quiet", "job_state_transition", { "n": 0 } )       # oldest, and live
+        for i in range( 4 ):
+            sid = f"busy{i}"
+            _connect( mgr, sid, device_id=f"phone-busy{i}" )
+            await mgr.emit_to_session( sid, "job_state_transition", { "n": i } )
+            mgr.disconnect( sid )
+        assert ( "u1", "phone-quiet" ) in mgr.device_frame_buffers, "the connected slot was evicted"
+        assert mgr.device_seq[ ( "u1", "phone-quiet" ) ] == 1
+        assert len( mgr.device_frame_buffers ) == 2
+        assert ( "u1", "phone-busy3" ) in mgr.device_frame_buffers, "the newest disconnected slot should be the one kept beside it"
+
+    @pytest.mark.asyncio
+    async def test_when_every_slot_is_live_the_cap_is_exceeded_and_warns_ONCE( self, capsys ):
+        mgr = _manager( buffer_size=5, max_slots=2 )
+        for i in range( 4 ):
+            _connect( mgr, f"s{i}", device_id=f"phone-{i}" )
+            await mgr.emit_to_session( f"s{i}", "job_state_transition", { "n": i } )
+        for _ in range( 3 ):   # more frames on live slots: no new crossing, no new warning
+            await mgr.emit_to_session( "s0", "job_state_transition", { "n": 9 } )
+        assert len( mgr.device_frame_buffers ) == 4, "every live slot keeps its buffer, bounded by connections"
+        assert capsys.readouterr().out.count( "exceed the ceiling" ) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_next_write_after_holders_disconnect_brings_it_back_down_and_re_arms_the_warning( self, capsys ):
+        mgr = _manager( buffer_size=5, max_slots=2 )
+        for i in range( 4 ):
+            _connect( mgr, f"s{i}", device_id=f"phone-{i}" )
+            await mgr.emit_to_session( f"s{i}", "job_state_transition", { "n": i } )
+        capsys.readouterr()
+        for i in range( 3 ): mgr.disconnect( f"s{i}" )
+        _connect( mgr, "s9", device_id="phone-9" )
+        await mgr.emit_to_session( "s9", "job_state_transition", { "n": 9 } )
+        assert len( mgr.device_frame_buffers ) == 2
+        assert ( "u1", "phone-3" ) in mgr.device_frame_buffers and ( "u1", "phone-9" ) in mgr.device_frame_buffers
+        assert mgr.device_buffers_over_cap is False
+        assert "exceed the ceiling" not in capsys.readouterr().out
+        # crossing again warns again
+        for i in ( 10, 11 ):
+            _connect( mgr, f"s{i}", device_id=f"phone-{i}" )
+            await mgr.emit_to_session( f"s{i}", "job_state_transition", { "n": i } )
+        assert capsys.readouterr().out.count( "exceed the ceiling" ) == 1
 
 
 # ── The endpoint seam ───────────────────────────────────────────────────────

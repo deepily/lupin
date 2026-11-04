@@ -78,6 +78,26 @@ class TestPureHelpers( unittest.TestCase ):
         # appended canonical pair lands at the tail.
         self.assertEqual( out, [ "x = 1", "result = test()", "print( result )" ] )
 
+    def test_ensure_proper_appendages_debug_prints_normalized_keys_as_json( self ):
+        """Debug mode prints the key dict as JSON and returns the usual result."""
+        import io, json
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with patch.object( ucr, "debug", True ), redirect_stdout( buf ):
+            out = _ensure_proper_appendages( [ "A = 1" ], [ "print( a )" ] )
+        self.assertEqual( out, [ "A = 1", "print( a )" ] )
+        self.assertEqual( json.loads( buf.getvalue() ), { "a=1": "A = 1" } )
+
+    def test_ensure_proper_appendages_debug_off_prints_nothing( self ):
+        """Debug off prints nothing and returns the usual result."""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with patch.object( ucr, "debug", False ), redirect_stdout( buf ):
+            out = _ensure_proper_appendages( [ "A = 1" ], [ "print( a )" ] )
+        self.assertEqual( out, [ "A = 1", "print( a )" ] )
+        self.assertEqual( buf.getvalue(), "" )
+
     def test_ensure_proper_appendages_no_overlap_preserves_all( self ):
         """With no normalized collisions, every original line is kept then appendages added."""
         code            = [ "a = 1", "b = 2" ]
@@ -184,6 +204,7 @@ class TestAssembleAndRunSolution( unittest.TestCase ):
         # ConfigurationManager resolves the code-execution path by default.
         cfg_instance = MagicMock()
         cfg_instance.get.return_value = "/io/code_execution.py"
+        cfg_instance.get_required.return_value = "America/New_York"
         self.mock_cfg = _start(
             "cosa.config.configuration_manager.ConfigurationManager",
             return_value=cfg_instance,
@@ -212,13 +233,13 @@ class TestAssembleAndRunSolution( unittest.TestCase ):
         self.assertIn( "ERROR executing code:", out[ "output" ] )
         self.assertIn( "boom traceback", out[ "output" ] )
 
-    def test_config_value_error_uses_fallback_path( self ):
-        """A ValueError from ConfigurationManager falls back to the hardcoded path, still runs."""
+    def test_config_value_error_has_no_user_zone_and_refuses_to_run( self ):
+        """Without configuration there is no user zone: the run is refused, nothing is executed."""
         self.mock_cfg.side_effect = ValueError( "no env var" )
-        self.mock_run.return_value = _FakeResult( returncode=0, stdout="ok" )
-        out = assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
-        self.assertEqual( out[ "output" ], "ok" )
-        self.assertTrue( self.mock_run.called )
+        with self.assertRaises( ValueError ) as raised:
+            assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
+        self.assertIn( "app timezone", str( raised.exception ) )
+        self.assertFalse( self.mock_run.called )
 
     def test_timeout_returns_none_when_flag_set( self ):
         self.mock_run.side_effect = subprocess.TimeoutExpired( cmd="python3", timeout=60 )
@@ -323,6 +344,7 @@ class TestPerInvocationCodeFile( unittest.TestCase ):
 
         cfg_instance = MagicMock()
         cfg_instance.get.return_value = "/io/code.py"
+        cfg_instance.get_required.return_value = "America/New_York"
         _start( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg_instance )
 
     def tearDown( self ):
@@ -482,6 +504,7 @@ class TestConcurrentInvocationsDoNotCrossAnswers( unittest.TestCase ):
 
             cfg_instance = MagicMock()
             cfg_instance.get.return_value = "/io/code.py"
+            cfg_instance.get_required.return_value = "America/New_York"
 
             def one_job( name ):
                 """Record the answer, or the failure — never leave the key simply absent."""

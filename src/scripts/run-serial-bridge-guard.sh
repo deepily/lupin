@@ -10,7 +10,7 @@
 # and run ONLY here.
 #
 # ⚠️ NOTHING ELSE INVOKES THIS. It is wired into the human merge checklist —
-# CLAUDE.md § PR MERGE REQUIREMENTS. If that line is dropped, the whole-directory
+# CLAUDE.md § PR merge requirements. If that line is dropped, the whole-directory
 # hazard guard is silently gone; the concurrent scoped canary does not see a merge
 # into a live seat.
 #
@@ -19,7 +19,7 @@
 # with no suite running anywhere, 13 entries under ~/.claude/sessions changed in 60
 # seconds, and the seat RUNNING the guard writes its own bridge while the guard
 # executes. It cannot be arranged by asking peers to hold still. Superseded by
-# CLAUDE.md § PR MERGE REQUIREMENTS (row 5a68c92c); analysis in
+# CLAUDE.md § PR merge requirements (row 5a68c92c); analysis in
 # src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md
 #
 # HOW TO READ THE RESULT — real contact is DETERMINISTIC, peer noise is not:

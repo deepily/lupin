@@ -1,12 +1,9 @@
 """
-CanonicalSynonymRepository — Postgres storage for the ``canonical_synonyms``
-table.
+CanonicalSynonymRepository — Postgres storage for the ``canonical_synonyms`` table.
 
-Exact-match lookups on the three text keys (btree on question_normalized +
-snapshot_id) — the 3 embedding columns are stored but NOT ANN-searched.
-Storage-only: embeddings + normalization are supplied by the Lane-C memory layer.
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+Exact-match lookups on the three text keys (btree on question_normalized + snapshot_id).
+The 3 embedding columns are stored but not ANN-searched.
+Storage only: the memory layer supplies embeddings and normalization.
 """
 
 from datetime import datetime
@@ -69,6 +66,19 @@ class CanonicalSynonymRepository( BaseRepository[CanonicalSynonym] ):
             source               = source,
         )
 
+    def _snapshot_id_where( self, column, value ) -> Optional[str]:
+        """
+        Find the snapshot_id of the first synonym whose column equals a value.
+
+        Requires:
+            - column is a CanonicalSynonym column; value is the exact text to match
+
+        Ensures:
+            - returns the matching snapshot_id, or None when no row matches
+        """
+        row = self.session.query( CanonicalSynonym ).filter( column == value ).first()
+        return row.snapshot_id if row is not None else None
+
     def find_exact_verbatim( self, question_verbatim: str ) -> Optional[str]:
         """
         Find a snapshot_id by exact verbatim question.
@@ -79,10 +89,7 @@ class CanonicalSynonymRepository( BaseRepository[CanonicalSynonym] ):
         Ensures:
             - returns the matching snapshot_id, or None
         """
-        row = self.session.query( CanonicalSynonym ).filter(
-            CanonicalSynonym.question_verbatim == question_verbatim
-        ).first()
-        return row.snapshot_id if row is not None else None
+        return self._snapshot_id_where( CanonicalSynonym.question_verbatim, question_verbatim )
 
     def find_exact_normalized( self, question_normalized: str ) -> Optional[str]:
         """
@@ -94,10 +101,7 @@ class CanonicalSynonymRepository( BaseRepository[CanonicalSynonym] ):
         Ensures:
             - returns the matching snapshot_id, or None
         """
-        row = self.session.query( CanonicalSynonym ).filter(
-            CanonicalSynonym.question_normalized == question_normalized
-        ).first()
-        return row.snapshot_id if row is not None else None
+        return self._snapshot_id_where( CanonicalSynonym.question_normalized, question_normalized )
 
     def find_exact_gist( self, question_gist: str ) -> Optional[str]:
         """
@@ -109,10 +113,7 @@ class CanonicalSynonymRepository( BaseRepository[CanonicalSynonym] ):
         Ensures:
             - returns the matching snapshot_id, or None
         """
-        row = self.session.query( CanonicalSynonym ).filter(
-            CanonicalSynonym.question_gist == question_gist
-        ).first()
-        return row.snapshot_id if row is not None else None
+        return self._snapshot_id_where( CanonicalSynonym.question_gist, question_gist )
 
     def delete_by_snapshot_id( self, snapshot_id: str ) -> int:
         """

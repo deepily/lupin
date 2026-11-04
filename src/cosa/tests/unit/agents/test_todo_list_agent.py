@@ -198,8 +198,8 @@ class TestTodoListAgent( unittest.TestCase ):
         }
 
         with patch.object( AgentBase, "__init__", _fake_agent_base_init() ), \
-             patch( "cosa.agents.todo_list_agent.open", mock_open(), create=True ), \
-             patch( "cosa.agents.todo_list_agent.json.load", return_value=data ):
+             patch( "cosa.agents.agent_base.open", mock_open(), create=True ), \
+             patch( "cosa.agents.agent_base.json.load", return_value=data ):
             restored = TodoListAgent.restore_from_serialized_state( "/tmp/todo_state.json" )
 
         self.assertIsInstance( restored, TodoListAgent )

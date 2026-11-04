@@ -70,14 +70,27 @@ test("effective hours: All time sends no hours, a number sends itself", () => {
   assert.equal(effectiveHoursForQuery(168, now), 168);
 });
 
-test("effective hours: Today is whole hours since local midnight, rounded up", () => {
-  assert.equal(effectiveHoursForQuery("today", new Date(2026, 8, 10, 9, 30)), 10);
-  assert.equal(effectiveHoursForQuery("today", new Date(2026, 8, 10, 23, 0)), 23);
+test("effective hours: Today is whole hours since midnight in UTC without a server zone, rounded up", () => {
+  assert.equal(effectiveHoursForQuery("today", new Date(Date.UTC(2026, 8, 10, 9, 30))), 10);
+  assert.equal(effectiveHoursForQuery("today", new Date(Date.UTC(2026, 8, 10, 23, 0))), 23);
 });
 
 test("effective hours: Today never drops below 1, even at midnight", () => {
-  assert.equal(effectiveHoursForQuery("today", new Date(2026, 8, 10, 0, 0, 0)), 1);
-  assert.equal(effectiveHoursForQuery("today", new Date(2026, 8, 10, 0, 10)), 1);
+  assert.equal(effectiveHoursForQuery("today", new Date(Date.UTC(2026, 8, 10, 0, 0, 0))), 1);
+  assert.equal(effectiveHoursForQuery("today", new Date(Date.UTC(2026, 8, 10, 0, 10))), 1);
+});
+
+test("effective hours: Today counts from midnight in the server zone, whatever the browser zone is", () => {
+  const saved = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+  try {
+    // 15:30 UTC is 00:30 the next morning in Tokyo, and 23:00 UTC is 08:00 there.
+    assert.equal(effectiveHoursForQuery("today", new Date(Date.UTC(2026, 8, 10, 15, 30)), "Asia/Tokyo"), 1);
+    assert.equal(effectiveHoursForQuery("today", new Date(Date.UTC(2026, 8, 10, 23, 0)), "Asia/Tokyo"), 8);
+    assert.equal(effectiveHoursForQuery("today", new Date(Date.UTC(2026, 8, 10, 23, 0)), null), 23);
+  } finally {
+    if (saved === undefined) delete process.env.TZ; else process.env.TZ = saved;
+  }
 });
 
 test("label: each option shows its own label; any other number reads 'Last N hours'", () => {

@@ -9,18 +9,18 @@ Routes embedding generation to the configured engine:
 Callers specify content_type="prose" or content_type="code" to route
 to the appropriate engine when provider is "local".
 
-Process-aware routing (added 2026-04-28):
-    Inside the FastAPI process — which loaded the GPU engine singletons at
-    startup — `generate_embedding()` calls those singletons directly. In any
-    OTHER process (scripts, tests, CC subagents, MCP), the same call routes
+Process-aware routing:
+    Inside the FastAPI process, which loaded the GPU engine singletons at
+    startup, `generate_embedding()` calls those singletons directly. In any
+    other process (scripts, tests, CC subagents, MCP), the same call routes
     via HTTP to the FastAPI server's /api/embeddings/{generate,batch}
     endpoints. The server URL is resolved at call time from the
-    LUPIN_APP_SERVER_URL environment variable so a test running on the
-    :8000 test server hits :8000 (not the :7999 dev server).
+    LUPIN_APP_SERVER_URL environment variable. A test running on the
+    :8000 test server therefore hits :8000, not the :7999 dev server.
 
-    The toggle is the class-level flag `_is_in_process_engine_owner`,
-    flipped True by FastAPI's main.py at startup after engines are loaded.
-    Default False everywhere else means no caller accidentally grabs GPU.
+    The toggle is the class-level flag `_is_in_process_engine_owner`.
+    FastAPI's main.py sets it True at startup after the engines are loaded.
+    It defaults to False, so no other caller accidentally grabs the GPU.
 """
 
 import os
@@ -32,27 +32,73 @@ import cosa.utils.util_stopwatch as sw
 from cosa.config.configuration_manager import ConfigurationManager
 
 
+EMBEDDING_ROLES = ( "query", "document" )
+
+
+class EmbeddingRoleUnsupported( RuntimeError ):
+    """
+    A role was asked of a service that cannot honour it.
+
+    Only the FastAPI embeddings router takes a role. A call that sets one and
+    resolves to lupin-model-server is refused here, so a vector is never built
+    with the wrong prefix. It subclasses RuntimeError like its sibling.
+    """
+
+
 class EmbeddingProviderUnreachable( RuntimeError ):
     """
-    The embedding service could not be reached at all — a TRANSPORT failure.
+    The embedding service could not be reached at all, a transport failure.
 
-    Raised only after this module has already spent every configured retry and
-    backoff, so it means the service is definitively not answering: DNS failure,
-    connection refused, unroutable host, or a per-attempt timeout that never
-    completed a request.
+    Raised only after every configured retry and backoff is spent. It means
+    the service is not answering: DNS failure, connection refused,
+    unroutable host, or a timeout that never completed a request.
 
-    Why it is its own type: callers that retry by SHRINKING the request (batch
-    splitters, adaptive budgets) need to tell "the request was too large" — where
-    a smaller retry is the correct remedy — from "nothing is listening", where
-    every retry at every size is guaranteed to fail identically. Without this
-    distinction a batch splitter converts one dead dependency into one doomed
-    retry per row (bug 13b35b37, found 2026-08-17: a 100-row batch split all the
-    way to 100 single-row retries, every one failing on the same dead socket).
+    Callers that shrink the request on retry (batch splitters, adaptive
+    budgets) must tell "request too large" from "nothing is listening".
+    A smaller retry fixes the first. Every retry
+    fails the same way on the second, so a splitter would make one doomed
+    retry per row.
 
-    Subclasses RuntimeError deliberately: every existing `except RuntimeError`
-    and `except Exception` caller keeps working unchanged. Only callers that
-    WANT the distinction have to ask for it.
+    It subclasses RuntimeError so every existing `except RuntimeError` and
+    `except Exception` caller keeps working. Only callers that want the
+    distinction have to ask for it.
     """
+
+
+def embedding_dimensions( config_mgr ):
+    """
+    Read the standardized embedding dimension from config.
+
+    Requires:
+        - config_mgr is a ConfigurationManager
+
+    Ensures:
+        - Returns the "embedding dimensions" value as an int
+        - Returns 768 when the key is unset; the default lives here only
+    """
+    return int( config_mgr.get( "embedding dimensions", default="768" ) )
+
+
+def init_embedding_table_config( table, debug, verbose ):
+    """
+    Set the four attributes every embedding-backed table starts with.
+
+    Requires:
+        - table is a table instance being constructed
+        - LUPIN_CONFIG_MGR_CLI_ARGS names the configuration, as ConfigurationManager needs
+
+    Ensures:
+        - table.debug and table.verbose hold the arguments
+        - table._config_mgr is a new ConfigurationManager on LUPIN_CONFIG_MGR_CLI_ARGS
+        - table._embedding_dim is embedding_dimensions( table._config_mgr )
+
+    Raises:
+        - ConfigurationManager errors propagated
+    """
+    table.debug          = debug
+    table.verbose        = verbose
+    table._config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    table._embedding_dim = embedding_dimensions( table._config_mgr )
 
 
 class EmbeddingProvider:
@@ -81,16 +127,11 @@ class EmbeddingProvider:
     @classmethod
     def declare_in_process_engine_owner( cls ):
         """
-        Mark this Python process as the owner of the in-process GPU engine
-        singletons. Called by `src/lupin_app/main.py` AFTER `get_code_engine()`
-        and `get_prose_engine()` have completed their eager warmup.
+        Mark this process as the owner of the in-process GPU engine singletons.
 
-        Effect: subsequent `generate_embedding()` / `generate_embeddings_batch()`
-        calls in this process route directly to the in-process engine
-        singletons. In every other process the flag stays False and routing
-        falls back to HTTP via /api/embeddings/{generate,batch}.
-
-        Idempotent — safe to call multiple times.
+        Called by `src/lupin_app/main.py` after the engines finish warmup.
+        This process then uses the engines directly. Every other process
+        keeps the flag False and routes via HTTP. Idempotent.
 
         Ensures:
             - Class-level flag is True after this call returns
@@ -180,13 +221,11 @@ class EmbeddingProvider:
     @staticmethod
     def _resolve_server_url() -> str:
         """
-        Resolve the FastAPI server URL at call time (NOT at module load).
+        Resolve the FastAPI server URL at call time, not at module load.
 
-        Read fresh from `LUPIN_APP_SERVER_URL` per-call so a test running
-        on the :8000 test server can set the env var and have HTTP routing
-        target :8000 dynamically — without restarting the Python process.
-        Default is `http://localhost:7999` (host targeting dev server,
-        and inside-container targeting the container's own bound port).
+        Reads `LUPIN_APP_SERVER_URL` on every call, so a test on the :8000
+        server can retarget HTTP routing without a restart.
+        The default is `http://localhost:7999`.
 
         Ensures:
             - Returns the env value when set and non-empty (stripped)
@@ -199,21 +238,10 @@ class EmbeddingProvider:
     @staticmethod
     def _resolve_model_server_url() -> Optional[ str ]:
         """
-        Resolve the lupin-model-server URL at call time. Returns None when
-        BOTH env var AND INI key are unset → caller falls through to the
-        legacy FastAPI HTTP-proxy path.
+        Resolve the lupin-model-server URL at call time, or None if neither source is set.
 
-        Priority chain (mirrors SpeechToTextProvider._resolve_model_server_url):
-            1. `LUPIN_MODEL_SERVER_URL` env var (compose-injected at container creation)
-            2. `model server url` INI key (lupin-app.ini default)
-            3. None → caller routes via legacy FastAPI URL
-
-        Why both: `docker restart` doesn't re-read compose, so a fresh INI
-        flip without a `docker compose up -d --force-recreate` would leave
-        the env var unset in running containers. The INI fallback prevents
-        that scenario from causing self-recursion (compute → compute →
-        compute → timeout) on the FastAPI fallback URL.
-
+        Tries the `LUPIN_MODEL_SERVER_URL` env var, then the `model server url` INI key.
+        The INI key covers `docker restart`, which skips compose, so the env var may be unset. Without that fallback the compute path would call itself on the FastAPI fallback URL, compute to compute to compute, until it timed out.
         See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
 
         Ensures:
@@ -236,30 +264,11 @@ class EmbeddingProvider:
     @staticmethod
     def _http_api_key() -> Optional[str]:
         """
-        Load the X-API-Key value used for the MODEL SERVER's embeddings endpoint.
+        Load the X-API-Key value used for the model server's embeddings endpoint.
 
-        ⚠️ THIS IS NOT THE SAME CREDENTIAL AS prediction_engine's, DESPITE THE
-        IDENTICAL READING IDIOM. This docstring used to say it "mirrors the
-        pattern in `prediction_engine._generate_embedding_via_http`", and that
-        sentence is how a shared IDIOM got read as a shared AUTHORITY:
-
-          prediction_engine -> POSTs to localhost/api/embeddings/generate, i.e.
-                               LUPIN'S OWN server, validated against THAT
-                               DEPLOYMENT'S `api_keys` table. Per-host value.
-          this method       -> POSTs to the model server on Cloud Run, which
-                               bcrypt-hashes ONE mounted secret version at boot.
-                               Globally-identical value.
-
-        One file served both until 2026-07-28. On the dev box the two authorities
-        coincide by accident (dev's key was seeded into Secret Manager), so the
-        flaw was invisible there; on the VM they cannot, and /embeddings/generate
-        returned 100% 401 for ~38h with the VM's key matching NEITHER secret
-        version. Rows 574fd1dc / 6cc52525.
-        src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
-
-        The name is read from the SAME env var the model server itself reads
-        (`LUPIN_MODEL_SERVER_API_KEY_NAME`, lupin_model_server/main.py:76) so the
-        two ends cannot drift apart by editing one of them.
+        Not prediction_engine's credential: that one goes to Lupin's server and its
+        per-host `api_keys` table. This one goes to the model server, which hashes
+        one mounted secret. The name comes from `LUPIN_MODEL_SERVER_API_KEY_NAME`, the same variable the model server reads, so the two ends cannot drift apart when only one is edited.
 
         Requires:
             - nothing
@@ -275,20 +284,33 @@ class EmbeddingProvider:
         except Exception:
             return None
 
+    @staticmethod
+    def _fastapi_api_key() -> Optional[str]:
+        """
+        Load the X-API-Key value the FastAPI server accepts.
+
+        The model server's key is a different one, and FastAPI answers it with 401.
+        The name comes from `LUPIN_FASTAPI_API_KEY_NAME`, and defaults to the key every
+        other host-side caller of the FastAPI routes already uses.
+
+        Ensures:
+            - Returns the key string if the file is present and readable
+            - Returns None if the file is missing or empty
+            - Never raises
+        """
+        try:
+            return du.get_api_key( os.environ.get( "LUPIN_FASTAPI_API_KEY_NAME", "notification-api-claude-code-dev" ) )
+        except Exception:
+            return None
+
     @classmethod
-    def _resolve_http_target( cls ) -> tuple:
+    def _resolve_http_target( cls, pin_fastapi=False ) -> tuple:
         """
         Pick the HTTP target for embedding fallback calls.
 
-        Priority:
-            1. lupin-model-server (when `LUPIN_MODEL_SERVER_URL` env is set)
-            2. FastAPI server (existing behavior, `LUPIN_APP_SERVER_URL`)
-
-        Both targets accept the SAME `ck_live_*` key from
-        `src/conf/keys/notification-api-claude-code-dev` (per María's
-        2026-05-16 brief — no parallel `ck_internal_*` namespace). So we
-        call `_http_api_key()` for both branches; only the URL + endpoint
-        prefix differ.
+        Uses lupin-model-server when its URL resolves, else the FastAPI server.
+        pin_fastapi=True skips that lookup, so nothing reroutes the call.
+        It also sends the FastAPI key. The model server's key is not that key.
 
         Returns:
             tuple[str, Optional[str], str]: (base_url, api_key, endpoint_prefix)
@@ -298,10 +320,56 @@ class EmbeddingProvider:
                                    "/api/embeddings" for the FastAPI path
                   (model-server omits the `/api/` prefix per its leaner routing)
         """
-        model_server_url = cls._resolve_model_server_url()
+        model_server_url = None if pin_fastapi else cls._resolve_model_server_url()
         if model_server_url:
             return ( model_server_url, cls._http_api_key(), "/embeddings" )
-        return ( cls._resolve_server_url(), cls._http_api_key(), "/api/embeddings" )
+        key = cls._fastapi_api_key() if pin_fastapi else cls._http_api_key()
+        return ( cls._resolve_server_url(), key, "/api/embeddings" )
+
+    @classmethod
+    def _check_role( cls, role, pin_fastapi ):
+        """
+        Refuse a role that is not one of the two the services know.
+
+        Requires:
+            - role is None, "query" or "document"
+
+        Ensures:
+            - returns None when role is None or a known role
+
+        Raises:
+            - ValueError: role is not one of EMBEDDING_ROLES
+        """
+        if role is None: return
+        if role not in EMBEDDING_ROLES:
+            raise ValueError( f"role must be one of {EMBEDDING_ROLES}, got {role!r}" )
+
+    @classmethod
+    def _require_role_echo( cls, role, prefix, body, url ):
+        """
+        Refuse an answer from lupin-model-server that did not apply the role asked for.
+
+        A model server older than role support ignores the field.
+        Its vectors would be of the wrong kind, so the answer must name the role it applied.
+
+        Requires:
+            - role is None, "query" or "document"
+            - prefix is the endpoint prefix the call went to
+            - body is the decoded JSON answer
+
+        Ensures:
+            - returns None when role is None, or the call went to the FastAPI router
+            - returns None when the model server's answer names the same role
+
+        Raises:
+            - EmbeddingRoleUnsupported: ROLE_UNSUPPORTED_ON_MODEL_SERVER
+        """
+        if role is None or prefix != "/embeddings": return
+        if body.get( "role" ) != role:
+            raise EmbeddingRoleUnsupported(
+                f"ROLE_UNSUPPORTED_ON_MODEL_SERVER: {url} did not apply role {role!r}; "
+                f"its answer named {body.get( 'role' )!r}. It predates role support."
+            )
 
     # HTTP status codes worth a second attempt. A 5xx is the server failing to
     # answer a request it accepted; 429 is explicit backpressure. Everything
@@ -329,12 +397,9 @@ class EmbeddingProvider:
         """
         POST to an embedding endpoint, retrying transport failures and 5xx/429.
 
-        The defect this exists for (bug `574fd1dc`): the model server is a
-        scale-to-zero Cloud Run GPU service whose cold start was MEASURED at
-        31.5-66.0s across 12 of 12 starts. A single attempt against any
-        timeout below that loses the caller's data every time the service has
-        gone idle. With a retry, the first attempt absorbs the warm-up and a
-        later one lands on the now-warm instance.
+        The model server is a scale-to-zero Cloud Run GPU service with a cold
+        start of 31.5 to 66.0 seconds. Retries let the first attempt absorb
+        the warm-up and a later one reach the warm instance.
 
         Requires:
             - url is the fully-qualified endpoint
@@ -388,19 +453,20 @@ class EmbeddingProvider:
             f"assuming the service is down (bug 574fd1dc)."
         )
 
-    def _generate_embedding_via_http( self, text: str, content_type: str ) -> List[float]:
+    def _generate_embedding_via_http( self, text: str, content_type: str, role=None, pin_fastapi=False ) -> List[float]:
         """
         Single-text embedding via HTTP fallback to /api/embeddings/generate.
 
-        Used when this process is NOT the in-process engine owner — typically
-        a test, script, or CC subagent. Routes through the FastAPI server's
-        already-loaded GPU singleton instead of grabbing GPU here.
+        Used when this process does not own the in-process engine, typically
+        a test, script, or CC subagent. The server's loaded GPU singleton
+        does the work, so this process never takes the GPU.
 
         Requires:
             - text is a non-empty string
             - content_type is "prose" or "code"
             - LUPIN_APP_SERVER_URL is reachable (default http://localhost:7999)
-            - API key file at src/conf/keys/notification-api-claude-code-dev
+            - The model-server API key (`model-server-api` unless
+              `LUPIN_MODEL_SERVER_API_KEY_NAME` names another) is readable
 
         Ensures:
             - Returns list[float] embedding vector on success
@@ -415,7 +481,8 @@ class EmbeddingProvider:
         # "/embeddings"). Otherwise falls through to the existing FastAPI
         # path with the notification key + "/api/embeddings" prefix.
         # See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
-        base_url, api_key, prefix = self._resolve_http_target()
+        self._check_role( role, pin_fastapi )
+        base_url, api_key, prefix = self._resolve_http_target( pin_fastapi )
         if not api_key:
             raise RuntimeError(
                 "EmbeddingProvider HTTP fallback: no API key found. Expected one of: "
@@ -430,8 +497,11 @@ class EmbeddingProvider:
         # (31.5-66.0s) defeated. Config-driven now; see bug 574fd1dc.
         timeout = float( self._config_mgr.get( "embedding http timeout seconds", default="90" ) )
 
+        payload = { "text": text, "content_type": content_type }
+        if role is not None: payload[ "role" ] = role
+
         response = self._post_with_retry(
-            url, { "text": text, "content_type": content_type },
+            url, payload,
             api_key, timeout, "EmbeddingProvider HTTP fallback"
         )
 
@@ -442,13 +512,16 @@ class EmbeddingProvider:
             )
 
         try:
-            return response.json()[ "embedding" ]
+            body   = response.json()
+            vector = body[ "embedding" ]
         except ( KeyError, ValueError ) as e:
             raise RuntimeError(
                 f"EmbeddingProvider HTTP fallback: malformed response from {url}: {e}"
             )
+        self._require_role_echo( role, prefix, body, url )
+        return vector
 
-    def _generate_embeddings_batch_via_http( self, texts: List[str], content_type: str ) -> List[List[float]]:
+    def _generate_embeddings_batch_via_http( self, texts: List[str], content_type: str, role=None, pin_fastapi=False ) -> List[List[float]]:
         """
         Batch embedding via HTTP fallback to /api/embeddings/batch.
 
@@ -467,7 +540,8 @@ class EmbeddingProvider:
             RuntimeError: when HTTP routing cannot complete the request
         """
         # Phase 3.1 carve-out: same resolver as the single-text path above.
-        base_url, api_key, prefix = self._resolve_http_target()
+        self._check_role( role, pin_fastapi )
+        base_url, api_key, prefix = self._resolve_http_target( pin_fastapi )
         if not api_key:
             raise RuntimeError(
                 "EmbeddingProvider HTTP batch fallback: no API key found. Expected one of: "
@@ -480,8 +554,11 @@ class EmbeddingProvider:
         # path (a batch is more work) at a magnitude every cold start defeated.
         timeout = float( self._config_mgr.get( "embedding http batch timeout seconds", default="120" ) )
 
+        payload = { "texts": texts, "content_type": content_type }
+        if role is not None: payload[ "role" ] = role
+
         response = self._post_with_retry(
-            url, { "texts": texts, "content_type": content_type },
+            url, payload,
             api_key, timeout, "EmbeddingProvider HTTP batch fallback"
         )
 
@@ -492,23 +569,104 @@ class EmbeddingProvider:
             )
 
         try:
-            return response.json()[ "embeddings" ]
+            body    = response.json()
+            vectors = body[ "embeddings" ]
         except ( KeyError, ValueError ) as e:
             raise RuntimeError(
                 f"EmbeddingProvider HTTP batch fallback: malformed response from {url}: {e}"
             )
+        self._require_role_echo( role, prefix, body, url )
+        return vectors
 
-    def generate_embedding( self, text, content_type="prose", normalize_for_cache=True ):
+    def _encode_local( self, texts, content_type, role ):
         """
-        Route to the appropriate engine based on config, content_type, and
-        whether this process owns the in-process engine singletons.
+        Encode with the in-process engine, choosing the encoder by content type and role.
 
-        Routing decision:
-            - provider="openai" → OpenAI HTTP client (unchanged regardless of flag)
-            - provider="local" + this process owns engines → in-process engine
-            - provider="local" + this process does NOT own engines → HTTP route
-              to /api/embeddings/generate on the FastAPI server (URL resolved
-              dynamically from LUPIN_APP_SERVER_URL)
+        Requires:
+            - this process owns the engines
+            - role is None, "query" or "document"
+
+        Ensures:
+            - role None keeps today's choice: encode_code for code, encode_query for prose
+            - "query" uses the query prefix, "document" the document prefix (none for code)
+        """
+        if content_type == "code":
+            engine = self._get_code_engine()
+            if role == "query": return engine.encode_query( texts )
+            return engine.encode_code( texts )
+        engine = self._get_prose_engine()
+        if role == "document": return engine.encode_document( texts )
+        return engine.encode_query( texts )
+
+    def _describe_engines_via_http( self ):
+        """
+        Read the engines block from lupin-model-server's /embeddings/info.
+
+        Requires:
+            - a model server URL resolves and its API key is readable
+
+        Ensures:
+            - returns the engines dict the model server reports
+
+        Raises:
+            - RuntimeError when there is no key, the answer is not 200, or it has no engines block
+        """
+        import requests
+
+        base_url, api_key, prefix = self._resolve_http_target( False )
+        if not api_key:
+            raise RuntimeError( "EmbeddingProvider engines info: no API key found for lupin-model-server" )
+        url      = f"{base_url}{prefix}/info"
+        timeout  = float( self._config_mgr.get( "embedding http timeout seconds", default="90" ) )
+        response = requests.get( url, headers={ "X-API-Key": api_key }, timeout=timeout )
+        if response.status_code != 200:
+            raise RuntimeError( f"EmbeddingProvider engines info returned {response.status_code} from {url}: {response.text[ :200 ]}" )
+        body = response.json()
+        if "engines" not in body:
+            raise RuntimeError( f"EmbeddingProvider engines info: {url} reports no engines block; it predates role support" )
+        return body[ "engines" ]
+
+    def describe_engines( self ):
+        """
+        Report the settings that decide what a vector means, without loading a model.
+
+        Ensures:
+            - returns { code, prose, device_class, libraries }
+            - code and prose are each engine's describe() dict
+            - libraries holds torch, transformers, sentence-transformers and numpy
+              versions, None for a package that is not installed
+            - never loads a model
+        - a process that does not own the engines, with a model server to ask, reports the
+          model server's engines block instead of its own unloaded engines
+        """
+        if not self._is_in_process_engine_owner and self._resolve_model_server_url():
+            return self._describe_engines_via_http()
+        from importlib import metadata
+        from cosa.memory.local_embedding_engine import device_class
+
+        libraries = {}
+        for package in ( "torch", "transformers", "sentence-transformers", "numpy" ):
+            try:
+                libraries[ package ] = metadata.version( package )
+            except metadata.PackageNotFoundError:
+                libraries[ package ] = None
+
+        code  = self._get_code_engine().describe()
+        prose = self._get_prose_engine().describe()
+        return {
+            "code"         : code,
+            "prose"        : prose,
+            "device_class" : device_class( code[ "device" ] ),
+            "libraries"    : libraries
+        }
+
+    def generate_embedding( self, text, content_type="prose", normalize_for_cache=True, role=None, pin_fastapi=False ):
+        """
+        Embed one text with the configured provider, in-process or over HTTP.
+
+        Provider "openai" uses the OpenAI engine, whatever the flag says.
+        Provider "local" uses the in-process engine if this process owns it,
+        else HTTP to /api/embeddings/generate (URL from LUPIN_APP_SERVER_URL).
 
         Requires:
             - text is a non-empty string
@@ -537,20 +695,20 @@ class EmbeddingProvider:
         timer = sw.Stopwatch( silent=True )
 
         if self._provider == "openai":
+            if role is not None:
+                raise EmbeddingRoleUnsupported( "ROLE_UNSUPPORTED_ON_OPENAI: the OpenAI provider has no role field." )
             if content_type == "code":
                 print( "WARNING: OpenAI provider does not support code-specific embeddings. "
                        "Using text-embedding-3-small for code content." )
             embedding = self._get_openai_engine().generate_embedding( text, normalize_for_cache=normalize_for_cache )
         elif self._is_in_process_engine_owner:
             # In-process owner: use the loaded engine singletons directly.
-            if content_type == "code":
-                embedding = self._get_code_engine().encode_code( [ text ] )[ 0 ]
-            else:
-                # prose - use encode_query for single-text embedding (query context)
-                embedding = self._get_prose_engine().encode_query( [ text ] )[ 0 ]
+            # role None keeps today's choice (code: encode_code, prose: encode_query).
+            self._check_role( role, True )
+            embedding = self._encode_local( [ text ], content_type, role )[ 0 ]
         else:
             # Non-owner: HTTP route. No GPU touch in this process.
-            embedding = self._generate_embedding_via_http( text, content_type )
+            embedding = self._generate_embedding_via_http( text, content_type, role=role, pin_fastapi=pin_fastapi )
 
         delta_ms = timer.get_delta_ms()
         self._record_metric( content_type, self._provider, delta_ms, len( embedding ) if embedding else 0 )
@@ -560,11 +718,11 @@ class EmbeddingProvider:
 
         return embedding
 
-    def generate_embeddings_batch( self, texts, content_type="prose" ):
+    def generate_embeddings_batch( self, texts, content_type="prose", role=None, pin_fastapi=False ):
         """
-        Generate embeddings for a batch of texts. Same process-aware routing
-        as generate_embedding() — non-owner processes round-trip via HTTP
-        to /api/embeddings/batch.
+        Embed a batch of texts, using the same routing as generate_embedding().
+
+        A process that does not own the engines calls /api/embeddings/batch over HTTP.
 
         Requires:
             - texts is a list of non-empty strings
@@ -588,18 +746,18 @@ class EmbeddingProvider:
         timer = sw.Stopwatch( silent=True )
 
         if self._provider == "openai":
+            if role is not None:
+                raise EmbeddingRoleUnsupported( "ROLE_UNSUPPORTED_ON_OPENAI: the OpenAI provider has no role field." )
             if content_type == "code":
                 print( "WARNING: OpenAI provider does not support code-specific embeddings. "
                        "Using text-embedding-3-small for code content." )
             # OpenAI engine doesn't support batch - loop
             embeddings = [ self._get_openai_engine().generate_embedding( t ) for t in texts ]
         elif self._is_in_process_engine_owner:
-            if content_type == "code":
-                embeddings = self._get_code_engine().encode_code( texts )
-            else:
-                embeddings = self._get_prose_engine().encode_query( texts )
+            self._check_role( role, True )
+            embeddings = self._encode_local( texts, content_type, role )
         else:
-            embeddings = self._generate_embeddings_batch_via_http( texts, content_type )
+            embeddings = self._generate_embeddings_batch_via_http( texts, content_type, role=role, pin_fastapi=pin_fastapi )
 
         delta_ms = timer.get_delta_ms()
         self._record_metric( content_type, self._provider, delta_ms, len( embeddings[ 0 ] ) if embeddings and embeddings[ 0 ] else 0 )
@@ -620,12 +778,12 @@ class EmbeddingProvider:
             - Returns the configured embedding dimensions (default 768)
             - Same value for all providers (OpenAI uses MRL truncation)
         """
-        return int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+        return embedding_dimensions( self._config_mgr )
 
     @property
     def code_dimensions( self ):
         """Return the embedding dimension for the code engine."""
-        return int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+        return embedding_dimensions( self._config_mgr )
 
     def _record_metric( self, content_type, provider, delta_ms, dims ):
         """Record timing metric for a provider/content_type pair."""

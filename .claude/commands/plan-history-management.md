@@ -1,9 +1,11 @@
 # History Management for Lupin Project
 
 **Project**: Lupin
-**Prefix**: [LUPIN]
+**Prefix**: `[LUPIN]`
 **Mode Parameter**: Accepts mode=check (default), mode=archive, mode=analyze, mode=dry-run
-**Version**: 1.0
+
+**Optional Parameter**: `pending_entry=<path>` — a drafted-but-unwritten history entry whose size is added before thresholding (see canonical workflow → `Threshold the PROJECTED total`)
+**Version**: 1.1
 
 ---
 
@@ -11,25 +13,27 @@
 
 **On every invocation of this command:**
 
-1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
+1. **Must use the following project-specific configuration**:
+   - **[SHORT_PROJECT_PREFIX]**: `[LUPIN]`
    - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md
    - **Archive directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history/
-   - **Token thresholds**: 20k warning, 22k critical, 25k limit (defaults)
+   - **Token thresholds**: **17k warning, 19k critical**, 25k limit (canonical defaults, corrected; this file had claimed 20k/22k, which contradicted planning-is-prompting/workflow/history-management.md and would have thresholded 3k late)
+   - **Thresholds are applied to the projected total** — on-disk + `pending_entry`, never the bare file measurement
    - **Retention targets**: 8-12k tokens, 7-14 days (defaults)
    - **Mode parameter**: mode=check (default), mode=archive, mode=analyze, mode=dry-run
-   - Do NOT proceed without these parameters
+   - **Optional**: `pending_entry=<path>` (drafted entry, counted before thresholding)
+   - Never proceed without these parameters
 
-2. **MUST read the canonical workflow document**:
+2. **Must read the canonical workflow document**:
    - Location: planning-is-prompting → workflow/history-management.md
-   - This is the ONLY authoritative source for ALL history management operations
-   - Do NOT proceed without reading this document in full
+   - This is the only authoritative source for all history management operations
+   - Never proceed without reading this document in full
 
-3. **MUST execute the complete history management workflow**:
-   - Execute ALL steps exactly as described in the canonical workflow document
-   - Do NOT skip any steps (including TodoWrite tracking, notifications, or mode-specific operations)
-   - Do NOT substitute a shortened or summarized version
-   - Follow the workflow exactly as documented using the configuration parameters from Step 1
+3. **Must execute the complete history management workflow**:
+   - Execute every step exactly as described in the canonical workflow document
+   - Never skip any step (including notifications or mode-specific operations)
+   - Never substitute a shortened or summarized version
+   - Follow the workflow exactly as documented using the configuration parameters from instruction 1
    - Parse and apply the mode parameter as described in the canonical workflow
 
 ---
@@ -38,7 +42,9 @@
 
 ```bash
 /plan-history-management                    # Health check (default)
-/plan-history-management mode=check         # Explicit health check
+/plan-history-management mode=check         # Explicit health check (file as it stands)
+/plan-history-management mode=check pending_entry=/tmp/history-entry-draft.md
+                                            # Session-end form: counts the drafted entry BEFORE thresholding
 /plan-history-management mode=dry-run       # Preview archive without changes
 /plan-history-management mode=analyze       # Trend analysis and recommendations
 /plan-history-management mode=archive       # Execute archival (when needed)

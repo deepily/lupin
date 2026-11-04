@@ -67,7 +67,7 @@ def quick_smoke_test():
 
     Ensures:
         - Endpoint accepts authenticated POST requests with dry_run=true
-        - Returns expected response structure (job_id, queue_position, message)
+        - Returns expected response structure (job_id, queue_position)
         - Job ID uses rp- prefix
         - Job completes in done queue with mock results ($0.00 cost)
     """
@@ -146,7 +146,6 @@ def quick_smoke_test():
         print( f"✓ Job submitted successfully" )
         print( f"  Job ID: {data.get( 'job_id', 'unknown' )}" )
         print( f"  Queue position: {data.get( 'queue_position', 'unknown' )}" )
-        print( f"  Message: {data.get( 'message', 'unknown' )}" )
 
         job_id = data.get( "job_id" )
 
@@ -154,7 +153,7 @@ def quick_smoke_test():
         # Test 3: Verify response structure
         # ═══════════════════════════════════════════════════════════════════════
         print( "\nTest 3: Verifying response structure..." )
-        required_keys = [ "job_id", "queue_position", "message" ]
+        required_keys = [ "job_id", "queue_position" ]
         for key in required_keys:
             if key not in data:
                 print( f"✗ Missing required key: {key}" )

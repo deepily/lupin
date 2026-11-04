@@ -16,6 +16,89 @@ from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import EmailVerificationTokenRepository, PasswordResetTokenRepository
 
 
+def _issue_token( repo_cls, user_id: str, expires_hours: int, ok_message: str, fail_label: str ) -> Tuple[bool, str, Optional[str]]:
+    """
+    Generate a token, store it through the given repository class, and report the result.
+
+    Requires:
+        - repo_cls is a token repository class with create_token( token, user_id, expires_hours )
+        - user_id is a valid UUID string
+        - ok_message and fail_label are the words used in the success and failure results
+
+    Ensures:
+        - returns (True, ok_message, token) when the token is stored
+        - returns (False, "Failed to generate <fail_label>: <error>", None) on any exception
+        - the token is cryptographically secure (32 bytes)
+
+    Returns:
+        Tuple[bool, str, Optional[str]]: (success, message, token)
+    """
+    try:
+        # Generate cryptographically secure token
+        token = secrets.token_urlsafe( 32 )
+
+        # Store in database using PostgreSQL repository
+        with get_db() as session:
+            token_repo = repo_cls( session )
+            token_repo.create_token(
+                token=token,
+                user_id=uuid.UUID( user_id ),
+                expires_hours=expires_hours
+            )
+
+        return True, ok_message, token
+
+    except Exception as e:
+        return False, f"Failed to generate {fail_label}: {str( e )}", None
+
+
+def _consume_token( repo_cls, token: str, noun: str, ok_message: str ) -> Tuple[bool, str, Optional[str]]:
+    """
+    Check a token, mark it used, and return the user id it was issued for.
+
+    Requires:
+        - repo_cls is a token repository class with is_valid, get_by_token and mark_used
+        - noun is the lower-case name of the token ("verification token", "password reset token")
+
+    Ensures:
+        - returns (True, ok_message, user_id) and marks the token used when it is valid
+        - returns (False, "Invalid <noun>", None) when no such token exists
+        - returns (False, "<Noun> already used", None) or (False, "<Noun> expired", None) otherwise
+        - returns (False, "Failed to validate <noun>: <error>", None) on any exception
+
+    Returns:
+        Tuple[bool, str, Optional[str]]: (success, message, user_id)
+    """
+    try:
+        with get_db() as session:
+            token_repo = repo_cls( session )
+
+            # Check if token is valid (not used, not expired)
+            if not token_repo.is_valid( token ):
+                token_obj = token_repo.get_by_token( token )
+                if token_obj is None:
+                    return False, f"Invalid {noun}", None
+                elif token_obj.used:
+                    return False, f"{noun.capitalize()} already used", None
+                else:
+                    return False, f"{noun.capitalize()} expired", None
+
+            # Get the token to retrieve user_id
+            token_obj = token_repo.get_by_token( token )
+            if token_obj is None:
+                return False, f"Invalid {noun}", None
+
+            user_id = str( token_obj.user_id )
+
+            # Mark token as used
+            token_repo.mark_used( token )
+
+        return True, ok_message, user_id
+
+    except Exception as e:
+        return False, f"Failed to validate {noun}: {str( e )}", None
+
+
 def generate_verification_token( user_id: str ) -> Tuple[bool, str, Optional[str]]:
     """
     Generate email verification token for user.
@@ -38,23 +121,7 @@ def generate_verification_token( user_id: str ) -> Tuple[bool, str, Optional[str
         if success:
             send_verification_email( user_email, token )
     """
-    try:
-        # Generate cryptographically secure token
-        token = secrets.token_urlsafe( 32 )
-
-        # Store in database using PostgreSQL repository
-        with get_db() as session:
-            token_repo = EmailVerificationTokenRepository( session )
-            token_repo.create_token(
-                token=token,
-                user_id=uuid.UUID( user_id ),
-                expires_hours=24
-            )
-
-        return True, "Verification token generated", token
-
-    except Exception as e:
-        return False, f"Failed to generate verification token: {str( e )}", None
+    return _issue_token( EmailVerificationTokenRepository, user_id, 24, "Verification token generated", "verification token" )
 
 
 def validate_verification_token( token: str ) -> Tuple[bool, str, Optional[str]]:
@@ -79,34 +146,7 @@ def validate_verification_token( token: str ) -> Tuple[bool, str, Optional[str]]
         if success:
             mark_email_verified( user_id )
     """
-    try:
-        with get_db() as session:
-            token_repo = EmailVerificationTokenRepository( session )
-
-            # Check if token is valid (not used, not expired)
-            if not token_repo.is_valid( token ):
-                token_obj = token_repo.get_by_token( token )
-                if token_obj is None:
-                    return False, "Invalid verification token", None
-                elif token_obj.used:
-                    return False, "Verification token already used", None
-                else:
-                    return False, "Verification token expired", None
-
-            # Get the token to retrieve user_id
-            token_obj = token_repo.get_by_token( token )
-            if token_obj is None:
-                return False, "Invalid verification token", None
-
-            user_id = str( token_obj.user_id )
-
-            # Mark token as used
-            token_repo.mark_used( token )
-
-        return True, "Email verification token valid", user_id
-
-    except Exception as e:
-        return False, f"Failed to validate verification token: {str( e )}", None
+    return _consume_token( EmailVerificationTokenRepository, token, "verification token", "Email verification token valid" )
 
 
 def generate_password_reset_token( user_id: str ) -> Tuple[bool, str, Optional[str]]:
@@ -131,23 +171,7 @@ def generate_password_reset_token( user_id: str ) -> Tuple[bool, str, Optional[s
         if success:
             send_password_reset_email( user_email, token )
     """
-    try:
-        # Generate cryptographically secure token
-        token = secrets.token_urlsafe( 32 )
-
-        # Store in database using PostgreSQL repository
-        with get_db() as session:
-            token_repo = PasswordResetTokenRepository( session )
-            token_repo.create_token(
-                token=token,
-                user_id=uuid.UUID( user_id ),
-                expires_hours=1
-            )
-
-        return True, "Password reset token generated", token
-
-    except Exception as e:
-        return False, f"Failed to generate password reset token: {str( e )}", None
+    return _issue_token( PasswordResetTokenRepository, user_id, 1, "Password reset token generated", "password reset token" )
 
 
 def validate_password_reset_token( token: str ) -> Tuple[bool, str, Optional[str]]:
@@ -172,34 +196,7 @@ def validate_password_reset_token( token: str ) -> Tuple[bool, str, Optional[str
         if success:
             reset_password_with_token( user_id, new_password )
     """
-    try:
-        with get_db() as session:
-            token_repo = PasswordResetTokenRepository( session )
-
-            # Check if token is valid (not used, not expired)
-            if not token_repo.is_valid( token ):
-                token_obj = token_repo.get_by_token( token )
-                if token_obj is None:
-                    return False, "Invalid password reset token", None
-                elif token_obj.used:
-                    return False, "Password reset token already used", None
-                else:
-                    return False, "Password reset token expired", None
-
-            # Get the token to retrieve user_id
-            token_obj = token_repo.get_by_token( token )
-            if token_obj is None:
-                return False, "Invalid password reset token", None
-
-            user_id = str( token_obj.user_id )
-
-            # Mark token as used
-            token_repo.mark_used( token )
-
-        return True, "Password reset token valid", user_id
-
-    except Exception as e:
-        return False, f"Failed to validate password reset token: {str( e )}", None
+    return _consume_token( PasswordResetTokenRepository, token, "password reset token", "Password reset token valid" )
 
 
 def cleanup_expired_tokens() -> Tuple[int, int]:

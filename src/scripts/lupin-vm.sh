@@ -37,6 +37,10 @@ VM_DEEPILY_PROJECTS_DIR="/mnt/lupin-data"       # parent of the on-VM checkouts;
 # SIBLING of the projects dir (…/projects-data); the VM has no such sibling — /mnt/lupin-data IS
 # the projects dir — so it nests under the data disk instead. Holds claude-permissions.json.
 VM_DEEPILY_DATA_DIR="/mnt/lupin-data/projects-data"
+# The gitignored esbuild bundles the pages load from static/dist/. The compose file bind-mounts the VM checkout's
+# ./src over the image's, so the image's copy is hidden and the checkout must carry them; git cannot (bug 527fec6e).
+# One name per build-*.sh in package.json's "build" script; preflight-vm-lib.sh keeps the same list.
+DIST_BUNDLES="multiplexer console doc-podcast"
 # The CPU VM (post GPU→CPU downgrade) runs the cloud-GPU topology: model-server on Cloud Run,
 # NO local nvidia container. Using cloud-test.yml here recreates a local GPU model-server that
 # cannot start on the CPU VM ("could not select device driver nvidia"). Source of truth:
@@ -75,7 +79,7 @@ Usage: lupin-vm.sh [--dry-run] <subcommand> [args]
 
 Instance lifecycle:
   vm-status              show RUNNING / STOPPED / SUSPENDED
-  vm-start               start the instance (needed before SSH; VM is suspended-by-default)
+  vm-start               resume a SUSPENDED instance or start a TERMINATED one (needed before SSH); reports which
   vm-stop                stop the instance (cost control)
 
 SSH:
@@ -109,7 +113,9 @@ Deployment contract (task 47c4801b):
                          running mount sets, the Cloud SQL socket ITSELF (not the proxy's self-
                          report), and credential ACCEPTANCE with a wrong-key control.
                          Assert-only — every failure prints an executable remedy.
-                         `deploy` runs the pre arm before, and the post arm after, automatically.
+                         'deploy' runs the pre arm before, and the post arm after, automatically.
+  install-hooks          link the two git hooks (pre-commit, pre-push) on the VM's checkout; 'deploy' runs it
+                         after the checkout. Safe to re-run. Leaves a file in the way alone and says so.
   push-unversioned       ship the payloads git cannot deliver (gitignored keys, personal-data maps),
                          driven by src/conf/vm-unversioned-manifest.tsv. Rows with local_path '-'
                          are VM-local and only ASSERTED, never copied.
@@ -148,12 +154,57 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           install Python 3.13 (matches the dev box + image), builds the SDK venv on
                           it, symlinks the bundled 'claude'. One-time OAuth is a manual 'claude' run
                           you do afterward. Idempotent.
+  install-voice           run src/scripts/install-cosa-voice.sh on the VM, then read the registration
+                          back. It removes and re-adds the cosa-voice entry in the VM user's Claude
+                          Code config, so any hand-added env on that entry is dropped. It also
+                          overwrites the "hooks" key of ~/.claude/settings.json from the repo's
+                          template (a .bak-<epoch> copy is kept each run), may build ~/.venv-lupin-mcp and
+                          add its export to ~/.bashrc, and sends one test notification when the
+                          server is up. Needs, in order: a checkout, install-cli, push-env (writes
+                          ~/.lupin/config) and push-unversioned (delivers the notification key).
+                          The settings block defaults to Lupin:+Development; set
+                          LUPIN_MCP_CONFIG_BLOCK here to register another, e.g. Lupin:+Testing-GCS.
+                          It ends by reading the entry back and stops, saying why, if any scope
+                          lacks the variable or carries a value that names no settings block.
+                          Sessions pick the entry up when they next start. Safe to re-run.
   push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
                           both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT +
                           DEEPILY_PROJECTS_DIR + LUPIN_CC_VENV (operator-owned CC venv) +
                           LUPIN_DEV_EMAIL (notify target-user), and
                           create ~/.lupin/config (lupin CLI) if absent. Re-run anytime. Idempotent.
+  push-project-id         put LUPIN_GCP_PROJECT_ID (from your shell) into the VM's cloud-gpu.env as the
+                          line LUPIN_GCP_PROJECT_ID=. The cloud-gpu compose file requires it and the VM
+                          runs compose with --env-file, so without it every svc verb aborts. Keeps the
+                          file's owner and mode; says written / unchanged. Recreate the container to apply.
+  push-test-login         put the test role's password into the VM's cloud-gpu.env as the line
+                          LUPIN_TEST_DB_PASSWORD=. Reads Secret Manager lupin-db-test-password with your
+                          own gcloud login and sends the value to the VM on stdin: it is never in a
+                          command line, a log or this verb's output. Keeps the file's owner and mode,
+                          replaces the line if present, appends it if not, and says only set /
+                          replaced / unchanged. It does not recreate the container. The Cloud SQL
+                          lupin_test role and the template database must already exist.
+  push-test-mock-login [local|vm]
+                          write the test login the daily vector refresh needs into an owner-only
+                          (mode 600) env file at ~/.lupin/reuse-vector-refresh.env on this host (local,
+                          the default) or on the VM (vm). Reads Secret Manager lupin-test-mock-jobs-email
+                          and lupin-test-mock-jobs-password with your own gcloud login. The values travel
+                          on stdin: they are never in a command line, a log or this verb's output. It says
+                          only set / replaced / unchanged. reuse-vector-refresh.sh --install names this
+                          file in REUSE_VECTOR_REFRESH_ENV.
+  push-dist               ship the built static/dist bundles (multiplexer, console, doc-podcast) from this
+                          checkout to the VM checkout, which git cannot carry. Prints each bundle's build time beside the newest
+                          source time, warning only. Refuses, sending nothing, naming
+                          any bundle not built here (npm run build). deploy runs it after the code sync.
+  install-refresh-cron [local|vm]
+                          install the daily reuse-vector refresh cron lines on this host (local, the
+                          default) or on the VM (vm), with nothing set by hand. On the VM it sets
+                          LUPIN_ROOT, DEEPILY_DATA_DIR and PLANNING_IS_PROMPTING_ROOT from the known VM
+                          paths; locally it needs the last two already set, and says which is missing.
+                          The cron lines carry both, because cron never reads ~/.bashrc. The installer
+                          refuses, writing nothing, if no Python on the host can import the job. Warns
+                          if ~/.lupin/reuse-vector-refresh.env is absent (push-test-mock-login writes it).
+                          Ends by printing the cron status. A person runs it, never a Claude seat.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
@@ -176,7 +227,12 @@ shift || true
 # `gcloud config` project, which may point elsewhere. (This mirrored the same guard in
 # deploy-cloud-test.sh, retired 2026-08-26 — row 0d175dac.)
 require_project() {
-    : "${LUPIN_GCP_PROJECT_ID:?Set LUPIN_GCP_PROJECT_ID (e.g. export LUPIN_GCP_PROJECT_ID=hello-world-foo-423219)}"
+    # --dry-run only prints the command, so it may show a placeholder; --help never gets here.
+    if [ "$DRY_RUN" -eq 1 ] && [ -z "$( printenv LUPIN_GCP_PROJECT_ID )" ]; then
+        LUPIN_GCP_PROJECT_ID="<LUPIN_GCP_PROJECT_ID>"
+        log "LUPIN_GCP_PROJECT_ID is not set; showing a placeholder because this is a --dry-run"
+    fi
+    : "${LUPIN_GCP_PROJECT_ID:?LUPIN_GCP_PROJECT_ID is not set. Export it first: export LUPIN_GCP_PROJECT_ID=<your-project-id>}"
 }
 
 # ---- run-or-echo ---------------------------------------------------------
@@ -317,9 +373,37 @@ case "$SUBCMD" in
         ;;
 
     vm-start)
+        # The VM is suspended-by-default, and `instances start` refuses a SUSPENDED instance
+        # (it needs `resume`); a TERMINATED one needs `start`. Read the state, pick the verb,
+        # and say which one ran.
         require_project
-        runit gcloud compute instances start "$VM_NAME" \
-            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            runit gcloud compute instances describe "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --format='value(status)'
+            log "(dry-run) would then: SUSPENDED -> resume, TERMINATED/STOPPED -> start, RUNNING -> nothing"
+        else
+            VM_STATE="$( gcloud compute instances describe "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --format='value(status)' )" \
+                || die "could not read the state of $VM_NAME"
+            case "$VM_STATE" in
+                SUSPENDED|SUSPENDING)
+                    log "$VM_NAME is $VM_STATE: running 'instances resume'"
+                    runit gcloud compute instances resume "$VM_NAME" \
+                        --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+                    ;;
+                TERMINATED|STOPPED)
+                    log "$VM_NAME is $VM_STATE: running 'instances start'"
+                    runit gcloud compute instances start "$VM_NAME" \
+                        --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+                    ;;
+                RUNNING)
+                    log "$VM_NAME is already RUNNING: nothing to do"
+                    ;;
+                *)
+                    die "$VM_NAME is in state '${VM_STATE:-unknown}'; not starting it (wait for the transition to finish, then retry)"
+                    ;;
+            esac
+        fi
         ;;
 
     vm-stop)
@@ -619,7 +703,18 @@ case "$SUBCMD" in
         #    the deploy; set LUPIN_SKIP_PREFLIGHT=1 to override deliberately.
         #    Running both arms is what distinguishes "the deploy broke it" from "it was
         #    already broken" — the diagnosis that cost five minutes of bisection on 07-26.
-        if [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+        # 0a. The cloud-gpu compose file requires LUPIN_GCP_PROJECT_ID and the VM runs compose with
+        #     --env-file, which drops the shell's environment. A VM whose cloud-gpu.env lacks the line aborts
+        #     every compose call, the preflight's own included, so write it before anything else runs.
+        #     Fatal on failure: nothing after this can work without it (row d3550878).
+        PP_ARGS=( push-project-id )
+        [ "$DRY_RUN" -eq 1 ] && PP_ARGS=( --dry-run push-project-id )
+        bash "${BASH_SOURCE[0]}" "${PP_ARGS[@]}" \
+            || die "could not put LUPIN_GCP_PROJECT_ID in the VM's $ENV_FILE; every compose call there would abort. Fix that, then re-run."
+        if [ "$DRY_RUN" -eq 1 ]; then
+            # --dry-run prints and runs nothing; this step goes over IAP SSH, so it must not run.
+            log "(dry-run) PRE-deploy preflight on VM: bash src/scripts/preflight-vm.sh --phase pre"
+        elif [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
             log "PRE-deploy preflight (--phase pre)"
             if ! gcloud compute ssh "$VM_NAME" \
                     --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
@@ -634,6 +729,26 @@ case "$SUBCMD" in
         #    deploy target must mirror the branch and may have drifted). Preserves untracked
         #    data/env/keys — no git clean.
         do_push_bundle "$DEPLOY_BRANCH" "reset"
+        # 1b. The VM's planning-is-prompting copy is a push-repo snapshot, and the refresh cron's lock module
+        #     (workflow/scripts/crontab_lock.py) arrived in it after the first snapshot. Refresh it from the
+        #     local checkout at its HEAD. A failure is a loud warning, not a stop: the app deploy is unaffected.
+        #     LUPIN_SKIP_PIP_SYNC=1 skips it.
+        if [ "${LUPIN_SKIP_PIP_SYNC:-0}" = "1" ]; then
+            log "planning-is-prompting sync SKIPPED (LUPIN_SKIP_PIP_SYNC=1)"
+        elif [ -z "${PLANNING_IS_PROMPTING_ROOT:-}" ] || [ ! -d "$PLANNING_IS_PROMPTING_ROOT/.git" ]; then
+            log "WARN: PLANNING_IS_PROMPTING_ROOT is not a git checkout here, so the VM's planning-is-prompting copy was NOT refreshed"
+        else
+            log "refreshing the VM's planning-is-prompting from $PLANNING_IS_PROMPTING_ROOT @ $( git -C "$PLANNING_IS_PROMPTING_ROOT" rev-parse --short HEAD )"
+            PIP_SYNC_ARGS=( push-repo "$PLANNING_IS_PROMPTING_ROOT" "$( basename "$VM_PIP_ROOT" )" )
+            [ "$DRY_RUN" -eq 1 ] && PIP_SYNC_ARGS=( --dry-run "${PIP_SYNC_ARGS[@]}" )
+            bash "${BASH_SOURCE[0]}" "${PIP_SYNC_ARGS[@]}" || log "WARN: the planning-is-prompting refresh FAILED; the VM copy may be stale (the refresh cron needs its crontab_lock.py)"
+        fi
+        # 1c. The pages load gitignored bundles from static/dist/, and the VM's bind mount hides the image's copy,
+        #     so ship them from the local build. A failure is a loud warning: the app deploy is unaffected, the pages are not.
+        DIST_SYNC_ARGS=( push-dist )
+        [ "$DRY_RUN" -eq 1 ] && DIST_SYNC_ARGS=( --dry-run push-dist )
+        bash "${BASH_SOURCE[0]}" "${DIST_SYNC_ARGS[@]}" \
+            || log "WARN: push-dist FAILED; pages that load a bundle from static/dist (the doc viewer's podcast button) may be missing on the VM"
         # 2-4. restart both servers, then verify. `systemctl --user` needs XDG_RUNTIME_DIR wired
         #      up for the non-interactive SSH session; the arbiter bounce is best-effort (a failure
         #      is warned, not fatal) and the :8001 /health probe is the real proof it came back.
@@ -665,6 +780,8 @@ for p in $APP_PORT $ARBITER_PORT; do
   done
   echo \":\$p health -> \$st (after ~\$((i*8))s)\"
 done
+echo '== install git hooks (pre-commit, pre-push) =='
+bash src/scripts/install-git-hooks.sh || echo 'WARN: git hook install reported a problem (above); the post-deploy preflight below will say which hook is missing'
 echo '== [4/4] POST-deploy preflight (--phase post) =='
 bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight reported BLOCKING failures (above). NOT rolling back — a rollback on a half-applied deploy is more dangerous than a named failure. Fix forward.'"
         if [ "$DRY_RUN" -eq 1 ]; then
@@ -908,6 +1025,17 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
             --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase $PF_PHASE"
         ;;
 
+    install-hooks)
+        # Link the two git hooks (pre-commit, pre-push) on the VM's checkout. `deploy` runs the
+        # same installer after its checkout, so this verb is for a VM you did not just deploy to.
+        # Safe to re-run: a correct link is left alone. See src/scripts/install-git-hooks.sh.
+        require_project
+        runit gcloud compute ssh "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+            $SSH_KEEPALIVE \
+            --command "cd $VM_ROOT && bash src/scripts/install-git-hooks.sh"
+        ;;
+
     install-cli)
         # Install Claude Code + the Claude Agent SDK on the VM's HOST command line (NOT inside the
         # app container — the image has them, but that's unreachable for interactive host use).
@@ -951,6 +1079,54 @@ echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complet
         fi
         ;;
 
+    install-voice)
+        # Register the cosa-voice MCP server in the VM user's Claude Code config by running the
+        # repo's own installer there (row c9252819). The registration is per user and per host,
+        # so a bundle push does not deliver it. The installer removes and re-adds the entry, so
+        # the settings block must be passed through or a re-run resets it to the default.
+        require_project
+        VOICE_BLOCK_EXPORT=""
+        if [ -n "${LUPIN_MCP_CONFIG_BLOCK:-}" ]; then
+            case "$LUPIN_MCP_CONFIG_BLOCK" in
+                *[!A-Za-z0-9:+_-]*) die "LUPIN_MCP_CONFIG_BLOCK may hold only letters, digits and : + _ - (got '$LUPIN_MCP_CONFIG_BLOCK')" ;;
+            esac
+            # A misspelled block passes the character check and would be registered as typed.
+            # This checkout's settings file is the one the bundle ships, so ask it first.
+            VOICE_LOCAL_INI="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )/src/conf/lupin-app.ini"
+            # The same header match the preflight uses on the VM, so the two cannot disagree.
+            PFV_HEADER="[${LUPIN_MCP_CONFIG_BLOCK//+/ }]" awk '
+                { sub( /[ \t\r]+$/, "" ); if ( $0 == ENVIRON[ "PFV_HEADER" ] ) found = 1 }
+                END { exit !found }' "$VOICE_LOCAL_INI" \
+                || die "LUPIN_MCP_CONFIG_BLOCK names no block in $VOICE_LOCAL_INI: [${LUPIN_MCP_CONFIG_BLOCK//+/ }]"
+            VOICE_BLOCK_EXPORT="export LUPIN_MCP_CONFIG_BLOCK=$LUPIN_MCP_CONFIG_BLOCK"
+        fi
+        # After the installer, the entry is read back with the preflight's own reader and each
+        # value is checked to resolve: the installer hides the CLI's stderr and its own verify
+        # step is a notification, not a readback. A failed read says why before it stops; a
+        # bare non-zero exit after the installer's "complete" banner explains nothing.
+        RCMD_VOICE="set -e
+export PATH=\"\$HOME/.local/bin:\$PATH\"
+export LUPIN_ROOT=$VM_ROOT
+export LUPIN_CC_VENV=\"\$HOME/.venv-lupin-mcp\"
+$VOICE_BLOCK_EXPORT
+bash $VM_ROOT/src/scripts/install-cosa-voice.sh
+. $VM_ROOT/src/scripts/lib/preflight-vm-lib.sh
+registered=\"\$( pfv_mcp_registration_env \"\$HOME/.claude.json\" cosa-voice LUPIN_CONFIG_MGR_CLI_ARGS )\" || { rc=\$?; echo \"READBACK FAILED (reader rc=\$rc; 1 = these scopes lack the variable, 2 = not registered, 3 = wrong shape, 4 = unreadable): \$registered\" >&2; exit \$rc; }
+echo \"registered LUPIN_CONFIG_MGR_CLI_ARGS, as scope then value:\"
+echo \"\$registered\"
+echo \"\$registered\" | while IFS=\$'\\t' read -r scope value; do
+    why=\"\$( pfv_config_mgr_args_resolve \"\$value\" $VM_ROOT )\" || { echo \"READBACK FAILED: the \$scope registration does not resolve: \$why\" >&2; exit 1; }
+done"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) register cosa-voice on VM:"
+            printf '%s\n' "$RCMD_VOICE" >&2
+        else
+            log "registering cosa-voice on $VM_NAME host"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                --command "$RCMD_VOICE"
+        fi
+        ;;
     push-env)
         # Sync your dev-box shell environment to the VM host so both feel identical. SCPs your alias
         # file + the uppercase generator, REGENERATES the uppercase aliases ON the VM (from the just-
@@ -1071,6 +1247,228 @@ echo '== done — open a fresh shell (or: source ~/.bashrc) to pick up aliases +
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
                 --command "$RCMD_ENV"
+        fi
+        ;;
+
+    push-project-id)
+        # Row d3550878. docker-compose.cloud-gpu.yml requires LUPIN_GCP_PROJECT_ID, and the VM runs compose
+        # with --env-file, which drops the shell's environment. So the line must be in the VM's env file, or
+        # `config`, `ps` and every svc verb abort. The value is a project id, not a secret, so it may ride in
+        # the command string. It is checked here so the env file never gets a value it could misread.
+        require_project
+        case "$LUPIN_GCP_PROJECT_ID" in
+            *[!a-z0-9-]*) die "LUPIN_GCP_PROJECT_ID has characters a project id cannot have; use lowercase letters, digits and -" ;;
+        esac
+        PP_ENV_PATH="$VM_ROOT/$ENV_FILE"
+        read -r -d '' RCMD_PP <<PPEOF || true
+set -e
+f='$PP_ENV_PATH'
+sudo test -f "\$f" || { echo "no \$f on the VM; create it first" >&2; exit 3; }
+owner=\$(sudo stat -c '%u:%g' "\$f"); mode=\$(sudo stat -c '%a' "\$f")
+new=\$(mktemp); cur=\$(mktemp)
+trap 'rm -f "\$new" "\$cur"' EXIT
+sudo cat "\$f" > "\$cur"
+awk 'BEGIN { done = 0 }
+    index(\$0, "LUPIN_GCP_PROJECT_ID=") == 1 { if (!done) { print "LUPIN_GCP_PROJECT_ID=$LUPIN_GCP_PROJECT_ID"; done = 1 } next }
+    { print }
+    END { if (!done) print "LUPIN_GCP_PROJECT_ID=$LUPIN_GCP_PROJECT_ID" }' "\$cur" > "\$new"
+if sudo cmp -s "\$new" "\$f"; then echo "LUPIN_GCP_PROJECT_ID: unchanged"; exit 0; fi
+sudo install -o "\${owner%:*}" -g "\${owner#*:}" -m "\$mode" "\$new" "\$f"
+echo "LUPIN_GCP_PROJECT_ID: written"
+PPEOF
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would set LUPIN_GCP_PROJECT_ID in $PP_ENV_PATH on $VM_NAME. The remote command:"
+            printf '%s\n' "$RCMD_PP" | sed 's/^/    /'
+        else
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_PP"
+            log "done. The container reads the env file at create: recreate it to apply (lupin-vm.sh deploy, or svc up -d --force-recreate)."
+        fi
+        ;;
+
+    push-test-login)
+        # Row 80513825. The VM's env file is VM-local and hand-written (see vm-unversioned-manifest.tsv), so
+        # push-env, which writes ~/.bashrc exports, is the wrong door. The value rides on ssh's stdin; the
+        # command string below holds no secret, so it is safe to log and to show in a process list.
+        require_project
+        TL_SECRET="lupin-db-test-password"
+        TL_ENV_PATH="$VM_ROOT/$ENV_FILE"
+        read -r -d '' RCMD_TL <<TLEOF || true
+set -e
+f='$TL_ENV_PATH'
+sudo test -f "\$f" || { echo "no \$f on the VM; create it first" >&2; exit 3; }
+IFS= read -r pw
+[ -n "\$pw" ] || { echo "no value arrived on stdin" >&2; exit 4; }
+owner=\$(sudo stat -c '%u:%g' "\$f"); mode=\$(sudo stat -c '%a' "\$f")
+new=\$(mktemp); cur=\$(mktemp)
+trap 'rm -f "\$new" "\$cur"' EXIT
+sudo cat "\$f" > "\$cur"
+PW="\$pw" awk 'BEGIN { pw = ENVIRON["PW"]; done = 0 }
+    index(\$0, "LUPIN_TEST_DB_PASSWORD=") == 1 { if (!done) { print "LUPIN_TEST_DB_PASSWORD=" pw; done = 1 } next }
+    { print }
+    END { if (!done) print "LUPIN_TEST_DB_PASSWORD=" pw }' "\$cur" > "\$new"
+if sudo cmp -s "\$new" "\$f"; then echo "LUPIN_TEST_DB_PASSWORD: unchanged"; exit 0; fi
+had=no; if sudo grep -q '^LUPIN_TEST_DB_PASSWORD=' "\$f"; then had=yes; fi
+sudo install -o "\${owner%:*}" -g "\${owner#*:}" -m "\$mode" "\$new" "\$f"
+if [ "\$had" = yes ]; then echo "LUPIN_TEST_DB_PASSWORD: replaced"; else echo "LUPIN_TEST_DB_PASSWORD: set"; fi
+TLEOF
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would read Secret Manager $TL_SECRET with your gcloud login, then send it on stdin over IAP ssh to $VM_NAME to set LUPIN_TEST_DB_PASSWORD in $TL_ENV_PATH. The remote command, which holds no secret:"
+            printf '%s\n' "$RCMD_TL" | sed 's/^/    /'
+        else
+            tl_value="$( gcloud secrets versions access latest --secret="$TL_SECRET" --project="$LUPIN_GCP_PROJECT_ID" | tr -d '\r\n' )" \
+                || die "could not read Secret Manager $TL_SECRET (needs your IAM access to it)"
+            [ -n "$tl_value" ] || die "Secret Manager $TL_SECRET has no value; add one first"
+            # An env file is read by compose, not a shell: refuse anything it could misread. The value is never printed.
+            case "$tl_value" in
+                *[!A-Za-z0-9._~@%+=/-]*) die "the value of $TL_SECRET has characters an env file may misread; use letters, digits and . _ ~ @ % + = / -" ;;
+            esac
+            printf '%s\n' "$tl_value" | gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_TL"
+            unset tl_value
+            log "done. The container reads the env file at create: recreate it to apply (lupin-vm.sh deploy, or svc up -d --force-recreate)."
+        fi
+        ;;
+
+    push-test-mock-login)
+        # Decision 2e2324dd. Cron never reads ~/.bashrc, so the daily vector refresh gets its login from an
+        # owner-only file instead. The two values ride on stdin; the writer below holds no secret.
+        require_project
+        TM_WHERE="${1:-local}"
+        case "$TM_WHERE" in local|vm) ;; *) die "push-test-mock-login takes local or vm, not '$TM_WHERE'" ;; esac
+        TM_EMAIL_SECRET="lupin-test-mock-jobs-email"
+        TM_PASSWORD_SECRET="lupin-test-mock-jobs-password"
+        TM_REL=".lupin/reuse-vector-refresh.env"
+        read -r -d '' RCMD_TM <<'TMEOF' || true
+set -e
+umask 077
+d="$HOME/${rel%/*}"; f="$HOME/$rel"
+IFS= read -r em
+IFS= read -r pw
+[ -n "$em" ] && [ -n "$pw" ] || { echo "no value arrived on stdin" >&2; exit 4; }
+mkdir -p "$d"
+new=$(mktemp "$d/.tmp-login.XXXXXX")
+trap 'rm -f "$new"' EXIT
+printf "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='%s'\nLUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='%s'\n" "$em" "$pw" > "$new"
+chmod 600 "$new"
+if cmp -s "$new" "$f" && [ "$(stat -c '%a' "$f")" = 600 ]; then echo "$f: unchanged"; exit 0; fi
+had=no; [ -e "$f" ] && had=yes
+mv -f "$new" "$f"
+if [ "$had" = yes ]; then echo "$f: replaced"; else echo "$f: set"; fi
+TMEOF
+        RCMD_TM="rel='$TM_REL'
+$RCMD_TM"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would read Secret Manager $TM_EMAIL_SECRET and $TM_PASSWORD_SECRET with your gcloud login, then write ~/$TM_REL ($TM_WHERE, mode 600) with the values on stdin. The command, which holds no secret:"
+            printf '%s\n' "$RCMD_TM" | sed 's/^/    /'
+        else
+            tm_email="$( gcloud secrets versions access latest --secret="$TM_EMAIL_SECRET" --project="$LUPIN_GCP_PROJECT_ID" | tr -d '\r\n' )" \
+                || die "could not read Secret Manager $TM_EMAIL_SECRET (needs your IAM access to it)"
+            tm_password="$( gcloud secrets versions access latest --secret="$TM_PASSWORD_SECRET" --project="$LUPIN_GCP_PROJECT_ID" | tr -d '\r\n' )" \
+                || die "could not read Secret Manager $TM_PASSWORD_SECRET (needs your IAM access to it)"
+            [ -n "$tm_email" ] || die "Secret Manager $TM_EMAIL_SECRET has no value; add one first"
+            [ -n "$tm_password" ] || die "Secret Manager $TM_PASSWORD_SECRET has no value; add one first"
+            # The file is sourced by a shell inside single quotes: refuse a quote, which would end the string. Neither value is printed.
+            case "$tm_email$tm_password" in
+                *\'*) die "a value of $TM_EMAIL_SECRET or $TM_PASSWORD_SECRET holds a single quote, which the env file cannot carry" ;;
+            esac
+            if [ "$TM_WHERE" = vm ]; then
+                { printf '%s\n' "$tm_email"; printf '%s\n' "$tm_password"; } | gcloud compute ssh "$VM_NAME" \
+                    --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                    $SSH_KEEPALIVE --command "$RCMD_TM"
+            else
+                { printf '%s\n' "$tm_email"; printf '%s\n' "$tm_password"; } | bash -c "$RCMD_TM"
+            fi
+            unset tm_email tm_password
+            log "done. Install the cron lines on that host with: src/scripts/reuse-vector-refresh.sh --install (a person runs it)."
+        fi
+        ;;
+
+    push-dist)
+        # The VM bind-mounts its checkout's ./src over the image, so the bundles baked into the image are hidden and the
+        # gitignored static/dist/ must be on the VM checkout itself. Ship the locally built folders by archive+SCP.
+        require_project
+        PD_LOCAL="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )/src/lupin_app/static/dist"
+        PD_MISSING=""
+        for PD_B in $DIST_BUNDLES; do
+            [ -f "$PD_LOCAL/$PD_B/manifest.json" ] || PD_MISSING="$PD_MISSING $PD_B"
+        done
+        [ -z "$PD_MISSING" ] || die "push-dist: not built in $PD_LOCAL:$PD_MISSING (run: npm run build). Nothing was sent."
+        # Say how fresh each bundle is beside the newest TypeScript source (a warning only, never a refusal: a file's
+        # modified time says when it was saved, not whether the bundle matches it).
+        PD_SRC_NEWEST="$( find "$PD_LOCAL/../js" -name '*.ts' -printf '%T@\n' 2>/dev/null | sort -n | tail -1 || true )"
+        PD_SRC_TIME="$( [ -n "$PD_SRC_NEWEST" ] && date -u -d "@${PD_SRC_NEWEST%.*}" +%Y-%m-%dT%H:%M:%SZ || echo unknown )"
+        for PD_B in $DIST_BUNDLES; do
+            PD_BUILT="$( sed -n 's/.*"built"[^"]*"\([^"]*\)".*/\1/p' "$PD_LOCAL/$PD_B/manifest.json" )"
+            PD_NOTE=""
+            [ -n "$PD_BUILT" ] && [ "$PD_SRC_TIME" != unknown ] && [[ "$PD_BUILT" < "$PD_SRC_TIME" ]] && PD_NOTE="  WARN: older than the newest source; run npm run build"
+            log "bundle $PD_B: built ${PD_BUILT:-unknown}, newest source $PD_SRC_TIME$PD_NOTE"
+        done
+        PD_DEST="$VM_ROOT/src/lupin_app/static/dist"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would: tar -czf dist.tar.gz $DIST_BUNDLES; gcloud compute scp -> VM:/tmp; sudo mkdir -p $PD_DEST; sudo tar -xzf -C $PD_DEST; chown 1001"
+        else
+            PD_TAR="$( mktemp -t "lupin-dist-XXXXXX.tar.gz" )"
+            # shellcheck disable=SC2086
+            tar -czf "$PD_TAR" -C "$PD_LOCAL" $DIST_BUNDLES || die "push-dist: tar failed"
+            gcloud compute scp "$PD_TAR" "$VM_NAME:/tmp/lupin-dist.tar.gz" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+            rm -f "$PD_TAR"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE \
+                --command "sudo mkdir -p $PD_DEST && sudo tar -xzf /tmp/lupin-dist.tar.gz -C $PD_DEST && sudo chown -R 1001:1001 $PD_DEST && rm -f /tmp/lupin-dist.tar.gz && echo DIST_SHIPPED && ls $PD_DEST"
+        fi
+        ;;
+
+    install-refresh-cron)
+        # The one command that installs the reuse-vector refresh cron. Cron and a non-interactive ssh shell never read
+        # ~/.bashrc, so the variables the job needs are set here, from known paths, not from the caller's shell.
+        require_project
+        IR_WHERE="${1:-local}"
+        case "$IR_WHERE" in local|vm) ;; *) die "install-refresh-cron takes local or vm, not '$IR_WHERE'" ;; esac
+        IR_PREP=""
+        if [ "$IR_WHERE" = vm ]; then
+            IR_ROOT="$VM_ROOT"; IR_DATA="$VM_DEEPILY_DATA_DIR"; IR_PIP="$VM_PIP_ROOT"
+            # The purpose-line hand-off folder sits inside the checkout, which the container user (uid 1001) owns, so
+            # the ssh user that cron runs as cannot create it (Permission denied on the first build, 2026-10-25).
+            # Create it owned by 1001 with this user's group, group-writable and setgid, so both sides can write.
+            IR_PREP="HANDOFF=\"\$( sed -n 's/^reuse candidate purpose handoff subdir *= *//p' src/conf/lupin-app.ini | head -1 )\"
+[ -n \"\$HANDOFF\" ] || { echo 'ERROR: src/conf/lupin-app.ini has no reuse candidate purpose handoff subdir'; exit 1; }
+sudo install -d -m 2775 -o 1001 -g \"\$( id -g )\" \"$IR_ROOT/\$HANDOFF\""
+            # The vector build imports numpy late, and ~/.venv-lupin-mcp has none and no pip (cron runs died at
+            # vector_build.py on 2026-10-29 and 10-30). Install the pinned file with uv, else ensurepip plus pip.
+            IR_PREP="$IR_PREP
+VENVPY=\"\$HOME/.venv-lupin-mcp/bin/python\"
+if [ -x \"\$VENVPY\" ] && ! \"\$VENVPY\" -c 'import numpy' 2>/dev/null; then
+  NUMPY_REQ=\"$IR_ROOT/src/scripts/requirements-reuse-vector-refresh.txt\"
+  if [ -x \"\$HOME/.local/bin/uv\" ]; then \"\$HOME/.local/bin/uv\" pip install --python \"\$VENVPY\" -r \"\$NUMPY_REQ\"
+  else \"\$VENVPY\" -m ensurepip --upgrade && \"\$VENVPY\" -m pip install -r \"\$NUMPY_REQ\"; fi
+fi"
+        else
+            IR_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+            IR_DATA="${DEEPILY_DATA_DIR:-}"; IR_PIP="${PLANNING_IS_PROMPTING_ROOT:-}"
+            [ -n "$IR_DATA" ] || die "install-refresh-cron local needs DEEPILY_DATA_DIR set, so the cron lines can carry it"
+            [ -n "$IR_PIP" ] || die "install-refresh-cron local needs PLANNING_IS_PROMPTING_ROOT set, so the cron lines can carry it"
+        fi
+        RCMD_IR="set -e
+export LUPIN_ROOT='$IR_ROOT' DEEPILY_DATA_DIR='$IR_DATA' PLANNING_IS_PROMPTING_ROOT='$IR_PIP'
+[ -r \"\$HOME/.lupin/reuse-vector-refresh.env\" ] || echo \"WARN: \$HOME/.lupin/reuse-vector-refresh.env is missing, so the refresh cannot log in; run lupin-vm.sh push-test-mock-login $IR_WHERE\"
+cd '$IR_ROOT'
+$IR_PREP
+bash src/scripts/reuse-vector-refresh.sh --install
+bash src/scripts/reuse-vector-refresh.sh --status"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would run on the $IR_WHERE host:"
+            printf '%s\n' "$RCMD_IR" | sed 's/^/    /'
+        elif [ "$IR_WHERE" = vm ]; then
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_IR"
+        else
+            bash -c "$RCMD_IR"
         fi
         ;;
 

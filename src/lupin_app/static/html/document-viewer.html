@@ -86,11 +86,35 @@
             display: none;
         }
 
+        /* Row e23b9ed6 — the podcast button's success line must not read as an error. */
+        .doc-download-status.is-ok {
+            color: #166534;
+        }
+
         /* Ticket 416d4b00 — the bar now carries up to three buttons, each hidden on its
            own: 📁 Folder and ⬇ Download on a file, ⬆ Upload on a folder (admins only). */
         .doc-toolbar-buttons {
             display: flex;
             gap: 6px;
+        }
+
+        /* Row e23b9ed6 — the in-page confirmation before a podcast starts (never a browser dialog). */
+        .doc-podcast-confirm {
+            font-size: 12px;
+            color: #1f2937;
+            background: rgb( 255, 255, 255, 0.95 );
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 6px 8px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            max-width: 520px;
+        }
+
+        .doc-podcast-confirm[hidden] {
+            display: none;
         }
 
         .doc-upload-status {
@@ -388,9 +412,23 @@
                     <button type="button" id="doc-upload-btn" class="doc-download-btn"
                             data-testid="doc-upload-btn" hidden
                             title="Upload a file into this folder (or drop one on the listing)">⬆ Upload</button>
+                    <button type="button" id="doc-copy-btn" class="doc-download-btn"
+                            data-testid="doc-copy-btn" hidden
+                            title="Copy the raw text of this file to the clipboard">📋 Copy</button>
                     <button type="button" id="doc-download-btn" class="doc-download-btn"
                             data-testid="doc-download-btn" hidden
                             title="Download the original file, without the viewer around it">⬇ Download</button>
+                    <button type="button" id="doc-podcast-btn" class="doc-download-btn"
+                            data-testid="doc-podcast-btn" hidden
+                            title="Make a podcast of this file">🎙 Make a podcast</button>
+                </div>
+                <div id="doc-podcast-confirm" class="doc-podcast-confirm" data-testid="doc-podcast-confirm"
+                     role="group" aria-label="Confirm the podcast" hidden>
+                    <span id="doc-podcast-text" data-testid="doc-podcast-text"></span>
+                    <button type="button" id="doc-podcast-yes" class="doc-download-btn"
+                            data-testid="doc-podcast-yes">Yes, make it</button>
+                    <button type="button" id="doc-podcast-cancel" class="doc-download-btn"
+                            data-testid="doc-podcast-cancel">Cancel</button>
                 </div>
                 <span id="doc-download-status" class="doc-download-status" role="status"></span>
                 <div id="doc-upload-status" class="doc-upload-status" role="status"
@@ -404,6 +442,9 @@
     <script src="/static/js/lupin-nav.js" defer></script>
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
+    <!-- Row e23b9ed6: the "Make a podcast" button's logic. Built by src/scripts/build-doc-podcast.sh from
+         js/multiplexer/docPodcast/. A missing bundle leaves the page exactly as it was, with no button. -->
+    <script type="module" src="/static/dist/doc-podcast/doc-podcast.js"></script>
     <!--
         Path-prefix dispatch.
 
@@ -611,7 +652,14 @@
                 const contentType = response.headers.get( 'content-type' ) || '';
                 if ( !contentType.includes( 'application/json' ) || /\.json$/i.test( filename ) ) {
                     wireDownload( fetchUrl, filename );
+                    const copyable = isCopyableType( contentType, filename );
+                    wireCopy( fetchUrl, copyable );
+                    if ( copyable ) preloadRawText( response );
                     wireFolder( folderPathFor( rawPath, apiPath === '/api/io/file' && firstSeg !== 'io' ) );
+                    // Row e23b9ed6: tell the podcast bundle a FILE is showing. It may not have loaded yet, so
+                    // leave the path where it reads it at boot as well as firing the event.
+                    window.__docViewerFilePath = rawPath;
+                    document.dispatchEvent( new CustomEvent( 'doc-viewer-file', { detail: { path: rawPath } } ) );
                 }
 
                 // Polymorphic dispatch by Content-Type:
@@ -813,6 +861,105 @@
                     a.remove();
                     // Revoke after the browser has taken the bytes, not synchronously.
                     setTimeout( () => URL.revokeObjectURL( url ), 60000 );
+                } catch ( err ) {
+                    status.textContent = err.message;
+                } finally {
+                    btn.disabled = false;
+                }
+            } );
+        }
+
+        // Row 20e26936 — 📋 Copy: the raw text on the clipboard, not the rendered page.
+        //
+        // Requires:
+        //     - contentType is the response's Content-Type header ( may be empty )
+        //     - filename is the last path segment
+        // Ensures:
+        //     - true for text/* ( markdown, source, plain text ) and for a .json FILE
+        //     - false for images, audio, video, PDF and every other binary type
+        //     - a directory listing never reaches here ( it returns before the bar is wired )
+        function isCopyableType( contentType, filename ) {
+            if ( contentType.startsWith( 'text/' ) ) return true;
+            return contentType.includes( 'application/json' ) && /\.json$/i.test( filename || '' );
+        }
+
+        // Keeps the raw text ready BEFORE the click, from the response the page already holds,
+        // so the click can copy synchronously with no network call. Firefox ties a clipboard
+        // write to the click's user activation, and an awaited fetch in between can lose it.
+        //
+        // Requires: response is the not-yet-consumed Response for the file ( cloned here )
+        // Ensures:  window.__docViewerRawText becomes the body string once it has arrived; a
+        //           failure leaves it unset and the click falls back to fetching
+        function preloadRawText( response ) {
+            window.__docViewerRawText = null;
+            response.clone().text().then( ( t ) => { window.__docViewerRawText = t; } ).catch( () => {
+                // Left unset on purpose: the click handler fetches when nothing is preloaded.
+            } );
+        }
+
+        // Puts `text` on the clipboard, or throws.
+        //
+        // ⚠️ navigator.clipboard exists only in a SECURE context ( https or localhost ). The
+        // viewer is often opened over plain http on a LAN host, where it is undefined, so the
+        // fallback is a hidden textarea + execCommand( "copy" ) rather than a dead button.
+        async function writeToClipboard( text ) {
+            if ( navigator.clipboard && navigator.clipboard.writeText ) {
+                await navigator.clipboard.writeText( text );
+                return;
+            }
+            const ta = document.createElement( 'textarea' );
+            ta.value = text;
+            ta.setAttribute( 'readonly', '' );
+            ta.style.position = 'fixed';
+            ta.style.opacity  = '0';
+            document.body.appendChild( ta );
+            ta.select();
+            let ok = false;
+            try {
+                ok = document.execCommand( 'copy' );
+            } finally {
+                ta.remove();
+            }
+            if ( !ok ) throw new Error( 'Copy failed: the browser refused clipboard access' );
+        }
+
+        // Requires:
+        //     - fetchUrl is the same API URL the page itself loaded
+        //     - copyable is the verdict of isCopyableType()
+        // Ensures:
+        //     - the button is shown; DISABLED with an explanatory title when not copyable
+        //     - a click copies the body preloaded by preloadRawText() with no network call; if
+        //       none is preloaded it re-requests it through authedFetch, then copies; the label reads "✓ Copied" for 1.5s
+        //     - any failure is said beside the button, never in a browser dialog
+        function wireCopy( fetchUrl, copyable ) {
+            const bar    = document.getElementById( 'doc-viewer-toolbar' );
+            const btn    = document.getElementById( 'doc-copy-btn' );
+            const status = document.getElementById( 'doc-download-status' );
+            if ( !bar || !btn || btn.dataset.wired === 'true' ) return;
+            btn.dataset.wired = 'true';
+            bar.hidden = false;
+            btn.hidden = false;
+            if ( !copyable ) {
+                btn.disabled = true;
+                btn.title    = 'Only text files can be copied — use ⬇ Download for this file type';
+                return;
+            }
+            const label = btn.textContent;
+            btn.addEventListener( 'click', async () => {
+                btn.disabled       = true;
+                status.textContent = '';
+                try {
+                    // Preloaded text first: no await before the clipboard call, so the
+                    // click's user activation is still live ( Firefox ). Fetch is the fallback.
+                    let text = window.__docViewerRawText;
+                    if ( typeof text !== 'string' ) {
+                        const resp = await window.__docViewerAuthedFetch( fetchUrl, {} );
+                        if ( !resp.ok ) throw new Error( 'Copy failed (HTTP ' + resp.status + ')' );
+                        text = await resp.text();
+                    }
+                    await writeToClipboard( text );
+                    btn.textContent = '✓ Copied';
+                    setTimeout( () => { btn.textContent = label; }, 1500 );
                 } catch ( err ) {
                     status.textContent = err.message;
                 } finally {
@@ -1156,9 +1303,9 @@
             // result non-negative — JavaScript's % returns the sign of the
             // dividend, so a bare ( offset - minute ) % period goes negative for
             // most of every hour.
-            const minutes = next.getMinutes();
+            const minutes = next.getUTCMinutes();
             const forward = ( ( ( offsetMin - minutes ) % periodMin ) + periodMin ) % periodMin;
-            next.setMinutes( minutes + forward );
+            next.setUTCMinutes( minutes + forward );
 
             let delayMs = next.getTime() - now.getTime();
             if ( delayMs < AUTOREFRESH_MIN_LEAD_MS ) delayMs += periodMin * 60 * 1000;

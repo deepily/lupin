@@ -1,0 +1,4 @@
+{
+  "src/x/Widget.ts" : [ [ 1, "summary-length" ], [ 23, "bare-ref" ], [ 23, "caps" ] ],
+  "src/x/Broken.js" : [ [ 4, "parse-error" ] ]
+}

@@ -29,6 +29,7 @@
 /** The two batch verbs, in the fixed order they render in. */
 import { ownLookup } from "../shared/ownLookup";
 
+/** The two batch verbs, approve and won't-fix, in the order the buttons render. */
 export const HOLDING_BATCH_VERBS: ReadonlyArray<string> = [ "approve", "wont_fix" ];
 
 /**
@@ -104,6 +105,9 @@ export const HOLDING_BATCH_BLANK_REASON =
  */
 export const HOLDING_BATCH_NO_ROWS = "No rows in this group.";
 
+/** What a plan with no ids reports. Carbon copy of notifications.js `_handleHoldingPlanApproveClick`. */
+export const HOLDING_BATCH_NO_ROWS_PLAN = "No rows in this plan.";
+
 /**
  * The group status line WHILE a batch is running.
  *
@@ -171,4 +175,68 @@ export function holdingBatchExtras( verb: string, reason: string ): Record<strin
   const needs = holdingBatchNeeds( verb );
   if ( needs === null ) return {};
   return needs.reason ? { reason } : {};
+}
+
+// ---------------------------------------------------------------------------
+// Arm, then confirm (row 376dd4cb)
+// ---------------------------------------------------------------------------
+//
+// Rick approved a held row set by accident with one click, and asked that "Approve all"
+// and "Won't fix all" work the way the per-row Submit already does: the first click ARMS
+// the button (it changes its own label and colour), the second CONFIRMS. A browser
+// `confirm()` is out for the reason stated at the top of this file.
+//
+// The earlier note above ("Approve is the non-destructive direction: no confirm") is
+// superseded for the batch: a batch approve is one click over many rows, and the promotion
+// is what asks Rick, so "demoted straight back" is a cleanup, not an undo.
+
+/** The class an armed button carries — the same one the per-row Submit uses. */
+export const HOLDING_BATCH_ARMED_CLASS = "task-submit-armed";
+
+/** A batch button's resting label. Pinned equal to the label the group template renders. */
+export function holdingBatchRestLabel( verb: string ): string {
+  return verb === "wont_fix" ? "Won't fix all" : "Approve all";
+}
+
+/**
+ * The label an ARMED batch button carries. It names the verb and the count, so the second
+ * click is a decision about a stated number of rows, not a repeat of the first.
+ * Carbon copy of notifications.js `_armHoldingBatchButton`.
+ */
+export function holdingBatchConfirmLabel( verb: string, count: number ): string {
+  return verb === "wont_fix"
+    ? `Confirm won't fix all ${ count }`
+    : `Confirm approve all ${ count }`;
+}
+
+/**
+ * The group status line while a batch button is armed. Not remembered across a repaint:
+ * a repaint rebuilds the buttons unarmed, and the line must not outlive the arming.
+ * Carbon copy of notifications.js `_armHoldingBatchButton`.
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line — c8 reports ONE location (the identifier itself) where a real conditional carries two; both arms of the ternary below ARE exercised (approve and wont_fix), pinned by holding_area_batch.test.ts.
+export function holdingBatchArmedStatus( verb: string, count: number ): string {
+  return verb === "wont_fix"
+    ? `Click again to close ${ count } rows as won't fix with this reason.`
+    : `Click again to approve ${ count } rows.`;
+}
+
+// ---------------------------------------------------------------------------
+// Arm, then confirm — the plan header's button (row 376dd4cb, plan-level half)
+// ---------------------------------------------------------------------------
+
+/**
+ * The label an ARMED plan button carries. Carbon copy of notifications.js `_armHoldingPlanButton`.
+ */
+export function holdingPlanConfirmLabel( count: number ): string {
+  return `Confirm approve all ${ count }`;
+}
+
+/**
+ * The plan status line while its button is armed. The renderer paints it again after a repaint
+ * while the plan stays open. Carbon copy of notifications.js `_armHoldingPlanButton`.
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line (c8 reports one branch location at the identifier, line 238, with no conditional in the body); the function is called and its string pinned by holding_area_batch.test.ts and the plan tests.
+export function holdingPlanArmedStatus( count: number ): string {
+  return `Click again to approve ${ count } rows in this plan.`;
 }

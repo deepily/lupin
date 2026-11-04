@@ -44,7 +44,24 @@ variable "min_instances" {
 
 variable "max_instances" {
   type        = number
-  description = "Maximum Cloud Run instances. Pinned to 1 — the model server is a single-GPU singleton (per design Set B)."
+  description = "Maximum Cloud Run instances (template scaling). Module default 1 — the single-GPU singleton (per design Set B); envs/test sets 3 to match the live service (Rick 2026-10-30, row 2f4fd59e)."
+  default     = 1
+}
+
+variable "scaling_mode" {
+  type        = string
+  description = "Service-level scaling mode: \"\" omits the service-level scaling block (automatic scaling); \"MANUAL\" pins the count at manual_instance_count."
+  default     = ""
+
+  validation {
+    condition     = contains( ["", "AUTOMATIC", "MANUAL"], var.scaling_mode )
+    error_message = "scaling_mode must be \"\", AUTOMATIC or MANUAL."
+  }
+}
+
+variable "manual_instance_count" {
+  type        = number
+  description = "Instance count when scaling_mode is MANUAL; ignored otherwise."
   default     = 1
 }
 
@@ -192,7 +209,7 @@ variable "service_account_email" {
 #
 # ⇒ Do NOT point these back at lupin-notification-api-key "to reduce secret
 #   sprawl". The sprawl is the fix.
-# src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+# Decision record: src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the model server no longer shares the notification key)
 
 variable "api_key_secret_id" {
   type        = string

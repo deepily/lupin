@@ -149,14 +149,15 @@ DIALOGUE GUIDELINES:
 8. End segments with hooks that lead to next topic
 
 OUTPUT FORMAT:
-Return a JSON object with this structure:
+Return a JSON object with this structure. Inside a "text" value every double quote is
+escaped with a backslash, so a pause tag is written <break time=\\"1.5s\\"/> there.
 {
     "title": "Episode title",
     "segments": [
         {
             "speaker": "Host Name",
             "role": "curious|expert",
-            "text": "Dialogue with <break time=\"1.0s\"/> pacing markers",
+            "text": "Dialogue with <break time=\\"1.0s\\"/> pacing markers",
             "topic_reference": "which topic this covers"
         }
     ],
@@ -400,7 +401,7 @@ lenient_json_loads = recover_json_object
 
 def parse_analysis_response( response_content: str ) -> dict:
     """
-    Parse the content analysis response from Claude (D6-LENIENT).
+    Parse the content analysis response from Claude (lenient parse).
 
     Requires:
         - response_content contains JSON (possibly with markdown / prose)
@@ -433,29 +434,29 @@ def parse_analysis_response( response_content: str ) -> dict:
     }
 
 
-def parse_script_response( response_content: str ) -> dict:
+def parse_script_response( response_content: str, label: str = "podcast-script" ) -> dict:
     """
-    Parse the script generation response from Claude (D6-LENIENT).
+    Parse the script generation response from Claude (lenient parse).
 
     Requires:
         - response_content contains a JSON script (possibly with markdown / prose)
+        - label is a short tag naming the job, used in the failure dump file name
 
     Ensures:
         - Returns dictionary with title, segments, key_topics
         - Recovers JSON embedded in surrounding prose (bounded-CC tolerant)
-        - RAISES ValueError if no JSON object can be recovered (P0 4317efd1) —
-          the caller (orchestrator initial-generation) dead-letters the job with
-          an honest failure rather than presenting an empty script for approval.
+        - Raises ValueError, naming the saved raw-response file, if no JSON object can be recovered; the caller
+          (orchestrator initial-generation) dead-letters the job with an honest
+          failure rather than presenting an empty script for approval
 
-    Fail-loud posture (P0 4317efd1): a previous version returned a silent
-    "Untitled Podcast" / 0-segment fallback here, which flowed all the way to the
-    human approval gate looking like a normal (if empty) result. That is why the
-    zero-segment failure hid since March. Unrecoverable output now raises; the
-    orchestrator additionally floors a genuinely-empty (parsed-but-0-segment)
-    script BEFORE the approval gate.
+    Fail-loud posture: unrecoverable output raises instead of returning a silent
+    "Untitled Podcast" / 0-segment fallback, which would reach the human approval
+    gate looking like a normal (if empty) result. The orchestrator additionally
+    floors a parsed-but-0-segment script before the approval gate.
 
     Args:
         response_content: Raw response from Claude
+        label: Tag for the failure dump file name, such as the podcast id
 
     Returns:
         dict: Parsed script data
@@ -463,7 +464,8 @@ def parse_script_response( response_content: str ) -> dict:
     Raises:
         ValueError: if the response contains no recoverable JSON object.
     """
-    parsed = recover_json_object( response_content )
+    dump_info = {}
+    parsed    = recover_json_object( response_content, label=label, dump_info=dump_info )
     if isinstance( parsed, dict ):
         # Validate required fields
         if "segments" not in parsed:
@@ -480,7 +482,7 @@ def parse_script_response( response_content: str ) -> dict:
     # "Untitled Podcast" to approve.
     raise ValueError(
         "Podcast script response contained no recoverable JSON object — the model "
-        "output could not be parsed into a script."
+        f"output could not be parsed into a script. Raw response saved to: {dump_info.get( 'path' )}"
     )
 
 

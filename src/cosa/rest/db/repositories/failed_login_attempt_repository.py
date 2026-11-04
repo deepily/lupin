@@ -140,7 +140,7 @@ class FailedLoginAttemptRepository(BaseRepository[FailedLoginAttempt]):
             - minutes: Look back period in minutes (default: 15)
 
         Ensures:
-            - Efficient COUNT query
+            - Efficient `COUNT` query
             - Case-insensitive email matching
 
         Returns:
@@ -167,7 +167,7 @@ class FailedLoginAttemptRepository(BaseRepository[FailedLoginAttempt]):
             - minutes: Look back period in minutes (default: 15)
 
         Ensures:
-            - Efficient COUNT query
+            - Efficient `COUNT` query
 
         Returns:
             Number of failed attempts
@@ -222,11 +222,4 @@ class FailedLoginAttemptRepository(BaseRepository[FailedLoginAttempt]):
             # Cleanup old attempts (run daily via cron)
             deleted = attempt_repo.cleanup_old( days_old=30 )
         """
-        cutoff_date = datetime.now( timezone.utc ) - timedelta( days=days_old )
-
-        result = self.session.query( FailedLoginAttempt ).filter(
-            FailedLoginAttempt.attempt_time < cutoff_date
-        ).delete( synchronize_session=False )
-
-        self.session.flush()
-        return result
+        return self._delete_older_than( FailedLoginAttempt.attempt_time, days_old )

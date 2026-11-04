@@ -44,6 +44,7 @@ if __name__ == "__main__":
 
 import anyio
 import functools
+import importlib
 import logging
 import os
 import re
@@ -59,6 +60,7 @@ from pydantic import ValidationError
 from fastmcp import FastMCP
 
 from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp import validation_alert_throttle
 
 # Import from lupin_cli.notifications (the notification library)
 from lupin_cli.notifications.notification_models import (
@@ -91,12 +93,13 @@ from cosa.utils.notification_utils import (
     is_known_project
 )
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
+from cosa.utils.speech_text import strip_markdown_links_for_speech
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
     get_claude_session_id_with_source, wait_for_session_id_with_source,
     SOURCE_CWD_FALLBACK, DEFINITIVE_SOURCES,
     clear_cached_session_id, _find_session_file, _read_session_file,
-    get_speakerphone, set_speakerphone
+    get_speakerphone, set_speakerphone, atomic_write_json
 )
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     log_to_stream,
@@ -270,20 +273,31 @@ def _get_sender_id( project: str, session_id: str = None ) -> str:
 ERROR_SENDER_ID = "claude.code@errors.deepily.ai"
 
 
-def _send_validation_error( detail: str ) -> None:
+def _send_validation_error( detail: str, project: str ) -> None:
     """
-    Send urgent notification about a validation failure.
+    Send urgent notification about a validation failure, at most once per project per cooldown.
 
     Requires:
         - Lupin FastAPI server is running (for notification delivery)
+        - project is the project name the failure belongs to
 
     Ensures:
-        - Sends urgent-priority notification from ERROR_SENDER_ID
-        - Logs critical message regardless of notification success
+        - Logs critical message regardless of notification success or suppression
+        - Sends urgent-priority notification from ERROR_SENDER_ID unless this project already had
+          one DELIVERED within `validation_alert_throttle.COOLDOWN_SECONDS`; a suppressed repeat
+          logs a warning line instead of notifying
+        - Records the send only after delivery succeeded, so an undelivered alert is retried by
+          the next start; a missing or corrupt throttle file means send (fail open)
         - Never raises (all exceptions caught)
     """
     msg = f"COSA-VOICE MCP VALIDATION FAILED\n\n{detail}"
     logger.critical( msg )
+    if validation_alert_throttle.is_suppressed( project ):
+        logger.warning(
+            f"MCP validation alert for project '{project}' not re-sent: one was already delivered "
+            f"within the last {validation_alert_throttle.COOLDOWN_SECONDS // 3600}h"
+        )
+        return
     try:
         request = AsyncNotificationRequest(
             message           = msg,
@@ -291,7 +305,9 @@ def _send_validation_error( detail: str ) -> None:
             priority          = NotificationPriority( "urgent" ),
             sender_id         = ERROR_SENDER_ID
         )
-        notify_user_async( request=request, debug=False )
+        response = notify_user_async( request=request, debug=False )
+        if response.success:
+            validation_alert_throttle.record_sent( project )
     except Exception as e:
         logger.warning( f"Could not send validation error notification: {e}" )
 
@@ -336,7 +352,8 @@ def _validate_repo_account( project: str ) -> None:
             f"   email = {expected_email}\n"
             f"   password = <the password you set in the admin UI>\n\n"
             f"Once the account exists, the CC Notification Listener can authenticate\n"
-            f"via WebSocket and auto-start receiving hook events for this repo."
+            f"via WebSocket and auto-start receiving hook events for this repo.",
+            project
         )
         return
 
@@ -355,7 +372,8 @@ def _validate_repo_account( project: str ) -> None:
                 f"To fix:\n"
                 f"1. Open the Admin UI: {SERVER_URL}/app/admin/users\n"
                 f"2. Verify or create the user account: {expected_email}\n"
-                f"3. Check that the password in ~/.lupin/config [{project}] matches"
+                f"3. Check that the password in ~/.lupin/config [{project}] matches",
+                project
             )
             return
     except ( requests.ConnectionError, requests.Timeout ) as e:
@@ -366,7 +384,8 @@ def _validate_repo_account( project: str ) -> None:
         _ACCOUNT_VALIDATED = False
         _send_validation_error(
             f"Cannot reach Lupin server at {SERVER_URL} ({type( e ).__name__}).\n"
-            f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh"
+            f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh",
+            project
         )
         return
     except Exception as e:
@@ -389,7 +408,18 @@ def _handle_sigterm( signum, frame ):
     sys.exit( 0 )
 
 
-signal.signal( signal.SIGTERM, _handle_sigterm )
+def install_sigterm_handler():
+    """
+    Make SIGTERM exit the server cleanly.
+
+    Requires:
+        - the caller is the server entry point, in the main thread
+
+    Ensures:
+        - SIGTERM runs _handle_sigterm, which exits with code 0
+        - importing this module does not call it, so a test process keeps its own handler
+    """
+    signal.signal( signal.SIGTERM, _handle_sigterm )
 
 # ============================================================================
 # Initialize at module load
@@ -842,8 +872,9 @@ def _refuse_borrowed_identity( verb: str, source: Optional[ str ] = None ) -> Op
     into a fail-to-resolve, and a false "your session is broken" is what cost Rick an
     afternoon. So the tier still answers, and THIS is what stops the answer being acted on.
 
-    ⚠️ SCOPE IS DELIBERATELY NARROW — WRITES THAT CARRY AN IDENTITY, NOTHING ELSE. `notify`
-    and the `commons_read` family are untouched: a notification from the wrong pane is noise,
+    ⚠️ SCOPE IS DELIBERATELY NARROW — WRITES THAT CARRY AN IDENTITY, NOTHING ELSE. That covers a
+    task row, a DM, a commons post, and the topic `set_session_topic` writes into the resolved
+    session's bridge file. `notify` and the `commons_read` family are untouched: a notification from the wrong pane is noise,
     while a task row or a DM from the wrong seat is a durable misattribution. Refusing the
     alert path would also silence the very warning that says the identity is borrowed.
 
@@ -965,19 +996,23 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
 # Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md §4: the full standing
 # TTS contract is stated ONCE here in the session-init `instructions` payload.
 # The per-turn `<system-reminder>` rider (hook_common._speakerphone_reminder_body)
-# is now slim and only points at this section. The brevity + routing prose is
-# single-sourced from hook_common._brevity_rules() + _routing_reminder() — the
-# SAME functions the rider historically composed from and the same
-# cu.get_spoken_char_cap() source the caller-side enforcement guard reads — so
-# the spoken-char cap never drifts between the rider, this contract, and the
-# server reject boundary.
+# is now slim and only points at this section. The brevity prose is
+# single-sourced from hook_common._brevity_rules() — the SAME function the
+# rider historically composed from and the same cu.get_spoken_char_cap() source
+# the caller-side enforcement guard reads — so the spoken-char cap never drifts
+# between the rider, this contract, and the server reject boundary.
+#
+# The interactive-tool routing rule is NOT in this section. It lives in the
+# "## Interactive Tool Routing" section of the `instructions` body below, built
+# from hook_common._routing_reminder(), and the per-turn rider carries the
+# routing line itself. A unit test ties the reminder text to the served
+# instructions (test_the_routing_reminder_is_in_the_served_instructions.py).
 
 _TTS_CONTRACT_SECTION = (
     "## Speakerphone TTS Contract (applies on every turn — speakerphone is the standing default)\n\n"
     "CLOSING TURN: after your user-facing reply, call "
     "notify(message=<full reply, recrafted for speech>, suppress_ding=True, priority='high').\n\n"
     + _brevity_rules() + "\n\n"
-    + _routing_reminder() + "\n\n"
 )
 
 
@@ -991,24 +1026,13 @@ _TTS_CONTRACT_SECTION = (
 # shaped how a DM is COMPOSED in the first place. This section states that
 # explicitly, spliced unconditionally into the MCP `instructions` payload.
 _DM_STYLE_CONTRACT_SECTION = (
-    "## DM Style Contract (governs `dm_send` — composing AND replying)\n\n"
-    "Every dm_send body is written under this contract BEFORE you send it, "
-    "not only when replying to one. Lead with the result. Plain, literal "
-    "sentences — write it as a human colleague would read it, no invented "
-    "vocabulary. Report only decisions, evidence, risks, and required "
-    "actions; do not narrate routine reasoning or verification; no "
-    "metaphors, aphorisms, slogans, or redundant summaries. "
-    # Rick, 2026-08-13: "3 sentences and a path with no word counts to be found
-    # anywhere." The word budget that used to sit here ("3 lines / ~60 words") is
-    # gone deliberately — a count in the composition contract is the same leak the
-    # tutor's trigger number is kept out of: it teaches the fleet to write TO a
-    # number rather than to the shape. The path clause is load-bearing, because
-    # without it the pointer reads as a fourth sentence and the compliant house
-    # style looks non-compliant (María, 2026-08-13).
-    "Say it in three sentences — a headline and two supporting statements. "
-    "When the detail lives somewhere, send the path instead of the detail. The "
-    "path is a pointer, not a fourth sentence, and does not count against the "
-    f"three. Longer ONLY WHEN ASKED. {DM_STYLE_TAG}\n\n"
+    "## DM Style Contract (governs `dm_send`, composing and replying)\n\n"
+    "Write every body before sending, in plain literal sentences a colleague would read; no metaphors or invented vocabulary. "
+    # Rick, 2026-08-13: three sentences and a path, no word counts anywhere. The path clause is load-bearing: without it the
+    # pointer reads as a fourth sentence and the compliant house style looks non-compliant (María, 2026-08-13). The rest of the
+    # contract rides in DM_STYLE_TAG, which is also the reply-affordance tag.
+    "Three sentences; a path replaces detail and is not a fourth. "
+    f"{DM_STYLE_TAG}\n\n"
 )
 
 
@@ -1021,255 +1045,111 @@ mcp = FastMCP(
     instructions=(
         f"Voice I/O for Claude Code [Session: {SENDER_ID}]\n\n"
 
-        # =====================================================================
-        # Framing paragraph + tool-inventory navigation map (2026-05-16)
-        # Per src/rnd/v0.1.7/2026.05.16-mcp-discovery-surface-expansion.md.
-        # Anchors the reader before the deeper protocol sections below.
-        # =====================================================================
-        f"## Instructions vs Per-Turn Rider\n\n"
-        f"This `instructions` payload (which you are reading now) describes what "
-        f"this cosa-voice MCP server IS and how to use it — it is injected into "
-        f"your system prompt ONCE per session at the `initialize` handshake. "
-        f"In contrast, the per-turn `<system-reminder>` rider you'll see on every "
-        f"inbound user message is now SLIM: it carries only the live turn-state "
-        f"(the input modality — voice-from-a-distance vs typed) plus a pointer to "
-        f"the standing TTS contract. It does NOT repeat the full contract each "
-        f"turn — the complete obligations live ONCE in the § Speakerphone TTS "
-        f"Contract section below. The two are complementary: `instructions` "
-        f"(this payload, including that contract section) is the standing "
-        f"contract; the slim rider is the per-turn 'contract is ACTIVE — here is "
-        f"what changed' marker under it.\n\n"
+        f"## Startup (every session and after /clear, plan mode included)\n"
+        f"\n"
+        f"Before any user-facing text call `get_session_info()` and learn your `voice_persona`; never answer as 'Claude'. Then `notify(notification_type='custom', priority='medium')` a greeting by `display_name`. If `voice_persona` is None, ANNOUNCE THE NULL, never go quiet: speak 'no voice persona' plus the FIRST 8 CHARACTERS of `claude_code.session_id` (the one id allowed in speech); the full id goes in `abstract`.\n"
+        f"\n"
 
-        # =====================================================================
-        # The once-stated TTS contract (rider-slim §4). Single-sourced from
-        # hook_common._brevity_rules() + _routing_reminder() so the spoken-char
-        # cap never drifts between this contract and the per-turn rider.
-        # =====================================================================
         f"{_TTS_CONTRACT_SECTION}"
 
         f"{_DM_STYLE_CONTRACT_SECTION}"
 
-        f"## Your Toolkit at a Glance\n\n"
-        f"This server exposes 18+ tools grouped by function. Scan this map "
-        f"before reading the per-tool docstrings:\n\n"
-        f"| Group | Tools | One-line purpose |\n"
-        f"|---|---|---|\n"
-        f"| **Notifications** | `notify` | Fire-and-forget announcement; spoken via TTS in speakerphone mode |\n"
-        f"| **Blocking decisions** | `ask_yes_no`, `ask_multiple_choice`, `converse`, `ask_open_ended_batch` | Block until user responds; route by question shape (see § Interactive Tool Routing) |\n"
-        f"| **Commons read** | `commons_read`, `commons_who` | Always-allowed inspection of cross-session traffic |\n"
-        f"| **Commons self-disclosure** | `commons_post` | Append to topic blackboard; recipient sees on next poll |\n"
-        f"| **Peer DM** | `dm_send` | Directed AI↔AI direct message to a peer persona — body inline (~204 tokens), zero re-fetch |\n"
-        f"| **Commons polling** | `commons_ask_async`, `commons_ask_sync` | Post a question to a topic at large + poll for replies (DM-mode retired — use `dm_send`) |\n"
-        f"| **Session state** | `get_session_info`, `set_session_topic`, `enable_speakerphone`, `disable_speakerphone`, `request_persona` | Read or update this session's bridge state |\n\n"
-        f"Each per-tool docstring opens with a `**[TIER]**` marker on line 1 "
-        f"that signals user-permission requirements (READ / SELF-DISCLOSURE / "
-        f"ATTENTION-DEMANDING / DM). Consult the marker AT DECISION-TIME — when "
-        f"you're considering calling a tool — to know whether the call requires "
-        f"a user trigger or can fire on your own initiative.\n\n"
-
-        f"## Speakerphone Mode\n\n"
-        f"> **Forward-pointer**: this section describes WHAT `speakerphone_on` + "
-        f"`tts_interaction_mode` mean and how to behave under each combination. "
-        f"For HOW to obtain those values (the `get_session_info()` Phase-A call + "
-        f"the persona/doc_scope extraction protocol), see § MCP Startup Protocol below.\n\n"
-        f"This session has a per-session `speakerphone_on` flag backed by the bridge file, "
-        f"plus a global `tts_interaction_mode` (`solo` | `chorus`) that controls cross-session "
-        f"behavior. At session start (and after any /clear), check `get_session_info()` once to "
-        f"read both fields and act accordingly:\n\n"
-        f"- **phone mode** (`speakerphone_on=false`): respond normally; speaking via TTS only "
-        f"happens when YOU explicitly call notify(), converse(), or ask_*().\n"
-        f"- **speakerphone mode** (`speakerphone_on=true`): the user is at a distance, "
-        f"listening via TTS rather than reading the terminal. Two per-turn obligations:\n"
-        f"  1. **Acknowledge receipt BEFORE tool work begins.** Every user prompt must be greeted "
-        f"with at minimum a brief receipt-acknowledgment `notify(message=<short ack>, "
-        f"suppress_ding=True, priority='high')` BEFORE you fire any tool calls. A turn that "
-        f"opens with tool calls and never speaks violates the contract — the user has no way to "
-        f"know the prompt was received. The acknowledgment can be one short sentence ('Looking "
-        f"into the speakerphone directives now.') — it does not need to be the full plan. "
-        f"This rule applies even when the substantive response will arrive in a later turn.\n"
-        f"  2. **Speak every closing turn in full.** After tool work completes (or on any turn "
-        f"that produces user-facing text), call "
-        f"`notify(message=<full text of your response>, suppress_ding=True, priority='high')` "
-        f"so the response is spoken aloud. Strip fenced code blocks and tool-call narration from "
-        f"the spoken text (those are TTS-hostile). No length cap — speak the full response.\n\n"
-        f"To toggle, call `enable_speakerphone()` or `disable_speakerphone()`. "
-        f"The user may say 'enable speakerphone' / 'disable speakerphone' / 'enter conversation "
-        f"mode' / 'exit conversation mode' / 'speakerphone on' / 'speakerphone off' (or close "
-        f"paraphrases) in voice — pattern-match those phrases and call the corresponding tool, "
-        f"then continue with the new state in effect.\n\n"
-        f"**USER-ONLY INITIATION (HARD RULE)**: NEVER call `enable_speakerphone()` or "
-        f"`disable_speakerphone()` on your own initiative. You may only call them in DIRECT "
-        f"response to an explicit user instruction (voice phrase like 'enable speakerphone' / "
-        f"'disable speakerphone' or close paraphrases, typed request, slash command). Do NOT "
-        f"preemptively toggle on your own judgment (e.g. 'since this is a long task, let me "
-        f"enable speakerphone' is FORBIDDEN). The mic is the user's to direct, not yours to "
-        f"grab. If unsure whether the user actually asked, prefer NOT calling the tool and ask "
-        f"for clarification.\n\n"
-        f"**MODE-DEPENDENT CROSS-SESSION BEHAVIOR**:\n"
-        f"- Under `tts_interaction_mode=solo` (today's monopoly behavior): at most one CC "
-        f"session at a time can hold speakerphone across all of the user's sessions. When the "
-        f"user enables speakerphone in this session while another session holds it, the other "
-        f"session is automatically displaced — its UI reverts to phone mode, any in-flight TTS "
-        f"pauses, and its sender card unpins. The displacement is broadcast via the "
-        f"`speakerphone_changed` WebSocket event with `displaced=true, displaced_by=<this "
-        f"session's id>`.\n"
-        f"- Under `tts_interaction_mode=chorus` (multi-voice default): N sessions can hold "
-        f"speakerphone simultaneously; persona voices disambiguate at the listener's ear. No "
-        f"displacement; activating in another session does NOT pull the mic away from this one. "
-        f"The `speakerphone_changed` event still fires for self-state-change broadcasts but "
-        f"never with `displaced=true`.\n\n"
-        f"The toggle state survives /clear within this session (stored in the bridge file). "
-        f"A fresh Claude Code session's default `speakerphone_on` is mode-aware: false in solo, "
-        f"true in chorus (at-distance is the default in chorus).\n\n"
-        f"## Voice Persona Self-Announcement (Phase A.5)\n\n"
-        f"> **Forward-pointer**: this section describes the announcement obligation "
-        f"once your persona is allocated. The allocation itself happens during "
-        f"`get_session_info()` Phase A — see § MCP Startup Protocol below for the "
-        f"complete startup sequence.\n\n"
-        f"After `get_session_info()` returns, if the `voice_persona` field is non-null, "
-        f"send a brief TTS greeting by your persona name. Phrasing recipe: time-of-day-"
-        f"appropriate greeting + persona's `display_name` (proper-noun form, e.g. 'Maria'; "
-        f"NOT `name` which is the lowercase pool key) + brief duty announcement. Examples:\n"
-        f"- 'Good morning, Maria reporting for duty, setting things up.'\n"
-        f"- 'Good afternoon, Henrietta here, ready to roll.'\n\n"
-        f"Send via `notify(notification_type='custom', priority='medium', suppress_ding=False)`.\n\n"
-        f"**If `voice_persona` is None (allocation failed), do NOT skip — ANNOUNCE THE NULL.** "
-        f"A session that boots healthy announces itself, so a session that boots broken must not "
-        f"go quiet: skipping optimises the greeting's CONTENT and silences the ALARM, leaving the "
-        f"system quietest exactly when something is wrong. There is no name to greet with, so "
-        f"announce the FAULT and identify yourself by session id instead:\n"
-        f"- spoken `message` — state that this session has no voice persona, and give the FIRST 8 "
-        f"CHARACTERS of `claude_code.session_id`. Example: 'Warning — this session booted with no "
-        f"voice persona assigned. Session a1b2c3d4, running unattributed.'\n"
-        f"  **This is an explicit, deliberate EXCEPTION to the standing TTS rule that ids, hashes "
-        f"and other machine strings belong in `abstract` and never in spoken text.** That rule is "
-        f"correct everywhere else and WRONG here, for one reason: normally the persona badge and "
-        f"the persona VOICE carry identity, so the spoken channel never needs it. In this case "
-        f"there is no badge and no distinct voice — the alarm is spoken in the fallback voice, "
-        f"anonymously, alongside every other session. 8 characters is the whole cost. Put them in "
-        f"the speech. Do NOT silently relocate the id to `abstract` only and consider the "
-        f"obligation met — a listener at a distance would hear an unattributed alarm and have no "
-        f"idea which session is broken.\n"
-        f"- `abstract` — repeat the FULL `claude_code.session_id` plus the project name.\n\n"
-        f"**The session id is MANDATORY in both, not optional and not cosmetic.** The UI persona "
-        f"badge is gated on `sender_id && voice_persona`, so a null session's card renders with "
-        f"its message and abstract intact but WITHOUT its badge — the one channel that normally "
-        f"carries identity is exactly the channel that disappears. If the id is not in the text, "
-        f"nobody can tell who sent the alarm and the card is unactionable. Then follow Failure "
-        f"Mode 2 below (notify + manager DM come BEFORE any blocking `converse()`).\n\n"
-        f"Fires once per Phase A startup including after "
-        f"`/clear` (the persona persists across /clear, so re-announcing keeps the session "
-        f"audibly tagged for users running parallel CC sessions).\n\n"
-
-        # =====================================================================
-        # MCP Startup Protocol (G1) — Phase A + Phase B
-        # =====================================================================
-        f"## MCP Startup Protocol\n\n"
-        f"You MUST complete this two-phase startup before any substantive work.\n\n"
-        f"**Phase A — Immediate, before composing your first response**:\n\n"
-        f"1. Call `get_session_info()` once. The response carries critical session identity + state:\n"
-        f"   - `voice_persona` dict (`{{name, display_name, voice_id, icon, color, borrowed}}`) — your assigned persona. **MUST extract before any user-facing text**: in chorus mode, your persona voice is the disambiguator the listener relies on. If `voice_persona` is None (allocation failure), do NOT open with a blocking `converse()`. FIRST emit the null-announcing `notify()` carrying your session id (see § Voice Persona Self-Announcement above), and DM your manager if you have one — both are zero-interrupt and neither needs anyone's permission. Only escalate to `converse()` if the null actually blocks the work in front of you. See Failure Mode 2.\n"
-        f"   - `speakerphone_on` (bool) + `tts_interaction_mode` (`solo` | `chorus`) — drives the per-turn obligations you'll see in the rider.\n"
-        f"   - `claude_code.session_id` — your stable session identity, used in cross-session DM correlation.\n"
-        f"2. Report MCP server status to the user in your first acknowledgment (project name, session_id, server_url, version, your resolved persona name).\n"
-        f"3. Call `notify(notification_type='custom', priority='medium')` — ALWAYS, in BOTH cases. If `voice_persona.name` is non-null, send a time-of-day-appropriate greeting using `display_name`. If `voice_persona` is None, send the null alarm naming your session id instead. **You announce either way**; the null case is the one that most needs to be heard, and it is the only zero-interrupt broadcast in startup. See § Voice Persona Self-Announcement above for both forms.\n\n"
-        f"**Phase B — After context gathering**:\n\n"
-        f"Call `set_session_topic(topic='<3-8 word title>')` as soon as you can write a meaningful session title — from the user's first message, from history.md/TODO.md, or from the approved plan. Skipping is a session-start bug, not a minor oversight. The topic appears in the 'Continue Session?' stop-hook notification so the user knows what they'd be continuing.\n\n"
-        f"**Rules**: Phase A runs in ALL modes including plan mode (MCP tools are communication tools, not code-changing tools). Phase A MUST complete BEFORE any file reading, exploration, edits, or planning begins — and BEFORE the first user-facing text. Phase B runs as soon as the topic is knowable, NOT 'whenever I get around to it.'\n\n"
-
-        # =====================================================================
-        # Inter-Session Commons Protocol (G2)
-        # =====================================================================
-        f"## Inter-Session Commons Protocol\n\n"
-        f"The commons is a file-backed blackboard for cross-session communication. Other CC sessions running on this host (potentially with different personas) read from + write to the same topic files.\n\n"
-        f"**Three-tier autonomy** governs when you can use commons tools without explicit user permission:\n\n"
+        f"## Startup details (short form is at the top of this payload)\n"
+        f"\n"
+        f"**Phase A, before your first user-facing text, in ALL modes including plan mode** (these are communication tools, not code-changing tools). Finish it before any file reading, exploration, edits or planning:\n"
+        f"\n"
+        f"1. Call `get_session_info()` once. It returns `voice_persona` (`{{name, display_name, voice_id, icon, color, borrowed}}`), `speakerphone_on`, `tts_interaction_mode` (`solo` | `chorus`) and `claude_code.session_id` (your stable id for DM correlation). Extract `voice_persona` first: in chorus mode your persona voice is how the listener tells sessions apart.\n"
+        f"2. Report MCP status in your first acknowledgment: project, session_id, server_url, version, resolved persona name.\n"
+        f"3. Call `notify(notification_type='custom', priority='medium', suppress_ding=False)` — ALWAYS, in BOTH cases. Named persona: a time-of-day greeting using `display_name` (the proper noun, e.g. 'Maria', not the lowercase pool key `name`) plus a brief duty line, e.g. 'Good morning, Maria reporting for duty, setting things up.' Null persona: the alarm below. It fires again after /clear (the persona persists).\n"
+        f"\n"
+        f"**Phase B, as soon as the topic is knowable:** call `set_session_topic(topic='<3-8 word title>')`, from the user's first message, history.md/TODO.md or the approved plan. Skipping it is a session-start bug: the topic is what the 'Continue Session?' stop-hook notification shows.\n"
+        f"\n"
+        f"**If `voice_persona` is None (allocation failed), do NOT skip — ANNOUNCE THE NULL.** A session that boots healthy announces itself, so one that boots broken must not go quiet: skipping optimises the greeting's CONTENT and silences the ALARM. With no name to greet by, identify yourself by session id:\n"
+        f"- spoken `message`: say this session has no voice persona and give the FIRST 8 CHARACTERS of `claude_code.session_id`. Example: 'Warning — this session booted with no voice persona assigned. Session a1b2c3d4, running unattributed.' **This is an explicit EXCEPTION to the standing TTS rule that ids and hashes belong in `abstract`, never in speech.** Everywhere else the persona badge and voice carry identity; a null session has neither, so the alarm would be anonymous. 8 characters is the whole cost: put them in the speech. Do NOT silently relocate the id to `abstract` only and consider the obligation met.\n"
+        f"- `abstract`: the FULL `claude_code.session_id` plus the project name.\n"
+        f"\n"
+        f"**The session id is MANDATORY in both.** The UI persona badge is gated on `sender_id && voice_persona`, so a null session's card renders without its badge, and with no id in the text nobody can tell who sent it. Then follow Failure Mode 2: the notify and the manager DM come BEFORE any blocking `converse()`.\n"
+        f"\n"
+        f"## Speakerphone Mode\n"
+        f"\n"
+        f"Each session has a `speakerphone_on` flag (bridge file) and there is a global `tts_interaction_mode` (`solo` | `chorus`). Read both from `get_session_info()` at session start and after /clear.\n"
+        f"\n"
+        f"- **phone** (`speakerphone_on=false`): respond normally; speak only when YOU call `notify()`, `converse()` or `ask_*()`.\n"
+        f"- **speakerphone** (`speakerphone_on=true`): the user is at a distance, listening. Send a short receipt-acknowledgment `notify(message=<short ack>, suppress_ding=True, priority='high')` BEFORE any tool call, even when the real answer comes in a later turn; a turn that opens with tool calls and never speaks breaks the contract. Speak every closing turn as the TTS Contract above says.\n"
+        f"\n"
+        f"When the user says 'enable speakerphone', 'disable speakerphone', 'enter conversation mode', 'exit conversation mode', 'speakerphone on' or 'speakerphone off' (or a close paraphrase), call `enable_speakerphone()` or `disable_speakerphone()` and continue in the new state.\n"
+        f"\n"
+        f"**USER-ONLY INITIATION (HARD RULE)**: NEVER call either on your own initiative; only in direct response to an explicit user instruction (voice phrase, typed request, slash command). 'Since this is a long task, let me enable speakerphone' is FORBIDDEN: the mic is the user's to direct. If unsure whether the user asked, do not call; ask.\n"
+        f"\n"
+        f"Across sessions: under `solo`, one session at a time holds speakerphone, so enabling it here displaces the other (its UI reverts to phone mode, in-flight TTS pauses, its sender card unpins; broadcast as `speakerphone_changed` with `displaced=true, displaced_by=<this session's id>`). Under `chorus` (the multi-voice default) N sessions hold it at once, persona voices tell them apart, and nothing is displaced. The flag survives /clear; a fresh session defaults to false in solo and true in chorus.\n"
+        f"\n"
+        f"## Inter-Session Commons and Peer DM\n"
+        f"\n"
+        f"The commons is a file-backed blackboard shared by the CC sessions on this host. Each per-tool docstring opens with a `**[TIER]**` marker (READ / SELF-DISCLOSURE / ATTENTION-DEMANDING / DM): check it when deciding whether a call needs a user trigger.\n"
+        f"\n"
         f"| Tier | Tools | When you can fire on your own |\n"
         f"|---|---|---|\n"
-        f"| **READ** | `commons_read`, `commons_who` | Always — inspecting the blackboard never disturbs anyone |\n"
-        f"| **SELF-DISCLOSURE** | `commons_post` to free-form / presence / incident topics | When announcing your own state (e.g. 'starting long migration', 'observed bug X') — fire-and-forget, no recipient is summoned |\n"
-        f"| **ATTENTION-DEMANDING** | `commons_post` to coordination/help-wanted topics; `commons_ask_async` / `commons_ask_sync` (topic polling); `dm_send` (directed peer DM); broadcasts | Requires clear coordination need OR explicit user trigger. Summons a peer recipient's attention. |\n\n"
-        f"**Reserved topic vocabulary** (pre-seeded by the store):\n\n"
-        f"- `broadcasts` — user-originated broadcasts (read-only from CC sessions; only the user posts)\n"
-        f"- `broadcast-acks` — recipient ack records for broadcast delivery (auto-managed)\n"
-        f"- `presence` — session lifecycle signals (joining/leaving)\n"
-        f"- `system-events` — server-side notices\n\n"
-        f"All other topic names are free-form and auto-create on first post. Persona name/icon/color are stamped server-side at post-time and IMMUTABLE thereafter (you cannot spoof another persona).\n\n"
-        f"For full doctrine — anti-patterns, sensitive-content rules, retention semantics — see § Deep Doctrine Reference at the bottom.\n\n"
-
-        # =====================================================================
-        # Phase 0 DM Workflow (G3 + G7 + G8)
-        # =====================================================================
-        f"## Peer DM Workflow\n\n"
-        f"Directed AI↔AI messaging uses **`dm_send`** — the notification-native peer-DM tool. The body travels INLINE in the recipient's push (direction='ai_to_ai', ~204 tokens), so the recipient processes it directly with ZERO re-fetch. (The legacy `commons_send_to` tool + the DM-mode of `commons_ask_async` — which routed through the commons claim-check path at ~3,700 tokens/received DM — were RETIRED in the cosa-voice token-reduction Phase 4, 2026-06-15.)\n\n"
-        f"| Tool | Use when |\n"
-        f"|---|---|\n"
-        f"| `dm_send(recipient='persona', body=...)` | Directed peer DM by persona name. Body inline, ~18× cheaper than the retired commons claim-check. The common case. |\n"
-        f"| `commons_ask_async(topic, body)` | POLLING-mode only — post an open question to a topic at large + poll for replies yourself via `commons_read`. NOT a directed DM. |\n"
-        f"| `commons_ask_sync` | BLOCKING topic poll — waits for a reply. Rarely justified. |\n\n"
-        f"**Receipt + reply etiquette** — when a peer DM arrives (an inbound `dm_send`, direction='ai_to_ai'):\n\n"
-        f"1. **Acknowledge receipt** before tool calls if you're in speakerphone mode (same rule as user prompts — silent tool-only turns break the audio loop).\n"
-        f"2. **The body is INLINE** — it arrives in the DM framing itself; there is NO `commons_read` re-fetch and NO blackboard round-trip. Read it directly.\n"
-        f"3. **Reply** with `dm_send(recipient=<sender>, body=<reply>, reply_to=<message_id>, thread_id=<thread_id>)` — the `message_id` + `thread_id` are surfaced in the inbound DM framing. A reply is just a DM back; there is no separate watcher and no `expect_reply` flag.\n"
-        f"4. **Loop avoidance** — don't reply to a DM you yourself sent (compare the sender against `get_session_info()` if unsure).\n\n"
-        f"**DM vs Broadcast — when to choose which**:\n\n"
-        f"- **DM** (`dm_send`): peer-specific question or coordination request. One recipient. The recipient owes you attention; you owe them context.\n"
-        f"- **Broadcast**: user-originated only. Sessions do NOT initiate broadcasts. When a broadcast arrives, it appears as a `USER BROADCAST` `<system-reminder>` injection — that's the user talking to multiple sessions at once.\n\n"
-        f"**Cross-session bug-filing pattern** (durable backup for unreliable push):\n\n"
-        f"When you discover a bug that affects a peer session's domain, BOTH:\n"
-        f"1. DM the responsible session via `dm_send` (low-latency, body inline)\n"
-        f"2. File a structured entry in their repo's `bug-fix-queue.md` (durable backup if push fails / they're offline)\n\n"
-        f"This double-channel pattern is documented in detail at planning-is-prompting → workflow/cross-session-communication.md §6.5.1.\n\n"
-
-        # =====================================================================
-        # Interactive Tool Routing (G4)
-        # =====================================================================
-        f"## Interactive Tool Routing\n\n"
-        f"When you need user input, **prefer the cosa-voice blocking tools over Claude Code's built-in `AskUserQuestion`** — those built-in questions render to the TERMINAL only (no TTS, no audio), so users in speakerphone mode never hear them.\n\n"
+        f"| **READ** | `commons_read`, `commons_who` | Always — inspecting the blackboard disturbs no one |\n"
+        f"| **SELF-DISCLOSURE** | `commons_post` to free-form / presence / incident topics | When announcing your own state ('starting long migration', 'observed bug X'): fire-and-forget, no recipient is summoned |\n"
+        f"| **ATTENTION-DEMANDING** | `commons_post` to coordination/help-wanted topics; `commons_ask_async` / `commons_ask_sync`; `dm_send`; broadcasts | Only with a clear coordination need or an explicit user trigger: it summons a peer's attention |\n"
+        f"\n"
+        f"Reserved topics: `broadcasts` (user-originated, read-only from CC sessions), `broadcast-acks` (auto-managed), `presence` (session lifecycle), `system-events` (server notices). Any other name is free-form and auto-creates on first post. Persona name, icon and color are stamped server-side at post time and are immutable: you cannot spoof another persona.\n"
+        f"\n"
+        f"**Directed peer messages use `dm_send(recipient='persona', body=...)`**: the body travels inline in the recipient's push (~204 tokens), with no re-fetch. `commons_ask_async(topic, body)` is polling-mode only (an open question to a topic at large; you poll for replies with `commons_read`), not a directed DM. `commons_ask_sync` blocks until a reply and is rarely justified.\n"
+        f"\n"
+        f"When a peer DM arrives (an inbound `dm_send`, direction='ai_to_ai'):\n"
+        f"1. In speakerphone mode, acknowledge receipt before tool calls, as for a user prompt.\n"
+        f"2. The body is inline in the DM framing; there is no `commons_read` re-fetch.\n"
+        f"3. Reply with `dm_send(recipient=<sender>, body=<reply>, reply_to=<message_id>, thread_id=<thread_id>)`; both ids are in the inbound framing. A reply is just a DM back; there is no `expect_reply` flag.\n"
+        f"4. Do not reply to a DM you sent yourself (compare the sender with `get_session_info()` if unsure).\n"
+        f"\n"
+        f"A DM is one peer-specific question or request: the recipient owes you attention and you owe them context. A `USER BROADCAST` `<system-reminder>` is the user talking to several sessions at once; sessions never initiate broadcasts.\n"
+        f"\n"
+        f"**Bug in a peer's domain: do BOTH** — `dm_send` the responsible session (low latency), and file a structured entry in their repo's `bug-fix-queue.md` (the durable backup if push fails or they are offline).\n"
+        f"\n"
+        f"Canonical doctrine (anti-patterns, sensitive-content rules, retention, broadcast receipts): planning-is-prompting → workflow/cross-session-communication.md (§1.5 DM mechanics and threading, §2 three-tier autonomy, §3 reserved topics, §4 broadcast receipts, §6.5.1 bug-filing pattern).\n"
+        f"\n"
+        f"## Interactive Tool Routing\n"
+        f"\n"
+        f"{_routing_reminder()}\n"
+        f"\n"
         f"| Question shape | Use | Why |\n"
         f"|---|---|---|\n"
-        f"| Yes / No (binary) | `ask_yes_no(question, default='yes'\\|'no')` | Three-button UI with optional 'Neither' escape hatch when the question itself needs re-framing |\n"
-        f"| 2-4 mutually-exclusive options | `ask_multiple_choice(questions=[{{...}}], default={{header: label}})` | Radio-button UI; supports multi-question batches; optional `default` dict keyed by question header returns `{{\"answers\": default}}` on timeout instead of an error |\n"
+        f"| Yes / No (binary) | `ask_yes_no(question, default='yes'\\|'no')` | Three-button UI with an optional 'Neither' escape hatch when the question itself needs re-framing |\n"
+        f"| 2-4 mutually-exclusive options | `ask_multiple_choice(questions=[{{...}}], default={{header: label}})` | Radio-button UI; supports multi-question batches; an optional `default` dict keyed by question header returns `{{\"answers\": default}}` on timeout instead of an error |\n"
         f"| Single open-ended | `converse(message=..., response_type='open_ended')` | Free-form text or voice response |\n"
-        f"| Multiple open-ended at once | `ask_open_ended_batch(questions=[{{header, question}}, ...])` | Single screen with per-question text+mic inputs; user submits all at once |\n\n"
-        f"**On 'Neither' from `ask_yes_no`**: treat as a signal that the question needs re-framing, NOT as a soft yes/no. Read the comment (if present) and ask a clearer follow-up.\n\n"
-        f"**All blocking tools should use `priority='high'`** to ensure the TTS alert reaches the user in speakerphone mode.\n\n"
-        f"**Pros/cons + recommendation in every multi-option ask**: per `feedback_always_include_pros_cons_recommendation`, every substantive `ask_yes_no` or `ask_multiple_choice` should carry per-option pros AND cons AND a 'My recommendation: X because Y' block in the `abstract` parameter, plus a 'flip-condition' (what would make a different option correct). Pros/cons go in `abstract` ONLY — not in the spoken `message` body.\n\n"
-
-        # =====================================================================
-        # Failure Modes + Debugging Signals (G5)
-        # =====================================================================
-        f"## Failure Modes + Debugging Signals\n\n"
-        f"Common ways cosa-voice can fail silently or partially, and what to look at in the result dict to debug:\n\n"
-        f"**1. `dm_send` returns `{{status: 'error', reason: 'recipient_unresolved'}}`** — the recipient persona/session couldn't be resolved (same-user scoped). The `detail` carries the RecipientResolutionError chain (what was attempted + candidate alternatives + suggested next action). Read it before retrying with a corrected recipient name. A transport/auth error returns `{{status: 'error', reason: ...}}` instead — the Lupin REST API may be down or the X-API-Key unavailable.\n\n"
-        f"**2. `voice_persona: None` in `get_session_info()`** — the per-session persona allocator returned no assignment, OR the persona pool was exhausted and you got a 'Sam' overflow fallback (`borrowed: true` if from the legacy hash-borrow path). When None:\n\n"
-        f"- DO NOT respond as 'Claude' or a placeholder — that breaks the chorus-mode disambiguation contract\n"
-        f"- **DO NOT go quiet.** The remedies below are ORDERED BY COST, and the first two cost nothing. Work down the list; do not skip to the bottom.\n\n"
+        f"| Multiple open-ended at once | `ask_open_ended_batch(questions=[{{header, question}}, ...])` | One screen with per-question text+mic inputs; the user submits all at once |\n"
+        f"\n"
+        f"On 'Neither' from `ask_yes_no`: the question needs re-framing; it is NOT a soft yes/no. Read the comment (if present) and ask a clearer follow-up.\n"
+        f"\n"
+        f"All blocking tools use `priority='high'` so the TTS alert reaches the user in speakerphone mode.\n"
+        f"\n"
+        f"Every substantive `ask_yes_no` or `ask_multiple_choice` carries, in the `abstract`, per-option pros AND cons, a 'My recommendation: X because Y' block, and a flip-condition (what would make a different option correct). Pros and cons go in `abstract` ONLY, never in the spoken `message`.\n"
+        f"\n"
+        f"## Failure Modes + Debugging Signals\n"
+        f"\n"
+        f"How cosa-voice fails silently or partially, and what to read in the result dict:\n"
+        f"\n"
+        f"**1. `dm_send` returns `{{status: 'error', reason: 'recipient_unresolved'}}`** — the recipient persona/session could not be resolved (same-user scoped). `detail` carries the RecipientResolutionError chain (what was tried, candidate alternatives, suggested next action): read it before retrying with a corrected name. A transport/auth error returns `{{status: 'error', reason: ...}}` instead: the Lupin REST API may be down or the X-API-Key unavailable.\n"
+        f"\n"
+        f"**2. `voice_persona: None` in `get_session_info()`** — the allocator returned no assignment, or the pool was exhausted and you got the 'Sam' overflow fallback (`borrowed: true` on the legacy hash-borrow path). Rare; it means pool exhaustion or a corrupt bridge file. When None:\n"
+        f"\n"
+        f"- DO NOT respond as 'Claude' or a placeholder: that breaks the chorus-mode disambiguation contract.\n"
+        f"- **DO NOT go quiet.** The remedies below are ORDERED BY COST, and the first two cost nothing. Work down the list; do not skip to the bottom.\n"
+        f"\n"
         f"| # | Do this | Interrupt cost | Permission needed |\n"
         f"|---|---|---|---|\n"
-        f"| 1 | `notify()` the null alarm, naming your `claude_code.session_id` INLINE (§ Voice Persona Self-Announcement) | **none** — fire-and-forget | none; self-disclosure tier |\n"
+        f"| 1 | `notify()` the null alarm, naming your `claude_code.session_id` INLINE (§ Startup) | **none** — fire-and-forget | none; self-disclosure tier |\n"
         f"| 2 | `dm_send()` your manager, if you have one, so they can allocate for you | **none** | none; DM tier |\n"
-        f"| 3 | `converse(message='Which persona am I?', response_type='open_ended')` | **one blocking interrupt to the user** | escalate ONLY if the null blocks the work |\n\n"
-        f"**Why the order matters**: a standing drive-to-completion rule correctly prices out INTERRUPTS, so a worker that treats `converse()` as the only remedy will correctly decline it and stay unnamed indefinitely. That rule does NOT price out NON-BLOCKING SIGNALS. Steps 1 and 2 are free, are always permitted, and are what actually gets you named — someone with the authority to allocate can only help once they know you are null. Note that `request_persona()` remains USER-INITIATED ONLY; do not self-heal (see its docstring).\n"
-        f"- This is rare (allocator is resilient); it indicates either a fresh session pool exhaustion or a bridge-file corruption\n\n"
-        f"**3. (retired) Legacy commons-DM failure modes** — the `commons_send_to` 'FunctionTool not callable' bug, the `dm_dispatched`/`push_mode_active` register-question signals, and the topic-file case-fragmentation issue all belonged to the legacy commons claim-check DM path, RETIRED in the cosa-voice token-reduction Phase 4 (2026-06-15). They no longer apply — use `dm_send` (see Failure Mode 1).\n\n"
-        f"**5. Stale-bridge phantom personas in `commons_who`** — `commons_who` may show sessions whose host process has died. The host-side prune at SessionStart eventually cleans these, but during the window between death and prune, they appear active. If a DM to a 'visible' peer never returns a reply, the recipient may be a phantom. Cross-reference with `commons_who(retention_hours=1)` for a narrower window.\n\n"
-
-        f"**6. Persona-allocation cache staleness across MCP restart** — if your session was bounced (architecture switchover, manual MCP subprocess kill, etc.) AND the persona pool was exhausted such that you got a 'Sam' overflow allocation, an in-memory cache of the pre-bounce allocation may persist in the running MCP subprocess until you call `get_session_info()` fresh. After ANY MCP restart or pool-exhaustion event, re-call `get_session_info()` to confirm the current allocation matches what your bridge file says — the bridge file is the source of truth; the in-memory cache may lag.\n\n"
-
-        # =====================================================================
-        # Deep Doctrine Reference Footer (G10)
-        # =====================================================================
-        f"## Deep Doctrine Reference\n\n"
-        f"For three-tier autonomy semantics, reserved topic vocabulary, anti-patterns, sensitive-content rules, broadcast routing diagrams, and the full cross-session-bug-filing pattern with mermaid flow, see the canonical reference at:\n\n"
-        f"  **planning-is-prompting → workflow/cross-session-communication.md**\n\n"
-        f"Key sections to bookmark:\n"
-        f"- §1.5 — DM mechanics, threading, receipt etiquette, channel-choice\n"
-        f"- §1.5.3 — Threading conventions (`in_reply_to` chains, sender-mailbox topic routing, loop-avoidance)\n"
-        f"- §2 — Three-tier autonomy (READ / SELF-DISCLOSURE / ATTENTION-DEMANDING)\n"
-        f"- §3 — Reserved topic vocabulary\n"
-        f"- §4 — Broadcast receipt rules\n"
-        f"- §6.5.1 — Cross-session bug-filing pattern (mermaid diagram of the double-channel flow)\n\n"
-        f"That doc was refreshed 2026-05-16 by Tiberius 🌑 alongside the expansion of this `instructions` payload by María 🌸. Both surfaces are intentionally orthogonal — this file covers the cosa-voice-bound how-to; the doctrine file covers the deep semantics and policy."
+        f"| 3 | `converse(message='Which persona am I?', response_type='open_ended')` | **one blocking interrupt to the user** | escalate ONLY if the null blocks the work |\n"
+        f"\n"
+        f"**Why the order matters**: a standing drive-to-completion rule correctly prices out INTERRUPTS, so a worker that treats `converse()` as the only remedy will decline it and stay unnamed indefinitely. That rule does NOT price out NON-BLOCKING SIGNALS: steps 1 and 2 are always permitted, and someone with the authority to allocate can only help once they know you are null. `request_persona()` remains USER-INITIATED ONLY; do not self-heal (see its docstring).\n"
+        f"\n"
+        f"**3. (retired)** The legacy commons-DM failure modes no longer apply; use `dm_send` (Failure Mode 1).\n"
+        f"\n"
+        f"**4. Stale-bridge phantom personas in `commons_who`** — it may list sessions whose host process has died until the SessionStart prune cleans them. If a DM to a 'visible' peer never gets a reply, the recipient may be a phantom; cross-check with `commons_who(retention_hours=1)`.\n"
+        f"\n"
+        f"**5. Persona-allocation cache staleness across MCP restart** — after ANY MCP restart or pool-exhaustion event (especially a 'Sam' overflow), the running MCP subprocess may hold an in-memory allocation older than the bridge file. Re-call `get_session_info()` and trust the bridge file, which is the source of truth.\n"
     )
 )
 
@@ -1375,7 +1255,8 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
     Ensures:
         - returns None when override_size_limitation is True
         - returns None when the global enforce flag is OFF (kill-switch)
-        - returns None when every spoken unit is <= the configured cap
+        - returns None when every spoken unit is <= the configured cap, counting a
+          markdown link as its label alone (the address is never spoken)
         - raises ValueError naming the over-cap unit + its measured length otherwise
 
     Raises:
@@ -1399,7 +1280,7 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
                 units.append( ( f"{field}[{i}].question", q[ "question" ] ) )
 
     for label, text in units:
-        n = len( text )
+        n = len( strip_markdown_links_for_speech( text ).strip() )   # the cap counts what is spoken: a link is its label plus the URL-omitted marker
         if n > cap:
             raise ValueError(
                 f"Spoken `{label}` is {n} chars (cap {cap}). The spoken channel is "
@@ -1638,9 +1519,9 @@ def converse(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send a long spoken `message` KNOWINGLY. Default False — detail belongs
-            in `abstract` (not length-limited), not the spoken/TTS channel.
+        override_size_limitation: Default False. True sends a spoken `message` over the
+            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
+            which has no length limit, not in speech.
 
     Returns:
         User's response as text, or error/timeout message
@@ -1976,8 +1857,7 @@ def _notify_send(
 
     # Assign the idempotency key HERE (before send) so a durable-outbox retry
     # reuses the SAME key → the server de-dups a maybe-already-delivered message.
-    if request.idempotency_key is None:
-        request = request.model_copy( update={ "idempotency_key": str( _uuid.uuid4() ) } )
+    request = _with_idempotency_key( request )
 
     # Drain-first ordering: if a backlog already exists for this session, queue
     # behind it instead of sending live (preserves FIFO order during a degraded
@@ -2028,9 +1908,9 @@ def notify(
             Notifications sharing this ID update a single element instead of appending new ones.
         session_name: Optional human-readable session name for UI header display.
             When set, updates the sender-session-name span in notification history card.
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send a long spoken `message` KNOWINGLY. Default False — detail belongs
-            in `abstract` (not length-limited), not the spoken/TTS channel.
+        override_size_limitation: Default False. True sends a spoken `message` over the
+            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
+            which has no length limit, not in speech.
 
     Returns:
         Delivery status message
@@ -2093,34 +1973,14 @@ def ask_yes_no(
     human_only: bool = False
 ) -> str:
     """
-    Ask a yes/no question and get the user's response as a string.
+    Ask a yes/no question and get the user's response as a string. A convenience wrapper for quick binary decisions, with a third "Neither" escape hatch for when the question itself needs re-framing. The user may attach a qualifying comment to any answer via the UI.
 
-    Convenience wrapper for quick binary decisions, with a third "Neither"
-    escape hatch for cases where the question itself needs re-framing.
-    The user may optionally attach a qualifying comment to any answer via the UI.
+    Returns an annotated string: "yes", "no" or "neither", optionally suffixed with "[comment: ...]", and PREFIXED with "[default used] " (the same prefix `converse` uses) when the value is a substituted default rather than something the user chose. On ANY non-answer (timeout, expiry, user offline, transport error, server error, request-validation failure) it returns the default PREFIXED with "[default used] ": this verb has no error shape, and a bare default would be indistinguishable from a keypress. A genuine keypress is returned CLEAN. A prefixed value is NOT a ruling: do not treat it as authorization. On "neither", treat the response as a signal that the question needs re-framing, not as a soft yes or no: read the comment (if present) and ask a clearer follow-up.
 
     Requires:
         - question is a non-empty string
-        - default is "yes" or "no" (Neither is never a default — it requires
-          an explicit user click)
+        - default is "yes" or "no" (Neither is never a default; it requires an explicit user click)
         - timeout_seconds is a positive integer
-
-    Ensures:
-        - returns one of:
-          * "yes", "no", "neither"
-          * "yes [comment: ...]", "no [comment: ...]", "neither [comment: ...]"
-        - on ANY non-answer — timeout, expiry, user offline, transport error,
-          server error, or a request-validation failure — returns the default
-          PREFIXED with "[default used] ". It is deliberately NOT bare, because
-          a bare default is indistinguishable from a keypress (row e5f21fff) and
-          this verb has no error shape at all: every failure mode lands on the
-          same return. The prefix matches `converse`, and this verb's contract
-          already promises an ANNOTATED string (see the qualifier form above)
-        - a genuine keypress is returned CLEAN, with no prefix — that is what
-          makes the prefix mean something
-        - On "neither", Claude should treat the response as a signal that the
-          question needs re-framing rather than as a soft yes or no — read the
-          comment (if present) and ask a clearer follow-up question
 
     Args:
         question: The yes/no question to ask
@@ -2129,22 +1989,11 @@ def ask_yes_no(
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send a long spoken `question` KNOWINGLY. Default False — detail belongs
-            in `abstract` (not length-limited), not the spoken/TTS channel.
-
-    Returns:
-        Annotated string: one of "yes", "no", "neither", optionally suffixed
-        with "[comment: ...]", and PREFIXED with "[default used] " when the value
-        is a substituted default rather than something the user chose.
-
-        ⚠️ A prefixed value is NOT a ruling. Do not treat it as authorization.
+        override_size_limitation: Default False. True sends a spoken `question` over the length cap (configured, default 500) knowingly; detail belongs in `abstract`, which has no length limit, not in speech.
 
     Examples:
         response = ask_yes_no("Delete the old backups?")
-        # response == "yes" or "no" or "neither"
-        # or with qualifier: "yes [comment: only the March ones]"
-        # or signaling re-frame: "neither [comment: ambiguous which backups]"
+        # "yes", "no" or "neither"; with a qualifier: "yes [comment: only the March ones]"; signaling re-frame: "neither [comment: ambiguous which backups]"
     """
     logger.debug( f"ask_yes_no() called: {question[:50]}..." )
 
@@ -2220,107 +2069,32 @@ def ask_multiple_choice(
     override_size_limitation: bool = False
 ) -> dict:
     """
-    Ask multiple-choice questions and get user's selection(s).
+    Ask multiple-choice questions and get the user's selection(s). Presents questions with options via TTS and UI; supports single-select (radio buttons) and multi-select (checkboxes), and the user can give a custom "Other" answer.
 
-    Presents questions with options via TTS and UI. Supports both single-select
-    (radio buttons) and multi-select (checkboxes) questions. Users can select
-    from predefined options or provide custom "Other" answers.
+    READ `answered` BEFORE TREATING THE RESULT AS A DECISION. The result is {"answers": {...}, "default_used": bool, "answered": bool}, and both flags are ALWAYS present. `default_used` is True when the user TIMED OUT (your `default` was substituted) and when the user was OFFLINE (the server substituted, returning through the success branch). Reading `answers` while ignoring `answered` turns silence into consent.
+
+    `default` covers a TIMEOUT, not an absent user: an offline user gets a 503 from the FIRST ask whether or not you passed a default, because the offline path is decided server-side against a `response_default` this verb does not send (`ask_yes_no` plumbs it). So do NOT use `default` to leave a walkthrough running with nobody at the desk; it will stop on the first question.
+
+    Returns:
+        dict with answers keyed by header, plus the provenance of those answers:
+        {"answers": {"Auth method": "OAuth", "Features": ["Dark mode", "Notifications"]}, "default_used": False, "answered": True}
 
     Args:
-        questions: List of question objects matching Claude Code's AskUserQuestion format:
-            [
-                {
-                    "question": "Which auth method?",
-                    "header": "Auth method",
-                    "multiSelect": false,
-                    "options": [
-                        {"label": "OAuth", "description": "Use OAuth2 flow"},
-                        {"label": "JWT", "description": "Use JWT tokens"}
-                    ]
-                }
-            ]
+        questions: List of question objects in Claude Code's AskUserQuestion format: {"question": "Which auth method?", "header": "Auth method", "multiSelect": false, "options": [{"label": "OAuth", "description": "Use OAuth2 flow"}, {"label": "JWT", "description": "Use JWT tokens"}]}
         timeout_seconds: How long to wait for response (1-600, default 120)
         priority: "low", "medium", "high", or "urgent"
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        default: Optional dict keyed by question header. When provided, a timeout
-            returns ``{"answers": <default>, "default_used": True,
-            "answered": False}`` instead of the error dict. It is DELIBERATELY
-            NOT the same shape as a successful response — that identity was the
-            defect (row e5f21fff): an unanswered question read as a ruling, and
-            five ratified decisions carry a permanent provenance caveat because
-            of it. Keys must match question headers;
-            values must be option labels (string for single-select, list of
-            strings for multi-select). Validated at call time; mismatches
-            return an error dict before the notification fires.
-            Backward-compat: ``default=None`` preserves the legacy timeout
-            return ``{"error": "timeout - no response received", "timeout": True}``.
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send long spoken `question` text KNOWINGLY. Default False — detail
-            belongs in `abstract` (not length-limited), not the spoken/TTS channel.
-
-    Returns:
-        dict with answers keyed by header, PLUS the provenance of those answers:
-        {
-            "answers": {
-                "Auth method": "OAuth",
-                "Features": ["Dark mode", "Notifications"]
-            },
-            "default_used": False,   # True => nobody chose this; it was substituted
-            "answered":     True     # the affirmative twin, so the common check reads positive
-        }
-
-        ⚠️ READ `answered` BEFORE TREATING THIS AS A DECISION. Both keys are
-        ALWAYS present, including an explicit "default_used": False on a genuine
-        selection — an absent key would leave you unable to tell a real answer
-        from an older server that never sent the field. `default_used` is True
-        when the user TIMED OUT (the caller's `default` was substituted here) and
-        when the user was OFFLINE (the server substituted, and that path returns
-        through the success branch, not the timeout one).
-
-        This is a DETECTION aid, not prevention: reading `answers` while ignoring
-        `answered` still turns silence into consent.
+        default: Optional dict keyed by question header. On timeout the result is {"answers": <default>, "default_used": True, "answered": False} instead of the error dict; it is deliberately NOT the same shape as a real answer. Keys must match question headers; values must be option labels (a string for single-select, a list of strings for multi-select). Validated at call time: a mismatch returns an error dict before the notification fires. `default=None` keeps the legacy timeout return {"error": "timeout - no response received", "timeout": True}.
+        override_size_limitation: Default False. True sends a spoken `question` over the length cap (configured, default 500) knowingly; detail belongs in `abstract`, which has no length limit, not in speech.
 
     Examples:
-        # Single question, single select
-        result = ask_multiple_choice([{
-            "question": "Which database should we use?",
-            "header": "Database",
-            "multiSelect": False,
-            "options": [
-                {"label": "PostgreSQL", "description": "Relational database"},
-                {"label": "MongoDB", "description": "Document database"}
-            ]
-        }])
-        # Returns: {"answers": {"Database": "PostgreSQL"}}
+        result = ask_multiple_choice([{"question": "Which database should we use?", "header": "Database", "multiSelect": False, "options": [{"label": "PostgreSQL", "description": "Relational database"}, {"label": "MongoDB", "description": "Document database"}]}])
+        # {"answers": {"Database": "PostgreSQL"}, "default_used": False, "answered": True}
 
-        # Multiple questions
-        result = ask_multiple_choice([
-            {"question": "Which framework?", "header": "Framework", "multiSelect": False,
-             "options": [{"label": "FastAPI"}, {"label": "Flask"}]},
-            {"question": "Which features?", "header": "Features", "multiSelect": True,
-             "options": [{"label": "Auth"}, {"label": "Caching"}]}
-        ])
-
-        # With timeout default. ⚠️ IT COVERS A TIMEOUT, NOT AN ABSENT USER.
-        # An offline user gets a 503 from the FIRST ask whether or not you passed
-        # a default, because the offline path is decided server-side against a
-        # `response_default` this verb does not send — ask_yes_no plumbs it, this
-        # one does not. So do NOT reach for this pattern to leave a walkthrough
-        # running with nobody at the desk; it will stop on the first question.
-        # A unit test guards this wording — it forbids the retired term outright,
-        # so state what IS true here rather than negating the old claim.
-        result = ask_multiple_choice(
-            questions=[{
-                "question":    "Which database should we use?",
-                "header":      "Database",
-                "multiSelect": False,
-                "options":     [{"label": "PostgreSQL"}, {"label": "MongoDB"}]
-            }],
-            default={"Database": "PostgreSQL"}
-        )
-        # On timeout returns: {"answers": {"Database": "PostgreSQL"}}
+        result = ask_multiple_choice(questions=[{"question": "Which database should we use?", "header": "Database", "multiSelect": False, "options": [{"label": "PostgreSQL"}, {"label": "MongoDB"}]}], default={"Database": "PostgreSQL"})
+        # on timeout: {"answers": {"Database": "PostgreSQL"}, "default_used": True, "answered": False}
     """
     # Validate BEFORE logging. `len( questions )` on the line above this guard
     # raised TypeError for a null/unsized argument, so the guard right below it
@@ -2597,9 +2371,9 @@ def ask_open_ended_batch(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send long spoken `question` text KNOWINGLY. Default False — detail
-            belongs in `abstract` (not length-limited), not the spoken/TTS channel.
+        override_size_limitation: Default False. True sends a spoken `question` over the
+            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
+            which has no length limit, not in speech.
 
     Returns:
         dict with answers keyed by header:
@@ -2715,6 +2489,9 @@ def set_session_topic( topic: str ) -> dict:
     Returns:
         dict with status and the topic that was set
     """
+    refusal = _refuse_borrowed_identity( "set_session_topic" )
+    if refusal is not None: return refusal
+
     import json
 
     meta        = _get_cc_metadata()
@@ -2726,8 +2503,8 @@ def set_session_topic( topic: str ) -> dict:
         with open( bridge_path ) as f:
             data = json.load( f )
         data[ "session_topic" ] = topic
-        with open( bridge_path, "w" ) as f:
-            json.dump( data, f, indent=2 )
+        if not atomic_write_json( bridge_path, data ):
+            return { "status": "error", "reason": f"bridge write failed for {bridge_path}" }
 
         # Also push to notification UI for real-time header update
         # Truncate session_name for UI display (max 64 chars)
@@ -2763,8 +2540,9 @@ def get_session_info() -> dict:
     Returns:
         dict with project name, session_id, sender_id, server_url, version,
         speakerphone_on flag, claude_code metadata from the session bridge,
-        and voice_persona dict (None if allocation failed; otherwise
-        {name, voice_id, icon, color, borrowed, display_name?})
+        voice_persona dict (None if allocation failed; otherwise
+        {name, voice_id, icon, color, borrowed, display_name?}), and skeleton_crew
+        ({on, since, set_by, settings_mute_while_off}, or None when unreadable)
     """
     resolved_sender = _wait_for_sender_id()
     # Resolve the global TTS interaction mode (solo | chorus) so the consumer
@@ -2786,6 +2564,15 @@ def get_session_info() -> dict:
         "tts_interaction_mode" : _tts_mode
     }
 
+    # The skeleton crew switch, read fresh from the configuration file on every call so a
+    # flip shows up with no restart. None means the state could not be read. A manager
+    # reads None as unknown and not as off.
+    try:
+        from lupin_mcp import skeleton_crew
+        info[ "skeleton_crew" ] = skeleton_crew.describe()
+    except Exception:
+        info[ "skeleton_crew" ] = None
+
     # Include CC session bridge metadata when available
     try:
         cc_meta = _get_cc_metadata()
@@ -2806,64 +2593,23 @@ def get_session_info() -> dict:
 @mcp.tool
 def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20, cycle_window_seconds: int = 300 ) -> dict:  # pragma: no cover - live MCP boundary; all logic + branches are covered in self_respin_core
     """
-    Self-re-spin: schedule a `/clear` into THIS session's OWN pane so it rehydrates
-    as the same seat (same session id, tmux, persona, board, lineage) at low
-    context — for the price of one memento write instead of a whole successor's
-    context. IRREVERSIBLE; every guard lives INSIDE this verb.
+    Self-re-spin: schedule a `/clear` into THIS session's OWN pane so it rehydrates as the same seat (same session id, tmux, persona, board, lineage). IRREVERSIBLE; every guard is inside this verb.
 
-    BEFORE CALLING: generate this cycle's nonce uuid FIRST, then write your memento
-    with the nonce already in it — ONE call, no separate stamping step:
+    BEFORE CALLING: generate the nonce uuid, then write your memento with it in ONE call:
 
-        python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
-            --slot root --persona <you> --session-id <from get_session_info()> \
-            --self-respin-nonce <uuid>
+        python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot root --persona <you> --session-id <from get_session_info()> --self-respin-nonce <uuid>
 
-    Pass that same uuid as `memento_nonce`. Do NOT stamp it afterwards by hand or via
-    self_respin_core.stamp_nonce_into, which is RETIRED and now refuses.
+    Pass that uuid as `memento_nonce`. Do NOT stamp it afterwards by hand or via self_respin_core.stamp_nonce_into (retired). `write` exits 5 if record and mirror disagree.
 
-    ALREADY WROTE YOUR ROOT MEMENTO THIS SESSION? Then `write` refuses it as immutable
-    (exit 3) and the above is closed to you — which is the USUAL case on a second
-    self-respin, since the seat keeps its session id. Use `amend` instead, with the
-    nonce line as the LAST line of the amendment body you pipe in (there is no flag for
-    it; it is ordinary content, and amend appends). amend re-syncs record, mirror and
-    pointer in the same call, so it is safe on the point that matters here — but the
-    nonce then shares the AMENDMENT's timestamp, not the whole body's, so it proves the
-    amendment is fresh rather than the whole file. Two reasons, and the second is why appending was
-    not simply repaired (row c9f4d613): an append reaches the RECORD alone and leaves
-    the durable MIRROR one line short of it, so a restore yields a memento this verb
-    then refuses; and a fresh nonce appended to an hour-old body proves the STAMP is
-    fresh, never the body. Pre-stamping shares the body's own written_at, so the
-    freshness gate below is about what you actually clear into. cmd_write lands record
-    + mirror + pointer together and exits 5 if record and mirror disagree, so the
-    truncation this guard was born from (row 4cf9f9fd) stays unwritable. The verb confirms that exact nonce, a fresh timestamp, AND a body
-    that still has substance once the nonce line is removed — a stale, partial, or
-    nonce-only memento aborts the clear, so you never clear into nothing.
+    Already wrote your root memento this session? `write` refuses it as immutable (exit 3). Use `amend`, with the nonce line as the LAST line of the amendment body you pipe in (no flag needed). amend keeps record, mirror and pointer in step; the nonce proves only the amendment is fresh.
 
-    The verb then: (a) verifies the memento is complete + fresh this cycle;
-    (b) asks you a yes/no confirmation on the human surface, DEFAULTING TO YES so an
-    absent user does not cost the fleet a manager (offline / timeout → proceed; a
-    real "no" schedules nothing); (c) writes the observer's liveness marker plus a
-    one-shot fire token; (d) schedules a detached `/clear` that consumes the token
-    at the fire point, so a second fire after rehydrate no-ops.
+    The verb checks the exact nonce, a fresh timestamp, and a body with substance beyond the nonce line; a stale, partial or nonce-only memento aborts, and NOTHING is scheduled unless the memento verified AND the ask resolved yes (or default-yes) AND the observer marker is durable. It then asks you yes/no on the human surface, DEFAULTING TO YES so an absent user does not cost the fleet a manager (offline or timeout proceeds; a real "no" stops it), writes the observer's liveness marker and a one-shot fire token, and schedules a detached `/clear` that consumes the token. The session id comes from the local bridge, never an argument, so it can only aim at your own pane; nothing pre-supplies the confirmation or targets another session.
 
-    The session id is resolved from the local bridge — NEVER taken from a caller
-    argument — so this can only ever aim at your own pane. There is deliberately no
-    parameter to pre-supply the confirmation, substitute the ask, or target another
-    session: the irreversible guard is not skippable.
-
-    Requires:
-        - you have written your memento this cycle with the stamped nonce line
-        - memento_path points at that memento; memento_nonce is its nonce uuid
-        - delay_seconds is the detached sleep before the clear fires
-        - cycle_window_seconds bounds how old the memento nonce may be
+    Requires: your memento, written this cycle with the nonce line (`memento_path`; `memento_nonce` is its uuid); `delay_seconds`, the detached sleep before the clear; `cycle_window_seconds`, the oldest nonce allowed.
 
     Ensures:
-        - returns { status: scheduled|declined|aborted, reason, marker_path,
-          fire_token_path, expected_return_by }
-        - schedules NOTHING unless the memento verified AND the ask resolved yes/
-          default-yes AND the observer marker is durable on disk
-        - makes NO task-store calls (the observer owns done-state; this seat is
-          cleared before it could mark its own row)
+        - returns { status: scheduled|declined|aborted, reason, marker_path, fire_token_path, expected_return_by }
+        - makes NO task-store calls (the observer owns done-state)
     """
     refusal = _refuse_borrowed_identity( "self_respin" )
     if refusal is not None: return refusal
@@ -2981,28 +2727,18 @@ def enable_speakerphone() -> dict:
     """
     Enter conversation mode for this session.
 
-    USER-ONLY INITIATION (HARD RULE): Call this ONLY in direct response to an
-    explicit user instruction — voice phrase like "enter conversation mode" (or
-    close paraphrases), typed request, or slash command. NEVER call on your own
-    initiative. Preemptive activation ("since this is a long task...") is
-    forbidden. The mic is the user's to direct, not yours to grab.
+    USER-ONLY INITIATION (HARD RULE): Call this ONLY in direct response to an explicit user instruction: a voice phrase like "enter conversation mode" (or a close paraphrase), a typed request, or a slash command. NEVER call it on your own initiative; preemptive activation ("since this is a long task...") is forbidden. The mic is the user's to direct, not yours to grab.
 
-    When conversation mode is on, after every assistant turn you should call
-    `notify(message=<full_response_text>, suppress_ding=True, priority='high')` so the
-    response is spoken aloud (the user is listening at a distance via TTS, not reading
-    the terminal). Strip fenced code blocks and tool-call narration from the spoken text.
+    While conversation mode is on, after every assistant turn call `notify(message=<full_response_text>, suppress_ding=True, priority='high')` so the response is spoken aloud (the user is listening at a distance). Strip fenced code blocks and tool-call narration from the spoken text.
 
-    Mutual exclusion: at most one CC session at a time can hold conversation mode
-    across the user's sessions. Activating here will atomically displace any other
-    active session — its UI reverts, in-flight TTS pauses, sender card unpins.
-
-    State is stored in the bridge file and survives /clear within this session.
+    At most one CC session at a time can hold conversation mode across the user's sessions; activating here atomically displaces any other (its UI reverts, in-flight TTS pauses, sender card unpins). State is stored in the bridge file and survives /clear within this session.
 
     Returns:
-        dict with status, session_id, speakerphone_on=True on success;
-        when HTTP path is reachable, also includes "displaced_sessions" list and
-        "ui_sync"="broadcast" (other tabs sync via WebSocket immediately)
+        dict with status, session_id, speakerphone_on=True on success; when the HTTP path is reachable, also includes "displaced_sessions" and "ui_sync"="broadcast" (other tabs sync via WebSocket immediately)
     """
+    refusal = _refuse_borrowed_identity( "enable_speakerphone" )
+    if refusal is not None: return refusal
+
     return _flip_speakerphone( True )
 
 
@@ -3021,6 +2757,9 @@ def disable_speakerphone() -> dict:
     Returns:
         dict with status, session_id, speakerphone_on=False on success
     """
+    refusal = _refuse_borrowed_identity( "disable_speakerphone" )
+    if refusal is not None: return refusal
+
     return _flip_speakerphone( False )
 
 
@@ -3183,47 +2922,18 @@ def request_persona( name: Optional[ str ] = None ) -> dict:
     """
     Request a named voice persona for this session, or let the server pick one.
 
-    USER-INITIATED ONLY (HARD RULE): Call this ONLY in direct response to an
-    explicit user instruction — e.g. "become Mr. Radio", "switch my voice to
-    Rachel", or a request to reclaim a persona that was lost after a context
-    compaction. NEVER call it on your own initiative. The persona pool is a
-    shared resource and the voice is the user's to assign, not yours to grab.
+    USER-INITIATED ONLY (HARD RULE): Call this ONLY in direct response to an explicit user instruction, e.g. "become Mr. Radio", "switch my voice to Rachel", or a request to reclaim a persona lost after a context compaction. NEVER call it on your own initiative: the persona pool is shared, and the voice is the user's to assign. This applies equally to the no-argument form: `request_persona()` is not a self-service fix for your own null persona; it only surrenders the choice of name to the server. Ask the user first, every time.
 
-    USER-INITIATED ONLY APPLIES EQUALLY TO THE NO-ARGUMENT FORM. Calling
-    `request_persona()` with no name is NOT a self-service path — it still
-    requires the user to have asked for a persona; it only surrenders the
-    CHOICE OF NAME to the server, which the user is not exercising when the
-    session is unnamed. Do not call it to fix your own null persona on your own
-    initiative. Ask the user first, every time.
-
-    (Historical note, so the rule is not mistaken for boilerplate: `name` used
-    to be a required argument. That requirement was doing double duty as an
-    accidental guard — self-allocating meant guessing a specific free pool name,
-    and the friction discouraged it. The no-argument form removes that friction,
-    so this instruction is now the only thing standing in its place.)
-
-    Routes through the canonical allocate endpoint, which swaps this session's
-    persona atomically under a server-side lock and broadcasts a
-    `voice_persona_assigned` WebSocket event — every connected browser tab
-    re-badges immediately, no extra client work. If another LIVE session
-    already holds the requested name you get status "occupied"; if the name is
-    not in the configured pool you get status "not_in_pool".
+    It swaps this session's persona atomically under a server-side lock and broadcasts a `voice_persona_assigned` WebSocket event, so every connected browser tab re-badges immediately. If another LIVE session already holds the requested name you get status "occupied"; if the name is not in the configured pool you get status "not_in_pool".
 
     Args:
-        name: The persona name to request (e.g. "Mr. Radio", "rachel",
-              "Tiberius"). Server-side resolution is case-insensitive.
-              OMIT ENTIRELY to have the server pick uniformly at random from
-              the unallocated pool — the path for healing a session whose
-              `voice_persona` is null, where no specific name is wanted.
-              Passing "" or "   " is a caller error, not a request for
-              auto-pick; only omission selects it.
+        name: The persona name to request (e.g. "Mr. Radio", "rachel", "Tiberius"); resolution is case-insensitive. OMIT ENTIRELY to have the server pick uniformly at random from the unallocated pool (the path for healing a session whose `voice_persona` is null, where no specific name is wanted). Passing "" or "   " is a caller error, not a request for auto-pick; only omission selects it.
 
     Returns:
-        dict — one of:
+        dict, one of:
           {status:"ok", session_id, voice_persona, swapped, message}
           {status:"not_in_pool", requested, available}
-          {status:"occupied", requested, holding_session_id,
-           holding_persona_name, available}
+          {status:"occupied", requested, holding_session_id, holding_persona_name, available}
           {status:"error", reason, ...}
 
     Examples:
@@ -3231,6 +2941,9 @@ def request_persona( name: Optional[ str ] = None ) -> dict:
         request_persona("Rachel")      # deliberate voice swap
         request_persona()              # user asked for a persona, any free one
     """
+    refusal = _refuse_borrowed_identity( "request_persona" )
+    if refusal is not None: return refusal
+
     return _request_persona( name )
 
 
@@ -3250,11 +2963,30 @@ def _spawn_script_path() -> str:  # pragma: no cover  # trivial path join; exerc
     return os.path.join( os.environ.get( "LUPIN_ROOT", "" ), "src", "scripts", "start-cc-with-tmux.sh" )
 
 
-def _spawn_config_mgr():  # pragma: no cover  # constructs a real ConfigurationManager; logic lives in resolve_spawn_config
+# Why the last _spawn_config_mgr() call returned None; None when it built a manager.
+# spawn_sessions reads it to say so in its return (row c9252819).
+_spawn_config_error = None
+
+
+def _spawn_config_mgr():
+    """
+    Build the ConfigurationManager the spawn path reads its INI keys from.
+
+    Ensures:
+        - returns a ConfigurationManager when LUPIN_CONFIG_MGR_CLI_ARGS resolves
+        - returns None otherwise, and records the cause in `_spawn_config_error`
+          so spawn_sessions can report it instead of silently spawning on the
+          user default model
+        - clears `_spawn_config_error` on success
+    """
+    global _spawn_config_error
     try:
         from cosa.config.configuration_manager import ConfigurationManager
-        return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        _spawn_config_error = None
+        return mgr
     except Exception as e:
+        _spawn_config_error = str( e )
         logger.warning( f"[spawn] ConfigurationManager unavailable; using defaults. Reason: {e}" )
         return None
 
@@ -3271,64 +3003,31 @@ def spawn_sessions(
     model              : Optional[ str ] = None
 ) -> dict:
     """
-    **[SPAWN — host-side; launches real Claude Code sessions]** Spin up `count`
-    headless reviewer sessions on this (the manager's) behalf.
+    **[SPAWN — host-side; launches real Claude Code sessions]** Spin up `count` headless reviewer sessions for this manager.
 
-    Each child boots as a real interactive `claude` in a detached tmux session,
-    fires SessionStart (so it gets its own voice persona — Extra-N when the named
-    pool is exhausted), and reads `task_prompt` as its initial brief. Lineage is
-    recorded against this manager's session so `dismiss_sessions` /
-    `list_spawned_sessions` can find them. Results flow back over the existing
-    commons DM threading: instruct children in `task_prompt` to post findings to
-    the returned `collection_topic` (`dm-{your-persona}`).
-
-    Cost/throttle: each child consumes Max-plan OAuth and shares the rolling
-    window — schedule non-interactive cascades off-peak (post-midnight).
+    Each child boots as a real interactive `claude` in a detached tmux session, gets its own voice persona (Extra-N when the named pool is exhausted) and reads `task_prompt` as its brief. Lineage is recorded so `dismiss_sessions` and `list_spawned_sessions` find the children. Tell children in `task_prompt` to post findings to the returned `collection_topic` (`dm-{your-persona}`). Each child spends Max-plan OAuth from the shared window. `config_warning` in the result means the INI config manager could not be built (INI model pins and the spawn cap were NOT applied); it names the cause.
 
     Args:
         count: number of reviewers (1..INI `cc session spawn max reviewers`)
-        task_prompt: brief template; tokens {role} {manager_session_id} {index}
-            are auto-substituted, plus any you reference and supply downstream
-        role: reviewer | author | observer | manager (templated into the brief)
-        project: child project (sets cwd / CLAUDE.md)
-        persona_preference: str | list — ordered persona CHAIN ("Rio,Krishna,*"
-            or ["Rio","Krishna","*"]): transported to each child via the
-            COSA_VOICE_PERSONA_CHAIN env var; the child's SessionStart walks
-            it strictly — first FREE element wins, `*` means "then take
-            anything free", exhaustion without `*` is a LOUD fail (child
-            stays persona-less; never silently re-allocated). Sibling spawns
-            walk the same chain and take successive unclaimed elements.
-        seed_memento: prior context that restores author continuity — EITHER a
-            PATH to a memento record (what CLAUDE.md's re-spin ladder prescribes, and
-            what the child opens itself) OR the memento CONTENT as a blob. Appended
-            verbatim to the child's task prompt; never read or resolved here.
-            🔴 This line used to say "path/ref" while `render_task_prompt`'s said
-            "blob" — one parameter, two contracts, same code (row 75b36135). The full
-            statement, with the 130-transcript measurement and its two limits, lives
-            on `render_task_prompt` in session_spawner.py.
-            ⚠️ It has a SECOND job that is not about content at all: `seed_memento`
-            being truthy is what arms the re-spin wake watch below. Deliberate (row
-            b0570b67), recorded here so the coupling is not a surprise.
-        dry_run: build + print the spawn commands without launching
-        model: explicit model id to pin each child to (e.g. "claude-opus-5").
-            Resolution: this explicit param → the INI role key
-            `cc session spawn model <role>` → the INI `cc session spawn model
-            default` key (covers unknown/new roles) → None. None resolves to NO
-            `--model` flag, so the child inherits the user default (fail-open;
-            today's behavior, zero-risk rollout). The cost-split default posture
-            (2026-08-17) is Fable-5-managers (via Rick's user default, zero code)
-            / Opus-5-workers (the `claude-opus-5` INI keys). The resolved
-            model is echoed on every roster entry + at the top level (spawn-ack
-            verification).
+        task_prompt: brief template; {role} {manager_session_id} {index} and tokens you supply are substituted
+        role: reviewer | author | observer | manager (fills the brief's {role})
+        project: child project (cwd, CLAUDE.md)
+        persona_preference: str | list, an ordered chain ("Rio,Krishna,*" or a list) sent to each child as COSA_VOICE_PERSONA_CHAIN. SessionStart takes the first FREE name, then `*` takes anything free; exhausting the chain without `*` is a LOUD failure (persona-less child, never re-allocated); siblings take successive names.
+        seed_memento: a PATH to a memento record (the child opens it) or the memento CONTENT as a blob, appended verbatim to the child's prompt, never read here. Truthy also arms the re-spin wake watch.
+        dry_run: print the commands, do not launch
+        model: explicit model id (e.g. "claude-opus-5"). Resolution: this param, INI `cc session spawn model <role>`, INI `cc session spawn model default`, then None (no `--model` flag: the child inherits the user default).
 
     Returns:
-        dict: { spawned:[{session_name, requested_role, status, model, ...}],
-                manager_persona, collection_topic, model, ... } or {status:"error",...}
+        dict: { spawned:[{session_name, requested_role, status, model}], manager_persona, collection_topic, model } or {status:"error"}
     """
+    refusal = _refuse_borrowed_identity( "spawn_sessions" )
+    if refusal is not None: return refusal
+
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
     sid, persona = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
-    cfg          = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
+    config_mgr   = _spawn_config_mgr()
+    cfg          = session_spawner.resolve_spawn_config( config_mgr )
     # Resolve the child's model: explicit param wins; else the per-role INI key;
     # else the INI `default` key (covers unknown/new roles); else None (no flag →
     # inherit the user default, fail-open). See ruling #2 (2026-07-02): managers
@@ -3360,6 +3059,15 @@ def spawn_sessions(
         )
     except ValueError as e:
         return { "status": "error", "reason": str( e ) }
+
+    # Say so when the INI could not be read (row c9252819). Without the config manager
+    # every role resolves to no model, so the child silently inherits the user default.
+    if config_mgr is None:
+        result[ "config_warning" ] = (
+            "ConfigurationManager unavailable; INI spawn settings (per-role model, spawn cap) were NOT applied. "
+            f"Cause: {_spawn_config_error}. Pass model= explicitly, or register the cosa-voice MCP "
+            "with LUPIN_CONFIG_MGR_CLI_ARGS (src/scripts/install-cosa-voice.sh)."
+        )
 
     # Arm the wake check on a RE-SPIN (row b0570b67). A spawn carrying a
     # seed_memento is a seat being brought back, and that is the path where a
@@ -3435,84 +3143,34 @@ def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):
         logger.warning( f"[spawn] re-spin wake watch not armed: {e}" )
 
 
+def _retire_reaped_seat_tree( session_name, cwd ):
+    """
+    Adapt the spawner's ( session_name, cwd ) call to retire_seat_worktree( path, seat_name ).
+
+    Ensures:
+        - returns retire_seat_worktree's outcome for the seat's own tree
+        - the cwd goes in as the path and the session name as the seat, in that order
+    """
+    from cosa.agents.shared import seat_teardown
+    return seat_teardown.retire_seat_worktree( cwd, session_name )
+
+
 @mcp.tool
 def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str = "", write_memento: Optional[ bool ] = None, respin_personas: Optional[ List[ str ] ] = None ) -> dict:
     """
     **[REAP — host-side]** Tear down reviewer sessions THIS manager spawned.
 
-    Kills each target's tmux session (idempotent) and drops it from the lineage
-    manifest, freeing its Extra-N/pool persona slot. With `session_names=None`,
-    reaps ALL sessions this manager spawned.
+    Kills each target's tmux session (idempotent), drops it from the lineage manifest, frees its persona slot. `session_names` names the tmux sessions; None reaps ALL sessions this manager spawned. `reason` is recorded. Returns `dismissed`, `remaining`.
 
-    `write_memento` (defaults to the INI `cc session spawn write memento default`)
-    makes the reap PROVE each seat has a fresh+complete memento on disk BEFORE kill,
-    at the derivable slot `io/mementos/<persona-slug>.md` — and, when one is absent,
-    DM the still-alive child to write it and WAIT (bounded) for it to appear, so its
-    specialization survives a future re-spawn (pass that path back as `seed_memento`).
-    The result's `memento_outcomes` carries an EXPLICIT per-seat verdict (verified /
-    written / prior_holder_present / unproven_present / unparseable_present /
-    timeout_no_memento / skipped)
-    — a seat that produced no PROVABLE memento fails VISIBLY, never as a silent success
-    (row 0a36d83d — the flag used to be a no-op). The verdict splits FOUR recovery
-    actions apart, and the split exists so a manager can tell them apart WITHOUT
-    opening the file: `unproven_present` (THIS seat's own memento is at the slot — the
-    header parses and names this session — but a gate failed, and the reason names
-    which; the writer is fine, so a small staleness means it was still writing when the
-    window closed), `unparseable_present` (a file is on disk but carries NO parseable
-    memento-record header, so nothing attests to who wrote it or when — a WRITER
-    bypassed memento_io; OPEN AND READ it, RECOVERABLE), `prior_holder_present` (the
-    file at the slot parsed fine and names ANOTHER session — this seat's memento is NOT
-    there, so do not read it expecting their context; hunt for one written to the wrong
-    place, usually the repo root, or accept it was never written), and
-    `timeout_no_memento` (nothing readable on disk at all — ABSENT, unrecoverable).
-    The first two were ONE verdict until row 48b5f19e: measured on a live reap
-    2026-08-29, a seat 45 seconds past the poll deadline with a perfect memento and a
-    seat that hand-wrote a header-less slot drew the same string, and both read as
-    failures when only one was. Before the middle one
-    existed, a race and a lost memento returned the SAME verdict ten minutes apart
-    (row 3b0c5f90), which forced a manual check on every reap.
+    Re-spinning? Pass `respin_personas=["cheech","rio"]` for every seat you are bringing back; their rows keep owner. By default a reap moves each worker's open store rows off them (closed if receipted, else reassigned to the accountable or reaping manager), so a re-spin that omits the name leaves its rows on YOU. The result echoes `retained_owner_personas` (skipped) and `retained_unmatched` (named but not reaped in this batch: a typo protects nothing: check it). A named seat that does not return leaves its rows on a persona with no live session, and nothing checks. Retention is keyed on the persona NAME and freed names are re-granted, so a re-granted name can retain the wrong seat's rows: reap and re-spin in one batch.
 
-    ⚠️ **Read `memento_alarm` FIRST.** It is a single top-level line naming every seat
-    about to be killed without a proven memento, and it is `None` when there is nothing
-    to say. The per-seat verdicts were already honest and still got missed, because they
-    sit in a nested dict while the reap reports success around them (row 3b0c5f90).
-    A seat already carrying a fresh memento (a manual "prepare for re-spin" the
-    manager already did) is NOT asked again — the guard suppresses the duplicate.
+    Mementos: `write_memento` (None = INI `cc session spawn write memento default`, else a bool) makes the reap prove each seat has a fresh, complete memento at `io/mementos/<persona-slug>.md` before killing it; if none is there it DMs the live child to write one and waits (bounded). Pass that path back as `seed_memento` on respawn. Read `memento_alarm` first: names each seat killed without a proven memento, `None` if none. A seat with a fresh memento is not asked again.
 
-    ⚠️ **A REAP UN-ASSIGNS THE WORKER'S STORE ROWS. A RE-SPIN MUST SAY SO.**
-    By default every reaped worker's non-terminal rows are reconciled away from
-    them (closed-if-receipt, else reassigned to the accountable/reaping manager)
-    so nothing is left owned by a persona with no live session. When you are
-    re-spinning a persona straight back, that is WRONG: the memento carries the
-    context forward but ownership does not follow it, so the store stops showing
-    anyone on the lane — and it is self-concealing, because the rows land on YOU,
-    making your board look fuller while a worked lane reads as unworked.
-
-    **Pass `respin_personas=["cheech","rio"]` for every seat you are bringing
-    back.** Those rows keep their owner. The result echoes
-    `retained_owner_personas` (actually skipped) and `retained_unmatched` (named
-    but not reaped in this batch — a typo protects nothing, so check it).
-
-    ⚠️ **Two known limits, both real, neither hidden:**
-    1. **Retention is an unverified claim.** Nothing checks that the re-spin
-       actually happens. Name a seat and fail to bring it back and its rows sit
-       on a persona with no live session — the exact orphan the reconciliation
-       exists to prevent, now indistinguishable from a live-owned lane. The claim
-       is yours to keep.
-    2. **It is keyed on the persona NAME, and a name is not a seat.** A name can
-       be held by more than one live session, and freed names are re-granted
-       after a reap — so a claim naming a re-granted name can retain the WRONG
-       seat's rows. Prefer reaping-and-respinning in one batch you control.
-
-    Args:
-        session_names: explicit tmux session names, or None = all mine
-        reason: recorded teardown reason
-        write_memento: None → use INI default; else explicit bool
-        respin_personas: personas coming straight back — keep their row ownership
-
-    Returns:
-        dict: { dismissed:[{session_name, status}], remaining, memento_alarm,
-                memento_outcomes, retained_owner_personas, retained_unmatched, ... }
+    `memento_outcomes` gives one verdict per seat: verified, written, skipped, or a visible failure:
+    - `unproven_present`: its own memento is there but a gate failed; the reason names which (small staleness: still writing).
+    - `unparseable_present`: a file with no memento-record header (a writer bypassed memento_io): read it.
+    - `prior_holder_present`: names ANOTHER session, so not theirs to read; look elsewhere (usually the repo root) or accept it was never written.
+    - `timeout_no_memento`: nothing on disk; unrecoverable.
     """
     refusal = _refuse_borrowed_identity( "dismiss_sessions" )
     if refusal is not None: return refusal
@@ -3567,15 +3225,15 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     # partial, not a closure, for the same reason the memento seams are: the wrapper stays
     # covered when the inner dismiss_sessions is stubbed, and probe_seat_branches has its
     # own direct unit tests.
-    # NO target_branch is passed, deliberately. `reap_branch.DEFAULT_TARGET_BRANCH` reads
+    # NO target_branch is passed, deliberately. `reap_branch.resolve_target_branch` reads
     # $CONTEXT_TICK_TARGET_BRANCH — the SAME variable the context-pressure tick already
-    # resolves the working line from. A second INI key here would be a second definition
-    # of one value, and two derivations of one fact coincide until the day they do not.
+    # resolves the working line from — and otherwise the branch checked out in the main
+    # tree. A second INI key here would be a second definition of one value, and two
+    # derivations of one fact coincide until the day they do not.
     branch_probe = functools.partial( reap_branch.probe_seat_branches )
     # SEAT TEARDOWN (row 129cc96b, P3) → wire the LIVE teardown so a reaped seat's own
     # tree and merged branch go with it, instead of waiting hours for the janitor. It
     # keeps and reports any tree holding uncommitted or unmerged work.
-    from cosa.agents.shared import seat_teardown
     # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
     # worker's non-terminal store items are auto-reconciled (close-if-receipt /
     # reassign-to-live-manager / surface) instead of orphaning. session_spawner
@@ -3586,57 +3244,29 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         reconcile_items_fn=session_spawner._default_reconcile_store_items,
         respin_personas=respin_personas, memento_coord_fn=memento_coord,
         memento_recheck_fn=memento_recheck, branch_probe_fn=branch_probe,
-        seat_teardown_fn=seat_teardown.retire_seat_worktree )
+        seat_teardown_fn=_retire_reaped_seat_tree )
 
 
 @mcp.tool
 def list_spawned_sessions() -> dict:
     """
-    **[READ — host-side]** List the sessions THIS manager spawned, on TWO axes:
-    LIVENESS (probed from tmux) and IDENTITY (read from each child's bridge).
+    **[READ — host-side]** List the sessions THIS manager spawned, on two axes: LIVENESS (probed from tmux) and IDENTITY (read from each child's bridge).
 
-    ⚠️ THIS IS NOT A GENERAL HEALTH CHECK, and a live row is NOT proof of who is
-    sitting in it. The persona is written by the CHILD's SessionStart into the
-    child's own bridge file, well after the parent recorded the seat — so a seat
-    can be genuinely alive and genuinely nameless at the same time. Before you
-    address a seat by persona name, read `identity_complete`; if it is False,
-    `identity_warning` names every seat you must NOT address by name.
+    This is not a general health check, and a live row is not proof of who sits in it. A child's SessionStart writes its persona into its own bridge after the parent recorded the seat, so a seat can be alive and nameless. Before you address a seat by persona name, read `identity_complete`; if False, `identity_warning` names every seat you must NOT address by name.
 
     Per row, `persona_state` is one of:
-        "allocated"         — bridge found, persona named; `persona` is that name
-        "none"              — bridge found, persona explicitly null. The child
-                              wrote a bridge but has no persona in it.
-        "unknown_no_bridge" — no bridge on disk at all. Either the child is
-                              mid-boot (a real race — the parent writes the seat
-                              before the child writes its bridge) or its
-                              SessionStart never completed.
+        "allocated"         bridge found, persona named; `persona` is that name
+        "none"              bridge found, persona explicitly null
+        "unknown_no_bridge" no bridge on disk: the child is mid-boot, or its SessionStart never completed
+        "unreadable"        bridge found, persona record malformed: an instrument failure, NOT an absent persona
+    `persona` is null for every state but "allocated", and a null persona always comes with a state saying why.
 
-    ⏱️ NEITHER of those two is a failure verdict by itself. Measured on a live
-    spawn: a HEALTHY child goes unknown_no_bridge → none → allocated in about
-    one second. Both states are normal at one second old and damning at forty
-    minutes old, and nothing on disk can tell those apart — so read them WITH
-    `age_seconds`. The state reports what is on disk; the age is your evidence.
+    Neither "none" nor "unknown_no_bridge" is a failure by itself: a healthy child goes unknown_no_bridge, then none, then allocated in about a second. Both are normal at one second old and damning at forty minutes, so read them WITH `age_seconds`.
 
-    📍 WHAT THIS ANSWERS, AND WHAT IT DOES NOT. This repairs the ROSTER's
-    identity axis only. A persona-less session is inconsistently visible across
-    the identity-bearing surfaces, and they contradict each other — measured on
-    one live session, simultaneously: this roster said alive/live, `dm_send`
-    said recipient_unresolved (listing 7 live peers and omitting it), and no
-    bridge existed for it at all. An identity-verified row here is NOT a promise
-    that the session is addressable by DM, and `identity_complete: true` says
-    nothing about the other surfaces. Do not read this tool as the fleet's
-    source of truth for identity; there isn't one.
-        "unreadable"        — bridge found but the persona record is malformed.
-                              Instrument failure, NOT an absent persona.
-    `persona` is null for every state but "allocated" — a name is only ever
-    returned when it was actually read, and a null persona always arrives with a
-    state explaining why.
+    An identity-verified row is NOT a promise the session is addressable by DM (`dm_send` can still answer recipient_unresolved), and `identity_complete: true` says nothing about other surfaces. This roster is not the fleet's source of truth for identity.
 
     Returns:
-        dict: { sessions:[{session_name, requested_role, status, alive, model,
-                           persona, persona_state, identity_verified, age_seconds}],
-                count, identity_complete, identity_warning,
-                unattributable_bridges, manager_session_id }
+        dict: { sessions:[{session_name, requested_role, status, alive, model, persona, persona_state, identity_verified, age_seconds}], count, identity_complete, identity_warning, unattributable_bridges, manager_session_id }
     """
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
@@ -3849,55 +3479,27 @@ def commons_post(
     metadata : Optional[ dict ] = None,
 ) -> dict:
     """
-    Dual tier marker (depends on topic):
-    - **[SELF-DISCLOSURE]** — free-form / presence / incident topics (announcing your own state)
-    - **[ATTENTION-DEMANDING]** — coordination / help-wanted / contested-claim topics (summons peer attention)
+    Append an entry to a commons topic (the file-based inter-session blackboard). The tier depends on the topic: **[SELF-DISCLOSURE]** for free-form, presence and incident topics (announcing your own state); **[ATTENTION-DEMANDING]** for coordination, help-wanted and contested-claim topics (summons peer attention).
 
-    Append an entry to a commons topic (file-based inter-session blackboard).
+    Free-form topics auto-create on first post and keep 7 days by default; reserved topics (`broadcast-acks`, `presence`, `system-events`) are pre-seeded and may differ. Persona fields are stamped from the session bridge and immutable, so you cannot spoof another persona. Posting user-sensitive data is prohibited (see cross-session-communication.md §5).
 
-    Examples:
-        # Self-disclosure: announce your own state
-        commons_post(topic="presence", body="starting long migration", metadata={"kind": "status"})
-
-        # Threaded reply to a DM (closes the loop on a `COMMONS PEER MESSAGE`):
-        commons_post(
-            topic    = "dm-tiberius",
-            body     = "yes, that fix landed in commit f4e0370",
-            metadata = {"in_reply_to": "<question_id_from_system_reminder>", "kind": "answer"}
-        )
-
-    Free-form topics auto-create on first post. Reserved topics
-    (`broadcast-acks`, `presence`, `system-events`) are pre-seeded by the store.
-    Persona fields are stamped from the session bridge at post-time and are
-    immutable thereafter (per C4 ratification) — you cannot spoof another persona.
-
-    **Threading callout**: for a directed peer reply, use `dm_send(reply_to=...,
-    thread_id=...)` — the body travels inline and the recipient processes it
-    directly. `commons_post` is for the topic blackboard; a reply posted here
-    with `metadata={"in_reply_to": <qid>}` correlates to the original question
-    but lands on the blackboard only — the asker sees it on their next
-    `commons_read` poll (no push-back).
-
-    **Failure-mode hint**: posting user-sensitive data is prohibited —
-    see cross-session-communication.md §5 for the sensitive-content rules.
-    Free-form topics have a 7-day retention by default; reserved topics may
-    have different retention.
+    For a directed peer reply use `dm_send(reply_to=..., thread_id=...)`: the body travels inline and the recipient acts on it directly. A reply posted here with `metadata={"in_reply_to": <qid>}` correlates to the original question but lands on the blackboard only; the asker sees it on their next `commons_read` poll.
 
     Args:
         topic: Topic name (free-form or one of the reserved topics)
         body: The message body (any string)
-        metadata: Optional dict of extra metadata fields. Common patterns:
-            - `{"kind": "status"}` for presence pings
-            - `{"kind": "answer", "in_reply_to": <qid>}` for threaded replies
-            - `{"kind": "incident", "severity": "warn|error|info"}` for incidents
+        metadata: Optional dict of extra fields. Common patterns: `{"kind": "status"}` for presence pings; `{"kind": "answer", "in_reply_to": <qid>}` for threaded replies; `{"kind": "incident", "severity": "warn|error|info"}` for incidents
 
     Returns:
-        dict with `ts`, `sender_session_id`, `persona_name`, `persona_icon`,
-        `persona_color`, `body`, `metadata`
+        dict with `ts`, `sender_session_id`, `persona_name`, `persona_icon`, `persona_color`, `body`, `metadata`
 
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§2 autonomy tiers, §3 reserved topics, §5 sensitive-content rules)
+    Examples:
+        commons_post(topic="presence", body="starting long migration", metadata={"kind": "status"})
+        commons_post(topic="dm-tiberius", body="yes, that fix landed in commit f4e0370", metadata={"in_reply_to": "<question_id_from_system_reminder>", "kind": "answer"})
     """
+    refusal = _refuse_borrowed_identity( "commons_post" )
+    if refusal is not None: return refusal
+
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     persona = _commons_persona_fields()
     return _get_commons_store().post(
@@ -3918,21 +3520,9 @@ def commons_read(
     limit : int = 50,
 ) -> list:
     """
-    **[READ — always allowed, no user permission needed]** Tail a commons topic.
+    **[READ — always allowed, no user permission needed]** Tail a commons topic. Returns newest-first when `since` is None, ascending when `since` is supplied. Honors `limit` strictly. A missing free-form topic returns an empty list (no error).
 
-    Examples:
-        # Most recent 10 entries on the DM topic addressed to you
-        commons_read(topic="dm-maria", limit=10)
-
-        # New entries since you last polled (Phase 1 polling-mode pattern)
-        commons_read(topic="dm-tiberius", since="2026-05-16T22:00:00+00:00")
-
-    Returns newest-first when `since` is None, ascending when `since` is supplied.
-    Honors `limit` strictly. Missing free-form topic → empty list (no error).
-
-    Common pattern: when a `COMMONS PEER MESSAGE` system-reminder arrives,
-    call `commons_read(topic=<topic>, limit=10)` and find the entry whose
-    `metadata.question_id` matches the system-reminder's `question_id`.
+    When a `COMMONS PEER MESSAGE` system-reminder arrives, call `commons_read(topic=<topic>, limit=10)` and find the entry whose `metadata.question_id` matches the reminder's `question_id`.
 
     Args:
         topic: Topic name to read from
@@ -3940,11 +3530,11 @@ def commons_read(
         limit: Maximum number of entries to return (default 50)
 
     Returns:
-        List of entry dicts, each containing ts, sender_session_id, persona_*,
-        body, metadata
+        List of entry dicts, each containing ts, sender_session_id, persona_*, body, metadata
 
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§1.5 DM mechanics + receipt etiquette)
+    Examples:
+        commons_read(topic="dm-maria", limit=10)    # the most recent 10 entries on the DM topic addressed to you
+        commons_read(topic="dm-tiberius", since="2026-05-16T22:00:00+00:00")    # new entries since you last polled
     """
     if not _commons_enabled(): return [ ]
     return _get_commons_store().read( topic=topic, since=since, limit=limit )
@@ -3984,8 +3574,6 @@ def commons_who(
     Returns:
         List of dicts `{session_id, persona_name, persona_icon, persona_color, last_post_ts}`,
         sorted by last_post_ts descending
-
-    See: planning-is-prompting → workflow/cross-session-communication.md
     """
     if not _commons_enabled(): return [ ]
     return _get_commons_store().who( topic=topic, retention_hours=retention_hours )
@@ -4000,42 +3588,28 @@ def commons_ask_sync(
     grace_seconds    : Optional[ float ] = None,
 ) -> dict:
     """
-    **[ATTENTION-DEMANDING + BLOCKING — rarely justified; consider `commons_ask_async` first]**
-    Post a question to commons and block until the first reply arrives + grace expires.
+    **[ATTENTION-DEMANDING + BLOCKING — rarely justified; consider `commons_ask_async` first]** Post a question to commons and block until the first reply arrives plus a grace period.
 
-    Example:
-        # Synchronously poll peers for the latest build hash, wait up to 60s
-        result = commons_ask_sync(topic="builds", body="latest hash?", timeout_seconds=60)
-        for entry in result["replies"]:
-            print(entry["body"])
+    Prefer `commons_ask_async` in nearly all cases: it returns immediately, starts a watcher that pushes the recipient's reply back to your tmux, and frees your session meanwhile. Use this variant only when downstream logic LITERALLY cannot proceed without the reply AND a fixed timeout is acceptable.
 
-    Hybrid first+grace timing (A3b ratification): the call blocks until the
-    FIRST matching reply arrives in `topic`, then waits an additional
-    `grace_seconds` to coalesce any fast follow-up replies, and returns the
-    accumulated list. Replies are correlated via `metadata.in_reply_to`
-    matching the question's auto-generated `question_id`.
-
-    **Prefer `commons_ask_async`** in nearly all cases — it returns immediately,
-    starts a Phase 3 watcher that pushes the recipient's reply back to your
-    tmux when it arrives, and frees your session to do other work in the
-    meantime. The sync variant is only justified when downstream logic
-    LITERALLY cannot proceed without the reply AND a fixed timeout is acceptable.
-
-    On timeout with zero replies, returns `{..., replies: []}`.
+    Timing: the call blocks until the FIRST matching reply arrives in `topic`, waits `grace_seconds` more to coalesce fast follow-ups, and returns the accumulated list. Replies are correlated via `metadata.in_reply_to` matching the question's auto-generated `question_id`. On timeout with zero replies it returns `{..., replies: []}`.
 
     Args:
         topic: Topic to post the question to (and listen on for replies)
         body: The question text
         timeout_seconds: Maximum wait for the first reply (default 120)
-        grace_seconds: Additional wait after first reply for follow-up replies
-            (default from `commons ask sync grace seconds` INI key; falls back to 1.0)
+        grace_seconds: Additional wait after the first reply for follow-ups (default from the `commons ask sync grace seconds` INI key; falls back to 1.0)
 
     Returns:
         dict `{question_id, posted_ts, replies: [entry, ...]}`
 
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§1.5 DM mechanics — note this is the BLOCKING variant)
+    Example:
+        result = commons_ask_sync(topic="builds", body="latest hash?", timeout_seconds=60)    # poll peers for the latest build hash, wait up to 60s
+        for entry in result["replies"]: print(entry["body"])
     """
+    refusal = _refuse_borrowed_identity( "commons_ask_sync" )
+    if refusal is not None: return refusal
+
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     grace = grace_seconds if grace_seconds is not None else _commons_ask_sync_grace_default()
     persona = _commons_persona_fields()
@@ -4059,22 +3633,9 @@ def commons_ask_async(
     question_id          : Optional[ str ] = None,
 ) -> dict:
     """
-    **[ATTENTION-DEMANDING — requires user trigger or clear coordination need]**
-    Post a question to a topic at large and return immediately (fire-and-forget,
-    polling-mode). For directed peer DMs use `dm_send` (body inline) instead.
+    **[ATTENTION-DEMANDING — requires user trigger or clear coordination need]** Post a question to a topic at large and return immediately (fire-and-forget, polling-mode). For directed peer DMs use `dm_send` (body inline) instead.
 
-    Example:
-        # Polling-mode: ask the topic at large, poll for replies yourself
-        result = commons_ask_async(topic="builds", body="latest hash?")
-        # Later: commons_read(topic="builds", since=result["posted_ts"]) → filter on in_reply_to
-
-    The message lands on the blackboard `topic`; peers see it on their next
-    `commons_read` poll, and the entry is durable. Correlate replies via
-    `metadata.in_reply_to == question_id`.
-
-    (The directed-DM / push-back-to-asker mode was removed in the cosa-voice
-    token-reduction full-removal pass, 2026-06-17 — it routed through the commons
-    claim-check path at ~3,700 tokens/received DM. Use `dm_send`, ~204 tokens.)
+    The message lands on the blackboard `topic` and is durable; peers see it on their next `commons_read` poll. Correlate replies via `metadata.in_reply_to == question_id`.
 
     Args:
         topic: Topic to post the question to
@@ -4084,9 +3645,13 @@ def commons_ask_async(
     Returns:
         dict `{question_id, posted_ts}`
 
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§1.5 DM mechanics — for directed DMs use `dm_send`)
+    Example:
+        result = commons_ask_async(topic="builds", body="latest hash?")    # poll-mode: ask the topic at large
+        # later: commons_read(topic="builds", since=result["posted_ts"]) and filter on in_reply_to
     """
+    refusal = _refuse_borrowed_identity( "commons_ask_async" )
+    if refusal is not None: return refusal
+
     return _commons_ask_async_dispatch(
         topic       = topic,
         body        = body,
@@ -4177,7 +3742,7 @@ def _commons_ask_async_dispatch(
 # processes it directly (~204 tokens) with zero `commons_read` re-fetch, vs the
 # commons claim-check path's ~3,700 tokens/received DM. `commons_send_to` /
 # `commons_ask_async` are deprecated in favor of this.
-# Design: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
+# Design: src/docs/decisions/2026.06.15-notification-native-ai-to-ai-messaging.md
 # ============================================================================
 
 def _dm_send_impl(
@@ -4275,53 +3840,24 @@ def _dm_send_fn(
     recipient_session_id : Optional[ str ] = None,
 ) -> dict:
     """
-    **[DM — directed attention-demanding]** Send a notification-native direct
-    message to another CC persona session. **PREFERRED** over `commons_send_to`
-    / `commons_ask_async`, which are deprecated.
+    **[DM — directed attention-demanding]** Send a notification-native direct message to another CC persona session. **PREFERRED** over `commons_send_to` / `commons_ask_async`, which are deprecated.
 
-    Unlike the commons DM path (empty-body claim-check → forced `commons_read`
-    re-fetch, ~3,700 tokens per received DM), dm_send carries the body INLINE in
-    the recipient's push (direction='ai_to_ai'), so the recipient processes it
-    directly (~204 tokens — ~18× cheaper) with zero re-fetch.
+    The body travels INLINE in the recipient's push (direction='ai_to_ai'), so the recipient acts on it directly: ~204 tokens, against ~3,700 for the commons claim-check path with its forced `commons_read` re-fetch.
 
-    Replies are symmetric: to answer a DM you received, call dm_send back to the
-    sender with `reply_to` = the message_id from their system-reminder and
-    `thread_id` = the conversation's thread_id (both surfaced in the inbound DM
-    framing). There is no separate watcher/expect_reply — a reply is just a DM.
-
-    Examples:
-        # Basic DM by persona name:
-        dm_send(recipient="tiberius", body="have you touched src/auth.py today?")
-
-        # Threaded reply to a DM you received:
-        dm_send(recipient="tiberius", body="yes — commit f4e0370",
-                reply_to="<message_id>", thread_id="<thread_id>")
+    To answer a DM you received, call dm_send back to the sender with `reply_to` = the message_id from their system-reminder and `thread_id` = the conversation's thread_id (both in the inbound framing). A reply is just a DM; there is no separate watcher.
 
     Args:
         recipient: Recipient persona name (case/punctuation-tolerant resolution).
-        body: Message body (delivered inline — no re-fetch).
-        reply_to: message_id of the DM this answers (threading). Omit for a new DM.
-        thread_id: conversation id (threading). Omit to start a fresh thread (the
-                   server seeds one from the new message_id).
-        recipient_session_id: precise session addressing; takes precedence over
-                   `recipient` when supplied.
+        body: Message body (delivered inline, no re-fetch).
+        reply_to: message_id of the DM this answers. Omit for a new DM.
+        thread_id: conversation id. Omit to start a fresh thread.
+        recipient_session_id: precise session addressing; takes precedence over `recipient`.
 
     Returns:
-        Success: {"status":"sent","message_id","thread_id","recipient_session",
-                  "recipient_session_hash8","recipient_persona","dispatched":True}.
-        Recipient-resolution failure: {"status":"error",
-                  "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
-        Transport/auth failure: {"status":"error","reason":...,"detail":...}.
+        {"status":"sent","message_id","thread_id","recipient_session","recipient_session_hash8","recipient_persona","dispatched":True}, or {"status":"error","reason":"recipient_unresolved","detail":...}, or a transport/auth error {"status":"error","reason":...,"detail":...}. `recipient_session` is the FULL session id (feed it back as `recipient_session_id` for precise addressing); `recipient_session_hash8` is the persisted 8-character form that `dm_list` reports as the addressee. They are deliberately NOT the same value, so they will not compare equal (`dm_list`'s `session_id` filter accepts either).
 
-    TWO WIDTHS, TWO NAMES — use the right one for the right job:
-      `recipient_session`       FULL session id. Feed this back as
-                                `recipient_session_id` for precise addressing on
-                                a SUBSEQUENT SEND.
-      `recipient_session_hash8` the 8-char form actually persisted, and the form
-                                `dm_list` reports as the addressee. Compare
-                                against `recipient_session_hash8` on listed DMs.
-    They are deliberately NOT the same value; comparing one to the other will
-    not match. (`dm_list`'s `session_id` filter accepts either — it normalizes.)
+    Example:
+        dm_send(recipient="tiberius", body="yes — commit f4e0370", reply_to="<message_id>", thread_id="<thread_id>")
     """
     refusal = _refuse_borrowed_identity( "dm_send" )
     if refusal is not None: return refusal
@@ -4545,42 +4081,24 @@ def dm_respond(
     recipient_session_id : Optional[ str ] = None,
 ) -> dict:
     """
-    **[DM — directed attention-demanding]** Reply to a peer DM IN-THREAD.
-
-    A `dm_respond` is a `dm_send` whose threading is mandatory: `reply_to` (the
-    message_id you are answering) and `thread_id` (the conversation) are REQUIRED.
-    Use it to answer a DM you received — both ids are surfaced in the inbound DM
-    framing. The body travels INLINE (direction='ai_to_ai'), zero re-fetch.
-
-    (Equivalent to `dm_send(..., reply_to=..., thread_id=...)`; this verb exists so
-    the contract reads itself — every /api/dm/<verb> mirrors a dm_<verb> tool — and
-    so the threading fields are enforced, not optional.)
+    **[DM — directed attention-demanding]** Reply to a peer DM IN-THREAD. A `dm_respond` is a `dm_send` whose threading is mandatory: `reply_to` (the message_id you are answering) and `thread_id` (the conversation) are REQUIRED, and both are surfaced in the inbound DM framing. The body travels INLINE (direction='ai_to_ai'), zero re-fetch. It is equivalent to `dm_send(..., reply_to=..., thread_id=...)`.
 
     Args:
         recipient: Recipient persona name (case/punctuation-tolerant resolution).
-        body: Reply body (delivered inline — no re-fetch).
+        body: Reply body (delivered inline, no re-fetch).
         reply_to: message_id of the DM you are answering (required).
         thread_id: conversation id the reply belongs to (required).
-        recipient_session_id: precise session addressing; takes precedence over
-                   `recipient` when supplied.
+        recipient_session_id: precise session addressing; takes precedence over `recipient` when supplied.
 
     Returns:
-        Success: {"status":"sent","message_id","thread_id","recipient_session",
-                  "recipient_session_hash8","recipient_persona","dispatched":True}.
-        Recipient-resolution failure: {"status":"error",
-                  "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
+        Success: {"status":"sent","message_id","thread_id","recipient_session","recipient_session_hash8","recipient_persona","dispatched":True}.
+        Recipient-resolution failure: {"status":"error","reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
-
-    TWO WIDTHS, TWO NAMES — use the right one for the right job:
-      `recipient_session`       FULL session id. Feed this back as
-                                `recipient_session_id` for precise addressing on
-                                a SUBSEQUENT SEND.
-      `recipient_session_hash8` the 8-char form actually persisted, and the form
-                                `dm_list` reports as the addressee. Compare
-                                against `recipient_session_hash8` on listed DMs.
-    They are deliberately NOT the same value; comparing one to the other will
-    not match. (`dm_list`'s `session_id` filter accepts either — it normalizes.)
+        The two id fields are the ones `dm_send` returns: `recipient_session` is the FULL session id (feed it back as `recipient_session_id`), `recipient_session_hash8` the persisted 8-character form that `dm_list` reports. They are deliberately not equal (`dm_list`'s `session_id` filter accepts either).
     """
+    refusal = _refuse_borrowed_identity( "dm_respond" )
+    if refusal is not None: return refusal
+
     persona = _commons_persona_fields()
     return _dm_respond_impl(
         recipient            = recipient,
@@ -4634,58 +4152,28 @@ def dm_list(
     scope     : str             = "session",
 ) -> dict:
     """
-    **[READ]** List or poll peer DMs addressed to THIS session — or, on request,
-    every DM on the account.
+    **[READ]** List or poll peer DMs addressed to THIS session, or on request every DM on the account.
 
-    With `thread_id`, returns that conversation oldest-first (read order). Without
-    it, returns your DMs newest-first. `since` (an ISO-8601 timestamp) tails only
-    messages newer than that instant — the lightweight poll for new replies.
-    `limit` is clamped server-side to [1, 200].
+    With `thread_id`, returns that conversation oldest-first (read order). Without it, returns your DMs newest-first. `since` (an ISO-8601 timestamp) tails only messages newer than that instant, the lightweight poll for new replies. `limit` is clamped server-side to [1, 200].
 
-    ⚠️ THIS TOOL USED TO SAY "your peer-DM inbox," AND THAT WAS FALSE. The
-    underlying store scopes DMs to a SERVICE ACCOUNT, not to a session, and the
-    write path currently stamps one account for the whole fleet — so an
-    unscoped read returns every session's traffic. Measured 2026-07-21: one
-    session's unscoped read returned 50 messages across 7 sender sessions with
-    ZERO addressed to it; another returned 200+ across 12 personas. On
-    2026-07-16 a careful seat read that output as her own mail and filed a
-    false cross-session finding within minutes. The label licensed a claim the
-    payload could not support (row 2565956b).
+    `scope="session"` (the DEFAULT) asks the server to return only DMs ADDRESSED to this session. `scope="account"` is the deliberate wide read for audit and forensics: the store scopes DMs to a service account, so it returns every session's traffic. READ THE RESPONSE'S `scope` FIELD, do not assume it: if this session's id cannot be resolved the server cannot narrow the read and returns `scope:"account"`. A DM's presence in an account-scoped result says only that it EXISTS; each message carries `recipient_session_hash8` (the addressee), so use that field to answer "was this for me?".
 
-    ⇒ `scope="session"` (the DEFAULT) now asks the server to return only DMs
-      ADDRESSED to this session, so the name and the payload finally agree.
-    ⇒ `scope="account"` is the deliberate wide read for audit/forensics. It is
-      never the silent outcome of a normal call — you have to ask for it.
-
-    🔎 READ THE RESPONSE'S `scope` FIELD, DO NOT ASSUME IT. If this session's id
-    cannot be resolved, the server CANNOT narrow the read and returns
-    `scope:"account"` — a wide result, honestly labelled. Presence of a DM in an
-    account-scoped result says only that it EXISTS, never that it was sent to
-    you. Each message carries `recipient_session_hash8` (the addressee) — use
-    that field to answer "was this for me?", never mere presence in the list.
-
-    ⚠️ NOTE THE `_hash8` SUFFIX — it is load-bearing. The addressee is persisted
-    as the recipient's FIRST 8 CHARACTERS, while `dm_send` returns a key called
-    `recipient_session` holding the FULL id. They are deliberately named
-    differently because they are different widths; comparing them directly will
-    not match. (You may still pass a full id as a filter — the server truncates
-    it for you.)
+    Note the `_hash8` suffix: the addressee is persisted as the recipient's FIRST 8 CHARACTERS, while `dm_send` returns `recipient_session` holding the FULL id. They are different widths and will not compare equal (you may still pass a full id as a filter; the server truncates it).
 
     Args:
-        thread_id: a conversation id (thread view) or omit for the inbox view.
-        since: ISO-8601 timestamp — return only messages created after it (poll).
+        thread_id: a conversation id (thread view), or omit for the inbox view.
+        since: ISO-8601 timestamp; return only messages created after it (poll).
         limit: max messages to return (default 50, capped at 200).
-        scope: "session" (default — only DMs addressed here) or "account"
-            (every DM on the account; an explicit, auditable wide read).
-            Anything else is REJECTED (422), never silently narrowed.
+        scope: "session" (default, only DMs addressed here) or "account" (every DM on the account; an explicit, auditable wide read). Anything else is REJECTED (422), never silently narrowed.
 
     Returns:
-        Success: {"status":"ok","thread_id","since","count","scope",
-                  "recipient_session_hash8",
-                  "messages":[ {... ,"recipient_session_hash8"} ]}.
+        Success: {"status":"ok","thread_id","since","count","scope","recipient_session_hash8","messages":[ {... ,"recipient_session_hash8"} ]}.
         Bad `since`: {"status":"error","reason":"bad_request","detail":...}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
     """
+    refusal = _refuse_borrowed_identity( "dm_list" )
+    if refusal is not None: return refusal
+
     return _dm_list_impl(
         thread_id    = thread_id,
         since        = since,
@@ -4711,7 +4199,8 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_ask_unpark_impl, task_edit_impl, task_get_impl, task_approve_line_impl, task_approve_batch_line_impl, task_promotion_status_impl
+from lupin_mcp.podcast_for_rick import podcast_for_rick_impl
 
 
 def _task_store_identity() -> str:
@@ -4752,107 +4241,16 @@ def task_create(
     authority           : str              = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Create a TYPED or CROSS-PERSONA item in the unified task store.
+    **[SELF-DISCLOSURE]** Create an item in the unified task store, the one door for owed work, your own included: an item created on the native harness `TaskCreate` list is invisible to the fleet, the arbiter and the operator's board. Use it for self-owned tasks, cross-persona assignments and typed items (decision, gate, bug, review_request) alike. Omit `status`: the row lands in the holding area (not_approved) and waits for Rick. It is NOT how DM-born tasks get created: `source_qid` only stamps provenance.
 
-    ┌─ WHICH DOOR? ──────────────────────────────────────────────────────────┐
-    │ Do NOT use this for your OWN work stubs. Use the native harness          │
-    │ `TaskCreate` instead — it auto-mirrors into this same durable store      │
-    │ via the PostToolUse hook. Reach for THIS verb ONLY for the two things    │
-    │ the harness physically cannot express: a TYPED item, or one OWNED BY     │
-    │ ANOTHER persona.                                                         │
-    └─────────────────────────────────────────────────────────────────────────┘
+    FILING A P0 THAT RICK ORDERED. No seat sets P0 directly; a MANAGER relaying Rick's instruction files a PETITION, here, at create:
+      1. Call with `priority="P0"` AND `authority="user_direct"`. Any other authority, or a worker seat, gets a flat 403; a worker escalates through its manager. Raising an EXISTING row to P0 through task_edit is also a 403: the petition exists only at create.
+      2. The create answers 201 with a `petition` field: {ticket_id, minted_at: "P1", requesting: "P0", answer_by, resolves_by, deadlines, check_with: "task_promotion_status"}. The row is REAL and yours, but mints at P1 in the holding area (`not_approved`).
+      3. `answer_by` is when his answer window closes: the promotion ask timeout (120s by default). `resolves_by` is NOT his window: it is the STALL deadline (ask timeout + notification grace + apply margin, 480s by default). Relay `answer_by`, never `resolves_by`, as his deadline.
+      4. A TIMEOUT IS NOT A GRANT. An unanswered ask is refused and the row stays at P1 in holding. Never report the P0 as landed from the 201 — check `task_promotion_status(ticket_id)`: pending | approved | refused | superseded | stalled. One approval raises the row to P0 and admits it to `queued`.
 
-    Two creation methods, ONE destination, different EXPRESSIVENESS
-    ---------------------------------------------------------------
-    Both the harness `TaskCreate` and this `task_create` ultimately write to
-    the SAME store (POST /api/tasks). They are NOT distinguished by durability
-    or by "session-local vs cross-session" — the harness items survive /clear
-    too. They differ ONLY in what SHAPE of item they can mint:
-
-    - Harness `TaskCreate` (the default, ~90% of items): the PostToolUse mirror
-      (task_store_mirror.py:356-362) HARDCODES `item_class="task"`,
-      `owner_persona = accountable_manager = <self>`, and reads only
-      `metadata.task_store_id`. So the harness can mint EXACTLY ONE shape:
-      a generic, SELF-OWNED `task`. That covers your own work stubs.
-
-    - This `task_create` is the ONLY agent-facing path that can mint:
-        (a) a CROSS-PERSONA item — `owner_persona` / `accountable_manager`
-            set to someone OTHER than yourself (assigning work to a worker);
-        (b) a TYPED item — `item_class` in {decision, gate, bug, review_request}
-            (e.g. a `decision` with `gate_class="operator"` for the operator queue,
-            a durable `bug`, a `review_request`, a `gate`).
-      If your item is neither (a) nor (b), you are at the WRONG door — go use
-      the harness `TaskCreate`.
-
-    NOT a reason to reach here
-    --------------------------
-    Do NOT reach for this verb thinking it is how DM-born tasks get created.
-    `source_qid` is a provenance FIELD (plumbed through TaskCreateIn) RESERVED
-    for a designed-but-NOT-YET-BUILT server-side DM→task auto-create path
-    (cold-review C10, still an OPEN design question — no such auto-creator
-    exists in src/cosa today). It is NOT what this wrapper is for: this
-    wrapper's `source_qid` param only stamps provenance when you are ALREADY
-    minting a typed/cross-persona item here for one of the reasons above.
-
-    Forward-note (Rick ruling 2026-06-16)
-    -------------------------------------
-    This verb is KEPT, not deleted — its purpose is intentionally distinct from
-    the harness method. The future route to a SINGLE creation door is to teach
-    the mirror to also read `metadata.item_class` / `owner_persona` /
-    `gate_class` from harness `TaskCreate`; once the harness can express typed +
-    cross-persona items, THIS verb can be retired with zero capability loss.
-    Until that lands, deleting it would amputate cross-persona assignment and
-    the decision/gate/bug/review_request classes — exactly the items that
-    surface decisions to Rick. See planning-is-prompting
-    workflow/task-store-discipline.md §3.
-
-    Managers-first write practice (design F4) is enforced socially + by the
-    audit trail, not by tool gating.
-
-    FILING A P0 THAT RICK ORDERED (row d2b1b59a)
-    --------------------------------------------
-    No seat sets P0 directly. A MANAGER relaying Rick's instruction files a
-    PETITION, and it must do so HERE, at create:
-      1. Call with `priority="P0"` AND `authority="user_direct"`. Any other
-         authority, or a worker seat, gets a flat 403 — a worker escalates
-         through its manager. Raising an EXISTING row to P0 through task_edit
-         is also a 403: the petition exists only at create.
-      2. The create answers 201 and carries a `petition` field:
-         {ticket_id, minted_at: "P1", requesting: "P0", answer_by, resolves_by,
-          deadlines, check_with: "task_promotion_status"}. The row is REAL and
-         yours, but it mints at P1 in the holding area (`not_approved`), whatever
-         status you sent. The ratio gate still judges it at P1 and can refuse a 422.
-      3. Rick is asked in the background. `answer_by` is when his answer window
-         closes: the promotion ask timeout (120s by default).
-         `resolves_by` is NOT his window: it is the STALL deadline (ask timeout +
-         notification grace + apply margin, 480s by default), after which an
-         unresolved ticket is an orphan. Relay `answer_by`, never `resolves_by`,
-         as his deadline.
-      4. A TIMEOUT IS NOT A GRANT. An unanswered ask is refused, and the row
-         stays at P1 in holding. Never report the P0 as landed from the 201 —
-         check `task_promotion_status(ticket_id)`: pending | approved | refused
-         | superseded | stalled. One approval both raises the row to P0 and
-         admits it to `queued`; a refusal means ask again when Rick is back.
-
-    Examples:
-        # Assign work to ANOTHER persona (cross-persona — harness can't):
-        task_create(item_class="task", title="Review the wrapper build",
-                    project="lupin", owner_persona="tiffany",
-                    accountable_manager="tiberius")
-
-        # A decision for the operator queue (TYPED — harness can't):
-        task_create(item_class="decision", title="Deploy window for MCP restart",
-                    project="lupin", body="Options: ... Recommendation: ...",
-                    gate_class="operator")
-
-        # A P0 Rick ordered (MANAGER seat; mints P1 + a petition, see above):
-        task_create(item_class="bug", title="Prod login is down",
-                    project="lupin", owner_persona="tiffany",
-                    priority="P0", authority="user_direct")
-        #   → then task_promotion_status(ticket_id=<petition.ticket_id>)
-
-        # Your OWN work stub → DON'T use this; use the harness instead:
-        #   TaskCreate(subject="Draft the docstring", description="...")
+    Returns:
+        The item dict (server 201 body) verbatim, with `petition` when one was filed, or an error dict: {"status": "error", "reason": "server_unreachable"|"server_read_timeout"|"missing_auth_header"} or {"status": "error", "http_status": 422, "errors": [...]}.
 
     Args:
         item_class: task | decision | review_request | bug | gate
@@ -4862,36 +4260,20 @@ def task_create(
         owner_persona: Who owes the work
         accountable_manager: Who chases it
         gate_class: none | operator (default "none")
-        priority: P0..P3 (default "P2")
-        urgency: urgent | normal | low (default "normal") — operator-gate TIME-
-            sensitivity (NOT priority/importance); the arbiter routes a gate by it
-            (urgent→interrupt, normal→digest, low→queue)
-        status: OMIT IT. Left unset, the row lands in the holding area
-            (not_approved) where the holding default is on, and waits for Rick.
-            Naming "queued" or "blocked" puts a row straight on the live board, so
-            the server REFUSES it 403 unless the row is P0 or the caller is Rick
-            himself (Rick 2026-09-08; row 2d786391). The 2026-07-20 one-call
-            blocked mint survives only on those two paths, and is still
-            MANAGER-ONLY there. Where the holding default is off, queued|blocked
-            mint as before. done/dropped/parked/claimed/in_progress/review are
-            never mintable — transition after create.
-        blocked_by: typed refs [{kind: item|persona|user, id}] — REQUIRED (>=1)
-            for a blocked mint; ignored for queued
-        next_chase_ts: ISO-8601 chase time — REQUIRED for a blocked mint whose
-            blocked_by names a {kind:persona} ref (I3 — a peer is chaseable)
+        priority: P0..P5 (default "P2")
+        urgency: urgent | normal | low (default "normal"); operator-gate TIME-sensitivity, NOT importance
+        status: OMIT IT. Unset, the row lands in the holding area (not_approved) and waits for Rick. Naming "queued" or "blocked" is a 403 unless the row is P0 or the caller is Rick (a one-call blocked mint is MANAGER-ONLY). done/dropped/parked/claimed/in_progress/review are never mintable; transition after create.
+        blocked_by: typed refs [{kind: item|persona|user, id}], REQUIRED (>=1) for a blocked mint
+        next_chase_ts: ISO-8601 chase time, REQUIRED for a blocked mint whose blocked_by names a {kind:persona} ref
         source_qid: Originating commons question_id, when DM-born
         correlation_key: Upsert key for hook-mirrored items
-        authority: standing | user_direct | manager_relay (default "standing").
-            "user_direct" with priority="P0" files a petition (see above)
+        authority: standing | user_direct | manager_relay (default "standing"); "user_direct" with priority="P0" files a petition
 
-    Returns:
-        The serialized item dict (server 201 body) verbatim — carrying a
-        `petition` field when the create filed one — or an error dict:
-        {"status": "error", "reason": "server_unreachable"|"server_read_timeout"|"missing_auth_header", ...}
-        or {"status": "error", "http_status": 422, "errors": [...server's words...]}.
-
-    `created_by` is NOT a parameter — it is stamped from the session bridge
-    ("<persona> <session id>"), the same identity lane as commons_post.
+    Examples:
+        task_create(item_class="task", title="Review the wrapper build", project="lupin", owner_persona="tiffany", accountable_manager="tiberius")    # assign work to ANOTHER persona
+        task_create(item_class="decision", title="Deploy window for MCP restart", project="lupin", body="Options: ... Recommendation: ...", gate_class="operator")    # a decision for the operator queue
+        task_create(item_class="bug", title="Prod login is down", project="lupin", owner_persona="tiffany", priority="P0", authority="user_direct")    # a P0 Rick ordered (MANAGER seat; mints P1 + a petition)
+        #   → then task_promotion_status(ticket_id=<petition.ticket_id>)
     """
     refusal = _refuse_borrowed_identity( "task_create" )
     if refusal is not None: return refusal
@@ -4931,102 +4313,32 @@ def task_transition(
     asynchronous  : Optional[ bool ] = True,
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Apply one state change to a task-store item.
+    **[SELF-DISCLOSURE]** Apply one state change to a task-store item. The server enforces the rules and surfaces them verbatim (a 422 carries its errors unedited); this tool pre-checks none of them. `asynchronous` defaults to True and matters only for a promotion out of `not_approved`.
 
-    The receipts discipline is enforced SERVER-side and surfaces verbatim:
-    `->done` REQUIRES receipt_refs — if you can't cite a receipt, the work isn't
-    done. The whitelist is SEVEN keys, and `task_store_rules.RECEIPT_KEY_WHITELIST`
-    is the authority; this list is a courtesy that can drift from it:
-        commit · test_run · qid · doc_path · log_line · operator_attestation ·
-        manager_attestation
-    🔴 BUT ONLY FOUR OF THEM CLOSE A ROW (`CLOSING_RECEIPT_KEYS`). A WORKER seat
-    can mint exactly one of them, and a MANAGER seat two:
-        commit               ✅ a sha you produced
-        test_run             ❌ harness only — `ts-<8 hex>`, a TestSuiteJob id;
-                                nothing you generate yourself will fullmatch
-        operator_attestation ❌ the OPERATOR's word, and the router — not this
-                                tool — decides whether you may assert it
-        manager_attestation  ✅ MANAGER seats only (Rick, 2026-09-10, row
-                                adaf7698). The value is a placeholder: the server
-                                REPLACES it with the manager identity it resolved,
-                                and your text is not stored anywhere (row 8639d1ad).
-                                Put your evidence in `reason`, which IS kept.
-                                It closes decision rows and held
-                                (`not_approved`) rows, never a `parked` one.
-                                A worker seat gets a 403
-    ⇒ So a WORKER whose work produces no commit has no closing receipt it can
-    supply, and should ask its manager to close the row. Do not route around
-    that by naming an unrelated sha (row b4281428). `operator_attestation` was ABSENT from this list until
-    2026-09-09, which meant the one key representing Rick's own word was
-    invisible to every seat that read only this description;
-    `->blocked` REQUIRES BOTH >=1 typed blocked_by ref ({kind: item|persona|user,
-    id}) AND next_chase_ts; done/dropped are terminal. This tool does NOT
-    pre-check any of that — a 422 carries the server's errors unedited.
+    `->done` REQUIRES `receipt_refs`: no receipt, no done. Keys: commit · test_run · qid · doc_path · log_line · operator_attestation · manager_attestation, but only four CLOSE a row, and a worker seat can mint one of them, a manager seat two: `commit` (a sha you produced); `test_run` (harness only, `ts-<8 hex>`); `operator_attestation` (the OPERATOR's word; the router decides whether you may assert it); `manager_attestation` (MANAGER seats only, else 403; the server stores the manager identity, so put evidence in `reason`; closes decision and held rows, never `parked`). A worker with no commit asks its manager to close the row; do not name an unrelated sha.
 
-    `->parked` means A HUMAN RULED THIS NOT-NOW: approved, not abandoned, and
-    blocked on NOTHING. It REQUIRES BOTH `park_reason` (non-blank) AND
-    `next_chase_ts`, and is legal ONLY from queued / in_progress.
-      · `park_reason` MUST QUOTE the row's own decisive sentence, not
-        paraphrase it — the quote is what lets the next reader REFUTE the park
-        row-by-row instead of re-deriving the whole board.
-      · The chase IS the un-park. Expiry is computed at READ time: once
-        next_chase_ts passes, the row REJOINS the owed count automatically —
-        no daemon, no sweeper, no human action. Parking buys BOUNDED,
-        SELF-EXPIRING silence, never an exit.
-      · An INDEFINITE hold is NOT a park — that is `dropped` with a reason,
-        because dropping is VISIBLE.
-      · Leaving `parked` CLEARS park_reason: a quote must never outlive the
-        park it justified.
+    `->blocked` REQUIRES >=1 typed `blocked_by` ref ({kind: item|persona|user, id}), and `next_chase_ts` only when a ref is `persona` (a user-only or item-only block needs none). `->dropped` needs a `reason`. done and dropped are terminal.
 
-    Examples:
-        # Close with receipts:
-        task_transition(task_id="<uuid>", to_status="done",
-                        receipt_refs={"commit": "f4e0370", "test_run": "ts-b51e63c9"})
-
-        # Block with a typed wait + chase time:
-        task_transition(task_id="<uuid>", to_status="blocked",
-                        blocked_by=[{"kind": "persona", "id": "tiffany"}],
-                        next_chase_ts="2026-06-13T09:00:00-04:00")
-
-        # Park a deliberately-held row, quoting its OWN decisive sentence:
-        task_transition(task_id="<uuid>", to_status="parked",
-                        park_reason="NOT TO BE WORKED per Rick's direct instruction",
-                        next_chase_ts="2026-07-22T09:00:00-04:00")
+    Returns:
+        { item, event } (server 200 body) verbatim, or an error dict (422: the server's `errors`; 404: "task {id} not found"). On a PROMOTION whose 25s poll budget runs out you get the 202 body (`status: "awaiting_human_approval"`, `ticket_id`): still waiting. Do NOT retry (it 422s); call `task_promotion_status`.
 
     Args:
         task_id: The item's UUID
-        to_status: Target status (e.g. in_progress | blocked | done | dropped)
-        receipt_refs: Receipt dict — REQUIRED server-side for ->done
-        next_chase_ts: ISO-8601 chase time — REQUIRED server-side for ->blocked
-        blocked_by: Typed refs [{kind, id}] — REQUIRED server-side for ->blocked
-        park_reason: The row's OWN decisive sentence, quoted (<=4000) —
-            REQUIRED server-side (non-blank) for ->parked; cleared on unpark
-        reason: Free-text rationale (<=4000) — REQUIRED server-side (non-empty)
-            for ->dropped once the Phase-2 write-path lands (C12 pull-forward);
-            give one on every ->dropped regardless (task-store-discipline.md §4)
+        to_status: in_progress | blocked | parked | done | dropped
+        receipt_refs: Receipt dict, REQUIRED for ->done
+        next_chase_ts: ISO-8601 time, REQUIRED for ->parked, and for ->blocked when `blocked_by` has a persona ref
+        blocked_by: Typed refs [{kind, id}], REQUIRED for ->blocked
+        park_reason: REQUIRED (non-blank, <=4000) for ->parked (only from queued / in_progress): the row's OWN decisive sentence, QUOTED. The chase IS the un-park (the row rejoins the owed count when `next_chase_ts` passes); an INDEFINITE hold is `dropped`. Cleared on unpark
+        reason: Rationale (<=4000); REQUIRED for ->dropped
         authority: standing | user_direct | manager_relay (default "standing")
-        asynchronous: DEFAULTS TO True — this verb is the one caller that opts
-            into the 202 promotion path, so you do not have to remember to. It
-            changes NOTHING except a promotion out of `not_approved`: pass False
-            to demand today's synchronous path, None to omit the field entirely.
-            It is the second of two gates and fails CLOSED behind the operator's
-            INI flag, and it MUST be a real boolean — the wire field is
-            StrictBool, so the string "true" is a deliberate 422.
+        asynchronous: default True (see above). Pass False for the synchronous path, None to omit the field. Must be a real boolean (the string "true" is a 422).
 
-    Returns:
-        { item, event } (server 200 body) verbatim, or an error dict — a 422
-        carries the server's detail.errors list VERBATIM under "errors"; a 404
-        carries "task {id} not found" verbatim under "detail".
+    `actor` is not a parameter: it is stamped from the session bridge.
 
-        ⚠️ ON A PROMOTION, ONE MORE SHAPE IS POSSIBLE and it is not an error: if
-        the 25s poll budget runs out before Rick answers, you get the 202 body
-        back — `status: "awaiting_human_approval"` plus a `ticket_id` and
-        `check_with: "task_promotion_status"`. That is a DETERMINATE "still
-        waiting", not a failure, and the request already succeeded. Do NOT retry
-        the transition: the server rejects the retry 422 as a no-op and that 422
-        is a success signal wearing a rejection's clothes (row 96cf5cec).
-
-    `actor` is NOT a parameter — bridge-stamped like task_create's created_by.
+    Examples:
+        task_transition(task_id="<uuid>", to_status="done", receipt_refs={"commit": "f4e0370", "test_run": "ts-b51e63c9"})    # close with receipts
+        task_transition(task_id="<uuid>", to_status="blocked", blocked_by=[{"kind": "persona", "id": "tiffany"}], next_chase_ts="2026-06-13T09:00:00-04:00")    # block with a typed wait and chase time
+        task_transition(task_id="<uuid>", to_status="parked", park_reason="NOT TO BE WORKED per Rick's direct instruction", next_chase_ts="2026-07-22T09:00:00-04:00")    # park a held row, quoting its OWN decisive sentence
     """
     refusal = _refuse_borrowed_identity( "task_transition" )
     if refusal is not None: return refusal
@@ -5084,6 +4396,7 @@ def task_query(
     project             : Optional[ str ] = None,
     item_class          : Optional[ str ] = None,
     correlation_key     : Optional[ str ] = None,
+    blocked_by_persona  : Optional[ str ] = None,
     limit               : Optional[ int ] = None,
     offset              : Optional[ int ] = None,
     terse               : bool            = False,
@@ -5092,157 +4405,44 @@ def task_query(
     include_parked      : bool            = False,
 ) -> dict:
     """
-    **[READ — always allowed, no user permission needed]** Query the task store.
+    **[READ — always allowed, no user permission needed]** Query the task store: exact-match filters, AND semantics, newest first. Bad enum values are a 422.
 
-    The deterministic owed-work query (design R4): exact-match filters, AND
-    semantics, newest first. Junk enum filter values are rejected by the
-    server (422), never silently empty.
+    Pass terse=True for any "see my list" / board glance (the at-a-glance projection, without `body`); terse=False only when you need a row's body or audit context.
 
-    TOKEN-EFFICIENCY (goal #1): pass terse=True for any "see my list" / board
-    glance. It returns the at-a-glance projection (id / title / status /
-    blocked_by / next_chase_ts / priority / park_reason_stale / request_state /
-    request_move — `body` and the
-    other full-row fields
-    dropped), a fraction of the full-row token weight. Reach for the full shape
-    (terse=False) ONLY when you actually need a row's body/audit context.
+    Scope every read: a BARE `task_query()` is REJECTED once the store holds more than the threshold of non-terminal rows. Add a filter (owner_persona / status / item_class / project / gate_class / accountable_manager / correlation_key) or pass `unscoped_audit=True` for a deliberate full-store audit. `blocked_by_persona` also scopes a read.
 
-    UNSCOPED-QUERY GUARD (design 2026.07.07): a BARE `task_query()` with no
-    narrowing filter is REJECTED with an educational error-dict once the store
-    holds more than the threshold of non-terminal rows — the DB only grows;
-    nobody pulls the whole board by accident. The two fixes the error names:
-    (1) add a narrowing filter (owner_persona / status / item_class / project /
-    gate_class / accountable_manager / correlation_key), or (2) pass
-    `unscoped_audit=True` for a DELIBERATE full-store audit. Terminal (done/
-    dropped) rows are excluded by default; pass `include_terminal=True` to
-    include them on an un-status'd query.
+    Hidden by default: terminal rows (`include_terminal=True` adds done/dropped), held rows (`status="not_approved"` shows them; an un-status'd query puts a HOLDING AREA notice in `warnings[]` when any match) and park-active rows (`include_parked=True` or `status="parked"`). The `in_progress` and `queued` passes cannot see held rows: add a `not_approved` pass before concluding nothing is owed.
 
-    🔴 AND SO ARE `not_approved` ROWS — THE HOLDING AREA IS EXCLUDED BY THE SAME
-    DEFAULT, AND THE FLAG THAT REVEALS IT IS NAMED FOR THE OTHER END OF THE
-    LIFECYCLE (row d254c397, 2026-09-05). `not_approved` is not terminal and not
-    abandoned: it is work awaiting an approver. Nothing in the paragraph above
-    predicted its exclusion, and that omission has cost real work — a seat re-minted
-    a duplicate of its own 50-minute-old row because the original was held and
-    invisible to every query it ran, INCLUDING the un-status'd catch-all, which is
-    the one you reach for precisely when you want everything you own.
+    A `parked` row is a human's not-now ruling, with a `park_reason` quoting the row's decisive sentence. Parking is bounded and self-expiring: once `next_chase_ts` passes, the row rejoins the owed count and shows here. An indefinite hold is `dropped` with a reason, not parked.
 
-    ⇒ **The un-status'd query now DECLARES what it withheld**: when held rows match
-    your filters, `warnings[]` carries a HOLDING AREA notice with the count and the
-    query that reveals them. An absent notice means nothing was withheld.
-    ⇒ To see them directly: `status="not_approved"` with your usual filters — cheap
-    and exact. `include_terminal=True` also works and drags in the whole completed
-    history, which is why it is the wrong reach.
+    `park_reason_stale` (bool, also in terse rows) is True when the row's body changed after the quote was frozen: read the row, not its park_reason, and re-park. False means only "no body change", never "still true" (its basis can live outside the row), and a row parked before capture-time shipped reads False until its body next changes. Advisory: changes no owed-ness.
 
-    ⚠️ SESSION-START HYGIENE IS TWO PASSES AND NEEDS A THIRD. The prescribed
-    `in_progress` then `queued` passes cannot see held rows, so a seat proving
-    "nothing owed" from them has proved nothing about its holding area.
-
-    PARKED ROWS (2026-07-19): a `parked` row is one a human deliberately ruled
-    not-now, carrying a `park_reason` quoting the row's own decisive sentence.
-    Park-ACTIVE rows are HIDDEN from this query by default, so `queued` now
-    means "actually workable now" and the burn-down number stops being fiction.
-    Parking is BOUNDED and SELF-EXPIRING, never an exit: a parked row whose
-    `next_chase_ts` has PASSED is no longer parked — it rejoins the owed count
-    automatically and stays VISIBLE here. Nothing sweeps it; expiry is computed
-    at READ time. An INDEFINITE hold is not parked, it is `dropped` with a
-    reason (dropping is visible). Pass `include_parked=True` (or
-    `status="parked"`) to audit what is currently parked and why.
-
-    STALE PARK REASONS (2026-07-19): every row carries `park_reason_stale`
-    (bool) — in the TERSE projection too, not only the full row. A
-    `park_reason` is a FROZEN QUOTE of the row's decisive sentence, captured at
-    park time. Change the row's BODY afterward and that quote stays syntactically
-    valid while it stops being true, and nothing goes red. `park_reason_stale=True`
-    IS that red: the row's body changed AFTER its quote was frozen, so the
-    quote is no longer known to describe the row — read the row itself, not its
-    park_reason, and re-park to re-freeze the quote.
-
-    ⚠️ FIXED 2026-07-26 (bug 54924128) — IF YOU REMEMBER THIS FLAG BEING NOISE,
-    THAT WAS THE BUG. It used to fire on ANY write that bumped `updated_ts`, so a
-    **priority-only edit during a routine board recut defamed a correct quote**.
-    When it was found, every parked row in the store carried the flag and every
-    one was wrong. It now reads `body_changed_ts`, which moves only when the body
-    actually changes. ⇒ Re-check any `park_reason_stale: true` you saw before that
-    date rather than trusting it.
-
-    ⚠️ AND `False` DOES NOT MEAN "STILL TRUE" (row aa543525 §2). The flag answers
-    "has the BODY changed since the quote was frozen?" — nothing more. A park
-    reason whose basis lived OUTSIDE the row dies without touching the row, so it
-    reads FRESH forever. MEASURED 2026-07-25: four rows read `false` while each
-    quoted a fleet-wide stand-down that had already evaporated. ⇒ Treat `false` as
-    "no body change," NEVER as an endorsement — and note the flag is silent in
-    exactly the case you most want it to speak. The real property is CONTENT
-    CONTRADICTION, which no clock can answer; **the chase is the backstop, because
-    a park is bounded and self-expiring.**
-
-    ADVISORY ONLY. Staleness changes NO owed-ness, unparks nothing, blocks
-    nothing. It marks a quote untrustworthy and stops there — deciding what to
-    do about it is a human's call, not this flag's.
-
-    It under-reports by design, and MORE SO right after the fix: a row parked
-    before capture-time shipped has no capture time and reports False, as does any
-    row never parked — and since the fix ships **no backfill**, every row's
-    `body_changed_ts` starts NULL, which also reports False. So the flag is quiet
-    until each row's body next changes. `True` is strong evidence; `False` is
-    merely the absence of evidence.
-
-    Examples:
-        # My owed work (terse list) — the everyday scoped query:
-        task_query(owner_persona="sam", status="in_progress", terse=True)
-
-        # Operator queue, full rows (need the body):
-        task_query(gate_class="operator")
-
-        # Deliberate full-store audit (past the guard, incl. terminal rows):
-        task_query(unscoped_audit=True, include_terminal=True, terse=True)
-
-        # What is currently parked, and why (the audit surface):
-        task_query(status="parked", terse=True)
+    Returns:
+        { tasks, count, total, has_more, truncated, warnings } verbatim (terse rows when terse=True), or an error dict (a bare over-threshold pull is a 400). READ `total`, NOT `count`: `count` is this PAGE and saturates at `limit`. Branch on `has_more` (= offset + count < total). `truncated` is True when a CHARACTER budget, not the row limit, stopped serialization early.
 
     Args:
         owner_persona: Filter by who owes the work
-        status: Filter by status (not_approved | queued | claimed | in_progress |
-            blocked | parked | review | done | dropped | wont_fix)
-        gate_class: Filter by gate (none | operator)
-        urgency: Filter by operator-gate urgency tier (urgent | normal | low)
+        status: not_approved | queued | claimed | in_progress | blocked | parked | review | done | dropped | wont_fix
+        gate_class: none | operator
+        urgency: operator-gate urgency tier (urgent | normal | low)
         accountable_manager: Filter by chasing manager
         project: Filter by owning project
-        item_class: Filter by class (task | decision | review_request | bug | gate)
+        item_class: task | decision | review_request | bug | gate
         correlation_key: Exact-match filter on the hook-upsert correlation key
-            (Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
+        blocked_by_persona: Rows blocked on this persona, whoever owns them ("what waits on me")
         limit: Max rows (server default 100, cap 500)
         offset: Pagination offset
-        terse: True → the at-a-glance projection (§G token win); False (default)
-            → the full wire shape including body
-        include_terminal: True → include done/dropped rows on an un-status'd
-            query (default False excludes them)
-        unscoped_audit: True → the deliberate-full-sweep escape past the
-            unscoped-size guard (default False → a bare over-threshold pull is
-            rejected as an error-dict)
-        include_parked: True → also return park-ACTIVE rows (default False hides
-            them). EXPIRED parked rows are returned either way — they have
-            rejoined the owed count and hiding them would make a row that pokes
-            you invisible on the board.
+        terse: True for the at-a-glance projection; False (default) for the full wire shape including body
+        include_terminal: True also returns done/dropped rows on an un-status'd query (default False)
+        unscoped_audit: True is the deliberate full-sweep escape past the unscoped-size guard (default False)
+        include_parked: True also returns park-ACTIVE rows (default False hides them). EXPIRED parked rows are returned either way: they have rejoined the owed count.
 
-    Returns:
-        { tasks, count, total, has_more, truncated, warnings } verbatim (terse
-        rows when terse=True), or an error dict — an unscoped over-threshold pull
-        without unscoped_audit surfaces { status: "error", http_status: 400,
-        detail: <the two fixes> }.
-
-        ⚠️ READ `total`, NOT `count`. `count` is the length of THIS PAGE and
-        saturates at `limit` (default 100). It was being read as the size of the
-        result and never was: measured 2026-07-21, a properly-SCOPED query
-        reported count:100 while offset=100 returned 100 more rows. `total` is the
-        true count of rows matching your filters, page-independent. `has_more`
-        (= offset + count < total) is the one field to branch on before concluding
-        you have seen everything.
-
-        `truncated` is True when a CHARACTER budget — not the row limit — stopped
-        serialization early, because a row cap is not a size cap: the same 100-row
-        page measures ~21k chars terse and ~424k full. `warnings` carries those
-        notices to YOU rather than to the server's stdout, which is where they
-        used to go — an audience that is not the one paying the token weight.
-        Both truncation and page-saturation are announced; neither is ever silent.
+    Examples:
+        task_query(owner_persona="sam", status="in_progress", terse=True)    # my owed work, the everyday scoped query
+        task_query(gate_class="operator")    # operator queue, full rows
+        task_query(blocked_by_persona="tiffany", terse=True)    # what waits on me, whoever owns it: read it before a clear
+        task_query(unscoped_audit=True, include_terminal=True, terse=True)    # deliberate full-store audit
+        task_query(status="parked", terse=True)    # what is parked, and why
     """
     return task_query_impl(
         api_base_url        = _get_server_url(),
@@ -5255,6 +4455,7 @@ def task_query(
         project             = project,
         item_class          = item_class,
         correlation_key     = correlation_key,
+        blocked_by_persona  = blocked_by_persona,
         limit               = limit,
         offset              = offset,
         terse               = terse,
@@ -5267,37 +4468,18 @@ def task_query(
 @mcp.tool
 def task_get( task_id: str ) -> dict:
     """
-    **[READ — always allowed, no user permission needed]** Fetch ONE store row
-    by its UUID.
+    **[READ — always allowed, no user permission needed]** Fetch ONE store row by its UUID.
 
-    THE FAILURE THIS PREVENTS: a filtered query's empty result is NOT evidence a
-    row is absent — use this to ask about a row DIRECTLY. `task_query` can only
-    ask a filter and scan a page; a row sitting at offset=15 of a limit=15 page
-    reads as gone, and an absence in a filtered page becomes a false fact about
-    the world. This asks about the specific row instead of inferring it from a
-    page's silence.
-
-    Returns the FULL item including `body` (not the terse projection) — you
-    asked for the row, you get the row. An absent id is a 404 → error dict
-    carrying "task {id} not found" verbatim, NEVER an empty success or None: a
-    missing row rendered as a silent nothing is the exact confusion this verb
-    exists to kill.
-
-    Example:
-        # Open one row by id (e.g. from a terse list's `id` field):
-        task_get(task_id="4288dd53-6779-460a-88bd-a7365fb734b2")
+    Use it to ask about a row directly: an empty filtered `task_query` is not evidence a row is absent (a row at offset=15 of a limit=15 page reads as gone). It returns the FULL item including `body`, not the terse projection. An absent id is a 404 error dict carrying "task {id} not found" verbatim, never an empty success or None.
 
     Args:
-        task_id: The item's UUID string. A malformed id is the server's reject
-            to surface (422), never pre-checked here.
+        task_id: The item's UUID string. A malformed id is the server's reject to surface (422), never pre-checked here.
 
     Returns:
-        The full serialized item (200 body) verbatim on success, or an error
-        dict — a 404 carries "task {id} not found" verbatim under "detail"; a
-        malformed UUID carries the server's 422 detail verbatim; auth/transport
-        failures carry the shared missing_auth_header / server_unreachable /
-        server_read_timeout
-        contract. NEVER an empty success, NEVER None.
+        The full serialized item (200 body) verbatim, or an error dict: a 404 carries "task {id} not found" under "detail"; a malformed UUID carries the server's 422 detail; auth/transport failures carry the shared missing_auth_header / server_unreachable / server_read_timeout contract. Never an empty success, never None.
+
+    Example:
+        task_get(task_id="4288dd53-6779-460a-88bd-a7365fb734b2")    # open one row by id, e.g. from a terse list's `id` field
     """
     return task_get_impl(
         api_base_url = _get_server_url(),
@@ -5307,52 +4489,80 @@ def task_get( task_id: str ) -> dict:
 
 
 @mcp.tool
+def task_approve_line( task_id: str, priority: str | None = None ) -> dict:
+    """
+    **[Read tier, always allowed]** Write the card bullet for one held row.
+
+    The bullet carries a link that lets Rick approve the row with one click.
+
+    Use it whenever you ask Rick to approve rows: put one returned `line` per row in your action-required card. Both browser clients turn a click on the link into the approve move and show "approved ✅" in place. A 📋 link beside it shows the ticket. Do not hand-type the link.
+
+    Args:
+        task_id: The row's full lowercase UUID. A short or malformed id is refused here without asking the server.
+        priority: Optional, P0..P5. Adds a `[⏫ P0]` link that admits the row to queued at that higher level in one click. With none, the line is exactly as before and admission keeps the row's own priority. The server honours it for Rick's login only, and only when it raises the row; anything else is a 403.
+
+    Returns:
+        { "line": "- <title> [approve ☐](/app/tasks/approve?row=<id>) [⏫ P0](/app/tasks/approve?row=<id>&priority=P0) [📋](/app/tasks/view?row=<id>)" } (the middle link only with a priority), or an error dict: `invalid_row_id`, `blank_title`, or the server's own error for a row it could not return (404, auth, transport).
+
+    Example:
+        task_approve_line(task_id="a3975cf4-c640-4659-9247-0a99fa8a5f4a")
+    """
+    return task_approve_line_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        task_id      = task_id,
+        priority     = priority,
+    )
+
+
+@mcp.tool
+def task_approve_batch_line( task_ids: list[str], move: str = "queued", reason: str | None = None ) -> dict:
+    """
+    **[Read tier, always allowed]** Write one card bullet that moves a list of held rows.
+
+    Use it instead of `task_approve_line` whenever you ask Rick to act on more than one row: one line, one click, never a row-by-row list. The 📋 link beside it lists every row's title first, so the click is never blind. After the click the card reads, per row, applied or refused with the reason; one refusal does not hide the others.
+
+    Args:
+        task_ids: Full lowercase UUIDs, at least one, no duplicates. A short or malformed id is refused here without asking the server.
+        move: "queued" approves (default); "dropped" drops.
+        reason: Required for a drop, refused for an approve.
+
+    Returns:
+        { "line": "- <N> held rows [approve all N ☐](/app/tasks/approve?rows=<ids>&move=queued) [📋](/app/tasks/view?rows=<ids>)" }, or { "error": "invalid_batch", "detail": ... }.
+
+    Example:
+        task_approve_batch_line(task_ids=["a3975cf4-c640-4659-9247-0a99fa8a5f4a", "0b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8"], move="dropped", reason="duplicate refile")
+    """
+    return task_approve_batch_line_impl( task_ids = task_ids, move = move, reason = reason )
+
+
+@mcp.tool
 def task_promotion_status( ticket_id: str ) -> dict:
     """
     **[READ — always allowed, no user permission needed]** How did that promotion go?
 
-    🔴 THE VERB A CALLER COMES BACK WITH. When a promotion out of the holding area runs
-    ASYNCHRONOUSLY, the door answers immediately with a ticket instead of holding the
-    request open while Rick thinks — and `task_transition` then waits a budget for the
-    answer. If the budget runs out you get `awaiting_human_approval` plus a `ticket_id`,
-    and THIS is what you come back with. So does a caller whose process died: the ticket
-    is persisted, and the answer is waiting whenever you ask.
+    When a promotion out of the holding area runs ASYNCHRONOUSLY, the door answers immediately with a ticket, and `task_transition` waits a budget for Rick's answer. If the budget runs out you get `awaiting_human_approval` plus a `ticket_id`, and THIS is the verb you come back with. So does a caller whose process died: the ticket is persisted, and the answer waits whenever you ask.
 
-    ⚠️ IT EXISTS BECAUSE A 202 WITHOUT IT WOULD BE THE SAME DEFECT WITH THE WAITING MOVED
-    SOMEWHERE NOBODY LOOKS. That is María 🌸's binding condition on the ruling that made
-    the promotion ask asynchronous, and it is the reason this is not optional polish.
-
-    WHAT THE STATES MEAN, and two of them are easy to collapse and must not be:
+    WHAT THE STATES MEAN; two are easy to collapse and must not be:
         pending     the ask is out; Rick has not answered and the deadline has not passed
-        approved    it went through — `response_body` is the { item, event } a synchronous
-                    call would have returned, and `approval_source` says whether it was
-                    his keypress or a timed-out default
-        refused     Rick said no, OR the ask never reached him — `refusal` says which
-        superseded  🔴 HE APPROVED IT AND THE WORLD MOVED. The transition was no longer
-                    legal when the answer landed. NOT a refusal: nobody said no, so read
-                    `refusal` for what the row had become and go look at what else touched
-                    it
-        stalled     the ask died without an answer — usually a server bounce mid-ask. A
-                    human was already told by an urgent notification; nothing was promoted
+        approved    it went through; `response_body` is the { item, event } a synchronous call would have returned, and `approval_source` says whether it was his keypress or a timed-out default
+        refused     Rick said no, OR the ask never reached him; `refusal` says which
+        superseded  HE APPROVED IT AND THE WORLD MOVED: the transition was no longer legal when the answer landed. NOT a refusal, nobody said no; read `refusal` for what the row had become and look at what else touched it
+        stalled     the ask died without an answer, usually a server bounce mid-ask; a human was already told by an urgent notification and nothing was promoted
 
-    TWO DEADLINES, AND ONLY ONE IS RICK'S (row dbe42964):
-        answer_by    when his ANSWER WINDOW closes — the ask timeout (120s by default).
-                     Null on a ticket minted before the field existed.
-        resolves_by  the STALL deadline — ask timeout + notification grace + apply margin
-                     (480s by default). Still `pending` after it means the ask died.
+    TWO DEADLINES, AND ONLY ONE IS RICK'S:
+        answer_by    when his ANSWER WINDOW closes — the ask timeout (120s by default). Null on a ticket minted before the field existed.
+        resolves_by  the STALL deadline — ask timeout + notification grace + apply margin (480s by default). Still `pending` after it means the ask died.
     The `deadlines` field repeats this, so a relay never reports the wrong one.
+
+    Args:
+        ticket_id: the id handed back in the 202, and repeated in every `awaiting_human_approval` answer.
+
+    Returns:
+        The ticket verbatim on success. A 404 carries "promotion ticket {id} not found" verbatim, NEVER an empty success: a missing ticket and an unresolved one are different facts and only one of them means "keep waiting".
 
     Example:
         task_promotion_status( ticket_id="4288dd53-6779-460a-88bd-a7365fb734b2" )
-
-    Args:
-        ticket_id: the id handed back in the 202, and repeated in every
-            `awaiting_human_approval` answer.
-
-    Returns:
-        The ticket verbatim on success. A 404 carries "promotion ticket {id} not found"
-        verbatim — NEVER an empty success, because a missing ticket and an unresolved one
-        are different facts and only one of them means "keep waiting".
     """
     return task_promotion_status_impl(
         api_base_url = _get_server_url(),
@@ -5368,19 +4578,7 @@ def task_correlate(
     authority       : str = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Re-stamp a task-store item's correlation_key.
-
-    Cross-session respawn adoption (Phase-2 design C5/ruling #4): when a
-    successor session inherits an item, ADOPT it by re-keying it onto your own
-    harness id instead of forking a duplicate. The server appends an audited
-    `re-correlated` event (R3) and REJECTS terminal items (no re-keying closed
-    history) — this tool does NOT pre-check that; a 422 carries the server's
-    words verbatim.
-
-    Example:
-        # Adopt the inherited item onto this session's harness id:
-        task_correlate(task_id="<uuid>",
-                       correlation_key="cc-task:<my-stable-sid>:<harness-id>")
+    **[SELF-DISCLOSURE]** Re-stamp a task-store item's correlation_key. When a successor session inherits an item, ADOPT it by re-keying it onto your own harness id instead of forking a duplicate. The server appends an audited `re-correlated` event and REJECTS terminal items (no re-keying closed history); this tool does not pre-check that, and a 422 carries the server's words verbatim.
 
     Args:
         task_id: The item's UUID
@@ -5388,11 +4586,12 @@ def task_correlate(
         authority: standing | user_direct | manager_relay (default "standing")
 
     Returns:
-        { item, event } (server 200 body) verbatim, or an error dict — a 404
-        carries "task {id} not found" verbatim under "detail"; a 422 (terminal
-        item / bad authority) carries the server's detail verbatim.
+        { item, event } (server 200 body) verbatim, or an error dict: a 404 carries "task {id} not found" verbatim under "detail"; a 422 (terminal item / bad authority) carries the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped like task_transition's actor.
+    `actor` is not a parameter: it is stamped from the session bridge.
+
+    Example:
+        task_correlate(task_id="<uuid>", correlation_key="cc-task:<my-stable-sid>:<harness-id>")    # adopt the inherited item onto this session's harness id
     """
     refusal = _refuse_borrowed_identity( "task_correlate" )
     if refusal is not None: return refusal
@@ -5416,48 +4615,23 @@ def task_reassign(
     authority         : str             = "manager_relay",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Reassign a task-store item to a new owner persona.
-
-    The manager's handoff primitive (design §4.2): pull a worker off a queue and
-    hand their in-flight work to another persona. Changes OWNERSHIP ONLY — it can
-    NEVER change `status` (the store walls PATCH off from the state machine,
-    design D4). If the handoff should also re-queue the item, that is a SEPARATE
-    `task_transition`. The server is the single normalization + audit seam: it
-    canonicalizes the new owner to the owed-query key (so the new owner's
-    `task_query(owner_persona=…)` finds the row — the 2026-06-18 false-idle
-    guard) and appends one `patched` event carrying your `reason`.
-
-    A non-empty `reason` is REQUIRED here at the verb (the manager's "why" for the
-    handoff) — a blank reason is rejected before any server round-trip.
-
-    Examples:
-        # Hand Tiffany's in-flight item to Marcus, manager unchanged:
-        task_reassign(task_id="<uuid>", new_owner_persona="marcus",
-                      reason="Tiffany pulled onto the P0 arbiter fix")
-
-        # Reassign AND move it under a new chasing manager:
-        task_reassign(task_id="<uuid>", new_owner_persona="marcus",
-                      new_manager="tiberius",
-                      reason="lane handoff — Tiberius now chasing")
+    **[SELF-DISCLOSURE]** Reassign a task-store item to a new owner persona: the manager's handoff primitive, to pull a worker off a queue and hand their in-flight work to another persona. Changes OWNERSHIP ONLY; it can NEVER change `status`. If the handoff should also re-queue the item, that is a SEPARATE `task_transition`. The server canonicalizes the new owner to the owed-query key (so the new owner's `task_query(owner_persona=…)` finds the row) and appends one `patched` event carrying your `reason`. A non-empty `reason` is REQUIRED here at the verb; a blank one is rejected before any server round-trip.
 
     Args:
         task_id: The item's UUID
-        new_owner_persona: The handoff target (server normalizes to canonical key)
+        new_owner_persona: The handoff target (server normalizes to the canonical key)
         reason: Non-empty justification for the handoff (stamps the audit event)
-        new_manager: Optional new accountable_manager; when omitted the chasing
-            manager is left UNCHANGED (design Q6)
+        new_manager: Optional new accountable_manager; when omitted the chasing manager is left UNCHANGED
         authority: standing | user_direct | manager_relay (default "manager_relay")
 
     Returns:
-        { item, event } (server 200 body) verbatim, or an error dict:
-        {"status": "error", "reason": "empty_reason"} when `reason` is blank
-        (verb-enforced, no round-trip); a 404 carries "task {id} not found"
-        verbatim; a 422 (terminal item / bad authority) carries the server's
-        detail verbatim.
+        { item, event } (server 200 body) verbatim, or an error dict: {"status": "error", "reason": "empty_reason"} when `reason` is blank (verb-enforced, no round-trip); a 404 carries "task {id} not found" verbatim; a 422 (terminal item / bad authority) carries the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
-    (anti-impersonation; the manager-relay handoff is auditable to the real
-    session that issued it).
+    `actor` is not a parameter: it is stamped from the session bridge, so the handoff is auditable to the real session that issued it.
+
+    Examples:
+        task_reassign(task_id="<uuid>", new_owner_persona="marcus", reason="Tiffany pulled onto the P0 arbiter fix")    # hand an in-flight item to another persona, manager unchanged
+        task_reassign(task_id="<uuid>", new_owner_persona="marcus", new_manager="tiberius", reason="lane handoff — Tiberius now chasing")    # reassign and move it under a new chasing manager
     """
     refusal = _refuse_borrowed_identity( "task_reassign" )
     if refusal is not None: return refusal
@@ -5485,52 +4659,23 @@ def task_amend(
     authority : str             = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Append an amendment to a task-store item's body.
+    **[SELF-DISCLOSURE]** Append an amendment to a task-store item's body: the durable home for a LIVE item whose scope is legitimately reframed mid-flight, instead of leaving the current spec in scratchpad checklists, code comments or transition reasons, where a successor rehydrating from the store never sees it. APPEND-ONLY: the original body is preserved verbatim and your note lands below a persona-stamped, UTC-timestamped divider, so the amendment history reads inline. Reach for it when you would otherwise rewrite a body but must keep the prior spec.
 
-    The durable-record seam for a LIVE item whose scope is legitimately reframed
-    mid-flight (Krishna's 2026-07-02 friction): instead of leaving the current
-    spec in scratchpad checklists / code comments / transition reasons — where a
-    successor rehydrating from the store never sees it — append it to the item's
-    DURABLE body. APPEND-ONLY: the original body is preserved verbatim and your
-    note lands below a persona-stamped + UTC-timestamped divider, so the full
-    amendment history reads inline. This is NOT a destructive edit — reach for it
-    when you would otherwise rewrite a body but must keep the prior spec.
-
-    A TERMINAL item is ALLOWED (Rick's ruling 2026-08-02): amend is the ONE write
-    verb the store accepts on a done/dropped row — the durable home for a gate
-    verdict written AFTER a worker self-closes their own row. On a terminal row
-    the block is marked a post-terminal addendum (`[post-terminal addendum · … ·
-    added after close, not a reopening]`) and the audit event is stamped
-    'amended_post_terminal', so a reader tells at a glance it arrived after the
-    close; status is NOT moved (a closed row stays closed — transition / edit /
-    correlate remain refused on it). The server still REJECTS a blank note and a
-    bad authority — this tool does NOT pre-check those; a 422 carries the server's
-    words verbatim.
-
-    Example:
-        # Record a manager-ruled scope reframe on a live item:
-        task_amend(task_id="<uuid>",
-                   note="SCOPE REFRAME (Rick 2026-07-02): scheduler-port -> "
-                        "request-initiation subscriber. Prior spec below stands "
-                        "as history.",
-                   reason="4f14d38f manager ruling on cited evidence")
+    A TERMINAL item is ALLOWED: amend is the ONE write verb the store accepts on a done/dropped row, the durable home for a gate verdict written AFTER a worker self-closes their own row. On a terminal row the block is marked a post-terminal addendum (`[post-terminal addendum · ... · added after close, not a reopening]`) and the audit event is stamped 'amended_post_terminal'; status is NOT moved (a closed row stays closed; transition / edit / correlate remain refused on it). The server REJECTS a blank note and a bad authority, and this tool does not pre-check them; a 422 carries the server's words verbatim.
 
     Args:
         task_id: The item's UUID
         note: The amendment text to append (server validates 1..4000 + non-blank)
-        reason: Optional justification stamping the audit event; when omitted the
-            event records an auto-marker naming the appended length. The event
-            transition is 'amended' on a live row, 'amended_post_terminal' on a
-            terminal one
+        reason: Optional justification stamping the audit event; when omitted the event records an auto-marker naming the appended length. The event transition is 'amended' on a live row, 'amended_post_terminal' on a terminal one
         authority: standing | user_direct | manager_relay (default "standing")
 
     Returns:
-        { item, event } (server 200 body) verbatim, or an error dict — a 404
-        carries "task {id} not found" verbatim under "detail"; a 422 (blank note /
-        bad authority) carries the server's detail verbatim.
+        { item, event } (server 200 body) verbatim, or an error dict: a 404 carries "task {id} not found" verbatim under "detail"; a 422 (blank note / bad authority) carries the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
-    (anti-impersonation; the amendment is auditable to the real session).
+    `actor` is not a parameter: it is stamped from the session bridge, so the amendment is auditable to the real session.
+
+    Example:
+        task_amend(task_id="<uuid>", note="SCOPE REFRAME (Rick 2026-07-02): scheduler-port -> request-initiation subscriber. Prior spec below stands as history.", reason="4f14d38f manager ruling on cited evidence")    # record a manager-ruled scope reframe on a live item
     """
     refusal = _refuse_borrowed_identity( "task_amend" )
     if refusal is not None: return refusal
@@ -5554,57 +4699,34 @@ def task_request(
     deletion_task_id : Optional[ str ] = None,
 ) -> dict:
     """
-    **[MANAGER — directed at Rick]** Ask Rick to promote or demote ONE task-store row.
+    **[MANAGER — directed at Rick]** Ask Rick to promote or demote ONE task-store row. Rick alone promotes and demotes; managers can only request, and requests default to no. This files a question on the row and NEVER moves it: the row stays exactly where it is until Rick answers from his board.
 
-    Rick alone promotes and demotes (his ruling, 2026-09-08): "Only thing managers can do
-    is request And there's requests default to no". This is that request. It files a
-    question on the row and NEVER moves it — the row stays exactly where it is until Rick
-    answers from his board.
-
-    ⚠️ WHAT HAPPENS NEXT, so you do not wait for the wrong thing:
-      · the request waits on Rick's board with NO expiry — silence changes nothing, and
-        NO ANSWER MEANS NO: nothing moves until he approves
-      · if he APPROVES, the move is performed for you (admit -> queued; demote -> the
-        holding area); you do not transition the row yourself
+    What happens next, so you do not wait for the wrong thing:
+      · the request waits on Rick's board with NO expiry: silence changes nothing, and NO ANSWER MEANS NO
+      · if he APPROVES, the move is performed for you (admit -> queued; demote -> the holding area); you do not transition the row yourself
       · if he DENIES, the row stays put and you may file a fresh request
       · if the row moves another way first, the request is withdrawn, not denied
 
-    ⚔️ THE SWORD OF DAMOCLES (row ab8c5728) — AN ADMIT COSTS ONE OF YOUR OWN TICKETS.
-    While Rick's `sword_of_damocles_active` switch is on, an admit must name
-    `deletion_task_id`: a live ticket YOU own. When he approves, the row is admitted and
-    that ticket is dropped in the same step; if he denies, neither moves. Ownership is
-    checked against your session's persona, not a name you type. A demote pays nothing.
-
-    Refused by the server, with its words verbatim:
-      · 403 — you are not a manager (a worker asks its manager to file this), or the
-        deletion ticket is not yours, or your persona could not be read
-      · 409 — the row cannot make that move from where it is (admit is only for a row in
-        the holding area; demote only for a live, unfinished row), or a request is
-        already pending on it (one at a time — Rick's no-batches rule), or the deletion
-        ticket is already finished or already pledged on another pending admit
-      · 422 — `move` is not "admit" or "demote", `reason` is blank, an admit named no
-        deletion ticket while the switch is on, a demote named one, or the ticket does
-        not exist or is the row itself
-
-    Example:
-        task_request(task_id="<uuid>", move="admit",
-                     reason="fix merged at 36a0a403; the row is ready to work",
-                     deletion_task_id="<uuid of a live ticket you own>")
+    AN ADMIT COSTS ONE OF YOUR OWN TICKETS while Rick's `sword_of_damocles_active` switch is on: an admit must name `deletion_task_id`, a live ticket YOU own. When he approves, the row is admitted and that ticket is dropped in the same step; if he denies, neither moves. Ownership is checked against your session's persona, not a name you type. A demote pays nothing.
 
     Args:
-        task_id: The row's UUID — one row per call, never a batch
+        task_id: The row's UUID; one row per call, never a batch
         move: "admit" (promote out of the holding area) or "demote" (off the live board)
-        reason: Why the row should move. Rick reads it to decide — make it the one
-            sentence he needs
-        deletion_task_id: admit only — the UUID of a live ticket you own, dropped when
-            Rick approves. Required while the Sword of Damocles switch is on
+        reason: Why the row should move. Rick reads it to decide: make it the one sentence he needs
+        deletion_task_id: admit only; the UUID of a live ticket you own, dropped when Rick approves. Required while the switch is on
 
     Returns:
-        The row (server 200 body) with request_state "pending", or an error dict carrying
-        the server's detail verbatim.
+        The row (server 200 body) with request_state "pending", or an error dict carrying the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped, so the server's manager check reads your
-    real session, not a name you typed.
+    Refused by the server, with its words verbatim:
+      · 403: you are not a manager (a worker asks its manager to file this), or the deletion ticket is not yours, or your persona could not be read
+      · 409: the row cannot make that move from where it is (admit is only for a row in the holding area; demote only for a live, unfinished row), or a request is already pending on it (one at a time), or the deletion ticket is already finished or already pledged on another pending admit
+      · 422: `move` is not "admit" or "demote", `reason` is blank, an admit named no deletion ticket while the switch is on, a demote named one, or the ticket does not exist or is the row itself
+
+    `actor` is not a parameter: it is stamped from the session bridge, so the manager check reads your real session.
+
+    Example:
+        task_request(task_id="<uuid>", move="admit", reason="fix merged at 36a0a403; the row is ready to work", deletion_task_id="<uuid of a live ticket you own>")
     """
     refusal = _refuse_borrowed_identity( "task_request" )
     if refusal is not None: return refusal
@@ -5621,6 +4743,116 @@ def task_request(
 
 
 @mcp.tool
+def task_ask_unpark(
+    task_id : str,
+) -> dict:
+    """
+    Ask Rick to approve un-parking one parked row; the server makes the card.
+
+    This asks and never moves the row. Manager seats only.
+
+    Args:
+        task_id: The parked row's UUID; one row per call
+
+    Returns:
+        { card_id, task_id, expires_at, pushed }, or an error dict carrying the server's detail verbatim.
+        When pushed is false the card is saved but Rick was not shown it. A second ask is refused
+        with a 409 until the card expires, 10 minutes after it was made.
+
+    Next steps:
+      1. Wait. Rick answers the card from his board, and silence refuses.
+      2. After a yes, send task_transition with to_status "queued" and
+         receipt_refs { "approval_card": "<card_id>" }.
+      3. The card covers that one move once. A second use, a no, a default answer or a card made
+         before the park is refused.
+
+    Refused by the server:
+      - 403: you are not a manager
+      - 404: no such row, or the operator's account was not found
+      - 409: the row is not parked, it has no recorded park time, or an unanswered card already exists (its id is in the message)
+
+    The actor is not a parameter: it is stamped from the session bridge.
+
+    Example:
+        task_ask_unpark(task_id="<uuid of a parked row>")
+    """
+    refusal = _refuse_borrowed_identity( "task_ask_unpark" )
+    if refusal is not None: return refusal
+
+    return task_ask_unpark_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        actor        = _task_store_identity(),
+        task_id      = task_id,
+    )
+
+
+def _podcast_actor() -> str:
+    """
+    Build the actor the podcast doors bind a card to: the persona and the stable session id.
+
+    Ensures:
+        - returns "<persona> <first 8 hex of the stable session id>"
+        - the stable id survives a clear, so a re-spun seat can resume its own card
+        - falls back to the current session's 8 hex when the bridge has no stable id
+        - never raises
+    """
+    try:
+        stable = _get_cc_metadata().get( "stable_session_id" ) or ""
+    except Exception:
+        stable = ""
+    return f"{_commons_persona_fields()[ 'persona_name' ]} {stable[ :8 ] if stable else SESSION_ID}"
+
+
+@mcp.tool
+@_offloaded_tool
+def podcast_for_rick(
+    path    : str = "",
+    card_id : str = "",
+) -> dict:
+    """
+    Ask Rick about a podcast of one file, wait for his answer, and start it on a yes.
+
+    The server makes the card. This tool polls it until Rick answers or it expires, then starts the job.
+    It blocks up to about 15 minutes, and only a person's yes starts anything. To resume after an error
+    such as queue_failed, pass the card_id: the ask is skipped, and the path refuses a card for another file.
+
+    Args:
+        path: Absolute path to a file in the main checkout of a registered repo. A file inside a
+            git worktree is refused: the server cannot see it, so write it to the main checkout's io/tmp.
+        card_id: A card from an earlier call, to resume instead of asking again.
+
+    Returns:
+        { status: "started", card_id, job_id, ... } after a yes and a successful start;
+        { status: "dry run", card_id, job_id } when the server's dry-run switch is on: the yes is spent and nothing was queued;
+        { status: "declined", card_id } for a no or neither;
+        { status: "default_used", card_id } when the card timed out on its default;
+        { status: "expired", card_id } when nobody answered in time;
+        or { status: "error", reason, detail, stage? }. The reason is the server's own code
+        (too_old, hash_mismatch, queue_failed and so on) or one of path_not_absolute, file_not_found,
+        outside_any_repo, inside_a_worktree, path_or_card_required, card_for_a_different_file,
+        card_already_waiting, card_already_spent, claimed_no_job, ask_answer_malformed, card_unreadable.
+        A queue_failed error carries a retry hint: the card is still valid.
+        A claimed_no_job error means a start is under way or did not finish: do not start it again.
+
+    The actor is not a parameter: it is stamped from the session bridge, bound to the stable session id.
+
+    Example:
+        podcast_for_rick(path="/mnt/DATA01/include/www.deepily.ai/projects/lupin/io/tmp/2026.10.08-summary.md")
+    """
+    refusal = _refuse_borrowed_identity( "podcast_for_rick" )
+    if refusal is not None: return refusal
+
+    return podcast_for_rick_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        actor        = _podcast_actor(),
+        host_path    = path,
+        card_id      = card_id,
+    )
+
+
+@mcp.tool
 def task_edit(
     task_id   : str,
     updates   : dict,
@@ -5628,59 +4860,24 @@ def task_edit(
     authority : str             = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Edit one or more of the 5 FREE-EDIT fields of a
-    task-store item.
+    **[SELF-DISCLOSURE]** Edit one or more of the 5 FREE-EDIT fields of a task-store item: `title` · `body` · `priority` · `gate_class` · `urgency`. Most often used to DEMOTE a mis-inflated `priority`. A thin wrapper over `PATCH /api/tasks/{id}`: it OVERWRITES the named fields atomically (one txn, one `patched` audit event). Value validation stays server-side.
 
-    The last-mile "change field X to value Y" seam (design §4) — most concretely,
-    DEMOTE a mis-inflated `priority`. A thin MCP wrapper over `PATCH /api/tasks/
-    {id}`: it OVERWRITES the named fields atomically (one txn, one `patched` audit
-    event). Value validation stays server-side (Pydantic + `validate_patch`).
-
-    EDITABLE (5 fields) — pass any subset in `updates`:
-        title · body · priority · gate_class · urgency
-
-    REFUSED at the MCP layer — OWNER fields `owner_persona` · `accountable_manager`
-    → use `task_reassign` (the single owner-change path, with a mandatory reason).
-    Editing owner via a bare `task_edit` would be a reason-free reassignment
-    backdoor; a raw PATCH would accept them, so this refusal is MCP-side.
-
-    REFUSED by the server (`extra="forbid"` → 422) — invariant-bearing fields; use
-    `task_transition`, which moves the coupled fields together:
-        status · blocked_by · next_chase_ts · park_reason ·
-        park_reason_captured_at · receipt_refs · correlation_key
-
-    A bad enum (`priority` not P0–P5 — WIDENED from P0–P3 on 2026-09-07, see
-    VALID_PRIORITIES in task_store_rules.py, the single decider — `gate_class` not
-    none/manager/operator,
-    `urgency` not urgent/normal/low) or empty `title` → 422 from the server, no
-    row mutation. Terminal (done/dropped) items are rejected server-side.
-
-    Examples:
-        # Demote a mis-inflated priority (the C7 P1-inflation fix):
-        task_edit(task_id="<uuid>", updates={"priority": "P3"},
-                  reason="over-inflated at mint; not user-blocking")
-
-        # Multi-field atomic edit in one txn/event:
-        task_edit(task_id="<uuid>",
-                  updates={"title": "Retitled", "urgency": "low"})
+    REFUSED at the MCP layer: owner fields `owner_persona` and `accountable_manager`; use `task_reassign` (the single owner-change path, with a mandatory reason). REFUSED by the server (`extra="forbid"`, 422): `status` · `blocked_by` · `next_chase_ts` · `park_reason` · `park_reason_captured_at` · `receipt_refs` · `correlation_key`; use `task_transition`, which moves the coupled fields together. A bad enum (`priority` not P0–P5, `gate_class` not none/manager/operator, `urgency` not urgent/normal/low) or an empty `title` is a 422 with no row mutation. Terminal (done/dropped) items are rejected server-side.
 
     Args:
         task_id: The item's UUID
-        updates: Dict of {field: value} to overwrite — non-empty; owner keys are
-            refused with a pointer to task_reassign, invariant keys 422 server-side
-        reason: Optional justification stamping the 'patched' audit event; when
-            omitted the event records the field delta
+        updates: Dict of {field: value} to overwrite; non-empty. Owner keys are refused with a pointer to task_reassign; invariant keys 422 server-side
+        reason: Optional justification stamping the 'patched' audit event; when omitted the event records the field delta
         authority: standing | user_direct | manager_relay (default "standing")
 
     Returns:
-        { item, event } (server 200 body) verbatim, or an error dict:
-        {"reason": "empty_updates"} when `updates` is empty/not-a-dict (verb-
-        enforced, no round-trip); {"reason": "owner_field_refused"} → task_reassign;
-        a 404 carries "task {id} not found" verbatim; a 422 (invariant field / bad
-        enum / empty title / terminal item) carries the server's detail verbatim.
+        { item, event } (server 200 body) verbatim, or an error dict: {"reason": "empty_updates"} when `updates` is empty or not a dict (verb-enforced, no round-trip); {"reason": "owner_field_refused"} → task_reassign; a 404 carries "task {id} not found" verbatim; a 422 (invariant field / bad enum / empty title / terminal item) carries the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
-    (anti-impersonation; stamped LAST, so an `updates` "actor" key cannot shadow it).
+    `actor` is not a parameter: it is stamped from the session bridge, last, so an `updates` "actor" key cannot shadow it.
+
+    Examples:
+        task_edit(task_id="<uuid>", updates={"priority": "P3"}, reason="over-inflated at mint; not user-blocking")    # demote a mis-inflated priority
+        task_edit(task_id="<uuid>", updates={"title": "Retitled", "urgency": "low"})    # multi-field atomic edit in one txn/event
     """
     refusal = _refuse_borrowed_identity( "task_edit" )
     if refusal is not None: return refusal
@@ -5699,12 +4896,152 @@ def task_edit(
     )
 
 
+# ============================================================================
+# Reuse-review tools: check_exists, fetch_similar, read_capability, replay
+# ============================================================================
+#
+# The logic lives in lupin_mcp/reuse_tools.py and is imported INSIDE each wrapper, never at
+# module level, so a failure in that module cannot stop the voice tools from loading. A
+# wrapper that cannot import it answers with an error dict. Design of record:
+# src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/ (implementation plan, section 5).
+# A fix to these tools reaches a seat only when its MCP server restarts; /clear does not reload it.
+
+
+def _reuse_unavailable( e ) -> dict:
+    """Ensures: returns the error dict a reuse wrapper answers with when reuse_tools cannot be used."""
+    return { "status": "error", "error": "REUSE_TOOLS_UNAVAILABLE", "detail": f"{type( e ).__name__}: {e}" }
+
+
+def _reuse_call( impl_name, root, *args, module="reuse_tools", **kw ) -> dict:
+    """
+    Run one reuse_tools implementation for a wrapper, or say why it cannot run.
+
+    Requires:
+        - impl_name names a function in lupin_mcp.<module>, reuse_tools unless module says otherwise, that takes ( *args, ctx, **kw )
+    Ensures:
+        - imports reuse_tools and builds its context for root; if either fails, returns _reuse_unavailable
+        - otherwise returns <module>.<impl_name>( *args, ctx, **kw )
+    """
+    try:
+        from lupin_mcp import reuse_tools
+        ctx = reuse_tools.context_from_environment( root )
+    except Exception as e:
+        return _reuse_unavailable( e )
+    home = reuse_tools if module == "reuse_tools" else importlib.import_module( f"lupin_mcp.{module}" )
+    return getattr( home, impl_name )( *args, ctx, **kw )
+
+
+@mcp.tool
+@_offloaded_tool
+def check_exists( need: str, language: Optional[ str ] = None, root: Optional[ str ] = None, include_tests: bool = False ) -> dict:
+    """
+    Should this be built? Gives a verdict and the existing symbols that may do it.
+
+    Describe the need in one or two sentences before writing new code. The answer carries a
+    shortlist of existing symbols, the nearest entries, and a receipt_id to cite. UNCERTAIN_READ_SOURCE
+    always carries a `cause`; it means read the source of the shortlist and nearest entries, and is
+    never a guess. The cause NO_MATCH (nothing relevant found) does not rule the need distinct: read the nearest entries first.
+
+    The language argument is mandatory: py, ts, dart, or all. The search covers that language only,
+    and all is the explicit choice to look across languages. A call without it answers LANGUAGE_REQUIRED.
+
+    Args:
+        need: what the new code would do
+        language: py, ts, dart or all (required; there is no default)
+        root: repository root to check; default is the git root of the working directory
+        include_tests: also ask the test files (default false); the call then sweeps every record, so it is slower and dearer
+    """
+    return _reuse_call( "check_exists_impl", root, need, language=language, include_tests=include_tests )
+
+
+@mcp.tool
+@_offloaded_tool
+def fetch_similar( entry: str, language: Optional[ str ] = None, root: Optional[ str ] = None, include_tests: bool = False ) -> dict:
+    """
+    What does this symbol resemble? Returns the shortlist of similar existing symbols and a receipt_id.
+
+    Use it on each new definition in a diff. `entry` is the symbol id as listed in the index, for
+    example "cosa.rest.task_store_owed.park_reason_is_stale". The symbol itself is excluded.
+
+    The language argument is mandatory: py, ts, dart, or all. It is never inferred from the entry,
+    so a language other than the entry's own is a deliberate cross-language look. A call without it answers LANGUAGE_REQUIRED.
+
+    Args:
+        entry: symbol id
+        language: py, ts, dart or all (required; there is no default)
+        root: repository root; default is the git root of the working directory
+        include_tests: also look among the test files (default false), and accept a test definition as the entry
+    """
+    return _reuse_call( "fetch_similar_impl", root, entry, language=language, include_tests=include_tests )
+
+
+@mcp.tool
+@_offloaded_tool
+def read_capability( names: list, root: Optional[ str ] = None ) -> dict:
+    """
+    Read capability pages from the code wiki by slug. No model call; returns the page text and a receipt_id.
+
+    Args:
+        names: capability slugs, for example ["task-store"]
+        root: repository root; default is the git root of the working directory
+    """
+    return _reuse_call( "read_capability_impl", root, names )
+
+
+@mcp.tool
+@_offloaded_tool
+def record_search( receipt_id: Optional[ str ] = None, entry: Optional[ str ] = None, extra_terms: Optional[ list ] = None,
+                   language: Optional[ str ] = None, root: Optional[ str ] = None ) -> dict:
+    """
+    Search the tree for the nearest existing code and record the search. No model call.
+
+    Run it before ruling that new code is distinct. It searches the working tree for three to six terms
+    and returns the five nearest definitions and a search_id to cite. Read each candidate's source.
+    Give exactly one of receipt_id and entry. An entry has no receipt, so it needs a language: py, ts, dart or all, with no default.
+
+    Args:
+        receipt_id: id returned by check_exists or fetch_similar
+        entry: symbol id, when there is no receipt
+        extra_terms: terms to add to the derived ones, three to six in all
+        language: for an entry search only; py, ts, dart or all
+        root: repository root; default is the git root of the working directory
+    """
+    return _reuse_call( "record_search_impl", root, receipt_id, entry, extra_terms, language, module="reuse_search" )
+
+
+@mcp.tool
+@_offloaded_tool
+def replay( receipt_id: str, root: Optional[ str ] = None ) -> dict:
+    """
+    Re-check a receipt_id: the stored result, a re-run against the frozen index, and a re-run at HEAD.
+
+    The frozen re-run tests that the receipt's inputs reproduce its result. The HEAD re-run tests
+    whether the code or the model still agrees. A damaged or missing input answers with a named
+    error and never a verdict.
+
+    Args:
+        receipt_id: id returned by another reuse tool
+        root: repository root; default is the git root of the working directory
+    """
+    return _reuse_call( "replay_impl", root, receipt_id )
+
+
+# The server-side call log is a second FastMCP middleware beside BridgeLivenessMiddleware. A failure
+# to import or mount it is reported on stderr and the server starts without it.
+try:
+    from lupin_mcp.reuse_call_log_middleware import ReuseCallLogMiddleware
+    mcp.add_middleware( ReuseCallLogMiddleware( identity=lambda: _task_store_identity(), session_id=SESSION_ID ) )
+except Exception as _reuse_log_error:
+    print( f"reuse call-log middleware not mounted: {type( _reuse_log_error ).__name__}: {_reuse_log_error}", file=sys.stderr )
+
+
 if __name__ == "__main__":
     # THE POSITIVE ASSIGNMENT — the only place this is set. It must come BEFORE
     # mcp.run() so a resolution failure during startup still hard-exits the server
     # exactly as it always has. See the flag's definition for why this is not an
     # environment check, and for what a future console_scripts entry point owes.
     _IS_MCP_SERVER = True
+    install_sigterm_handler()
     # PHASE 2 STARTS HERE AND NOWHERE ELSE (row `87ae7234`). Importing this module
     # must not start a poll loop that credits coverage to no test.
     _start_bridge_watch()

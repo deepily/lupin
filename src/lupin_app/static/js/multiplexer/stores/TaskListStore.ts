@@ -4,20 +4,25 @@
 // Owns the poll-driven task-list lifecycle, mirroring FleetStatusStore. Reads
 // the EXISTING `GET /api/tasks` endpoint (routers/tasks.py:419-477, full-row
 // fidelity) — a read-only consumer; this card never touches tasks.py. Like
-// fleet-status it is an autonomous-timer feature (60s), OFF the WS transports;
-// it does NOT subscribe to the EventBus, it only emits `store_task_list_changed`.
+// fleet-status it is an autonomous-timer feature (60s). Row 8796333b slice 1 adds one
+// EventBus subscription, `task_store_changed` (a server invalidation push), which calls
+// refreshAfterWrite(), so a push that lands during a read still gets a read that began
+// after it; the poll stays as the safety net. It emits
+// `store_task_list_changed`.
 //
 // Fetch + cache + timer only. The DOM dispatch (auth_required / unreachable /
 // empty / table) + the "updated" stamp live in TaskListRenderer; the pure
 // grouping/format fns live in render/taskListModel.ts.
 
 import type { EventBus } from "../shared/EventBus";
+import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreTaskListChangedPayload } from "../shared/types";
 import type { TaskItem, TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor, isOpenStatus } from "../render/taskListModel";
 import type { TransitionExtras } from "../render/taskVerbs";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
 import { AWAITING_HUMAN_APPROVAL } from "./HoldingAreaStore";
+import { alreadyAtTarget } from "./alreadyAtTarget";
 
 /**
  * Raised when the transition door answers "Rick has not been asked yet".
@@ -34,6 +39,9 @@ import { AWAITING_HUMAN_APPROVAL } from "./HoldingAreaStore";
 export class AwaitingHumanApprovalError extends Error {
   readonly pending  = true as const;
   readonly ticketId : string;
+  /**
+   * Builds the error for a transition still awaiting human approval, keeping the ticket ID.
+   */
   constructor( ticketId: string ) {
     super( "Waiting on Rick — he has not been asked yet." );
     this.name     = "AwaitingHumanApprovalError";
@@ -56,36 +64,33 @@ function awaitingApproval( body: unknown ): boolean {
     && ( body as { status?: unknown } ).status === AWAITING_HUMAN_APPROVAL;
 }
 
-// Narrowed ApiClient surface. The production ApiClient.get throws ApiError
-// (carrying `.status`) on non-2xx; refresh() maps that to the display-only
-// sentinels rather than letting it propagate. Phase 2 widens this to the WRITE
-// verbs the editing controls ride: PATCH (priority / owner reassignment) and
-// POST (drop-with-reason via the transition endpoint). The production ApiClient
-// satisfies all three structurally; the read-only fleet/get callers are
-// unaffected (they only ever touch `.get`).
+/** The slice of the API client the store needs: `get`, `patch` and `post`. */
 export interface TaskListApiClient {
   get<T>( path: string ): Promise<T>;
   patch<T>( path: string, body: unknown ): Promise<T>;
   post<T>( path: string, body: unknown ): Promise<T>;
 }
 
-// The descriptive fields the PATCH endpoint accepts from the card (D2/D3 scope):
-// priority (P0–P5) and owner_persona (reassignment; null clears the owner).
-// Title/body/accountable_manager/gate_class are PATCH-able server-side but out
-// of the per-row editing scope, so they are not surfaced here.
+/** The fields a card may change on a task: the priority and the owner persona. */
 export interface TaskPatchFields {
   priority?      : string;
   owner_persona? : string | null;
 }
 
-// The optimistic-mutation handle returned by patchTask/transitionTask — mirrors the
-// `{ restoreState }` rollback contract of JobStore.delete, plus a `done` promise
-// the renderer awaits to drive the JobsPaneRenderer-style success / 404-as-
-// success / rollback-on-error flow. `done` resolves on a 2xx and rejects with
-// the ApiError the production ApiClient throws on non-2xx.
+/**
+ * The handle of an optimistic task change.
+ *
+ * `restoreState` undoes the change. `done` settles when the server has answered and carries no body.
+ * For a transition it carries `alreadyAt` when the task was already at the target status.
+ */
 export interface TaskMutation {
   restoreState : () => void;
-  done         : Promise<void>;
+  done         : Promise<TransitionOutcome | void>;
+}
+
+/** What a transition resolves with when the task was already at the target status. */
+export interface TransitionOutcome {
+  alreadyAt? : string;
 }
 
 // v1 read-contract: the whole fleet board, newest-first, capped. Rick's
@@ -102,9 +107,12 @@ export interface TaskMutation {
 // since ordering is newest-first, the evicted rows were OPEN ones this card
 // exists to show. Re-exported under the historical name so importers are
 // unaffected.
+/** The server path that lists the fleet's tasks, newest first. */
 export const TASK_LIST_ENDPOINT         = TASK_LIST_QUERY;
+/** How often the store polls the task list, in milliseconds. */
 export const TASK_LIST_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (fleet parity)
 
+/** The fleet's task list as one composite, with the reads and the verbs that change a task. */
 export interface TaskListStore {
   /** Last fetched composite (any status), or null before the first refresh. */
   composite(): TaskListComposite | null;
@@ -162,6 +170,7 @@ export interface TaskListStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createTaskListStore`: the bus, the API client, an actor provider and timer hooks. */
 export interface TaskListStoreOptions {
   bus             : EventBus;
   api             : TaskListApiClient;
@@ -180,39 +189,59 @@ export interface TaskListStoreOptions {
   actorProvider?  : () => string | null;
 }
 
+/**
+ * Holds the cached task list, refreshes it by polling and push, and applies quick edits.
+ *
+ * It emits a bus event whenever the cached list changes.
+ */
 class TaskListStoreImpl implements TaskListStore {
   private readonly bus      : EventBus;
+  private readonly poller : PushPoller;
   private readonly api      : TaskListApiClient;
   private readonly endpoint : string;
   private readonly nowFn    : () => number;
-  private readonly setIntervalFn   : ( cb: () => void, ms: number ) => number;
-  private readonly clearIntervalFn : ( handle: number ) => void;
   private readonly actorProvider   : () => string | null;
 
   private lastComposite : TaskListComposite | null = null;
   private inFlight      = false;
   private inFlightRun   : Promise<void> | null = null;
-  private pollHandle    : number | null = null;
 
+  /**
+   * Creates the store from a bus and API client, defaulting endpoint, clock, timers and actor.
+   *
+   * It fetches nothing yet.
+   */
   constructor( opts: TaskListStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
+    const { nowFn, setIntervalFn, clearIntervalFn } = resolveRuntimeDefaults( opts );
+    this.nowFn = nowFn;
     /* c8 ignore next */ // production-default fallback: boot wires the real authManager email provider; read-only test constructions never reach the write paths.
     this.actorProvider = opts.actorProvider ?? ( () => null );
     /* c8 ignore next */ // production-default fallback: the canonical endpoint; tests inject an explicit one.
     this.endpoint = opts.endpoint ?? TASK_LIST_ENDPOINT;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? ( () => Date.now() );
-    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
-    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
-    /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the default above.
-    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+    this.poller = createPushPoller( {
+      bus              : this.bus,
+      setIntervalFn,
+      clearIntervalFn,
+      intervalMs       : TASK_LIST_POLL_INTERVAL_MS,
+      refresh          : () => this.refresh(),
+      refreshAfterWrite: () => this.refreshAfterWrite(),
+    } );
   }
 
+  /**
+   * Returns the last fetched task list result, or null before the first fetch.
+   */
   composite(): TaskListComposite | null {
     return this.lastComposite;
   }
 
+  /**
+   * Fetches the task list and emits a change event.
+   *
+   * Does nothing when a fetch is already in flight.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // debounce: a manual tick landing on a poll can't double-fetch
     this.inFlight = true;
@@ -229,6 +258,9 @@ class TaskListStoreImpl implements TaskListStore {
     return run;
   }
 
+  /**
+   * Waits out any fetch in flight, then returns one that started after this call.
+   */
   async refreshAfterWrite(): Promise<void> {
     if ( this.inFlightRun !== null ) await this.inFlightRun;
     // 🔴 A RUN IN FLIGHT NOW BEGAN AFTER THIS CALL — JOIN IT, DO NOT CALL refresh(). Two
@@ -240,19 +272,25 @@ class TaskListStoreImpl implements TaskListStore {
     return this.refresh();
   }
 
+  /**
+   * Fetches now, then refetches on a timer and whenever the server pushes a task store change.
+   *
+   * Restarts cleanly if already polling.
+   */
   startPolling(): void {
-    this.stopPolling();
-    void this.refresh();
-    this.pollHandle = this.setIntervalFn( () => void this.refresh(), TASK_LIST_POLL_INTERVAL_MS );
+    this.poller.start();
   }
 
+  /**
+   * Cancels the poll timer and the server push subscription.
+   */
   stopPolling(): void {
-    if ( this.pollHandle !== null ) {
-      this.clearIntervalFn( this.pollHandle );
-      this.pollHandle = null;
-    }
+    this.poller.stop();
   }
 
+  /**
+   * Stops polling; used by tests for cleanup.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
@@ -263,6 +301,11 @@ class TaskListStoreImpl implements TaskListStore {
   // Phase 2 — optimistic mutations (PATCH priority/owner; transition→dropped)
   // -------------------------------------------------------------------------
 
+  /**
+   * Applies priority or owner changes to a cached task at once and sends a PATCH request.
+   *
+   * Returns a rollback function and a promise for the request; a missing cache or task gives a no-op handle.
+   */
   patchTask( id: string, fields: TaskPatchFields ): TaskMutation {
     const tasks = this.openTasksOrNull();
     if ( tasks === null ) return NOOP_MUTATION();
@@ -284,6 +327,11 @@ class TaskListStoreImpl implements TaskListStore {
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 
+  /**
+   * Moves a cached task to a new status at once and posts the transition.
+   *
+   * A closed status removes the row. Returns a rollback function and a promise that rejects while approval is pending.
+   */
   transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation {
     const tasks = this.openTasksOrNull();
     if ( tasks === null ) return NOOP_MUTATION();
@@ -312,6 +360,11 @@ class TaskListStoreImpl implements TaskListStore {
         throw new AwaitingHumanApprovalError( String( ( answer as { ticket_id?: unknown } ).ticket_id ?? "" ) );
       }
       return undefined;
+    } ).catch( async ( err: unknown ) => {
+      // Row 71a11ed7: the optimistic row already shows `toStatus`; if the server says the row is
+      // there, keep it. Any other rejection (including the 202 error above) rethrows to rollback.
+      if ( await alreadyAtTarget( this.api, id, toStatus, err ) ) return { alreadyAt: toStatus };
+      throw err;
     } );
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
@@ -369,12 +422,14 @@ class TaskListStoreImpl implements TaskListStore {
   }
 }
 
-// A no-op mutation handle for the cache-miss path (no cached composite / unknown
-// id): no api call, an immediately-resolved `done`, an inert `restoreState`.
+/**
+ * Returns a mutation handle that does nothing: inert rollback and a resolved promise.
+ */
 function NOOP_MUTATION(): TaskMutation {
   return { restoreState: () => { /* nothing to revert */ }, done: Promise.resolve() };
 }
 
+/** Build the store. It fetches nothing when it is built. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createTaskListStore( opts: TaskListStoreOptions ): TaskListStore {
   return new TaskListStoreImpl( opts );

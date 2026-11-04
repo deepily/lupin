@@ -32,7 +32,9 @@ from pathlib import Path
 
 import pytest
 
+import cosa.utils.server_coverage as sc
 import cosa.utils.util as cu
+from tests.helpers.server_coverage_fixture import make_server_dir
 
 PROJECT_ROOT = cu.get_project_root()
 GATE         = f"{PROJECT_ROOT}/src/tests/run-coverage-gate.sh"
@@ -70,7 +72,8 @@ def _run_gate_over_a_real_measurement( tmp_path ):
     report_txt = tmp_path / "per-file-report.txt"
     env        = { **os.environ,
                    "COVERAGE_FILE"       : str( data_file ),
-                   "COVERAGE_REPORT_TXT" : str( report_txt ) }
+                   "COVERAGE_REPORT_TXT" : str( report_txt ),
+                   sc.DIR_ENV            : make_server_dir( tmp_path / "server-coverage" ) }
 
     measured = subprocess.run(
         [ sys.executable, "-m", "coverage", "run", "--branch", "driver.py" ],

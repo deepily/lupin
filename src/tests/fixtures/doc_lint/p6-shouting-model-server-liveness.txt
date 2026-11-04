@@ -1,0 +1,21 @@
+
+Refuse a run whose model server is not answering — row b9604f8c.
+
+WHY THIS EXISTS. On 2026-08-17 the Ministral-8B router at 192.168.1.21:3000 went down.
+Port 3001 (Phi-4) stayed up, so the box looked alive to any casual check, and the outage
+surfaced only when a THREE-HOUR JOB DIED ON IT — with an API error three layers from the
+cause. The outage was fixed the same day. The DETECTION is what this module is about: a
+dead dependency read as a working one, because only one of two ports was ever checked.
+
+TWO THINGS IT MUST DO, both taken from the incident:
+
+  · PROBE EVERY PORT THE RUN WILL USE, not one of them. Half-alive read as alive is what
+    made the outage invisible; a probe that checks one port reproduces the defect it was
+    built to prevent.
+  · NAME WHICH PORT DID NOT ANSWER, and how it failed. "The model server is down" at hour
+    three teaches nobody anything; "3000 refused the connection, 3001 answered with
+    Phi-4" at second one is self-diagnosing.
+
+WHAT IT DELIBERATELY DOES NOT DO. It does not judge whether the right MODEL is loaded, and
+it does not measure latency. It answers one question — did this endpoint answer — because a
+probe that can fail for many reasons is a probe whose refusal has to be diagnosed itself.

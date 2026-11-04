@@ -1,7 +1,6 @@
 # Authentication Integration Guide
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Target Audience**: Frontend developers, API consumers
 
 ---
@@ -862,5 +861,4 @@ describe( 'Authentication Flow', () => {
 ---
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Maintained By**: Lupin Development Team

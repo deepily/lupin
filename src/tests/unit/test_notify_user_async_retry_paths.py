@@ -302,3 +302,42 @@ class TestTheRetrySchedule:
 
     def test_a_budget_too_small_for_any_retry_yields_no_retries( self ):
         assert calculate_retry_intervals( 1 ) == []
+
+
+class TestDebugRetryNarration:
+    """With debug on, each retry arm says which failure it is retrying."""
+
+    def test_a_retryable_http_status_is_narrated( self, capsys ):
+        result, post = _send( [ _reply( status_code=503 ), _reply() ], debug=True )
+        assert result.success is True and post.call_count == 2
+        assert "HTTP 503 (attempt 1), will retry" in capsys.readouterr().err
+
+    def test_a_connection_error_is_narrated( self, capsys ):
+        import requests
+        result, post = _send( [ requests.exceptions.ConnectionError(), _reply() ], debug=True )
+        assert result.success is True and post.call_count == 2
+        assert "ConnectionError (attempt 1), will retry" in capsys.readouterr().err
+
+    def test_a_timeout_is_narrated( self, capsys ):
+        import requests
+        result, post = _send( [ requests.exceptions.Timeout(), _reply() ], debug=True )
+        assert result.success is True and post.call_count == 2
+        assert "Timeout (attempt 1), will retry" in capsys.readouterr().err
+
+
+class TestUnsetTargetUser:
+
+    def test_an_unset_target_user_is_resolved_before_sending( self ):
+        with patch( "lupin_cli.notifications.notification_models.resolve_target_user", return_value="resolved@example.com" ):
+            result, post = _send( [ _reply() ], request=_request( target_user=None ) )
+        assert result.success is True
+        assert post.call_args.kwargs[ "params" ][ "target_user" ] == "resolved@example.com"
+
+
+class TestFinalTimeoutMessage:
+
+    @pytest.mark.parametrize( "seconds", [ 10, 30 ] )
+    def test_the_final_timeout_names_the_request_budget( self, seconds ):
+        result, _ = _send( [ requests.exceptions.Timeout() ] * 12, request=_request( timeout=seconds ) )
+        assert result.success is False
+        assert result.message == f"Server did not respond within {seconds} seconds"

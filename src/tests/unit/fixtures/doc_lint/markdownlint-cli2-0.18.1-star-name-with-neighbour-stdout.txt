@@ -1,0 +1,3 @@
+Finding: a*b.md
+Linting: 2 file(s)
+Summary: 2 error(s)

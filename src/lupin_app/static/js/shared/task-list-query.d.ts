@@ -4,12 +4,22 @@
 // browser module on the classic-script notifications page, which has no build
 // step. This declaration lets the TypeScript multiplexer bundle import the same
 // file rather than keeping a second copy of the string.
+/**
+ * The URL both clients poll for the board.
+ *
+ * It asks for open work only, up to 500 rows, parked rows included, with no byte budget.
+ */
 export declare const TASK_LIST_QUERY: string;
 
 // Row 87812328: the holding-area pane's query. The IMPLEMENTATION has exported
 // this since the pane was built, but this declaration did not, so the TS side
 // could not see it and the only way to use it was to copy the string — which is
 // the exact drift this shared module exists to prevent. Declared, not copied.
+/**
+ * The URL both clients poll for the holding area.
+ *
+ * It asks for rows with status `not_approved`, up to 500, with no byte budget.
+ */
 export declare const HOLDING_AREA_QUERY: string;
 
 // The classic-script bridge. notifications.js is not a module and cannot

@@ -45,6 +45,8 @@ suite name and a run under it executes nothing and reports 0/0/0/0. Submit via:
 
 from __future__ import annotations
 
+from tests.helpers.card_wait_report import format_card_wait_report
+
 from .conftest import BASE_URL
 
 CARD_SENDER = "claude.code@lupin.deepily.ai#e2ecard"
@@ -120,6 +122,35 @@ def _interactive_selector( nid ):
         f'[data-testid="multiplexer-action-required"][data-id-hash="{ nid }"]'
         f'.action-required-widget-interactive'
     )
+
+
+def _card_wait_report( page, nid ):
+    """
+    Read the card, the focused element and the store ids off the page, and format them.
+
+    Requires:
+        - the page is open on /app/multiplexer with the boot test hook live
+    Ensures:
+        - returns the text of format_card_wait_report for that card
+        - never raises; a failed read is reported as a missing reading
+    """
+    try:
+        probe = page.evaluate(
+            """( nid ) => {
+                const card   = document.querySelector( `[data-testid="multiplexer-action-required"][data-id-hash="${ nid }"]` );
+                const active = document.activeElement;
+                const store  = window.__multiplexerTestHook.stores.actionRequired;
+                return {
+                    html   : card ? card.outerHTML : null,
+                    active : active ? { tag: active.tagName, class_name: active.className, testid: active.getAttribute( "data-testid" ) } : null,
+                    ids    : store.list().map( ( item ) => item.id_hash ),
+                };
+            }""",
+            nid,
+        )
+    except Exception:
+        probe = { "html": None, "active": None, "ids": None }
+    return format_card_wait_report( nid, probe[ "html" ], probe[ "active" ], probe[ "ids" ] )
 
 
 def _assert_still_answerable( card, why ):
@@ -239,11 +270,56 @@ class TestActionRequiredCardParity:
         card.locator( ".yes-no-comment-input" ).blur()
         assert page.locator( _interactive_selector( "e2ecard-esc" ) ).count() == 1
         page.keyboard.press( "Escape" )
-        page.wait_for_selector(
-            _interactive_selector( "e2ecard-esc" ),
-            state   = "detached",
-            timeout = 10000,
+        try:
+            page.wait_for_selector(
+                _interactive_selector( "e2ecard-esc" ),
+                state   = "detached",
+                timeout = 10000,
+            )
+        except Exception:
+            print( _card_wait_report( page, "e2ecard-esc" ) )
+            raise
+
+    def test_escape_that_stops_a_recording_in_other_keeps_the_dialog_open( self, logged_in_page ):
+        """Escape that stops a recording in Other leaves the dialog open."""
+        # Focus sits on the mic button after the click, so the typing test never held.
+        # The recorder and the card both hear Escape; the card must stand down.
+        page = logged_in_page
+        _open_multiplexer( page )
+        # A fake microphone: the recorder reads getUserMedia at call time, so this
+        # stands in for the device without a permission prompt.
+        page.evaluate(
+            """() => {
+                const ctx = new AudioContext();
+                const dest = ctx.createMediaStreamDestination();
+                navigator.mediaDevices.getUserMedia = async () => dest.stream;
+            }"""
         )
+        _emit( page, {
+            "id_hash"         : "e2ecard-rec",
+            "response_type"   : "multiple_choice",
+            "response_options": { "questions": [
+                { "header": "db", "question": "Which store?", "options": [ "PostgreSQL", "SQLite" ] },
+            ] },
+        } )
+        card = _card( page, "e2ecard-rec" )
+        mic  = card.locator( ".mc-other-mic" )
+
+        mic.click()
+        page.wait_for_selector(
+            '[data-id-hash="e2ecard-rec"] .mc-other-mic.recording', timeout=10000,
+        )
+        assert page.evaluate( "() => document.activeElement.tagName" ) not in ( "INPUT", "TEXTAREA" ), (
+            "focus is on the mic button — the case the typing test did not cover"
+        )
+
+        page.keyboard.press( "Escape" )
+        page.wait_for_selector(
+            '[data-id-hash="e2ecard-rec"] .mc-other-mic:not(.recording)', timeout=10000,
+        )
+        page.wait_for_timeout( 300 )
+        _assert_still_answerable( card, "Escape that stops the recording must not cancel the dialog" )
+        assert page.locator( _interactive_selector( "e2ecard-rec" ) ).count() == 1
 
     # ---- #2k, #2l : the other two response types -----------------------------
 

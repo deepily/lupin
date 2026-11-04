@@ -1,27 +1,26 @@
 """
-FCM wake-push sender — the S6 silent-relay backend (Q10).
+FCM wake-push sender, the silent-relay backend for the mobile app.
 
-Sends a content-free, high-priority, DATA-ONLY `ws_wake` push to a user's
-registered mobile devices when the parent has traffic for them and no live
-MOBILE queue-WS exists (S6 §3.2/§3.3). The push is a summons, not a message:
-NO `notification` block, NO content, NO sender identity — the woken handler
-fetches everything over the authenticated notifications API.
+Sends a content-free, high-priority, data-only `ws_wake` push to a user's registered
+mobile devices. It fires when the parent has traffic for them and no live mobile queue-WS
+exists. The push is a summons, not a message: no `notification` block, no content, no sender
+identity. The woken handler fetches everything over the authenticated notifications API.
 
-Trigger policy lives entirely in this class (`maybe_send_wake`) so the
-notification fan-out hook stays a one-liner and every policy arm is unit-
-testable: enabled → no-live-mobile-WS → debounce → ≥1 registered token → send.
+Trigger policy lives entirely in this class (`maybe_send_wake`). The notification
+fan-out hook therefore stays a one-liner. Every policy arm is unit-testable: enabled,
+no live mobile WS, debounce, at least one registered token, send.
 
-Firebase separation (F-S6-2): the REAL `firebase_admin` FCM init here is a
-SEPARATE touchpoint from the MOCK Firebase AUTH layer in `auth.py` — distinct
-credentials (own INI-named env var), a NAMED firebase app ("lupin-fcm-wake"),
-zero shared initialization.
+Firebase separation: the real `firebase_admin` FCM init here is a separate touchpoint from
+the mock Firebase auth layer in `auth.py`. It has distinct credentials (own INI-named env
+var), a named firebase app ("lupin-fcm-wake"), and zero shared initialization.
 
-Firebase-absent tolerance (OSQ-7): console provisioning is a later HUMAN step.
-Until the service-account JSON exists (or if `firebase_admin` isn't installed),
-the service boots DISABLED with one clear log line and every wake attempt
-returns "disabled" — it never raises, never crashes the notification path.
+Firebase-absent tolerance: console provisioning is a later human step. Until the
+service-account JSON exists, or if `firebase_admin` is not installed, the service boots
+disabled with one clear log line. Every wake attempt then returns "disabled". It never
+raises and never crashes the notification path.
 
-See: src/lupin-mobile/src/rnd/2026.06.11-focus-mode-voice-chat/15-section-s6-fcm-backend-interface.md
+See: lupin-mobile/src/rnd/2026.06.11-focus-mode-voice-chat/15-section-s6-fcm-backend-interface.md
+(in the sibling lupin-mobile repo)
 """
 
 import json
@@ -47,7 +46,7 @@ FIREBASE_APP_NAME = "lupin-fcm-wake"
 
 def build_wake_payload( reason: str ) -> dict:
     """
-    Build the data-only `ws_wake` payload (S6 §3.2 contract shape).
+    Build the data-only `ws_wake` payload in its contract shape.
 
     FCM data payloads are string→string maps, so every value is a str.
 
@@ -55,7 +54,7 @@ def build_wake_payload( reason: str ) -> dict:
         - reason is one of WAKE_REASONS ("undelivered" | "reconnect-hint")
 
     Ensures:
-        - returns exactly the keys {"type", "reason", "ts"} — content-free
+        - returns the key set {"type", "reason", "ts"} — content-free
         - "type" is the literal "ws_wake"
         - "ts" is an ISO-8601 UTC timestamp
         - all values are strings
@@ -75,18 +74,18 @@ def build_wake_payload( reason: str ) -> dict:
 
 def _default_timer_factory( delay: float, callback: Callable[[], None] ) -> threading.Timer:
     """
-    Build the one-shot DAEMON timer a deferred wake rides (row ed76b897).
+    Build the one-shot daemon timer a deferred wake rides.
 
-    Daemon deliberately: a plain threading.Timer is non-daemon, so a pending
-    trailing wake would hold the process open for the rest of its window at
-    shutdown. Nothing about a wake is worth delaying an exit for.
+    A plain threading.Timer is non-daemon, so a pending trailing wake would hold the
+    process open for the rest of its window at shutdown. Nothing about a wake is worth
+    delaying an exit for.
 
     Requires:
         - delay is a non-negative number of seconds
         - callback takes no arguments
 
     Ensures:
-        - returns an UNSTARTED daemon timer (the caller starts it, so the
+        - returns an unstarted daemon timer (the caller starts it, so the
           pending-marker write and the start happen under one lock)
 
     Raises:
@@ -101,15 +100,16 @@ class FcmWakeService:
     """
     Debounced, policy-gated FCM wake-push sender.
 
-    Collaborators are injected as callables so the service has zero import-time
-    coupling to the token store or the WebSocket manager (and is trivially
-    unit-testable with fakes):
+    Collaborators are injected as callables, so the service has zero import-time
+    coupling to the token store or the WebSocket manager. It is trivially
+    unit-testable with fakes.
 
-        token_lookup( user_id )    -> List[str]  registered FCM tokens
-        mobile_liveness( user_id ) -> bool       live mobile queue-WS exists?
-        transport( token, data )   -> None       delivers one wake (None ⇒ real
-                                                 firebase_admin transport when
-                                                 credentials resolve, else disabled)
+    - token_lookup( user_id )    -> List[str]  registered FCM tokens
+    - mobile_liveness( user_id ) -> bool       live mobile queue-WS exists?
+    - transport( token, data )   -> None       delivers one wake
+
+    A transport of None means the real firebase_admin transport when credentials
+    resolve, else disabled.
 
     Usage:
         service = FcmWakeService( config_mgr,
@@ -136,16 +136,16 @@ class FcmWakeService:
               start() and cancel(). Defaults to _default_timer_factory
 
         Ensures:
-            - self.enabled is True only when the master INI switch is on AND a
+            - self.enabled is True only when the master INI switch is on and a
               working transport exists (injected, or real firebase_admin init
               succeeded — via the "fcm wake auth mode" fork: "key_file" against
               the service-account JSON at the INI-named env var, or "adc" via
               Application Default Credentials)
             - when disabled, self.disabled_reason names the single cause and one
-              clear log line was printed — construction NEVER raises (OSQ-7)
+              clear log line was printed — construction never raises
             - per-user debounce window loaded from "fcm wake debounce seconds"
               (default 60)
-            - at most one PENDING trailing wake per user (row ed76b897)
+            - at most one pending trailing wake per user
             - auth mode loaded from "fcm wake auth mode" (default "key_file")
 
         Raises:
@@ -203,7 +203,7 @@ class FcmWakeService:
 
         Ensures:
             - self.enabled is False and self.disabled_reason is set
-            - exactly one [FCM-WAKE] DISABLED line is printed
+            - exactly one [FCM-WAKE] `DISABLED` line is printed
         """
         self.enabled         = False
         self.disabled_reason = reason
@@ -212,24 +212,10 @@ class FcmWakeService:
 
     def _init_real_transport( self ) -> bool:
         """
-        Initialize the NAMED FCM app via the configured auth mode (F-S6-2).
+        Initialize the named FCM app via the configured auth mode.
 
-        Two first-class, permanently-supported auth modes (feature-flag fork on
-        the "fcm wake auth mode" INI key — both paths are permanent, neither is
-        a deprecation ramp):
-
-            - "key_file" (DEFAULT) — resolve a downloaded Firebase service-account
-              JSON via the INI-named env var, then `credentials.Certificate(path)`.
-              The original, back-compatible behavior.
-            - "adc" — resolve Application Default Credentials (the runtime
-              service account, e.g. the GCE VM's attached SA) via
-              `credentials.ApplicationDefault()`. No key FILE, no env var — the
-              keyless path required when org policy
-              `iam.disableServiceAccountKeyCreation` blocks key downloads.
-
-        Both arms feed the SAME get_app/initialize_app + messaging transport flow.
-        Kept separate from the mock Firebase AUTH layer in auth.py (F-S6-2): own
-        credential object, own named app — no shared state.
+        Two permanent auth modes fork on the "fcm wake auth mode" INI key; neither is a
+        deprecation ramp.
 
         Requires:
             - self._auth_mode is "key_file" or "adc"
@@ -241,7 +227,16 @@ class FcmWakeService:
             - returns False after _disable() naming the exact failure arm:
               key_file → env var unset, file missing, module missing, init error;
               adc → module missing, ADC resolution / init error
-            - NEVER raises (OSQ-7 tolerance)
+            - "key_file" (the default) resolves a downloaded Firebase service-account JSON
+              via the INI-named env var, then `credentials.Certificate(path)`
+            - "adc" resolves Application Default Credentials (the runtime service account,
+              e.g. the GCE VM's attached SA) via `credentials.ApplicationDefault()`, with no
+              key file and no env var; org policy `iam.disableServiceAccountKeyCreation`
+              requires this keyless path
+            - both arms feed the same get_app/initialize_app + messaging transport flow,
+              with their own credential object and named app, sharing no state with the
+              mock Firebase auth layer in auth.py
+            - never raises
         """
         if self._auth_mode == "adc":
             return self._init_real_transport_adc()
@@ -249,11 +244,11 @@ class FcmWakeService:
 
     def _init_real_transport_key_file( self ) -> bool:
         """
-        Initialize the NAMED FCM app from a downloaded service-account JSON key.
+        Initialize the named FCM app from a downloaded service-account JSON key.
 
-        The original (DEFAULT) key-file auth path — unchanged behavior. Resolves
-        the JSON path from the INI-named env var, requires the file to exist, then
-        builds a `credentials.Certificate` and feeds the shared init flow.
+        The default key-file auth path. Resolves the JSON path from the INI-named env
+        var, requires the file to exist, then builds a `credentials.Certificate` and
+        feeds the shared init flow.
 
         Requires:
             - self._credentials_env names the env var holding the JSON path
@@ -262,7 +257,7 @@ class FcmWakeService:
             - returns True with self._transport set on success
             - returns False after _disable() naming the exact failure arm:
               env var unset, file missing, module missing, or init error
-            - NEVER raises (OSQ-7 tolerance)
+            - never raises
         """
         credentials_path = os.environ.get( self._credentials_env )
         if not credentials_path:
@@ -290,13 +285,11 @@ class FcmWakeService:
 
     def _init_real_transport_adc( self ) -> bool:
         """
-        Initialize the NAMED FCM app from Application Default Credentials (keyless).
+        Initialize the named FCM app from Application Default Credentials (keyless).
 
-        The keyless ADC auth path — no downloaded key file, no env var. Resolves
-        the runtime service account (e.g. the GCE VM's attached SA) via
-        `credentials.ApplicationDefault()`, then feeds the shared init flow. This
-        is the path mandated when org policy `iam.disableServiceAccountKeyCreation`
-        blocks downloading service-account JSON keys.
+        The keyless ADC path: no key file, no env var. It resolves the runtime service
+        account via `credentials.ApplicationDefault()`, then feeds the shared init flow.
+        Org policy `iam.disableServiceAccountKeyCreation` makes it the only option.
 
         Requires:
             - the runtime environment exposes Application Default Credentials
@@ -306,7 +299,7 @@ class FcmWakeService:
             - returns True with self._transport set on success
             - returns False after _disable() naming the exact failure arm:
               module missing, or ADC resolution / init error
-            - NEVER raises (OSQ-7 tolerance)
+            - never raises
         """
         try:
             import firebase_admin
@@ -325,12 +318,11 @@ class FcmWakeService:
 
     def _finalize_real_transport( self, firebase_admin, messaging, cred, source_label: str ) -> bool:
         """
-        Build the NAMED FCM app + messaging transport from a resolved credential.
+        Build the named FCM app and messaging transport from a resolved credential.
 
-        Shared tail of both auth arms: get-or-create the named app, wire the
-        data-only high-priority transport, and emit the single Enabled log line.
-        The firebase_admin + messaging modules are passed in (already imported by
-        the calling auth arm) so this shared tail has no redundant import guard.
+        Shared tail of both auth arms: get-or-create the named app, wire the data-only
+        high-priority transport, and emit the single Enabled log line. The calling arm
+        already imported firebase_admin and messaging, so no import guard is repeated.
 
         Requires:
             - firebase_admin and messaging are the imported firebase_admin modules
@@ -340,7 +332,7 @@ class FcmWakeService:
         Ensures:
             - returns True with self._transport set on success
             - returns False after _disable() on any get_app/init/transport error
-            - NEVER raises (OSQ-7 tolerance)
+            - never raises
         """
         try:
             try:
@@ -365,29 +357,11 @@ class FcmWakeService:
 
     def maybe_send_wake( self, user_id: str, reason: str = WAKE_REASON_UNDELIVERED ) -> str:
         """
-        Apply the full S6 §3.3 trigger policy and submit a wake if it passes.
+        Apply the full trigger policy and submit a wake if it passes.
 
-        Policy order (cheapest first): enabled → no-live-mobile-WS → debounce →
-        ≥1 registered token → off-thread send. Called synchronously from the
-        notification fan-out path, so everything on this thread is in-memory
-        except the indexed token lookup; the network send is off-thread.
-
-        A notify landing INSIDE a live debounce window is DEFERRED, never dropped
-        (row ed76b897): the first one schedules a single trailing wake for the
-        moment the window closes, and every later one in that window collapses
-        onto it. The trailing wake re-runs this whole method, so a device that
-        reconnected meanwhile is not woken — a deferral is a request, not a
-        promise.
-
-        🔴 THE TRAILING WAKE HONOURS THE WINDOW LIKE ANY OTHER CALLER — it has no
-        override, deliberately. A timer thread is not a clock: descheduled it
-        fires LATE, by which time an ordinary notify may have taken the expired
-        slot and opened a new window, and a forced send would put two wakes
-        inside it — defeating the one rate limit this service exists for. Woken
-        EARLY it would send before the window it was waiting on had closed. Both
-        disappear when the trailing wake simply re-enters here: late or early, it
-        finds the window open and re-defers for what is genuinely left, and each
-        re-defer's delay strictly decreases, so it converges rather than loops.
+        Policy order (cheapest first): enabled, no live mobile WS, debounce, at least
+        one registered token, off-thread send. Called synchronously from the fan-out
+        path, so everything on this thread is in-memory except the indexed token lookup.
 
         Requires:
             - user_id is a non-empty string
@@ -397,18 +371,28 @@ class FcmWakeService:
             - returns a status string naming the outcome arm:
               "disabled" | "paused" | "mobile_ws_live" | "deferred" | "debounced" |
               "no_tokens" | "submitted"
-            - "paused" means the LIVE `fcm wake push enabled` key is False (an admin pause,
-              row 7df08e59): nothing else ran — no liveness check, no debounce slot burned,
+            - "paused" means the live `fcm wake push enabled` key is False (an admin
+              pause): nothing else ran — no liveness check, no debounce slot burned,
               no token lookup
-            - "deferred" means a trailing wake was scheduled by THIS call;
-              "debounced" means one was already pending and this collapsed onto it
-            - NEVER more than one wake per user per window, including from a
-              trailing timer that fires late
+            - "deferred": this call scheduled a trailing wake; "debounced": one was
+              already pending and this call collapsed onto it
+            - a notify inside a live debounce window is deferred, never dropped: the
+              first schedules one trailing wake for the moment the window closes, and
+              every later one collapses onto it
+            - the trailing wake re-runs this whole method with no override, so a device
+              that reconnected meanwhile is not woken: a deferral is a request, not a
+              promise
+            - the trailing wake honours the window like any other caller. A descheduled
+              timer fires late, when an ordinary notify may have opened a new window, and
+              a forced send would put two wakes inside it. Woken early it would send
+              before the window closed. Re-entering here avoids both: it re-defers for
+              what is left, and each delay strictly decreases, so it converges
+            - never more than one wake per user per window, including from a late timer
             - at most one wake per user per debounce window, and at most one
-              PENDING trailing wake per user (the slot is burned at attempt time,
+              pending trailing wake per user (the slot is burned at attempt time,
               even when the token lookup then comes up empty)
             - the send itself runs on the executor; this method never blocks on
-              the network and NEVER raises (the fan-out path must stay safe)
+              the network and never raises (the fan-out path must stay safe)
 
         Raises:
             - None (lookup/send failures are logged, not propagated)
@@ -464,11 +448,11 @@ class FcmWakeService:
 
     def _schedule_trailing_wake_locked( self, user_id: str, reason: str, delay: float ) -> bool:
         """
-        Arm the ONE trailing wake for a user whose window is still open.
+        Arm the one trailing wake for a user whose window is still open.
 
-        Caller MUST hold self._debounce_lock — the pending marker and the window
-        it belongs to are a single decision, and reading them apart is what would
-        let two notifies each believe they were first.
+        Caller must hold self._debounce_lock. The pending marker and the window it
+        belongs to are a single decision. Reading them apart would let two notifies
+        each believe they were first.
 
         Requires:
             - self._debounce_lock is held by the calling thread
@@ -477,8 +461,8 @@ class FcmWakeService:
         Ensures:
             - returns False and changes nothing when a trailing wake is already
               pending for this user (the collapse arm)
-            - otherwise builds, records and STARTS one timer, and returns True
-            - the timer is recorded BEFORE it is started, so a timer that fires
+            - otherwise builds, records and starts one timer, and returns True
+            - the timer is recorded before it is started, so a timer that fires
               immediately still finds its own marker to clear
 
         Raises:
@@ -500,16 +484,16 @@ class FcmWakeService:
             - the debounce window this was deferred for has elapsed
 
         Ensures:
-            - releases the pending marker FIRST, so a notify arriving during this
+            - releases the pending marker first, so a notify arriving during this
               call can arm the next window's trailing wake rather than being lost —
               and so a re-defer has a free marker to take
-            - re-runs the FULL policy with NO override: a device that reconnected
+            - re-runs the full policy with no override: a device that reconnected
               returns "mobile_ws_live" and is not woken, an empty token list
               returns "no_tokens", and a window that is somehow still open (a
               late or early timer) returns "deferred" — re-armed, not dropped
-            - logs the outcome UNGATED — nothing returns this value to a caller,
-              so the log line is the only place the outcome is visible
-            - NEVER raises: this runs on a timer thread with nobody to catch it
+            - logs the outcome whatever the debug flags — nothing returns this value to a
+              caller, so the log line is the only place the outcome is visible
+            - never raises: this runs on a timer thread with nobody to catch it
 
         Raises:
             - None
@@ -553,7 +537,7 @@ class FcmWakeService:
             - attempts every token even when earlier ones fail (per-token
               isolation — one dead token must not mask a live device)
             - returns the count of successful sends
-            - NEVER raises (executor thread must not die)
+            - never raises (executor thread must not die)
         """
         sent = 0
         for token in tokens:

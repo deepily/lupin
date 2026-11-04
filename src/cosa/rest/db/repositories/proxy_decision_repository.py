@@ -5,7 +5,7 @@ Provides decision-specific methods beyond base repository functionality,
 including shadow logging, ratification, and trust state persistence.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from typing import Optional, List, Dict
@@ -23,12 +23,8 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
     """
     Repository for ProxyDecision model with trust-aware operations.
 
-    Extends BaseRepository with decision-specific methods:
-        - Shadow logging (L1 decisions — observe only)
-        - Decision logging (L2+ — suggest/act/defer)
-        - Pending decision retrieval for ratification
-        - Ratification (approve/reject)
-        - Similar decision lookup
+    Adds shadow logging (trust level 1, observe only) and decision logging (level 2 and up: suggest, act, defer).
+    It also covers pending decision retrieval, ratification (approve or reject) and similar decision lookup.
 
     Requires:
         - session: Active SQLAlchemy session (from get_db())
@@ -52,7 +48,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
                     sender_id="", confidence=0.0, trust_level=1, reason="",
                     metadata_json=None, data_origin="organic" ):
         """
-        Log a shadow decision (L1 — observe only, no action taken).
+        Log a shadow decision (trust level 1: observe only, no action taken).
 
         Requires:
             - notification_id: UUID string of the original notification
@@ -234,7 +230,7 @@ class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
         Ensures:
             - Decision is hard-deleted from the database if pending
             - Returns True on success, False if not found
-            - Does NOT modify trust state counters
+            - Does not modify trust state counters
 
         Raises:
             - ValueError if decision exists but is not in "pending" state
@@ -463,7 +459,7 @@ class TrustStateRepository( BaseRepository[TrustState] ):
 
     def update_after_ratification( self, user_email, domain, category, approved ):
         """
-        Update trust state after a ratification event.
+        Increment a category's trust counters after a ratification event.
 
         Requires:
             - user_email: User email address
@@ -531,7 +527,7 @@ class TrustStateRepository( BaseRepository[TrustState] ):
 
     def update_trust_level( self, user_email, domain, category, new_level ):
         """
-        Update the stored trust level for a category.
+        Set the stored trust level for a category.
 
         Requires:
             - user_email: User email address
@@ -560,7 +556,7 @@ class TrustStateRepository( BaseRepository[TrustState] ):
 
     def update_circuit_breaker_state( self, user_email, domain, category, cb_state ):
         """
-        Update the circuit breaker state for a category.
+        Set the circuit breaker state for a category.
 
         Requires:
             - user_email: User email address

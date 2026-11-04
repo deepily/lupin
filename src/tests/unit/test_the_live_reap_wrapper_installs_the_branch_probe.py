@@ -108,10 +108,11 @@ def test_the_wrapper_installs_the_REAL_seat_teardown( cv_mcp, monkeypatch ):
     Row 129cc96b P3: the reap removes the seat's own tree. Delete the wiring line in
     cosa_voice_mcp and this reddens; the seam's own tests inject a fake and stay green.
     """
-    from cosa.agents.shared import seat_teardown
-
     captured = {}
     _patch( cv_mcp, monkeypatch, captured )
     asyncio.run( cv_mcp.dismiss_sessions.run( { "session_names": [ "x" ] } ) )
 
-    assert captured.get( "seat_teardown_fn" ) is seat_teardown.retire_seat_worktree
+    # The adapter, not retire_seat_worktree itself: the spawner calls ( name, cwd ) and the
+    # function takes ( path, seat_name ). Row 74c1bf37; test_the_live_reap_wrapper_hands_the_
+    # teardown_a_path_first drives the adapter's argument order.
+    assert captured.get( "seat_teardown_fn" ) is cv_mcp._retire_reaped_seat_tree

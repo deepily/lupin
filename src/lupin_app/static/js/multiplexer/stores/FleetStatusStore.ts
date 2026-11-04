@@ -17,19 +17,27 @@
 // `store_fleet_size_cap_changed`, so a save never rebuilds the table.
 
 import type { EventBus } from "../shared/EventBus";
+import { resolveRuntimeDefaults } from "./polling";
 import type { StoreFleetSizeCapChangedPayload, StoreFleetStatusChangedPayload } from "../shared/types";
 import type { FleetComposite } from "../render/fleetModel";
 
-// Narrowed ApiClient surface (Pass 2 F4 idiom). The production ApiClient.get
-// throws ApiError (carrying `.status`) on non-2xx; we map that to the legacy
-// display-only sentinels rather than letting it propagate.
+/**
+ * The slice of the API client the store needs: a `get` and a `put`.
+ *
+ * The production client throws an error that carries the status on a non-success answer. The store maps that to display-only values instead of letting it propagate.
+ */
 export interface FleetApiClient {
   get<T>( path: string ): Promise<T>;
   put<T>( path: string, body: unknown ): Promise<T>;
 }
 
+/** The server path that returns the fleet state. */
 export const FLEET_STATE_ENDPOINT          = "/api/arbiter/fleet-state";
+/** The server path that reads and sets the fleet size cap. */
 export const FLEET_SIZE_CAP_ENDPOINT       = "/api/arbiter/fleet-size-cap";
+/** The server path that sets the skeleton crew switch. The server answers only `PUT` on it. */
+export const FLEET_SKELETON_CREW_ENDPOINT  = "/api/arbiter/skeleton-crew";
+/** How often the store polls the fleet state, in milliseconds. */
 export const FLEET_STATUS_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (D4)
 
 /** Who occupies the cap right now — every session counts, managers included. */
@@ -37,6 +45,8 @@ export interface FleetLiveCounts {
   total    : number;
   managers : number;
   workers  : number;
+  /** Sessions the census could not classify; the server sends it, the dial does not show it. */
+  unknown? : number;
 }
 
 /**
@@ -44,12 +54,28 @@ export interface FleetLiveCounts {
  * this is what the server SENT, not what it promised: the renderer paints only when
  * both numbers are finite, and hides the dial otherwise (legacy :9273-9276).
  */
+export interface FleetSkeletonCrew {
+  on                       : boolean;
+  since                    : string | null;
+  set_by                   : string | null;
+  /** True when the settings.json mute is set while off; null when unreadable. */
+  settings_mute_while_off  : boolean | null;
+}
+
+/**
+ * The size cap as the server reports it.
+ *
+ * It holds the cap, its ceiling, the live counts and the skeleton crew switch.
+ */
 export interface FleetSizeCap {
   cap?     : number;
   ceiling? : number;
   live?    : FleetLiveCounts | null;
+  /** The skeleton crew switch. Absent from a server that predates the toggle. */
+  skeleton_crew? : FleetSkeletonCrew;
 }
 
+/** The fleet status: the last composite, the offline view flag, polling and the cap dial. */
 export interface FleetStatusStore {
   /** Last fetched composite (any status), or null before the first refresh. */
   composite(): FleetComposite | null;
@@ -71,10 +97,15 @@ export interface FleetStatusStore {
   refreshSizeCap(): Promise<void>;
   /** PUT a new cap, then hold the SERVER's answer — or re-read on a refusal. Never throws. */
   setSizeCap( cap: number ): Promise<void>;
+  /** The state being saved while a skeleton crew write is in flight, else null. */
+  skeletonCrewSaving(): boolean | null;
+  /** Write { on }, then hold the server's answer, or re-read on a refusal. Never throws. */
+  setSkeletonCrew( on: boolean ): Promise<void>;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
 
+/** Options for `createFleetStatusStore`: bus, API client, timer hooks and an error hook. */
 export interface FleetStatusStoreOptions {
   bus             : EventBus;
   api             : FleetApiClient;
@@ -87,6 +118,9 @@ export interface FleetStatusStoreOptions {
   errorFn?        : ( message: string ) => void;
 }
 
+/**
+ * Holds fleet status, size cap and skeleton-crew state for the fleet pane.
+ */
 class FleetStatusStoreImpl implements FleetStatusStore {
   private readonly bus   : EventBus;
   private readonly api   : FleetApiClient;
@@ -101,28 +135,39 @@ class FleetStatusStoreImpl implements FleetStatusStore {
   private pollHandle    : number | null = null;
   private lastSizeCap   : FleetSizeCap | null = null;
   private savingCap     : number | null = null;
+  private savingCrew    : boolean | null = null;
 
+  /**
+   * Builds the store from a bus, an API client and optional runtime hooks.
+   */
   constructor( opts: FleetStatusStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? ( () => Date.now() );
-    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
-    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
-    /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the default above.
-    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+    const { nowFn, setIntervalFn, clearIntervalFn } = resolveRuntimeDefaults( opts );
+    this.nowFn = nowFn;
+    this.setIntervalFn   = setIntervalFn;
+    this.clearIntervalFn = clearIntervalFn;
     /* c8 ignore next */ // production-default fallback: console.error is the runtime sink; tests inject a collector.
     this.errorFn         = opts.errorFn ?? ( ( m ) => console.error( `[FleetStatusStore] ${m}` ) );
   }
 
+  /**
+   * Returns the latest fleet composite, or null before the first refresh.
+   */
   composite(): FleetComposite | null {
     return this.lastComposite;
   }
 
+  /**
+   * Returns whether offline entries are currently shown.
+   */
   showOfflineFlag(): boolean {
     return this.showOffline;
   }
 
+  /**
+   * Fetches the fleet state and the size cap, then emits a change event.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // debounce: a manual click landing on a tick can't double-fetch
     this.inFlight = true;
@@ -137,17 +182,26 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     }
   }
 
+  /**
+   * Flips the show-offline flag and emits a change event without a new timestamp.
+   */
   toggleShowOffline(): void {
     this.showOffline = !this.showOffline;
     this.emitChanged( false );
   }
 
+  /**
+   * Refreshes now and then again on a fixed interval, replacing any earlier polling.
+   */
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), FLEET_STATUS_POLL_INTERVAL_MS );
   }
 
+  /**
+   * Cancels the polling timer if one is running.
+   */
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
@@ -155,14 +209,23 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     }
   }
 
+  /**
+   * Returns the latest fleet size cap, or null when it is unknown or unavailable.
+   */
   sizeCap(): FleetSizeCap | null {
     return this.lastSizeCap;
   }
 
+  /**
+   * Returns the cap value being saved now, or null when no save is in flight.
+   */
   sizeCapSaving(): number | null {
     return this.savingCap;
   }
 
+  /**
+   * Reads the fleet size cap from the server and emits a size-cap change event.
+   */
   async refreshSizeCap(): Promise<void> {
     try {
       this.lastSizeCap = await this.api.get<FleetSizeCap>( FLEET_SIZE_CAP_ENDPOINT );
@@ -176,6 +239,9 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     this.emitSizeCapChanged();
   }
 
+  /**
+   * Saves a new fleet size cap and adopts the value the server answers with.
+   */
   async setSizeCap( cap: number ): Promise<void> {
     this.savingCap = cap;
     this.emitSizeCapChanged();
@@ -203,6 +269,43 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     this.emitSizeCapChanged();
   }
 
+  /**
+   * Returns the skeleton-crew value being saved now, or null if none is.
+   */
+  skeletonCrewSaving(): boolean | null {
+    return this.savingCrew;
+  }
+
+  /**
+   * Saves the skeleton-crew switch and adopts the state the server answers with.
+   */
+  async setSkeletonCrew( on: boolean ): Promise<void> {
+    this.savingCrew = on;
+    this.emitSizeCapChanged();
+    let persisted: FleetSizeCap | null = null;
+    try {
+      // The answer is the server's re-read of the configuration file, not the value sent,
+      // so the switch cannot show a state the spawn path is not enforcing.
+      persisted = await this.api.put<FleetSizeCap>( FLEET_SKELETON_CREW_ENDPOINT, { on } );
+    } catch ( err ) {
+      const status = ( err as { status?: number } ).status;
+      this.errorFn( typeof status === "number"
+        ? `Skeleton crew not saved: ${serverDetail( err, status )}`
+        : `Skeleton crew save failed: ${err}` );
+    }
+    this.savingCrew = null;
+    // A refusal re-reads, so the switch snaps back to the state that is actually enforced.
+    if ( persisted === null ) {
+      await this.refreshSizeCap();
+      return;
+    }
+    this.lastSizeCap = persisted;
+    this.emitSizeCapChanged();
+  }
+
+  /**
+   * Stops polling so a test can finish cleanly.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
@@ -226,7 +329,7 @@ class FleetStatusStoreImpl implements FleetStatusStore {
   private emitSizeCapChanged(): void {
     this.bus.emit<StoreFleetSizeCapChangedPayload>( {
       type    : "store_fleet_size_cap_changed",
-      payload : { saving: this.savingCap !== null },
+      payload : { saving: this.savingCap !== null || this.savingCrew !== null },
       source  : "FleetStatusStore",
       ts      : this.nowFn(),
     } );
@@ -262,6 +365,7 @@ function serverDetail( err: unknown, status: number ): string {
   return `HTTP ${status}`;
 }
 
+/** Build the store. It fetches nothing when it is built. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFleetStatusStore( opts: FleetStatusStoreOptions ): FleetStatusStore {
   return new FleetStatusStoreImpl( opts );

@@ -8,7 +8,7 @@ Covers the first-class columns added for notification-native AI<->AI messaging
   - NotificationFifoQueue.push_notification forwards all five to the item.
   - NotificationRepository.create_notification forwards all five to self.create.
 
-Design: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
+Design: src/docs/decisions/2026.06.15-notification-native-ai-to-ai-messaging.md
 
 Zero external dependencies — InputAndOutputTable and the DB session are mocked.
 """
@@ -22,6 +22,9 @@ class TestNotificationItemDirection( unittest.TestCase ):
     """NotificationItem direction + DM fields: defaults, explicit values, to_dict 1:1."""
 
     def setUp( self ):
+        tz_patch = patch( "cosa.rest.notification_fifo_queue.get_app_timezone", return_value="America/New_York" )
+        tz_patch.start()
+        self.addCleanup( tz_patch.stop )
         from cosa.rest.notification_fifo_queue import NotificationItem
         self.NotificationItem = NotificationItem
 
@@ -79,6 +82,9 @@ class TestPushNotificationForwardsDirection( unittest.TestCase ):
     """NotificationFifoQueue.push_notification forwards direction + DM fields."""
 
     def setUp( self ):
+        tz_patch = patch( "cosa.rest.notification_fifo_queue.get_app_timezone", return_value="America/New_York" )
+        tz_patch.start()
+        self.addCleanup( tz_patch.stop )
         self._io_tbl_patch = patch( "cosa.rest.notification_fifo_queue.InputAndOutputTable" )
         self._io_tbl_patch.start().return_value = MagicMock()
         from cosa.rest.notification_fifo_queue import NotificationFifoQueue

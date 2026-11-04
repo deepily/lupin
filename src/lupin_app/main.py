@@ -8,6 +8,7 @@ from lupin_app.versioned_static import VersionedStaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from datetime import datetime
+from types import SimpleNamespace
 import os
 import sys
 import base64
@@ -50,8 +51,14 @@ if src_path not in sys.path:
 # valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
 # instead of cryptically later at config load. (No defensive fallback.)
 from lupin_app.bootstrap_helpers import ( assert_lupin_root_valid, reload_enabled as _reload_enabled,
-                                          register_sigusr1_faulthandler )
+                                          register_sigusr1_faulthandler, reload_kwargs as _reload_kwargs )
 from cosa.rest.error_envelope import make_unhandled_exception_handler
+from lupin_app.lifespan_steps import ( record_clean_shutdown, cancel_background_task, shutdown_fcm_wake, drain_agentic_pool,
+                                       stop_consumer_thread, cancel_peer_watchers, stop_commons_watcher,
+                                       print_migration_banner, build_snapshot_manager_config, recover_interrupted_jobs,
+                                       restore_jobs_at_boot, print_all_clear_receipt, schedule_all_clear,
+                                       start_websocket_maintenance_tasks, start_notification_sweep_task,
+                                       init_commons, load_models )
 assert_lupin_root_valid( lupin_root )
 
 # Row abe4188d — arm `kill -USR1 <pid>` to dump every thread's Python stack to stderr.
@@ -77,10 +84,11 @@ from cosa.rest.running_fifo_queue import RunningFifoQueue
 import cosa.utils.util as du
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
 from cosa.rest.websocket_manager import WebSocketManager
+from cosa.rest import task_store_change_notifier
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask, cc_transcript
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_drive, podcast_generator, podcast_proxy, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask, cc_transcript, heartbeat, reuse_candidates, pair_labelling
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs, record_server_available
 
@@ -126,6 +134,9 @@ commons_activity_watcher = None
 
 # WebSocket connection management
 websocket_manager = WebSocketManager()
+# Task-store pane push (row 8796333b): a commit that appended task events emits ONE
+# task_store_changed invalidation. Only THIS process installs the sink; other processes no-op.
+task_store_change_notifier.install_websocket_sink( websocket_manager )
 # Background task tracking for cleanup
 active_tasks = {}
 # Clock update background task
@@ -243,6 +254,23 @@ notification_sweep_task = None
 #         thread.start()
 #         print( f"[SPEECH] Started speech emission thread for: '{msg}' (user: {user_id})" )
 #     return sync_emit_speech
+
+
+def _invalidate_snapshot_mgr():
+    """
+    Reload the solution snapshots when the cache registry flushes, if the manager is built.
+
+    Requires:
+        - the module global snapshot_mgr is None before boot finishes, or a manager with reload()
+
+    Ensures:
+        - calls snapshot_mgr.reload() and prints one line when the manager exists
+        - does nothing when it does not
+    """
+    if snapshot_mgr is not None:
+        print( "Reloading solution snapshots..." )
+        snapshot_mgr.reload()
+
 
 
 async def clock_loop():
@@ -424,12 +452,11 @@ async def websocket_cleanup_loop():
 
 async def notification_expiry_sweep_loop():
     """
-    Background task that closes ORPHANED response-required notifications.
+    Background task that closes orphaned response-required notifications.
 
-    An orphan is a row whose asking client walked away: the SSE generator is
-    cancelled at its `await`, so the only writer of state='expired' never runs
-    and the row sits 'delivered' forever. Measured 2026-09-05: 39 such rows,
-    oldest 2026-05-11, newest that same day. Row bf4f65c3.
+    An orphan is a row whose asking client walked away. The SSE generator is
+    cancelled at its `await`, so the only writer of state='expired' never runs.
+    The row then sits 'delivered' forever.
 
     Requires:
         - config_mgr initialized
@@ -442,8 +469,8 @@ async def notification_expiry_sweep_loop():
         - sweeps at most `notification expiry sweep batch limit` rows a pass
         - a DB error is logged and retried on the next tick rather than
           killing the loop
-        - runs the DB work OFF the event loop via asyncio.to_thread, matching
-          _mark_notification_expired_sync (lever B)
+        - runs the DB work off the event loop via asyncio.to_thread, matching
+          _mark_notification_expired_sync
 
     Raises:
         asyncio.CancelledError: when cancelled during shutdown
@@ -501,14 +528,13 @@ async def notification_expiry_sweep_loop():
 
 def _managed_bounce_server_label():
     """
-    Which server THIS process is, as it should appear in a fleet broadcast.
+    Which server this process is, as it should appear in a fleet broadcast.
 
     The dev and test containers run this same file and differ only by config
-    block (`Lupin: Development` vs `Lupin: Testing`), so without this the test
-    server announces itself as ":7999" — measured 2026-08-01, nine sessions were
-    told the DEV server had bounced when the TEST container restarted (bug
-    652271f3). Resolved ONCE here and passed to every call site so the warning
-    and the all-clear can never disagree about who is speaking.
+    block (`Lupin: Development` vs `Lupin: Testing`). Without this label the
+    test server would announce itself as ":7999", and the fleet would be told
+    the dev server had bounced. It is resolved once here and passed to every
+    call site, so the warning and the all-clear never disagree about the speaker.
     """
     from cosa.rest.managed_bounce_broadcast import DEFAULT_SERVER_LABEL
 
@@ -519,9 +545,9 @@ def _emit_managed_bounce( kind, message, broadcast_id=None ):
     """
     Fire a managed-bounce fleet broadcast in-process, never raising.
 
-    Returns the execute_broadcast result dict, or None when commons is disabled /
-    not yet wired (the not-wired guard + skip-log live in the measured module's
-    emit_bounce_broadcast_in_process, so the branch is tested, not just written).
+    Returns the execute_broadcast result dict, or None when commons is disabled
+    or not yet wired. The not-wired guard and its skip log live in
+    emit_bounce_broadcast_in_process, a measured module, so that branch is tested.
     """
     from cosa.rest.routers.commons import execute_broadcast, BroadcastRequestBody, build_sender_id_for_cc, _load_bridge_fields
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
@@ -548,11 +574,12 @@ def _emit_managed_bounce( kind, message, broadcast_id=None ):
 
 def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     """
-    R5 all-clear, run in a worker thread post-yield (option A: bounded settle gate).
+    All-clear broadcast, run in a worker thread after startup yields (bounded settle gate).
 
-    Waits for cc-listener/browser sockets to reconnect after the restart, then
-    fires ONE boot-stamped all-clear. Blocking (filesystem + queue writes); the
-    async wrapper hands it to a thread so it never touches the event loop.
+    Waits for cc-listener and browser sockets to reconnect after the restart,
+    then fires one boot-stamped all-clear. Blocking (filesystem and queue
+    writes); the async wrapper hands it to a thread so it never touches the
+    event loop.
     """
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
     from cosa.rest.managed_bounce_broadcast import wait_for_roster_coverage, build_bounce_message
@@ -606,43 +633,7 @@ def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     # after the fanout would see late arrivals and report a SMALLER loss than the
     # one the gate actually decided on — an under-count in the direction that
     # flatters us.
-    missed = gate[ "missing" ]
-    loss   = (
-        f" {len( missed )} session(s) had NOT rejoined and got NO all-clear "
-        f"(accepted loss, no re-fire): {missed}."
-        if missed
-        else (
-            f" all {gate[ 'roster_size' ]} session(s) on the roster had a live socket."
-            if gate[ "roster_size" ]
-            # ⚠️ An EMPTY roster is AMBIGUOUS and the gate cannot resolve it:
-            # find_active_sessions returns [] both when nobody is expected back AND
-            # when the bridge directory is missing or unreadable. Coverage is then
-            # satisfied vacuously and this fires into nobody. Say that plainly rather
-            # than reporting the flattering reading as fact (Arnold 🪨, attack #2).
-            else (
-                " ⚠️ the roster was EMPTY — either nobody was expected back, or the bridge "
-                "directory could not be read. This fire reached nobody and the gate cannot "
-                "tell those two apart."
-            )
-        )
-    )
-
-    # Fire-time receipt + reconnect curve — the instruments that tell us later
-    # whether the guessed window was right and how the fleet came back.
-    if gate[ "reason" ] == "deadline":
-        print(
-            f"[managed-bounce] ⚠️ all-clear FIRED on DEADLINE EXPIRY (boot #{boot_id}): reached "
-            f"{recipients} recipient(s) after {gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}."
-            f"{loss}",
-            file=sys.stderr,
-        )
-    else:
-        print(
-            f"[managed-bounce] all-clear FIRED (boot #{boot_id}): roster COVERED after "
-            f"{gate[ 'elapsed' ]:.1f}s; reconnect curve {curve}; reached {recipients} recipient(s)."
-            f"{loss}",
-            file=sys.stderr,
-        )
+    print_all_clear_receipt( gate, boot_id, recipients, curve )
 
 
 async def _run_managed_bounce_all_clear( *, boot_id, boot_started, startup_began ):
@@ -658,12 +649,12 @@ async def lifespan( app: FastAPI ):
     """
     Manages the application lifecycle for FastAPI.
     
-    Preconditions:
+    Requires:
         - Environment variable LUPIN_CONFIG_MGR_CLI_ARGS must be set or empty string
         - Configuration files must exist at specified paths
         - CUDA device must be available if using GPU
     
-    Postconditions:
+    Ensures:
         - All global components are initialized (config_mgr, queues, etc.)
         - Whisper STT model is loaded and ready
         - Application is ready to handle requests
@@ -721,14 +712,7 @@ async def lifespan( app: FastAPI ):
     # gate, and it is not claimed as one.
     #
     # Deliberately silent on a no-op: a line on every boot is a line nobody sees.
-    if migrate_result[ "applied" ]:
-        print(
-            f"⚠️  MIGRATION APPLIED — the database moved {migrate_result[ 'before' ] or '(unstamped)'}"
-            f" -> {migrate_result[ 'after' ]}.\n"
-            f"    On :7999 a file-save restarts the server and runs this migrate, so this may be a\n"
-            f"    schema deploy nobody decided. If you did not intend it, that is the thing to look at.",
-            file=sys.stderr,
-        )
+    print_migration_banner( migrate_result )
 
     # ORM/database drift alarm — FAIL-OPEN. Detects a mapped_column that reached
     # the tree ahead of its migration: on :7999 uvicorn runs with --reload, so the
@@ -762,46 +746,19 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.db.schema_drift import emit_startup_drift_alarm
     schema_drift_report = emit_startup_drift_alarm( debug=app_debug )
 
+    # The grants alarm, beside the drift alarm and under the same fail-open contract. A table made by a migration
+    # or a test can lack the grants the other roles need; this names each gap in the boot log. It asks one
+    # catalog query over this app's own login and never raises. A skipped or clean answer prints one line or none.
+    from cosa.utils.db_grants import emit_startup_grants_alarm
+    emit_startup_grants_alarm( debug=app_debug )
+
     # Initialize the ID generator singleton
     id_generator = TwoWordIdGenerator()
 
     # Initialize solution snapshot manager using factory pattern
     manager_type = config_mgr.get( "solution snapshots manager type", default="postgres" )
     
-    if manager_type.lower() == "postgres":
-        # The Postgres-native manager (row 5ff7b8f5, 2026-08-17). No storage location
-        # to build: the table is fixed by the ORM model and the connection comes from
-        # the DB layer, so the only key read here is the reporting-only table name.
-        #
-        # This branch is what makes `solution snapshots manager type = postgres` a
-        # legal value at STARTUP. It was added on 2026-08-17 after the else-arm below
-        # was found rejecting every value but "lancedb", which would have failed the
-        # server on its next bounce — latent, because reload is off and the running
-        # process still held the pre-flip config. The LanceDB arm that sat above this
-        # one is gone with the manager class it named (row 8098838f); it had already
-        # been building this same table-name-only config, so nothing about what runs
-        # here has changed.
-        config = {
-            "table_name" : config_mgr.get( "solution snapshots postgres table", default="solution_snapshots" )
-        }
-
-        if app_debug:
-            print( "Using Postgres+pgvector solution snapshot manager" )
-
-    else:
-        # # Use file-based backend (default)
-        # path_to_snapshots_dir_wo_root = config_mgr.get( "path to snapshots dir wo root" )
-        # path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
-        #
-        # config = {"path": path_to_snapshots}
-        #
-        # if app_debug:
-        #     print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
-        # throw value error
-        raise ValueError(
-            f"Unsupported 'solution snapshots manager type' = {manager_type!r}; "
-            "the only supported value is 'postgres'"
-        )
+    config = build_snapshot_manager_config( manager_type, config_mgr, app_debug )
     
     # Create manager using factory pattern for true swappability
     snapshot_mgr = SolutionSnapshotManagerFactory.create_manager(
@@ -815,10 +772,6 @@ async def lifespan( app: FastAPI ):
     # with the rest of the cache_registry. Mirrors the per-instance .reload()
     # call previously inlined in routers/system.py:/api/init.
     from cosa.config.cache_registry import register_invalidator
-    def _invalidate_snapshot_mgr():
-        if snapshot_mgr is not None:
-            print( "Reloading solution snapshots..." )
-            snapshot_mgr.reload()
     register_invalidator( "snapshot_mgr", _invalidate_snapshot_mgr )
 
     # Initialize queues with websocket manager
@@ -894,18 +847,8 @@ async def lifespan( app: FastAPI ):
     print( "[AUTH] Using PostgreSQL authentication database" )
 
     # CJ Flow Persistence: Mark in-flight jobs as interrupted, preserve scheduled jobs
-    try:
-        counts = mark_interrupted_jobs()
-        total_interrupted = counts.get( "running", 0 ) + counts.get( "pending_interrupted", 0 )
-        preserved         = counts.get( "pending_preserved", 0 )
-        catchup           = counts.get( "pending_catchup", 0 )
-        if total_interrupted > 0 or preserved > 0 or catchup > 0:
-            print( f"[CJ-PERSIST] Startup recovery: {total_interrupted} interrupted, "
-                   f"{preserved} future-scheduled preserved, {catchup} downtime-missed caught up" )
-        else:
-            print( "[CJ-PERSIST] No interrupted or scheduled jobs found" )
-    except Exception as e:
-        print( f"[WARN] CJ Flow startup recovery failed: {e}" )
+    recover_interrupted_jobs( mark_interrupted_jobs )
+
 
     # ===================================================================
     # Inter-Session Commons — Phase 2 (user-broadcast surface)
@@ -915,76 +858,17 @@ async def lifespan( app: FastAPI ):
     # INI key — when False, the subsystem is fully absent and the router
     # endpoints will 503 per `_require_initialized()`.
     global commons_store, commons_rate_limiter, commons_ack_watcher, commons_activity_watcher
-    if config_mgr.get( "commons enabled", default=True, return_type="boolean" ):
-        try:
-            import os
-            from cosa.rest.commons_ack_watcher import CommonsAckWatcher
-            from cosa.rest.commons_activity_watcher import CommonsActivityWatcher
-            from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
-            from cosa.rest.routers.commons import init_commons_state, _load_bridge_fields
-            from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
-            from lupin_mcp.commons_llm_disambiguator import CommonsLlmDisambiguator
-            from lupin_mcp.commons_persona_matcher import configure_llm_disambiguator
-            from lupin_mcp.commons_store import CommonsStore
-
-            commons_root = os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
-            commons_store        = CommonsStore( commons_root )
-            commons_rate_limiter = CommonsBroadcastRateLimiter(
-                window_seconds = config_mgr.get( "commons broadcast rate limit seconds", default=30, return_type="int" )
-            )
-            commons_ack_watcher  = CommonsAckWatcher(
-                store                  = commons_store,
-                push_notification_fn   = jobs_notification_queue.push_notification,
-                poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
-            )
-            init_commons_state(
-                store                            = commons_store,
-                rate_limiter                     = commons_rate_limiter,
-                ack_watcher                      = commons_ack_watcher,
-                active_session_threshold_seconds = config_mgr.get( "commons broadcast liveness threshold seconds", default=28800, return_type="int" ),
-            )
-            commons_ack_watcher.start()
-
-            # Phase 2.5/3.5 — CommonsActivityWatcher for broadcast-card Recent Activity WS push.
-            # Per src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (AC3).
-            # Gated by `commons traffic visibility enabled` AND `commons traffic visibility ws push enabled`.
-            if (
-                config_mgr.get( "commons traffic visibility enabled", default=True, return_type="boolean" )
-                and config_mgr.get( "commons traffic visibility ws push enabled", default=True, return_type="boolean" )
-            ):
-                excluded_raw     = config_mgr.get( "commons traffic visibility exclude topics", default="presence, system-events" )
-                excluded_topics  = [ t.strip() for t in excluded_raw.split( "," ) if t.strip() ]
-
-                def _commons_activity_bridge_owner_resolver():
-                    """Build a fresh {session_id: owner_user_id|None} map for each tick."""
-                    out = { }
-                    for path, sid, _persona in find_active_voice_persona_sessions():
-                        bridge = _load_bridge_fields( path )
-                        if bridge is not None:
-                            out[ sid ] = bridge.get( "owner_user_id" )
-                    return out
-
-                commons_activity_watcher = CommonsActivityWatcher(
-                    store                    = commons_store,
-                    push_notification_fn     = jobs_notification_queue.push_notification,
-                    excluded_topics          = excluded_topics,
-                    bridge_owner_resolver_fn = _commons_activity_bridge_owner_resolver,
-                    poll_interval_seconds    = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
-                )
-                commons_activity_watcher.start()
-                print( f"[COMMONS] Phase 2.5/3.5 CommonsActivityWatcher started (excluded={excluded_topics})" )
-
-            # Phase 3 — wire the LLM disambiguator singleton for commons_persona_matcher
-            try:
-                configure_llm_disambiguator( CommonsLlmDisambiguator( config_mgr ) )
-                print( "[COMMONS] Phase 3 LLM disambiguator installed" )
-            except Exception as e:
-                print( f"[COMMONS] WARN — LLM disambiguator init failed (matcher falls back to Phase 1 stub): {e}" )
-            print( f"[COMMONS] Phase 2+3 subsystem started (root={commons_root})" )
-        except Exception as e:
-            print( f"[COMMONS] WARN — Phase 2+3 init failed: {e}" )
-    else:
-        print( "[COMMONS] Disabled via `commons enabled = false` — skipping Phase 2+3 init" )
+    commons_state = SimpleNamespace(
+        commons_store            = commons_store,
+        commons_rate_limiter     = commons_rate_limiter,
+        commons_ack_watcher      = commons_ack_watcher,
+        commons_activity_watcher = commons_activity_watcher,
+    )
+    init_commons( commons_state, config_mgr, jobs_notification_queue )
+    commons_store            = commons_state.commons_store
+    commons_rate_limiter     = commons_state.commons_rate_limiter
+    commons_ack_watcher      = commons_state.commons_ack_watcher
+    commons_activity_watcher = commons_state.commons_activity_watcher
 
     # ===================================================================
     # GPU Model Loading (smallest → largest to minimize CUDA fragmentation)
@@ -996,120 +880,10 @@ async def lifespan( app: FastAPI ):
     # Defaults to `local` (today's behavior) so a compute container without
     # `LUPIN_MODEL_SERVER_URL` injected continues to eager-load identically.
     # See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
-    provider_mode = config_mgr.get(
-        "speech to text provider", default="local", silent=True
-    ).lower().strip()
-    remote_mode = ( provider_mode == "model-server" )
-
     global whisper_pipeline
-
-    if remote_mode:
-        print( "[REMOTE-MODE] Skipping eager GPU loads — routing via HTTP to lupin-model-server" )
-
-        # Set process-ownership flags appropriately for remote mode:
-        # - Skip `EmbeddingProvider.declare_in_process_engine_owner()` →
-        #   HTTP fallback engages on every embedding call (per R1=C, the
-        #   `_resolve_http_target()` resolver returns the model-server URL
-        #   when `LUPIN_MODEL_SERVER_URL` is set in env).
-        # - Explicit `SpeechToTextProvider.declare_remote_only()` so the
-        #   speech provider's `_should_use_local()` returns False even if
-        #   some earlier path accidentally flipped the owner flag.
-        from cosa.memory.speech_to_text_provider import SpeechToTextProvider
-        SpeechToTextProvider.declare_remote_only()
-        whisper_pipeline = None
-
-        # Readiness probe — wait up to `model server startup probe timeout
-        # seconds` (default 60 s) for the model-server's `/health` endpoint
-        # to return 200. Best-effort: on timeout, log a warning and continue
-        # so the rest of FastAPI (queue, notifications, doc viewer, auth)
-        # comes up cleanly. Model endpoints will 503 (via the provider's
-        # HTTP-fallback error path) until lupin-model-server becomes reachable.
-        model_server_url = os.environ.get(
-            "LUPIN_MODEL_SERVER_URL",
-            config_mgr.get( "model server url", default="http://lupin-model-server:7998", silent=True )
-        )
-        probe_timeout = config_mgr.get(
-            "model server startup probe timeout seconds",
-            default=60, return_type="int", silent=True
-        )
-        probe_url = f"{model_server_url}/health"
-        print( f"[REMOTE-MODE] Probing model-server readiness at {probe_url} (budget={probe_timeout}s)... ", end="" )
-        import requests as _requests
-        probe_start    = time.time()
-        probe_deadline = probe_start + probe_timeout
-        probe_ok       = False
-        while time.time() < probe_deadline:
-            try:
-                _r = _requests.get( probe_url, timeout=2 )
-                if _r.status_code == 200:
-                    probe_ok = True
-                    break
-            except _requests.RequestException:
-                pass
-            await asyncio.sleep( 1.0 )
-        elapsed = int( time.time() - probe_start )
-        if probe_ok:
-            print( f"OK ({elapsed}s)" )
-        else:
-            print( f"TIMEOUT after {elapsed}s — continuing; model endpoints will 503 until reachable" )
-
-    else:
-        # Local-mode (today's behavior): eager-load all 3 models on cuda:0,
-        # declare in-process ownership so the provider classes route locally.
-
-        # 1. CodeRankEmbed — Load + multi-batch warmup
-        from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
-
-        print( "Loading CodeRankEmbed embedding engine... ", end="" )
-        code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
-        code_engine.encode_code( [ "def hello(): return 'world'" ] )
-        code_engine.encode_query( [ "How do I sort a list in Python?" ] )
-        code_engine.encode_code( [ "import os\nimport sys\n\ndef main():\n    path = os.getcwd()\n    print( path )\n    return 0" ] )
-        print( "Done!" )
-        _log_vram( "CodeRankEmbed" )
-
-        # 2. Prose Embedding — Load + multi-batch warmup
-        print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
-        prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
-        prose_engine.encode_query( [ "What is the meaning of life?" ] )
-        prose_engine.encode_document( [ "The quick brown fox jumps over the lazy dog. This is a longer document to exercise memory allocation patterns." ] )
-        prose_engine.encode_query( [ "Explain quantum computing in simple terms" ] )
-        print( "Done!" )
-        _log_vram( "Prose Embedding" )
-
-        # Mark this process as the in-process owner of the GPU embedding singletons.
-        # After this point, EmbeddingProvider.generate_embedding() in THIS process
-        # routes directly to the loaded engines. Every other process (scripts,
-        # tests, MCP, CC subagents) keeps the default flag=False and routes via
-        # HTTP to /api/embeddings/{generate,batch} — so no second process ever
-        # lazy-loads a duplicate GPU model.
-        from cosa.memory.embedding_provider import EmbeddingProvider
-        EmbeddingProvider.declare_in_process_engine_owner()
-        print( "[EmbeddingProvider] Declared in-process engine owner — local routing enabled for this FastAPI process" )
-
-        # 3. Whisper STT — Load + warmup transcription (LAST, largest GPU footprint)
-        print( "Loading distill whisper engine... ", end="" )
-        try:
-            whisper_pipeline = await load_stt_model()
-            # Warmup: transcribe audio to establish stable CUDA footprint
-            warmup_path = du.get_project_root() + "/src/conf/warmup/whisper-warmup-85s.mp3"
-            if os.path.exists( warmup_path ):
-                whisper_pipeline( warmup_path, chunk_length_s=30, stride_length_s=5, return_timestamps=False )
-                print( "Done! (with warmup)" )
-            else:
-                print( "Done! (no warmup file)" )
-            # Phase 3.3 of the model-server carve-out: tell the SpeechToTextProvider
-            # singleton that THIS process owns the in-process Whisper pipeline.
-            # Mirrors EmbeddingProvider.declare_in_process_engine_owner() above.
-            # See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
-            from cosa.memory.speech_to_text_provider import SpeechToTextProvider
-            SpeechToTextProvider.declare_in_process_owner()
-        except Exception as e:
-            whisper_pipeline = None
-            print( "FAILED!" )
-            print( f"[WARN] Whisper STT model failed to load: {e}" )
-            print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
-        _log_vram( "Whisper" )
+    whisper_pipeline = await load_models(
+        config_mgr, app_debug, app_verbose, _log_vram, load_stt_model, du.get_project_root(), os.environ
+    )
 
     # 4. Prediction Engine — no GPU model, just initialization
     from cosa.agents.prediction_engine import get_prediction_engine
@@ -1127,15 +901,9 @@ async def lifespan( app: FastAPI ):
     print( "[CLOCK] Background clock task started" )
     
     # Start WebSocket maintenance tasks
-    if websocket_manager.config_mgr.get( "websocket heartbeat enabled", default=True, return_type="boolean" ):
-        print( "[WS-HEARTBEAT] Starting heartbeat task..." )
-        websocket_heartbeat_task = asyncio.create_task( websocket_heartbeat_loop() )
-        print( "[WS-HEARTBEAT] Heartbeat task started" )
-    
-    if websocket_manager.config_mgr.get( "websocket cleanup enabled", default=True, return_type="boolean" ):
-        print( "[WS-CLEANUP] Starting cleanup task..." )
-        websocket_cleanup_task = asyncio.create_task( websocket_cleanup_loop() )
-        print( "[WS-CLEANUP] Cleanup task started" )
+    websocket_heartbeat_task, websocket_cleanup_task = start_websocket_maintenance_tasks(
+        websocket_manager.config_mgr, websocket_heartbeat_loop, websocket_cleanup_loop
+    )
 
     # default=False, NOT True. A missing key must FAIL CLOSED: this sweeper is
     # the first thing in the system that can refuse a real human answer (see
@@ -1144,10 +912,7 @@ async def lifespan( app: FastAPI ):
     # default and the shipped INI value are pinned to agree by
     # test_the_sweeper_fails_closed_when_the_key_is_absent.py — they were
     # written disagreeing, and only the guard stops them drifting again.
-    if config_mgr.get( "notification expiry sweep enabled", default=False, return_type="boolean" ):
-        print( "[NOTIFY-SWEEP] Starting orphan sweep task..." )
-        notification_sweep_task = asyncio.create_task( notification_expiry_sweep_loop() )
-        print( "[NOTIFY-SWEEP] Orphan sweep task started" )
+    notification_sweep_task = start_notification_sweep_task( config_mgr, notification_expiry_sweep_loop )
     
     # Start consumer thread for producer-consumer pattern
     print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
@@ -1160,16 +925,17 @@ async def lifespan( app: FastAPI ):
     init_tracker( config_mgr, debug=app_debug )
     init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug, ask_flow=ask_flow )
 
-    # Initialize API Resource Manager singleton (Phase 1 CJ Flow async multi-lane).
-    # No agents call it yet — wiring ensures the infrastructure is alive from boot
-    # so Phase 2/3 can migrate callers without a startup-plumbing pass.
+    # Initialize the API Resource Manager singleton. No agent calls acquire() or
+    # record_call() today (Deep Research dropped its gating when it moved to bounded
+    # CC); it is initialised so the pool-status report in running_fifo_queue can
+    # include get_arm().get_status() and not an "uninitialised" marker.
     from cosa.utils.api_resource_manager import init_arm
     init_arm()
 
     # Restore pre-execution jobs that survived the restart (preserved by
     # mark_interrupted_jobs): future-scheduled, downtime-catch-up, AND immediate
     # submits with no scheduled_at (row 2817b0f5 — a queued job must survive a bounce).
-    try:
+    def _restore_jobs():
         from cosa.rest.job_persistence import get_restorable_jobs, restore_pending_jobs
         from cosa.rest.agentic_job_factory import create_agentic_job
         from cosa.rest.queue_extensions import user_job_tracker
@@ -1182,8 +948,7 @@ async def lifespan( app: FastAPI ):
             get_restorable_jobs(), create_agentic_job, ask_flow,
             register_scoped_job=user_job_tracker.register_scoped_job, debug=app_debug
         )
-    except Exception as e:
-        print( f"[WARN] Job restoration failed: {e}" )
+    restore_jobs_at_boot( _restore_jobs )
 
     # v2.2 closed-loop (B1 standing cadence): auto-submit ONE standing
     # Heartbeat-Arbiter observer into CJ Flow. Single-instance-guarded (skips if a
@@ -1226,23 +991,10 @@ async def lifespan( app: FastAPI ):
     # NEVER blocks boot, and so the settle gate can wait for reconnecting sockets
     # while the server already accepts connections. Guarded on commons being
     # wired; any failure degrades to a log, never a failed boot.
-    if config_mgr.get( "commons enabled", default=True, return_type="boolean" ) and commons_store is not None:
-        try:
-            from cosa.rest.managed_bounce_broadcast import next_boot_id, boot_counter_path
-            # PER-SERVER counter (bug 652271f3): io/ is bind-mounted into both
-            # containers, so one shared file interleaved dev and test boots and
-            # made the number in a watched all-clear unpredictable.
-            _boot_counter_path = boot_counter_path( du.get_project_root(), _managed_bounce_server_label() )
-            _boot_id           = next_boot_id( _boot_counter_path )
-            asyncio.create_task(
-                _run_managed_bounce_all_clear(
-                    boot_id       = _boot_id,
-                    boot_started  = datetime.now().isoformat( timespec="seconds" ),
-                    startup_began = _startup_monotonic,
-                )
-            )
-        except Exception as e:  # pragma: no cover - best-effort boundary guard; never let the all-clear break boot (main.py is outside cov source=["cosa"])
-            print( f"[managed-bounce] WARN: could not schedule all-clear: {e}", file=sys.stderr )
+    schedule_all_clear(
+        config_mgr, commons_store, _managed_bounce_server_label, du.get_project_root,
+        _run_managed_bounce_all_clear, _startup_monotonic, datetime.now
+    )
 
     yield
 
@@ -1272,53 +1024,15 @@ async def lifespan( app: FastAPI ):
         print( f"[managed-bounce] WARN: shutdown warning emit failed: {e}", file=sys.stderr )
 
     # Clean-shutdown marker: exact last-available stamp (the 60s heartbeat covers hard kills)
-    try:
-        record_server_available()
-        print( "[CJ-PERSIST] Recorded clean-shutdown last-available marker" )
-    except Exception as e:
-        print( f"[WARN] shutdown last-available marker failed: {e}" )
+    record_clean_shutdown( record_server_available )
     
     # Cancel and cleanup background clock task
-    if clock_task:
-        print( "[CLOCK] Cancelling background clock task..." )
-        clock_task.cancel()
-        try:
-            await clock_task
-        except asyncio.CancelledError:
-            print( "[CLOCK] Background clock task cancelled successfully" )
-        except Exception as e:
-            print( f"[CLOCK] Error during clock task shutdown: {e}" )
-    
-    # Cancel and cleanup WebSocket maintenance tasks
-    if websocket_heartbeat_task:
-        print( "[WS-HEARTBEAT] Cancelling heartbeat task..." )
-        websocket_heartbeat_task.cancel()
-        try:
-            await websocket_heartbeat_task
-        except asyncio.CancelledError:
-            print( "[WS-HEARTBEAT] Heartbeat task cancelled successfully" )
-        except Exception as e:
-            print( f"[WS-HEARTBEAT] Error during heartbeat task shutdown: {e}" )
-    
-    if websocket_cleanup_task:
-        print( "[WS-CLEANUP] Cancelling cleanup task..." )
-        websocket_cleanup_task.cancel()
-        try:
-            await websocket_cleanup_task
-        except asyncio.CancelledError:
-            print( "[WS-CLEANUP] Cleanup task cancelled successfully" )
-        except Exception as e:
-            print( f"[WS-CLEANUP] Error during cleanup task shutdown: {e}" )
+    await cancel_background_task( clock_task, "CLOCK", "background clock task", "Background clock task", "clock task" )
 
-    if notification_sweep_task:
-        print( "[NOTIFY-SWEEP] Cancelling orphan sweep task..." )
-        notification_sweep_task.cancel()
-        try:
-            await notification_sweep_task
-        except asyncio.CancelledError:
-            print( "[NOTIFY-SWEEP] Orphan sweep task cancelled successfully" )
-        except Exception as e:
-            print( f"[NOTIFY-SWEEP] Error during sweep task shutdown: {e}" )
+    # Cancel and cleanup WebSocket maintenance tasks
+    await cancel_background_task( websocket_heartbeat_task, "WS-HEARTBEAT", "heartbeat task", "Heartbeat task", "heartbeat task" )
+    await cancel_background_task( websocket_cleanup_task, "WS-CLEANUP", "cleanup task", "Cleanup task", "cleanup task" )
+    await cancel_background_task( notification_sweep_task, "NOTIFY-SWEEP", "orphan sweep task", "Orphan sweep task", "sweep task" )
     
     # Row ed76b897: cancel any pending TRAILING wake. A notify that lands inside a
     # debounce window arms a timer for the window's close, and at shutdown that
@@ -1332,62 +1046,23 @@ async def lifespan( app: FastAPI ):
     except Exception as e:  # pragma: no cover - best-effort boundary guard; must never block shutdown (main.py is outside cov source=["cosa"])
         print( f"[FCM-PAUSE] Error during pause-controller shutdown (continuing): {e}" )
 
-    if fcm_wake_service is not None:
-        try:
-            fcm_wake_service.shutdown()
-            print( "[FCM-WAKE] Pending trailing wakes cancelled" )
-        except Exception as e:
-            print( f"[FCM-WAKE] Error during wake-service shutdown (continuing): {e}" )
+    shutdown_fcm_wake( fcm_wake_service )
 
     # Phase 2 (CJ Flow async multi-lane): drain agentic pool BEFORE consumer stops
     # and BEFORE HTTP socket closes. In-flight pool workers need the WebSocket
     # channel alive long enough to emit their final job_state_transition events
     # as they finish (or are dead-lettered on timeout).
-    if jobs_run_queue is not None and hasattr( jobs_run_queue, "shutdown_pool" ):
-        try:
-            print( "[AGENTIC-POOL] Draining agentic pool before consumer stop..." )
-            jobs_run_queue.shutdown_pool( wait=True, timeout=30.0 )
-        except Exception as e:
-            print( f"[AGENTIC-POOL] Error during pool drain (continuing): {e}" )
+    drain_agentic_pool( jobs_run_queue )
 
     # Shutdown consumer thread
-    if consumer_thread:
-        print( "[CONSUMER] Stopping todo-producer-run-consumer thread..." )
-        with jobs_todo_queue.condition:
-            jobs_todo_queue.consumer_running = False
-            jobs_todo_queue.condition.notify()
-
-        # Wait for consumer thread to finish
-        consumer_thread.join( timeout=5.0 )
-        if consumer_thread.is_alive():
-            print( "[CONSUMER] Warning: Consumer thread did not exit cleanly" )
-        else:
-            print( "[CONSUMER] Todo-producer-run-consumer thread stopped successfully" )
+    stop_consumer_thread( consumer_thread, jobs_todo_queue )
     
     # Cancel any active peer-queue watchers
-    try:
-        print( "[PEER-WATCH] Cancelling active peer-queue watchers..." )
-        await peer.cancel_all_watchers_on_shutdown()
-        print( "[PEER-WATCH] Peer-queue watchers cancelled" )
-    except Exception as e:
-        print( f"[PEER-WATCH] Error cancelling watchers: {e}" )
+    await cancel_peer_watchers( peer.cancel_all_watchers_on_shutdown )
 
-    # Stop the commons ack watcher daemon (Phase 2)
-    if commons_activity_watcher is not None:
-        try:
-            print( "[COMMONS] Stopping CommonsActivityWatcher daemon..." )
-            commons_activity_watcher.stop( join_timeout=3.0 )
-            print( "[COMMONS] CommonsActivityWatcher stopped" )
-        except Exception as e:
-            print( f"[COMMONS] WARN — CommonsActivityWatcher shutdown failed: {e}" )
-
-    if commons_ack_watcher is not None:
-        try:
-            print( "[COMMONS] Stopping CommonsAckWatcher daemon..." )
-            commons_ack_watcher.stop( join_timeout=3.0 )
-            print( "[COMMONS] CommonsAckWatcher stopped" )
-        except Exception as e:
-            print( f"[COMMONS] Error stopping watcher: {e}" )
+    # Stop the commons watcher daemons (Phase 2)
+    stop_commons_watcher( commons_activity_watcher, "CommonsActivityWatcher", "WARN — CommonsActivityWatcher shutdown failed" )
+    stop_commons_watcher( commons_ack_watcher, "CommonsAckWatcher", "Error stopping watcher" )
 
 
     # Add any other cleanup code here if needed
@@ -1411,6 +1086,11 @@ app = FastAPI(
 SERVER_STARTED_AT = datetime.now().isoformat( timespec="seconds" )
 app.add_exception_handler( Exception, make_unhandled_exception_handler( SERVER_STARTED_AT ) )
 
+# Doc-upload size guard: refuse an oversized /api/docs/upload before its body is spooled to disk.
+# Added BEFORE CORS so CORS wraps it and a browser can read the 413 (later add = outer).
+from cosa.rest.upload_size_guard import UploadSizeGuard
+app.add_middleware( UploadSizeGuard )
+
 # Add CORS middleware to allow Flutter web app to access API endpoints
 app.add_middleware(
     CORSMiddleware,
@@ -1425,7 +1105,7 @@ app.add_middleware(
 @app.middleware( "http" )
 async def add_security_headers( request: Request, call_next ):
     """
-    Add security headers to all HTTP responses (Phase 8).
+    Add security headers to all HTTP responses.
 
     Requires:
         - request is FastAPI Request object
@@ -1433,7 +1113,7 @@ async def add_security_headers( request: Request, call_next ):
 
     Ensures:
         - Security headers added to response
-        - X-Content-Type-Options: nosniff (prevent MIME sniffing)
+        - X-Content-Type-Options: nosniff (prevent content-type sniffing)
         - X-Frame-Options: SAMEORIGIN (blocks cross-origin clickjacking, permits
           this app framing its own pages)
         - X-XSS-Protection: 1; mode=block (XSS protection)
@@ -1485,8 +1165,10 @@ app.include_router(stats.router)
 app.include_router(deep_research.router)
 app.include_router(io_files.router)
 app.include_router(docs_files.router)
+app.include_router(podcast_drive.router)
 app.include_router(mock_job.router)
 app.include_router(podcast_generator.router)
+app.include_router(podcast_proxy.router)
 app.include_router(presentation_generator.router)
 app.include_router(deep_research_to_podcast.router)
 app.include_router(deep_research_to_presentation.router)
@@ -1503,9 +1185,12 @@ app.include_router(commons.router)
 app.include_router(arbiter.router)
 app.include_router(tasks.router)
 app.include_router(fcm.router)
+app.include_router(heartbeat.router)   # /api/heartbeat/poke-mute — fleet switch for the Stop poke (row 3526fb95)
 app.include_router(dm.router)   # /api/dm/* — notification-native AI↔AI DM (relocated legacy peer-DM route)
 app.include_router(v2_ask.router)   # /api/v2/ask — CJ Flow v2 unified ask endpoint (unit D)
 app.include_router(cc_transcript.router)   # /api/cc-transcript/* — the console-tee read-only stream (row 27760534)
+app.include_router(reuse_candidates.router)   # /api/reuse-candidates/* — the resident search of the reuse-lookup candidate stage (row d3f71441)
+app.include_router(pair_labelling.router)   # /api/pair-labelling/* — a reviewer labels a blind duplicate-check pair packet in the browser (row ea45cf15)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -1521,12 +1206,12 @@ async def load_stt_model():
     """
     Load and initialize the speech-to-text model pipeline.
     
-    Preconditions:
+    Requires:
         - config_mgr must be initialized
         - CUDA toolkit installed if using GPU
         - Model files available locally or downloadable
     
-    Postconditions:
+    Ensures:
         - Returns initialized Whisper pipeline ready for transcription
         - Model loaded on specified device (CPU/GPU)
     
@@ -1604,16 +1289,7 @@ if __name__ == "__main__":
     # by default, that trap is easy to hit: reload-having-been-live has trained
     # everyone that source edits are served live; they are not until you bounce.
     reload_enabled = _reload_enabled( os.environ.get( "LUPIN_RELOAD" ), is_production_or_test )
-    reload_kwargs = {}
-    if reload_enabled:
-        reload_kwargs[ "reload" ]      = True
-        reload_kwargs[ "reload_dirs" ] = [
-            "lupin_app", "lib", "lupin_cli", "lupin_mcp",
-            # cosa RUNTIME subpackages only — NOT cosa/tests, cosa/rnd, cosa/docs, cosa/history
-            "cosa/agents", "cosa/config", "cosa/crud_for_dataframes", "cosa/io",
-            "cosa/memory", "cosa/orchestration", "cosa/repo", "cosa/rest",
-            "cosa/tools", "cosa/training", "cosa/utils",
-        ]
+    reload_kwargs  = _reload_kwargs( reload_enabled )
 
     uvicorn.run(
         "lupin_app.main:app",

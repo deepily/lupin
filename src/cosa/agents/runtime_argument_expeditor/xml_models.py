@@ -26,9 +26,9 @@ class ExpeditorResponse( BaseXMLModel ):
     </response>
 
     Fields:
-        all_required_met: "true" or "false" indicating if all required args are satisfied
-        args_present: Comma-separated key=value pairs for arguments found in user input
-        args_missing: Comma-separated list of missing required argument names
+        - all_required_met: "true" or "false" indicating if all required args are satisfied.
+        - args_present: Comma-separated key=value pairs for arguments found in user input.
+        - args_missing: Comma-separated list of missing required argument names.
     """
 
     all_required_met: str = Field(

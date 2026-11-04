@@ -6,24 +6,14 @@ Exports all repository classes for clean imports:
 
 Each repository provides CRUD operations for its corresponding model.
 
-LAZY re-exports (PEP 562, bug 1b8ec2b9): the names below resolve on first access
-via `__getattr__` instead of being eagerly imported at package load. This keeps
-`import cosa.rest.db.repositories` (and a bare `importlib.util.find_spec` on any
-SUBMODULE of this package) side-effect-light — it no longer drags in the whole
-SQLAlchemy ORM stack. That matters because coverage's `--cov=<dotted.module>`
-resolver (coverage.inorout.set_matchers_depending_on_syspath) calls
-`find_spec("cosa.rest.db.repositories.task_repository")` INSIDE a
-`sys_modules_saved()` block; the old eager `__init__` loaded ~400 modules
-(SQLAlchemy included) there, and the block's bulk `del sys.modules[...]` on exit
-partially evicted SQLAlchemy, so a later re-import re-ran its declarative +
-dialect registration and tripped `AssertionError: Type <class 'object'> is
-already registered` at collection. With lazy re-exports the resolver imports only
-this lightweight package, nothing gets evicted, and the eager `--cov=<module>`
-coverage form collects clean. The public API is UNCHANGED — `from
-cosa.rest.db.repositories import UserRepository` still works (IMPORT_FROM falls
-through to `__getattr__`), and direct submodule imports
-(`from cosa.rest.db.repositories.user_repository import UserRepository`) were
-never affected.
+The re-exports are lazy (`PEP 562`): each name resolves on first access via `__getattr__`, not at package load.
+So `import cosa.rest.db.repositories`, and `find_spec` on any submodule, stays light and does not import the
+SQLAlchemy ORM stack. That matters because coverage's `--cov=<dotted.module>` resolver calls `find_spec` inside
+a `sys_modules_saved()` block, which on exit deletes modules from `sys.modules`. An eager `__init__` loaded about
+400 modules there. The partial eviction of SQLAlchemy made a later re-import fail at collection with
+`AssertionError: Type <class 'object'> is already registered`. With lazy exports nothing gets evicted.
+The public API is unchanged: `from cosa.rest.db.repositories import UserRepository` still works, and direct
+submodule imports were never affected.
 """
 
 import importlib
@@ -47,9 +37,7 @@ __all__ = list( _LAZY_EXPORTS.keys() )
 
 def __getattr__( name ):
     """
-    PEP 562 lazy attribute resolver — import the owning submodule on first access
-    of a re-exported repository class, then bind it on the package so subsequent
-    lookups are plain attribute reads.
+    Resolve a re-exported repository class on first access (`PEP 562` lazy attribute).
 
     Requires:
         - name is the attribute being accessed on this package

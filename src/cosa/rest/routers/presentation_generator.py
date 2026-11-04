@@ -9,13 +9,12 @@ The request and response models went with the handler, and so did the todo-queue
 websocket dependencies. A Pydantic model no route reads is a shape a caller can still
 find and reasonably believe in.
 
-⚠️ `validate_source_path` LEFT THIS MODULE BEFORE THE DOOR DID, and the order was not an
-accident. This door was the only place a presentation source path was checked for escaping
-the project root — nothing downstream repeated it. Retiring the door and moving the guard
-in the same commit would have been fine; retiring it FIRST would have opened a hole for as
-long as that took. The guard is now `presentation_generator/job.py::
-source_path_is_inside_the_project`, raising where the file is actually opened, so it
-protects every caller rather than one door.
+`validate_source_path` left this module before the door did, and that order matters. This
+door was the only place a presentation source path was checked for escaping the project
+root. Nothing downstream repeated the check. Retiring the door first would have opened a
+hole for as long as the move took. The guard is now
+`presentation_generator/job.py::source_path_is_inside_the_project`. It raises where the
+file is actually opened, so it protects every caller rather than one door.
 
 What a caller sends instead:
 
@@ -29,7 +28,7 @@ What a caller sends instead:
 
 from fastapi import APIRouter
 
-from cosa.rest.routers._retired_doors import gone, tombstone_description
+from cosa.rest.routers._retired_doors import check_tombstone_router, gone, tombstone_description
 import cosa.utils.util as cu
 
 
@@ -96,7 +95,7 @@ async def submit_presentation_job():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          `REMOVE BY` text built from the `REMOVE_BY` constant
     """
     gone( "/api/presentation-generator/submit" )
 
@@ -113,8 +112,6 @@ def quick_smoke_test():
 
         # Test 2: Router configuration
         print( "Testing router configuration..." )
-        assert router.prefix == "/api/presentation-generator"
-        assert "presentation-generator" in router.tags
         print( f"  Prefix: {router.prefix}" )
         print( "  PASS" )
 
@@ -126,10 +123,8 @@ def quick_smoke_test():
         # handed the full path would mount it twice-prefixed and the door would answer 404
         # — the one answer a tombstone must never give.
         print( "Testing the retired route..." )
-        from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT
-        paths = { route.path for route in router.routes }
-        assert paths == { "/api/presentation-generator/submit" }, f"mounted at {paths}"
-        assert RETIRED_DOORS[ "/api/presentation-generator/submit" ] == V2_SUBMIT
+        from cosa.rest.routers._retired_doors import V2_SUBMIT
+        check_tombstone_router( router, "/api/presentation-generator", "presentation-generator", "/api/presentation-generator/submit", V2_SUBMIT )
         print( "  PASS" )
 
         print( "\nAll Presentation Generator Router smoke tests passed" )

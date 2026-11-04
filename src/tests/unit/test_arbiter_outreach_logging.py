@@ -34,7 +34,7 @@ if _src_path not in sys.path:
 
 from cosa.agents.heartbeat_arbiter.arbiter_job import (
     ArbiterConsumerJob, GATE_DUMP_INTERVAL_POLLS, OUTREACH_SUMMARY_MAXLEN,
-    _default_log_fn, _fmt_eastern, _fmt_minutes,
+    _default_log_fn, _fmt_local, _fmt_minutes,
 )
 
 
@@ -80,11 +80,12 @@ def test_default_log_fn_emits_one_json_line( capsys ):
     assert line[ "kind" ] == "stuck_poke" and line[ "recipients" ] == [ "P" ] and "ts" in line
 
 
-def test_fmt_eastern_labels_zone_and_degrades():
-    out = _fmt_eastern( NOW )
-    assert out.endswith( "EDT" ) or out.endswith( "EST" )            # zone-labeled, never bare
-    assert _fmt_eastern( None ) == "unknown"
-    assert _fmt_eastern( "not-a-datetime" ) == "unknown"             # exception → degrade
+def test_fmt_local_labels_the_passed_zone_and_degrades():
+    from zoneinfo import ZoneInfo
+    assert _fmt_local( NOW, ZoneInfo( "Asia/Kolkata" ) ).endswith( "IST" )   # the zone passed, never a built-in one
+    assert _fmt_local( NOW, ZoneInfo( "America/New_York" ) ).split()[ -1 ] in ( "EDT", "EST" )
+    assert _fmt_local( None, ZoneInfo( "UTC" ) ) == "unknown"
+    assert _fmt_local( "not-a-datetime", ZoneInfo( "UTC" ) ) == "unknown"   # exception → degrade
 
 
 def test_fmt_minutes():

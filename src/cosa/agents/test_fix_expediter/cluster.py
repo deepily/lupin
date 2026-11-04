@@ -1,22 +1,22 @@
 """
-Phase 0 clustering for the TestFixExpediter.
+Clustering stage of the TestFixExpediter: groups pytest failures by shared root cause.
 
-Groups N pytest failures into K ≤ max_clusters coherent clusters, each
-representing one shared root cause. The cluster list drives Phase 1
-(per-cluster diagnosis), Phase 2 (per-cluster proposal), Phase 3 (per-cluster
-fix application), and Phase 5 (per-cluster commits within one branch).
+Groups N pytest failures into K <= max_clusters coherent clusters, each
+representing one shared root cause. The cluster list drives the per-cluster
+diagnosis, the per-cluster proposal, the per-cluster fix application, and the
+per-cluster commits within one branch.
 
 Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/03-phase0-clustering-plan.md
 
 Approach:
     1. Heuristic seed (`heuristic_seed`): group failures by
        (normalized_classname, first_non_pytest_traceback_frame). Pure
-       Python, no LLM cost, handles ~80% of realworld cases.
-    2. LLM refinement (`llm_refine`): optional pass that merges/splits/
-       relabels the heuristic seeds via Opus. In step 7, the LLM path is
-       a pass-through that caps by `max_clusters` via consolidation of
-       smallest clusters. The real Claude Agent SDK call lands when Phase 1
-       diagnose goes live (step 8) and we have a working SDK wiring path.
+       Python, no LLM cost, handles about 80% of real-world cases.
+    2. LLM refinement (`llm_refine`): optional pass meant to merge, split and
+       relabel the heuristic seeds via Opus. Today the LLM path is a
+       pass-through that caps by `max_clusters` via consolidation of the
+       smallest clusters. The real Claude Agent SDK call is meant to land
+       once the diagnosis stage has a working SDK wiring path.
 """
 
 import logging
@@ -83,15 +83,10 @@ def _normalize_classname( classname: str ) -> str:
 
 def _extract_first_real_frame( traceback: str ) -> str:
     """
-    Extract the first traceback frame that is NOT pytest infrastructure.
+    Extract the first traceback frame that is not pytest infrastructure.
 
-    pytest tracebacks generally contain interleaved frames from:
-      - pytest / _pytest / pluggy (infrastructure)
-      - the user's test file
-      - the user's production code under test (when the assertion came from there)
-
-    For clustering purposes, the most informative frame is usually the
-    first non-pytest frame — either the test function or the tested code.
+    Tracebacks interleave pytest, _pytest and pluggy frames, the user's test file, and the code under test.
+    The most informative frame for clustering is usually the first non-pytest one: the test or the tested code.
 
     Requires:
         - traceback is a string (may be empty)
@@ -233,7 +228,7 @@ def heuristic_seed( ctx: TestRemediationContext ) -> list[ FailureCluster ]:
         - Returns a list of FailureCluster, possibly empty if ctx.failures is empty
         - Every failure index from 0..N-1 appears in exactly one cluster
         - Clusters are ordered by first-appearance of their seed key (stable)
-        - cluster_id is assigned sequentially: C1, C2, ...
+        - cluster_id is assigned sequentially as the text "C" plus the position, starting at 1
 
     Args:
         ctx: TestRemediationContext with the flat failures list
@@ -282,12 +277,8 @@ async def llm_refine(
     """
     Refine heuristic seed clusters, optionally via an LLM call.
 
-    **Step 10 status**: If `refine_fn` is None (default), performs
-    pure-Python cap enforcement: if the heuristic produced more than
-    `max_clusters`, the smallest clusters are merged into a tail
-    cluster labeled "mixed". The full LLM refinement wiring (real
-    Claude Agent SDK call) lands when Phase 1 diagnose goes live —
-    this module is already structured to plug it in via `refine_fn`.
+    Without `refine_fn`, only cap enforcement runs: the smallest clusters merge into a tail "mixed" cluster.
+    The real LLM call is not wired yet; `refine_fn` is the plug-in point for it.
 
     Requires:
         - ctx is a valid TestRemediationContext
@@ -301,7 +292,7 @@ async def llm_refine(
         - Returns between 0 and max_clusters clusters (0 iff input was empty)
         - Every failure index from the input seed clusters appears in exactly
           one output cluster
-        - Falls back to cap-enforced seeds if refine_fn is None OR raises
+        - Falls back to cap-enforced seeds if refine_fn is None or raises
 
     Args:
         ctx: Remediation context (passed through for refine_fn)
@@ -345,8 +336,8 @@ def _cap_enforce(
     Consolidate excess clusters by merging the smallest ones.
 
     When the heuristic produces more than max_clusters clusters, the
-    `max_clusters - 1` largest clusters are kept as-is, and the remainder
-    are merged into a single "mixed" tail cluster.
+    `max_clusters - 1` largest clusters are kept as-is. The remainder
+    merge into a single "mixed" tail cluster.
 
     Requires:
         - clusters is a non-empty list
@@ -355,7 +346,7 @@ def _cap_enforce(
     Ensures:
         - Returns at most max_clusters clusters
         - All failure indices from the input are preserved (no drops)
-        - cluster_ids are re-sequenced C1, C2, ... in size-descending order
+        - cluster_ids are re-sequenced as "C" plus a position number, in size-descending order
     """
     if len( clusters ) <= max_clusters:
         return clusters

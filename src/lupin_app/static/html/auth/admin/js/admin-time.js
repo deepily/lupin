@@ -61,5 +61,5 @@ function formatRelativeTime( isoString ) {
     if ( diffHr  < 24 )  return diffHr + "h ago";
     if ( diffDays < 7 )  return diffDays + "d ago";
 
-    return date.toLocaleDateString();
+    return LupinAppZone.day( date );
 }

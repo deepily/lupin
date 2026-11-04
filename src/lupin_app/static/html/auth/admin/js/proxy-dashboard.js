@@ -45,6 +45,7 @@ document.addEventListener( "DOMContentLoaded", async function() {
         if ( user && user.email ) {
             userEmail = user.email;
         }
+        await LupinAppZone.load();
         await loadTrustStates();
         await loadRecentDecisions( "" );
     } catch ( error ) {

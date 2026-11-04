@@ -14,6 +14,7 @@ Venue: :8000 (mutates DB state). Submit via the test-suite channel.
 
 import os
 import time
+import uuid
 
 import pytest
 import requests
@@ -48,17 +49,36 @@ def auth_headers():
     return { "Authorization": f"Bearer {token}" }
 
 
-def test_undelivered_inbox_round_trip( auth_headers ):
+@pytest.fixture
+def throwaway_recipient():
+    """
+    A user registered for this test alone, as ( email, headers ).
+
+    The shared test user collects undelivered rows on every run.
+    The pull is oldest-first with a 1000-row limit, so a new marker can sit past the limit.
+    A fresh recipient starts with an empty inbox.
+    """
+    email    = f"inbox_{uuid.uuid4().hex[ :10 ]}@test.com"
+    password = uuid.uuid4().hex + "Aa1!"
+    register = requests.post( f"{BASE_URL}/auth/register", json={ "email": email, "password": password }, timeout=15 )
+    assert register.status_code == 201, f"Registration failed: {register.status_code} {register.text}"
+    login = requests.post( f"{BASE_URL}/auth/login", json={ "email": email, "password": password }, timeout=15 )
+    assert login.status_code == 200, f"Login failed: {login.status_code} {login.text}"
+    return email, { "Authorization": f"Bearer {login.json()[ 'tokens' ][ 'access_token' ]}" }
+
+
+def test_undelivered_inbox_round_trip( auth_headers, throwaway_recipient ):
     """A notify sent while the user is offline shows up in the pull-able undelivered inbox."""
     marker = f"lever-d-itest-{int( time.time() * 1000 )}"
+    recipient_email, recipient_headers = throwaway_recipient
 
-    # 1. Fire-and-forget notify to self while offline (no WS) → persists undelivered.
+    # 1. Fire-and-forget notify, sent by the test user to the throwaway recipient while offline (no WS).
     send = requests.post(
         f"{BASE_URL}/api/notify",
         headers = auth_headers,
         params  = {
             "message"            : marker,
-            "target_user"        : _EMAIL,
+            "target_user"        : recipient_email,
             "type"               : "task",
             "priority"           : "low",
             "response_requested" : "false",
@@ -67,12 +87,10 @@ def test_undelivered_inbox_round_trip( auth_headers ):
     )
     assert send.status_code in ( 200, 201 ), f"notify send failed: {send.status_code} {send.text}"
 
-    # 2. Pull the undelivered inbox as that user. High limit: the inbox is oldest-first
-    #    and the shared test user accrues a backlog of stale undelivered rows, so a
-    #    freshly-sent (newest) marker sorts last — fetch wide enough to include it.
+    # 2. Pull the undelivered inbox as the recipient, whose inbox holds this one row.
     resp = requests.get(
         f"{BASE_URL}/api/notifications/undelivered",
-        headers = auth_headers,
+        headers = recipient_headers,
         params  = { "limit": 1000 },
         timeout = 10,
     )

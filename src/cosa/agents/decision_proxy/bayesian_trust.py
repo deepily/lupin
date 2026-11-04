@@ -4,20 +4,20 @@ Bayesian Logistic Regression (BLR) for trust-level estimation.
 
 Online Bayesian logistic regression with Laplace approximation for the
 Decision Proxy trust system. Replaces scalar Beta-Bernoulli with a
-4-feature regression that captures category context, question complexity,
-temporal patterns, and recent error rate.
+4-feature regression. The features capture category context, question
+complexity, temporal patterns, and recent error rate.
 
 Features (all normalized to [0, 1]):
-    0: category_index   — ordinal encoding / 6.0
-    1: question_length  — min( word_count / 50, 1.0 )
-    2: hour_of_day      — hour / 24.0
-    3: recent_error_rate — category error_rate (already 0-1)
+    0: category_index, ordinal encoding / 6.0.
+    1: question_length, min( word_count / 50, 1.0 ).
+    2: hour_of_day, hour / 24.0.
+    3: recent_error_rate, category error_rate (already 0-1).
 
 Uses online Laplace approximation with Sherman-Morrison rank-1 updates
 to the Hessian inverse, giving O(d^2) per observation.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 import math
@@ -48,12 +48,9 @@ class BayesianLogisticRegression:
     """
     Online Bayesian Logistic Regression with Laplace approximation.
 
-    Maintains a Gaussian posterior over weight vector w:
-        p( w | D ) ≈ N( w_MAP, H^{-1} )
-
-    where H is the Hessian of the negative log-posterior evaluated at w_MAP.
-
-    Uses Sherman-Morrison rank-1 updates for O(d^2) online learning.
+    Maintains a Gaussian posterior over weight vector w, p( w | D ) ≈ N( w_MAP, H^{-1} ).
+    H is the Hessian of the negative log-posterior at w_MAP.
+    Sherman-Morrison rank-1 updates give O(d^2) online learning.
 
     Requires:
         - n_features > 0
@@ -100,10 +97,8 @@ class BayesianLogisticRegression:
         """
         Predict success probability with uncertainty for a feature vector.
 
-        Uses probit approximation for the posterior predictive:
-            p = sigma( w^T x / sqrt( 1 + pi * s^2 / 8 ) )
-
-        where s^2 = x^T H^{-1} x is the predictive variance.
+        Probit approximation: p = sigma( w^T x / sqrt( 1 + pi * s^2 / 8 ) ).
+        Here s^2 = x^T H^{-1} x is the predictive variance.
 
         Requires:
             - x is a numpy array of shape (n_features,)
@@ -135,14 +130,9 @@ class BayesianLogisticRegression:
         """
         Online Bayesian update with a single observation.
 
-        Uses Laplace approximation with Sherman-Morrison rank-1 update
-        to the Hessian inverse.
-
-        The update formula:
-            1. Compute predicted probability: p = sigma( w^T x )
-            2. Compute lambda = p * (1 - p)  (Hessian contribution)
-            3. Sherman-Morrison update to H_inv
-            4. Update w_MAP via Newton step
+        Laplace approximation with a Sherman-Morrison rank-1 update to the Hessian inverse.
+        Steps: (1) p = sigma( w^T x ). (2) lambda = p * (1 - p), the Hessian contribution.
+        (3) Sherman-Morrison update to H_inv. (4) Newton step on w_MAP.
 
         Requires:
             - x is a numpy array of shape (n_features,)

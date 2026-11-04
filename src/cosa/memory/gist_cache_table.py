@@ -197,7 +197,7 @@ class GistCacheTable:
         """
         Clear all entries from cache (for testing/maintenance).
 
-        NOT IMPLEMENTED — logs under debug and does nothing else.
+        Not implemented: logs under debug and does nothing else.
 
         Ensures:
             - No rows are deleted
@@ -210,12 +210,7 @@ def quick_smoke_test():
     """
     Quick smoke test for GistCacheTable - validates basic functionality.
 
-    Tests:
-        1. Table initialization
-        2. Cache miss (non-existent entry)
-        3. Cache storage (insert new entry)
-        4. Cache hit (retrieve stored entry)
-        5. Statistics retrieval
+    Covers table initialization, a cache miss, storing an entry, a cache hit and statistics.
 
     Requires:
         - LUPIN_ROOT environment variable set
@@ -223,7 +218,7 @@ def quick_smoke_test():
 
     Ensures:
         - All basic operations work correctly
-        - No exceptions during normal operations
+        - Normal operations raise no exception
     """
     cu.print_banner( "GistCacheTable Smoke Test", prepend_nl=True )
 

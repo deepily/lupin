@@ -60,6 +60,10 @@ TEST_DIRS    = ( "src/tests/smoke", "src/tests/integration" )
 LINEAGE_FIELD = "parent_id_hash"
 LINEAGE_ENV   = "LUPIN_TEST_MONOPOLIZE_PARENT_ID"
 
+# The shared helper threads the parent id for a file that imports and calls it.
+HELPER_PATH   = "src/tests/helpers/suite_lineage.py"
+HELPER_IMPORT = re.compile( r"^from tests\.helpers\.suite_lineage import [^\n]*\blineage_request\b", re.MULTILINE )
+
 PREFIX_RE = re.compile( r"""prefix\s*=\s*["']([^"']+)["']""" )
 POST_RE   = re.compile( r"""@router\.post\(\s*\n?\s*["']([^"']+)["']""", re.MULTILINE )
 
@@ -377,6 +381,61 @@ def _code_only( text ):
     return "\n".join( line.split( "#" )[ 0 ] for line in text.splitlines() )
 
 
+def names_endpoint_in_code( text, endpoint ):
+    """
+    Whether a test file's CODE carries `endpoint` as a string it could post to.
+
+    WHY THIS IS NOT `endpoint in text` (row 4cbd4858). Once `/api/v2/ask` became
+    lineage-aware, the substring test accused five files that post nothing to it:
+    `/api/v2/ask-audio` contains it as a prefix, a docstring or comment can name it, and
+    `assert "/api/v2/ask" in detail` only reads a 410 body. A checker that accuses innocent
+    files teaches people to ignore it, which is the lesson `lineage_aware_endpoints` already
+    records about the per-file rule.
+
+    Ensures:
+        - the endpoint must not be followed by a word character or `-` (so `/api/v2/ask` does
+          not match `/api/v2/ask-audio`, while `/api/v2/ask?x=1` and `/api/v2/ask"` do)
+        - docstrings and any string inside a comparison (`"..." in detail`, `== "..."`) do not
+          count: neither one posts anywhere
+        - a file that does not parse is read as raw text, strictly, as before — never silently
+          dropped from the check
+    """
+    pattern = re.compile( re.escape( endpoint ) + r"(?![\w-])" )
+    try:
+        tree = ast.parse( text )
+    except SyntaxError:
+        return pattern.search( text ) is not None
+    skipped = set()
+    for node in ast.walk( tree ):
+        if isinstance( node, ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef ) ):
+            body = node.body
+            if body and isinstance( body[ 0 ], ast.Expr ) and isinstance( body[ 0 ].value, ast.Constant ):
+                skipped.add( id( body[ 0 ].value ) )
+        if isinstance( node, ast.Compare ):
+            skipped.update( id( sub ) for sub in ast.walk( node ) )
+    return any( isinstance( node, ast.Constant ) and isinstance( node.value, str )
+                and id( node ) not in skipped and pattern.search( node.value )
+                for node in ast.walk( tree ) )
+
+
+def _helper_threads_the_parent_id( root ):
+    """
+    Whether the shared helper reads the env var and stamps the field, in code.
+
+    Ensures:
+        - returns False when the helper file does not exist under `root`
+    """
+    path = os.path.join( root, HELPER_PATH )
+    if not os.path.isfile( path ): return False
+    with open( path, "r", errors="ignore" ) as f: code = _code_only( f.read() )
+    return LINEAGE_ENV in code and LINEAGE_FIELD in code
+
+
+def _threads_through_the_helper( code, helper_ok ):
+    """A file threads the id through the helper when it imports lineage_request and calls it."""
+    return helper_ok and bool( HELPER_IMPORT.search( code ) ) and "lineage_request(" in code
+
+
 def untagged_callers( endpoints, root, test_dirs ):
     """
     Test files that POST to a lineage-aware endpoint without READING the parent-id env var.
@@ -386,8 +445,11 @@ def untagged_callers( endpoints, root, test_dirs ):
         - the env var must appear in CODE, not in a comment (see _code_only)
         - the file must also stamp `parent_id_hash` in code — reading the var and never
           putting it in a payload is not threading it
+        - a file that imports lineage_request from the shared helper and calls it also passes,
+          provided the helper itself reads the env var and stamps the field
     """
     offenders = []
+    helper_ok = _helper_threads_the_parent_id( root )
     for d in test_dirs:
         full_dir = os.path.join( root, d )
         if not os.path.isdir( full_dir ): continue
@@ -397,8 +459,9 @@ def untagged_callers( endpoints, root, test_dirs ):
             with open( path, "r", errors="ignore" ) as f: text = f.read()
             code = _code_only( text )
             if LINEAGE_ENV in code and LINEAGE_FIELD in code: continue
+            if _threads_through_the_helper( code, helper_ok ): continue
             for endpoint in endpoints:
-                if endpoint in text:
+                if names_endpoint_in_code( text, endpoint ):
                     offenders.append( ( os.path.join( d, name ), endpoint ) )
                     break
     return offenders
@@ -784,14 +847,17 @@ def test_no_router_in_the_tree_is_unmatched():
 def test_the_v2_submit_door_is_lineage_aware_and_its_siblings_are_not():
     """
     Against the REAL router tree, not a synthetic one. `/api/v2/submit` gained the field
-    when the nine retiring doors' scheduling and lineage moved onto it; `/api/v2/ask` and
-    `/api/v2/resume` never took it and must not be held to it.
+    when the nine retiring doors' scheduling and lineage moved onto it, and `/api/v2/ask`
+    gained it on 2026-10-02 (row 4cbd4858): a suite's asks used to be foreign by
+    construction, so under a monopoly hold every one sat out a 120 s collect timeout.
+    `/api/v2/resume` and `/api/v2/ask-audio` never took it and must not be held to it.
     """
     endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
 
     assert endpoints.get( "/api/v2/submit" ) == "v2_ask.py"
-    assert "/api/v2/ask"    not in endpoints
-    assert "/api/v2/resume" not in endpoints
+    assert endpoints.get( "/api/v2/ask" )    == "v2_ask.py"
+    assert "/api/v2/resume"    not in endpoints
+    assert "/api/v2/ask-audio" not in endpoints
 
     # The v1 doors still LIVE are still watched. This used to name the research doors as
     # its examples; they retired, their models went with their handlers, and they left the
@@ -856,6 +922,39 @@ def test_a_comment_naming_the_env_var_does_NOT_satisfy_the_check( tmp_path ):
         ( "smoke/test_comment_only.py", "/api/deep-research/submit" ) ]
 
 
+@pytest.mark.parametrize( "source", [
+    'requests.post( f"{BASE_URL}/api/v2/ask-audio", files=files )\n',                  # a sibling door, longer path
+    '"""Posts to /api/v2/ask through a helper."""\nx = 1\n',                            # a docstring
+    'def test_a():\n    """Names /api/v2/ask."""\n    assert "/api/v2/ask" in detail\n',  # a docstring and a comparison
+    '# POST /api/v2/ask happens elsewhere\nx = 1\n',                                  # a comment
+] )
+def test_a_file_that_only_names_the_endpoint_is_not_a_caller( tmp_path, source ):
+    """
+    THE CONTROLS FOR THE NARROWER MATCH, one per way a file can name an endpoint without
+    posting to it. RED ON REVERT: go back to `endpoint in text` and every one of these is
+    accused.
+    """
+    smoke_dir = tmp_path / "smoke"
+    smoke_dir.mkdir()
+    ( smoke_dir / "test_names_it.py" ).write_text( source )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == []
+
+
+@pytest.mark.parametrize( "source", [
+    'requests.post( f"{BASE_URL}/api/v2/ask", json=body )\n',
+    '_ASK = f"{BASE_URL}/api/v2/ask"\n',
+    'requests.post( f"{BASE_URL}/api/v2/ask?x=1", json=body )\n',
+    'def (: /api/v2/ask\n',                                   # unparseable: read as raw text, strictly
+] )
+def test_a_file_that_posts_to_the_endpoint_is_still_flagged( tmp_path, source ):
+    """The narrowing must not blind the check: each real way of reaching the door is still caught."""
+    smoke_dir = tmp_path / "smoke"
+    smoke_dir.mkdir()
+    ( smoke_dir / "test_posts.py" ).write_text( source )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == [
+        ( "smoke/test_posts.py", "/api/v2/ask" ) ]
+
+
 # ── the real-tree assertions ────────────────────────────────────────────────
 def test_the_derivation_finds_the_lineage_aware_routers():
     """
@@ -871,6 +970,45 @@ def test_the_derivation_finds_the_lineage_aware_routers():
     endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
     assert endpoints, "derived ZERO lineage-aware endpoints — the router parse has rotted"
     assert "/api/v2/submit" in endpoints
+
+
+def _write( root, rel, text ):
+    path = os.path.join( root, rel )
+    os.makedirs( os.path.dirname( path ), exist_ok=True )
+    with open( path, "w" ) as f: f.write( text )
+
+
+GOOD_HELPER = f'import os\nparent = os.environ.get( "{LINEAGE_ENV}" )\nbody = {{ "{LINEAGE_FIELD}": parent }}\n'
+CALLER      = ( 'from tests.helpers.suite_lineage import lineage_request\n'
+                'requests.post( "http://x/api/v2/ask", **lineage_request( {}, {} ) )\n' )
+
+
+def test_a_file_that_sends_its_asks_through_the_shared_helper_is_threaded( tmp_path ):
+    _write( str( tmp_path ), HELPER_PATH, GOOD_HELPER )
+    _write( str( tmp_path ), "smoke/test_x.py", CALLER )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == []
+
+
+def test_the_helper_does_not_vouch_when_it_never_reads_the_env_var( tmp_path ):
+    _write( str( tmp_path ), HELPER_PATH, f'body = {{ "{LINEAGE_FIELD}": 1 }}\n' )
+    _write( str( tmp_path ), "smoke/test_x.py", CALLER )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == [ ( "smoke/test_x.py", "/api/v2/ask" ) ]
+
+
+def test_there_is_no_vouching_without_a_helper_file( tmp_path ):
+    _write( str( tmp_path ), "smoke/test_x.py", CALLER )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == [ ( "smoke/test_x.py", "/api/v2/ask" ) ]
+
+
+def test_importing_the_helper_without_calling_it_is_not_threading( tmp_path ):
+    _write( str( tmp_path ), HELPER_PATH, GOOD_HELPER )
+    _write( str( tmp_path ), "smoke/test_x.py",
+            'from tests.helpers.suite_lineage import lineage_request\nrequests.post( "http://x/api/v2/ask", json={} )\n' )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == [ ( "smoke/test_x.py", "/api/v2/ask" ) ]
+
+
+def test_the_real_helper_reads_the_env_var_and_stamps_the_field():
+    assert _helper_threads_the_parent_id( PROJECT_ROOT ) is True
 
 
 def test_every_lineage_aware_caller_threads_the_parent_id():

@@ -250,16 +250,23 @@ test("formatChaseTime: valid ISO with zone → MM-DD HH:MM string (non-empty, no
   assert.match(out, /\d/);
 });
 
-test("formatChaseTime: no zone → browser-local (non-empty)", () => {
-  const out = formatChaseTime("2026-06-16T14:30:00Z", undefined);
-  assert.notEqual(out, "—");
-  assert.match(out, /\d/);
+test("formatChaseTime: no zone → labelled UTC, whatever the browser zone is", () => {
+  const saved = process.env.TZ;
+  process.env.TZ = "Asia/Tokyo";
+  try {
+    assert.match(formatChaseTime("2026-06-16T14:30:00Z", undefined), /^06.16.? 14:30 UTC$/);
+  } finally {
+    if (saved === undefined) delete process.env.TZ; else process.env.TZ = saved;
+  }
 });
 
-test("formatChaseTime: invalid IANA zone → degrades to browser-local (no throw)", () => {
-  const out = formatChaseTime("2026-06-16T14:30:00Z", "Not/AZone");
-  assert.notEqual(out, "—");
-  assert.match(out, /\d/);
+test("formatChaseTime: invalid IANA zone → degrades to labelled UTC (no throw)", () => {
+  assert.match(formatChaseTime("2026-06-16T14:30:00Z", "Not/AZone"), /^06.16.? 14:30 UTC$/);
+});
+
+test("formatChaseTime: a valid zone is honoured and carries no UTC label", () => {
+  const out = formatChaseTime("2026-06-16T14:30:00Z", "Asia/Tokyo");
+  assert.match(out, /^06.16.? 23:30$/);
 });
 
 // ---------------------------------------------------------------------------

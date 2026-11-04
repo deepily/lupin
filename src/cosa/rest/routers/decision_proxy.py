@@ -2,10 +2,10 @@
 Decision proxy ratification API endpoints.
 
 Provides REST endpoints for viewing pending decisions and ratifying
-(approving/rejecting) them. Used by the morning ratification UI workflow.
+(approving or rejecting) them. Used by the morning ratification UI workflow.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from fastapi import APIRouter, Query, HTTPException, Depends
@@ -88,15 +88,14 @@ async def acknowledge_proxy_batch():
     Ensures:
         - Returns the retired batch ID and the new batch ID
 
-    🔴 NO OWNER CHECK, AND THAT IS A FINDING RATHER THAN AN OMISSION. Row 44d8e89c ruled an
-    owner check onto this route alongside ratify and delete. There is nothing here to own:
-    `_proxy_batch_state` is a single process-global counter, not a per-user record, and this
-    route takes no identity parameter in its path, query or body — both callers
-    (`notifications.js` and `ApiClient.acknowledgeProxy`) POST it body-less. Inventing a
-    required `user_email` would break both of them and would gate a counter that is shared
-    anyway. So the credential is the whole available fix, and the residue is real: any
-    credentialed caller can retire another user's displayed batch. Making the batch per-user
-    is a design change, not an authorization fix.
+    This route has no owner check, and that is a known limit, not an omission. There is
+    nothing here to own. `_proxy_batch_state` is a single process-global counter, not a
+    per-user record. The route takes no identity parameter in its path, query or body,
+    because both callers (`notifications.js` and `ApiClient.acknowledgeProxy`) POST it
+    without a body. A required `user_email` would break both and would gate a counter that
+    is shared anyway. So the credential is the whole available protection. Any credentialed
+    caller can retire another user's displayed batch. Making the batch per-user is a design
+    change, not an authorization fix.
     """
     result = acknowledge_batch()
     return { "status": "success", **result }
@@ -124,11 +123,10 @@ async def get_proxy_batch_id():
     Ensures:
         - Returns dict with status and batch_id
 
-    ⚠️ ITS SERVER-TO-SERVER CALLER HAD TO BE FIXED IN THE SAME PASS. Row 2d6f2221 left this
-    route open BECAUSE of that caller — `swe_team/orchestrator.py`'s proxy-summary
-    notification fetched it with no credential, so gating it would have broken the SWE
-    orchestrator. That caller now sends its API key; see
-    `SweTeamOrchestrator._emit_proxy_summary_notification`.
+    The server-to-server caller must send its API key. `swe_team/orchestrator.py` fetches
+    this route for its proxy-summary notification (see
+    `SweTeamOrchestrator._emit_proxy_summary_notification`). Without the key the gate
+    would break the SWE orchestrator.
     """
     return { "status": "success", "batch_id": get_current_batch_id() }
 
@@ -258,7 +256,7 @@ async def ratify_decision(
 
     Ensures:
         - Decision ratification_state updated to "approved" or "rejected"
-        - ratified_by and ratified_at set — from `audit_identity`, NOT from `user_email`
+        - ratified_by and ratified_at set from `audit_identity`, not from `user_email`
         - Trust state counters updated, keyed on `audit_identity`
         - Returns updated decision
 
@@ -270,10 +268,10 @@ async def ratify_decision(
     Args:
         decision_id: UUID of the decision
         audit_identity: the caller's account email, resolved from their credential by
-            `require_query_identity_owner`. This is what gets STORED. `user_email` is only the
-            claim the guard checked — accepting it here would let the same person write two
-            different strings (their bare user id, or their email in another case) into the
-            same audit column, and before this row it let an anonymous caller write anything.
+            `require_query_identity_owner`. This is what gets stored. `user_email` is only the
+            claim the guard checked. Accepting it here would let one person write two
+            different strings into the same audit column, such as a bare user id or the
+            email in another case.
         approved: True to approve, False to reject
         feedback: Optional feedback text
         user_email: Ratifying user's email, which must be the caller's own
@@ -714,7 +712,7 @@ async def update_trust_mode(
     config_mgr=Depends( get_config_mgr )
 ):
     """
-    Update trust mode at runtime for running orchestrator and/or INI config.
+    Change the trust mode at runtime for the running orchestrator and the INI config.
 
     Requires:
         - Authenticated user

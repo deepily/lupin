@@ -1,6 +1,6 @@
 #!/bin/bash
 # PROPOSED FIX for run-coverage-gate.sh's false green (row from Maya's working-tree-artifact
-# audit, src/rnd/v0.2.1/2026.08.30-working-tree-artifact-gate-audit.md).
+# audit, the R&D write-up "working tree artifact gate audit").
 #
 # THE DEFECT THIS CLOSES. The gate's floor is pyproject's `fail_under`, read from the
 # WORKING TREE at gate time — never from HEAD. Measured 2026-08-30 at sha 908414ad:

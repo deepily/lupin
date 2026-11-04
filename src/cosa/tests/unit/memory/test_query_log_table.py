@@ -31,7 +31,7 @@ def _cfg():
 
 def _make_table( debug=False, verbose=False ):
     """Build a QueryLogTable with config mocked; no I/O occurs."""
-    with patch( "cosa.memory.query_log_table.ConfigurationManager", return_value=_cfg() ):
+    with patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_cfg() ):
         return QueryLogTable( debug=debug, verbose=verbose )
 
 

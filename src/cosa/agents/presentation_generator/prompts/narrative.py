@@ -3,7 +3,7 @@
 Narrative Analysis Prompts for Presentation Generator.
 
 Provides system prompts, prompt builders, and response parsers for the
-narrative extraction phase (Orchestrator Phase 2: Analyze).
+narrative extraction phase (the orchestrator's Analyze step).
 
 The LLM analyzes a source document and classifies its sections into
 narrative arc positions, proposing a slide allocation for each.
@@ -14,6 +14,7 @@ import logging
 from typing import List, Optional
 
 from .json_recovery import recover_json_object
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_metadata
 
 logger = logging.getLogger( __name__ )
 
@@ -242,7 +243,7 @@ def parse_analysis_response( response_content: str ) -> List[ dict ]:
           content_summary, arc_position, proposed_slide_count, key_points
 
     Raises:
-        - ValueError (D6-STRICT fail-loud) when the response has no recoverable
+        - ValueError (strict fail-loud policy) when the response has no recoverable
           JSON object, the "sections" value is missing / not a list / empty, or
           every entry is a non-dict (zero usable sections). Slide data feeds pptx
           rendering downstream, so an empty/degenerate result is a real defect.
@@ -328,22 +329,7 @@ def extract_narrative_metadata( response_content: str ) -> dict:
     Returns:
         dict with total_proposed_slides and narrative_assessment, or empty dict
     """
-    content = response_content.strip()
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    elif content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-
-    try:
-        parsed = json.loads( content.strip() )
-        return {
-            "total_proposed_slides" : parsed.get( "total_proposed_slides", 0 ),
-            "narrative_assessment"  : parsed.get( "narrative_assessment", "" ),
-        }
-    except json.JSONDecodeError:
-        return {}
+    return extract_json_metadata( response_content, { "total_proposed_slides" : 0, "narrative_assessment" : "" } )
 
 
 # =============================================================================

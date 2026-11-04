@@ -1,20 +1,20 @@
 """
 Shared Proxy Agent Infrastructure — Layer 1.
 
-Base classes and utilities shared across all proxy agents (notification proxy,
-decision proxy, future domain proxies). Provides WebSocket listener, responder,
-strategy protocol, configuration, and CLI argument helpers.
+Base classes and utilities shared across all proxy agents: the notification
+proxy, the decision proxy and future domain proxies. Provides the WebSocket
+listener, responder, strategy protocol, configuration and CLI argument helpers.
 
 Modules:
-    base_strategy: Protocol definition for proxy response strategies
-    base_listener: WebSocket connection, auth, reconnection with exponential backoff
-    base_responder: Strategy chain execution and REST response submission
-    rest_submitter: Standalone REST response submission function
-    base_config: Connection defaults, reconnection params, credential resolution
-    base_cli: Shared CLI argument parser helpers
+    - base_strategy: Protocol definition for proxy response strategies.
+    - base_listener: WebSocket connection, auth, reconnection with exponential backoff.
+    - base_responder: Strategy chain execution and REST response submission.
+    - rest_submitter: Standalone REST response submission function.
+    - base_config: Connection defaults, reconnection params, credential resolution.
+    - base_cli: Shared CLI argument parser helpers.
 
 Dependency Rule:
-    This package NEVER imports from notification_proxy, decision_proxy, or swe_team.
+    This package never imports from notification_proxy, decision_proxy, or swe_team.
 """
 
 from cosa.agents.utils.proxy_agents.base_strategy import BaseStrategy

@@ -1,76 +1,44 @@
 """
-ORM-vs-database schema drift detector — the startup alarm (Half 3b, FAIL-OPEN).
+ORM-vs-database schema drift detector, the startup alarm (fail-open).
 
-Why this exists
----------------
-A ``mapped_column`` can land in ``postgres_models.py`` before its migration
-exists. R1 turned ``:7999``'s uvicorn ``--reload`` **OFF** on 2026-08-01, so a
-model edit no longer deploys itself — it sits **inert until someone bounces**.
-That is safer, but it changes the shipping rule: the migration must be *applied*
-before the bounce, not merely committed first, or the model and its column land
-together at the next restart and the ORM immediately SELECTs a column the
-database lacks — every read of that table then 500s fleet-wide until the
-migration is applied.
+Why this exists:
+    A ``mapped_column`` can land in ``postgres_models.py`` before its migration exists.
+    With uvicorn ``--reload`` off on ``:7999``, a model edit sits inert until a bounce.
+    So the migration must be applied before the bounce, not only committed first.
+    Otherwise the model and its column land together at restart. The ORM then selects
+    a column the database lacks, and every read of that table returns 500 fleet-wide.
+    ``/api/tasks`` is the task store that the Stop-hook and the arbiter both read.
+    A pytest-tier detector fires only when someone runs pytest, after reads fail.
+    This module fires at boot, on the box where the drift landed.
 
-Measured incident (2026-07-19): ``task_items.park_reason_captured_at`` — 12 live
-500s on ``/api/tasks`` over 2m 28s. ``/api/tasks`` is the task store, the
-owed-work oracle that both the Stop-hook and the arbiter read, so a read outage
-there is fleet-wide rather than local.
+Design contract:
+    1. Fail-open, always. Drift produces an alarm and the server serves anyway. A
+       refused boot would take down the box carrying the MCP transport, the task
+       store and the owed-work oracle. That turns a partial outage into a total one.
+       The worst case here is a false alarm, which is the correct price.
+    2. The alarm of record is the synchronous `CRITICAL` log on stderr, which needs no
+       network, auth, event loop or database. Any richer channel is decoration on top,
+       and its failure must never degrade the alarm.
+    3. Nothing here may raise or block. ``emit_startup_drift_alarm`` swallows every
+       exception, including one raised while reporting an exception.
+    4. Read-only against the database: reflection via ``inspect(engine)`` only.
+       ``MigrationContext.get_current_heads()`` returns ``()`` without a version table
+       and never calls ``_ensure_version_table()``, so it creates no table.
+    5. The alarm names model, table, column and revisions, so no re-diagnosis is needed.
 
-A pytest-tier detector only fires when someone runs pytest — which is *after* the
-store has already 500'd. This module is the tier that fires at boot, on the box
-where the drift actually landed.
+Placement:
+    Called from the ``lupin_app.main`` lifespan after ``run_migrations_to_head()``.
+    ``upgrade head`` cannot invent a migration for a column that has none, so the
+    defect survives auto-migrate and is visible afterwards. Running before it would
+    alarm on every legitimately pending migration, and such an alarm gets ignored.
 
-Design contract (all of it load-bearing)
-----------------------------------------
-1. **FAIL-OPEN, always.** Drift produces an alarm and the server **SERVES
-   ANYWAY**. A refused boot would take down the box carrying the MCP transport,
-   the task store, and the owed-work oracle — converting a partial outage into a
-   total one. Worst case here is a false alarm, which is the correct price.
-
-2. **The alarm of record is the synchronous CRITICAL log on stderr.** stderr has
-   no dependencies: no network, no auth, no event loop, no database. Any richer
-   channel (a UI notification) is strictly decoration layered on top, and its
-   failure must never degrade the alarm.
-
-3. **Nothing here may raise, and nothing here may block.**
-   :func:`emit_startup_drift_alarm` swallows every exception, including
-   exceptions raised while reporting an exception. A detector bug must not be
-   able to abort a boot that would otherwise have succeeded.
-
-4. **Read-only against the database.** Verified at source before use, because a
-   comparison run at boot must not itself mutate the schema it is judging:
-   - ``inspect(engine).get_table_names() / get_columns()`` — reflection only.
-   - ``MigrationContext.get_current_heads()`` guards on ``_has_version_table()``
-     and returns ``()`` when absent; it does **not** call
-     ``_ensure_version_table()``, so no ``CREATE TABLE`` is issued
-     (alembic 1.18.1, ``runtime/migration.py:499-542``).
-
-5. **The alarm names model, table, column, and revisions.** A startup alarm
-   reading only "drift detected" reproduces the diagnosis cost it exists to
-   remove (Mr. Radio's constraint).
-
-Placement
----------
-Called from the ``lupin_app.main`` lifespan **after** ``run_migrations_to_head()``.
-"After" is correct and was ruled on: ``upgrade head`` cannot fabricate a
-migration for a column that has none, so the target defect survives auto-migrate
-untouched and is fully visible afterwards. Running "before" would instead alarm
-on every legitimately-pending migration — a false alarm on every boot after any
-new migration lands, which is how a detector gets ignored into uselessness.
-
-Named limits (this detector is partial, and is not sold as complete)
---------------------------------------------------------------------
-- It checks the **ORM-has / DB-lacks** direction only. That is precisely the
-  500-causing class. A column the DB has but the ORM does not is harmless to
-  reads and is deliberately not reported here.
-- It compares **presence**, not type, nullability, or server default. Presence is
-  what produces ``UndefinedColumn``; type nuance is the ``compare_metadata()``
-  tier's job (Half 2), which is where a richer diff belongs. Keeping this tier
-  presence-only is deliberate: it has no false-alarm surface from reflection
-  nuance, and an alarm that cries wolf gets ignored.
-- It reads ``postgres_models.Base`` only. Tables mapped on any other declarative
-  base are invisible to it.
+Named limits (the detector is partial and is not sold as complete):
+    - It checks the ORM-has / DB-lacks direction only, the class that causes a 500.
+      A column the DB has and the ORM lacks is harmless to reads and not reported.
+    - It compares presence, not type, nullability or server default. Presence is what
+      raises ``UndefinedColumn``. Type nuance belongs to the ``compare_metadata()``
+      tier. Presence-only means no false alarms from reflection nuance.
+    - It reads ``postgres_models.Base`` only; tables on another base are invisible.
 """
 
 import asyncio
@@ -128,8 +96,8 @@ def find_missing_columns( engine, metadata, model_names=None ):
     """
     Find ORM-mapped tables/columns that the live database does not have.
 
-    This is the whole oracle. It is deliberately small and deliberately
-    one-directional: ORM-has / DB-lacks is the class that produces a live 500.
+    This is the whole oracle. It is small and one-directional: ORM-has / DB-lacks
+    is the class that produces a live 500.
 
     Requires:
         - engine is a connectable SQLAlchemy Engine
@@ -138,7 +106,7 @@ def find_missing_columns( engine, metadata, model_names=None ):
     Ensures:
         - returns a list of drift dicts, sorted by (table, column) for a stable
           alarm text across boots
-        - a table missing entirely yields ONE row (kind=missing_table) and its
+        - a table missing entirely yields one row (kind=missing_table) and its
           columns are not enumerated — the table is the actionable unit
         - returns [] when the database satisfies every mapped column
         - performs no writes
@@ -190,8 +158,8 @@ def read_revisions( engine ):
     """
     Best-effort read of the DB's stamped revision and the migration-script head.
 
-    Both are advisory context for the alarm text, never a gate: a drift finding
-    stands on its own whether or not the revisions could be read.
+    Both are advisory context for the alarm text and never a gate. A drift finding
+    stands whether or not the revisions could be read.
 
     Ensures:
         - returns ( db_revision, head_revision ), either of which may be None
@@ -228,10 +196,10 @@ def read_revisions( engine ):
 
 def format_drift_alarm( drift, db_revision, head_revision ):
     """
-    Render the CRITICAL alarm text.
+    Render the `CRITICAL` alarm text.
 
-    Names model, table, column, and both revisions, so the reader can act
-    without re-deriving the diagnosis the alarm exists to remove.
+    Names model, table, column and both revisions, so the reader can act
+    without re-deriving the diagnosis.
 
     Requires:
         - drift is a non-empty list of drift dicts
@@ -320,7 +288,7 @@ def check_schema_drift( database_url=None ):
           is present
         - returns None when the database satisfies every mapped column
         - disposes the engine it creates
-        - MAY raise — this is the inner, testable form. The boot path calls
+        - may raise: this is the inner, testable form. The boot path calls
           emit_startup_drift_alarm(), which is the one that cannot raise.
 
     Args:
@@ -369,20 +337,18 @@ def check_schema_drift( database_url=None ):
 
 def emit_startup_drift_alarm( database_url=None, debug=False ):
     """
-    The boot-path entry point: detect drift and log the CRITICAL alarm.
+    Boot-path entry point: detect drift, log the `CRITICAL` alarm, never raise.
 
-    This function is **structurally incapable of raising or blocking**. It makes
-    no network call, awaits nothing, and swallows every exception — including one
-    raised while reporting an exception. That is not defensive habit: it is the
-    fail-open contract. A bug in this detector must never be able to abort a boot
-    that would otherwise have succeeded.
+    It makes no network call, awaits nothing, and swallows every exception,
+    including one raised while reporting an exception. That is the fail-open
+    contract: a bug here must never abort a boot that would otherwise succeed.
 
     Ensures:
-        - on drift: writes the CRITICAL alarm to stderr and returns the report
+        - on drift: writes the `CRITICAL` alarm to stderr and returns the report
         - on no drift: returns None (and prints a one-liner when debug)
-        - on ANY internal failure: returns None, having written a bounded
+        - on any internal failure: returns None, having written a bounded
           diagnostic to stderr; never propagates
-        - performs NO network I/O and NO awaiting
+        - performs no network I/O and no awaiting
 
     Args:
         database_url: optional explicit URL (None → the app's resolved URL)
@@ -390,7 +356,7 @@ def emit_startup_drift_alarm( database_url=None, debug=False ):
 
     Returns:
         dict | None — the drift report, for a caller that wants to route it to a
-        richer channel AFTER startup completes. Never required.
+        richer channel after startup completes. Never required.
     """
     try:
         report = check_schema_drift( database_url=database_url )
@@ -466,8 +432,8 @@ def push_drift_notification( report, recipient_email, notification_queue ):
     Resolve the configured recipient and enqueue the drift notification.
 
     Synchronous and blocking (a DB lookup plus a queue push), so callers run it
-    off the event loop. Separated from the async wrapper purely so the resolution
-    logic is directly testable without an event loop.
+    off the event loop. It is separate from the async wrapper so the resolution
+    logic can be tested without an event loop.
 
     Requires:
         - recipient_email is a non-empty string
@@ -476,8 +442,8 @@ def push_drift_notification( report, recipient_email, notification_queue ):
     Ensures:
         - returns True when a notification was enqueued
         - returns False when the configured recipient does not resolve to a user,
-          having warned on stderr — a MISCONFIGURED key must be visible, because
-          push_notification() itself accepts an unknown user_id silently and the
+          having warned on stderr, because a misconfigured key must be visible and
+          push_notification() itself accepts an unknown user_id silently, so the
           alarm would otherwise vanish without trace
 
     Args:
@@ -530,7 +496,7 @@ async def deliver_drift_notification( report, recipient_email, notification_queu
         - the blocking work runs in a worker thread, so a slow DB lookup cannot
           stall the event loop of a server that is already accepting traffic
         - abandoned after timeout_seconds
-        - NEVER raises: a delivery failure is reported to stderr and swallowed,
+        - never raises: a delivery failure is reported to stderr and swallowed,
           because the alarm of record has already fired and the second channel
           must not be able to damage the first
 
@@ -559,20 +525,15 @@ def schedule_drift_notification( report, recipient_email, notification_queue,
     """
     Schedule the drift notification to run once the app is serving.
 
-    This is the whole "post-yield" mechanism. asyncio.create_task() does not
-    begin executing the coroutine — it only queues it on the loop, which cannot
-    resume until the lifespan generator yields. So calling this pre-yield is
-    correct AND non-blocking, whereas awaiting delivery pre-yield would dial a
-    server that is not yet accepting connections.
-
-    NOTE: main.py has exactly ONE yield and everything after it is SHUTDOWN, so a
-    literal post-yield call site would fire this alarm as the server goes DOWN.
+    create_task() only queues the coroutine until the lifespan yields, so a pre-yield
+    call is non-blocking; awaiting pre-yield would dial a server not yet accepting.
+    A post-yield call would run at shutdown, since main.py has one yield.
 
     Ensures:
         - returns None without scheduling anything when there is no drift, no
-          recipient configured (the EMPTY DEFAULT — the common case), or no queue
+          recipient configured (the empty default, the common case), or no queue
         - returns the created Task otherwise
-        - NEVER raises, including when there is no running event loop
+        - never raises, including when there is no running event loop
 
     Args:
         report:             the drift report, or None when there is no drift

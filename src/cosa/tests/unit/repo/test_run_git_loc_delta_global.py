@@ -326,16 +326,14 @@ class TestAnalyzeRepos( _GitRepoFixtureMixin, unittest.TestCase ):
         df, commits, cov, empty, skipped = _analyze( [ repo ], since=None, until=None )
         self.assertEqual( skipped, [] )
 
-    def test_include_merges_adds_no_loc_but_guard_flags_the_merge( self ):
+    def test_include_merges_counts_the_merge_and_the_guard_reconciles( self ):
         """
-        A subtlety worth pinning. `git log --numstat` emits a merge commit's HEADER but
-        NO file rows (numstat is silent on merges without -m/--cc), so a merge contributes
-        zero counted rows and never enters the SHA set — LoC and commit totals are
-        IDENTICAL with and without --include-merges.
+        A merge counts what it brought in over its first parent. `git log --numstat` prints
+        no rows for a merge on its own, so the parser asks for `--diff-merges=first-parent`.
 
-        But `git rev-list` DOES count the merge. So the coverage guard correctly reports
-        it as uncounted — the same benign-but-visible shape as a binary-only commit. This
-        is the guard doing its job, not a defect.
+        With the flag the merge adds its rows and enters the SHA set, so the coverage guard
+        (which counts it through `git rev-list`) agrees. Without the flag both ignore it.
+        Row 895261c6: before the fix the totals were identical either way.
         """
         repo = self.init_repo( "merges" )
         self.commit( repo, { "a.py": self.lines( "a", 3 ) }, "base" )
@@ -353,17 +351,14 @@ class TestAnalyzeRepos( _GitRepoFixtureMixin, unittest.TestCase ):
         s_no  = g._build_summary( df_no,  commits_no  )
         s_yes = g._build_summary( df_yes, commits_yes )
 
-        # The merge carries no numstat rows → totals are unchanged.
-        self.assertEqual( s_yes[ "total_added"   ], s_no[ "total_added"   ] )
-        self.assertEqual( s_yes[ "total_commits" ], s_no[ "total_commits" ] )
+        # The merge brings b.py (3 lines) in over its first parent, and is one more commit.
+        self.assertEqual( s_yes[ "total_added"   ], s_no[ "total_added"   ] + 3 )
+        self.assertEqual( s_yes[ "total_commits" ], s_no[ "total_commits" ] + 1 )
 
-        # Without merges: git and we agree exactly.
+        # Git and we agree exactly, with and without the merge.
         self.assertTrue( cov_no[ 0 ][ "reconciled" ] )
-
-        # With merges: git counts the merge, we cannot → the guard says so, out loud.
-        self.assertFalse( cov_yes[ 0 ][ "reconciled" ] )
-        self.assertEqual( cov_yes[ 0 ][ "expected" ] - cov_yes[ 0 ][ "counted" ], 1 )
-        self.assertIn( "COVERAGE MISMATCH", err.getvalue() )
+        self.assertTrue( cov_yes[ 0 ][ "reconciled" ] )
+        self.assertNotIn( "COVERAGE MISMATCH", err.getvalue() )
 
     def test_debug_flag_threaded( self ):
         repo = self.init_repo( "dbg" )

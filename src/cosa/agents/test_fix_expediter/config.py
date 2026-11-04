@@ -9,7 +9,9 @@ See: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/12-config-inventory.md
 """
 
 import os
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
+
+from cosa.agents.shared.config_loader import load_kwargs_from_ini
 from typing import Optional
 
 
@@ -21,6 +23,7 @@ class TestFixExpediterConfig:
     Requires:
         - All numeric values are positive
         - trust_mode in {"inherit", "shadow", "fixed_l1", "fixed_l3"}
+        - push_fix_branch_enabled is false unless the INI turns it on; false means nothing is pushed
         - rerun_scope in {"affected", "full"}
         - voice_gate_mode in {"aggregate", "per_cluster"}
 
@@ -76,6 +79,7 @@ class TestFixExpediterConfig:
 
     # === Trust / Git ===
     trust_mode                    : str   = "inherit"
+    push_fix_branch_enabled       : bool  = False
 
     # === Phase 6 validation ===
     rerun_scope                   : str   = "affected"
@@ -145,6 +149,7 @@ class TestFixExpediterConfig:
             "cost_cap_usd"                : "test fix expediter cost cap usd",
             "wall_clock_timeout_secs"     : "test fix expediter wall clock timeout secs",
             "trust_mode"                  : "test fix expediter trust mode",
+            "push_fix_branch_enabled"     : "test fix expediter push fix branch enabled",
             "rerun_scope"                 : "test fix expediter rerun scope",
             "continue_on_cluster_failure" : "test fix expediter continue on cluster failure",
             "voice_gate_mode"             : "test fix expediter voice gate mode",
@@ -154,27 +159,7 @@ class TestFixExpediterConfig:
             "narrate_progress"            : "test fix expediter narrate progress",
         }
 
-        kwargs    = {}
-        dc_fields = { f.name: f for f in fields( cls ) }
-
-        for field_name, ini_key in key_map.items():
-            dc_field   = dc_fields[ field_name ]
-            default    = dc_field.default
-            field_type = dc_field.type
-
-            if field_type == "bool" or field_type is bool:
-                return_type = "boolean"
-            elif field_type == "int" or field_type is int:
-                return_type = "int"
-            elif field_type == "float" or field_type is float:
-                return_type = "float"
-            else:
-                return_type = "string"
-
-            value = config_mgr.get( ini_key, default=default, return_type=return_type )
-            kwargs[ field_name ] = value
-
-            if debug: print( f"  [TestFixExpediterConfig] {field_name} = {value} (from INI: {ini_key})" )
+        kwargs = load_kwargs_from_ini( cls, config_mgr, key_map, debug=debug )
 
         # Env-var override for feedback_timeout_seconds — used by
         # test_live_stall_and_resume to force voice-gate timeout deterministically

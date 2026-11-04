@@ -1,42 +1,36 @@
 #!/usr/bin/env python3
 """
-Observe Gate B ADMITTING a lineage child through a monopoly hold — row 99b09840.
+Observe Gate B admitting a lineage child through a monopoly hold.
 
-WHAT THIS ANSWERS, and what it deliberately does not. Row 7451bebe proved the parent-id
-tag is THREADED: six routers stamp it at the same seam, eight untagged callers were closed,
-a strict marker forced its own waiver off. Tiberius, in red on that row: "THREADED IS A
-FLOOR, NOT THE VERDICT." What is still unproven is that the CONSUMER ACCEPTS the child once
-it is tagged. This script observes that and nothing else.
+What this answers, and what it does not:
+    The parent-id tag is threaded: six routers stamp it at the same seam. Threaded is a
+    floor, not the verdict. What is still unproven is that the consumer accepts the
+    child once it is tagged. This script observes that and nothing else.
 
-THE OBSERVABLE IS A CONJUNCTION — all three true in ONE sample of /api/queue/pool-status:
+The observable is a conjunction, all three true in one sample of /api/queue/pool-status:
 
     1. monopolize_inflight is True
     2. inflight_agentic_jobs >= 1
-    3. monopolize_id == THIS RUN'S OWN test-suite job id
+    3. monopolize_id equals this run's own test-suite job id
 
-⚠️ CLAUSE 3 IS NOT DECORATION. maria's watcher on 2026-08-21 was reading
-monopolize_inflight=True off SOMEBODY ELSE'S E2E hold; one tick with any unrelated child
-running and it would have printed QUALIFYING SAMPLE against a job that was not hers. On a
-box several sessions submit to, "during the hold" has to mean "during MY hold". The runner
-exports its own id_hash as LUPIN_TEST_MONOPOLIZE_PARENT_ID (test_suite/job.py) and that same
-id_hash is what pool-status reports as monopolize_id, so the identity is directly checkable
-against the job id the submit returned.
+Clause 3 is required. Another session's E2E hold also shows monopolize_inflight=True.
+One tick with any unrelated child running would then print a qualifying sample for a
+job that was not ours. The runner exports its own id_hash as LUPIN_TEST_MONOPOLIZE_PARENT_ID
+(test_suite/job.py), and pool-status reports that same id_hash as monopolize_id. The
+identity is checked against the job id the submit returned.
 
-⚠️ WHAT DOES NOT COUNT, restated here so it cannot drift in the reading: the sweep not
-erroring; no 900s timeout; the job eventually completing; a green suite. A deferred child
-that runs AFTER the hold releases looks identical from the outside and is the exact failure
-this row is about. NO QUALIFYING SAMPLE IS A FAIL, NOT INCONCLUSIVE — and this script exits
-non-zero in that case rather than reporting an ambiguity.
+What does not count: the sweep not erroring, no 900s timeout, the job eventually
+completing, a green suite. A deferred child that runs after the hold releases looks
+identical from outside, and it is the failure this script exists to detect. No qualifying
+sample is a fail, never inconclusive, and the script exits non-zero in that case.
 
-⚠️ EVERY SAMPLE IS WRITTEN TO DISK, AS JSON LINES, FLUSHED PER SAMPLE. The 2026-08-21
-attempt left no log anywhere, and that is half of why nobody could say what happened. A
-verdict nobody can re-read is not evidence. The qualifying sample is printed VERBATIM, not
-summarised, for the same reason.
+Every sample is written to disk as JSON lines, flushed per sample, so a killed run still
+leaves a log. The qualifying sample is printed verbatim, not summarised.
 
-VENUE: :8000 only, and only when it is free and on the MAIN mount. A job queued behind a rig
-that recreated the container on a detached-worktree mount measures the WRONG TREE and returns
-a plausible number instead of an error. Both preconditions are checked before submit, and the
-script refuses rather than degrading.
+Venue: :8000 only, and only when it is free and on the main mount. A job queued behind a
+rig that recreated the container on a detached-worktree mount measures the wrong tree.
+It returns a plausible number instead of an error. Both preconditions are checked before
+submit, and the script refuses rather than degrading.
 
 Usage:
     python3 src/scripts/observe_gate_b_admission.py --out io/gate-b/<stamp>/
@@ -99,10 +93,9 @@ YAML_DIR      = "io/presentations/interactive.job.tester@lupin.deepily.ai"
 
 def _http( method, path, token=None, body=None, timeout=30 ):
     """
-    One HTTP call against the test server.
+    One HTTP call against the test server, using urllib (curl is prohibited for API work).
 
-    ⚠️ urllib, never curl — curl is prohibited for API work (CLAUDE.md § testing
-    anti-patterns). Returns ( status_code, decoded_json_or_text ).
+    Returns ( status_code, decoded_json_or_text ).
     """
     url  = f"{BASE_URL}{path}"
     data = json.dumps( body ).encode() if body is not None else None
@@ -152,11 +145,11 @@ def login():
 
 def check_mount():
     """
-    The test container must be on the MAIN checkout, not a detached worktree.
+    The test container must be on the main checkout, not a detached worktree.
 
-    A rig that recreated the container on a worktree mount measures the WRONG TREE and
-    returns a plausible number instead of an error — which is worse than a failure, because
-    nothing about the output says it happened.
+    A rig that recreated the container on a worktree mount measures the wrong tree and
+    returns a plausible number instead of an error. That is worse than a failure, because
+    nothing in the output says it happened.
 
     Ensures:
         - returns ( ok, detail ); never raises on a docker hiccup, so the caller can report
@@ -182,12 +175,10 @@ def check_mount():
 
 def check_prior_yaml():
     """
-    Render-only re-renders a PRIOR full-pipeline YAML; one must exist for the test user.
+    Render-only re-renders a prior full-pipeline YAML; one must exist for the test user.
 
-    Checked BEFORE submit because a substitution whose precondition was never verified is a
-    hope rather than a substitution. Without a YAML the suite cannot spawn the child at all,
-    and the run would report NO QUALIFYING SAMPLE — a FAIL, per this row — for a reason that
-    has nothing to do with Gate B.
+    Checked before submit. Without a YAML the suite cannot spawn the child, and the run
+    would report a fail for a reason unrelated to Gate B.
 
     Ensures:
         - returns ( ok, detail ) naming the newest YAML found, or saying none was
@@ -205,12 +196,11 @@ def check_prior_yaml():
 
 def check_idle( token ):
     """
-    :8000 must be free — nothing running, nothing queued.
+    :8000 must be free: no monopolizer holding and no agentic job in flight.
 
-    ⚠️ Reads the pool state, NOT only the user-filtered queue view. Row 62eb2e9c's precheck
-    is the model: a filtered queue view shows only your own rows and will call a busy box
-    idle. A monopolizer already holding is the specific thing that must not be mistaken for
-    an empty box, because this script's whole subject is who holds the monopoly.
+    Reads the pool state, not the user-filtered queue view, which shows only the caller's
+    own rows and calls a busy box idle. A monopolizer already holding must not pass as an
+    empty box. Queued work that has not started is not examined.
 
     Ensures:
         - returns ( ok, pool_payload )
@@ -230,21 +220,13 @@ def _job_key( job_id ):
     """
     The identity half of a job id, for comparing a monopolize_id against a submit response.
 
-    ⚠️ MEASURED, NOT ASSUMED — and a plain `==` here would have failed a WORKING system.
-    The submit endpoint's own field description says the job id is "ts-{uuid8}", but a live
-    pool-status read on 2026-08-24 returned:
-
-        "monopolize_id": "ts-21fd1f2b::50c73ba7-36dd-4eaf-a7e2-63256252c84f"
-
-    i.e. the id carries a `::<user_uuid>` suffix. Comparing the documented shape against the
-    live shape would report NO QUALIFYING SAMPLE while Gate B was admitting the child
-    correctly — a FAIL verdict caused by the instrument, on the one row whose whole subject
-    is an instrument that could not see. Found by running the preconditions against the live
-    box before submitting anything.
+    The submit endpoint documents the job id as "ts-{uuid8}", but pool-status returns a
+    `::<user_uuid>` suffix after it. A plain `==` would report no qualifying sample while
+    Gate B was admitting the child correctly, a fail caused by the instrument.
 
     Ensures:
         - returns the `ts-…` identity half, whichever form the id arrives in
-        - this stays an EXACT match on a unique job id, not a loose prefix test: clause 3
+        - this stays an exact match on a unique job id, not a loose prefix test: clause 3
           must still be unable to match somebody else's monopolizer
     """
     return job_id.split( "::" )[ 0 ] if job_id else None
@@ -252,16 +234,16 @@ def _job_key( job_id ):
 
 def qualifies( sample, my_job_id ):
     """
-    All three clauses, in THIS one sample.
+    All three clauses, in this one sample.
 
     Requires:
-        - my_job_id is the id the submit returned for THIS run's sweep
+        - my_job_id is the id the submit returned for this run's sweep
 
     Ensures:
-        - True only when monopolize_inflight is True AND inflight_agentic_jobs >= 1 AND
-          monopolize_id names THIS run's own job
-        - clause 3 compares against THIS run's job, never merely "some monopolizer" — that
-          is the 2026-08-21 defect this row exists to not repeat
+        - True only when monopolize_inflight is True and inflight_agentic_jobs >= 1 and
+          monopolize_id names this run's own job
+        - clause 3 compares against this run's job, never merely "some monopolizer",
+          so that another session's hold is not read as ours
     """
     mine = _job_key( my_job_id )
     return (
@@ -274,13 +256,13 @@ def qualifies( sample, my_job_id ):
 
 def watch( token, my_job_id, out_dir, max_seconds ):
     """
-    Poll pool-status every POLL_SECONDS, writing EVERY sample to disk as it arrives.
+    Poll pool-status every POLL_SECONDS, writing every sample to disk as it arrives.
 
     Ensures:
         - each sample is one JSON line in samples.jsonl, flushed immediately, so a killed
-          run still leaves everything it saw (the 08-21 attempt left nothing)
+          run still leaves everything it saw, where an unflushed run leaves nothing
         - returns ( qualifying_sample_or_None, n_samples )
-        - stops early on the first qualifying sample; the row asks for ONE
+        - stops early on the first qualifying sample, since one is all the verdict needs
     """
     os.makedirs( out_dir, exist_ok=True )
     path      = os.path.join( out_dir, "samples.jsonl" )

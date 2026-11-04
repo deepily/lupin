@@ -193,7 +193,7 @@ def test_claude_md_merge_pyramid_agrees_with_all_suite_components():
     """
     CLAUDE.md's merge pyramid and the code's suite list must name the same suites.
 
-    THE FAILURE THIS PREVENTS, measured 2026-08-25: CLAUDE.md § PR MERGE REQUIREMENTS
+    THE FAILURE THIS PREVENTS, measured 2026-08-25: CLAUDE.md § PR merge requirements
     listed six steps and omitted BOTH `typescript` and `smoke`, while
     ALL_SUITE_COMPONENTS and run-all-tests.sh's SUITES=(...) both carried seven
     suites. A reader following the documented pyramid merged without ever running
@@ -222,7 +222,7 @@ def test_claude_md_merge_pyramid_agrees_with_all_suite_components():
     assert marker is not None, (
         "CLAUDE.md carries no `<!-- merge-pyramid-suites: ... -->` marker — the merge "
         "pyramid became unparseable, so this drift check cannot run. Restore the marker "
-        "immediately above § PR MERGE REQUIREMENTS' order sentence."
+        "immediately above § PR merge requirements' order sentence."
     )
     documented = marker.group( 1 ).split()
 
@@ -300,7 +300,7 @@ def test_claude_md_numbered_gate_table_carries_every_suite():
     against the very failure it had just re-created one level up.
 
     Requires:
-        - CLAUDE.md carries a `| # | gate | venue |` table under § PR MERGE REQUIREMENTS
+        - CLAUDE.md carries a `| # | gate | venue |` table under § PR merge requirements
 
     Ensures:
         - the table's numbering is contiguous from 1, with no gaps or repeats
@@ -314,7 +314,7 @@ def test_claude_md_numbered_gate_table_carries_every_suite():
     assert header != -1, (
         "CLAUDE.md carries no `| # | gate | venue |` table — the numbered merge pyramid "
         "became unparseable, so this drift check cannot run. It lives under "
-        "§ PR MERGE REQUIREMENTS, beneath the merge-pyramid-suites marker."
+        "§ PR merge requirements, beneath the merge-pyramid-suites marker."
     )
 
     rows = []
@@ -531,3 +531,29 @@ def test_the_runner_injects_its_own_job_id_for_artifact_provenance():
         "LUPIN_TEST_SUITE_JOB_ID is spread-over by **self.env_vars — a caller could "
         "relabel whose run wrote an artifact. Move the injection after the spread."
     )
+
+
+def test_the_runner_builds_the_production_bundle_before_it_measures_anything( runner_source ):
+    """
+    Starts from a production bundle, so the bundle gate does not depend on what ran before.
+
+    A smoke test once left an unminified boot.js in the tree.
+    The bundle tests in this suite then failed on a file nothing in this run had built.
+
+    Requires:
+        - runner_source is the runner script's full text
+
+    Ensures:
+        - an executable line runs build-multiplexer.sh in production mode, not --watch
+        - it comes before the tree-state report and before the c8 invocation
+    """
+    executable = [ ln for ln in runner_source.splitlines() if not ln.lstrip().startswith( "#" ) ]
+    builds     = [ i for i, ln in enumerate( executable ) if "build-multiplexer.sh" in ln ]
+
+    assert len( builds ) == 1, f"expected exactly one executable build-multiplexer.sh line, found {len( builds )}"
+    assert "--watch" not in executable[ builds[ 0 ] ], "a watch build is the dev bundle this guard exists to keep out"
+
+    state = next( i for i, ln in enumerate( executable ) if ln.strip() == "emit_tree_state" )
+    c8    = next( i for i, ln in enumerate( executable ) if "npx c8" in ln )
+    assert builds[ 0 ] < state, "build before the tree-state line, or the bundle hash it reports moves during the run"
+    assert builds[ 0 ] < c8,    "build before the tests run"

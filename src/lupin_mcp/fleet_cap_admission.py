@@ -500,9 +500,96 @@ def _live_bridge_lookup( tmux_session_name: str ):
     return find_session_by_tmux( tmux_session_name )
 
 
+AGENT_MARKERS = ( "CLAUDECODE", "COSA_VOICE_SPAWNED_BY" )
+
+
+def _launched_by_an_agent( headless: bool, stdin_is_tty_fn: Callable, environ: Any ) -> bool:
+    """
+    Whether this launch looks like it came from an agent and not from a person's terminal.
+
+    Requires:
+        - stdin_is_tty_fn() -> bool
+        - environ supports .get
+
+    Ensures:
+        - True for a headless launch
+        - True when stdin is not a terminal, which is a manager's shell
+        - True when an agent marker is set to a non-empty value in the environment
+        - False only for a person at a terminal with no marker
+    """
+    if headless:
+        return True
+    if not stdin_is_tty_fn():
+        return True
+    return any( environ.get( marker ) for marker in AGENT_MARKERS )
+
+
+def _live_skeleton_refusal() -> Optional[ str ]:
+    """The skeleton crew refusal for a launch, read fresh from the configuration file."""
+    from lupin_mcp import skeleton_crew
+    return skeleton_crew.skeleton_crew_refusal(
+        None, disk_fn=skeleton_crew.default_disk_skeleton_reader, door="launch" )
+
+
+def _live_stdin_is_tty() -> bool:
+    """Whether this process's stdin is a terminal."""
+    return sys.stdin.isatty()
+
+
+def _live_credit_spend( manager_session_id: str, slug: str, session_name: str ) -> bool:
+    """Take the re-spin credit in the real credit folder, for this launch."""
+    from lupin_mcp import respin_credit
+    return respin_credit.spend( manager_session_id, slug, session_name=session_name,
+                                owner_pid=os.getppid() )
+
+
+def _live_credit_restore( session_name: str ) -> bool:
+    """Give back the credit a launch took, when that launch did not start a session."""
+    from lupin_mcp import respin_credit
+    return respin_credit.restore( session_name )
+
+
+def _skeleton_refusal( headless: bool, skeleton_fn: Callable, stdin_is_tty_fn: Callable,
+                       environ: Any, stderr: Any, credit_spend_fn: Callable = _live_credit_spend,
+                       session_name: str = "" ) -> Optional[ str ]:
+    """
+    The skeleton crew refusal for this launch, or None when it may go on.
+
+    Ensures:
+        - returns None for a person at a terminal, whatever the switch says
+        - returns the refusal text for an agent launch when the switch is on
+        - returns None for a re-spin whose credit this call spent, once
+        - never spends a credit when the switch is off
+        - a check that raises is allowed, and says so on stderr, like the cap guard
+        - a credit that cannot be spent, for any reason, leaves the refusal in place
+    """
+    try:
+        if not _launched_by_an_agent( headless, stdin_is_tty_fn, environ ):
+            return None
+        refusal = skeleton_fn()
+        if refusal is None:
+            return None
+    except Exception as error:
+        stderr.write( f"\n[SKELETON-CREW] check could not run, ALLOWING the launch: {error}\n\n" )
+        return None
+
+    from lupin_mcp import respin_credit
+    parsed = respin_credit.parse_env_value( environ.get( respin_credit.CREDIT_ENV ) )
+    if parsed is None:
+        return refusal
+    try:
+        spent = credit_spend_fn( parsed[ 0 ], parsed[ 1 ], session_name )
+    except Exception:
+        return refusal
+    return None if spent else refusal
+
+
 def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under_lock,
           release_fn: Callable = release, dir_fn: Callable = reservation_dir,
-          stderr = None ) -> int:
+          stderr = None, skeleton_fn: Optional[ Callable ] = None,
+          stdin_is_tty_fn: Optional[ Callable ] = None, environ: Any = None,
+          credit_spend_fn: Optional[ Callable ] = None,
+          credit_restore_fn: Optional[ Callable ] = None ) -> int:
     """
     The command line `start-cc-with-tmux.sh` runs before it creates a tmux session.
 
@@ -512,6 +599,7 @@ def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under
     Ensures:
         - EXIT_ADMITTED (0) — the launch may proceed; a reservation holds its seat
         - EXIT_REFUSED (3) — over cap AND `--headless`; the refusal is on stderr
+        - EXIT_REFUSED (3) — skeleton crew is on and the launch is not a person at a terminal
         - EXIT_ADMITTED with a warning when over cap WITHOUT `--headless`
         - EXIT_ADMITTED on ANY internal failure, with the failure printed to stderr —
           fail-open, matching `default_fleet_gate`
@@ -533,10 +621,29 @@ def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under
     parser.add_argument( "--release",  action="store_true" )
     args = parser.parse_args( argv )
 
+    if not args.release:
+        refusal = _skeleton_refusal(
+            args.headless,
+            skeleton_fn     if skeleton_fn     is not None else _live_skeleton_refusal,
+            stdin_is_tty_fn if stdin_is_tty_fn is not None else _live_stdin_is_tty,
+            environ         if environ         is not None else os.environ,
+            stderr,
+            credit_spend_fn if credit_spend_fn is not None else _live_credit_spend,
+            args.session_name )
+        if refusal is not None:
+            stderr.write( f"\n[SKELETON-CREW] REFUSING TO LAUNCH: {refusal}\n\n" )
+            return EXIT_REFUSED
+
     try:
         directory = dir_fn()
         if args.release:
             release_fn( args.session_name, directory )
+            # A launch that took a re-spin credit and then never started a session gives
+            # it back, so the manager can try again. A failure here never breaks the release.
+            try:
+                ( credit_restore_fn if credit_restore_fn is not None else _live_credit_restore )( args.session_name )
+            except Exception:
+                pass
             return EXIT_ADMITTED
 
         verdict = admit_fn(

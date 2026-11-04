@@ -1,19 +1,20 @@
 """
 pytest plugin: hold the session open for a fixed interval, changing nothing else.
 
-Row `87ae7234`. This is the DEMONSTRATION lever, not the detector. Held beside an
-otherwise-identical baseline it shows the defect plainly - the same 333 tests report
-15% or 18% of session_bridge.py depending only on session length. It was tried as a
-detector and rejected: it fires only when the baseline finishes inside one poll
-interval, and under subprocess overhead the baseline took 5.6s against a 2.0s poll,
-reporting CLEAN on a scope it had itself proven dirty. The shipped detector is
-`detect_thread_credited_coverage.py`, which uses thread attribution instead. Background threads accrue coverage while the
-session is open, so any line covered in the held run and not in the baseline was
-credited by elapsed time rather than by a test.
+This is the demonstration lever, not the detector. The shipped detector is `detect_thread_credited_coverage.py`.
 
-Interval comes from LUPIN_CLOCK_HOLD_SECONDS (default 12.0), which must exceed the
-slowest poll interval among the threads under test — cosa_voice_mcp's watcher polls
-every 2.0s.
+Notes:
+    - Held beside an otherwise-identical baseline, it shows the defect plainly.
+    - The same 333 tests report 15% or 18% of session_bridge.py depending only on session length.
+    - Background threads accrue coverage while the session is open.
+    - So any line covered in the held run and not in the baseline was credited by elapsed time, not by a test.
+    - It was tried as a detector and rejected, because it fires only when the baseline finishes inside one poll interval.
+    - Under subprocess overhead the baseline took 5.6s against a 2.0s poll.
+    - It then reported clean on a scope it had itself proven dirty.
+    - The shipped detector uses thread attribution instead.
+    - The interval comes from `LUPIN_CLOCK_HOLD_SECONDS` (default 12.0).
+    - It must exceed the slowest poll interval among the threads under test.
+    - The watcher in cosa_voice_mcp polls every 2.0s.
 """
 import os
 import time

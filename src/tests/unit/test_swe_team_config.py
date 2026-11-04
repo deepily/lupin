@@ -431,6 +431,7 @@ class TestTrustProxyConfigFactory:
         from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
 
         mock_mgr = MagicMock()
+        mock_mgr.get_required = MagicMock( return_value="America/Chicago" )
         mock_mgr.get = MagicMock( side_effect=lambda key, default=None, return_type="string": default )
 
         result = trust_proxy_config_from_config_mgr( mock_mgr )
@@ -467,6 +468,7 @@ class TestTrustProxyConfigFactory:
         )
 
         mock_mgr = MagicMock()
+        mock_mgr.get_required = MagicMock( return_value="America/Chicago" )
         mock_mgr.get = MagicMock( side_effect=lambda key, default=None, return_type="string": default )
 
         result = trust_proxy_config_from_config_mgr( mock_mgr )
@@ -482,6 +484,7 @@ class TestTrustProxyConfigFactory:
         from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
 
         mock_mgr = MagicMock()
+        mock_mgr.get_required = MagicMock( return_value="America/Chicago" )
         calls = {}
 
         def track_calls( key, default=None, return_type="string" ):
@@ -496,14 +499,15 @@ class TestTrustProxyConfigFactory:
         assert calls[ "decision proxy enabled" ] == "boolean"
         assert calls[ "swe team trust proxy l2 threshold" ] == "int"
         assert calls[ "swe team trust proxy circuit breaker error rate threshold" ] == "float"
-        assert calls[ "decision proxy timezone" ] == "string"
+        assert "decision proxy timezone" not in calls
+        mock_mgr.get_required.assert_called_once_with( "decision proxy timezone" )
 
 
 class TestSweProxyConfigFactory:
     """Tests for swe_proxy_config_from_config_mgr factory function."""
 
     def test_factory_returns_all_expected_keys( self ):
-        """Factory returns dict with all 4 SWE-specific keys."""
+        """Factory returns dict with all 5 SWE-specific keys."""
         from unittest.mock import MagicMock
         from cosa.agents.swe_team.proxy.config import swe_proxy_config_from_config_mgr
 
@@ -514,7 +518,7 @@ class TestSweProxyConfigFactory:
 
         expected_keys = {
             "accepted_senders", "deployment_cap_level",
-            "destructive_cap_level", "architecture_cap_level",
+            "destructive_cap_level", "architecture_cap_level", "ask_before_act",
         }
         assert set( result.keys() ) == expected_keys
 
@@ -548,3 +552,30 @@ class TestSweProxyConfigFactory:
         assert result[ "deployment_cap_level" ] == 3
         assert result[ "destructive_cap_level" ] == 3
         assert result[ "architecture_cap_level" ] == 3
+
+
+class TestShippedAskBeforeActValue:
+    """The shipped INI value of the ask-before-act switch is off."""
+
+    KEY = "swe engineering proxy ask before act"
+
+    def _values( self, relative_path ):
+        """Return every right-hand side the key has in the file at relative_path."""
+        import cosa.utils.util as cu
+
+        values = []
+        with open( cu.get_project_root() + relative_path ) as ini_file:
+            for line in ini_file:
+                if line.strip().startswith( self.KEY ):
+                    values.append( line.split( "=", 1 )[ 1 ].strip() )
+        return values
+
+    def test_lupin_app_ini_ships_the_switch_false_everywhere_it_is_set( self ):
+        """Every occurrence in src/conf/lupin-app.ini is false, and there is at least one."""
+        values = self._values( "/src/conf/lupin-app.ini" )
+        assert values != [], "the key is missing from lupin-app.ini"
+        assert values == [ "false" ] * len( values ), f"shipped value must be false, got {values}"
+
+    def test_splainer_ini_documents_the_key( self ):
+        """The splainer file carries one explanation for the key."""
+        assert len( self._values( "/src/conf/lupin-app-splainer.ini" ) ) == 1

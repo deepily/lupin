@@ -300,7 +300,7 @@ luck that a second attempt averages out; re-running in the same tree reproduces 
 names a property rather than a command.
 
 See row `d18ce9ef` and Pocholo's write-up
-`src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the six priced remedies.
+the R&D write-up "stale pyc defeats mutation testing" for the six priced remedies.
 ⚠️ **That write-up's "+3.3% import cost" is an ANALYTIC figure and did not survive measurement on the
 real tier** — see `866f43ce` for the observed numbers. Quote the row, not the 3.3%.
 
@@ -650,7 +650,7 @@ nothing about either verdict (Krishna 🦚, correcting this reviewer). **Exchang
 DISAGREEMENT, never to manufacture a confirmation.**
 
 Full derivation, with what each claim does NOT establish:
-`src/rnd/v0.2.1/2026.08.30-two-harnesses-one-file-cross-reproduced-shas.md`.
+the R&D write-up "two harnesses one file cross reproduced shas".
 
 
 ---

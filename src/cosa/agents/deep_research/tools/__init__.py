@@ -1,7 +1,7 @@
 """
 Tool wrappers for COSA Deep Research Agent.
 
-Phase 2 will add:
+Planned additions:
 - web_search.py: Claude WebSearch wrapper
   - Async wrapper for Claude's web_search_20250305 tool
   - Handles rate limiting and retries

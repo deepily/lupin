@@ -50,6 +50,12 @@ from lupin_cli.claude_code.hooks.session_end import (
 
 
 MODULE = "lupin_cli.claude_code.hooks.session_end"
+
+
+@pytest.fixture( autouse=True )
+def _the_pid_is_the_listener( monkeypatch ):
+    """These tests are about signalling. The identity check has its own tests below."""
+    monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: True )
 BRIDGE = "lupin_cli.claude_code.hooks.lib.session_bridge"
 CREDS  = "lupin_cli.claude_code.hooks.lib.hook_credentials"
 
@@ -210,3 +216,36 @@ class TestStopListener:
         with patch( f"{MODULE}.os.kill", side_effect=calls ), \
              patch( f"{MODULE}.time.sleep" ):
             _stop_listener( 4242 )   # must not raise
+
+
+class TestStopListenerChecksWhatTheProcessIs:
+    """A pid read from a bridge file may be a reused number."""
+
+    def test_a_process_that_is_not_a_listener_is_never_signalled( self, monkeypatch ):
+        monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: False )
+        with patch( f"{MODULE}.os.kill" ) as kill, patch( f"{MODULE}.time.sleep" ):
+            _stop_listener( 4242 )
+        kill.assert_not_called()
+
+    def test_the_marker_asked_for_is_the_listener_module( self, monkeypatch ):
+        asked = []
+        monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: asked.append( ( pid, marker ) ) or False )
+        _stop_listener( 4242 )
+        assert asked == [ ( 4242, "cc_notification_listener" ) ]
+
+
+class TestStopListenerLateRaces:
+    """the permission-error arms of the wait loop and the final SIGKILL."""
+
+    def test_losing_permission_mid_wait_stops_without_escalating( self ):
+        with patch( f"{MODULE}.os.kill", side_effect=[ None, PermissionError() ] ) as kill, \
+             patch( f"{MODULE}.time.sleep" ):
+            _stop_listener( 4242 )
+        assert [ c.args[ 1 ] for c in kill.call_args_list ] == [ signal.SIGTERM, 0 ]
+
+    def test_a_refused_final_sigkill_does_not_raise( self ):
+        calls = [ None ] * 11 + [ PermissionError() ]
+        with patch( f"{MODULE}.os.kill", side_effect=calls ) as kill, \
+             patch( f"{MODULE}.time.sleep" ):
+            _stop_listener( 4242 )
+        assert kill.call_args_list[ -1 ].args[ 1 ] == signal.SIGKILL

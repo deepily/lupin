@@ -58,8 +58,8 @@ before( () => {
 const FIXED_DATE = (): Date => new Date( "2026-09-23T20:30:07Z" );
 
 /** A transport whose state can be moved between assertions. */
-function fakeTransport( state: ConnectionState ): TransportStateLike & { set( s: ConnectionState ): void } {
-  const holder = { state, set( s: ConnectionState ) { holder.state = s; } };
+function fakeTransport( state: ConnectionState ): TransportStateLike & { set( s: ConnectionState ): void; restarts: number } {
+  const holder = { state, restarts: 0, set( s: ConnectionState ) { holder.state = s; }, restart() { holder.restarts++; } };
   return holder;
 }
 
@@ -98,6 +98,7 @@ interface MountOpts {
   reinit?      : () => Promise<{ status?: string; message?: string }>;
   clipboardFn? : ( text: string ) => Promise<void>;
   logFn?       : ( message: string ) => void;
+  appTimezoneFn? : () => string | undefined;
 }
 
 function mountPane( opts: MountOpts = {} ) {
@@ -116,6 +117,7 @@ function mountPane( opts: MountOpts = {} ) {
     reinitConfig : opts.reinit ?? ( async () => ( { status: "success", message: "ok" } ) ),
     logFn       : opts.logFn ?? ( () => {} ),
     nowDateFn   : FIXED_DATE,
+    appTimezoneFn : opts.appTimezoneFn,
     clipboardFn : opts.clipboardFn ?? ( async ( t ) => { copied.push( t ); } ),
     setTimeoutFn   : ( cb ) => { timeouts.push( cb ); return timeouts.length; },
     clearTimeoutFn : () => {},
@@ -304,6 +306,16 @@ test( "S7: both connected → '✓ Healthy (checked …)'", () => {
   assert.equal( text( "multiplexer-ws-health-status" ), HEALTH_MONITORING, "before the first tick" );
   intervals[ 0 ]!.cb();
   assert.match( text( "multiplexer-ws-health-status" ), /^✓ Healthy \(checked .+\)$/ );
+} );
+
+test( "S7: the healthy line is stamped in the server zone, or in labelled UTC without one", () => {
+  const healthy = ( appTimezoneFn?: () => string | undefined ) => {
+    const { text, intervals } = mountPane( { queue: fakeTransport( "connected" ), audio: fakeTransport( "connected" ), appTimezoneFn } );
+    intervals[ 0 ]!.cb();
+    return text( "multiplexer-ws-health-status" );
+  };
+  assert.equal( healthy(), "✓ Healthy (checked 8:30:07 PM UTC)" );
+  assert.equal( healthy( () => "Asia/Tokyo" ), "✓ Healthy (checked 5:30:07 AM)" );
 } );
 
 test( "S7: either socket failed → the circuit message, which wins over a half-connected pair", () => {
@@ -555,4 +567,40 @@ test( "mounting twice throws; unmount empties the root and detaches the socket s
   assert.equal( root.children.length, 0 );
   queue.set( "failed" );
   emitState( "QueueTransport", "failed" );   // must not throw into a torn-down pane
+} );
+
+
+// ---- Retry-now (row 5a8bd0c6, Rick's ruling 2026-10-07) -------------------------------------
+
+const RETRY = "multiplexer-ws-retry-now-btn";
+
+test( "Retry-now: hidden while nothing is failed, shown with the circuit line, hidden again after", () => {
+  const queue = fakeTransport( "connected" );
+  const { q, emitState, intervals } = mountPane( { queue, audio: fakeTransport( "connected" ) } );
+  assert.equal( q( RETRY ).textContent, "Retry now" );                    // the label itself, not the constant that holds it
+  assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, true, "hidden at mount" );
+  intervals[ 0 ]!.cb();
+  assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, true, "hidden while healthy" );
+  queue.set( "failed" );
+  emitState( "QueueTransport", "failed" );
+  assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, false, "shown with HEALTH_CIRCUIT" );
+  queue.set( "connecting" );
+  emitState( "QueueTransport", "connecting" );
+  assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, true, "hidden once the transport left failed" );
+} );
+
+test( "Retry-now: a click restarts the failed transport and leaves the healthy one alone", () => {
+  const queue = fakeTransport( "failed" );
+  const audio = fakeTransport( "connected" );
+  const { q } = mountPane( { queue, audio } );
+  q( RETRY ).click();
+  assert.deepEqual( [ queue.restarts, audio.restarts ], [ 1, 0 ] );
+} );
+
+test( "Retry-now: both failed → both restart; a pane with no transports wired clicks without throwing", () => {
+  const queue = fakeTransport( "failed" );
+  const audio = fakeTransport( "failed" );
+  mountPane( { queue, audio } ).q( RETRY ).click();
+  assert.deepEqual( [ queue.restarts, audio.restarts ], [ 1, 1 ] );
+  mountPane( {} ).q( RETRY ).click();
 } );

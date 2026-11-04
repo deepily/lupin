@@ -2,25 +2,23 @@
 """
 Resolve the GCP project id (and Vertex location) for Python callers.
 
-WHY THIS EXISTS. Rick, 2026-08-16: *"you're not supposed to use an API key for Gemini, you're
-supposed to use the project ID which I gave you in an environment variable."* The variable is
-`LUPIN_GCP_PROJECT_ID` — and a Python process cannot count on it being set:
+Gemini on Vertex is called with a project id, never an API key. The id lives in the environment
+variable `LUPIN_GCP_PROJECT_ID`, and a Python process cannot count on it being set:
 
-  - `~/.bashrc:138` exports it, but `.bashrc` only runs for INTERACTIVE shells. systemd units, cron
-    jobs, hooks, test runners and containers all start without it. Measured: `env -i bash -c` shows
-    it unset, an interactive login shell shows the value.
-  - `src/scripts/cloud-run.env` also carries it, but that file is a SHELL file and git-ignored
-    (`.gitignore:74`) — nothing in Python reads it, and a fresh clone or rebuilt container does not
-    even have it. The committed template is `cloud-run.env.example`.
+  - `~/.bashrc` exports it, but `.bashrc` only runs for interactive shells. Systemd units, cron
+    jobs, hooks, test runners and containers all start without it.
+  - `src/scripts/cloud-run.env` also carries it, but that file is a shell file and git-ignored.
+    Nothing in Python reads it, and a fresh clone or rebuilt container does not have it. The
+    committed template is `cloud-run.env.example`.
 
-So "read os.environ and hope" silently resolves to nothing, or worse, to a stale project. This
-module gives Python the same three properties `src/scripts/cloud-run-config.sh` already has in
-shell — **environment override wins, else parse the env file, else FAIL LOUDLY** — rather than
-inventing a fourth convention.
+So reading `os.environ` and hoping silently resolves to nothing, or worse, to a stale project.
+This module gives Python the three properties `src/scripts/cloud-run-config.sh` has in shell.
+An environment value wins, else the env file is parsed, else it fails loudly. It does not invent
+a fourth convention.
 
-WHAT IT WILL NOT DO. It never defaults, never falls back to a sandbox project, and never falls back
-to an API key. An absent project id is an error, because the failure it prevents — billing or
-querying the wrong project — looks like a permissions problem and costs an afternoon to diagnose.
+It never defaults, never falls back to a sandbox project, and never falls back to an API key.
+An absent project id is an error. The failure it prevents is billing or querying the wrong
+project, which looks like a permissions problem and is slow to diagnose.
 """
 
 import os
@@ -46,7 +44,7 @@ def _default_env_file():
 
     Ensures:
         - returns the Path to src/scripts/cloud-run.env under the project root
-        - does NOT check existence — the caller decides whether absence is fatal
+        - does not check existence; the caller decides whether absence is fatal
     """
     root = os.environ.get( "LUPIN_ROOT", "/var/lupin" )
     return Path( root ) / "src" / "scripts" / "cloud-run.env"
@@ -60,12 +58,12 @@ def parse_env_file( path ):
         - path is a Path
 
     Ensures:
-        - returns {} when the file does not exist — absence is the caller's decision to judge
-        - returns a dict of KEY -> value with surrounding quotes stripped
+        - returns {} when the file does not exist; the caller decides whether that matters
+        - returns a dict of key -> value with surrounding quotes stripped
         - comment lines and blank lines are ignored; `export` prefixes are tolerated
-        - a value that is an unexpanded shell reference (e.g. "${FOO:-}") is treated as EMPTY,
-          because that is what the template ships and an empty placeholder must never look like a
-          configured value
+        - a value that is an unexpanded shell reference (e.g. "${FOO:-}") is treated as empty,
+          because that is what the template ships and an empty placeholder must never look like
+          a configured value
     """
     if not Path( path ).exists(): return {}
 
@@ -96,12 +94,12 @@ def resolve_gcp_project_id( environ=None, env_file=None ):
         - env_file is a Path to a shell env file (the repo's cloud-run.env when None)
 
     Ensures:
-        - an environment value WINS over the file, matching cloud-run-config.sh's override
-          semantics — the two must not disagree about precedence
+        - an environment value wins over the file, matching cloud-run-config.sh's override
+          semantics; the two must not disagree about precedence
         - otherwise the value comes from the env file
-        - raises RuntimeError when neither supplies a non-empty value, naming BOTH sources it
+        - raises RuntimeError when neither supplies a non-empty value, naming both sources it
           looked at, so the reader knows what to fix rather than only that something is missing
-        - NEVER returns a default and never falls back to an API key
+        - never returns a default and never falls back to an API key
     """
     environ  = os.environ if environ is None else environ
     env_file = _default_env_file() if env_file is None else Path( env_file )
@@ -130,8 +128,8 @@ def resolve_gcp_location( environ=None, env_file=None ):
 
     Ensures:
         - environment wins, then the env file, then DEFAULT_LOCATION
-        - unlike the project id this DOES default, because "global" is a correct answer rather than
-          a guess about someone's billing
+        - unlike the project id this does default, because "global" is a correct answer rather
+          than a guess about someone's billing
     """
     environ  = os.environ if environ is None else environ
     env_file = _default_env_file() if env_file is None else Path( env_file )

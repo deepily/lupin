@@ -10,6 +10,12 @@ from .user_id_generator import get_user_info, email_to_system_id, email_to_user_
 class TokenExpiredException( HTTPException ):
     """Raised when a JWT access token has expired. Subclass of HTTPException for compatibility."""
     def __init__( self ):
+        """
+        Build an HTTPException with status 401 and the detail "Token expired".
+
+        Ensures:
+            - takes no arguments; status_code and detail are fixed
+        """
         super().__init__(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired"
@@ -50,7 +56,21 @@ def init_firebase():
 from fastapi import Request
 
 class HTTPBearerWith401(HTTPBearer):
+    """
+    HTTPBearer that answers 401, not 403, when a request carries no usable credentials.
+
+    Ensures:
+        - a request with credentials gets them back unchanged
+        - a request without them raises HTTPException 401 with a `WWW-Authenticate: Bearer` header
+        - the missing-credentials case prints a line saying whether an Authorization header was present
+    """
     def __init__(self):
+        """
+        Set up HTTPBearer with auto_error off, so __call__ raises the 401 itself.
+
+        Ensures:
+            - takes no arguments
+        """
         # Initialize with auto_error=False to handle errors manually
         super().__init__(auto_error=False)
 
@@ -82,10 +102,8 @@ async def verify_token(token: str) -> Dict:
     """
     Unified token verification supporting both JWT and mock tokens.
 
-    Behavior based on 'auth mode' configuration:
-    - 'mock': Accepts mock_token_* format (legacy development mode)
-    - 'jwt': Validates real JWT tokens (production mode)
-    - 'firebase': Firebase ID tokens (future support)
+    The 'auth mode' setting picks the verifier: 'mock' accepts mock_token_* (development),
+    'jwt' validates real JWT tokens (production). Any other mode, 'firebase' included, answers 401.
 
     Requires:
         - token is a non-empty string
@@ -116,9 +134,6 @@ async def verify_token(token: str) -> Dict:
     elif auth_mode == "mock":
         # Mock mode: Legacy mock token support
         return await verify_mock_token( token )
-    elif auth_mode == "firebase":
-        # Firebase mode: Future support
-        return await verify_firebase_token( token )
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -404,9 +419,8 @@ def identity_or_401( current_user: Dict ) -> tuple:
     """
     The user id and email a v2 door acts as, or a 401 naming which one is missing.
 
-    Written once here rather than inline in every door (F1 of the spoken-ask plan):
-    /api/v2/ask, /submit and /resume each carried the same four lines, and
-    /api/v2/ask-audio would have been a fourth copy.
+    Written once here rather than inline in every door. /api/v2/ask, /submit,
+    /resume and /ask-audio all need the same four lines.
 
     Requires:
         - current_user is the dict get_current_user returned

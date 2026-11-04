@@ -35,7 +35,7 @@ import os
 import unittest
 
 import cosa.utils.util as cu
-from cosa.agents.runtime_argument_expeditor.expeditor import DOCUMENT_DESCRIBE_ASK_ID
+from cosa.agents.runtime_argument_expeditor.expeditor import DOCUMENT_CHOICE_CARD_ID, DOCUMENT_DESCRIBE_ASK_ID
 
 
 SCRIPT_DIR = "/src/conf/notification-proxy-scripts"
@@ -157,6 +157,25 @@ class TestEveryProfileAnswersTheDescribeAsk( unittest.TestCase ):
                 continue
             with self.subTest( profile=filename ):
                 self.assertIsInstance( _load( filename ), dict )
+
+
+class TestEveryDescribeProfileAnswersTheChoiceCard( unittest.TestCase ):
+    """Tests that each script answering the describe ask also answers the document choice card."""
+
+    def test_the_describe_scripts_are_the_six_we_expect( self ):
+        directory = cu.get_project_root() + SCRIPT_DIR
+        carriers  = { name for name in os.listdir( directory )
+                      if name.endswith( ".json" ) and _describe_entries( _load( name ) ) }
+        self.assertEqual( carriers, set( EXPECTED ), "a script gained or lost the describe entry" )
+
+    def test_each_claims_the_card_once_with_a_positional_answer( self ):
+        for filename in EXPECTED:
+            with self.subTest( profile=filename ):
+                claims = [ e for e in _load( filename )[ "entries" ]
+                           if e.get( "card_id" ) == DOCUMENT_CHOICE_CARD_ID ]
+                self.assertEqual( len( claims ), 1, f"{filename}: the same ask can raise the card" )
+                self.assertEqual( claims[ 0 ][ "answer" ], "__first_option__" )
+                self.assertEqual( claims[ 0 ][ "response_types" ], [ "multiple_choice" ] )
 
 
 if __name__ == "__main__":

@@ -739,10 +739,25 @@ def test_main_returns_one_and_names_offenders_on_a_drifted_tree( tmp_path, monke
     assert "drifted." in out
 
 
+def test_main_does_not_call_an_empty_census_clean( tmp_path, monkeypatch, capsys ):
+    """
+    A tree with no pycs measured nothing, so exit 0 would say "clean" about no data.
+
+    The ledger line is still written, and the output names the count.
+    """
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    ( tmp_path / "src" ).mkdir()
+    assert chp.main( [ str( tmp_path / "src" ) ] ) == 2
+    out = capsys.readouterr().out
+    assert "scanned 0 pycs" in out
+    entry = json.loads( ( tmp_path / "io" / "pyc-mode-ledger.jsonl" ).read_text().strip() )
+    assert entry[ "counts" ] == { }
+
+
 def test_main_defaults_its_roots_from_lupin_root( tmp_path, monkeypatch, capsys ):
     monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
     ( tmp_path / "src" ).mkdir()
-    assert chp.main() == 0
+    assert chp.main() == 2
     assert str( tmp_path / "src" ) in capsys.readouterr().out
 
 
@@ -756,5 +771,5 @@ def test_main_says_so_when_the_ledger_cannot_be_written( tmp_path, monkeypatch, 
     """A trace that silently fails to record is worse than none — it looks like evidence."""
     monkeypatch.delenv( "LUPIN_ROOT", raising=False )
     ( tmp_path / "src" ).mkdir()
-    assert chp.main( [ str( tmp_path / "src" ) ] ) == 0
+    assert chp.main( [ str( tmp_path / "src" ) ] ) == 2
     assert "ledger: NOT WRITTEN" in capsys.readouterr().out

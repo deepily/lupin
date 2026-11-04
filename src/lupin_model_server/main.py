@@ -1,41 +1,41 @@
 """
 Lupin Model Server — FastAPI app hosting Whisper + 2 text encoders on `:7998`.
 
-This container is FROZEN — code here doesn't evolve. Compute containers
-(`lupin-rest-dev` + `lupin-rest-test`) call out over HTTP for transcription
+This container is frozen: its code does not evolve. The compute containers
+(`lupin-rest-dev` + `lupin-rest-test`) call it over HTTP for transcription
 and embedding work. See:
     src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
 
 Endpoints:
-    GET  /health                       — 503 until all 3 models loaded; 200 with VRAM count once ready (no auth)
-    POST /transcribe                   — audio → text (X-API-Key ck_live_* required)
-    POST /embeddings/generate          — text → vector (X-API-Key ck_live_* required)
-    POST /embeddings/batch             — texts → vectors (X-API-Key ck_live_* required)
-    GET  /embeddings/info              — model metadata (X-API-Key ck_live_* required)
-    GET  /admin/metrics                — Prometheus text format (X-API-Key ck_live_* required)
+    GET  /health                       — 503 until all 3 models are loaded, then 200 with the VRAM count (no auth).
+    POST /transcribe                   — audio → text (X-API-Key ck_live_* required).
+    POST /embeddings/generate          — text → vector (X-API-Key ck_live_* required).
+    POST /embeddings/batch             — texts → vectors (X-API-Key ck_live_* required).
+    GET  /embeddings/info              — model metadata (X-API-Key ck_live_* required).
+    GET  /admin/metrics                — Prometheus text format (X-API-Key ck_live_* required).
 
-Auth model (post-2026-05-16 simplification per María's brief):
-    The model-server reuses Lupin's existing `ck_live_*` API key namespace
-    (no parallel `ck_internal_*` ecosystem). At lifespan boot it reads the
-    plaintext key from `/var/lupin/src/conf/keys/<LUPIN_MODEL_SERVER_API_KEY_NAME>`
-    (bind-mounted from the host's `src/conf/keys/` dir), bcrypt-hashes it
-    once, and stores the hash in `_state.api_key_hash`. Each incoming
-    request is validated via `bcrypt.checkpw(incoming, _state.api_key_hash)`
-    — functionally identical security posture to the DB-backed validator at
-    `cosa/rest/middleware/api_key_auth.py:34-79`, just allowlisted to one
-    known-good key instead of walking a DB row set. Plaintext is purged from
-    process memory after the boot-time hash (only the hash is retained).
+Auth model:
+    The model server reuses Lupin's existing `ck_live_*` API key namespace.
+    There is no parallel `ck_internal_*` ecosystem. At lifespan boot it reads
+    the plaintext key from `/var/lupin/src/conf/keys/<LUPIN_MODEL_SERVER_API_KEY_NAME>`.
+    The host's `src/conf/keys/` directory is bind-mounted there. The server
+    bcrypt-hashes the key once and stores the hash in `_state.api_key_hash`.
+    Each incoming request is checked with `bcrypt.checkpw(incoming, _state.api_key_hash)`.
+    The security posture matches the DB-backed validator in
+    `cosa/rest/middleware/api_key_auth.py`. The difference is that it allows
+    one known-good key instead of walking a DB row set. The plaintext is
+    purged from process memory after the boot-time hash; only the hash is kept.
 
-Configuration is env-var driven (no ConfigurationManager dependency, keeps the
-container self-contained and frozen):
-    LUPIN_MODEL_SERVER_API_KEY_NAME — name of the key file in KEYS_DIR (default `notification-api-claude-code-dev`)
-    LUPIN_MODEL_SERVER_KEYS_DIR     — default "/var/lupin/src/conf/keys"
-    LUPIN_MODEL_SERVER_DEVICE       — default "cuda:0" (per memory rule: Lupin models ALWAYS GPU 0)
-    LUPIN_MODEL_SERVER_WHISPER_ID   — default "distil-whisper/distil-large-v3"
-    LUPIN_MODEL_SERVER_CODE_EMBED   — default "nomic-ai/CodeRankEmbed"
-    LUPIN_MODEL_SERVER_PROSE_EMBED  — default "nomic-ai/nomic-embed-text-v1.5"
-    LUPIN_MODEL_SERVER_WARMUP_MP3   — optional warmup audio path
-    LUPIN_MODEL_SERVER_PORT         — default 7998
+Configuration is env-var driven. There is no ConfigurationManager dependency,
+which keeps the container self-contained and frozen:
+    LUPIN_MODEL_SERVER_API_KEY_NAME — name of the key file in KEYS_DIR (default `notification-api-claude-code-dev`).
+    LUPIN_MODEL_SERVER_KEYS_DIR     — default "/var/lupin/src/conf/keys".
+    LUPIN_MODEL_SERVER_DEVICE       — default "cuda:0" (Lupin models always run on GPU 0).
+    LUPIN_MODEL_SERVER_WHISPER_ID   — default "distil-whisper/distil-large-v3".
+    LUPIN_MODEL_SERVER_CODE_EMBED   — default "nomic-ai/CodeRankEmbed".
+    LUPIN_MODEL_SERVER_PROSE_EMBED  — default "nomic-ai/nomic-embed-text-v1.5".
+    LUPIN_MODEL_SERVER_WARMUP_MP3   — optional warmup audio path.
+    LUPIN_MODEL_SERVER_PORT         — default 7998.
 """
 
 import asyncio
@@ -46,7 +46,7 @@ import re
 import secrets
 import time
 from contextlib import asynccontextmanager
-from typing      import Annotated, List, Optional
+from typing      import Annotated, List, Literal, Optional
 
 import bcrypt
 import torch
@@ -64,6 +64,13 @@ DEVICE          = os.environ.get( "LUPIN_MODEL_SERVER_DEVICE",      "cuda:0" )
 WHISPER_MODEL   = os.environ.get( "LUPIN_MODEL_SERVER_WHISPER_ID",  "distil-whisper/distil-large-v3" )
 CODE_EMBED      = os.environ.get( "LUPIN_MODEL_SERVER_CODE_EMBED",  "nomic-ai/CodeRankEmbed" )
 PROSE_EMBED     = os.environ.get( "LUPIN_MODEL_SERVER_PROSE_EMBED", "nomic-ai/nomic-embed-text-v1.5" )
+# Role prefixes and the prose Matryoshka width. They copy the INI keys `local embedding code query prefix`,
+# `local embedding prose query prefix`, `... prose document prefix` and `... prose matryoshka dim`, which
+# this container cannot read. A role request is only as good as these matching the INI values.
+CODE_QUERY_PREFIX     = os.environ.get( "LUPIN_MODEL_SERVER_CODE_QUERY_PREFIX",     "Represent this query for searching relevant code:" )
+PROSE_QUERY_PREFIX    = os.environ.get( "LUPIN_MODEL_SERVER_PROSE_QUERY_PREFIX",    "search_query:" )
+PROSE_DOCUMENT_PREFIX = os.environ.get( "LUPIN_MODEL_SERVER_PROSE_DOCUMENT_PREFIX", "search_document:" )
+PROSE_MATRYOSHKA_DIM  = int( os.environ.get( "LUPIN_MODEL_SERVER_PROSE_MATRYOSHKA_DIM", "768" ) )
 WARMUP_MP3_PATH = os.environ.get( "LUPIN_MODEL_SERVER_WARMUP_MP3",  "" )
 PORT            = int( os.environ.get( "LUPIN_MODEL_SERVER_PORT", "7998" ) )
 
@@ -125,19 +132,10 @@ TRANSCRIBE_PIPELINE_KWARGS = { "chunk_length_s": 30, "stride_length_s": 5, "retu
 
 def _key_fingerprint( plaintext: str ) -> str:
     """
-    Stable, non-reversible identifier for WHICH key this instance holds.
+    Return a stable, non-reversible identifier for which key this instance holds.
 
-    Truncated sha256 of the plaintext — 12 hex chars, 48 bits. It answers
-    "do these two instances hold the same key?" and nothing else. The key is
-    64+ chars of high-entropy random (`_CK_LIVE_RE`), so this leaks no usable
-    information about the value; it is a version tag, not a credential.
-
-    ⚠️ Deliberately surfaced on the UNAUTHENTICATED `/health`, not on the
-    auth-gated `/admin/metrics`. The failure this exists to diagnose is
-    "every request 401s because this instance holds a stale key" — during
-    which, by construction, nobody has a working key to authenticate WITH.
-    A fingerprint behind auth would be unreadable in exactly the outage it
-    was added for.
+    It is a truncated sha256 of the plaintext (12 hex chars, 48 bits) and only answers whether two instances hold the same key. The key is 64+ random chars (`_CK_LIVE_RE`), so it leaks nothing usable: a version tag, not a credential.
+    It is served on the unauthenticated `/health`, not the auth-gated `/admin/metrics`. The failure it diagnoses is every request returning 401 from a stale key, when nobody has a working key.
 
     Requires:
         - plaintext is a non-empty str
@@ -208,17 +206,10 @@ _UPTIME = Gauge(
 
 def require_api_key( x_api_key: Annotated[ Optional[ str ], Header() ] = None ) -> str:
     """
-    Validate the X-API-Key header carries a `ck_live_*` value matching the
-    bcrypt hash computed at lifespan boot from the existing
-    `notification-api-claude-code-dev` plaintext key file.
+    Check that X-API-Key is the `ck_live_*` key hashed at lifespan boot.
 
-    Reuses the canonical Lupin `ck_live_*` namespace per María's 2026-05-16
-    brief — model-server does NOT fork the namespace. It just bcrypt-checkpw's
-    incoming keys against a hash it computed once from the same plaintext
-    file the FastAPI compute containers send. Functionally identical security
-    to the DB-backed `cosa/rest/middleware/api_key_auth.py:34-79` validator
-    (same bcrypt path; just allowlisted to one known-good key instead of
-    walking a DB row set).
+    The hash comes from the `notification-api-claude-code-dev` plaintext key file. The FastAPI compute containers send that same plaintext key. The model server reuses the Lupin `ck_live_*` namespace and does not fork it.
+    It runs `bcrypt.checkpw` on incoming keys against that hash. This matches the DB-backed `cosa/rest/middleware/api_key_auth.py` validator, but allows one known-good key instead of walking a DB row set.
 
     Requires:
         - x_api_key is non-empty + matches `^ck_live_[A-Za-z0-9_-]{64,}$`
@@ -285,17 +276,16 @@ def _update_vram_gauge():
 
 def _install_api_key() -> None:
     """
-    Read the mounted API key, VALIDATE it, and install hash + fingerprint.
+    Read the mounted API key, validate it, and install its hash and fingerprint.
 
-    Extracted from `lifespan` for bug 6cc52525: the logic is three branches
-    with real consequences and was unreachable by unit tests while it sat
-    inside an asynccontextmanager that also loads three models onto a GPU.
-    An untestable guard is how the untested one got there.
+    Extracted from `lifespan` so the three branches can be unit tested. They have
+    real consequences, and inside the asynccontextmanager that also loads three
+    models onto a GPU they were unreachable by tests.
 
     Ensures:
         - key missing/unreadable  -> load_error, hash stays None (503)
-        - key present but malformed -> DISTINCT load_error, hash stays None (503),
-          and it is NEVER hashed
+        - key present but malformed -> a distinct load_error, hash stays None (503),
+          and it is never hashed
         - key valid -> fingerprint + bcrypt hash installed, plaintext purged
         - the key value is never logged, in whole or in part, on any branch
     """
@@ -402,11 +392,13 @@ app = FastAPI( title="Lupin Model Server", version="0.1.0", lifespan=lifespan )
 class EmbedRequest( BaseModel ):
     text         : str = Field( ..., min_length=1 )
     content_type : str = Field( "prose", pattern=r"^(code|prose)$" )
+    role         : Optional[ Literal[ "query", "document" ] ] = None
 
 
 class EmbedBatchRequest( BaseModel ):
     texts        : List[ str ]
     content_type : str = Field( "prose", pattern=r"^(code|prose)$" )
+    role         : Optional[ Literal[ "query", "document" ] ] = None
 
 
 # ── /health (no auth) ────────────────────────────────────────────────────────
@@ -479,26 +471,104 @@ def _select_engine( content_type: str ):
     return engine
 
 
+def _encode( content_type: str, texts: List[ str ], role: Optional[ str ] ):
+    """
+    Encode texts with the engine of content_type, as the local engines do for a role.
+
+    Requires:
+        - content_type is "code" or "prose"
+        - role is None, "query" or "document"
+
+    Ensures:
+        - role None is the container's original path: engine.encode( texts ), no prefix and no post-step
+        - code: a query gets the code query prefix, a document gets none; both are unit length
+        - prose: the role's prefix, then layer norm, truncation to PROSE_MATRYOSHKA_DIM and unit length,
+          the steps the local prose engine applies after pooling
+        - returns a list of vectors
+
+    Raises:
+        - HTTPException 503 when the engine is not loaded
+    """
+    engine = _select_engine( content_type )
+    if role is None:
+        return engine.encode( texts ).tolist()
+    if content_type == "code":
+        if role == "query": texts = [ f"{CODE_QUERY_PREFIX} {t}" for t in texts ]
+        return engine.encode( texts, normalize_embeddings=True ).tolist()
+    prefix  = PROSE_QUERY_PREFIX if role == "query" else PROSE_DOCUMENT_PREFIX
+    pooled  = engine.encode( [ f"{prefix} {t}" for t in texts ], convert_to_tensor=True, normalize_embeddings=False )
+    normed  = torch.nn.functional.layer_norm( pooled, normalized_shape=( pooled.shape[ 1 ], ) )
+    cut     = torch.nn.functional.normalize( normed[ :, :PROSE_MATRYOSHKA_DIM ], p=2, dim=1 )
+    return cut.cpu().tolist()
+
+
 @app.post( "/embeddings/generate" )
-def embeddings_generate( body: EmbedRequest, request: Request ):   # pragma: no cover — needs live engine
+def embeddings_generate( body: EmbedRequest, request: Request ):
     require_api_key( request.headers.get( "x-api-key" ) )
     with _REQUEST_DURATION.labels( endpoint="/embeddings/generate" ).time():
         _REQUESTS_TOTAL.labels( endpoint="/embeddings/generate" ).inc()
-        engine = _select_engine( body.content_type )
-        vector = engine.encode( [ body.text ] )[ 0 ].tolist()
-    return JSONResponse( content={ "embedding": vector, "dim": len( vector ) } )
+        vector = _encode( body.content_type, [ body.text ], body.role )[ 0 ]
+    return JSONResponse( content={ "embedding": vector, "dim": len( vector ), "role": body.role } )
 
 
 @app.post( "/embeddings/batch" )
-def embeddings_batch( body: EmbedBatchRequest, request: Request ): # pragma: no cover — needs live engine
+def embeddings_batch( body: EmbedBatchRequest, request: Request ):
     require_api_key( request.headers.get( "x-api-key" ) )
     if not body.texts:
         raise HTTPException( status_code=400, detail="texts must be non-empty" )
     with _REQUEST_DURATION.labels( endpoint="/embeddings/batch" ).time():
         _REQUESTS_TOTAL.labels( endpoint="/embeddings/batch" ).inc()
-        engine = _select_engine( body.content_type )
-        vectors = engine.encode( body.texts ).tolist()
-    return JSONResponse( content={ "embeddings": vectors, "count": len( vectors ), "dim": len( vectors[ 0 ] ) if vectors else 0 } )
+        vectors = _encode( body.content_type, body.texts, body.role )
+    return JSONResponse( content={ "embeddings": vectors, "count": len( vectors ), "dim": len( vectors[ 0 ] ) if vectors else 0, "role": body.role } )
+
+
+def _describe_engine( engine, model: str, query_prefix: str, document_prefix: str, dimensions: int ) -> dict:
+    """
+    Report one engine in the shape the app's /api/embeddings/info engines block uses.
+
+    Ensures:
+        - revision is the commit hash of the loaded model, None when the engine is not loaded
+        - dtype and device come from the loaded model's parameters, None when it is not loaded
+        - never loads a model
+    """
+    loaded   = engine is not None
+    revision = engine[ 0 ].auto_model.config._commit_hash if loaded else None
+    first    = next( engine.parameters() ) if loaded else None
+    return {
+        "model"           : model,
+        "revision"        : revision,
+        "dtype"           : str( first.dtype ).replace( "torch.", "" ) if loaded else None,
+        "device"          : str( first.device ) if loaded else DEVICE,
+        "query_prefix"    : query_prefix,
+        "document_prefix" : document_prefix,
+        "dimensions"      : dimensions,
+        "loaded"          : loaded
+    }
+
+
+def _device_class( device: str ) -> str:
+    """
+    Name the kind of device the engines run on, as the app's device_class does.
+
+    Ensures:
+        - an available CUDA device returns "<card name>, sm_<major><minor>"
+        - anything else returns the device string unchanged
+    """
+    if not device.startswith( "cuda" ) or not torch.cuda.is_available(): return device
+    major, minor = torch.cuda.get_device_capability( device )
+    return f"{torch.cuda.get_device_name( device )}, sm_{major}{minor}"
+
+
+def _library_versions() -> dict:
+    """Return the versions of four libraries that decide a vector, None when absent."""
+    from importlib import metadata
+    versions = {}
+    for package in ( "torch", "transformers", "sentence-transformers", "numpy" ):
+        try:
+            versions[ package ] = metadata.version( package )
+        except metadata.PackageNotFoundError:
+            versions[ package ] = None
+    return versions
 
 
 @app.get( "/embeddings/info" )
@@ -510,6 +580,12 @@ def embeddings_info( request: Request ):
         "prose_model"    : PROSE_EMBED,
         "code_loaded"    : "code_rank_embed" in _state.models_loaded,
         "prose_loaded"   : "nomic_embed_text_v1_5" in _state.models_loaded,
+        "engines"        : {
+            "code"         : _describe_engine( _state.code_engine, CODE_EMBED, CODE_QUERY_PREFIX, "", 768 ),
+            "prose"        : _describe_engine( _state.prose_engine, PROSE_EMBED, PROSE_QUERY_PREFIX, PROSE_DOCUMENT_PREFIX, PROSE_MATRYOSHKA_DIM ),
+            "device_class" : _device_class( DEVICE ),
+            "libraries"    : _library_versions()
+        }
     } )
 
 

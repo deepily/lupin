@@ -244,9 +244,16 @@ def test_phase6b_functional_smoke():
             assert page.locator(
                 '.action-required-widget[data-id-hash="ar-mc-002"] .action-required-options-group'
             ).count() == 1
+            # The card offers its three fixture options and, always, an "Other" choice that
+            # carries the same label class plus its own (8420e8b0a).
+            labels = page.locator(
+                '.action-required-widget[data-id-hash="ar-mc-002"] '
+                '.action-required-option-label:not(.action-required-option-other)'
+            )
+            assert [ t.strip() for t in labels.all_text_contents() ] == [ "PostgreSQL", "SQLite", "MongoDB" ]
             assert page.locator(
-                '.action-required-widget[data-id-hash="ar-mc-002"] .action-required-option-label'
-            ).count() == 3   # PostgreSQL / SQLite / MongoDB
+                '.action-required-widget[data-id-hash="ar-mc-002"] .action-required-option-other'
+            ).count() == 1
             assert page.locator( '.action-required-minimized-position' ).all_text_contents() == [ "#1" ]
 
             _expire( page, "ar-mc-002" )

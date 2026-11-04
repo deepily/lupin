@@ -5,7 +5,11 @@ Provides two singleton engines:
 - CodeEmbeddingEngine: Uses SentenceTransformer("nomic-ai/CodeRankEmbed") for code search
 - ProseEmbeddingEngine: Uses raw transformers for nomic-embed-text-v1.5 with Matryoshka support
 
-Both engines support lazy GPU loading, L2-normalized output, and configurable via lupin-app.ini.
+Both engines support lazy GPU loading, unit-length output, and configurable via lupin-app.ini.
+
+Unit length is true only of vectors these classes make in-process. Vectors served by lupin_model_server
+(src/lupin_model_server/main.py) come from a bare SentenceTransformer encode() and are not normalized.
+The dev server's embeddings endpoint returned norms of 22.35 (prose) and 24.47 (code) when probed.
 """
 
 import gc
@@ -18,6 +22,37 @@ from typing import List, Optional, Dict, Any
 import cosa.utils.util as du
 import cosa.utils.util_stopwatch as sw
 from cosa.config.configuration_manager import ConfigurationManager
+
+
+def _loaded_dtype_name( model ):
+    """
+    Name the dtype of a loaded model's parameters.
+
+    Requires:
+        - model is None or a torch module with at least one parameter
+
+    Ensures:
+        - returns None when model is None
+        - otherwise returns the parameter dtype name, e.g. "float16"
+    """
+    if model is None: return None
+    return str( next( model.parameters() ).dtype ).replace( "torch.", "" )
+
+
+def _enforce_dtype( model, model_dtype ):
+    """
+    Cast a loaded model to the requested dtype when the loader did not apply it.
+
+    Requires:
+        - model is a torch module with at least one parameter
+        - model_dtype is a torch dtype
+
+    Ensures:
+        - returns a model whose parameters are model_dtype
+        - a model already in model_dtype is returned untouched
+    """
+    if next( model.parameters() ).dtype == model_dtype: return model
+    return model.to( model_dtype )
 
 
 class CodeEmbeddingEngine:
@@ -60,7 +95,7 @@ class CodeEmbeddingEngine:
 
         Ensures:
             - Reads config for model name, device, dtype, prefix
-            - Does NOT load model yet (lazy loading on first encode call)
+            - Does not load model yet (lazy loading on first encode call)
 
         Raises:
             - ConfigurationManager errors if env var not set
@@ -120,6 +155,7 @@ class CodeEmbeddingEngine:
                 device=self._device,
                 model_kwargs={ "torch_dtype": model_dtype }
             )
+            self._model = _enforce_dtype( self._model, model_dtype )
 
             timer.print( "Done!", use_millis=True )
 
@@ -158,7 +194,7 @@ class CodeEmbeddingEngine:
             - queries is a list of non-empty strings
 
         Ensures:
-            - Returns list of 768-dim L2-normalized embeddings
+            - Returns list of 768-dim unit-length embeddings
             - Prepends query prefix to each query
             - Thread-safe: serializes inference via _inference_lock
             - CUDA OOM: gc.collect + empty_cache, retries once
@@ -192,7 +228,7 @@ class CodeEmbeddingEngine:
             - code_snippets is a list of non-empty strings
 
         Ensures:
-            - Returns list of 768-dim L2-normalized embeddings
+            - Returns list of 768-dim unit-length embeddings
             - No prefix applied (asymmetric: documents have no prefix)
             - Thread-safe: serializes inference via _inference_lock
             - CUDA OOM: gc.collect + empty_cache, retries once
@@ -240,6 +276,30 @@ class CodeEmbeddingEngine:
         """Return whether the model is loaded on GPU."""
         return self._model is not None
 
+    def describe( self ):
+        """
+        Report what this engine will use to encode, without loading the model.
+
+        Ensures:
+            - returns model id, revision, dtype, device, prefixes and dimensions
+            - revision is None until the model has been loaded
+            - dtype is the INI value until load (what the engine will use), then
+              the dtype of the loaded parameters (what it did use)
+            - never loads the model and never touches the GPU
+        """
+        revision = None
+        if self._model is not None: revision = self._model[ 0 ].auto_model.config._commit_hash
+        return {
+            "model"           : self._model_name,
+            "revision"        : revision,
+            "dtype"           : self._dtype_str if self._model is None else _loaded_dtype_name( self._model ),
+            "device"          : self._device,
+            "query_prefix"    : self._query_prefix,
+            "document_prefix" : "",
+            "dimensions"      : self._dimensions,
+            "loaded"          : self._model is not None
+        }
+
 
 class ProseEmbeddingEngine:
     """
@@ -247,7 +307,7 @@ class ProseEmbeddingEngine:
 
     Uses raw transformers (AutoModel + AutoTokenizer) for full Matryoshka
     dimension control. Supports asymmetric search with query/document prefixes.
-    Produces L2-normalized embeddings at configurable dimensions (64-768).
+    Produces unit-length embeddings at configurable dimensions (64-768).
     """
 
     _instance        = None
@@ -282,7 +342,7 @@ class ProseEmbeddingEngine:
 
         Ensures:
             - Reads config for model name, device, dtype, prefixes, Matryoshka dim
-            - Does NOT load model yet (lazy loading on first encode call)
+            - Does not load model yet (lazy loading on first encode call)
 
         Raises:
             - ConfigurationManager errors if env var not set
@@ -342,6 +402,7 @@ class ProseEmbeddingEngine:
                 trust_remote_code=True,
                 torch_dtype=model_dtype
             ).to( self._device ).eval()
+            self._model = _enforce_dtype( self._model, model_dtype )
 
             timer.print( "Done!", use_millis=True )
 
@@ -375,13 +436,13 @@ class ProseEmbeddingEngine:
 
         Ensures:
             - Returns numpy array of shape (batch_size, matryoshka_dim)
-            - Applies mean pooling, layer norm, Matryoshka truncation, L2 normalization
+            - Applies mean pooling, layer norm, Matryoshka truncation, unit-length normalization
 
         Args:
             texts: List of prefixed text strings
 
         Returns:
-            numpy array of L2-normalized embeddings
+            numpy array of unit-length embeddings
         """
         encoded = self._tokenizer(
             texts, padding=True, truncation=True, max_length=8192, return_tensors="pt"
@@ -434,7 +495,7 @@ class ProseEmbeddingEngine:
             - queries is a list of non-empty strings
 
         Ensures:
-            - Returns list of matryoshka_dim L2-normalized embeddings
+            - Returns list of matryoshka_dim unit-length embeddings
             - Prepends query prefix to each query
             - Thread-safe: serializes inference via _inference_lock
             - CUDA OOM: gc.collect + empty_cache, retries once
@@ -445,20 +506,7 @@ class ProseEmbeddingEngine:
         Returns:
             List of embedding vectors
         """
-        self._load_model()
-
-        prefixed = [ f"{self._query_prefix} {q}" for q in queries ]
-
-        if self.debug and self.verbose:
-            timer = sw.Stopwatch( msg=f"Encoding {len( queries )} prose queries..." )
-
-        with self._inference_lock:
-            result = self._run_with_cuda_retry( lambda: self._encode_batch( prefixed ) )
-
-        if self.debug and self.verbose:
-            timer.print( "Done!", use_millis=True )
-
-        return result.tolist()
+        return self._encode_with_prefix( queries, self._query_prefix, "queries" )
 
     def encode_document( self, documents: List[ str ] ) -> List[ List[ float ] ]:
         """
@@ -468,7 +516,7 @@ class ProseEmbeddingEngine:
             - documents is a list of non-empty strings
 
         Ensures:
-            - Returns list of matryoshka_dim L2-normalized embeddings
+            - Returns list of matryoshka_dim unit-length embeddings
             - Prepends document prefix to each document
             - Thread-safe: serializes inference via _inference_lock
             - CUDA OOM: gc.collect + empty_cache, retries once
@@ -479,12 +527,28 @@ class ProseEmbeddingEngine:
         Returns:
             List of embedding vectors
         """
+        return self._encode_with_prefix( documents, self._document_prefix, "documents" )
+
+    def _encode_with_prefix( self, texts: List[ str ], prefix: str, noun: str ) -> List[ List[ float ] ]:
+        """
+        Encode texts after prepending a role prefix to each.
+
+        Requires:
+            - texts is a list of non-empty strings
+            - prefix is the role prefix string
+            - noun is the plural word for the debug banner ("queries", "documents")
+
+        Ensures:
+            - Returns list of matryoshka_dim unit-length embeddings
+            - Thread-safe: serializes inference via _inference_lock
+            - CUDA OOM: gc.collect + empty_cache, retries once
+        """
         self._load_model()
 
-        prefixed = [ f"{self._document_prefix} {d}" for d in documents ]
+        prefixed = [ f"{prefix} {t}" for t in texts ]
 
         if self.debug and self.verbose:
-            timer = sw.Stopwatch( msg=f"Encoding {len( documents )} prose documents..." )
+            timer = sw.Stopwatch( msg=f"Encoding {len( texts )} prose {noun}..." )
 
         with self._inference_lock:
             result = self._run_with_cuda_retry( lambda: self._encode_batch( prefixed ) )
@@ -520,6 +584,30 @@ class ProseEmbeddingEngine:
         """Return whether the model is loaded on GPU."""
         return self._model is not None
 
+    def describe( self ):
+        """
+        Report what this engine will use to encode, without loading the model.
+
+        Ensures:
+            - returns model id, revision, dtype, device, prefixes and dimensions
+            - revision is None until the model has been loaded
+            - dtype is the INI value until load (what the engine will use), then
+              the dtype of the loaded parameters (what it did use)
+            - never loads the model and never touches the GPU
+        """
+        revision = None
+        if self._model is not None: revision = self._model.config._commit_hash
+        return {
+            "model"           : self._model_name,
+            "revision"        : revision,
+            "dtype"           : self._dtype_str if self._model is None else _loaded_dtype_name( self._model ),
+            "device"          : self._device,
+            "query_prefix"    : self._query_prefix,
+            "document_prefix" : self._document_prefix,
+            "dimensions"      : self._matryoshka_dim,
+            "loaded"          : self._model is not None
+        }
+
 
 # ---------------------------------------------------------------------------
 # Module-level convenience functions
@@ -549,6 +637,22 @@ def get_prose_engine( debug=False, verbose=False ):
         - Returns singleton ProseEmbeddingEngine instance
     """
     return ProseEmbeddingEngine( debug=debug, verbose=verbose )
+
+
+def device_class( device ):
+    """
+    Name the kind of device an engine runs on, for the vector manifest.
+
+    Requires:
+        - device is a device string such as "cuda:0" or "cpu"
+
+    Ensures:
+        - a CUDA device that is available returns "<card name>, sm_<major><minor>"
+        - anything else returns the device string unchanged
+    """
+    if not device.startswith( "cuda" ) or not torch.cuda.is_available(): return device
+    major, minor = torch.cuda.get_device_capability( device )
+    return f"{torch.cuda.get_device_name( device )}, sm_{major}{minor}"
 
 
 def vram_report( device="cuda:0" ):

@@ -15,7 +15,7 @@ runs without a live server, we point `LUPIN_API_URL` at an unreachable host
 so the waiter's REST call fails fast — we're testing the spawn/sleep/wake
 plumbing, not the response-parse path (that's covered in test_idle_waiter.py).
 
-Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+Design: src/docs/decisions/2026.04.29-idle-aware-stop-hook.md
 """
 
 import json

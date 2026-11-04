@@ -1,0 +1,272 @@
+"""
+Marker counting for the docstring and markdown linters (documentation-standard plan).
+
+Counts the spec's six marker columns, per 1,000 words, using the frozen lists in
+rule_lists. Stdlib only, so it can be vendored into lupin-mobile's tool/ directory.
+"""
+
+import re
+
+from .rule_lists import (
+    CAPS_WORD_EXCEPTIONS, QUOTED_SPAN_REGEX, TIC_REGEX, EMPHASIS_GLYPHS, ID_REF_REGEX, SECTION_REGEX,
+    PATH_REGEX, SECTION_PATH_LOOKBACK, SECTION_PATH_LOOKAHEAD
+)
+from .word_list import default_words
+
+MARKER_COLUMNS = ( "em_dash", "caps_words", "section_refs", "id_refs", "tics", "emphasis_glyphs" )
+
+WORD_REGEX       = re.compile( r"[A-Za-z0-9][\w'’\-]*" )
+CAPS_REGEX       = re.compile( r"\b[A-Z][A-Z0-9]+\b" )
+MEMBER_ACCESS    = re.compile( r"[A-Za-z_][A-Za-z0-9_]*\.$" )
+OPTION_ARGUMENT  = re.compile( r"(?<![A-Za-z0-9_-])-{1,2}[A-Za-z][A-Za-z0-9_-]*[ \t]+$" )
+# A bracketed project prefix at the start of an item, such as a project tag or a plan tag, read from the text before the word.
+# Rick ruled it an identifier, the way an acronym is (task-store row id=486cc499).
+PROJECT_PREFIX_HEAD = re.compile( r"[ \t]*(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])[ \t]+)?(?:\[[ xX]\][ \t]+)?(?:\[[A-Z0-9_]+\][ \t]*)*\[" )
+PROJECT_PREFIX_END  = re.compile( r"\](?:$|[ \t:])" )
+FRONTMATTER      = re.compile( r"\A---\n.*?\n---\n", re.DOTALL )
+FENCED_BLOCK     = re.compile( r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE )
+INLINE_CODE      = re.compile( r"`[^`\n]*`" )
+HTML_COMMENT     = re.compile( r"<!--.*?-->", re.DOTALL )
+DOCTEST_BLOCK    = re.compile( r"^[ \t]*>>>.*?(?=\n[ \t]*\n|\Z)", re.DOTALL | re.MULTILINE )
+
+
+def _blank( match ):
+    """
+    Replace a matched block with as many newlines as it spans.
+
+    Requires:
+        - match is a re match object
+
+    Ensures:
+        - returns a string of newlines only, so line numbers after the block do not move
+
+    Raises:
+        - nothing
+    """
+    return "\n" * match.group( 0 ).count( "\n" )
+
+
+def blank_code( text ):
+    """
+    Blank the fenced code blocks and doctest blocks in a docstring or page.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - returns text with each such block reduced to its newlines, so line numbers hold
+        - prose outside the blocks is untouched
+
+    Raises:
+        - nothing
+    """
+    return DOCTEST_BLOCK.sub( _blank, FENCED_BLOCK.sub( _blank, text ) )
+
+
+def strip_markdown( text ):
+    """
+    Remove the parts of a markdown page that are not prose.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - front matter, fenced code blocks and HTML comments are removed
+        - inline code spans are kept, since a bare reference can sit inside one
+
+    Raises:
+        - nothing
+    """
+    text = FRONTMATTER.sub( "", text, count=1 )
+    text = FENCED_BLOCK.sub( "", text )
+    return HTML_COMMENT.sub( "", text )
+
+
+LINK_LABEL_REST = re.compile( r"[^\[\]\n]*\]\(([^)\s]+)" )
+
+
+def link_target_of_label( text, match ):
+    """
+    Return the target of the markdown link whose label holds a section mark.
+
+    Requires:
+        - match is a SECTION_REGEX match over text
+
+    Ensures:
+        - returns the text between the parentheses of [label](target) when the mark sits in the label
+        - returns None when the mark is outside any link label, or the label is not followed by a target
+        - the target counts in full, however long, so a long split-page path is not cut
+
+    Raises:
+        - nothing
+    """
+    line_start = text.rfind( "\n", 0, match.start() ) + 1
+    before     = text[ line_start : match.start() ]
+    if before.rfind( "[" ) == -1 or before.rfind( "[" ) < before.rfind( "]" ): return None
+    rest = LINK_LABEL_REST.match( text, match.end() )
+    return None if rest is None else rest.group( 1 )
+
+
+def is_section_ref_resolved( text, match ):
+    """
+    Say whether a section mark has a path beside it in the same paragraph.
+
+    Requires:
+        - match is a SECTION_REGEX match over text
+
+    Ensures:
+        - True when a path occurs within SECTION_PATH_LOOKBACK characters before the mark or
+          SECTION_PATH_LOOKAHEAD characters after it, without crossing a blank line
+        - a mark in the label of a markdown link is resolved when the link target holds a path, however long the target
+        - a hard-wrapped line break does not separate the mark from its path
+        - False otherwise, which makes the section mark a bare reference
+
+    Raises:
+        - nothing
+    """
+    target = link_target_of_label( text, match )
+    if target is not None and PATH_REGEX.search( target ) is not None: return True
+    para_start = text.rfind( "\n\n", 0, match.start() ) + 1
+    para_end   = text.find( "\n\n", match.end() )
+    if para_end == -1: para_end = len( text )
+    before = text[ max( para_start, match.start() - SECTION_PATH_LOOKBACK ) : match.start() ]
+    after  = text[ match.end() : min( para_end, match.end() + SECTION_PATH_LOOKAHEAD ) ]
+    return PATH_REGEX.search( before ) is not None or PATH_REGEX.search( after ) is not None
+
+
+def bare_section_refs( text ):
+    """
+    List the section marks in text that carry no path.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - returns the matched strings, in order of appearance
+
+    Raises:
+        - nothing
+    """
+    return [ m.group( 0 ) for m in SECTION_REGEX.finditer( text ) if not is_section_ref_resolved( text, m ) ]
+
+
+def caps_words( text, words=None ):
+    """
+    List the ALL-CAPS words in text that are emphasis.
+
+    Requires:
+        - text is a str
+        - words is a set of lowercase English words; None means the vendored list
+
+    Ensures:
+        - a word counts only when its lowercase form is in words and it is not in
+          CAPS_WORD_EXCEPTIONS
+        - words inside quotes or backticks, with a digit, next to an underscore or hyphen, are skipped
+        - a word that follows an identifier and a dot with no space, as in TaskType.BOUNDED, is a code member and is skipped
+        - both of those checks read only the text before the word on its own line, so the cost grows with line length and not with the page
+        - a capitalised word after a period and a space is still read as prose
+        - a word that follows a command-line option and a space, as in `--json OUT`, is the option's placeholder and is skipped
+        - a word inside square brackets at the start of an item, as in `- [LUPIN] Fix it`, is a project prefix and is skipped; `- PENDING item` is not
+        - a word after a bare double dash and a space is still read as prose, and so is a capitalised word after a plain word
+        - a prose sentence that puts a capitalised word right after an option name is skipped too; that is a chosen limit
+
+    Raises:
+        - OSError when words is None and the vendored list is missing
+    """
+    words = default_words() if words is None else words
+    text  = QUOTED_SPAN_REGEX.sub( lambda m: " " * len( m.group( 0 ) ), text )
+    found = []
+    for m in CAPS_REGEX.finditer( text ):
+        word   = m.group( 0 )
+        before = text[ m.start() - 1 ] if m.start() > 0 else ""
+        after  = text[ m.end() ] if m.end() < len( text ) else ""
+        if before in ( "_", "-" ) or after in ( "_", "-" ): continue
+        line_head = text[ text.rfind( "\n", 0, m.start() ) + 1 : m.start() ]
+        if before == "." and MEMBER_ACCESS.search( line_head ) is not None: continue
+        if before == "[" and PROJECT_PREFIX_HEAD.fullmatch( line_head ) is not None and PROJECT_PREFIX_END.match( text, m.end() ) is not None: continue
+        if before in ( " ", "\t" ) and OPTION_ARGUMENT.search( line_head ) is not None: continue
+        if any( c.isdigit() for c in word ) or word in CAPS_WORD_EXCEPTIONS: continue
+        if word.lower() in words: found.append( word )
+    return found
+
+
+def count_markers( text, words=None ):
+    """
+    Count the six marker columns in a piece of prose.
+
+    Requires:
+        - text is a str, already stripped of front matter and fenced code where it is markdown
+        - words is a set of lowercase English words, or None for the vendored list
+
+    Ensures:
+        - returns { "words": int, <each MARKER_COLUMNS name>: int }
+        - fenced and doctest blocks are blanked first; capitalised words are counted outside inline
+          code spans; every other column is counted on the rest of the text
+        - id_refs counts the row, bug, task and ts references only
+
+    Raises:
+        - nothing
+    """
+    text  = blank_code( text )
+    prose = INLINE_CODE.sub( " ", text )
+    return {
+        "words"           : len( WORD_REGEX.findall( text ) ),
+        "em_dash"         : text.count( "—" ),
+        "caps_words"      : len( caps_words( prose, words ) ),
+        "section_refs"    : text.count( "§" ),
+        "id_refs"         : len( ID_REF_REGEX.findall( text ) ),
+        "tics"            : len( TIC_REGEX.findall( text ) ),
+        "emphasis_glyphs" : sum( text.count( g ) for g in EMPHASIS_GLYPHS )
+    }
+
+
+def rates_per_thousand( counts ):
+    """
+    Convert raw marker counts to rates per 1,000 words.
+
+    Requires:
+        - counts is a dict from count_markers, or a sum of several
+
+    Ensures:
+        - returns a dict with the MARKER_COLUMNS keys, rounded to one decimal
+        - a corpus with no words has every rate 0.0
+
+    Raises:
+        - nothing
+    """
+    words = counts[ "words" ]
+    return { c : ( round( counts[ c ] * 1000.0 / words, 1 ) if words else 0.0 ) for c in MARKER_COLUMNS }
+
+
+def add_counts( total, counts ):
+    """
+    Add one count_markers result into a running total.
+
+    Requires:
+        - total and counts are dicts with the "words" key and every MARKER_COLUMNS key
+
+    Ensures:
+        - total is updated in place and returned
+        - the sum of rates is never taken; rates are computed once, from the summed counts
+
+    Raises:
+        - nothing
+    """
+    for key in ( "words", *MARKER_COLUMNS ): total[ key ] += counts[ key ]
+    return total
+
+
+def empty_counts():
+    """
+    Return a zeroed count_markers result.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - returns { "words": 0, <each MARKER_COLUMNS name>: 0 }
+
+    Raises:
+        - nothing
+    """
+    return { key : 0 for key in ( "words", *MARKER_COLUMNS ) }

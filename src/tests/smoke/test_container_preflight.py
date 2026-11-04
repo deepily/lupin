@@ -192,7 +192,45 @@ RESOLVE_SNIPPET  = (
 )
 
 
-def _newest_host_bridge_with_persona():
+def _host_sessions_dir():
+    """
+    The HOST directory bound at SESSIONS_DIR in CONTAINER, read from `docker inspect`.
+
+    Row d849a6d9: the test container's sessions folder is its own, not ~/.claude/sessions,
+    so the host side is read from the running container rather than assumed.
+
+    Ensures:
+        - returns the bind's Source path, or None when nothing is bound at SESSIONS_DIR
+    """
+    import json
+    result = subprocess.run( [ "docker", "inspect", "--format", "{{json .Mounts}}", CONTAINER ],
+                             capture_output=True, text=True, timeout=15 )
+    if result.returncode != 0: return None
+    for mount in json.loads( result.stdout or "[]" ):
+        if mount.get( "Destination" ) == SESSIONS_DIR: return mount.get( "Source" )
+    return None
+
+
+def _seed_probe_bridge( host_dir ):
+    """
+    Write one synthetic persona bridge into a folder that is NOT the real host sessions folder.
+
+    Ensures:
+        - returns ( path, session_id, name ), or None when host_dir is the real
+          ~/.claude/sessions (a synthetic bridge must never land among live seats)
+        - the bridge has role "worker", so no census counts it as a manager
+    """
+    import json
+    import uuid
+    if os.path.realpath( host_dir ) == os.path.realpath( os.path.expanduser( "~/.claude/sessions" ) ): return None
+    session_id = str( uuid.uuid4() )
+    path       = os.path.join( host_dir, f"cc-itest-preflight-{session_id[ :8 ]}.json" )
+    with open( path, "w" ) as handle:
+        json.dump( { "session_id": session_id, "role": "worker", "voice_persona": { "name": "preflight" } }, handle )
+    return path, session_id, "preflight"
+
+
+def _newest_host_bridge_with_persona( host_dir=None ):
     """
     The session id and persona name of the most recently written host bridge that has both.
 
@@ -200,10 +238,12 @@ def _newest_host_bridge_with_persona():
         - returns ( session_id, name ) or None when no bridge carries a persona
         - reads the HOST side only, so the container's answer is compared against an
           independent source rather than against itself
+        - looks in host_dir when given, else in ~/.claude/sessions
     """
     import glob
     import json
-    paths = sorted( glob.glob( os.path.expanduser( "~/.claude/sessions/cc-*.json" ) ),
+    base  = host_dir if host_dir is not None else os.path.expanduser( "~/.claude/sessions" )
+    paths = sorted( glob.glob( os.path.join( base, "cc-*.json" ) ),
                     key=os.path.getmtime, reverse=True )
     for path in paths:
         try:
@@ -237,20 +277,32 @@ def test_session_bridge_mount_resolves_a_known_persona():
         f"Remedy: docker rm -f {CONTAINER} && docker compose up -d {CONTAINER}"
     )
 
-    known = _newest_host_bridge_with_persona()
+    host_dir = _host_sessions_dir()
+    assert host_dir is not None, f"{CONTAINER} reports no mount at {SESSIONS_DIR} in `docker inspect`"
+
+    known  = _newest_host_bridge_with_persona( host_dir )
+    seeded = None
     if known is None:
-        pytest.skip( "no host session bridge carries a voice persona, so there is nothing known to resolve" )
+        # The test container's own folder holds no seats, by design (row d849a6d9), so seed
+        # one synthetic bridge and remove it afterwards. The real folder is never seeded.
+        seeded = _seed_probe_bridge( host_dir )
+        if seeded is None:
+            pytest.skip( "no host session bridge carries a voice persona, so there is nothing known to resolve" )
+        known = ( seeded[ 1 ], seeded[ 2 ] )
     session_id, name = known
 
-    rc, printed, err = _container_resolves( session_id )
-    assert rc == 0, f"the persona probe could not run inside {CONTAINER}: {err}"
-    assert printed == name, (
-        f"{CONTAINER} resolved session {session_id[ :8 ]} to {printed!r}; the host bridge says "
-        f"{name!r}. The mount is present but not the same files the host sees."
-    )
+    try:
+        rc, printed, err = _container_resolves( session_id )
+        assert rc == 0, f"the persona probe could not run inside {CONTAINER}: {err}"
+        assert printed == name, (
+            f"{CONTAINER} resolved session {session_id[ :8 ]} to {printed!r}; the host bridge says "
+            f"{name!r}. The mount is present but not the same files the host sees."
+        )
 
-    rc, printed, err = _container_resolves( "deadbeef" )
-    assert ( rc, printed ) == ( 0, "None" ), f"a made-up session id resolved to {printed!r} ({err})"
+        rc, printed, err = _container_resolves( "deadbeef" )
+        assert ( rc, printed ) == ( 0, "None" ), f"a made-up session id resolved to {printed!r} ({err})"
+    finally:
+        if seeded is not None: os.remove( seeded[ 0 ] )
 
 
 def test_gh_auth_status_warn_only():

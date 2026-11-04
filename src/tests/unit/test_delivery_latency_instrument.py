@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Guard for `src/scripts/delivery_latency.py` — the instrument behind §9–§9e of
-`src/rnd/v0.2.1/2026.09.05-no-worker-facing-delivery-route.md`.
+the R&D write-up "no worker facing delivery route".
 
 WHY THE PURE FUNCTIONS AND NOT THE CLI. The three functions here are the whole measurement;
 everything else is `git` and `journalctl` I/O. A test that shelled out to those would be
@@ -110,3 +110,11 @@ def test_a_single_commit_still_yields_the_gap_to_the_landing():
     ups = [ ( 0, 100 * H ) ]
     up, _, start, end = dl.largest_silent_stretch( ups, [ 5 * H ], 9 * H )
     assert ( start, end ) == ( 5 * H, 9 * H ) and up == pytest.approx( 4.0 )
+
+
+# ---------------------------------------------------------------- the module docstring
+
+def test_the_docstring_says_the_route_side_term_is_not_computed_and_nothing_here_computes_it():
+    assert "this script does not compute that term" in dl.__doc__
+    assert not [ name for name in dir( dl ) if "route_side" in name.lower() ]
+    assert "route_side" not in Path( dl.__file__ ).read_text( encoding="utf-8" )

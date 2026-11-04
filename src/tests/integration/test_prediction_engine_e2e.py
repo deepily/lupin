@@ -277,7 +277,8 @@ class TestPredictionEngineE2E:
             json = {
                 "notification_id" : notification_id,
                 "response_value"  : response_value,
-            }
+            },
+            headers = self.auth_headers,
         )
         assert response.status_code == 200, f"Response submission failed: {response.text}"
 
@@ -720,7 +721,8 @@ class TestPredictionEngineWarm:
             json = {
                 "notification_id" : notification_id,
                 "response_value"  : response_value,
-            }
+            },
+            headers = self.auth_headers,
         )
         assert response.status_code == 200, f"Response submission failed: {response.text}"
 

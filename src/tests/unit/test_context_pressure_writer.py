@@ -78,10 +78,12 @@ class FakeClock:
         self._sleep_calls       = 0
         self._sleep_stops_after = sleep_stops_after
         self.stop_event         = None     # wired to the loop's _stop after construction
+        self.sleeps             = [ ]      # the seconds each sleep() was asked for
     def now( self ):
         return T0
     def sleep( self, seconds ):
         self._sleep_calls += 1
+        self.sleeps.append( seconds )
         if ( self._sleep_stops_after is not None
              and self._sleep_calls >= self._sleep_stops_after
              and self.stop_event is not None ):
@@ -105,6 +107,12 @@ def test_unmeasured_status_mapping():
     assert _unmeasured_status( "IDLE" )   == "idle"
     assert _unmeasured_status( "DEAD" )   == "dead"
     assert _unmeasured_status( "ACTIVE" ) == "unknown"             # ACTIVE, no assistant turn yet
+
+
+@pytest.fixture( autouse=True )
+def _journal_zone( monkeypatch ):
+    """Pin the journal zone the default log function reads at its first call."""
+    monkeypatch.setattr( "cosa.agents.heartbeat_arbiter.arbiter_journal.read_arbiter_journal_timezone", lambda: "America/New_York" )
 
 
 def test_default_log_fn_emits_one_json_line( capsys ):
@@ -382,6 +390,14 @@ def test_run_loop_polls_until_stopped():
     loop.run()                                                     # exits after 2 sleeps
     assert clock._sleep_calls == 2
     assert store.get_section( SECTION_NAME ) is not None
+
+
+def test_run_sleeps_for_its_own_interval():
+    clock = FakeClock( sleep_stops_after=2 )
+    loop  = _loop( lambda **kw: [ ], Recorder(), clock=clock, interval_seconds=17 )
+    clock.stop_event = loop._stop
+    loop.run()
+    assert clock.sleeps == [ 17, 17 ]
 
 
 def test_run_loop_survives_poll_error():

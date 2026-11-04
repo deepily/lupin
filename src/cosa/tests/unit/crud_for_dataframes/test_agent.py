@@ -162,6 +162,22 @@ class TestRunCode( unittest.TestCase ):
         self.assertEqual( result[ "output" ][ "status" ], "cancelled" )
         self.assertIsNone( agent.error )
 
+    def test_padded_destructive_operation_still_asks_and_is_not_dispatched_when_denied( self ):
+        """
+        Ensures "Delete" and " update" reach the confirmation and a denial stops them.
+
+        Before the fix the raw-string compare skipped the ask, so dispatch lowercased the
+        operation and ran the delete with no confirmation.
+        """
+        for op in ( "Delete", " update" ):
+            agent = self._agent_with_intent( CRUDIntent( operation=op, schema_type="todo", item_id="abc" ) )
+            with patch.object( agent, "_confirm_destructive_operation", return_value=False ) as confirm, \
+                 patch( "cosa.crud_for_dataframes.agent.dispatch" ) as dispatch:
+                result = agent.run_code()
+            confirm.assert_called_once()
+            dispatch.assert_not_called()
+            self.assertEqual( result[ "output" ][ "status" ], "cancelled", f"{op!r} should have been cancelled" )
+
     def test_destructive_confirmation_granted_dispatches( self ):
         """Ensures a granted destructive confirmation proceeds to dispatch."""
         agent = self._agent_with_intent( CRUDIntent( operation="delete", schema_type="todo", item_id="abc" ) )
@@ -259,6 +275,32 @@ class TestConfirmDestructiveOperation( unittest.TestCase ):
     def test_error_denies( self ):
         """Ensures an error safely defaults to denial."""
         self.assertFalse( self._confirm( SimpleNamespace( is_timeout=False, is_error=True, response_value=None ) ) )
+
+    def test_new_agent_does_not_claim_suite_lineage( self ):
+        """Ensures a fresh agent starts without suite lineage, so the ask is kept."""
+        agent, _ = _make_agent()
+        self.assertIs( agent.lineage_is_test_suite, False )
+
+    def test_suite_lineage_takes_no_default_without_asking( self ):
+        """Row 4cbd4858: suite lineage returns False and never calls notify_user_sync."""
+        agent, _ = _make_agent()
+        agent.crud_intent          = CRUDIntent( operation="delete", target_list="groceries", schema_type="todo" )
+        agent.lineage_is_test_suite = True
+        with patch( "cosa.crud_for_dataframes.agent.notify_user_sync" ) as notify:
+            result = agent._confirm_destructive_operation()
+        self.assertFalse( result )
+        notify.assert_not_called()
+
+    def test_suite_lineage_prints_one_line_saying_why( self ):
+        """Ensures the skipped path prints exactly one line naming the operation and the reason."""
+        agent, _ = _make_agent()
+        agent.crud_intent          = CRUDIntent( operation="delete", target_list="groceries", schema_type="todo" )
+        agent.lineage_is_test_suite = True
+        with patch( "builtins.print" ) as out:
+            agent._confirm_destructive_operation()
+        out.assert_called_once()
+        self.assertIn( "Test-suite lineage", out.call_args.args[ 0 ] )
+        self.assertIn( "delete", out.call_args.args[ 0 ] )
 
     def test_none_value_denies( self ):
         """Ensures a None response value is treated as denial."""

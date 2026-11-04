@@ -165,7 +165,7 @@ _STABILIZE_DOM_JS = """
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase5_notifications_pane_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot, assert_snapshot_height_tolerant, logged_in_page,
 ):
     """
     Capture the Phase 5 notifications-list pane in its rendered baseline state
@@ -247,7 +247,13 @@ def test_multiplexer_phase5_notifications_pane_visual(
     cards = page.locator( '[data-testid="multiplexer-sender-cards"]' )
     assert cards.locator( '[data-id-hash="phase5-visual-sender-a"]' ).count() == 1
     assert cards.locator( '[data-id-hash="phase5-visual-sender-b"]' ).count() == 1
-    assert_snapshot( cards, name="multiplexer_phase5_sender_cards.png" )
+    # Height-tolerant, max 1px (threshold unchanged, so every pixel of the shared region is still
+    # compared at the configured threshold): the card list renders 298 OR 299 rows run to run --
+    # measured 2026-09-30, e2e_a 15:05 EDT compared same-size (298) and ts-0e5040ed at 18:5x raised
+    # 'Image sizes do not match' 1148160 vs 1144320 bytes = 299 vs 298 rows. The stock assert_snapshot
+    # raises ValueError on ANY size difference, which aborts the test before action_required_section
+    # runs. Same class as bug 660d02b4; same existing fixture.
+    assert_snapshot_height_tolerant( cards, name="multiplexer_phase5_sender_cards.png", max_height_delta=1 )
 
     print( "✓ multiplexer_phase5_sender_cards: visual snapshot compared" )
 
@@ -260,6 +266,11 @@ def test_multiplexer_phase5_notifications_pane_visual(
     # _STABILIZE_DOM_JS above; the AR widget was waited-for at
     # `[data-testid="multiplexer-action-required"]`, so the section is rendered.
     ar_section = page.locator( '[data-testid="multiplexer-action-required-section"]' )
-    assert_snapshot( ar_section, name="multiplexer_phase5_action_required_section.png" )
+    # Height-tolerant (max 1px) for the same reason as sender_cards above, and for a second one: the
+    # stock assert_snapshot raises ValueError on a size difference BEFORE it saves any PNG, so the
+    # +45 rows this card gained from the Action Required parity chrome (289 vs the 244-row baseline,
+    # row 2ebf322f) left no actual to re-bless from. The tolerant fixture fails a >1px delta WITH
+    # the actual/expected saved; once re-blessed it stays strict to 1px. Threshold is unchanged.
+    assert_snapshot_height_tolerant( ar_section, name="multiplexer_phase5_action_required_section.png", max_height_delta=1 )
 
     print( "✓ multiplexer_phase5_action_required_section: visual snapshot compared" )

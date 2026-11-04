@@ -609,6 +609,21 @@ tbody.task-group.collapsed .task-row {
     background: #f1b0b7;
 }
 
+/* ARMED — the holding area's "Approve all" / "Won't fix all" and a plan header's "Approve all N" (row 376dd4cb). Same colours as
+   the per-row Submit above; the label already says "Confirm …", so the red is redundant. */
+.holding-area-group-header .task-action-btn.task-submit-armed,
+.holding-plan-header .task-action-btn.task-submit-armed {
+    border-color: #f5c6cb;
+    background: #f8d7da;
+    color: #721c24;
+    font-weight: 600;
+}
+
+.holding-area-group-header .task-action-btn.task-submit-armed:hover:not(:disabled),
+.holding-plan-header .task-action-btn.task-submit-armed:hover:not(:disabled) {
+    background: #f1b0b7;
+}
+
 /* Inline edit-failure stripe. The stripe is its own <tr class="task-row-error-stripe" hidden>
    under each task row (rowDisclosure.ts renderErrorStripe, since f3cfe655 on 09-05), so this
    styles its CELL. It used to style the row itself with `display: block` — a leftover from when
@@ -775,4 +790,33 @@ tbody.task-group.collapsed .task-row {
     50% {
         opacity: 0.6;
     }
+}
+
+/* Row 30257e87 — the holding area's Creator / Assignee toggle (same look as the legacy client's). */
+.holding-group-toggle {
+    display     : flex;
+    align-items : center;
+    gap         : 6px;
+    margin      : 4px 0 8px;
+    font-size   : 12px;
+}
+
+.holding-group-toggle-label {
+    opacity : 0.7;
+}
+
+.holding-group-toggle-btn {
+    padding       : 2px 10px;
+    border        : 1px solid currentcolor;
+    border-radius : 10px;
+    background    : transparent;
+    color         : inherit;
+    cursor        : pointer;
+    opacity       : 0.65;
+}
+
+.holding-group-toggle-btn[aria-pressed="true"] {
+    background  : rgb( 126, 87, 194, 0.18 );
+    font-weight : 600;
+    opacity     : 1;
 }

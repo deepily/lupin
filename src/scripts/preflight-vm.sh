@@ -58,11 +58,22 @@ PHASE="full"
 VERBOSE=false
 CONTAINER="${PREFLIGHT_VM_CONTAINER:-lupin-rest-cloud-gpu}"
 COMPOSE_FILE="${PREFLIGHT_VM_COMPOSE:-$REPO_ROOT/docker-compose.cloud-gpu.yml}"
+# The compose SERVICE name. A remedy line runs `docker compose ... up <service>`, and compose
+# refuses a container name there ("no such service") and restarts nothing. Order: an explicit
+# override; the label compose put on the running container; the service the compose file gives
+# this container_name. With none of them the remedy prints a placeholder rather than a guess.
+SERVICE="${PREFLIGHT_VM_SERVICE:-}"
+if [ -z "$SERVICE" ] && command -v docker >/dev/null 2>&1; then
+    SERVICE="$( docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$CONTAINER" 2>/dev/null || printf '' )"
+fi
+[ -n "$SERVICE" ] || SERVICE="$( pfv_compose_service "$COMPOSE_FILE" "$CONTAINER" 2>/dev/null || printf '' )"
+[ -n "$SERVICE" ] || SERVICE="<service of $CONTAINER in $( basename "$COMPOSE_FILE" )>"
 # The env file compose is invoked with. C6's bootstrap exemption (row e7048496) asks
 # this file whether a var missing from the RUNNING container will be supplied by the
 # imminent recreate, so it needs the real path, not just a basename for a remedy line.
 ENV_FILE="${PREFLIGHT_VM_ENVFILE:-$REPO_ROOT/cloud-gpu.env}"
 VM_PREFIX="${PREFLIGHT_VM_PREFIX:-/mnt/lupin-data}"
+FLEET_ROSTER="${PREFLIGHT_VM_FLEET_ROSTER:-$HOME/.claude/fleet-roster.env}"
 APP_URL="${PREFLIGHT_VM_APP_URL:-http://localhost:7999}"
 ARBITER_URL="${PREFLIGHT_VM_ARBITER_URL:-http://localhost:8001}"
 
@@ -246,6 +257,51 @@ else
     report unknown BLOCK "CC venv $CC_VENV does not exist" "lupin-vm.sh push-env, then install-cosa-voice.sh on the VM"
 fi
 
+# A3b — the voice server's registration carries the settings pointer (row c9252819).
+# Without it a spawned worker gets no model and runs on the user's default, silently.
+# Two files can register the server: the user's ~/.claude.json (user scope and each
+# local scope) and the repo's .mcp.json (project scope). Both go through one check.
+# The remedy is the dev-box verb, not the bare installer: the installer needs PATH and
+# LUPIN_CC_VENV set, and a non-login ssh shell sets neither.
+CLAUDE_JSON="${PREFLIGHT_VM_CLAUDE_JSON:-$HOME/.claude.json}"
+PROJECT_MCP_JSON="${PREFLIGHT_VM_PROJECT_MCP_JSON:-$REPO_ROOT/.mcp.json}"
+VOICE_INSTALL="from the dev box: src/scripts/lupin-vm.sh install-voice"
+# install-voice rewrites the user-scope entry only. The other two scopes are fixed by hand.
+VOICE_REMEDY="$VOICE_INSTALL; a local-scope entry is removed with: claude mcp remove cosa-voice -s local (run in that project directory); an entry in a project .mcp.json is removed by hand"
+
+# $1 = file, $2 = what a file with no registration is worth: "warn" or "silent",
+# $3 = the scope name of the file's top-level entry ("user" or "project").
+# A host nobody runs Claude Code on has no ~/.claude.json, and most trees have no
+# .mcp.json, so "nothing registered here" never blocks. Everything else that is not a
+# pass does: a missing variable, a value that names nothing, a file of the wrong shape,
+# and a file or reader that could not be read at all.
+voice_registration_check() {
+    local file="$1" when_none="$2" top="$3" out rc scope value why bad=""
+    out="$( pfv_mcp_registration_env "$file" cosa-voice LUPIN_CONFIG_MGR_CLI_ARGS "$top" )"; rc=$?
+    case $rc in
+        0) while IFS=$'\t' read -r scope value; do
+               why="$( pfv_config_mgr_args_resolve "$value" "$REPO_ROOT" )" || bad="$bad[$scope: $why] "
+           done <<< "$out"
+           if [ -z "$bad" ]; then
+               report pass BLOCK "cosa-voice registration in $file carries LUPIN_CONFIG_MGR_CLI_ARGS and it resolves ($( printf '%s' "$out" | tr '\t\n' ' ;' ))"
+           else
+               report fail BLOCK "cosa-voice registration in $file carries LUPIN_CONFIG_MGR_CLI_ARGS but it does not resolve: $bad— spawned workers get no model" \
+                            "$VOICE_REMEDY"
+           fi ;;
+        1) report fail BLOCK "cosa-voice is registered in $file without a usable LUPIN_CONFIG_MGR_CLI_ARGS (scope: $( printf '%s' "$out" | tr '\n' ';' )) — spawned workers get no model and run on the user default" \
+                        "$VOICE_REMEDY" ;;
+        2) if [ "$when_none" = warn ]; then
+               report unknown WARN "no cosa-voice registration in $file" "$VOICE_INSTALL"
+           fi ;;
+        3) report unknown BLOCK "$file, or a cosa-voice entry in it, is not the shape Claude Code writes (reader rc=3), so the registration is unread" \
+                           "python3 -m json.tool $file — if that prints cleanly, a cosa-voice entry in it is not an object; look at mcpServers and projects.*.mcpServers" ;;
+        *) report unknown BLOCK "the registration reader could not read $file (reader rc=$rc), so the cosa-voice registration is unread" \
+                           "ls -l $file; python3 --version" ;;
+    esac
+}
+voice_registration_check "$CLAUDE_JSON" warn user
+voice_registration_check "$PROJECT_MCP_JSON" silent project
+
 # A4/A5 — the CC session-bridge surface (persona-404's two halves).
 SESSIONS_DIR="${LUPIN_HOST_SESSIONS_DIR:-$HOME/.claude/sessions}"
 if [ -d "$SESSIONS_DIR" ]; then
@@ -301,6 +357,35 @@ for d in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
                       "sudo git config --global --add safe.directory $d"
     fi
 done
+# A8 — the Stop-hook poke is silently OFF without a heartbeat block (row 31344c5f).
+#      heartbeat_settings.py defaults enabled=False, so a VM whose settings.json lacks
+#      the block never pokes a stalled seat — and nothing says so. Applied by hand on
+#      lupin-host-test 2026-09-30; this is the assertion that keeps it there.
+CC_SETTINGS="${PREFLIGHT_VM_CC_SETTINGS:-$HOME/.claude/settings.json}"
+if command -v python3 >/dev/null 2>&1; then
+    hb_out="$( pfv_heartbeat_settings_status "$CC_SETTINGS" )"; hb_rc=$?
+    case $hb_rc in
+        0) report pass BLOCK "settings.json heartbeat.enabled + owed_source_from_store + task_store.enabled all true" ;;
+        1) report fail BLOCK "settings.json not wired for the Stop poke / task store — not true: $hb_out" \
+                      "python3 -c \"import json,os;p=os.path.expanduser('$CC_SETTINGS');d=json.load(open(p));d.setdefault('heartbeat',{}).update(enabled=True,owed_source_from_store=True);d.setdefault('task_store',{})['enabled']=True;json.dump(d,open(p,'w'),indent=2)\"   # back the file up first" ;;
+        *) report unknown BLOCK "cannot read the heartbeat block: $hb_out ($CC_SETTINGS)" "python3 -m json.tool $CC_SETTINGS" ;;
+    esac
+else
+    report unknown BLOCK "python3 missing — cannot assert the heartbeat settings block" "install python3"
+fi
+
+# A9 — without ~/.claude/fleet-roster.env no seat on this VM is a manager, so every
+#      manager-gated store write 403s (start-cc-with-tmux.sh derives the persona chain
+#      from it). Row 31344c5f. Needs at least one line; per-project coverage is checked
+#      in layer C, where the external-project mounts are known.
+pfv_roster_declares "$FLEET_ROSTER" ""; ros_rc=$?
+case $ros_rc in
+    0) report pass BLOCK "fleet-roster.env declares at least one COSA_VOICE_MANAGERS__ line" ;;
+    1) report fail BLOCK "$FLEET_ROSTER has no COSA_VOICE_MANAGERS__<PROJECT> line — no seat here is a manager; manager-gated store writes will 403" \
+                  "printf 'COSA_VOICE_MANAGERS__<PROJECT>=\"<Persona>\"\n' >> $FLEET_ROSTER   # template: src/conf/fleet-roster.env.template" ;;
+    *) report fail BLOCK "$FLEET_ROSTER is missing — no seat here is a manager; manager-gated store writes will 403" \
+                  "cp $REPO_ROOT/src/conf/fleet-roster.env.template $FLEET_ROSTER   # then set COSA_VOICE_MANAGERS__<PROJECT>=\"<Persona>\"" ;;
+esac
 else note_skip A; fi
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -401,6 +486,71 @@ else
     report pass BLOCK "no orphaned bytecode under $PYC_ROOT"
 fi
 
+# B7 — the two git hooks are links to the scripts this checkout ships (Rick, 2026-10-07).
+# A hook lives in .git/hooks, which git does not carry, so a fresh clone or an updated VM has
+# none until a person makes the links. A guard refuses a Claude seat that writes that folder.
+# Every phase: it is cheap, and the time to learn of a missing hook is before work starts.
+# WARN, not BLOCK: the merge pyramid runs the same lint gate, so a host without the hook is
+# unguarded at commit and push, not unfit to deploy onto.
+GIT_HOOKS_DIR="${PREFLIGHT_VM_GIT_HOOKS_DIR:-}"
+if [ -z "$GIT_HOOKS_DIR" ]; then
+    # --git-path follows core.hooksPath, so this is the folder git itself would run hooks from.
+    hooks_path="$( git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" rev-parse --git-path hooks 2>/dev/null || printf '' )"
+    case "$hooks_path" in
+        "")  GIT_HOOKS_DIR="$REPO_ROOT/.git/hooks" ;;
+        /*)  GIT_HOOKS_DIR="$hooks_path" ;;
+        *)   GIT_HOOKS_DIR="$REPO_ROOT/$hooks_path" ;;
+    esac
+fi
+for hook_row in "pre-commit:pre-commit-chain.sh" "pre-push:pre-push-chain.sh"; do
+    hook_name="${hook_row%%:*}"; hook_script="${hook_row##*:}"
+    # The remedy names the folder this check read, so it is right when core.hooksPath moves it.
+    hook_fix="ln -sf $REPO_ROOT/src/scripts/$hook_script $GIT_HOOKS_DIR/$hook_name   # a person runs this; a Claude seat is refused"
+    hook_out="$( pfv_git_hook_status "$GIT_HOOKS_DIR" "$hook_name" "$REPO_ROOT/src/scripts/$hook_script" "$REPO_ROOT" )"
+    case "${hook_out%%$'\t'*}" in
+        MATCH)
+            report pass WARN "git hook $hook_name links to src/scripts/$hook_script" ;;
+        NO_SCRIPT)
+            report fail WARN "this checkout has no src/scripts/$hook_script — it predates the $hook_name hook" \
+                          "update the checkout first (lupin-vm.sh push-bundle <branch> --checkout), then: $hook_fix" ;;
+        ABSENT)
+            report fail WARN "git hook $hook_name is not installed in $GIT_HOOKS_DIR — nothing checks a ${hook_name#pre-} on this clone" \
+                          "$hook_fix" ;;
+        NOT_LINK)
+            report fail WARN "git hook $hook_name in $GIT_HOOKS_DIR is a file, not a link — it will not follow src/scripts/$hook_script when the checkout updates" \
+                          "$hook_fix" ;;
+        WRONG_TARGET)
+            report fail WARN "git hook $hook_name links to ${hook_out#*$'\t'}, not to src/scripts/$hook_script" \
+                          "$hook_fix" ;;
+        DANGLING)
+            report fail WARN "git hook $hook_name is a dangling link to ${hook_out#*$'\t'} — nothing exists there, so git runs no ${hook_name#pre-} check" \
+                          "$hook_fix" ;;
+        OUTSIDE)
+            report fail WARN "git hook $hook_name links to ${hook_out#*$'\t'}, outside this checkout — it will not follow src/scripts/$hook_script" \
+                          "$hook_fix" ;;
+        NOT_EXECUTABLE)
+            report fail WARN "git hook $hook_name links to src/scripts/$hook_script, which is not executable — git skips it with a warning" \
+                          "chmod +x $REPO_ROOT/src/scripts/$hook_script   # a person runs this; a Claude seat is refused" ;;
+        *)
+            report unknown WARN "git hook $hook_name could not be read in $GIT_HOOKS_DIR" "$hook_fix" ;;
+    esac
+done
+
+# B8 — the test role's password reaches the VM (row 80513825). Plain mode is a legal state, so this
+# is a WARN: tests that create databases then run as DB_USER. The env file is the only witness here;
+# whether the Secret Manager secret lupin-db-test-password exists is not checked from the VM.
+test_login_state="$( pfv_test_login_env_status "$ENV_FILE" )"
+case "$test_login_state" in
+    SUPPLIED)
+        report pass WARN "$( basename "$ENV_FILE" ) supplies LUPIN_TEST_DB_PASSWORD (value not shown)" ;;
+    PLAIN)
+        report fail WARN "$( basename "$ENV_FILE" ) does not supply LUPIN_TEST_DB_PASSWORD — tests that create databases run as DB_USER (plain mode)" \
+                      "put the VALUE of the Secret Manager secret lupin-db-test-password on a LUPIN_TEST_DB_PASSWORD= line in it (an env file does not run commands, so paste the value; fetch it with: gcloud secrets versions access latest --secret=lupin-db-test-password), or run, from the dev box: lupin-vm.sh push-test-login; then recreate the container; the lupin_test user and the template database must already exist on Cloud SQL" ;;
+    *)
+        report unknown WARN "$( basename "$ENV_FILE" ) could not be read, so LUPIN_TEST_DB_PASSWORD is unchecked" \
+                      "check that $ENV_FILE exists and is readable by this user" ;;
+esac
+
 if layer_runs B; then
 # B1/B2 — parity. POST-phase only: PRE runs before HEAD changes, so asserting the
 # old ref would be meaningless — and a meaningless assertion that passes is worse
@@ -475,6 +625,23 @@ else
     esac
 fi
 
+# B7 — the built esbuild bundles are on the checkout (bug 527fec6e).
+# The compose file bind-mounts this checkout's ./src over the image's, so the bundles baked into the image are
+# hidden, and static/dist/ is gitignored so a code sync does not carry it. A script 404s and the feature it
+# carries never shows (measured 2026-10-20: the VM held multiplexer only, so the doc viewer lost its podcast button).
+# PHASE-AWARE TIER, like the schema check: BLOCK once the deploy has run (post, full), WARN in pre, because the
+# deploy that is about to run is what ships them.
+DIST_REQUIRED="multiplexer console doc-podcast"
+dist_tier="BLOCK"; [ "$PHASE" = "pre" ] && dist_tier="WARN"
+dist_present="$( pfv_dist_present "$REPO_ROOT/src/lupin_app/static/dist" "$DIST_REQUIRED" )"
+dist_status="$( pfv_dist_status "$DIST_REQUIRED" "$dist_present" )"
+case "$dist_status" in
+    OK)
+        report pass "$dist_tier" "built bundles present on the checkout: $DIST_REQUIRED" ;;
+    *)
+        report fail "$dist_tier" "built bundles absent from $REPO_ROOT/src/lupin_app/static/dist (${dist_status#MISSING:}), so the pages that load them lose that feature"                       "lupin-vm.sh push-dist   # from a checkout where npm run build has run" ;;
+esac
+
 # B4 — a committed .mcp.json with absolute dev paths pollutes every checkout.
 if sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" ls-files --error-unmatch .mcp.json >/dev/null 2>&1; then
     report fail WARN ".mcp.json is TRACKED — it must not be (cosa-voice is a per-machine USER-scope MCP)" \
@@ -494,7 +661,7 @@ if ! command -v docker >/dev/null 2>&1; then
     report unknown BLOCK "docker not reachable" "check the docker daemon"
 elif ! docker ps --filter "name=^${CONTAINER}$" --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
     report fail BLOCK "container '$CONTAINER' is not running" \
-                  "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps $CONTAINER"
+                  "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps $SERVICE"
 else
     report pass BLOCK "container '$CONTAINER' is running"
 
@@ -521,7 +688,7 @@ PY
         [ $rc -eq 0 ] \
             && report pass BLOCK "running mount set covers every compose-declared mount" \
             || report fail BLOCK "compose declares mounts the RUNNING container lacks: $( printf '%s' "$missing" | tr '\n' ' ' )" \
-                          "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT do it"
+                          "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT do it"
     else
         report unknown WARN "cannot parse $COMPOSE_FILE (need python3 + pyyaml)" "pip install pyyaml"
     fi
@@ -584,7 +751,7 @@ PY
     case $rc in
         0) report pass BLOCK "LUPIN_ENV='$c_env' agrees with config_block_id='$c_block'" ;;
         1) report fail BLOCK "LUPIN_ENV='$c_env' DISAGREES with config_block_id='$c_block' — the app reads one environment's config while addressing another's database" \
-                      "make them agree in $COMPOSE_FILE, then: up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read the environment" ;;
+                      "make them agree in $COMPOSE_FILE, then: up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT re-read the environment" ;;
         2) report unknown BLOCK "cannot compare LUPIN_ENV='$c_env' with config_block_id='$c_block' — one is empty or the block id lacks the 'Lupin:+' prefix" \
                       "check the environment: block for LUPIN_ENV and LUPIN_CONFIG_MGR_CLI_ARGS in $COMPOSE_FILE" ;;
     esac
@@ -614,6 +781,7 @@ PY
             [ -n "$row" ] || continue
             cname="$(    pfv_contract_field "$row" 1 )" || continue
             csurface="$( pfv_contract_field "$row" 2 )"
+            cwriter="$(  pfv_contract_field "$row" 3 )"
             cshape="$(   pfv_contract_field "$row" 4 )"
             creq="$(     pfv_contract_field "$row" 5 )"
             case "$csurface" in CONTAINER|COMPOSE) ;; *) continue ;; esac
@@ -637,17 +805,47 @@ PY
             if [ "$csurface" = "COMPOSE" ]; then
                 case "$regime" in
                     REQUIRED)
-                        if docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
-                            report pass BLOCK "$cname supplied at container CREATE — $( basename "$COMPOSE_FILE" ) interpolates it \${VAR:?}, which aborts \`up\` when unset, and $CONTAINER is running   [surface: COMPOSE]"
+                        # THE WITNESS IS THE ENV FILE, NOT THE RUNNING CONTAINER. A container
+                        # that is up only proves what it was CREATED with; one that predates a
+                        # newly-required key stays up and says nothing about it. So read the
+                        # line itself, the way C5 reads CLOUD_SQL_CONNECTION_NAME: the file is
+                        # mode 600 and owned by the container user, so a plain grep by the SSH
+                        # user reads nothing, and `sudo -n grep` is the reader. Anchored, so a
+                        # commented-out line does not count; the last assignment wins.
+                        cfile="$( basename "$ENV_FILE" )"
+                        if cline="$( sudo -n grep -E "^${cname}=" "$ENV_FILE" 2>/dev/null )" \
+                           || cline="$( grep -E "^${cname}=" "$ENV_FILE" 2>/dev/null )"; then
+                            cval="$( printf '%s\n' "$cline" | tail -1 | cut -d= -f2- )"
+                            if [ -n "$cval" ]; then
+                                report pass BLOCK "$cname supplied by $cfile, which the next container create reads   [surface: COMPOSE]"
+                            else
+                                report fail BLOCK "$cname is declared EMPTY in $cfile, which \${VAR:?} rejects exactly as it rejects unset   [surface: COMPOSE]" \
+                                              "set $cname in $cfile (contract writer: $cwriter)"
+                            fi
+                        elif [ -r "$ENV_FILE" ] || sudo -n test -r "$ENV_FILE" 2>/dev/null; then
+                            report fail BLOCK "$cname is absent from $cfile; the next container create aborts on \${VAR:?}   [surface: COMPOSE]" \
+                                          "set $cname in $cfile (contract writer: $cwriter)"
                         else
-                            report unknown BLOCK "$cname: cannot witness a COMPOSE-surface var while $CONTAINER is not running" \
-                                          "start the stack, then re-run: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d"
+                            report unknown BLOCK "$cname: $cfile could not be read, so nothing here can say whether the next container create is supplied   [surface: COMPOSE]" \
+                                          "make $cfile readable to the preflight (sudo -n), then re-run"
                         fi ;;
                     ABSENT)
                         report fail WARN "$cname declared surface=COMPOSE but $( basename "$COMPOSE_FILE" ) never references it" \
                                       "add the interpolation to $( basename "$COMPOSE_FILE" ), or correct its surface in env-contract.tsv" ;;
+                    DEFAULTED)
+                        # ${VAR:-d} cannot abort a container create, so a contract row marked
+                        # OPTIONAL leaves nothing here to supply and nothing to assert (measured
+                        # 2026-10-28: LUPIN_VERTEX_REGION blocked a post-deploy preflight). A row
+                        # the contract calls required is a different case, and falls to the arm
+                        # below: the two files disagree and neither can say which is right.
+                        if [ "$creq" = "OPTIONAL" ]; then
+                            report pass BLOCK "$cname is defaulted by $( basename "$COMPOSE_FILE" ) and optional in the contract, so its absence cannot abort a container create   [surface: COMPOSE]"
+                            continue
+                        fi
+                        report unknown BLOCK "$cname is surface=COMPOSE but $( basename "$COMPOSE_FILE" ) treats it as $regime, not \${VAR:?} — a running container is NOT evidence it was supplied" \
+                                      "either interpolate it \${VAR:?} so absence aborts \`up\`, or correct its surface in env-contract.tsv" ;;
                     *)
-                        # DEFAULTED/LITERAL/BARE/CONFLICT/UNKNOWN: compose tolerates an
+                        # LITERAL/BARE/CONFLICT/UNKNOWN: compose tolerates an
                         # unset value, so a running container proves NOTHING about it.
                         # Never launder that into a pass.
                         report unknown BLOCK "$cname is surface=COMPOSE but $( basename "$COMPOSE_FILE" ) treats it as $regime, not \${VAR:?} — a running container is NOT evidence it was supplied" \
@@ -736,7 +934,7 @@ PY
                         *) efnote="and $( basename "$ENV_FILE" ) could not be read, so nothing here can say whether a recreate would supply it" ;;
                     esac
                     report unknown "$ctier" "$cname is UNSET in the container (compose regime: $regime) — $efnote   [witness: $cwitness]" \
-                                  "set $cname in $( basename "$ENV_FILE" ) for this venue, then: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read the environment"
+                                  "set $cname in $( basename "$ENV_FILE" ) for this venue, then: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT re-read the environment"
                 fi
             else
                 pfv_shape_matches "$cvalue" "$cshape" "$VM_PREFIX"; crc=$?
@@ -812,7 +1010,7 @@ PY
         case $schema_rc in
             0) report pass "$schema_tier" "DB schema is at the tree's head revision ($schema_head)" ;;
             1) report fail "$schema_tier" "SCHEMA DRIFT — ${schema_detail:-db=$schema_cur tree=$schema_head}" \
-                          "restart the app container so main.py migrates to head: sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $CONTAINER" ;;
+                          "restart the app container so main.py migrates to head: sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $SERVICE" ;;
             *) report unknown "$schema_tier" "cannot determine schema revision — ${schema_detail:-$( printf '%s' "$schema_out" | tr '\n' ' ' | cut -c1-160 )}" \
                           "this is NOT drift and does not take drift's remedy — the question could not be answered; check the container is up and the DB reachable: docker exec $CONTAINER python /var/lupin/src/scripts/check_schema_at_head.py" ;;
         esac
@@ -883,7 +1081,84 @@ PY
         report pass BLOCK "Cloud SQL socket exists and IS a socket"
     else
         report fail BLOCK "Cloud SQL socket /cloudsql/$conn/.s.PGSQL.5432 is absent or not a socket (the proxy may still report 'healthy' — bug 70794d58)" \
-                      "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env restart cloud-sql-proxy && ... up -d --no-deps --force-recreate $CONTAINER"
+                      "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env restart cloud-sql-proxy && ... up -d --no-deps --force-recreate $SERVICE"
+    fi
+    # C9 — the flow-ratio override file exists (row 31344c5f). WARN, not block: the
+    #      VALUES are the operator's call, so this only reports whether an override is
+    #      in force and what it says. Absent ⇒ the shipped defaults (24h / 1.0) apply
+    #      instead of the ruled 24h / 2.0. The dir comes from the container's own env.
+    fr_dir="$( docker exec "$CONTAINER" sh -c 'printf %s "${LUPIN_FLOW_RATIO_DIR:-}"' 2>/dev/null || printf '' )"
+    if [ -z "$fr_dir" ]; then
+        report fail WARN "LUPIN_FLOW_RATIO_DIR is unset in $CONTAINER — flow-ratio overrides cannot be read from anywhere" \
+                      "add LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio to the compose environment, then up -d --no-deps --force-recreate $SERVICE"
+    else
+        fr_body="$( docker exec "$CONTAINER" cat "$fr_dir/flow-ratio-settings.json" 2>/dev/null )"; fr_rc=$?
+        if [ $fr_rc -eq 0 ] && [ -n "$fr_body" ]; then
+            fr_found="$( printf '%s' "$fr_body" | tr -d '\n' | tr -s ' ' )"
+            fr_why="$( pfv_flow_ratio_status "$fr_body" )"; fr_status=$?
+            if [ $fr_status -eq 0 ]; then
+                report pass WARN "flow-ratio override present at $fr_dir/flow-ratio-settings.json and holds the ruled ${PFV_FLOW_RATIO_WINDOW_HOURS}h / ${PFV_FLOW_RATIO_ALLOW_BELOW}: $fr_found"
+            else
+                report fail WARN "flow-ratio override at $fr_dir/flow-ratio-settings.json is NOT the ruled ${PFV_FLOW_RATIO_WINDOW_HOURS}h / ${PFV_FLOW_RATIO_ALLOW_BELOW} (found: $fr_why)" \
+                              "docker exec -w /var/lupin $CONTAINER python -c \"import cosa.rest.flow_ratio_settings as f; f.set_overrides( window_hours=${PFV_FLOW_RATIO_WINDOW_HOURS}, allow_below=${PFV_FLOW_RATIO_ALLOW_BELOW} )\"   # ruled 2026-09-30 (row 08691779)"
+            fi
+        else
+            report fail WARN "no flow-ratio override at $fr_dir/flow-ratio-settings.json — shipped defaults (24h / 1.0) apply, not the ruled 24h / 2.0" \
+                          "docker exec -w /var/lupin $CONTAINER python -c \"import cosa.rest.flow_ratio_settings as f; f.set_overrides( window_hours=<H>, allow_below=<R> )\"   # values are the operator's call"
+        fi
+    fi
+
+    # C10 — git inside the container must trust every external-project mount. The
+    #       container runs as uid 1001 while the host owner differs, so git answers
+    #       "dubious ownership" and receipt commits read as "not found" (row 31344c5f).
+    #       Population = the LIVE mount table, never a hand list.
+    #       Two populations: every external mount (what docker inspect lists), and the
+    #       git-backed subset of it (what git can be asked about). The report names both,
+    #       because a mount with no .git (planning-is-prompting) is in the first only.
+    unsafe_mounts=""; ext_seen=0; ext_total=0; not_git=""
+    while IFS= read -r m; do
+        [ -n "$m" ] || continue
+        case "$m" in /var/external-projects/*) ;; *) continue ;; esac
+        ext_total=$(( ext_total + 1 ))
+        [ -n "$( docker exec "$CONTAINER" sh -c "ls -A '$m/.git' 2>/dev/null | head -1" 2>/dev/null )" ] || { not_git="$not_git $m"; continue; }
+        ext_seen=$(( ext_seen + 1 ))
+        docker exec "$CONTAINER" git -C "$m" rev-parse HEAD >/dev/null 2>&1 || unsafe_mounts="$unsafe_mounts $m"
+    done <<< "$running_mounts"
+    if [ "$ext_seen" -eq 0 ]; then
+        report unknown WARN "no git-backed /var/external-projects mount found to test safe.directory against" \
+                      "check the external-project binds in $COMPOSE_FILE"
+    elif [ -z "$unsafe_mounts" ]; then
+        if [ -z "$not_git" ]; then
+            report pass BLOCK "git rev-parse HEAD succeeds inside $CONTAINER for all $ext_seen external-project mounts"
+        else
+            report pass BLOCK "git rev-parse HEAD succeeds inside $CONTAINER for all $ext_seen git-backed external-project mounts ($ext_total external mounts in all; not git-backed:$not_git)"
+        fi
+    else
+        report fail BLOCK "git refuses these mounts inside $CONTAINER (dubious ownership):$unsafe_mounts" \
+                      "durable: add GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n=safe.directory / GIT_CONFIG_VALUE_n=<mount> per mount to the lupin-rest environment in $COMPOSE_FILE, then up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT re-read env"
+    fi
+
+    # C11 — every project actually WORKED on this VM has a roster line. "Worked" is
+    #       derived, not listed: an external mount whose host path has a Claude Code
+    #       project dir under ~/.claude/projects. WARN: a missing line leaves that
+    #       project without a declared manager (A9 blocks the no-line-at-all case).
+    CC_PROJECTS_DIR="${PREFLIGHT_VM_CC_PROJECTS:-$HOME/.claude/projects}"
+    no_roster=""; worked=0
+    while IFS=$'\t' read -r src dst; do
+        case "$dst" in /var/external-projects/*) ;; *) continue ;; esac
+        [ -d "$CC_PROJECTS_DIR/$( pfv_cc_project_dirname "$src" )" ] || continue
+        worked=$(( worked + 1 ))
+        key="$( pfv_roster_project_key "$( basename "$dst" )" )"
+        pfv_roster_declares "$FLEET_ROSTER" "$key" || no_roster="$no_roster COSA_VOICE_MANAGERS__$key"
+    done < <( docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}}{{"\t"}}{{.Destination}}{{"\n"}}{{end}}' 2>/dev/null )
+    if [ "$worked" -eq 0 ]; then
+        report unknown WARN "no worked-on external project found under $CC_PROJECTS_DIR — per-project roster coverage not assessed" \
+                      "run a Claude Code session in a project, or check $CC_PROJECTS_DIR"
+    elif [ -z "$no_roster" ]; then
+        report pass WARN "every worked-on project ($worked) has a COSA_VOICE_MANAGERS__ line in $FLEET_ROSTER"
+    else
+        report fail WARN "worked-on project(s) with no roster line:$no_roster" \
+                      "echo '<KEY>=\"<Persona>\"' >> $FLEET_ROSTER   # one per key listed"
     fi
 fi
 else note_skip C; fi
@@ -990,28 +1265,63 @@ else note_skip D; fi
 if layer_runs E; then
 say_head "E. Cloud / IAM"
 
+# Two witnesses, because Claude Code runs in two places: on this VM host (the ssh shell's own
+# variables, set in ~/.bashrc) and inside the container (its /proc/1/environ). Each line says which.
 if [ "${CLAUDE_CODE_USE_VERTEX:-}" = "1" ]; then
     # Opus 4.8 on Vertex is GLOBAL-only. A regional value yields model-not-found,
     # which the Claude Code wizard mis-reports as "permission denied".
     [ "${CLOUD_ML_REGION:-}" = "global" ] \
-        && report pass WARN "CLOUD_ML_REGION=global (Opus 4.8 is global-only)" \
-        || report fail WARN "CLOUD_ML_REGION='${CLOUD_ML_REGION:-}' — Opus 4.8 on Vertex is GLOBAL-only" \
+        && report pass WARN "CLOUD_ML_REGION=global in the host shell (Opus 4.8 is global-only)" \
+        || report fail WARN "CLOUD_ML_REGION='${CLOUD_ML_REGION:-}' in the host shell — Opus 4.8 on Vertex is GLOBAL-only" \
                       "export CLOUD_ML_REGION=global in ~/.bashrc"
     [ -n "${ANTHROPIC_VERTEX_PROJECT_ID:-}" ] \
-        && report pass WARN "ANTHROPIC_VERTEX_PROJECT_ID set" \
-        || report fail WARN "ANTHROPIC_VERTEX_PROJECT_ID unset" "export it in ~/.bashrc"
+        && report pass WARN "ANTHROPIC_VERTEX_PROJECT_ID set in the host shell" \
+        || report fail WARN "ANTHROPIC_VERTEX_PROJECT_ID unset in the host shell" "export it in ~/.bashrc"
 else
-    report pass WARN "Vertex not enabled here (CLAUDE_CODE_USE_VERTEX != 1) — skipping region checks"
+    report pass WARN "Vertex not enabled in the host shell (CLAUDE_CODE_USE_VERTEX != 1) — skipping host region checks"
 fi
-
-# CC 2.1.220 added VERTEX_REGION_CLAUDE_5_OPUS. An unguarded per-model override
-# silently routes a SINGLE model to another region, where it runs, bills, and logs
-# nothing. Opus is the expensive one.
 if env | grep -q '^VERTEX_REGION_CLAUDE_5_OPUS='; then
-    report fail WARN "VERTEX_REGION_CLAUDE_5_OPUS is set — a per-model override routes ONE model elsewhere, silently" \
+    report fail WARN "VERTEX_REGION_CLAUDE_5_OPUS is set in the host shell — a per-model override routes ONE model elsewhere, silently" \
                   "unset VERTEX_REGION_CLAUDE_5_OPUS   # unless this is deliberate"
 else
-    report pass WARN "no per-model Vertex region override set"
+    report pass WARN "no per-model Vertex region override set in the host shell"
+fi
+
+# The witness is the CONTAINER's own environment, read from /proc/1/environ as C6 does, because
+# the container is what runs Claude Code. The ssh shell's variables describe a different process:
+# on 2026-10-28 a container with all three set was reported "Vertex not enabled here".
+e_environ="$( docker exec "$CONTAINER" sh -c "tr '\\0' '\\n' < /proc/1/environ" 2>/dev/null )"
+if [ -z "$e_environ" ]; then
+    report unknown WARN "cannot read the environment of $CONTAINER, so the Vertex region checks were not made" \
+                  "check that $CONTAINER is running and that /proc/1/environ is readable inside it"
+else
+    e_vertex="$(  pfv_environ_lookup CLAUDE_CODE_USE_VERTEX       <<< "$e_environ" )" || e_vertex=""
+    e_region="$(  pfv_environ_lookup CLOUD_ML_REGION              <<< "$e_environ" )" || e_region=""
+    e_project="$( pfv_environ_lookup ANTHROPIC_VERTEX_PROJECT_ID  <<< "$e_environ" )" || e_project=""
+    if [ "$e_vertex" = "1" ]; then
+        # Opus 4.8 on Vertex is GLOBAL-only. A regional value yields model-not-found,
+        # which the Claude Code wizard mis-reports as "permission denied".
+        [ "$e_region" = "global" ] \
+            && report pass WARN "CLOUD_ML_REGION=global in $CONTAINER (Opus 4.8 is global-only)" \
+            || report fail WARN "CLOUD_ML_REGION='$e_region' in $CONTAINER — Opus 4.8 on Vertex is GLOBAL-only" \
+                          "set LUPIN_VERTEX_REGION=global in $( basename "$ENV_FILE" ) (or leave it unset), then up -d --no-deps --force-recreate $SERVICE"
+        [ -n "$e_project" ] \
+            && report pass WARN "ANTHROPIC_VERTEX_PROJECT_ID set in $CONTAINER" \
+            || report fail WARN "ANTHROPIC_VERTEX_PROJECT_ID unset in $CONTAINER" \
+                          "src/scripts/lupin-vm.sh push-project-id, then up -d --no-deps --force-recreate $SERVICE"
+    else
+        report pass WARN "Vertex not enabled in $CONTAINER (CLAUDE_CODE_USE_VERTEX != 1) — skipping region checks"
+    fi
+
+    # CC 2.1.220 added VERTEX_REGION_CLAUDE_5_OPUS. An unguarded per-model override
+    # silently routes a SINGLE model to another region, where it runs, bills, and logs
+    # nothing. Opus is the expensive one.
+    if pfv_environ_lookup VERTEX_REGION_CLAUDE_5_OPUS <<< "$e_environ" >/dev/null; then
+        report fail WARN "VERTEX_REGION_CLAUDE_5_OPUS is set in $CONTAINER — a per-model override routes ONE model elsewhere, silently" \
+                      "remove VERTEX_REGION_CLAUDE_5_OPUS from the environment of $CONTAINER   # unless this is deliberate"
+    else
+        report pass WARN "no per-model Vertex region override set in $CONTAINER"
+    fi
 fi
 else note_skip E; fi
 

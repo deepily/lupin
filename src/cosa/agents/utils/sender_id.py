@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
-Shared Sender ID Construction for COSA Agent Notifications.
+Shared sender_id construction for COSA agent notifications.
 
-Provides project detection from the current working directory and
-sender_id string construction. Used by all agent cosa_interface/
-notification_profile modules and the MCP server.
+Provides project detection from the current working directory and sender_id string construction. Used by all agent cosa_interface and notification_profile modules and by the MCP server.
 
 The sender_id format is: {agent_type}@{project}.deepily.ai[#{suffix}]
 
@@ -12,7 +10,7 @@ Examples:
     deep.research@lupin.deepily.ai
     podcast.gen@lupin.deepily.ai#cli
     swe.lead@lupin.deepily.ai#abc123
-    claude.code@lupin.deepily.ai#a1b2c3d4
+    claude.code@lupin.deepily.ai#<session hash>
 """
 
 import os
@@ -32,19 +30,10 @@ _PROJECT_ALIASES = {
 
 def canonicalize_project_name( name: Optional[ str ] ) -> Optional[ str ]:
     """
-    Canonicalize an ALREADY-resolved project name through the shared
-    `_PROJECT_ALIASES` map (e.g. "planning-is-prompting" -> "plan").
+    Map an already-resolved project name through the shared alias table.
 
-    The SINGLE name-in -> name-out core of project canonicalization, for
-    callers that already HOLD a project-name string and must NOT re-run cwd /
-    bridge detection — specifically the task-store write seam (task_create_impl)
-    and read seam (task_query_impl). `detect_project()` and
-    `resolve_project_name()` apply this SAME `_PROJECT_ALIASES` map after
-    resolving a name from cwd/bridge; this function is the bare alias step they
-    share, exposed so the store seams alias IDENTICALLY (read == write). Reuses
-    the one `_PROJECT_ALIASES` table — never a duplicated copy (bug c6751cf8:
-    the oracle aliased on READ but the MCP write path stored the raw repo name,
-    so aliased repos like planning-is-prompting false-idled while owing work).
+    This is the bare alias step that `detect_project()` and `resolve_project_name()` also apply. It serves callers that already hold a name and must not re-run cwd or bridge detection: the task-store write seam (`task_create_impl`) and read seam (`task_query_impl`).
+    Both seams therefore alias identically. It reuses the one `_PROJECT_ALIASES` table and never a copy of it. Read and write once aliased differently, and an aliased repo such as planning-is-prompting false-idled while it owed work.
 
     Requires:
         - name is a str or None
@@ -69,22 +58,19 @@ def canonicalize_project_name( name: Optional[ str ] ) -> Optional[ str ]:
 
 def _worktree_owner_basename( candidate: Path ) -> Optional[ str ]:
     """
-    Resolve the MAIN repo basename when `candidate` is a git worktree.
+    Resolve the main repo basename when `candidate` is a git worktree.
 
-    A worktree and a submodule both store `.git` as a FILE (a gitlink), so the
-    bare walk-up in detect_project() cannot tell them apart. Git itself can:
-    `git rev-parse --git-common-dir` reports the SHARED main-repo `.git` for a
-    worktree (basename ".git") but the per-submodule `.git/modules/<name>` for a
-    submodule (basename != ".git"). That distinction is the disambiguator.
+    A worktree and a submodule both store `.git` as a file (a gitlink), so the bare walk-up in detect_project() cannot tell them apart. Git can tell them apart.
+    `git rev-parse --git-common-dir` reports the shared main-repo `.git` for a worktree (basename ".git"), but the per-submodule `.git/modules/<name>` for a submodule (basename != ".git"). That distinction is the disambiguator.
 
     Requires:
         - candidate is a Path whose `.git` child is a file (a gitlink); the
           caller guarantees this before invoking
 
     Ensures:
-        - Returns the lowercased basename of the MAIN repo root when candidate
+        - Returns the lowercased basename of the main repo root when candidate
           is a linked worktree (e.g. a worktree of /…/lupin -> "lupin")
-        - Returns None when candidate is NOT a worktree — i.e. a submodule
+        - Returns None when candidate is not a worktree — i.e. a submodule
           gitlink (common-dir basename != ".git"), git is unavailable, git
           returns non-zero, or stdout is empty — so the caller falls back to
           the existing basename behavior (fail toward existing behavior)
@@ -94,7 +80,7 @@ def _worktree_owner_basename( candidate: Path ) -> Optional[ str ]:
         candidate: Directory whose `.git` gitlink file is being resolved
 
     Returns:
-        Optional[str]: MAIN repo basename (lowercased) for a worktree, else None
+        Optional[str]: Main repo basename (lowercased) for a worktree, else None
     """
     try:
         result = subprocess.run(
@@ -129,24 +115,14 @@ def _worktree_owner_basename( candidate: Path ) -> Optional[ str ]:
 
 def _dangling_gitlink_owner_basename( git_entry: Path ) -> Optional[ str ]:
     """
-    Static-parse fallback: resolve the MAIN repo basename from the gitlink
-    FILE's content when live git cannot answer.
+    Resolve the main repo basename by parsing the gitlink file when live git cannot answer.
 
-    `git rev-parse --git-common-dir` fails ("not a git repository") in a
-    worktree whose `<main>/.git/worktrees/<name>` admin dir has been deleted
-    (e.g. an over-eager prune while the worktree is still in use — the
-    2026-06-11 fleet incident). The gitlink file itself still says where the
-    admin dir WAS:
-
-        gitdir: <main>/.git/worktrees/<name>
-
-    which is enough to recover the main-repo identity WITHOUT git: the path
-    segment before `/.git/worktrees/` is the main repo root. Submodule
-    gitlinks point at `<main>/.git/modules/<name>` instead and return None
-    (same submodule semantics as the live-git path).
+    Live `git rev-parse --git-common-dir` fails in a worktree whose `<main>/.git/worktrees/<name>` admin directory was deleted, for example by an over-eager prune. The worktree directory itself may still be in use.
+    The gitlink file still says where the admin directory was: `gitdir: <main>/.git/worktrees/<name>`. That is enough to recover the main-repo identity without git, because the path segment before `/.git/worktrees/` is the main repo root.
+    Submodule gitlinks point at `<main>/.git/modules/<name>` instead and return None, the same as on the live-git path.
 
     Requires:
-        - git_entry is a Path to a `.git` FILE (a gitlink); caller guarantees
+        - git_entry is a Path to a `.git` file (a gitlink); caller guarantees
 
     Ensures:
         - Returns the lowercased main-repo basename when the gitlink targets
@@ -176,9 +152,9 @@ def _dangling_gitlink_owner_basename( git_entry: Path ) -> Optional[ str ]:
 
 def detect_project() -> str:
     """
-    Detect project name as the basename of the nearest enclosing
-    git repository — walking up from cwd until a .git entry is found,
-    with worktree-aware resolution to the MAIN repo.
+    Detect the project name as the basename of the nearest enclosing git repository.
+
+    The walk starts at cwd and climbs until a .git entry is found, with worktree-aware resolution to the main repo.
 
     Requires:
         - Current working directory is accessible
@@ -188,22 +164,23 @@ def detect_project() -> str:
         - Walks up from cwd; first ancestor containing .git wins
         - .git may be a directory (normal repo), file (worktree/submodule
           gitlink), or any other FS entry — any form satisfies the check
-        - WORKTREE-AWARE: when the found .git is a gitlink FILE and git
-          reports a worktree, returns the MAIN repo basename (e.g. a worktree
-          of lupin returns "lupin", NOT the worktree dir name). This prevents
+        - Worktree-aware: when the found .git is a gitlink file and git
+          reports a worktree, returns the main repo basename (e.g. a worktree
+          of lupin returns "lupin", not the worktree dir name). This keeps
           the MCP server from mis-detecting worktree crews as bogus projects.
-        - DANGLING-GITLINK-SAFE: when live git CANNOT answer (the worktree's
+        - Dangling-gitlink-safe: when live git cannot answer (the worktree's
           admin dir under `<main>/.git/worktrees/` was deleted while the
-          worktree dir survives — 2026-06-11 fleet incident), the gitlink
-          file's `gitdir:` target is parsed statically and still yields the
-          MAIN repo basename. A broken worktree never degrades to its own
-          dir basename (which spammed urgent "no credentials for project
-          'sam-debt-sweep'" notifications).
-        - Handles nested repos correctly: cwd inside src/cosa (which has
-          its own .git gitlink) still returns "cosa", not "lupin" — submodule
-          gitlinks are NOT treated as worktrees
+          worktree dir survives), the gitlink file's `gitdir:` target is
+          parsed statically and still yields the main repo basename. A broken
+          worktree never degrades to its own dir basename, which would send
+          urgent "no credentials for project" notifications for a project
+          that does not exist.
+        - Handles nested repos correctly: cwd inside a nested repo such as
+          src/lupin-mobile returns that repo's name, not the parent's —
+          submodule gitlinks are not treated as worktrees
         - Normal repos (.git is a directory) keep a zero-subprocess fast path
-        - Falls back to basename of cwd if no .git ancestor is found
+        - Falls back to basename of cwd if no .git ancestor is found, and says
+          so on stderr
         - Applies _PROJECT_ALIASES for legacy short names (e.g.
           "planning-is-prompting" -> "plan")
 
@@ -215,15 +192,10 @@ def detect_project() -> str:
 
 def detect_project_for_path( start_path ) -> str:
     """
-    Detect the project name for an ARBITRARY path, as `detect_project` does for cwd.
+    Detect the project name for an arbitrary path, as `detect_project` does for cwd.
 
-    `detect_project` is this function applied to `os.getcwd()`; the walk lives here
-    ONCE so a caller holding somebody else's path (a session bridge's `cwd`
-    snapshot, say) resolves the project by the SAME rules rather than a second
-    copy of them. Two derivations of one value that agree only by careful copying
-    diverge the first time somebody edits one — measured: row 6597cea9, where
-    `_resolve_project_from_bridge_cwd` missed detect_project's gitlink branch and
-    one seat rendered as two focus-bar rows.
+    `detect_project` is this function applied to `os.getcwd()`. The walk lives here once. A caller holding someone else's path, such as a session bridge's `cwd` snapshot, therefore resolves the project by the same rules, not a second copy.
+    Two derivations of one value that agree only by careful copying diverge when one is edited. That once rendered one seat as two focus-bar rows.
 
     Requires:
         - start_path is a path-like; it need not exist
@@ -232,23 +204,21 @@ def detect_project_for_path( start_path ) -> str:
         - Returns a lowercase project name with _PROJECT_ALIASES applied
         - Walks up from start_path; the first ancestor containing .git wins
         - Worktree- and dangling-gitlink-aware, exactly as detect_project documents
-        - 🔴 GUESSES the basename of start_path when no .git ancestor is found, and
-          PRINTS that it did, to stderr, naming the path (row 1ca233ae). The guess is
-          kept because for `os.getcwd()` it is documented fleet policy — CLAUDE.md
-          builds the never-run-outside-a-registered-repo rule on it. For SOMEBODY
-          ELSE'S path it is the defect row 1ca233ae names, and such callers want
+        - Guesses the basename of start_path when no .git ancestor is found, and
+          prints that it did, to stderr, naming the path. The guess is kept
+          because for `os.getcwd()` it is documented fleet policy: CLAUDE.md
+          builds the never-run-outside-a-registered-repo rule on it. For
+          someone else's path it is a defect, and such callers want
           `resolve_project_for_path`, which returns None instead.
         - Never raises for a path that does not exist
 
     Args:
         start_path: The directory to resolve from (e.g. a bridge's `cwd`)
 
-    ⚠️ PREFER `resolve_project_for_path` IN NEW CODE. A caller holding a path it did
-    not choose — a bridge's `cwd` snapshot, a reaped seat's directory — cannot tell this
-    function's detection from its guess, because both are just a string.
-
     Returns:
         str: Detected project name, or a basename guess (announced on stderr)
+
+    Prefer `resolve_project_for_path` in new code. A caller holding a path it did not choose, such as a bridge's `cwd` snapshot or a reaped seat's directory, cannot tell this function's detection from its guess, because both are just a string.
     """
     resolved = resolve_project_for_path( start_path )
     if resolved is not None:
@@ -275,38 +245,30 @@ def resolve_project_for_path( start_path ) -> Optional[ str ]:
     """
     Resolve the project for an arbitrary path, or return None when it cannot be resolved.
 
-    🔴 THE STRICT TWIN OF `detect_project_for_path`, and the reason it exists: that
-    function answers a question nobody asked. Handed a path with no `.git` ancestor it
-    returns the last path segment, so `/no/such/place/seat-x` comes back as `'seat-x'` —
-    a plain string, indistinguishable from a real detection, which then travels into a
-    sender_id and routes notifications to a project that does not exist. Worse, a path
-    that DOES resolve and one that merely has a plausible-looking basename produce the
-    same SHAPE of answer, so no caller can tell them apart (row 1ca233ae).
-
-    ⚠️ AND THE DANGER IS IN THE PASSING CASES, NOT THE FAILING ONE. A seat under the main
-    checkout has basename `lupin`, so the fallback produces the RIGHT answer by accident
-    — the same defect that mis-names a worktree seat also makes the common case look
-    correct, which is why this survived so long (row 2184bebb).
+    This is the strict twin of `detect_project_for_path`. Given a path with no `.git` ancestor, that function returns the last path segment, so `/no/such/place/seat-x` comes back as `seat-x`.
+    That is a plain string that looks like a real detection, and it then routes notifications to a project that does not exist. A path that resolves and one that only has a plausible basename produce the same shape of answer, so no caller can tell them apart.
 
     Requires:
         - start_path is path-like; it need not exist
 
     Ensures:
         - Returns a lowercase project name with _PROJECT_ALIASES applied when a `.git`
-          ancestor is found — by exactly the walk `detect_project_for_path` documents,
+          ancestor is found — by the walk `detect_project_for_path` documents,
           worktree- and dangling-gitlink-aware
-        - Returns None when NO `.git` ancestor exists. The name is never invented.
+        - Returns None when no `.git` ancestor exists. The name is never invented.
         - Never raises for a path that does not exist
-        - Is the SAME walk, not a copy of it: `detect_project_for_path` now calls this
-          and adds its fallback on top, so the two can never disagree about WHETHER a
-          repo was found. Two walks that agree only by careful copying diverge the first
-          time somebody edits one — row 6597cea9.
+        - Is the same walk, not a copy of it: `detect_project_for_path` calls this
+          and adds its fallback on top, so the two can never disagree about whether
+          a repo was found. Two walks that agree only by careful copying diverge the
+          first time somebody edits one.
 
     Args:
         start_path: The directory to resolve from (e.g. a bridge's `cwd`)
 
     Returns:
         Optional[str]: The project name, or None when the path resolves to no repo
+
+    The danger is in the passing cases, not the failing one. A seat under the main checkout has basename `lupin`, so the fallback gives the right answer by accident. That is why the defect survived so long.
     """
     start = Path( start_path ).resolve()
     for candidate in [ start, *start.parents ]:

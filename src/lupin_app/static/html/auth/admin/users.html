@@ -335,13 +335,14 @@
     <!-- Include Scripts -->
     <script src="/static/js/lupin-nav.js" defer></script>
     <script src="/static/html/auth/js/auth.js"></script>
+    <script src="/static/js/app-zone.js"></script>
     <script src="/static/html/auth/admin/js/admin-users.js"></script>
     <script>
         // Require authentication
         requireAuth();
 
-        // Load users on page load
-        loadUsers();
+        // Load users on page load, once the server zone is known
+        LupinAppZone.load().then( loadUsers );
 
         console.log( '👥 Lupin User Management Page Ready' );
     </script>

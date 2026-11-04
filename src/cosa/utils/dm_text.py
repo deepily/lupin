@@ -1,12 +1,12 @@
 """
-Shared DM text measurement — the ONE place a DM body's word count is computed.
+Shared DM text measurement: the one place a DM body's word count is computed.
 
-Before this module, `len( body_text.split() )` was duplicated verbatim at four
-sites (dm.py x2, judge.py, judge_v2.py). A `word_count_version` stamp on a corpus
-row means nothing while four independent copies can silently drift; centralizing
-the count here is what makes that version stamp truthful (plan item 1 / finding E).
+The expression `len( body_text.split() )` used to be copied verbatim at four sites (`dm.py`
+twice, `judge.py` and `judge_v2.py`). A `word_count_version` stamp on a corpus row means
+nothing while four independent copies can silently drift. Centralizing the count here is what
+makes that version stamp truthful.
 
-Design: src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md §1
+Design: src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md
 """
 
 # Bump this ONLY when dm_word_count's algorithm changes (e.g. a real tokenizer

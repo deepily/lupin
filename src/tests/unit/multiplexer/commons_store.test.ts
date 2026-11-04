@@ -45,16 +45,16 @@ interface Harness {
   nowFn   : () => number;
 }
 
-// Fixed clock: 2026-06-10T14:00:00 LOCAL (the Date ctor below is local-time).
-const FIXED_NOW = new Date(2026, 5, 10, 14, 0, 0).getTime();
+// Fixed clock: 14:00 UTC on 10 June.
+const FIXED_NOW = Date.UTC(2026, 5, 10, 14, 0, 0);
 
-function makeHarness(opts: { storage?: StorageService; nowFn?: () => number } = {}): Harness {
+function makeHarness(opts: { storage?: StorageService; nowFn?: () => number; appTimezoneFn?: () => string | undefined } = {}): Harness {
   const bus     = createEventBusForTesting();
   const storage = opts.storage ?? createStorageServiceForTesting(bus);
   const nowFn   = opts.nowFn ?? (() => FIXED_NOW);
   const events: Array<StoreCommonsChangedPayload> = [];
   bus.on<StoreCommonsChangedPayload>("store_commons_changed", (e) => events.push(e.payload));
-  const store = createCommonsStore({ bus, storage, nowFn });
+  const store = createCommonsStore({ bus, storage, nowFn, appTimezoneFn: opts.appTimezoneFn });
   return { bus, storage, store, events, nowFn };
 }
 
@@ -119,7 +119,7 @@ test("hydrate without a window arg keeps the current window", async () => {
   const cap: { path?: string } = {};
   const api = makeApi({ entries: [] }, cap);
   await store.hydrate(api);   // no window → uses default "today"
-  // "today" at FIXED_NOW (14:00 local) → 14 hours since midnight
+  // "today" at FIXED_NOW (14:00 UTC, no server zone) → 14 hours since midnight
   assert.equal(cap.path, "/api/commons/broadcast-history?hours=14&limit=200");
 });
 
@@ -131,12 +131,20 @@ test("hydrate with numeric window passes hours through", async () => {
 });
 
 test("hydrate 'today' rounds up and floors at 1 hour just after midnight", async () => {
-  // 00:10 local → ceil(10min/60min)=1
-  const justAfterMidnight = new Date(2026, 5, 10, 0, 10, 0).getTime();
+  // 00:10 UTC → ceil(10min/60min)=1
+  const justAfterMidnight = Date.UTC(2026, 5, 10, 0, 10, 0);
   const { store } = makeHarness({ nowFn: () => justAfterMidnight });
   const cap: { path?: string } = {};
   await store.hydrate(makeApi({ entries: [] }, cap), "today");
   assert.equal(cap.path, "/api/commons/broadcast-history?hours=1&limit=200");
+});
+
+test("hydrate 'today' counts from midnight in the server zone", async () => {
+  // 14:00 UTC is 23:00 in Tokyo, so the window is 23 hours.
+  const { store } = makeHarness({ appTimezoneFn: () => "Asia/Tokyo" });
+  const cap: { path?: string } = {};
+  await store.hydrate(makeApi({ entries: [] }, cap), "today");
+  assert.equal(cap.path, "/api/commons/broadcast-history?hours=23&limit=200");
 });
 
 test("hydrate honors the server disabled kill-switch: clears cache, flips isDisabled", async () => {

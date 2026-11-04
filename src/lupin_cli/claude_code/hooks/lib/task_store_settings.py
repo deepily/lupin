@@ -3,23 +3,21 @@ Task-store mirror settings loader for the Claude Code PostToolUse hook.
 
 Reads `~/.claude/settings.json` ["task_store"] and returns a normalized config
 dict for the Phase-2 write-path mirror (harness Task* events -> unified task
-store). Mirrors the `heartbeat_settings` loader exactly — same file, same
+store). Mirrors the `heartbeat_settings` loader exactly: same file, same
 defaults-on-missing, same fail-loud-on-malformed-values posture.
 
-**DEFAULT enabled=False (conservative opt-in).** The mirror is a brand-new
-ACTIVE behavior on the shared production PostToolUse hook — it issues
-authenticated HTTP writes against `:7999`. Defaulting OFF when the
-`task_store` block is absent means merging the mirror code is a NO-OP until
-the user/manager explicitly opts in via `settings.json`; the settings wiring
-IS the rollout gate / kill-switch.
+The default is enabled=False, a conservative opt-in. The mirror is a new active
+behavior on the shared production PostToolUse hook and issues authenticated HTTP
+writes against `:7999`. Defaulting off when the `task_store` block is absent
+makes merging the mirror code a no-op until the user or a manager opts in via
+`settings.json`. That settings wiring is the rollout gate and kill-switch.
 
-Validates loudly — raises ValueError on a bogus timeout/TTL (mirrors
-heartbeat_settings; per `feedback_no_defensive_programming`: no silent
-fallback chains). The mirror orchestrator catches that ValueError and fails
-SAFE (treats the mirror as disabled — never writes on a malformed config).
+Validation is loud: a bogus timeout or TTL raises ValueError, with no silent
+fallback chains. The mirror orchestrator catches that ValueError and fails safe,
+treating the mirror as disabled, so it never writes on a malformed config.
 
 Design authority: lupin ->
-    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md §1.1.
+    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md section 1.1.
 """
 
 import json
@@ -40,18 +38,11 @@ def load_task_store_settings() -> dict:
     """
     Load task-store mirror settings from ~/.claude/settings.json with defaults.
 
-    Schema in settings.json:
-        {
-          "task_store": {
-            "enabled"           : bool,
-            "api_base_url"      : str,
-            "timeout_seconds"   : number > 0,
-            "spool_ttl_seconds" : number > 0
-          }
-        }
+    Schema: {"task_store": {"enabled": bool, "api_base_url": str,
+    "timeout_seconds": number > 0, "spool_ttl_seconds": number > 0}}
 
     Requires:
-        - ~/.claude/settings.json is either missing OR valid JSON
+        - ~/.claude/settings.json is either missing or valid JSON
 
     Ensures:
         - File missing                  → returns defaults (enabled=False)

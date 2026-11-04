@@ -32,39 +32,12 @@ export function replaceChildren(parent: Element | DocumentFragment, incoming: No
   parent.replaceChildren(incoming);
 }
 
-/**
- * Keyed list merge — reconcile `parent`'s child elements against `entries`
- * keyed by `data-id-hash`.
- *
- * Algorithm:
- *   1. Build a map of existing children by `data-id-hash` value
- *   2. Walk `entries` in target order; for each:
- *      a. If existing child has matching id_hash, move into position +
- *         optionally re-render its body via `update()`
- *      b. Otherwise, render via `create()` and insert at the position
- *   3. Remove any existing children whose id_hash isn't in the new set
- *
- * Per F12 invariant: every renderable element MUST carry `data-id-hash`. The
- * `data-id-hash` value is the canonical key; legacy `id="..."` attribute is
- * NOT consulted (keyed-merge correctness depends on a single key surface).
- *
- * Requires:
- *   - `parent` is the element holding the keyed list
- *   - `entries` is the target ordering, each entry having a unique `idHash`
- *   - `create(entry)` returns a new element with `data-id-hash="${entry.idHash}"`
- *     already set
- *   - `update(el, entry)` mutates `el` in place; OPTIONAL — when omitted,
- *     existing elements are left untouched on match
- *
- * Ensures:
- *   - parent's children after the call exactly match `entries` order
- *   - elements whose id_hash appears in both old + new are reused (DOM
- *     identity preserved; no flicker; child state like focus survives)
- */
+/** One entry of a keyed list: `idHash` is the value of the element's `data-id-hash`. */
 export interface KeyedEntry {
   readonly idHash : string;
 }
 
+/** The options of `keyedListMerge`: the parent, the entries and the create and update callbacks. */
 export interface KeyedMergeOptions<T extends KeyedEntry> {
   parent : Element;
   entries: ReadonlyArray<T>;
@@ -72,6 +45,24 @@ export interface KeyedMergeOptions<T extends KeyedEntry> {
   update?: (el: Element, entry: T) => void;
 }
 
+/**
+ * Make `parent`'s children match `entries`, keyed by `data-id-hash`.
+ *
+ * The `data-id-hash` value is the only key: an `id` attribute is not consulted.
+ *
+ * Requires:
+ *   - `parent` is the element holding the keyed list
+ *   - `entries` is the target ordering, each entry having a unique `idHash`
+ *   - `create(entry)` returns a new element, normally with `data-id-hash` already set
+ *   - `update(el, entry)` is optional and mutates `el` in place; when omitted, a matched element is left untouched
+ *
+ * Ensures:
+ *   - children whose `data-id-hash` is not in `entries`, or that have none, are removed
+ *   - an element whose key is in both the old and the new list is reused, so focus and scroll state survive
+ *   - an entry with no element is built by `create` and gets `data-id-hash` set when `create` left it off
+ *   - parent's children afterwards are the entries' elements, in `entries` order; a second child that carries a wanted key is left where it is
+ *   - only elements that are out of position are moved, so an unchanged element is not detached
+ */
 export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>): void {
   const { parent, entries, create, update } = opts;
 
@@ -135,13 +126,9 @@ export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>)
 // `Element.moveBefore` (Chrome 133+) is not in this TypeScript DOM lib yet.
 type MovableParent = Element & { moveBefore?: (node: Node, child: Node | null) => void };
 
-// Put `el` in front of `cursor`. Row 11793820: `insertBefore` detaches a child
-// before re-inserting it, so a card that moves to the top loses the scroll
-// position inside it (Chrome, bundle 3d959d529554: 100 → 0). `moveBefore` moves
-// an element that is ALREADY a child without detaching it, keeping scroll, focus
-// and running animations. It throws where such a move is not allowed (for
-// example a parent not in the document), and the plain insert still places the
-// element. A new element was never attached, so it is simply inserted.
+/**
+ * Puts an element before a cursor element, keeping scroll where possible.
+ */
 function placeBefore(parent: MovableParent, el: Element, cursor: Element | null): void {
   if (el.parentNode === parent && typeof parent.moveBefore === "function") {
     try {
@@ -154,11 +141,9 @@ function placeBefore(parent: MovableParent, el: Element, cursor: Element | null)
   parent.insertBefore(el, cursor);
 }
 
-// Run `update(el)` and return the element that now holds `el`'s place under
-// `parent`. An update that keeps its node returns `el`. An update that called
-// `el.replaceWith(fresh)` leaves `fresh` exactly where `el` stood, so it is read
-// off the neighbour captured beforehand — O(1). Anything else an update might do
-// (remove the node, insert elsewhere) falls back to the old keyed scan.
+/**
+ * Runs an update on an element and returns the element now in its place.
+ */
 function updateAndLocate<T extends KeyedEntry>(
   parent : Element,
   el     : Element,
@@ -175,12 +160,56 @@ function updateAndLocate<T extends KeyedEntry>(
   return found ?? el;
 }
 
-// CSS.escape polyfill — same as NotificationsListRenderer's cssEscape.
+/**
+ * Escapes a string for use inside a CSS selector.
+ *
+ * The one copy for every renderer. It uses the built-in CSS.escape, or a regex escape without one.
+ */
 /* c8 ignore start */ // CSS.escape polyfill: production browsers always provide CSS.escape (Baseline 2020); the fallback regex path exists only for non-DOM Node contexts where keyedListMerge is never actually called (this module is consumed exclusively by browser-side renderer code).
-function cssEscape(value: string): string {
+export function cssEscape(value: string): string {
   if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
     return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
   }
   return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
 }
 /* c8 ignore stop */
+
+/**
+ * Builds the status paragraph a board renderer shows in place of its table.
+ *
+ * Requires:
+ *   - `prefix` is the board's message class stem, for example "task-list" or "fleet-status"
+ *
+ * Ensures:
+ *   - returns a <p> whose class is `<prefix>-message <className>` and whose text is `text`
+ */
+export function messageEl(prefix: string, className: string, text: string): HTMLParagraphElement {
+  const p = document.createElement("p");
+  p.className = `${prefix}-message ${className}`;
+  p.textContent = text;
+  return p;
+}
+
+/**
+ * Starts a renderer's `unmount()`: drops the bus and collapse listeners and the children.
+ *
+ * Requires:
+ *   - `unsubscribers` is the renderer's own list of off-functions (emptied here)
+ *
+ * Ensures:
+ *   - every off-function runs once, then the list is empty
+ *   - `collapseOff` runs when it is not null
+ *   - `root`'s children are removed when `root` is not null
+ *   - the caller still clears its own `collapseOff` and `root` fields
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the multi-line function declaration: both null and non-null arms of each guard are tested.
+export function teardownScaffold(
+  unsubscribers: Array<() => void>,
+  collapseOff: (() => void) | null,
+  root: Element | null,
+): void {
+  for (const off of unsubscribers) off();
+  unsubscribers.length = 0;
+  if (collapseOff !== null) collapseOff();
+  if (root !== null) root.replaceChildren();
+}

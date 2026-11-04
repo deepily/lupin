@@ -1,26 +1,24 @@
 """
-Seat teardown — a seat removes its OWN worktree and its merged branch (row 129cc96b, P3).
+Seat teardown: a seat removes its own worktree and its merged branch.
 
-Rick ruled 2026-09-18: workers must not leave trees behind. Two doors call this:
+Workers must not leave trees behind. Two doors call this:
 
-    1. session_spawner.dismiss_sessions — right after the manager's reap kills the seat
-    2. the SessionEnd hook — a detached waiter, launched when a seat exits on its own
+    1. session_spawner.dismiss_sessions, right after the manager's reap kills the seat
+    2. the SessionEnd hook, a detached waiter launched when a seat exits on its own
 
 The arbiter's worktree janitor stays the backstop for seats that get hard-killed.
 
-This is STRICTER than the janitor, on purpose. The janitor auto-commits WIP and removes
-the tree anyway, because it is the last line and a tree left forever is its own failure.
-Teardown runs while somebody is still around to look, so it keeps and REPORTS instead:
+This is stricter than the janitor. The janitor auto-commits WIP and removes the tree anyway.
+It is the last line, and a tree left forever is its own failure. Teardown runs while somebody is still around to look, so it keeps and reports. The outcomes are:
 
-    uncommitted edits             → tree kept, "uncommitted_work"
-    ignored files that are data   → tree kept, "ignored_files_present"
-    commits the WIP line lacks    → tree AND branch kept, "unmerged"
-    clean, and merged             → `git worktree remove` (no --force), then
-                                    `git branch -d` via worktree_reaper.delete_merged_branch
+    Uncommitted edits: tree kept, "uncommitted_work".
+    Ignored files that are data: tree kept, "ignored_files_present".
+    Commits the WIP line lacks: tree and branch kept, "unmerged".
+    Clean and merged: `git worktree remove` (no --force), then `git branch -d` via worktree_reaper.delete_merged_branch.
 
-It touches only a tree locked `lupin-seat:<this seat's tmux name>`, and only once that seat
-is provably gone (worktree_reaper.seat_is_alive: tmux absent AND no process standing in
-the tree). Every uncertainty keeps the tree.
+It touches only a tree locked `lupin-seat:<this seat's tmux name>`, and only once that seat is provably gone.
+Provably gone means worktree_reaper.seat_is_alive reports tmux absent and no process standing in the tree.
+Every uncertainty keeps the tree.
 
 See: planning-is-prompting -> src/rnd/2026.09.18-worktree-and-branch-cleanup-proposal.md §4
 """
@@ -43,6 +41,9 @@ from cosa.agents.shared.worktree_reaper import (
 # checkout has nothing to report.
 NOT_A_SEAT_TREE = ( "no_tree", "not_a_worktree", "not_registered", "main_worktree",
                     "not_a_seat_tree", "not_this_seats_tree" )
+
+# A reap result lists at most this many paths per list; the count says how many there were.
+SAMPLE_LIMIT = 10
 
 DEFAULT_WAIT_SECONDS = 10.0
 POLL_SECONDS         = 0.5
@@ -92,7 +93,7 @@ def retire_seat_worktree(
     debug        : bool                 = False,
 ) -> dict:
     """
-    Remove a dead seat's own worktree and its merged branch — or keep both and say why.
+    Remove a dead seat's own worktree and merged branch, or keep both and say why.
 
     Requires:
         - path is the seat's cwd (its worktree or anything inside it), or None
@@ -103,12 +104,12 @@ def retire_seat_worktree(
     Ensures:
         - returns { seat, path, removed, kept_reason, branch, branch_outcome,
           ignored_blockers, errors }
-        - removed=True only when ALL hold: the tree is a linked worktree (not the main
+        - removed=True only when all of these hold: the tree is a linked worktree (not the main
           checkout), it is locked `lupin-seat:<seat_name>`, the seat is gone within
           wait_seconds, `git status --porcelain` is empty, no ignored file is data
           (find_ignored_blockers), and HEAD is an ancestor of the main tree's branch
-        - then: unlock, `git worktree remove` WITHOUT --force, and
-          delete_merged_branch — which runs `git branch -d` only, never -D. A failed
+        - then: unlock, `git worktree remove` without --force, and
+          delete_merged_branch, which runs `git branch -d` only, never -D. A failed
           removal re-locks the tree with its original reason
         - every other case keeps the tree, sets kept_reason, and changes nothing
         - never auto-commits, never pushes, never raises
@@ -153,6 +154,20 @@ def retire_seat_worktree(
 
     if not _wait_until_gone( seat_name, tree, alive_fn, wait_seconds, sleep_fn, clock ):
         return keep( "seat_alive" )
+
+    # The other door may have retired this tree while we waited (the SessionEnd waiter
+    # waits up to 120s, the dismiss door 10s): the directory checked above can be gone now.
+    if not os.path.isdir( tree ):
+        registry = _git( run, main_root, "worktree", "list", "--porcelain" )
+        if not registry[ "success" ]:
+            return keep( "worktree_list_failed", registry[ "stderr" ] )
+        still_registered = any( os.path.realpath( line[ 9: ].strip() ) == os.path.realpath( tree )
+                                for line in registry[ "stdout" ].splitlines() if line.startswith( "worktree " ) )
+        if still_registered:
+            return keep( "tree_missing", "directory vanished but git still registers the worktree" )
+        out[ "removed" ] = True
+        if debug: print( f"[seat_teardown] {tree} was already removed by the other door" )
+        return out
 
     status = _git( run, tree, "status", "--porcelain" )
     if not status[ "success" ]:
@@ -204,8 +219,8 @@ def _detached_verdict( tree: str, main_root: str, target: str, run: Callable ) -
     """
     merge_verdict for a detached HEAD: resolve the sha in the tree, measure it in main.
 
-    A seat tree is provisioned detached, and a seat that never made a branch still has
-    commits only the tree anchors if it committed on the detached HEAD.
+    A seat tree is provisioned detached. A seat that never made a branch and committed
+    on the detached HEAD has commits that only the tree anchors.
 
     Ensures:
         - returns merge_verdict's shape; "failed" when the sha cannot be read
@@ -216,9 +231,32 @@ def _detached_verdict( tree: str, main_root: str, target: str, run: Callable ) -
     return merge_verdict( main_root, sha[ "stdout" ], target, run )
 
 
+def summarise_outcome( outcome ):
+    """
+    A retire_seat_worktree result with its long lists cut to a count and a capped sample.
+
+    Requires:
+        - outcome is a retire_seat_worktree result, or the string a raising teardown became
+
+    Ensures:
+        - ignored_blockers and errors, when present, become <key>_count and <key>_sample
+          (the first SAMPLE_LIMIT entries), so the result stays small however many files the tree holds
+        - every other key is kept as it was; the input is not modified
+        - a non-dict outcome is returned unchanged
+    """
+    if not isinstance( outcome, dict ):
+        return outcome
+    summary = { k: v for k, v in outcome.items() if k not in ( "ignored_blockers", "errors" ) }
+    for key in ( "ignored_blockers", "errors" ):
+        if key in outcome:
+            summary[ f"{key}_count" ]  = len( outcome[ key ] )
+            summary[ f"{key}_sample" ] = list( outcome[ key ][ :SAMPLE_LIMIT ] )
+    return summary
+
+
 def teardown_notice( outcomes: dict ) -> Optional[ str ]:
     """
-    One sentence naming every seat whose tree teardown KEPT because of work in it.
+    One sentence naming every seat whose tree teardown kept because of work in it.
 
     Requires:
         - outcomes maps seat name -> a retire_seat_worktree result; a non-dict value is
@@ -226,7 +264,7 @@ def teardown_notice( outcomes: dict ) -> Optional[ str ]:
 
     Ensures:
         - returns None when every tree was removed or was never a seat tree
-          (NOT_A_SEAT_TREE) — the quiet case stays quiet
+          (NOT_A_SEAT_TREE), so the quiet case stays quiet
         - otherwise names each kept seat with its reason and path, sorted by seat
     """
     kept = []

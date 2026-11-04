@@ -75,6 +75,7 @@ if lupin_root:
         sys.path.insert( 0, src_path )
 
 from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
+from tests.smoke.utilities.proxy_opt_in import skip_unless_proxy_opt_in
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -416,7 +417,8 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
                 return { "ok": True, "detail": f"slide_count={slide_count} (from artifacts)" }
             return { "ok": False, "detail": f"slide_count={slide_count} — chain produced 0 slides" }
         import re
-        match = re.search( r"(\d+)\s+slide", response )
+        # The done queue's row has no artifacts dict, only `abstract` ("**Slides**: N slides") and the answer.
+        match = re.search( r"(\d+)\s+slide", response ) or re.search( r"(\d+)\s+slide", job_data.get( "abstract" ) or "" )
         if match:
             count = int( match.group( 1 ) )
             if count > 0:
@@ -456,8 +458,9 @@ def quick_smoke_test( argv=None ):
     return test.run( argv )
 
 
-def test_research_to_presentation_live():
-    """Pytest entry point."""
+def test_research_to_presentation_live( request ):
+    """Pytest entry point; skips without --auto-proxy and the interactive flag."""
+    skip_unless_proxy_opt_in( request )
     argv = sys.argv[ 1: ] if len( sys.argv ) > 1 else []
     assert quick_smoke_test( argv )
 

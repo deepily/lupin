@@ -101,6 +101,7 @@ class TestCommitAndPrSingle( unittest.IsolatedAsyncioTestCase ):
         return await gs.commit_and_pr_single(
             git_ops=git_ops, files_changed=[ "a.py" ], commit_message="msg",
             pr_title="t", pr_body="b", trust_level=trust, notify_fn=notify,
+            push_enabled=True,   # these tests exercise the push path; the flag is off by default
         ), notify
 
     async def test_l1_commit_only_success( self ):
@@ -121,6 +122,19 @@ class TestCommitAndPrSingle( unittest.IsolatedAsyncioTestCase ):
         result, _ = await self._run( ops, trust=3 )
         self.assertEqual( result[ "error" ], "no branch" )
         self.assertIsNone( result[ "git_strategy" ] )
+
+    async def test_l3_push_disabled_no_original_branch_skips_checkout( self ):
+        ops = make_git_ops( get_current_branch=AsyncMock( return_value=None ) )
+        gs  = GitStrategist( debug=True )
+        result = await gs.commit_and_pr_single(
+            git_ops=ops, files_changed=[ "a.py" ], commit_message="msg",
+            pr_title="t", pr_body="b", trust_level=3, notify_fn=AsyncMock(),
+            push_enabled=False,
+        )
+        self.assertEqual( result[ "git_strategy" ], "commit_only" )
+        self.assertIn( "push disabled", result[ "error" ] )
+        ops.commit_and_push.assert_not_called()
+        ops.checkout_branch.assert_not_called()
 
     async def test_l3_push_fail_checks_out_original( self ):
         ops = make_git_ops()
@@ -181,6 +195,7 @@ class TestCommitAndPrMulti( unittest.IsolatedAsyncioTestCase ):
         return await gs.commit_and_pr_multi(
             git_ops=git_ops, clusters=clusters, trust_level=trust,
             notify_fn=notify, pr_title="t", pr_body="b", branch_slug_hint=hint,
+            push_enabled=True,   # these tests exercise the push path; the flag is off by default
         ), notify
 
     async def test_empty_clusters_errors( self ):
@@ -225,11 +240,25 @@ class TestCommitAndPrMulti( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( result[ "pr_url" ], "http://pr/1" )
         ops.push_branch.assert_awaited_once()
 
-    async def test_l3_no_push_branch_attr_proceeds_to_pr( self ):
-        # hasattr(git_ops, "push_branch") False → push_ok stays True → create_pr.
+    async def test_l3_no_push_branch_attr_reports_no_push_and_opens_no_pr( self ):
+        # The real GitOps has no push_branch. Nothing was pushed, so no "Pushed" message and no PR
+        # (row c07aef9f); the commits stay local and the original branch is restored.
         ops = make_git_ops( with_push_branch=False )
-        result, _ = await self._run( ops, [ ( "c1", "t", [ "a.py" ], "m" ) ], trust=3 )
-        self.assertEqual( result[ "git_strategy" ], "branch_and_pr" )
+        result, notify = await self._run( ops, [ ( "c1", "t", [ "a.py" ], "m" ) ], trust=3 )
+        self.assertEqual( result[ "git_strategy" ], "commit_only" )
+        self.assertIn( "push_branch", result[ "error" ] )
+        self.assertIsNone( result[ "pr_url" ] )
+        ops.create_pr.assert_not_awaited()
+        ops.checkout_branch.assert_awaited_once_with( "main" )
+        messages = [ c.args[ 0 ] for c in notify.await_args_list ]
+        self.assertFalse( any( "Pushed" in m for m in messages ) )
+        self.assertTrue( any( "push_branch" in m for m in messages ) )
+
+    async def test_l3_says_pushed_only_after_a_successful_push( self ):
+        ops = make_git_ops( with_push_branch=True )
+        result, notify = await self._run( ops, [ ( "c1", "t", [ "a.py" ], "m" ) ], trust=3, hint="my-fix" )
+        messages = [ c.args[ 0 ] for c in notify.await_args_list ]
+        self.assertTrue( any( m.startswith( "Pushed 1 commit(s)" ) for m in messages ) )
 
     async def test_l3_no_commits_rolls_back( self ):
         # all clusters no-files in L3 → no commit_hashes → checkout original + return.

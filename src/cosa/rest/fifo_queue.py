@@ -152,8 +152,8 @@ class FifoQueue:
         """
         Remove and return the first eligible job from the queue.
 
-        A job is eligible if: not paused AND (scheduled_at is None OR scheduled_at <= now)
-        AND (predicate is None OR predicate( job ) is True).
+        A job is eligible if it is not paused. Its scheduled_at must be None or <= now.
+        A supplied predicate( job ) must be True.
         Non-eligible jobs remain in their original queue positions.
 
         Requires:
@@ -166,7 +166,7 @@ class FifoQueue:
             - Non-eligible jobs stay in the queue unchanged
             - When predicate is supplied, jobs it rejects stay queued in place
               (FIFO-intact) — the consumer's monopoly Gate B uses this to admit
-              ONLY the active monopolizer's lineage children (bug 3a14292b) while
+              only the active monopolizer's lineage children while
               foreign jobs remain deferred
 
         Raises:
@@ -404,9 +404,9 @@ class FifoQueue:
     
     def get_jobs_for_user( self, user_id: str ) -> list[Any]:
         """
-        Get raw job objects for specific user (NO authorization, NO formatting).
+        Get raw job objects for a specific user (no authorization, no formatting).
 
-        Pure data access method - performs NO authorization checks.
+        Pure data access method - performs no authorization checks.
         Authorization should be handled by calling code.
 
         Requires:
@@ -416,8 +416,8 @@ class FifoQueue:
         Ensures:
             - Returns list of job objects matching user's job IDs
             - Returns empty list if user has no jobs
-            - Returns raw job objects (NOT HTML formatted)
-            - NO authorization checks performed
+            - Returns raw job objects (not HTML formatted)
+            - No authorization checks performed
 
         Args:
             user_id: The user identifier to filter jobs by
@@ -442,9 +442,9 @@ class FifoQueue:
 
     def get_jobs_excluding_user( self, user_id: str ) -> list[Any]:
         """
-        Get raw job objects for all users EXCEPT the specified user (NO authorization, NO formatting).
+        Get raw job objects for all users except the given one (no authorization, no formatting).
 
-        Inverse of get_jobs_for_user(). Pure data access method - performs NO authorization checks.
+        Inverse of get_jobs_for_user(). Pure data access method - performs no authorization checks.
         Authorization should be handled by calling code.
 
         Requires:
@@ -452,16 +452,16 @@ class FifoQueue:
             - UserJobTracker singleton is initialized
 
         Ensures:
-            - Returns list of job objects NOT matching user's job IDs
+            - Returns list of job objects not matching user's job IDs
             - Returns empty list if all jobs belong to the user
-            - Returns raw job objects (NOT HTML formatted)
-            - NO authorization checks performed
+            - Returns raw job objects (not HTML formatted)
+            - No authorization checks performed
 
         Args:
             user_id: The user identifier whose jobs should be excluded
 
         Returns:
-            list[Any]: List of job objects NOT belonging to the user
+            list[Any]: List of job objects not belonging to the user
 
         Raises:
             - None (returns empty list if all jobs belong to user)
@@ -480,9 +480,9 @@ class FifoQueue:
 
     def get_all_jobs( self ) -> list[Any]:
         """
-        Get ALL raw job objects (NO authorization, NO formatting).
+        Get all raw job objects (no authorization, no formatting).
 
-        Pure data access method - performs NO authorization checks.
+        Pure data access method - performs no authorization checks.
         Authorization should be handled by calling code.
 
         Requires:
@@ -490,9 +490,9 @@ class FifoQueue:
 
         Ensures:
             - Returns complete copy of queue_list
-            - NO filtering by user
-            - Returns raw job objects (NOT HTML formatted)
-            - NO authorization checks performed
+            - No filtering by user
+            - Returns raw job objects (not HTML formatted)
+            - No authorization checks performed
 
         Returns:
             list[Any]: Complete list of all job objects in queue
@@ -546,18 +546,10 @@ class FifoQueue:
         abstract: str = None
     ) -> None:
         """
-        Send notification via notification service (replaces _emit_speech).
+        Send a notification via the notification service.
 
-        Queue notifications default to:
-        - priority="high" → message is spoken via TTS
-        - suppress_ding=True → no notification sound (conversational flow)
-
-        Abstract auto-promotion:
-        - When a job is provided and `abstract` is not explicitly passed, the
-          method reads `job.artifacts["abstract"]` (if present) and forwards
-          it on the AsyncNotificationRequest. This surfaces rich completion
-          context on the primary task-card the UI shows, not just on the
-          secondary progress row the job emits explicitly.
+        Queue notifications default to priority="high" (spoken via TTS) and
+        suppress_ding=True (no notification sound, for conversational flow).
 
         Requires:
             - msg is a non-empty string
@@ -568,7 +560,9 @@ class FifoQueue:
             - If job_id available, routes to job card in UI
             - Message is spoken (high priority) without ding
             - If job.artifacts["abstract"] exists and no explicit abstract
-              was passed, it rides along on the notification
+              was passed, it rides along on the notification; this puts the rich
+              completion context on the primary task-card the UI shows, not just
+              on the secondary progress row the job emits explicitly
             - Handles exceptions gracefully
 
         Args:

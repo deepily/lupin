@@ -68,11 +68,13 @@ def execute_env(
 
     cfg = MagicMock()
     cfg.get.side_effect = lambda key, default=None: values.get( key, default )
+    cfg.get_required.return_value = "America/New_York"
 
     gister = MagicMock()
     gister.get_gist.return_value = gist
 
     mock_config = MagicMock()
+    mock_config.get_required.return_value = "America/New_York"
 
     tracker = MagicMock()
     tracker.get_summary.return_value = make_summary()
@@ -253,6 +255,42 @@ class TestExecute( unittest.IsolatedAsyncioTestCase ):
         self.assertTrue( budget_msgs, "expected a 'Budget exceeded' notification" )
         # the carried attrs are formatted into the spoken message
         self.assertIn( "$0.03 spent of $0.01 limit", str( budget_msgs[ 0 ] ) )
+        # a budget stop is the user's to see: high priority, not a background note
+        self.assertEqual( budget_msgs[ 0 ].kwargs[ "priority" ], "high" )
+
+
+# ===========================================================================
+# do_all() — a budget overrun through the REAL run_research
+# ===========================================================================
+class TestBudgetOverrunEndToEnd( unittest.TestCase ):
+
+    def test_budget_overrun_fails_the_job_and_is_not_reported_as_cancelled( self ):
+        # execute_env mocks run_research, so it never saw the swallow inside the real one.
+        # Here the real run_research runs, and only the API client below it is faked.
+        from cosa.tests.unit.agents.deep_research.test_cli import rr_env, clar, plan
+        import cosa.agents.deep_research.cli as cli_mod
+        real_run_research = cli_mod.run_research
+        err = BudgetExceededError( "Budget limit $0.10 would be exceeded", current_cost=0.5, budget_limit=0.1 )
+        job = make_job( budget=0.1 )
+        with execute_env() as m:
+            m[ "config" ].lead_model = "claude-opus"
+            m[ "config" ].subagent_model = "claude-sonnet"
+            m[ "config" ].max_subagents_complex = 10
+            m[ "config" ].audience = "academic"
+            m[ "config" ].audience_context = None
+            with rr_env( [ clar(), plan( 2 ) ], subagent_side_effect=[ err ] ):
+                with patch( "cosa.agents.deep_research.cli.run_research", real_run_research ):
+                    notify = voice_io_mod.notify   # rr_env's mock replaced execute_env's
+                    with self.assertRaises( BudgetExceededError ):
+                        job.do_all()
+        self.assertEqual( job.state, JobState.FAILED )
+        self.assertTrue( job.answer_conversational.startswith( "Research failed:" ) )
+        self.assertIn( "Budget limit", job.answer_conversational )
+        self.assertNotIn( "cancelled", job.answer_conversational.lower() )
+        budget_msgs = [ c for c in notify.call_args_list if "Budget exceeded" in str( c ) ]
+        self.assertTrue( budget_msgs, "expected the job's own budget notification" )
+        self.assertEqual( budget_msgs[ 0 ].kwargs[ "priority" ], "high" )
+        self.assertFalse( [ c for c in notify.call_args_list if "cancelled" in str( c ).lower() ] )
 
 
 # ===========================================================================

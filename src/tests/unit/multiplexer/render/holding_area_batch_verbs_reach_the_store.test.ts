@@ -155,6 +155,15 @@ function click( el: HTMLElement ): void {
   el.dispatchEvent( new globalThis.MouseEvent( "click", { bubbles: true } ) );
 }
 
+/**
+ * The operator's whole gesture on a batch button: the first click ARMS it, the second
+ * CONFIRMS (row 376dd4cb). Every test below that expects the batch to run goes through this.
+ */
+function confirmClick( el: HTMLElement ): void {
+  click( el );
+  click( el );
+}
+
 // ---------------------------------------------------------------------------
 // THE INSTALL QUESTION: is the button connected to anything at all?
 // ---------------------------------------------------------------------------
@@ -173,7 +182,7 @@ test( "the pane renders both batch buttons and the reason box for each filer", (
 
 test( "clicking Approve all REACHES THE STORE — one transition per held row, to queued", async () => {
   const h = mountWithRows( [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ) ] );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.deepEqual( h.calls.map( ( c ) => c.id ).sort(), [ "a", "b" ] );
@@ -185,7 +194,7 @@ test( "clicking Approve all REACHES THE STORE — one transition per held row, t
 test( "clicking Won't fix all with a reason REACHES THE STORE — wont_fix, ONE reason on every row", async () => {
   const h = mountWithRows( [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ) ] );
   h.reasonBox( "Krishna" ).value = "  superseded by the v2 door  ";
-  click( h.buttonOf( "Krishna", "holding-wont-fix-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-wont-fix-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.equal( h.calls.length, 2 );
@@ -198,7 +207,7 @@ test( "clicking Won't fix all with a reason REACHES THE STORE — wont_fix, ONE 
 
 test( "the batch acts ONLY on its own filer's rows", async () => {
   const h = mountWithRows( [ heldRow( "a", "krishna" ), heldRow( "b", "mr radio" ) ] );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a" ] );
   h.unmount();
@@ -211,7 +220,7 @@ test( "the batch acts ONLY on its own filer's rows", async () => {
 test( "a blank won't-fix reason refuses, names the blast radius, and posts NOTHING", async () => {
   const h = mountWithRows( [ heldRow( "a", "krishna" ) ] );
   h.reasonBox( "Krishna" ).value = "   ";          // whitespace is blank
-  click( h.buttonOf( "Krishna", "holding-wont-fix-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-wont-fix-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.equal( h.calls.length, 0, "a blank reason still posted — the server would answer N identical 422s" );
@@ -221,7 +230,7 @@ test( "a blank won't-fix reason refuses, names the blast radius, and posts NOTHI
 
 test( "approve needs NO reason — a blank box does not refuse it", async () => {
   const h = mountWithRows( [ heldRow( "a", "krishna" ) ] );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   assert.equal( h.calls.length, 1 );
   h.unmount();
@@ -233,7 +242,7 @@ test( "a group whose rows are all terminal says so rather than reporting success
   // after the button merge — and the batch then reported a clean success over an
   // empty set. `wont_fix` is terminal, so `approve` is disabled on these rows.
   const h = mountWithRows( [ heldRow( "a", "krishna", "wont_fix" ) ] );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.equal( h.calls.length, 0 );
@@ -252,7 +261,7 @@ test( "every row is attempted, whatever the ones before it returned", async () =
     [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ), heldRow( "c", "krishna" ) ],
     ( id ) => id === "a" ? { ok: false, message: "403 denied" } : { ok: true },
   );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   assert.deepEqual( h.calls.map( ( c ) => c.id ).sort(), [ "a", "b", "c" ] );
   h.unmount();
@@ -277,7 +286,7 @@ test( "🔴 THE PARTIAL-FAILURE REPORT SURVIVES THE REFRESH — the legacy card'
     // refused ones remain, and the pane repaints from that.
     ( ctl ) => ctl.setRows( [ rows[ 1 ] as TaskItem, rows[ 2 ] as TaskItem ] ),
   );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   const line = h.statusOf( "Krishna" );
@@ -294,7 +303,7 @@ test( "a fully successful batch refreshes exactly once and leaves no stale repor
     () => ( { ok: true } ),
     ( ctl ) => ctl.setRows( [] ),          // everything approved → the group is gone
   );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.equal( h.refreshes, 1, "the pane refreshed more than once for one batch" );
@@ -323,7 +332,7 @@ test( "both batch buttons are dead WHILE a batch runs, and live again after", as
       return { ok: true };
     },
   );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.deepEqual( seenDisabled, [ true, true ], "a batch button stayed live mid-batch" );
@@ -347,7 +356,7 @@ test( "a SECOND press mid-batch is ignored — the guard is not the disabled att
       return { ok: true };
     },
   );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.equal( h.calls.length, 2, `a re-entrant batch fired ${ h.calls.length } transitions over 2 rows` );
@@ -388,7 +397,7 @@ test( "a filer whose label contains selector metacharacters still batches correc
   // it begins a word. Written out because the first cut of this test asserted the
   // intuitive spelling and failed — the label is what the pane really renders.
   const h = mountWithRows( [ heldRow( "a", 'we"ird [x]' ), heldRow( "b", "krishna" ) ] );
-  click( h.buttonOf( 'We"Ird [X]', "holding-approve-all" ) );
+  confirmClick( h.buttonOf( 'We"Ird [X]', "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a" ] );
   h.unmount();
@@ -426,7 +435,7 @@ test( "the pane can be UNMOUNTED mid-batch: the remaining rows still post, and n
       return { ok: true };
     },
   );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a", "b", "c" ],
@@ -451,7 +460,7 @@ test( "a group missing its reason box refuses the won't-fix batch rather than po
   // empty justification — the exact thing the box exists to prevent.
   const h = mountWithRows( [ heldRow( "a", "krishna" ) ] );
   h.reasonBox( "Krishna" ).remove();
-  click( h.buttonOf( "Krishna", "holding-wont-fix-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-wont-fix-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   assert.equal( h.calls.length, 0 );
   assert.equal( h.statusOf( "Krishna" ), HOLDING_BATCH_BLANK_REASON );
@@ -465,7 +474,7 @@ test( "a refusal carrying NO message still produces a report, not `undefined` on
     [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ) ],
     ( id ) => id === "a" ? { ok: false } : { ok: true },
   );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   const line = h.statusOf( "Krishna" );
@@ -481,7 +490,7 @@ test( "an ID-LESS row is skipped rather than posted to `/api/tasks//transition`"
   // reported against a row nobody can find.
   const rows = [ heldRow( "a", "krishna" ), heldRow( "", "krishna" ) ];
   const h = mountWithRows( rows );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a" ] );
 } );
@@ -512,7 +521,7 @@ test( "THE REPORT SURVIVES A POLL THAT WAS ALREADY IN FLIGHT — the case the ol
   );
   h.setPollInFlight( true );
 
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   assert.ok( h.refreshes >= 2,
@@ -535,7 +544,7 @@ test( "and the report survives a LATER repaint too — a poll landing after the 
     [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ) ],
     ( id ) => id === "a" ? { ok: false, message: "409 conflict" } : { ok: true },
   );
-  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  confirmClick( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   assert.match( h.statusOf( "Krishna" ), /409 conflict/ );
 
@@ -544,4 +553,105 @@ test( "and the report survives a LATER repaint too — a poll landing after the 
   assert.match( h.statusOf( "Krishna" ), /409 conflict/,
     "an unrelated poll repaint erased the partial-failure report — the one message " +
     "whose entire job is to still be there after the pane refreshes" );
+} );
+
+
+// ---------------------------------------------------------------------------
+// Arm, then confirm (row 376dd4cb): Rick approved a held set by accident with ONE click
+// ---------------------------------------------------------------------------
+
+test( "the FIRST click on Approve all only ARMS it: names the verb and the count, posts nothing", async () => {
+  const h = mountWithRows( [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ) ] );
+  const btn = h.buttonOf( "Krishna", "holding-approve-all" );
+  click( btn );
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+
+  assert.equal( h.calls.length, 0, "one click posted a batch" );
+  assert.equal( btn.textContent, "Confirm approve all 2" );
+  assert.ok( btn.classList.contains( "task-submit-armed" ) );
+  assert.equal( btn.dataset.armed, "1" );
+  assert.equal( h.statusOf( "Krishna" ), "Click again to approve 2 rows." );
+  h.unmount();
+} );
+
+test( "the SECOND click confirms: the batch runs and the button returns to its resting label", async () => {
+  const h = mountWithRows( [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ) ] );
+  const btn = h.buttonOf( "Krishna", "holding-approve-all" );
+  click( btn );
+  click( btn );
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+
+  assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a", "b" ] );
+  assert.equal( btn.dataset.armed, undefined, "the button was left armed after the batch ran" );
+  assert.ok( !btn.classList.contains( "task-submit-armed" ) );
+  h.unmount();
+} );
+
+test( "Won't fix all arms the same way, and carries the reason on the confirming click", async () => {
+  const h = mountWithRows( [ heldRow( "a", "krishna" ) ] );
+  h.reasonBox( "Krishna" ).value = "duplicate";
+  const btn = h.buttonOf( "Krishna", "holding-wont-fix-all" );
+  click( btn );
+  assert.equal( btn.textContent, "Confirm won't fix all 1" );
+  assert.equal( h.statusOf( "Krishna" ), "Click again to close 1 rows as won't fix with this reason." );
+  assert.equal( h.calls.length, 0 );
+  click( btn );
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  assert.deepEqual( h.calls.map( ( c ) => [ c.id, c.toStatus, c.extras.reason ] ), [ [ "a", "wont_fix", "duplicate" ] ] );
+  h.unmount();
+} );
+
+test( "arming one button DISARMS its sibling — the two can never both sit armed", () => {
+  const h = mountWithRows( [ heldRow( "a", "krishna" ) ] );
+  h.reasonBox( "Krishna" ).value = "x";
+  const approve = h.buttonOf( "Krishna", "holding-approve-all" );
+  const wontFix = h.buttonOf( "Krishna", "holding-wont-fix-all" );
+  click( approve );
+  assert.equal( approve.dataset.armed, "1" );
+  click( wontFix );
+  assert.equal( approve.dataset.armed, undefined, "Approve all stayed armed after Won't fix all was armed" );
+  assert.equal( approve.textContent, "Approve all" );
+  assert.equal( wontFix.dataset.armed, "1" );
+  assert.equal( wontFix.textContent, "Confirm won't fix all 1" );
+  h.unmount();
+} );
+
+test( "a blank reason on Won't fix all refuses and does NOT arm; a reason cleared after arming refuses and disarms", () => {
+  const h = mountWithRows( [ heldRow( "a", "krishna" ) ] );
+  const btn = h.buttonOf( "Krishna", "holding-wont-fix-all" );
+  click( btn );
+  assert.equal( btn.dataset.armed, undefined, "a refused click armed the button" );
+  assert.equal( h.statusOf( "Krishna" ), HOLDING_BATCH_BLANK_REASON );
+
+  h.reasonBox( "Krishna" ).value = "later cleared";
+  click( btn );
+  assert.equal( btn.dataset.armed, "1" );
+  h.reasonBox( "Krishna" ).value = "";
+  click( btn );
+  assert.equal( btn.dataset.armed, undefined, "an armed button survived its reason being cleared" );
+  assert.equal( btn.textContent, "Won't fix all" );
+  assert.equal( h.calls.length, 0 );
+  h.unmount();
+} );
+
+test( "a group with no eligible rows does not arm", () => {
+  const h = mountWithRows( [ heldRow( "a", "krishna", "wont_fix" ) ] );
+  const btn = h.buttonOf( "Krishna", "holding-approve-all" );
+  click( btn );
+  assert.equal( btn.dataset.armed, undefined );
+  assert.equal( h.statusOf( "Krishna" ), HOLDING_BATCH_NO_ROWS );
+  h.unmount();
+} );
+
+test( "a repaint rebuilds the buttons UNARMED, and the armed line does not outlive them", async () => {
+  const h = mountWithRows( [ heldRow( "a", "krishna" ) ] );
+  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  await h.forceRefresh();
+  const fresh = h.buttonOf( "Krishna", "holding-approve-all" );
+  assert.equal( fresh.dataset.armed, undefined );
+  assert.equal( fresh.textContent, "Approve all" );
+  assert.equal( h.statusOf( "Krishna" ), "", "the armed status line survived the repaint that unarmed the button" );
+  click( fresh );
+  assert.equal( h.calls.length, 0, "after a repaint the first click must arm again, not post" );
+  h.unmount();
 } );

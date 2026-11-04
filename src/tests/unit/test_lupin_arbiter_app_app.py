@@ -151,6 +151,8 @@ def test_lifespan_starts_and_stops_turn_age_watchdog_loop():
 
 class _FakeCfg:
     """Fake ConfigurationManager for assemble_app's enable-gate branches."""
+    config_block_id = "Lupin:+Stub"
+    def get_required( self, key, **_kw ): return "America/New_York"
     def __init__( self, enabled, context_enabled=True, observer_enabled=False, stale_mcp_enabled=True ):
         self._enabled           = enabled
         self._context_enabled   = context_enabled

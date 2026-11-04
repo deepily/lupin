@@ -50,6 +50,23 @@ class TestAPIKeyGeneration:
         assert len( api_key ) >= 70, f"API key too short: {len( api_key )} chars (expected 70+)"
         assert len( api_key ) <= 100, f"API key too long: {len( api_key )} chars (expected <=100)"
 
+    def test_the_docstring_states_the_length_and_entropy_the_code_produces( self ):
+        """The 72 characters and 384 bits in the contract are what token_urlsafe( 48 ) gives."""
+        api_key = create_service_account.generate_api_key()
+        assert api_key.startswith( "ck_live_" ) and len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
+        assert "(72 characters)" in create_service_account.generate_api_key.__doc__
+        assert "(384 bits entropy)" in create_service_account.generate_api_key.__doc__
+
+    def test_the_postgres_twin_produces_the_length_its_docstring_states( self ):
+        """Test the twin's docstring figures against the key it builds."""
+        twin_path = Path( lupin_root ) / "src" / "scripts" / "create_service_account_postgres.py"
+        twin_spec = importlib.util.spec_from_file_location( "create_service_account_postgres", twin_path )
+        twin      = importlib.util.module_from_spec( twin_spec )
+        twin_spec.loader.exec_module( twin )
+        api_key = twin.generate_api_key()
+        assert api_key.startswith( "ck_live_" ) and len( api_key ) == 72 and len( api_key ) - len( "ck_live_" ) == 64
+        assert "(72 characters)" in twin.generate_api_key.__doc__ and "(384 bits entropy)" in twin.generate_api_key.__doc__
+
     def test_api_key_uniqueness( self ):
         """Test that multiple generated keys are unique."""
         keys = set()

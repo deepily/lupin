@@ -38,6 +38,7 @@ if src_path not in sys.path:
 
 # Now cosa is importable
 import cosa.utils.util as cu
+from cosa.utils.admin_script_helpers import write_key_file
 from cosa.rest.sqlite_database import get_auth_db_connection
 from cosa.rest.password_service import hash_password
 
@@ -50,9 +51,9 @@ def generate_api_key() -> str:
         - secrets module available (Python 3.6+)
 
     Ensures:
-        - returns API key string (70 characters)
+        - returns API key string (72 characters)
         - format: ck_live_ + 64 chars base64url
-        - cryptographically secure (288 bits entropy)
+        - cryptographically secure (384 bits entropy)
 
     Returns:
         str: API key (e.g., "ck_live_9x7Kp3mN8vQ2jR5wT6yL...")
@@ -239,25 +240,8 @@ def write_key_to_file( api_key: str, env: str ) -> Path:
     Raises:
         OSError: File system errors
     """
-    project_root = cu.get_project_root()
+    return write_key_file( cu.get_project_root(), api_key, env )
 
-    # Determine key file path based on environment
-    key_filename = f"notification-api-claude-code-{env}"
-    key_file = Path( project_root ) / "src" / "conf" / "keys" / key_filename
-
-    # Create directory if needed
-    key_file.parent.mkdir( parents=True, exist_ok=True )
-
-    # Write key to file
-    key_file.write_text( api_key + "\n" )
-
-    # Set restrictive permissions (owner read/write only)
-    key_file.chmod( 0o600 )
-
-    print( f"  ✓ Wrote key to file: {key_file}" )
-    print( f"  ✓ Permissions set: 600 (owner read/write only)" )
-
-    return key_file
 
 
 def main():

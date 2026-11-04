@@ -32,12 +32,7 @@ class MockAgentSDKSession:
     """
     Mock Agent SDK session for dry-run mode.
 
-    Simulates the full task lifecycle without making API calls:
-    1. Task decomposition (lead)
-    2. Implementation (coder)
-    3. Test writing (tester)
-    4. Code review (reviewer)
-    5. Completion report (lead)
+    Simulates the full task lifecycle without making API calls.
 
     Requires:
         - task_description is a non-empty string
@@ -46,6 +41,10 @@ class MockAgentSDKSession:
         - query() yields a sequence of MockAgentMessage objects
         - All phases complete without errors in dry-run mode
         - Realistic delays between phases
+
+    Notes:
+        - Lifecycle steps, in order: task decomposition (lead), implementation (coder),
+          test writing (tester), code review (reviewer), completion report (lead).
     """
 
     # Per-test scaling knob — multiply all per-phase delays by this factor.

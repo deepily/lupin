@@ -148,6 +148,58 @@ class TestComposeInterpolatesFromTheEnvironmentItIsGiven( unittest.TestCase ):
         self.assertNotIn( "LUPIN_ROOT", out )
 
 
+# Captured 2026-10-08 from the live dev container (docker 24.0.4) and `docker compose config --format json`,
+# after the 13:48 bounce had recreated it. The 2026-09-15 pair above predates this mount, so it never held one.
+TMPFS_VOLUME_FROM_COMPOSE = { "type": "tmpfs", "target": "/var/lupin/.venv" }
+TMPFS_MOUNT_FROM_INSPECT  = { "Type": "tmpfs", "Source": "", "Destination": "/var/lupin/.venv", "Mode": "", "RW": True, "Propagation": "" }
+
+
+def _pair_with_the_tmpfs_volume():
+    rendered, inspected = _pair()
+    rendered[ "services" ][ SERVICE ][ "volumes" ].append( dict( TMPFS_VOLUME_FROM_COMPOSE ) )
+    inspected[ 0 ][ "Mounts" ].append( dict( TMPFS_MOUNT_FROM_INSPECT ) )
+    return rendered, inspected
+
+
+class TestALongFormTmpfsVolumeIsNotDrift( unittest.TestCase ):
+    """Compose gives a tmpfs volume no source and docker reports an empty one: they agree."""
+
+    def test_the_pair_with_the_tmpfs_volume_has_no_drift( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        self.assertEqual( _verdict( rendered, inspected ), ( probe_module.EXIT_NO_DRIFT, [ ] ) )
+
+    def test_the_cli_exits_zero_on_it( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        with patch( "sys.stdout" ):
+            self.assertEqual( probe_module.main( [ SERVICE ], runner=_runner_for( rendered, inspected ) ), probe_module.EXIT_NO_DRIFT )
+
+    def test_the_fragments_really_are_the_shape_that_broke_it( self ):
+        self.assertNotIn( "source", TMPFS_VOLUME_FROM_COMPOSE )
+        self.assertEqual( TMPFS_MOUNT_FROM_INSPECT[ "Source" ], "" )
+
+    def test_a_tmpfs_volume_the_container_lacks_is_still_drift( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        inspected[ 0 ][ "Mounts" ] = [ m for m in inspected[ 0 ][ "Mounts" ] if m[ "Destination" ] != "/var/lupin/.venv" ]
+        self.assertEqual( _verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /var/lupin/.venv" ] ) )
+
+    def test_a_tmpfs_mount_compose_no_longer_declares_is_still_drift( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        rendered[ "services" ][ SERVICE ][ "volumes" ].pop()
+        self.assertEqual( _verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /var/lupin/.venv" ] ) )
+
+    def test_a_tmpfs_mount_moved_to_another_target_is_still_drift( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        inspected[ 0 ][ "Mounts" ][ -1 ][ "Destination" ] = "/var/lupin/.other"
+        code, fields = _verdict( rendered, inspected )
+        self.assertEqual( ( code, sorted( fields ) ), ( probe_module.EXIT_DRIFT, [ "mount /var/lupin/.other", "mount /var/lupin/.venv" ] ) )
+
+    def test_whatever_source_docker_reports_for_a_tmpfs_mount_it_reads_as_empty( self ):
+        container = { "Mounts": [ dict( TMPFS_MOUNT_FROM_INSPECT, Source="/odd" ) ] }
+        self.assertEqual( probe_module.inspect_mounts( container ), { ( "tmpfs", "", "/var/lupin/.venv", False ) } )
+        service = { "volumes": [ dict( TMPFS_VOLUME_FROM_COMPOSE, source="/odd" ) ] }
+        self.assertEqual( probe_module.compose_mounts( service, { } ), { ( "tmpfs", "", "/var/lupin/.venv", False ) } )
+
+
 class TestEachKindOfDriftIsNamed( unittest.TestCase ):
 
     def test_a_changed_tmpfs_option_is_drift_the_mp3_upload_case( self ):
@@ -265,6 +317,61 @@ class TestNormalizers( unittest.TestCase ):
     def test_a_named_volume_absent_from_the_rendered_names_keeps_its_own_name( self ):
         service = { "volumes": [ { "type": "volume", "source": "external-vol", "target": "/data" } ] }
         self.assertEqual( probe_module.compose_mounts( service, { } ), { ( "volume", "external-vol", "/data", False ) } )
+
+
+class TestComposeSecretsAndShellPassThroughs( unittest.TestCase ):
+    # Row 21b96c4f. The fixtures are `docker compose config` and `docker inspect` of lupin-rest-test,
+    # captured 2026-11-03 22:55 EST (values redacted as above, GH_TOKEN kept non-empty in the container).
+    # That container mounts two compose secrets and holds a GH_TOKEN its compose file renders as "".
+
+    def _pair( self ):
+        return _load( "compose-config-lupin-rest-test.json" ), _load( "inspect-lupin-rest-test.json" )
+
+    def _verdict( self, rendered, inspected ):
+        return probe_module.probe( "lupin-rest-test", runner=_runner_for( rendered, inspected ) )[ :2 ]
+
+    def test_the_captured_pair_has_no_drift( self ):
+        rendered, inspected = self._pair()
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_NO_DRIFT, [ ] ) )
+
+    def test_the_capture_really_has_the_two_secret_mounts_and_the_blank_pass_through( self ):
+        rendered, inspected = self._pair()
+        secret_mounts = sorted( m[ "Destination" ] for m in inspected[ 0 ][ "Mounts" ] if m[ "Destination" ].startswith( "/run/secrets/" ) )
+        self.assertEqual( secret_mounts, [ "/run/secrets/db_app_password", "/run/secrets/db_test_password" ] )
+        self.assertEqual( len( rendered[ "services" ][ "lupin-rest-test" ][ "secrets" ] ), 2 )
+        self.assertEqual( rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "GH_TOKEN" ], "" )
+        self.assertNotEqual( probe_module.inspect_env( inspected[ 0 ] )[ "GH_TOKEN" ], "" )
+
+    def test_a_secret_compose_dropped_is_drift_because_a_recreate_would_remove_its_mount( self ):
+        rendered, inspected = self._pair()
+        rendered[ "services" ][ "lupin-rest-test" ][ "secrets" ].pop()
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /run/secrets/db_test_password" ] ) )
+
+    def test_a_secret_mount_the_container_lacks_is_drift( self ):
+        rendered, inspected = self._pair()
+        inspected[ 0 ][ "Mounts" ] = [ m for m in inspected[ 0 ][ "Mounts" ] if m[ "Destination" ] != "/run/secrets/db_app_password" ]
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /run/secrets/db_app_password" ] ) )
+
+    def test_a_secret_whose_host_file_moved_is_drift( self ):
+        rendered, inspected = self._pair()
+        rendered[ "secrets" ][ "db_app_password" ][ "file" ] = "/etc/lupin/secrets/elsewhere"
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /run/secrets/db_app_password" ] ) )
+
+    def test_a_blank_pass_through_is_not_drift_but_a_real_compose_value_still_is( self ):
+        rendered, inspected = self._pair()
+        rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "GH_TOKEN" ] = "a-value-compose-now-sets"
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_ENV_DRIFT, [ "env GH_TOKEN" ] ) )
+
+    def test_a_key_blank_in_compose_and_missing_in_the_container_is_still_drift( self ):
+        rendered, inspected = self._pair()
+        rendered[ "services" ][ "lupin-rest-test" ][ "environment" ][ "LUPIN_BLANK_AND_ABSENT" ] = ""
+        self.assertEqual( self._verdict( rendered, inspected ), ( probe_module.EXIT_ENV_DRIFT, [ "env LUPIN_BLANK_AND_ABSENT" ] ) )
+
+    def test_compose_mounts_reads_a_secret_target_alias_and_skips_a_secret_with_no_host_file( self ):
+        service = { "secrets": [ { "source": "a", "target": "renamed" }, { "source": "b", "target": "/abs/path" }, { "source": "from_env" } ] }
+        files   = { "a": "/host/a", "b": "/host/b" }
+        self.assertEqual( probe_module.compose_mounts( service, { }, files ),
+                          { ( "bind", "/host/a", "/run/secrets/renamed", True ), ( "bind", "/host/b", "/abs/path", True ) } )
 
 
 class TestTheProbeNeverRaises( unittest.TestCase ):

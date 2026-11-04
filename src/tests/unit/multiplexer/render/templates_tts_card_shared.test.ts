@@ -50,13 +50,16 @@ test( "ttsCardTime: non-empty time_display → used verbatim", () => {
 } );
 test( "ttsCardTime: notification present but no time_display → addedAt HH:MM", () => {
   const out = ttsCardTime( item( { notification: notif( {} ), addedAt: 0 } ) );
-  assert.match( out, /^\d{2}:\d{2}$/ );
+  assert.equal( out, "00:00 UTC" );
+} );
+test( "ttsCardTime: a server zone decides the clock and carries no UTC label", () => {
+  assert.equal( ttsCardTime( item( { notification: notif( {} ), addedAt: 0 } ), "Asia/Tokyo" ), "09:00" );
 } );
 test( "ttsCardTime: no notification and no addedAt → epoch-0 HH:MM (no throw)", () => {
   const out = ttsCardTime( item() );
-  assert.match( out, /^\d{2}:\d{2}$/ );
+  assert.equal( out, "00:00 UTC" );
 } );
 test( "ttsCardTime: empty-string time_display is falsy → falls back to addedAt", () => {
   const out = ttsCardTime( item( { notification: notif( { time_display: "" } ), addedAt: 0 } ) );
-  assert.match( out, /^\d{2}:\d{2}$/ );
+  assert.equal( out, "00:00 UTC" );
 } );

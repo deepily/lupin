@@ -1,0 +1,44 @@
+[
+ {
+  "id": "w0-get_timestamp-removed",
+  "old": "\n        Get current timestamp with optional microsecond precision.\n        \n        Requires:\n            - None\n            \n        Ensures:\n            - Returns formatted datetime string\n            - Default format: \"YYYY-MM-DD @ HH:MM:SS TZ\" \n            - Microsecond format: \"YYYY-MM-DD @ HH:MM:SS.ffffff TZ\"\n            \n        Args:\n            microseconds: If True, include microseconds for unique IDs (default: False)\n            \n        Raises:\n            - None\n        ",
+  "new": "\n        Get current timestamp with optional microsecond precision.\n        \n        Requires:\n            - None\n            \n        Ensures:\n            - Default format: \"YYYY-MM-DD @ HH:MM:SS TZ\" \n            - Microsecond format: \"YYYY-MM-DD @ HH:MM:SS.ffffff TZ\"\n            \n        Args:\n            microseconds: If True, include microseconds for unique IDs (default: False)\n            \n        Raises:\n            - None\n        ",
+  "seed_span": [
+   158,
+   191
+  ]
+ },
+ {
+  "id": "w1-literal_violations-removed",
+  "old": "\n    Literals the rewrite ALTERED. Absence is legal; mutation is not.\n\n    Requires:\n        - original and rewrite are strings\n\n    Ensures:\n        - returns a list of ( literal, sent_count, got_count ) for literals that\n          appear MORE often than sent, and ( literal, 0, n ) for ones never sent\n        - a literal appearing FEWER times is not a violation \u2014 dropping a\n          sentence takes its literals with it, and that is the design\n        - a mutation still registers, because the changed value is a literal\n          that was never sent\n\n    Raises:\n        - nothing\n    ",
+  "new": "\n    Literals the rewrite ALTERED. Absence is legal; mutation is not.\n\n    Requires:\n        - original and rewrite are strings\n\n    Ensures:\n          appear MORE often than sent, and ( literal, 0, n ) for ones never sent\n        - a literal appearing FEWER times is not a violation \u2014 dropping a\n          sentence takes its literals with it, and that is the design\n        - a mutation still registers, because the changed value is a literal\n          that was never sent\n\n    Raises:\n        - nothing\n    ",
+  "seed_span": [
+   152,
+   222
+  ]
+ },
+ {
+  "id": "w2-_update_lora_env-removed",
+  "old": "\n        Update ~/.lora_env with the latest quantized model path for this model.\n\n        Requires:\n            - self.model_name is set\n            - self.quantized_model_dirs is populated with {bits: path}\n            - model_name exists in LORA_ENV_VAR_MAP\n\n        Ensures:\n            - ~/.lora_env is updated with new path for this model\n            - Other model entries are preserved\n            - Header comments and timestamp are updated\n            - Prefers 8-bit path if available, falls back to 4-bit\n\n        Raises:\n            - IOError if file cannot be written\n        ",
+  "new": "\n        Update ~/.lora_env with the latest quantized model path for this model.\n\n        Requires:\n            - self.model_name is set\n            - self.quantized_model_dirs is populated with {bits: path}\n            - model_name exists in LORA_ENV_VAR_MAP\n\n        Ensures:\n            - Other model entries are preserved\n            - Header comments and timestamp are updated\n            - Prefers 8-bit path if available, falls back to 4-bit\n\n        Raises:\n            - IOError if file cannot be written\n        ",
+  "seed_span": [
+   292,
+   343
+  ]
+ },
+ {
+  "id": "w3-prepare_scratch-writer",
+  "old": "\n    Create or refresh the scratch pub project that holds the extractor script.\n\n    Requires:\n        - dart is the path of a dart executable\n        - data_root is the repo's own data directory, never the tree being indexed\n\n    Ensures:\n        - returns the scratch directory, under data_root, with pubspec.yaml, bin/dart_extract.dart\n          and resolved packages\n        - `pub get` runs offline first and online only when the offline run fails\n        - an unchanged project with resolved packages skips `pub get`\n\n    Raises:\n        - DependencyMissing when the analyzer package cannot be resolved\n        - OSError when the project files cannot be written\n    ",
+  "new": "\n    Create or refresh the scratch pub project that holds the extractor script.\n\n    Requires:\n        - dart is the path of a dart executable\n        - data_root is the repo's own data directory, and is never the tree being indexed\n\n    Ensures:\n        - Returns the scratch directory under data_root.\n        - The directory holds pubspec.yaml, bin/dart_extract.dart and resolved packages.\n        - `pub get` runs offline first, and online only when the offline run fails.\n        - An unchanged project with resolved packages skips `pub get`.\n\n    Raises:\n        - DependencyMissing when the analyzer package cannot be resolved\n        - OSError when the project files cannot be written\n    "
+ },
+ {
+  "id": "w4-heartbeat_check-writer",
+  "old": "\n        Send ping messages to all connections and remove dead ones.\n        \n        This method is called periodically by the heartbeat background task\n        to proactively detect and clean up dead WebSocket connections.\n        \n        Requires:\n            - Method is called from async context\n            - Configuration may disable heartbeat checking\n            \n        Ensures:\n            - Sends sys_ping message to all active connections\n            - Identifies and removes connections that fail to receive ping\n            - Prints summary of removed connections\n            - Returns early if heartbeat disabled in configuration\n            \n        Raises:\n            - None (WebSocket failures handled gracefully)\n        ",
+  "new": "\n        Ping every connection and remove the ones that fail to respond.\n\n        The heartbeat background task calls this periodically to find and clean up dead WebSocket connections.\n\n        Requires:\n            - The method is called from an async context.\n            - Configuration may disable heartbeat checking.\n\n        Ensures:\n            - Returns early if heartbeat is disabled in configuration.\n            - Sends a sys_ping message to all active connections.\n            - Removes connections that fail to receive the ping.\n            - Prints a summary of the removed connections.\n\n        Raises:\n            - None. WebSocket failures are handled internally.\n        "
+ },
+ {
+  "id": "w5-_is_match-writer",
+  "old": "\n        Check if transcription matches any known command.\n        \n        Requires:\n            - transcription is a non-empty string\n            - self.command_strings is initialized\n            \n        Ensures:\n            - Returns tuple of (is_match, command_dict)\n            - Checks for exact and startswith matches\n            - Populates command_dict with match details\n            \n        Raises:\n            - None\n        ",
+  "new": "\n        Check whether a transcription matches any known command.\n\n        Requires:\n            - transcription is a non-empty string\n            - self.command_strings is initialized\n\n        Ensures:\n            - Returns a tuple of (is_match, command_dict).\n            - Checks for exact matches and startswith matches.\n            - Populates command_dict with the match details.\n\n        Raises:\n            - None\n        "
+ }
+]

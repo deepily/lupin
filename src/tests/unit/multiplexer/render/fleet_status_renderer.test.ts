@@ -39,6 +39,8 @@ function makeStore(): FakeStore {
     sizeCap: () => null,
     sizeCapSaving: () => null,
     setSizeCap: async (): Promise<void> => {},
+    skeletonCrewSaving: () => null,
+    setSkeletonCrew: async (): Promise<void> => {},
     setComposite: (c) => { composite = c; },
     setShowOffline: (b) => { showOffline = b; },
   };

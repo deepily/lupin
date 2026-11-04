@@ -22,7 +22,8 @@
 #   everywhere for the second. On the dev box they coincide by accident, so
 #   the flaw was invisible there; on the VM they cannot, and
 #   /embeddings/generate returned 100% 401 for ~38h.
-#   Full analysis: src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+#   The ruling is rule 5 of src/docs/decisions/2026.05.16-model-server-carveout.md. The full analysis note was deleted from the tree;
+#   it is in git history at b113a3a7d^.
 #
 # ⚠️ ORDER MATTERS WHEN ROTATING. The model server hashes its key at BOOT:
 #     1. this script (add the new secret version)

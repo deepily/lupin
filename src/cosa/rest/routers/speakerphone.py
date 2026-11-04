@@ -1,41 +1,39 @@
 """
 Cosa-voice speakerphone endpoints.
 
-Per-session "speakerphone" toggle backed by the SessionStart bridge file
-at ~/.claude/sessions/cc-{PPID}.json. When `speakerphone_on=True`, Claude
-auto-calls notify(full_text, suppress_ding=True) after every assistant turn so
-the user can hold a voice dialogue at a distance (notification UI listening via
-TTS rather than reading the terminal). Default = mode-aware: False in solo,
-True in chorus (see lupin-app.ini `tts interaction mode`).
+Per-session "speakerphone" toggle backed by the SessionStart bridge file at
+~/.claude/sessions/cc-{PPID}.json. When `speakerphone_on=True`, Claude auto-calls
+notify(full_text, suppress_ding=True) after every assistant turn. The user can then hold a
+voice dialogue at a distance, with the notification UI listening through TTS rather than
+reading the terminal. The default is mode-aware: False in solo, True in chorus (see
+lupin-app.ini `tts interaction mode`).
 
 Activation surfaces (all four converge here or on the cosa-voice MCP tool):
     - Voice phrase: "enable speakerphone" → MCP enable_speakerphone()
     - Slash command: /speakerphone-on → MCP enable_speakerphone()
     - MCP tool: enable_speakerphone() / disable_speakerphone() (writes bridge directly)
-    - UI toggle button: POST to this router (writes bridge AND broadcasts WS event)
+    - UI toggle button: POST to this router (writes bridge and broadcasts WS event)
 
 The bridge file is the single source of truth. UI clients hold a localStorage
 read-through cache, hydrated by the GET endpoint and the speakerphone_changed
 WebSocket event broadcast on POST.
 
-## Mode-conditional behavior (Phase 3 of solo/chorus refactor)
+## Mode-conditional behavior
 
 Activation behavior branches on `get_tts_interaction_mode()` from
 cosa.utils.util:
 
-- **Solo branch** (preserve today's monopoly behavior pixel-perfect):
+- **Solo branch** (preserves the monopoly behavior exactly):
   asyncio.Lock + scan-for-active + atomic displace + activate self + broadcast.
   Response includes `displaced_sessions: [...]` listing the SIDs the activation
   pushed off.
 
-- **Chorus branch** (new): no Lock, no scan. Activate self + broadcast.
+- **Chorus branch**: no Lock, no scan. Activate self + broadcast.
   Response includes `displaced_sessions: []` (always empty; kept in schema for
   response-shape stability so UI clients don't need to special-case modes).
 
 Deactivate is mode-independent: same set-speakerphone-false + broadcast +
 self-action push under both branches.
-
-Generated on: 2026-04-27, renamed + mode-conditionalized 2026-05-12.
 """
 
 import asyncio
@@ -160,13 +158,13 @@ async def set_speakerphone_endpoint(
         - Returns 200 with {session_id, on, broadcast_delivered, displaced_sessions} on success
         - Returns 404 if no bridge matches
         - Returns 500 if bridge found but write failed
-        - In SOLO mode + body.on=True: scans for other active speakerphone sessions
+        - In solo mode + body.on=True: scans for other active speakerphone sessions
           and displaces them atomically (asyncio.Lock-serialized) before activating self
-        - In CHORUS mode + body.on=True: no displacement; only self is activated;
+        - In chorus mode + body.on=True: no displacement; only self is activated;
           response still includes displaced_sessions=[] for shape stability
         - Broadcasts speakerphone_changed event to the authenticated user's
           WebSocket sessions (other tabs of the same user). Broadcast failures are
-          logged but do not fail the endpoint — the bridge write is the canonical
+          logged but do not fail the endpoint, because the bridge write is the canonical
           state.
 
     Args:

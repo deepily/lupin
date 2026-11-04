@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Purge OFFLINE-marked heartbeat-event files from the live arbiter roster source.
+Archive offline-marked heartbeat-event files from the live arbiter roster source.
 
 The standalone arbiter (:8001) rebuilds its fleet table every poll from one
-JSONL file per session under ~/.claude/heartbeat-events/. There is no aging on
-that directory, so every session that ever emitted an event lingers forever and
-shows as "offline" days later. This tool archives the event files for sessions
-the live arbiter currently marks `liveness.verdict == "offline"`, leaving the
-LIVE/quiet sessions untouched — giving a fresh, accurate roster on the next poll.
+JSONL file per session under ~/.claude/heartbeat-events/. Nothing ages that
+directory, so every session that ever emitted an event lingers and shows as
+"offline" days later. This tool archives the event files of sessions the live
+arbiter marks `liveness.verdict == "offline"`. Live and quiet sessions are left
+untouched, so the next poll gives a fresh, accurate roster.
 
-SAFE BY DEFAULT: dry-run unless --apply is passed. Files are MOVED to a timestamped
-archive dir (recoverable), never hard-deleted. Deleting while :8001 runs is safe —
-the event tailer skips missing files (offset preserved); no arbiter restart needed.
+It is dry-run unless --apply is passed. Files are moved to a timestamped archive
+dir (recoverable), never hard-deleted. Moving files while :8001 runs is safe:
+the event tailer skips missing files (offset preserved), so no restart is needed.
 
 Run (dry-run first):
     python3 src/scripts/purge-offline-heartbeat-events.py
@@ -36,7 +36,7 @@ def fetch_offline_and_live( state_url, timeout ):
 
     Ensures:
         - returns ( offline, live ) — two lists of session dicts; a session is
-          OFFLINE iff liveness.verdict == "offline", else LIVE (kept)
+          offline iff liveness.verdict == "offline", otherwise live (kept)
         - raises urllib.error.URLError / json.JSONDecodeError on a bad fetch
     """
     raw      = urllib.request.urlopen( state_url, timeout=timeout ).read()

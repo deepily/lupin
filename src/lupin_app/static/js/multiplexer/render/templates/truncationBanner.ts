@@ -15,6 +15,9 @@ import type { TaskListComposite } from "../taskListModel";
 
 const HELD_NOTE_MARKER = "matching your filters are in the HOLDING AREA";
 
+/**
+ * Builds a paragraph element with the given text for the truncation note.
+ */
 function line( text: string, extraClass: string = "" ): HTMLParagraphElement {
   const p = document.createElement( "p" );
   p.className = `task-list-message task-list-truncated${extraClass}`;

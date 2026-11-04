@@ -168,6 +168,16 @@ else
     pass_check "MCP server file found"
 fi
 
+# 3a. INI config-manager args for the MCP server's spawn path.
+# spawn_sessions reads the per-role worker model (`cc session spawn model *`) through a
+# ConfigurationManager built from LUPIN_CONFIG_MGR_CLI_ARGS. The registration used to omit it,
+# so the build failed, every role resolved to no model, and workers inherited the user default
+# (row c9252819). Paths are relative to the project root, so the value is host-independent;
+# only the block is overridable.
+LUPIN_MCP_CONFIG_BLOCK="${LUPIN_MCP_CONFIG_BLOCK:-Lupin:+Development}"
+CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=$LUPIN_MCP_CONFIG_BLOCK"
+pass_check "LUPIN_CONFIG_MGR_CLI_ARGS = $CONFIG_MGR_CLI_ARGS"
+
 # 4. Claude CLI
 if ! command -v claude &> /dev/null; then
     fail_check "claude CLI not found on PATH"
@@ -237,6 +247,7 @@ fi
 
 # 6. Server reachable (soft check)
 SERVER_URL="${LUPIN_APP_SERVER_URL:-http://localhost:7999}"
+SERVER_URL_EXPLICIT=0; [ -n "${LUPIN_APP_SERVER_URL:-}" ] && SERVER_URL_EXPLICIT=1
 if curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
     pass_check "Lupin server reachable at $SERVER_URL"
     SERVER_REACHABLE=1
@@ -389,6 +400,38 @@ else
     echo -e "${CYAN}Installing cosa-voice MCP (user scope)...${NC}"
     echo ""
 
+    # ── Carry the reuse-check settings across the re-add ─────────────
+    # The remove-then-add below rebuilds the entry from scratch, so a value that was only in the old entry
+    # would be dropped (plan 3 section 12.3 D3, first caution). Each setting is taken from this shell if set.
+    # The pack size is otherwise kept from the registration about to be removed. The token ceiling is otherwise
+    # the one constant the capacity check reads, reuse_ledger.LOOKUP_CEILING_TOKENS, so the live ceiling and
+    # the checked one cannot drift apart; an older value in the old entry is not carried over. Each is checked
+    # here, before anything is removed: a wrong value makes every reuse lookup fail with BAD_SPEND_LIMIT, and
+    # an install that stops leaves the old entry whole.
+    REUSE_PASSTHROUGH_VARS="LUPIN_REUSE_JEV_PACK_SIZE LUPIN_REUSE_JEV_TOKEN_CEILING"
+    REUSE_ENV_ARGS=()
+    for var in $REUSE_PASSTHROUGH_VARS; do
+        value="${!var:-}"
+        if [ -z "$value" ] && [ "$var" = "LUPIN_REUSE_JEV_TOKEN_CEILING" ]; then
+            value="$( PYTHONPATH="$LUPIN_ROOT/src" python3 -c "from lupin_mcp import reuse_ledger as rl; print( rl.LOOKUP_CEILING_TOKENS )" 2>/dev/null || true )"
+            [ -z "$value" ] && warn_check "could not read reuse_ledger.LOOKUP_CEILING_TOKENS, so no token ceiling is written"
+        elif [ -z "$value" ] && [ "$HAS_USER" = true ]; then
+            value="$( python3 -c "
+import json, sys
+with open( sys.argv[1] ) as f:
+    env = json.load( f ).get( 'mcpServers', {} ).get( 'cosa-voice', {} ).get( 'env', {} )
+print( env.get( sys.argv[2], '' ) )
+" "$USER_CONFIG_FILE" "$var" 2>/dev/null || true )"
+        fi
+        [ -z "$value" ] && continue
+        if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+            fail_check "$var must be a positive whole number, got '$value' (nothing was changed)"
+            exit 1
+        fi
+        REUSE_ENV_ARGS+=( -e "$var=$value" )
+        pass_check "$var = $value (kept in the registration)"
+    done
+
     # Remove stale local-scope registration if present
     if [ "$HAS_LOCAL" = true ]; then
         echo "  Removing local-scope registration..."
@@ -412,6 +455,8 @@ else
         cosa-voice \
         -e "PYTHONPATH=$LUPIN_ROOT/src" \
         -e "LUPIN_ROOT=$LUPIN_ROOT" \
+        -e "LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_CLI_ARGS" \
+        "${REUSE_ENV_ARGS[@]}" \
         -- "$VENV_PYTHON" "$MCP_SERVER" 2>/dev/null; then
         pass_check "cosa-voice registered at user scope (global)"
     else
@@ -421,71 +466,50 @@ else
         echo "      claude mcp add --scope user --transport stdio cosa-voice \\"
         echo "        -e \"PYTHONPATH=$LUPIN_ROOT/src\" \\"
         echo "        -e \"LUPIN_ROOT=$LUPIN_ROOT\" \\"
+        echo "        -e \"LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_CLI_ARGS\" \\"
         echo "        -- \"$VENV_PYTHON\" \"$MCP_SERVER\""
         echo ""
         exit 1
     fi
 
-    # ── Install the 8 CC hooks from the canonical in-repo template ────
-    # Merges src/conf/claude-code-hooks.json into ~/.claude/settings.json,
-    # overwriting ONLY the "hooks" key and preserving every other setting.
+    # ── Install the CC hooks from the canonical in-repo template ──────
+    # Merges src/conf/claude-code-hooks.json into ~/.claude/settings.json by way of
+    # src/scripts/lib/merge_cc_hooks.py, replacing ONLY the "hooks" key and preserving
+    # every other setting. The helper REFUSES, and leaves settings untouched, when the
+    # settings hold a hook entry the template does not carry exactly (row ea27d263): a plain
+    # replace used to delete live guard hooks and leave only a .bak copy. Opt in to the
+    # overwrite with LUPIN_INSTALL_FORCE_HOOKS=1; the .bak copy is still made first.
     # Commands are $LUPIN_ROOT / $PLANNING_IS_PROMPTING_ROOT relative, so the
     # SAME template ports to any host where those env vars are exported.
     HOOKS_TEMPLATE="$LUPIN_ROOT/src/conf/claude-code-hooks.json"
-    echo "  Installing CC hooks (SessionStart, Stop, PreToolUse, ... 8 total)..."
+    HOOKS_MERGER="$LUPIN_ROOT/src/scripts/lib/merge_cc_hooks.py"
+    echo "  Installing CC hooks (SessionStart, Stop, PreToolUse, ... 8 event types)..."
     if [ ! -f "$HOOKS_TEMPLATE" ]; then
         warn_check "Hooks template missing: $HOOKS_TEMPLATE (skipping hook install)"
     else
         mkdir -p "$HOME/.claude"
-        [ -f "$SETTINGS_FILE" ] && cp "$SETTINGS_FILE" "$SETTINGS_FILE.bak-$(date +%s)"
-        if python3 -c "
-import json, os, sys
-tmpl = json.load( open( '$HOOKS_TEMPLATE' ) )[ 'hooks' ]
-cfg  = '$SETTINGS_FILE'
-existing = {}
-if os.path.exists( cfg ):
-    try:    existing = json.load( open( cfg ) )
-    except Exception: existing = {}
-existing[ 'hooks' ] = tmpl
-json.dump( existing, open( cfg, 'w' ), indent=2 )
-print( '  ✓ installed', len( tmpl ), 'hook event-types ->', cfg )
-"; then
+        FORCE_HOOKS_ARG=""
+        [ "${LUPIN_INSTALL_FORCE_HOOKS:-0}" = "1" ] && FORCE_HOOKS_ARG="--force"
+        # `set -e` is on: capture the exit code with `||`, or a refusal would end the whole install.
+        HOOKS_RC=0
+        python3 "$HOOKS_MERGER" "$SETTINGS_FILE" "$HOOKS_TEMPLATE" $FORCE_HOOKS_ARG || HOOKS_RC=$?
+        if [ "$HOOKS_RC" -eq 0 ]; then
             pass_check "CC hooks installed (8/8)"
+        elif [ "$HOOKS_RC" -eq 3 ]; then
+            warn_check "CC hook install REFUSED: $SETTINGS_FILE holds hook entries the template does not carry exactly (listed above). Settings left untouched. Correct the template at $HOOKS_TEMPLATE, or re-run with LUPIN_INSTALL_FORCE_HOOKS=1 (a .bak copy is kept)."
         else
-            warn_check "CC hook install failed — merge $HOOKS_TEMPLATE into $SETTINGS_FILE manually"
+            warn_check "CC hook install failed (exit $HOOKS_RC) — merge $HOOKS_TEMPLATE into $SETTINGS_FILE manually"
         fi
     fi
 
     # ── End-to-end test notification ─────────────────────────────────
-    if curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
-        echo ""
-        echo "  Sending test notification..."
-        TEST_RESULT=$("$VENV_PYTHON" -c "
-import sys, os
-sys.path.insert( 0, '$LUPIN_ROOT/src' )
-os.environ[ 'LUPIN_ROOT' ] = '$LUPIN_ROOT'
-from lupin_cli.notifications.notify_user_async import notify_user_async
-from lupin_cli.notifications.notification_models import AsyncNotificationRequest, NotificationType, NotificationPriority
-try:
-    req = AsyncNotificationRequest(
-        message='cosa-voice bootstrapper: test notification',
-        notification_type=NotificationType.PROGRESS,
-        priority=NotificationPriority.LOW,
-        sender_id='claude.code@installer.deepily.ai',
-        server_url='$SERVER_URL'
-    )
-    resp = notify_user_async( req )
-    print( 'ok' if resp and resp.success else 'fail' )
-except Exception as e:
-    print( f'fail: {e}' )
-" 2>/dev/null || echo "fail")
-
-        if echo "$TEST_RESULT" | grep -q "^ok"; then
-            pass_check "Test notification delivered"
-        else
-            warn_check "Test notification failed ($TEST_RESULT)"
-        fi
-    fi
+    # Row 80535f46: a failed send used to be a warning and the installer still exited 0.
+    # The helper keeps the notifier's own status and message. Exit 0 delivered, 3 skipped
+    # (server reached, nobody listening), 1 failed. No server to reach is also a skip.
+    INSTALL_RC=0
+    # shellcheck source=lib/installer-notify-step.sh
+    . "$LUPIN_ROOT/src/scripts/lib/installer-notify-step.sh"
+    run_test_notification
 
     # ── Summary ──────────────────────────────────────────────────────
     echo ""
@@ -503,5 +527,5 @@ except Exception as e:
     echo "  To verify, start Claude Code and run:"
     echo "    get_session_info()"
     echo ""
-    exit 0
+    exit "$INSTALL_RC"
 fi

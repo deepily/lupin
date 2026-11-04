@@ -162,7 +162,7 @@ class NarrowingHarness:
 
     async def run_theme_clustering( self, subqueries: List[ dict ] ) -> dict:
         """
-        Run ONLY theme clustering on existing subqueries.
+        Run only theme clustering on existing subqueries.
 
         Requires:
             - subqueries is a non-empty list of dicts with 'topic' key

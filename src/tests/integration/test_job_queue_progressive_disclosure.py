@@ -21,9 +21,13 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from tests.helpers.done_queue_budget import budget_before_submit
+from tests.helpers.suite_lineage import lineage_request
+
 
 # Test server configuration
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
+
 
 
 def unique_email( prefix ):
@@ -61,7 +65,6 @@ NEEDS_A_DRAINED_QUEUE = pytest.mark.xfail(
              "fix it, and strict=True means an unexpected pass goes RED so the mark "
              "cannot outlive the mechanism it names."
 )
-
 
 class TestJobQueueProgressiveDisclosure:
     """Integration tests for job queue progressive disclosure UI."""
@@ -116,12 +119,18 @@ class TestJobQueueProgressiveDisclosure:
         """
         return requests.post(
             f"{BASE_URL}/api/v2/ask",
-            json={
-                "question": question,
-                "websocket_id": websocket_id
-            },
-            headers={ "Authorization": f"Bearer {token}" }
+            **lineage_request( { "question": question, "websocket_id": websocket_id },
+                               { "Authorization": f"Bearer {token}" } )
         )
+
+    def _budget_before_submit( self ):
+        """
+        Jobs ahead of a job submitted now, and the seconds that justifies waiting for it.
+
+        Returns:
+            tuple: ( jobs_ahead, budget_seconds )
+        """
+        return budget_before_submit( BASE_URL )
 
     def _get_queue( self, token, queue_name, user_filter=None ):
         """
@@ -314,7 +323,11 @@ class TestJobQueueProgressiveDisclosure:
             assert job[ "agent_type" ] == "MathAgent", \
                 f"Expected MathAgent, got {job[ 'agent_type' ]}"
 
-    @NEEDS_A_DRAINED_QUEUE
+    # No mark on this test, nor on test_done_queue_metadata_includes_session_fields and
+    # test_job_interactions_unauthorized_access below. Each XPASSed(strict) in integration run
+    # ts-c7aea993 on ea925ae5f (log integration-20261008-043410.log, 2026-10-08), after the per-run
+    # suite token (row 8d4a5a59) landed. Only test_job_transitions_todo_to_done above still xfails,
+    # so it alone keeps NEEDS_A_DRAINED_QUEUE. One run: a second green is what keeps these marks off.
     def test_job_interactions_endpoint( self, clean_test_db ):
         """
         Verify the /api/get-job-interactions/{job_id} endpoint works.
@@ -462,7 +475,6 @@ class TestJobQueueProgressiveDisclosure:
         print( f"Queue counts after concurrent submissions: {counts}" )
         assert counts[ "total" ] >= 1, "Expected at least 1 job in queues"
 
-    @NEEDS_A_DRAINED_QUEUE
     def test_done_queue_metadata_includes_session_fields( self, clean_test_db ):
         """
         Verify done queue metadata includes new Session 57 fields.
@@ -475,7 +487,8 @@ class TestJobQueueProgressiveDisclosure:
         # Setup: Create user
         token, user_id = self._create_user_and_get_token( unique_email( "metadata" ) )
 
-        # Submit and wait for completion
+        # Submit and wait for completion; the wait grows with the jobs queued ahead of this one
+        ahead, budget = self._budget_before_submit()
         response = self._submit_job(
             token,
             "What is 7 + 7?",
@@ -483,8 +496,8 @@ class TestJobQueueProgressiveDisclosure:
         )
         assert response.status_code == 200
 
-        done_jobs = self._wait_for_jobs_in_done_queue( token, 1, timeout_seconds=30 )
-        assert len( done_jobs ) >= 1, "Job did not complete"
+        done_jobs = self._wait_for_jobs_in_done_queue( token, 1, timeout_seconds=budget )
+        assert len( done_jobs ) >= 1, f"Job did not complete in {budget}s with {ahead} jobs ahead of it"
 
         job = done_jobs[ 0 ]
 
@@ -503,7 +516,6 @@ class TestJobQueueProgressiveDisclosure:
         print( f"  agent_type: {job[ 'agent_type' ]}" )
         print( f"  has_interactions: {job[ 'has_interactions' ]}" )
 
-    @NEEDS_A_DRAINED_QUEUE
     def test_job_interactions_unauthorized_access( self, clean_test_db ):
         """
         Verify users cannot access other users' job interactions.
@@ -514,7 +526,8 @@ class TestJobQueueProgressiveDisclosure:
         token_a, user_id_a = self._create_user_and_get_token( "owner@test.com" )
         token_b, user_id_b = self._create_user_and_get_token( "attacker@test.com" )
 
-        # User A submits a job
+        # User A submits a job; the wait grows with the jobs queued ahead of it
+        ahead, budget = self._budget_before_submit()
         response = self._submit_job(
             token_a,
             "What is 99 + 99?",
@@ -523,8 +536,8 @@ class TestJobQueueProgressiveDisclosure:
         assert response.status_code == 200
 
         # Wait for job to complete
-        done_jobs = self._wait_for_jobs_in_done_queue( token_a, 1, timeout_seconds=30 )
-        assert len( done_jobs ) >= 1, "Job did not complete"
+        done_jobs = self._wait_for_jobs_in_done_queue( token_a, 1, timeout_seconds=budget )
+        assert len( done_jobs ) >= 1, f"Job did not complete in {budget}s with {ahead} jobs ahead of it"
 
         job_id = done_jobs[ 0 ][ "job_id" ]
 

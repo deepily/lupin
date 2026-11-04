@@ -152,12 +152,37 @@ def test_no_roots_means_one_reconcile_at_the_default_root():
 
 def test_kept_and_deleted_branches_are_logged_as_one_report():
     events = []
+    # Row aec2319f: an unmerged branch is archived, and the log says where it went and
+    # whether its work had landed. An outcome with no archive (wt-c) logs None for both.
     reconcile = lambda **kw: { "branches_deleted": [ { "branch": "wt-a" } ],
-                               "branches_kept": [ { "branch": "wt-b", "kept_reason": "unmerged", "commits_ahead": 2 } ] }
+                               "branches_kept": [ { "branch": "wt-b", "kept_reason": "archived", "commits_ahead": 2,
+                                                    "archive_ref": "refs/archive/2026-10-02/wt-b", "landed": False },
+                                                  { "branch": "wt-c", "kept_reason": "checked_out", "commits_ahead": None } ] }
     _janitor( [ "/a" ], reconcile, events )()
     assert events == [ ( "worktree_janitor_branches",
                          { "deleted": [ "wt-a" ],
-                           "kept": [ { "branch": "wt-b", "reason": "unmerged", "commits_ahead": 2 } ] } ) ]
+                           "kept": [ { "branch": "wt-b", "reason": "archived", "commits_ahead": 2,
+                                       "archive_ref": "refs/archive/2026-10-02/wt-b", "landed": False },
+                                     { "branch": "wt-c", "reason": "checked_out", "commits_ahead": None,
+                                       "archive_ref": None, "landed": None } ] } ) ]
+
+
+def test_every_kept_branch_is_tagged_with_the_repo_it_came_from():
+    """Row aec2319f: the row for an archived branch needs its project, so each outcome carries its root."""
+    def reconcile( **kw ):
+        return { "branches_kept": [ { "branch": f"tree-{kw[ 'project_root' ][ 1: ]}", "kept_reason": "archived" } ] }
+    sweep = lambda project_root: { "kept": [ { "branch": f"sweep-{project_root[ 1: ]}", "kept_reason": "archived" },
+                                             { "branch": "pre-tagged", "repo_root": "/elsewhere" } ] }
+    janitor = fal.make_worktree_janitor_fn(
+        sandbox_root=".claude/worktrees", age_hours=6, ledger_path="/nowhere", notify_fn=lambda m, a: [],
+        log_fn=lambda e, **f: None, reconcile_fn=reconcile, report_fn=lambda *a, **k: { "changed": False },
+        repo_roots=[ "/a", "/b" ], branch_sweep_fn=sweep )
+
+    out = janitor()
+
+    assert [ ( k[ "branch" ], k[ "repo_root" ] ) for k in out[ "branches_kept" ] ] == [
+        ( "tree-a", "/a" ), ( "sweep-a", "/a" ), ( "pre-tagged", "/elsewhere" ),
+        ( "tree-b", "/b" ), ( "sweep-b", "/b" ), ( "pre-tagged", "/elsewhere" ) ]
 
 
 def test_a_poll_that_touched_no_branch_logs_nothing():

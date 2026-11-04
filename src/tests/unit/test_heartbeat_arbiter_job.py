@@ -272,6 +272,24 @@ def test_poll_once_folds_bridge_only_session_into_union( tmp_path ):
     }
 
 
+def test_poll_once_puts_each_seats_project_from_the_project_reader_on_its_row( tmp_path ):
+    """The job hands its project reader to the snapshot builder, so a published row has one."""
+    import datetime
+    now_epoch = datetime.datetime.fromisoformat( NOW_ISO ).timestamp()
+    snapshots = [ ]
+    asked     = [ ]
+    job = _make_job(
+        tmp_path, gateway=FakeGateway( who_rows=[ ] ),
+        bridge_discovery_fn = lambda: { "ghost-sid": "Ghost" },
+        bridge_mtime_fn     = lambda sid: now_epoch - 5,
+        project_fn          = lambda sid: asked.append( sid ) or "lupin",
+        snapshot_sink       = snapshots.append,
+    )
+    job._poll_once()
+    assert asked and set( asked ) == { "ghost-sid" }
+    assert snapshots[ -1 ][ "sessions" ][ 0 ][ "project" ] == "lupin"
+
+
 def test_poll_once_inference_idle_with_shipped_defaults( tmp_path ):
     """F3 end-to-end: an alive+quiet session lands on the roster as inference
     under the SHIPPED defaults (quiet 300 < alive 600) — the hybrid's inference

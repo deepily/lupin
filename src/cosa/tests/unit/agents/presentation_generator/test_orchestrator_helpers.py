@@ -514,14 +514,26 @@ class TestAnalyzeAsync:
                 _run( agent._analyze_async( "src" ) )
         assert "Traceback" in capsys.readouterr().err
 
-    def test_real_exception_returns_empty_debug_traceback( self, capsys, _silence_voice_io ):
-        # A NON-parse API/runtime error still degrades to [] (do_all_async's
-        # empty-guard then fails the job loudly downstream).
+    def test_real_api_exception_propagates_with_real_cause( self, _silence_voice_io ):
+        # Row a362fc8b: an API error must not become [] (the later empty-guard would then
+        # blame "no sections"); the original error propagates and the urgent notify names it.
+        agent = _agent()
+        agent._api_client = _mock_api_client()
+        agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "api down" ) )
+        with patch( f"{_NARR}.get_narrative_analysis_prompt", return_value="P" ):
+            with pytest.raises( RuntimeError, match="api down" ):
+                _run( agent._analyze_async( "src" ) )
+        assert any( c.kwargs.get( "priority" ) == "urgent" and "api down" in c.args[ 0 ]
+                    for c in _silence_voice_io[ "notify" ].await_args_list )
+
+    def test_real_exception_propagates_debug_traceback( self, capsys, _silence_voice_io ):
+        # A NON-parse API/runtime error propagates too (row a362fc8b); debug prints the traceback.
         agent = _agent( debug=True )
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "api down" ) )
         with patch( f"{_NARR}.get_narrative_analysis_prompt", return_value="P" ):
-            assert _run( agent._analyze_async( "src" ) ) == []
+            with pytest.raises( RuntimeError, match="api down" ):
+                _run( agent._analyze_async( "src" ) )
         assert "Traceback" in capsys.readouterr().err
 
 
@@ -568,6 +580,24 @@ class TestOutlineAsync:
              patch( f"{_OUT}.parse_outline_response", return_value=dicts ):
             outlines = _run( agent._outline_async( [ _section() ] ) )
         assert len( outlines ) == 1
+
+    @pytest.mark.parametrize( "target,warned", [ ( 40, True ), ( None, False ) ] )
+    def test_real_slide_count_drift_is_announced_only_for_an_explicit_target( self, _silence_voice_io, target, warned ):
+        agent = _agent()
+        agent.config.target_slide_count = target
+        agent._api_client = _mock_api_client()
+        dicts = [
+            { "number": 1, "arc_position": "opening", "type": "title", "title": "T", "visual_type": "text_only" },
+            { "number": 2, "arc_position": "closing", "type": "cta", "title": "C", "visual_type": "text_only" },
+        ]
+        with patch( f"{_OUT}.get_outline_prompt", return_value="P" ), \
+             patch( f"{_OUT}.parse_outline_response", return_value=dicts ):
+            outlines = _run( agent._outline_async( [ _section() ] ) )
+        assert len( outlines ) == 2
+        drift = [ c for c in _silence_voice_io[ "notify" ].await_args_list
+                  if c.kwargs.get( "priority" ) == "medium" ]
+        assert len( drift ) == ( 1 if warned else 0 )
+        if warned: assert drift[ 0 ].args[ 0 ] == "Slide-count drift: requested 40 slides, outline produced 2."
 
     def test_real_parse_failure_propagates( self, _silence_voice_io ):
         # D6-STRICT: parser raises (refusal/garbage) → _outline_async PROPAGATES.
@@ -1152,6 +1182,26 @@ class TestGate1NarrativeReview:
         assert agent._presentation_state[ "revision_count" ] == 1
         agent._analyze_async.assert_awaited_once()
 
+    def test_revise_analysis_error_keeps_its_own_type( self, _silence_voice_io ):
+        # A failed re-analysis is not a gate that could not reach a human: the API error
+        # propagates as itself, in the first revision and in a nested one.
+        agent = _agent()
+        agent._analyze_async = AsyncMock( side_effect=RuntimeError( "api down" ) )
+        _silence_voice_io[ "choices" ].return_value = _ans( "Narrative Arc", "Revise" )
+        _silence_voice_io[ "input" ].return_value = "merge sections"
+        with pytest.raises( RuntimeError, match="api down" ) as excinfo:
+            _run( agent._gate_1_narrative_review( [ _section() ] ) )
+        assert not isinstance( excinfo.value, VoiceGateNotAnsweredError )
+
+    def test_nested_revise_analysis_error_keeps_its_own_type( self, _silence_voice_io ):
+        agent = _agent()
+        agent._analyze_async = AsyncMock( side_effect=[ [ _section( "New" ) ], RuntimeError( "api down" ) ] )
+        _silence_voice_io[ "choices" ].return_value = _ans( "Narrative Arc", "Revise" )
+        _silence_voice_io[ "input" ].return_value = "again"
+        with pytest.raises( RuntimeError, match="api down" ) as excinfo:
+            _run( agent._gate_1_narrative_review( [ _section() ] ) )
+        assert not isinstance( excinfo.value, VoiceGateNotAnsweredError )
+
     def test_revise_empty_feedback_approves( self, _silence_voice_io ):
         agent = _agent()
         _silence_voice_io[ "choices" ].return_value = _ans( "Narrative Arc", "Revise" )
@@ -1391,7 +1441,8 @@ class TestBranchCompleters:
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "x" ) )
         with patch( f"{_NARR}.get_narrative_analysis_prompt", return_value="P" ):
-            assert _run( agent._analyze_async( "src" ) ) == []
+            with pytest.raises( RuntimeError, match="x" ):
+                _run( agent._analyze_async( "src" ) )
 
     # _outline_async: response missing tokens_used (756->760) + debug=False except (796->799)
     def test_outline_happy_no_tokens_attr( self, _silence_voice_io ):

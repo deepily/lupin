@@ -1,37 +1,34 @@
 #!/usr/bin/env python3
 """
-Central EDT timestamp formatter — the ONE owner of Rick's outreach-stamp shape.
+Central EDT timestamp formatter: the one owner of the outreach-stamp shape.
 
-Rick (2026-06-24): every DM (worker↔manager, manager↔manager, all directions) must
-carry the SAME bracketed local-time prefix the arbiter pings already carry — e.g.
-`[2026.06.24 at 18:44:09]` — sourced from ONE central, neutral place reused
-everywhere (don't reinvent the wheel).
+Every DM, in every direction, carries the same bracketed local-time prefix the
+arbiter pings carry, for example `[2026.06.24 at 18:44:09]`. One neutral module
+supplies it, so nobody reinvents it.
 
-The format + tz + renderer originally lived INSIDE the heartbeat_arbiter package
-(`arbiter_journal.py`). That made it un-reusable by the REST DM path without a bad
-dependency direction (REST → arbiter). This module is the neutral home in
-`cosa/utils/`, importable by BOTH the REST layer (`rest/routers/dm.py`) and the
-arbiter (`agents/heartbeat_arbiter/arbiter_journal.py`, which now re-exports these
-names so the arbiter ping output stays BYTE-IDENTICAL).
+The format, timezone and renderer began inside the heartbeat_arbiter package.
+The REST DM path could not reuse them without a bad dependency direction (REST
+importing the arbiter). This module is the neutral home in `cosa/utils/`. The
+REST layer (`rest/routers/dm.py`) and the arbiter
+(`agents/heartbeat_arbiter/arbiter_journal.py`) both import it. The arbiter
+re-exports these names so its ping output stays byte-identical.
 
-Two public renderers, distinct only by bracketing:
-    - format_outreach_ts( dt, tz ) -> "2026.06.24 at 18:44:09"   (INNER string; the
-      arbiter caller wraps its own brackets at arbiter_job.py _stamp).
-    - format_edt_timestamp( dt=None, tz_name=None ) -> "[2026.06.24 at 18:44:09]"
-      (BRACKETED, self-contained prefix; the DM chokepoint prepends this + a space).
+Two public renderers differ only by bracketing:
+    - format_outreach_ts( dt, tz ) -> "2026.06.24 at 18:44:09" (inner string,
+      no brackets; the arbiter caller adds its own brackets in `_stamp`).
+    - format_edt_timestamp( dt=None, tz_name ) -> "[2026.06.24 at 18:44:09]"
+      (bracketed and self-contained; the DM chokepoint prepends it plus a space).
 
-The two are drift-locked: format_edt_timestamp( dt, tz ) + " " is VISUALLY IDENTICAL
-to the arbiter caller's f"[{format_outreach_ts( dt, tz )}] " — a reader cannot tell a
-DM's stamp from an arbiter ping's stamp (test-locked in test_edt_timestamp.py).
+The two are drift-locked. format_edt_timestamp( dt, tz ) + " " is identical to
+the arbiter caller's f"[{format_outreach_ts( dt, tz )}] ". A reader cannot tell
+a DM stamp from an arbiter ping stamp. test_edt_timestamp.py locks this.
 
-Degrade-safe by the observer invariant: an invalid/unknown timezone must never raise
-— it falls back to UTC rendering (resolve_tz returns a UTC ZoneInfo + an error string
-the caller may journal once).
-
-Design: src/rnd/v0.1.9/2026.06.24-central-edt-timestamp-on-all-dms.md
+An invalid or unknown timezone never raises. Rendering falls back to UTC, and
+resolve_tz returns an error string the caller may journal once.
 """
 import datetime
 import re
+import sys
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -39,7 +36,9 @@ from zoneinfo import ZoneInfo
 # — the human-facing leading prefix on every arbiter shoulder-tap/outreach message
 # AND (as of this milestone) every peer DM.
 OUTREACH_TS_FORMAT  = "%Y.%m.%d at %H:%M:%S"
-DEFAULT_TZ_NAME     = "America/New_York"
+
+# Timezone names already reported on stderr, so a bad name in a loop is named once and not per call.
+_WARNED_TZ_NAMES = set()
 
 # A body that ALREADY leads with a bracketed EDT stamp of the exact shape this
 # module emits — "[YYYY.MM.DD at HH:MM:SS]" — anchored at string start, tolerating
@@ -54,15 +53,21 @@ def resolve_tz( tz_name: Optional[ str ] ):
     Resolve a tz-database name to a ZoneInfo, degrade-safe.
 
     Requires:
-        - tz_name is a string tz-database name (e.g. "America/New_York") or None
+        - tz_name is a string tz-database name ( the configured zone )
 
     Ensures:
-        - returns ( ZoneInfo, None ) for a valid name (None → DEFAULT_TZ_NAME)
+        - returns ( ZoneInfo, None ) for a valid name
         - returns ( ZoneInfo("UTC"), <error string> ) for an invalid/unknown
-          name — the caller journals the error ONCE; rendering falls back to UTC
-        - never raises
+          name, and for any name that is not text; the caller journals the error once, and rendering falls back to UTC
+
+    Raises:
+        - ValueError if tz_name is None or empty: the zone comes from configuration, never from here
     """
-    name = tz_name if tz_name else DEFAULT_TZ_NAME
+    if tz_name is None or tz_name == "":
+        raise ValueError( "tz_name is required: the zone comes from configuration, this module has no default" )
+    name = tz_name
+    if not isinstance( name, str ):
+        return ZoneInfo( "UTC" ), f"unknown timezone {name!r}: not text"
     try:
         return ZoneInfo( name ), None
     except Exception as e:
@@ -71,64 +76,74 @@ def resolve_tz( tz_name: Optional[ str ] ):
 
 def format_outreach_ts( dt: datetime.datetime, tz: Any ) -> str:
     """
-    Render an aware datetime as Rick's outreach stamp "YYYY.MM.DD at HH:MM:SS"
-    (2026-06-24) in the given tz — the INNER string (no brackets); the arbiter
-    caller wraps its own brackets.
+    Render an aware datetime as the inner outreach stamp "YYYY.MM.DD at HH:MM:SS".
+
+    The result has no brackets; the arbiter caller adds its own.
 
     Requires:
-        - dt is an AWARE datetime
-        - tz is a tzinfo (ZoneInfo) — REUSE resolve_tz to obtain it; this function
-          builds NO tz infra
+        - dt is an aware datetime
+        - tz is a tzinfo (ZoneInfo); obtain it with resolve_tz, since this function
+          builds no timezone infrastructure
 
     Ensures:
         - returns the same instant as `dt` rendered "%Y.%m.%d at %H:%M:%S"
-          (e.g. "2026.06.24 at 11:47:57"); DST handled by the tz database
+          (e.g. "2026.06.24 at 11:47:57"); DST is handled by the tz database
     """
     return dt.astimezone( tz ).strftime( OUTREACH_TS_FORMAT )
 
 
 def format_edt_timestamp( dt: Optional[ datetime.datetime ] = None, tz_name: Optional[ str ] = None ) -> str:
     """
-    The self-contained, BRACKETED EDT prefix for any DM body — "[YYYY.MM.DD at
-    HH:MM:SS]" — matching the arbiter ping's bracketed shape exactly.
+    Return the bracketed EDT prefix "[YYYY.MM.DD at HH:MM:SS]" for a DM body.
+
+    The shape matches the arbiter ping's bracketed stamp exactly.
 
     Requires:
-        - dt is an AWARE datetime, or None (None → current aware UTC instant)
-        - tz_name is a tz-database name, or None (None → DEFAULT_TZ_NAME); an
-          invalid/unknown name degrades to UTC (never raises)
+        - dt is an aware datetime, or None (None -> current aware UTC instant)
+        - tz_name is a tz-database name ( the configured zone ); an invalid/unknown
+          name degrades to UTC
 
     Ensures:
         - returns "[" + format_outreach_ts( dt, resolve_tz( tz_name ) ) + "]"
           (e.g. "[2026.06.24 at 18:44:09]"); DST handled by the tz database
         - dt=None renders "now" in the resolved tz
-        - an invalid tz_name renders the instant in UTC (degrade-safe)
-        - never raises
+        - an invalid tz_name renders the instant in UTC (degrade-safe) and is named once on stderr; the stamp itself carries no marker
+
+    Raises:
+        - ValueError if tz_name is None or empty
     """
     if dt is None:
         dt = datetime.datetime.now( datetime.timezone.utc )
-    tz, _error = resolve_tz( tz_name )
+    tz, error = resolve_tz( tz_name )
+    # The stamp keeps its shape, because is_already_stamped and split_leading_stamp parse it.
+    # So the UTC fallback is named on stderr, once per bad name.
+    # Keyed on repr, because a caller can pass an unhashable value and this function never raises.
+    if error is not None and repr( tz_name ) not in _WARNED_TZ_NAMES:
+        _WARNED_TZ_NAMES.add( repr( tz_name ) )
+        try:
+            # print( file=None ) writes to stdout, so a missing stderr must skip the line, not redirect it
+            if sys.stderr is not None: print( f"[edt_timestamp] {error}; rendering UTC", file=sys.stderr )
+        except ( OSError, ValueError ):
+            pass   # a closed or broken stderr must not cost the caller its stamp
     return f"[{format_outreach_ts( dt, tz )}]"
 
 
 def is_already_stamped( text: Any ) -> bool:
     """
-    True iff `text` ALREADY begins with a bracketed EDT stamp of the exact shape
-    `format_edt_timestamp` emits — "[YYYY.MM.DD at HH:MM:SS]" — anchored at string
-    start (tolerating one optional leading space).
+    Return True iff `text` already begins with a bracketed EDT stamp.
 
-    The DM chokepoint (`rest/routers/dm.py`) calls this to stay IDEMPOTENT: a body
-    an upstream caller already stamped (an arbiter ping pre-stamped via _route, then
-    pushed through /api/dm/send) is passed through UNCHANGED instead of being
-    re-wrapped into a "[push-ts] [compose-ts]" double-stamp (bug f49a8b34 / bc8d9d82).
+    The shape is exactly what format_edt_timestamp emits, at the start of the string
+    (one optional leading space tolerated). The DM chokepoint uses it to stay
+    idempotent, so a pre-stamped arbiter ping is not re-wrapped into a double stamp.
 
     Requires:
-        - text is any value (defensive — a non-string is never "stamped")
+        - text is any value (defensive: a non-string is never "stamped")
 
     Ensures:
         - returns True iff text is a str whose start matches
           "^ ?\\[YYYY.MM.DD at HH:MM:SS\\]" (the exact format_edt_timestamp shape)
         - returns False for a non-string, an empty string, an unstamped body, or a
-          stamp that appears only MID-string (must lead)
+          stamp that appears only mid-string (it must lead)
         - never raises (pure)
     """
     return isinstance( text, str ) and _LEADING_EDT_STAMP_RE.match( text ) is not None
@@ -136,25 +151,21 @@ def is_already_stamped( text: Any ) -> bool:
 
 def split_leading_stamp( text ):
     """
-    Split a leading EDT stamp off `text` → ( stamp, rest ).
+    Split a leading EDT stamp off `text` and return ( stamp, rest ).
 
-    Anchored to `_LEADING_EDT_STAMP_RE` — the SAME exact "[YYYY.MM.DD at HH:MM:SS]"
-    shape `is_already_stamped` uses (tolerating one optional leading space). A no-op
-    pass-through when there is no leading stamp: it never eats a non-timestamp leading
-    bracket (e.g. "[URGENT] ..." is returned unchanged).
-
-    Used by the peer-DM framing (`hook_common.build_peer_dm_reminder`) to fold the
-    stored body's leading stamp INTO the header line — a RENDER-LAYER extraction that
-    leaves the stored body untouched (never origin-suppress).
+    It matches the same shape as `is_already_stamped`. A non-timestamp leading
+    bracket such as "[URGENT] ..." is never eaten. The peer-DM framing uses it to
+    fold the stamp into the header line; the stored body is left untouched.
 
     Requires:
-        - text is any value (defensive — a non-string has no stamp)
+        - text is any value (defensive: a non-string has no stamp)
 
     Ensures:
-        - text begins with a stamp → ( stamp, rest ): stamp is the bracketed timestamp
-          string, surrounding whitespace stripped (e.g. "[2026.08.15 at 21:29:37]");
-          rest is text with that stamp AND the whitespace immediately after it removed
-        - no leading stamp (or a non-string) → ( None, text ) with text UNCHANGED
+        - text begins with a stamp -> ( stamp, rest ): stamp is the bracketed
+          timestamp string with surrounding whitespace stripped (e.g.
+          "[2026.08.15 at 21:29:37]"); rest is text with that stamp and the
+          whitespace right after it removed
+        - no leading stamp (or a non-string) -> ( None, text ) with text unchanged
           (byte-identical pass-through)
         - never raises (pure)
     """
@@ -180,17 +191,17 @@ def quick_smoke_test():
     assert format_outreach_ts( jan,  tz ) == "2026.01.11 at 16:28:46"
 
     # bracketed prefix: matches the arbiter ping's "[...]" shape exactly
-    assert format_edt_timestamp( june )                    == "[2026.06.11 at 17:28:46]"
+    assert format_edt_timestamp( june, "America/New_York" ) == "[2026.06.11 at 17:28:46]"
     assert format_edt_timestamp( jan, "America/New_York" ) == "[2026.01.11 at 16:28:46]"
 
     # invalid tz → UTC fallback, never raises
     assert format_edt_timestamp( june, "Not/AZone" )       == "[2026.06.11 at 21:28:46]"
 
     # drift-lock: DM prefix + " " is visually identical to the arbiter caller's wrap
-    assert format_edt_timestamp( june ) + " " == f"[{format_outreach_ts( june, tz )}] "
+    assert format_edt_timestamp( june, "America/New_York" ) + " " == f"[{format_outreach_ts( june, tz )}] "
 
     # None dt renders "now" — just assert the bracketed shape (length + delimiters)
-    now_prefix = format_edt_timestamp()
+    now_prefix = format_edt_timestamp( tz_name="America/New_York" )
     assert now_prefix.startswith( "[" ) and now_prefix.endswith( "]" ) and " at " in now_prefix
 
     # split_leading_stamp — BOTH branches (falsifiable):

@@ -1,13 +1,11 @@
 """
-CJ Flow v2 — the LoRA router call, decoupled from TodoFifoQueue (plan §1; risk 8).
+CJ Flow v2 router call, decoupled from TodoFifoQueue.
 
-`_get_routing_command` was trapped on `TodoFifoQueue`, whose construction drags in
-Gister, GistNormalizer, Normalizer, QueryLogTable and an embedding provider —
-precisely the machinery v2 exists to shed. The v1 refactor already extracted the
-body to the module-level `get_routing_command( question, config_mgr, llm_factory,
-debug, verbose )` with the method delegating; this client calls that function with
-only what the router needs — a config_mgr and an LlmClientFactory — and never
-constructs a TodoFifoQueue.
+Building a `TodoFifoQueue` drags in Gister, GistNormalizer, Normalizer, QueryLogTable and an
+embedding provider. That is the machinery v2 exists to shed. The routing body lives in the
+module-level `get_routing_command( question, config_mgr, llm_factory, debug, verbose )`, and
+the `TodoFifoQueue` method delegates to it. This client calls that function with only what
+the router needs, a config_mgr and an LlmClientFactory. It never constructs a TodoFifoQueue.
 """
 
 from cosa.rest.todo_fifo_queue import get_routing_command
@@ -16,8 +14,7 @@ from cosa.agents.llm_client_factory import LlmClientFactory
 
 class RouterClient:
     """
-    v2's router seam: turn a question into a ( command, args ) routing decision
-    without instantiating TodoFifoQueue.
+    Turns a question into a ( command, args ) routing decision without a TodoFifoQueue.
 
     Requires:
         - config_mgr exposes .get( "prompt template for agent router" ) and
@@ -47,7 +44,7 @@ class RouterClient:
 
     def route( self, question ):
         """
-        Route a question to its ( command, args ) via the LoRA router.
+        Route a question to a ( command, args ) pair through the LoRA router.
 
         Requires:
             - question is a non-empty string

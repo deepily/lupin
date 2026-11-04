@@ -2,32 +2,30 @@
 """
 Seed companion credentials from lupin_db_dev into lupin_db_test.
 
-Ensures the human admin user, system admin, service account, and API keys
-exist in the test database so the operator can log into the test server
-(port 8000) and monitor test runs with their normal credentials. Also
-ensures the cosa-voice MCP API key resolves against the test database.
+Ensures the human admin user, system admin, service account, and API keys exist in the test
+database. The operator can then log into the test server (port 8000) and monitor test runs
+with their normal credentials. It also ensures the cosa-voice MCP API key resolves against the
+test database.
 
-Runs at test container startup BEFORE uvicorn launches. Safe to run on every
-startup, and CONVERGENT rather than merely create-only: INSERT ... ON CONFLICT
-DO UPDATE refreshes the credential columns from dev each run, so a password or
-key rotated in dev actually reaches test. It used to be DO NOTHING, which meant
-an existing test row froze forever at whatever it was first seeded with — the
-cause of ":8000 returns 401 with credentials that work on :7999" (2026-08-19).
+Runs at test container startup, before uvicorn launches. Safe to run on every startup.
+It converges rather than only creating: `INSERT ... ON CONFLICT DO UPDATE` refreshes the
+credential columns from dev each run, so a password or key rotated in dev reaches test.
+A create-only insert (`ON CONFLICT DO NOTHING`) froze an existing test row at its first value.
+That made :8000 return 401 with credentials that work on :7999.
 
 Records seeded:
-    - Admin user identified by LUPIN_DEV_EMAIL env var (default: ricardo.felipe.ruiz@gmail.com)
-    - System admin (admin@lupin.deepily.ai)
-    - Service account (claude.code@deepily.ai) — API key owner
-    - All api_keys rows owned by the service account
+    - Admin user identified by LUPIN_DEV_EMAIL env var (default: ricardo.felipe.ruiz@gmail.com).
+    - System admin (admin@lupin.deepily.ai).
+    - Service account (claude.code@deepily.ai) — API key owner.
+    - All api_keys rows owned by the service account.
 
 Environment variables:
-    DB_HOST           - PostgreSQL hostname (default: lupin-postgres)
-    DB_PORT           - PostgreSQL port (default: 5432)
-    DB_USER           - PostgreSQL user (default: lupin_dev)
-    DB_PASSWORD       - PostgreSQL password (REQUIRED, no default)
-    LUPIN_DEV_EMAIL   - Human admin email to seed (default: ricardo.felipe.ruiz@gmail.com)
-
-Created: 2026-04-12 Session 248e740e (dual-container architecture)
+    DB_HOST           - PostgreSQL hostname (default: lupin-postgres).
+    DB_PORT           - PostgreSQL port (default: 5432).
+    DB_USER           - PostgreSQL user (default: lupin_dev).
+    DB_PASSWORD       - PostgreSQL password (no default).
+    DB_PASSWORD_FILE  - Path to a file holding the password; read only when DB_PASSWORD is blank.
+    LUPIN_DEV_EMAIL   - Human admin email to seed (default: ricardo.felipe.ruiz@gmail.com).
 """
 
 import os
@@ -40,10 +38,39 @@ import psycopg2
 # Configuration from environment
 # ---------------------------------------------------------------------------
 
+def _read_password():
+    """
+    The database password: DB_PASSWORD, else the file named by DB_PASSWORD_FILE.
+
+    The app containers log in as lupin_app from a password file and carry no DB_PASSWORD. This
+    script runs from scripts/ with no cosa on its path, so the file is read here, not imported.
+
+    Requires:
+        - the environment is the one the script was started with
+
+    Ensures:
+        - returns DB_PASSWORD when it is not blank
+        - else returns the stripped content of DB_PASSWORD_FILE when that names a readable file
+        - else returns "", after a warning when a file was named but could not be read
+        - never raises
+    """
+    password = os.environ.get( "DB_PASSWORD", "" )
+    if password: return password
+
+    path = os.environ.get( "DB_PASSWORD_FILE", "" )
+    if not path: return ""
+
+    try:
+        with open( path ) as handle: return handle.read().strip()
+    except ( OSError, UnicodeDecodeError ) as error:
+        print( f"[SEED] DB_PASSWORD_FILE {path} could not be read: {error.__class__.__name__}" )
+        return ""
+
+
 DB_HOST     = os.environ.get( "DB_HOST", "lupin-postgres" )
 DB_PORT     = os.environ.get( "DB_PORT", "5432" )
 DB_USER     = os.environ.get( "DB_USER", "lupin_dev" )
-DB_PASSWORD = os.environ.get( "DB_PASSWORD", "" )
+DB_PASSWORD = _read_password()
 
 DEV_DB      = "lupin_db_dev"
 TEST_DB     = "lupin_db_test"
@@ -108,11 +135,11 @@ def seed_if_missing():
         - All companion users exist in lupin_db_test with the same UUID,
           email, password_hash, and roles as in lupin_db_dev
         - All api_keys owned by companion users exist in lupin_db_test
-        - Idempotent: ON CONFLICT DO NOTHING prevents duplicates
+        - Idempotent: `ON CONFLICT DO UPDATE` prevents duplicates, so nothing is inserted twice and existing rows are refreshed
         - Prints summary of what was seeded
 
     Raises:
-        - None (catches and logs all exceptions)
+        - None from database errors, since all exceptions are caught and logged; SystemExit with code 2 if the primary admin is missing from dev, or code 3 if the target is not a test database
     """
     # 🔴 THE TARGET MUST BE A TEST DATABASE — ASSERT IT, DO NOT ASSUME IT (María, 2026-08-19).
     #

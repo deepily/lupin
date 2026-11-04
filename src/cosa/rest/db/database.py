@@ -24,7 +24,7 @@ import os
 from typing import Generator
 
 from cosa.rest.postgres_models import Base
-from cosa.utils.dotenv_password import seed_db_password_from_dotenv
+from cosa.utils.dotenv_password import reselect_seeded_login, seed_db_password_from_dotenv, seed_db_password_from_file
 
 
 _CLOUD_BACKED_TRUTHY = ( "1", "true", "yes", "on" )
@@ -34,10 +34,9 @@ def is_cloud_backed() -> bool:
     """
     Decide whether this deployment uses cloud-backed Postgres (Cloud SQL).
 
-    Cloud-backing is an explicit deployment property set via LUPIN_CLOUD_BACKED
-    — it is NEVER inferred from the environment NAME. The GCP test env and any
-    future production env opt in by setting the flag; local dev/test leave it
-    unset and run against local Postgres-in-Docker.
+    Cloud-backing is an explicit deployment flag, LUPIN_CLOUD_BACKED, and is never
+    inferred from the environment name. Cloud envs opt in by setting it; local
+    dev/test leave it unset and use local Postgres-in-Docker.
 
     Requires:
         - reads os.environ for LUPIN_CLOUD_BACKED
@@ -59,28 +58,16 @@ _ANNOUNCED_EMPTY_DB_PASSWORD = False
 
 def announce_empty_db_password_once( venue: str ) -> bool:
     """
-    Say out loud that this process has NO database password, and name the seam.
+    Warn once that this process has no database password, and name the seam.
 
-    🔴 WHY THIS EXISTS (row 2ab9961b, Rick's P1, 2026-09-04). `DB_PASSWORD` is read HERE and
-    supplied NOWHERE for a host-side process: the untracked repo-root `.env` carries
-    `POSTGRES_PASSWORD`, and `docker-compose.yml` is the ONLY thing that translates one name
-    into the other — for CONTAINERS. A value produced in one place, read in another under a
-    different name, with nothing saying so.
-
-    The empty default below is DELIBERATE and stays (an unset password must not break every
-    importer). But silent-and-empty is what let this run for months: the failure surfaced far
-    downstream as a refused connection inside a gist cache read, which a caller's broad
-    `except` then dressed up as a five-word summary. Measured across 2,479 listener logs, 158
-    failures in seven days, every one of them this.
-
-    ⚠️ WARNS, NEVER RAISES — the module docstring's invariant is load-bearing and this must not
-    weaken it. Nearly everything imports this module at startup; raising here would take the
-    fleet down to report a misconfiguration.
+    Only docker-compose maps `.env`'s `POSTGRES_PASSWORD` to `DB_PASSWORD`, and only
+    for containers. It warns and never raises, since nearly everything imports this
+    module at startup. The empty default stays so an unset password cannot break an importer.
 
     Requires:
         - venue is a short label naming the resolved environment (e.g. "development")
     Ensures:
-        - prints a named, actionable warning the FIRST time it is called in this process
+        - prints a named, actionable warning the first time it is called in this process
         - returns True iff it printed, False on every subsequent call
         - never raises
     """
@@ -125,6 +112,7 @@ def get_database_url() -> str:
     # variable at create time — reaches that helper's early return and is unaffected.
     # This exists for the third consumer commit 765e7145 missed: host-run processes,
     # which are neither containers nor pytest. See cosa/utils/dotenv_password.py.
+    seed_db_password_from_file()
     seed_db_password_from_dotenv()
 
     env = os.environ.get( "LUPIN_ENV", "development" ).lower()
@@ -261,6 +249,8 @@ def swap_database( new_env: str ) -> str:
 
     Ensures:
         - LUPIN_ENV is updated
+        - a DB_USER and DB_PASSWORD that get_database_url seeded from .env are chosen again for
+          the new environment; an exported DB_USER or DB_PASSWORD is left alone
         - engine, SessionLocal, ScopedSession are recreated
         - Old engine is disposed (connections released)
         - Returns the new database URL (password masked)
@@ -271,6 +261,10 @@ def swap_database( new_env: str ) -> str:
     global engine, SessionLocal, ScopedSession
 
     os.environ[ "LUPIN_ENV" ] = new_env
+
+    # The login was picked at the first call, from the LUPIN_ENV of that moment. Pick it again
+    # for the environment being moved to, unless the caller exported DB_USER or DB_PASSWORD.
+    reselect_seeded_login()
 
     # Dispose old engine (releases connection pool)
     engine.dispose()

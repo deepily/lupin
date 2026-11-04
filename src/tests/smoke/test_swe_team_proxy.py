@@ -2,8 +2,10 @@
 """
 SWE Team proxy integration test — Surface 3.
 
-⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL RUN BY THE :7999 SMOKE TIER,
-   SO IT IS EXPECTED RED THERE. Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately.
+⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL COLLECTED BY THE :7999 SMOKE TIER.
+   Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately. Since row 72d25810 (4 Nov 2026) its
+   pytest entry SKIPS without --auto-proxy and LUPIN_INTERACTIVE_TESTS=true, instead of failing
+   with three 503s; the runner passes neither, so the smoke tier shows one skip here.
 
    Criterion tripped (CLAUDE.md § TESTING VENUES — a file is :8000 if ANY apply):
      - runtime > 2 minutes
@@ -62,8 +64,10 @@ lupin_root = os.environ.get( "LUPIN_ROOT" )
 if lupin_root:
     sys.path.insert( 0, os.path.join( lupin_root, "src" ) )
 
+import pytest
 import requests
 import cosa.utils.util as cu
+from tests.smoke.utilities.proxy_opt_in import skip_unless_proxy_opt_in
 
 from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
 from tests.helpers.mock_job_v2 import submit_body, legacy_response
@@ -412,8 +416,23 @@ def quick_smoke_test():
     return test.run_scenarios( args )
 
 
-def test_swe_team_proxy():
-    """Pytest entry point."""
+def test_swe_team_proxy( request ):
+    """
+    Pytest entry point.
+
+    Requires:
+        - request is the pytest request fixture
+        - the run passes --auto-proxy and sets LUPIN_INTERACTIVE_TESTS=true: under pytest
+          `pre_run_hook` never fires, so the conftest fixture `_auto_proxy_for_module` is the
+          only thing that starts a proxy, and it starts one only on --auto-proxy
+
+    Ensures:
+        - without --auto-proxy or the interactive flag the test skips at once with the reason.
+          Before, it ran all three scenarios with no proxy to answer them: each got a 503
+          "notification dispatch" and the file failed the :7999 smoke tier (row 72d25810)
+        - otherwise the result is that of quick_smoke_test()
+    """
+    skip_unless_proxy_opt_in( request )
     assert quick_smoke_test()
 
 

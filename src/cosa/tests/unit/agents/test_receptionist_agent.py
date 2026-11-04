@@ -247,8 +247,8 @@ class TestReceptionistAgent( unittest.TestCase ):
 
         with patch.object( AgentBase, "__init__", _fake_agent_base_init() ), \
              patch( "cosa.agents.receptionist_agent.InputAndOutputTable", return_value=mock_io ), \
-             patch( "cosa.agents.receptionist_agent.open", mock_open(), create=True ), \
-             patch( "cosa.agents.receptionist_agent.json.load", return_value=data ):
+             patch( "cosa.agents.agent_base.open", mock_open(), create=True ), \
+             patch( "cosa.agents.agent_base.json.load", return_value=data ):
             restored = ReceptionistAgent.restore_from_serialized_state( "/tmp/recep_state.json" )
 
         self.assertIsInstance( restored, ReceptionistAgent )

@@ -1,30 +1,31 @@
 """
 CSV Writer — tidy-long output for the Daily LoC Delta tool.
 
-Schema v2 (2026-05-21 — extended by Rachel 🕊️ for cross-repo aggregation
-per cross-session DM design with María 🌸). Emits one row per
-(date, file_type) bucket, now carrying explicit `repo` + `branch` columns:
+Schema v2 supports cross-repo aggregation. It emits one row per (date, file_type)
+bucket, and each row carries explicit `repo` and `branch` columns:
 
-    date,repo,branch,file_type,added,deleted,files_touched,commits
-    2026-05-15,cosa,wip-v0.1.7,python,128,42,7,3
-    2026-05-15,cosa,wip-v0.1.7,markdown,300,15,2,3
-    ...
+```
+date,repo,branch,file_type,added,deleted,files_touched,commits
+2026-05-15,cosa,wip-v0.1.7,python,128,42,7,3
+2026-05-15,cosa,wip-v0.1.7,markdown,300,15,2,3
+...
+```
 
 Schema rationale:
-  - `repo` made explicit so cross-repo aggregation reduces to a single
-    `pandas.concat([read_csv(p) for p in csvs])` + `groupby(date)` — no
-    filename parsing or basename heuristics required.
-  - `branch` made explicit for time-anchoring across branch lifetimes.
-  - Long-form (one row per bucket) so downstream pivots stay stable
-    across file-type cardinality changes.
+  - `repo` is explicit, so cross-repo aggregation reduces to a single
+    `pandas.concat([read_csv(p) for p in csvs])` plus `groupby(date)`. No
+    filename parsing or basename heuristics are needed.
+  - `branch` is explicit, for time-anchoring across branch lifetimes.
+  - The long form (one row per bucket) keeps downstream pivots stable
+    when the number of file types changes.
 
-A sidecar JSON file is written alongside the CSV via `write_sidecar()`
-carrying immutable run metadata: csv_schema_version, repo, branch, rev_range,
-since, until, generated_at. Aggregators read the sidecar (if present) or
-fall back to filename-derived identity for legacy v1 CSVs.
+`write_sidecar()` writes a JSON file next to the CSV. It carries the immutable run
+metadata: csv_schema_version, repo, branch, rev_range, since, until, generated_at.
+Aggregators read the sidecar when present. For legacy v1 CSVs they fall back to the
+identity derived from the filename.
 
-Empty input produces a header-only CSV (documented behavior for empty
-ranges). Reuses the COSA `to_csv(index=False)` pattern (Reuse Map R6).
+Empty input produces a header-only CSV. This is the documented behavior for empty
+ranges. The writer reuses the COSA `to_csv(index=False)` pattern.
 """
 
 import json
@@ -106,24 +107,23 @@ def write_sidecar(
     """
     Write a sidecar JSON file carrying immutable run metadata for `csv_path`.
 
-    The sidecar lives next to the CSV with `.meta.json` appended to the
-    full filename (e.g. `cosa-wip-v0.1.7-loc-delta.csv` →
-    `cosa-wip-v0.1.7-loc-delta.csv.meta.json`). Cross-repo aggregators read
-    this to discover repo identity without parsing filenames.
+    The sidecar is named by appending `.meta.json` to the full CSV filename, so
+    `cosa-wip-v0.1.7-loc-delta.csv` gives `cosa-wip-v0.1.7-loc-delta.csv.meta.json`.
+    Cross-repo aggregators read it to find the repo identity.
 
     Requires:
         - csv_path points at a writable location; parent dir already exists
           (csv_writer.write_csv() creates it)
         - repo is a non-empty string
-        - branch / rev_range / since / until may be None (omitted from JSON)
+        - branch / rev_range / since / until may be None (written as JSON null)
 
     Ensures:
         - File written at `{csv_path}.meta.json` with keys:
-            csv_schema_version, repo, branch?, rev_range?, since?, until?, generated_at
+            csv_schema_version, repo, branch, rev_range, since, until, generated_at
         - generated_at is ISO-8601 UTC at write time
         - Returns the sidecar path written
         - None-valued metadata fields are still written (as JSON null) for
-          shape stability across runs — consumers can rely on key presence
+          shape stability across runs, so consumers can rely on key presence
     """
     sidecar_path = f"{csv_path}.meta.json"
 

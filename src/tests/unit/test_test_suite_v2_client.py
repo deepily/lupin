@@ -79,5 +79,13 @@ def test_the_refusing_wrapper_turns_a_valueerror_into_submit_refused_and_passes_
     assert own.value.route_reason == "own_reason"
     with pytest.raises( KeyError ):
         _refusing_bad_input( boom )()
+    # a4014235: a wrong-typed argument is caller input too; a code bug (AttributeError) is not.
+    def wrong_type( *a, **k ): raise TypeError( "int() argument must be a string" )
+    def code_bug( *a, **k ):   raise AttributeError( "'NoneType' object has no attribute 'x'" )
+    with pytest.raises( SubmitRefused ) as typed:
+        _refusing_bad_input( wrong_type )()
+    assert typed.value.route_reason == "submit_refused" and "int()" in str( typed.value )
+    with pytest.raises( AttributeError ):
+        _refusing_bad_input( code_bug )()
     assert _refusing_bad_input( fine )( 1, x=2 ) == ( ( 1, ), { "x": 2 } )
     assert _refusing_bad_input( fine ).__name__ == "fine"

@@ -36,6 +36,7 @@ from unittest import mock
 
 # Path bootstrapped by src/tests/conftest.py - cosa now importable
 import cosa.utils.util as cu
+from tests.helpers.repo_root_litter_guard import assert_no_new_litter, neutral_working_dir, root_litter
 from cosa.orchestration import ClaudeCodeDispatcher, Task, TaskType, TaskResult
 
 
@@ -52,6 +53,17 @@ def project_root():
         str: Path to project root from LUPIN_ROOT
     """
     return cu.get_project_root()
+
+
+@pytest.fixture( scope="module" )
+def neutral_dir( tmp_path_factory, project_root ):
+    """
+    A working directory for a dispatched session that is not the repo root.
+
+    Returns:
+        str: The scratch project if it exists, else a temp dir
+    """
+    return neutral_working_dir( project_root, tmp_path_factory.mktemp( "dispatch-cwd" ) )
 
 
 @pytest.fixture( scope="module" )
@@ -121,6 +133,25 @@ def verify_claude_cli():
 
 # ============================================================================
 # Unit Tests (No external dependencies)
+def _require_dispatch_success( result, what ):
+    """
+    Fail the calling test when the dispatcher returned a failed TaskResult.
+
+    A dispatcher failure is the thing these tests exist to catch, so it is never a skip.
+    A skip is for a precondition that is absent, and the fixtures above already do that.
+
+    Requires:
+        - result is a TaskResult
+        - what names the task, for the failure message
+
+    Ensures:
+        - returns None when result.success is True
+        - otherwise fails with the task id and the dispatcher's error text
+    """
+    if result.success: return
+    pytest.fail( f"{what} failed in the dispatcher (task {result.task_id}): {result.error}" )
+
+
 # ============================================================================
 
 class TestDispatcherUnit:
@@ -271,7 +302,7 @@ class TestDispatcherE2E:
                 print( f"  Cost: ${result.cost_usd:.4f}" )
         else:
             print( f"\n⚠ E2E simple task failed: {result.error}" )
-            pytest.skip( f"Task failed (may be config issue): {result.error}" )
+            _require_dispatch_success( result, "bounded simple task" )
 
     @pytest.mark.e2e
     @pytest.mark.asyncio
@@ -417,8 +448,7 @@ class TestDispatcherInteractive:
                 print( f"  Cost: ${result.cost_usd:.4f}" )
         else:
             print( f"\n⚠ Interactive session failed: {result.error}" )
-            # Don't fail - may be infrastructure issue
-            pytest.skip( f"Interactive task failed (may be config issue): {result.error}" )
+            _require_dispatch_success( result, "interactive basic session" )
 
     @pytest.mark.e2e
     @pytest.mark.asyncio
@@ -462,7 +492,7 @@ class TestDispatcherInteractive:
             assert len( messages_received ) > 0, "No messages received during streaming"
             print( f"\n✓ Streaming validation passed with {len( messages_received )} messages" )
         else:
-            pytest.skip( f"Task failed: {result.error}" )
+            _require_dispatch_success( result, "interactive streaming session" )
 
     @pytest.mark.e2e
     @pytest.mark.asyncio
@@ -514,7 +544,7 @@ class TestDispatcherInteractive:
                 print( f"  Cost: ${result.cost_usd:.4f}" )
         else:
             print( f"⚠ Error: {result.error}" )
-            pytest.skip( f"Task failed: {result.error}" )
+            _require_dispatch_success( result, "interactive notify session" )
 
     @pytest.mark.e2e
     @pytest.mark.manual
@@ -563,7 +593,7 @@ class TestDispatcherInteractive:
 
     @pytest.mark.e2e
     @pytest.mark.asyncio
-    async def test_interactive_error_handling( self, dispatcher, verify_lupin_server, verify_claude_cli ):
+    async def test_interactive_error_handling( self, dispatcher, neutral_dir, verify_lupin_server, verify_claude_cli ):
         """
         Test interactive session error handling.
 
@@ -581,10 +611,13 @@ class TestDispatcherInteractive:
             prompt="Write a 1000-line Python script that does complex calculations.",
             type=TaskType.INTERACTIVE,
             max_turns=1,  # Very low - should hit limit
-            timeout_seconds=30
+            timeout_seconds=30,
+            working_dir=neutral_dir  # the session may write the file it is asked for
         )
 
-        result = await dispatcher.dispatch( task )
+        litter_before = root_litter( cu.get_project_root() )
+        result        = await dispatcher.dispatch( task )
+        assert_no_new_litter( cu.get_project_root(), litter_before )
 
         # Should either succeed with partial result or fail gracefully
         print( f"\nResult: success={result.success}" )
@@ -802,3 +835,4 @@ class TestDispatcherMocked:
 
 if __name__ == "__main__":
     pytest.main( [__file__, "-v", "-m", "not e2e and not manual"] )
+

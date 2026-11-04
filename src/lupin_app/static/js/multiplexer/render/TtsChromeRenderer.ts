@@ -47,6 +47,11 @@ import {
 // Public interfaces
 // ---------------------------------------------------------------------------
 
+/**
+ * The slice of the audio store the renderer uses.
+ *
+ * It is the playback state and the pause, resume, stop and skip calls. It also declares the burst length, which the renderer does not call.
+ */
 export interface AudioStoreLike {
   state(): AudioPlaybackState;
   burstLength(): number;   // OQ-F0.4: AudioStore PCM burst counter (renamed from queueLength)
@@ -56,10 +61,11 @@ export interface AudioStoreLike {
   skip(): void;
 }
 
-// WP4 — the TtsQueueStore surface the renderer consumes: read-only queries +
-// mutators dispatched via card/chrome handlers. NO advance(): the store
-// self-advances on store_audio_ended (TtsQueueStore.ts:168); the renderer never
-// calls advance() and never subscribes store_audio_ended (COND-2).
+/**
+ * The slice of the speech queue store the renderer uses.
+ *
+ * It is read queries plus remove, clear and focus resume. It has no `advance`, because the store advances itself when audio ends. It also declares `current()`, which the renderer does not call.
+ */
 export interface TtsQueueStoreLike {
   current(): string | null;
   activeItem(): TtsQueueItem | null;
@@ -74,11 +80,17 @@ export interface TtsQueueStoreLike {
   resumeFocus(): void;
 }
 
+/** The stores the chrome uses: the audio store and the speech queue store. */
 export interface TtsChromeRendererStores {
   audio    : AudioStoreLike;
   ttsQueue : TtsQueueStoreLike;   // WP4 — notification-item queue (active + pending)
 }
 
+/**
+ * The speech pane chrome: pause or resume, stop, skip and the queue counts.
+ *
+ * It paints again on audio state changes, decoded chunks and speech queue changes, at most once per animation frame.
+ */
 export interface TtsChromeRenderer {
   /**
    * Mount onto `root`. Renders chrome immediately (initial paint) and
@@ -94,6 +106,11 @@ export interface TtsChromeRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createTtsChromeRenderer`.
+ *
+ * The bus and the stores are required. The animation frame hooks are for tests.
+ */
 export interface TtsChromeRendererOptions {
   eventBus              : EventBus;
   stores                : TtsChromeRendererStores;
@@ -104,18 +121,24 @@ export interface TtsChromeRendererOptions {
    */
   requestAnimationFrameFn? : (cb: FrameRequestCallback) => number;
   cancelAnimationFrameFn?  : (handle: number) => void;
+  /** The server zone, read at each render; UTC (labelled) while it is unset. */
+  appTimezoneFn?           : () => string | undefined;
 }
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Renders the Playing panel with transport controls for the TTS audio queue.
+ */
 class TtsChromeRendererImpl implements TtsChromeRenderer {
   private readonly bus    : EventBus;
   private readonly stores : TtsChromeRendererStores;
   private readonly raf    : (cb: FrameRequestCallback) => number;
   private readonly caf    : (handle: number) => void;
   private readonly unsubscribers: Array<() => void> = [];
+  private readonly appTimezoneFn : () => string | undefined;
 
   private root: HTMLElement | null = null;
   // Lane 0a — persistent `.section-header` bar + `.section-content` body wrapper.
@@ -126,6 +149,9 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
   private pendingRender = false;
   private rafHandle: number | null = null;
 
+  /**
+   * Creates the renderer from its bus and stores, with browser frame functions.
+   */
   constructor(opts: TtsChromeRendererOptions) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
@@ -133,8 +159,12 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     this.raf    = opts.requestAnimationFrameFn ?? ((cb): number => globalThis.requestAnimationFrame(cb));
     /* c8 ignore next */ // production-default fallback: globalThis.cancelAnimationFrame pairs with the RAF default above.
     this.caf    = opts.cancelAnimationFrameFn  ?? ((h): void => globalThis.cancelAnimationFrame(h));
+    this.appTimezoneFn = opts.appTimezoneFn ?? ( () => undefined );
   }
 
+  /**
+   * Builds the Playing section inside the root, paints it, and subscribes to changes.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) {
       throw new Error("TtsChromeRenderer already mounted");
@@ -187,6 +217,9 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     );
   }
 
+  /**
+   * Removes subscriptions, cancels any pending frame, and empties the root element.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -209,6 +242,9 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the panel at once, for tests, when mounted.
+   */
   forceRenderForTesting(): void {
     if (this.mounted) this.renderNow();
   }
@@ -284,14 +320,14 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
       children.push( renderTtsActiveCard( activeItem, {
         onStop  : () => this.stores.audio.stop(),
         onDelete: ( id ) => this.stores.ttsQueue.removeById( id ),
-      } ) );
+      }, this.appTimezoneFn() ) );
     }
 
     // Pending minimized cards — 1-indexed queue positions (WP2 ttsMinimizedCard).
     pending.forEach( ( it, i ) => {
       children.push( renderTtsMinimizedCard( it, i + 1, {
         onDelete: ( id ) => this.stores.ttsQueue.removeById( id ),
-      } ) );
+      }, this.appTimezoneFn() ) );
     } );
     // Empty state (active null + pending empty) falls through to just the chrome,
     // whose idle panel shows "🔇 Nothing in the queue" when audio is idle.
@@ -324,6 +360,11 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createTtsChromeRenderer(opts: TtsChromeRendererOptions): TtsChromeRenderer {
   return new TtsChromeRendererImpl(opts);

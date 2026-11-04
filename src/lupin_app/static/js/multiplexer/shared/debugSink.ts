@@ -61,6 +61,11 @@ export function currentDebugPanel(): DebugPanelSink | null {
   return panel;
 }
 
+/**
+ * Sends a message to the registered debug panel with its type.
+ *
+ * Does nothing when no panel is registered.
+ */
 function toPanel( message: string, type: "info" | "error" ): void {
   if ( panel === null ) return;
   panel.addDebugMessage( message, type );

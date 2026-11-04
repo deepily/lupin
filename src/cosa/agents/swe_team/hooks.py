@@ -214,20 +214,9 @@ def build_can_use_tool( team_io, guard, role="coder" ):
 
 async def wrap_prompt_for_streaming( prompt, session_id=None ):
     """
-    Wrap a string prompt as the single-message AsyncIterable shape that
-    `claude-agent-sdk >= 0.1.36` requires whenever `options.can_use_tool` is set.
+    Wrap a string prompt as a single-message AsyncIterable for `can_use_tool` sessions.
 
-    WORKAROUND for an upstream Python-SDK design gap: the SDK raises
-    `ValueError( "can_use_tool callback requires streaming mode. Please
-    provide prompt as an AsyncIterable instead of a string." )` if a plain
-    string is passed while `can_use_tool` is configured. The TypeScript SDK
-    has no such restriction — this is Python-only.
-
-    Upstream tracker (unresolved as of 2026-04-17):
-        https://github.com/anthropics/claude-code/issues/18735
-
-    **Remove this helper and revert every call site** once upstream lands
-    stream persistence for `can_use_tool` and the string path works again.
+    `claude-agent-sdk >= 0.1.36` requires this shape whenever `options.can_use_tool` is set.
 
     Requires:
         - prompt is a non-empty string
@@ -237,6 +226,16 @@ async def wrap_prompt_for_streaming( prompt, session_id=None ):
         - Returns an async generator yielding exactly one SDK-format message dict
         - Shape matches what the SDK's `query()` path builds internally
           (see https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/client.py)
+
+    Notes:
+        - This is a workaround for an upstream Python-SDK design gap: the SDK raises
+          `ValueError( "can_use_tool callback requires streaming mode. Please
+          provide prompt as an AsyncIterable instead of a string." )` if a plain
+          string is passed while `can_use_tool` is configured. The TypeScript SDK
+          has no such restriction; this is Python-only.
+        - Upstream tracker: https://github.com/anthropics/claude-code/issues/18735
+        - Remove this helper and revert every call site once upstream lands
+          stream persistence for `can_use_tool` and the string path works again.
     """
     import uuid
     effective_session_id = session_id or str( uuid.uuid4() )

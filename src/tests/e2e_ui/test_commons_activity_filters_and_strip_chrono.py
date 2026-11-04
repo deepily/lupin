@@ -43,6 +43,8 @@ the same pattern used by test_commons_activity_toggle.py — runs without
 needing live commons traffic on the test server.
 """
 
+import json
+
 import pytest
 
 from .conftest import BASE_URL
@@ -286,11 +288,25 @@ class TestFilterPersistence:
         # `loadConversationHistory()` step at startup. Wait for the dropdown to
         # actually reflect the restored state rather than for the controller to
         # exist.
+        #
+        # The persona dropdown keeps a persisted persona only while it is in the
+        # live pool (`_repopulatePersonaDropdown` clears a stale one). Pin the pool
+        # to one active tiberius session so the result does not depend on which
+        # personas the fleet happens to have running at reload time.
+        notifications_page.route( "**/api/cosa-voice/voice-persona/pool", lambda route: route.fulfill(
+            status       = 200,
+            content_type = "application/json",
+            body         = json.dumps( {
+                "pool"            : [ { "name": "tiberius", "display_name": "Tiberius", "icon": "" } ],
+                "active_sessions" : [ { "persona_name": "tiberius" } ]
+            } )
+        ) )
         notifications_page.reload()
         notifications_page.wait_for_function(
             """() => {
-                const el = document.getElementById( "commons-recent-activity-filter-direction" );
-                return el && el.value === "sender";
+                const d = document.getElementById( "commons-recent-activity-filter-direction" );
+                const p = document.getElementById( "commons-recent-activity-filter-persona" );
+                return d && d.value === "sender" && p && p.value === "tiberius";
             }""",
             timeout = 15_000
         )

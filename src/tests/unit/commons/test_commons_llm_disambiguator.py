@@ -37,7 +37,7 @@ def _make_config_mgr( overrides=None ):
     defaults.update( overrides )
 
     mgr = MagicMock()
-    def _get( key, default=None ):
+    def _get( key, default=None, return_type="string" ):
         return defaults.get( key, default )
     mgr.get = _get
     return mgr
@@ -102,7 +102,7 @@ def test_construction_reads_ini_keys( config_mgr ):
 def test_construction_uses_defaults_when_missing():
     """Missing optional INI keys → built-in defaults (floor 0.7, timeout 5.0)."""
     mgr = MagicMock()
-    mgr.get = lambda key, default=None: default if key != "llm spec key for commons persona disambiguator" else "spec-key"
+    mgr.get = lambda key, default=None, return_type="string": default if key != "llm spec key for commons persona disambiguator" else "spec-key"
     d = CommonsLlmDisambiguator( mgr )
     assert d.confidence_floor == _DEFAULT_CONFIDENCE_FLOOR
     assert d.timeout_seconds  == _DEFAULT_TIMEOUT_SECONDS
@@ -409,7 +409,7 @@ def test_the_default_timeout_is_handed_to_the_client_when_the_key_is_absent( sam
         unnoticed, because nothing in the config names the number.
     """
     mgr = MagicMock()
-    mgr.get = lambda key, default=None: (
+    mgr.get = lambda key, default=None, return_type="string": (
         "kaitchup/phi_4_14b" if key == "llm spec key for commons persona disambiguator" else default
     )
     client = MagicMock()

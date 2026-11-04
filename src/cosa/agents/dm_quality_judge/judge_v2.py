@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 """
-DM Quality Judge **v2** — the model locates the verdict; Python computes the grade.
+DM Quality Judge **v2**: the model locates the verdict; Python computes the grade.
 
-WHAT CHANGED FROM v1, AND WHY. v1 asked one model call to GRADE Directness and Tone.
-Measured live 2026-08-01 over four bodies crossing {verdict leads, buried} x {plain,
-jargon}, three runs each, 15/15 identical: hold the prose jargony and the model can no
-longer tell a leading verdict from a buried one, and the error is always toward `good`.
-It grades that same body `bad` on Tone and names the invented vocabulary correctly, so
-it is not blind to the jargon — it graded the document's REGISTER instead of the first
-sentence's CONTENT. A grade can never be checked. So v2 stops asking for one.
+What changed from v1: v1 asked one model call to grade directness and tone.
+Measured live over four bodies crossing {verdict leads, buried} x {plain, jargon},
+three runs each and 15/15 identical. With jargony prose the model could no longer
+tell a leading verdict from a buried one, and the error always ran toward `good`. It graded that same body `bad` on tone and named the invented
+vocabulary correctly, so it was not blind to the jargon. It graded the register
+of the document instead of the content of the first sentence. A grade can never
+be checked, so v2 stops asking for one.
 
     Directness : the model quotes the earliest sentence that states a payload, gives
                  its number, and lists the stray sentences after it. Python checks all
                  three against the source text and computes the weight.
-    Tone       : v1's rubric, unchanged — it was never the defect — with its evidence
-                 field moved AHEAD of its grade field.
+    Tone       : v1's rubric, unchanged because it was never the defect, with its
+                 evidence field moved ahead of its grade field.
     Length     : v1's Python bucket, imported.
     Overall    : v1's combination, imported.
 
-HOW FAR THE GUARANTEE GOES. Position is fully validated: an invented, paraphrased or
-miscounted quote is REJECTED, not averaged in. The stray classification is NOT — that
-is the same payload judgement the model failed at, and the indices list makes it
-checkable for shape, not for truth. So the result carries BOTH weights: `weight` (final)
-and `position_weight` (the grounded half), and the probe reports them as separate
-columns. The plan says this out loud; so does this module.
+How far the guarantee goes: position is fully validated, so an invented,
+paraphrased or miscounted quote is rejected, not averaged in. The stray
+classification is not. It is the same payload judgement the model failed at, and
+the indices list makes it checkable for shape, not for truth. So the result
+carries both weights, `weight` (final) and `position_weight` (the grounded half),
+and the probe reports them as separate columns.
 
 v1 is untouched and remains the live path. Selection is by INI key, default 1.
 
@@ -131,9 +131,9 @@ def _extraction_failed_dimension( reason ):
     Ensures:
         - weight is None, like every other non-answer: the model answered but its answer
           did not survive checking, which is not an opinion of `meh`. A 0 here would be
-          averaged into Overall as a considered neutral grade (measured 2026-08-01 on
-          Maria's 527-word DM, which came out SOFTER than Length alone because of it)
-        - the detail NAMES this as an unverified extraction — distinct from
+          averaged into Overall as a considered neutral grade, and a long DM would then
+          come out softer than its Length grade alone
+        - the detail names this as an unverified extraction — distinct from
           judge-unavailable and from over-length, because three different silences must
           not report as one
         - position_weight is None too: there is no grounded half to report when the
@@ -154,9 +154,9 @@ class DmQualityJudgeV2:
           (a missing server degrades gracefully — see Ensures)
 
     Ensures:
-        - judge() returns {"length", "directness", "tone", "overall"} — the SAME shape
+        - judge() returns {"length", "directness", "tone", "overall"} — the same shape
           v1 returns, so the caller in rest/routers/dm.py needs no branch
-        - never raises: any failure degrades to a NAMED non-answer
+        - never raises: any failure degrades to a named non-answer
         - the directness dict additionally carries "position_weight" and "structure",
           which v1 has no analogue for; consumers that do not know about them ignore
           them harmlessly
@@ -180,11 +180,12 @@ class DmQualityJudgeV2:
         Ensures:
             - builds the LLM client + prompt processor; available=True on success
             - a client-build failure sets available=False (judge() then falls back)
-            - qualitative_enabled=None reads the INI; an explicit bool is the INJECTION
-              SEAM the discrimination probe uses. Without it the probe would run at the
-              operator's ambient toggle — which is OFF — and measure withheld
-              non-answers, i.e. pass while measuring nothing. v1 has the same seam and
-              the probe already uses it; v2 must keep it or the probe cannot see v2.
+            - qualitative_enabled=None reads the INI; an explicit bool is the injection
+              seam the discrimination probe uses. Without it the probe would run at the
+              operator's ambient toggle, which is off, and measure withheld
+              non-answers, so it would pass while measuring nothing. v1 has the same
+              seam and the probe already uses it; v2 must keep it or the probe cannot
+              see v2.
         """
         self.debug                  = debug
         self.verbose                = verbose
@@ -218,14 +219,13 @@ class DmQualityJudgeV2:
     @property
     def available( self ):
         """
-        Whether the LLM client was CONSTRUCTED — not whether the server answers.
+        Whether the LLM client was constructed, not whether the server answers.
 
-        The name overpromises and the code cannot deliver on it: the factory builds a
-        client from config without opening a socket, so this is True against a server
-        that is down, and would have been True had it been down at construction. Nothing
-        re-checks it either — it is written once in __init__ and never again. Read it as
-        "we have a client object to call", and read `_client_ever_responded` for the
-        question this one looks like it answers.
+        The name overpromises. The factory builds a client from config without
+        opening a socket, so this is True against a server that is down. Nothing
+        re-checks it; it is written once in __init__. Read it as "we have a client
+        object to call", and read `_client_ever_responded` for the question this
+        one looks like it answers.
         """
         return self._available
 
@@ -276,12 +276,12 @@ class DmQualityJudgeV2:
 
         Ensures:
             - returns the finished prompt string
-            - uses .replace(), NEVER .format(): str.format treats every brace in the
-              string as a field, and two independent sources put literal braces here —
+            - uses .replace(), never .format(): str.format treats every brace in the
+              string as a field, and two independent sources put literal braces here:
               the injected example's {terrible|bad|meh|good|exemplary} placeholder, and
               any DM body containing a dict, f-string or JSON snippet, which peers paste
-              constantly. That crash lived OUTSIDE v1's retry block and broke its own
-              never-raises contract until it was found on 2026-08-01.
+              constantly. That crash would sit outside the retry block and break the
+              never-raises contract.
         """
         raw       = cu.get_file_as_string( cu.get_project_root() + template_path )
         processed = self._processor.process_template( raw, routing_command )
@@ -298,15 +298,17 @@ class DmQualityJudgeV2:
             - known_fields is the schema's canonical child tags. The repair layer
               rebuilds the response from the fields it is told about and drops the
               rest, so passing the wrong tuple deletes data silently rather than
-              raising — the two v2 schemas therefore pass their OWN tuples
+              raising — the two v2 schemas therefore pass their own tuples
 
         Ensures:
-            - returns parse_fn's result on the first attempt that succeeds
-            - returns ( None, last_error ) shape? NO — returns None on exhaustion, and
-              the caller decides which named non-answer that becomes, because "the
-              server is down" and "the model's answer did not verify" are different
-              silences and must not collapse into one
+            - returns ( parse_fn's result, None ) on the first attempt that succeeds
+            - returns ( None, last_error ) on exhaustion, with no exception raised, and the caller decides which
+              named non-answer that becomes, because "the server is down" and "the
+              model's answer did not verify" are different silences and must not
+              collapse into one
             - never raises
+            - a transport failure on a client that has never once answered stops after
+              that attempt; the first response of any kind restores the full budget
         """
         last_error = None
         for attempt in range( 1, _MAX_ATTEMPTS + 1 ):
@@ -359,9 +361,9 @@ class DmQualityJudgeV2:
 
         Ensures:
             - returns {"emoji","weight","position_weight","structure","detail"}
-            - the model NEVER supplies the weight — it supplies a quote, an index and a
+            - the model never supplies the weight — it supplies a quote, an index and a
               stray list, each checked against the source before any number is derived
-            - an unverifiable extraction returns the NAMED extraction-failed non-answer,
+            - an unverifiable extraction returns the named extraction-failed non-answer,
               not a grade
             - the client being unavailable returns v1's judge-unavailable fallback
         """

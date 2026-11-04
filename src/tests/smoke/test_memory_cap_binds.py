@@ -367,6 +367,7 @@ class TestTheSkipPathAndTheFlagPlumbing:
         """
 
         monkeypatch.setattr( shutil, "which", lambda _name: "/usr/bin/systemd-run" )
+        monkeypatch.setenv( "XDG_RUNTIME_DIR", "/run/user/test" )
         monkeypatch.setattr(
             subprocess, "run",
             lambda *a, **kw: subprocess.CompletedProcess( a, 1, stdout="", stderr="Failed to start transient scope" ),
@@ -382,6 +383,7 @@ class TestTheSkipPathAndTheFlagPlumbing:
         """A silent failure must not produce a reason ending in nothing."""
 
         monkeypatch.setattr( shutil, "which", lambda _name: "/usr/bin/systemd-run" )
+        monkeypatch.setenv( "XDG_RUNTIME_DIR", "/run/user/test" )
         monkeypatch.setattr(
             subprocess, "run",
             lambda *a, **kw: subprocess.CompletedProcess( a, 1, stdout="", stderr="   " ),

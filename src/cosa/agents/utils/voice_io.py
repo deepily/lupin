@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Consolidated Voice-First I/O Layer for COSA Agents.
+Consolidated voice-first I/O layer for COSA agents.
 
 This module provides a unified interface for user interaction that:
-1. PRIMARILY uses voice I/O via cosa_interface (TTS + voice input)
+1. Primarily uses voice I/O via cosa_interface (TTS + voice input)
 2. Automatically falls back to CLI text when voice is unavailable
 3. Allows explicit --cli-mode override to force text interaction
 
@@ -25,7 +25,7 @@ Usage:
     approved = await voice_io.ask_yes_no( "Proceed?" )
 
 Priority Order:
-    1. Voice I/O (cosa_interface functions) - PRIMARY
+    1. Voice I/O (cosa_interface functions) - primary
     2. CLI fallback (print/input) - when voice unavailable
     3. --cli-mode flag - forces CLI regardless of voice availability
 
@@ -342,17 +342,8 @@ async def ask_yes_no(
     Ensures:
         - Returns True if user said yes
         - Returns False if user said no
-        - On a path where NO human can answer, returns unattended_default if
+        - On a path where no human can answer, returns unattended_default if
           the caller declared one, and raises otherwise
-
-    `default` and `unattended_default` answer two different questions, and
-    before 2026-08-01 one parameter was doing both jobs. `default` is what an
-    interactive [Y/n] prompt OFFERS — pressing Enter to accept it is a human
-    act. `unattended_default` is what the answer means when there is no human
-    at all, which nobody had ever stated: `default: str = "no"` silently
-    supplied one. All four production callers passed default="yes", so an
-    unreachable user was recorded as having said yes to "continue with partial
-    audio" and to "proceed with this research plan". Row 84933a05.
 
     Args:
         question: The yes/no question to ask
@@ -368,6 +359,8 @@ async def ask_yes_no(
 
     Returns:
         bool: True if user approved, False otherwise
+
+    `default` and `unattended_default` answer two different questions. `default` is what an interactive [Y/n] prompt offers, and pressing Enter to accept it is a human act. `unattended_default` is what the answer means when no human is reachable at all. One parameter must not do both jobs: an unreachable user would be recorded as having said yes to "continue with partial audio" or "proceed with this research plan".
     """
     # Auto-inject module-level job_id if caller didn't provide one
     if job_id is None and _job_id is not None:
@@ -471,12 +464,9 @@ async def choose(
     """
     Present multiple-choice options (voice-first).
 
-    In voice mode: Speaks options via TTS, captures voice selection
-    In CLI mode: Prints numbered options, waits for number input
-
-    Options can be provided in two formats:
-    - List of strings: ["Option 1", "Option 2"]
-    - List of dicts: [{"label": "...", "description": "..."}]
+    In voice mode: Speaks options via TTS, captures voice selection.
+    In CLI mode: Prints numbered options, waits for number input.
+    Options are a list of strings, or a list of dicts with a label and a description.
 
     Requires:
         - question is a non-empty string
@@ -488,20 +478,14 @@ async def choose(
         - On any path where no human answered, returns response_default if the
           caller declared one, and raises otherwise
 
-    Before 2026-08-01 every unreachable-human path returned labels[0]. The
-    answer was therefore decided by the ORDER of the options rather than by
-    anything the caller asked for: reorder the same gate and an absent user is
-    deemed to have chosen something else. Row 741011ba.
-
     Args:
         question: The question introducing the choices
         options: List of option strings or dicts with label/description
         timeout: Seconds to wait for response
         allow_custom: If True, user can provide custom input via "Other"
         response_default: What to answer when no human can be reached. This is
-            the supported way to run unattended — the caller picks the value,
-            rather than the function picking position 0. Omitting it makes an
-            unreachable gate raise.
+            the supported way to run unattended: the caller picks the value,
+            not position 0. Omitting it makes an unreachable gate raise.
 
     Raises:
         - VoiceGateNoDefaultError if no human answered and response_default
@@ -509,6 +493,8 @@ async def choose(
 
     Returns:
         str: The selected option label (or custom input)
+
+    The answer never depends on the order of the options. Reordering the same gate would otherwise change what an absent user is deemed to have chosen.
     """
     # Auto-inject module-level job_id if caller didn't provide one
     if job_id is None and _job_id is not None:
@@ -597,15 +583,10 @@ async def choose(
 
 class VoiceGateNoDefaultError( RuntimeError ):
     """
-    Raised when a choice gate cannot reach a human and the caller named no
-    explicit default.
+    Raised when a choice gate cannot reach a human and the caller named no explicit default.
 
-    Position in an options list is not consent. Before 2026-08-01 every
-    unreachable-human path here answered `options[0]["label"]` and returned
-    it in a payload identical to a real selection, so a podcast script
-    review gate offering [Approve, Revise, Cancel] "approved" itself while
-    the user was offline (row be8830a3). A gate with nothing to fall back
-    on now fails loudly instead of guessing.
+    Position in an options list is not consent. A gate that answered `options[0]["label"]` for an absent human, in a payload identical to a real selection, approved itself while the user was offline. A podcast script review gate offering [Approve, Revise, Cancel] did that.
+    A gate with nothing to fall back on now fails loudly instead of guessing.
 
     Attributes:
         reason:  which unreachable path fired (see _DEFAULT_SOURCES)
@@ -637,21 +618,8 @@ def read_gate_answer( result, header: str, gate_name: str, unattended_default=No
     """
     Read one answer out of a present_choices payload, refusing to invent one.
 
-    The CONSUMER-side counterpart to the producer fixes in this module, and
-    public because six agents need it. Each had written its own
-
-        result.get( "answers", {} ).get( "<Header>", <fallback> )
-
-    which reads as ordinary defensive code and is not: an absent header — a
-    payload that carries no answer at all — silently becomes the fallback.
-    Presentation's version of this line turned a failed gate into "Approve"
-    (row fef0ed85); swe_team's turned it into "Continue to next task" on a
-    task that had already failed every retry; deep_research's set a flag named
-    plan_approved. Row 2b604cdb.
-
-    An answer the user genuinely gave is returned untouched, including an
-    empty string or empty list — choosing nothing is a choice. What is refused
-    is the header being ABSENT.
+    This is the consumer-side counterpart to the producer fixes in this module, and it is public because six agents need it. Each had written `result.get( "answers", {} ).get( "<Header>", <fallback> )`, which reads as ordinary defensive code but is not.
+    An absent header, meaning a payload that carries no answer at all, silently became the fallback. That line turned a failed gate into "Approve" in one agent. In another it became "Continue to next task" after every retry had failed. In a third it set a flag named plan_approved.
 
     Requires:
         - result is the dict returned by present_choices (a non-dict is
@@ -660,12 +628,14 @@ def read_gate_answer( result, header: str, gate_name: str, unattended_default=No
 
     Ensures:
         - returns the answer the gate actually received
-        - logs at WARNING when that answer came from a declared default rather
+        - logs at `WARNING` when that answer came from a declared default rather
           than a human, naming the gate and the path
 
     Raises:
         - VoiceGateNoDefaultError if the header is absent and the caller
           declared no unattended_default
+
+    An answer the user gave is returned untouched, including an empty string or an empty list, because choosing nothing is a choice. What is refused is an absent header.
     """
     answers = result.get( "answers", {} ) if isinstance( result, dict ) else {}
 
@@ -683,16 +653,10 @@ def read_gate_answer( result, header: str, gate_name: str, unattended_default=No
 
 def _require_default( response_default, source: str, what: str ):
     """
-    Resolve the caller's declared default for a path where no human answered,
-    or refuse to answer at all.
+    Resolve the caller's declared default for a path where no human answered, or refuse.
 
-    The bare-return twin of _resolve_default. present_choices returns a dict,
-    so it could carry provenance in new keys; choose / select_themes /
-    select_topics return a bare string or a bare list, and there is nowhere in
-    those to put a `default_used` flag without changing every call site. So
-    the contract here is the other half of the same rule: an explicitly
-    declared default is honoured and logged loudly, and the absence of one is
-    an error rather than a guess.
+    This is the bare-return twin of `_resolve_default`. `present_choices` returns a dict, so it can carry provenance in new keys. `choose`, `select_themes` and `select_topics` return a bare string or a bare list. Those have nowhere to put a `default_used` flag without changing every call site.
+    So the contract here is the other half of the same rule. An explicitly declared default is honoured and logged loudly. The absence of one is an error rather than a guess.
 
     Requires:
         - source is one of the _DEFAULT_SOURCE_* markers
@@ -700,7 +664,7 @@ def _require_default( response_default, source: str, what: str ):
 
     Ensures:
         - returns response_default unchanged when the caller declared one
-        - logs at WARNING naming the value and the path that produced it, so
+        - logs at `WARNING` naming the value and the path that produced it, so
           a defaulted answer is distinguishable after the fact from a real one
 
     Raises:
@@ -727,7 +691,7 @@ def _resolve_default( questions: list, response_default: Optional[ dict ], sourc
 
     Ensures:
         - returns a payload carrying default_used=True and default_source
-        - the payload is NOT shape-identical to a genuine selection
+        - the payload is not shape-identical to a genuine selection
 
     Raises:
         - VoiceGateNoDefaultError if response_default does not cover every
@@ -752,7 +716,7 @@ def _resolve_default( questions: list, response_default: Optional[ dict ], sourc
 
 def _is_gate_timeout( error ) -> bool:
     """
-    Whether `error` is the dispatcher's VoiceGateTimeoutError — WITHOUT importing it.
+    Whether `error` is the dispatcher's VoiceGateTimeoutError, without importing it.
 
     Requires:
         - error is any exception
@@ -760,10 +724,10 @@ def _is_gate_timeout( error ) -> bool:
     Ensures:
         - returns True only for a VoiceGateTimeoutError instance
         - never imports cosa.agents.test_fix_expediter: importing that package runs
-          its __init__, which pulls in swe_team and REBINDS this module's
+          its __init__, which pulls in swe_team and rebinds this module's
           _cosa_interface to swe_team's cosa_interface (no present_choices). A local
           import inside a gate therefore broke the very ask it was guarding, on the
-          first call in a fresh process (found 2026-09-11, row b6cfbf8d).
+          first call in a fresh process.
         - is sound: an instance can only exist once its module has been imported,
           so an absent module means this cannot be one
     """
@@ -781,7 +745,7 @@ def _timeout_source( timeout_error ) -> str:
     Ensures:
         - returns _DEFAULT_SOURCE_ANSWER_TIMEOUT when the ask reached a human who
           did not answer (delivered=True), else _DEFAULT_SOURCE_DISPATCH_FAILED
-        - is the ONE place present_choices() and the select_* gates decide this
+        - is the one place present_choices() and the select_* gates decide this
     """
     return _DEFAULT_SOURCE_ANSWER_TIMEOUT if timeout_error.delivered else _DEFAULT_SOURCE_DISPATCH_FAILED
 
@@ -801,13 +765,6 @@ async def present_choices(
     In voice mode: Uses TTS and voice UI
     In CLI mode: Prints numbered options, waits for number input
 
-    This function supports the full question format with headers and
-    multi-select capability. For simpler use cases, see choose().
-
-    Every path that cannot obtain a human answer either applies the
-    caller's explicit `response_default` — flagged as such in the return —
-    or raises. None of them invent an answer from option ordering.
-
     Requires:
         - questions is a list of question objects
         - Each question has: question, header, multiSelect, options
@@ -817,8 +774,8 @@ async def present_choices(
         - a genuine selection returns {"answers": {...}, "default_used": False,
           "answered": True}
         - an unanswered gate returns default_used=True, answered=False and a
-          default_source naming the path — deliberately NOT the same shape as
-          a real answer, so callers can distinguish consent from silence
+          default_source naming the path, not the same shape as a real answer, so
+          callers can distinguish consent from silence
         - option order never decides the outcome
 
     Args:
@@ -837,6 +794,9 @@ async def present_choices(
     Raises:
         - VoiceGateNoDefaultError when no human can answer and no
           response_default covers the questions
+
+    This function supports the full question format with headers and multi-select capability. For simpler use cases, see choose().
+    Every path that cannot obtain a human answer either applies the caller's explicit `response_default`, flagged as such in the return, or raises. None of them invent an answer from option ordering.
     """
     # Auto-inject module-level job_id if caller didn't provide one
     if job_id is None and _job_id is not None:
@@ -956,11 +916,6 @@ async def select_themes(
         - On any path where no human answered, returns response_default if the
           caller declared one, and raises otherwise
 
-    Before 2026-08-01 the unreachable-human path returned every index — so
-    "nobody answered" became "the user wants all of them", which silently
-    maximises scope on a path that spends real search budget. A malformed CLI
-    entry separately became "the user wants none of them". Row 741011ba.
-
     Args:
         themes: List of theme dicts from clustering response
         timeout: Seconds to wait for response
@@ -970,16 +925,15 @@ async def select_themes(
         source_label: Optional name of where the themes came from (e.g. the
             source document), prefixed to the question so the user can see it.
 
-    A voice ask that times out is "no human answered" and resolves exactly as
-    present_choices() does — to the declared default, or a raise. It used to
-    fall into the generic handler and report an urgent "selection failed".
-
     Raises:
         - VoiceGateNoDefaultError if no human answered and response_default
           was not declared
 
     Returns:
         list[int]: Selected theme indices (0-based)
+
+    "Nobody answered" never means "the user wants all of them", which would silently maximise scope on a path that spends real search budget. A malformed CLI entry never means "the user wants none of them" either.
+    A voice ask that times out is "no human answered" and resolves as present_choices() does: to the declared default, or a raise. It is not an urgent "selection failed".
     """
     if _force_cli_mode or _cosa_interface is None or not await is_voice_available():
         # Non-interactive (queue/Docker): no human to ask
@@ -1080,11 +1034,6 @@ async def select_topics(
         - On any path where no human answered, returns response_default if the
           caller declared one, and raises otherwise
 
-    Before 2026-08-01 both the unreachable-human path AND an unparseable CLI
-    entry returned every index, the latter under a comment reading "Default to
-    all on error". A typo therefore expanded the run to every topic, on a path
-    that spends real per-token budget. Row 741011ba.
-
     Args:
         topics: List of topic dicts (subqueries)
         preselected: Whether topics should be pre-selected (for deselection flow)
@@ -1094,15 +1043,15 @@ async def select_topics(
         source_label: Optional name of where the topics came from (e.g. the
             source document), prefixed to the question so the user can see it.
 
-    A voice ask that times out resolves as in select_themes(): declared default,
-    or a raise — never an urgent "selection failed".
-
     Raises:
         - VoiceGateNoDefaultError if no human answered and response_default
           was not declared
 
     Returns:
         list[int]: Selected topic indices (0-based)
+
+    Neither the unreachable-human path nor an unparseable CLI entry returns every index. A typo must not expand the run to every topic, on a path that spends real per-token budget.
+    A voice ask that times out resolves as in select_themes(): the declared default, or a raise, never an urgent "selection failed".
     """
     if _force_cli_mode or _cosa_interface is None or not await is_voice_available():
         # Non-interactive (queue/Docker): no human to ask

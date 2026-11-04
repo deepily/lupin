@@ -1,11 +1,9 @@
 """
-FCM token repository for the mobile silent-relay wake channel (S6).
+FCM token repository for the mobile silent-relay wake channel.
 
-CRUD over the `fcm_tokens` table — the DURABLE registry the wake trigger
-resolves device tokens from (F-S6-S2-1a: the registry must survive parent
-restart; this repository reads the database on every call, never a
-write-through cache, so a fresh instance rehydrates by construction — the
-AC-S6.1 re-instantiate-from-store proof).
+CRUD over the `fcm_tokens` table, the durable registry the wake trigger resolves device tokens from.
+The registry must survive a parent restart, so every call reads the database and never a write-through cache.
+A fresh instance therefore rehydrates from the store.
 """
 
 from datetime import datetime, timezone
@@ -20,7 +18,7 @@ from cosa.rest.db.repositories.base import BaseRepository
 
 class FcmTokenRepository( BaseRepository[FcmToken] ):
     """
-    Repository for FcmToken rows with upsert-on-token semantics (S6 §3.1).
+    Repository for FcmToken rows with upsert-on-token semantics.
 
     Usage:
         with get_db() as session:
@@ -44,25 +42,19 @@ class FcmTokenRepository( BaseRepository[FcmToken] ):
         """
         Register a device token, updating the existing row when the token is known.
 
-        Upsert is keyed on the TOKEN (S6 §3.1): a re-registration (mobile app
-        login, onTokenRefresh, or WS-reconnect belt) refreshes the user binding
-        and last_registered_at instead of duplicating the row. Multiple devices
-        per user are allowed — each device has its own token, hence its own row.
-
-        ATOMIC by construction (Rachel R3): a single PostgreSQL
-        `INSERT .. ON CONFLICT (token) DO UPDATE` — a read-then-insert sequence
-        would race when the same token registers concurrently (login +
-        WS-reconnect belt firing together) and 500 on the unique constraint.
+        Upsert is keyed on the token. A re-registration (login, token refresh, WS-reconnect) refreshes the user binding
+        and last_registered_at instead of duplicating the row. Multiple devices per user are allowed, one row each.
+        It is one atomic PostgreSQL `INSERT .. ON CONFLICT (token) DO UPDATE`: read-then-insert would race on concurrent same-token registration.
 
         Requires:
             - token is a non-empty FCM registration token string
             - user_id is the authenticated user's uid
-            - user_email is the registering user's email (contract field, S6 §3.1)
+            - user_email is the registering user's email (contract field)
 
         Ensures:
             - exactly one row exists for the token afterwards — even under
               concurrent same-token registration
-            - the row's user_id/user_email/platform reflect THIS registration
+            - the row's user_id/user_email/platform reflect this registration
             - last_registered_at is refreshed to now (UTC)
             - the statement is flushed; returns the persisted row
 
@@ -89,7 +81,7 @@ class FcmTokenRepository( BaseRepository[FcmToken] ):
 
     def delete_token( self, token: str ) -> bool:
         """
-        Unregister a device token (best-effort logout path, S6 §3.1 amended).
+        Unregister a device token (best-effort logout path).
 
         Requires:
             - token is a string (may be unknown)
@@ -116,9 +108,9 @@ class FcmTokenRepository( BaseRepository[FcmToken] ):
         Ensures:
             - returns the token strings of every row bound to user_id
             - returns an empty list for unknown users (never None)
-            - reads the DATABASE — never an in-memory cache — so a fresh
+            - reads the database, never an in-memory cache, so a fresh
               repository instance resolves tokens registered before this
-              process started (AC-S6.1 rehydration)
+              process started
 
         Returns:
             List[str] of FCM token strings

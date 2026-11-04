@@ -71,12 +71,22 @@ export interface TaskListComposite {
   warnings? : unknown[];
 }
 
+/**
+ * One owner's tasks.
+ *
+ * `isUnassigned` is true for the group of tasks with no owner, where `ownerPersona` is null.
+ */
 export interface TaskGroup {
   ownerPersona : string | null;   // null → the "Unassigned" bucket
   isUnassigned : boolean;
   tasks        : TaskItem[];
 }
 
+/**
+ * The task list as groups.
+ *
+ * `totalCount` is the number of tasks and `groups` holds them by owner.
+ */
 export interface TaskListModel {
   totalCount : number;
   groups     : TaskGroup[];
@@ -130,6 +140,11 @@ export function isOpenStatus( status: string | null | undefined ): boolean {
 // comparator inside the TS client is deliberate — Rick's no-code-reuse ruling
 // is about the two CLIENTS (JS vs TS), never about this client's own internals,
 // and two copies of a rank table is exactly the drift the legacy card killed.
+/**
+ * A status's sort rank, with blocked first and terminal statuses last.
+ *
+ * A missing or unknown status ranks between open and terminal, so a typo never sorts above blocked work.
+ */
 export function statusRank( status: string | null | undefined ): number {
   if ( !status ) return UNKNOWN_STATUS_RANK;
   const rank = STATUS_RANK[ status ];
@@ -139,6 +154,11 @@ export function statusRank( status: string | null | undefined ): number {
 // Priority rank for the secondary sort: P0 highest. Unknown sorts last.
 // Exported (Phase 2) — the editable priority control reuses the same ranking
 // vocabulary the model sorts by, so the dropdown order matches row order.
+/**
+ * A priority's sort rank, P0 first.
+ *
+ * A missing or unrecognised priority returns 99 and sorts last.
+ */
 export function priorityRank( priority: string | null | undefined ): number {
   if ( !priority ) return 99;
   const m = /^P(\d+)$/.exec( priority );
@@ -156,6 +176,11 @@ export function priorityRank( priority: string | null | undefined ): number {
 // "the editors for the tickets will mean that you need to have a range of P0
 // through P5"). The server enum `task_store_rules.VALID_PRIORITIES` is the
 // authority; this list is the EDITOR's view of it and must not drift from it.
+/**
+ * The priorities the editor offers, most urgent first.
+ *
+ * It mirrors the server's list and must not drift from it.
+ */
 export const EDITABLE_PRIORITIES: ReadonlyArray<string> = [ "P0", "P1", "P2", "P3", "P4", "P5" ];
 
 // ---------------------------------------------------------------------------
@@ -192,13 +217,19 @@ export function taskTitleLabel( task: TaskItem | null | undefined ): string {
 // (bug 6ce252e7). This number stayed at 60 because the two caps answer different
 // questions and always did: the store cap decides what is KEPT, and losing a tail
 // there destroys a qualifier permanently. This one decides how much fits in a
-// fixed-width column, and what it cuts is recoverable in place — the row renders
-// an ellipsis and the full title rides the cell's hover tooltip.
+// fixed-width column. No row applies it today: the row template renders the whole
+// title (render/templates/taskRowDisclosed.ts).
 //
 // ⚠️ SO: DO NOT "RESYNC" THIS TO 120 to restore the old identity. A 120-char cell
 // changes the row layout, and nothing is lost at 60. Whether the column should get
 // wider now that titles may legitimately run to 120 is a UI question for Rick, and
 // it is banked rather than decided here.
+/**
+ * The cap `truncateTaskTitle` applies, in characters.
+ *
+ * The row template shows the whole title, and no TypeScript production code calls `truncateTaskTitle`.
+ * Only tests do. The cap is shorter than the store's own.
+ */
 export const TASK_TITLE_TRUNCATE_LEN = 60;
 
 /**
@@ -247,6 +278,9 @@ export function taskBodyIsEmpty( task: TaskItem | null | undefined ): boolean {
 // Grouping
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns the tasks as an array, or an empty array when the input is not an array.
+ */
 function asRows( tasks: unknown ): Array<TaskItem | null | undefined> {
   return Array.isArray( tasks ) ? ( tasks as Array<TaskItem | null | undefined> ) : [];
 }
@@ -402,7 +436,7 @@ export function taskPriorityClass( priority: string | null | undefined ): string
 /**
  * Format an ISO-8601 next-chase timestamp as "MM-DD HH:MM" in the given IANA
  * zone (DST-aware via Intl). Null/absent → "—"; unparseable → "—"; invalid
- * zone → browser-local. Pure (never throws).
+ * zone → UTC, labelled UTC. Pure (never throws).
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (try/catch default-param interplay).
 export function formatChaseTime( iso: string | null | undefined, ianaZone: string | null | undefined ): string {
@@ -420,10 +454,10 @@ export function formatChaseTime( iso: string | null | undefined, ianaZone: strin
     try {
       return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: ianaZone } ).format( date );
     } catch {
-      // Invalid IANA zone — degrade to browser-local (never throw).
+      // Invalid IANA zone — degrade to UTC (never throw).
     }
   }
-  return new Intl.DateTimeFormat( undefined, opts ).format( date );
+  return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: "UTC" } ).format( date ) + " UTC";
 }
 
 // ---------------------------------------------------------------------------

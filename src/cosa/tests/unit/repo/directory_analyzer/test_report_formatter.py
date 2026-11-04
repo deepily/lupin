@@ -93,6 +93,19 @@ class TestInit:
         DirectoryReportFormatter( {}, debug=True )
         assert "Initialized" in capsys.readouterr().out
 
+    def test_every_column_width_default_and_override( self ):
+        """Ensures: each of the four widths has its own default and its own config key."""
+        d = DirectoryReportFormatter( {} )
+        assert ( d.col_file_type, d.col_lines, d.col_files, d.col_percent ) == ( 18, 12, 8, 8 )
+        widths = { "file_type": 1, "lines": 2, "files": 3, "percent": 4 }
+        f = DirectoryReportFormatter( { "formatting": { "column_widths": widths } } )
+        assert ( f.col_file_type, f.col_lines, f.col_files, f.col_percent ) == ( 1, 2, 3, 4 )
+
+    def test_debug_line_names_this_class( self, capsys ):
+        """Ensures: the init line is tagged with the directory class name."""
+        DirectoryReportFormatter( {}, debug=True )
+        assert capsys.readouterr().out == "[DirectoryReportFormatter] Initialized with console/JSON/markdown support\n"
+
 
 class TestFormatConsole:
     """Console rendering: banner, summary, optional scan block, breakdowns."""

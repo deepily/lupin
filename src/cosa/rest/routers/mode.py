@@ -4,8 +4,6 @@ Mode management API endpoints.
 Allows users to switch between agent-specific modes for direct routing.
 When in a mode, all user input bypasses the LLM router and routes directly
 to the selected agent.
-
-Generated on: 2026-01-12
 """
 
 from fastapi import APIRouter, Depends, HTTPException

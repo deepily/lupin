@@ -3,8 +3,7 @@ Unified protocol for all queueable job objects in CJ Flow (COSA Jobs Flow).
 
 All job types (AgentBase, SolutionSnapshot, AgenticJobBase) must implement
 this interface for consistent queue system handling. This protocol documents
-the unified interface that was established through property additions to
-each class.
+the unified interface.
 
 The unified naming conventions are:
     - job_type: Unified type identifier (replaces agent_class_name/JOB_TYPE getattr chains)
@@ -14,8 +13,6 @@ The unified naming conventions are:
     - answer_conversational: Formatted answer for display
     - created_date: When the job was created
     - run_date: When the job was executed
-
-Generated on: 2025-01-22
 """
 
 from typing import Protocol, runtime_checkable, Dict, Any

@@ -6,7 +6,7 @@ Defines the sender ID used for all decision proxy notifications
 and REST submissions.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 SENDER_ID = "decision.proxy@lupin.deepily.ai"

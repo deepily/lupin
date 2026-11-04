@@ -160,12 +160,18 @@ INCONCLUSIVE_TIERS=()
 # attempted so the operator learns about both problems in one run rather than one per re-run,
 # which is the same reason the frame and floor verdicts are both printed below.
 run_tier() {
-    local label="$1" script="$2" status=0
+    local label="$1" script="$2" status=0 log
+    log="$(mktemp)"
     echo "═══ coverage gate: running $label tier ═══"
-    bash "$PROJECT_ROOT/$script" -q || status=$?
+    bash "$PROJECT_ROOT/$script" -q 2>&1 | tee "$log"
+    status=${PIPESTATUS[0]}
     if ! tier_measured "$status"; then
         INCONCLUSIVE_TIERS+=( "$label|$status|$( tier_not_measured_reason "$status" )" )
+    elif tier_lost_worker_data "$log"; then
+        # The tier ran, but a dead worker's data never arrived (row e1a36bb4).
+        INCONCLUSIVE_TIERS+=( "$label|$status|$( tier_lost_worker_reason "$log" )" )
     fi
+    rm -f "$log"
 }
 
 if [ "$RUN_TIERS" -eq 1 ]; then
@@ -195,6 +201,18 @@ if [ "$RUN_TIERS" -eq 1 ]; then
         echo "  Re-run when the cause above is cleared."
         exit 2
     fi
+fi
+
+# ⚠️ A PYRAMID THAT LEFT A TIER OUT IS NOT A COVERAGE VERDICT (row 2f18ad99). The test container no
+# longer runs the unit tier, so an "all" there appends cosa's data alone. The job names the tiers it
+# left out in LUPIN_TEST_TIERS_NOT_RUN; the gate answers exit 2 before it reads any data, because a
+# percentage over that file would be a verdict on the box. Empty or unset means nothing was left out.
+if [ -n "${LUPIN_TEST_TIERS_NOT_RUN:-}" ]; then
+    echo ""
+    echo "COVERAGE GATE INCONCLUSIVE — this pyramid left out: ${LUPIN_TEST_TIERS_NOT_RUN} (not run here, host tier)."
+    echo "  The data file holds only the tiers that ran here, so any percentage rendered from it"
+    echo "  would be measured over a SHORT denominator. Run the gate on the host, with the unit tier."
+    exit 2
 fi
 
 # Record the tree the figure is earned on. A coverage number without a sha cannot be
@@ -259,7 +277,7 @@ if [ "$SPAN_VERDICT" != "unmoved" ]; then
 fi
 
 # 🔴 THE FLOOR MUST BE THE ONE THE BRANCH COMMITTED (Maya's working-tree-artifact audit,
-# src/rnd/v0.2.1/2026.08.30-working-tree-artifact-gate-audit.md — the coverage gate's own row).
+# the R&D write-up "working tree artifact gate audit" — the coverage gate's own row).
 # The tell ABOVE is a print, not a check: measured 2026-08-30 at sha 908414ad, lowering
 # pyproject's fail_under from 92 to 0 in the working tree turned a 0.84% measurement into
 # "COVERAGE GATE PASSED", exit 0 — and the tell dutifully printed tracked-dirty=1 while it
@@ -306,6 +324,27 @@ if ! "$PYBIN" -c "import json,sys; sys.exit( 0 if json.load( open( sys.argv[1] )
     echo "COVERAGE GATE INCONCLUSIVE  (no data)"
     exit 2
 fi
+# ══ SERVER COVERAGE FOLD (row e1a36bb4, option A — Rick, 2026-10-26) ═════════════════════
+# src/lupin_app/main.py is always in the frame, and its lifespan() start-up work and __main__
+# block only run when a real server boots. The :8000 test container can run its server under
+# `coverage run` (LUPIN_SERVER_COVERAGE=1); this step adds main.py's arcs from that data to the
+# tiers' data file. Only main.py's arcs come across, so nothing is double-counted.
+# 🔴 NO USABLE SERVER DATA IS EXIT 2, NEVER 1 AND NEVER A PASS. Absent, stale (main.py's content
+# hash differs from the one the server booted on), unreadable and incomplete data all land here,
+# and the message names the scheduled :8000 run that produces it. A floor verdict over a
+# denominator that holds main.py but not its runtime would be a verdict on the missing run.
+SERVER_FOLD_OUT="$( "$PYBIN" -m cosa.utils.server_coverage fold --target "$COVERAGE_FILE" 2>&1 )"
+SERVER_FOLD_EXIT=$?
+echo "$SERVER_FOLD_OUT"
+if [ "$SERVER_FOLD_EXIT" -ne 0 ]; then
+    echo ""
+    echo "COVERAGE GATE INCONCLUSIVE — the :8000 server's coverage of src/lupin_app/main.py is not usable."
+    echo "  NOTHING HERE IS A COVERAGE VERDICT. main.py's runtime is measured only inside the test"
+    echo "  server, and that measurement is absent, stale or unreadable (the line above says which)."
+    exit 2
+fi
+# The report above was rendered from the tiers' data alone; render it again from the folded file.
+"$PYBIN" -m coverage json -o "$REPORT_JSON" >/dev/null 2>&1 || true
 FRAME_EXIT=0
 "$PYBIN" - "$REPORT_JSON" <<'PY' || FRAME_EXIT=$?
 import sys

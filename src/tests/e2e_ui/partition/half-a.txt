@@ -54,6 +54,8 @@ src/tests/e2e_ui/test_multiplexer_stt_insert_at_cursor.py
 src/tests/e2e_ui/test_multiplexer_task_list_group_accordion.py
 src/tests/e2e_ui/test_multiplexer_tts_slider_governs_speech.py
 src/tests/e2e_ui/test_multiplexer_worker_badge_silencing.py
+src/tests/e2e_ui/test_one_click_approve_link_both_clients.py
+src/tests/e2e_ui/test_one_click_batch_approve_link_both_clients.py
 src/tests/e2e_ui/test_prediction_hint_vote_e2e.py
 src/tests/e2e_ui/test_qa_submission.py
 src/tests/e2e_ui/test_resume_overrides.py
@@ -74,3 +76,10 @@ src/tests/e2e_ui/test_multiplexer_holding_area_flow_ratio.py
 src/tests/e2e_ui/test_multiplexer_action_required_card_parity.py
 src/tests/e2e_ui/test_doc_viewer_download.py
 src/tests/e2e_ui/test_doc_viewer_folder_roots_upload.py
+src/tests/e2e_ui/test_poke_mute_switch.py
+src/tests/e2e_ui/test_multiplexer_podcast_play_here_and_download.py
+src/tests/e2e_ui/test_multiplexer_podcast_card_filed_before_load.py
+src/tests/e2e_ui/test_legacy_keep_place_holds_the_view_on_arrival.py
+src/tests/e2e_ui/test_legacy_keep_place_holds_the_history_pane.py
+src/tests/e2e_ui/test_legacy_focus_bar_toggles_row.py
+src/tests/e2e_ui/test_legacy_keep_place_toggle_style.py

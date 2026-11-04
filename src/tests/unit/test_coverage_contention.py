@@ -740,3 +740,41 @@ def test_a_seat_brief_quoting_a_direct_run_is_still_dropped_by_comm():
                                    comm_of=_AN_INTERPRETER ) == table, (
         "the positive control — the same line under a real interpreter IS one"
     )
+
+
+# ---- row 488403da: the same question asked of REAL processes, with nothing injected ------------
+
+def _spawn_named( tmp_path, comm, argv0 ):
+    """
+    Start a real `sleep` whose kernel name is comm and whose command line starts with argv0.
+
+    Requires:
+        - comm is a file name; argv0 is the text to show as the first command-line token
+
+    Ensures:
+        - returns the Popen; the caller must terminate it
+        - /proc/<pid>/comm reads comm, because the kernel takes it from the executable's file name
+    """
+    import shutil
+    import subprocess
+    exe = tmp_path / comm
+    shutil.copy( shutil.which( "sleep" ), exe )
+    return subprocess.Popen( [ "bash", "-c", f'exec -a "$0" "$1" 30', argv0, str( exe ) ] )
+
+
+def test_a_real_claude_seat_quoting_pytest_is_not_listed_and_a_real_interpreter_is( tmp_path ):
+    import time
+    brief = "/usr/bin/pytest -m pytest src/tests/unit/"
+    seat  = _spawn_named( tmp_path, "claude", brief )
+    suite = _spawn_named( tmp_path, "python3", brief )
+    try:
+        deadline = time.time() + 5
+        while time.time() < deadline and ( cc._default_comm_of( seat.pid ) != "claude" or cc._default_comm_of( suite.pid ) != "python3" ): time.sleep( 0.05 )
+        assert cc._default_comm_of( seat.pid ) == "claude" and cc._default_comm_of( suite.pid ) == "python3", "precondition: the kernel names"
+        pids = [ pid for pid, _ in cc.find_foreign_pytest() ]
+        assert suite.pid in pids, "the positive control: the same line under an interpreter comm is a suite"
+        assert seat.pid not in pids, "a live seat whose brief quotes pytest must not refuse a coverage run"
+    finally:
+        for proc in ( seat, suite ):
+            proc.terminate()
+            proc.wait()

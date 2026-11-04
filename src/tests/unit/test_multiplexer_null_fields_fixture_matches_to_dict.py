@@ -13,6 +13,8 @@ the arguments notify_user's fire-and-forget branch passes for that request, and 
 
 import json
 
+import pytest
+
 import cosa.utils.util as cu
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue, NotificationItem
 
@@ -68,6 +70,12 @@ def _rebuild( notification ):
     built = item.to_dict()
     NotificationFifoQueue._stamp_manager_persona( None, built, built[ "sender_id" ] )
     return built
+
+
+@pytest.fixture( autouse=True )
+def _configured_zone( monkeypatch ):
+    """NotificationItem needs a configured zone; this test compares frames, not zones."""
+    monkeypatch.setattr( "cosa.rest.notification_fifo_queue.get_app_timezone", lambda config_mgr: "America/New_York" )
 
 
 def test_the_fixture_frame_is_what_to_dict_builds_for_a_sender_without_a_persona():

@@ -288,7 +288,7 @@ def delete_item( storage, schema_type, item_id=None, match_fields=None ):
 
 def update_item( storage, schema_type, field_updates, item_id=None, match_fields=None ):
     """
-    Update an item's fields by id or by matching field values.
+    Change an item's fields, found by id or by matching field values.
 
     Requires:
         - storage is a DataFrameStorage instance

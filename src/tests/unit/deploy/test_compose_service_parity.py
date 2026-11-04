@@ -241,6 +241,14 @@ KNOWN_DIVERGENT_MOUNTS = {
         "dev-test"  : "2026-09-28 — Rick's personal gcloud ADC login powers dev's FCM wake-ups only (row 9b366409).",
         "cloud-gpu" : "2026-09-28 — same; the VM has no gcloud user login to mount.",
     },
+    # ── the reuse-review data folder (row d3f71441, 2026-10-15) ──────────────
+    # The candidate search reads vectors that the build driver writes on the dev host. The cloud leg
+    # has no such folder and no caller that sends a host path to it, so it neither mounts the folder
+    # nor names it. LUPIN_REUSE_REVIEW_DATA_ROOT below is this mount's partner and carries the same scope.
+    "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review": {
+        "cloud-gpu" : "2026-10-15 — the vectors live on the dev host, which the VM cannot see; "
+                      "no caller sends it a host vectors path (row d3f71441).",
+    },
 }
 
 # ── KNOWN_DIVERGENT_ENV ───────────────────────────────────────────────────
@@ -252,6 +260,34 @@ KNOWN_DIVERGENT_ENV = {
     },
     "LUPIN_DM_CORPUS_DIR": {
         "cloud-gpu" : "2026-08-13 — same.",
+    },
+    "CLAUDE_CODE_USE_VERTEX": {
+        "dev-dev"   : "2026-10-26 — only the VM container calls Claude on Vertex (Rick's ruling, row "
+                      "d3550878); dev keeps the Max-plan login, which is covered by the plan.",
+        "dev-test"  : "2026-10-26 — same.",
+    },
+    "CLOUD_ML_REGION": {
+        "dev-dev"   : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
+        "dev-test"  : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
+    },
+    "ANTHROPIC_VERTEX_PROJECT_ID": {
+        "dev-dev"   : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
+        "dev-test"  : "2026-10-26 — see CLAUDE_CODE_USE_VERTEX.",
+    },
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": {
+        "dev-dev"   : "2026-10-28 — see CLAUDE_CODE_USE_VERTEX (row 3ed25e12).",
+        "dev-test"  : "2026-10-28 — same.",
+    },
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": {
+        "dev-dev"   : "2026-10-28 — see CLAUDE_CODE_USE_VERTEX (row 3ed25e12).",
+        "dev-test"  : "2026-10-28 — same.",
+    },
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": {
+        "dev-dev"   : "2026-10-28 — see CLAUDE_CODE_USE_VERTEX (row 3ed25e12).",
+        "dev-test"  : "2026-10-28 — same.",
+    },
+    "LUPIN_REUSE_REVIEW_DATA_ROOT": {
+        "cloud-gpu" : "2026-10-15 — the partner of the reuse-review mount, which the VM does not take (row d3f71441).",
     },
     # LUPIN_FLOW_RATIO_DIR's exemption was REMOVED 2026-09-26 with its mount partner — see
     # the /var/lupin/flow-ratio comment in KNOWN_DIVERGENT_MOUNTS above for why the original
@@ -266,6 +302,26 @@ KNOWN_DIVERGENT_ENV = {
     # one without the other fail loudly instead of being excused.
     "LUPIN_SERVER_PORT": {
         "cloud-gpu" : "2026-08-13 — same.",
+    },
+    "LUPIN_SKELETON_CREW_INI": {
+        "dev-dev"   : "2026-10-10 — only :8000 gets a test-only copy of the configuration file for the "
+                      "skeleton crew switch; :7999 keeps the real src/conf/lupin-app.ini, which the "
+                      "launcher and every Stop hook read.",
+        "cloud-gpu" : "2026-10-10 — no test server on the VM.",
+    },
+    "LUPIN_HEARTBEAT_POKE_MUTE_FILE": {
+        "dev-dev"   : "2026-10-02 — only :8000 gets a test-only poke switch file; :7999 keeps the "
+                      "fleet's real heartbeat-poke-mute.json, which the Stop hook on the host reads.",
+        "cloud-gpu" : "2026-10-02 — no test server on the VM.",
+    },
+    "LUPIN_TEST_ADMIN_EMAIL": {
+        "dev-dev"   : "2026-10-26 — the smoke admin sign-in is :8000-only; the smoke helpers run in the "
+                      "test container (row 4ad9c156).",
+        "cloud-gpu" : "2026-10-26 — no test server on the VM.",
+    },
+    "LUPIN_TEST_ADMIN_PASSWORD": {
+        "dev-dev"   : "2026-10-26 — see LUPIN_TEST_ADMIN_EMAIL.",
+        "cloud-gpu" : "2026-10-26 — see LUPIN_TEST_ADMIN_EMAIL.",
     },
     "CHROME_PATH": {
         "cloud-gpu" : "2026-07-26 — same.",
@@ -293,9 +349,30 @@ KNOWN_DIVERGENT_ENV = {
         "dev-dev"  : "2026-07-26 — dev derives the DB from the compose postgres service.",
         "dev-test" : "2026-07-26 — same.",
     },
-    "DB_USER": {
-        "dev-dev"  : "2026-07-26 — see DB_NAME.",
-        "dev-test" : "2026-07-26 — same.",
+    # DB_USER: exemption removed 2026-10-03 (row 80513825) — dev and test now set it too
+    # (`lupin_app`), so all three services agree and the reverse arm would fail an entry here.
+    "DB_PASSWORD": {
+        "dev-dev"  : "2026-10-03 (row 80513825) — dev and test read the lupin_app password from a "
+                     "root-owned file (DB_PASSWORD_FILE below); cloud-gpu takes it from Secret Manager "
+                     "through the env.",
+        "dev-test" : "2026-10-03 — same.",
+    },
+    "DB_PASSWORD_FILE": {
+        "cloud-gpu" : "2026-10-03 (row 80513825) — the VM has no /etc/lupin/secrets; its password "
+                      "arrives as DB_PASSWORD from Secret Manager. See DB_PASSWORD.",
+    },
+    "LUPIN_TEST_DB_USER": {
+        "dev-dev" : "2026-10-08 (row 80513825) — only the test server creates databases through the test login.",
+    },
+    "LUPIN_TEST_DB_PASSWORD_FILE": {
+        "dev-dev"   : "2026-10-08 (row 80513825) — only the test server mounts the test role file.",
+        "cloud-gpu" : "2026-10-08 — the VM has no /etc/lupin/secrets; its test password arrives as "
+                      "LUPIN_TEST_DB_PASSWORD from Secret Manager.",
+    },
+    "LUPIN_TEST_DB_PASSWORD": {
+        "dev-dev"  : "2026-10-08 (row 80513825) — dev and test read the test password from a file "
+                     "(LUPIN_TEST_DB_PASSWORD_FILE); only the VM takes it through the env.",
+        "dev-test" : "2026-10-08 — same.",
     },
     "CLOUD_SQL_CONNECTION_NAME": {
         "dev-dev"  : "2026-07-26 — no Cloud SQL on dev.",
@@ -328,12 +405,35 @@ KNOWN_DIVERGENT_ENV = {
                       "read 'see above' and pointed at the dev-dev entry deleted that day — "
                       "a cross-reference outlives the text it points at.)",
     },
+    "LUPIN_SERVER_COVERAGE": {
+        "dev-dev"   : "2026-10-26 TEST-ONLY BY DESIGN (row e1a36bb4, option A) — runs the :8000 "
+                      "test server under `coverage run` so the coverage gate can count "
+                      "src/lupin_app/main.py's start-up code. The dev server is not a coverage "
+                      "venue and its start script has no such branch.",
+        "cloud-gpu" : "2026-10-26 TEST-ONLY BY DESIGN (row e1a36bb4) — same reason; the cloud "
+                      "service is a deployment, never a measurement venue.",
+    },
     "LUPIN_MODEL_SERVER_API_KEY_FILE": {
         "cloud-gpu": "2026-07-26 UNCLASSIFIED — present in the other THREE services, absent "
                      "here. cloud-gpu reaches the Cloud Run model server, the same path whose "
                      "key drifted on 07-25 (STT 401). Whether this absence is correct has NOT "
                      "been determined. Records an open question, not a ruling.",
     },
+}
+
+# ── git safe.directory env (row 31344c5f, 2026-09-30) ────────────────────────────────
+# cloud-gpu enumerates its external-project binds one by one, and its container uid (1001)
+# differs from the host owner, so git needs a safe.directory entry per mount. Dev binds the
+# whole projects dir as the same user, so git never objects there and needs none.
+# test_preflight_vm_host_test_fixes.py pins this env to cloud-gpu's own bind table.
+for _n in range( 7 ):
+    KNOWN_DIVERGENT_ENV[ f"GIT_CONFIG_KEY_{_n}" ] = KNOWN_DIVERGENT_ENV[ f"GIT_CONFIG_VALUE_{_n}" ] = {
+        "dev-dev"  : "2026-09-30 — dev binds the whole projects dir as the owning user; git never objects.",
+        "dev-test" : "2026-09-30 — same.",
+    }
+KNOWN_DIVERGENT_ENV[ "GIT_CONFIG_COUNT" ] = {
+    "dev-dev"  : "2026-09-30 — see GIT_CONFIG_KEY_0.",
+    "dev-test" : "2026-09-30 — same.",
 }
 
 

@@ -470,6 +470,23 @@ class TestSimilarityMethods( unittest.TestCase ):
         with self.assertRaises( ValueError ):
             a.get_code_similarity( empty )
 
+    def test_missing_embedding_messages_name_their_own_embedding( self ):
+        """Each public method keeps its own noun; a missing embedding on either side raises."""
+        with _embed_mocked():
+            a = SolutionSnapshot( question="q", solution_summary="s", code=[ "a = 1" ], debug=False )
+            empty = SolutionSnapshot( debug=False )
+        cases = [
+            ( a.get_question_similarity,         "Both snapshots must have a question embedding to compare." ),
+            ( a.get_solution_summary_similarity, "Both snapshots must have a solution summary embedding to compare." ),
+            ( a.get_code_similarity,             "Both snapshots must have a code embedding to compare." ),
+        ]
+        for method, message in cases:
+            with self.assertRaises( ValueError ) as raised:
+                method( empty )
+            self.assertEqual( str( raised.exception ), message )
+        with self.assertRaises( ValueError ):
+            empty.get_code_similarity( a )
+
 
 class TestCopyAndSerialization( unittest.TestCase ):
     """get_copy / to_jsons / for_current_user."""
@@ -523,6 +540,92 @@ class TestCopyAndSerialization( unittest.TestCase ):
 
 class TestRuntimeStatsAndReplay( unittest.TestCase ):
     """update_runtime_stats (first-run + subsequent) + record_replay."""
+
+    def test_default_runtime_stats_are_not_shared_between_snapshots( self ):
+        """Two snapshots built without runtime_stats each get their own dict."""
+        with _embed_mocked():
+            first, second = SolutionSnapshot( debug=False ), SolutionSnapshot( debug=False )
+        self.assertIsNot( first.runtime_stats, second.runtime_stats )
+        timer = Mock()
+        timer.get_delta_ms.return_value = 250
+        first.update_runtime_stats( timer )
+        first.update_runtime_stats( timer )
+        self.assertEqual( first.runtime_stats[ "run_count" ], 1 )
+        self.assertEqual( second.runtime_stats, SolutionSnapshot.get_default_stats_dict() )
+
+    def _pair( self ):
+        """Two snapshots built with only a question."""
+        with _embed_mocked():
+            return SolutionSnapshot( question="what is the weather", question_gist="weather", debug=False ), \
+                   SolutionSnapshot( question="how do I sort a list", question_gist="sorting", debug=False )
+
+    def test_synonymous_questions_are_not_shared_between_snapshots( self ):
+        """The second snapshot's synonym is its own question, not the first's."""
+        first, second = self._pair()
+        self.assertIsNot( first.synonymous_questions, second.synonymous_questions )
+        self.assertEqual( dict( second.synonymous_questions ), { "how do I sort a list": 100.0 } )
+
+    def test_synonymous_question_gists_are_not_shared_between_snapshots( self ):
+        """Same for the gists."""
+        first, second = self._pair()
+        self.assertIsNot( first.synonymous_question_gists, second.synonymous_question_gists )
+        self.assertEqual( dict( second.synonymous_question_gists ), { "sorting": 100.0 } )
+
+    def test_non_synonymous_questions_are_not_shared_between_snapshots( self ):
+        """A question added to one snapshot's non-synonyms is not in the other's."""
+        first, second = self._pair()
+        first.non_synonymous_questions.append( "x" )
+        self.assertEqual( second.non_synonymous_questions, [] )
+
+    def test_code_is_not_shared_between_snapshots( self ):
+        """A code line added to one snapshot is not in the other."""
+        first, second = self._pair()
+        first.code.append( "print( 1 )" )
+        self.assertEqual( second.code, [] )
+
+    def test_containers_a_caller_passes_are_kept_as_given( self ):
+        """Only None means default; a caller's own list and dict are used, empty or not."""
+        mine, others, syn = [ "print( 2 )" ], [ "q" ], OrderedDict( { "a": 1.0 } )
+        empty_code, empty_non, empty_emb = [ ], [ ], [ ]
+        empty_syn, empty_gists = OrderedDict(), OrderedDict()
+        with _embed_mocked():
+            snap  = SolutionSnapshot( code=mine, non_synonymous_questions=others, synonymous_questions=syn, debug=False )
+            blank = SolutionSnapshot( code=empty_code, non_synonymous_questions=empty_non, question_embedding=empty_emb,
+                                      synonymous_questions=empty_syn, synonymous_question_gists=empty_gists, debug=False )
+        self.assertIs( snap.code, mine )
+        self.assertIs( snap.non_synonymous_questions, others )
+        self.assertIs( snap.synonymous_questions, syn )
+        self.assertIs( blank.code, empty_code )
+        self.assertIs( blank.non_synonymous_questions, empty_non )
+        self.assertIs( blank.question_embedding, empty_emb )
+        self.assertIs( blank.synonymous_questions, empty_syn )
+        self.assertIs( blank.synonymous_question_gists, empty_gists )
+
+    def test_embedding_lists_are_not_shared_between_snapshots( self ):
+        """Each of the seven embedding fields is its own list per snapshot."""
+        names = ( "question_embedding", "question_normalized_embedding", "question_gist_embedding", "solution_embedding",
+                  "code_embedding", "thoughts_embedding", "solution_gist_embedding" )
+        with _embed_mocked():
+            first, second = SolutionSnapshot( debug=False ), SolutionSnapshot( debug=False )
+        for name in names:
+            with self.subTest( field=name ):
+                getattr( first, name ).append( 1.0 )
+                self.assertEqual( getattr( second, name ), [ ] )
+
+    def test_complete_without_code_does_not_share_a_list( self ):
+        """complete( answer ) twice: a line added to one snapshot's code is not in the other's."""
+        with _embed_mocked():
+            first, second = SolutionSnapshot( debug=False ), SolutionSnapshot( debug=False )
+            first.complete( "a" )
+            first.code.append( "print( 1 )" )
+            second.complete( "b" )
+        self.assertEqual( second.code, [ ] )
+
+    def test_an_empty_runtime_stats_dict_is_kept_as_given( self ):
+        """Only None means default; a caller's empty dict is the caller's."""
+        with _embed_mocked():
+            snap = SolutionSnapshot( runtime_stats={}, debug=False )
+        self.assertEqual( snap.runtime_stats, {} )
 
     def test_update_runtime_stats_first_run( self ):
         """run_count == -1 → records first_run_ms and flips run_count to 0."""

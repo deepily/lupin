@@ -1,39 +1,36 @@
 """
-Late-answer catch-up — the per-session Claude Code sibling of dm_inbox_reconcile
-(§4.4 of src/rnd/v0.1.9/2026.08.01-late-answer-handback.md, store row `7bb0a7df`).
+Late-answer catch-up: the per-session Claude Code sibling of dm_inbox_reconcile.
 
 When a human answers a blocking ask, the answer is persisted durably but handed
-back only by waking an in-memory dict; if that entry is gone (server bounce,
-dropped SSE stream), the answer is stored and never travels and the asking
-session times out and re-asks. This module is the durable at-least-once path: a
-returning session PULLS everything answered in its absence and surfaces it as
-replayed context — mirroring the human client's recovery behavior.
+back only by waking an in-memory dict. If that entry is gone (server bounce,
+dropped SSE stream), the answer is stored and never travels, and the asking
+session times out and re-asks. This module is the durable at-least-once path. A
+returning session pulls everything answered in its absence and surfaces it as
+replayed context, mirroring the human client's recovery behavior.
 
 Two drivers call `surface_owed_answers`:
-    1. cc_notification_listener._on_connected — the listener process, on every
-       connect edge (a respawn after a bounce IS a first connect).
-    2. user_prompt_submit.py — the hook process, at start-of-turn. This covers
-       what the on-connect hook structurally cannot: the listener process being
-       DEAD, not merely its socket. The shared HWM file dedupes the two for free.
+    1. cc_notification_listener._on_connected: the listener process, on every
+       connect edge (a respawn after a bounce is a first connect).
+    2. user_prompt_submit.py: the hook process, at start-of-turn. This covers
+       what the on-connect hook structurally cannot, which is the listener process
+       being dead, not merely its socket. The shared HWM file dedupes the two for free.
 
-⚠️ DELIBERATE DIVERGENCE FROM THE DM SIBLING — read before "fixing" it:
-`dm_inbox_reconcile.surface_dm_inbox` SUPPRESSES output on first seed, so
-activation never replays a live session's pre-existing backlog. **Ruling 3
-requires the OPPOSITE here** — a returning session must pull everything
-accumulated in its absence, and a listener respawn after a bounce IS a first
-connect. So this module has **NO seed suppression**: the first reconcile surfaces
-every owed answer. Do not pattern-match against the sibling and re-add it.
+Deliberate divergence from the DM sibling: `dm_inbox_reconcile.surface_dm_inbox`
+suppresses output on first seed, so activation never replays a live session's
+pre-existing backlog. Here a returning session must pull everything accumulated in
+its absence, and a listener respawn after a bounce is a first connect.
+So this module has no seed suppression. The first reconcile surfaces every owed answer.
+It must not be pattern-matched against the sibling to re-add it.
 
-⚠️ AUTH LANE (the plan's one silent-failure surface, D-V1): the fetch reads the
-hook X-API-Key lane (task_store_client.read_api_key / _request), which resolves
-to the HUMAN OWNER's user_id — the same lane dm_inbox_reconcile uses. It must
-NEVER read the listener's ambient service-account `self._user_id`: that returns a
-correct-looking, SILENTLY EMPTY list. Retrieval here is persona-keyed anyway
-(ruling 6), so the endpoint is called with `persona`, never a user_id — but the
-listener's _on_connected override MUST hand this module the persona, not lean on
-its own `self._user_id`. D-V1 (real-DB, Rachel's tier) is the negative control.
+Auth lane (the one silent-failure surface): the fetch reads the hook X-API-Key lane
+(task_store_client.read_api_key / _request). That lane resolves to the human owner's
+user_id and is the same one dm_inbox_reconcile uses. It must never read the listener's
+ambient service-account `self._user_id`, because that returns a correct-looking but
+silently empty list. Retrieval is persona-keyed anyway, so the endpoint is called
+with `persona`, never a user_id. The listener's _on_connected override must hand
+this module the persona, not lean on its own `self._user_id`.
 
-Replayed answers surface as context, NEVER as an interrupt or a synthesized tool
+Replayed answers surface as context, never as an interrupt or a synthesized tool
 result (matching dm_inbox_reconcile's no-interrupt contract). Never raises.
 """
 
@@ -61,10 +58,10 @@ def _max_iso( a, b ):
     Return the later of two ISO-8601 timestamp strings (None-safe).
 
     All responded_at values carry the same UTC offset (server `.isoformat()`), so
-    lexicographic comparison IS chronological.
+    lexicographic comparison is chronological.
 
     Ensures:
-        - None + None → None; one None → the other; else the greater string
+        - None + None gives None; one None gives the other; else the greater string
     """
     if a is None:
         return b
@@ -75,11 +72,10 @@ def _max_iso( a, b ):
 
 def _dedup_tail( seq, cap ):
     """
-    De-duplicate `seq` preserving first-occurrence order, then keep only the last
-    `cap` entries (0 → no cap).
+    De-duplicate `seq` keeping first-occurrence order, then keep only the last `cap` entries.
 
     Ensures:
-        - Order-stable dedup, tail-capped when cap > 0 and len > cap
+        - Order-stable dedup, tail-capped when cap > 0 and len > cap (0 means no cap)
     """
     seen = set()
     out  = []
@@ -95,10 +91,11 @@ def _dedup_tail( seq, cap ):
 
 def _format_answer_block( row ):
     """
-    Render one replayed owed-answer as a non-interrupt context block (rulings 6/7):
-    the ORIGINAL question, the human's answer, when it was answered, and — when the
-    asking session differs from the receiving one — the earlier-session flag. A bare
-    answer with no question attached is worse than nothing.
+    Render one replayed owed-answer as a non-interrupt context block.
+
+    The block carries the original question, the human's answer and when it was answered.
+    It adds the earlier-session flag when the asking session differs from the receiving one.
+    A bare answer with no question attached is worse than nothing.
 
     Requires:
         - row is an owed-answer envelope dict (question, response_value, responded_at,
@@ -125,32 +122,30 @@ def _format_answer_block( row ):
 
 def reconcile_answers( session_hash8, rows, state, extra_surfaced_ids=() ):
     """
-    Pure core: given fetched owed-answer `rows` + current `state`, return the
-    additionalContext of un-surfaced answers and the advanced state. No IO —
-    fully unit-testable.
+    Pure core: build the additionalContext of un-surfaced answers plus the advanced state.
 
-    Retrieval is persona-keyed at the endpoint (ruling 6), so EVERY fetched row is
-    already for this persona and is surfaced (earlier-session rows included, flagged)
-    — there is NO job_id/session filter here, unlike the DM sibling.
+    Takes fetched owed-answer `rows` and the current `state`. It does no IO, so it is fully unit-testable.
+    Retrieval is persona-keyed at the endpoint, so every fetched row is already for this persona.
+    Every row is surfaced, earlier-session rows included and flagged. Unlike the DM sibling there is no job_id or session filter here.
 
     Requires:
-        - session_hash8 is the 8-char session hash (labels logs; NOT a row filter)
+        - session_hash8 is the 8-char session hash (labels logs; not a row filter)
         - rows is a list of owed-answer envelope dicts (id, question, response_value,
           responded_at, from_earlier_session, ...)
         - state is {"cursor_ts": <iso|None>, "surfaced_ids": [<notification_id>...]}
         - extra_surfaced_ids: notification_ids already surfaced by the live listener
-          arm THIS session (read from the cross-process side-log) — excluded AND
-          recorded so the two routes collapse to one surfacing (the §4.3 ledger)
+          arm this session (read from the cross-process side-log), excluded and
+          recorded so the two routes collapse to one surfacing (the one-ledger rule)
 
     Ensures:
         - Returns ( context_str, new_state )
-        - context has ONE answer block per fresh, non-blank row, oldest-first by
+        - context has one answer block per fresh, non-blank row, oldest-first by
           responded_at
-        - Dedup by notification_id against state.surfaced_ids ∪ extra_surfaced_ids
-        - cursor_ts advances to the max responded_at across ALL fetched rows (seen,
-          not merely surfaced) — cursor is on responded_at, never created_at
+        - Dedup by notification_id against state.surfaced_ids and extra_surfaced_ids combined
+        - cursor_ts advances to the max responded_at across all fetched rows (seen,
+          not merely surfaced); the cursor is on responded_at, never created_at
         - surfaced_ids = tail-capped dedup of ( existing + extra + newly surfaced )
-        - NO seed suppression — first reconcile surfaces everything owed (ruling 3)
+        - No seed suppression: the first reconcile surfaces everything owed
         - Never raises
     """
     cursor_ts    = state.get( "cursor_ts" )
@@ -190,20 +185,25 @@ def _base_dir( base_dir=None ):
 
 
 def _hwm_path( session_id, base_dir=None ):
-    """Resolve the durable HWM file path (same runtime-state dir as the hold file → /clear-proof)."""
+    """
+    Resolve the durable HWM file path, in the same runtime-state dir as the hold file.
+
+    Sharing the hold file's dir makes the HWM survive /clear.
+    """
     suffix = ( session_id or "" )[ :8 ]
     return _base_dir( base_dir ) / HWM_FILENAME_TEMPLATE.format( session_id=suffix )
 
 
 def read_hwm( session_id, base_dir=None ):
     """
-    Read the durable high-water mark; default on any miss/corruption (fail-open).
+    Read the durable high-water mark, returning a default on any miss or corruption.
+
+    Unlike the DM sibling there is no `seeded` flag. A missing HWM means "surface everything owed", not "seed silent".
 
     Ensures:
         - Returns {"cursor_ts": <str|None>, "surfaced_ids": [<str>...]}
-        - Missing file / bad JSON / non-dict / wrong field types → the empty
-          default (never raises). Unlike the DM sibling there is NO `seeded` flag:
-          a missing HWM means "surface everything owed" (ruling 3), not "seed silent."
+        - Missing file / bad JSON / non-dict / wrong field types give the empty
+          default (never raises)
     """
     path = _hwm_path( session_id, base_dir=base_dir )
     try:
@@ -223,8 +223,9 @@ def read_hwm( session_id, base_dir=None ):
 
 def write_hwm( session_id, state, base_dir=None ):
     """
-    Persist the high-water mark. Best-effort (returns False on OSError, never
-    raises) — a failed persist just means the next pull re-surfaces + retries.
+    Persist the high-water mark, best-effort (returns False on OSError, never raises).
+
+    A failed persist just means the next pull re-surfaces and retries.
     """
     path = _hwm_path( session_id, base_dir=base_dir )
     try:
@@ -242,26 +243,28 @@ def write_hwm( session_id, state, base_dir=None ):
 # ── Cross-process shared side-log (the §4.3 ledger's cross-process hop, K-D1) ──
 
 def _surfaced_log_path( session_id, base_dir=None ):
-    """Resolve the append-only side-log the LIVE listener arm writes and the hook folds."""
+    """Resolve the append-only side-log the live listener arm writes and the hook folds."""
     suffix = ( session_id or "" )[ :8 ]
     return _base_dir( base_dir ) / SURFACED_LOG_TEMPLATE.format( session_id=suffix )
 
 
 def append_surfaced_id( session_id, notification_id, base_dir=None ):
     """
-    Append one live-surfaced notification_id to the shared side-log — called by the
-    listener's :481 notification_responded arm (a DIFFERENT process than the hook).
+    Append one live-surfaced notification_id to the shared side-log.
 
-    POSIX O_APPEND makes small-record writes atomic and lock-free across processes,
-    so the listener never races the hook on this file. The hook is sole writer of
-    the HWM JSON and folds this log in via reconcile_answers(extra_surfaced_ids=…)
-    then compacts it under its own ownership. Best-effort; never raises.
+    The listener's notification_responded arm calls it, a different process than the hook.
+    POSIX O_APPEND makes small writes atomic and lock-free, so the listener never races the hook here.
+    Best-effort; never raises.
 
     Requires:
         - session_id, notification_id are non-empty strings
 
     Ensures:
         - one "<notification_id>\\n" record appended atomically, or a silent no-op
+
+    Notes:
+        - The hook is the sole writer of the HWM JSON.
+        - It folds this log in via reconcile_answers(extra_surfaced_ids=...) and then compacts it under its own ownership.
     """
     if not session_id or not notification_id:
         return False
@@ -280,8 +283,9 @@ def append_surfaced_id( session_id, notification_id, base_dir=None ):
 
 def read_surfaced_log( session_id, base_dir=None ):
     """
-    Read the cross-process side-log's notification_ids (the ids the live listener
-    arm surfaced). Missing file → [] (never raises).
+    Read the cross-process side-log's notification_ids (those the live listener arm surfaced).
+
+    A missing file gives [] (never raises).
     """
     path = _surfaced_log_path( session_id, base_dir=base_dir )
     try:
@@ -293,8 +297,9 @@ def read_surfaced_log( session_id, base_dir=None ):
 
 def _compact_surfaced_log( session_id, base_dir=None ):
     """
-    Truncate the side-log after the hook has folded it into the durable HWM — the
-    hook is the sole compactor (single-writer of the fold result). Best-effort.
+    Truncate the side-log after the hook has folded it into the durable HWM.
+
+    The hook is the sole compactor (single writer of the fold result). Best-effort.
     """
     path = _surfaced_log_path( session_id, base_dir=base_dir )
     try:
@@ -308,10 +313,10 @@ def _compact_surfaced_log( session_id, base_dir=None ):
 
 def _resolve_persona( session_id ):
     """
-    Resolve THIS session's voice persona (the retrieval key, ruling 6) from the
-    session bridge — the same lane the server-side stamp uses. Returns None on any
-    failure (a persona-less session's answers are unretrievable by persona — the
-    §4.4 accepted gap). Never raises.
+    Resolve this session's voice persona (the retrieval key) from the session bridge.
+
+    It uses the same lane the server-side stamp uses. Returns None on any failure.
+    A persona-less session's answers are unretrievable by persona, which is an accepted gap. Never raises.
     """
     try:
         from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona
@@ -333,17 +338,17 @@ def _load_settings():
 
 def _fetch_owed( persona, session_hash8, since=None, limit=DEFAULT_LIMIT, timeout=DEFAULT_TIMEOUT_SECONDS ):
     """
-    GET /api/notifications/answers-owed (X-API-Key) — the answers owed to `persona`.
+    GET /api/notifications/answers-owed (X-API-Key): the answers owed to `persona`.
 
-    ⚠️ Uses the X-API-Key lane (read_api_key / _request), which resolves to the
-    human owner — NOT the listener's ambient service-account self._user_id. The
-    query is persona-keyed, so no user_id crosses this boundary at all.
+    It uses the X-API-Key lane (read_api_key / _request), which resolves to the human owner.
+    It does not use the listener's ambient service-account self._user_id.
+    The query is persona-keyed, so no user_id crosses this boundary at all.
 
     Ensures:
         - Returns ( ok, rows, page_full )
         - ok False (rows=[], page_full=False) on any transport/HTTP failure or a
-          non-dict body / non-list answers (fail-safe — caller surfaces nothing and
-          does NOT advance the HWM)
+          non-dict body / non-list answers (fail-safe: caller surfaces nothing and
+          does not advance the HWM)
         - Never raises
     """
     from lupin_cli.claude_code.hooks.lib import task_store_client as tc
@@ -370,14 +375,15 @@ def _fetch_owed( persona, session_hash8, since=None, limit=DEFAULT_LIMIT, timeou
 
 def surface_owed_answers( session_id, persona=None, extra_surfaced_ids=(), fetch_fn=None, base_dir=None ):
     """
-    Reconcile this session's owed answers against the durable HWM + the live side-log
-    and return the additionalContext of any un-surfaced answers. Called from BOTH
-    cc_notification_listener._on_connected and user_prompt_submit.py.
+    Reconcile this session's owed answers against the durable HWM and the live side-log.
+
+    It returns the additionalContext of any un-surfaced answers. Both
+    cc_notification_listener._on_connected and user_prompt_submit.py call it.
 
     Requires:
-        - session_id is the stable session id (or "" — returns "")
+        - session_id is the stable session id (or "", which returns "")
         - persona: the retrieval key; when None it is resolved from the session
-          bridge (None ⇒ the persona-less accepted gap ⇒ returns "")
+          bridge (None means the persona-less accepted gap, and returns "")
         - extra_surfaced_ids: additional ids to treat as already surfaced (tests /
           callers); the cross-process side-log is folded in automatically
         - fetch_fn(persona, session_hash8, since, limit) -> ( ok, rows, page_full );
@@ -386,10 +392,10 @@ def surface_owed_answers( session_id, persona=None, extra_surfaced_ids=(), fetch
     Ensures:
         - Returns the additionalContext string ("" when nothing fresh)
         - Folds the cross-process side-log (live listener arm) into the dedup, so a
-          live-surfaced answer is NOT re-surfaced by catch-up (§4.3 one-ledger)
-        - On a not-ok fetch: returns "" and does NOT advance the HWM (retry next)
+          live-surfaced answer is not re-surfaced by catch-up (one ledger)
+        - On a not-ok fetch: returns "" and does not advance the HWM (retry next)
         - Persists the advanced HWM and compacts the side-log on success
-        - NO seed suppression (ruling 3) — first pull surfaces everything owed
+        - No seed suppression: the first pull surfaces everything owed
         - Never raises (fail-open on the connect/turn hot path)
     """
     try:

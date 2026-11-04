@@ -732,6 +732,21 @@ def _classification_help( actual_keys ):
     return "\n".join( lines )
 
 
+def test_a_terse_row_says_what_KIND_of_thing_it_is( client, repo ):
+    # Row 7e1d72d0 (item B). A terse row could not tell a task from a bug from a decision. Five
+    # rows, five classes: a constant in place of the column, or a field wired to the wrong
+    # attribute, would give the same value for every row and fail here. The exact-set test above
+    # proves the KEY is present; only distinct VALUES prove it is carried off the row.
+    classes = [ "task", "bug", "decision", "review_request", "gate" ]
+    repo.query_tasks.return_value = [ make_item( item_class=c, title=f"a {c}" ) for c in classes ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    rows = r.json()[ "tasks" ]
+    assert [ row[ "item_class" ] for row in rows ] == classes
+    assert "item_class" in tasks.TERSE_DATA_FIELDS, "item_class is CARRIED off the row, so it is a DATA field"
+    assert "item_class" not in tasks.TERSE_ADVISORY_FIELDS
+
+
 def test_query_terse_returns_glance_projection_only( client, repo ):
     # §G: terse=true serializes the at-a-glance projection — EXACTLY the seven
     # glance keys, with `body` (and every other full-row field) dropped.

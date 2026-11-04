@@ -56,7 +56,7 @@ in commit `53fef419`, 2026-06-19. The rename is noted so the trail survives a
 carve-out compatibility and refines a test list for `lupin_model_server/main.py`,
 a different file. The ruling was real, but a reader checking the citation landed
 on a document about something else. Full audit and measurements:
-`src/rnd/v0.2.1/2026.08.30-lifespan-carveout-citation-audit.md`.
+the R&D write-up "lifespan carveout citation audit".
 
 ALSO UNWRITTEN, on purpose: design doc
 `src/rnd/v0.1.7/2026.05.16-model-server-carveout/02-phase5-unit-tests-and-coverage-design.md`

@@ -1,43 +1,34 @@
 #!/usr/bin/env python3
 """
-Arbiter host-venv import gate — fails a DEPLOY instead of a running thread.
+Arbiter host-venv import gate: fails a deploy instead of a running thread.
 
-WHY THIS EXISTS
----------------
-On 2026-08-08 the standalone arbiter's `fleet-arbiter-loop` thread died on its first
-tick with `ModuleNotFoundError: No module named 'sqlalchemy'` and stayed dead for two
-days. Nothing caught it:
+Checks every module the arbiter imports at runtime, in the venv that will run it, before the service starts.
+An import failure gives a non-zero exit and the exact remedy.
 
-  * `systemctl status`  → active (running)      (the PROCESS was fine)
-  * `/health`           → 200 {"status":"ok"}   (the endpoint knew nothing of threads)
-  * provisioning        → verified only /health
+Notes:
+    Why this exists:
+    - The standalone arbiter's `fleet-arbiter-loop` thread once died on its first tick with `ModuleNotFoundError: No module named 'sqlalchemy'`.
+    - It stayed dead for two days, and nothing caught it.
+    - `systemctl status` said active (running), because the process was fine.
+    - `/health` returned 200 {"status":"ok"}, because the endpoint knew nothing of threads.
+    - Provisioning verified only `/health`.
+    - So the only symptom was an empty Fleet Status panel three hops downstream.
+    - That was the third instance of one class: the light host venv drifting behind the arbiter's import graph.
+    - The venv is `src/scripts/requirements-arbiter.txt`, labelled "CLOSED + FROZEN".
+    - `pyyaml` was added after a live `ModuleNotFoundError('yaml')` on the same VM.
+    - A frozen list plus a comment asking people to keep it current is not a control, so this script is the control.
 
-…so the only symptom was an empty Fleet Status panel three hops downstream.
+    What it checks:
+    - The follow-through watcher is checked only when `follow through escalation enabled` is true.
+    - This mirrors the runtime gate in `fleet_arbiter_loop.make_follow_through_watcher_factory`.
+    - With the flag off the arbiter must not import the DB layer at all.
+    - The script asserts that stays true by not requiring those packages.
 
-That was the THIRD instance of one class: the light host venv
-(`src/scripts/requirements-arbiter.txt`, labelled "CLOSED + FROZEN") drifting behind
-the arbiter's import graph. `pyyaml` was added 2026-07-22 after a live
-`ModuleNotFoundError('yaml')` on this same VM. A frozen list plus a comment asking
-people to keep it current is not a control — this script is the control.
+    Usage:
+    - <arbiter-venv>/bin/python src/scripts/check-arbiter-venv.py
+    - <arbiter-venv>/bin/python src/scripts/check-arbiter-venv.py --json
 
-WHAT IT CHECKS
---------------
-Every module the arbiter actually imports at RUNTIME, in the venv that will run it,
-before the service is started. Import failure ⇒ non-zero exit + the exact remedy.
-
-The follow-through watcher is checked ONLY when `follow through escalation enabled`
-is true, mirroring the runtime gate added the same day in
-`fleet_arbiter_loop.make_follow_through_watcher_factory` — with the flag off the
-arbiter must not import the DB layer at all, and this script asserts that stays true
-by NOT requiring those packages.
-
-USAGE
-    <arbiter-venv>/bin/python src/scripts/check-arbiter-venv.py
-    <arbiter-venv>/bin/python src/scripts/check-arbiter-venv.py --json
-
-Exit codes: 0 = every required module imports · 1 = at least one missing/broken.
-
-Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+    Exit codes: 0 means every required module imports, 1 means at least one is missing or broken.
 """
 import argparse
 import importlib
@@ -93,7 +84,7 @@ def follow_through_enabled():
 
     Ensures:
         - returns a bool
-        - a config that cannot be loaded degrades to True (CHECK MORE, not less) —
+        - a config that cannot be loaded degrades to True (check more, not less) —
           an unreadable config must never quietly shrink the required set
     """
     try:

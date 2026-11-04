@@ -49,6 +49,7 @@ import os
 import re
 import tempfile
 
+from lupin_mcp import config_write_lock
 from typing import List, NamedTuple, Optional, Tuple
 
 
@@ -197,60 +198,88 @@ def read_int_from_disk( path: str, key: str ) -> Optional[ int ]:
         return None
 
 
+def _replace_value_line( path: str, key: str, value_text: str, insert_after: Optional[ str ] = None ) -> None:
+    """
+    Replace the value on the one line that defines `key`, atomically, under the write lock.
+
+    Requires:
+        - path names a writable configuration file
+        - key is defined in it exactly once
+        - value_text is the text to put after the equals sign
+        - insert_after is a key defined exactly once, or None
+
+    Ensures:
+        - when the key is absent and insert_after is given, the line is added after that
+          key's line, aligned to the same column
+        - the defining line keeps its key and its column alignment
+        - every other byte in the file is unchanged
+        - the replacement is a temp file in the same folder moved in with os.replace
+        - nothing is written when the key is missing or defined twice
+        - the temp file is removed when the replacement fails
+
+    Raises:
+        - KeyNotFound or KeyDefinedTwice without writing anything
+        - OSError when the lock or the replacement fails
+    """
+    with config_write_lock.write_lock():
+        try:
+            definition = locate_key( path, key )      # refuses before touching anything
+        except KeyNotFound:
+            if insert_after is None:
+                raise
+            definition = None
+
+        with open( path, "r", encoding="utf-8" ) as handle:
+            content = handle.read()
+        lines = content.split( "\n" )
+
+        if definition is not None:
+            match   = _key_pattern( key ).match( lines[ definition.index ] )
+            padding = match.group( 1 )                # preserve the column alignment
+            lines[ definition.index ] = f"{key}{padding}= {value_text}"
+        else:
+            anchor  = locate_key( path, insert_after )
+            column  = lines[ anchor.index ].index( "=" )
+            padding = " " * max( 1, column - len( key ) )
+            lines.insert( anchor.index + 1, f"{key}{padding}= {value_text}" )
+
+        directory = os.path.dirname( os.path.abspath( path ) ) or "."
+        handle_fd, temp_path = tempfile.mkstemp( dir=directory, prefix=".fleet-cap-", suffix=".ini" )
+        try:
+            with os.fdopen( handle_fd, "w", encoding="utf-8" ) as temp:
+                temp.write( "\n".join( lines ) )
+                temp.flush()
+                os.fsync( temp.fileno() )
+            os.chmod( temp_path, 0o644 )
+            os.replace( temp_path, path )
+        except BaseException:
+            try:
+                os.unlink( temp_path )
+            except OSError:
+                pass
+            raise
+
+
 def write_int_to_disk( path: str, key: str, value: int ) -> int:
     """
-    Replace the key's value in place, atomically, and RETURN WHAT THE FILE NOW SAYS.
+    Replace the key's value in place, atomically, and return what the file now says.
 
     Requires:
         - path names a writable INI file
-        - key is defined in it EXACTLY once
+        - key is defined in it exactly once
         - value is an int
 
     Ensures:
-        - the defining line keeps its key and its column alignment; ONLY the value
-          after `=` changes
-        - every other byte in the file is unchanged
-        - the replacement is atomic: written to a temp file in the same directory
-          and moved into place with os.replace
-        - RETURNS the value RE-READ FROM THE FILE, never the argument
-        - raises KeyNotFound / KeyDefinedTwice without writing anything
+        - only the value after the equals sign changes
+        - the replacement is atomic and taken under the write lock
+        - returns the value re-read from the file, never the argument
+        - raises KeyNotFound or KeyDefinedTwice without writing anything
 
-    🔴 IT RETURNS A RE-READ AND NOT THE INPUT, AND THAT IS NOT A FLOURISH. A writer
-    that echoes its argument reports success identically whether the bytes reached
-    the disk or not — the caller cannot tell a write from a no-op, and neither can
-    a test. Reading the file back is the only version of this function whose return
-    value can be wrong.
-
-    ⚠️ AND THE RE-READ GOES THROUGH THE SAME PARSER AS THE PRODUCTION READ, so a
-    write that lands somewhere the reader cannot see it fails HERE, loudly, instead
-    of at the next spawn.
+    The return is a re-read and not the input. A writer that echoes its argument reports
+    success the same way whether the bytes reached the disk or not. The re-read goes through
+    the production parser, so a write that lands where the reader cannot see it fails here.
     """
-    definition = locate_key( path, key )          # refuses before touching anything
-
-    with open( path, "r", encoding="utf-8" ) as handle:
-        content = handle.read()
-    lines = content.split( "\n" )
-
-    match   = _key_pattern( key ).match( lines[ definition.index ] )
-    padding = match.group( 1 )                    # preserve the column alignment
-    lines[ definition.index ] = f"{key}{padding}= {int( value )}"
-
-    directory = os.path.dirname( os.path.abspath( path ) ) or "."
-    handle_fd, temp_path = tempfile.mkstemp( dir=directory, prefix=".fleet-cap-", suffix=".ini" )
-    try:
-        with os.fdopen( handle_fd, "w", encoding="utf-8" ) as temp:
-            temp.write( "\n".join( lines ) )
-            temp.flush()
-            os.fsync( temp.fileno() )
-        os.chmod( temp_path, 0o644 )
-        os.replace( temp_path, path )
-    except BaseException:
-        try:
-            os.unlink( temp_path )
-        except OSError:
-            pass
-        raise
-
+    _replace_value_line( path, key, str( int( value ) ) )
     persisted = read_int_from_disk( path, key )
     if persisted is None:
         raise KeyNotFound(
@@ -258,3 +287,31 @@ def write_int_to_disk( path: str, key: str, value: int ) -> int:
             f"The file was replaced; its state is on disk and should be inspected."
         )
     return persisted
+
+
+def write_bool_to_disk( path: str, key: str, value: bool, insert_after: Optional[ str ] = None ) -> bool:
+    """
+    Replace the key's value with true or false in place, and return what the file now says.
+
+    Requires:
+        - path names a writable INI file
+        - key is defined in it exactly once
+        - value is a bool
+        - insert_after is a key defined exactly once, or None
+
+    Ensures:
+        - writes the text true or false and nothing else
+        - adds the line after insert_after's line when the key is absent and insert_after is
+          given, and refuses an absent key when it is not
+        - the replacement is atomic and taken under the write lock
+        - returns the value re-read from the file, never the argument
+        - raises KeyNotFound or KeyDefinedTwice without writing anything
+    """
+    _replace_value_line( path, key, "true" if value else "false", insert_after=insert_after )
+    raw = read_value_from_disk( path, key )
+    if raw is None:
+        raise KeyNotFound(
+            f"Wrote `{key}` to {path} and could not read it back. "
+            f"The file was replaced; its state is on disk and should be inspected."
+        )
+    return raw.strip().lower() == "true"

@@ -7,7 +7,7 @@ shared by all proxy agents. Subclasses implement handle_event() with
 domain-specific routing logic.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy, decision_proxy, or swe_team.
+    This module never imports from notification_proxy, decision_proxy, or swe_team.
 
 References:
     - src/cosa/rest/routers/notifications.py (POST /api/notify/response)
@@ -22,6 +22,27 @@ from cosa.agents.utils.proxy_agents.base_config import (
     DEFAULT_SERVER_PORT,
 )
 from cosa.agents.utils.proxy_agents.rest_submitter import submit_notification_response
+
+
+def print_stats_table( title: str, stats: Dict[ str, Any ] ) -> None:
+    """
+    Print a titled table of counters, one "Label : value" row per entry.
+
+    Requires:
+        - title is a string
+        - stats maps counter names (snake_case) to printable values
+
+    Ensures:
+        - Prints a rule, the title, a rule, one row per counter in dict order, and a closing rule
+        - Turns each key into a title-cased label ("events_received" becomes "Events Received")
+    """
+    print( f"\n{'=' * 50}" )
+    print( title )
+    print( f"{'=' * 50}" )
+    for key, value in stats.items():
+        label = key.replace( "_", " " ).title()
+        print( f"  {label:30s} : {value}" )
+    print( f"{'=' * 50}" )
 
 
 class BaseResponder( ABC ):
@@ -45,6 +66,9 @@ class BaseResponder( ABC ):
     # Subclass override point: log prefix for all messages
     LOG_PREFIX = "[Responder]"
 
+    # Subclass override point: heading of the table print_stats() prints
+    STATS_TITLE = "Proxy Agent Statistics"
+
     def __init__(
         self,
         host    = DEFAULT_SERVER_HOST,
@@ -64,7 +88,7 @@ class BaseResponder( ABC ):
             - Stores connection parameters
             - Initializes empty stats dict
             - authorization_fn starts as None; the proxy's entry point wires it to its
-              listener's login (row e20e249a)
+              listener's login
             - Subclass must add strategies after calling super().__init__()
 
         Args:
@@ -212,11 +236,5 @@ class BaseResponder( ABC ):
         )
 
     def print_stats( self ):
-        """Print summary statistics."""
-        print( f"\n{'=' * 50}" )
-        print( f"Proxy Agent Statistics" )
-        print( f"{'=' * 50}" )
-        for key, value in self.stats.items():
-            label = key.replace( "_", " " ).title()
-            print( f"  {label:30s} : {value}" )
-        print( f"{'=' * 50}" )
+        """Print summary statistics under STATS_TITLE."""
+        print_stats_table( self.STATS_TITLE, self.stats )

@@ -1,17 +1,17 @@
 """
 GitLogLocDeltaAnalyzer — orchestrator for the Daily LoC Delta tool.
 
-Wires together the parser, aggregator, and formatters. Resolves date ranges
-from the CLI flags (--today / --since / --until / --branch / --base) into
-concrete `since` / `until` / `rev_range` arguments for `GitLogParser`.
+Wires together the parser, aggregator, and formatters. Turns the CLI flags
+(--today, --since, --until, --branch, --base) into the `since`, `until` and
+`rev_range` arguments that `GitLogParser` takes.
 
-Reuse map references (verified during REUSE pre-pass):
-- Subprocess pattern: `cosa/repo/branch_analyzer/git_diff_parser.py:115-150`
-- CLI scaffolding shape: `cosa/repo/run_branch_analyzer.py:69-156`
-- quick_smoke_test() template: `cosa/repo/branch_analyzer/analyzer.py:279-407`
-- get_project_root(): `cosa/utils/util.py:626`
+Code this module follows or reuses:
+- Subprocess pattern: `cosa/repo/branch_analyzer/git_diff_parser.py`
+- CLI scaffolding shape: `cosa/repo/run_branch_analyzer.py`
+- quick_smoke_test() template: `cosa/repo/branch_analyzer/analyzer.py`
+- get_project_root(): `cosa/utils/util.py`
 
-Usage:
+Example:
     from cosa.repo.git_loc_delta.analyzer import GitLogLocDeltaAnalyzer
 
     analyzer = GitLogLocDeltaAnalyzer(
@@ -73,29 +73,29 @@ class GitLogLocDeltaAnalyzer:
             - When mode="explicit", at least one of `since` / `until` is set
             - When mode="branch", `base` is a valid ref (default "main"); `branch`
               defaults to the current HEAD if None
-            - all_branches is NOT valid in "branch" mode — a branch delta names its
+            - all_branches is not valid in "branch" mode. A branch delta names its
               own endpoints, so widening the walk to every local ref would answer a
               different question than the one asked. Raises ValueError.
             - repo_path is a valid directory
-            - repo_name is the explicit repo identity (added 2026-05-21 schema v2);
-              None is allowed for backward compatibility but callers writing CSVs
-              should always pass it. CLI resolves the default in
+            - repo_name is the explicit repo identity (schema v2). None is allowed
+              for backward compatibility, but callers writing CSVs should always
+              pass it. The CLI resolves the default in
               `run_git_loc_delta._resolve_repo_name`
 
         Ensures:
             - All flags captured for analyze() to consume
             - analyze() result dict carries `repo_name` (may be None if not set)
 
-        The two questions this tool answers (2026-07-13, bugs bbff93a3 / 37a8beeb):
+        The tool answers two different questions:
 
             "What work happened in window W?"      → date-windowed + all_branches=True
             "How far ahead is this branch?"        → mode="branch" (main..<branch>)
 
-            These coincide ONLY when all work sits on the WIP branch, and they diverge
-            silently otherwise — a commit that landed on `main` sits on the BASELINE
-            side of `main..<branch>` and is uncountable by it, forever. The roll-up
-            asks the FIRST question; for weeks it was being answered with the second.
-            Do not let these two drift back together.
+            The answers match only when all work sits on the WIP branch. Otherwise they
+            diverge silently. A commit that landed on `main` sits on the baseline side
+            of `main..<branch>`, so a branch delta can never count it. The roll-up asks
+            the first question, so it must use the date-windowed mode. Keep the two
+            modes separate.
 
         Raises:
             - ValueError on an invalid mode, or all_branches in branch mode
@@ -205,8 +205,8 @@ class GitLogLocDeltaAnalyzer:
         Ensures:
             - Returns a dict with keys: since, until, branch, rev_range, all_branches,
               repo_path, repo_name, summary, daily, by_type, shas
-            - `shas` is the set of UNIQUE commit SHAs counted — the only honest basis
-              for a commit count (see DailyAggregator.all_shas)
+            - `shas` is the set of unique commit SHAs counted. It is the only sound
+              basis for a commit count (see DailyAggregator.all_shas)
             - `coverage` is present iff reconcile=True; it carries the guard's report
               and its `warning` is the caller's to surface (this method does not print)
 
@@ -285,7 +285,7 @@ def quick_smoke_test():
     Ensures:
         - Tests complete with ✓ or ✗ indicators
         - Uses COSA print_banner formatting
-        - Does NOT raise (catches all exceptions)
+        - Does not raise; it catches all exceptions
     """
     from datetime import date, timedelta
 

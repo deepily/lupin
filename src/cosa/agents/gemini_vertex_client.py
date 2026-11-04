@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """
-GeminiVertexClient — text generation through Google Vertex AI using the
-google-genai SDK in Vertex mode (ADC auth, NO API key).
+Text generation through Google Vertex AI, using the google-genai SDK in Vertex mode.
 
-Row 3405f0b2. Why a NEW client shape: the factory's other clients (ChatClient,
-CompletionClient) route through pydantic_ai / the OpenAI-compat protocol. Vertex
-Gemini text needs a google.genai.Client( vertexai=True, ... ), a genuinely
-different construction — not another VENDOR_CONFIG row over the same two client
-types. This class conforms to LlmClientInterface ( run / run_async -> str ), so
-callers use it identically and nothing downstream changes.
+This is a new client shape. The factory's other clients (ChatClient, CompletionClient)
+route through pydantic_ai or the OpenAI-compatible protocol. Vertex Gemini text needs
+a google.genai.Client( vertexai=True, ... ), a different construction, so it is not
+another VENDOR_CONFIG row over the same two client types. The class conforms to
+LlmClientInterface ( run / run_async -> str ), so callers use it like any other client.
 
-Auth: Application Default Credentials (google.auth ADC), NOT an API key. Vertex
-mode is self-sufficient — do NOT import `vertexai` or `google.cloud.aiplatform`
-(both absent on the deployment host and unneeded). This is also why the factory
-entry for this vendor carries NO env_var: there is no API key to resolve, so the
-two-env-var google-gla pattern (bug 7f361ccf) is structurally impossible here.
+Auth uses Application Default Credentials (google.auth ADC), not an API key. Vertex
+mode is self-sufficient: do not import `vertexai` or `google.cloud.aiplatform`, which
+are absent on the deployment host and unneeded. For the same reason the factory entry
+for this vendor carries no env_var, since there is no API key to resolve.
 
-Ground truth, proven live on the host 2026-08-16 (~1s round trip):
+Working call shape:
     genai.Client( vertexai=True, project=<LUPIN_GCP_PROJECT_ID>, location="global" )
-        .models.generate_content( model="gemini-3.1-flash-lite", contents=... ).text == "OK"
-location MUST be "global" for this model — us-central1 returns 404 NOT_FOUND.
+        .models.generate_content( model="gemini-3.1-flash-lite", contents=... ).text
+The location must be "global" for this model. The region us-central1 returns 404 NOT_FOUND.
 """
 
 from typing import Any, Optional
@@ -33,19 +30,19 @@ class GeminiVertexClient( LlmClientInterface ):
     Text client for Vertex-hosted Gemini models via the google-genai SDK.
 
     Requires:
-        - Application Default Credentials present (google.auth ADC); NO API key.
+        - Application Default Credentials present (google.auth ADC); no API key.
         - LUPIN_GCP_PROJECT_ID resolvable (env or repo env file) unless `project`
           is passed explicitly.
 
     Ensures:
         - run() / run_async() return the model's text response as a str.
-        - Constructs genai.Client in Vertex mode ( vertexai=True ); NEVER passes
+        - Constructs genai.Client in Vertex mode ( vertexai=True ); never passes
           api_key.
-        - location is REQUIRED and passed by the caller ( the vertex:// descriptor );
-          it is NEVER resolved from the environment ( LUPIN_GCP_LOCATION, the var the
-          old resolve_gcp_location() default read ), so an ambient override cannot
-          silently point an arm at a region that 404s for this model ( bug e0f67a7d /
-          Caveat 2 ). project fails loud if unresolvable.
+        - location is required and passed by the caller ( the vertex:// descriptor );
+          it is never resolved from the environment ( LUPIN_GCP_LOCATION ), so an
+          ambient override cannot silently point an arm at a region that returns 404
+          for this model.
+        - project fails loud if unresolvable.
 
     Raises:
         - RuntimeError from resolve_gcp_project_id() if the project id cannot be
@@ -76,13 +73,14 @@ class GeminiVertexClient( LlmClientInterface ):
                   location: Optional[ str ]=None, generation_params: Optional[ dict ]=None,
                   debug: bool=False, verbose: bool=False ):
         """
+        Build a client for one Vertex model, one region and optional generation settings.
+
         Requires:
             - model_name is a non-empty Vertex model id (e.g. "gemini-3.1-flash-lite").
             - generation_params, when given, is a dict whose keys are either known
               generation knobs (_GEN_KEY_MAP) or known control keys (_IGNORED_PARAM_KEYS).
-
-            - location is REQUIRED (fail loud if None) — a per-arm experimental variable
-              that MUST come from the caller/descriptor, never the environment.
+            - location is supplied (fail loud if None); it is a per-arm experimental
+              variable that must come from the caller or descriptor, never the environment.
 
         Ensures:
             - self.project resolves now (fail loud) unless passed; self.location is the
@@ -93,8 +91,8 @@ class GeminiVertexClient( LlmClientInterface ):
               configured temperature/max_tokens actually reach generate_content.
 
         Raises:
-            - ValueError if location is None (bug e0f67a7d / Caveat 2): a silent env
-              default could point an arm at a region that 404s for this model.
+            - ValueError if location is None: a silent env default could point an arm
+              at a region that returns 404 for this model.
             - ValueError if generation_params carries a key that is neither a known
               generation knob nor a known control key (fail loud, never silent-drop).
         """
@@ -162,7 +160,7 @@ class GeminiVertexClient( LlmClientInterface ):
         Lazy-init the Vertex-mode genai.Client (ADC auth, no api_key).
 
         Ensures:
-            - Returns a google.genai.Client built with vertexai=True and NO api_key.
+            - Returns a google.genai.Client built with vertexai=True and no api_key.
         """
         if self._client is None:
             from google import genai

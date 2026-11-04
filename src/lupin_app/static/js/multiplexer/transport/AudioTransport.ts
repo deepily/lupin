@@ -34,6 +34,9 @@ const TRANSPORT_NAME = "AudioTransport";
 
 // Phase 3 default binary handler. Phase 4's AudioStore replaces this when
 // it calls audioTransport.start(sessionId, audioStore.handleChunk).
+/**
+ * Logs the size of a received binary audio frame to the console debug output.
+ */
 /* c8 ignore start */ // Phase 3 default binary handler — replaced by Phase 4 AudioStore.handleChunk in production wiring; the debug-logger fallback runs only when AudioTransport is started without a binaryHandler arg, which Phase 3 boot.ts no longer does once Phase 4 lands. Tests cover the override path (audio_transport.test.ts), not this fallback.
 function defaultBinaryHandler(data: Blob | ArrayBuffer): void {
   const size = data instanceof Blob ? data.size : data.byteLength;
@@ -41,12 +44,28 @@ function defaultBinaryHandler(data: Blob | ArrayBuffer): void {
 }
 /* c8 ignore stop */
 
+/**
+ * A transport for `/ws/audio/{sessionId}` that also delivers binary audio frames.
+ *
+ * `start( sessionId, binaryHandler )` takes the function called once per binary frame.
+ */
 export interface AudioTransport extends Transport {
   start(sessionId: string, binaryHandler?: (data: Blob | ArrayBuffer) => void): void;
 }
 
+/**
+ * The options of an audio transport.
+ *
+ * `baseUrl` is the server origin. The socket opens at `<baseUrl>/ws/audio/<session id>`.
+ */
 export type AudioTransportOptions = BaseTransportOptions;
 
+/**
+ * The audio transport.
+ *
+ * It uses the base handshake and reconnect handling, and routes each binary frame to the handler given at `start`.
+ * A handler that throws is logged and does not stop the transport.
+ */
 export class AudioTransportImpl extends BaseTransportImpl implements AudioTransport {
   protected readonly transportName    : string                = TRANSPORT_NAME;
   protected readonly endpointPath     : string                = "/ws/audio";
@@ -54,9 +73,9 @@ export class AudioTransportImpl extends BaseTransportImpl implements AudioTransp
 
   private boundBinaryHandler: (data: Blob | ArrayBuffer) => void = defaultBinaryHandler;
 
-  // Re-typed `start` to accept the optional binary handler. The base class's
-  // `start(sessionId)` is called; we set the bound handler first so
-  // `openSocket()` (invoked from base.start) sees it.
+  /**
+   * Sets the binary frame handler and then starts the base transport.
+   */
   override start(sessionId: string, binaryHandler?: (data: Blob | ArrayBuffer) => void): void {
     this.boundBinaryHandler = binaryHandler ?? defaultBinaryHandler;
     super.start(sessionId);
@@ -77,6 +96,7 @@ export class AudioTransportImpl extends BaseTransportImpl implements AudioTransp
   };
 }
 
+/** Build an audio transport for `/ws/audio`; no socket opens until `start` is called. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAudioTransport(opts: AudioTransportOptions): AudioTransport {
   return new AudioTransportImpl(opts);

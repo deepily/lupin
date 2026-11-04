@@ -51,6 +51,7 @@ import uuid
 
 import pytest
 
+from tests.integration.manager_seat import manager_seat, new_seat_ids
 from lupin_mcp.task_store_tools import (
     task_edit_impl,
     task_amend_impl,
@@ -61,7 +62,11 @@ from lupin_mcp.task_store_tools import (
 
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )   # runner exports LUPIN_TEST_BASE_URL=:8000
-ACTOR    = "tiffany 2e399fd9"   # test actor (prod stamps the bridge identity; here a plain param)
+# The caller is a DECLARED MANAGER SEAT (manager_seat.py): the priority firewall refuses a
+# P2 create from an API-key caller with no declared role, and reads the caller's bridge via the
+# session id on the end of this actor string. Prod stamps the bridge identity; here the module
+# fixture below writes the bridge and removes it.
+SESSION_ID, ACTOR = new_seat_ids()
 
 # task_edit's FREE-EDIT set (5 — post-amendment; owner/manager REMOVED).
 EDITABLE_FIELDS = ( "title", "body", "priority", "gate_class", "urgency" )
@@ -97,6 +102,13 @@ def _api_key():
         return None
 
 
+@pytest.fixture( scope="module", autouse=True )
+def declared_manager_seat():
+    """Hold the manager bridge for every arm in this module; removed at module teardown."""
+    with manager_seat( SESSION_ID ):
+        yield
+
+
 @pytest.fixture( scope="module" )
 def api_key():
     key = _api_key()
@@ -106,20 +118,22 @@ def api_key():
 
 
 def _make_probe( api_key, **overrides ):
-    """Create one fresh, non-terminal probe row for a mutation arm (status=='queued')."""
+    """Create one fresh, non-terminal probe row for a mutation arm (minted queued, or not_approved
+    when the holding-area default is on, which is the case on :8000)."""
     body = {
-        "created_by" : ACTOR,
-        "item_class" : "task",
-        "title"      : "task_edit parity probe (PRE-EDIT)",
-        "project"    : "lupin",
-        "body"       : "PROBE-ORIGINAL-BODY",
-        "priority"   : "P2",
-        "gate_class" : "none",
-        "urgency"    : "normal",
+        "created_by"      : ACTOR,
+        "item_class"      : "task",
+        "title"           : "task_edit parity probe (PRE-EDIT)",
+        "project"         : "lupin",
+        "body"            : "PROBE-ORIGINAL-BODY",
+        "priority"        : "P2",
+        "gate_class"      : "none",
+        "urgency"         : "normal",
+        "correlation_key" : "epic:unassigned",   # the create door 422s a row with no epic key
     }
     body.update( overrides )
     item = task_create_impl( BASE_URL, api_key, **body )
-    assert isinstance( item, dict ) and item.get( "status" ) == "queued", f"probe create failed: {item!r}"
+    assert isinstance( item, dict ) and item.get( "status" ) in ( "queued", "not_approved" ), f"probe create failed: {item!r}"
     return item
 
 
@@ -320,20 +334,30 @@ def test_empty_updates_rejected( probe, api_key ):
 # ---------------------------------------------------------------------------
 def test_terminal_item_edit_rejected( api_key ):
     """AC5: a done/dropped item refuses any edit ('no edits to closed history')."""
-    item    = _make_probe( api_key, title="task_edit parity probe (TERMINAL)" )
-    task_id = item[ "id" ]
-    trans   = task_transition_impl(
-        BASE_URL, api_key, ACTOR, task_id, "dropped",
-        reason="parity E2E: retire to terminal for the reject arm",
-    )
-    assert not _is_refused( trans ), f"could not drop probe: {trans!r}"
+    # The row is SEEDED as queued, not created through the API: a created probe sits in the
+    # holding area, and closing it from there needs an approver's login (403 on :8000 job
+    # ts-11c25f8a). Built by hand rather than through the `seeded_task_rows` fixture, which
+    # pulls in `clean_test_db` and would drop the module-scoped `probe` row under the tests
+    # that follow.
+    from cosa.rest.db import database as db_module
+    from tests.integration.seeded_task_rows import SeededRows
 
-    resp = task_edit_impl( BASE_URL, api_key, ACTOR, task_id, { "priority": "P1" }, reason="parity E2E: edit terminal" )
+    rows = SeededRows( db_module.engine.url, db_module.get_db )
+    try:
+        task_id = rows.create( "itest edit parity", "task_edit parity probe (TERMINAL)", created_by=ACTOR )[ "id" ]
+        trans   = task_transition_impl(
+            BASE_URL, api_key, ACTOR, task_id, "dropped",
+            reason="parity E2E: retire to terminal for the reject arm",
+        )
+        assert not _is_refused( trans ), f"could not drop probe: {trans!r}"
 
-    assert _is_refused( resp ), f"terminal edit should be refused: {resp!r}"
-    if "http_status" in resp:
-        assert resp[ "http_status" ] == 422, f"expected 422 on terminal edit, got {resp!r}"
-    # No teardown — the row is already terminal.
+        resp = task_edit_impl( BASE_URL, api_key, ACTOR, task_id, { "priority": "P1" }, reason="parity E2E: edit terminal" )
+
+        assert _is_refused( resp ), f"terminal edit should be refused: {resp!r}"
+        if "http_status" in resp:
+            assert resp[ "http_status" ] == 422, f"expected 422 on terminal edit, got {resp!r}"
+    finally:
+        rows.delete_all()
 
 
 # ---------------------------------------------------------------------------

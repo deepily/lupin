@@ -27,6 +27,8 @@ The quick_smoke_test() + `if __name__ == "__main__":` block is MARKED FOR DELETI
 exclude_also regex. `async def main()` is NOT excluded and is tested below.
 """
 import asyncio
+import logging
+import pathlib
 
 import pytest
 
@@ -102,11 +104,15 @@ class _FakeAssistantMessage:
 
 
 class _FakeResultMessage:
-    def __init__( self, session_id="s1", result="done", total_cost_usd=0.01, duration_ms=42 ):
+    def __init__( self, session_id="s1", result="done", total_cost_usd=0.01, duration_ms=42,
+                  is_error=False, subtype="success", errors=None ):
         self.session_id     = session_id
         self.result         = result
         self.total_cost_usd = total_cost_usd
         self.duration_ms    = duration_ms
+        self.is_error       = is_error
+        self.subtype        = subtype
+        self.errors         = errors
 
 
 class _FakeRateLimitEvent:
@@ -702,3 +708,122 @@ def test_main_dispatch_failure( monkeypatch, lupin_root, capsys ):
     asyncio.run( disp.main() )
     out = capsys.readouterr().out
     assert "✗ Failed: nope" in out and "Exit code: 7" in out
+
+
+# =========================================================================== #
+# An error result keeps the CLI's own text (both entry points)
+# =========================================================================== #
+ERROR_LINE = b'{"type":"result","subtype":"success","is_error":true,"result":"Your credit balance is too low"}\n'
+
+
+def test_run_bounded_error_result_names_the_cli_text_when_stderr_is_empty( lupin_root, monkeypatch ):
+    """A failed run whose stderr is empty reports the result's text, not 'Unknown error'."""
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert res.success is False and res.exit_code == 1
+    assert "Your credit balance is too low" in res.error
+    assert "Unknown error" not in res.error
+    assert "stderr:" not in res.error                       # empty stderr adds no suffix
+
+
+def test_run_bounded_error_result_with_exit_zero_is_a_failure( lupin_root, monkeypatch ):
+    """Behaviour change: an error result on exit 0 was success=True; it is now a failure."""
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=0, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert res.success is False and res.exit_code == 0
+    assert "Your credit balance is too low" in res.error
+
+
+def test_run_bounded_error_result_names_the_errors_list( lupin_root, monkeypatch ):
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    line = b'{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["tool died","disk full"]}\n'
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ line ], returncode=1, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "error_during_execution" in res.error
+    assert "tool died; disk full" in res.error
+
+
+def test_run_bounded_error_result_keeps_stderr_beside_the_text( lupin_root, monkeypatch ):
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"kaboom" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "Your credit balance is too low" in res.error
+    assert "kaboom" in res.error
+
+
+def test_run_interactive_error_result_fails_with_the_cli_text( lupin_root, patched_sdk ):
+    """An error ResultMessage ends the session as a failure that names the text, and cleans up."""
+    d = _make_dispatcher( on_message=lambda tid, m: None )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeResultMessage( is_error=True, result="Your credit balance is too low" ) ] ]
+    res = asyncio.run( d._run_interactive( _bounded_task( type=TaskType.INTERACTIVE ) ) )
+    assert res.success is False
+    assert "Your credit balance is too low" in res.error
+    assert d.active_sessions == {}
+
+
+def test_run_interactive_error_result_names_the_errors_list( lupin_root, patched_sdk ):
+    d = _make_dispatcher( on_message=lambda tid, m: None )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeResultMessage( is_error=True, result=None, subtype="error_max_turns", errors=[ "ran out" ] ) ] ]
+    res = asyncio.run( d._run_interactive( _bounded_task( type=TaskType.INTERACTIVE ) ) )
+    assert res.success is False
+    assert "error_max_turns" in res.error and "ran out" in res.error
+
+
+LOGIN_LINE = ( b'{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. '
+               b'API Error: 401 OAuth access token has expired. Re-authenticate to continue."}\n' )
+
+
+def test_run_bounded_401_result_says_the_servers_login_expired_and_how_to_renew_it( lupin_root, monkeypatch ):
+    """A 401 result gets the renew sentence, and stderr still follows it."""
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ LOGIN_LINE ], returncode=1, stderr=b"kaboom" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "API Error: 401 OAuth access token has expired" in res.error
+    assert "docker exec -it lupin-rest-dev claude /login" in res.error and "lupin-rest-test" in res.error
+    assert res.error.endswith( "; stderr: kaboom" )
+
+
+def test_run_bounded_other_errors_do_not_get_the_login_sentence( lupin_root, monkeypatch ):
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "claude /login" not in res.error
+
+
+def test_run_interactive_401_result_says_the_servers_login_expired( lupin_root, patched_sdk ):
+    d = _make_dispatcher( on_message=lambda tid, m: None )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeResultMessage(
+        is_error=True, result="Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue." ) ] ]
+    res = asyncio.run( d._run_interactive( _bounded_task( type=TaskType.INTERACTIVE ) ) )
+    assert res.success is False
+    assert "docker exec -it lupin-rest-dev claude /login" in res.error
+
+
+def test_run_bounded_error_result_cuts_a_long_stderr_to_500( lupin_root, monkeypatch ):
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"s" * 5000 ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "s" * 500 in res.error
+    assert "s" * 501 not in res.error
+
+
+def test_run_interactive_error_result_logs_the_task_id_and_the_cli_text( lupin_root, patched_sdk, caplog ):
+    d = _make_dispatcher( on_message=lambda tid, m: None )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeResultMessage( is_error=True, result="Your credit balance is too low" ) ] ]
+    with caplog.at_level( logging.ERROR, logger=disp.logger.name ):
+        asyncio.run( d._run_interactive( _bounded_task( id="task-77", type=TaskType.INTERACTIVE ) ) )
+    assert any( "task-77" in r.getMessage() and "Your credit balance is too low" in r.getMessage()
+                and r.name == disp.logger.name for r in caplog.records )
+
+
+def test_run_bounded_real_cli_max_turns_result_line_names_the_subtype_and_the_errors( lupin_root, monkeypatch ):
+    """A result line captured from the host CLI (max-turns 1, exit 1) fails with its text."""
+    line = ( pathlib.Path( __file__ ).parent / "fixtures" / "cli-error-max-turns-result-line.json" ).read_bytes()
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ line ], returncode=1, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert res.success is False and res.exit_code == 1
+    assert "error_max_turns" in res.error
+    assert "Reached maximum number of turns (1)" in res.error

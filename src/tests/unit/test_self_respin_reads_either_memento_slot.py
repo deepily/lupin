@@ -83,8 +83,9 @@ def _write_pair( root, slot, *, written_at, canary=CANARY, sid=SID, persona=PERS
     return str( pointer )
 
 
-def _verify( tmp_path, claimed_path, *, now=_dt( 21 ) ):
+def _verify( tmp_path, claimed_path, *, now=None ):
     """The live seam, exactly as self_respin's gate calls it."""
+    if now is None: now = _dt( 21 )
     return sr._default_verify_slot(
         claimed_path, repo_root=str( tmp_path ), persona=PERSONA, session_id=SID,
         now=now, read_text_fn=lambda p: _read_or_none( p ),

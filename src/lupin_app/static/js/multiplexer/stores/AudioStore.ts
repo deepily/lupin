@@ -37,6 +37,8 @@ import type {
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
   StoreAudioEndedPayload,
+  TtsRequestStartedPayload,
+  UtteranceFramePayload,
   StoreTtsModeChangedPayload,
 } from "../shared/types";
 import type { AudioContextLike, AudioBufferLike } from "../audio/pcm-decoder";
@@ -55,12 +57,17 @@ import { error as debugError } from "../shared/debugSink";
 // every scheduler method inside `c8` scope.
 // ---------------------------------------------------------------------------
 
+/** The states an audio context reports: suspended, running or closed. */
 export type AudioContextStateLike = "suspended" | "running" | "closed";
 
-// The destination node is an opaque connect() target — the scheduler never
-// reads members off it, only passes it to `source.connect(...)`.
+/** An opaque connect target. The scheduler only passes it to `source.connect`. */
 export type AudioDestinationNodeLike = object;
 
+/**
+ * The slice of an audio buffer source the scheduler uses.
+ *
+ * It has a buffer, an end callback, and connect, start and stop.
+ */
 export interface AudioBufferSourceLike {
   buffer  : AudioBufferLike | null;
   onended : ( () => void ) | null;
@@ -69,6 +76,11 @@ export interface AudioBufferSourceLike {
   stop(): void;
 }
 
+/**
+ * An audio context that can both decode and schedule playback.
+ *
+ * It adds the time, destination and state, source creation, suspend and resume.
+ */
 export interface SchedulableAudioContext extends AudioContextLike {
   readonly currentTime : number;
   readonly destination : AudioDestinationNodeLike;
@@ -161,6 +173,7 @@ const audioMachine = setup({
  */
 export type TtsMode = "instant" | "reliable";
 
+/** The page-wide audio store: playback state, speech mode and the playback controls. */
 export interface AudioStore {
   state(): AudioPlaybackState;
   /**
@@ -251,6 +264,7 @@ export const TTS_STALL_TAIL_SLACK_MS  = 10_000;
  *  notice. */
 export const TTS_STALL_FIRST_AUDIO_MS = 30_000;
 
+/** Options for `createAudioStore`: the bus, factories, sample rate and test hooks. */
 export interface AudioStoreOptions {
   bus                : EventBus;
   // Factory for the production AudioContext. Production code defaults to a
@@ -274,6 +288,11 @@ export interface AudioStoreOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Models TTS audio playback as a state machine fed by binary chunks from the audio socket.
+ *
+ * Decodes chunks, schedules them gaplessly on one audio context, and publishes state changes on the event bus.
+ */
 class AudioStoreImpl implements AudioStore {
   private readonly bus                 : EventBus;
   private readonly audioContextFactory : () => SchedulableAudioContext;
@@ -334,6 +353,11 @@ class AudioStoreImpl implements AudioStore {
   // NOT released per error: one decode failure emits two error changes, and a
   // blocked context emits one per chunk, so counting errors would skip items.
   private utteranceFailed  = false;
+  // The `utterance_id` the newest speech request sent, or null when
+  // it sent none. The server echoes it on that stream's complete and error
+  // frames. A stream the client gave up on keeps sending (nothing on the server
+  // cancels it), so its late complete frame used to end the next utterance.
+  private expectedUtteranceId: string | null = null;
 
   // The bound binary handler. Named via `function audioStoreBinaryHandler` so
   // `Function.name === "audioStoreBinaryHandler"` — AC9 verification reads
@@ -348,6 +372,11 @@ class AudioStoreImpl implements AudioStore {
   // audio scheduled at step N can never fire against step N+1's schedule.
   private stallTimer: unknown | null = null;
 
+  /**
+   * Builds the audio store from its options, with defaults for context, decoder and timers.
+   *
+   * Starts the playback state machine and creates the binary handler used by the audio transport.
+   */
   constructor(opts: AudioStoreOptions) {
     this.bus                 = opts.bus;
     /* c8 ignore next */ // production-default fallback: defaultAudioContextFactory wraps the browser-only `AudioContext`/`webkitAudioContext`; tests always inject a stub audioContextFactory.
@@ -380,12 +409,20 @@ class AudioStoreImpl implements AudioStore {
     // P6-c — subscribe to the server end-of-utterance marker. The subscription
     // lives HERE (in AudioStore, not boot — F-Sam-B3) with the flag + handler it
     // drives, so the completion seam is self-contained + unit-testable.
-    this.bus.on("audio_streaming_complete", () => this.handleStreamComplete());
-    this.bus.on("tts_error", () => this.handleTtsError());
+    // A frame that names another utterance is not this one's end.
+    this.bus.on<UtteranceFramePayload>("audio_streaming_complete", (e) => {
+      if (!this.namesAnotherUtterance(e.payload)) this.handleStreamComplete();
+    });
+    this.bus.on<UtteranceFramePayload>("tts_error", (e) => {
+      if (!this.namesAnotherUtterance(e.payload)) this.handleTtsError();
+    });
     // Row 26bfde78 — arm the stall watchdog the moment speech is REQUESTED, not
     // when audio arrives: a stream that yields no chunk at all never reaches this
     // store by any other route.
-    this.bus.on("tts_request_started", () => this.armStall(TTS_STALL_FIRST_AUDIO_MS));
+    this.bus.on<TtsRequestStartedPayload>("tts_request_started", (e) => {
+      this.expectedUtteranceId = e.payload.utteranceId ?? null;
+      this.armStall(TTS_STALL_FIRST_AUDIO_MS);
+    });
 
     // Closure-captured instance so the named function expression keeps its
     // identifier — `.bind(this)` would yield `"bound audioStoreBinaryHandler"`,
@@ -399,18 +436,32 @@ class AudioStoreImpl implements AudioStore {
     };
   }
 
+  /**
+   * Returns the current playback state, such as idle, playing or paused.
+   */
   state(): AudioPlaybackState {
     return this.actor.getSnapshot().value as AudioPlaybackState;
   }
 
+  /**
+   * Returns how many chunks have arrived in the current burst of audio.
+   */
   burstLength(): number {
     return this.chunksInBurst;
   }
 
+  /**
+   * Returns the selected TTS mode.
+   */
   ttsMode(): TtsMode {
     return this.ttsModeValue;
   }
 
+  /**
+   * Sets the TTS mode and emits a mode-changed event.
+   *
+   * Setting the value it already has emits nothing.
+   */
   setTtsMode( mode: TtsMode ): void {
     // A no-op write emits nothing — a select fires `change` only on a real change,
     // but a restore path could write the same value and a repaint per identical
@@ -425,6 +476,11 @@ class AudioStoreImpl implements AudioStore {
     } );
   }
 
+  /**
+   * Pauses playback by suspending the audio context, only while playing.
+   *
+   * Disarms the stall watchdog so a manual pause is not reported as a stall.
+   */
   pause(): void {
     // P6-b — suspend() freezes the context clock, so currentTime and every
     // already-scheduled start(when) offset stay coherent; resume() does NOT
@@ -440,6 +496,11 @@ class AudioStoreImpl implements AudioStore {
     void this.audioContext!.suspend();
   }
 
+  /**
+   * Resumes a paused utterance by resuming the audio context.
+   *
+   * Re-arms the stall watchdog from the audio still scheduled. Does nothing unless paused.
+   */
   resume(): void {
     // P6-b — resume the (paused → suspended) context; same non-rebase invariant
     // as pause(). Invariant: state "paused" ⇒ audioContext is non-null.
@@ -452,6 +513,9 @@ class AudioStoreImpl implements AudioStore {
     void this.audioContext!.resume();
   }
 
+  /**
+   * Skips the current audio while playing or paused and resets the burst counter.
+   */
   skip(): void {
     const s = this.state();
     if (s === "playing" || s === "paused") {
@@ -460,9 +524,11 @@ class AudioStoreImpl implements AudioStore {
     }
   }
 
-  // Phase 6b — full halt (per Pass 2 A6). Reachable from playing/paused/ended/error;
-  // no-op from idle/decoding. State transitions to idle and queue counter clears.
-  // The state-change emission flows through the existing actor.subscribe() path.
+  /**
+   * Halts playback fully: silences scheduled audio, returns to idle, clears the burst.
+   *
+   * It does nothing when already idle or decoding.
+   */
   stop(): void {
     const s = this.state();
     if (s === "idle" || s === "decoding") return;
@@ -487,6 +553,9 @@ class AudioStoreImpl implements AudioStore {
     this.utteranceFailed  = false;
   }
 
+  /**
+   * Stops the state machine actor; used by tests for cleanup.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.actor.stop();
@@ -648,6 +717,16 @@ class AudioStoreImpl implements AudioStore {
     this.maybeComplete();
   }
 
+  // Does this complete or error frame belong to a different
+  // utterance than the one last requested? Only a frame that carries an id, while
+  // an id is expected, can be told apart: a frame with no id (a request that sent
+  // none, or a server without the echo) is handled as it always was.
+  private namesAnotherUtterance(payload: UtteranceFramePayload): boolean {
+    if (this.expectedUtteranceId === null) return false;
+    if (typeof payload.utterance_id !== "string") return false;
+    return payload.utterance_id !== this.expectedUtteranceId;
+  }
+
   // The server signalled all chunks sent (audio_streaming_complete). Set the
   // flag, then test for completion — covering the F-Sam-B2 drop-race where the
   // last onended already fired (no live source) and we must emit immediately
@@ -804,6 +883,11 @@ class AudioStoreImpl implements AudioStore {
 // Default factory — `globalThis.AudioContext` (Chrome-only; no vendor prefix).
 // ---------------------------------------------------------------------------
 
+/**
+ * Creates a browser audio context at 24000 Hz for production use.
+ *
+ * Throws if the environment has no AudioContext.
+ */
 /* c8 ignore start */ // Browser-only fallback; tests inject `audioContextFactory` directly.
 function defaultAudioContextFactory(): SchedulableAudioContext {
   // Chrome-only mux (Rick 2026-06-27) — no `webkitAudioContext` vendor prefix.
@@ -821,6 +905,11 @@ function defaultAudioContextFactory(): SchedulableAudioContext {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the store.
+ *
+ * It starts the playback state machine at once and emits `store_audio_state_change` when the state moves.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAudioStore(opts: AudioStoreOptions): AudioStore {
   return new AudioStoreImpl(opts);

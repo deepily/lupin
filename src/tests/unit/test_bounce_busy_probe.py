@@ -115,5 +115,21 @@ class TestExitCodeWireContract( unittest.TestCase ):
         self.assertEqual( _probe_returning( b'{"inflight_agentic_jobs": 1, "run_queue_size": 0}' ), 10 )
 
 
+class TestMainReadsTheUrlFromTheEnvironment( unittest.TestCase ):
+
+    def test_main_probes_the_env_url_when_set( self ):
+        with patch.dict( os.environ, { "BOUNCE_BUSY_URL": "http://override/api/busy" } ), \
+             patch( "bounce_busy_probe.probe", MagicMock( return_value=10 ) ) as fake:
+            self.assertEqual( bp.main(), 10 )
+        fake.assert_called_once_with( "http://override/api/busy" )
+
+    def test_main_falls_back_to_the_default_url_when_unset( self ):
+        env = { k: v for k, v in os.environ.items() if k != "BOUNCE_BUSY_URL" }
+        with patch.dict( os.environ, env, clear=True ), \
+             patch( "bounce_busy_probe.probe", MagicMock( return_value=0 ) ) as fake:
+            self.assertEqual( bp.main(), 0 )
+        fake.assert_called_once_with( bp.DEFAULT_URL )
+
+
 if __name__ == "__main__":
     unittest.main()

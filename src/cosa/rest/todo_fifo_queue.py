@@ -408,28 +408,9 @@ class TodoFifoQueue( FifoQueue ):
         """
         Push a new job onto the queue based on the question.
 
-        🔴 DEAD AS OF STEP 6c (2026-08-21) — NOTHING IN PRODUCTION CALLS THIS.
-
-        This was the live voice path: a question came in, and everything below decided
-        what to do with it — fitness, cache, confirmation, routing, agent construction,
-        the queue push. All of that now lives in `AskFlow` (`cosa/rest/v2/flow.py`), and
-        the switch happened by CUTOVER rather than by this method delegating to it:
-
-            · 11a / 11b retired the router doors that called it; they answer 410.
-            · step 12 moved the seven internal callers to flow.submit() / flow.ask().
-            · door 8 — /api/upload-and-transcribe-mp3, the SPOKEN way in — hands the
-              transcription to the flow in-process (routers/speech.py).
-
-        The body survives only because steps 7b and 7c delete its internals next, and
-        the queue's own coverage suite still drives it. Do not add a caller: a sweep
-        (`src/tests/unit/test_6c_push_job_has_no_production_caller.py`) fails if any
-        production module calls `push_job(` again.
-
-        THE REASON THIS PARAGRAPH EXISTS rather than the deadness just being true: the
-        plan's step 0 closed a trap where `grep "def save_snapshot"` returned the
-        DEPRECATED manager first, and a reader followed it into code nobody runs. A
-        440-line `push_job` that still reads as the live voice path is that same trap,
-        set for the next person who greps for how a spoken question is handled.
+        Nothing in production calls this method. The live voice path now lives in `AskFlow` (`cosa/rest/v2/flow.py`).
+        The body stays only because its internals are deleted later and the queue's coverage suite still drives it.
+        Never add a caller: `src/tests/unit/test_6c_push_job_has_no_production_caller.py` fails if production calls `push_job(`.
 
         Requires:
             - question is a non-empty string
@@ -447,6 +428,13 @@ class TodoFifoQueue( FifoQueue ):
             - Passes user_id to agent creation for event routing
             - Sets user_email on agent/job for TTS notification routing
             - Returns dict with "message" (str) and "job_id" (str or None)
+            - The switch to `AskFlow` was a cutover, not delegation: the router doors that
+              called this answer 410, the internal callers use flow.submit() / flow.ask(),
+              and the spoken door (/api/upload-and-transcribe-mp3) hands the transcription
+              to the flow in-process (routers/speech.py)
+            - The body is flagged as unused because a long push_job that reads as the live
+              voice path would send a reader grepping for how a spoken question is handled
+              into code nobody runs
 
         Raises:
             - None (exceptions handled internally)
@@ -974,10 +962,8 @@ class TodoFifoQueue( FifoQueue ):
         """
         Run a web search, returning a spoken message even when the search backend is down.
 
-        The push path calls this synchronously, so an unhandled transport error here
-        surfaces to the user as an HTTP 500 from /api/push with a stack trace and no
-        explanation. Two unrelated conditions — "we could not route your request" and
-        "a third-party search API is unavailable" — must not both present as a 500.
+        The push path calls this synchronously. An unhandled transport error here would reach the
+        user as an HTTP 500 from /api/push, with a stack trace and no explanation.
 
         Requires:
             - question_gist is a non-empty string
@@ -985,6 +971,8 @@ class TodoFifoQueue( FifoQueue ):
         Ensures:
             - returns a non-empty string suitable for speaking to the user
             - never raises on a search-backend transport or HTTP failure
+            - a search-backend outage never presents as a 500, so "a third-party search API is
+              unavailable" stays distinct from "we could not route your request"
 
         Raises:
             - nothing for search-backend failures; unrelated exceptions propagate
@@ -1046,8 +1034,9 @@ class TodoFifoQueue( FifoQueue ):
 
     def _confirm_agentic_routing( self, command, args, user_id, user_email, original_question ):
         """
-        Confirm agentic command routing with user via voice prompt.
-        Shows what was detected and offers alternatives from the same confusable group.
+        Confirm agentic command routing with the user via a voice prompt.
+
+        It shows what was detected and offers alternatives from the same confusable group.
 
         Requires:
             - command is a valid JOB_ARG_CONTRACTS key
@@ -1056,9 +1045,9 @@ class TodoFifoQueue( FifoQueue ):
         Ensures:
             - Returns confirmed command string, or None if cancelled
             - User sees product name, not internal command string
-            - On timeout or notification error, returns None (ABORTS): a silent
+            - On timeout or notification error, returns None (aborts): a silent
               timeout must not masquerade as a confirmation of a possibly-wrong
-              detection, so the detected command is NOT auto-run. Row cad45cf1.
+              detection, so the detected command is not auto-run.
             - The wait window is read from config key
               "agentic routing confirm timeout seconds" (default 30), not a literal.
         """
@@ -1130,10 +1119,9 @@ class TodoFifoQueue( FifoQueue ):
         """
         Handle an agentic agent command via the Runtime Argument Expeditor.
 
-        Creates a speculative job card in the UI BEFORE the expeditor runs,
-        so the user sees immediate visual feedback. The expeditor's notifications
-        route to this card via job_id. On success the real job inherits the
-        speculative ID; on cancel/failure the card moves to the dead queue.
+        Creates a speculative job card in the UI before the expeditor runs, so the user sees feedback at once.
+        The expeditor's notifications route to this card via job_id.
+        On success the real job inherits the speculative ID; on cancel or failure the card moves to the dead queue.
 
         Requires:
             - command is a key in JOB_ARG_CONTRACTS
@@ -1277,17 +1265,11 @@ class TodoFifoQueue( FifoQueue ):
         monopolize      : bool = False,
     ) -> Dict:
         """
-        Submit an agentic job with explicit routing_command + args, bypassing
-        the runtime argument expeditor entirely.
+        Submit an agentic job with explicit routing_command and args, skipping the expeditor.
 
-        Designed for unattended / service-to-service job submission (E2E test
-        harnesses, CLI tools, downstream agents). The caller supplies all
-        required args up-front; no interactive Q&A is triggered. If the agent
-        constructor rejects the args, the factory returns None and this method
-        returns an error result.
-
-        Contrast with `push_job` (the voice/UI /api/push path) which runs the
-        expeditor to fill arg gaps interactively.
+        Designed for unattended or service-to-service submission (E2E harnesses, CLI tools, downstream agents).
+        The caller supplies all required args up-front, and no interactive Q&A is triggered.
+        Unlike `push_job` (the voice/UI /api/push path), it never runs the expeditor to fill arg gaps.
 
         Requires:
             - routing_command matches one of the branches in create_agentic_job
@@ -1300,6 +1282,8 @@ class TodoFifoQueue( FifoQueue ):
               are emitted (pending→todo) with the same flow as _handle_agentic_command
             - On unknown command or construction failure: returns error message
               with job_id=None and emits no state transitions
+            - If the agent constructor rejects the args, the factory returns None and this
+              method returns an error result
         """
         agent_entry = JOB_ARG_CONTRACTS.get( routing_command, {} )
         job_prefix  = agent_entry.get( "job_prefix", "aj" )
@@ -1369,7 +1353,9 @@ class TodoFifoQueue( FifoQueue ):
 
     def push( self, item: Any ) -> None:
         """
-        Override parent's push to add producer-consumer coordination and emit pending→todo transition.
+        Push an item, adding producer-consumer coordination and the pending→todo transition.
+
+        Overrides the parent's push.
 
         Requires:
             - item must implement QueueableJob protocol

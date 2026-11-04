@@ -105,6 +105,7 @@ function statusGlyph( status: string ): DocumentFragment {
                     aria-hidden="true">${ face.icon }</span>` as DocumentFragment;
 }
 
+/** What the finished-tasks controls draw: the lit statuses and the window slider position. */
 export interface FinishedControlsOptions {
   /** Currently-lit statuses (POSITIVE polarity — these are the SHOWN ones). */
   shown      : ReadonlyArray<string>;

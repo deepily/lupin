@@ -1,104 +1,40 @@
 """
-board_sweep.py — the Stop-hook's "you are not done sweeping yet" counter.
+board_sweep.py: the Stop-hook counter that says you are not done sweeping yet.
 
-RICK'S ORDER, 2026-07-25 (broadcast `40626d03`): both seats holding the task board are to
-iterate EVERY owed row once, asking two questions per row — *is it already done?* and *has
-it been overtaken by events?* — dropping or closing what answers yes. His instruction for
-this module, verbatim in effect:
+Seats holding the task board iterate every owed row once, asking whether it is already done
+and whether events have overtaken it. The hook keeps poking until every row is iterated.
 
-    "stop poke hook says, do not stop reviewing them until you have iterated your way
-     through all of your 22 or your 71 items, depending on who you are."
+Why a ledger and not the `heartbeat worker goal line` INI key:
+  1. That key is role-scoped, not persona-scoped. Both sweeping seats resolve to `worker`,
+     so one key shows both the same number, and a seat could stop early believing it was done.
+  2. A constant cannot count down. A fixed sentence is a reminder, not a gate.
 
-WHY A LEDGER AND NOT A CONFIG LINE. The obvious implementation is to edit the
-`heartbeat worker goal line` INI key. It is wrong for two independent reasons, both checked
-before writing this:
+Only the arm meaning "this seat is not sweeping" may be quiet. Every arm meaning "I could
+not tell" is loud:
+  - No ledger file: returns "", the only silent arm, because no sweep is the fleet norm.
+  - Incomplete: the do-not-stop line with the live count.
+  - Complete: a distinct completion line. A finished sweep that goes quiet looks like one
+    that never started.
+  - Unreadable or corrupt ledger: a loud line naming the file and the parse failure, never "".
+  - Older than the TTL: a loud expired line instead of any fraction.
 
-  1. THAT KEY IS ROLE-SCOPED, NOT PERSONA-SCOPED. Both sweeping seats resolve to `worker`,
-     so ONE key cannot say "22" to María and "71" to Mr. Radio. It would say the same
-     number to both, and one of them would be wrong in the direction that lets a seat stop
-     early believing it had finished.
-  2. A CONSTANT CANNOT COUNT DOWN. Rick asked for a poke that keeps firing "until you have
-     iterated through all of them", which needs PROGRESS, not a fixed sentence. A line that
-     says "sweep your 71" on tick 1 and on tick 71 alike is a reminder, not a gate.
+A ledger with no expiry would report a finished sweep forever. Nothing in the hooks tree
+calls `rearm()`, so `reviewed >= live_owed` stayed true. The fix is an expiry
+read at display time, since wiring in `rearm()` needs live board ids the Stop hook lacks.
+  - Only the arms comparing `reviewed` (which ages) with `live_owed` (fetched fresh each
+    tick) become the expired line. The `live_owed is None` and `live_owed == 0` arms describe
+    the live board, stay true at any age, and gain a staleness note. Alarming on "0 owed
+    now" would be crying wolf.
+  - Age is a distance (`abs`), not a difference: a future-stamped ledger is as untrustworthy
+    as an old one. A signed comparison would read it as fresh, failing toward quiet.
 
-⚠️ HOW THIS FAILS, STATED OUT LOUD, because the whole point is a gate that cannot be
-   satisfied by accident:
-
-   · NO LEDGER FILE            -> returns "". A seat not sweeping gets a byte-identical
-                                  poke to yesterday's. This is the ONLY silent arm, and it
-                                  is silent because "no sweep in progress" is the normal
-                                  state of every session in the fleet.
-   · LEDGER PRESENT, INCOMPLETE-> the DO-NOT-STOP line, carrying the live count.
-   · LEDGER PRESENT, COMPLETE  -> a distinct "sweep complete" line. NOT silence. A finished
-                                  sweep that reverts to saying nothing is indistinguishable
-                                  from a sweep that never started, and that difference is
-                                  the entire receipt.
-   · LEDGER UNREADABLE/CORRUPT -> a LOUD line naming the file and the parse failure. It does
-                                  NOT degrade to "". A counter that reports "nothing to
-                                  sweep" because it could not read its own state is the
-                                  alarm-gated-on-the-healthy-value defect, and this gate
-                                  exists precisely to survive a seat that wants to stop.
-   · LEDGER OLDER THAN THE TTL -> a LOUD EXPIRED line INSTEAD of any fraction. See the
-                                  next block; a stale ledger's `reviewed` list is the one
-                                  input here that ages, and both arms that consume it read
-                                  SATISFIED as it ages.
-
-   The ordering matters: only the arm meaning "this seat is not sweeping" may be quiet.
-   Every arm meaning "I could not tell" is loud.
-
-🔴 A LEDGER WITH NO EXPIRY REPORTS A FINISHED SWEEP FOREVER (bug `c2d6bcfa`, María 🌸
-   2026-07-31, root-caused by Clayton 😎). `rearm()` below exists to refresh a ledger against
-   a fresh board — and is called from NOWHERE in the hooks tree. Only the read-only
-   `sweep_progress_line` is invoked (`stop.py:436` via `_board_sweep_line`). So a ledger
-   written once is never refreshed: `board-sweep-maria.json` and `board-sweep-mr-radio.json`
-   were written on 2026-07-25/26 at 22/22 and 71/71 and stood untouched for five days, with
-   `reviewed >= live_owed` permanently true.
-
-   ⇒ THE FIX IS AN EXPIRY, NOT A CALL SITE. Wiring `rearm()` into the hook lifecycle needs
-     per-persona live board ids at hook time, which the Stop hook does not have. A TTL read
-     at the point of DISPLAY needs nothing the function is not already holding.
-
-   ⇒ WHICH ARMS IT REPLACES, and why not all of them. `live_owed` is fetched fresh every
-     tick; `reviewed` is what ages. Only the two arms that compare them — SATISFIED and
-     IN PROGRESS — can be made to lie by an old ledger, so only those two are replaced by
-     the EXPIRED line. The `live_owed is None` and `live_owed == 0` arms describe the LIVE
-     board and stay true at any ledger age; they carry an appended staleness note instead.
-     Turning a truthful "0 owed now" into an alarm would be crying wolf on a clear board,
-     which is the same defect as a false green wearing the other coat.
-
-   ⇒ AGE IS MEASURED AS A DISTANCE, NOT A DIFFERENCE (`abs`). A ledger stamped in the FUTURE
-     is as untrustworthy as one stamped long past, and a signed comparison would read it as
-     freshly written — failing toward quiet, which is the direction this module never fails.
-
-THE COUNTER COUNTS REVIEWS, NOT DROPS. A row that survives the sweep is REVIEWED — Rick's
-two questions were asked and both answered no. Counting only drops would make a careful
-sweep look idle and would reward dropping, which is the one outcome nobody wants from a
-board-hygiene pass. For the same reason `total_at_start` is FROZEN at sweep start: if the
-denominator shrank as rows were dropped, the gate could be closed by dropping instead of by
-reviewing.
-
-🔴 BOTH ENDS OF THE FRACTION NEED A FLOOR, and the first version only had one (María 🌸,
-   `fae1bbc4`, 2026-07-25, found with a PLANTED-JUNK CONTROL rather than by reading):
-
-       record_reviewed( "maria", [ 5 real ids ] )                         -> 5/22
-       record_reviewed( "maria", [ "deadbeef-0000-0000-0000-000000000000" ] ) -> 6/22
-
-   `deadbeef-…` is on nobody's board and it COUNTED. The denominator was frozen so dropping
-   rows could not shrink the gate open — and the NUMERATOR had the identical hole from the
-   other side: it could not be shrunk, but it could be PADDED. Twenty-two arbitrary strings
-   satisfied the gate. A counter that measures "how many ids were recorded" instead of "how
-   many of MY rows were reviewed" is only correct while the caller is honest, which is
-   precisely the property a gate exists not to depend on.
-
-   ⇒ The start-set of row ids is now frozen alongside the count, and an id outside it is
-     REFUSED. The membership set must be the FROZEN start-set and never a live re-query
-     (also hers): a row legitimately DROPPED mid-sweep leaves the live board, so a naive
-     live intersection would reject the id of a row you just reviewed and dropped — the
-     exact work the gate is trying to reward.
-
-   ⇒ A ledger carrying NO frozen start-set is UNVALIDATED, and `sweep_progress_line` says so
-     out loud on every tick rather than reporting a bare fraction. An unverifiable numerator
-     rendered as a clean number is the false green this whole gate exists to prevent.
+The counter counts reviews, not drops, since counting drops would reward dropping. The shown
+denominator is the live owed count, so a shrunken board cannot hold a satisfied gate open.
+`total_at_start` stays in the ledger as history. The numerator needs a floor too.
+The start-set of row ids is frozen with the count and an id outside it is refused, so
+arbitrary strings cannot pad it. Membership uses that frozen set, never a live re-query,
+because a row dropped mid-sweep leaves the live board.
+A ledger with no frozen start-set is reported as unvalidated on every tick, since an unverifiable numerator is a false green.
 """
 
 import json
@@ -129,12 +65,12 @@ def _ledger_age_seconds( ledger, now ):
 
     Ensures:
         - prefers `updated_at`; falls back to `started_at` when it is absent or unparseable
-        - returns a NON-NEGATIVE float — the DISTANCE, not the difference. A future-dated
+        - returns a non-negative float, the distance and not the difference. A future-dated
           ledger (clock moved backwards) is untrustworthy in the same way an ancient one is,
           and a signed comparison would read it as freshly written
         - assumes UTC for a naive timestamp, since every stamp this module writes is UTC
-        - returns None when no timestamp is parseable — the caller treats that as expired,
-          matching the module's "loud whenever I could not tell" rule
+        - returns None when no timestamp is parseable; the caller treats that as expired,
+          matching the module rule to be loud whenever it could not tell
         - never raises
     """
     for key in ( "updated_at", "started_at" ):
@@ -154,9 +90,9 @@ def _age_phrase( age ):
     Render a ledger age for a human reading a poke.
 
     Ensures:
-        - None -> names the MISSING TIMESTAMP rather than inventing an age. "unknown age"
-          would read as a measurement that came back vague; it is not a measurement at all
-        - otherwise a coarse "N hours old" / "N days old" — the reader needs the order of
+        - None -> names the missing timestamp rather than inventing an age. An "unknown
+          age" would read as a measurement that came back vague; it is not a measurement at all
+        - otherwise a coarse "N hours old" or "N days old"; the reader needs the order of
           magnitude to decide, not a precise duration
         - never raises
     """
@@ -171,11 +107,11 @@ def persona_slug( persona ):
     Filesystem-safe slug for a persona display name.
 
     Requires:
-        - persona is a string (any case/spacing) or None
+        - persona is a string (any case or spacing) or None
 
     Ensures:
-        - returns lowercase with spaces/dots/underscores collapsed to single hyphens
-        - returns "" for None/blank, which callers treat as "no ledger addressable"
+        - returns lowercase with spaces, dots, underscores and slashes collapsed to single hyphens
+        - returns "" for None or blank, which callers treat as no ledger addressable
         - never raises
     """
     if not persona: return ""
@@ -201,11 +137,11 @@ def read_ledger( persona ):
 
     Ensures:
         - returns ( ledger_dict, error_string ); at most one is truthy
-        - ( None, "" )      -> no ledger file: this seat is not sweeping
-        - ( dict, "" )      -> a parsed, structurally-valid ledger
-        - ( None, "<why>" ) -> the file EXISTS and could not be used. Never collapsed into
-          the no-file case: "absent" and "unreadable" mean opposite things to the caller,
-          and only one of them is safe to be quiet about
+        - ( None, "" ) -> no ledger file: this seat is not sweeping
+        - ( dict, "" ) -> a parsed, structurally valid ledger
+        - ( None, "<why>" ) means the file exists and could not be used. It is never collapsed
+          into the no-file case: absent and unreadable mean opposite things to the caller, and
+          only one of them is safe to be quiet about
         - never raises
     """
     path = ledger_path( persona )
@@ -231,54 +167,33 @@ def sweep_progress_line( persona, live_owed=None, now=None ):
     """
     The sentence the Stop-hook appends to its self-poke reason.
 
-    THE DENOMINATOR IS THE LIVE OWED COUNT (Rick, 2026-07-27).
-
-    He saw `✅ BOARD SWEEP COMPLETE: 71/71 owed rows iterated` in a live poke and
-    asked whether 71 was real. It was — on 2026-07-25. Mr Radio's board was 71 rows
-    then and is 12 now, and the ledger on disk has no expiry, so a finished sweep
-    asserted a two-day-old fraction in the present tense on every tick.
-
-    🔴 MY FIRST FIX SPLIT THE ARMS — live count on COMPLETE, frozen on IN-PROGRESS —
-    to protect the module docstring's anti-gaming property (*"if the denominator
-    shrank as rows were dropped, the gate could be closed by dropping instead of by
-    reviewing"*). RICK OVERRULED IT, 2026-07-27: *"your argument about gaming the
-    board … is specious, and irrelevant. I as a human operator will catch gaming of
-    the system in a heartbeat. Let's not assume the worst of Claude Code just yet."*
-
-    ⇒ HE IS ALSO RIGHT ON THE MERITS, which I missed while defending the freeze. The
-    sweep's purpose is *"review every row you owe."* If the board legitimately shrank
-    — rows closed, dropped with reason, reassigned — then a seat that reviewed what
-    remains IS done, and the frozen denominator was holding a satisfied gate open
-    against a board that no longer had the work in it. The freeze defended against a
-    dishonest seat by lying to an honest one on every tick.
-
-    ⇒ `total_at_start` stays in the LEDGER as the historical record of what the sweep
-    began against. It is no longer the denominator anyone is shown.
+    The denominator is the live owed count, not the frozen `total_at_start` (kept as history).
+    A frozen fraction was asserted in the present tense long after the board had shrunk.
+    A frozen denominator would hold a satisfied gate open when the work is gone.
 
     Requires:
         - persona is the seat's display name (str) or None
-        - live_owed is the seat's CURRENT owed-row count, or None when the caller
-          could not resolve it (store unreachable — the caller must pass None
-          rather than 0, since 0 is a real and very different answer)
-        - now is a timezone-aware datetime, or None to read the clock. A test seam;
-          the stop.py call site passes neither and is unchanged
+        - live_owed is the seat's current owed-row count, or None when the caller could not
+          resolve it (store unreachable); the caller must pass None rather than 0, since 0 is
+          a real and very different answer
+        - now is a timezone-aware datetime, or None to read the clock; a test seam, and the
+          stop.py call site passes neither
 
     Ensures:
-        - "" ONLY when this seat has no ledger — see the module docstring's failure table
-        - the denominator is `live_owed` on BOTH arms; `total_at_start` is reported
-          only as dated history
-        - live_owed None ⇒ the count is UNKNOWN and says so; it NEVER falls back to
-          the frozen total, which is the stale number this change exists to remove
-        - an incomplete sweep yields a DO-NOT-STOP line with the number remaining
+        - "" only when this seat has no ledger; see the module docstring for the state table
+        - the denominator is `live_owed` on both arms; `total_at_start` is reported only as
+          dated history
+        - live_owed None means the count is unknown and says so; it never falls back to the
+          frozen total, which is the stale number this design removes
+        - an incomplete sweep yields a do-not-stop line with the number remaining
         - a complete sweep yields a distinct completion line (never silence)
-        - an unreadable ledger yields a LOUD line naming the file and the reason
-        - a ledger older than SWEEP_LEDGER_TTL_SECONDS (or carrying no parseable
-          timestamp) yields a LOUD EXPIRED line INSTEAD of either arm that compares
-          `reviewed` against `live_owed` — a stale ledger satisfies that comparison
-          forever, which is bug `c2d6bcfa`
-        - the two arms that describe the LIVE board rather than the ledger (live_owed
-          None, live_owed 0) keep their verdict and gain an appended staleness note —
-          they are true at any ledger age, and alarming on them would be a false alarm
+        - an unreadable ledger yields a loud line naming the file and the reason
+        - a ledger older than `SWEEP_LEDGER_TTL_SECONDS` (or carrying no parseable timestamp)
+          yields a loud expired line instead of either arm that compares `reviewed` against
+          `live_owed`, because a stale ledger satisfies that comparison forever
+        - the two arms that describe the live board rather than the ledger (live_owed None,
+          live_owed 0) keep their verdict and gain an appended staleness note; they are true
+          at any ledger age, and alarming on them would be a false alarm
         - never raises
     """
     ledger, error = read_ledger( persona )
@@ -351,33 +266,30 @@ def sweep_progress_line( persona, live_owed=None, now=None ):
 
 def record_reviewed( persona, task_ids, total_at_start=None, board_ids=None ):
     """
-    Mark one or more rows as iterated, creating the ledger on first call.
+    Mark rows as iterated in the seat's ledger, creating it on the first call.
 
     Requires:
         - persona is the seat's display name
-        - task_ids is an iterable of task-id strings (duplicates fine — de-duped on read)
-        - total_at_start is the owed count at sweep start; REQUIRED on the call that
-          CREATES the ledger and ignored afterwards, so the denominator cannot drift down
-          as rows are dropped
-        - board_ids is the seat's FROZEN start-set of owed row ids. Supplied on the
-          creating call; ignored afterwards. When present, every recorded id must belong
-          to it
+        - task_ids is an iterable of task-id strings (duplicates fine, de-duped on read)
+        - total_at_start is the owed count at sweep start; required on the call that creates
+          the ledger and ignored afterwards, so the denominator cannot drift down as rows
+          are dropped
+        - board_ids is the seat's frozen start-set of owed row ids. Supplied on the creating
+          call; ignored afterwards. When present, every recorded id must belong to it
 
     Ensures:
         - returns the written ledger dict
-        - raises ValueError when creating a ledger without a positive total_at_start — a
-          sweep with no denominator can never be completed, and a gate that cannot close is
-          an outage
-        - raises ValueError, naming the offending ids, when a recorded id is NOT in the
-          frozen start-set — the numerator cannot be padded past the board (María's
-          planted-junk finding; see the module docstring)
-        - a ledger with NO frozen start-set accepts anything, and `sweep_progress_line`
-          then reports itself UNVALIDATED on every tick. Accepting silently AND reporting
-          cleanly would be the false green; accepting loudly is the honest degrade for the
-          ledgers that predate this check
-        - membership is checked against the FROZEN set, never a live re-query: a row
+        - raises ValueError when creating a ledger without a positive total_at_start; a sweep
+          with no denominator can never be completed, and a gate that cannot close is an outage
+        - raises ValueError, naming the offending ids, when a recorded id is not in the frozen
+          start-set; the numerator cannot be padded past the board
+        - a ledger with no frozen start-set accepts anything, and `sweep_progress_line` then
+          reports itself unvalidated on every tick. Accepting silently and reporting cleanly
+          would be a false green; accepting loudly is the honest degrade for the ledgers that
+          predate this check
+        - membership is checked against the frozen set, never a live re-query: a row
           legitimately dropped mid-sweep leaves the live board, and rejecting it would
-          punish exactly the work the gate rewards
+          punish the work the gate rewards
         - raises ValueError rather than appending to an unreadable ledger
     """
     ledger, error = read_ledger( persona )
@@ -419,54 +331,22 @@ def record_reviewed( persona, task_ids, total_at_start=None, board_ids=None ):
 
 def rearm( persona, live_board_ids ):
     """
-    Re-create a seat's ledger against a fresh board WITHOUT losing progress or un-freezing
-    the denominator.
+    Re-create a seat's ledger on a fresh board, keeping progress and the start-set.
 
-    ⚠️ NOTHING CALLS THIS, AND THAT IS DELIBERATE AS OF 2026-08-01 — it is not an oversight
-       to be tidied up by wiring it in. Bug `c2d6bcfa` was filed because the absent call site
-       let ledgers report a finished sweep forever, and the obvious reading of that bug is
-       "so add the call site." It was not the remedy: re-arming needs the seat's CURRENT owed
-       row ids, and the Stop hook has a persona and a count, not a board. Fetching one per
-       tick would put a store round-trip in the hook's path to fix a display defect.
-
-       ⇒ The expiry in `sweep_progress_line` closes the bug using only what that function
-         already holds. This stays as the operator's manual re-arm — the thing the EXPIRED
-         line tells a seat to run — and its correctness below is still load-bearing for that.
-
-    🔴 THE DEFECT THIS EXISTS TO NOT HAVE (María 🌸, `fae1bbc4`, 2026-07-25 — the third time
-       in one evening she found the frozen-denominator property re-derived incorrectly one
-       layer out). The first re-arm helper did:
-
-           kept = [ r for r in prior["reviewed"] if r in set( live_ids ) ]   # INTERSECTION
-           total_at_start = len( live_ids )
-
-       A row you REVIEWED AND CLOSED is terminal, so it has left the live board. The
-       intersection discards it from `reviewed`, AND the denominator re-derives from that
-       same shrunken list. ⇒ RE-ARMING UN-FREEZES THE DENOMINATOR. Close ten rows, re-arm,
-       and a 71-row gate silently becomes 61 — the seat is PUNISHED FOR MAKING PROGRESS,
-       and the gate lets it stop having reviewed 61.
-
-       The freeze held only so long as nobody re-armed, and re-arming was the published
-       remedy for the previous defect. A property built correctly in one place and
-       re-derived in another is not a property.
-
-    ⇒ THE FIX IS ONE WORD: UNION, not intersection. The frozen set is everything on the
-      live board PLUS everything already reviewed — because a reviewed row that has left
-      the board left it BY BEING REVIEWED.
-
-    ⚠️ IT IS ALSO `blocker_terminal`'s SHAPE AGAIN, and that is the lesson worth keeping:
-       "absent from the live board" means BOTH "I closed it" and "it was never mine", and
-       the code cannot tell those apart. Both of tonight's flag bugs were an absence with
-       two meanings.
+    Nothing calls this, and wiring it into the Stop hook is not wanted.
+    The hook lacks the owed row ids and would need a per-tick store round-trip. The expiry covers stale ledgers.
+    This stays as the operator's manual re-arm.
 
     Requires:
         - persona is the seat's display name
-        - live_board_ids is the CURRENT owed-row id set for that seat
+        - live_board_ids is the current owed-row id set for that seat
 
     Ensures:
-        - the frozen start-set is union( live_board_ids, prior reviewed ) — never an
-          intersection, so completed work can neither shrink the denominator nor be
-          discarded from the numerator
+        - the frozen start-set is union( live_board_ids, prior reviewed ), never an
+          intersection, so completed
+          work can neither shrink the denominator nor be discarded from the numerator. A row
+          reviewed and closed has left the live board, and an intersection would drop it from
+          `reviewed`, punishing progress. Absent from the live board means both "I closed it" and "it was never mine"
         - prior `reviewed` entries are carried forward in full
         - returns ( ledger, carried_forward_count, frozen_total )
         - raises ValueError on an unreadable prior ledger rather than silently starting over
@@ -486,15 +366,11 @@ def rearm( persona, live_board_ids ):
 
 def quick_smoke_test():
     """
-    Self-contained smoke test — writes only inside a temp dir.
+    Self-contained smoke test of the sweep ledger; writes only inside a temp dir.
 
-    ⚠️ THIS FUNCTION WAS DEAD-WRONG FROM 2026-07-27 TO 2026-08-01 and nothing noticed,
-    because nothing runs it. It asserted `"2/5"` and `"3 NOT YET REVIEWED"` against calls
-    that passed no `live_owed` — which take the UNKNOWN arm and contain neither string, and
-    `"3 NOT YET REVIEWED"` had stopped being emitted anywhere at all. It is fixed here to
-    the current API, but the lesson is the file's, not the function's: an assertion nobody
-    executes decays into a description of a version that no longer exists. The real gate is
-    `src/tests/unit/test_board_sweep_gate.py`.
+    It asserts the current API: the unknown-owed arm, the live-count arms, expiry, a corrupt
+    ledger and a refused start. Nothing runs it automatically, so an assertion here can decay.
+    The real gate is `src/tests/unit/test_board_sweep_gate.py`.
     """
     import tempfile
 

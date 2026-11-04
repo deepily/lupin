@@ -16,15 +16,10 @@ from cosa.memory.snapshot_manager_interface import SolutionSnapshotManagerInterf
 class ManagerType( Enum ):
     """The solution snapshot backends this app can build.
 
-    ⚰️ FILE_BASED was REMOVED on 2026-08-21 (Rick's ruling 6791ce47, "delete after v2 lands"),
-    together with `FileBasedSolutionManager` and the deprecated `SolutionSnapshotManager`.
-    It had been unreachable in production for some time — `main.py` refuses to start on any
-    value but "postgres" — but unreachable is not the reason it went. It was a TRAP: a grep
-    for `def save_snapshot` found the deprecated file-based class FIRST, in the most
-    obviously-named file, with a docstring saying it saved to files. A reviewer read that,
-    believed it, and raised a false alarm that the queue was writing to files while the
-    brain read Postgres. Two of the three classes carrying that method could not be built at
-    all; only one could, and it was the third one found.
+    The file-based backend, `FileBasedSolutionManager` and the deprecated
+    `SolutionSnapshotManager` are gone. They were unreachable, since `main.py` refuses
+    any value but "postgres". They also misled readers: a deprecated `save_snapshot`
+    docstring claimed to save to files, so a reviewer thought the queue wrote files.
 
     One backend, so one answer to "where does a snapshot go".
     """
@@ -116,7 +111,7 @@ class SolutionSnapshotManagerFactory:
         Create the Postgres+pgvector solution snapshot manager.
 
         Requires:
-            - config may be empty; there is NO storage location to validate and
+            - config may be empty; there is no storage location to validate and
               config["table_name"] is optional (reporting-only — the table is fixed
               by the ORM model)
 

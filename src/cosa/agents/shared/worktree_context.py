@@ -1,35 +1,36 @@
 """
-Async context manager for TFE/BFE git worktree isolation (Bug 9, 2026-04-16).
+Async context manager that isolates TFE/BFE git work in a dedicated worktree.
 
-When `cosa worktree enabled` is true, FixExecutor (Phase 3) and GitStrategist
-(Phase 5) run inside a dedicated worktree sandbox so agent edits never touch
-the operator's current working tree.
+When `cosa worktree enabled` is true, FixExecutor and GitStrategist run inside a dedicated worktree sandbox.
+Agent edits then never touch the operator's current working tree.
 
 Usage:
     async with WorktreeContext( job_id ) as wt:
         if wt.enabled:
             executor = FixExecutor( ..., worktree_cwd=wt.path )
             git_ops  = GitOps( cwd=wt.path )
+
         else:
             executor = FixExecutor( ... )
             git_ops  = GitOps( cwd=cu.get_project_root() )
+
         # ... work ...
+
     # auto-cleanup on __aexit__ (when auto_cleanup=true)
 
-Design:
+Behaviour:
     - Config read from ConfigurationManager (LUPIN_CONFIG_MGR_CLI_ARGS)
-    - `enabled=False` by default → context becomes a no-op and `wt.path` is
-       the project root, so callers can uniformly pass it
-    - Collision detection: target path must NOT exist at __aenter__
-    - Base ref validation: falls back to HEAD with warning if configured ref missing
-    - Cleanup failures are logged as warnings; never mask the primary exception
-
-See: src/rnd/v0.1.6/2026.04.16-bug-9-worktree-isolation.md
+    - `enabled=False` by default, so the context becomes a no-op and `wt.path` is
+       the project root, and callers can uniformly pass it
+    - Collision detection: target path must not exist at __aenter__
+    - Base ref validation: falls back to HEAD with a warning if the configured ref is missing
+    - Cleanup failures are logged as warnings; they never mask the primary exception
 """
 
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import cosa.utils.util as cu
@@ -192,20 +193,21 @@ class WorktreeContext:
 
     async def __aexit__( self, exc_type, exc, tb ) -> bool:
         """
-        Clean up the worktree when auto_cleanup is true — via the shared
-        drain-then-remove reaper (Worktree Lifecycle Contract §4a).
+        Clean up the worktree when auto_cleanup is true, via the shared drain-then-remove reaper.
+
+        The reaper step follows the Worktree Lifecycle Contract.
 
         Ensures:
             - Returns False so any primary exception propagates unmasked
             - Cleanup errors are logged as warnings but never raised
-            - Delegates to worktree_reaper.drain_then_remove, which DIRTY-GATES:
-              it auto-commits WIP to the branch ONLY when `git status --porcelain`
-              is non-empty, then removes the dir + KEEPS the branch (never pushes;
-              only the arbiter janitor deletes a branch, and only a merged one).
-              A NORMAL exit is expected-clean (FixExecutor/GitStrategist commit
-              their own work by design — verified 2026-06-22), so the auto-commit
-              fires ONLY on the abnormal-exit path (an exception / early-return
-              that left WIP) — the rescue we want, with zero interference on the
+            - Delegates to worktree_reaper.drain_then_remove, which gates on dirt.
+              It auto-commits WIP to the branch only when `git status --porcelain`
+              is non-empty, then removes the dir and keeps the branch.
+              It never pushes. Only the arbiter janitor deletes a branch, and only a merged one.
+              A normal exit is expected to be clean, because FixExecutor and GitStrategist
+              commit their own work themselves. So the auto-commit
+              fires only on the abnormal-exit path (an exception or early return
+              that left WIP). That is the rescue we want, with zero interference on the
               happy path. No in-flight check is needed: the `async with` body
               (and thus any GitStrategist op) has completed before __aexit__ runs.
         """
@@ -241,7 +243,7 @@ class WorktreeContext:
 
     def _load_config( self ) -> tuple:
         """
-        Read config values. Returns (enabled, sandbox_root, base_ref, auto_cleanup, cleanup_timeout).
+        Read config as (enabled, sandbox_root, base_ref, auto_cleanup, cleanup_timeout).
 
         Tests inject either a config_mgr with get() or an enabled-override.
         """
@@ -323,6 +325,35 @@ class WorktreeContext:
             }
         except Exception as e:
             return { "success": False, "stdout": "", "stderr": str( e ), "returncode": -1 }
+
+
+@asynccontextmanager
+async def worktree_scope( orchestrator, label ):
+    """
+    Give an expediter orchestrator worktree isolation for the span of the block.
+
+    Requires:
+        - orchestrator has job_id, debug, _worktree_cwd and an async
+          _warn_on_uncommitted_changes_if_any()
+        - label is the class name shown in the debug print
+
+    Ensures:
+        - yields the WorktreeContext
+        - orchestrator._worktree_cwd is the worktree path while isolation is active
+        - when isolation is off, _worktree_cwd is None and the uncommitted-changes warning runs
+        - orchestrator._worktree_cwd is None on exit, even if the block raised
+    """
+    async with WorktreeContext( job_id=orchestrator.job_id, debug=orchestrator.debug ) as wt:
+        if wt.enabled:
+            orchestrator._worktree_cwd = wt.path
+            if orchestrator.debug: print( f"[{label}] Worktree isolation active: {wt.path}" )
+        else:
+            orchestrator._worktree_cwd = None
+            await orchestrator._warn_on_uncommitted_changes_if_any()
+        try:
+            yield wt
+        finally:
+            orchestrator._worktree_cwd = None
 
 
 # ==========================================================================

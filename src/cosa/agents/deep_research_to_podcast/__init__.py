@@ -11,7 +11,7 @@ This agent:
 3. Passes report_path to Podcast Generator
 4. Returns combined result with both artifacts
 
-Usage:
+Example:
     # CLI
     python -m cosa.agents.deep_research_to_podcast \\
         --query "State of quantum computing in 2026" \\

@@ -38,6 +38,9 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from lupin_cli.claude_code.hooks.lib.listener_processes import LISTENER_MODULE_NAME
+from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
+from lupin_cli.claude_code.hooks.lib.main_tree import WORKTREE_LANE_MARK, main_tree_root
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, get_buffer_path
 )
@@ -71,18 +74,11 @@ _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 
 def _find_all_listener_pids( session_id, session_dir=None ):
     """
-    Find EVERY live listener serving this session — bridge PID + cmdline matches.
+    Find every live listener serving this session, by bridge PID and cmdline match.
 
-    Reap-all fix (F2, 2026-06-11): the bridge remembers only the LAST spawned
-    listener's PID, so when the `--continue` double-fire produced duplicates,
-    killing just the bridge PID orphaned the other listener permanently (the
-    broadcast-miss root cause). This collects the union of:
-        1. The bridge-recorded listener_pid (if any)
-        2. Live processes whose cmdline matches `--session-id <hash>` for ANY
-           hash associated with the session (session_id, stable_session_id,
-           every session_ids[] entry — the listener is started with the STABLE
-           hash while this hook receives the transient ID)
-    See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §4
+    The bridge keeps only the last listener's PID, and a `--continue` double-fire
+    can leave duplicates. So this also matches live cmdlines with `--session-id <hash>`.
+    The hashes are session_id, stable_session_id and every session_ids[] entry.
 
     Requires:
         - session_id is a non-empty string
@@ -138,17 +134,11 @@ def _find_all_listener_pids( session_id, session_dir=None ):
 
 def _release_voice_persona( session_id ):
     """
-    Best-effort POST /api/cosa-voice/voice-persona/{stable_session_id}/release.
+    Release this session's voice persona with a best-effort POST to the server.
 
-    Uses the stable_session_id from the bridge file (not the transient
-    session_id passed to the hook) so the release matches what was
-    originally allocated. Resolves credentials via hook_credentials and
-    obtains a JWT for the auth-gated endpoint.
-
-    Fail-soft: any failure (server unreachable, auth issue, missing
-    credentials, missing bridge) logs to stderr and continues. The
-    background dead-PID filter on subsequent /allocate calls will reclaim
-    the slot anyway.
+    The endpoint is /api/cosa-voice/voice-persona/{stable_session_id}/release.
+    It uses the stable id from the bridge file, so the release matches the
+    allocation. It resolves credentials through hook_credentials and gets a JWT for the endpoint. A failure logs to stderr; later /allocate calls reclaim the slot.
 
     Requires:
         - session_id is a non-empty string
@@ -240,6 +230,9 @@ def _stop_listener( pid ):
     Args:
         pid: Listener process ID
     """
+    # A pid read from a bridge file may have been reused by another program.
+    if not process_runs( pid, LISTENER_MODULE_NAME ):
+        return
     try:
         os.kill( pid, signal.SIGTERM )
     except ProcessLookupError:
@@ -267,7 +260,7 @@ def _stop_listener( pid ):
 # Row 129cc96b P3: a seat's worktree lives here, and nowhere else (the P5 creation guard).
 # A cheap path filter so an ordinary session's exit does not start a waiter; the waiter
 # itself makes the real decision (seat lock, liveness, clean, merged).
-_WORKTREE_LANE_MARK          = os.sep + os.path.join( ".claude", "worktrees" ) + os.sep
+_WORKTREE_LANE_MARK          = WORKTREE_LANE_MARK
 _SEAT_TEARDOWN_WAIT_SECONDS = 120
 
 
@@ -275,10 +268,9 @@ def _schedule_seat_teardown( payload, popen_fn=None, lupin_root=None ):
     """
     Launch a detached waiter that removes this seat's own worktree once the seat is gone.
 
-    The hook cannot remove the tree itself: the seat's process is still standing in it
-    while this hook runs. So it starts `python -m cosa.agents.shared.seat_teardown`,
-    detached and outside the tree, which waits for the seat to be gone and then removes
-    the tree and its merged branch — or keeps them and logs why.
+    The hook cannot remove the tree itself: the seat's process still stands in it.
+    So it starts `python -m cosa.agents.shared.seat_teardown`, detached and outside
+    the tree. The waiter removes the tree and its merged branch, or keeps them and logs why.
 
     Requires:
         - payload is the SessionEnd hook input (reason, cwd)
@@ -287,7 +279,8 @@ def _schedule_seat_teardown( payload, popen_fn=None, lupin_root=None ):
         - returns None, starting nothing, on /clear or /compact (the session goes on),
           when LUPIN_ROOT is unset, or when cwd is not under a `.claude/worktrees/` lane
         - otherwise starts the waiter with start_new_session=True and cwd="/", appending
-          its one-line JSON verdict to <LUPIN_ROOT>/io/worktree-janitor/seat-teardown.jsonl,
+          its one-line JSON verdict to <main tree>/io/worktree-janitor/seat-teardown.jsonl
+          (main_tree_root( LUPIN_ROOT ) — never inside the seat's own tree),
           and returns the Popen handle
         - never raises; a failed launch is printed to stderr and the janitor stays the
           backstop
@@ -300,7 +293,9 @@ def _schedule_seat_teardown( payload, popen_fn=None, lupin_root=None ):
     if _WORKTREE_LANE_MARK not in cwd + os.sep:
         return None
     try:
-        log_dir = os.path.join( lupin_root, "io", "worktree-janitor" )
+        # The log is the repo's, not the seat's: written into the seat's own tree it is an
+        # ignored non-artifact file, which is what makes the janitor refuse that tree.
+        log_dir = os.path.join( main_tree_root( lupin_root ), "io", "worktree-janitor" )
         os.makedirs( log_dir, exist_ok=True )
         with open( os.path.join( log_dir, "seat-teardown.jsonl" ), "a" ) as log:
             return popen_fn(

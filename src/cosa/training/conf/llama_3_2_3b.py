@@ -38,8 +38,7 @@ architecture and requirements:
 The PEFT Trainer uses this configuration through the load_model_config() function to
 properly initialize and fine-tune the Llama model with settings optimized for its
 architecture. This configuration accounts for Llama 3.2's specific tokenization approach,
-memory requirements, and architectural characteristics that differ from other models in
-the collection.
+memory requirements, and architectural characteristics that differ from other models.
 """
 
 from typing import Union, Callable

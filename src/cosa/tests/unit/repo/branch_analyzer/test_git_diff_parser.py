@@ -328,3 +328,82 @@ class TestClassifyDiffLine:
         lines = parser.get_diff( "main", "HEAD" )
         add_line = next( dl for dl in lines if dl.operation == "add" )
         assert add_line.file_path is None
+
+
+class TestFilePathPrefix:
+    """The file path comes from the 'b/' side of the header, one prefix removed."""
+
+    @pytest.mark.parametrize( "header, expected", [
+        ( "diff --git a/src/x.py b/src/x.py",         "src/x.py"        ),  # control: no leading b
+        ( "diff --git a/bug-fix-queue.md b/bug-fix-queue.md", "bug-fix-queue.md" ),
+        ( "diff --git a/build.py b/build.py",         "build.py"        ),
+        ( "diff --git a/b/x.py b/b/x.py",             "b/x.py"          ),
+    ] )
+    def test_path_loses_exactly_one_b_slash_prefix( self, parser, run_mock, header, expected ):
+        """
+        Ensures:
+            - only the literal 'b/' prefix is removed, never a character set
+        """
+        run_mock.return_value = _completed( stdout=header + "\n+x\n" )
+        lines = parser.get_diff( "main", "HEAD" )
+        add_line = next( dl for dl in lines if dl.operation == "add" )
+        assert add_line.file_path == expected
+
+
+class TestPlusMinusTextInsideHunk:
+    """A content line is classified by its first character once the hunk has started."""
+
+    HEADER = (
+        "diff --git a/a.c b/a.c\n"
+        "index 111..222 100644\n"
+        "--- a/a.c\n"
+        "+++ b/a.c\n"
+    )
+
+    def _ops( self, parser, run_mock, body ):
+        run_mock.return_value = _completed( stdout=self.HEADER + body )
+        return { dl.content: dl.operation for dl in parser.get_diff( "main", "HEAD" ) }
+
+    def test_control_plain_add_and_remove_and_file_headers( self, parser, run_mock ):
+        ops = self._ops( parser, run_mock, "@@ -1 +1 @@\n+x\n-y\n z\n" )
+        assert ops[ "+x" ] == "add"
+        assert ops[ "-y" ] == "remove"
+        assert ops[ " z" ] == "context"
+        assert ops[ "--- a/a.c" ] == "meta"
+        assert ops[ "+++ b/a.c" ] == "meta"
+        assert ops[ "@@ -1 +1 @@" ] == "meta"
+
+    def test_added_text_starting_plus_plus_is_add( self, parser, run_mock ):
+        ops = self._ops( parser, run_mock, "@@ -1 +1,2 @@\n+++i;\n+++ spaced\n" )
+        assert ops[ "+++i;" ] == "add"
+        assert ops[ "+++ spaced" ] == "add"
+
+    def test_removed_text_starting_minus_minus_is_remove( self, parser, run_mock ):
+        ops = self._ops( parser, run_mock, "@@ -1,2 +1 @@\n---i;\n--- spaced\n" )
+        assert ops[ "---i;" ] == "remove"
+        assert ops[ "--- spaced" ] == "remove"
+
+    def test_next_file_header_after_a_hunk_is_meta_again( self, parser, run_mock ):
+        body = (
+            "@@ -1 +1 @@\n+x\n"
+            "diff --git a/e.c b/e.c\n"
+            "--- a/e.c\n"
+            "+++ b/e.c\n"
+            "@@ -1 +1 @@\n+y\n"
+        )
+        run_mock.return_value = _completed( stdout=self.HEADER + body )
+        lines = parser.get_diff( "main", "HEAD" )
+        by_content = [ ( dl.content, dl.operation, dl.file_path ) for dl in lines ]
+        assert ( "--- a/e.c", "meta", "e.c" ) in by_content
+        assert ( "+++ b/e.c", "meta", "e.c" ) in by_content
+        assert ( "+y", "add", "e.c" ) in by_content
+
+    def test_no_newline_marker_is_context( self, parser, run_mock ):
+        ops = self._ops( parser, run_mock, "@@ -1 +1 @@\n+x\n\\ No newline at end of file\n" )
+        assert ops[ "\\ No newline at end of file" ] == "context"
+
+    def test_classify_defaults_to_header_rules_outside_a_hunk( self, parser ):
+        assert parser._classify_diff_line( "+++ b/a.c" ) == "meta"
+        assert parser._classify_diff_line( "+++ b/a.c", in_hunk=True ) == "add"
+        assert parser._classify_diff_line( "--- a/a.c", in_hunk=True ) == "remove"
+        assert parser._classify_diff_line( "@@ -1 +1 @@", in_hunk=True ) == "meta"

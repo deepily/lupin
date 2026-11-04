@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 """
-Grep a design document for claims that have been killed but may still be asserted somewhere in it.
+Grep a design document for killed claims that may still be asserted in it.
 
-WHY THIS EXISTS. The Phi-4 vs Flash-Lite comparison design had SIX stale claims found by reviewers,
-one at a time, over an afternoon. Every one was the same failure: a section was revised and a
-neighbour kept asserting what it replaced. Fixing them individually did not work — it cost six
-rounds of reviewer time — because the rule "when a claim dies, grep the document" is a thing a
-person has to remember, and the author kept not remembering it inside the very fix for it.
+Why this exists:
+    A design document accumulated several stale claims, found by reviewers one at a time.
+    Each was the same failure: a section was revised and a neighbour kept asserting what it
+    replaced. Fixing them individually cost many rounds of reviewer time.
+    The rule "when a claim dies, grep the document" has to be remembered by a person.
+    The author kept forgetting it inside the very fix for it.
 
-WHAT COUNTS AS MARKED. A dead phrase is fine when it appears inside a strike-through, a withdrawal,
-or a banner naming it dead — that is a document correctly recording its own history. It is a defect
-only when it reads as a live instruction. Because these documents are hard-wrapped, the marker often
-lands on a NEIGHBOURING line, so the check reads a small window around each hit rather than the one
-line it matched. A checker that flags every historical mention trains its reader to ignore it, which
-is the same false-positive failure the fleet already watches for on the arbiter.
+What counts as marked:
+    A dead phrase is fine inside a strike-through, a withdrawal, or a banner naming it dead.
+    That is a document correctly recording its own history. It is a defect only when it
+    reads as a live instruction. These documents are hard-wrapped, so the marker often
+    lands on a neighbouring line. The check therefore reads a small window around each hit,
+    not only the line it matched. A checker that flags every historical mention trains its
+    reader to ignore it.
+    That is the false-positive failure the fleet already watches for on the arbiter.
 
 Usage:
     python3 src/scripts/check_dead_claims.py <doc.md> [--claims <claims.json>]
 
 Exit codes:
-    0  no live dead-claim found
-    1  at least one dead claim reads as live
+    0  no live dead-claim found.
+    1  at least one dead claim reads as live.
     2  the document or claims file could not be read
 """
 
@@ -84,10 +87,12 @@ _QUOTED = re.compile( r"`([^`]+)`|\"([^\"]+)\"" )
 
 def _first_quoted( text ):
     """
+    Return the first quoted token of one table cell.
+
     Requires:
         - text is a single table cell's raw text
     Ensures:
-        - returns the inner text of the FIRST backticked or double-quoted token, or
+        - returns the inner text of the first backticked or double-quoted token, or
           None when the cell carries neither (a header/separator cell)
     """
     match = _QUOTED.search( text )
@@ -135,8 +140,9 @@ def extract_table_claims( text, table_after="DEAD CLAIMS" ):
 
 def unenforced_table_claims( text, claims, table_after="DEAD CLAIMS" ):
     """
-    The canonical table phrases the checker does NOT enforce — the drift between the
-    human dead-claims table and the claims the checker actually greps for.
+    Return the table phrases the checker does not enforce.
+
+    That is the drift between the human dead-claims table and the claims the checker greps for.
 
     Requires:
         - text is the document's full text
@@ -160,12 +166,14 @@ _EXEMPTION = re.compile( r"<!--\s*claim-exempt:\s*(.+?)\s*-->" )
 
 def _exemption_reason( line ):
     """
+    Return the stated reason of a `claim-exempt` marker on one line, or None.
+
     Requires:
         - line is a single line of the document
     Ensures:
         - returns the stated reason (trimmed) of a reasoned `claim-exempt` marker on
-          this line, or None when the line carries no such marker OR its reason is
-          blank/whitespace-only — a reason is REQUIRED, a blank suppress cannot slip in
+          this line, or None when the line carries no such marker or its reason is
+          blank/whitespace-only — a reason is required, a blank suppress cannot slip in
     """
     match = _EXEMPTION.search( line )
     if match is None:
@@ -176,8 +184,9 @@ def _exemption_reason( line ):
 
 def find_exemptions( text, claims ):
     """
-    List every per-line dead-claim exemption in the document, so they can be audited
-    and never accumulate unnoticed.
+    List every per-line dead-claim exemption in the document.
+
+    Listing them lets them be audited, so they never accumulate unnoticed.
 
     Requires:
         - text is the document's full text
@@ -185,7 +194,7 @@ def find_exemptions( text, claims ):
     Ensures:
         - returns ( lineno, reason, stale, line ) for each line carrying a reasoned
           `claim-exempt` marker, in document order
-        - stale is True when NO dead phrase appears on that line — the exemption now
+        - stale is True when no dead phrase appears on that line — the exemption now
           guards nothing and should be removed
     """
     out = []
@@ -208,13 +217,13 @@ def find_live_claims( text, claims, skip_until=None ):
         - skip_until is a line prefix that ends the checker's own exempt region, or None
 
     Ensures:
-        - returns a list of ( lineno, phrase, reason, line ) for UNMARKED occurrences only
-        - a phrase inside or adjacent to a marker is not reported — the window is +/- WINDOW lines,
+        - returns a list of ( lineno, phrase, reason, line ) for unmarked occurrences only
+        - a phrase inside or adjacent to a marker is not reported — the window is +/- `WINDOW` lines,
           because a hard-wrapped banner puts its marker on a neighbouring line
-        - everything before skip_until is ignored, so a document's own dead-claims TABLE does not
+        - everything before skip_until is ignored, so a document's own dead-claims table does not
           report itself
         - a line carrying a reasoned `claim-exempt` marker is not reported — an explicit,
-          per-line, auditable exemption distinct from the fuzzy +/- WINDOW marker heuristic
+          per-line, auditable exemption distinct from the fuzzy +/- `WINDOW` marker heuristic
     """
     lines = text.splitlines()
     start = 0
@@ -239,6 +248,8 @@ def find_live_claims( text, claims, skip_until=None ):
 
 def main( argv=None ):
     """
+    Run the dead-claims check from the command line.
+
     Requires:
         - argv is a list of arguments or None
 

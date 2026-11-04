@@ -1,10 +1,9 @@
 import cosa.utils.util as du
 from cosa.memory.embedding_manager import EmbeddingManager
-from cosa.memory.embedding_provider import get_embedding_provider
+from cosa.memory.embedding_provider import get_embedding_provider, init_embedding_table_config
 
 from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
 from cosa.memory.solution_snapshot import SolutionSnapshot as ss
-from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
 
 from threading import Lock
@@ -35,9 +34,7 @@ class InputAndOutputTable():
             - ConfigurationManager errors propagated
         """
 
-        self.debug          = debug
-        self.verbose        = verbose
-        self._config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        init_embedding_table_config( self, debug, verbose )
 
         # Bug 574fd1dc Defect 2 — async-drop accounting. The async embedding
         # path drops a row on any failure; before this, the loss was
@@ -49,14 +46,11 @@ class InputAndOutputTable():
         self._embedding_mgr      = EmbeddingManager( debug=debug, verbose=verbose )
         self._embedding_provider = get_embedding_provider( debug=debug, verbose=verbose )
 
-        # Get standardized embedding dimension from config
-        self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
-
         # The question-embedding cache table generates query/input embeddings.
         self._question_embeddings_tbl = QuestionEmbeddingsTable( debug=self.debug, verbose=self.verbose )
 
-    def insert_io_row( self, date: str=du.get_current_date(), time: str=du.get_current_time( include_timezone=False ),
-        input_type: str="", input: str="", input_embedding: list[float]=[], output_raw: str="", output_final: str="", output_final_embedding: list[float]=[], solution_path_wo_root: Optional[str]=None, async_embedding: bool=None
+    def insert_io_row( self, date: str=None, time: str=None,
+        input_type: str="", input: str="", input_embedding: list[float]=None, output_raw: str="", output_final: str="", output_final_embedding: list[float]=None, solution_path_wo_root: Optional[str]=None, async_embedding: bool=None
     ) -> None:
         """
         Insert a new row into the input/output table.
@@ -85,6 +79,9 @@ class InputAndOutputTable():
         # In this case the only embedding that we are caching is the one that corresponds to the query/input, otherwise known
         # as the 'question' in the solution snapshot object and the 'query' in the self._question_embeddings_tbl object.
         # TODO: Make consistent the use of the terms 'input', 'query' and 'question'. While they are synonymous that's not necessarily clear to the casual reader.
+        # None means "not given": the date and time are read per call, not once at import
+        if date is None: date = du.get_current_date()
+        if time is None: time = du.get_current_time( include_timezone=False )
         # Get debug text truncation length from config first (needed for timer message)
         debug_truncate_len = self._config_mgr.get( "debug text truncation length", default=48, return_type="int" )
         timer = Stopwatch( msg=f"insert_io_row( '{input[ :debug_truncate_len ]}...' )", silent=True )
@@ -192,19 +189,11 @@ class InputAndOutputTable():
 
     def _record_async_failure( self, input_text: str, error: Exception ) -> None:
         """
-        Count one dropped row from the async embedding path (bug `574fd1dc`).
+        Count one dropped row from the async embedding path.
 
-        The row itself is still lost — this does NOT retry or dead-letter it.
-        What it changes is that the loss becomes COUNTABLE. Before this, the
-        handler printed a banner and returned, so the only record of a dropped
-        row was a console line in a container log, and "how many have we lost"
-        was unanswerable by construction.
-
-        Called from the embedding-pool worker thread, so the increment is
-        locked: the pool runs several workers concurrently and a bare `+= 1`
-        on a shared int is a read-modify-write that can silently lose counts —
-        which would make the instrument understate exactly the quantity it
-        exists to measure.
+        The row is still lost: this does not retry or dead-letter it, it only makes the
+        loss countable. Called from pool worker threads, so the increment is locked
+        because a bare `+= 1` can silently lose counts.
 
         Requires:
             - input_text is the row's input string (may be empty)
@@ -213,7 +202,7 @@ class InputAndOutputTable():
         Ensures:
             - async_failure_count increments by exactly one per call
             - last_async_failure holds ( truncated input, exception type, str(error) )
-              for the MOST RECENT failure
+              for the most recent failure
             - never raises — a failure in the failure recorder must not mask
               the original error
         """
@@ -309,11 +298,7 @@ class InputAndOutputTable():
         Raises:
             - None
         """
-        from cosa.rest.db.database import get_db
-        from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
-        with get_db() as session:
-            rows = InputAndOutputRepository( session ).get_all_io( max_rows=max_rows )
-            return [ self._io_row_to_dict( r ) for r in rows ]
+        return self._rows_as_dicts( "get_all_io", max_rows )
 
     def get_io_stats_by_input_type( self, max_rows: int=1000 ) -> dict[str, int]:
         """
@@ -346,10 +331,26 @@ class InputAndOutputTable():
         Raises:
             - None
         """
+        return self._rows_as_dicts( "get_all_qnr", max_rows )
+
+    def _rows_as_dicts( self, fetch_name: str, max_rows: int ) -> list[dict]:
+        """
+        Fetch rows with one repository getter and project each to the 5-key record shape.
+
+        Requires:
+            - fetch_name names a InputAndOutputRepository method taking max_rows
+            - max_rows is a positive integer
+
+        Ensures:
+            - Returns the getter's rows as _io_row_to_dict records, in order
+
+        Raises:
+            - AttributeError if fetch_name is not a repository method
+        """
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
         with get_db() as session:
-            rows = InputAndOutputRepository( session ).get_all_qnr( max_rows=max_rows )
+            rows = getattr( InputAndOutputRepository( session ), fetch_name )( max_rows=max_rows )
             return [ self._io_row_to_dict( r ) for r in rows ]
 
     @staticmethod

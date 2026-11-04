@@ -4,15 +4,13 @@ Companion to `SKILL.md`. Use when the user's change doesn't fit cleanly into the
 
 ---
 
-## CoSA Submodule (`src/cosa/`)
+## CoSA (`src/cosa/`)
 
 `src/cosa/` is on the container's `PYTHONPATH` via the bind mount of `src/`. From a reload-detection standpoint:
 
 - `.py` files inside `src/cosa/` behave **identically** to `.py` files in the parent `src/` tree
-- Dev `:7999` auto-reloads them; test `:8000` requires a bounce
-- The submodule's *git state* is not the AI's concern from parent context (see `feedback_lupin_only_never_cosa.md`), but **editing** `src/cosa/*.py` files and relying on auto-reload is fine
-
-CLAUDE.md memory entry `feedback_cosa_edit_vs_manage_git.md` confirms this.
+- Neither `:7999` nor `:8000` picks them up on its own (auto-reload is off); both need a bounce
+- CoSA is ordinary Lupin source, not a submodule: its git state is managed from Lupin like any other file
 
 ---
 

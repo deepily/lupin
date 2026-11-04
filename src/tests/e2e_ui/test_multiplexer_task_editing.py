@@ -62,7 +62,7 @@ the refusal away. An unreachable branch nobody flags is how the FIRST repair of 
 flow-ratio hole went wrong: its fix sat behind an `if` that no request could reach, and
 the tests around it looked green.
 
-Audit + every measurement: src/rnd/v0.2.1/2026.09.01-mocked-seam-audit-e2e-ui.md
+Audit + every measurement: the R&D write-up "mocked seam audit e2e ui"
 
 Venue: :8000 (monopolize, scheduled) — `test_multiplexer_*` E2E batch. Uses
 page.route stubs (no real state mutation) but runs via the manager's :8000

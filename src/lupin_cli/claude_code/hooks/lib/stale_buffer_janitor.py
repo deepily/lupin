@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
 """
-Stale cc-buffer janitor — bug 59f355e0 follow-up (task 18603e57).
+Stale cc-buffer janitor: archives undrained buffers owned by dead sessions.
 
-The store-backed DM inbox reconcile (dm_inbox_reconcile.py, commit 4cfc9ddc)
-stops FUTURE peer-DM orphans, but pre-existing orphans already sit undrained in
-~/.claude/sessions/cc-buffer-*.jsonl files owned by DEAD sessions (84 across 46
-files at triage). This janitor ARCHIVES those stale files — it does NOT delete
-and NEVER replays a DM into any session.
+The store-backed DM inbox reconcile (dm_inbox_reconcile.py) stops future
+peer-DM orphans. Older orphans already sit undrained in
+~/.claude/sessions/cc-buffer-*.jsonl files owned by dead sessions. This janitor
+archives those stale files. It does not delete them and never replays a DM
+into any session.
 
-Doctrine (Mr. Radio ruling 2026-07-02):
-    - DRY-RUN by DEFAULT: list what WOULD move, move nothing. --apply is a
-      SEPARATE, explicitly-granted go (dry-run-before-destructive).
-    - REVERSIBLE: --apply MOVEs stale files to a quarantine dir (never `rm`).
-    - BIAS-TO-KEEP: a buffer is archived ONLY when its owning session is
-      definitively NOT live (no running listener AND no fresh/pid-live bridge)
-      AND the file is older than a grace window. Any ambiguity keeps it.
-    - NO REPLAY: this is archival only — orphaned DMs are never re-injected.
+Doctrine:
+    - Dry run by default: list what would move, and move nothing. `--apply` is a
+      separate, explicitly granted go (dry-run before anything destructive).
+    - Reversible: `--apply` moves stale files to a quarantine dir (never `rm`).
+    - Bias to keep: a buffer is archived only when its owning session is
+      definitively not live (no running listener and no fresh or pid-live
+      bridge) and the file is older than a grace window. Any ambiguity keeps it.
+    - No replay: this is archival only, and orphaned DMs are never re-injected.
 
-Design authority: src/rnd/v0.1.9/2026.07.02-dm-loss-surfacing-leg-triage.md
-(Orphan inventory + proposed janitor sweep).
-
-    python -m lupin_cli.claude_code.hooks.lib.stale_buffer_janitor            # DRY-RUN
-    python -m lupin_cli.claude_code.hooks.lib.stale_buffer_janitor --apply    # MOVE (separate go)
+Usage:
+    python -m lupin_cli.claude_code.hooks.lib.stale_buffer_janitor            (dry run)
+    python -m lupin_cli.claude_code.hooks.lib.stale_buffer_janitor --apply    (move, separate go)
 """
 
 import argparse
@@ -89,11 +87,11 @@ def count_buffer_lines( text ):
 
 def classify_buffer( meta, live_hashes, now_epoch, min_age_hours ):
     """
-    Classify ONE buffer as archive-eligible ('dead') or keep, with a reason.
+    Classify one buffer as archive-eligible ("dead") or keep, with a reason.
 
-    BIAS-TO-KEEP: dead is True ONLY when the session hash is NOT in live_hashes
-    AND the file's age >= min_age_hours (a dead-but-just-orphaned buffer is kept
-    through the grace window). Everything else is kept.
+    Bias to keep: dead is True only when the session hash is not in live_hashes
+    and the file's age >= min_age_hours. A dead-but-just-orphaned buffer is kept
+    through the grace window. Everything else is kept.
 
     Requires:
         - meta: {hash8, path, total, ai_to_ai, mtime_epoch}
@@ -132,8 +130,8 @@ def format_report( plan, apply, quarantine_dir ):
     """
     Render a human-readable inventory report of the plan.
 
-    Lists every archive candidate (dead-session proof + counts) and every kept
-    file (reason). The header states DRY-RUN vs APPLY so the mode is unmistakable.
+    Lists every archive candidate (dead-session proof and counts) and every kept
+    file (reason). The header states dry run or apply so the mode is unmistakable.
     """
     archive = plan[ "archive" ]
     keep    = plan[ "keep" ]
@@ -166,7 +164,7 @@ def format_report( plan, apply, quarantine_dir ):
 # ── IO shell ──────────────────────────────────────────────────────────────────
 
 def is_pid_alive( pid ):
-    """True iff `pid` is a live process (os.kill sig 0). Non-positive/bogus → False."""
+    """True iff `pid` is a live process (os.kill sig 0); non-positive or bogus gives False."""
     try:
         pid = int( pid )
     except ( TypeError, ValueError ):
@@ -184,11 +182,11 @@ def is_pid_alive( pid ):
 
 def list_listener_hashes( run_fn=None ):
     """
-    Set of session hashes with a RUNNING cc_notification_listener process.
+    Return the set of session hashes with a running cc_notification_listener process.
 
     run_fn (injectable) returns the raw `ps`-style output; the default shells out
-    to `ps` and greps. Propagates errors to the caller so run() can BIAS-TO-KEEP
-    (a failed live-scan must never let a live session's buffer be swept).
+    to `ps` and greps. Errors propagate to the caller so run() keeps its bias to
+    keep: a failed live-scan must never let a live session's buffer be swept.
     """
     if run_fn is None:
         def run_fn():
@@ -202,12 +200,12 @@ def list_listener_hashes( run_fn=None ):
 
 def list_bridge_live_hashes( sessions_dir, now_epoch, fresh_seconds, is_pid_alive=is_pid_alive ):
     """
-    Set of session hashes considered live from the bridge files: a bridge counts
-    as live when its file mtime is fresh (< fresh_seconds) OR its listener_pid is
-    a running process. Both session_id and stable_session_id (8-char) are added.
+    Return the session hashes considered live from the bridge files.
 
-    BIAS-TO-KEEP: a malformed / unreadable bridge is skipped (contributes no
-    'dead' signal — the buffer stays keepable unless positively dead elsewhere).
+    A bridge counts as live when its file mtime is fresh (< fresh_seconds) or its
+    listener_pid is a running process. Both session_id and stable_session_id (8-char) are added.
+    A malformed or unreadable bridge is skipped. It adds no dead signal, so the
+    buffer stays keepable unless it is positively dead elsewhere.
     """
     live = set()
     base = Path( sessions_dir )
@@ -234,9 +232,10 @@ def list_bridge_live_hashes( sessions_dir, now_epoch, fresh_seconds, is_pid_aliv
 
 def collect_live_hashes( sessions_dir, now_epoch, fresh_seconds=DEFAULT_BRIDGE_FRESH_SEC ):
     """
-    Union of live hashes from running listeners AND live bridges — the widest
-    possible live-set (BIAS-TO-KEEP). Raises if the listener scan fails, so run()
-    aborts rather than sweep against an incomplete live-set.
+    Union of live hashes from running listeners and live bridges (the widest live-set).
+
+    Raises if the listener scan fails, so run() aborts rather than sweeping
+    against an incomplete live-set.
     """
     listeners = list_listener_hashes()
     bridges   = list_bridge_live_hashes( sessions_dir, now_epoch, fresh_seconds )
@@ -245,9 +244,10 @@ def collect_live_hashes( sessions_dir, now_epoch, fresh_seconds=DEFAULT_BRIDGE_F
 
 def gather_buffer_meta( path, now_epoch ):
     """
-    Read one buffer file into a classify()-ready meta dict. An unreadable file
-    still yields a meta (counts 0) so it remains classifiable (never crashes the
-    sweep). mtime falls back to now_epoch (→ within grace → kept) on stat error.
+    Read one buffer file into a classify_buffer()-ready meta dict.
+
+    An unreadable file still yields a meta (counts 0), so it stays classifiable and never crashes the sweep.
+    On a stat error mtime falls back to now_epoch, which puts the file within the grace window so it is kept.
     """
     p = Path( path )
     try:
@@ -271,18 +271,19 @@ def gather_buffer_meta( path, now_epoch ):
 def run( sessions_dir, quarantine_dir=None, apply=False, now_epoch=None,
          live_hashes=None, min_age_hours=DEFAULT_MIN_AGE_HOURS, move_fn=None ):
     """
-    Scan `sessions_dir` for cc-buffer files, classify each (BIAS-TO-KEEP), and
-    (only when apply=True) MOVE the dead ones to the quarantine dir.
+    Scan `sessions_dir` for cc-buffer files, classify each, move dead ones if applying.
+
+    Each file is classified with a bias to keep. Files move to the quarantine dir only when apply=True.
 
     Requires:
         - sessions_dir: dir holding cc-buffer-*.jsonl
         - now_epoch: reference time (defaults to real now)
-        - live_hashes: injected live-set, or None → collect_live_hashes()
+        - live_hashes: injected live-set, or None to call collect_live_hashes()
         - move_fn(src, dst): injectable mover (default shutil.move) for testing
 
     Ensures:
-        - DRY-RUN (apply=False) MOVES NOTHING (moved == [])
-        - apply=True moves ONLY dead-classified files, into quarantine (reversible)
+        - A dry run (apply=False) moves nothing (moved == [])
+        - apply=True moves only dead-classified files, into quarantine (reversible)
         - Returns {plan, report, moved:[dst,...]}
     """
     base = Path( sessions_dir )
@@ -316,7 +317,7 @@ def run( sessions_dir, quarantine_dir=None, apply=False, now_epoch=None,
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main( argv=None ):
-    """CLI entry: DRY-RUN by default; --apply performs reversible MOVEs."""
+    """CLI entry: dry run by default; --apply performs reversible moves."""
     parser = argparse.ArgumentParser(
         description = "Archive stale cc-buffer files from DEAD sessions (dry-run by default; "
                       "--apply MOVEs reversibly to a quarantine dir; never deletes, never replays)."

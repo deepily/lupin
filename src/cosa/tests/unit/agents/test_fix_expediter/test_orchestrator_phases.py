@@ -27,6 +27,7 @@ Created 2026-05-31 by Rachel 🕊️ (CoSA coverage campaign, TFE lane).
 
 import sys
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -99,6 +100,16 @@ def _sdk_stub( messages ):
     return _gen
 
 
+def _result_msg( is_error=False, subtype="success", result=None, errors=None, text=None ):
+    m = MagicMock( spec=ResultMessage )
+    m.is_error = is_error
+    m.subtype  = subtype
+    m.result   = result
+    m.errors   = errors
+    if text is not None: m.text = text
+    return m
+
+
 def _assistant( *blocks ):
     return AssistantMessage( content=list( blocks ), model="claude-x" )
 
@@ -112,12 +123,20 @@ def run( coro ):
 # ============================================================================
 class TestPhase0:
     def test_resume_short_circuit( self ):
+        # The stored cluster has an id a fresh clustering cannot produce, so only a skip returns it.
         o = _orch( debug=True )
-        o.clusters = [ _cluster() ]
+        o.clusters = [ _cluster( "STORED" ) ]
         o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.CLUSTERING ] )
         out = run( o.run_phase0_cluster() )
-        assert out == o.clusters
+        assert [ c.cluster_id for c in out ] == [ "STORED" ]
         assert o.current_phase == TFEPhase.CLUSTERING
+
+    def test_resume_from_the_phase_before_clustering_does_not_skip_it( self ):
+        o = _orch()
+        o.clusters = [ _cluster( "STALE" ) ]
+        o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.LOADING ] )
+        out = run( o.run_phase0_cluster() )
+        assert "STALE" not in [ c.cluster_id for c in out ]
 
     def test_normal_clustering( self ):
         o = _orch()
@@ -131,11 +150,23 @@ class TestPhase0:
 # ============================================================================
 class TestPhase1:
     def test_resume_short_circuit( self ):
+        # A run would diagnose cluster C1; only a skip returns the stored diagnosis for STORED.
         o = _orch( debug=True )
-        o.diagnoses = { "C1": _diag() }
+        o.clusters  = [ _cluster( "C1" ) ]
+        o.diagnoses = { "STORED": _diag( "STORED" ) }
         o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.DIAGNOSING ] )
-        out = run( o.run_phase1_diagnose() )
-        assert out == o.diagnoses
+        with patch.object( orch_mod, "SDK_AVAILABLE", False ):
+            out = run( o.run_phase1_diagnose() )
+        assert set( out.keys() ) == { "STORED" }
+
+    def test_resume_from_the_phase_before_diagnosing_does_not_skip_it( self ):
+        o = _orch()
+        o.clusters  = [ _cluster( "C1" ) ]
+        o.diagnoses = { "STALE": _diag( "STALE" ) }
+        o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.CLUSTERING ] )
+        with patch.object( orch_mod, "SDK_AVAILABLE", False ):
+            out = run( o.run_phase1_diagnose() )
+        assert set( out.keys() ) == { "C1" }
 
     def test_no_clusters_returns_empty( self ):
         o = _orch()
@@ -224,7 +255,7 @@ class TestDelegateDiagnosis:
             TextBlock( text="world" ),
             MagicMock( spec=RateLimitEvent ),
             MagicMock(),                       # unknown message type
-            MagicMock( spec=ResultMessage ),
+            _result_msg(),
         ]
         with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ):
             out = run( o._delegate_to_lead_diagnosis( "prompt" ) )
@@ -259,6 +290,17 @@ class TestDelegateDiagnosis:
 # ============================================================================
 # run_phase2_propose
 # ============================================================================
+class TestDelegateDiagnosisErrorResult:
+    def test_error_result_logs_the_cli_text_and_returns_none( self, caplog ):
+        o = _orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low", errors=[ "tool died" ] )
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( [ err ] ) ), \
+             caplog.at_level( logging.ERROR, logger=orch_mod.logger.name ):
+            assert run( o._delegate_to_lead_diagnosis( "p" ) ) is None
+        text = "\n".join( r.getMessage() for r in caplog.records if r.name == orch_mod.logger.name )
+        assert "Your credit balance is too low" in text and "tool died" in text
+
+
 class TestPhase2:
     def test_resume_short_circuit_voice_gate_success( self ):
         o = _orch( debug=True )
@@ -285,6 +327,16 @@ class TestPhase2:
         with patch.object( o, "_proposal_voice_gate", AsyncMock() ) as gate:
             proposed, selected, plan = run( o.run_phase2_propose() )
         gate.assert_not_called()
+
+    def test_resume_from_the_phase_before_proposing_does_not_skip_generation( self ):
+        o = _orch()
+        o.proposed_fixes = [ _prop() ]
+        o.clusters = []; o.diagnoses = {}
+        o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.DIAGNOSING ] )
+        with patch.object( o, "_proposal_voice_gate", AsyncMock() ) as gate:
+            proposed, selected, plan = run( o.run_phase2_propose() )
+        gate.assert_not_called()
+        assert proposed == [] and selected == []
 
     def test_no_clusters_or_diagnoses_skips( self ):
         o = _orch()
@@ -378,7 +430,7 @@ class TestDelegateProposal:
             TextBlock( text="]" ),
             MagicMock( spec=RateLimitEvent ),
             MagicMock(),                       # unknown message type
-            MagicMock( spec=ResultMessage ),
+            _result_msg(),
         ]
         with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ):
             out = run( o._delegate_to_lead_proposal( "p" ) )
@@ -401,6 +453,17 @@ class TestDelegateProposal:
 # ============================================================================
 # _write_multi_cluster_plan_doc
 # ============================================================================
+class TestDelegateProposalErrorResult:
+    def test_error_result_logs_the_cli_text_and_returns_none( self, caplog ):
+        o = _orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( [ err ] ) ), \
+             caplog.at_level( logging.ERROR, logger=orch_mod.logger.name ):
+            assert run( o._delegate_to_lead_proposal( "p" ) ) is None
+        text = "\n".join( r.getMessage() for r in caplog.records if r.name == orch_mod.logger.name )
+        assert "Your credit balance is too low" in text
+
+
 class TestWritePlanDoc:
     def test_single_category_with_evidence( self ):
         o = _orch()
@@ -608,7 +671,7 @@ class TestCoderAndVerify:
             TextBlock( text="done" ),
             MagicMock( spec=RateLimitEvent ),
             MagicMock(),                                                               # unknown message -> 1502->1477
-            MagicMock( spec=ResultMessage, text="result-text" ),
+            _result_msg( text="result-text" ),
         ]
         with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ), \
              patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ), \
@@ -641,6 +704,33 @@ class TestCoderAndVerify:
              patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ):
             assert run( o._delegate_to_coder( MagicMock(), "p", MagicMock(), MagicMock() ) ) == ( "", [] )
 
+    def test_coder_error_result_logs_the_cli_text_and_returns_empty( self, caplog ):
+        o = _orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( [ err ] ) ), \
+             patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ), \
+             caplog.at_level( logging.ERROR, logger=orch_mod.logger.name ):
+            assert run( o._delegate_to_coder( MagicMock(), "p", MagicMock(), MagicMock() ) ) == ( "", [] )
+        text = "\n".join( r.getMessage() for r in caplog.records if r.name == orch_mod.logger.name )
+        assert "Your credit balance is too low" in text
+
+    def test_verify_error_result_fails_with_the_cli_text( self ):
+        o = _orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( [ _assistant( TextBlock( text="All tests pass" ) ), err ] ) ), \
+             patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ):
+            passed, out = run( o._verify_fix( MagicMock(), _prop(), "co", [], MagicMock(), MagicMock() ) )
+        assert passed is False
+        assert "Your credit balance is too low" in out
+
+    def test_verify_clean_result_message_still_passes( self ):
+        o = _orch()
+        msgs = [ _assistant( TextBlock( text="All tests pass" ) ), _result_msg(), MagicMock() ]   # unknown message after the result: loop-back arc
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ), \
+             patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ):
+            passed, out = run( o._verify_fix( MagicMock(), _prop(), "co", [], MagicMock(), MagicMock() ) )
+        assert passed is True
+
     def test_verify_unavailable( self ):
         o = _orch()
         with patch.object( orch_mod, "SAFETY_AVAILABLE", False ):
@@ -672,7 +762,7 @@ class TestCoderAndVerify:
             ),
             TextBlock( text=" report" ),       # bare TextBlock message -> 1575
             MagicMock( spec=RateLimitEvent ),  # not last -> 1576->1558
-            MagicMock( spec=ResultMessage ),
+            _result_msg(),
         ]
         run_res = SimpleNamespace( passed=True, passed_count=2, total_tests=2 )
         with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ), \
@@ -818,6 +908,21 @@ class TestPhase5:
             out = run( o.run_phase5_git() )
         assert out[ "branch_name" ] == "fix/x"
         assert o.commit_hashes == [ "h1" ]
+
+    @pytest.mark.parametrize( "flag", [ True, False ] )
+    def test_the_push_flag_reaches_the_strategist( self, flag ):
+        o = _orch()
+        self._setup( o )
+        o.config.push_fix_branch_enabled = flag
+        strategist = MagicMock()
+        strategist.commit_and_pr_multi = AsyncMock( return_value={
+            "git_strategy": None, "branch_name": None, "commit_hashes": [],
+            "pr_url": None, "error": None,
+        } )
+        with patch( "cosa.agents.bug_fix_expediter.git_ops.GitOps", MagicMock() ), \
+             patch( "cosa.agents.shared.git_strategist.GitStrategist", return_value=strategist ):
+            run( o.run_phase5_git() )
+        assert strategist.commit_and_pr_multi.call_args.kwargs[ "push_enabled" ] is flag
 
     def test_normal_with_error_summary( self ):
         o = _orch()

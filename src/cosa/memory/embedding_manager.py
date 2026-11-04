@@ -1,6 +1,5 @@
 """
-Utility module for OpenAI embedding functionality.
-Handles embedding generation with proper error handling and caching.
+Generates and caches text embeddings through the OpenAI client, with error handling.
 """
 
 import openai
@@ -9,6 +8,7 @@ import cosa.utils.util as du
 import cosa.utils.util_stopwatch as sw
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.embedding_cache_table import EmbeddingCacheTable
+from cosa.memory.embedding_provider import embedding_dimensions
 from cosa.memory.gist_normalizer import GistNormalizer
 from threading import Lock
 
@@ -223,7 +223,7 @@ class EmbeddingManager:
             
         Note:
             - Continues execution even if embedding generation fails
-            - Important: Generates embedding for NORMALIZED text when cache miss occurs
+            - Important: Generates the embedding for the normalized text when cache miss occurs
         """
         # Determine cache key based on normalization setting
         if normalize_for_cache:
@@ -291,7 +291,7 @@ class EmbeddingManager:
                 print( f"Using OpenAI API endpoint: https://api.openai.com/v1" )
             
             # Generate embedding for text_for_embedding (normalized or exact)
-            embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+            embedding_dim = embedding_dimensions( self._config_mgr )
             response = embedding_client.embeddings.create(
                 input=text_for_embedding,
                 model=embedding_model,

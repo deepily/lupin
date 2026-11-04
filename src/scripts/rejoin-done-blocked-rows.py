@@ -1,42 +1,30 @@
 #!/usr/bin/env python3
 """
-Rejoin blocked rows whose blockers are ALL `done` — store row 00a6bde2, item 3.
+Rejoin blocked rows whose blockers are all done, moving them back to queued.
 
-WHY THIS SCRIPT EXISTS AND NOT JUST THE MODULE
-----------------------------------------------
-`cosa/rest/task_store_rejoin.py` is the pure decision. A decision with no caller is still
-silence — row `1dd41cde` ("Nothing RUNS verify") on this same board. This is the caller.
+cosa/rest/task_store_rejoin.py holds the pure decision, and a decision with no caller is
+still silence. This script is the caller, not a schedule: nothing runs it on a timer.
 
-⚠️ IT IS A CALLER, NOT A SCHEDULE. Nothing runs this on a timer. That gap is named here
-rather than left for the commit's existence to imply it was covered — the identical
-disclosure item 4's scanner carries.
-
-DRY-RUN BY DEFAULT. `--apply` is the only thing that writes. The pass moves rows into the
-workable set where a seat will pick them up, so the default had to be the reversible one.
-
-WRITE ORDER IS AMEND-THEN-TRANSITION, AND THAT ORDER IS LOAD-BEARING
---------------------------------------------------------------------
-Transition first and the amend fails -> the row is QUEUED, workable, and READS AS FRESHLY
-VETTED. That is precisely the defect item 3 exists to prevent, manufactured by the fix.
-Amend first and the transition fails -> the row stays BLOCKED (nobody works a blocked row)
-carrying a stamp that has not come true yet. Visible, harmless, retried next run. A
-re-run then appends a second stamp, which is honest: it was attempted twice.
-
-WHAT IT NEVER TOUCHES
-    · a row with a `dropped` blocker — Rick's ruling, and only his
-    · a row with an unresolvable blocker — a dead edge is not a satisfied precondition
-    · a row with a persona/user blocker — no registry exists to resolve one
-
-EXIT CODES
-    0  examined, nothing eligible (or dry-run with nothing eligible)
-    1  eligible rows found (dry-run), or rejoined successfully (--apply)
-    2  could not reach the store / auth failure
-    3  the board was truncated — the result is PARTIAL, treat as unknown
-    4  --apply ran and at least one row failed mid-write (named in the output)
-
-Usage:
-    PYTHONPATH=src python src/scripts/rejoin-done-blocked-rows.py            # dry run
-    PYTHONPATH=src python src/scripts/rejoin-done-blocked-rows.py --apply
+Ensures:
+    - dry run by default; --apply is the only thing that writes, because the pass moves
+      rows into the workable set where a seat will pick them up, so the default is the
+      reversible one
+    - write order is amend then transition. Transition first and a failed amend leaves the
+      row queued, workable and reading as freshly vetted, the defect this pass prevents.
+      Amend first and a failed transition leaves the row blocked, so nobody works it, with
+      a stamp that has not come true yet: visible, harmless and retried on the next run.
+      A re-run appends a second stamp, which is honest because it was attempted twice
+    - never touches a row with a dropped blocker, which needs a ruling from the project owner, and only the owner
+    - never touches a row with an unresolvable blocker, since a dead edge is not a
+      satisfied precondition
+    - never touches a row with a persona or user blocker, since no registry resolves one
+    - exit 0: examined, nothing eligible (or dry run with nothing eligible)
+    - exit 1: eligible rows found (dry run), or rejoined successfully (--apply)
+    - exit 2: could not reach the store, or auth failure
+    - exit 3: the board was truncated, so the result is partial; treat it as unknown
+    - exit 4: --apply ran and at least one row failed mid-write (named in the output)
+    - usage: PYTHONPATH=src python src/scripts/rejoin-done-blocked-rows.py for a dry run,
+      then add --apply to write
 """
 
 import argparse
@@ -53,7 +41,8 @@ src_path = os.path.join( lupin_root, "src" )
 if src_path not in sys.path: sys.path.insert( 0, src_path )
 
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request, transition_task
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request, transition_task, FETCH_BOARD_PAGE_SIZE
+from lupin_cli.claude_code.hooks.lib.task_store_client import fetch_board as _shared_fetch_board
 
 from cosa.rest.task_store_rejoin import (
     VERDICT_REJOIN,
@@ -63,16 +52,16 @@ from cosa.rest.task_store_rejoin import (
 )
 from cosa.rest.task_store_rules import BLOCKED_STATUS
 
-PAGE_SIZE = 500      # the router's hard `le=500` cap; not a tunable
+PAGE_SIZE = FETCH_BOARD_PAGE_SIZE
 
 
 def fetch_board( settings, api_key, max_rows ):
     """
     Page the entire board, terminal rows included.
 
-    Terminal rows are REQUIRED here, not incidental: the blockers this pass resolves are
-    `done` by definition, so a fetch that excluded them would resolve every blocker to
-    None and the pass would rejoin NOTHING while reporting a clean run.
+    Terminal rows are required here: the blockers this pass resolves are `done` by
+    definition. A fetch that excluded them would resolve every blocker to None, and the
+    pass would rejoin nothing while reporting a clean run.
 
     Requires:
         - settings is load_task_store_settings()'s dict; api_key is a valid key
@@ -80,37 +69,11 @@ def fetch_board( settings, api_key, max_rows ):
 
     Ensures:
         - returns ( rows, truncated ); `truncated` is True iff the board holds more rows
-          than were fetched — the caller MUST surface that, never absorb it
+          than were fetched — the caller must surface that, never absorb it
         - raises on a non-2xx rather than returning an empty board (an unchecked 401
-          scans CLEAN, which is the false-green this row family is made of)
+          scans clean, which is a false green)
     """
-    rows      = [ ]
-    offset    = 0
-    truncated = False
-
-    while True:
-        # Ask for no more than the caller still has room for. A flat PAGE_SIZE here made
-        # `--max-rows` a page-stop THRESHOLD rather than a cap (row 9124b70a): `--max-rows 100`
-        # fetched 500 and then reported "truncated at 100 rows" — a figure the run never
-        # honoured. `max( 1, … )` is reachable only via a direct non-positive max_rows; the
-        # break below guarantees the subtraction is >= 1 on every later pass.
-        limit = max( 1, min( PAGE_SIZE, max_rows - len( rows ) ) )
-        query = ( f"include_terminal=true&unscoped_audit=true&hide_parked=false"
-                  f"&limit={limit}&offset={offset}" )
-        ok, status, page = _request( "GET", f"{settings[ 'api_base_url' ]}/api/tasks?{query}",
-                                     api_key, settings[ "timeout_seconds" ] )
-        if not ok:
-            raise RuntimeError( f"HTTP {status}: {page.get( 'error' ) or page.get( 'detail' ) or page}" )
-        batch = page.get( "tasks", [ ] )
-        rows.extend( batch )
-        offset += len( batch )
-
-        if not page.get( "has_more" ) or not batch: break
-        if len( rows ) >= max_rows:
-            truncated = True
-            break
-
-    return ( rows, truncated )
+    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=True, request=_request, page_size=PAGE_SIZE )
 
 
 def examine( rows, now ):
@@ -118,7 +81,7 @@ def examine( rows, now ):
     Classify every blocked row on the board.
 
     Requires:
-        - rows is the full board (terminal rows INCLUDED — see fetch_board)
+        - rows is the full board (terminal rows included — see fetch_board)
         - now is the comparison instant as a datetime
 
     Ensures:
@@ -126,7 +89,7 @@ def examine( rows, now ):
           { row, stamp, closed_blocker_ids } and counts tallies every verdict/hold bucket
         - `examined` counts only rows whose status is BLOCKED_STATUS
         - a row whose blocker is missing from the board (truncation) classifies as
-          unresolved and is NOT rejoined
+          unresolved and is not rejoined
         - never raises
     """
     status_by_id = { row[ "id" ]: row.get( "status" )     for row in rows if row.get( "id" ) }
@@ -158,7 +121,7 @@ def examine( rows, now ):
 
 def apply_rejoin( settings, api_key, actor, candidate ):
     """
-    Amend then transition ONE row. Amend FIRST — see the module docstring.
+    Amend then transition one row, amending first so the stamp lands before the move.
 
     Requires:
         - candidate is one `examine()` eligible entry
@@ -167,8 +130,8 @@ def apply_rejoin( settings, api_key, actor, candidate ):
     Ensures:
         - returns ( ok, stage, detail ); stage is "amend" or "transition" on failure and
           "done" on success
-        - a failed amend NEVER proceeds to the transition — the stamp is the point, and a
-          row rejoined without it is the defect wearing the fix's clothes
+        - a failed amend never proceeds to the transition: a row rejoined without its
+          stamp reads as freshly vetted while its premise is unchecked
         - never raises
     """
     item_id = candidate[ "row" ][ "id" ]

@@ -63,7 +63,7 @@ import {
   HOLDING_WONT_FIX_REASON_PLACEHOLDER,
   HOLDING_WONT_FIX_REASON_ARIA_LABEL,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/holdingAreaTable";
-import { groupHeldRowsByFiler } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaModel";
+import { groupHeldRowsByFiler, type HeldFilerGroup } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaModel";
 import { rowWidth } from "../../../../lupin_app/static/js/multiplexer/render/rowSchema";
 import type { TaskItem } from "../../../../lupin_app/static/js/multiplexer/render/taskListModel";
 
@@ -83,7 +83,7 @@ const LEGACY_PATH = resolve( HERE, "../../../../lupin_app/static/js/notification
 /** The body of `_renderHoldingAreaGroup`, sliced out of the legacy client. */
 function legacyGroupSource(): string {
   const src   = readFileSync( LEGACY_PATH, "utf8" );
-  const start = src.indexOf( "_renderHoldingAreaGroup( filer, tasks ) {" );
+  const start = src.indexOf( "_renderHoldingAreaGroup( filer, tasks, plans, ungrouped ) {" );
   assert.ok( start !== -1, "legacy _renderHoldingAreaGroup not found — the extraction is pointing at nothing" );
   const end   = src.indexOf( "_wireHoldingAreaControls()", start );
   assert.ok( end > start,  "legacy _wireHoldingAreaControls not found after the group renderer" );
@@ -97,7 +97,8 @@ function legacyTitleAfter( marker: string ): string {
   assert.ok( at !== -1, `legacy marker ${ marker } not found in the group renderer` );
   const match = /title="([^"]*)"/.exec( body.slice( at ) );
   assert.ok( match, `no title attribute after ${ marker } in the legacy group renderer` );
-  return match[ 1 ];
+  // The batch tooltips read "${whose}", which is "${label} filed" for a creator group. This pins that wording.
+  return match[ 1 ].replace( "${whose}", "${label} filed" );
 }
 
 function legacyAttr( pattern: RegExp ): string {
@@ -109,6 +110,11 @@ function legacyAttr( pattern: RegExp ): string {
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/** A filer group with no plans: every row is its own ungrouped row (plans are covered in holding_area_plan_approve.test.ts). */
+function flatGroup( filer: string, tasks: TaskItem[] ): HeldFilerGroup {
+  return { filer, label: filer, by: "creator", tasks, plans: [], ungrouped: tasks };
+}
 
 function heldTask( id: string, filer: string, title = "a held row" ): TaskItem {
   return {
@@ -172,11 +178,11 @@ test( "the batch tooltips are byte-identical to the legacy client's, filer subst
 
 test( "the batch reason box's placeholder and accessible name match the legacy client's", () => {
   assert.equal( HOLDING_WONT_FIX_REASON_PLACEHOLDER, legacyAttr( /placeholder="([^"]*)"/ ) );
-  assert.equal( HOLDING_WONT_FIX_REASON_ARIA_LABEL,  legacyAttr( /aria-label="([^"]*)"/ ) );
+  assert.equal( HOLDING_WONT_FIX_REASON_ARIA_LABEL,  legacyAttr( /placeholder="[^"]*"\s+aria-label="([^"]*)"/ ) );
 } );
 
 test( "a rendered group carries both tooltips with THIS group's filer in them", () => {
-  const group = { filer: "Mr Radio", tasks: [ heldTask( "t1", "mr radio 0e61abe3" ) ] };
+  const group = flatGroup( "Mr Radio", [ heldTask( "t1", "mr radio 0e61abe3" ) ] );
   const el    = renderHoldingAreaGroup( group, null );
 
   const approve = el.querySelector( "button.holding-approve-all" ) as HTMLButtonElement;
@@ -201,7 +207,7 @@ test( "a rendered group carries both tooltips with THIS group's filer in them", 
 // ---------------------------------------------------------------------------
 
 test( "every keyed element in the header carries this group's data-filer", () => {
-  const group = { filer: "Krishna", tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] };
+  const group = flatGroup( "Krishna", [ heldTask( "t1", "Krishna 420f5ec9" ) ] );
   const el    = renderHoldingAreaGroup( group, null );
 
   assert.equal( el.getAttribute( "data-filer" ), "Krishna" );
@@ -222,7 +228,7 @@ test( "every keyed element in the header carries this group's data-filer", () =>
 } );
 
 test( "the group's table uses the SHARED row head, so its width cannot drift from the row's", () => {
-  const group = { filer: "Krishna", tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] };
+  const group = flatGroup( "Krishna", [ heldTask( "t1", "Krishna 420f5ec9" ) ] );
   const el    = renderHoldingAreaGroup( group, null );
 
   const table = el.querySelector( "table" ) as HTMLTableElement;
@@ -233,7 +239,7 @@ test( "the group's table uses the SHARED row head, so its width cannot drift fro
 } );
 
 test( "each held row renders the SHARED disclosed row, tagged for this pane and not the epic board", () => {
-  const group = { filer: "Krishna", tasks: [ heldTask( "t1", "Krishna 420f5ec9" ), heldTask( "t2", "Krishna 420f5ec9" ) ] };
+  const group = flatGroup( "Krishna", [ heldTask( "t1", "Krishna 420f5ec9" ), heldTask( "t2", "Krishna 420f5ec9" ) ] );
   const el    = renderHoldingAreaGroup( group, null );
 
   const rows = el.querySelectorAll( "tbody tr.task-row" );
@@ -253,7 +259,7 @@ test( "each held row renders the SHARED disclosed row, tagged for this pane and 
 
 test( "the group count is the number of rows in THAT group, not the pane total", () => {
   const el = renderHoldingAreaGroup(
-    { filer: "Krishna", tasks: [ heldTask( "t1", "k" ), heldTask( "t2", "k" ), heldTask( "t3", "k" ) ] }, null );
+    flatGroup( "Krishna", [ heldTask( "t1", "k" ), heldTask( "t2", "k" ), heldTask( "t3", "k" ) ] ), null );
   assert.equal( ( el.querySelector( ".holding-area-group-count" ) as HTMLElement ).textContent, "3" );
   assert.equal( ( el.querySelector( ".holding-area-filer" ) as HTMLElement ).textContent, "Krishna" );
 } );
@@ -303,8 +309,59 @@ test( "an empty model yields an EMPTY fragment — the 'nothing waiting' message
 
 test( "reassignTargets reach the row's owner select through this pane too", () => {
   const el = renderHoldingAreaGroup(
-    { filer: "Krishna", tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] }, null, [ "rachel", "sam" ] );
+    flatGroup( "Krishna", [ heldTask( "t1", "Krishna 420f5ec9" ) ] ), null, [ "rachel", "sam" ] );
   const options = Array.from( el.querySelectorAll( "select option" ) ).map( ( o ) => o.textContent );
   assert.ok( options.some( ( o ) => o === "rachel" ), `owner select never received the roster: ${ JSON.stringify( options ) }` );
   assert.ok( options.some( ( o ) => o === "sam" ) );
+} );
+
+// ---------------------------------------------------------------------------
+// Row fa5415af — a persona group shows how many requests wait on it, closed or open.
+// ---------------------------------------------------------------------------
+
+function requestRow( id: string, filer: string, state: string | null, move: string | null ): TaskItem {
+  return { ...heldTask( id, filer ), request_state: state, request_move: move, request_ts: "2026-09-10T09:00:00Z" } as unknown as TaskItem;
+}
+
+test( "a persona with one pending request carries a '1 request' badge on its COLLAPSED header", () => {
+  const el    = renderHoldingAreaGroup( flatGroup( "Mr Radio", [
+    requestRow( "t1", "Mr Radio", "pending", "admit" ), requestRow( "t2", "Mr Radio", null, null ) ] ), null, [], false );
+  const badge = el.querySelector<HTMLElement>( ".holding-area-group-header .holding-area-group-request-badge" );
+  assert.ok( badge, "no request badge on the group header" );
+  assert.equal( badge.textContent, "1 request" );
+  assert.equal( badge.dataset.filer, "Mr Radio" );
+  assert.equal( badge.getAttribute( "role" ), "img", "a label on a bare span is not announced; the role is what makes it a name" );
+  assert.equal( badge.getAttribute( "aria-label" ), "1 pending request", "the badge needs an accessible name that joins it to what it counts" );
+  assert.ok( badge.classList.contains( "task-request-badge" ), "it must reuse the pane badge's look" );
+  assert.ok( el.classList.contains( "collapsed" ), "the badge must be there with the group closed" );
+} );
+
+test( "a persona with several pending requests shows the count; the row total is untouched", () => {
+  const el = renderHoldingAreaGroup( flatGroup( "Krishna", [
+    requestRow( "t1", "Krishna", "pending", "admit" ),
+    requestRow( "t2", "Krishna", "pending", "demote" ),
+    requestRow( "t3", "Krishna", "pending", "admit" ),
+    requestRow( "t4", "Krishna", null, null ),
+  ] ), null );
+  assert.equal( el.querySelector( ".holding-area-group-request-badge" )!.textContent, "3 requests" );
+  assert.equal( el.querySelector( ".holding-area-group-request-badge" )!.getAttribute( "aria-label" ), "3 pending requests" );
+  assert.equal( el.querySelector( ".holding-area-group-count" )!.textContent, "4" );
+} );
+
+test( "a persona with no pending request has NO badge — not a zero, not a hidden span", () => {
+  const el = renderHoldingAreaGroup( flatGroup( "Sam", [
+    requestRow( "t1", "Sam", null, null ), requestRow( "t2", "Sam", "approved", "admit" ) ] ), null );
+  assert.ok( el.querySelector( ".holding-area-group-request-badge" ) === null, "a group with no pending request must carry no group badge" );
+  assert.ok( el.querySelector( ".task-request-badge" ) === null, "a group with no pending request must carry no row badge" );
+} );
+
+test( "in a fragment only the personas with requests carry a badge", () => {
+  const frag = renderHoldingAreaGroups( [
+    flatGroup( "Krishna", [ requestRow( "t1", "Krishna", "pending", "admit" ) ] ),
+    flatGroup( "Sam",     [ requestRow( "t2", "Sam", null, null ) ] ),
+  ], null );
+  const holder = document.createElement( "div" );
+  holder.appendChild( frag );
+  const badged = Array.from( holder.querySelectorAll<HTMLElement>( ".holding-area-group-request-badge" ) ).map( ( b ) => b.dataset.filer );
+  assert.deepEqual( badged, [ "Krishna" ] );
 } );

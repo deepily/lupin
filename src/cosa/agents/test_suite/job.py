@@ -31,6 +31,7 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from zoneinfo import ZoneInfo
 
+from cosa.rest import suite_run_token
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 from cosa.rest.pytest_args_policy import validate_pytest_args, validate_timeout_against_suite_budget
@@ -42,6 +43,7 @@ SUITE_SCRIPTS = {
     "unit"         : "src/tests/run-unit-tests.sh",
     "typescript"   : "src/tests/run-typescript-tests.sh",   # TS suite under c8 at an enforced 100% threshold (row 36e479ed)
     "smoke"        : "src/tests/run-smoke-tests.sh",
+    "docker_smoke" : "src/tests/run-docker-smoke-gate.sh",   # the three docker smoke files on the host; a skip is a failure. Host only, like unit.
     "smoke_direct" : "src/tests/run-smoke-direct.sh",
     "pytest_direct": "src/tests/run-pytest-direct.sh",    # Arbitrary pytest file (doc 16 follow-up)
     "websocket"    : "src/scripts/run-websocket-smoke-tests.sh",
@@ -54,6 +56,8 @@ SUITE_SCRIPTS = {
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
     "typecheck"      : "src/tests/run-typecheck-gate.sh", # the three tsc projects as a BLOCKING merge gate (row 7bc67019, Rick 2026-09-09 02:35 UTC: "Yes, blocking gate", answered on a direct ask, default_used: false). Runs FIRST in ALL_SUITE_COMPONENTS: it is ~3s of static analysis (MEASURED 3.00s wall, 2026-09-09), so a type-red branch fails in seconds instead of after the ~25min TypeScript tier.
     "stylelint"      : "src/tests/run-stylelint-gate.sh", # every git-tracked .css file as a BLOCKING merge gate (row d3d4a18c, Rick's ruling 2026-09-18 21:06). Runs SECOND, right after typecheck: MEASURED 1.5s wall for 32 files (2026-09-18), static like typecheck, so a style-red branch also fails in seconds. Its summary counts FILES, not tests.
+    "doclint"        : "src/tests/run-doclint-gate.sh", # every swept-scope Python file's docstrings as a blocking merge gate (row 2c48c717, Rick's ruling). Runs third, after the two other static gates: measured 4.6s wall for 862 files. Its second step is the metrics dashboard check. Its summary counts the swept files plus one for that check, and its "Errors:" line counts findings plus the lines that check printed.
+    "reuse"          : "src/tests/run-reuse-gate.sh",   # the outcome lines a branch adds, judged against the call log, as a blocking merge gate (Plan 3 step C3, ruling 12). Runs fourth, after the three other static gates, and makes no model call. Its summary counts checks: one for the scan, one per outcome line, one per new definition in a symbol index diff. With `reuse review gating` false it reports and passes.
     "coverage"       : "src/tests/run-coverage-gate.sh", # the Python coverage gate (row e2099400, 2026-08-29). Until it existed, pyproject's fail_under was invoked by NOTHING — no addopts, no runner, no injection here — so the 100% mandate had teeth on the TypeScript side only. Runs AFTER unit+cosa have appended to one data file; pass --run-tiers to make it run them itself.
                                                         # 🔴 EXIT-CODE CONTRACT, documented at this call site rather than only where it is
                                                         # raised (row 73ebccb1, Mr. Radio's ruling 2026-09-05): a code is a contract, a
@@ -112,6 +116,9 @@ SUITE_TIMEOUTS_SECONDS = {
     "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
     "typecheck"    : 300,    #  5 min. MEASURED 3.00s wall for all three projects (2026-09-09, row 7bc67019) — a 100x margin, and deliberately not the 600s default: a static gate that has run for five minutes has hung, not slowed down, and the budget is the only thing that says so.
     "stylelint"    : 300,    #  5 min. MEASURED 1.5s wall for 32 files (2026-09-18, row d3d4a18c) — the typecheck gate's reasoning: a static gate that has run for five minutes has hung, and the budget is the only thing that says so.
+    "docker_smoke" : 600,    # 10 min. The three files took about 90s together on a loaded host (28.4s rollback, 59.3s grants); a step that runs for ten minutes has hung.
+    "doclint"      : 300,    #  5 min. Measured 4.6s wall for 862 files (row 2c48c717). The typecheck gate's reasoning applies: a static gate that has run for five minutes has hung.
+    "reuse"        : 300,    #  5 min. A static gate over the lines one branch adds and a call log read; it takes seconds, and a run of five minutes has hung (Plan 3 step C3).
     "coverage"     : 2400,   # 40 min. As a pyramid STEP it is a report + a frame check, ~1 min; the budget covers the standalone --run-tiers form, which re-runs unit (936s) + cosa (301s) itself.
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
@@ -218,13 +225,79 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # 🔴 "stylelint" IS SECOND (row d3d4a18c, Rick's ruling 2026-09-18 21:06), for typecheck's
 # reason: 1.5s of static analysis (measured), so a style-red branch fails before any tier runs.
 # Before it existed no gate ran stylelint, and 329 errors accumulated as "pre-existing".
+# "doclint" is third (row 2c48c717, Rick's ruling), for the same reason: 4.6s of
+# static analysis (measured), so a branch with a docstring lint finding in a swept file fails
+# before any tier runs.
+# "reuse" is fourth (Plan 3 step C3, ruling 12), for the same reason: it reads the outcome lines a branch
+# adds and the call log, makes no model call, and takes seconds, so a branch with a refused outcome
+# line fails before any tier runs.
 # 🔴 E2E RUNS AS TWO HALVES, "e2e_a" THEN "e2e_b" (row 2818dad7, Rick's ruling on decision row
 # 4103ea0f, 2026-09-14). The whole suite measured 3038.1s and grows ~5.39 s/day, and one timeout
 # threw away every result in the run (09-10: 633 passed, none written to JUnit). As two entries here,
 # each half gets its own timeout, junit and log, and a timeout loses one half. They run one after
 # the other, not side by side — see run-e2e-ui-tests.sh's header for why they cannot overlap. "e2e"
 # stays registered for a deliberate whole-suite run.
-ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "doclint", "reuse", "unit", "cosa", "coverage", "typescript", "smoke", "docker_smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+
+
+# Suites a container does not offer: they run on the host. The unit tier ran inside the :8000 container
+# until it hit its own time limit, and part of it needs what only the host has (the venv at
+# /var/lupin/.venv, systemd-run, the Dart SDK). Rick took it off the container's menu on 2026-10-07.
+# The reuse gate joined them after run ts-04537a36: it reads the call log under /projects-data, a host path the
+# container does not mount, and refused with PermissionError there.
+HOST_ONLY_SUITES = ( "unit", "reuse", "docker_smoke" )
+# Where each host-only suite runs. The refusal names this command, so each suite has to have its own.
+HOST_COMMANDS    = {
+    "unit"         : "`pytest src/tests/unit/` (or `src/tests/run-unit-tests.sh`)",
+    "reuse"        : "`src/tests/run-reuse-gate.sh`",
+    "docker_smoke" : "`src/tests/run-docker-smoke-gate.sh`",
+}
+NOT_RUN_HERE     = "not run here, host tier"
+
+
+def running_in_container() -> bool:
+    """
+    Say whether this server process runs inside a container.
+
+    Ensures:
+        - returns True when LUPIN_IN_CONTAINER is 1, true or yes (any case), or when /.dockerenv exists
+        - returns False otherwise; a falsy sentinel does not hide the file check, it simply adds nothing
+    """
+    if os.environ.get( "LUPIN_IN_CONTAINER", "" ).strip().lower() in ( "1", "true", "yes" ): return True
+    return os.path.exists( "/.dockerenv" )
+
+
+def container_refusal( test_types: List[ str ] ) -> Optional[ str ]:
+    """
+    Say why a request naming a host-only suite is refused, or None.
+
+    Requires:
+        - test_types is the list of names as submitted, before "all" is expanded
+
+    Ensures:
+        - returns None unless this process runs in a container and a name is in HOST_ONLY_SUITES
+        - the message names the host, the command that runs the suite there, and the suites offered here
+        - the suite name all is not a host-only name: the job expands it without them
+    """
+    if not running_in_container(): return None
+    asked = [ t for t in test_types if t in HOST_ONLY_SUITES ]
+    if not asked: return None
+    offered = ", ".join( s for s in SUITE_SCRIPTS if s not in HOST_ONLY_SUITES )
+    how     = "; ".join( f"{t} with {HOST_COMMANDS[ t ]}" for t in asked )
+    return ( f"the {', '.join( asked )} suite is not offered through this server's test container: it runs on the host, "
+             f"{how}. Suites offered here: {offered}." )
+
+
+def suites_left_out( test_types: List[ str ], in_container: bool ) -> Dict[ str, str ]:
+    """
+    Name the host-only suites that "all" leaves out in a container, with where they run.
+
+    Ensures:
+        - returns { suite: NOT_RUN_HERE } for each host-only suite when in_container and "all" is requested
+          and the suite was not also named on its own, else an empty dict
+    """
+    if not in_container or "all" not in test_types: return {}
+    return { s: NOT_RUN_HERE for s in HOST_ONLY_SUITES if s not in test_types }
 
 
 def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
@@ -238,9 +311,8 @@ def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
         - returns [] iff every name is a registered suite ("all" included)
         - never mutates the input; duplicates are reported once
 
-    Row 4e8f348e: "e2e_ui" is the DIRECTORY, not a suite. A submit naming it was accepted,
-    took the monopolize slot on :8000, found no script and wrote a zero report — five times
-    since 2026-05-05. The door asks this before the job exists.
+    "e2e_ui" is the directory, not a suite. A submit naming it was accepted, took the monopolize slot on :8000,
+    found no script and wrote a zero report. The door asks this before the job exists.
     """
     unknown = []
     for t in test_types:
@@ -249,41 +321,71 @@ def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
     return unknown
 
 
-def _expand_all( test_types: List[ str ] ) -> List[ str ]:
+def _expand_all( test_types: List[ str ], in_container: bool = False ) -> List[ str ]:
     """
-    Expand any "all" entry in `test_types` into ALL_SUITE_COMPONENTS, preserving
-    order and deduping. Non-"all" entries pass through unchanged.
+    Expand "all" in `test_types` into ALL_SUITE_COMPONENTS, keeping order and deduping.
+
+    Non-"all" entries pass through unchanged.
 
     Requires:
         - test_types is a list of strings (possibly empty)
 
     Ensures:
         - returns a new list; never mutates the input
-        - "all" is replaced in place by ALL_SUITE_COMPONENTS
+        - "all" is replaced in place by ALL_SUITE_COMPONENTS, minus HOST_ONLY_SUITES when in_container
+        - a host-only suite named on its own still runs, so a row persisted earlier keeps its meaning
         - duplicates (e.g. test_types=["all","unit"]) are removed, first wins
     """
     expanded = []
     seen     = set()
     for t in test_types:
-        candidates = ALL_SUITE_COMPONENTS if t == "all" else [ t ]
+        candidates = [ c for c in ALL_SUITE_COMPONENTS if not ( in_container and c in HOST_ONLY_SUITES ) ] if t == "all" else [ t ]
         for c in candidates:
             if c not in seen:
                 seen.add( c )
                 expanded.append( c )
     return expanded
 
+class BetweenSuiteResetError( RuntimeError ):
+    """
+    The shared test database could not be reset between two suites.
+
+    Raised so the sweep stops: the next suite would otherwise run on the earlier suite's rows
+    and report on someone else's data.
+    """
+
+
+def tables_with_fk_into( metadata, listed ) -> List[ str ]:
+    """
+    Return the tables outside `listed` that hold a foreign key into a table in `listed`.
+
+    Requires:
+        - metadata is a SQLAlchemy MetaData; listed is an iterable of table names
+
+    Ensures:
+        - returns the sorted names of tables that Postgres refuses to leave out of a truncate of
+          the listed tables
+        - an empty list means the truncate set is closed under foreign keys
+    """
+    listed  = set( listed )
+    missing = set()
+    for table in metadata.tables.values():
+        if table.name in listed: continue
+        if any( fk.column.table.name in listed for fk in table.foreign_keys ): missing.add( table.name )
+    return sorted( missing )
+
+
 class _StdoutReaderCrash:
     """
-    Queue marker meaning THE STDOUT READER THREAD DIED — not end of output.
+    Queue marker meaning the stdout reader thread died, not end of output.
 
-    `None` on the stdout queue means clean EOF. Without a second, distinct
-    marker a reader that crashed posts the same `None` (from its `finally`),
-    and the poll loop reports the run as a clean success: the crashed tier's
-    exit code becomes `process.returncode`, which for a child that already
-    exited 0 is 0. That is a green for a run whose output was never read.
+    `None` on the stdout queue means clean EOF. Without a second, distinct marker, a crashed reader posts the same
+    `None` from its `finally`. The poll loop then reports the run as a clean success. The crashed tier's exit code
+    becomes `process.returncode`, which is 0 for a child that already exited 0. That is a green for a run whose
+    output was never read.
 
-    Carries the traceback text because the exception is re-raised on the main
-    thread, where the original thread's stack is otherwise unrecoverable.
+    Carries the traceback text because the exception is re-raised on the main thread, where the original thread's
+    stack is otherwise unrecoverable.
     """
 
     def __init__( self, exc, tb ):
@@ -351,7 +453,7 @@ class TestSuiteJob( AgenticJobBase ):
                 True  → force-enable TFE auto-dispatch for this run only
                 False → force-disable TFE auto-dispatch for this run only
                 The override is read by TestSuiteCompletionWatchdog Gate 1 and
-                does NOT mutate the INI file.
+                does not mutate the INI file.
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -398,10 +500,12 @@ class TestSuiteJob( AgenticJobBase ):
         self.dry_run             = dry_run
         self.auto_fix_on_failure = auto_fix_on_failure
         self.env_vars            = self._filter_env_vars( env_vars or {} )
+        self._suite_token        = None  # set per real run by _execute; None when the INI switch is off
 
         # Results (populated after execution)
         self.suite_results = {}
         self.cost_summary  = None  # Required by queues.py for unified job interface
+        self.suites_not_run = {}   # host-only suites that "all" left out in a container, with where they run
         # The 4-way verdict from _classify_outcome, published by the REAL run path only
         # (row a9d19d18). Stays None on the dry-run path and on any early return, which
         # is exactly what do_all uses to tell "a real run executed nothing" apart from
@@ -412,6 +516,10 @@ class TestSuiteJob( AgenticJobBase ):
     # client-supplied vars can't leak into the runner. Extend the allowlist here
     # when adding new test-scoped env contracts.
     _ENV_VAR_ALLOWED_PREFIXES = ( "TFE_", "BFE_", "LUPIN_TEST_" )
+
+    # Names only the runner may set. A caller's value is dropped, not overridden later, so a
+    # run with no token issued shows its children no token at all.
+    _ENV_VAR_RESERVED = ( suite_run_token.TOKEN_ENV_NAME, )
 
     @classmethod
     def _filter_env_vars( cls, raw: Dict[ str, str ] ) -> Dict[ str, str ]:
@@ -424,7 +532,9 @@ class TestSuiteJob( AgenticJobBase ):
             if not isinstance( k, str ):
                 dropped.append( repr( k ) )
                 continue
-            if any( k.startswith( p ) for p in cls._ENV_VAR_ALLOWED_PREFIXES ):
+            if k in cls._ENV_VAR_RESERVED:
+                dropped.append( k )
+            elif any( k.startswith( p ) for p in cls._ENV_VAR_ALLOWED_PREFIXES ):
                 filtered[ k ] = str( v )
             else:
                 dropped.append( k )
@@ -595,36 +705,33 @@ class TestSuiteJob( AgenticJobBase ):
 
         Requires:
             - passed, failed, errors, skipped, not_executed are non-negative ints
-            - collection_error is True only when pytest failed during COLLECTION
-            - coverage_miss is True only when the runner PRINTED a coverage-threshold
-              failure (see _parse_c8_threshold_failures) — never inferred from exit code
+            - collection_error is True only when pytest failed during collection
+            - coverage_miss is True only when the runner printed a coverage-threshold
+              failure (see _parse_c8_threshold_failures), never inferred from exit code
 
         Ensures:
-            - returns "COLLECTION ERROR" when collection_error is set, BEFORE any count
-              is consulted (row bc83f2df). A collection error in a TEST module writes a
-              junit carrying errors=1, which this method used to read as "FAILED" — a
-              string byte-identical to a genuine red. It is not a red: nothing ran. The
-              measured case held 3 tests across 2 files and the junit accounted for 1,
-              so the report also understated its own blast radius while sounding precise.
-              Counts cannot distinguish these cases, which is why the caller passes the
+            - returns "COLLECTION ERROR" when collection_error is set, before any count
+              is consulted. A collection error in a test module writes a junit carrying
+              errors=1, which this method used to read as "FAILED", a string
+              byte-identical to a genuine red. It is not a red, because nothing ran.
+              Counts cannot distinguish these cases, so the caller passes the
               exit-code-derived fact instead of it being re-derived here.
-            - returns "NOT EXECUTED" when nothing was collected (all counts zero)
-              — a zero-count run is NON-EXECUTION, not a failure (bug 89bfcc8f: a
-              harness reporting "FAILED — 0/0/0/0" is trusted as a real red by the
-              next reader; the JUnit XML was never produced or no tests were
-              collected, which is an ERROR condition, not a test failure)
+            - returns "NOT EXECUTED" when nothing was collected (all counts zero).
+              A zero-count run is non-execution, not a failure. A harness reporting
+              "FAILED — 0/0/0/0" is trusted as a real red by the next reader, but the
+              JUnit XML was never produced or no tests were collected, which is an
+              error condition, not a test failure
             - returns "FAILED"  when at least one test failed or errored (a genuine
-              failure dominates — even if some tiers also did not run)
-            - returns "FAILED"  when tests ran and coverage_miss is set (row 1a11fe96).
-              The typescript tier ran 4020/4020 green on 2026-09-14 while c8 printed
-              three threshold ERROR lines and exited 1, and this method said PASSED,
-              because it reads counts only. The counts-only rule stays (the 335/0/0
-              false positive came from trusting the exit code), so the caller passes
-              the printed threshold miss as its own fact, the same way it passes
+              failure dominates, even if some tiers also did not run)
+            - returns "FAILED"  when tests ran and coverage_miss is set. The typescript
+              tier can run every test green while c8 prints threshold `ERROR` lines and
+              exits 1, and a counts-only rule would say "PASSED". The counts-only rule
+              stays, because trusting the exit code gave a false positive. So the caller
+              passes the printed threshold miss as its own fact, the same way it passes
               collection_error
             - returns "NOT EXECUTED" when nothing failed but at least one tier did
               not run (multi-tier runner: a tier that never ran is not a pass and
-              not a failure — it must not read as green)
+              not a failure, and it must not read as green)
             - returns "PASSED"  when tests ran, none failed or errored, and every
               tier ran
         """
@@ -643,9 +750,7 @@ class TestSuiteJob( AgenticJobBase ):
         """
         One suite's line in the completion card the user actually reads.
 
-        Extracted from do_all so it can be tested directly (row 24a85385): the card
-        is the only place most readers ever learn what a run did, and nothing was
-        covering what it says.
+        Extracted from do_all so it can be tested directly. The card is the only place most readers learn what a run did.
 
         Requires:
             - result carries passed / failed / errors / skipped counts.
@@ -653,8 +758,8 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - always opens with the outcome icon and the counts.
             - appends the startup-crash line when startup_crash_output is present.
-            - appends the FIRST failure's message when failure_details is non-empty,
-              plus an "and N more" tail — the message is the notice, the junit XML
+            - appends the first failure's message when failure_details is non-empty,
+              plus an "and N more" tail; the message is the notice, the junit XML
               stays the receipt.
             - never raises on a missing or malformed failure_details entry; a card
               that cannot be built is worse than a card missing one detail.
@@ -679,6 +784,11 @@ class TestSuiteJob( AgenticJobBase ):
         crash_output = result.get( "startup_crash_output" )
         if crash_output:
             line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
+
+        # The unit tier's own scope exits 72 when the kernel killed a process for memory. Say so,
+        # because the counts alone read as failing tests (row d0b369af).
+        if suite_type == "unit" and result.get( "exit_code" ) == 72:
+            line += "\n  **OUT OF MEMORY**: the unit scope was killed for memory (exit 72); this is not a test failure"
 
         # A FAIL next to "0 failed" reads as a harness bug unless the card says why (row 1a11fe96).
         coverage_misses = result.get( "coverage_threshold_failures" ) or []
@@ -712,6 +822,11 @@ class TestSuiteJob( AgenticJobBase ):
 
         Runs each suite sequentially, always completing all suites regardless
         of individual failures. Reports progress via voice_io notifications.
+
+        Ensures:
+            - a failed between-suites reset stops the sweep: the suite that did not run gets a
+              failure entry (errors=1, the reset error as its reason), the suites already run keep
+              their entries, and the normal summary and report still run with a failing verdict
 
         Returns:
             str: Conversational summary of all suite results
@@ -756,9 +871,15 @@ class TestSuiteJob( AgenticJobBase ):
             # timeout and its own suite_results entry. self.test_types stays
             # unchanged so the report filename ("all-results.md") and the
             # user-visible label in notifications/snapshots remain meaningful.
-            suites_to_run = _expand_all( self.test_types )
+            in_container        = running_in_container()
+            suites_to_run       = _expand_all( self.test_types, in_container )
+            self.suites_not_run = suites_left_out( self.test_types, in_container )
             if self.debug and suites_to_run != list( self.test_types ):
                 print( f"[TestSuiteJob] Expanded {self.test_types} -> {suites_to_run}" )
+
+            # The lineage token for the children this sweep starts (row 8d4a5a59). Issued after
+            # the preflight, revoked in the finally below on every exit.
+            self._suite_token = self._issue_suite_token( suites_to_run )
 
             # Between-suites reset seams (bug 8bd20375): _between_suite_pairs is
             # the SINGLE source of truth for WHERE the shared-DB reset fires —
@@ -787,7 +908,29 @@ class TestSuiteJob( AgenticJobBase ):
                 # :8000 DB. Fires iff this suite opens a seam.
                 seam_prev = reset_predecessor.get( suite_type )
                 if seam_prev is not None:
-                    self._reset_state_between_suites( seam_prev, suite_type )
+                    try:
+                        self._reset_state_between_suites( seam_prev, suite_type )
+                    except BetweenSuiteResetError as reset_err:
+                        # Record the suite that did not run as a failure and stop, then fall through to
+                        # the normal summary: the finished suites keep their report and the verdict
+                        # is a failure. A bare break would summarise only the suites that ran and
+                        # read as a pass (bug 07dde530, Tiberius B1).
+                        self.suite_results[ suite_type ] = {
+                            "passed"    : 0,
+                            "failed"    : 0,
+                            "skipped"   : 0,
+                            "errors"    : 1,
+                            "exit_code" : 1,
+                            "log_path"  : None,
+                            "duration"  : 0.0,
+                            "error"     : f"{suite_type} did not run: {reset_err}",
+                        }
+                        await voice_io.notify(
+                            f"{suite_type} did not run: the between-suites reset failed after {seam_prev}.",
+                            priority="high",
+                            queue_name="run"
+                        )
+                        break
 
                 await voice_io.notify(
                     f"Starting {suite_type} tests...",
@@ -904,6 +1047,7 @@ class TestSuiteJob( AgenticJobBase ):
                 "total_deselected"   : total_deselected,
                 "filtered"           : filtered,
                 "all_passed"         : all_passed,
+                "suites_not_run"     : dict( self.suites_not_run ),
             }
             self.artifacts[ "suite_results" ] = self.suite_results
             self.artifacts[ "cost_summary" ]  = self.cost_summary
@@ -921,6 +1065,9 @@ class TestSuiteJob( AgenticJobBase ):
                 "NOT EXECUTED"     : "NOT EXECUTED",
                 "COLLECTION ERROR" : "COLLECTION ERROR — THE SUITE DID NOT RUN",
             }[ overall_status ]
+            # A pyramid without a tier must not read as a full green: the label carries what was left out.
+            if self.suites_not_run:
+                overall = f"{overall} ({'; '.join( f'{s}: {why}' for s, why in self.suites_not_run.items() )})"
 
             # ─── Write full report to io/ for the document viewer ───
             import urllib.parse
@@ -1066,6 +1213,8 @@ class TestSuiteJob( AgenticJobBase ):
             return summary
 
         finally:
+            suite_run_token.revoke( self.id_hash )
+            self._suite_token = None
             voice_io.clear_job_id()
 
     async def _execute_dry_run( self, voice_io, cosa_interface ) -> str:
@@ -1097,6 +1246,8 @@ class TestSuiteJob( AgenticJobBase ):
         voice_io.set_job_id( self.id_hash )
 
         if self.debug: print( f"[TestSuiteJob] DRY RUN MODE for: {self.test_types}" )
+        self.suites_not_run = suites_left_out( self.test_types, running_in_container() )
+        left_out            = ''.join( f" ({s}: {why})" for s, why in self.suites_not_run.items() )
 
         try:
             await voice_io.notify(
@@ -1134,6 +1285,7 @@ class TestSuiteJob( AgenticJobBase ):
                 "mode"       : "dry_run",
                 "suites"     : self.test_types,
                 "suites_run" : len( self.test_types ),
+                "suites_not_run" : dict( self.suites_not_run ),
             }
             self.artifacts[ "suite_results" ] = self.suite_results
             self.artifacts[ "cost_summary" ]  = self.cost_summary
@@ -1153,7 +1305,7 @@ class TestSuiteJob( AgenticJobBase ):
                 queue_name="run"
             )
 
-            return f"Dry run complete. Would have run: {', '.join( self.test_types )}"
+            return f"Dry run complete. Would have run: {', '.join( self.test_types )}{left_out}"
 
         finally:
             voice_io.clear_job_id()
@@ -1161,18 +1313,21 @@ class TestSuiteJob( AgenticJobBase ):
     # Residue tables cleared at the between-suites seam (bug 8bd20375). Superset
     # of the per-test clean_test_db TRUNCATE list PLUS refresh_tokens — the
     # residue whose duplicate-jti survival across the e2e→integration seam
-    # produced the "Token already exists" flood.
+    # produced the "Token already exists" flood. Postgres refuses a TRUNCATE of a
+    # table another table references unless that table is in the statement too,
+    # so this set must be closed under foreign keys (bug 07dde530: it was not
+    # once task_promotion_tickets was added). tables_with_fk_into() and its unit
+    # test enforce that.
     _BETWEEN_SUITE_TRUNCATE_TABLES = (
-        "auth_audit_log", "failed_login_attempts", "job_history",
+        "auth_audit_log", "failed_login_attempts",
         "proxy_decisions", "trust_states", "task_items", "task_events",
-        "fcm_tokens", "refresh_tokens",
+        "fcm_tokens", "refresh_tokens", "task_promotion_tickets",
     )
 
     @staticmethod
     def _between_suite_pairs( suites: List[ str ] ) -> List[ tuple ]:
         """
-        Ordered (prev, next) adjacency pairs marking the BETWEEN-suite reset
-        seams (bug 8bd20375).
+        Ordered (prev, next) adjacency pairs marking the between-suite reset seams.
 
         Requires:
             - suites is an ordered list of suite-type strings (possibly empty)
@@ -1180,43 +1335,37 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - returns one (suites[i-1], suites[i]) pair per gap → len(suites)-1 pairs
             - empty for 0 or 1 suite (single-suite-skip)
-            - NEVER a trailing pair after the last suite (no reset-after-last)
+            - never a trailing pair after the last suite (no reset-after-last)
         """
         return [ ( suites[ i - 1 ], suites[ i ] ) for i in range( 1, len( suites ) ) ]
 
     def _preflight_assert_exclusive_test_db( self ) -> None:
         """
-        Fail loud if a non-test agentic job is inflight on the shared test DB at
-        the moment this merge-gate sweep starts (bug caf58f71 — concurrent-writer
-        contamination).
-
-        The sweep is monopolize-mode. `monopolize` IS enforced now (bug 30398595:
-        the consumer's Gate A drains foreign writers before dispatch and Gate B
-        holds foreign intake for the run; bug 3a14292b exempts the sweep's own
-        lineage children from both). This preflight is the belt to that
-        suspenders — a same-instant DETECTION guard that converts any foreign
-        writer already inflight AT sweep start into an explicit, diagnosable
-        startup failure. It catches writers inflight at start (the shape the
-        evidence shows) but, being a one-shot preflight, cannot see jobs
-        dispatched later in the window — that is Gate B's job.
-
-        SAFETY (mirrors _reset_state_between_suites): gated to lupin_db_test. On
-        any other engine (a sweep aimed at :7999 dev, where coexisting fleet jobs
-        are legitimate) this is a logged NO-OP. If the running-queue singleton is
-        unreachable or not yet initialised (unit context, alternate host) it is
-        also a logged NO-OP — the ONLY raise is the loud-fail.
+        Fail loudly if a non-test agentic job is inflight on the shared test DB at sweep start.
 
         Requires:
             - self.id_hash is this sweep's pool key (excluded from the count)
 
         Ensures:
             - on lupin_db_test with >=1 non-test inflight agentic job: raises
-              RuntimeError naming the offenders — aborts the sweep before any suite
-            - on lupin_db_test with none: logs the PASS and returns
-            - off the test DB, or with no reachable running queue: logged NO-OP
+              RuntimeError naming the offenders, which aborts the sweep before any suite
+            - on lupin_db_test with none: logs the pass and returns
+            - off the test DB, or with no reachable running queue: logged no-op
+            - after a clean pass, runs the grants preflight, which can raise for its own reason
 
         Raises:
             - RuntimeError when a foreign inflight writer shares lupin_db_test
+
+        The sweep runs in monopolize mode, and `monopolize` is enforced. The consumer's Gate A drains foreign writers
+        before dispatch, and its Gate B holds foreign intake for the run. The sweep's own lineage children are exempt
+        from both. This preflight backs those gates with a same-instant detection guard. It turns any foreign writer
+        already inflight at sweep start into an explicit, diagnosable startup failure. Being a one-shot preflight, it
+        cannot see jobs dispatched later in the window. That is Gate B's job.
+
+        Safety mirrors _reset_state_between_suites: the check is gated to lupin_db_test. On any other engine, such as a
+        sweep aimed at :7999 dev where coexisting fleet jobs are legitimate, it is a logged no-op. If the running-queue
+        singleton is unreachable or not yet initialised (unit context, alternate host), it is also a logged no-op.
+        The only raise is the loud failure.
         """
         from cosa.rest.db import database as db_module
 
@@ -1251,23 +1400,77 @@ class TestSuiteJob( AgenticJobBase ):
         print( "[TestSuiteJob] ✓ preflight exclusivity PASSED: no non-test inflight agentic "
                "jobs on lupin_db_test" )
 
+        self._preflight_assert_grants_on_test_db()
+
+    def _preflight_assert_grants_on_test_db( self ) -> None:
+        """
+        Fail at second zero if the database roles lack grants on lupin_db_test.
+
+        Requires:
+            - the engine is lupin_db_test, and the exclusivity preflight has just passed on a live server
+
+        Ensures:
+            - a gap in the privilege matrix raises RuntimeError naming each missing grant and the repair command
+            - a clean check logs one summary line and returns
+            - a cloud-backed deployment, a database the matrix does not name, or a check that could not run is a
+              logged no-op, so a bug in the check cannot stop a sweep that would otherwise pass
+
+        Raises:
+            - RuntimeError when a role lacks a grant the matrix requires
+
+        An integration or browser sweep over a table the roles cannot reach fails twenty tests with no common
+        message. This turns that into one line before the first suite starts.
+        """
+        from cosa.rest.db import database as db_module
+        from cosa.utils import db_grants
+
+        try:
+            if db_module.is_cloud_backed():
+                print( "[TestSuiteJob] preflight grants SKIPPED: a cloud-backed deployment has its own roles" )
+                return
+            with db_module.engine.connect() as connection:
+                report = db_grants.check_current_database( db_grants.query_runner( connection ) )
+        except Exception as error:
+            print( f"[TestSuiteJob] preflight grants SKIPPED: the check could not run ({type( error ).__name__}: {error})" )
+            return
+
+        if report is None:
+            print( "[TestSuiteJob] preflight grants SKIPPED: this database is not one the matrix describes" )
+            return
+        lines = db_grants.report_lines( report )
+        if not report[ "ok" ]:
+            raise RuntimeError( "Merge-gate sweep preflight FAILED: the database roles lack grants the matrix requires.\n" + "\n".join( lines ) )
+        print( f"[TestSuiteJob] ✓ preflight grants PASSED: {lines[ 0 ]}" )
+
+    def _issue_suite_token( self, suites_to_run: List[ str ] ) -> Optional[ str ]:
+        """
+        Issue the per-run lineage token for this sweep when the INI switch is on.
+
+        Requires:
+            - suites_to_run is the expanded list of suite names this sweep will run
+
+        Ensures:
+            - returns None when the switch is off, and nothing is stored
+            - otherwise returns a token bound to this job's id, expiring after the sum of the
+              suites' budgets plus the module's slack
+            - a failure to issue is printed and returns None: a missing token costs the children
+              their lineage, and must not end the sweep
+        """
+        try:
+            if not suite_run_token.token_enabled(): return None
+            budget = sum( SUITE_TIMEOUTS_SECONDS.get( s, SUITE_TIMEOUT_DEFAULT_SECONDS ) for s in suites_to_run )
+            return suite_run_token.issue( self.id_hash, budget + suite_run_token.EXPIRY_SLACK_SECONDS )
+        except Exception as error:
+            print( f"[TestSuiteJob] WARNING: suite token not issued ({type( error ).__name__}); children lose their lineage" )
+            return None
+
+    def _suite_token_env( self ) -> Dict[ str, str ]:
+        """The token as a one-entry environment, or empty when none was issued."""
+        return { } if self._suite_token is None else { suite_run_token.TOKEN_ENV_NAME: self._suite_token }
+
     def _reset_state_between_suites( self, prev_suite: str, next_suite: str ) -> None:
         """
-        Hard-reset the shared test DB at the seam between two suites (bug 8bd20375).
-
-        The merge-gate sweep runs suites back-to-back on ONE shared :8000 DB
-        (lupin_db_test). Without a reset here, the earlier suite's residue —
-        notably refresh_tokens, whose duplicate jti collides with the login
-        "Token already exists" 500 — survives into the next suite's auth
-        fixtures (the e2e→integration flood, RED ts-2230937c). A literal
-        container bounce is impossible from inside this job (self-kill), so the
-        equivalent isolation is an in-process residue truncate against the
-        hot-swapped test engine.
-
-        SAFETY: mirrors clean_test_db — refuses to touch anything but
-        lupin_db_test. When the live engine is NOT the test DB (e.g. a
-        multi-suite run submitted against the :7999 dev server), this is a
-        logged NO-OP, never a destructive op on dev data.
+        Hard-reset the shared test DB at the seam between two suites.
 
         Requires:
             - prev_suite / next_suite name the adjacent suites (logging only)
@@ -1275,11 +1478,28 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - on lupin_db_test: non-protected users deleted + residue TRUNCATEd
               (incl. refresh_tokens); protected companion rows survive
+            - job_history keeps its pending rows scheduled in the future (the rule of
+              cosa.rest.job_history_cleanup); every other row goes, the sweep's own included
             - on any other DB: no destructive op; logs the skip
-            - never raises — a reset failure logs loudly but does NOT abort the
-              sweep (per-test clean_test_db is the finer-grained backstop)
+            - a reset failure raises BetweenSuiteResetError and stops the sweep: a
+              suite on an unreset database reports on the previous suite's rows, so
+              the sweep stops before the next suite runs
+
+        Raises:
+            - BetweenSuiteResetError if the delete or the truncate fails
+
+        The merge-gate sweep runs suites back-to-back on one shared :8000 DB (lupin_db_test). Without a reset here, the
+        earlier suite's residue survives into the next suite's auth fixtures. Notably, `refresh_tokens` keeps a
+        duplicate jti that collides with the login "Token already exists" 500, which caused the e2e to integration
+        flood. A literal container bounce is impossible from inside this job, because the job would kill itself. So the
+        equivalent isolation is an in-process residue truncate against the hot-swapped test engine.
+
+        Safety mirrors clean_test_db: it refuses to touch anything but lupin_db_test. When the live engine is not the
+        test DB, for example a multi-suite run submitted against the :7999 dev server, the reset is a logged no-op,
+        never a destructive op on dev data.
         """
         from cosa.rest.db import database as db_module
+        from cosa.rest.job_history_cleanup import clean_job_history
         from sqlalchemy import text
 
         try:
@@ -1294,37 +1514,38 @@ class TestSuiteJob( AgenticJobBase ):
             with engine.begin() as conn:
                 conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
                 conn.execute( text( f"TRUNCATE TABLE {table_list}" ) )
+                kept = clean_job_history( conn )
             print( f"[TestSuiteJob] ✓ between-suites DB reset ({prev_suite}->{next_suite}): "
-                   f"non-protected users + residue cleared on lupin_db_test ({table_list})" )
+                   f"non-protected users + residue cleared on lupin_db_test ({table_list}); "
+                   f"job_history cleared except {len( kept )} pending job(s) scheduled ahead" )
 
         except Exception as reset_err:
-            # Non-fatal: the per-test clean_test_db remains the backstop. A reset
-            # hiccup must never vaporize the rest of the sweep.
-            print( f"[TestSuiteJob] ⚠️ between-suites reset FAILED ({prev_suite}->{next_suite}), "
-                   f"non-fatal: {reset_err}" )
+            print( f"[TestSuiteJob] between-suites reset FAILED ({prev_suite}->{next_suite}): {reset_err}" )
+            raise BetweenSuiteResetError(
+                f"between-suites reset failed ({prev_suite}->{next_suite}); stopping the sweep so "
+                f"{next_suite} does not run on {prev_suite}'s rows: {reset_err}"
+            ) from reset_err
 
     def _attest_tier_run( self, suite_type: str, result: Dict, started_at: str ) -> None:
         """
-        Append a durable, tamper-evident record that this tier ran (row 691d49db).
+        Append a durable, tamper-evident record that this tier ran.
 
         Requires:
             - result is a `_run_suite` return dict, or None when `_run_suite`
               raised and the exception is escaping
-            - started_at is an ISO timestamp taken BEFORE the run
+            - started_at is an ISO timestamp taken before the run
 
         Ensures:
-            - a None result is attested as an ESCAPED run rather than skipped —
+            - a None result is attested as an escaped run rather than skipped:
               exit_code 1, errors 1, and an `error` naming the escape. A crashed
-              tier that leaves no receipt is the exact hole this row exists to
+              tier that leaves no receipt is the hole this record exists to
               close, and it is the outcome most worth recording.
             - appends one chained record to the ledger under the `io/` bind mount
-            - NEVER raises: a failure to record must not fail the tier it records.
-              The whole point is a receipt for runs that go wrong, so an
-              attestation that can abort the run would delete the evidence in
-              exactly the case it exists for.
-            - prints the failure rather than swallowing it — a silent recorder is
-              indistinguishable from one that was never wired, which is the defect
-              this row was filed about
+            - never raises: a failure to record must not fail the tier it records.
+              An attestation that can abort the run would delete the evidence in
+              the very case it exists for.
+            - prints the failure rather than swallowing it, because a silent recorder is
+              indistinguishable from one that was never wired
         """
         try:
             from cosa.agents.test_suite import attestation
@@ -1367,7 +1588,7 @@ class TestSuiteJob( AgenticJobBase ):
         Run a single test suite via subprocess.
 
         Uses subprocess.Popen with a poll loop to support cancellation.
-        Does NOT use --bg flag (the AgenticJob IS the background runner).
+        Does not use the --bg flag, because the AgenticJob is the background runner.
 
         Requires:
             - suite_type is "integration" or "e2e"
@@ -1499,6 +1720,9 @@ class TestSuiteJob( AgenticJobBase ):
                     "LUPIN_TEST_MONOPOLIZE_PARENT_ID" : self.id_hash,
                     # Caller-supplied env (allowlist-filtered in __init__) overrides defaults.
                     **self.env_vars,
+                    # The tiers this job left out of an "all", for the coverage gate: without the unit tier's data it
+                    # answers inconclusive. After **self.env_vars so a caller cannot clear it.
+                    "LUPIN_TEST_TIERS_NOT_RUN" : ",".join( self.suites_not_run ),
                     # 🔴 PROVENANCE — DELIBERATELY AFTER **self.env_vars, so a caller cannot
                     # overwrite it (row 224fbb68). Everything above is a default a caller may
                     # override; this is a FACT about who ran the suite, and a run that can
@@ -1516,6 +1740,11 @@ class TestSuiteJob( AgenticJobBase ):
                     # The LUPIN_TEST_ prefix is already inside _ENV_VAR_ALLOWED_PREFIXES, so the
                     # plumbing to carry it existed and was simply unused.
                     "LUPIN_TEST_SUITE_JOB_ID" : self.id_hash,
+                    # The per-run lineage token (row 8d4a5a59), also AFTER **self.env_vars so a
+                    # caller cannot replace it. Present only while a token is issued. The name
+                    # keeps a credential word, which is what makes the redaction layer hunt its
+                    # value in test output; a unit test pins that.
+                    **self._suite_token_env(),
                 }
             )
 
@@ -1858,6 +2087,14 @@ class TestSuiteJob( AgenticJobBase ):
         # ADDED 2026-09-18 with the stylelint gate (row d3d4a18c). Its stdout names every
         # offending file:line:col, and it is the only record a non-pytest gate produces.
         "stylelint"    : "stylelint-gate-latest.log",
+        # The doclint gate (row 2c48c717). Its stdout names every
+        # finding as file:line: rule, and that is the only record this gate produces.
+        "doclint"      : "doclint-gate-latest.log",
+        # The reuse gate (Plan 3 step C3). Its stdout names every refused outcome line and every definition with none.
+        "reuse"        : "reuse-gate-latest.log",
+        # The docker smoke step. Its stdout names each skipped test with the reason, and that is the
+        # only record this step produces.
+        "docker_smoke" : "docker-smoke-gate-latest.log",
         # ⚠️ ADDED 2026-08-28. These three are registered in SUITE_SCRIPTS and were
         # MISSING here, and a suite absent from this map has its stdout silently thrown
         # away: `_write_stdout_log` no-ops on a falsy basename, so the run's only
@@ -1883,6 +2120,8 @@ class TestSuiteJob( AgenticJobBase ):
     @classmethod
     def _log_symlink_path( cls, suite_type: str ) -> Optional[ str ]:
         """
+        Canonical latest-log symlink path for a suite.
+
         Ensures:
             - returns the absolute canonical symlink path for a known suite
             - returns None for an unknown suite (callers treat that as a no-op)
@@ -1893,16 +2132,16 @@ class TestSuiteJob( AgenticJobBase ):
     @classmethod
     def _artifact_dir( cls ) -> str:
         """
-        The ONE resolution point for the artifact root.
+        The one place the artifact root is resolved.
 
         Ensures:
             - returns `cls._ARTIFACT_DIR` when a test (or an operator) has pinned it
             - otherwise resolves the durable root via attestation.artifact_root(), which
-              RAISES under pytest when no root was pinned — so a test cannot reach the
+              raises under pytest when no root was pinned, so a test cannot reach the
               real directory through any call path, computed or literal
 
-        ⚠️ Resolved lazily, per call. An eager module- or class-level resolution would
-        trigger that refusal at import and take down every test that imports this file.
+        The root is resolved lazily, per call. An eager module- or class-level resolution would trigger that refusal
+        at import and take down every test that imports this file.
         """
         root = cls._ARTIFACT_DIR
         if root is None:
@@ -1935,8 +2174,9 @@ class TestSuiteJob( AgenticJobBase ):
     @classmethod
     def _write_stdout_log( cls, suite_type: str, stdout_text: str ) -> Optional[ str ]:
         """
-        Persist captured subprocess stdout to a timestamped file and refresh the
-        canonical /tmp/<suite>-latest.log symlink.
+        Persist captured subprocess stdout to a timestamped file and refresh the latest symlink.
+
+        The canonical symlink is /tmp/<suite>-latest.log.
 
         Requires:
             - suite_type is a known SUITE_SCRIPTS key (unknown keys are a no-op)
@@ -1962,10 +2202,10 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _synth_failure_detail( suite_type: str, name: str, elapsed: float, message: str, traceback_text: str ) -> Dict:
         """
-        Build a single failure_details entry for synthesized ERRORs (timeout,
-        caught exception, etc.) so the remediation snapshot's `failures` array
-        is never empty when `errors > 0`. Matches the shape produced by
-        _parse_junit_xml for real testcase <failure>/<error> elements.
+        Build one failure_details entry for a synthesized error (timeout, caught exception).
+
+        It keeps the remediation snapshot's `failures` array from being empty when `errors > 0`. It matches the shape
+        _parse_junit_xml produces for real testcase failure and error elements.
         """
         return {
             "classname" : f"TestSuiteJob.{suite_type}",
@@ -2069,17 +2309,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _parse_node_tap_summary( stdout: str ) -> Optional[ Dict ]:
         """
-        Parse `node --test` TAP trailer counts emitted by the typescript suite.
-
-        Row 36e479ed. Without this the typescript suite would land in exactly
-        the state WG-7 found the websocket suite in: a green run classified as
-        a failure with metrics 0/0/0/0, because no junit-xml exists to parse.
-
-        The trailer looks like:
-            # tests 2245
-            # pass 2245
-            # fail 0
-            # skipped 0
+        Parse the `node --test` `TAP` trailer counts emitted by the typescript suite.
 
         Requires:
             - stdout is the captured runner stdout (may be empty)
@@ -2088,8 +2318,17 @@ class TestSuiteJob( AgenticJobBase ):
             - returns passed/failed/skipped/errors when a `# pass` line is present
             - returns None when the trailer is absent, so the caller keeps its
               zero-count default and downstream classification is unchanged
-            - counts the LAST trailer, so a nested `# pass` inside test output
+            - counts the last trailer, so a nested `# pass` inside test output
               cannot shadow the run's real total
+
+        Without this parser the typescript suite would land in the state the websocket suite once did. That is a green
+        run classified as a failure with metrics 0/0/0/0, because no junit-xml exists to parse.
+
+        Example:
+            # tests 2245
+            # pass 2245
+            # fail 0
+            # skipped 0
         """
         import re
 
@@ -2112,20 +2351,19 @@ class TestSuiteJob( AgenticJobBase ):
         """
         Extract c8's coverage-threshold failures from the typescript runner's stdout.
 
-        Row 1a11fe96. run-typescript-tests.sh runs c8 with --check-coverage, and a
-        miss prints lines like
-            ERROR: Coverage for branches (99.75%) does not meet global threshold (100%)
-        and exits 1. The TAP counts stay green, so without this the job reported
-        all_passed=True on 2026-09-14 (ts-0678b4dc) with three of these lines in its log.
-
         Requires:
             - stdout is the captured runner stdout (may be empty)
 
         Ensures:
-            - returns each threshold ERROR line, stripped, in the order printed
-            - returns [] when there is none — including a --report-only run, where
-              c8 does not check thresholds and prints no ERROR line
-            - never keys on the exit code (the 335/0/0 false positive)
+            - returns each threshold `ERROR` line, stripped, in the order printed
+            - returns [] when there is none, including a --report-only run, where
+              c8 does not check thresholds and prints no `ERROR` line
+            - never keys on the exit code, because reading it gave the 335/0/0 false positive
+
+        run-typescript-tests.sh runs c8 with --check-coverage. A miss prints a line like
+        `ERROR: Coverage for branches (99.75%) does not meet global threshold (100%)` and exits 1.
+        The `TAP` counts stay green, so without this parser the job reports all_passed=True with threshold failures in
+        its log.
         """
         import re
 
@@ -2137,14 +2375,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _terminate_process_group( process ) -> None:
         """
-        Kill the subprocess AND everything it spawned.
-
-        WHY (bug 8b93bcf5, third defect): the runner is `bash <script>`, and
-        process.terminate() signals that bash alone. A script that does NOT exec
-        into pytest leaves a grandchild holding the inherited stdout pipe, which
-        outlives the kill — so the tier's own budget stops governing the machine.
-        Popen is started with start_new_session=True, giving the child its own
-        process group, so one signal reaches the whole tree.
+        Kill the subprocess and everything it spawned.
 
         Requires:
             - process is a Popen started with start_new_session=True
@@ -2155,6 +2386,11 @@ class TestSuiteJob( AgenticJobBase ):
               is already gone (ProcessLookupError) or the platform has no killpg;
               a cleanup helper must never raise into the caller's error path,
               because the caller is already handling a failure
+
+        The runner is `bash <script>`, and process.terminate() signals that bash alone. A script that does not exec
+        into pytest leaves a grandchild holding the inherited stdout pipe, which outlives the kill. Then the tier's own
+        budget stops governing the machine. Popen is started with start_new_session=True, which gives the child its own
+        process group, so one signal reaches the whole tree.
         """
         def _signal_group( sig ):
             try:
@@ -2180,22 +2416,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _parse_deselected( stdout: str ) -> int:
         """
-        Parse pytest's deselect count from captured stdout (row f3beb6d5).
-
-        The junit-xml carries NO deselect information — its `tests` attribute
-        counts only what was selected — so a `-k`/`-m` slice is invisible to
-        _parse_junit_xml, and a 5-of-692 run looks byte-identical to a full
-        green. This recovers the slice size so cost_summary can flag the run
-        as `filtered` and the report header can name the scope.
-
-        ⚠️ Deselection is INTENTIONAL SCOPING, not non-execution (bug 89bfcc8f).
-        The count returned here must NEVER be routed into `not_executed` — that
-        would red every filtered run, including the TFE landing/confirm runs
-        which are filtered BY DESIGN.
-
-        Two pytest forms carry the count; either one suffices:
-            collected 692 items / 687 deselected / 5 selected
-            ============== 5 passed, 687 deselected in 23.08s ==============
+        Parse pytest's deselect count from captured stdout.
 
         Requires:
             - stdout is the captured runner stdout (may be empty)
@@ -2205,6 +2426,21 @@ class TestSuiteJob( AgenticJobBase ):
             - returns 0 when neither is present (an unfiltered run)
             - prefers the collection form (the authoritative "/ M deselected /")
               when both are present; the two forms agree in practice
+
+        The junit-xml carries no deselect information, because its `tests` attribute counts only what was selected.
+        A `-k` or `-m` slice is therefore invisible to _parse_junit_xml, and a 5-of-692 run looks byte-identical to a
+        full green. This recovers the slice size so cost_summary can flag the run as `filtered` and the report header
+        can name the scope.
+
+        Deselection is intentional scoping, not non-execution. The count returned here must never be routed into
+        `not_executed`. That would red every filtered run, including the TFE landing and confirm runs. Those runs
+        are meant to be filtered.
+
+        Two pytest forms carry the count, and either one suffices.
+
+        Example:
+            collected 692 items / 687 deselected / 5 selected
+            ============== 5 passed, 687 deselected in 23.08s ==============
         """
         collected = re.search( r"collected\s+\d+\s+items?\s*/\s*(\d+)\s+deselected", stdout )
         if collected:
@@ -2217,27 +2453,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _parse_pytest_progress_stdout( stdout: str ) -> Optional[ Dict ]:
         """
-        Recover per-file result counts from pytest's COMPACT progress output.
-
-        WHY (bug 8b93bcf5): --junit-xml is written only at session end, so a tier
-        killed by the timeout leaves NO junit file, _parse_junit_xml falls back to
-        zeros, and the tier publishes "0 passed, 0 failed, 1 errors" — a string
-        byte-identical to a tier that crashed at import, a tier whose script was
-        missing, and a tier that collected nothing. On 2026-07-26 that erased
-        ~17 failures and 1 error the smoke tier had ALREADY found.
-
-        The progress line survives in captured stdout, so the counts are
-        recoverable even though the junit file is not:
-
-            src/tests/smoke/test_alembic_....py FFF.F                    [  1%]
-
-        ⚠️ THIS IS A MITIGATION, NOT THE FIX. It recovers FILE-level resolution
-        only. Compact mode never emits a test node-id, and a killed run never
-        reaches the "short test summary info" block, so no per-test name and no
-        traceback exist ANYWHERE to recover. A reader learns "4 tests in this
-        file failed" and cannot learn which four or why. Full per-test detail
-        needs incremental capture (pytest-reportlog is NOT installed in the test
-        image), which is a separate change.
+        Recover per-file result counts from pytest's compact progress output.
 
         Requires:
             - stdout is the captured (possibly truncated) subprocess output
@@ -2245,9 +2461,25 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - returns a dict with passed/failed/skipped/errors counts plus a
               `partial_files` list of ( filename, chars ) for the reader
-            - returns None when NO progress line was recognized — an empty parse
-              must not read as "zero of everything", which is the exact
-              indistinguishable-zeros failure this method exists to end
+            - returns None when no progress line was recognized, because an empty parse
+              must not read as "zero of everything", the indistinguishable-zeros failure
+              this method exists to end
+
+        --junit-xml is written only at session end. A tier killed by the timeout leaves no junit file, so
+        _parse_junit_xml falls back to zeros. The tier would then publish "0 passed, 0 failed, 1 errors". That string is
+        byte-identical to a tier that crashed at import, one whose script was missing, and one that collected nothing.
+        It would hide failures the tier had already found.
+
+        The progress line survives in captured stdout, so the counts are recoverable even though the junit file is not.
+
+        This is a mitigation, not the fix. It recovers file-level resolution only. Compact mode never emits a test
+        node-id, and a killed run never reaches the "short test summary info" block. So no per-test name and no
+        traceback exist anywhere to recover. A reader learns "4 tests in this file failed" and cannot learn which four
+        or why. Full per-test detail needs incremental capture, and pytest-reportlog is not installed in the test image.
+        That is a separate change.
+
+        Example:
+            src/tests/smoke/test_alembic_....py FFF.F                    [  1%]
         """
         # Progress chars pytest emits in compact mode. 'x'/'X' are xfail/xpass and
         # count as neither pass nor failure, matching the junit parser's treatment.
@@ -2290,18 +2522,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _parse_non_pytest_stdout( suite_type: str, stdout: str ) -> Optional[ Dict ]:
         """
-        Parse the stdout of a non-pytest suite runner (e.g. the websocket smoke
-        runner) into pytest-compatible counts.
-
-        WG-7 (2026-04-28): the websocket suite's bash-driven runner emits its
-        own log format. _parse_junit_xml returns zero counts because there's
-        no junit-xml file. Without this fallback, the test_suite parser
-        classifies 50/50 PASS as a FAIL with metrics 0/0/0/0.
-
-        Recognized signals (websocket runner today):
-            - "ALL SMOKE TESTS PASSED!" → green
-            - "ALL SMOKE TESTS FAILED" / "tests failed" → red
-            - "Total Tests: N" / "Passed: X" / "Failed: Y" → counts
+        Parse a non-pytest suite runner's stdout into pytest-compatible counts.
 
         Requires:
             - suite_type is a known suite name
@@ -2310,8 +2531,17 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - Returns a dict with keys passed, failed, skipped, errors when the
               format is recognized.
-            - Returns None when the format isn't recognized — caller keeps the
+            - Returns None when the format isn't recognized, so the caller keeps the
               zero-count default and downstream classification stays unchanged.
+
+        The websocket suite's bash-driven runner emits its own log format, so _parse_junit_xml returns zero counts
+        because there is no junit-xml file. Without this fallback, the test_suite parser classifies 50/50 passing as a
+        failure with metrics 0/0/0/0.
+
+        Recognized signals (websocket runner today):
+            - `ALL SMOKE TESTS PASSED!` means green
+            - `ALL SMOKE TESTS FAILED` or `tests failed` means red
+            - `Total Tests: N`, `Passed: X`, `Failed: Y` give the counts
 
         Args:
             suite_type: Suite name (e.g., "websocket")
@@ -2340,7 +2570,13 @@ class TestSuiteJob( AgenticJobBase ):
         # same three lines, and ITS UNIT IS FILES — "Failed: 1" is one red .css file, whatever
         # its error count. The extra "Errors: N" line it prints matches none of these regexes.
         # Its refusals exit 2 with no summary, so they too read NOT EXECUTED, never PASSED.
-        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint" ):
+        # "doclint" (row 2c48c717) prints the same three lines. Its unit is files, plus one for the
+        # dashboard check that is its second step. That check failing adds one to "Failed:".
+        # Its refusals exit 2 or 3 with no summary, so they read not executed, never passed.
+        # "reuse" (Plan 3 step C3) prints the same lines, and its unit is checks. With gating off it prints
+        # "Failed: 0" and its would-be refusals under "Report-only:", so the suite reads as passed.
+        # A run that could not check exits 3 with no summary, so it reads not executed, never passed.
+        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint", "doclint", "reuse", "docker_smoke" ):
             return None
         if not stdout:
             return None

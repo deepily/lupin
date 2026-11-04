@@ -1,16 +1,16 @@
 """
-Test-aware diagnosis prompt for TFE Phase 1.
+Test-aware diagnosis prompt for the TFE per-cluster diagnosis step.
 
 Per-cluster diagnosis uses an Opus lead agent with read-only Claude Agent
-SDK tools (Grep, Read, Bash) to analyze a `FailureCluster` and produce a
-`TestDiagnosisResult` with root cause, error category, confidence, and
-test symptoms.
+SDK tools (Grep, Read, Bash). The agent analyzes a `FailureCluster`. It
+produces a `TestDiagnosisResult` with root cause, error category,
+confidence, and test symptoms.
 
-**Critical difference from BFE's diagnosis prompts**: BFE embeds dead-job
-fields (ctx.error, ctx.stack_trace, ctx.question_text) into the prompt.
-TFE embeds `classname::name[param]` test IDs + per-failure tracebacks from
-the cluster, and teaches the lead agent four failure-mode categories plus
-pytest test-ID decoding.
+This differs from BFE's diagnosis prompts. BFE embeds dead-job fields
+(ctx.error, ctx.stack_trace, ctx.question_text) into the prompt.
+TFE embeds `classname::name[param]` test IDs and per-failure tracebacks from
+the cluster. It also teaches the lead agent four failure-mode categories
+and how to decode pytest test IDs.
 
 Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/04-phase1-diagnose-plan.md
         src/rnd/v0.1.6/2026.04.10-test-fix-expediter/10-prompt-design.md#2

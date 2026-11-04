@@ -3,7 +3,7 @@
 COSA Deep Research to Presentation Agent Package.
 
 A wrapper agent that orchestrates a chained workflow:
-Deep Research → Presentation Generation.
+Deep Research to Presentation Generation.
 
 This agent:
 1. Runs Deep Research on a given query
@@ -11,7 +11,7 @@ This agent:
 3. Passes report_path to Presentation Generator as source_path
 4. Returns combined result with both artifacts
 
-Usage:
+Example:
     # CLI
     python -m cosa.agents.deep_research_to_presentation \\
         --query "State of quantum computing in 2026" \\

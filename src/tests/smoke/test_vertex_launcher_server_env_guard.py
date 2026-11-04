@@ -1,7 +1,7 @@
 """
 OSQ-6 (EXISTING-server half) + §5c row 2 — the launcher refuses a TAINTED tmux server.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 Finding: Rio's C1 (store item b0e7142c) — "the guard runs in the WRONG PROCESS."
 
 THE EXPLOIT THIS FILE KILLS, verbatim from the finding: a tainted server env holding
@@ -36,7 +36,7 @@ from cosa.utils.vertex_env import (
     SERVER_TAINT_REFUSAL_KEYS,
     VERTEX_REGION_ENV_KEY,
 )
-from tests.smoke.tmux_isolation import TMUX_ISOLATION_STRIP_KEYS
+from tests.smoke.tmux_isolation import TMUX_ISOLATION_STRIP_KEYS, isolate_fleet_census
 
 
 LAUNCHER = Path( cu.get_project_root() ) / "src" / "scripts" / "start-cc-with-tmux.sh"
@@ -69,7 +69,7 @@ def _clean_base_env( socket_dir ):
     for key in MAX_PANE_UNSET_KEYS:
         env.pop( key, None )
     env[ "TMUX_TMPDIR" ] = str( socket_dir )
-    return env
+    return isolate_fleet_census( env, socket_dir )    # the launcher's fleet-cap gate must not read the LIVE fleet
 
 
 def _tmux( socket_dir, *args ):

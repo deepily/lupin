@@ -73,11 +73,9 @@ class LlmCompletion:
         """
         Shrink the completion budget so prompt + completion fits the model's window.
 
-        Row a203d91d: `max_tokens` came from config as a constant while the prompt is
-        a variable, and the server checks their SUM. A 4096 budget against an 8192
-        window meant any prompt over ~4096 tokens was a hard 400 before a single token
-        was generated. The window is read from the server, never from config, because
-        a configured copy is a second source of truth that drifts.
+        `max_tokens` is a constant from config while the prompt varies, and the server
+        checks their sum. A long prompt would be a hard 400 before any token is generated.
+        The window is read from the server, never from config, since a copy drifts.
 
         Requires:
             - prompt is the exact string being sent
@@ -88,10 +86,10 @@ class LlmCompletion:
         Ensures:
             - returns `requested` when it already fits
             - returns a smaller budget that fits when it does not
-            - returns `requested` UNCHANGED if the token count cannot be obtained,
-              which is exactly today's behaviour — this is a hot path, and refusing
-              to answer at all would turn a working call into a hard failure over a
-              measurement that is only an optimisation when the prompt is small
+            - returns `requested` unchanged if the token count cannot be obtained,
+              because this is a hot path and refusing to answer at all would turn a
+              working call into a hard failure over a measurement that is only an
+              optimisation when the prompt is small
 
         Raises:
             - None
@@ -155,22 +153,21 @@ class LlmCompletion:
             - Processes and returns the response text
             - Provides debug information if enabled
             - Returns within `timeout` seconds of entry when one is given, counting
-              BOTH HTTP calls this method can make
+              both HTTP calls this method can make
             
         Raises:
             - May raise HTTP exceptions for API errors
             - TimeoutError (the builtin) when `timeout` is given and elapses. A caller
               should not have to import requests to catch a timeout from this client,
-              and requests.exceptions.Timeout is NOT a subclass of the builtin —
-              measured, not assumed — so an `except TimeoutError` upstream would miss
-              it if it were allowed to propagate as-is.
+              and requests.exceptions.Timeout is not a subclass of the builtin, so an
+              `except TimeoutError` upstream would miss it if it propagated as-is.
             
         Args:
             prompt: The text prompt to send to the LLM
             stream: Whether to stream the response
             timeout: Seconds this whole call may take, or None for unbounded. The
                      streaming path is bounded too, by aiohttp's own ClientTimeout,
-                     which needs no translation because its timeouts already ARE the
+                     which needs no translation because its timeouts already are the
                      builtin.
             **generation_args: Additional arguments for generation
             
@@ -266,8 +263,8 @@ class LlmCompletion:
             - aiohttp exceptions for network errors
             - TimeoutError (the builtin) when `timeout` is given and elapses. No
               translation is needed on this path, unlike the requests one: aiohttp's
-              own timeouts already ARE the builtin — measured, asyncio.TimeoutError
-              IS TimeoutError on this runtime, and ServerTimeoutError inherits it.
+              own timeouts already are the builtin, since asyncio.TimeoutError is
+              TimeoutError on this runtime and ServerTimeoutError inherits it.
             
         Yields:
             Chunks of the response text

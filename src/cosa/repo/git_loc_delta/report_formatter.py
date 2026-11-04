@@ -5,6 +5,8 @@ Console output uses two tables (daily totals + by date×file_type) with
 `du.print_banner` for headers (matches COSA idiom).
 
 JSON output is a single nested dict:
+
+```
     {
         "since":      "2026-05-15",
         "until":      "2026-05-16",
@@ -14,6 +16,7 @@ JSON output is a single nested dict:
         "summary":    { total_added, total_deleted, total_files, total_commits, total_days, net },
         "days":       [ { date, added, deleted, files_touched, commits, by_file_type: [...] }, ... ],
     }
+```
 
 CSV output is delegated to `csv_writer.write_csv()`.
 """
@@ -145,8 +148,9 @@ def format_json(
 
 def print_console_banner( title: str ) -> None:
     """
-    Convenience wrapper around `du.print_banner` for callers that want the
-    banner printed directly to stdout (e.g. the CLI in --debug mode).
+    Print a banner to stdout through `du.print_banner`.
+
+    Callers that want the banner printed directly use this, as the CLI does in --debug mode.
 
     Ensures:
         - Delegates to cosa.utils.util.print_banner with prepend_nl=True

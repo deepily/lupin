@@ -371,3 +371,24 @@ def test_it_never_passes_a_mutating_verb( ledger, script ):
 
 def test_smoke_test_passes():
     assert tick.quick_smoke_test() is True
+
+
+# ── the arms the suite never reached ────────────────────────────
+
+@pytest.mark.parametrize( "cwd", [ None, 7, "", "   " ] )
+def test_a_bridge_whose_cwd_is_not_a_usable_string_is_skipped_and_the_good_repo_still_counts( tmp_path, cwd ):
+    bridges = tmp_path / "sessions"; bridges.mkdir()
+    good    = tmp_path / "good"; ( good / "io" / "mementos" ).mkdir( parents=True )
+    ( bridges / "cc-1.json" ).write_text( json.dumps( { "cwd": cwd } ) )
+    ( bridges / "cc-2.json" ).write_text( json.dumps( { "cwd": str( good ) } ) )
+    assert tick.fleet_repo_roots( bridges_dir=bridges ) == [ str( good ) ]
+
+
+def test_an_unusable_bridges_dir_gives_an_empty_list_not_an_exception():
+    assert tick.fleet_repo_roots( bridges_dir=12345 ) == []
+
+
+def test_an_unexpected_subprocess_error_names_the_repo_and_the_exception_type( ledger, script ):
+    with patch.object( subprocess, "run", side_effect=PermissionError( "nope" ) ):
+        line = tick.verify_tick_line( now=NOW, force=True )
+    assert "could not run" in line and "PermissionError" in line and "UNVERIFIED" in line

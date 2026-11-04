@@ -22,6 +22,7 @@
 // (Defect 5, the colour's threshold, is fixed in render/flowRatioModel.ts.)
 
 import type { EventBus } from "../shared/EventBus";
+import { resolveRuntimeDefaults } from "./polling";
 import type { StoreFlowRatioChangedPayload } from "../shared/types";
 import {
   flowRatioSettingsUsable,
@@ -30,15 +31,20 @@ import {
   type ManagerPullState,
 } from "../render/flowRatioModel";
 
+/** The slice of the API client the store needs: `get`, `patch` and `delete`. */
 export interface FlowRatioApiClient {
   get<T>( path: string ): Promise<T>;
   patch<T>( path: string, body: unknown ): Promise<T>;
   delete<T>( path: string ): Promise<T>;
 }
 
+/** The server path that returns the flow ratio. */
 export const FLOW_RATIO_ENDPOINT          = "/api/tasks/flow-ratio";
+/** The server path that reads and changes the flow ratio settings. */
 export const FLOW_RATIO_SETTINGS_ENDPOINT = "/api/tasks/flow-ratio/settings";
+/** The server path that reads and changes the manager pull state. */
 export const MANAGER_PULL_ENDPOINT        = "/api/tasks/manager-pull";
+/** How often the store polls the flow ratio, in milliseconds. */
 export const FLOW_RATIO_POLL_INTERVAL_MS  = 60000;   // legacy's shared 60 s task-list tick
 
 /** A settings write: the threshold as a fraction, the window in hours, or both. */
@@ -47,6 +53,7 @@ export interface FlowRatioSettingsPatch {
   window_hours? : number;
 }
 
+/** The flow ratio, its settings and the manager pull state, with the writes that change them. */
 export interface FlowRatioStore {
   /** The last ratio payload, or null before a read / after a failed one. */
   ratio(): FlowRatioPayload | null;
@@ -66,6 +73,7 @@ export interface FlowRatioStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createFlowRatioStore`: bus, API client, timer hooks and an error hook. */
 export interface FlowRatioStoreOptions {
   bus              : EventBus;
   api              : FlowRatioApiClient;
@@ -90,6 +98,11 @@ function refusalText( verb: string, err: unknown ): string {
   return `${verb} (network)`;
 }
 
+/**
+ * Holds the flow ratio reading, its settings and the manager pull state for the page.
+ *
+ * It polls the server, saves operator changes, and emits a change event after each update.
+ */
 class FlowRatioStoreImpl implements FlowRatioStore {
   private readonly bus             : EventBus;
   private readonly api             : FlowRatioApiClient;
@@ -105,24 +118,42 @@ class FlowRatioStoreImpl implements FlowRatioStore {
   private inFlight     = false;
   private pollHandle   : number | null = null;
 
+  /**
+   * Sets up the store from the bus, API client and optional clock, timer and error sink.
+   */
   constructor( opts: FlowRatioStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? ( () => Date.now() );
-    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
-    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
-    /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the default above.
-    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+    const { nowFn, setIntervalFn, clearIntervalFn } = resolveRuntimeDefaults( opts );
+    this.nowFn = nowFn;
+    this.setIntervalFn   = setIntervalFn;
+    this.clearIntervalFn = clearIntervalFn;
     /* c8 ignore next */ // production-default fallback: console.error is the runtime sink; tests inject a collector.
     this.errorFn         = opts.errorFn ?? ( ( m ) => console.error( `[FlowRatioStore] ${m}` ) );
   }
 
+  /**
+   * Returns the last flow ratio reading, or null if none has been read.
+   */
   ratio(): FlowRatioPayload | null { return this.lastRatio; }
+  /**
+   * Returns the last flow ratio settings read from the server, or null.
+   */
   settings(): FlowRatioSettings | null { return this.lastSettings; }
+  /**
+   * Returns the last manager pull state, or null if it has not been read.
+   */
   managerPull(): ManagerPullState | null { return this.lastPull; }
+  /**
+   * Returns the status message from the last save or reset, or null.
+   */
   controlsMessage(): string | null { return this.message; }
 
+  /**
+   * Re-reads the ratio from the server and emits a change event.
+   *
+   * Settings and manager pull state are re-read only while they are missing or unusable. Overlapping calls are ignored.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // a manual refresh landing on a tick cannot double-fetch
     this.inFlight = true;
@@ -139,6 +170,11 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     }
   }
 
+  /**
+   * Sends a settings patch to the server and keeps the result.
+   *
+   * On failure it records a refusal message and re-reads the settings. It always re-reads the ratio afterwards.
+   */
   async saveSettings( patch: FlowRatioSettingsPatch ): Promise<void> {
     this.message = null;
     try {
@@ -151,6 +187,11 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     this.emit();
   }
 
+  /**
+   * Freezes or allows the manager pull on the server and records a status message.
+   *
+   * On failure it records a refusal and re-reads the state.
+   */
   async saveManagerPull( disabled: boolean ): Promise<void> {
     this.message = null;
     try {
@@ -163,6 +204,11 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     this.emit();
   }
 
+  /**
+   * Asks the server to delete the saved settings, then re-reads the ratio.
+   *
+   * A server refusal becomes a message. A network failure is only logged.
+   */
   async resetSettings(): Promise<void> {
     this.message = null;
     try {
@@ -176,12 +222,20 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     this.emit();
   }
 
+  /**
+   * Starts refreshing on a fixed interval, with one refresh right away.
+   *
+   * Any earlier polling is stopped first.
+   */
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), FLOW_RATIO_POLL_INTERVAL_MS );
   }
 
+  /**
+   * Stops the polling timer if one is running.
+   */
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
@@ -189,6 +243,9 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     }
   }
 
+  /**
+   * Stops polling so a test leaves no timer behind.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
@@ -236,6 +293,7 @@ class FlowRatioStoreImpl implements FlowRatioStore {
   }
 }
 
+/** Build the store. It fetches nothing when it is built. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFlowRatioStore( opts: FlowRatioStoreOptions ): FlowRatioStore {
   return new FlowRatioStoreImpl( opts );

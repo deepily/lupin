@@ -186,3 +186,35 @@ class TestWhatTheHumanSees:
         err = capsys.readouterr().err
         assert "Invalid parameters" in err
         assert "message" in err
+
+
+class TestConfigFailureAndDebugUserId:
+    """The arms the CLI suite never reached."""
+
+    def test_a_config_failure_makes_target_user_required( self, capsys ):
+        with patch( f"{MODULE}.get_api_config", side_effect=RuntimeError( "no config" ) ), \
+             patch( f"{MODULE}.sys.argv", [ "notify_user_async", "msg" ] ), \
+             patch( f"{MODULE}.notify_user_async" ) as send:
+            with pytest.raises( SystemExit ) as exc:
+                main()
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "--target-user" in err and "required" in err
+        send.assert_not_called()
+
+    def test_a_config_failure_still_works_when_target_user_is_passed( self ):
+        ok = MagicMock( success=True, status="queued", message="ok", connection_count=0, target_system_id=None )
+        with patch( f"{MODULE}.get_api_config", side_effect=RuntimeError( "no config" ) ), \
+             patch( f"{MODULE}.sys.argv", [ "notify_user_async", "msg", "--target-user", "a@b.c" ] ), \
+             patch( f"{MODULE}.notify_user_async", return_value=ok ) as send:
+            with pytest.raises( SystemExit ) as exc:
+                main()
+        assert exc.value.code == 0
+        assert send.call_args.kwargs[ "request" ].target_user == "a@b.c"
+
+    def test_debug_prints_the_user_id_to_stderr_only_when_one_came_back( self, capsys ):
+        with_id = MagicMock( success=True, status="queued", message="ok", connection_count=0, target_system_id="sys-123" )
+        _run( [ "msg", "--debug" ], response=with_id )
+        assert "User ID: sys-123" in capsys.readouterr().err
+        _run( [ "msg" ], response=with_id )            # no --debug: nothing on stderr
+        assert "User ID" not in capsys.readouterr().err

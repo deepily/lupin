@@ -22,6 +22,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import asyncio
 import os
+import re
 import time
 
 from fastapi.routing import APIRoute
@@ -296,3 +297,161 @@ if __name__ == "__main__":
     status = "✅ PASS" if success else "❌ FAIL"
     print( f"\n{status} Pages router unit tests completed in {duration:.3f}s" )
     print( f"Result: {message}" )
+
+
+class TestTaskApproveLandingPage( unittest.TestCase ):
+    """
+    Unit tests for `/app/tasks/approve`.
+
+    The page is the safe landing for a one-click approve link.
+
+    Requires:
+        - The pages router registers `/app/tasks/approve`
+
+    Ensures:
+        - A GET through TestClient answers 200 text/html with the no-cache header, reading the page off disk
+        - The page sends the approve move only from its button's click handler
+        - The load path reads the row and sends no POST
+    """
+
+    def test_get_serves_the_page_shell( self ):
+        """
+        Serve the landing page shell.
+
+        Ensures:
+            - GET /app/tasks/approve?row=<id> returns 200, text/html, Cache-Control: no-cache
+            - the body carries the approve button and the row display
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.include_router( router )
+        response = TestClient( app ).get( "/app/tasks/approve?row=a3975cf4-c640-4659-9247-0a99fa8a5f4a" )
+
+        self.assertEqual( response.status_code, 200 )
+        self.assertTrue( response.headers[ "content-type" ].startswith( "text/html" ) )
+        self.assertEqual( response.headers[ "cache-control" ], "no-cache" )
+        self.assertIn( 'id="task-approve-button"', response.text )
+        self.assertIn( 'id="task-approve-row"', response.text )
+
+    @staticmethod
+    def _click_handler_spans( html ):
+        """
+        Find the body of every click handler the page registers.
+
+        Requires:
+            - html is the page text; each handler is written `addEventListener( "click", <fn with no braces in its signature> {`
+            - no brace appears inside a string or comment of a handler
+
+        Ensures:
+            - returns a list of ( start, end ) offsets, one per handler, covering the braces of its body
+            - braces are matched by depth, so a nested object literal does not end the span early
+
+        Raises:
+            - AssertionError if a handler has no body brace or its braces never balance
+        """
+        spans = []
+        for registration in re.finditer( r'addEventListener\( "click"', html ):
+            opening = re.compile( r"function[^{]*\{" ).search( html, registration.end() )
+            assert opening is not None, "click handler without a function body"
+            depth = 0
+            for offset in range( opening.end() - 1, len( html ) ):
+                if html[ offset ] == "{": depth += 1
+                elif html[ offset ] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        spans.append( ( opening.end() - 1, offset ) )
+                        break
+            else:
+                raise AssertionError( "click handler braces never balance" )
+        return spans
+
+    def test_click_handler_spans_match_nested_braces_and_refuse_malformed_pages( self ):
+        """
+        The span finder survives nested braces and refuses a handler it cannot bound.
+
+        Ensures:
+            - a nested object literal does not end the span early
+            - a handler with no body, or with unbalanced braces, raises AssertionError
+        """
+        html  = 'a.addEventListener( "click", function () { x( { k: 1 } ); } ); tail'
+        spans = self._click_handler_spans( html )
+        self.assertEqual( len( spans ), 1 )
+        self.assertEqual( html[ spans[ 0 ][ 0 ] : spans[ 0 ][ 1 ] + 1 ], "{ x( { k: 1 } ); }" )
+        with self.assertRaisesRegex( AssertionError, "without a function body" ):
+            self._click_handler_spans( 'a.addEventListener( "click", handler );' )
+        with self.assertRaisesRegex( AssertionError, "never balance" ):
+            self._click_handler_spans( 'a.addEventListener( "click", function () { x(' )
+
+    def test_opening_the_page_cannot_send_the_approve_move( self ):
+        """
+        Opening the page cannot send an approve move.
+
+        Ensures:
+            - the page has exactly two `/transition` requests, the single and the batch button
+            - each one sits inside the body of a click handler, never on a load path
+        """
+        from cosa.rest.routers.pages import _ROUTE_TABLE, _static_dir
+
+        with open( os.path.join( _static_dir, _ROUTE_TABLE[ "/app/tasks/approve" ] ), encoding = "utf-8" ) as handle:
+            html = handle.read()
+
+        load_body = html[ html.index( "async function load()" ) : html.index( 'button.addEventListener( "click"' ) ]
+        self.assertNotIn( "/transition", load_body, "the load path must not send the approve move" )
+        self.assertNotIn( 'method  : "POST"', load_body )
+
+        spans   = self._click_handler_spans( html )
+        calls   = [ m.start() for m in re.finditer( "/transition", html ) ]
+        self.assertEqual( len( spans ), 2, "the single and the batch click handler" )
+        self.assertEqual( len( calls ), 2, "one /transition request per button" )
+        for call in calls:
+            self.assertTrue( any( start < call < end for start, end in spans ), f"/transition at offset {call} is outside every click handler" )
+
+
+class TestTaskViewLandingPage( unittest.TestCase ):
+    """
+    Unit tests for `/app/tasks/view`, the read-only landing for a card's 📋 link.
+
+    Ensures:
+        - A GET through TestClient answers 200 text/html with the no-cache header
+        - The page sends no write request of any kind
+    """
+
+    def test_get_serves_the_page_shell( self ):
+        """
+        Serve the view page shell.
+
+        Ensures:
+            - GET /app/tasks/view?row=<id> returns 200, text/html, Cache-Control: no-cache
+            - the body carries the row display and the body element
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.include_router( router )
+        response = TestClient( app ).get( "/app/tasks/view?row=a3975cf4-c640-4659-9247-0a99fa8a5f4a" )
+
+        self.assertEqual( response.status_code, 200 )
+        self.assertTrue( response.headers[ "content-type" ].startswith( "text/html" ) )
+        self.assertEqual( response.headers[ "cache-control" ], "no-cache" )
+        self.assertIn( 'id="task-view-row"', response.text )
+        self.assertIn( 'id="task-view-body"', response.text )
+
+    def test_the_page_cannot_write( self ):
+        """
+        The page only reads.
+
+        Ensures:
+            - the page names no PATCH, DELETE or /transition, and its one POST is the token refresh
+        """
+        from cosa.rest.routers.pages import _ROUTE_TABLE, _static_dir
+
+        with open( os.path.join( _static_dir, _ROUTE_TABLE[ "/app/tasks/view" ] ), encoding = "utf-8" ) as handle:
+            html = handle.read()
+
+        self.assertNotIn( "/transition", html )
+        self.assertNotIn( "PATCH", html )
+        self.assertNotIn( "DELETE", html )
+        self.assertEqual( html.count( "POST" ), 1, "the only POST is the token refresh" )

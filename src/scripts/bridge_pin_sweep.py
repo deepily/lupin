@@ -1,18 +1,19 @@
 """
-Find tests that drive code which reads LIVE session-bridge state without pinning it.
+Find tests that drive code reading live session-bridge state without pinning it.
 
-The failure this catches: _notify_impl's Phase-3 gate calls get_speakerphone( sid )
-on every non-internal call. A test that does not pin it measures whichever box it
-runs on — green on one machine, red on another, and green against a real defect
-whenever the ambient value happens to sit on the harmless side.
+The failure this catches: _notify_impl's gate calls get_speakerphone( sid ) on every non-internal call.
+A test that does not pin it measures whichever box it runs on, so it is green on one machine and red on another.
 
 Requires:
     - test_root is a directory of pytest files
 
 Ensures:
-    - one row per test FUNCTION that calls a bridge-reading entry point
+    - one row per test function that calls a bridge-reading entry point
     - reports whether that function, or its file, pins the bridge reader
     - reports only; touches nothing
+
+Notes:
+    - An unpinned test is also green against a real defect whenever the ambient value sits on the harmless side.
 """
 import os, re
 
@@ -57,7 +58,7 @@ HELPDEF = re.compile( r"^\s*def (_\w+)\s*\(", re.MULTILINE )
 def helper_bodies( src ):
     """{ name: body } for each _private helper, so a pin inside one is visible.
 
-    A shared arrange-helper is the NORMAL place to put these pins — three tests
+    A shared arrange-helper is the normal place to put these pins — three tests
     in one file isolate only through `self._arrange( ... )`. A sweep that reads
     test bodies alone calls all three exposed and sends someone to 'fix' code
     that was already correct."""
@@ -83,7 +84,7 @@ def functions( src ):
 
 def classify( src, label="<memory>" ):
     """
-    Rows for ONE source string: ( label, test_name, drivers, unpinned ).
+    Rows for one source string: ( label, test_name, drivers, unpinned ).
 
     Split out from sweep() so the self-test below can feed it synthetic sources.
     A detector that can only be exercised against the tree it was tuned on cannot
@@ -176,11 +177,9 @@ EXIT_BROKEN = 2     # self-test FAILED — the detector is untrustworthy, ignore
 def _driver_counts( rows ):
     """Tests seen per driver — a driver contributing 0 is a blinded sweep, visibly.
 
-    Mr Radio, 2026-08-26: blinding the detector dropped the total 41 -> 8, and
-    "that drop is itself a tell, but only to someone who remembers 41." Nobody
-    remembers 41. A per-driver line needs no memory: `_notify_impl: 0` is wrong
-    on its face. A hardcoded expected total would rot as the tree grows; this
-    does not.
+    A drop in the total is a tell only to someone who remembers the old total.
+    A per-driver line needs no memory: `_notify_impl: 0` is wrong on its face.
+    A hardcoded expected total would rot as the tree grows; this does not.
     """
     return { d: sum( 1 for r in rows if d in r[ 2 ] ) for d in BRIDGE_DRIVERS }
 

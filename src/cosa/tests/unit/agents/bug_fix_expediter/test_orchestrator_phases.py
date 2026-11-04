@@ -37,6 +37,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import cosa.agents.bug_fix_expediter.orchestrator as orch_mod
 import cosa.agents.bug_fix_expediter.voice_io as vio_mod
+import cosa.agents.bug_fix_expediter.cosa_interface as ci_mod
 from cosa.agents.bug_fix_expediter.orchestrator import BFEOrchestrator
 from cosa.agents.bug_fix_expediter.state import (
     BFEPhase, DeadJobContext, DiagnosisResult, ProposedFix, FixResult,
@@ -105,8 +106,13 @@ def _sdk_raise( exc ):
     return _gen
 
 
-def _result_msg():
-    return MagicMock( spec=orch_mod.ResultMessage )
+def _result_msg( is_error=False, subtype="success", result=None, errors=None ):
+    m = MagicMock( spec=orch_mod.ResultMessage )
+    m.is_error = is_error
+    m.subtype  = subtype
+    m.result   = result
+    m.errors   = errors
+    return m
 
 
 def _rate_limit():
@@ -290,6 +296,24 @@ class TestDelegateToLead( unittest.TestCase ):
             out = _run( orch._delegate_to_lead( vio_mod, "p", options="opts" ) )
         self.assertIsNone( out )
 
+    def test_error_result_logs_the_cli_text_and_returns_none( self ):
+        orch = _orch()
+        err  = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ):
+            with self.assertLogs( orch_mod.logger.name, level="ERROR" ) as logs:
+                out = _run( orch._delegate_to_lead( vio_mod, "p", options="opts" ) )
+        self.assertIsNone( out )
+        self.assertIn( "Your credit balance is too low", "\n".join( logs.output ) )
+
+    def test_error_result_logs_the_errors_list( self ):
+        orch = _orch()
+        err  = _result_msg( is_error=True, subtype="error_during_execution", errors=[ "tool died" ] )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ):
+            with self.assertLogs( orch_mod.logger.name, level="ERROR" ) as logs:
+                _run( orch._delegate_to_lead( vio_mod, "p", options="opts" ) )
+        self.assertIn( "error_during_execution", "\n".join( logs.output ) )
+        self.assertIn( "tool died", "\n".join( logs.output ) )
+
 
 # ===========================================================================
 # run_proposal
@@ -460,6 +484,16 @@ class TestVoiceGateDiagnosis( unittest.TestCase ):
         self.assertEqual( ctx.exception.phase, BFEPhase.DIAGNOSING.value )
         self.assertIsInstance( ctx.exception.cause, RuntimeError )
 
+    def test_unreachable_from_the_gate_passes_through_unwrapped_at_diagnosis( self ):
+        # The dispatcher now raises VoiceGateUnreachableError itself. Wrapping it
+        # again would bury the real cause one level down.
+        orch = _orch()
+        err = VoiceGateUnreachableError( "confirmation", RuntimeError( "ws down" ) )
+        self.ci.ask_confirmation.side_effect = err
+        with self.assertRaises( VoiceGateUnreachableError ) as ctx:
+            _run( orch._voice_gate_diagnosis( _diag(), vio_mod, self.ci ) )
+        self.assertIs( ctx.exception, err )
+
     def test_unreachable_is_not_reported_as_a_timeout( self ):
         # The two are distinct events and the record must be able to say which.
         # Collapsing them is the same "cannot distinguish" defect the gate had.
@@ -599,6 +633,14 @@ class TestVoiceGateProposal( unittest.TestCase ):
         with self.assertRaises( VoiceGateUnreachableError ) as ctx:
             _run( orch._voice_gate_proposal( [ _fix( confidence=0.9 ) ], vio_mod, self.ci ) )
         self.assertEqual( ctx.exception.phase, BFEPhase.PROPOSING.value )
+
+    def test_unreachable_from_the_gate_passes_through_unwrapped_at_proposal( self ):
+        orch = _orch()
+        err = VoiceGateUnreachableError( "confirmation", RuntimeError( "ws down" ) )
+        self.ci.ask_confirmation.side_effect = err
+        with self.assertRaises( VoiceGateUnreachableError ) as ctx:
+            _run( orch._voice_gate_proposal( [ _fix( confidence=0.9 ) ], vio_mod, self.ci ) )
+        self.assertIs( ctx.exception, err )
 
     def test_control_a_working_gate_still_returns_the_approved_fix( self ):
         # Control: if the refusal test above passed because the gate refuses
@@ -794,6 +836,20 @@ class TestRunGitStrategy( unittest.TestCase ):
         self.assertEqual( out.pr_url, "http://pr" )
         self.writer.update_git_references.assert_called_once()
 
+    def test_the_push_flag_reaches_the_strategist( self ):
+        for flag in ( True, False ):
+            orch = _orch()
+            orch.config.push_fix_branch_enabled = flag
+            fr = FixResult( applied=True, success=True, details="the fix" )
+            strat = MagicMock()
+            strat.commit_and_pr_single = AsyncMock( return_value={ "git_strategy": None, "commit_hash": None,
+                                                                   "branch_name": None, "pr_url": None } )
+            with patch.object( orch_mod, "GitStrategist",
+                               MagicMock( return_value=strat,
+                                          resolve_trust_level=MagicMock( return_value=3 ) ) ):
+                _run( orch.run_git_strategy( fr, [ "a.py" ], "/tmp/plan.md" ) )
+            self.assertIs( strat.commit_and_pr_single.call_args.kwargs[ "push_enabled" ], flag )
+
     def test_success_with_none_git_fields_and_no_details( self ):
         orch = _orch()
         fr = FixResult( applied=True, success=True, details="" )     # no details → default messages
@@ -849,6 +905,16 @@ class TestDelegateToCoder( unittest.TestCase ):
             output, files = _run( orch._delegate_to_coder( vio_mod, "p", _guard(), MagicMock() ) )
         self.assertEqual( output, "patching done" )
         self.assertEqual( files, [ "/x/a.py" ] )         # dup + empty + Read filtered
+
+    def test_error_result_logs_the_cli_text_and_returns_nothing( self ):
+        orch = _orch()
+        orch._build_coder_options = MagicMock( return_value="opts" )
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ):
+            with self.assertLogs( orch_mod.logger.name, level="ERROR" ) as logs:
+                output, files = _run( orch._delegate_to_coder( vio_mod, "p", _guard(), MagicMock() ) )
+        self.assertEqual( ( output, files ), ( "", [] ) )
+        self.assertIn( "Your credit balance is too low", "\n".join( logs.output ) )
 
     def test_cancellation_breaks_loop( self ):
         orch = _orch()
@@ -959,6 +1025,133 @@ class TestVerifyFix( unittest.TestCase ):
             passed, out = _run( orch._verify_fix( vio_mod, _fix(), "c", [], _guard(), MagicMock() ) )
         self.assertFalse( passed )
         self.assertIn( "Verification error", out )
+
+
+# =============================================================================
+# Resume: a stalled run records the phase it was gated in, and a resumed run skips what is done
+# =============================================================================
+
+class TestResumeFromCheckpoint( unittest.TestCase ):
+
+    def setUp( self ):
+        self._p = patch.object( vio_mod, "notify", AsyncMock() )
+        self._p.start()
+        self.writer = MagicMock()
+        self.writer.write_plan = MagicMock( return_value="/tmp/plan.md" )
+        self._pw = patch.object( orch_mod, "PlanWriter", MagicMock( return_value=self.writer ) )
+        self._pw.start()
+
+    def tearDown( self ):
+        self._p.stop(); self._pw.stop()
+
+    def _stall_at_diagnosis_gate( self, error=None ):
+        # The real gate runs; only the interface it asks through is faked.
+        orch = _orch()
+        orch._delegate_to_lead = AsyncMock( return_value=_diag_json( 0.9 ) )
+        with patch.object( ci_mod, "ask_confirmation", AsyncMock( side_effect=error or VoiceGateTimeoutError( "diagnosing" ) ) ):
+            with self.assertRaises( StalledException ) as ctx:
+                _run( orch.run_diagnosis() )
+        return ctx.exception.checkpoint
+
+    def _stall_at_proposal_gate( self, error=None ):
+        orch = _orch()
+        orch._delegate_to_lead = AsyncMock(
+            return_value='[{"title":"Parsed","description":"d","fix_type":"x","confidence":0.9}]' )
+        with patch.object( ci_mod, "ask_confirmation", AsyncMock( side_effect=error or VoiceGateTimeoutError( "proposing" ) ) ):
+            with self.assertRaises( StalledException ) as ctx:
+                _run( orch.run_proposal( _diag() ) )
+        return ctx.exception.checkpoint
+
+    def _resumed( self, checkpoint ):
+        orch = _orch()
+        orch.load_checkpoint( checkpoint )
+        orch.set_resume_phase( checkpoint[ "phase_ordinal" ] )
+        orch._delegate_to_lead     = AsyncMock()
+        orch._voice_gate_diagnosis = AsyncMock( side_effect=lambda d, *a: d )
+        orch._voice_gate_proposal  = AsyncMock( return_value=None )
+        return orch
+
+    # --- the stall records the phase it was gated in -------------------------------------------
+
+    def test_a_diagnosis_gate_stall_records_the_diagnosing_phase( self ):
+        for error in ( VoiceGateTimeoutError( "diagnosing" ), VoiceGateUnreachableError( "diagnosing", RuntimeError( "x" ) ) ):
+            ck = self._stall_at_diagnosis_gate( error )
+            self.assertEqual( ( ck[ "phase_name" ], ck[ "phase_ordinal" ] ), ( "diagnosing", 1 ), type( error ).__name__ )
+
+    def test_a_proposal_gate_stall_records_the_proposing_phase( self ):
+        for error in ( VoiceGateTimeoutError( "proposing" ), VoiceGateUnreachableError( "proposing", RuntimeError( "x" ) ) ):
+            ck = self._stall_at_proposal_gate( error )
+            self.assertEqual( ( ck[ "phase_name" ], ck[ "phase_ordinal" ] ), ( "proposing", 2 ), type( error ).__name__ )
+
+    # --- a resumed run skips finished work -------------------------------------------------------
+
+    def test_resume_at_the_diagnosis_gate_reuses_the_diagnosis_and_asks_the_gate_again( self ):
+        ck   = self._stall_at_diagnosis_gate()
+        orch = self._resumed( ck )
+        out  = _run( orch.run_diagnosis() )
+        orch._delegate_to_lead.assert_not_awaited()
+        orch._voice_gate_diagnosis.assert_awaited_once()
+        self.assertEqual( out.confidence, 0.9 )
+
+    def test_resume_at_the_proposal_gate_does_not_ask_the_diagnosis_gate_again( self ):
+        ck   = self._stall_at_proposal_gate()
+        ck[ "state_snapshot" ][ "diagnosis" ] = _diag().model_dump()
+        orch = self._resumed( ck )
+        out  = _run( orch.run_diagnosis() )
+        orch._delegate_to_lead.assert_not_awaited()
+        orch._voice_gate_diagnosis.assert_not_awaited()
+        self.assertEqual( out.root_cause, "rc" )
+
+    def test_resume_at_the_proposal_gate_reuses_the_proposals_and_asks_the_gate_again( self ):
+        ck   = self._stall_at_proposal_gate()
+        orch = self._resumed( ck )
+        fixes, selected, plan = _run( orch.run_proposal( _diag() ) )
+        orch._delegate_to_lead.assert_not_awaited()
+        orch._voice_gate_proposal.assert_awaited_once()
+        self.assertEqual( fixes[ 0 ].title, "Parsed" )
+        self.assertEqual( plan, "/tmp/plan.md" )
+
+    def test_a_resumed_proposal_stall_stalls_again_with_the_same_phase( self ):
+        ck   = self._stall_at_proposal_gate()
+        orch = self._resumed( ck )
+        orch._voice_gate_proposal = AsyncMock( side_effect=VoiceGateTimeoutError( "proposing" ) )
+        with self.assertRaises( StalledException ) as ctx:
+            _run( orch.run_proposal( _diag() ) )
+        self.assertEqual( ctx.exception.checkpoint[ "phase_ordinal" ], 2 )
+
+    def test_resume_at_the_proposal_gate_can_still_revise_with_the_users_feedback( self ):
+        # Revising needs the diagnosis the run was resumed with; a resumed run that
+        # skipped proposal generation must still hand it to the revision prompt.
+        ck   = self._stall_at_proposal_gate()
+        orch = _orch()
+        orch.load_checkpoint( ck )
+        orch.set_resume_phase( ck[ "phase_ordinal" ] )
+        orch._delegate_to_lead = AsyncMock(
+            return_value='[{"title":"Revised","description":"d","fix_type":"x","confidence":0.8}]' )
+        with patch.object( ci_mod, "ask_confirmation", AsyncMock( return_value=False ) ), \
+             patch.object( ci_mod, "get_feedback", AsyncMock( return_value="try the other approach" ) ):
+            fixes, selected, plan = _run( orch.run_proposal( _diag( root_cause="the cache key collides" ) ) )
+        orch._delegate_to_lead.assert_awaited_once()
+        prompt = orch._delegate_to_lead.await_args.args[ 1 ]
+        self.assertIn( "try the other approach", prompt )
+        self.assertIn( "the cache key collides", prompt )   # the diagnosis root cause
+        self.assertEqual( selected.title, "Revised" )
+
+    def test_control_without_a_resume_the_phases_still_run( self ):
+        orch = _orch()
+        orch._delegate_to_lead     = AsyncMock( return_value=_diag_json( 0.9 ) )
+        orch._voice_gate_diagnosis = AsyncMock( side_effect=lambda d, *a: d )
+        _run( orch.run_diagnosis() )
+        orch._delegate_to_lead.assert_awaited()
+
+    def test_control_a_resume_checkpoint_with_no_stored_diagnosis_still_diagnoses( self ):
+        # An old checkpoint, or one that never held a diagnosis, must not make the run skip it.
+        orch = _orch()
+        orch.set_resume_phase( 1 )
+        orch._delegate_to_lead     = AsyncMock( return_value=_diag_json( 0.9 ) )
+        orch._voice_gate_diagnosis = AsyncMock( side_effect=lambda d, *a: d )
+        _run( orch.run_diagnosis() )
+        orch._delegate_to_lead.assert_awaited()
 
 
 if __name__ == "__main__":

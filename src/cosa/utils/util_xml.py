@@ -1,17 +1,15 @@
 """
-DEPRECATED: util_xml.py - Legacy XML parsing utilities
-
-⚠️  WARNING: This module is DEPRECATED as of Session 116 (2026-02-02).
+Legacy XML parsing utilities. Deprecated: use the Pydantic models instead.
 
 All XML parsing should use Pydantic models from:
     cosa.agents.io_models.xml_models
 
 Migration path:
-    OLD: dux.get_value_by_xml_tag_name( response, "gist" )
-    NEW: SimpleResponse.from_xml( response ).get_content()
+    before: dux.get_value_by_xml_tag_name( response, "gist" )
+    after:  SimpleResponse.from_xml( response ).get_content()
 
-    OLD: dux.get_value_by_xml_tag_name( response, "command" )
-    NEW: CommandResponse.from_xml( response ).command
+    before: dux.get_value_by_xml_tag_name( response, "command" )
+    after:  CommandResponse.from_xml( response ).command
 
 Available Pydantic models:
     - SimpleResponse: For <gist>, <summary>, <answer> tags
@@ -20,7 +18,7 @@ Available Pydantic models:
     - CodeResponse: For code generation responses
     - And many more in xml_models.py
 
-This module will be REMOVED in a future release.
+This module will be removed in a future release.
 """
 
 import re
@@ -39,14 +37,10 @@ warnings.warn(
 
 def get_value_by_xml_tag_name( xml_string: str, name: str, default_value: Optional[str]=None ) -> Union[str, None]:
     """
-    DEPRECATED: Use Pydantic XML models instead.
+    Extract the value enclosed by an XML tag's open and close brackets.
 
-    Extract the value enclosed by XML tag open/close brackets.
-
-    Migration:
-        from cosa.agents.io_models.xml_models import SimpleResponse
-        response = SimpleResponse.from_xml( xml_string )
-        value = response.get_content()
+    Deprecated: use `SimpleResponse.from_xml( xml_string ).get_content()` from
+    cosa.agents.io_models.xml_models instead.
 
     Requires:
         - xml_string is a string containing XML content
@@ -78,9 +72,9 @@ def get_value_by_xml_tag_name( xml_string: str, name: str, default_value: Option
     
 def get_xml_tag_and_value_by_name( xml_string: str, name: str, default_value: Optional[str]=None ) -> str:
     """
-    DEPRECATED: Use Pydantic XML models instead.
-
     Extract and return the full XML tag with its value.
+
+    Deprecated: use the Pydantic XML models instead.
 
     Requires:
         - xml_string is a string containing XML content
@@ -108,9 +102,9 @@ def get_xml_tag_and_value_by_name( xml_string: str, name: str, default_value: Op
 
 def get_nested_list( xml_string: str, tag_name: str="code", debug: bool=False, verbose: bool=False ) -> list[str]:
     """
-    DEPRECATED: Use Pydantic XML models with list fields instead.
-
     Extract a list of values from nested line tags within a parent tag.
+
+    Deprecated: use the Pydantic XML models with list fields instead.
 
     Requires:
         - xml_string is a string containing XML with nested <line> tags

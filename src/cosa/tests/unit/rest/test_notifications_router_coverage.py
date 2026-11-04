@@ -33,6 +33,7 @@ from unittest.mock import Mock, MagicMock, AsyncMock, patch
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
+from cosa.config.app_timezone import InvalidAppTimezoneError
 import cosa.rest.routers.notifications as N
 from cosa.rest.routers.notifications import (
     _voice_persona_for_sender_id, get_formatted_time_display, get_formatted_date_display,
@@ -134,28 +135,46 @@ class TestVoicePersonaHelper( unittest.TestCase ):
 
     def test_import_fallbacks_set_globals_none( self ):
         """
-        Force both optional imports to fail and reload the module so the
-        `except ImportError:` fallback arms (_bridge_get_voice_persona /
-        _display_name_for → None) execute, then reload clean to restore state.
+        Force both optional imports to fail so the `except ImportError:` fallback arms
+        (_bridge_get_voice_persona / _display_name_for -> None) execute.
+
+        🔴 THIS RUNS ON A PRIVATE COPY OF THE MODULE, NEVER `importlib.reload( N )` (row 876d183e).
+        A reload re-executes the module body, so `N.get_notification_queue` becomes a NEW
+        function object while every module that did `from .notifications import
+        get_notification_queue` (dm.py) keeps the OLD one. FastAPI's `dependency_overrides` is
+        keyed by function identity, so any later test overriding the fresh name silently missed
+        dm's Depends() and got the real dependency (None): test_dm_experiment_integration failed
+        whenever dm was imported BEFORE this reload in the same process, and only then.
+        The copy is executed from the same file (coverage still counts it) and never enters
+        sys.modules, so the shared module and every reference to it stay untouched.
         """
+        import importlib.util
         blockers = {
             "lupin_cli.claude_code.hooks.lib.session_bridge": None,
             "cosa.rest.voice_persona_helpers": None,
         }
-        try:
-            with patch.dict( sys.modules, blockers ):
-                reloaded = importlib.reload( N )
-                self.assertIsNone( reloaded._bridge_get_voice_persona )
-                self.assertIsNone( reloaded._display_name_for )
-        finally:
-            importlib.reload( N )   # restore real imports for the rest of the suite
+        identities_before = { name: obj for name, obj in vars( N ).items() if callable( obj ) }
+        self.assertIn( "get_notification_queue", identities_before )     # the object dm.py holds
+
+        spec  = importlib.util.spec_from_file_location( N.__name__, N.__file__ )
+        probe = importlib.util.module_from_spec( spec )
+        with patch.dict( sys.modules, blockers ):
+            spec.loader.exec_module( probe )
+        self.assertIsNone( probe._bridge_get_voice_persona )
+        self.assertIsNone( probe._display_name_for )
+
+        # The shared module is exactly as it was: same module object, same function objects.
+        self.assertIs( sys.modules[ N.__name__ ], N )
+        for name, obj in identities_before.items():
+            self.assertIs( vars( N )[ name ], obj, f"{name} was rebound — a reload-style leak" )
+        self.assertIsNotNone( N._bridge_get_voice_persona )              # real imports still in place
 
 
 class TestTimeDateDisplay( unittest.TestCase ):
     """Coverage for get_formatted_time_display / get_formatted_date_display."""
 
     def _main( self, tz_name ):
-        cfg = Mock(); cfg.get.return_value = tz_name
+        cfg = Mock(); cfg.get.return_value = tz_name; cfg.get_required.return_value = tz_name
         m = Mock(); m.config_mgr = cfg
         return m
 
@@ -164,20 +183,29 @@ class TestTimeDateDisplay( unittest.TestCase ):
             out = get_formatted_time_display()
         self.assertRegex( out, r"^\d{2}:\d{2}" )
 
-    def test_time_display_fallback( self ):
-        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ):
-            out = get_formatted_time_display()
-        self.assertRegex( out, r"^\d{2}:\d{2}$" )
+    def test_time_display_with_a_bogus_zone_raises( self ):
+        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ), self.assertRaises( InvalidAppTimezoneError ):
+            get_formatted_time_display()
 
     def test_date_display_success( self ):
         with _patch_fastapi_main( self._main( "America/New_York" ) ):
             out = get_formatted_date_display()
         self.assertRegex( out, r"^\d{4}-\d{2}-\d{2}$" )
 
-    def test_date_display_fallback( self ):
-        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ):
-            out = get_formatted_date_display()
-        self.assertRegex( out, r"^\d{4}-\d{2}-\d{2}$" )
+    def test_date_display_with_a_bogus_zone_raises( self ):
+        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ), self.assertRaises( InvalidAppTimezoneError ):
+            get_formatted_date_display()
+
+    def test_local_now_text_uses_fmt_in_the_configured_zone_and_raises_outside_it( self ):
+        from cosa.rest.routers.notifications import _local_now_text
+        with _patch_fastapi_main( self._main( "UTC" ) ):
+            self.assertRegex( _local_now_text( "%H:%M %Z" ), r"^\d{2}:\d{2} UTC$" )
+        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ), self.assertRaises( InvalidAppTimezoneError ):
+            _local_now_text( "%H:%M %Z" )
+
+    def test_time_display_in_zone_carries_the_zone_abbreviation( self ):
+        with _patch_fastapi_main( self._main( "UTC" ) ):
+            self.assertRegex( get_formatted_time_display(), r"^\d{2}:\d{2} UTC$" )
 
 
 class TestResolveSenderId( unittest.TestCase ):
@@ -444,6 +472,30 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
                 idempotency_key="stamp-key" )
 
         stamp.assert_called_once_with( str( first_id ), "delivered" )
+
+    async def test_a_failing_delivered_stamp_on_a_retry_is_reported_and_the_retry_still_succeeds( self ):
+        N._idempotency_cache.clear()
+        first_id = uuid.uuid4()
+        mock_db  = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=first_id )
+        nq = Mock(); nq.push_notification.return_value = Mock()
+        stamp = Mock( side_effect=RuntimeError( "db down" ) )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "_update_notification_state_sync", stamp ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ) as printed:
+            await self._call(
+                Mock(), _ws_manager( is_connected=False, connection_count=0, listener_delivered=False ),
+                idempotency_key="stamp-fail-key" )
+            out = await self._call(
+                nq, _ws_manager( is_connected=True, connection_count=1 ),
+                idempotency_key="stamp-fail-key" )
+
+        self.assertEqual( out[ "status" ], "queued" )
+        stamp.assert_called_once_with( str( first_id ), "delivered" )
+        said = " ".join( str( c.args[ 0 ] ) for c in printed.call_args_list if c.args )
+        self.assertIn( "State update to 'delivered' failed (non-fatal): db down", said )
 
     async def test_caller_supplied_persist_false_is_not_stamped( self ):
         """
@@ -857,18 +909,18 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_missing_notification_id_422( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await submit_notification_response( authenticated_user_id="test-user", request_body={ "response_value": "yes" }, ws_manager=_ws_manager() )
+            await submit_notification_response( authenticated_user_id=UID_STR, request_body={ "response_value": "yes" }, ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 422 )
 
     async def test_missing_response_value_422( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await submit_notification_response( authenticated_user_id="test-user", request_body={ "notification_id": UID_STR }, ws_manager=_ws_manager() )
+            await submit_notification_response( authenticated_user_id=UID_STR, request_body={ "notification_id": UID_STR }, ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 422 )
 
     async def test_empty_string_response_400( self ):
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response( authenticated_user_id="test-user",
+                await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": "  <b></b> " },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
@@ -879,38 +931,38 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response( authenticated_user_id="test-user",
+                await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 404 )
 
     async def test_already_responded_400( self ):
-        notif = Mock(); notif.state = "responded"
+        notif = Mock(); notif.state = "responded"; notif.recipient_id = UID_STR
         repo = Mock(); repo.get_by_id.return_value = notif
         with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response( authenticated_user_id="test-user",
+                await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
 
     async def test_expired_beyond_grace_400( self ):
-        notif = Mock(); notif.state = "expired"
+        notif = Mock(); notif.state = "expired"; notif.recipient_id = UID_STR
         notif.expires_at = datetime.now( timezone.utc ) - timedelta( seconds=10000 )
         repo = Mock(); repo.get_by_id.return_value = notif
         with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg( grace=300 ) ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response( authenticated_user_id="test-user",
+                await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
 
     async def test_expired_within_grace_accepted( self ):
-        notif = Mock(); notif.state = "expired"
+        notif = Mock(); notif.state = "expired"; notif.recipient_id = UID_STR
         notif.expires_at = datetime.now( timezone.utc ) - timedelta( seconds=5 )
         notif.recipient_id = UID_STR; notif.job_id = "dr-a1b2c3d4"
         notif.sender_id = None; notif.sender_persona = None
@@ -920,7 +972,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-            out = await submit_notification_response( authenticated_user_id="test-user",
+            out = await submit_notification_response( authenticated_user_id=UID_STR,
                 request_body={ "notification_id": UID_STR, "response_value": "yes" },
                 ws_manager=_ws_manager() )
         self.assertEqual( out[ "status" ], "success" )
@@ -933,7 +985,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response( authenticated_user_id="test-user",
+                await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
@@ -955,7 +1007,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response( authenticated_user_id="test-user",
+                out = await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": { "value": "blue" } },
                     ws_manager=ws )
             self.assertEqual( out[ "status" ], "success" )
@@ -986,7 +1038,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response( authenticated_user_id="test-user",
+                out = await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
             self.assertEqual( out[ "status" ], "success" )
@@ -1011,7 +1063,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response( authenticated_user_id="test-user",
+                out = await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=_ws_manager() )
             self.assertEqual( out[ "status" ], "success" )   # outcome-recording error swallowed
         finally:
@@ -1027,7 +1079,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-            out = await submit_notification_response( authenticated_user_id="test-user",
+            out = await submit_notification_response( authenticated_user_id=UID_STR,
                 request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
         self.assertEqual( out[ "status" ], "success" )
 
@@ -1042,7 +1094,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
         with patch.object( N, "_submit_response_sync", side_effect=RuntimeError( "db down" ) ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response( authenticated_user_id="test-user",
+                await submit_notification_response( authenticated_user_id=UID_STR,
                     request_body={ "notification_id": "not-a-uuid", "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
@@ -1071,9 +1123,9 @@ class TestLateAnswerHandback( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
-             _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) ) ), \
+             _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ), get_required=Mock( return_value="America/New_York" ) ) ) ), \
              patch( "builtins.print" ):
-            return await submit_notification_response( authenticated_user_id="test-user",
+            return await submit_notification_response( authenticated_user_id=UID_STR,
                 request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
 
     # NOTE: test_cv4_emit_routes_on_asker_hash8_when_no_job_id and
@@ -1128,12 +1180,12 @@ class TestSenderHistoryEndpoints( unittest.IsolatedAsyncioTestCase ):
     EMAIL = "ricardo.felipe.ruiz@gmail.com"
 
     def _cfg_main( self, tz="America/New_York" ):
-        cfg = Mock(); cfg.get.return_value = tz
+        cfg = Mock(); cfg.get.return_value = tz; cfg.get_required.return_value = tz
         m = Mock(); m.config_mgr = cfg
         return m
 
     def _patch_cfgmgr( self, tz="America/New_York" ):
-        cfg = Mock(); cfg.get.return_value = tz
+        cfg = Mock(); cfg.get.return_value = tz; cfg.get_required.return_value = tz
         return patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg )
 
     # ---- bulk_delete_notifications ----

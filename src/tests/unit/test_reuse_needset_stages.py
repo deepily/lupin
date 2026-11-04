@@ -1,0 +1,345 @@
+"""
+The stage runner: four stages under one call cap, each reported.
+
+The runner makes no model call itself. These tests hand it fake stages and a fake transport, so no model is contacted.
+"""
+import asyncio
+import os
+import subprocess
+import sys
+
+import pytest
+from claude_agent_sdk import AssistantMessage, TextBlock
+
+from cosa.repo.doc_lint import harness_report, model_transport as mt
+from cosa.repo.labelling import run_check
+from cosa.repo.symindex.candidates import candidate_stage as cs
+from lupin_mcp.reuse_needset import call_cap, hardness, loss_trace, stage3, stages
+from lupin_mcp.reuse_needset import errors as er
+from tests.unit.test_reuse_needset_hardness import crowded_index
+from tests.unit.test_reuse_needset_positive_control import pool
+from tests.unit.test_reuse_needset_stage3 import lexical_ask, twenty
+
+FABLE = "claude-fable-5-1"
+
+
+@pytest.fixture( autouse=True )
+def no_hook_left_over():
+    yield
+    mt.set_charge_hook( None )
+
+
+class Transport:
+    """A stand-in for sdk_query that answers ok and counts the calls."""
+
+    def __init__( self ):
+        self.calls = 0
+
+    async def __call__( self, prompt, options ):
+        self.calls += 1
+        yield AssistantMessage( content=[ TextBlock( "ok" ) ], model=options.model )
+
+
+def spend( transport, n ):
+    """Return an async stage function that makes n model calls and reports done."""
+    async def stage():
+        for _ in range( n ): await mt.complete( FABLE, "s", "u", query_fn=transport )
+        return { "calls": n }
+    return stage
+
+
+def all_stages( transport, **over ):
+    """Return the four stage functions, each spending one call, with some replaced."""
+    base = { name: spend( transport, 1 ) for name in stages.ORDER }
+    base.update( over )
+    return base
+
+
+def run( cap, funcs ):
+    with cap.installed(): return asyncio.run( stages.run_stages( cap, funcs ) )
+
+
+def new_cap( tmp_path, limit=1000 ): return call_cap.CallCap( str( tmp_path / "calls.jsonl" ), limit=limit )
+
+
+def test_the_four_stages_run_in_the_plan_order_with_the_planned_allowances():
+    assert stages.ORDER == ( "attribution", "yield", "control", "remainder" )
+    assert stages.PLANNED_CALLS == { "attribution": 300, "yield": 600, "control": 250 } and stages.STAGE_BUDGETS == { **stages.PLANNED_CALLS, "remainder": 0 } and sum( stages.STAGE_BUDGETS.values() ) <= call_cap.CALL_LIMIT and stages.YIELD_SEEDS == 100
+
+
+def test_each_stage_runs_in_order_and_its_calls_carry_its_name( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    out = run( cap, all_stages( transport, **{ "attribution": spend( transport, 3 ), "control": spend( transport, 2 ) } ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done" ] * 4 and list( out[ "stages" ] ) == list( stages.ORDER )
+    assert out[ "by_stage" ] == { "attribution": 3, "control": 2, "remainder": 1, "yield": 1 } and out[ "used" ] == 7 and out[ "limit" ] == 1000
+    assert [ r[ "stage" ] for r in cap.rows() ] == [ "attribution" ] * 3 + [ "yield" ] + [ "control" ] * 2 + [ "remainder" ]
+    assert out[ "over_plan" ] == [] and out[ "stages" ][ "attribution" ][ "report" ] == { "calls": 3 }
+
+
+def test_a_stage_that_reports_stop_ends_the_run_and_the_later_stages_never_start( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    async def halting():
+        await mt.complete( FABLE, "s", "u", query_fn=transport )
+        return { "stop": True, "why": "no seed lost at any stage" }
+    out = run( cap, all_stages( transport, **{ "yield": halting } ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done", "stopped", "not_run", "not_run" ]
+    assert transport.calls == 2 and out[ "stages" ][ "yield" ][ "report" ][ "why" ] == "no seed lost at any stage"
+
+
+def test_the_cap_ending_a_stage_is_reported_by_name_and_nothing_after_it_runs( tmp_path ):
+    cap, transport = new_cap( tmp_path, limit=5 ), Transport()
+    out = run( cap, all_stages( transport, **{ "yield": spend( transport, 9 ) } ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done", "cap_reached", "not_run", "not_run" ]
+    assert out[ "stages" ][ "yield" ][ "code" ] == er.CALL_CAP_REACHED and out[ "used" ] == 5 and transport.calls == 5
+    assert out[ "over_plan" ] == []
+
+
+def test_any_other_named_failure_stops_the_run_with_its_code( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    async def broken():
+        raise er.NeedsetError( er.RECEIPT_FIELD_ABSENT, "no candidate stage" )
+    out = run( cap, all_stages( transport, **{ "attribution": broken } ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "failed", "not_run", "not_run", "not_run" ]
+    assert out[ "stages" ][ "attribution" ] == { "status": "failed", "code": er.RECEIPT_FIELD_ABSENT, "detail": "no candidate stage" } and transport.calls == 0
+
+
+def test_an_error_that_is_not_a_named_one_is_never_swallowed( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    async def crash():
+        raise RuntimeError( "boom" )
+    with pytest.raises( RuntimeError, match="boom" ): run( cap, all_stages( transport, **{ "attribution": crash } ) )
+
+
+def test_a_stage_that_spends_past_its_allowance_is_listed_but_only_the_cap_stops_the_run( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    out = run( cap, all_stages( transport, **{ "attribution": spend( transport, 301 ), "yield": spend( transport, 300 ) } ) )
+    assert out[ "over_plan" ] == [ "attribution" ] and out[ "stages" ][ "remainder" ][ "status" ] == "done"
+
+
+def test_a_missing_stage_is_refused_before_anything_runs( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    funcs = all_stages( transport )
+    del funcs[ "control" ]
+    with pytest.raises( ValueError, match="control" ): run( cap, funcs )
+    assert transport.calls == 0
+
+
+def lost_record( members ): return { "kind": "work_alike", "write_lang": "py", "members": members }
+
+
+def test_the_attribution_report_stops_when_no_member_was_lost_at_a_named_stage():
+    some = stages.attribution_report( [ lost_record( { "a": loss_trace.FOUND, "b": loss_trace.NOT_READ } ), lost_record( { "c": loss_trace.NOT_RETRIEVED } ) ] )
+    assert ( some[ "members" ], some[ "lost" ], some[ "found" ] ) == ( 3, 2, 1 ) and some[ "can_name_a_stage" ] is True and some[ "stop" ] is False
+    assert some[ "by_lost_at" ] == { "FOUND": 1, "NOT_READ": 1, "NOT_RETRIEVED": 1 } and some[ "summary" ][ "members" ] == 3
+    none = stages.attribution_report( [ lost_record( { "a": loss_trace.FOUND } ) ] )
+    assert ( none[ "lost" ], none[ "can_name_a_stage" ], none[ "stop" ] ) == ( 0, False, True )
+
+
+def entry( i, name, doc="" ): return { "id": i, "module": "m", "name": name, "sig": "()", "doc": doc }
+
+
+def yield_index():
+    """Return an index where "banana" ranks m.easy first and never lists m.hidden."""
+    return hardness.build_index( [ entry( "m.easy", "banana_easy", "banana banana" ), entry( "m.hidden", "hidden", "turns one text into another" ) ] )
+
+
+def prepare_from( table ):
+    """Return an async prepare_fn that answers from a table and records the seeds asked."""
+    asked = []
+    async def prepare( seed_id ):
+        asked.append( seed_id )
+        return table[ seed_id ]
+    prepare.asked = asked
+    return prepare
+
+
+def row( seed, target, lang ): return { "seed": seed, "need": "banana", "targets": [ target ], "lang": lang }
+
+
+def test_the_yield_counts_hard_seeds_per_language_in_order_with_intervals_and_skips():
+    table   = { "s1": row( "s1", "m.hidden", "py" ), "s2": row( "s2", "m.easy", "py" ), "s3": None, "s4": row( "s4", "m.hidden", "ts" ) }
+    prepare = prepare_from( table )
+    out     = asyncio.run( stages.run_yield( [ "s1", "s2", "s3", "s4" ], prepare, yield_index() ) )
+    assert prepare.asked == [ "s1", "s2", "s3", "s4" ] and out[ "skipped" ] == 1 and out[ "seeds" ] == 3 and out[ "hard" ] == 2 and out[ "k" ] == 10
+    assert out[ "by_lang" ] == { "py": { "seeds": 2, "hard": 1, "per_100": 50.0 }, "ts": { "seeds": 1, "hard": 1, "per_100": 100.0 } }
+    assert out[ "intervals" ] == { "py": harness_report.interval( 1, 2 ), "ts": harness_report.interval( 1, 1 ) }
+    assert out[ "stop" ] is False and out[ "short" ] == [ "py", "ts" ]
+
+
+def test_a_language_with_a_hundred_seeds_and_no_hard_one_stops_the_run_and_a_short_one_does_not():
+    ids   = [ f"s{n}" for n in range( 100 ) ]
+    table = { i: row( i, "m.easy", "py" ) for i in ids }
+    table[ "t1" ] = row( "t1", "m.hidden", "ts" )
+    out = asyncio.run( stages.run_yield( ids + [ "t1" ], prepare_from( table ), yield_index() ) )
+    assert out[ "by_lang" ][ "py" ][ "seeds" ] == 100 and out[ "by_lang" ][ "py" ][ "hard" ] == 0 and out[ "stop" ] is True and out[ "short" ] == [ "ts" ]
+    ninety_nine = asyncio.run( stages.run_yield( ids[ :99 ], prepare_from( table ), yield_index() ) )
+    assert ninety_nine[ "stop" ] is False and ninety_nine[ "short" ] == [ "py" ]
+
+
+def pairs():
+    """Return 20 pairs: 3 drifted, 12 unsure, 5 others, each with a marker in its original."""
+    return ( [ { "id": f"d{n}", "group": "drifted", "original": f"orig-d{n}", "rewrite": f"new-d{n}" } for n in range( 3 ) ]
+             + [ { "id": f"u{n}", "group": "unsure", "original": f"orig-u{n}", "rewrite": f"new-u{n}" } for n in range( 12 ) ]
+             + [ { "id": f"o{n}", "group": "other", "original": f"orig-o{n}", "rewrite": f"new-o{n}" } for n in range( 5 ) ] )
+
+
+def scripted_check( script ):
+    """Return a check_fn that rules by the marker in the original and records what it was given."""
+    seen = []
+    def check( original, rewrite, seed ):
+        seen.append( ( original, rewrite, seed ) )
+        route = script[ original.split( "-", 1 )[ 1 ] ]
+        return { "route": route, "status": "x", "reason": f"ruled {route}", "cases": 8 }
+    check.seen = seen
+    return check
+
+
+def test_the_remainder_counts_drifted_pairs_caught_and_unsure_pairs_resolved():
+    script = { **{ f"d{n}": r for n, r in enumerate( [ "reject", "reject", "accept" ] ) },
+               **{ f"u{n}": r for n, r in enumerate( [ "accept" ] * 7 + [ "reject" ] * 2 + [ "person_check" ] * 3 ) },
+               **{ f"o{n}": "person_check" for n in range( 5 ) } }
+    check = scripted_check( script )
+    out   = stages.run_remainder( pairs(), 7, check )
+    assert out[ "pairs" ] == 20 and out[ "drifted" ] == { "total": 3, "caught": 2 } and out[ "unsure" ] == { "total": 12, "resolved": 9 }
+    assert out[ "routes" ] == { "accept": 8, "person_check": 8, "reject": 4 } and len( out[ "per_pair" ] ) == 20
+    assert check.seen[ 0 ] == ( "orig-d0", "new-d0", 7 ) and all( s[ 2 ] == 7 for s in check.seen ) and out[ "per_pair" ][ 0 ][ "reason" ] == "ruled reject"
+
+
+def test_a_drifted_pair_that_goes_to_a_person_is_not_caught_and_the_default_check_is_the_run_check():
+    out = stages.run_remainder( [ { "id": "d", "group": "drifted", "original": "orig-d", "rewrite": "new-d" } ], 1, scripted_check( { "d": "person_check" } ) )
+    assert out[ "drifted" ] == { "total": 1, "caught": 0 } and out[ "unsure" ] == { "total": 0, "resolved": 0 }
+    assert stages.run_remainder.__defaults__[ 0 ] is run_check.check_pair
+
+
+def test_the_runner_loads_no_labelling_tool_and_makes_no_packet():
+    src  = os.path.join( os.environ[ "LUPIN_ROOT" ], "src" )
+    code = ( f"import sys; sys.path.insert( 0, {src!r} ); import lupin_mcp.reuse_needset.stages; "
+             "print( sorted( m for m in sys.modules if m.startswith( 'cosa.repo.labelling.' ) and m.rsplit( '.', 1 )[ 1 ] in ( 'packets', 'confirm', 'adjudicate', 'agreement', 'pair_labels' ) ) )" )
+    out  = subprocess.run( [ sys.executable, "-I", "-c", code ], capture_output=True, text=True, timeout=120 )
+    assert out.returncode == 0 and out.stdout.strip().splitlines()[ -1 ] == "[]", out.stderr[ -300: ]
+
+
+def test_run_stages_refuses_unless_this_cap_is_installed_and_starts_nothing( tmp_path ):
+    cap, other, transport = new_cap( tmp_path ), call_cap.CallCap( str( tmp_path / "other.jsonl" ) ), Transport()
+    with pytest.raises( er.NeedsetError ) as bare: asyncio.run( stages.run_stages( cap, all_stages( transport ) ) )
+    assert bare.value.code == er.CAP_NOT_INSTALLED
+    with other.installed(), pytest.raises( er.NeedsetError ) as wrong: asyncio.run( stages.run_stages( cap, all_stages( transport ) ) )
+    assert wrong.value.code == er.CAP_NOT_INSTALLED and transport.calls == 0 and cap.used() == 0 and other.used() == 0
+
+
+def counted_ask( transport ):
+    """Return an ask that makes one counted model call per pair, then answers by the word stage."""
+    word_stage = lexical_ask()
+    async def ask( planted, pair ):
+        await mt.complete( FABLE, "s", "u", query_fn=transport )
+        return await word_stage( planted, pair )
+    return ask
+
+
+def with_control( transport, ask ):
+    """Return the four stages with the real control stage in its slot."""
+    return all_stages( transport, **{ "control": stage3.control_stage( pool(), twenty(), ask, cs.build_stage ) } )
+
+
+def test_the_real_control_stage_runs_in_its_slot_and_its_twenty_calls_are_counted_under_control( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    out = run( cap, with_control( transport, counted_ask( transport ) ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done" ] * 4 and out[ "stages" ][ "control" ][ "report" ][ "found" ] == 20
+    assert out[ "by_stage" ] == { "attribution": 1, "control": 20, "remainder": 1, "yield": 1 } and out[ "used" ] == 23 and out[ "over_plan" ] == []
+
+
+def test_a_missed_planted_pair_alone_does_not_stop_the_run_but_a_control_report_that_says_stop_does( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    async def blind( planted, pair ):
+        await mt.complete( FABLE, "s", "u", query_fn=transport )
+        return []
+    out = run( cap, with_control( transport, blind ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done" ] * 4 and out[ "stages" ][ "control" ][ "report" ][ "stop" ] is False
+    ( tmp_path / "again" ).mkdir()
+    cap2, transport2 = new_cap( tmp_path / "again" ), Transport()
+    inner = stage3.control_stage( pool(), twenty(), blind, cs.build_stage )
+
+    async def says_stop(): return { **await inner(), "stop": True }
+
+    halted = run( cap2, all_stages( transport2, **{ "control": says_stop } ) )
+    assert [ s[ "status" ] for s in halted[ "stages" ].values() ] == [ "done", "done", "stopped", "not_run" ]
+
+
+def test_the_cap_ending_the_control_mid_run_is_reported_and_the_remainder_never_starts( tmp_path ):
+    cap, transport = new_cap( tmp_path, limit=12 ), Transport()
+    out = run( cap, with_control( transport, counted_ask( transport ) ) )
+    assert [ s[ "status" ] for s in out[ "stages" ].values() ] == [ "done", "done", "cap_reached", "not_run" ] and out[ "used" ] == 12 and transport.calls == 12
+    assert out[ "by_stage" ] == { "attribution": 1, "control": 10, "yield": 1 }
+
+
+def test_a_stage_that_spends_its_own_budget_ends_alone_and_the_stages_after_it_still_run( tmp_path ):
+    cap, transport = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 100, { "attribution": 2, "yield": 5, "control": 5, "remainder": 0 } ), Transport()
+    out = run( cap, all_stages( transport, **{ "attribution": spend( transport, 3 ), "yield": spend( transport, 1 ) } ) )
+    assert out[ "stages" ][ "attribution" ][ "status" ] == "budget_reached" and out[ "stages" ][ "attribution" ][ "code" ] == er.STAGE_BUDGET_REACHED
+    assert out[ "stages" ][ "yield" ][ "status" ] == "done" and out[ "stages" ][ "control" ][ "status" ] == "done" and out[ "by_stage" ][ "attribution" ] == 2
+
+
+def test_the_remainder_has_a_budget_of_none_so_a_call_from_it_is_refused( tmp_path ):
+    cap, transport = call_cap.CallCap( str( tmp_path / "calls.jsonl" ), 100, stages.STAGE_BUDGETS ), Transport()
+    out = run( cap, all_stages( transport, **{ "remainder": spend( transport, 1 ) } ) )
+    assert out[ "stages" ][ "remainder" ][ "status" ] == "budget_reached" and transport.calls == 3 and "remainder" not in out[ "by_stage" ]
+
+
+def budget_stop( after ):
+    """Return a prepare_fn that gives rows, then hits the stage budget."""
+    async def prepare( seed_id ):
+        if int( seed_id ) >= after: raise er.NeedsetError( er.STAGE_BUDGET_REACHED, "the yield stage used 600 of its 600 calls" )
+        return { "seed": seed_id, "need": "banana", "targets": [ "m.target_best" ], "lang": "py" }
+    return prepare
+
+
+def test_a_yield_walk_ended_by_its_own_budget_reports_what_it_has_and_says_so():
+    index, _ = crowded_index()
+    out = asyncio.run( stages.run_yield( [ "0", "1", "2", "3" ], budget_stop( 2 ), index ) )
+    assert out[ "budget_reached" ] is True and "600 of its 600" in out[ "budget_detail" ] and out[ "seeds_left" ] == 2 and out[ "seeds" ] == 2 and out[ "by_lang" ][ "py" ][ "seeds" ] == 2
+    whole = asyncio.run( stages.run_yield( [ "0", "1" ], budget_stop( 9 ), index ) )
+    assert whole[ "budget_reached" ] is False and whole[ "budget_detail" ] is None and whole[ "seeds_left" ] == 0
+
+
+def test_any_other_error_still_stops_a_yield_walk():
+    index, _ = crowded_index()
+
+    async def crash( seed_id ): raise er.NeedsetError( er.CALL_CAP_REACHED, "cap" )
+
+    with pytest.raises( er.NeedsetError ) as caught: asyncio.run( stages.run_yield( [ "0" ], crash, index ) )
+    assert caught.value.code == er.CALL_CAP_REACHED
+
+
+def test_run_stages_keeps_a_partial_report_whole_under_the_budget_reached_status( tmp_path ):
+    cap, transport = new_cap( tmp_path ), Transport()
+    partial = { "seeds": 3, "budget_reached": True }
+
+    async def yielded(): return partial
+
+    out = run( cap, all_stages( transport, **{ "yield": yielded } ) )
+    assert out[ "stages" ][ "yield" ] == { "status": "budget_reached", "report": partial } and out[ "stages" ][ "control" ][ "status" ] == "done"
+
+
+def test_a_stage_that_raises_hands_the_report_so_far_to_on_raise_before_the_error_goes_on( tmp_path ):
+    cap, transport, seen = new_cap( tmp_path ), Transport(), []
+
+    async def crash():
+        raise RuntimeError( "boom" )
+
+    funcs = all_stages( transport, **{ "control": crash } )
+    with cap.installed(), pytest.raises( RuntimeError, match="boom" ): asyncio.run( stages.run_stages( cap, funcs, on_raise=seen.append ) )
+    report, = seen
+    assert [ s[ "status" ] for s in report[ "stages" ].values() ] == [ "done", "done", "failed", "not_run" ] and report[ "used" ] == 2
+    assert report[ "stages" ][ "control" ] == { "status": "failed", "code": "RuntimeError", "detail": "boom" } and report[ "stages" ][ "attribution" ][ "report" ] == { "calls": 1 }
+
+
+def test_a_cancelled_stage_also_hands_the_report_so_far_to_on_raise_and_the_cancel_goes_on( tmp_path ):
+    cap, transport, seen = new_cap( tmp_path ), Transport(), []
+
+    async def cancelled():
+        raise asyncio.CancelledError()
+
+    funcs = all_stages( transport, **{ "yield": cancelled } )
+    with cap.installed(), pytest.raises( asyncio.CancelledError ): asyncio.run( stages.run_stages( cap, funcs, on_raise=seen.append ) )
+    report, = seen
+    assert [ s[ "status" ] for s in report[ "stages" ].values() ] == [ "done", "failed", "not_run", "not_run" ] and report[ "stages" ][ "yield" ][ "code" ] == "CancelledError"

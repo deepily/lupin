@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+import cosa.agents.test_suite.job as job_mod
 from cosa.agents.test_suite.job import SUITE_SCRIPTS, unknown_suite_names
 from tests.helpers.v2_submit_harness import Queue, make_client, submit_test_suite
 
@@ -37,7 +38,8 @@ def queue():
 
 
 @pytest.fixture
-def client( queue, tmp_path ):
+def client( queue, tmp_path, monkeypatch ):
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: False )   # these cases admit unit and all; they must not depend on where the test runs
     return make_client( queue, tmp_path )
 
 

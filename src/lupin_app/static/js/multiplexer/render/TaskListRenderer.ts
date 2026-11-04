@@ -54,7 +54,13 @@ import {
   wireSectionCollapse,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { teardownScaffold, messageEl } from "./dom";
 
+/**
+ * The slice of the task list store the renderer uses.
+ *
+ * It is the composite, two reads and the patch and transition writes. `refreshAfterWrite` is a read that begins after the caller's write.
+ */
 export interface TaskListStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
@@ -76,12 +82,16 @@ export interface TaskListStoreLike {
   transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation;
 }
 
-// The fleet store the owner-reassignment roster is sourced from (Phase 2 — the
-// SAME source the fleet-status card consumes). Only `composite()` is needed.
+/** The slice of the fleet store that supplies the owner roster: its composite. */
 export interface TaskListFleetLike {
   composite(): FleetComposite | null;
 }
 
+/**
+ * The stores the task list uses.
+ *
+ * The task list store is required. The fleet store fills the owner select. The holding area store lets the pane drop a note that repeats its header.
+ */
 export interface TaskListRendererStores {
   taskList : TaskListStoreLike;
   // Optional so read-only / legacy constructions still mount; when absent the
@@ -103,12 +113,23 @@ export interface TaskListHoldingAreaLike {
   composite(): TaskListComposite | null;
 }
 
+/**
+ * The Task List pane: open tasks grouped by owner, with row editing.
+ *
+ * When there is no table it shows a sign-in banner, an unreachable indicator, or a no-open-tasks message.
+ * The unreachable indicator sits over the last known rows, or over "No tasks loaded yet.". A task looked up by id shows as a pinned row.
+ */
 export interface TaskListRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createTaskListRenderer`.
+ *
+ * The bus and the stores are required. The lookup, ticket post, request store and recorder hooks are optional.
+ */
 export interface TaskListRendererOptions {
   eventBus   : EventBus;
   stores     : TaskListRendererStores;
@@ -146,13 +167,12 @@ export interface TaskListRendererOptions {
   getAuthToken? : () => string | null;
 }
 
-function messageEl( className: string, text: string ): HTMLParagraphElement {
-  const p = document.createElement( "p" );
-  p.className = `task-list-message ${className}`;
-  p.textContent = text;
-  return p;
-}
-
+/**
+ * Paints the task list pane with tasks grouped by owner and row controls.
+ *
+ * Also offers a refresh button and, when wired, ticket lookup and New.
+ * Repaints when the task list store changes.
+ */
 class TaskListRendererImpl implements TaskListRenderer {
   private readonly bus       : EventBus;
   private readonly stores    : TaskListRendererStores;
@@ -213,6 +233,11 @@ class TaskListRendererImpl implements TaskListRenderer {
   // same controller the holding area mounts. Null while unmounted.
   private rows : TaskRowController | null = null;
 
+  /**
+   * Stores the event bus and stores, and fills defaults for the clock and timer.
+   *
+   * Ticket lookup, ticket posting, request store, recorder and token getter are optional.
+   */
   constructor( opts: TaskListRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
@@ -227,6 +252,11 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.getAuthToken = opts.getAuthToken;
   }
 
+  /**
+   * Builds the pane's refresh button, optional lookup box and New button in the root.
+   *
+   * Wires row controls and store subscriptions. Throws if already mounted.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "TaskListRenderer already mounted" );
@@ -393,21 +423,17 @@ class TaskListRendererImpl implements TaskListRenderer {
     );
   }
 
+  /**
+   * Disposes row controls, subscriptions, guards and request wiring, and clears the root.
+   */
   unmount(): void {
     this.rows?.dispose();   // tear down any open body overlay + its Esc listener
     this.rows = null;
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
     this.pressGuard = null;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.countEl = null;
     this.noticesEl = null;
@@ -417,6 +443,9 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the list from the store at once, stamping the updated time; used by tests.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }
@@ -440,7 +469,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     // on screen. Legacy pays the same cost the same way (notifications.js:12057).
     if ( composite && composite.status === "auth_required" ) {
       this.clearNotices();
-      this.container.replaceChildren( messageEl( "task-list-signin", "🔒 Sign-in required." ) );
+      this.container.replaceChildren( messageEl( "task-list", "task-list-signin", "🔒 Sign-in required." ) );
       this.setCountText( "Live: 0" );
       return;
     }
@@ -468,7 +497,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.paintNotices( renderTruncationBanner( composite, TASK_LIST_QUERY, this.heldHeaderCount() ) );
 
     if ( openTasks.length === 0 ) {
-      this.container.replaceChildren( messageEl( "task-list-empty", "✅ No open tasks." ) );
+      this.container.replaceChildren( messageEl( "task-list", "task-list-empty", "✅ No open tasks." ) );
     } else {
       const model = groupTasksByOwner( openTasks );
       this.paintRows( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
@@ -566,10 +595,13 @@ class TaskListRendererImpl implements TaskListRenderer {
    *   - `restoreState` is the store's own restorer, not a new one
    */
   private rowWrite( mutation: TaskMutation ): TaskMutation {
-    const done = mutation.done.then( () => readBackAfterWrite(
-      () => this.stores.taskList.refreshAfterWrite(),
-      () => this.stampReadBackFailed(),
-    ) );
+    const done = mutation.done.then( async ( outcome ) => {
+      await readBackAfterWrite(
+        () => this.stores.taskList.refreshAfterWrite(),
+        () => this.stampReadBackFailed(),
+      );
+      return outcome;
+    } );
     return { restoreState: mutation.restoreState, done };
   }
 
@@ -610,14 +642,14 @@ class TaskListRendererImpl implements TaskListRenderer {
   private renderUnreachable(): void {
     /* c8 ignore next */ // defensive: only reached from renderFromStore past its container-null guard.
     if ( this.container === null ) return;
-    const indicator = messageEl( "task-list-unreachable", "⚠️ Store unreachable." );
+    const indicator = messageEl( "task-list", "task-list-unreachable", "⚠️ Store unreachable." );
 
     if ( this.lastGoodTasks !== null && this.lastGoodTasks.length > 0 ) {
       const model = groupTasksByOwner( this.lastGoodTasks );
       this.paintRows( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
       this.setCountText( taskListCountText( this.lastGoodTasks ) );
     } else {
-      this.container.replaceChildren( indicator, messageEl( "task-list-empty", "No tasks loaded yet." ) );
+      this.container.replaceChildren( indicator, messageEl( "task-list", "task-list-empty", "No tasks loaded yet." ) );
       this.setCountText( "Live: 0" );
     }
   }
@@ -750,6 +782,11 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createTaskListRenderer( opts: TaskListRendererOptions ): TaskListRenderer {
   return new TaskListRendererImpl( opts );

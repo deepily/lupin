@@ -42,15 +42,22 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
-import { groupHeldRowsByFiler } from "./holdingAreaModel";
-import { holdingGroupChevron, renderHoldingAreaGroups } from "./templates/holdingAreaTable";
+import { groupHeldRows, holdingPlanId, type HoldingGroupBy } from "./holdingAreaModel";
+import { holdingGroupChevron, holdingPlanApproveLabel, holdingPlanChevron, renderHoldingAreaGroups } from "./templates/holdingAreaTable";
 import {
   holdingBatchNeeds,
   holdingBatchExtras,
   holdingBatchInFlightStatus,
   holdingBatchFinalStatus,
+  holdingBatchRestLabel,
+  holdingBatchConfirmLabel,
+  holdingBatchArmedStatus,
+  holdingPlanConfirmLabel,
+  holdingPlanArmedStatus,
+  HOLDING_BATCH_ARMED_CLASS,
   HOLDING_BATCH_BLANK_REASON,
   HOLDING_BATCH_NO_ROWS,
+  HOLDING_BATCH_NO_ROWS_PLAN,
 } from "./holdingAreaBatch";
 import {
   renderSectionHeader,
@@ -68,6 +75,7 @@ import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
 import { createFlowRatioPanel, type FlowRatioStoreLike } from "./flowRatioPanel";
 import { renderTruncationBanner } from "./templates/truncationBanner";
 import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
+import { teardownScaffold, messageEl } from "./dom";
 
 /**
  * The pane's sentinel messages, carbon-copied from notifications.js:12678-12681.
@@ -96,6 +104,11 @@ export interface HoldingAreaSentinels {
 // the dynamic `SENTINELS[ status ]` lookup needs; the named fields are what the
 // direct reads need. Caught by `tsc -p`, NOT by the suite: the tests run under
 // tsx, which strips types rather than checking them.
+/**
+ * The messages the pane shows for each task-list state that is not a list of rows.
+ *
+ * The keys are `auth_required`, `query_unavailable` and `unreachable`.
+ */
 export const HOLDING_AREA_SENTINELS: HoldingAreaSentinels = Object.freeze( {
   auth_required     : "Sign-in required to read the holding area.",
   query_unavailable : "The shared query module did not load — this is a deploy defect, not an outage.",
@@ -108,6 +121,11 @@ export const HOLDING_AREA_EMPTY_MESSAGE = "Nothing waiting on triage.";
 /** What the count chip reads while a sentinel is showing — a count is not known. */
 export const HOLDING_AREA_COUNT_UNKNOWN = "—";
 
+/**
+ * The slice of the holding area store the renderer uses.
+ *
+ * It is the composite, the two reads and the row write verbs, which resolve to a result and never reject.
+ */
 export interface HoldingAreaStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
@@ -127,17 +145,27 @@ export interface HoldingAreaStoreLike {
    */
   transitionTask(
     id: string, toStatus: string, extras: TransitionExtras,
-  ): Promise<{ ok: boolean; message?: string }>;
+  ): Promise<{ ok: boolean; message?: string; alreadyAt?: string }>;
   /** PATCH one row's fields. Resolves to a result and never rejects, like transitionTask. */
   patchTask( id: string, fields: TaskPatchFields ): Promise<{ ok: boolean; message?: string }>;
 }
 
+/**
+ * The Holding Area pane: grouped held rows under a header with a count chip.
+ *
+ * It shows a message for every state, so the pane is never silently blank.
+ */
 export interface HoldingAreaRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createHoldingAreaRenderer`.
+ *
+ * The bus and the store are required. The request store and flow ratio store are passed by boot and omitted only in tests.
+ */
 export interface HoldingAreaRendererOptions {
   eventBus   : EventBus;
   store      : HoldingAreaStoreLike;
@@ -165,13 +193,35 @@ export interface HoldingAreaRendererOptions {
   flowRatio?    : FlowRatioStoreLike;
 }
 
-function messageEl( className: string, text: string ): HTMLParagraphElement {
-  const p = document.createElement( "p" );
-  p.className = `holding-area-message ${ className }`;
-  p.textContent = text;
-  return p;
+/** The localStorage key for the grouping choice, which is a per-viewer convenience. */
+export const HOLDING_GROUP_BY_STORAGE_KEY = "lupin.holdingArea.groupBy";
+
+/** The two groupings and the words on their buttons. */
+const HOLDING_GROUP_BY_CHOICES: ReadonlyArray<{ by: HoldingGroupBy; label: string; title: string }> = [
+  { by: "creator",  label: "Creator",  title: "Group by who CREATED the row (created_by)" },
+  { by: "assignee", label: "Assignee", title: "Group by who the row is ASSIGNED to (owner_persona)" },
+];
+
+/** The saved choice, or "creator" when none is saved or storage is unavailable. */
+function readSavedGroupBy(): HoldingGroupBy {
+  try {
+    return window.localStorage.getItem( HOLDING_GROUP_BY_STORAGE_KEY ) === "assignee" ? "assignee" : "creator";
+  } catch ( _e ) {
+    /* c8 ignore next */ // storage blocked (private window) — the pane works without it.
+    return "creator";
+  }
 }
 
+/** The plan id a plan approve button carries (its filer and plan data attributes). */
+function planButtonId( button: HTMLElement ): string {
+  return holdingPlanId( button.dataset.filer ?? "", button.dataset.plan ?? "" );
+}
+
+/**
+ * Draws the holding area pane: pending requests, plans and per-filer groups.
+ *
+ * It repaints from the store and keeps open groups, plans and batch reports across repaints.
+ */
 class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private readonly bus       : EventBus;
   private readonly store     : HoldingAreaStoreLike;
@@ -195,6 +245,10 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private pressGuard : PressHoldGuard | null = null;
   private mounted   = false;
 
+  // What the groups are keyed on. Per viewer, restored from localStorage.
+  private groupBy       : HoldingGroupBy = "creator";
+  private groupToggleEl : HTMLElement | null = null;
+
   // 🔴 THE GUARD IS THIS SET, NOT THE DISABLED ATTRIBUTE. Disabling both batch
   // buttons is the operator-facing affordance and it is genuinely load-bearing —
   // Approve-All and Won't-Fix-All act on the SAME rows, so leaving the other live
@@ -205,6 +259,23 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // meanwhile — a poll tick landing mid-batch would hand the operator live
   // buttons again. A set keyed by filer cannot be repainted away.
   private readonly batchesInFlight = new Set<string>();
+
+  // Plans mid-run, keyed by holdingPlanId( filer, key ) — the same guard, for the plan header.
+  private readonly plansInFlight = new Set<string>();
+
+  // The report of a plan that ended PARTLY refused, so a render can put it back and so
+  // the plan outlives the shrinking of its rows to one. A fully approved plan
+  // leaves no entry: its header is gone because its rows are.
+  private readonly planReports = new Map<string, string>();
+
+  // The plans whose Approve all is ARMED, keyed by holdingPlanId, with the row ids it was armed for.
+  // A repaint rebuilds every header unarmed, so this is what puts the arm back on a plan that is
+  // still open and still holds the same rows. Closing the plan, or any change to its rows, drops it.
+  private readonly armedPlans = new Map<string, string>();
+
+  // The plans the operator has OPENED, keyed by holdingPlanId. Plans start collapsed, like
+  // their filers, and an open one survives the 60s repaint.
+  private readonly expandedPlans = new Set<string>();
 
   // The last batch report per filer, so a render can put it back. This is STATE,
   // not a cache of the DOM: the status line the groups template emits is empty
@@ -218,6 +289,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // an open group must survive the repaint or it would snap shut under the reader.
   private readonly expandedFilers = new Set<string>();
 
+  /**
+   * Stores the bus, store and optional request, recorder, token and ratio sources.
+   */
   constructor( opts: HoldingAreaRendererOptions ) {
     this.bus   = opts.eventBus;
     this.store = opts.store;
@@ -230,6 +304,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.flowRatio    = opts.flowRatio ?? null;
   }
 
+  /**
+   * Builds the pane header and container in the root and listens to the store.
+   *
+   * A second mount without unmount throws.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "HoldingAreaRenderer already mounted" );
@@ -301,6 +380,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const onClick = ( e: Event ): void => {
       if ( this.requests !== null && this.requests.handleClick( e.target ) ) return;
       if ( rows.handleClick( e.target ) ) return;
+      if ( this.handlePlanToggle( e.target ) ) return;
       if ( this.handleGroupToggle( e.target ) ) return;
       this.handleBatchClick( e.target );
     };
@@ -309,7 +389,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       const k = e as KeyboardEvent;
       // Enter / Space on a focused group header toggles it, as the task list's does.
       // "Spacebar" is the legacy spelling; the classic client accepts it too.
-      if ( ( k.key === "Enter" || k.key === " " || k.key === "Spacebar" ) && this.handleGroupToggle( k.target ) ) {
+      if ( ( k.key === "Enter" || k.key === " " || k.key === "Spacebar" ) && ( this.handlePlanToggle( k.target ) || this.handleGroupToggle( k.target ) ) ) {
         k.preventDefault();
         return;
       }
@@ -331,7 +411,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     // Parity A-2 #8 — appended to the header's title AFTER wireRequestPane put the badge
     // behind the count, so the order reads count · badge · Gate, as legacy's <h3> does.
-    const body: HTMLElement[] = [];
+    // The Creator / Assignee toggle sits first, above the ratio cluster.
+    this.groupBy = readSavedGroupBy();
+    const body: HTMLElement[] = [ this.buildGroupToggle() ];
     if ( this.flowRatio !== null ) {
       const flow = createFlowRatioPanel( { bus: this.bus, store: this.flowRatio } );
       this.countEl.parentElement!.appendChild( flow.readout );
@@ -353,29 +435,80 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     );
   }
 
+  /**
+   * Disposes row controls, unsubscribes, clears the root and resets all element references.
+   */
   unmount(): void {
     this.rows?.dispose();
     this.rows = null;
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
     this.pressGuard = null;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.countEl = null;
+    this.groupToggleEl = null;
     this.updatedEl = null;
     this.header = null;
     this.requests = null;
     this.mounted = false;
   }
 
+  /**
+   * Builds the Creator / Assignee toggle.
+   *
+   * Two buttons in one labelled group; the pressed one has aria-pressed true.
+   */
+  private buildGroupToggle(): HTMLElement {
+    const wrap = document.createElement( "div" );
+    wrap.className = "holding-group-toggle";
+    wrap.setAttribute( "role", "group" );
+    wrap.setAttribute( "aria-label", "Group held rows by" );
+    wrap.setAttribute( "data-testid", "multiplexer-holding-group-toggle" );
+    const lead = document.createElement( "span" );
+    lead.className   = "holding-group-toggle-label";
+    lead.textContent = "Group by";
+    wrap.appendChild( lead );
+    for ( const choice of HOLDING_GROUP_BY_CHOICES ) {
+      const btn = document.createElement( "button" );
+      btn.type        = "button";
+      btn.className   = "holding-group-toggle-btn";
+      btn.textContent = choice.label;
+      btn.title       = choice.title;
+      btn.dataset.groupBy = choice.by;
+      btn.setAttribute( "data-testid", `multiplexer-holding-group-by-${ choice.by }` );
+      btn.addEventListener( "click", () => this.setGroupBy( choice.by ) );
+      wrap.appendChild( btn );
+    }
+    this.groupToggleEl = wrap;
+    this.syncGroupToggle();
+    return wrap;
+  }
+
+  /** Marks the button for the current grouping as pressed and the other as not. */
+  private syncGroupToggle(): void {
+    for ( const btn of Array.from( this.groupToggleEl!.querySelectorAll<HTMLButtonElement>( "button" ) ) ) {
+      btn.setAttribute( "aria-pressed", btn.dataset.groupBy === this.groupBy ? "true" : "false" );
+    }
+  }
+
+  /** Switches the grouping, remembers it, and repaints. */
+  private setGroupBy( by: HoldingGroupBy ): void {
+    if ( by === this.groupBy ) return;
+    this.groupBy = by;
+    try {
+      window.localStorage.setItem( HOLDING_GROUP_BY_STORAGE_KEY, by );
+    } catch ( _e ) {
+      /* c8 ignore next */ // storage blocked — the choice holds for this page view only.
+    }
+    this.syncGroupToggle();
+    this.renderFromStore( false );
+  }
+
+  /**
+   * Repaints the pane from the store right away when mounted, for tests.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }
@@ -413,7 +546,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       return;
     }
 
-    const groups = groupHeldRowsByFiler( composite!.tasks );
+    const groups = groupHeldRows( composite!.tasks, this.groupBy, new Set( this.planReports.keys() ) );
     const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
 
     this.setCountText( String( total ) );
@@ -426,9 +559,12 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     // groups: an empty page that the server cut short is not an empty queue.
     const banner = renderTruncationBanner( composite, HOLDING_AREA_QUERY, total );
     if ( total === 0 ) {
-      this.container.replaceChildren( ...banner, messageEl( "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
+      this.container.replaceChildren( ...banner, messageEl( "holding-area", "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
     } else {
-      this.container.replaceChildren( ...banner, renderHoldingAreaGroups( groups, undefined, [], this.expandedFilers ) );
+      this.container.replaceChildren(
+        ...banner,
+        renderHoldingAreaGroups( groups, undefined, [], this.expandedFilers, this.expandedPlans ),
+      );
     }
     this.hydrateRequests();
     // Parity A-1a — restored after hydrate, as the Task List does. Into the empty
@@ -454,6 +590,22 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       if ( !present.has( filer ) ) this.expandedFilers.delete( filer );
     }
     for ( const [ filer, message ] of this.batchReports ) this.applyGroupStatus( filer, message );
+    // A plan's open state and report outlive the repaint only while the plan is on screen
+    // (an open state) or one of its rows is (a report, which keeps a one-row remainder up).
+    const livePlans = new Set<string>();
+    const liveRows  = new Set<string>();
+    for ( const g of groups ) {
+      for ( const p of g.plans ) livePlans.add( holdingPlanId( g.filer, p.key ) );
+      for ( const t of g.tasks ) if ( t.correlation_key ) liveRows.add( holdingPlanId( g.filer, String( t.correlation_key ) ) );
+    }
+    for ( const id of Array.from( this.planReports.keys() ) ) {
+      if ( !liveRows.has( id ) ) this.planReports.delete( id );
+    }
+    for ( const id of Array.from( this.expandedPlans ) ) {
+      if ( !livePlans.has( id ) ) this.expandedPlans.delete( id );
+    }
+    for ( const [ id, message ] of this.planReports ) this.paintPlanStatus( id, message );
+    this.restoreArmedPlans();
 
     if ( stampUpdated ) this.stampUpdated();
   }
@@ -477,7 +629,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
    *   - `done` resolves once the after-write read has SETTLED, either way
    *   - a failed read paints no stripe; it marks this pane stale instead
    */
-  private rowWrite( result: Promise<{ ok: boolean; message?: string }> ): TaskMutation {
+  private rowWrite( result: Promise<{ ok: boolean; message?: string; alreadyAt?: string }> ): TaskMutation {
     const done = result.then( async ( r ) => {
       /* c8 ignore next */ // `?? ""` RHS: the store's result type always carries a message when ok is false.
       if ( !r.ok ) throw new Error( r.message ?? "" );
@@ -485,6 +637,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
         () => this.store.refreshAfterWrite(),
         () => this.stampReadBackFailed(),
       );
+      return { alreadyAt: r.alreadyAt };
     } );
     return { restoreState: () => {}, done };
   }
@@ -497,6 +650,52 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // -------------------------------------------------------------------------
   // The per-filer accordion (row 52142a84)
   // -------------------------------------------------------------------------
+
+  /**
+   * A click or key on a plan header's bar → open or close that plan's rows.
+   *
+   * ⚠️ The approve control lives on the same bar, so a target inside a button is NOT a toggle.
+   * A plan sits inside its filer's group but its header is not the filer's, so a click here
+   * never folds the filer.
+   *
+   * Ensures:
+   *   - returns false for anything that is not a bare plan header
+   *   - otherwise flips `.collapsed`, aria-expanded and the chevron IN PLACE, records the choice
+   *     for the next repaint, and returns true
+   */
+  private handlePlanToggle( target: EventTarget | null ): boolean {
+    /* c8 ignore next */ // defensive: a click whose target is not an element cannot reach a header.
+    if ( !( target instanceof Element ) ) return false;
+    const header = target.closest<HTMLElement>( ".holding-plan-header" );
+    if ( header === null ) return false;
+    if ( target.closest( "button, input, select, textarea, a" ) !== null ) return false;
+    const group = header.closest<HTMLElement>( ".holding-plan-group" )!;
+    this.setPlanOpen( group, group.classList.contains( "collapsed" ) );
+    return true;
+  }
+
+  /**
+   * Open or close one plan's rows IN PLACE and record the choice for the next repaint.
+   *
+   * Ensures:
+   *   - `.collapsed`, the header's aria-expanded and the chevron all agree with `open`
+   *   - the plan id is in expandedPlans exactly when `open`
+   *   - closing the plan disarms its own Approve all, so an arm cannot outlive the view it was made in
+   *   - opening a plan, and opening or closing any other plan, leaves an armed button armed
+   */
+  private setPlanOpen( group: HTMLElement, open: boolean ): void {
+    /* c8 ignore next */ // `?? ""` RHS: the template stamps data-filer and data-plan on every plan group.
+    const id = holdingPlanId( group.dataset.filer ?? "", group.dataset.plan ?? "" );
+    group.classList.toggle( "collapsed", !open );
+    const header = group.querySelector<HTMLElement>( ".holding-plan-header" )!;
+    header.setAttribute( "aria-expanded", open ? "true" : "false" );
+    header.querySelector( ".holding-plan-chevron" )!.textContent = holdingPlanChevron( open );
+    if ( open ) this.expandedPlans.add( id );
+    else {
+      this.expandedPlans.delete( id );
+      this.disarmPlanButton( group.querySelector<HTMLButtonElement>( ".holding-plan-approve-all" )! );
+    }
+  }
 
   /**
    * A click or key on a group header's bar → open or close that filer's group.
@@ -547,10 +746,15 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const el = target as Element | null;
     /* c8 ignore next */ // defensive: a click whose target is not an element cannot reach a button.
     if ( el === null || typeof el.closest !== "function" ) return;
+    const plan = el.closest<HTMLButtonElement>( ".holding-plan-approve-all" );
+    if ( plan !== null ) {
+      void this.runPlanApprove( plan );
+      return;
+    }
     const btn = el.closest<HTMLButtonElement>( ".holding-approve-all, .holding-wont-fix-all" );
     if ( btn === null ) return;
     const verb = btn.classList.contains( "holding-approve-all" ) ? "approve" : "wont_fix";
-    void this.runBatch( btn.dataset.filer ?? "", verb );
+    void this.runBatch( btn, btn.dataset.filer ?? "", verb );
   }
 
   /**
@@ -637,6 +841,68 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     }
   }
 
+  /** Return one filer's BOTH batch buttons to their resting labels. A repaint does the same by rebuilding them. */
+  private disarmGroup( filer: string ): void {
+    const group = this.groupFor( filer );
+    /* c8 ignore next */ // defensive: runBatch only runs for a button that is inside a rendered group.
+    if ( group === null ) return;
+    for ( const b of Array.from( group.querySelectorAll<HTMLButtonElement>(
+      ".holding-approve-all, .holding-wont-fix-all" ) ) ) {
+      delete b.dataset.armed;
+      b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
+      b.textContent = holdingBatchRestLabel( b.classList.contains( "holding-wont-fix-all" ) ? "wont_fix" : "approve" );
+    }
+  }
+
+  /** Return every plan header's button to its resting label. A repaint does the same by rebuilding the header. */
+  private disarmPlans(): void {
+    /* c8 ignore next */ // defensive: runPlanApprove only runs for a button inside the rendered container.
+    if ( this.container === null ) return;
+    for ( const b of Array.from( this.container.querySelectorAll<HTMLButtonElement>( ".holding-plan-approve-all" ) ) ) {
+      this.disarmPlanButton( b );
+    }
+  }
+
+  /**
+   * Put the arm back on every plan that was armed before this repaint and still holds the same rows.
+   *
+   * Ensures:
+   *   - an armed plan that is still on screen with the same row ids is armed again, label and line included
+   *   - a plan that left the board, or whose rows changed, is dropped from the armed set and left at rest,
+   *     so one press never approves rows other than the ones the operator armed it for
+   *   - an armed plan is open: arming opens it and closing disarms it, so nothing here checks the open state
+   */
+  private restoreArmedPlans(): void {
+    /* c8 ignore next */ // defensive: only reached from renderFromStore past its container-null guard.
+    if ( this.container === null ) return;
+    const buttons = Array.from( this.container.querySelectorAll<HTMLButtonElement>( ".holding-plan-approve-all" ) );
+    for ( const [ id, taskIds ] of Array.from( this.armedPlans ) ) {
+      const button = buttons.find( ( b ) => planButtonId( b ) === id );
+      if ( button !== undefined && button.dataset.taskIds === taskIds ) {
+        this.paintPlanArmed( button, id, taskIds.split( "," ).filter( ( rowId ) => rowId !== "" ).length );
+      } else {
+        this.armedPlans.delete( id );
+      }
+    }
+  }
+
+  /** Show one plan's button armed: the confirm label, the armed class and the line saying what the next press does. */
+  private paintPlanArmed( button: HTMLButtonElement, id: string, count: number ): void {
+    button.dataset.armed = "1";
+    button.classList.add( HOLDING_BATCH_ARMED_CLASS );
+    button.textContent = holdingPlanConfirmLabel( count );
+    this.paintPlanStatus( id, holdingPlanArmedStatus( count ) );
+  }
+
+  /** Return one plan's button to its resting label and clear its status line if it was armed. */
+  private disarmPlanButton( b: HTMLButtonElement ): void {
+    this.armedPlans.delete( planButtonId( b ) );
+    if ( b.dataset.armed === "1" ) this.paintPlanStatus( planButtonId( b ), "" );
+    delete b.dataset.armed;
+    b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
+    b.textContent = holdingPlanApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length );
+  }
+
   /** The group's batch reason box, trimmed, or "" when it is not rendered. */
   private batchReason( filer: string ): string {
     const input = this.groupFor( filer )?.querySelector<HTMLInputElement>( ".holding-wont-fix-all-reason" );
@@ -672,7 +938,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
    *   - every row is attempted, whatever the ones before it returned
    *   - the pane refreshes exactly once, after all rows have been attempted
    */
-  private async runBatch( filer: string, verb: string ): Promise<void> {
+  private async runBatch( btn: HTMLButtonElement, filer: string, verb: string ): Promise<void> {
     if ( filer === "" ) return;
     const needs = holdingBatchNeeds( verb );
     /* c8 ignore next */ // defensive: handleBatchClick only ever passes one of the two known verbs.
@@ -681,15 +947,30 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     const reason = needs.reason ? this.batchReason( filer ) : "";
     if ( needs.reason && reason === "" ) {
+      this.disarmGroup( filer );
       this.paintGroupStatus( filer, HOLDING_BATCH_BLANK_REASON );
       return;
     }
 
     const ids = this.heldRowIdsForFiler( filer );
     if ( ids.length === 0 ) {
+      this.disarmGroup( filer );
       this.paintGroupStatus( filer, HOLDING_BATCH_NO_ROWS );
       return;
     }
+
+    // ARM, THEN CONFIRM (row 376dd4cb). The first press only arms: the button names the verb
+    // and the row count, and nothing is posted. Arming one button disarms its sibling, so
+    // "Approve all" cannot sit armed while the operator reaches for "Won't fix all".
+    if ( btn.dataset.armed !== "1" ) {
+      this.disarmGroup( filer );
+      btn.dataset.armed = "1";
+      btn.classList.add( HOLDING_BATCH_ARMED_CLASS );
+      btn.textContent = holdingBatchConfirmLabel( verb, ids.length );
+      this.applyGroupStatus( filer, holdingBatchArmedStatus( verb, ids.length ) );
+      return;
+    }
+    this.disarmGroup( filer );
 
     const extras = holdingBatchExtras( verb, reason );
     this.batchesInFlight.add( filer );
@@ -731,10 +1012,98 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.paintGroupStatus( filer, holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError ) );
   }
 
+  /** One plan's status span, matched in JavaScript so a key with a quote or bracket cannot break a selector. */
+  private planStatusEl( id: string ): HTMLElement | null {
+    /* c8 ignore next */ // defensive: only reached once a plan header has been rendered into the container.
+    if ( this.container === null ) return null;
+    for ( const el of Array.from( this.container.querySelectorAll<HTMLElement>( ".holding-plan-status" ) ) ) {
+      if ( holdingPlanId( el.dataset.filer ?? "", el.dataset.plan ?? "" ) === id ) return el;
+    }
+    return null;
+  }
+
+  private paintPlanStatus( id: string, message: string ): void {
+    const el = this.planStatusEl( id );
+    if ( el !== null ) el.textContent = message;
+  }
+
+  /**
+   * Approve every row listed under one plan, one transition at a time, then report.
+   *
+   * ⚠️ NO NEW DOOR. Each row goes through `store.transitionTask` — the single-row
+   * request the per-row control sends — so the approver allowlist, the promotion ask and
+   * the batch throttle all run per row on the server and a non-operator is refused row
+   * by row. Operator-only stays the server's rule, unchanged.
+   *
+   * Ensures:
+   *   - a second press on the same plan while it runs is ignored
+   *   - the button is dead for the length of the run and live after
+   *   - the in-flight line counts ATTEMPTS; the final line counts successes, names the
+   *     refused count and the first refusal
+   *   - the final line is painted AFTER the read-back, because the repaint rebuilds the
+   *     header and would erase it
+   */
+  private async runPlanApprove( button: HTMLButtonElement ): Promise<void> {
+    if ( ( button.dataset.plan ?? "" ) === "" ) return;
+    const id = planButtonId( button );
+    if ( this.plansInFlight.has( id ) ) return;
+    const ids = ( button.dataset.taskIds ?? "" ).split( "," ).filter( ( rowId ) => rowId !== "" );
+    if ( ids.length === 0 ) {
+      this.paintPlanStatus( id, HOLDING_BATCH_NO_ROWS_PLAN );
+      return;
+    }
+    // ARM, THEN CONFIRM (row 376dd4cb, the plan-level half). The first press only arms: the
+    // button names the row count and nothing is posted. Arming one plan disarms the others.
+    if ( button.dataset.armed !== "1" ) {
+      this.disarmPlans();
+      this.paintPlanArmed( button, id, ids.length );
+      this.armedPlans.set( id, button.dataset.taskIds! );   // present: ids.length is above zero
+      // The rows about to be approved must be on screen BEFORE the confirming press.
+      this.setPlanOpen( button.closest<HTMLElement>( ".holding-plan-group" )!, true );
+      return;
+    }
+    this.disarmPlans();
+
+    const needs = holdingBatchNeeds( "approve" )!;
+    this.plansInFlight.add( id );
+    this.paintPlanStatus( id, holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );
+    button.disabled = true;
+
+    let ok = 0;
+    let failed = 0;
+    let firstError: string | null = null;
+    try {
+      for ( const rowId of ids ) {
+        const result = await this.store.transitionTask( rowId, needs.status, {} );
+        if ( result.ok ) {
+          ok += 1;
+        } else {
+          failed += 1;
+          if ( firstError === null ) firstError = result.message ?? "";
+        }
+        this.paintPlanStatus( id, holdingBatchInFlightStatus( needs.pastLabel, ok + failed, ids.length ) );
+      }
+    } finally {
+      button.disabled = false;
+      this.plansInFlight.delete( id );
+    }
+
+    // The report is remembered BEFORE the read-back: the repaint that read-back causes
+    // rebuilds the header, and keeps a one-row remainder on screen only if a report is held.
+    const final = holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError );
+    if ( failed > 0 ) this.planReports.set( id, final );
+    else this.planReports.delete( id );
+    await readBackAfterWrite(
+      () => this.store.refreshAfterWrite(),
+      () => this.stampReadBackFailed(),
+    );
+    this.paintPlanStatus( id, final );
+  }
+
   private paintSentinel( text: string ): void {
     /* c8 ignore next */ // defensive: only reached from renderFromStore past its container-null guard.
     if ( this.container === null ) return;
-    this.container.replaceChildren( messageEl( "holding-area-sentinel", text ) );
+    this.container.replaceChildren( messageEl( "holding-area", "holding-area-sentinel", text ) );
     this.setCountText( HOLDING_AREA_COUNT_UNKNOWN );
   }
 
@@ -767,6 +1136,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line — c8 reports ONE location for this "branch" (240:16-43, the identifier itself) where a real conditional carries two, and the factory is called by every test in the suite.
 export function createHoldingAreaRenderer( opts: HoldingAreaRendererOptions ): HoldingAreaRenderer {
   return new HoldingAreaRendererImpl( opts );

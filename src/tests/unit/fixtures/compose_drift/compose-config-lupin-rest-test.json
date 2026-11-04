@@ -1,0 +1,416 @@
+{
+  "name": "lupin",
+  "networks": {
+    "lupin-dev-network": {
+      "name": "lupin-dev-network",
+      "ipam": {},
+      "external": true
+    }
+  },
+  "secrets": {
+    "db_app_password": {
+      "name": "lupin_db_app_password",
+      "file": "/etc/lupin/secrets/db_app_password",
+      "external": false
+    },
+    "db_test_password": {
+      "name": "lupin_db_test_password",
+      "file": "/etc/lupin/secrets/db_test_password",
+      "external": false
+    }
+  },
+  "services": {
+    "lupin-rest-test": {
+      "command": [
+        "/bin/bash",
+        "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"
+      ],
+      "container_name": "lupin-rest-test",
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      },
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "12884901888"
+          },
+          "reservations": {
+            "devices": [
+              {
+                "capabilities": [
+                  "gpu"
+                ],
+                "driver": "nvidia",
+                "count": -1
+              }
+            ]
+          }
+        },
+        "placement": {}
+      },
+      "entrypoint": null,
+      "environment": {
+        "CHROME_PATH": "REDACTED-CHROME_PATH",
+        "DB_HOST": "REDACTED-DB_HOST",
+        "DB_PASSWORD_FILE": "",
+        "DB_USER": "REDACTED-DB_USER",
+        "GH_TOKEN": "",
+        "JWT_SECRET_KEY": "",
+        "LUPIN_API_KEY_FILE": "",
+        "LUPIN_API_URL": "REDACTED-LUPIN_API_URL",
+        "LUPIN_CONFIG_MGR_CLI_ARGS": "REDACTED-LUPIN_CONFIG_MGR_CLI_ARGS",
+        "LUPIN_DEV_EMAIL": "REDACTED-LUPIN_DEV_EMAIL",
+        "LUPIN_DM_CORPUS_DIR": "REDACTED-LUPIN_DM_CORPUS_DIR",
+        "LUPIN_ENV": "REDACTED-LUPIN_ENV",
+        "LUPIN_FLOW_RATIO_DIR": "REDACTED-LUPIN_FLOW_RATIO_DIR",
+        "LUPIN_HEARTBEAT_POKE_MUTE_FILE": "REDACTED-LUPIN_HEARTBEAT_POKE_MUTE_FILE",
+        "LUPIN_INTERACTIVE_TESTS": "REDACTED-LUPIN_INTERACTIVE_TESTS",
+        "LUPIN_MODEL_SERVER_API_KEY_FILE": "",
+        "LUPIN_MODEL_SERVER_API_KEY_NAME": "",
+        "LUPIN_MODEL_SERVER_URL": "REDACTED-LUPIN_MODEL_SERVER_URL",
+        "LUPIN_REUSE_REVIEW_DATA_ROOT": "REDACTED-LUPIN_REUSE_REVIEW_DATA_ROOT",
+        "LUPIN_ROOT": "REDACTED-LUPIN_ROOT",
+        "LUPIN_SERVER_COVERAGE": "REDACTED-LUPIN_SERVER_COVERAGE",
+        "LUPIN_SERVER_PORT": "REDACTED-LUPIN_SERVER_PORT",
+        "LUPIN_SKELETON_CREW_INI": "REDACTED-LUPIN_SKELETON_CREW_INI",
+        "LUPIN_TEST_ADMIN_EMAIL": "REDACTED-LUPIN_TEST_ADMIN_EMAIL",
+        "LUPIN_TEST_ADMIN_PASSWORD": "",
+        "LUPIN_TEST_DB_PASSWORD_FILE": "",
+        "LUPIN_TEST_DB_USER": "REDACTED-LUPIN_TEST_DB_USER",
+        "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "REDACTED-LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL",
+        "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "",
+        "PYTHONPYCACHEPREFIX": "REDACTED-PYTHONPYCACHEPREFIX",
+        "PYTHONUNBUFFERED": "REDACTED-PYTHONUNBUFFERED"
+      },
+      "extra_hosts": [
+        "host.docker.internal:host-gateway"
+      ],
+      "group_add": [
+        "1002"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""
+        ],
+        "timeout": "10s",
+        "interval": "30s",
+        "retries": 3,
+        "start_period": "1m0s"
+      },
+      "image": "lupin:1.1.7-candidate",
+      "init": true,
+      "mem_limit": "12884901888",
+      "memswap_limit": "12884901888",
+      "networks": {
+        "lupin-dev-network": null
+      },
+      "ports": [
+        {
+          "mode": "ingress",
+          "target": 7999,
+          "published": "8000",
+          "protocol": "tcp"
+        }
+      ],
+      "restart": "unless-stopped",
+      "secrets": [
+        {
+          "source": "db_app_password"
+        },
+        {
+          "source": "db_test_password"
+        }
+      ],
+      "tmpfs": [
+        "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
+      ],
+      "user": "1001:1001",
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "claude-creds-test",
+          "target": "/home/rruiz/.claude",
+          "volume": {}
+        },
+        {
+          "type": "bind",
+          "source": "/home/rruiz/.claude/sessions-test",
+          "target": "/home/rruiz/.claude/sessions",
+          "bind": {}
+        },
+        {
+          "type": "bind",
+          "source": "/home/rruiz/.lora_env",
+          "target": "/home/rruiz/.lora_env",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/home/rruiz/.lupin",
+          "target": "/home/rruiz/.lupin",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review",
+          "target": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/home/rruiz/.claude/plans",
+          "target": "/var/external-claude/plans",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects",
+          "target": "/var/external-projects",
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin",
+          "target": "/var/lupin",
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees",
+          "target": "/var/lupin/.claude/worktrees",
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.dockerignore",
+          "target": "/var/lupin/.dockerignore",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.docview.yml",
+          "target": "/var/lupin/.docview.yml",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/dev/null",
+          "target": "/var/lupin/.env",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.git",
+          "target": "/var/lupin/.git",
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.gitleaks.toml",
+          "target": "/var/lupin/.gitleaks.toml",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.stylelintrc.json",
+          "target": "/var/lupin/.stylelintrc.json",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "tmpfs",
+          "target": "/var/lupin/.venv"
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/alembic.ini",
+          "target": "/var/lupin/alembic.ini",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus",
+          "target": "/var/lupin/dm-corpus",
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker",
+          "target": "/var/lupin/docker",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.cloud-gpu.yml",
+          "target": "/var/lupin/docker-compose.cloud-gpu.yml",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.yml",
+          "target": "/var/lupin/docker-compose.yml",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio",
+          "target": "/var/lupin/flow-ratio",
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/io",
+          "target": "/var/lupin/io",
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/node_modules",
+          "target": "/var/lupin/node_modules",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/package-lock.json",
+          "target": "/var/lupin/package-lock.json",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/package.json",
+          "target": "/var/lupin/package.json",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/pyproject.toml",
+          "target": "/var/lupin/pyproject.toml",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/pytest.ini",
+          "target": "/var/lupin/pytest.ini",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src",
+          "target": "/var/lupin/src",
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.diagnostic.json",
+          "target": "/var/lupin/tsconfig.diagnostic.json",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.json",
+          "target": "/var/lupin/tsconfig.json",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        },
+        {
+          "type": "bind",
+          "source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.nav.json",
+          "target": "/var/lupin/tsconfig.nav.json",
+          "read_only": true,
+          "bind": {
+            "create_host_path": true
+          }
+        }
+      ]
+    }
+  },
+  "volumes": {
+    "claude-creds-dev": {
+      "name": "lupin_claude-creds-dev",
+      "driver": "local",
+      "external": false
+    },
+    "claude-creds-test": {
+      "name": "lupin_claude-creds-test",
+      "driver": "local",
+      "external": false
+    }
+  }
+}

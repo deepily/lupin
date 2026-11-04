@@ -1,7 +1,6 @@
 from cosa.memory.embedding_manager import EmbeddingManager
-from cosa.memory.embedding_provider import get_embedding_provider
+from cosa.memory.embedding_provider import get_embedding_provider, init_embedding_table_config
 
-from cosa.config.configuration_manager import ConfigurationManager
 
 
 class QuestionEmbeddingsTable():
@@ -9,10 +8,10 @@ class QuestionEmbeddingsTable():
     Manages question embeddings storage in Postgres+pgvector.
 
     Caches embeddings for questions to avoid regenerating them.
-    Supports embedding lookup and storage; storage runs through
-    QuestionEmbeddingRepository on a short-lived get_db() session per call,
-    while embedding generation on a cache miss stays here (the memory layer
-    owns generation).
+    Supports embedding lookup and storage. Storage runs through
+    QuestionEmbeddingRepository on a short-lived get_db() session per call.
+    Embedding generation on a cache miss stays here, because the memory
+    layer owns generation.
     """
     def __init__( self, debug: bool=False, verbose: bool=False, *args, **kwargs ) -> None:
         """
@@ -29,14 +28,9 @@ class QuestionEmbeddingsTable():
             - ConfigurationManager errors propagated
         """
 
-        self.debug               = debug
-        self.verbose             = verbose
-        self._config_mgr         = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        init_embedding_table_config( self, debug, verbose )
         self._embedding_mgr      = EmbeddingManager( debug=debug, verbose=verbose )
         self._embedding_provider = get_embedding_provider( debug=debug, verbose=verbose )
-
-        # Get standardized embedding dimension from config
-        self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
 
     def has( self, question: str ) -> bool:
         """
@@ -67,7 +61,7 @@ class QuestionEmbeddingsTable():
 
         Ensures:
             - Returns the cached embedding when present
-            - Generates a new embedding on a miss, and does NOT store it
+            - Generates a new embedding on a miss, and does not store it
 
         Raises:
             - Repository/session errors propagated

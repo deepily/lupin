@@ -156,6 +156,33 @@ class NotificationTestSuite:
         
         return success
     
+    def _run_table( self, banner: str, rows: List[Tuple[str, str, str, str]] ) -> int:
+        """
+        Print a banner and run each ( name, message, type, priority ) row through run_test.
+
+        Requires:
+            - banner is the title line to print above a 50-character rule
+            - rows is a list of ( test_name, message, notification_type, priority ) tuples
+
+        Ensures:
+            - Prints the banner, then a rule of 50 "=" characters
+            - Runs the rows in order through run_test
+            - Returns the number of rows whose run_test returned True
+
+        Raises:
+            - None
+        """
+
+        print( banner )
+        print( "=" * 50 )
+
+        passed = 0
+        for test_name, message, msg_type, priority in rows:
+            if self.run_test( test_name, message, msg_type, priority ):
+                passed += 1
+
+        return passed
+
     def run_basic_tests( self ) -> int:
         """
         Run basic notification type tests
@@ -163,25 +190,18 @@ class NotificationTestSuite:
         Returns:
             int: Number of tests that passed
         """
-        
-        print( "📋 Running Basic Notification Tests" )
-        print( "=" * 50 )
-        
-        tests = [
-            ( "Basic Custom Notification", "Test notification from Claude Code", "custom", "medium" ),
-            ( "Task Completion Success", "Build completed successfully", "task", "high" ),
-            ( "Task Completion Failure", "Tests failed - please check output", "task", "high" ),
-            ( "Progress Update", "Installing dependencies (step 1/4)", "progress", "low" ),
-            ( "Warning Alert", "Deprecated API usage detected", "alert", "medium" ),
-            ( "Critical Alert", "Disk space critically low", "alert", "urgent" ),
-        ]
-        
-        passed = 0
-        for test_name, message, msg_type, priority in tests:
-            if self.run_test( test_name, message, msg_type, priority ):
-                passed += 1
-        
-        return passed
+
+        return self._run_table(
+            "📋 Running Basic Notification Tests",
+            [
+                ( "Basic Custom Notification", "Test notification from Claude Code", "custom", "medium" ),
+                ( "Task Completion Success", "Build completed successfully", "task", "high" ),
+                ( "Task Completion Failure", "Tests failed - please check output", "task", "high" ),
+                ( "Progress Update", "Installing dependencies (step 1/4)", "progress", "low" ),
+                ( "Warning Alert", "Deprecated API usage detected", "alert", "medium" ),
+                ( "Critical Alert", "Disk space critically low", "alert", "urgent" ),
+            ]
+        )
     
     def run_priority_tests( self ) -> int:
         """
@@ -190,23 +210,16 @@ class NotificationTestSuite:
         Returns:
             int: Number of tests that passed
         """
-        
-        print( "\n🔔 Running Priority Level Tests" )
-        print( "=" * 50 )
-        
-        tests = [
-            ( "Low Priority Info", "Background cache cleanup completed", "custom", "low" ),
-            ( "Medium Priority Update", "Code analysis finished", "custom", "medium" ),
-            ( "High Priority Warning", "Memory usage approaching limit", "custom", "high" ),
-            ( "Urgent Priority Alert", "System error requires immediate attention", "custom", "urgent" ),
-        ]
-        
-        passed = 0
-        for test_name, message, msg_type, priority in tests:
-            if self.run_test( test_name, message, msg_type, priority ):
-                passed += 1
-        
-        return passed
+
+        return self._run_table(
+            "\n🔔 Running Priority Level Tests",
+            [
+                ( "Low Priority Info", "Background cache cleanup completed", "custom", "low" ),
+                ( "Medium Priority Update", "Code analysis finished", "custom", "medium" ),
+                ( "High Priority Warning", "Memory usage approaching limit", "custom", "high" ),
+                ( "Urgent Priority Alert", "System error requires immediate attention", "custom", "urgent" ),
+            ]
+        )
     
     def run_realistic_workflow_tests( self ) -> int:
         """
@@ -215,25 +228,18 @@ class NotificationTestSuite:
         Returns:
             int: Number of tests that passed
         """
-        
-        print( "\n⚙️  Running Realistic Workflow Tests" )
-        print( "=" * 50 )
-        
-        workflow_tests = [
-            ( "Build Started", "Starting build process for lupin", "progress", "low" ),
-            ( "Dependencies Installed", "npm install completed successfully", "progress", "low" ),
-            ( "Running Tests", "Executing test suite (15 tests)", "progress", "medium" ),
-            ( "Tests Passed", "All tests passed - 15/15 successful", "task", "medium" ),
-            ( "Build Complete", "Build completed successfully in 2m 34s", "task", "high" ),
-            ( "Deployment Ready", "Application ready for deployment", "task", "high" ),
-        ]
-        
-        passed = 0
-        for test_name, message, msg_type, priority in workflow_tests:
-            if self.run_test( test_name, message, msg_type, priority ):
-                passed += 1
-        
-        return passed
+
+        return self._run_table(
+            "\n⚙️  Running Realistic Workflow Tests",
+            [
+                ( "Build Started", "Starting build process for lupin", "progress", "low" ),
+                ( "Dependencies Installed", "npm install completed successfully", "progress", "low" ),
+                ( "Running Tests", "Executing test suite (15 tests)", "progress", "medium" ),
+                ( "Tests Passed", "All tests passed - 15/15 successful", "task", "medium" ),
+                ( "Build Complete", "Build completed successfully in 2m 34s", "task", "high" ),
+                ( "Deployment Ready", "Application ready for deployment", "task", "high" ),
+            ]
+        )
     
     def run_error_scenarios( self ) -> int:
         """
@@ -269,22 +275,15 @@ class NotificationTestSuite:
         Returns:
             int: Number of tests that passed
         """
-        
-        print( "⚡ Running Quick Test Suite" )
-        print( "=" * 50 )
-        
-        quick_tests = [
-            ( "Basic Notification", "Quick test from Claude Code", "custom", "medium" ),
-            ( "Task Success", "Quick task completed", "task", "medium" ),
-            ( "Alert Test", "Quick alert test", "alert", "high" ),
-        ]
-        
-        passed = 0
-        for test_name, message, msg_type, priority in quick_tests:
-            if self.run_test( test_name, message, msg_type, priority ):
-                passed += 1
-        
-        return passed
+
+        return self._run_table(
+            "⚡ Running Quick Test Suite",
+            [
+                ( "Basic Notification", "Quick test from Claude Code", "custom", "medium" ),
+                ( "Task Success", "Quick task completed", "task", "medium" ),
+                ( "Alert Test", "Quick alert test", "alert", "high" ),
+            ]
+        )
     
     def print_summary( self, total_passed: int, total_tests: int ):
         """

@@ -164,7 +164,7 @@ def _tailer( transcript, bridge_path=None ):
     bridge = lambda cc_session_id: { "session_id": cc_session_id, "stable_session_id": SEAT, "transcript_path": holder[ "path" ] }
     tailer = CcTranscriptTailer( SEAT, None, settings={
         "poll_interval_seconds": 0.01, "grace_seconds": 0, "coalesce_window_ms": 0,
-        "backlog_tail_bytes": 65536, "block_budget_bytes": 0, "ring_buffer_bytes": 1 << 20,
+        "backlog_tail_bytes": 65536, "block_budget_bytes": 0,
     }, bridge_reader=bridge )
     tailer.transcript_path = str( transcript )
     tailer.file_epoch      = SEAT

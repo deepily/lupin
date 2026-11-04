@@ -5,6 +5,7 @@ Tests job creation, configuration, pytest output parsing, state transitions,
 dry run mode, and voice_io integration.
 """
 
+import asyncio
 import os
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -791,7 +792,7 @@ class TestAllExpansion:
     """
 
     def test_all_components_order( self ):
-        """Canonical pyramid order: typecheck → stylelint → unit → cosa → coverage → typescript → smoke → websocket → integration → e2e."""
+        """The canonical pyramid order, with docker_smoke right after smoke."""
         # "typescript" joined the pyramid 2026-07-21 (row 36e479ed, Rick's ruling on
         # gate 07a5460d). Before that, `all` ran every Python tier and silently
         # skipped the entire TypeScript suite.
@@ -806,7 +807,9 @@ class TestAllExpansion:
         # same reason: 1.5s of static analysis over every tracked .css file (measured).
         # "e2e" became "e2e_a", "e2e_b" on 2026-09-14 (row 2818dad7): two halves back to back,
         # so one timeout no longer discards the whole suite's results. Half A before half B.
-        assert ALL_SUITE_COMPONENTS == [ "typecheck", "stylelint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+        # "doclint" joined with row 2c48c717 (Rick's ruling) third: 4.6s of static
+        # analysis over every swept-scope Python file's docstrings (measured).
+        assert ALL_SUITE_COMPONENTS == [ "typecheck", "stylelint", "doclint", "reuse", "unit", "cosa", "coverage", "typescript", "smoke", "docker_smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
     def test_expand_all_fans_out( self ):
         assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS
@@ -838,7 +841,7 @@ class TestAllExpansion:
         # belongs to "all", not to every submission that contains it — deliberately.
         # DO NOT "FIX" THIS. It looks like an oversight and it is a decision.
         assert _expand_all( [ "unit", "all" ] ) == [
-            "unit", "typecheck", "stylelint", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b"
+            "unit", "typecheck", "stylelint", "doclint", "reuse", "cosa", "coverage", "typescript", "smoke", "docker_smoke", "websocket", "integration", "e2e_a", "e2e_b"
         ]
 
         # Caller-supplied duplicates also deduped
@@ -1058,6 +1061,87 @@ class TestSweepResetsBetweenSuites:
     @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.voice_io" )
+    def test_a_failed_reset_stops_the_sweep_before_the_next_suite( self, mock_voice_io, mock_root, job, tmp_path ):
+        """The reset at the seam raises, so the second suite never runs on the first suite's rows."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        order = [ ]
+        def _run( suite_type, project_root ):
+            order.append( f"run:{suite_type}" )
+            return dict( self._CANNED )
+        def _reset( prev, nxt ):
+            order.append( f"reset:{prev}->{nxt}" )
+            raise BetweenSuiteResetError( "boom" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=_run ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            asyncio.run( job._execute() )
+
+        assert order == [ "run:integration", "reset:integration->e2e" ]
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_a_failed_reset_still_reports_the_finished_suite_and_the_verdict_is_failed( self, mock_voice_io, mock_root, job, tmp_path ):
+        """The first suite passed, the reset at the seam raised: the job still writes its summary and
+        report, the finished suite keeps its entry, the suite that did not run is recorded as FAILED
+        with the reset as its reason, and the verdict is FAILED rather than PASSED (Tiberius B1)."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        def _reset( prev, nxt ):
+            raise BetweenSuiteResetError( "boom" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=lambda s, r: dict( self._CANNED ) ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            asyncio.run( job._execute() )
+
+        assert list( job.suite_results ) == [ "integration", "e2e" ]
+        assert job.suite_results[ "integration" ][ "passed" ] == 1
+        assert job.suite_results[ "e2e" ][ "errors" ] == 1
+        assert job.suite_results[ "e2e" ][ "exit_code" ] == 1
+        assert "e2e did not run" in job.suite_results[ "e2e" ][ "error" ]
+        assert "boom" in job.suite_results[ "e2e" ][ "error" ]
+        assert "report_path" in job.artifacts
+        assert any( "between-suites reset failed after integration" in str( c ) for c in mock_voice_io.notify.call_args_list )
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_a_failed_reset_makes_the_overall_verdict_failed_not_passed( self, mock_voice_io, mock_root, job, tmp_path ):
+        """Kept in its own test so a missing verdict is caught by this assertion alone: one suite
+        passed, the next never ran, and the summary must not read as a pass."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        def _reset( prev, nxt ):
+            raise BetweenSuiteResetError( "boom" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=lambda s, r: dict( self._CANNED ) ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            asyncio.run( job._execute() )
+
+        assert job.overall_status == "FAILED"
+        assert job.cost_summary[ "all_passed" ] is False
+        assert job.cost_summary[ "suites_run" ] == 2
+        assert job.cost_summary[ "total_errors" ] == 1
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
     def test_single_suite_never_resets( self, mock_voice_io, mock_root, single_suite_job, tmp_path ):
         """A single-suite run has no gap → the reset must never fire."""
         mock_root.return_value    = str( tmp_path )
@@ -1081,7 +1165,12 @@ class TestResetStateBetweenSuitesBody:
     def _mock_engine( url ):
         conn = MagicMock()
         executed = [ ]
-        conn.execute.side_effect = lambda stmt: executed.append( str( stmt ) )
+
+        def _record( stmt, params=None ):
+            executed.append( str( stmt ) )
+            return MagicMock( fetchall=MagicMock( return_value=[ ] ) )
+
+        conn.execute.side_effect = _record
         cm = MagicMock()
         cm.__enter__.return_value = conn
         cm.__exit__.return_value  = False
@@ -1111,21 +1200,191 @@ class TestResetStateBetweenSuitesBody:
         engine.begin.assert_not_called()
         assert executed == [ ]
 
-    def test_reset_failure_is_non_fatal( self, job ):
-        """A DB error during the reset is swallowed (logged) — it must never
-        abort the surrounding sweep; the per-test clean_test_db is the backstop."""
+    def test_reset_failure_is_fatal( self, job ):
+        """A DB error during the reset raises BetweenSuiteResetError naming both suites and the
+        cause: a suite on an unreset database reports on someone else's rows (bug 07dde530)."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
         engine = MagicMock()
         engine.url = "postgresql://u@h/lupin_db_test"
         engine.begin.side_effect = RuntimeError( "connection refused" )
         with patch( "cosa.rest.db.database.engine", engine ):
-            # Must not raise
+            with pytest.raises( BetweenSuiteResetError, match=r"e2e->integration.*connection refused" ) as caught:
+                job._reset_state_between_suites( "e2e", "integration" )
+        assert isinstance( caught.value.__cause__, RuntimeError )
+        assert "so integration does not run on e2e's rows" in str( caught.value )
+
+    def test_a_foreign_key_refusal_from_the_truncate_is_fatal_too( self, job ):
+        """The 2026-10-01 failure: the TRUNCATE statement itself is refused."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        engine, executed = self._mock_engine( "postgresql://u@h/lupin_db_test" )
+        conn = engine.begin.return_value.__enter__.return_value
+        def refuse( statement ):
+            if "TRUNCATE" in str( statement ): raise RuntimeError( "cannot truncate a table referenced in a foreign key constraint" )
+        conn.execute.side_effect = refuse
+        with patch( "cosa.rest.db.database.engine", engine ):
+            with pytest.raises( BetweenSuiteResetError, match="foreign key" ):
+                job._reset_state_between_suites( "e2e", "integration" )
+
+    def test_the_truncate_statement_names_task_promotion_tickets_with_task_items( self, job ):
+        """task_promotion_tickets holds a foreign key into task_items, so it has to be in the same statement."""
+        engine, executed = self._mock_engine( "postgresql://u@h/lupin_db_test" )
+        with patch( "cosa.rest.db.database.engine", engine ):
             job._reset_state_between_suites( "e2e", "integration" )
+        truncate = next( sql for sql in executed if "TRUNCATE" in sql )
+        assert "task_promotion_tickets" in truncate and "task_items" in truncate
+
+
+class _JobHistoryConnection:
+    """A connection over an in-memory job_history: rows are ( id_hash, status, scheduled_at )."""
+
+    def __init__( self, rows ):
+        self.rows, self.statements = list( rows ), [ ]
+
+    def execute( self, statement, params=None ):
+        sql = str( statement )
+        self.statements.append( sql )
+        head = sql.lstrip().upper()
+        if head.startswith( "SELECT" ):
+            return MagicMock( fetchall=MagicMock( return_value=[ ( i, s ) for i, st, s in self.rows if st == "pending" ] ) )
+        if head.startswith( "DELETE FROM JOB_HISTORY" ):
+            self.rows = [ row for row in self.rows if row[ 0 ] in params[ "keep" ] ]
+        return MagicMock()
+
+
+class TestResetKeepsScheduledJobHistory:
+    """The between-suites reset spares a pending job scheduled ahead.
+
+    A job scheduled behind a sweep is a pending job_history row until the server restarts and
+    restores it. The reset used to truncate the table, so the row was lost at every seam."""
+
+    @staticmethod
+    def _iso( days ):
+        from datetime import datetime, timedelta, timezone
+        return ( datetime.now( timezone.utc ) + timedelta( days=days ) ).isoformat()
+
+    def _reset( self, job, rows ):
+        conn = _JobHistoryConnection( rows )
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value  = False
+        engine = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        engine.begin.return_value = cm
+        with patch( "cosa.rest.db.database.engine", engine ):
+            job._reset_state_between_suites( "e2e", "integration" )
+        return conn
+
+    def test_a_future_pending_row_survives_and_every_other_row_goes( self, job ):
+        conn = self._reset( job, [
+            ( "future::u",  "pending",   self._iso( 1 ) ),
+            ( "past::u",    "pending",   self._iso( -1 ) ),
+            ( "none::u",    "pending",   None ),
+            ( "done::u",    "completed", self._iso( 1 ) ),
+            ( job.id_hash,  "running",   None ),
+        ] )
+        assert [ row[ 0 ] for row in conn.rows ] == [ "future::u" ]
+
+    def test_the_sweeps_own_running_row_is_not_kept_even_with_a_future_time( self, job ):
+        conn = self._reset( job, [ ( job.id_hash, "running", self._iso( 1 ) ), ( "keep::u", "pending", self._iso( 2 ) ) ] )
+        assert [ row[ 0 ] for row in conn.rows ] == [ "keep::u" ]
+
+    def test_job_history_is_not_in_the_truncate_statement( self, job ):
+        conn = self._reset( job, [ ] )
+        truncate = next( sql for sql in conn.statements if "TRUNCATE" in sql )
+        assert "job_history" not in truncate and "refresh_tokens" in truncate
+
+    def test_the_rule_is_the_shared_one_and_runs_on_the_resets_own_connection( self, job ):
+        conn = _JobHistoryConnection( [ ] )
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value  = False
+        engine = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        engine.begin.return_value = cm
+        with patch( "cosa.rest.db.database.engine", engine ), \
+             patch( "cosa.rest.job_history_cleanup.clean_job_history", return_value=[ "k::u" ] ) as shared:
+            job._reset_state_between_suites( "e2e", "integration" )
+        shared.assert_called_once_with( conn )
+        engine.begin.assert_called_once()
+
+    def test_a_failure_in_the_job_history_cleanup_stops_the_sweep( self, job ):
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        engine, _ = TestResetStateBetweenSuitesBody._mock_engine( "postgresql://u@h/lupin_db_test" )
+        with patch( "cosa.rest.db.database.engine", engine ), \
+             patch( "cosa.rest.job_history_cleanup.clean_job_history", side_effect=RuntimeError( "lock timeout" ) ):
+            with pytest.raises( BetweenSuiteResetError, match="lock timeout" ):
+                job._reset_state_between_suites( "e2e", "integration" )
+
+    def test_off_the_test_database_the_rule_is_never_called( self, job ):
+        engine, _ = TestResetStateBetweenSuitesBody._mock_engine( "postgresql://u@h/lupin_db_dev" )
+        with patch( "cosa.rest.db.database.engine", engine ), \
+             patch( "cosa.rest.job_history_cleanup.clean_job_history" ) as shared:
+            job._reset_state_between_suites( "e2e", "integration" )
+        shared.assert_not_called()
+
+    def test_the_log_line_says_how_many_pending_jobs_were_kept( self, job, capsys ):
+        self._reset( job, [ ( "a::u", "pending", self._iso( 1 ) ), ( "b::u", "pending", self._iso( 3 ) ) ] )
+        assert "except 2 pending job(s) scheduled ahead" in capsys.readouterr().out
+
+
+class TestTruncateSetIsClosedUnderForeignKeys:
+    """Postgres refuses to TRUNCATE a table that another table references unless the referencing
+    table is in the same statement. The between-suites list must therefore be closed under foreign
+    keys, and the next foreign key added to a listed table has to fail this test (bug 07dde530)."""
+
+    def test_the_truncate_set_is_closed_under_foreign_keys( self ):
+        from cosa.agents.test_suite.job import tables_with_fk_into
+        from cosa.rest import postgres_models
+        listed = TestSuiteJob._BETWEEN_SUITE_TRUNCATE_TABLES
+        assert len( postgres_models.Base.metadata.tables ) > 10
+        assert set( listed ) <= set( postgres_models.Base.metadata.tables )
+        assert tables_with_fk_into( postgres_models.Base.metadata, listed ) == []
+
+    def test_a_referencing_table_outside_the_list_is_found( self ):
+        from sqlalchemy import Column, ForeignKey, Integer, MetaData, Table
+        from cosa.agents.test_suite.job import tables_with_fk_into
+        metadata = MetaData()
+        Table( "parent", metadata, Column( "id", Integer, primary_key=True ) )
+        Table( "listed_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "parent.id" ) ) )
+        Table( "late_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "parent.id" ) ) )
+        Table( "other_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "unrelated.id" ) ) )
+        Table( "unrelated", metadata, Column( "id", Integer, primary_key=True ) )
+        Table( "a_late_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "parent.id" ) ) )
+        assert tables_with_fk_into( metadata, [ "parent", "listed_child" ] ) == [ "a_late_child", "late_child" ]
+        assert tables_with_fk_into( metadata, [ "parent", "listed_child", "late_child", "a_late_child" ] ) == []
+
+    def test_the_real_metadata_would_flag_the_table_that_broke_the_reset( self ):
+        """Without task_promotion_tickets the real schema is not closed: the 2026-10-01 failure."""
+        from cosa.agents.test_suite.job import tables_with_fk_into
+        from cosa.rest import postgres_models
+        without = [ t for t in TestSuiteJob._BETWEEN_SUITE_TRUNCATE_TABLES if t != "task_promotion_tickets" ]
+        assert tables_with_fk_into( postgres_models.Base.metadata, without ) == [ "task_promotion_tickets" ]
 
 
 class TestPreflightAssertExclusiveTestDb:
     """The sweep-start exclusivity preflight (bug caf58f71 — concurrent-writer
     contamination). Fails LOUD if a non-test agentic job is inflight on the shared
     lupin_db_test; NO-OPs off the test DB or when the running queue is unreachable."""
+
+    @pytest.fixture( autouse=True )
+    def grants_preflight( self ):
+        """The grants preflight after a clean exclusivity pass is a stub here."""
+        with patch.object( TestSuiteJob, "_preflight_assert_grants_on_test_db" ) as stub:
+            yield stub
+
+    def test_a_clean_exclusivity_pass_is_followed_by_the_grants_preflight( self, job, grants_preflight ):
+        fake_queue = MagicMock()
+        fake_queue.get_non_test_inflight_agentic_jobs.return_value = [ ]
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), self._install_main( jobs_run_queue=fake_queue ):
+            job._preflight_assert_exclusive_test_db()
+        grants_preflight.assert_called_once_with()
+
+    def test_an_exclusivity_failure_never_reaches_the_grants_preflight( self, job, grants_preflight ):
+        fake_queue = MagicMock()
+        fake_queue.get_non_test_inflight_agentic_jobs.return_value = [ { "id_hash": "dr-abc123", "job_type": "deep_research" } ]
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), self._install_main( jobs_run_queue=fake_queue ):
+            with pytest.raises( RuntimeError, match="caf58f71" ): job._preflight_assert_exclusive_test_db()
+        grants_preflight.assert_not_called()
 
     @staticmethod
     def _test_engine():
@@ -1316,6 +1575,14 @@ def test_the_card_carries_the_failure_message_not_just_the_count():
     assert "EvalIntegrityError" in line
     assert "http-all-ok" in line
     assert "test_v2_eval_two_pass_live" in line
+
+
+def test_a_unit_exit_of_72_is_called_out_of_memory_on_the_card_and_other_suites_and_codes_are_not():
+    """The unit scope's memory kill must not read as failing tests."""
+    unit = lambda code: TestSuiteJob._suite_abstract_line( TestSuiteJob, "unit", { "passed": 5, "failed": 2, "errors": 0, "skipped": 0, "exit_code": code } )
+    assert "OUT OF MEMORY" in unit( 72 )
+    assert "OUT OF MEMORY" not in unit( 1 )
+    assert "OUT OF MEMORY" not in _line( failed=1, exit_code=72 ), "only the unit suite carries this code"
 
 
 def test_a_clean_suite_line_gains_nothing():
@@ -2033,3 +2300,50 @@ class TestProgressParserSkipsVerboseLines:
         assert result[ "exit_code" ] == -2
         # It drained SOME but not all — the budget cut it short, which is the point.
         assert 0 < result[ "passed" ] < 16                  # 8 files x 2 dots = 16 if fully drained
+
+
+class TestPreflightAssertGrantsOnTestDb:
+    """The sweep-start grants preflight: a gap fails the job before the first suite."""
+
+    @staticmethod
+    def _engine():
+        engine = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        return engine
+
+    @staticmethod
+    def _report( problems ):
+        from cosa.utils import db_grants
+        rows = [ ( "lupin_db_test", "tables", "", "27", "" ) ] + [ ( "lupin_db_test", *p ) for p in problems ]
+        return db_grants.evaluate( "lupin_db_test", rows )
+
+    def _run( self, job, report=None, check_raises=None, cloud=False ):
+        def fake_check( run_query ):
+            if check_raises: raise check_raises
+            return report
+        with patch( "cosa.rest.db.database.engine", self._engine() ), \
+             patch( "cosa.rest.db.database.is_cloud_backed", return_value=cloud ), \
+             patch( "cosa.utils.db_grants.check_current_database", fake_check ):
+            job._preflight_assert_grants_on_test_db()
+
+    def test_a_missing_grant_raises_naming_it_and_the_repair_command( self, job ):
+        report = self._report( [ ( "missing", "lupin_test", "gadgets", "SELECT" ) ] )
+        with pytest.raises( RuntimeError ) as raised: self._run( job, report )
+        text = str( raised.value )
+        assert "lupin_test cannot SELECT gadgets" in text and "--grants-only --apply" in text
+
+    def test_a_clean_check_passes_and_logs_the_summary( self, job, capsys ):
+        self._run( job, self._report( [] ) )
+        assert "preflight grants PASSED: lupin_db_test: 27 tables, 3 roles, 0 problems" in capsys.readouterr().out
+
+    def test_a_database_the_matrix_does_not_name_is_a_logged_noop( self, job, capsys ):
+        self._run( job, None )
+        assert "SKIPPED: this database is not one the matrix describes" in capsys.readouterr().out
+
+    def test_a_check_that_cannot_run_is_a_logged_noop_and_never_stops_the_sweep( self, job, capsys ):
+        self._run( job, check_raises=OSError( "connection refused" ) )
+        assert "SKIPPED: the check could not run (OSError: connection refused)" in capsys.readouterr().out
+
+    def test_a_cloud_backed_deployment_is_skipped_before_any_query( self, job, capsys ):
+        self._run( job, report=self._report( [ ( "missing", "lupin_test", "gadgets", "SELECT" ) ] ), cloud=True )
+        assert "cloud-backed" in capsys.readouterr().out

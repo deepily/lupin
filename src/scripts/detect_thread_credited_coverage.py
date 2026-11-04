@@ -1,67 +1,43 @@
 #!/usr/bin/env python3
 """
-Detect coverage that a BACKGROUND THREAD credited, not a test.
+Detect coverage that a background thread credited, not a test.
 
-Row `87ae7234`. A daemon started at import — `session-id-watcher`, started
-unguarded at `src/lupin_mcp/cosa_voice_mcp.py:529-534` and polling every 2.0s — runs
-for the life of the test process and executes product lines nobody wrote a test for.
-Coverage.py credits them like any other executed line. Measured on
-`src/tests/unit/lupin_mcp`: 41 statements of `session_bridge.py` are covered only
-because that thread ran.
-
-TWO LEVERS WERE TRIED. This script uses the second.
-
-  1. THE CLOCK — run the scope twice, once held open past the poll interval, and
-     diff. It DEMONSTRATES the defect well (15% vs 18% on the same 333 tests) but
-     it makes a bad detector: it only fires when the baseline run finishes inside
-     one poll. Measured — under this script's own subprocess overhead the baseline
-     took 5.6s against a 2.0s poll, so both runs credited the same 134 lines and
-     the check reported CLEAN on a scope known to be dirty. A detector that misses
-     its own known positive is worse than none.
-
-  2. THREAD ATTRIBUTION — record which thread executed each line, then report lines
-     no test thread ever reached. Deterministic, independent of how long anything
-     takes, and it names the responsible thread. That is what runs here.
-
-SUPPRESSION IS NOT AN OPTION, and this is measured rather than assumed: no-op'ing
-`Thread.start` for `session-id-watcher` takes `src/tests/unit/lupin_mcp` from
-`EXIT=0 / 333 passed` to `EXIT=1` with no summary, because that daemon resolves the
-session id and the failure path ends in `os._exit( 1 )`.
-
-SCOPE BUCKETS. A line executed only by a background thread is not automatically a
-finding. A module-scope declaration - a `class` statement, a dataclass field, a dict
-literal, a decorator - executes when the module is IMPORTED, and if the import
-happened on a worker thread the tracer credits it to that worker. Measured on the
-2026-08-26 sweep: 2,085 of 7,580 reported lines were declarations, 1,840 of them under
-one thread. Those are neither earned nor defects, so they are BUCKETED, not dropped:
-which modules were imported only from a worker thread is a real signal and dropping it
-destroys the evidence that found the lazy-import cascade. The verdict - and the exit
-code - keys on `call_time` ALONE.
-
-  call_time     inside a function body, non-test thread, absent from MainThread  <- the finding
-  module_scope  a declaration executed at import                                 <- reported, never counted
-  allowed       the thread is on --allow-thread                                  <- reported, never counted
-
-A `def` LINE IS NOT PART OF ITS BODY. Classification walks `node.body`, never the
-function's own `lineno..end_lineno` span: a `def` and its decorators execute at import,
-so crediting them to the body would manufacture call-time findings that never happened.
-
-WHAT A FINDING MEANS, AND WHAT IT DOES NOT. A reported line was executed by a
-non-test thread and by nothing else. That is always true of the report; whether it
-is a DEFECT depends on the thread. A daemon started at import credits lines nobody
-tested — that is the defect. A worker thread a test starts deliberately, and whose
-work that test then asserts on, is legitimate: the coverage is earned, it just did
-not happen on the test's own thread. The report names the thread so the reader can
-tell them apart. It does not decide.
+A daemon started at import credits product lines nobody tested, and coverage.py counts them like any other.
+Example: `session-id-watcher`, started unguarded in `src/lupin_mcp/cosa_voice_mcp.py` and polling every 2.0s.
 
 Usage:
     python src/scripts/detect_thread_credited_coverage.py <pytest-target>
         [--allow-thread NAME]... [--json OUT] [--quiet]
 
 Exit codes:
-    0  no CALL-TIME thread-credited lines outside the allow-list
-    1  call-time thread-credited lines found (the report names thread, file and lines)
-    2  the run failed, so the attribution means nothing
+    0  no call-time thread-credited lines outside the allow-list.
+    1  call-time thread-credited lines found. The report names thread, file and lines.
+    2  the run failed, so the attribution means nothing.
+
+Notes:
+    - The daemon runs for the life of the test process, and on `src/tests/unit/lupin_mcp` 41 `session_bridge.py` statements were covered only by it.
+    - Two levers were tried, and this script uses the second, thread attribution.
+    - The clock lever runs the scope twice, once held open past the poll interval, and diffs. It shows 15% vs 18% on the same 333 tests.
+    - It is a bad detector, because it fires only when the baseline finishes inside one poll.
+    - Under subprocess overhead the baseline took 5.6s against a 2.0s poll, so both runs credited the same 134 lines and reported clean.
+    - Thread attribution records which thread executed each line and reports lines no test thread reached.
+    - It is deterministic, independent of timing, and names the thread.
+    - Suppression is not an option: no-op'ing `Thread.start` for the watcher turned 333 passed into a bare failing exit.
+    - That daemon resolves the session id, and its failure path ends in `os._exit( 1 )`.
+    - A module-scope declaration (a `class` statement, dataclass field, dict literal or decorator) executes at import.
+    - If the import ran on a worker thread, the tracer credits the declaration to that worker.
+    - One sweep found 2,085 of 7,580 reported lines were declarations, 1,840 of them under one thread.
+    - They are neither earned nor defects, so they are bucketed, not dropped.
+    - Which modules were imported only from a worker thread is a real signal, and it found the lazy-import cascade.
+    - The verdict and exit code key on `call_time` alone.
+    - call_time is inside a function body, non-test thread, absent from MainThread. This is the finding.
+    - module_scope is a declaration executed at import, and allowed is a thread on --allow-thread. Both are reported, never counted.
+    - A `def` line is not part of its body, so classification walks `node.body`, never the `lineno..end_lineno` span.
+    - A `def` and its decorators execute at import, so crediting them to the body would invent call-time findings.
+    - A reported line was executed by a non-test thread and by nothing else, and whether that is a defect depends on the thread.
+    - A daemon started at import credits lines nobody tested, which is the defect.
+    - A worker thread a test starts for its own work, and then asserts on, is legitimate, since the coverage is earned.
+    - The report names the thread so the reader can tell them apart, and it does not decide.
 """
 import argparse
 import ast
@@ -148,7 +124,7 @@ def _stmt_span( stmt ):
 
     Ensures:
         - returns a range covering stmt's own lines
-        - a decorated nested def/class starts at its FIRST decorator, because those
+        - a decorated nested def/class starts at its first decorator, because those
           decorator expressions run when the enclosing function is called
     """
     start = stmt.lineno
@@ -161,7 +137,7 @@ def _stmt_span( stmt ):
 
 def call_time_lines( source ):
     """
-    The line numbers in `source` that execute only when a function is CALLED.
+    The line numbers in `source` that execute only when a function is called.
 
     Requires:
         - source is the full text of a parseable Python module
@@ -170,7 +146,7 @@ def call_time_lines( source ):
         - returns a set of 1-based line numbers belonging to statements inside some
           function body
         - a `def`/`async def` line, and the decorators of a module-scope function, are
-          NEVER included on account of the function they introduce - a def executes at
+          never included on account of the function they introduce - a def executes at
           import, and crediting it to its own body invents call-time lines
         - a class body at module scope is module-scope; the same class body written
           inside a function is call-time
@@ -242,11 +218,11 @@ def bucket_findings( attribution, allow_threads, is_call_time ):
 
 def verdict_exit_code( buckets ):
     """
-    The exit code, keyed on `call_time` ALONE.
+    The exit code, keyed on `call_time` alone.
 
     Ensures:
         - returns 1 when any call-time line was found, 0 otherwise
-        - module-scope declarations and allow-listed threads NEVER fail the check;
+        - module-scope declarations and allow-listed threads never fail the check;
           keying on them would leave the change cosmetic
     """
     return 1 if buckets[ "call_time" ] else 0

@@ -74,6 +74,23 @@ def test_the_real_step_tickets_a_long_idle_refused_tree( tmp_path ):
     assert state[ "trees" ][ str( tree ) ][ "estimated" ] is True
 
 
+def test_the_real_step_also_tickets_a_branch_archived_this_poll( tmp_path ):
+    """Row aec2319f: archive and ticket. The reaper archives; this step opens the row."""
+    store = _Store()
+    step  = fal.make_straggler_fn( ledger_path=str( tmp_path / "jan" / "refused.json" ), janitor_idle_hours=6,
+                                   log_fn=lambda e, **k: None, store=store )
+    kept  = { "branch": "wt-rescue/seat-cc-author-cheech-2-20261002T135947Z", "target": "wip-v9",
+              "kept_reason": "archived", "commits_ahead": 3, "sha": "abc123", "landed": False,
+              "archive_ref": "refs/archive/2026-10-02/wt-rescue/seat-cc-author-cheech-2-20261002T135947Z",
+              "repo_root": "/repos/lupin" }
+
+    out = step( { "swept": [], "skipped": [], "branches_kept": [ kept ] } )
+
+    assert out[ "archived" ] == { "opened": [ kept[ "archive_ref" ] ], "adopted": [], "errors": [] }
+    assert [ ( r[ "owner" ], r[ "project" ], r[ "correlation_key" ] ) for r in store.created ] == [
+        ( "cheech", "lupin", "archive:" + kept[ "archive_ref" ] ) ]
+
+
 def test_the_default_store_is_the_direct_repository_write( tmp_path ):
     from cosa.agents.shared import worktree_straggler_tickets as st
     captured = {}

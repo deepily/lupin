@@ -25,6 +25,11 @@
 
 import type { EventBus } from "../shared/EventBus";
 
+/**
+ * What the console buttons ask of the host.
+ *
+ * `resolve` names the seat for a card, `open` reports a click, and `showing` names the seat whose console is open.
+ */
 export interface SenderCardConsoleAffordance {
   /** The seat's FULL stable id, or null when this card offers no console. */
   resolve( senderId: string, personaName: string | null ): string | null;
@@ -34,6 +39,12 @@ export interface SenderCardConsoleAffordance {
   showing?(): string | null;
 }
 
+/**
+ * The console button in each sender card's title bar.
+ *
+ * It watches the card container and paints again when cards change, so a card with a resolved seat has one button.
+ * It also paints again on the roster, transcript and reading pane store events.
+ */
 export interface SenderCardConsoleButtons {
   mount( container: HTMLElement ): void;
   unmount(): void;
@@ -41,6 +52,11 @@ export interface SenderCardConsoleButtons {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createSenderCardConsoleButtons`.
+ *
+ * The bus and the affordance are required. The observer constructor is for tests.
+ */
 export interface SenderCardConsoleButtonsOptions {
   eventBus    : EventBus;
   affordance  : SenderCardConsoleAffordance;
@@ -48,8 +64,12 @@ export interface SenderCardConsoleButtonsOptions {
   observerCtor? : typeof MutationObserver;
 }
 
+/** The class of the console button. A repaint uses it to find the buttons already drawn. */
 export const SENDER_CONSOLE_BUTTON_CLASS = "sender-console-btn";
 
+/**
+ * Adds a console button to sender cards whose session has a transcript.
+ */
 class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
   private readonly bus          : EventBus;
   private readonly affordance   : SenderCardConsoleAffordance;
@@ -59,6 +79,9 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
   private container : HTMLElement | null = null;
   private observer  : MutationObserver | null = null;
 
+  /**
+   * Stores the bus, affordance and mutation observer constructor from the options.
+   */
   constructor( opts: SenderCardConsoleButtonsOptions ) {
     this.bus          = opts.eventBus;
     this.affordance   = opts.affordance;
@@ -66,6 +89,9 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
     this.observerCtor = opts.observerCtor ?? globalThis.MutationObserver;
   }
 
+  /**
+   * Observes the container and paints console buttons on sender cards.
+   */
   mount( container: HTMLElement ): void {
     if ( this.container !== null ) throw new Error( "SenderCardConsoleButtons.mount: already mounted" );
     this.container = container;
@@ -80,6 +106,9 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
     this.paint();
   }
 
+  /**
+   * Stops observing and removes every console button it added.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -89,6 +118,9 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
     this.container = null;
   }
 
+  /**
+   * Repaints the buttons at once; used by tests.
+   */
   forceRenderForTesting(): void { this.paint(); }
 
   private paint(): void {
@@ -142,12 +174,19 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
   }
 }
 
-// Written only when it changes, so an idle repaint touches nothing at all.
+/**
+ * Sets the pressed attribute on a button, writing only when the value changes.
+ */
 function setPressed( btn: HTMLElement, pressed: boolean ): void {
   const value = pressed ? "true" : "false";
   if ( btn.getAttribute( "aria-pressed" ) !== value ) btn.setAttribute( "aria-pressed", value );
 }
 
+/**
+ * Build the renderer.
+ *
+ * It watches and paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 export function createSenderCardConsoleButtons( opts: SenderCardConsoleButtonsOptions ): SenderCardConsoleButtons {
   return new SenderCardConsoleButtonsImpl( opts );

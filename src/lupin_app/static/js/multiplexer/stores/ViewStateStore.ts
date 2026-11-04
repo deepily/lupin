@@ -40,6 +40,7 @@ type FlagMap = Record<string, boolean>;
 interface SectionVisibilityEnvelope { sections: FlagMap }
 interface AccordionCollapsedEnvelope { accordions: FlagMap }
 
+/** The saved view state: which sections are hidden and which accordions are collapsed. */
 export interface ViewStateStore {
   /** True unless the section was explicitly hidden. Default: visible. */
   isSectionVisible(sectionId: string): boolean;
@@ -71,11 +72,15 @@ export interface ViewStateStore {
   requestBulkAccordionCollapse(collapsed: boolean): void;
 }
 
+/** Options for `createViewStateStore`: the bus and the storage service. */
 export interface ViewStateStoreOptions {
   bus     : EventBus;
   storage : StorageService;
 }
 
+/**
+ * Models which sections are hidden and which accordions are collapsed.
+ */
 class ViewStateStoreImpl implements ViewStateStore {
   private readonly bus     : EventBus;
   private readonly storage : StorageService;
@@ -83,6 +88,9 @@ class ViewStateStoreImpl implements ViewStateStore {
   private sectionVisibility : FlagMap = {};
   private accordionCollapsed: FlagMap = {};
 
+  /**
+   * Stores the bus and storage service, then loads the saved maps.
+   */
   constructor( opts: ViewStateStoreOptions ) {
     this.bus     = opts.bus;
     this.storage = opts.storage;
@@ -114,11 +122,17 @@ class ViewStateStoreImpl implements ViewStateStore {
   // Section visibility
   // -------------------------------------------------------------------------
 
+  /**
+   * Reports whether a section is visible; only an explicit false hides it.
+   */
   isSectionVisible(sectionId: string): boolean {
     // Default visible: only an explicit `false` hides a section.
     return this.sectionVisibility[sectionId] !== false;
   }
 
+  /**
+   * Records a section's visibility and saves the whole map to storage.
+   */
   setSectionVisible(sectionId: string, visible: boolean): void {
     this.sectionVisibility[sectionId] = visible;
     this.storage.setJSON<SectionVisibilityEnvelope>(
@@ -126,10 +140,16 @@ class ViewStateStoreImpl implements ViewStateStore {
     );
   }
 
+  /**
+   * Returns the IDs of sections explicitly set to hidden.
+   */
   getHiddenSectionIds(): string[] {
     return Object.keys(this.sectionVisibility).filter(id => this.sectionVisibility[id] === false);
   }
 
+  /**
+   * Reports whether a saved visibility choice exists for the section.
+   */
   hasSectionPreference(sectionId: string): boolean {
     return Object.prototype.hasOwnProperty.call(this.sectionVisibility, sectionId);
   }
@@ -138,11 +158,17 @@ class ViewStateStoreImpl implements ViewStateStore {
   // Accordion collapse
   // -------------------------------------------------------------------------
 
+  /**
+   * Reports whether an accordion is collapsed; only an explicit true collapses it.
+   */
   isAccordionCollapsed(accordionId: string): boolean {
     // Default expanded: only an explicit `true` collapses an accordion.
     return this.accordionCollapsed[accordionId] === true;
   }
 
+  /**
+   * Records an accordion's collapsed state and saves the whole map to storage.
+   */
   setAccordionCollapsed(accordionId: string, collapsed: boolean): void {
     this.accordionCollapsed[accordionId] = collapsed;
     this.storage.setJSON<AccordionCollapsedEnvelope>(
@@ -154,6 +180,9 @@ class ViewStateStoreImpl implements ViewStateStore {
   // Bulk intent (the only emit)
   // -------------------------------------------------------------------------
 
+  /**
+   * Emits a view state change asking every accordion to collapse or expand.
+   */
   requestBulkAccordionCollapse(collapsed: boolean): void {
     this.bus.emit<StoreViewStateChangedPayload>({
       type    : "store_view_state_changed",
@@ -164,9 +193,9 @@ class ViewStateStoreImpl implements ViewStateStore {
   }
 }
 
-// Defensive coercion: keep only genuine boolean entries from a persisted map.
-// A tampered / partially-corrupt envelope (non-object values) degrades to the
-// safe default rather than poisoning the in-memory map.
+/**
+ * Returns a map holding only the boolean entries of a saved value.
+ */
 function coerceFlagMap(raw: unknown): FlagMap {
   const out: FlagMap = {};
   // A tampered envelope can carry a non-object / null `sections`/`accordions`

@@ -1,12 +1,12 @@
 """
 Peer Queue Proxy + Watcher Router.
 
-Provides admin endpoints that let the dev server (:7999) observe and watch
-queue state on a peer Lupin server (typically the test server at :8000)
-without the user having to authenticate against the peer directly.
+Provides admin endpoints that let the dev server (:7999) observe and watch queue state
+on a peer Lupin server, typically the test server at :8000. The user does not have to
+authenticate against the peer directly.
 
 Endpoints:
-    GET  /api/admin/peer-queue/{queue_name}         — one-shot queue read
+    GET  /api/admin/peer-queue/{queue_name}         — one-shot queue read.
     POST /api/admin/peer-queue-watch/start          — start background watcher
     POST /api/admin/peer-queue-watch/stop           — stop watcher for caller
     GET  /api/admin/peer-queue-watch/status         — current watcher state
@@ -14,21 +14,20 @@ Endpoints:
 Auth:
     All endpoints require admin role via Depends( require_admin ).
 
-    Outbound auth to the peer uses a service-account JWT obtained via
-    POST /auth/login against the peer itself (Option B). Credentials come
-    from LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/_PASSWORD env vars.
+    Outbound auth to the peer uses a service-account JWT obtained via POST /auth/login
+    against the peer itself. Credentials come from the
+    LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and _PASSWORD env vars.
     Tokens are cached per-host and refreshed on 401.
 
-    JWT pass-through (forwarding the caller's Authorization header) was
-    tried first but doesn't work: dev and test share the JWT signing
-    secret but have SEPARATE user databases, so the peer's verify_jwt_token
-    → get_user_by_id() fails with "User not found".
+    JWT pass-through, forwarding the caller's Authorization header, does not work.
+    Dev and test share the JWT signing secret but have separate user databases.
+    The peer's verify_jwt_token → get_user_by_id() therefore fails with "User not found".
 
 SSRF protection:
     The target host must appear in config key "peer queue allowed hosts"
     (comma-separated list under [Lupin: Baseline]). Values are docker-compose
-    service names + in-container port (7999), e.g. "lupin-rest-test:7999" —
-    NOT host-mapped ports, since the dev container reaches peers over the
+    service names + in-container port (7999), e.g. "lupin-rest-test:7999". They are
+    not host-mapped ports, since the dev container reaches peers over the
     compose network.
 
 Drain notification:
@@ -53,6 +52,12 @@ from pydantic import BaseModel, Field
 from cosa.rest.auth_middleware import require_admin
 from cosa.config.configuration_manager import ConfigurationManager
 import cosa.utils.util as du
+
+# Session-level default: a peer call that forgets its own per-request timeout is still bounded (row f6ce66f1).
+_PEER_SESSION_TIMEOUT_SECONDS = 30.0
+
+# Bound on the peer /auth/login POST (row f6ce66f1).
+_PEER_LOGIN_TIMEOUT_SECONDS = 10.0
 
 
 _config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
@@ -123,7 +128,7 @@ async def _login_to_peer( session: aiohttp.ClientSession, host: str ) -> Dict:
     url  = f"http://{host}/auth/login"
     body = { "email": email, "password": password }
     try:
-        async with session.post( url, json=body, timeout=aiohttp.ClientTimeout( total=10.0 ) ) as resp:
+        async with session.post( url, json=body, timeout=aiohttp.ClientTimeout( total=_PEER_LOGIN_TIMEOUT_SECONDS ) ) as resp:
             if resp.status != 200:
                 preview = (await resp.text())[ :200 ]
                 raise HTTPException(
@@ -273,7 +278,7 @@ async def get_peer_queue(
 ) -> PeerQueueResponse:
     _validate_host_and_queue( host, queue_name )
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession( timeout=aiohttp.ClientTimeout( total=_PEER_SESSION_TIMEOUT_SECONDS ) ) as session:
         upstream = await _fetch_queue( session, host, queue_name )
 
     return PeerQueueResponse(
@@ -299,12 +304,13 @@ async def _watcher_loop(
     sender_id        : str
 ):
     """
-    Background task: poll the peer queue, fire notification on drain, exit.
-    Updates _watcher_state[user_id] on every iteration for /status to read.
+    Poll the peer queue as a background task, fire a notification on drain, then exit.
+
+    It updates _watcher_state[user_id] on every iteration for /status to read.
     """
     state = _watcher_state[ user_id ]
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession( timeout=aiohttp.ClientTimeout( total=_PEER_SESSION_TIMEOUT_SECONDS ) ) as session:
             while True:
                 try:
                     run_body  = await _fetch_queue( session, host, "run"  )

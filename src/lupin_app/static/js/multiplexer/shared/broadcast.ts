@@ -25,6 +25,11 @@ import type { LupinEvent, LupinEventType } from "./types";
 //   2. Confirm cross-tab synchronization is semantically correct.
 //   3. Add the type to this Set with a comment explaining why.
 //   4. Update broadcast.test.ts with a loop-prevention test for the new type.
+/**
+ * The event types that are copied to other tabs.
+ *
+ * The set is fixed in code and is not a setting. Every type in it is low-frequency, one event a second or less.
+ */
 export const BROADCAST_WHITELIST: ReadonlySet<LupinEventType> = new Set<LupinEventType>([
   "auth_state_change",
   "notification_received",
@@ -39,17 +44,28 @@ const CHANNEL_NAME     = "lupin";
 // Minimal BroadcastChannel-compatible shape for testing without messing with
 // the real `BroadcastChannel` global (Node has it but tests benefit from a
 // deterministic local mock).
+/** The part of `BroadcastChannel` the wrapper uses, so a test can pass a local stand-in. */
 export interface BroadcastChannelLike {
   postMessage(data: unknown): void;
   close(): void;
   onmessage: ((evt: MessageEvent<unknown>) => void) | null;
 }
 
+/**
+ * Starts and stops copying whitelisted bus events to other tabs of the same origin.
+ *
+ * `start` can be called again safely. An event that came from another tab is not sent on again.
+ */
 export interface BroadcastWrapper {
   start(): void;       // begin replication; idempotent
   stop(): void;
 }
 
+/**
+ * What the wrapper is built from.
+ *
+ * It needs the bus. The channel factory and the whitelist can be replaced in tests.
+ */
 export interface BroadcastWrapperOptions {
   bus              : EventBus;
   // Test injection. Production uses the global `BroadcastChannel`.
@@ -58,6 +74,9 @@ export interface BroadcastWrapperOptions {
   whitelist?       : ReadonlySet<LupinEventType>;
 }
 
+/**
+ * Copies whitelisted bus events to other tabs and replays incoming ones locally.
+ */
 class BroadcastWrapperImpl implements BroadcastWrapper {
   private readonly bus       : EventBus;
   private readonly whitelist : ReadonlySet<LupinEventType>;
@@ -66,12 +85,18 @@ class BroadcastWrapperImpl implements BroadcastWrapper {
   private unsubs  : Array<() => void> = [];
   private started = false;
 
+  /**
+   * Keeps the bus, whitelist and channel factory, with defaults for the last two.
+   */
   constructor(opts: BroadcastWrapperOptions) {
     this.bus            = opts.bus;
     this.whitelist      = opts.whitelist ?? BROADCAST_WHITELIST;
     this.channelFactory = opts.channelFactory ?? defaultChannelFactory;
   }
 
+  /**
+   * Opens the channel, replays incoming messages and forwards whitelisted bus events.
+   */
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -88,6 +113,11 @@ class BroadcastWrapperImpl implements BroadcastWrapper {
     }
   }
 
+  /**
+   * Unsubscribes from the bus and closes the channel.
+   *
+   * Does nothing if not started.
+   */
   stop(): void {
     /* c8 ignore next */ // defensive: idempotency guard — calling stop() before start() or twice is a no-op; tests cover the started-then-stop path but not the never-started branch.
     if (!this.started) return;
@@ -125,6 +155,9 @@ class BroadcastWrapperImpl implements BroadcastWrapper {
   }
 }
 
+/**
+ * Says whether a value has the shape of a bus event.
+ */
 /* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + multi-clause type-guard predicate. Each predicate clause registers as a branch; the type-guard is exercised end-to-end (tests pass both valid and invalid LupinEvent shapes) but each individual short-circuit doesn't get its own dedicated test.
 function isLupinEvent(v: unknown): v is LupinEvent<unknown> {
   if (typeof v !== "object" || v === null) return false;
@@ -138,11 +171,19 @@ function isLupinEvent(v: unknown): v is LupinEvent<unknown> {
 }
 /* c8 ignore stop */
 
+/**
+ * Creates a browser broadcast channel with the given name.
+ */
 function defaultChannelFactory(name: string): BroadcastChannelLike {
   // Browser + Node 18+ both expose `BroadcastChannel` as a global.
   return new globalThis.BroadcastChannel(name) as unknown as BroadcastChannelLike;
 }
 
+/**
+ * Build the cross-tab wrapper over a bus.
+ *
+ * Nothing production starts it, because the app is single-tab by policy; the module is kept in case that changes.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on factory function declaration line.
 export function createBroadcastWrapper(
   opts: BroadcastWrapperOptions,

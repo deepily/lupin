@@ -292,6 +292,16 @@ class TestDirectRetry( unittest.TestCase ):
              patch( "builtins.print" ):
             self.assertIsNone( wd._direct_retry( _job(), 0, FailureCategory.INFRA_TIMEOUT ) )
 
+    def test_missing_ask_flow_is_reported_and_nothing_is_retried( self ):
+        wd = DeadQueueWatchdog( _cfg(), Mock(), debug=False, ask_flow=None )
+        with patch( "cosa.rest.job_persistence.get_job_by_id_hash",
+                    return_value={ "question_text": "q?" } ), \
+             patch( "builtins.print" ) as printed:
+            self.assertIsNone( wd._direct_retry( _job(), 0, FailureCategory.INFRA_TIMEOUT ) )
+        reported = " ".join( str( c.args[ 0 ] ) for c in printed.call_args_list )
+        self.assertIn( "has no ask_flow", reported )
+        self.assertEqual( wd._attempts, {} )
+
 
 class TestSubmitBfe( unittest.TestCase ):
     def _wd( self, debug=False ):

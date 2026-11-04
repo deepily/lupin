@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
 
 from cosa.rest.db.repositories.refresh_token_repository import RefreshTokenRepository
+from cosa.rest.postgres_models import RefreshToken
 
 
 def _repo():
@@ -214,6 +215,23 @@ class TestRefreshTokenRepository( unittest.TestCase ):
         repo, _, q = _repo()
         q.first.return_value = None
         self.assertFalse( repo.delete( uuid.uuid4() ) )
+
+
+    def test_cleanup_expired_filters_on_expiry_or_revoked_and_deletes_without_syncing( self ):
+        """
+        Pins the delete criterion: rows past expires_at, or flagged revoked, nothing else.
+
+        The mocked query cannot check the filter's contents, so the compiled criterion is read.
+        """
+        repo, session, q = _repo()
+        q.delete.return_value = 2
+        repo.cleanup_expired()
+        session.query.assert_called_once_with( RefreshToken )
+        criterion = str( q.filter.call_args[ 0 ][ 0 ] )
+        self.assertIn( "refresh_tokens.expires_at <", criterion )
+        self.assertIn( " OR ", criterion )
+        self.assertIn( "refresh_tokens.revoked = true", criterion )
+        q.delete.assert_called_once_with( synchronize_session=False )
 
 
 if __name__ == "__main__":

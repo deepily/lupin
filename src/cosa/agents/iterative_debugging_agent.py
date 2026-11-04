@@ -13,8 +13,8 @@ class IterativeDebuggingAgent( AgentBase ):
     """
     Agent that iteratively debugs code using multiple LLMs until a solution is found.
     
-    This agent attempts to fix code errors by using different language models in sequence,
-    testing the fixes until the code runs successfully or all models have been tried.
+    It tries different language models in sequence and tests each fix. It stops when
+    the code runs successfully or every model has been tried.
     """
     
     def __init__( self, error_message: str, path_to_code: str, example: Optional[str]=None, returns: Optional[str]=None, minimalist: bool=True, debug: bool=False, verbose: bool=False ) -> None:
@@ -50,6 +50,7 @@ class IterativeDebuggingAgent( AgentBase ):
         self.minimalist             = minimalist
         self.prompt                 = self._get_prompt()
         self.prompt_response_dict   = { }
+        self.llm_model_keys         = self.config_mgr.get( "llm model keys for debugger", return_type="json" )
         self.available_llms         = self._load_available_llm_specs()
         self.successfully_debugged  = False
         if self.minimalist:
@@ -123,12 +124,11 @@ class IterativeDebuggingAgent( AgentBase ):
         Run debugging prompts through available LLMs until success.
         
         Requires:
-            - self.available_llms has at least one LLM spec
-            - Each LLM spec has required 'model' field
+            - self.llm_model_keys has at least one model key the LLM client factory can resolve
             - self.prompt is set
             
         Ensures:
-            - Attempts debugging with each LLM in sequence
+            - Attempts debugging with each LLM in sequence, setting self.model_name to that pass's key
             - Updates self.successfully_debugged on success
             - Updates self.code only if debugging succeeds
             - Returns final code_response_dict
@@ -144,9 +144,9 @@ class IterativeDebuggingAgent( AgentBase ):
         idx = 1
         self.successfully_debugged = False
         
-        for llm in self.available_llms:
+        for llm_key in self.llm_model_keys:
             
-            run_descriptor = f"Run {idx} of {len( self.available_llms )}"
+            run_descriptor = f"Run {idx} of {len( self.llm_model_keys )}"
             
             if self.successfully_debugged:
                 break
@@ -158,9 +158,11 @@ class IterativeDebuggingAgent( AgentBase ):
             # max_new_tokens = llm[ "max_new_tokens" ] if "max_new_tokens" in llm else 1024
             # stop_sequences = llm[ "stop_sequences" ] if "stop_sequences" in llm else []
             
-            du.print_banner( f"{run_descriptor}: Executing debugging prompt using model [{llm}]...", end="\n" )
+            du.print_banner( f"{run_descriptor}: Executing debugging prompt using model [{llm_key}]...", end="\n" )
             
             # prompt_response_dict = self.run_prompt( model_name=model_name, temperature=temperature, top_p=top_p, top_k=top_k, max_new_tokens=max_new_tokens, stop_sequences=stop_sequences )
+            # AgentBase.run_prompt builds its client from self.model_name, so each pass must set it
+            self.model_name      = llm_key
             prompt_response_dict = self.run_prompt()
             
             # TODO: debug and reinstate if/when needed in the future
@@ -194,7 +196,7 @@ class IterativeDebuggingAgent( AgentBase ):
                     print( f"Successfully debugged? 😢¡Nooooooo! 😢 ", end="" )
                     
                     # test for the last llm in this list
-                    if llm == self.available_llms[ -1 ]:
+                    if idx == len( self.llm_model_keys ):
                         print( "No more LLMs to try. Exiting LLM loop..." )
                     else:
                         print( "Moving on to the next LLM..." )
@@ -331,26 +333,7 @@ class IterativeDebuggingAgent( AgentBase ):
             - KeyError if required fields missing
         """
         
-        print( f"Restoring from {file_path}..." )
-        
-        # Read the file and parse JSON
-        with open( file_path, 'r' ) as file:
-            data = json.load( file )
-        
-        # Create a new object instance with the parsed data
-        restored_agent = IterativeDebuggingAgent(
-            data[ "error_message" ], data[ "path_to_code" ],
-            debug=data[ "debug" ], verbose=data[ "verbose" ]
-        )
-        # Set the remaining attributes from the parsed data, skipping the ones that we've already set
-        keys_to_skip = [ "error_message", "path_to_code", "debug", "verbose" ]
-        for k, v in data.items():
-            if k not in keys_to_skip:
-                setattr( restored_agent, k, v )
-            else:
-                print( f"Skipping key [{k}], it's already been set" )
-        
-        return restored_agent
+        return AgentBase._restore_from_file( IterativeDebuggingAgent, file_path, ( "error_message", "path_to_code" ), ( "debug", "verbose" ) )
     
     def is_code_runnable( self ) -> bool:
         """

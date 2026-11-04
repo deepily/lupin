@@ -1,25 +1,12 @@
 """
-Orphan-session-bridge reaper (bug ee59d5ed, Change 2).
+Reap orphaned session bridges directly, without any spawn manifest.
 
-The lineage-independent half of the orphaned-session focus-bar fix. `dismiss_sessions`
-can only reach sessions in a live manager's own spawn manifest, so when a spawner/manager
-dies, its children's bridges are unreachable by any persona's dismiss — they linger, and
-the operator's focus bar keeps rendering the dead sessions as ALIVE.
-
-This module sweeps `~/.claude/sessions/cc-*.json` bridges directly (no manifest), and for
-any bridge that is CONFIRMED dead — host PID confirmed-dead AND its tmux session gone AND
-dead across `debounce_threshold` consecutive polls — emits the SAME reap signals a normal
-`dismiss_sessions` emits (reusing `session_spawner`'s emitters): the persisted
-`session_reaped` marker (which Change 1 turns into a durable, history-safe roster
-eviction), the `kind="reaped"` tombstone (arbiter-snapshot eviction), a bridge unlink, and
-a heartbeat-hold clear. It is designed to run once per heartbeat-arbiter poll (host-side,
-where host PIDs are trustworthy).
-
-Design: src/rnd/v0.1.9/2026.07.15-orphan-session-bridge-reap-survival.md
-
-Every IO / decision / emit seam is injected with a real production default, so the sweep
-runs with zero setup in production AND unit-tests to 100% with pure in-memory fakes — the
-same pattern as `worktree_reaper.reconcile_worktrees`.
+`dismiss_sessions` reaches only sessions in a live manager's own spawn manifest. When a manager dies, its children's bridges linger and the focus bar keeps showing them as alive.
+This sweeps `~/.claude/sessions/cc-*.json`. It reaps a bridge only when every host PID is confirmed dead, its tmux session is gone, and it stayed dead for `debounce_threshold` polls.
+It emits the same signals as `dismiss_sessions`, reusing `session_spawner`'s emitters. These are the persisted `session_reaped` marker,
+the `kind="reaped"` tombstone, a bridge unlink and a heartbeat-hold clear. The marker becomes a durable roster eviction that keeps history. The tombstone evicts the arbiter snapshot.
+It runs once per heartbeat-arbiter poll on the host, where host PIDs are trustworthy.
+Every IO, decision and emit seam is injected with a real production default. The sweep needs no setup in production and unit-tests with in-memory fakes, like `worktree_reaper.reconcile_worktrees`.
 """
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -55,9 +42,9 @@ def _default_tmux_alive( tmux_session, runner=None ):
     """
     True iff `tmux has-session -t <name>` reports the session exists.
 
-    Mirrors session_spawner.list_spawned_sessions' liveness probe. Bias-to-ALIVE:
-    any probe failure (tmux missing, error) → treated as ALIVE, so a flaky probe
-    can NEVER cause a reap. Reaping requires a POSITIVE "gone" (returncode != 0
+    Mirrors the liveness probe of session_spawner.list_spawned_sessions. The bias is toward alive:
+    any probe failure (tmux missing, error) counts as alive, so a flaky probe
+    can never cause a reap. A reap needs a positive "gone" (returncode != 0
     with a working tmux).
     """
     if not tmux_session:
@@ -105,23 +92,23 @@ def reconcile_orphan_bridges(
     debug                    : bool = False,
 ) -> Dict[ str, List ]:
     """
-    Sweep orphaned session bridges once and reap the CONFIRMED-dead ones.
+    Sweep orphaned session bridges once and reap the confirmed-dead ones.
 
     Requires:
-        - dead_polls_state is a caller-owned dict that PERSISTS across polls
+        - dead_polls_state is a caller-owned dict that persists across polls
           (the debounce counter; the arbiter/factory keeps one instance alive)
         - debounce_threshold >= 1
 
     Ensures:
         - No-ops (returns empty result, state untouched) when host PIDs are not
-          trustworthy (inside a container — _can_trust_host_pids False)
-        - A bridge is reaped ONLY when ALL hold: every host PID it carries is
-          CONFIRMED dead (bias-to-alive), its tmux session is gone, AND it has
+          trustworthy (inside a container, where _can_trust_host_pids is False)
+        - A bridge is reaped only when all of these hold: every host PID it carries
+          is confirmed dead (bias toward alive), its tmux session is gone, and it has
           been dead across >= debounce_threshold consecutive polls
-        - A bridge with any live/ambiguous PID or a live/unprobeable tmux resets
+        - A bridge with any live or ambiguous PID or a live or unprobeable tmux resets
           its debounce counter (re-arm) and is never reaped
-        - On reap: emit session_reaped + tombstone, unlink the bridge, clear the
-          hold — each fail-safe (a raising seam never aborts the sweep)
+        - On reap: emit session_reaped and the tombstone, unlink the bridge, clear the
+          hold; each step is fail-safe (a raising seam never aborts the sweep)
         - Idempotent: an already-reaped session is marked and never re-emitted;
           stale counter keys (bridge gone) are pruned so the state stays bounded
         - Never raises (a bad bridge lands in `errors`, the sweep continues)

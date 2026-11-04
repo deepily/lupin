@@ -58,6 +58,9 @@ def _init_repo_with_a_venv( path, with_script=True ):
         dest = os.path.join( script_dir, "link-worktree-venv.sh" )
         shutil.copy2( _REAL_SCRIPT, dest )
         os.chmod( dest, 0o755 )
+        # The script sources this library from the folder beside it.
+        os.makedirs( os.path.join( script_dir, "lib" ) )
+        shutil.copy2( os.path.join( os.path.dirname( _REAL_SCRIPT ), "lib", "worktree-link-lib.sh" ), os.path.join( script_dir, "lib", "worktree-link-lib.sh" ) )
 
     with open( os.path.join( path, "README.md" ), "w" ) as f:
         f.write( "# test\n" )

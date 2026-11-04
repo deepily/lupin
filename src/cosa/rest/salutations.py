@@ -1,10 +1,9 @@
 """Salutation stripping, shared by the v1 queue and the v2 flow.
 
-This lived as a method + a hardcoded list on `TodoFifoQueue`. The v2 flow needs
-the same answer to build the agent the queue builds (step 4, agent-construction
-parity): `question_gist` is computed from the SALUTATION-STRIPPED question, and
-`last_question_asked` carries the salutation. Two copies of a word list is how
-two surfaces start disagreeing about what a greeting is, so there is one.
+The v2 flow needs the same answer as the queue to build the same agent.
+`question_gist` is computed from the salutation-stripped question, and
+`last_question_asked` carries the salutation. Two copies of the word list
+would let the two surfaces disagree about what a greeting is, so there is one.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ def parse_salutations( transcription: str, salutations=None ) -> tuple[ str, str
 
     Ensures:
         - returns ( salutations, remaining_text ), both possibly empty strings.
-        - only a LEADING run is taken: the first word that is not a salutation
+        - only a leading run is taken: the first word that is not a salutation
           ends the run, so "hey there is my package here" keeps "is my package
           here" intact.
         - trailing punctuation is ignored when matching, and the original words

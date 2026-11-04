@@ -32,6 +32,12 @@ if _src_path not in sys.path:
 import cosa.rest.notification_fifo_queue as nfq
 
 
+@pytest.fixture( autouse=True )
+def _configured_zone( monkeypatch ):
+    """NotificationItem needs a configured zone; these tests are not about it."""
+    monkeypatch.setattr( "cosa.rest.notification_fifo_queue.get_app_timezone", lambda config_mgr: "America/New_York" )
+
+
 def _queue( monkeypatch, fcm_wake_service=None, debug=False, verbose=False ):
     """NotificationFifoQueue with io_tbl stubbed and NO WebSocket (emission off)."""
     monkeypatch.setattr( nfq, "InputAndOutputTable", lambda **k: types.SimpleNamespace() )

@@ -4,42 +4,37 @@ COSA SWE Team Agent Package.
 A multi-agent engineering team powered by Claude Agent SDK,
 integrated with Lupin's notification system and CJ Flow queue.
 
-Phase 1: Foundation
+Foundation modules:
 - config.py: SweTeamConfig dataclass
 - state.py: Pydantic state schemas, OrchestratorState/JobSubState enums
 - safety_limits.py: SAFETY_LIMITS dict, SafetyGuard, DANGEROUS_COMMANDS
-- agent_definitions.py: 6 role definitions (lead + coder active)
+- agent_definitions.py: 6 role definitions (lead, coder, tester active; the other three inactive)
 - orchestrator.py: SweTeamOrchestrator (dry-run + live delegation)
 - cosa_interface.py: Role-aware async notification wrappers
 - voice_io.py: Voice-first I/O layer (thin wrapper)
 - mock_clients.py: MockAgentSDKSession for dry-run mode
 - __main__.py: CLI entry point
 
-Phase 2: Lead + Coder delegation loop
+Lead + coder delegation loop:
 - hooks.py: SDK hook functions (notification, pre-tool, post-tool)
 - state_files.py: FeatureList + ProgressLog for cross-session persistence
 
-Phase 3 (Current): Tester verification loop
+Tester verification loop (current):
 - test_runner.py: Orchestrator-level pytest validation helper
-- VerificationResult model in state.py
-- Coder-tester retry cycle in orchestrator.py
+- VerificationResult model (state.py) and the coder-tester retry cycle (orchestrator.py)
 
-Phase 4 (Planned): Trust-aware decision proxy
-Phase 5 (Planned): Full team + CJ Flow integration
+Decision proxy (current): proxy/ holds EngineeringStrategy, built by the orchestrator unless trust mode is "disabled".
+Queue job (current): job.py has SweTeamJob, which runs the orchestrator as a CJ Flow agentic job.
 
 Usage:
     # CLI (dry-run)
     python -m cosa.agents.swe_team "Implement health check endpoint" --dry-run
 
-    # CLI (live - Phase 3 delegation + verification)
+    # CLI (live - delegation + verification)
     python -m cosa.agents.swe_team "Add JWT auth"
 
     # Programmatic
-    from cosa.agents.swe_team import (
-        SweTeamOrchestrator,
-        SweTeamConfig,
-        OrchestratorState,
-    )
+    from cosa.agents.swe_team import SweTeamOrchestrator, SweTeamConfig, OrchestratorState
 
     config = SweTeamConfig( dry_run=True )
     orch = SweTeamOrchestrator( "Implement feature X", config=config )

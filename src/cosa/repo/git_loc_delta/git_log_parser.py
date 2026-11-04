@@ -39,7 +39,8 @@ class GitLogParser:
     Walks `git log --numstat` output and yields per-file LoC changes.
 
     Binary files (numstat rows starting with `-\t-\t`) are skipped silently.
-    Merge commits are excluded by default (controlled by `include_merges`).
+    Merge commits are excluded by default. With `include_merges` a merge counts what it brought in
+    over its first parent, so lines already counted on the merged branch are counted again.
     """
 
     def __init__(
@@ -71,8 +72,8 @@ class GitLogParser:
         Ensures:
             - Parser ready to call iter_changes()
             - Date range and rev_range can coexist; both are passed to git log
-            - all_branches=True walks the union of ALL local branch refs
-              (--branches), de-duplicated by git's DAG walk — each commit is
+            - all_branches=True walks the union of all local branch refs
+              (--branches), de-duplicated by git's DAG walk. Each commit is
               emitted exactly once even when reachable from several branches
         """
         self.repo_path      = repo_path
@@ -93,16 +94,17 @@ class GitLogParser:
         Ensures:
             - Returns a list of command tokens ready for subprocess.run
             - Always uses --date=short for stable ISO date parsing
-            - Custom --pretty marker COMMIT|<sha>|<cd>|<aE>| distinguishes commit rows
+            - Custom --pretty marker `COMMIT|<sha>|<cd>|<aE>` distinguishes commit rows
             - all_branches appends `--branches` (union of local branch refs)
+            - include_merges appends `--diff-merges=first-parent`, which older git than 2.31 rejects with GitCommandError; without include_merges, `--no-merges` is appended instead
 
-        Date basis (load-bearing — 2026-07-13, bug 37a8beeb):
-            The date field is `%cd` (COMMITTER date), NOT `%ad` (author date),
-            because `git log --since/--until` filters on the COMMITTER date. Using
+        Date basis:
+            The date field is `%cd` (committer date), not `%ad` (author date),
+            because `git log --since/--until` filters on the committer date. Using
             author date to label a row that a committer-date filter selected lets a
-            rebased or cherry-picked commit land in a day-bucket outside the very
-            window that selected it — and would make the coverage guard false-warn.
-            The filter basis and the bucket basis MUST be the same field.
+            rebased or cherry-picked commit land in a day bucket outside the very
+            window that selected it, and would make the coverage guard false-warn.
+            The filter basis and the bucket basis must be the same field.
         """
         cmd = [
             "git", "log",
@@ -110,7 +112,9 @@ class GitLogParser:
             "--date=short",
             "--pretty=format:COMMIT|%H|%cd|%aE",
         ]
-        if not self.include_merges:
+        if self.include_merges:
+            cmd.append( "--diff-merges=first-parent" )     # git log --numstat prints no rows for a merge without this
+        else:
             cmd.append( "--no-merges" )
         # Bare ISO dates are pinned to day boundaries here, NOT at the caller —
         # coverage_guard mirrors these flags and must normalize identically or
@@ -131,7 +135,7 @@ class GitLogParser:
         Ensures:
             - Returns stdout on success
             - Raises GitCommandError on any failure (timeout, missing git,
-              non-zero return code, generic OSError)
+              non-zero return code, any other exception raised while running git)
         """
         command = self._build_command()
         if self.debug:

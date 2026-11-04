@@ -1,34 +1,32 @@
 """
-Store-backed DM inbox reconcile — bug 59f355e0, Option A (Mr. Radio ruling
-2026-07-02). The durable notifications store becomes the delivery guarantee it
-already is; the lossy voice-buffer side-channel is left UNTOUCHED (its losses
-are simply made harmless).
+Store-backed DM inbox reconcile: the durable store is the delivery guarantee.
 
-Root cause (see src/rnd/v0.1.9/2026.07.02-dm-loss-surfacing-leg-triage.md): a
-peer DM (direction=ai_to_ai) that arrives while the recipient is mid-turn is
-written to the JSONL voice buffer and surfaced only if a LATER hook drains it in
-the same session. If the session ends / parks first, or the drain lands on the
-low-salience PostToolUse path, the DM is lost (84 orphaned DMs across 46 stale
-buffer files at triage time).
+The lossy voice-buffer side-channel is left untouched, and its losses are made harmless.
 
-This module adds an at-least-once surfacing path: at UserPromptSubmit
-(start-of-turn = fresh attention) it reconciles THIS session's DM inbox against a
-durable per-session high-water mark and surfaces any un-surfaced DMs as
-`additionalContext` — with NO interrupt/deny (the PreToolUse high-salience deny
-keeps serving mid-turn immediacy; this is the guaranteed-delivery backstop).
+Root cause: a peer DM (direction=ai_to_ai) that arrives while the recipient is
+mid-turn is written to the JSONL voice buffer. It is surfaced only if a later
+hook drains it in the same session. If the session ends or parks first, or the
+drain lands on the low-salience PostToolUse path, the DM is lost. The triage
+found 84 orphaned DMs across 46 stale buffer files.
 
-Design constraints honored (ruling):
-    1. Buffer/inject/PreToolUse-deny paths UNTOUCHED — this is purely additive.
-    2. High-water mark durable per-session (lives in the heartbeat-hold runtime-
-       state dir → survives /clear); dedup by message_id.
-    3. Surfaced at UserPromptSubmit as additionalContext, never interrupt/deny.
-    4. The 84 stale orphans are NOT replayed here (inventory + a separate dry-run
-       janitor sweep live in the triage doc).
+This module adds an at-least-once surfacing path. At UserPromptSubmit
+(start of turn, when attention is fresh) it reconciles this session's DM inbox
+against a durable per-session high-water mark. It surfaces any un-surfaced DMs
+as `additionalContext`, with no interrupt or deny. The PreToolUse high-salience
+deny keeps serving mid-turn immediacy; this is the guaranteed-delivery backstop.
 
-Auth reuses the hook-writer X-API-Key lane (task_store_client.read_api_key /
-_request) — empirically verified to resolve to the human owner's user_id, so
-/api/dm/list returns the owner's full (all-sessions) inbox, which is then
-job_id-filtered to this session. NEVER raises on the turn-start hot path.
+Design constraints:
+    1. The buffer, inject and PreToolUse-deny paths are untouched. This is purely additive.
+    2. The high-water mark is durable per session. It lives in the heartbeat-hold
+       runtime-state dir, so it survives /clear. Dedup is by message_id.
+    3. DMs are surfaced at UserPromptSubmit as additionalContext, never as interrupt or deny.
+    4. The 84 stale orphans are not replayed here. Their inventory and a separate
+       dry-run janitor sweep live in the DM-loss triage notes.
+
+Auth reuses the hook-writer X-API-Key lane (task_store_client.read_api_key and
+_request). It resolves to the human owner's user_id, so /api/dm/list returns the
+owner's full all-sessions inbox, which is then filtered by job_id to this
+session. It never raises on the turn-start hot path.
 """
 
 import json
@@ -56,10 +54,10 @@ def _max_iso( a, b ):
     Return the later of two ISO-8601 timestamp strings (None-safe).
 
     All /api/dm/list created_at values carry the same UTC offset (server
-    `.isoformat()`), so lexicographic comparison IS chronological.
+    `.isoformat()`), so lexicographic comparison is chronological.
 
     Ensures:
-        - None + None → None; one None → the other; else the greater string
+        - None + None gives None; one None gives the other; else the greater string
     """
     if a is None:
         return b
@@ -70,11 +68,10 @@ def _max_iso( a, b ):
 
 def _dedup_tail( seq, cap ):
     """
-    De-duplicate `seq` preserving first-occurrence order, then keep only the last
-    `cap` entries (0 → no cap).
+    De-duplicate `seq` keeping first-occurrence order, then keep only the last `cap` entries.
 
     Ensures:
-        - Order-stable dedup, tail-capped when cap > 0 and len > cap
+        - Order-stable dedup, tail-capped when cap > 0 and len > cap (0 means no cap)
     """
     seen = set()
     out  = []
@@ -92,26 +89,26 @@ def _dedup_tail( seq, cap ):
 
 def reconcile_context( session_hash8, rows, state, extra_surfaced_ids=() ):
     """
-    Pure core: given fetched inbox `rows` + current `state`, return the
-    additionalContext string of un-surfaced DMs for this session and the advanced
-    state. No IO — fully unit-testable.
+    Pure core: build the additionalContext of un-surfaced DMs for this session plus new state.
+
+    Takes the fetched inbox `rows` and the current `state`. It does no IO, so it is fully unit-testable.
 
     Requires:
         - session_hash8 is the 8-char session hash (== job_id on this session's DMs)
         - rows is a list of /api/dm/list serialized DM dicts (job_id, message_id,
           created_at, body, sender_persona, sender_icon, thread_id, ...)
         - state is {"cursor_ts": <iso|None>, "surfaced_ids": [<message_id>...]}
-        - extra_surfaced_ids: message_ids already delivered THIS turn (e.g. the
-          voice-buffer drain) — excluded from surfacing AND recorded so future
-          turns skip them (kills the at-most-one redundant re-surface).
+        - extra_surfaced_ids: message_ids already delivered this turn (e.g. the
+          voice-buffer drain), excluded from surfacing and recorded so future
+          turns skip them (this removes the at-most-one redundant re-surface).
 
     Ensures:
         - Returns ( context_str, new_state )
-        - context contains ONE build_peer_dm_reminder block per fresh, non-blank,
+        - context contains one build_peer_dm_reminder block per fresh, non-blank,
           this-session DM, oldest-first (read order)
-        - Dedup by message_id against state.surfaced_ids ∪ extra_surfaced_ids
-        - cursor_ts advances to the max created_at across ALL of THIS session's
-          fetched rows (seen, not merely surfaced) — never past another session's
+        - Dedup by message_id against state.surfaced_ids and extra_surfaced_ids combined
+        - cursor_ts advances to the max created_at across all of this session's
+          fetched rows (seen, not merely surfaced), never past another session's
           rows, so a quiet session never skips its own not-yet-page-visible DMs
         - surfaced_ids = tail-capped dedup of ( existing + extra + newly surfaced )
         - Never raises
@@ -160,9 +157,9 @@ def _hwm_path( session_id, base_dir=None ):
     """
     Resolve the durable HWM file path for a session.
 
-    Lives in the SAME runtime-state base dir as the heartbeat hold file
-    (heartbeat_hold._resolve_base_dir) so it survives /clear. Keyed by the 8-char
-    session hash (matches the DM job_id).
+    It lives in the same runtime-state base dir as the heartbeat hold file
+    (heartbeat_hold._resolve_base_dir) so it survives /clear.
+    It is keyed by the 8-char session hash, which matches the DM job_id.
     """
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _resolve_base_dir
     suffix = ( session_id or "" )[ :8 ]
@@ -171,11 +168,15 @@ def _hwm_path( session_id, base_dir=None ):
 
 def read_hwm( session_id, base_dir=None ):
     """
-    Read the durable high-water mark; default on any miss/corruption (fail-open).
+    Read the durable high-water mark, returning a default on any miss or corruption.
+
+    A missing file is not seeded: the first reconcile seeds the mark and surfaces
+    nothing, so activation never replays a session's pre-existing inbox.
+    A file that predates the `seeded` key counts as seeded, so its dedup ledger stands.
 
     Ensures:
-        - Returns {"cursor_ts": <str|None>, "surfaced_ids": [<str>...]}
-        - Missing file / bad JSON / non-dict / wrong field types → the empty
+        - Returns {"cursor_ts": <str|None>, "surfaced_ids": [<str>...], "seeded": <bool>}
+        - Missing file / bad JSON / non-dict / wrong field types give the empty
           default (never raises)
     """
     path = _hwm_path( session_id, base_dir=base_dir )
@@ -203,8 +204,9 @@ def read_hwm( session_id, base_dir=None ):
 
 def write_hwm( session_id, state, base_dir=None ):
     """
-    Persist the high-water mark. Best-effort (returns False on OSError, never
-    raises) — a failed persist just means the next turn re-surfaces + retries.
+    Persist the high-water mark, best-effort (returns False on OSError, never raises).
+
+    A failed persist just means the next turn re-surfaces and retries.
     """
     path = _hwm_path( session_id, base_dir=base_dir )
     try:
@@ -224,8 +226,9 @@ def write_hwm( session_id, state, base_dir=None ):
 
 def _load_settings():
     """
-    Resolve api_base_url + timeout, reusing the task-store settings loader (same
-    :7999 host). Fails SAFE to localhost defaults on a malformed settings block.
+    Resolve api_base_url and timeout from the task-store settings loader (same :7999 host).
+
+    On a malformed settings block it falls back to the localhost defaults.
     """
     from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
     try:
@@ -236,16 +239,17 @@ def _load_settings():
 
 def _fetch_inbox( since=None, limit=DEFAULT_LIMIT, timeout=DEFAULT_TIMEOUT_SECONDS ):
     """
-    GET /api/dm/list (X-API-Key) — the owner's peer-DM inbox, newest-first,
-    optionally tailed by `since`. Reuses task_store_client._request's never-raise
-    ( ok, status, body ) triple.
+    GET /api/dm/list (X-API-Key): the owner's peer-DM inbox, newest-first.
+
+    The result can be tailed by `since`. It reuses the never-raise ( ok, status, body )
+    triple of task_store_client._request.
 
     Ensures:
         - Returns ( ok, rows, page_full )
         - ok is False (rows=[], page_full=False) on any transport/HTTP failure or
-          a non-dict body / non-list messages (fail-safe — caller surfaces nothing
-          and does NOT advance the HWM)
-        - page_full = len(rows) >= limit (a full page ⇒ possible truncation)
+          a non-dict body / non-list messages (fail-safe: caller surfaces nothing
+          and does not advance the HWM)
+        - page_full = len(rows) >= limit (a full page means possible truncation)
         - Never raises
     """
     from lupin_cli.claude_code.hooks.lib import task_store_client as tc
@@ -268,9 +272,10 @@ def _fetch_inbox( since=None, limit=DEFAULT_LIMIT, timeout=DEFAULT_TIMEOUT_SECON
 
 def _log_capped( session_id, count, log_dir=None ):
     """
-    Best-effort visibility line when a fetch page hit the limit (possible
-    truncation of a quiet session's older DMs under fleet-storm traffic — the
-    documented known-bound). Never raises.
+    Write a best-effort log line when a fetch page hit the limit. Never raises.
+
+    A full page can truncate a quiet session's older DMs under fleet-storm
+    traffic, which is the known bound.
     """
     try:
         base = Path( log_dir ) if log_dir is not None else sessions_dir()   # row 8ccc20ab: the one seam
@@ -285,22 +290,27 @@ def _log_capped( session_id, count, log_dir=None ):
 
 def surface_dm_inbox( session_id, extra_surfaced_ids=(), fetch_fn=None, base_dir=None ):
     """
-    Reconcile this session's DM inbox against the durable HWM and return the
-    additionalContext of any un-surfaced DMs. The single entrypoint called from
-    user_prompt_submit.py.
+    Reconcile this session's DM inbox against the durable HWM; return the additionalContext.
+
+    This is the single entrypoint called from user_prompt_submit.py.
 
     Requires:
-        - session_id is the stable session id (or "" — returns "")
+        - session_id is the stable session id (or "", which returns "")
         - extra_surfaced_ids: message_ids already delivered this turn (voice-buffer
-          drain) — excluded + recorded
+          drain), excluded and recorded
         - fetch_fn(since, limit) -> ( ok, rows, page_full ); defaults to _fetch_inbox
           (dependency-injected in tests)
 
     Ensures:
         - Returns the additionalContext string ("" when nothing fresh)
-        - On a not-ok fetch: returns "" and does NOT advance the HWM (retry next turn)
+        - On a not-ok fetch: returns "" and does not advance the HWM (retry next turn)
         - Persists the advanced HWM on a successful reconcile
         - Never raises (fail-open on the turn-start hot path)
+
+    Notes:
+        - The first reconcile for a session (no HWM yet) seeds the mark. It records
+          the current inbox as seen and surfaces nothing, so activation never
+          replays a live session's backlog.
     """
     try:
         if not session_id:

@@ -1,16 +1,16 @@
 """
-pytest plugin: record which THREAD executed each first-party line.
+pytest plugin that records which thread executed each first-party line.
 
-Row `87ae7234`. Used by `detect_thread_credited_coverage.py`. `threading.settrace`
-installs on every thread started after it is set; `sys.settrace` covers the thread
-pytest runs tests on. Third-party frames are rejected on one substring compare
-before anything is recorded, because the tracer runs on every line of the process.
+Used by `detect_thread_credited_coverage.py`. `threading.settrace` installs on every thread
+started after it is set; `sys.settrace` covers the thread pytest runs tests on. Third-party
+frames are rejected on one substring compare before anything is recorded, because the
+tracer runs on every line of the process.
 
-Output (LUPIN_THREAD_ATTRIB_OUT, default /tmp/thread-attrib.json):
+Output (`LUPIN_THREAD_ATTRIB_OUT`, default /tmp/thread-attrib.json):
     { "<thread name>": { "<file>": [line, ...] } }
 
-⚠️ settrace is SLOW — roughly 1.5-2x on the scopes measured so far. This is a
-periodic check, not something to put in front of every run.
+Tracing is slow, roughly 1.5 to 2 times on the scopes measured so far. Use this as a
+periodic check, not in front of every run.
 """
 import atexit
 import collections
@@ -57,8 +57,7 @@ def _dump():
     Ensures:
         - writes at most once, whether called from pytest_unconfigure or atexit
         - atexit is the fallback for a run that ends without unconfigure; it does
-          NOT survive os._exit, which is the point made in the row about the
-          module's hard-exit path
+          not survive os._exit, so a hard exit loses the map
     """
     global _done
     if _done: return

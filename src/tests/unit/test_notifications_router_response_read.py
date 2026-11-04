@@ -89,6 +89,9 @@ def client( monkeypatch ):
         def get( self, _key, default=None, **_kw ):
             return default
 
+        def get_required( self, _key, **_kw ):
+            return "America/New_York"
+
     monkeypatch.setattr( main_module, "config_mgr", _Cfg() )
     monkeypatch.setattr( main_module, "app_debug", False, raising=False )
 

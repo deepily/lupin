@@ -1,5 +1,5 @@
 """
-Phase 3 (apply fixes) bundle-prompt builder for the TFE-to-CC engine variant.
+Apply-fixes bundle-prompt builder for the TFE-to-CC engine variant.
 
 Builds a coordinator prompt for Claude Code that:
 - Uses TodoWrite to plan N parallel fix attempts
@@ -7,7 +7,7 @@ Builds a coordinator prompt for Claude Code that:
 - Collects subagent results
 - Emits a single structured `tfe-result` fenced JSON block at end-of-run
 
-Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md
+Design: src/docs/decisions/2026.04.19-tfe-to-cc-parallel-claude-code-engine.md
 Smoke:  src/rnd/v0.1.6/2026.04.10-test-fix-expediter/21-tfe-to-cc-phase3-live-test.md (execution log)
 """
 
@@ -25,7 +25,7 @@ def build_fix_bundle_prompt(
     allow_mcp_escalation : bool = True,
 ) -> str:
     """
-    Build the Phase 3 coordinator prompt for Claude Code.
+    Build the apply-fixes coordinator prompt for Claude Code.
 
     Requires:
         - selected_fixes : non-empty list of dicts, each with:

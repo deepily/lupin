@@ -55,12 +55,30 @@ resource "google_cloud_run_v2_service" "lupin_model_server" {
   # create, then must NOT revert the scheduler's runtime value on later applies
   # — otherwise an off-hours apply would re-warm the L4 until the next 11pm cron
   # (a real overnight cost leak). ignore_changes hands the field to the scheduler.
+  #
+  # client / client_version are stamped by whichever tool last deployed (gcloud or
+  # the console); they carry no setting, so they must not show as drift.
   lifecycle {
-    ignore_changes = [template[0].scaling[0].min_instance_count]
+    ignore_changes = [
+      template[0].scaling[0].min_instance_count,
+      client,
+      client_version,
+    ]
+  }
+
+  # Service-level scaling. Omitted (null mode) leaves Cloud Run's automatic scaling;
+  # MANUAL pins the instance count at manual_instance_count (the live service runs
+  # MANUAL / 1, set from the console and ruled to keep by Rick 2026-10-30, row 2f4fd59e).
+  dynamic "scaling" {
+    for_each = var.scaling_mode != "" ? [1] : []
+    content {
+      scaling_mode          = var.scaling_mode
+      manual_instance_count = var.manual_instance_count
+    }
   }
 
   template {
-    # Stateless + single-GPU singleton: scale 0..1 (min is the dial-to-zero knob).
+    # Stateless + single-GPU singleton: scale 0..max (min is the dial-to-zero knob).
     scaling {
       min_instance_count = var.min_instances
       max_instance_count = var.max_instances

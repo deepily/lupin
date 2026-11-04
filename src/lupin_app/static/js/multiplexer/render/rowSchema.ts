@@ -24,17 +24,24 @@
 /** Line 1 is ALWAYS VISIBLE. Lines 2 and 3 live behind the disclosure. */
 import { ownLookup } from "../shared/ownLookup";
 
+/**
+ * The row's fields by line.
+ *
+ * Line one is always visible. Lines two and three show only when the row's disclosure is opened.
+ */
 export const ROW_SCHEMA = {
   line1 : [ "id", "title", "class", "status", "priority" ],
   line2 : [ "blocked", "chase", "accountable", "filer", "project" ],
   line3 : [ "detail", "actions" ],
 } as const;
 
+/** The name of any one row field, taken from `ROW_SCHEMA`. */
 export type RowField =
   | typeof ROW_SCHEMA.line1[ number ]
   | typeof ROW_SCHEMA.line2[ number ]
   | typeof ROW_SCHEMA.line3[ number ];
 
+/** The display label of each row field, such as "Next chase" for `chase`. */
 export const ROW_FIELD_LABELS: Readonly<Record<RowField, string>> = {
   id          : "ID",
   title       : "Title",

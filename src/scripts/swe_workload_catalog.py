@@ -15,8 +15,6 @@ Usage:
 
     for task in WORKLOAD_CATALOG:
         print( task[ "id" ], task[ "category" ], task[ "task" ] )
-
-Session 268: Work Item 2, Step 2.1.
 """
 
 # ---------------------------------------------------------------------------

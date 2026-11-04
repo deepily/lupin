@@ -2,50 +2,42 @@
 """
 Find live cosa-voice MCP processes that are running code older than the tree.
 
-WHY THIS RUNS OUTSIDE THE MCP. The in-process guard (row b5035039, merged 9f760b2a)
-lives inside the process it judges, so a stale process runs a stale guard and sees
-nothing. Only an outside reader can hold the process start time and the module mtimes
-side by side. Prior art, cited rather than re-derived: Sam's instrument recorded on
-row b5035039 (amendment 2026-09-16T00:55:57Z) — /proc start time against the mtimes of
-cosa_voice_mcp.py, self_respin_observer.py and self_respin_core.py; three of eight live
-processes stale at 20:31:57, validated live.
+This runs outside the MCP because the in-process guard lives inside the process it
+judges. A stale process runs a stale guard and sees nothing. Only an outside reader can
+hold the process start time and the module mtimes side by side. Prior art compared /proc
+start time with the mtimes of cosa_voice_mcp.py, self_respin_observer.py and self_respin_core.py.
 
-THE RULE. A process is STALE when it started before any watched module last changed.
-Watched modules are resolved the way that process would import them: the script path
-from its own argv (against its own cwd), the two imported modules from its own
-PYTHONPATH, then the script's tree, then its own LUPIN_ROOT. A module found nowhere is
-reported UNRESOLVED — never counted fresh.
+The rule. A process is stale when it started before any watched module last changed.
+Modules are resolved the way that process would import them. The script path comes from
+its own argv (against its own cwd). The two imported modules come from its own PYTHONPATH,
+then the script's tree, then its own LUPIN_ROOT. A module found nowhere is reported
+unresolved, never counted fresh.
 
-WHAT IT DOES NOT CLAIM.
-    - mtime newer means "the file changed after the process started", not "the process
-      imported the changed code": self_respin_core is imported lazily, so a process that
-      has never called self_respin would load current code on first call. It still
-      flags — the check cannot see sys.modules from outside, and flagging is the safe side.
-    - Boot time comes from now minus /proc/uptime (10ms resolution), NOT /proc/stat
-      btime: btime is truncated to whole seconds, so a start built on it reads up to 1s
-      early, and a live decoy launched 0.2s after its modules were written was falsely
-      flagged STALE on 2026-09-16 21:53 (btime 1789565947 vs uptime-derived 1789565947.22).
-      The residual error is the clock tick (10ms) plus the gap between reading the clock
-      and reading uptime.
-    - A process is recognised by argv shape only: a python interpreter whose SCRIPT (the
-      first argument after its own options) is a path named cosa_voice_mcp.py, or whose
-      `-m` module is lupin_mcp.cosa_voice_mcp. The name appearing as an argument TO some
-      other program (`python -m py_compile …/cosa_voice_mcp.py`) does not count. A
-      launcher that hides the interpreter (a wrapper binary) is not counted either.
+What it does not claim:
+    - A newer mtime means the file changed after the process started, not that the process
+      imported the changed code. self_respin_core is imported lazily, so a process that never
+      called self_respin would load current code on first call. It still flags, since the
+      check cannot see sys.modules from outside and flagging is the safe side.
+    - Boot time is now minus /proc/uptime (10ms resolution), not /proc/stat btime. The btime
+      is truncated to whole seconds, so a start built on it reads up to 1s early. A live decoy
+      launched 0.2s after its modules were written was falsely flagged stale that way. The
+      residual error is a clock tick plus the gap between reading clock and uptime.
+    - A process is recognised by argv shape only: a python interpreter whose script (the
+      first argument after its own options) is a path named cosa_voice_mcp.py, or whose `-m`
+      module is lupin_mcp.cosa_voice_mcp. The name as an argument to another program
+      (`python -m py_compile .../cosa_voice_mcp.py`) does not count, nor does a wrapper
+      binary that hides the interpreter.
 
-REMEDY. A SEAT RESTART — exit claude in that pane and relaunch it. A /clear does NOT
-reload the MCP: the MCP is a child of the pane's claude process and survives the clear.
+Remedy: a seat restart. Exit claude in that pane and relaunch it. A /clear does not reload
+the MCP, a child of the pane's claude process, which survives the clear. Read-only: it reads
+/proc, stats files and asks tmux to list panes, and never signals, kills or restarts anything.
 
-READ-ONLY. It reads /proc, stats files and asks tmux to list panes. It never signals,
-kills or restarts anything.
+Exit codes (the interface a sweep or cron reads):
+    0  every live MCP process measured, none stale. Zero processes is also 0.
+    1  at least one stale process.
+    2  nothing trustworthy produced: /proc unreadable, or some module unresolved.
 
-EXIT CODES (the interface a sweep or cron reads):
-    0  every live MCP process measured and none is stale (zero processes is also 0;
-       the report prints the denominator)
-    1  at least one STALE process
-    2  nothing trustworthy produced: /proc unreadable, or some module UNRESOLVED
-
-USAGE:
+Usage:
     python3 src/scripts/stale_mcp_check.py          # text report
     python3 src/scripts/stale_mcp_check.py --json   # for the observer sweep
 """
@@ -86,8 +78,8 @@ def read_boot_time( proc_root, now ):
     """
     Derive the boot time as now minus <proc_root>/uptime.
 
-    Why not /proc/stat btime: it is truncated to whole seconds, which made a process
-    started just after an edit read as started before it (see module docstring).
+    Why not /proc/stat btime: it is truncated to whole seconds. That made a process started
+    just after an edit read as started before it (see module docstring).
 
     Requires:
         - proc_root names a directory that may or may not exist
@@ -237,8 +229,8 @@ def mcp_launch( argv, cwd ):
         - argv is a list of strings; cwd is a path or None
     Ensures:
         - returns None when argv is not an MCP launch — including a process that only
-          MENTIONS the name inside a longer argument (claude's prompt, `bash -c`), and a
-          python program that merely receives the path as ITS argument
+          mentions the name inside a longer argument (claude's prompt, `bash -c`), and a
+          python program that merely receives the path as its argument
         - interpreter options are skipped; -W, -X and --check-hash-based-pycs consume
           their value
         - returns ( True, script_path ) for the path form, resolved against cwd
@@ -276,7 +268,7 @@ def resolve_modules( script_path, environ ):
         - environ is that process's environment dict
     Ensures:
         - returns ( resolved, unresolved ): resolved is a list of { rel, path }
-        - the script entry is script_path itself when known, UNRESOLVED if it no
+        - the script entry is script_path itself when known, unresolved if it no
           longer exists
         - other entries search, in order: the process PYTHONPATH, the script's own
           `src` tree, the process LUPIN_ROOT/src; first existing file wins
@@ -317,8 +309,8 @@ def census( proc_root="/proc", self_pid=None, pane_lister=None, clk_tck=None, no
           pid, start_epoch, start_ticks, cwd, script, pane_pid, tmux_session, tmux_pane,
           modules (each with mtime), newer_modules, unresolved, stale
         - start_ticks is the integer from /proc/<pid>/stat field 22, exactly as the kernel
-          wrote it, and is the process's IDENTITY across runs: ( pid, start_ticks ) names one
-          process. start_epoch is DERIVED (boot_time + ticks / clk_tck, boot_time = now - uptime,
+          wrote it, and is the process identity across runs: ( pid, start_ticks ) names one
+          process. start_epoch is derived (boot_time + ticks / clk_tck, boot_time = now - uptime,
           two clock reads that never line up) so it drifts a few milliseconds per run and must
           never be used as a key — a sweep keyed on it re-told every process every tick
         - excludes self_pid (default: this process) and all of its ancestors, so the
@@ -403,7 +395,7 @@ def render_text( records ):
         - first line states the denominator: processes, stale, unmeasured
         - each stale process names pid, start time, pane pid, tmux session and pane, cwd,
           and every newer module with its mtime
-        - the SEAT RESTART remedy is printed iff something is stale
+        - the seat restart remedy is printed iff something is stale
     """
     stale = [ r for r in records if r[ "stale" ] ]
     unmet = [ r for r in records if r[ "unresolved" ] ]

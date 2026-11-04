@@ -10,7 +10,9 @@
 // agree until someone renamed one. The legacy notifications client will later open the same
 // URL, and should import nothing but this contract: path, `seat`, `title`.
 
+/** The path of the standalone console page; the seat and title travel in the query string. */
 export const CONSOLE_PAGE_PATH    = "/app/console";
+/** The tab title used when the URL carries no `title`. */
 export const CONSOLE_DEFAULT_TITLE = "Console";
 
 /**
@@ -23,6 +25,11 @@ export const CONSOLE_DEFAULT_TITLE = "Console";
  */
 export const SEAT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * What the console page reads from its URL.
+ *
+ * `seat` is the full session id to watch, or null when none is usable. In that case `error` says why.
+ */
 export interface ConsolePageQuery {
   /** The seat to watch, or null when the query does not name a usable one. */
   seat  : string | null;

@@ -19,7 +19,7 @@ def email_to_system_id( email: str ) -> str:
     """
     Convert email address to collision-resistant system ID.
     
-    This is the SINGLE SOURCE OF TRUTH for email → system ID conversion.
+    This is the single source of truth for email → system ID conversion.
     All Python modules should import and use this function.
     
     Requires:
@@ -81,17 +81,9 @@ def email_to_user_uuid( email: str ) -> str:
     """
     Convert an email to the UUID-shaped user id mock auth hands out.
 
-    WHY THIS EXISTS (row befeba88): under AUTH_MODE=mock the user id was the system
-    id — "interactive_job_tester_8e32". The ordinary API path scopes a job id as
-    "{sha256}::{user_id}", and AsyncNotificationRequest's pattern requires a UUID after
-    the "::", so every queue notification raised a validation error that was caught,
-    printed and dropped: 530 of them in one baseline log, and a mock-auth environment
-    that looked like it had working notifications and did not.
-
-    The fix chosen over widening the validator (Mr Radio's ruling, 2026-08-21): mock
-    and JWT should produce the SAME id shape. Under JWT the user id is the database
-    row's UUID; under mock it is this — minted from the email, so it needs no database
-    and is stable across requests, processes and restarts.
+    Under AUTH_MODE=mock the user id used to be the system id, such as "interactive_job_tester_8e32".
+    A scoped job id is "{sha256}::{user_id}" and AsyncNotificationRequest requires a UUID after the "::".
+    Mock ids now have the shape of JWT ids, where the user id is the database row's UUID.
 
     Requires:
         - email is a non-empty string containing '@'
@@ -100,6 +92,9 @@ def email_to_user_uuid( email: str ) -> str:
         - returns the canonical string form of a UUID (36 chars, 8-4-4-4-12)
         - the same email always returns the same id
         - different emails return different ids
+        - the id is minted from the email alone, so it needs no database and is stable across
+          requests, processes and restarts
+        - the id has the same shape as a JWT user id, so the notification validator stays strict
 
     Raises:
         - ValueError if email is empty or contains no '@'

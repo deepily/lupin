@@ -36,10 +36,7 @@ const DEFAULT_CARD_OPEN      = true;   // legacy broadcast card is default-expan
 // Types
 // ---------------------------------------------------------------------------
 
-// One recipient chip's backing data — the subset of the active-sessions
-// projection the chip-row renders (server `project_session_response`:
-// session_id / persona_name / persona_icon / persona_color / last_seen_iso /
-// speakerphone_on). The store keeps only what the chips need.
+/** The data behind one recipient chip: a session id and its persona name, icon and color. */
 export interface BroadcastRecipient {
   session_id     : string;
   persona_name?  : string | null;
@@ -57,8 +54,7 @@ interface CardOpenEnvelope {
   open : boolean;
 }
 
-// Loose ApiClient surface for hydrate — BroadcastStore only needs `get<T>`.
-// Production passes the canonical ApiClient; tests pass a stub.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface BroadcastSessionsApiClient {
   get<T>(path: string): Promise<T>;
 }
@@ -67,6 +63,7 @@ export interface BroadcastSessionsApiClient {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The cache of broadcast recipients and the saved open state of the broadcast card. */
 export interface BroadcastStore {
   /** Cached recipient list (defensive copy), in server order. */
   recipients(): ReadonlyArray<BroadcastRecipient>;
@@ -83,6 +80,7 @@ export interface BroadcastStore {
   hydrate( api: BroadcastSessionsApiClient ): Promise<void>;
 }
 
+/** Options for `createBroadcastStore`: the storage service that keeps the card state. */
 export interface BroadcastStoreOptions {
   storage : StorageService;
 }
@@ -93,30 +91,50 @@ export interface BroadcastStoreOptions {
 
 const ACTIVE_SESSIONS_URL = "/api/commons/active-sessions";
 
+/**
+ * Holds the broadcast recipient list and the card's open or closed state.
+ */
 class BroadcastStoreImpl implements BroadcastStore {
   private readonly storage : StorageService;
 
   private recipientCache : BroadcastRecipient[] = [];
   private cardOpen       : boolean;
 
+  /**
+   * Builds the store from a storage service and loads the saved card-open state.
+   */
   constructor( opts: BroadcastStoreOptions ) {
     this.storage  = opts.storage;
     this.cardOpen = this.hydrateCardOpen();
   }
 
+  /**
+   * Returns a copy of the current broadcast recipient list.
+   */
   recipients(): ReadonlyArray<BroadcastRecipient> {
     return [ ...this.recipientCache ];   // defensive copy (Rachel nit-1) — callers never alias the cache
   }
 
+  /**
+   * Returns whether the broadcast card is open.
+   */
   isCardOpen(): boolean {
     return this.cardOpen;
   }
 
+  /**
+   * Sets the card-open flag and saves it to storage.
+   */
   setCardOpen( open: boolean ): void {
     this.cardOpen = open;
     this.storage.setJSON<CardOpenEnvelope>( STORAGE_KEY, { open }, STORAGE_SCHEMA_VERSION );
   }
 
+  /**
+   * Loads active sessions from the server into the recipient list.
+   *
+   * When the request fails it empties the recipient list and rethrows the error, so the caller must handle the rejection. A response without a sessions array also gives an empty list.
+   */
   async hydrate( api: BroadcastSessionsApiClient ): Promise<void> {
     try {
       const resp = await api.get<ActiveSessionsResponse>( ACTIVE_SESSIONS_URL );
@@ -145,6 +163,7 @@ class BroadcastStoreImpl implements BroadcastStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/** Build the store. It reads the saved card-open state from storage at once. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createBroadcastStore( opts: BroadcastStoreOptions ): BroadcastStore {
   return new BroadcastStoreImpl( opts );

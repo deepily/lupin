@@ -47,6 +47,9 @@ const SERVER_STATE_TO_STATUS: Record<string, JobStatus> = {
   interrupted : "dead",
 };
 
+/**
+ * Maps a server job state name to a UI status, or null when unknown.
+ */
 function mapServerStateToStatus(state: string): JobStatus | null {
   // 🔴 THE KEY COMES FROM THE SERVER, so this is the worst-placed member of the
   // family: a payload carrying `state: "toString"` returned a FUNCTION where a
@@ -75,15 +78,12 @@ interface JobRemovedPayload {
   timestamp ?: string;
 }
 
-// Loose ApiClient surface for hydrateHistory — JobStore only needs `get<T>`.
-// Production code passes the canonical ApiClient; tests pass a stub.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface JobHistoryApiClient {
   get<T>(path: string): Promise<T>;
 }
 
-// W3 — parametrized history hydration (time-window select + load-more).
-// `hydrateHistory(api)` with no opts stays backward-compatible: the mount call
-// in JobsPaneRenderer is unchanged and gets the legacy 30-day virgin window.
+/** The options of a history load: window in days, page size, offset, append and user filter. */
 export interface HydrateHistoryOptions {
   // Time window in days. KEY ABSENT → legacy 30-day default (DEFAULT_HISTORY_
   // WINDOW_DAYS). KEY PRESENT but `undefined` → all-time (the `days` query param
@@ -121,6 +121,7 @@ const DEFAULT_HISTORY_PAGE_LIMIT  = 20;
 // Public interface (per design § JobStore)
 // ---------------------------------------------------------------------------
 
+/** The jobs of the page in named buckets, with the history load and its counts. */
 export interface JobStore {
   bucket(name: JobBucket): ReadonlyArray<Job>;
   getById(idHash: string): Job | undefined;
@@ -167,6 +168,7 @@ export interface JobStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createJobStore`: the bus and a clock for tests. */
 export interface JobStoreOptions {
   bus    : EventBus;
   nowFn? : () => number;
@@ -176,6 +178,9 @@ export interface JobStoreOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Holds jobs in todo, running, done, dead, and history buckets from server events.
+ */
 class JobStoreImpl implements JobStore {
   private readonly bus   : EventBus;
   private readonly nowFn : () => number;
@@ -207,6 +212,9 @@ class JobStoreImpl implements JobStore {
 
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Creates the store and subscribes to job state and removal events.
+   */
   constructor(opts: JobStoreOptions) {
     this.bus   = opts.bus;
     /* c8 ignore next */ // defensive: production callers pass nowFn explicitly via DI; fallback is for ad-hoc construction.
@@ -214,16 +222,25 @@ class JobStoreImpl implements JobStore {
     this.subscribe();
   }
 
+  /**
+   * Returns the jobs in the named bucket.
+   */
   bucket(name: JobBucket): ReadonlyArray<Job> {
     return this.buckets[name];
   }
 
+  /**
+   * Returns the job with the given ID hash from any bucket, or undefined.
+   */
   getById(idHash: string): Job | undefined {
     const bucketName = this.indexById.get(idHash);
     if (!bucketName) return undefined;
     return this.buckets[bucketName].find(j => j.id_hash === idHash);
   }
 
+  /**
+   * Loads job history from the server, either replacing or appending to the bucket.
+   */
   async hydrateHistory(api: JobHistoryApiClient, opts: HydrateHistoryOptions = {}): Promise<void> {
     // W3 — re-runnable: the old `if (this.historyHydrated) return;` once-guard is
     // GONE. A REPLACE (append=false) must refetch on every window-change / retry.
@@ -307,22 +324,37 @@ class JobStoreImpl implements JobStore {
     });
   }
 
+  /**
+   * Returns true once history has been loaded at least once.
+   */
   isHistoryHydrated(): boolean {
     return this.historyHydrated;
   }
 
+  /**
+   * Returns how many history rows have been fetched so far.
+   */
   historyLoadedCount(): number {
     return this.historyOffset;
   }
 
+  /**
+   * Returns the server's total history count for the current window.
+   */
   historyTotalCount(): number {
     return this.historyTotal;
   }
 
+  /**
+   * Returns the history window in days, or undefined for all time.
+   */
   historyWindowDays(): number | undefined {
     return this.historyDays;
   }
 
+  /**
+   * Empties the named bucket and emits a removed event.
+   */
   clearBucket(name: JobBucket): void {
     const list = this.buckets[name];
     for (const j of list) this.indexById.delete(j.id_hash);
@@ -330,6 +362,9 @@ class JobStoreImpl implements JobStore {
     this.emit({ changeKind: "removed", bucket: name });
   }
 
+  /**
+   * Removes a job from its bucket and returns a function that puts it back.
+   */
   delete(idHash: string): { restoreState: () => void } {
     const bucketName = this.indexById.get(idHash);
     if (!bucketName) {
@@ -352,6 +387,9 @@ class JobStoreImpl implements JobStore {
     return { restoreState };
   }
 
+  /**
+   * Detaches the bus listeners so a test can clean up.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
@@ -518,6 +556,11 @@ class JobStoreImpl implements JobStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the store.
+ *
+ * It subscribes to the bus at once and fetches nothing until `hydrateHistory` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createJobStore(opts: JobStoreOptions): JobStore {
   return new JobStoreImpl(opts);

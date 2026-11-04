@@ -16,17 +16,18 @@
 
 import { html } from "../html";
 
-// Nine canonical stops in percent (12.5% increments). Exported so the renderer
-// and tests reference ONE source of truth (the one-descriptive-name rule).
+/** The nine slider stops, in percent, in steps of 12.5. */
 export const TTS_FRACTION_STOPS_PCT: ReadonlyArray<number> = [
   0, 12.5, 25, 37.5, 50, 62.5, 75, 87.5, 100,
 ];
 
+/** The callback the slider calls on every input event, with the value in percent. */
 export interface TtsPreviewSliderHandlers {
   /** Fired on every `input` event with the snapped percent (e.g. 37.5). */
   onInput( percent: number ): void;
 }
 
+/** What the slider draws: its starting position in percent. */
 export interface TtsPreviewSliderOpts {
   /** Initial slider position in PERCENT (0-100), already resolved by the renderer. */
   percent : number;

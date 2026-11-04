@@ -21,6 +21,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
+from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.deep_research.seed_context import normalize_source_document
@@ -95,11 +96,11 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
             audience_context: Custom audience description
-            source_document: Absolute paths to local documents the RESEARCH LEG reads
-                FIRST, as seed context. Already scope-validated and resolved by the v2
-                door ( cosa/rest/v2/source_document.py ) — this constructor receives real
+            source_document: Absolute paths to local documents the research leg reads
+                first, as seed context. Already scope-validated and resolved by the v2
+                door ( cosa/rest/v2/source_document.py ). This constructor receives real
                 paths and does not re-decide whether they may be read. None or [] means
-                the run behaves exactly as it did before.
+                the run behaves as it did without this argument.
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -151,55 +152,15 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         Returns:
             str: Conversational answer summarizing pipeline results
         """
-        if self.debug:
-            print( f"[DeepResearchToPresentationJob] Starting do_all() for: {self.query[ :50 ]}..." )
-
-        self.state      = JobState.RUNNING
-        self.started_at = cu.get_current_datetime_iso()
-
-        try:
-            result = asyncio.run( self._execute() )
-
-            self.state        = JobState.COMPLETED
-            self.completed_at = cu.get_current_datetime_iso()
-            self.result       = result
-            self.answer_conversational = result
-
-            if self.debug:
-                duration = self.get_execution_duration_seconds()
-                print( f"[DeepResearchToPresentationJob] Completed in {duration:.1f}s" )
-
-            return result
-
-        except Exception as e:
-            self.state        = JobState.FAILED
-            self.completed_at = cu.get_current_datetime_iso()
-            self.error        = str( e )
-            self.answer_conversational = f"Research→Presentation pipeline failed: {str( e )}"
-
-            if self.debug:
-                print( f"[DeepResearchToPresentationJob] Failed: {e}" )
-                import traceback
-                traceback.print_exc()
-
-            # Re-raise so the agentic-pool Future captures the exception.
-            # Backlog item 5 (2026-04-29): canonical Future contract.
-            raise
+        return self._run_execute( "DeepResearchToPresentationJob", self.query[ :50 ], "Research→Presentation pipeline failed" )
 
     def _make_agent( self ):
-        """Build the chained agent this job runs. Extracted so the JOIN can be driven.
+        """
+        Build the chained agent this job runs, so the job-to-agent hand-off can be tested.
 
-        🔴 WHY THIS IS A METHOD AND NOT AN EXPRESSION INSIDE `_execute` (row 5726e3c5).
-        `_execute` runs the whole pipeline — notifications, research, slides, storage —
-        so a test cannot reach the agent this job actually builds without running all of
-        it against real services. That left the job→agent hand-off provable only by a
-        test that rebuilt the argument list itself, which proves the test's copy and not
-        the job's.
-
-        That is the seam slice 1 died in one layer out: the door and the job were both
-        correct and the factory between them dropped the argument, and every test stopped
-        at a seam. `test_source_document_reaches_the_model_*` drives THIS method on a job
-        the REAL factory built, so nothing between the door and `run_research` is a copy.
+        A method, not an expression inside `_execute`, because `_execute` runs the whole pipeline: notifications, research, slides and storage.
+        That needs real services, so a test could only prove its own copy of the arguments.
+        The `test_source_document_reaches_the_model_*` tests drive it on a job the real factory built.
 
         Ensures:
             - returns a fully-configured agent carrying this job's own arguments
@@ -245,6 +206,8 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         # Set sender_id and target_user for notifications (use base_id to strip ::user_id scope suffix)
         cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
         cosa_interface.TARGET_USER = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
 
         # Set job_id for auto-injection into all downstream notify() calls
         voice_io.set_job_id( self.id_hash )
@@ -369,6 +332,8 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         # Set sender_id and target_user for notifications (use base_id to strip ::user_id scope suffix)
         cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
         cosa_interface.TARGET_USER = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
 
         # Set job_id for auto-injection into all downstream notify() calls
         voice_io.set_job_id( self.id_hash )

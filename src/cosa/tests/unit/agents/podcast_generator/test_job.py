@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
+from cosa.agents.podcast_generator import play_links
 from cosa.agents.podcast_generator.job import PodcastGeneratorJob
 from cosa.rest.job_state import JobState
 
@@ -196,7 +197,17 @@ class _ExecGraph:
         podcast_config.from_config.return_value = self.config_obj
         self.podcast_config = podcast_config
 
+        # The Drive hook is stubbed to its publishing-off answer: config_obj is a MagicMock whose
+        # publish flag would read as truthy, and these tests are about the job, not about Drive.
+        self.drive_hook = AsyncMock( return_value={ "language_links": {}, "extra_lines": [], "folder_link": None } )
+
         self.modules = {
+            # The real link builder: a leaf module the job imports by dotted name, which the fake package above hides.
+            "cosa.agents.podcast_generator.play_links": play_links,
+            "cosa.agents.podcast_generator.drive_hook": _make_module(
+                "cosa.agents.podcast_generator.drive_hook",
+                publish_podcast_to_drive=self.drive_hook,
+            ),
             "cosa.agents.podcast_generator": _make_module(
                 "cosa.agents.podcast_generator",
                 voice_io=self.voice_io, cosa_interface=self.cosa_interface,
@@ -281,8 +292,9 @@ class TestExecute:
         abstract = completion[ 0 ].kwargs[ "abstract" ]
 
         enc       = "pod/ep.mp3"                                    # quote( audio_rel ), '/' is safe
-        play_here = f"[▶️ Play Here](/app/audio?path={enc}&embed=1)"
-        listen    = f"[🎧 Listen](/app/audio?path={enc})"
+        query     = f"path={enc}&script=pod/ep.md"                  # the job passes the script path, the player cannot guess it
+        play_here = f"[▶️ Play Here](/app/audio?{query}&embed=1)"
+        listen    = f"[🎧 Listen](/app/audio?{query})"
         download  = f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
 
         # both audio forms present, plus download
@@ -332,9 +344,9 @@ class TestExecute:
         assert "**Mexican Spanish**:" in abstract
 
         # Each language carries its OWN full triplet against its OWN file.
-        for enc in ( "pod/ep-en.mp3", "pod/ep-es-MX.mp3" ):
-            assert f"[▶️ Play Here](/app/audio?path={enc}&embed=1)" in abstract
-            assert f"[🎧 Listen](/app/audio?path={enc})"           in abstract
+        for enc, script in ( ( "pod/ep-en.mp3", "pod/ep-en.md" ), ( "pod/ep-es-MX.mp3", "pod/ep-es-MX.md" ) ):
+            assert f"[▶️ Play Here](/app/audio?path={enc}&script={script}&embed=1)" in abstract
+            assert f"[🎧 Listen](/app/audio?path={enc}&script={script})"           in abstract
             assert f"[⬇️ Download](/api/io/file?path={enc}&download=true)" in abstract
         # Two languages → two overlay links, two mp3s reachable.
         assert abstract.count( "&embed=1" ) == 2
@@ -432,6 +444,17 @@ class TestExecute:
             _run( job._execute() )
         # orchestrator built with the project-root-joined absolute path
         assert graph.orch_ctor.call_args.kwargs[ "research_doc_path" ] == "/proj/io/dr/report.md"
+
+    def test_drive_hook_gets_the_resolved_source_and_the_loaded_config( self ):
+        job   = _job( research_path="io/dr/report.md" )
+        graph = _ExecGraph()
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+        graph.drive_hook.assert_awaited_once()
+        assert graph.drive_hook.call_args.args[ 2 ] == "/proj/io/dr/report.md"
+        assert graph.drive_hook.call_args.kwargs == { "config": graph.config_obj, "user_email": "u@test.com" }
 
     def test_missing_file_raises( self ):
         job   = _job()

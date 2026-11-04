@@ -20,20 +20,27 @@
  */
 
 export const REQUEST_PENDING = "pending";
+/** The `move` of a request to promote a row from the holding area onto the board. */
 export const MOVE_ADMIT      = "admit";
+/** The `move` of a request to demote a row from the board into the holding area. */
 export const MOVE_DEMOTE     = "demote";
+/** The verdict that performs the requested move. */
 export const VERDICT_APPROVED = "approved";
+/** The verdict that leaves the row where it is. */
 export const VERDICT_DENIED   = "denied";
 
 /** The two badge counts `GET /api/tasks/request-badges` returns. Never summed. */
 export const BADGE_HOLDING_AREA = "holding_area";
+/** The key of the request-badges count for the task area, the board. */
 export const BADGE_TASK_AREA    = "task_area";
 
+/** The endpoint that returns the pending-request counts, one per area. */
 export const REQUEST_BADGES_PATH = "/api/tasks/request-badges";
 
 /** Label for the triage date an approved demote needs, matching the demote verb's own. */
 export const TRIAGE_DATE_LABEL = "Triage this by";
 
+/** The refusal shown when an approved demote has no triage-by date. */
 export const DEMOTE_NEEDS_TRIAGE_DATE_MESSAGE =
     "Approving a demote moves the row into the holding area, so it needs a triage-by date — the same date your own Demote asks for.";
 
@@ -183,6 +190,52 @@ export function requestBadgeText( counts, badge ) {
     return n === 1 ? "1 request" : `${n} requests`;
 }
 
+/**
+ * How many of these rows carry a pending request.
+ *
+ * A holding-area persona group shows this beside its name, so the operator sees which persona
+ * has a request waiting without opening each group. It uses the same test as the row chip
+ * (`pendingRequestChip`), so a badge of N sits over exactly N chips.
+ *
+ * @param {ReadonlyArray<unknown> | null | undefined} rows
+ * @returns {number} 0 for a non-array, an empty array, or rows with nothing pending
+ */
+export function pendingRequestCount( rows ) {
+    if ( !Array.isArray( rows ) ) return 0;
+    let n = 0;
+    for ( const row of rows ) {
+        if ( pendingRequestChip( row, 0 ) !== null ) n += 1;
+    }
+    return n;
+}
+
+/**
+ * A persona group's request badge text, or "" when none.
+ *
+ * It reads "1 request" or "3 requests". The wording is that of `requestBadgeText`, so the group badge and the pane badge read alike.
+ *
+ * @param {ReadonlyArray<unknown> | null | undefined} rows
+ * @returns {string}
+ */
+export function groupRequestBadgeText( rows ) {
+    return requestBadgeText( { group: pendingRequestCount( rows ) }, "group" );
+}
+
+/**
+ * A persona group's request badge, spoken: "1 pending request", "3 pending requests", or "".
+ *
+ * The visible text is "3 requests" next to the row count "5", and a screen reader reads the two
+ * numbers with nothing to join them. This is the badge's accessible name.
+ *
+ * @param {ReadonlyArray<unknown> | null | undefined} rows
+ * @returns {string}
+ */
+export function groupRequestBadgeLabel( rows ) {
+    const n = pendingRequestCount( rows );
+    if ( n === 0 ) return "";
+    return n === 1 ? "1 pending request" : `${n} pending requests`;
+}
+
 // The classic-script bridge, mirroring task-lookup.js: notifications.js reads these at
 // CALL time. See window-globals.d.ts for the declaration that keeps this typechecking.
 if ( typeof window !== "undefined" ) {
@@ -190,6 +243,6 @@ if ( typeof window !== "undefined" ) {
         REQUEST_BADGES_PATH, BADGE_HOLDING_AREA, BADGE_TASK_AREA,
         VERDICT_APPROVED, VERDICT_DENIED, TRIAGE_DATE_LABEL,
         requestVerdictPath, requestAge, pendingRequestChip, requestVerdictBody, requestBadgeText,
-        requestEventsPath, requestFiledDetail,
+        requestEventsPath, requestFiledDetail, pendingRequestCount, groupRequestBadgeText, groupRequestBadgeLabel,
     };
 }

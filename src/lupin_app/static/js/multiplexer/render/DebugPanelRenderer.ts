@@ -22,6 +22,7 @@
 // lines (G8). That is legacy's state and styling them would be a visible change
 // from the lead — see the note in css/multiplexer/debug-panel.css.
 
+import { formatClock } from "./time";
 import {
   setDebugPanel,
   type DebugPanelSink,
@@ -46,29 +47,48 @@ export const DEBUG_LINE_CLASS = "debug-info";
  */
 export const DEBUG_SEEDED_CLASS = DEBUG_LINE_CLASS;
 
+/**
+ * The Debug Information panel: newest line first, capped at 20 lines, never opens itself.
+ *
+ * `mount` registers the panel as the debug sink and `unmount` clears it.
+ */
 export interface DebugPanelRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
 }
 
+/** Options for `createDebugPanelRenderer`: a clock for each line's timestamp. */
 export interface DebugPanelRendererOptions {
   /** Test injection — the clock for each line's timestamp. */
-  nowDateFn? : () => Date;
+  nowDateFn?      : () => Date;
+  /** The server zone, read at each stamp; UTC (labelled) while it is unset. */
+  appTimezoneFn?  : () => string | undefined;
 }
 
+/**
+ * Models the debug information pane: a header and a log of timestamped lines.
+ */
 class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
   private readonly nowDateFn : () => Date;
+  private readonly appTimezoneFn : () => string | undefined;
 
   private root        : HTMLElement | null = null;
   private logEl       : HTMLElement | null = null;
   private collapseOff : ( () => void ) | null = null;
   private mounted     = false;
 
+  /**
+   * Stores the clock used to stamp each line, which defaults to the current time.
+   */
   constructor( opts: DebugPanelRendererOptions ) {
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    this.appTimezoneFn = opts.appTimezoneFn ?? ( () => undefined );
   }
 
+  /**
+   * Builds the debug log in the root and registers it as the debug panel.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "DebugPanelRenderer already mounted" );
 
@@ -122,6 +142,9 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
     setDebugPanel( this );
   }
 
+  /**
+   * Deregisters the debug panel, removes the collapse wiring and empties the root.
+   */
   unmount(): void {
     // 🔴 DEREGISTER FIRST. A writer firing between the teardown of the DOM and
     // the clearing of the sink would paint into a detached node — invisible, and
@@ -173,11 +196,12 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
   private lineEl( message: string, className: string ): HTMLElement {
     const div = document.createElement( "div" );
     div.className = className;
-    div.textContent = `[${ this.nowDateFn().toLocaleTimeString() }] ${ message }`;
+    div.textContent = `[${ formatClock( this.nowDateFn(), this.appTimezoneFn() ) }] ${ message }`;
     return div;
   }
 }
 
+/** Build the panel renderer. It paints nothing until `mount()` is called. */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 export function createDebugPanelRenderer( opts: DebugPanelRendererOptions = {} ): DebugPanelRenderer {
   return new DebugPanelRendererImpl( opts );

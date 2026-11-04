@@ -23,7 +23,7 @@ from cosa.agents.utils.agent_notification_dispatcher import (
     ctx_target_user,
     ctx_session_name,
 )
-from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
+from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError, VoiceGateUnreachableError
 
 
 # --------------------------------------------------------------------------- #
@@ -270,11 +270,19 @@ def test_ask_confirmation_connection_error_raises_timeout():
             _run( d.ask_confirmation( "Proceed?" ) )
 
 
-def test_ask_confirmation_generic_error_returns_default():
+@pytest.mark.parametrize( "default", [ "yes", "no" ] )
+def test_ask_confirmation_unexpected_error_raises_unreachable_not_the_default( default ):
+    # An unexpected error means the asking broke and nobody answered. Returning
+    # `default` would hand the caller "yes" or "no" as if a person had said it.
+    # It is not a timeout either: the question may never have been asked.
     d = AgentNotificationDispatcher( agent_type="test.agent" )
-    with patch.object( mod, "_notify_user_sync", side_effect=RuntimeError( "weird" ) ):
-        assert _run( d.ask_confirmation( "Proceed?", default="yes" ) ) is True
-        assert _run( d.ask_confirmation( "Proceed?", default="no" ) ) is False
+    boom = RuntimeError( "weird" )
+    with patch.object( mod, "_notify_user_sync", side_effect=boom ):
+        with pytest.raises( VoiceGateUnreachableError ) as ctx:
+            _run( d.ask_confirmation( "Proceed?", default=default ) )
+    assert not isinstance( ctx.value, VoiceGateTimeoutError )
+    assert ctx.value.phase == "confirmation"
+    assert ctx.value.cause is boom
 
 
 # =========================================================================== #

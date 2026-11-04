@@ -1,34 +1,32 @@
 """
 SQLAlchemy ORM models for the pgvector vector store (v0.2.0).
 
-Grounded in the P0 schema inventory (src/rnd/v0.2.0/) and registered on the
-SAME declarative ``Base`` used by ``cosa.rest.postgres_models`` so these tables
-register in ``Base.metadata`` for both alembic autogenerate and the empty-DB
-``create_all`` bootstrap.
+Registered on the same declarative ``Base`` as ``cosa.rest.postgres_models``, so
+these tables appear in ``Base.metadata`` for alembic autogenerate and for the
+empty-DB ``create_all`` bootstrap. The schema inventory is under src/rnd/v0.2.0/.
 
-Metric ruling (design §4.2, Pass-1 F1 + Pass-2 H2, confirmed by P0):
-    Every ANN column is searched by DOT PRODUCT, so the operator is
-    INNER-PRODUCT (``vector_ip_ops`` / ``<#>``), NOT cosine — the keystone ``input_and_output`` vectors are NOT L2-normalized
-    (live norm ≈ 22); dot is correct because it is the IDENTICAL metric, not
-    because of any normalization invariant. NEVER substitute cosine ``<=>``.
+Metric rule:
+    Every ANN column is searched by dot product, so the operator is inner product
+    (``vector_ip_ops`` / ``<#>``), not cosine. The keystone ``input_and_output``
+    vectors are not unit-length (live norm is about 22). Dot is correct because
+    it is the identical metric the vectors were built for, not because of any
+    normalization invariant. Never substitute cosine ``<=>``.
 
-Index rule (design §4.2, per-column, gated on "is it ANN-searched?"):
+Index rule (per column, gated on "is it ANN-searched?"):
     Only the 4 columns actually ANN-searched get an HNSW ``vector_ip_ops`` index:
         - input_and_output.input_embedding          (input_and_output_table.py:303)
         - prediction_decisions.question_embedding    (proxy_decision_embeddings.py:227)
         - solution_snapshots.question_embedding
         - solution_snapshots.code_embedding
-    Scalar KV lookup keys get btree; write-only telemetry / never-searched vectors
-    get NO index until a real ANN consumer appears.
+    Scalar KV lookup keys get btree. Write-only telemetry and never-searched vectors
+    get no index until a real ANN consumer appears.
 
-Synthetic-PK note (Rachel review N1): the four tables that carry
-no natural key — ``input_and_output``, ``question_embeddings``, ``embedding_cache``,
-``gist_cache`` — get a synthetic ``BigInteger autoincrement`` surrogate PK (Postgres
-requires a primary key). Tables with an authoritative natural key
-(``canonical_synonyms``, ``query_log``, ``prediction_decisions``, ``solution_snapshots``)
-keep that key as their PK instead.
-
-Created: 2026-07-01 (Lane A · Tiffany 💍) · v0.2.0
+Synthetic primary keys:
+    Four tables have no natural key: ``input_and_output``, ``question_embeddings``,
+    ``embedding_cache`` and ``gist_cache``. Each gets a synthetic ``BigInteger
+    autoincrement`` surrogate PK, because Postgres requires a primary key. Tables with
+    an authoritative natural key (``canonical_synonyms``, ``query_log``,
+    ``prediction_decisions``, ``solution_snapshots``) keep it as their PK.
 """
 
 from datetime import datetime
@@ -151,7 +149,7 @@ class EmbeddingCache( Base ):
 # 4. gist_cache — RELATIONAL ONLY (P0: no vector column). Plain scalar cache.
 # =========================================================================== #
 class GistCache( Base ):
-    """gist/summary cache; NO pgvector column (P0-confirmed relational-only)."""
+    """gist/summary cache; relational only, with no pgvector column."""
     __tablename__ = "gist_cache"
 
     id:                  Mapped[int]           = mapped_column( BigInteger, primary_key=True, autoincrement=True )

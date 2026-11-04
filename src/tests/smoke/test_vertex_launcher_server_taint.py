@@ -1,7 +1,7 @@
 """
 F-A11 — THE LAUNCHER MUST NOT BIRTH A TAINTED TMUX SERVER. Proven by EXECUTION, not by reading.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 
 WHY THIS FILE EXISTS, AND WHY IT RUNS THE REAL SHELL
 
@@ -46,7 +46,7 @@ from cosa.utils.vertex_env import (
     VERTEX_REGION_ENV_KEY,
     VERTEX_SESSION_KEYS,
 )
-from tests.smoke.tmux_isolation import TMUX_ISOLATION_STRIP_KEYS
+from tests.smoke.tmux_isolation import TMUX_ISOLATION_STRIP_KEYS, isolate_fleet_census
 
 
 LAUNCHER = Path( cu.get_project_root() ) / "src" / "scripts" / "start-cc-with-tmux.sh"
@@ -89,6 +89,7 @@ def _launch( launcher, socket_dir, fake_bin, tainted, session_name, vertex=False
     env[ "TMUX_TMPDIR" ] = str( socket_dir )
     env[ "PATH" ]        = f"{fake_bin}:{env['PATH']}"
     env[ "LUPIN_ROOT" ]  = cu.get_project_root()
+    isolate_fleet_census( env, socket_dir )    # the launcher's fleet-cap gate must not read the LIVE fleet
     env.update( TAINT if tainted else {} )
     for key in ( [] if tainted else TAINT ):
         env.pop( key, None )

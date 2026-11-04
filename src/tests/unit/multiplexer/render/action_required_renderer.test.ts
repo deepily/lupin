@@ -725,7 +725,7 @@ test("empty: first widget added clears the empty panel (clearEmpty removes it)",
   state.items.set("ar1", makeItem({ id_hash: "ar1" }));
   emitChange(bus, { changeKind: "added", id_hash: "ar1" });
   assert.ok( root.querySelector("#action-required-empty") === null, "empty removed once a widget paints" );
-  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget painted");
+  assert.ok(root.querySelector<HTMLElement>('[data-id-hash="ar1"]') !== null, "widget painted");
   renderer.unmount();
 });
 
@@ -733,12 +733,12 @@ test("empty: removing the last widget repaints the empty panel (onChange list→
   const { renderer, root, bus, state } = setupRenderer();
   state.items.set("ar1", makeItem({ id_hash: "ar1" }));
   renderer.mount(root);
-  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget present");
+  assert.ok(root.querySelector<HTMLElement>('[data-id-hash="ar1"]') !== null, "widget present");
   assert.ok( root.querySelector("#action-required-empty") === null, "no empty while a widget exists" );
   // Item evicted from the store → onChange sees getById undefined.
   state.items.delete("ar1");
   emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
-  assert.equal(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget removed");
+  assert.ok(root.querySelector<HTMLElement>('[data-id-hash="ar1"]') === null, "widget removed");
   assert.ok( root.querySelector("#action-required-empty") !== null, "empty repainted after last removal" );
   renderer.unmount();
 });
@@ -751,7 +751,7 @@ test("empty: removing one of two widgets does NOT paint empty (list still non-em
   state.items.delete("ar1");
   emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
   assert.ok( root.querySelector("#action-required-empty") === null, "no empty while ar2 remains" );
-  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar2"]'), null, "ar2 still present");
+  assert.ok(root.querySelector<HTMLElement>('[data-id-hash="ar2"]') !== null, "ar2 still present");
   renderer.unmount();
 });
 

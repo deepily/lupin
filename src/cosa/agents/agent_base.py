@@ -112,6 +112,7 @@ class AgentBase( RunnableCode, abc.ABC ):
         self.df_path_key           = df_path_key
         self.routing_command       = routing_command
         self.original_args         = None  # CJ Flow persistence field — agent jobs don't carry structured args
+        self.snapshotable          = True  # the queue writes the answer cache only when this is True; the v2 queued executor sets it per job
         self.user_id               = user_id
         self.user_email            = user_email  # Email for TTS notification routing
         self.session_id            = session_id  # WebSocket session ID for job-notification correlation
@@ -206,6 +207,64 @@ class AgentBase( RunnableCode, abc.ABC ):
         """
         pass
     
+    @staticmethod
+    def _restore_from_data( agent_cls, data: dict, positional_keys: tuple, keyword_keys: tuple ) -> 'AgentBase':
+        """
+        Build an agent from a serialized state dict and copy the remaining saved fields onto it.
+
+        Requires:
+            - data is the dict loaded from a serialized JSON state file
+            - every key in positional_keys and keyword_keys is present in data
+            - agent_cls takes the positional_keys values in order, then the keyword_keys as keywords
+
+        Ensures:
+            - Returns an agent_cls instance built from those keys
+            - Every other key in data is set as an attribute on it, overwriting the constructor's value
+            - Prints one line for each key the constructor already used
+
+        Raises:
+            - KeyError if a constructor key is missing from data
+        """
+        restored_agent = agent_cls(
+            *[ data[ key ] for key in positional_keys ],
+            **{ key: data[ key ] for key in keyword_keys }
+        )
+
+        # Set the remaining attributes from the parsed data, skipping the ones that we've already set
+        keys_to_skip = [ *positional_keys, *keyword_keys ]
+        for k, v in data.items():
+            if k not in keys_to_skip:
+                setattr( restored_agent, k, v )
+            else:
+                print( f"Skipping key [{k}], it's already been set" )
+
+        return restored_agent
+
+    @staticmethod
+    def _restore_from_file( agent_cls, file_path: str, positional_keys: tuple, keyword_keys: tuple ) -> 'AgentBase':
+        """
+        Read a serialized JSON state file and build an agent from it.
+
+        Requires:
+            - file_path points to a valid JSON file holding a dict
+            - positional_keys and keyword_keys meet the requirements of _restore_from_data
+
+        Ensures:
+            - Prints one "Restoring from" line naming file_path
+            - Returns what _restore_from_data returns for the parsed file
+
+        Raises:
+            - FileNotFoundError if file doesn't exist
+            - JSONDecodeError if invalid JSON
+            - KeyError if a constructor key is missing from the file
+        """
+        print( f"Restoring from {file_path}..." )
+
+        with open( file_path, 'r' ) as file:
+            data = json.load( file )
+
+        return AgentBase._restore_from_data( agent_cls, data, positional_keys, keyword_keys )
+
     def serialize_to_json( self, subtopic: Optional[str]=None ) -> None:
         """
         Serialize agent state to a JSON file for persistence.
@@ -523,9 +582,51 @@ class AgentBase( RunnableCode, abc.ABC ):
         return self.answer_conversational
 
 
+def run_agent_smoke( agent_cls, question: str, label: str, error_context: str ) -> None:
+    """
+    Walk one agent through prompt, code and formatter on one question, printing each step.
+
+    Requires:
+        - agent_cls takes question, debug, verbose and auto_debug keyword arguments
+        - label names the agent in the banner and the summary lines
+        - error_context completes "Error during ..." when a step raises
+
+    Ensures:
+        - Prints a banner, then one line per completed step
+        - Catches any exception, prints it, and still prints the closing line
+        - Never raises
+    """
+    du.print_banner( f"{label} Smoke Test", prepend_nl=True )
+
+    try:
+        print( f"Testing question: '{question}'" )
+        agent = agent_cls( question=question, debug=True, verbose=False, auto_debug=False )
+        print( f"✓ {label} created successfully" )
+
+        # Run through the complete agent workflow
+        print( "Running prompt..." )
+        agent.run_prompt()
+        print( "✓ Prompt execution completed" )
+
+        print( "Running code..." )
+        agent.run_code()
+        print( "✓ Code execution completed" )
+
+        print( "Running formatter..." )
+        agent.run_formatter()
+        print( "✓ Formatter execution completed" )
+
+        print( f"✓ Final response: {agent.answer_conversational}" )
+
+    except Exception as e:
+        print( f"✗ Error during {error_context}: {e}" )
+
+    print( f"\n✓ {label} smoke test completed" )
+
+
 def quick_smoke_test():
     """
-    Critical smoke test for AgentBase - validates foundation functionality for all v010 agents.
+    Critical smoke test for AgentBase, the foundation functionality of all v010 agents.
     
     This test is essential for v000 deprecation as AgentBase is the foundation class
     that all v010 agents inherit from.

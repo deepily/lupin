@@ -40,6 +40,36 @@ import requests
 DEFAULT_PROXY_BASE_URL = "http://localhost:7999"
 
 
+def admin_auth_headers( base_url ):
+    """
+    Sign in as the test admin and return Authorization headers.
+
+    /api/debug/websocket-state needs the admin role.
+
+    Requires:
+        - LUPIN_TEST_ADMIN_EMAIL and LUPIN_TEST_ADMIN_PASSWORD are set
+          (account made by src/scripts/create_admin_test_account.py)
+        - base_url names a reachable server
+
+    Ensures:
+        - returns { "Authorization": "Bearer <token>" } on success
+
+    Raises:
+        - RuntimeError if either env var is unset or the login is refused
+    """
+    email    = os.environ.get( "LUPIN_TEST_ADMIN_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_ADMIN_PASSWORD" )
+    if not email or not password:
+        raise RuntimeError(
+            "Set LUPIN_TEST_ADMIN_EMAIL and LUPIN_TEST_ADMIN_PASSWORD: "
+            "/api/debug/websocket-state is admin-only (see src/scripts/create_admin_test_account.py)"
+        )
+    resp = requests.post( f"{base_url}/auth/login", json={ "email": email, "password": password }, timeout=30 )
+    if resp.status_code != 200:
+        raise RuntimeError( f"Admin login refused: {resp.status_code} {resp.text[ :200 ]}" )
+    return { "Authorization": f"Bearer {resp.json()[ 'tokens' ][ 'access_token' ]}" }
+
+
 class EmbeddedProxyMixin:
     """
     Mixin that auto-launches notification proxy as a subprocess.
@@ -296,6 +326,7 @@ class EmbeddedProxyMixin:
         deadline   = time.time() + self.PROXY_WS_AUTH_TIMEOUT
         last_state = None
         expected   = self.PROXY_EXPECTED_SESSION_ID
+        headers    = admin_auth_headers( base_url )
 
         while time.time() < deadline:
             # If subprocess died during poll, abort with diagnostics
@@ -309,7 +340,7 @@ class EmbeddedProxyMixin:
                 )
 
             try:
-                resp = requests.get( poll_url, timeout=5 )
+                resp = requests.get( poll_url, headers=headers, timeout=5 )
                 if resp.status_code == 200:
                     state           = resp.json()
                     last_state      = state

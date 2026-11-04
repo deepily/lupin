@@ -515,6 +515,28 @@ test("getCurrentUserId returns null when no token is present", () => {
   assert.equal(makeHarness().auth.getCurrentUserId(), null);
 });
 
+// ---------------------------------------------------------------------------
+// The in-memory token wins over a different stored one, for all three claim readers
+// (pinned before the shared token pick was factored out).
+// ---------------------------------------------------------------------------
+
+test("the in-memory token wins over a different stored token for email, id and admin", () => {
+  const h = makeHarness({ accessExpMs: Date.now() + 3_600_000, email: "memory@lupin.ai", roles: ["user"] });
+  assert.equal(h.auth.state, "ready");
+  h.storage.setTokens(accessJwt(Date.now() + 3_600_000, "stored@lupin.ai", ["user", "admin"]), "rrr");
+  assert.equal(h.auth.getCurrentUserEmail(), "memory@lupin.ai");
+  assert.equal(h.auth.isCurrentUserAdmin(), false);
+  assert.equal(h.auth.getCurrentUserId(), "u1");
+});
+
+test("an unreadable stored token gives null email, null id and not admin", () => {
+  const h = makeHarness();
+  h.storage.setTokens("not-a-jwt", "rrr");
+  assert.equal(h.auth.getCurrentUserEmail(), null);
+  assert.equal(h.auth.getCurrentUserId(), null);
+  assert.equal(h.auth.isCurrentUserAdmin(), false);
+});
+
 test("hydration is skipped when the stored access token has no decodable expiry", () => {
   // Both canonical keys are present, but the access token is not a decodable
   // JWT — jwtExpiryMs returns null, so readStoredToken returns null and the

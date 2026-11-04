@@ -1,53 +1,42 @@
 #!/usr/bin/env python3
 """
-Schema parity checker — model columns vs the live database.
+Schema parity checker: model columns versus the live database.
 
-For every table in ``Base.metadata`` (the ORM models, the source of truth),
-compare the declared columns against the live database's
-``information_schema.columns`` and report DRIFT:
-
-    - model-only : a column the ORM model declares but the live DB lacks
-                   (this is exactly the ``is_protected`` bug class — a model
-                   column with no migration to back it).
+Compares every table in ``Base.metadata`` (the ORM models, the source of truth) against the
+live ``information_schema.columns`` and reports drift:
+    - model-only : a column the ORM model declares but the live DB lacks (the
+                   ``is_protected`` bug class: a model column with no migration behind it).
     - db-only    : a column the live DB has but the model no longer declares.
     - missing    : an entire model table absent from the live DB.
 
-READ-ONLY: opens a single connection, issues SELECTs against
-``information_schema`` only, never mutates. Exits non-zero on any drift so it
-can gate a deploy / CI step — the reproducible check that would have caught
-``is_protected`` before it broke user-seeding in the cloud.
+Read-only: it opens one connection, issues SELECTs against ``information_schema`` only, and
+never mutates. It exits non-zero on any drift, so it can gate a deploy or CI step.
 
-THREE OUTCOMES, DELIBERATELY NOT TWO (row 3eb6dc41)
----------------------------------------------------
-  0  PARITY            every model table matches the live database
-  1  DRIFT             they disagree — this is the defect
-  2  CANNOT_DETERMINE  the question could not be answered
-
-⚠️ This script shipped with only TWO. An unreachable database raised out of
-``main`` and CPython exited **1** — byte-identical to DRIFT. MEASURED
-2026-07-27 against ``127.0.0.1:59999``: traceback, ``EXIT=1``. Any caller
-wiring it would have printed drift's remedy ("run a migration") at an operator
-whose database was merely unreachable. "The schema is wrong" and "I could not
-read the schema" have DIFFERENT remedies, so they get different codes — the
-same rule ``check_schema_at_head.py`` already follows one file over.
-
-The parseable record (``VERDICT=`` / ``DETAIL=``) exists so a shell caller can
-report the outcome without re-deriving it from prose; preflight-vm.sh check C8
-greps exactly those two keys.
+Notes:
+    Three outcomes, not two:
+        0  `PARITY`            every model table matches the live database.
+        1  `DRIFT`             they disagree; this is the defect.
+        2  `CANNOT_DETERMINE`  the question could not be answered.
+    An unreachable database would otherwise raise out of ``main`` and exit 1, identical to
+    drift.
+    A caller would then print drift's remedy ("run a migration") at an operator whose
+    database was merely unreachable.
+    "The schema is wrong" and "I could not read the schema" have different remedies.
+    So they get different codes, as in ``check_schema_at_head.py``.
+    The parseable record (`VERDICT=` / `DETAIL=`) lets a shell caller report the outcome
+    without re-deriving it from prose. The parity check in preflight-vm.sh greps those two keys.
+    Not a duplicate of ``check_schema_at_head.py``; see that file's header.
+    Parity asks whether the models and the DB agree about columns (the symptom).
+    The at_head check asks whether every migration in this tree has been run (the cause).
+    Neither subsumes the other, and preflight runs both.
+    The URL defaults to the app's own builder (cosa.rest.db.database.get_database_url via
+    cosa.rest.db.auto_migrate.resolve_database_url). The check therefore runs against the DB
+    the app would use, in every environment.
 
 Usage:
     python src/scripts/check_schema_parity.py
     python src/scripts/check_schema_parity.py --database-url postgresql+psycopg2://u:p@host:5432/db
     docker exec <container> python /var/lupin/src/scripts/check_schema_parity.py
-
-The URL defaults to the app's own builder (cosa.rest.db.database.get_database_url
-via cosa.rest.db.auto_migrate.resolve_database_url), so the check runs against
-exactly the DB the app would use, in every environment.
-
-NOT A DUPLICATE OF ``check_schema_at_head.py`` — see that file's header. In
-short: parity asks "do the models and the DB agree about columns?" (the
-SYMPTOM); at_head asks "has every migration in this tree been run?" (the
-CAUSE). Neither subsumes the other; preflight runs both (C7 and C8).
 """
 
 import argparse
@@ -100,7 +89,7 @@ def get_db_columns( engine, table_names ):
 
     Ensures:
         - returns { table_name: set( column_names ) }; a table absent from the
-          live DB maps to an EMPTY set (its model columns then read as drift)
+          live DB maps to an empty set (its model columns then read as drift)
 
     Returns:
         dict[str, set[str]]
@@ -130,7 +119,7 @@ def compute_drift( model_columns, db_columns ):
 
     Ensures:
         - returns { table: { "model_only": sorted[str], "db_only": sorted[str],
-          "missing_table": bool } } for every table that has ANY drift; tables
+          "missing_table": bool } } for every table that has any drift; tables
           in parity are omitted
 
     Returns:
@@ -216,11 +205,11 @@ def classify( drift, reason ):
 
     Ensures:
         - returns ( exit_code, verdict, detail )
-        - a reason present ⇒ CANNOT_DETERMINE, ALWAYS. An error is never folded
-          into a pass, and never into DRIFT either — drift's remedy is "run a
+        - a reason present -> `CANNOT_DETERMINE`, always. An error is never folded
+          into a pass, and never into `DRIFT` either — drift's remedy is "run a
           migration", which is wrong and misdirecting for an unreachable DB
-        - a non-empty drift dict ⇒ DRIFT, detail names the drifted tables
-        - an empty drift dict ⇒ PARITY
+        - a non-empty drift dict -> `DRIFT`, detail names the drifted tables
+        - an empty drift dict -> `PARITY`
         - never raises
     """
     if reason is not None:
@@ -244,10 +233,10 @@ def main( argv=None ):
 
     Ensures:
         - prints the human report (when one could be built) and a parseable
-          VERDICT= / DETAIL= record
+          `VERDICT=` / `DETAIL=` record
         - returns 0 on parity, 1 on drift, 2 when the question could not be
           answered — never raises out of the check itself, because an uncaught
-          exception exits 1 and would be indistinguishable from DRIFT
+          exception exits 1 and would be indistinguishable from `DRIFT`
 
     Args:
         argv: optional argument list (defaults to sys.argv[1:])

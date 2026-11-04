@@ -58,24 +58,21 @@
 
 set -euo pipefail
 
+source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/lib/worktree-link-lib.sh"
+
 if [[ "${1:-}" == "--check" ]]; then
     TARGET="${2:-$PWD}"
     if [[ ! -d "$TARGET" ]]; then
         echo "ERROR: not a directory: $TARGET" >&2
         exit 2
     fi
-    # No pipe into a short-circuiting reader — see the SIGPIPE note in
-    # link-worktree-venv.sh; this box has a 129-entry worktree list.
-    if ! LIST="$( git -C "$TARGET" worktree list --porcelain 2>/dev/null )"; then LIST=""; fi
-    MAIN=""
-    while IFS= read -r line; do
-        if [[ "$line" == "worktree "* ]]; then MAIN="${line#worktree }"; break; fi
-    done <<< "$LIST"
-    if [[ -z "$MAIN" ]]; then
+    # wt_resolve_main reads the list without a pipe; see the SIGPIPE note in lib/worktree-link-lib.sh.
+    if ! wt_resolve_main "$TARGET"; then
         echo "ERROR: $TARGET is not inside a git repository" >&2
         exit 2
     fi
-    if [[ "$( cd "$TARGET" && pwd -P )" == "$( cd "$MAIN" && pwd -P )" ]]; then
+    MAIN="$WT_MAIN"
+    if wt_same_dir "$TARGET" "$MAIN"; then
         echo "SHARED: $TARGET is the MAIN checkout — a peer's uncommitted work can be here" >&2
         exit 1
     fi
@@ -95,15 +92,12 @@ if [[ ! -d "$MAIN_ROOT" ]]; then
     exit 2
 fi
 
-if ! LIST="$( git -C "$MAIN_ROOT" worktree list --porcelain 2>/dev/null )"; then LIST=""; fi
-MAIN=""
-while IFS= read -r line; do
-    if [[ "$line" == "worktree "* ]]; then MAIN="${line#worktree }"; break; fi
-done <<< "$LIST"
-if [[ -z "$MAIN" ]]; then
+if ! wt_resolve_main "$MAIN_ROOT"; then
     echo "ERROR: $MAIN_ROOT is not inside a git repository" >&2
     exit 2
 fi
+LIST="$WT_LIST"
+MAIN="$WT_MAIN"
 
 # ⚠️ RESOLVE THE MAIN CHECKOUT RATHER THAN TRUSTING THE ARGUMENT. A manager standing in
 # its own worktree hands us that worktree; nesting a worktree inside one is not what the

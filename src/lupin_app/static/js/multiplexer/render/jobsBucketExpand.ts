@@ -34,6 +34,11 @@ export const JOBS_BUCKET_EXPAND_KEY = "lupin_queue_expand_state";
 /** The storage surface this module needs; `null` means "no persistence". */
 export type BucketExpandStorage = Pick<Storage, "getItem" | "setItem">;
 
+/**
+ * Which job buckets are expanded.
+ *
+ * A bucket missing from the map has no stored choice, so the template's default applies.
+ */
 export type BucketExpandState = Partial<Record<JobBucket, boolean>>;
 
 // Multiplexer bucket name -> legacy queue name. Only `running` differs.

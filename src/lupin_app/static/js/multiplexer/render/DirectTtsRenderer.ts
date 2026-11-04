@@ -66,6 +66,11 @@ export interface DirectTtsCache {
   checkCache( text: string ): Promise<Blob | null>;
 }
 
+/**
+ * The collaborators of the Direct TTS pane.
+ *
+ * They are the audio state, the cache, the two play paths and the log and error hooks.
+ */
 export interface DirectTtsRendererOptions {
   /** The page-wide audio state — the mode to speak in, and the halt (D3, D8). */
   audio        : DirectTtsAudioSurface;
@@ -83,6 +88,7 @@ export interface DirectTtsRendererOptions {
   errorFn      : ( message: string ) => void;
 }
 
+/** The Direct TTS Test pane, which speaks typed text and plays it from the cache when it can. */
 export interface DirectTtsRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -90,6 +96,9 @@ export interface DirectTtsRenderer {
 
 interface Wiring { el: HTMLElement; type: string; fn: EventListener }
 
+/**
+ * Renders and wires the Direct TTS Test section of the multiplexer.
+ */
 class DirectTtsRendererImpl implements DirectTtsRenderer {
   private readonly opts : DirectTtsRendererOptions;
 
@@ -99,10 +108,16 @@ class DirectTtsRendererImpl implements DirectTtsRenderer {
   private collapseOff : ( () => void ) | null = null;
   private mounted     = false;
 
+  /**
+   * Stores the renderer options. The DOM is built later by mount.
+   */
   constructor( opts: DirectTtsRendererOptions ) {
     this.opts = opts;
   }
 
+  /**
+   * Builds the Direct TTS Test section in the root and attaches its listeners.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "DirectTtsRenderer already mounted" );
 
@@ -171,6 +186,9 @@ class DirectTtsRendererImpl implements DirectTtsRenderer {
     this.mounted = true;
   }
 
+  /**
+   * Removes listeners and empties the root, returning to the unmounted state.
+   */
   unmount(): void {
     for ( const w of this.wirings ) w.el.removeEventListener( w.type, w.fn );
     this.wirings = [];
@@ -268,6 +286,7 @@ class DirectTtsRendererImpl implements DirectTtsRenderer {
   }
 }
 
+/** Build the renderer. It paints nothing until `mount()` is called. */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 export function createDirectTtsRenderer( opts: DirectTtsRendererOptions ): DirectTtsRenderer {
   return new DirectTtsRendererImpl( opts );

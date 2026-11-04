@@ -40,6 +40,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { TASK_LIST_QUERY, HOLDING_AREA_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
 import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
+import {
+  holdingBatchRestLabel, holdingBatchConfirmLabel, holdingBatchArmedStatus,
+} from "../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -570,6 +573,8 @@ test( "batch won't-fix will not fire without its one reason", async () => {
 
   ( document.querySelector( '.holding-wont-fix-all-reason[data-filer="Krishna"]' ) as HTMLInputElement ).value = "overtaken";
   await clickThrough( ui, "_handleHoldingWontFixAllClick", batchButton, "batch won't-fix for Krishna" );
+  assert.equal( called, 0, "the first click with a reason only ARMS the button (row 376dd4cb)" );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", batchButton, "batch won't-fix for Krishna (confirm)" );
   assert.equal( called, 1 );
 } );
 
@@ -1230,13 +1235,16 @@ test( "🔴 batch APPROVE sends `queued` and batch WON'T-FIX sends `wont_fix`", 
   } );
   fillRowInput( "holding-wont-fix-all-reason", "closing the lot" );
 
-  await clickThrough( ui, "_handleHoldingApproveAllClick",
-    document.querySelector( '.holding-approve-all[data-filer="Alice"]' ), "batch approve for Alice" );
+  // Two clicks each: the first ARMS, the second CONFIRMS (row 376dd4cb).
+  const approve = document.querySelector( '.holding-approve-all[data-filer="Alice"]' );
+  await clickThrough( ui, "_handleHoldingApproveAllClick", approve, "batch approve for Alice" );
+  await clickThrough( ui, "_handleHoldingApproveAllClick", approve, "batch approve for Alice (confirm)" );
   assert.deepEqual( sent, [ [ "a1", "queued" ] ], "batch approve sent the wrong transition verb" );
 
   sent.length = 0;
-  await clickThrough( ui, "_handleHoldingWontFixAllClick",
-    document.querySelector( '.holding-wont-fix-all[data-filer="Alice"]' ), "batch won't-fix for Alice" );
+  const wontFix = document.querySelector( '.holding-wont-fix-all[data-filer="Alice"]' );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice" );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice (confirm)" );
   assert.deepEqual( sent, [ [ "a1", "wont_fix" ] ], "batch won't-fix sent the wrong transition verb" );
 } );
 
@@ -1472,7 +1480,8 @@ function batchMidFlight( ids: string[] ) {
 
   const button = document.querySelector( '.holding-approve-all[data-filer="Alice"]' ) as HTMLButtonElement | null;
   assert.ok( button, "batch approve did not render — this test cannot speak to the control it names" );
-  clickWithoutWaiting( button, "Approve-All" );
+  clickWithoutWaiting( button, "Approve-All (arms)" );
+  clickWithoutWaiting( button, "Approve-All (confirms)" );          // two clicks: row 376dd4cb
   return { ui, gate, calls, button: button! };
 }
 
@@ -1781,4 +1790,102 @@ test( "row 52142a84 (legacy): a filer that drains away is forgotten — it comes
                           count: 1, total: 1, has_more: false } );
   ui.renderHoldingArea( heldComposite() );
   assert.ok( legacyGroup( "Krishna" ).classList.contains( "collapsed" ), "Krishna returned collapsed" );
+} );
+
+
+// ═════════ ARM, THEN CONFIRM (row 376dd4cb): Rick approved a held set by accident with ONE click ═════════
+//
+// Both batch buttons work the way the per-row Submit does: the first click ARMS (the button
+// renames itself and says how many rows), the second CONFIRMS. Every one of these goes through
+// `clickThrough`, so a pane with no click listener fails on the path to the assertion.
+
+function armablePane(): { ui: HoldingUI; sent: Array<[ string, string ]>; approve: Element; wontFix: Element } {
+  const ui   = newUI();
+  const sent: Array<[ string, string ]> = [];
+  ui._transitionTask = async ( id, to ) => { sent.push( [ id, to ] ); return { ok: true }; };
+  ui.refreshHoldingArea = async () => {};
+  paintedWith( ui, {
+    status: "ok",
+    tasks: [ row( { id: "a1", status: "not_approved", created_by: "alice 11111111" } ),
+             row( { id: "a2", status: "not_approved", created_by: "alice 11111111" } ) ]
+  } );
+  fillRowInput( "holding-wont-fix-all-reason", "closing the lot" );
+  return {
+    ui, sent,
+    approve : document.querySelector( '.holding-approve-all[data-filer="Alice"]' )!,
+    wontFix : document.querySelector( '.holding-wont-fix-all[data-filer="Alice"]' )!,
+  };
+}
+
+test( "🔴 the FIRST Approve-All click ARMS the button, names the count, and posts nothing", async () => {
+  const { ui, sent, approve } = armablePane();
+  await clickThrough( ui, "_handleHoldingApproveAllClick", approve, "batch approve for Alice" );
+  assert.deepEqual( sent, [], "one click posted a batch" );
+  assert.equal( approve.textContent, holdingBatchConfirmLabel( "approve", 2 ) );
+  assert.ok( approve.classList.contains( "task-submit-armed" ) );
+  assert.equal( ( approve as HTMLElement ).dataset.armed, "1" );
+  assert.equal( statusText(), holdingBatchArmedStatus( "approve", 2 ) );
+} );
+
+test( "🔴 the SECOND Approve-All click confirms, runs the batch, and the button is back to resting", async () => {
+  const { ui, sent, approve } = armablePane();
+  await clickThrough( ui, "_handleHoldingApproveAllClick", approve, "batch approve for Alice" );
+  await clickThrough( ui, "_handleHoldingApproveAllClick", approve, "batch approve for Alice (confirm)" );
+  assert.deepEqual( sent, [ [ "a1", "queued" ], [ "a2", "queued" ] ] );
+  assert.equal( ( approve as HTMLElement ).dataset.armed, undefined );
+  assert.ok( !approve.classList.contains( "task-submit-armed" ) );
+  assert.equal( approve.textContent, holdingBatchRestLabel( "approve" ) );
+} );
+
+test( "🔴 Won't-Fix-All arms the same way, with its own label and status line", async () => {
+  const { ui, sent, wontFix } = armablePane();
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice" );
+  assert.deepEqual( sent, [] );
+  assert.equal( wontFix.textContent, holdingBatchConfirmLabel( "wont_fix", 2 ) );
+  assert.equal( statusText(), holdingBatchArmedStatus( "wont_fix", 2 ) );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice (confirm)" );
+  assert.deepEqual( sent, [ [ "a1", "wont_fix" ], [ "a2", "wont_fix" ] ] );
+  assert.equal( wontFix.textContent, holdingBatchRestLabel( "wont_fix" ) );
+} );
+
+test( "🔴 arming one batch button DISARMS its sibling", async () => {
+  const { ui, approve, wontFix } = armablePane();
+  await clickThrough( ui, "_handleHoldingApproveAllClick", approve, "batch approve for Alice" );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice" );
+  assert.equal( ( approve as HTMLElement ).dataset.armed, undefined, "Approve all stayed armed beside an armed Won't fix all" );
+  assert.equal( approve.textContent, "Approve all" );
+  assert.equal( ( wontFix as HTMLElement ).dataset.armed, "1" );
+} );
+
+test( "🔴 a reason cleared AFTER arming Won't-Fix-All refuses and disarms; a blank reason never arms", async () => {
+  const { ui, sent, wontFix } = armablePane();
+  fillRowInput( "holding-wont-fix-all-reason", "" );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice" );
+  assert.equal( ( wontFix as HTMLElement ).dataset.armed, undefined, "a refused click armed the button" );
+
+  fillRowInput( "holding-wont-fix-all-reason", "overtaken" );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice" );
+  assert.equal( ( wontFix as HTMLElement ).dataset.armed, "1" );
+  fillRowInput( "holding-wont-fix-all-reason", "" );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice" );
+  assert.equal( ( wontFix as HTMLElement ).dataset.armed, undefined, "an armed button survived its reason being cleared" );
+  assert.equal( wontFix.textContent, "Won't fix all" );
+  assert.deepEqual( sent, [] );
+} );
+
+test( "🔴 a group with no rows arms neither button and says so", async () => {
+  const { ui, sent, approve, wontFix } = armablePane();
+  ( ui as unknown as Record<string, unknown> )._heldRowIdsForFiler = () => [];
+  await clickThrough( ui, "_handleHoldingApproveAllClick", approve, "batch approve for Alice" );
+  assert.equal( ( approve as HTMLElement ).dataset.armed, undefined );
+  assert.match( statusText(), /No rows in this group/ );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", wontFix, "batch won't-fix for Alice" );
+  assert.equal( ( wontFix as HTMLElement ).dataset.armed, undefined );
+  assert.deepEqual( sent, [] );
+} );
+
+test( "the legacy resting labels are the ones the multiplexer template renders", () => {
+  const { approve, wontFix } = armablePane();
+  assert.equal( approve.textContent,  holdingBatchRestLabel( "approve" ) );
+  assert.equal( wontFix.textContent,  holdingBatchRestLabel( "wont_fix" ) );
 } );

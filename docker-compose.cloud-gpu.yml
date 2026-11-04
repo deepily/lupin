@@ -23,6 +23,8 @@
 #   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
 # Optional (defaults shown):
 #   DB_USER=lupin_app  DB_NAME=lupin_db_test
+#   LUPIN_TEST_DB_PASSWORD=<from Secret Manager `lupin-db-test-password`>
+#   (empty means tests create databases as DB_USER)
 #
 # Launch:
 #   docker compose -f docker-compose.cloud-gpu.yml --env-file cloud-gpu.env up -d
@@ -232,6 +234,16 @@ services:
         target: /var/external-projects/google/parallel-search
         read_only: false
         bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/google/mcp-and-a2ui-apps
+        target: /var/external-projects/google/mcp-and-a2ui-apps
+        read_only: false
+        bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/google/weil-ge-mcp-server
+        target: /var/external-projects/google/weil-ge-mcp-server
+        read_only: false
+        bind: { create_host_path: false }
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
@@ -241,6 +253,11 @@ services:
       DB_USER: ${DB_USER:-lupin_app}
       DB_NAME: ${DB_NAME:-lupin_db_test}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD (from Secret Manager lupin-db-password)}
+      # Row 80513825: the test role's login, for tests that create databases (cosa.utils.dotenv_password.clone_login).
+      # Optional. Empty password means plain mode: the tests create databases as the app login, as before.
+      # Set it from Secret Manager `lupin-db-test-password` at deploy to make them clone the vector template.
+      LUPIN_TEST_DB_USER: ${LUPIN_TEST_DB_USER:-lupin_test}
+      LUPIN_TEST_DB_PASSWORD: ${LUPIN_TEST_DB_PASSWORD:-}
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS"
       # JWT signing secret (row adce3547 / bug 8df98a96, 2026-08-18). REQUIRED, and
       # `:?` rather than a default for a reason. HISTORY, because it explains the shape:
@@ -261,6 +278,27 @@ services:
       # (setgid, NOT chown 1001 — that mount comment says why, with the measurement.)
       # ⚠️ Env resolves at container CREATE: needs `up -d --force-recreate`.
       LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
+      # git safe.directory for every external-project bind (row 31344c5f, 2026-09-30).
+      # The container runs as uid 1001 while the host owner differs, so git answers
+      # "dubious ownership" and receipt commits read as "not found". Set per mount via
+      # git's env config, which — unlike `git config --global` run in the container —
+      # survives a recreate. KEEP IN STEP with the external-projects binds above (a unit
+      # test compares the two). ⚠️ Env resolves at container CREATE: --force-recreate.
+      GIT_CONFIG_COUNT: "7"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /var/external-projects/lupin
+      GIT_CONFIG_KEY_1: safe.directory
+      GIT_CONFIG_VALUE_1: /var/external-projects/planning-is-prompting
+      GIT_CONFIG_KEY_2: safe.directory
+      GIT_CONFIG_VALUE_2: /var/external-projects/google/weil-parallel-search
+      GIT_CONFIG_KEY_3: safe.directory
+      GIT_CONFIG_VALUE_3: /var/external-projects/google/weil-nda-drafting-suite
+      GIT_CONFIG_KEY_4: safe.directory
+      GIT_CONFIG_VALUE_4: /var/external-projects/google/parallel-search
+      GIT_CONFIG_KEY_5: safe.directory
+      GIT_CONFIG_VALUE_5: /var/external-projects/google/mcp-and-a2ui-apps
+      GIT_CONFIG_KEY_6: safe.directory
+      GIT_CONFIG_VALUE_6: /var/external-projects/google/weil-ge-mcp-server
       # ── THE ENV SWITCH ─────────────────────────────────────────────────────
       # Cloud Run model-server URL. The provider resolvers read this env var
       # FIRST (before the INI `model server url` key), so flipping local→cloud
@@ -283,13 +321,32 @@ services:
       # (terraform/envs/test/main.tf). The client sends what this names; the
       # server hashes what Terraform mounts. If they disagree, every request 401s
       # for the instance's whole life while the boot log still reads healthy.
-      # src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+      # Decision record: src/docs/decisions/2026.05.16-model-server-carveout.md (rule 5, the key names)
       LUPIN_MODEL_SERVER_API_KEY_NAME: model-server-api
 
       # NOTE: LUPIN_MODEL_SERVER_API_KEY_FILE removed (finding #7) — no code reads
       # it and it named the wrong key file (lupin-model-server-auth). The 3 other
       # compose files still carry the dead var (out of this remediation's scope).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Claude Code in this container calls Claude on Vertex AI Model Garden, not an Anthropic
+      # login (row d3550878, Rick's ruling 2026-10-26 "Switch to Model Garden"). Before this,
+      # every claude_code job here answered "Not logged in · Please run /login".
+      #   · region: `global` is the only certified one (cosa.utils.vertex_env; us-central1 and
+      #     us-east5 do not serve). It is Vertex's region, not LUPIN_GCP_REGION (Cloud Run).
+      #   · project: from the env file, never a literal. `:?` aborts `up` if it is missing.
+      #   · credentials: Application Default Credentials from the VM's service account through
+      #     the GCE metadata server; the account needs roles/aiplatform.user and a cloud-platform
+      #     scope. Dev services deliberately do NOT set these (the Max plan covers them).
+      # ⚠️ Env resolves at container CREATE: needs `up -d --no-deps --force-recreate lupin-rest`.
+      CLAUDE_CODE_USE_VERTEX: "1"
+      CLOUD_ML_REGION: ${LUPIN_VERTEX_REGION:-global}
+      ANTHROPIC_VERTEX_PROJECT_ID: ${LUPIN_GCP_PROJECT_ID:?set LUPIN_GCP_PROJECT_ID in the host env file (row d3550878)}
+      # Model pins (row 3ed25e12). Without them Claude Code's sonnet alias resolves to an id this
+      # Vertex deployment does not serve (404). The values are vertex_env.MODEL_PINS; a unit test in
+      # tests/unit/deploy fails if they drift. No ANTHROPIC_MODEL here: it would override the pins.
+      ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-4-8
+      ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-5-5
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-sonnet-5-5
       PYTHONUNBUFFERED: "1"
       # bug b39c350d — this service bind-mounts `./src:/var/lupin/src` (line 100), so the VM's
       # on-disk `src/**/__pycache__` is shared between the container (repo root /var/lupin) and

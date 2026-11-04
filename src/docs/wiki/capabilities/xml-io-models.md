@@ -1,0 +1,40 @@
+---
+capability: xml-io-models
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pins:
+  - cosa.agents.io_models.utils.util_xml_pydantic.BaseXMLModel@887c5745e8
+  - cosa.agents.io_models.utils.util_xml_pydantic.BaseXMLModel.from_xml@ca0234c9fa
+  - cosa.agents.io_models.utils.util_xml_pydantic.XMLParsingError@ee5156e1fc
+  - cosa.agents.io_models.utils.xml_parser_factory.XmlParserFactory.parse_agent_response@254bd01546
+  - cosa.agents.io_models.utils.xml_parser_factory.PydanticXmlParser.parse_xml_response@e49c7ce400
+  - cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor@01f5a736f5
+  - cosa.agents.io_models.xml_models.CodeResponse@c81386e483
+  - cosa.agents.io_models.utils.json_object_recovery.recover_json_object@7c795037c9
+  - cosa.agents.io_models.utils.json_object_recovery.save_raw_response@c4033ec0f4
+  - cosa.agents.io_models.utils.json_object_recovery.extract_json_object@d7acf5ea59
+  - cosa.agents.io_models.utils.fuzzy_file_prefilter.prefilter_docs_map_by_keywords@ea791b6269
+---
+# XML models and JSON recovery
+
+Agents ask a model for XML, and `BaseXMLModel` subclasses turn the reply into validated fields. The JSON helper does the same job for the generators that ask for JSON.
+
+## What it does
+- `BaseXMLModel.from_xml( text )` parses, `to_xml()` writes (it leaves out `None` fields). The shared models are in `io_models/xml_models.py`. Nine other packages keep their own `xml_models.py` (calculator, decision_proxy, dm_compression, dm_quality_judge (also `xml_models_v2.py`), dm_tutor, notification_proxy, prediction_engine, runtime_argument_expeditor, crud_for_dataframes), and `lupin_mcp/commons_xml_models.py` is one more.
+- `XmlParserFactory.parse_agent_response( xml, routing_command, tag_names )` is the entry point. `PydanticXmlParser` maps a routing command such as `agent router go to math` to a model class and returns `model_dump()` (fields use underscores, `rephrased_answer` for `<rephrased-answer>`).
+- `PromptTemplateProcessor` fills the XML example in a prompt from each model's `get_example_for_template()`, from its own command-to-model map.
+- `CodeResponse` is the shared code-generation reply, built on `CodeLinesMixin`. The mixins and the tag extractor are on [[xml-model-mixins]]. `recover_json_object( text )` pulls a JSON value out of a chatty reply. The podcast script parser and the podcast API client raise `ValueError` on `None`. So do the presentation generator's four callers (outline, narrative, elaboration, API client). The podcast analysis parser does not: it returns a default analysis dict.
+- `prefilter_docs_map_by_keywords` narrows a path map to the best 50 before an LLM picks a file. Its one production caller is the runtime-argument expeditor; the podcast router function its docstring names, `match_research_docs`, is defined nowhere in `src`.
+
+## Invariants
+- `from_xml` cuts text before `<?xml`, or else before `<response>`, `<result>` or `<output>` (tried in that order). It also cuts after a closing tag, trying `</response>`, `</result>` and `</output>` in that order. The cut is after the first occurrence of the first one present anywhere in the text (not the earliest closing tag). It escapes a bare `&`, keeps whitespace so code indentation survives, and raises `XMLParsingError` for bad XML and for validation failures alike.
+- `PydanticXmlParser.parse_xml_response` (reached through `XmlParserFactory.parse_agent_response`, not `from_xml`) raises `ValueError` for a routing command with no entry in its model map; there is no default model.
+- `recover_json_object` never raises. It returns `None` after logging a bounded copy of the raw body at `ERROR` (over 4,000 characters, the head and tail 2,000 each). If the text starts with a code fence it drops that line. It cuts at the last triple-backtick it finds (`rfind`), whichever fence that is. It then tries the whole text, then the last balanced `{...}`. Last it retries with the quotes of each bare `<break time="1.5s"/>` tag escaped.
+- A caller that passes `label=` also gets the full raw reply saved by `save_raw_response` to `io/json-recovery-failures/<day>/<time>-<label>.txt` (gitignored). The `ERROR` log names that path beside the bounded body, and `dump_info[ "path" ]` returns it. Without a label nothing is written. Only the podcast script parser passes one, with the podcast id. The podcast orchestrator retries script generation once when `parse_script_response` raises `ValueError`, after a low-priority progress note. A second failure raises `PodcastGenerationError` with the saved-file path in its message.
+- It repairs two things: unescaped `\n`, `\r` and `\t` inside strings, and the quotes of a bare `<break time="x.xs"/>` tag. Any other control character, bare quote or structural error stays a failure.
+
+## How to extend
+- Subclass `BaseXMLModel`, add it to `PydanticXmlParser.agent_model_map` and to `PromptTemplateProcessor.MODEL_MAPPING`; they are two separate maps.
+
+## Don't
+- Don't treat `None` from `recover_json_object` as an empty result; the caller must decide to fail.
+- Don't assume Deep Research uses this helper: it keeps its own `extract_json_object`, which returns a `dict`, where the shared one returns the substring.

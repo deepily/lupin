@@ -44,6 +44,8 @@ import {
   type AccordionCollapseStore,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { teardownScaffold } from "./dom";
+import { formatClock } from "./time";
 
 /**
  * The accordion id this pane persists its collapse under.
@@ -73,6 +75,11 @@ export const FINISHED_SENTINELS = Object.freeze( {
   partial    : "⚠️ Partial result — at least one status failed to load. The rows below are incomplete.",
 } );
 
+/**
+ * The slice of the finished-tasks store the renderer uses.
+ *
+ * It is the events, the measured statuses, the error, the window and refresh.
+ */
 export interface FinishedTasksStoreLike {
   eventsByStatus(): FinishedEventsByStatus;
   measuredStatuses(): ReadonlyArray<string>;
@@ -82,17 +89,29 @@ export interface FinishedTasksStoreLike {
   refresh(): Promise<void>;
 }
 
+/**
+ * The Finished Tasks pane.
+ *
+ * It shows a count chip, status pills, a window slider and the finished rows.
+ */
 export interface FinishedTasksRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createFinishedTasksRenderer`.
+ *
+ * The bus and the store are required. The clock, storage and view state are optional.
+ */
 export interface FinishedTasksRendererOptions {
   eventBus   : EventBus;
   store      : FinishedTasksStoreLike;
   /** Test injection — the clock for the "updated" stamp and relative ages. */
   nowDateFn? : () => Date;
+  /** The server zone, read at each stamp; UTC (labelled) while it is unset. */
+  appTimezoneFn? : () => string | undefined;
   /**
    * The persistence backend. Defaults to `localStorage`.
    *
@@ -139,10 +158,14 @@ function writeShown( storage: Pick<Storage, "getItem" | "setItem"> | null, shown
   }
 }
 
+/**
+ * Paints the Finished Tasks pane and repaints when the store changes.
+ */
 class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   private readonly bus       : EventBus;
   private readonly store     : FinishedTasksStoreLike;
   private readonly nowDateFn : () => Date;
+  private readonly appTimezoneFn : () => string | undefined;
   private readonly storage   : Pick<Storage, "getItem" | "setItem"> | null;
   private readonly viewState : AccordionCollapseStore | undefined;
   private readonly unsubscribers: Array<() => void> = [];
@@ -160,12 +183,16 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   /** True once a poll has resolved — gates the em dash on the count chip. */
   private measuredOnce = false;
 
+  /**
+   * Builds the renderer from a bus, a store and optional runtime hooks.
+   */
   constructor( opts: FinishedTasksRendererOptions ) {
     this.bus       = opts.eventBus;
     this.store     = opts.store;
     this.viewState = opts.viewState;
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    this.appTimezoneFn = opts.appTimezoneFn ?? ( () => undefined );
     /* c8 ignore start */ // production-default fallback, and it spans three lines — `ignore next` would cover only the first. The browser's localStorage; tests pass a fake, or null for a host that has none.
     this.storage = opts.storage === undefined
       ? ( typeof globalThis.localStorage === "undefined" ? null : globalThis.localStorage )
@@ -173,6 +200,9 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
     /* c8 ignore stop */
   }
 
+  /**
+   * Builds the header, controls and results in the root and renders from the store.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "FinishedTasksRenderer already mounted" );
     this.mounted = true;
@@ -244,17 +274,13 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
     );
   }
 
+  /**
+   * Unsubscribes from events, runs the collapse teardown and empties the root.
+   */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.controls  = null;
     this.countEl   = null;
@@ -263,6 +289,9 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
     this.mounted   = false;
   }
 
+  /**
+   * Repaints from the store now when mounted, so a test need not wait for an event.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }
@@ -404,10 +433,11 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   private stampUpdated(): void {
     /* c8 ignore next */ // defensive: updatedEl is set/nulled in lockstep with container, which the caller already guarded.
     if ( this.updatedEl === null ) return;
-    this.updatedEl.textContent = `updated ${ this.nowDateFn().toLocaleTimeString() }`;
+    this.updatedEl.textContent = `updated ${ formatClock( this.nowDateFn(), this.appTimezoneFn() ) }`;
   }
 }
 
+/** Build the renderer. It paints nothing until `mount()` is called. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFinishedTasksRenderer( opts: FinishedTasksRendererOptions ): FinishedTasksRenderer {
   return new FinishedTasksRendererImpl( opts );

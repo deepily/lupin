@@ -1,16 +1,17 @@
 """
 Keyword pre-filter for fuzzy file matching.
 
-Both the podcast-generator router path (`match_research_docs`) and the
-runtime-argument-expeditor path (`_handle_fuzzy_file_match`) build a
-`{ relative_path -> abs_path }` candidate map and hand it to a local LLM
-(kaitchup/phi_4_14b) to pick the best match. A repo can hold thousands of
-markdown files; sending them all overflows phi-4's 8k context and the request
-fails with HTTP 400 before any description is judged.
+The podcast-generator router path (`match_research_docs`) and the
+runtime-argument-expeditor path (`_handle_fuzzy_file_match`) each build a
+`{ relative_path -> abs_path }` candidate map.
+Each hands that map to a local LLM (kaitchup/phi_4_14b) to pick the best match.
 
-This module is the single, shared narrowing step used by BOTH paths so there
-is one behaviour instead of two: score each candidate path by keyword overlap
-with the user's description and keep only the top matches.
+A repo can hold thousands of markdown files. Sending them all overflows phi-4's 8k context,
+and the request fails with HTTP 400 before any description is judged.
+
+This module is the single narrowing step shared by both paths, so there is one behavior.
+It scores each candidate path by keyword overlap with the user's description.
+It keeps only the top matches.
 """
 
 import cosa.utils.util as cu
@@ -46,7 +47,7 @@ def _extract_keywords( description ):
     Lower-case, split, and drop stopwords + short tokens → a keyword set.
 
     The single tokenizer shared by the prefilter and the deterministic
-    dominant-match check so both narrow on IDENTICAL keyword rules.
+    dominant-match check so both narrow on identical keyword rules.
 
     Requires:
         - description is a string
@@ -77,7 +78,7 @@ def _score_docs_by_keyword_overlap( docs_map, desc_words ):
 
     Ensures:
         - returns a list of ( score, rel_path ) for paths with score > 0,
-          sorted by score DESCENDING
+          sorted by score, highest first
         - returns [] when desc_words is empty or nothing overlaps
         - never mutates docs_map
 
@@ -102,22 +103,18 @@ def _score_docs_by_keyword_overlap( docs_map, desc_words ):
 
 def dominant_keyword_match( docs_map, description ):
     """
-    Return the ONE rel-path whose keyword overlap dominates, else None.
+    Return the single rel-path whose keyword overlap dominates, else None.
 
-    Deterministic pre-empt of the nondeterministic phi-4 pick (row 8e70a34d):
-    at <= MAX_CANDIDATES the prefilter is a pass-through, so today EVERY
-    candidate reaches the LLM and the LLM makes the choice. When exactly one
-    candidate holds a strictly-unique top keyword-overlap score, the description
-    already names that document — resolve it without the model. A TIE at the top
-    is genuine ambiguity: return None and let the LLM decide, exactly as before.
+    Deterministic pre-empt of the nondeterministic phi-4 pick.
+    At <= MAX_CANDIDATES the prefilter is a pass-through, so every candidate reaches the LLM.
 
     Requires:
         - docs_map maps relative_path (str) -> abs_path (str)
         - description is a string
 
     Ensures:
-        - returns a rel_path KEY of docs_map when its overlap score is strictly
-          greater than every other candidate's AND that score > 0
+        - returns a rel_path key of docs_map when its overlap score is strictly
+          greater than every other candidate's and that score > 0
         - returns None on no keyword signal, zero overlap, or a top-score tie
         - never mutates docs_map
 
@@ -127,6 +124,11 @@ def dominant_keyword_match( docs_map, description ):
 
     Returns:
         str or None: the dominant rel_path, or None when ambiguous.
+
+    Notes:
+        - When exactly one candidate holds a strictly unique top keyword-overlap score,
+          the description already names that document, so it is resolved without the model.
+        - A tie at the top is real ambiguity: return None and let the LLM decide.
     """
     scored = _score_docs_by_keyword_overlap( docs_map, _extract_keywords( description ) )
     if not scored: return None
@@ -146,27 +148,27 @@ def prefilter_docs_map_by_keywords( docs_map, description, debug=False ):
 
     Ensures:
         - returns a tuple ( result_map, arbitrary )
-        - result_map's keys are a subset of docs_map's keys and NEVER exceed
-          MAX_CANDIDATES entries — a HARD cap so the candidate list can never
-          overflow the model's context regardless of the description
-        - result_map IS docs_map (same object) exactly when docs_map already
-          holds <= MAX_CANDIDATES entries; such a map is returned UNCHANGED and
+        - result_map's keys are a subset of docs_map's keys and never exceed
+          MAX_CANDIDATES entries (a hard cap, so the candidate list cannot
+          overflow the model's context whatever the description)
+        - result_map is docs_map (same object) exactly when docs_map already
+          holds <= MAX_CANDIDATES entries; such a map is returned unchanged and
           arbitrary is False (a within-budget list is complete, never a guess)
         - on a larger map with keyword overlap, keeps the highest-scoring
-          MAX_CANDIDATES; arbitrary is False ONLY when the whole scored list fit
-          (nothing scored dropped) AND the top overlap score is a genuine
-          multi-token match (>= MIN_TRUSTWORTHY_TOP_SCORE). arbitrary is True when
-          the scored list exceeds MAX_CANDIDATES — a real match may sit past the
-          cut (row c143fd84) — OR when the top score is thin (a single incidental
-          keyword hit): a zero-overlap target could beat a best-of-list-of-one, so
-          the shortlist it was dropped from is not trustworthy (row 888711f0)
-        - on a larger map with NO scoring signal (no usable keywords, or zero
-          keyword overlap), caps to a deterministic sorted MAX_CANDIDATES slice
-          AND sets arbitrary True: the slice is unranked and may not contain the
-          target, so the CALLER must NOT hand it to the model as a shortlist —
-          it should ask the user for an exact path instead. Capping here still
+          MAX_CANDIDATES; arbitrary is False only when the whole scored list fit
+          (nothing scored dropped) and the top overlap score is a genuine
+          multi-token match (>= MIN_TRUSTWORTHY_TOP_SCORE). Arbitrary is True when
+          the scored list exceeds MAX_CANDIDATES, because a real match may sit past
+          the cut, or when the top score is thin (a single incidental keyword hit):
+          a zero-overlap target could beat a best-of-list-of-one, so the shortlist
+          it was dropped from is not trustworthy
+        - on a larger map with no scoring signal (no usable keywords, or zero
+          keyword overlap), caps to a deterministic sorted MAX_CANDIDATES slice and
+          sets arbitrary True: the slice is unranked and may not contain the
+          target, so the caller must not hand it to the model as a shortlist and
+          should ask the user for an exact path instead. Capping here still
           guarantees the no-overflow invariant for any caller that chooses to
-          proceed with disclosure.
+          proceed with disclosure
         - never returns None; never mutates the input
 
     Args:

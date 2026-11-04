@@ -760,6 +760,11 @@ class TestProgressGroupId:
 class TestNotificationItemProgressGroup:
     """Test progress_group_id on NotificationItem and queue."""
 
+    @pytest.fixture( autouse=True )
+    def _configured_zone( self, monkeypatch ):
+        """NotificationItem needs a configured zone; this class is not about it."""
+        monkeypatch.setattr( "cosa.rest.notification_fifo_queue.get_app_timezone", lambda config_mgr: "America/New_York" )
+
     def test_notification_item_stores_progress_group_id( self ):
         """Test that NotificationItem stores progress_group_id."""
         from cosa.rest.notification_fifo_queue import NotificationItem

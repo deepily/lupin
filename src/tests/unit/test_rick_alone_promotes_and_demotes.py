@@ -78,6 +78,7 @@ class _FakeSession:
     def __init__( self, item ):
         self.item  = item
         self.added = [ ]
+        self.info  = { }   # a real Session always has .info; the change notifier parks events there
 
     def add( self, obj ):    self.added.append( obj )
     def flush( self ):       pass

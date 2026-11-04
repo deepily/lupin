@@ -1,0 +1,826 @@
+#!/usr/bin/env python3
+"""
+Tests for the one-for-one re-spin credit under skeleton crew.
+
+With skeleton crew on, no spawn is allowed. The operator ruled that a re-spin, one seat
+reaped and the same persona coming straight back, is allowed. The credit is how the spawn
+path knows a spawn is that case.
+
+Dismissing a seat with its persona named in the re-spin list writes one credit, keyed by the
+manager and the persona. The credit lives fifteen minutes. The launcher spends it atomically,
+so exactly one spawn uses each credit.
+
+A spawn with no credit, a spent credit, an expired credit or another manager's credit is
+refused. With skeleton crew off nothing changes.
+
+Every test writes to tmp_path. The live sessions folder is never touched.
+"""
+import datetime
+import json
+import os
+import subprocess
+import sys
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+_src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
+if _src_path not in sys.path:
+    sys.path.insert( 0, _src_path )
+
+from lupin_mcp import fleet_cap_admission as fca
+from lupin_mcp import fleet_size_cap as fsc
+from lupin_mcp import respin_credit as rc
+from lupin_mcp import session_spawner as ss
+from lupin_mcp import skeleton_crew as sc
+
+
+NOW         = datetime.datetime( 2026, 10, 10, 17, 0, 0, tzinfo=datetime.timezone.utc )
+SPAWN_TEXT  = sc.refusal_text( "spawn" )
+LAUNCH_TEXT = sc.refusal_text( "launch" )
+
+_REAL_SESSION_IS_LIVE = rc._session_is_live
+
+
+@pytest.fixture
+def folder( tmp_path, monkeypatch ):
+    target = tmp_path / "credits"
+    monkeypatch.setenv( rc.CREDIT_DIR_ENV, str( target ) )
+    monkeypatch.setattr( rc, "_session_is_live", lambda name: False )
+    return target
+
+
+class _Config:
+    def __init__( self, on ):
+        self._on = on
+
+    def get( self, key, default=None, return_type=None, silent=False ):
+        values = { fsc.FLEET_CAP_KEY: 15, fsc.FLEET_CEILING_KEY: 18, sc.SKELETON_CREW_KEY: self._on }
+        return values.get( key, default )
+
+
+# ── the credit itself ────────────────────────────────────────────────────────
+
+def test_mint_writes_one_credit_per_persona_and_names_who_and_when( folder ):
+    assert rc.mint( "mgr-1", [ "tiffany", "cheech" ], now=NOW ) == [ "tiffany", "cheech" ]
+    record = json.loads( ( folder / "mgr-1.tiffany.json" ).read_text( encoding="utf-8" ) )
+    assert record[ "manager_session_id" ] == "mgr-1"
+    assert record[ "persona_slug" ]       == "tiffany"
+    assert record[ "minted_ts" ]          == NOW.timestamp()
+    assert sorted( os.listdir( folder ) ) == [ "mgr-1.cheech.json", "mgr-1.tiffany.json" ]
+
+
+def test_a_fresh_credit_is_found_for_its_manager_and_persona( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.find( "mgr-1", "tiffany", now=NOW + datetime.timedelta( seconds=60 ) ) is not None
+
+
+def test_no_credit_is_not_found( folder ):
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+
+
+def test_another_managers_credit_is_not_found_or_spent( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.find( "mgr-2", "tiffany", now=NOW ) is None
+    assert rc.spend( "mgr-2", "tiffany", now=NOW ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is not None
+
+
+def test_another_personas_credit_is_not_found( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.find( "mgr-1", "cheech", now=NOW ) is None
+
+
+def test_an_expired_credit_is_not_found_or_spent( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    late = NOW + datetime.timedelta( seconds=rc.CREDIT_TTL_SECONDS + 1 )
+    assert rc.find( "mgr-1", "tiffany", now=late ) is None
+    assert rc.spend( "mgr-1", "tiffany", now=late ) is False
+
+
+def test_the_credit_lives_exactly_fifteen_minutes():
+    assert rc.CREDIT_TTL_SECONDS == 900
+
+
+def test_a_credit_is_spent_once( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is True
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+
+
+def test_two_launches_cannot_share_one_credit( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    gate    = threading.Barrier( 8 )
+    results = []
+    def launch():
+        gate.wait()
+        results.append( rc.spend( "mgr-1", "tiffany", now=NOW ) )
+    workers = [ threading.Thread( target=launch ) for _ in range( 8 ) ]
+    for worker in workers: worker.start()
+    for worker in workers: worker.join( timeout=10 )
+    assert results.count( True ) == 1
+    assert results.count( False ) == 7
+
+
+def test_a_garbled_credit_file_is_not_a_credit( folder ):
+    folder.mkdir( parents=True )
+    ( folder / "mgr-1.tiffany.json" ).write_text( "{not json", encoding="utf-8" )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+
+
+def test_a_name_that_could_climb_out_of_the_folder_is_refused( folder ):
+    assert rc.mint( "../mgr", [ "tiffany" ], now=NOW ) == []
+    assert rc.mint( "mgr-1", [ "../x" ], now=NOW ) == []
+    assert rc.find( "../mgr", "tiffany", now=NOW ) is None
+    assert rc.spend( "mgr-1", "a/b", now=NOW ) is False
+    assert not folder.exists() or os.listdir( folder ) == []
+
+
+def test_the_default_folder_is_beside_the_launch_reservations( monkeypatch ):
+    monkeypatch.delenv( rc.CREDIT_DIR_ENV, raising=False )
+    assert Path( rc.credit_dir() ).parent == fca.reservation_dir()
+
+
+# ── what counts as a re-spin ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize( "preference, seed, count, expected", [
+    ( "Tiffany",            "/m.md", 1, "tiffany" ),
+    ( [ "Tiffany" ],        "/m.md", 1, "tiffany" ),
+    ( '["Tiffany"]',        "/m.md", 1, "tiffany" ),
+    ( "Mr. Radio",          "/m.md", 1, "mr-radio" ),
+    ( "Tiffany",            None,    1, None ),
+    ( "Tiffany",            "",      1, None ),
+    ( "Tiffany",            "/m.md", 2, None ),
+    ( "*",                  "/m.md", 1, None ),
+    ( [ "Tiffany", "*" ],   "/m.md", 1, None ),
+    ( [ "Tiffany", "Rio" ], "/m.md", 1, None ),
+    ( None,                 "/m.md", 1, None ),
+    ( "   ",                "/m.md", 1, None ),
+] )
+def test_only_one_named_persona_with_a_memento_and_one_child_is_a_re_spin( preference, seed, count, expected ):
+    assert rc.respin_slug( preference, seed, count ) == expected
+
+
+def test_the_launcher_value_round_trips():
+    value = rc.env_value( "mgr-1", "tiffany" )
+    assert rc.parse_env_value( value ) == ( "mgr-1", "tiffany" )
+
+
+@pytest.mark.parametrize( "garbage", [ None, "", "no-colon", ":x", "x:", "a:b:c" ] )
+def test_a_malformed_launcher_value_is_nothing( garbage ):
+    assert rc.parse_env_value( garbage ) is None
+
+
+# ── the early gate ───────────────────────────────────────────────────────────
+
+def test_the_early_gate_lets_a_credited_re_spin_through_with_the_switch_on():
+    refusal = ss.default_fleet_gate( 1, config_fn=lambda: _Config( True ), census_fn=lambda: [],
+                                     respin_credit_fn=lambda: True )
+    assert refusal is None
+
+
+def test_the_early_gate_refuses_without_a_credit_with_the_switch_on():
+    refusal = ss.default_fleet_gate( 1, config_fn=lambda: _Config( True ), census_fn=lambda: [],
+                                     respin_credit_fn=lambda: False )
+    assert refusal == SPAWN_TEXT
+
+
+def test_the_credit_still_meets_the_cap():
+    sessions = [ ( f"/tmp/b{i}.json", f"s{i}", f"p{i}" ) for i in range( 15 ) ]
+    refusal  = ss.default_fleet_gate( 1, config_fn=lambda: _Config( True ), census_fn=lambda: sessions,
+                                      respin_credit_fn=lambda: True )
+    assert refusal is not None and "FLEET CAP REFUSED" in refusal
+
+
+def test_with_the_switch_off_the_credit_is_not_asked_for():
+    asked = []
+    refusal = ss.default_fleet_gate( 1, config_fn=lambda: _Config( False ), census_fn=lambda: [],
+                                     respin_credit_fn=lambda: asked.append( 1 ) or True )
+    assert refusal is None
+    assert asked == []
+
+
+def test_a_credit_check_that_raises_means_no_credit():
+    def boom():
+        raise OSError( "cannot read" )
+    refusal = ss.default_fleet_gate( 1, config_fn=lambda: _Config( True ), census_fn=lambda: [],
+                                     respin_credit_fn=boom )
+    assert refusal == SPAWN_TEXT
+
+
+# ── the spawn tool end to end ────────────────────────────────────────────────
+
+def _spawn( tmp_path, *, on, preference="Tiffany", seed="/m.md", count=1, manager="mgr-1" ):
+    started = []
+    def runner( argv, env=None ):
+        started.append( env )
+        return SimpleNamespace( returncode=0, stdout="", stderr="" )
+    result = ss.spawn_sessions(
+        count, "brief", manager, script_path="/nonexistent", runner=runner, session_dir=tmp_path,
+        persona_preference=preference, seed_memento=seed, spawn_cap=8,
+        fleet_config_fn=lambda: _Config( on ), fleet_census_fn=lambda: [] )
+    return result, started
+
+
+def test_a_credited_re_spin_spawns_and_hands_the_credit_to_the_launcher( tmp_path, folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    result, started = _spawn( tmp_path, on=True )
+    assert len( started ) == 1
+    assert started[ 0 ][ rc.CREDIT_ENV ] == "mgr-1:tiffany"
+
+
+def test_a_re_spin_without_a_credit_is_refused_and_starts_nothing( tmp_path, folder ):
+    with pytest.raises( ValueError ) as raised:
+        _spawn( tmp_path, on=True )
+    assert str( raised.value ) == SPAWN_TEXT
+
+
+def test_another_managers_credit_does_not_help( tmp_path, folder ):
+    rc.mint( "mgr-2", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    with pytest.raises( ValueError ):
+        _spawn( tmp_path, on=True )
+
+
+def test_an_expired_credit_does_not_help( tmp_path, folder ):
+    old = datetime.datetime.now( datetime.timezone.utc ) - datetime.timedelta( seconds=rc.CREDIT_TTL_SECONDS + 5 )
+    rc.mint( "mgr-1", [ "tiffany" ], now=old )
+    with pytest.raises( ValueError ):
+        _spawn( tmp_path, on=True )
+
+
+def test_a_spent_credit_does_not_help( tmp_path, folder ):
+    now = datetime.datetime.now( datetime.timezone.utc )
+    rc.mint( "mgr-1", [ "tiffany" ], now=now )
+    assert rc.spend( "mgr-1", "tiffany", now=now ) is True
+    with pytest.raises( ValueError ):
+        _spawn( tmp_path, on=True )
+
+
+def test_a_credit_for_one_persona_does_not_cover_a_batch_of_two( tmp_path, folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    with pytest.raises( ValueError ):
+        _spawn( tmp_path, on=True, count=2 )
+
+
+def test_with_the_switch_off_a_plain_spawn_is_unchanged_and_carries_no_credit( tmp_path, folder ):
+    result, started = _spawn( tmp_path, on=False, preference=None, seed=None )
+    assert len( started ) == 1
+    assert rc.CREDIT_ENV not in started[ 0 ]
+
+
+def test_a_re_spin_with_the_switch_off_carries_no_credit_and_spends_nothing( tmp_path, folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    result, started = _spawn( tmp_path, on=False )
+    assert len( started ) == 1
+    assert rc.find( "mgr-1", "tiffany" ) is not None
+
+
+# ── the launcher ─────────────────────────────────────────────────────────────
+
+class _Capture:
+    def __init__( self ): self.text = ""
+    def write( self, chunk ): self.text += chunk
+
+
+def _main( environ, spend, skeleton=lambda: LAUNCH_TEXT ):
+    err   = _Capture()
+    calls = []
+    code  = fca.main(
+        [ "--session-name", "cc-a", "--headless" ],
+        admit_fn        = lambda name, **kw: calls.append( name ) or { "admitted": True },
+        dir_fn          = lambda: "/tmp",
+        stderr          = err,
+        skeleton_fn     = skeleton,
+        stdin_is_tty_fn = lambda: False,
+        environ         = environ,
+        credit_spend_fn = spend )
+    return code, err.text, calls
+
+
+def test_the_launcher_spends_the_credit_and_lets_the_re_spin_launch():
+    spent = []
+    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s, n=None: spent.append( ( m, s ) ) or True )
+    assert code == fca.EXIT_ADMITTED
+    assert spent == [ ( "mgr-1", "tiffany" ) ]
+    assert calls == [ "cc-a" ]
+
+
+def test_the_launcher_refuses_when_the_credit_cannot_be_spent():
+    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s, n=None: False )
+    assert code == fca.EXIT_REFUSED
+    assert LAUNCH_TEXT in err
+    assert calls == []
+
+
+def test_the_launcher_refuses_without_a_credit_and_never_tries_to_spend():
+    spent = []
+    code, err, calls = _main( {}, lambda m, s, n=None: spent.append( 1 ) or True )
+    assert code == fca.EXIT_REFUSED
+    assert spent == []
+
+
+def test_the_launcher_refuses_a_malformed_credit_value():
+    code, err, calls = _main( { rc.CREDIT_ENV: "garbage" }, lambda m, s, n=None: True )
+    assert code == fca.EXIT_REFUSED
+
+
+def test_the_launcher_does_not_touch_the_credit_when_the_switch_is_off():
+    spent = []
+    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s, n=None: spent.append( 1 ) or True,
+                              skeleton=lambda: None )
+    assert code == fca.EXIT_ADMITTED
+    assert spent == []
+
+
+def test_a_credit_spend_that_raises_refuses_the_launch():
+    def boom( manager, slug, session_name=None ):
+        raise OSError( "folder gone" )
+    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, boom )
+    assert code == fca.EXIT_REFUSED
+
+
+def test_the_default_launcher_spend_uses_the_real_credit_folder( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    err  = _Capture()
+    code = fca.main( [ "--session-name", "cc-a", "--headless" ],
+                     admit_fn=lambda name, **kw: { "admitted": True }, dir_fn=lambda: "/tmp", stderr=err,
+                     skeleton_fn=lambda: LAUNCH_TEXT, stdin_is_tty_fn=lambda: False,
+                     environ={ rc.CREDIT_ENV: "mgr-1:tiffany" } )
+    assert code == fca.EXIT_ADMITTED
+    assert rc.find( "mgr-1", "tiffany" ) is None
+
+
+# ── dismissal writes the credit ──────────────────────────────────────────────
+
+_OK_RUNNER = lambda argv, env=None: SimpleNamespace( returncode=0 )
+
+
+def _reap( tmp_path, respin ):
+    sd  = Path( tmp_path )
+    mgr = "mgr-abc12345"
+    ss._write_manifest( ss._manifest_path( mgr, sd ), [ { "session_name": "cc-author-x-1", "session_id": "sid-1" } ] )
+    ( sd / "cc-99999.json" ).write_text( json.dumps( {
+        "tmux_session"      : "cc-author-x-1",
+        "stable_session_id" : "abcd1234-aaaa-bbbb",
+        "voice_persona"     : { "name": "Tiffany", "icon": "💍", "color": "#FFD600" },
+    } ) )
+    result = ss.dismiss_sessions(
+        mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+        emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+        clear_hold_fn=lambda i: True, respin_personas=respin )
+    return mgr, result
+
+
+def test_dismissing_a_re_spin_persona_writes_its_credit( tmp_path, folder ):
+    mgr, result = _reap( tmp_path, [ "Tiffany" ] )
+    assert result[ "respin_credits_minted" ] == [ "tiffany" ]
+    assert rc.find( mgr, "tiffany" ) is not None
+
+
+def test_dismissing_without_a_re_spin_list_writes_no_credit( tmp_path, folder ):
+    mgr, result = _reap( tmp_path, None )
+    assert result[ "respin_credits_minted" ] == []
+    assert rc.find( mgr, "tiffany" ) is None
+
+
+def test_a_name_that_matched_no_reaped_persona_writes_no_credit( tmp_path, folder ):
+    mgr, result = _reap( tmp_path, [ "Nobody" ] )
+    assert result[ "respin_credits_minted" ] == []
+
+
+def test_a_credit_folder_that_cannot_be_written_never_breaks_the_reap( tmp_path, monkeypatch ):
+    blocker = tmp_path / "file"
+    blocker.write_text( "x", encoding="utf-8" )
+    monkeypatch.setenv( rc.CREDIT_DIR_ENV, str( blocker / "inside" ) )
+    mgr, result = _reap( tmp_path, [ "Tiffany" ] )
+    assert result[ "bridges_deleted" ] == 1
+    assert result[ "respin_credits_minted" ] == []
+
+
+# ── a credit with a minted time that cannot be trusted never lives ───────────
+
+def _plant( folder, minted ):
+    folder.mkdir( parents=True, exist_ok=True )
+    ( folder / "mgr-1.tiffany.json" ).write_text(
+        json.dumps( { "manager_session_id": "mgr-1", "persona_slug": "tiffany", "minted_ts": minted } ),
+        encoding="utf-8" )
+
+
+@pytest.mark.parametrize( "minted", [
+    "abc", None, True, [ 1 ], { "t": 1 }, float( "nan" ), float( "inf" ), float( "-inf" ),
+    NOW.timestamp() + 60, NOW.timestamp() + 10 ** 9,
+] )
+def test_a_minted_time_that_is_not_a_past_number_is_expired_and_unspendable( folder, minted ):
+    _plant( folder, minted )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+    assert ( folder / "mgr-1.tiffany.json" ).exists()
+
+
+def test_a_credit_minted_this_instant_is_still_good( folder ):
+    _plant( folder, NOW.timestamp() )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is not None
+
+
+# ── a credit is minted only for a seat this dismissal actually killed ────────
+
+def _reap_with( tmp_path, runner, respin ):
+    sd  = Path( tmp_path )
+    mgr = "mgr-abc12345"
+    ss._write_manifest( ss._manifest_path( mgr, sd ), [ { "session_name": "cc-author-x-1", "session_id": "sid-1" } ] )
+    ( sd / "cc-99999.json" ).write_text( json.dumps( {
+        "tmux_session"      : "cc-author-x-1",
+        "stable_session_id" : "abcd1234-aaaa-bbbb",
+        "voice_persona"     : { "name": "Tiffany", "icon": "💍", "color": "#FFD600" },
+    } ) )
+    result = ss.dismiss_sessions(
+        mgr, session_names=[ "cc-author-x-1" ], runner=runner, session_dir=sd,
+        emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+        clear_hold_fn=lambda i: True, respin_personas=respin )
+    return mgr, result
+
+
+def test_a_seat_that_was_already_gone_earns_no_credit( tmp_path, folder ):
+    gone = lambda argv, env=None: SimpleNamespace( returncode=1 )
+    mgr, result = _reap_with( tmp_path, gone, [ "Tiffany" ] )
+    assert result[ "dismissed" ][ 0 ][ "status" ] == "already_gone"
+    assert result[ "respin_credits_minted" ] == []
+    assert rc.find( mgr, "tiffany" ) is None
+
+
+def test_a_seat_this_dismissal_killed_earns_its_credit( tmp_path, folder ):
+    killed = lambda argv, env=None: SimpleNamespace( returncode=0 )
+    mgr, result = _reap_with( tmp_path, killed, [ "Tiffany" ] )
+    assert result[ "dismissed" ][ 0 ][ "status" ] == "killed"
+    assert result[ "respin_credits_minted" ] == [ "tiffany" ]
+    assert rc.find( mgr, "tiffany" ) is not None
+
+
+def test_an_already_gone_seat_still_keeps_its_rows_through_a_re_spin( tmp_path, folder ):
+    gone = lambda argv, env=None: SimpleNamespace( returncode=1 )
+    mgr, result = _reap_with( tmp_path, gone, [ "Tiffany" ] )
+    assert result[ "retained_owner_personas" ] == [ "tiffany" ]
+
+
+# ── a launch that fails after the credit was taken gives it back ─────────────
+
+def test_a_claimed_credit_is_unspendable_until_it_is_restored( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" ) is True
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert rc.restore( "cc-new-1", now=NOW ) is True
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is not None
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is True
+
+
+def test_a_restored_credit_keeps_its_original_clock( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    late = NOW + datetime.timedelta( seconds=rc.CREDIT_TTL_SECONDS + 1 )
+    assert rc.restore( "cc-new-1", now=late ) is False
+    assert rc.find( "mgr-1", "tiffany", now=late ) is None
+
+
+def test_restoring_a_name_nothing_claimed_is_false( folder ):
+    assert rc.restore( "cc-never-claimed", now=NOW ) is False
+    assert rc.restore( "../x", now=NOW ) is False
+
+
+def test_a_claim_never_overwrites_a_newer_credit( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    newer = NOW + datetime.timedelta( seconds=30 )
+    rc.mint( "mgr-1", [ "tiffany" ], now=newer )
+    assert rc.restore( "cc-new-1", now=newer ) is False
+    record = rc.find( "mgr-1", "tiffany", now=newer )
+    assert record[ "minted_ts" ] == newer.timestamp()
+
+
+def test_a_second_restore_is_false( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    assert rc.restore( "cc-new-1", now=NOW ) is True
+    assert rc.restore( "cc-new-1", now=NOW ) is False
+
+
+def test_a_spend_with_an_unsafe_session_name_still_spends_once( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name="a/b" ) is True
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name="a/b" ) is False
+
+
+def test_old_claims_are_swept_when_the_next_credit_is_minted( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    later = NOW + datetime.timedelta( seconds=rc.CREDIT_TTL_SECONDS * 3 )
+    rc.mint( "mgr-2", [ "cheech" ], now=later )
+    assert [ n for n in os.listdir( folder ) if n.startswith( rc.CLAIM_PREFIX ) ] == []
+
+
+def test_the_launcher_gives_the_credit_back_when_the_session_never_starts( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    err  = _Capture()
+    base = dict( admit_fn=lambda name, **kw: { "admitted": True }, dir_fn=lambda: "/tmp", stderr=err,
+                 skeleton_fn=lambda: LAUNCH_TEXT, stdin_is_tty_fn=lambda: False,
+                 environ={ rc.CREDIT_ENV: "mgr-1:tiffany" } )
+    code = fca.main( [ "--session-name", "cc-new-1", "--headless" ], **base )
+    assert code == fca.EXIT_ADMITTED
+    assert rc.find( "mgr-1", "tiffany" ) is None
+    code = fca.main( [ "--session-name", "cc-new-1", "--release" ], release_fn=lambda n, d: None, **base )
+    assert code == fca.EXIT_ADMITTED
+    assert rc.find( "mgr-1", "tiffany" ) is not None
+
+
+def test_a_launch_that_started_keeps_the_credit_spent( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    err  = _Capture()
+    fca.main( [ "--session-name", "cc-new-1", "--headless" ],
+              admit_fn=lambda name, **kw: { "admitted": True }, dir_fn=lambda: "/tmp", stderr=err,
+              skeleton_fn=lambda: LAUNCH_TEXT, stdin_is_tty_fn=lambda: False,
+              environ={ rc.CREDIT_ENV: "mgr-1:tiffany" } )
+    assert rc.find( "mgr-1", "tiffany" ) is None
+    assert rc.restore( "cc-other-2" ) is False
+
+
+def test_a_restore_that_fails_never_breaks_the_release( folder ):
+    err = _Capture()
+    def boom( session_name ):
+        raise OSError( "folder gone" )
+    code = fca.main( [ "--session-name", "cc-new-1", "--release" ], release_fn=lambda n, d: None,
+                     dir_fn=lambda: "/tmp", stderr=err, credit_restore_fn=boom )
+    assert code == fca.EXIT_ADMITTED
+
+
+def test_the_credit_is_not_tied_to_the_session_name_the_launcher_is_given( folder ):
+    assert "not tied to the session name" in " ".join( ( rc.__doc__ or "" ).split() )
+
+
+def test_a_claim_with_an_unreadable_minted_time_is_swept_by_the_files_own_age( folder ):
+    folder.mkdir( parents=True, exist_ok=True )
+    stale = folder / f"{rc.CLAIM_PREFIX}cc-old-1.json"
+    stale.write_text( "{not json", encoding="utf-8" )
+    old = NOW.timestamp() - rc.CREDIT_TTL_SECONDS * 3
+    os.utime( stale, ( old, old ) )
+    fresh = folder / f"{rc.CLAIM_PREFIX}cc-new-2.json"
+    fresh.write_text( json.dumps( { "minted_ts": "later" } ), encoding="utf-8" )
+    os.utime( fresh, ( NOW.timestamp(), NOW.timestamp() ) )
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_the_sweep_survives_a_missing_folder( folder ):
+    rc._sweep_claims( NOW )
+
+
+# ── the filesystem losing a race never raises ────────────────────────────────
+
+def test_a_spend_that_loses_the_unlink_race_is_false( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    def lost( path ):
+        raise FileNotFoundError( path )
+    monkeypatch.setattr( rc.os, "unlink", lost )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+
+
+def test_a_claim_that_loses_the_rename_race_is_false( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    def lost( src, dst ):
+        raise FileNotFoundError( src )
+    monkeypatch.setattr( rc.os, "rename", lost )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" ) is False
+
+
+def test_a_restore_that_loses_the_rename_is_false( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    def lost( src, dst ):
+        raise OSError( "gone" )
+    monkeypatch.setattr( rc.os, "rename", lost )
+    assert rc.restore( "cc-new-1", now=NOW ) is False
+
+
+def test_a_sweep_that_cannot_remove_or_stat_a_claim_moves_on( folder, monkeypatch ):
+    folder.mkdir( parents=True, exist_ok=True )
+    stale = folder / f"{rc.CLAIM_PREFIX}cc-old-1.json"
+    stale.write_text( json.dumps( { "minted_ts": 1.0 } ), encoding="utf-8" )
+    def cannot( path ):
+        raise OSError( "busy" )
+    monkeypatch.setattr( rc.os, "unlink", cannot )
+    rc._sweep_claims( NOW )
+    assert stale.exists()
+    broken = folder / f"{rc.CLAIM_PREFIX}cc-old-2.json"
+    broken.write_text( "{not json", encoding="utf-8" )
+    monkeypatch.setattr( rc.os.path, "getmtime", cannot )
+    rc._sweep_claims( NOW )
+    assert broken.exists()
+
+
+def test_a_credit_file_that_holds_a_list_or_names_another_manager_is_not_a_credit( folder ):
+    folder.mkdir( parents=True, exist_ok=True )
+    ( folder / "mgr-1.tiffany.json" ).write_text( "[1, 2]", encoding="utf-8" )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    ( folder / "mgr-1.tiffany.json" ).write_text(
+        json.dumps( { "manager_session_id": "mgr-2", "persona_slug": "tiffany", "minted_ts": NOW.timestamp() } ),
+        encoding="utf-8" )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+
+
+# ── a restore never hands a credit to a seat that is running ─────────────────
+
+def test_a_restore_refuses_when_the_session_is_live_and_the_claim_is_spent_for_good( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    assert rc.restore( "cc-new-1", now=NOW, live_fn=lambda name: name == "cc-new-1" ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert not ( folder / f"{rc.CLAIM_PREFIX}cc-new-1.json" ).exists()
+    assert rc.restore( "cc-new-1", now=NOW, live_fn=lambda name: False ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+
+
+def test_a_restore_for_a_session_that_never_started_still_gives_the_credit_back( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    assert rc.restore( "cc-new-1", now=NOW, live_fn=lambda name: False ) is True
+
+
+def test_a_live_seat_cannot_buy_a_second_seat_through_release( folder, monkeypatch ):
+    now = datetime.datetime.now( datetime.timezone.utc )
+    rc.mint( "mgr-1", [ "tiffany" ], now=now )
+    err  = _Capture()
+    base = dict( admit_fn=lambda name, **kw: { "admitted": True }, dir_fn=lambda: "/tmp", stderr=err,
+                 skeleton_fn=lambda: LAUNCH_TEXT, stdin_is_tty_fn=lambda: False,
+                 environ={ rc.CREDIT_ENV: "mgr-1:tiffany" } )
+    assert fca.main( [ "--session-name", "seatX", "--headless" ], **base ) == fca.EXIT_ADMITTED
+    monkeypatch.setattr( rc, "_session_is_live", lambda name: name == "seatX" )
+    assert fca.main( [ "--session-name", "seatX", "--release" ], release_fn=lambda n, d: None, **base ) == fca.EXIT_ADMITTED
+    assert rc.find( "mgr-1", "tiffany" ) is None
+    assert fca.main( [ "--session-name", "seatZ", "--headless" ], **base ) == fca.EXIT_REFUSED
+
+
+def test_a_claim_that_cannot_be_removed_for_a_live_seat_is_still_false( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    def cannot( path ):
+        raise OSError( "busy" )
+    monkeypatch.setattr( rc.os, "unlink", cannot )
+    assert rc.restore( "cc-new-1", now=NOW, live_fn=lambda name: True ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+
+
+def test_the_default_restore_asks_the_live_check( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    asked = []
+    monkeypatch.setattr( rc, "_session_is_live", lambda name: asked.append( name ) or True )
+    assert rc.restore( "cc-new-1", now=NOW ) is False
+    assert asked == [ "cc-new-1" ]
+
+
+def _tmux( monkeypatch, outcome ):
+    def run( argv, **kwargs ):
+        if isinstance( outcome, Exception ):
+            raise outcome
+        run.argv = argv
+        return SimpleNamespace( returncode=outcome )
+    monkeypatch.setattr( rc.subprocess, "run", run )
+    return run
+
+
+def test_a_live_bridge_makes_the_session_live( monkeypatch ):
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: { "tmux": name } )
+    run = _tmux( monkeypatch, 1 )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is True
+    assert not hasattr( run, "argv" )
+
+
+def test_a_tmux_session_makes_the_session_live_and_is_matched_by_exact_name( monkeypatch ):
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
+    run = _tmux( monkeypatch, 0 )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is True
+    assert run.argv == [ "tmux", "has-session", "-t", "=seatX" ]
+
+
+def test_no_bridge_and_no_tmux_session_is_not_live( monkeypatch ):
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
+    _tmux( monkeypatch, 1 )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is False
+
+
+def test_a_box_where_tmux_cannot_be_found_says_live( monkeypatch ):
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
+    _tmux( monkeypatch, FileNotFoundError( "tmux" ) )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is True
+
+
+def test_a_restore_refuses_when_tmux_cannot_be_found_and_no_bridge_exists_yet( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="seatX" )
+    monkeypatch.setattr( rc, "_session_is_live", _REAL_SESSION_IS_LIVE )
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
+    _tmux( monkeypatch, FileNotFoundError( "tmux" ) )
+    assert rc.restore( "seatX", now=NOW ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+
+
+def test_a_live_check_that_fails_says_live( monkeypatch ):
+    def boom( name ):
+        raise RuntimeError( "bridge folder unreadable" )
+    monkeypatch.setattr( fca, "_live_bridge_lookup", boom )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is True
+
+
+# ── the sweep that spend runs ────────────────────────────────────────────────
+
+def test_old_claims_are_swept_when_a_credit_is_spent( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-old-1" )
+    later = NOW + datetime.timedelta( seconds=rc.CREDIT_TTL_SECONDS * 3 )
+    rc.mint( "mgr-2", [ "cheech" ], now=later )
+    stale = folder / f"{rc.CLAIM_PREFIX}cc-old-2.json"
+    stale.write_text( json.dumps( { "minted_ts": NOW.timestamp() } ), encoding="utf-8" )
+    assert stale.exists()
+    assert rc.spend( "mgr-2", "cheech", now=later, session_name="cc-new-2" ) is True
+    assert not stale.exists()
+    assert ( folder / f"{rc.CLAIM_PREFIX}cc-new-2.json" ).exists()
+
+
+# ── a release from another shell cannot beat the launch it would undo ───────
+
+def _claimed_by( pid, session="seatX" ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name=session, owner_pid=pid ) is True
+
+
+def test_the_claim_records_the_launcher_pid_and_its_start_time( folder ):
+    _claimed_by( os.getpid() )
+    record = json.loads( ( folder / f"{rc.CLAIM_PREFIX}seatX.json" ).read_text( encoding="utf-8" ) )
+    assert record[ "owner_pid" ] == os.getpid()
+    assert record[ "owner_start" ] == rc._process_start( os.getpid() )
+    assert record[ "manager_session_id" ] == "mgr-1"
+
+
+def test_a_release_from_another_process_while_the_launcher_runs_gives_nothing_back( folder ):
+    _claimed_by( os.getpid() )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() + 1 ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert ( folder / f"{rc.CLAIM_PREFIX}seatX.json" ).exists()
+
+
+def test_the_launcher_releasing_its_own_claim_gets_the_credit_back( folder ):
+    _claimed_by( os.getpid() )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() ) is True
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is not None
+
+
+def test_a_release_after_the_launcher_has_gone_gives_the_credit_back( folder ):
+    gone = subprocess.Popen( [ sys.executable, "-c", "pass" ] )
+    gone.wait()
+    _claimed_by( gone.pid )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() + 1 ) is True
+
+
+def test_a_recycled_pid_does_not_keep_a_claim_alive( folder, monkeypatch ):
+    _claimed_by( os.getpid() )
+    monkeypatch.setattr( rc, "_process_start", lambda pid: "a different start" )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() + 1 ) is True
+
+
+def test_a_claim_with_no_owner_is_restored_as_before( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="seatX" )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() + 1 ) is True
+
+
+def test_the_launcher_hands_its_own_parent_pid_to_the_credit( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    assert fca._live_credit_spend( "mgr-1", "tiffany", "seatX" ) is True
+    record = json.loads( ( folder / f"{rc.CLAIM_PREFIX}seatX.json" ).read_text( encoding="utf-8" ) )
+    assert record[ "owner_pid" ] == os.getppid()
+
+
+def test_an_owner_that_cannot_be_recorded_leaves_the_claim_as_it_was( folder ):
+    folder.mkdir( parents=True, exist_ok=True )
+    rc._record_owner( str( folder / "claimed.nothing.json" ), os.getpid() )
+    garbled = folder / "claimed.garbled.json"
+    garbled.write_text( "{not json", encoding="utf-8" )
+    rc._record_owner( str( garbled ), os.getpid() )
+    assert garbled.read_text( encoding="utf-8" ) == "{not json"
+
+
+def test_a_process_that_does_not_exist_has_no_start_time_and_is_not_running( folder ):
+    gone = subprocess.Popen( [ sys.executable, "-c", "pass" ] )
+    gone.wait()
+    assert rc._process_start( gone.pid ) is None
+    assert rc._owner_is_running( { "owner_pid": gone.pid, "owner_start": "1" } ) is False
+
+
+@pytest.mark.parametrize( "pid", [ None, True, "12", 0, -4, 1.5 ] )
+def test_an_owner_pid_that_is_not_a_positive_integer_is_not_running( pid ):
+    assert rc._owner_is_running( { "owner_pid": pid } ) is False

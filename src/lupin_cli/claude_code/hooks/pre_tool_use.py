@@ -2,7 +2,7 @@
 """
 PreToolUse hook: voice buffer drain before tool execution.
 
-Fires before every tool call. Does NOT announce tools via TTS (PostToolUse
+Fires before every tool call. Does not announce tools via TTS (PostToolUse
 handles that). Only drains the voice buffer and acknowledges buffered messages.
 
 Install in ~/.claude/settings.json:
@@ -106,6 +106,17 @@ def main():
         emit_json( build_branch_lock_deny_response( branch_lock_reason ) )
         sys.exit( 0 )
 
+    # Worktree creator record (row 8ca4be22): a worker makes its own review tree by hand, and the
+    # janitor retires it after the worker is gone. Write the spawning manager to the ledger now,
+    # while the seat's environment still names it, so the archive row can route to that manager.
+    # Never denies and never raises: the lib returns [] on any error, and a missing or broken
+    # module is caught here, so the command still runs.
+    try:
+        from lupin_cli.claude_code.hooks.lib.worktree_creator_record import record_worktree_creator
+        record_worktree_creator( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), payload.get( "cwd" ) )
+    except Exception:
+        pass
+
     # Kill guard (row cd332d2b): a seat's argv carries its whole spawn brief, so a
     # fleet-wide `ps`/`pgrep` sweep grepping for a test path matches LIVE SESSIONS,
     # not just tests. On 2026-08-21 one such sweep killed three seats in 612 ms —
@@ -117,7 +128,9 @@ def main():
     from lupin_cli.claude_code.hooks.lib.kill_guard import (
         kill_deny_reason, build_kill_deny_response,
     )
-    kill_reason = kill_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    kill_reason = kill_deny_reason(
+        payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), cwd=payload.get( "cwd" ),
+    )
     if kill_reason:
         emit_json( build_kill_deny_response( kill_reason ) )
         sys.exit( 0 )

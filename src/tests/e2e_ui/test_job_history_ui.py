@@ -962,7 +962,9 @@ class TestJobHistoryEdgeCases:
         expand_history_section( admin_page )
 
         container = admin_page.locator( "#history-jobs-container" )
-        cards     = container.locator( ".job-card" )
+        # An admin lists every user's jobs, and a job scheduled on this server may legitimately be
+        # in the table, so count the rows this test seeded rather than every card on the page.
+        cards     = container.locator( f".job-card[data-job-id$='::{other_user_id}']" )
         assert cards.count() == 2, f"Admin should see 2 other-user jobs, got {cards.count()}"
 
         # Auto-accept all dialogs

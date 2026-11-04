@@ -70,3 +70,29 @@ tier_not_measured_reason() {
         *) echo "exited $1, which is not a status a completed tier produces" ;;
     esac
 }
+
+# 🔴 A TIER THAT RAN CAN STILL HAVE LOST DATA (row e1a36bb4, measured 2026-10-26).
+# An xdist worker killed mid-run (here: the kernel OOM-killing it inside the seat's 8 GiB
+# cgroup, journalctl -k at 14:08:06) takes its coverage data with it. The tier exits 1, a
+# MEASURED status, so tier_measured above lets it through, and the report then shows every
+# file that worker covered far too low: 93.98% overall, commons_store 21.88% beside a
+# reviewed 100%. Reproduced on a toy repo: a module dropped from 100% to 25% when its
+# worker was SIGKILLed. pytest-cov prints the first line below and xdist the second.
+#
+# Usage: tier_lost_worker_data <tier log file>; returns 0 when the log shows a lost worker.
+# A missing log is not a lost worker: nothing was captured, so nothing is claimed.
+tier_lost_worker_data() {
+    [ -f "${1:-}" ] || return 1
+    grep -qE "failed to return coverage data|^worker 'gw[0-9]+' crashed while running" "$1"
+}
+
+# Says what was lost, from the log's own lines (first of each kind, so the verdict names the worker).
+tier_lost_worker_reason() {
+    local crashed
+    crashed="$(grep -m1 -E "^worker 'gw[0-9]+' crashed while running" "${1:-/dev/null}" 2>/dev/null)"
+    if [ -n "$crashed" ]; then
+        echo "a worker died mid-run and its coverage data was lost ($crashed)"
+    else
+        echo "pytest-cov reports a worker failed to return coverage data"
+    fi
+}

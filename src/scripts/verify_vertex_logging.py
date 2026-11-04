@@ -1,25 +1,23 @@
 #!/usr/bin/env python
 """
-Vertex request-response logging — the runner (design §4 / cascade §C).
+Runner for the Vertex request-response logging verification harness.
 
 The executable form of the harness in `cosa.utils.vertex_logging`.
 
-THE DIVISION OF LABOUR, WHICH IS THE POINT OF THIS FILE
-------------------------------------------------------
-Per the cascade's standing orders, **every prediction call and every GCP write belongs to Mr.
-Radio, on Rick's explicit word.** So this script does NOT fire them. It owns the part that must
-be RIGHT — the verdict — and it hands the part that costs MONEY to the seat authorized to spend.
+Division of labour: every prediction call and every GCP write belongs to Mr. Radio, on Rick's explicit word.
+This script fires none of them. It owns the verdict, the part that must be right, and hands the part
+that costs money to the seat authorized to spend.
 
-    --plan    (DEFAULT)  print the live-call manifest. Fires nothing. Free.
-    --emit               mint sentinels + print the EXACT L0/L1/L2 commands for Mr. Radio to run.
-    --verify             read BigQuery ONLY, apply the canary law, render a verdict.
+    --plan    (default)  print the live-call manifest. Fires nothing. Free.
+    --emit               mint sentinels and print the exact subject, control and canary commands for Mr. Radio to run.
+    --verify             read BigQuery only, apply the canary law, render a verdict.
 
-`--verify` is read-only: no predictions, no writes, no spend. It is where the discipline lives —
-it will return INADMISSIBLE (exit 1) rather than let anyone read an unproven silence as a result.
+`--verify` is read-only: no predictions, no writes, no spend. It is where the discipline lives.
+It returns `INADMISSIBLE` (exit 1) rather than let anyone read an unproven silence as a result.
 
-FIRE ORDER IS LOAD-BEARING: L0 (subject) BEFORE L2 (canary). ORDERING IS EVIDENCE — if the LATER
-call lands and the EARLIER one does not, "it was just slow" is a materially weaker explanation.
-`ProbePlan` REFUSES to be built the other way round.
+Fire order matters: the subject call goes before the canary call, because the ordering is evidence.
+If the later call lands and the earlier one does not, "it was just slow" is a materially weaker explanation.
+`ProbePlan` refuses to be built the other way round.
 """
 
 import argparse
@@ -60,11 +58,11 @@ def make_bq_query_fn( runner=subprocess.run, debug=False ):
 
     Ensures:
         - returns query_fn( sql, params ) -> list of dict rows
-        - the sentinel travels as a BOUND parameter, never interpolated into SQL
+        - the sentinel travels as a bound parameter, never interpolated into `SQL`
 
     Raises:
-        - VertexLoggingError when bq exits non-zero — A FAILED READ IS NOT AN EMPTY RESULT, and
-          reporting one as "no rows" would be the exact bug this harness exists to prevent
+        - VertexLoggingError when bq exits non-zero, because a failed read is not an empty result,
+          and reporting one as "no rows" would be the exact bug this harness exists to prevent
     """
     def query_fn( sql, params ):
         command = [ "bq", "query", "--format=json", "--use_legacy_sql=false", "--quiet" ]
@@ -87,7 +85,7 @@ def make_bq_query_fn( runner=subprocess.run, debug=False ):
 
 def print_plan( project_id, vertex_location, bq_location ):
     """
-    Print the live-call manifest and fire NOTHING.
+    Print the live-call manifest and fire nothing.
 
     Ensures:
         - returns 0
@@ -112,14 +110,14 @@ def print_plan( project_id, vertex_location, bq_location ):
 
 def print_emit( project_id, vertex_location, dataset ):
     """
-    Mint the sentinels and print the EXACT commands for the authorized seat to run.
+    Mint the sentinels and print the exact commands for the authorized seat to run.
 
-    The sentinels are minted HERE so that the two halves of the probe cannot drift apart, and so
-    that nobody hand-types a sentinel that turns out to be ambient.
+    The sentinels are minted here so the two halves of the probe cannot drift apart.
+    This also stops anyone hand-typing a sentinel that turns out to be ambient.
 
     Ensures:
         - returns 0
-        - prints L0 before L2, because the SUBJECT must be fired before the CANARY
+        - prints the subject command before the canary command, because the subject must be fired before the canary
     """
     subject = mint_sentinel()     # L0 — gpt-oss-120b-maas. FIRED FIRST.
     canary  = mint_sentinel()     # L2 — claude-opus-4-8 @ global. Fired second.
@@ -172,18 +170,20 @@ def print_emit( project_id, vertex_location, dataset ):
 
 def run_verify( args, clock, sleeper, query_fn ):
     """
-    Read BigQuery ONLY and render a verdict under the canary law. No predictions. No writes. No spend.
+    Read BigQuery only and render a verdict under the canary law.
+
+    It makes no predictions, no writes and no spend.
 
     Requires:
         - args carries the sentinels, the fire times, and the poll bounds
         - clock/sleeper/query_fn are injected (so this is testable without a network)
 
     Ensures:
-        - prints the verdict and EVERY residual assumption attached to it
-        - returns 0 for PROVEN or REFUTED, 1 for INADMISSIBLE
+        - prints the verdict and every residual assumption attached to it
+        - returns 0 for `PROVEN` or `REFUTED`, 1 for `INADMISSIBLE`
 
     Raises:
-        - VertexLoggingError when the plan is malformed (e.g. subject fired AFTER the canary)
+        - VertexLoggingError when the plan is malformed (for example, the subject fired after the canary)
     """
     readout = LoggingReadout( args.project_id, dataset=args.dataset, query_fn=query_fn, debug=args.debug )
     plan    = ProbePlan(
@@ -218,7 +218,12 @@ def run_verify( args, clock, sleeper, query_fn ):
 
 
 def build_parser():
-    """Ensures: returns the argument parser. --plan is the default, and it is free."""
+    """
+    Build the argument parser for the runner.
+
+    Ensures:
+        - returns the argument parser; the plan behaviour (--plan) is the default, and it is free
+    """
     parser = argparse.ArgumentParser( description="Vertex request-response logging verification harness." )
     parser.add_argument( "--emit",             action="store_true", help="Mint sentinels + print the exact L0/L1/L2 commands." )
     parser.add_argument( "--verify",           action="store_true", help="Read BigQuery only and render a verdict." )
@@ -238,11 +243,11 @@ def build_parser():
 
 def main( argv=None, clock=None, sleeper=None, query_fn=None ):
     """
-    Entry point. Defaults to --plan, which fires nothing.
+    Entry point; with neither --emit nor --verify it prints the plan and fires nothing.
 
     Ensures:
-        - returns 0 on a clean plan/emit, or on a PROVEN/REFUTED verdict
-        - returns 1 on INADMISSIBLE — fail loud; an unproven instrument is not a pass
+        - returns 0 on a clean plan/emit, or on a `PROVEN`/`REFUTED` verdict
+        - returns 1 on `INADMISSIBLE`, failing loud because an unproven instrument is not a pass
         - returns 2 on a usage error or a guard refusal
     """
     import time

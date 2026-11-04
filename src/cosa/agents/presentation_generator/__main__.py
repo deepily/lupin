@@ -19,6 +19,8 @@ import argparse
 import asyncio
 import sys
 
+from cosa.agents.utils.smoke_suite import run_import_smoke_suite
+
 # User-visible args: the canonical list of args that end users should see
 # and interact with. Engineering params (models, debug, etc.) are excluded.
 USER_VISIBLE_ARGS = [ "source", "target_duration_minutes", "target_slide_count", "audience", "audience_context", "theme" ]
@@ -26,10 +28,6 @@ USER_VISIBLE_ARGS = [ "source", "target_duration_minutes", "target_slide_count",
 
 def run_all_smoke_tests():
     """Run smoke tests for all Presentation Generator modules."""
-    import cosa.utils.util as cu
-
-    cu.print_banner( "Presentation Generator - Full Smoke Test Suite", prepend_nl=True )
-
     modules = [
         ( "config",         "cosa.agents.presentation_generator.config" ),
         ( "state",          "cosa.agents.presentation_generator.state" ),
@@ -39,38 +37,7 @@ def run_all_smoke_tests():
         ( "job",            "cosa.agents.presentation_generator.job" ),
     ]
 
-    results = []
-
-    for name, module_path in modules:
-        try:
-            print( f"\n{'=' * 60}" )
-            print( f"Running: {name}" )
-            print( '=' * 60 )
-
-            module = __import__( module_path, fromlist=[ "quick_smoke_test" ] )
-            module.quick_smoke_test()
-            results.append( ( name, "PASSED", None ) )
-
-        except Exception as e:
-            results.append( ( name, "FAILED", str( e ) ) )
-
-    # Summary table
-    print( f"\n{'=' * 60}" )
-    print( "SMOKE TEST SUMMARY" )
-    print( '=' * 60 )
-
-    passed = sum( 1 for _, status, _ in results if status == "PASSED" )
-    failed = sum( 1 for _, status, _ in results if status == "FAILED" )
-
-    for name, status, error in results:
-        status_icon = "✓" if status == "PASSED" else "✗"
-        print( f"  {status_icon} {name}: {status}" )
-        if error:
-            print( f"      Error: {error[:80]}" )
-
-    print( f"\nTotal: {passed} passed, {failed} failed out of {len( results )} modules" )
-
-    return failed == 0
+    return run_import_smoke_suite( "Presentation Generator", modules, error_chars=80 )
 
 
 async def run_presentation_generation( args ):

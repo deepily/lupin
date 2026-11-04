@@ -1,11 +1,9 @@
 """
 Speech processing endpoints for speech-to-text and text-to-speech functionality.
 
-Provides comprehensive audio processing capabilities including Whisper-based STT
-for MP3 and WAV files, WebSocket-based TTS streaming with OpenAI and ElevenLabs
-integration, and multimodal content processing with agent request detection.
-
-Generated on: 2025-01-24
+Provides audio processing capabilities. These include Whisper-based STT for MP3 and
+WAV files, and WebSocket-based TTS streaming with OpenAI and ElevenLabs integration.
+They also include multimodal content processing with agent request detection.
 """
 
 from fastapi import APIRouter, Request, Query, HTTPException, File, UploadFile, Depends, WebSocket
@@ -27,6 +25,7 @@ import torch
 # Import dependencies
 from openai import OpenAI
 import cosa.utils.util as du
+from cosa.utils.speech_text import strip_markdown_links_for_speech
 # from lib.clients import lupin_client as gc
 from cosa.rest.websocket_manager import WebSocketManager
 from cosa.memory.input_and_output_table import InputAndOutputTable
@@ -40,14 +39,14 @@ router = APIRouter(prefix="/api", tags=["speech"])
 
 def _run_whisper_with_retry( whisper_pipeline, path, debug=False, **kwargs ):
     """
-    DEPRECATED 2026-05-16 — retained for one release cycle for any external
-    callers. Use `cosa.memory.speech_to_text_provider.SpeechToTextProvider`
-    instead; its local-mode `transcribe()` carries identical OOM-retry
-    semantics + adds the model-server HTTP-proxy alternative.
+    Run Whisper inference with CUDA OOM retry (deprecated).
 
-    See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md (Phase 3.3)
+    Retained for one release cycle, for any external callers. Use
+    `cosa.memory.speech_to_text_provider.SpeechToTextProvider` instead. Its local-mode
+    `transcribe()` carries identical OOM-retry semantics and adds the model-server
+    HTTP-proxy alternative.
 
-    Run Whisper inference with CUDA OOM retry.
+    Design: src/docs/decisions/2026.05.16-model-server-carveout.md
     """
     try:
         return whisper_pipeline( path, **kwargs )
@@ -163,9 +162,9 @@ def insert_stt_io_row( input_type: str, input: str, output_raw: str, output_fina
     """
     Record one speech-to-text request in the input/output table.
 
-    One helper for every speech door (F5 of the spoken-ask plan): the MP3 door, the WAV
-    door and /api/v2/ask-audio each built their own InputAndOutputTable per request, and
-    a third copy of that would have been a fourth build site in the tree.
+    Every speech door shares this helper: the MP3 door, the WAV door and /api/v2/ask-audio.
+    Each used to build its own InputAndOutputTable per request, and a further copy would
+    have been another build site in the tree.
 
     Requires:
         - input_type names the door, e.g. "stt_mp3", "stt_wav", "stt_wav_ask"
@@ -187,15 +186,56 @@ def insert_stt_io_row( input_type: str, input: str, output_raw: str, output_fina
 
 
 # Global dependencies (temporary access via main module)
+UTTERANCE_ID_MAX_LENGTH = 255
+
+def read_utterance_id( request_data ):
+    """
+    Read the optional client-supplied utterance id from a speech request body.
+
+    Requires:
+        - request_data is a dict
+
+    Ensures:
+        - returns None when the key is absent or null
+        - returns the id unchanged when it is a string of 1 to 255 characters
+        - a returned id can be encoded as UTF-8, so it can be echoed in JSON
+
+    Raises:
+        - HTTPException with 400 status for any other value
+    """
+    utterance_id = request_data.get( "utterance_id" )
+    if utterance_id is None: return None
+
+    detail = f"utterance_id must be a non-empty string of at most {UTTERANCE_ID_MAX_LENGTH} characters"
+    if not isinstance( utterance_id, str ) or not utterance_id or len( utterance_id ) > UTTERANCE_ID_MAX_LENGTH:
+        raise HTTPException( status_code=400, detail=detail )
+
+    # A lone surrogate is a valid Python str that no JSON reply or frame can carry.
+    try:
+        utterance_id.encode( "utf-8" )
+    except UnicodeEncodeError:
+        raise HTTPException( status_code=400, detail=f"{detail}, encodable as UTF-8" )
+
+    return utterance_id
+
+def stream_frame( payload, utterance_id ):
+    """
+    Stamp one speech stream frame with the utterance it belongs to.
+
+    Requires:
+        - payload is a dict about to be sent on the audio socket
+        - utterance_id is a string, or None when the request carried no id
+
+    Ensures:
+        - returns payload, with "utterance_id" set when an id was given
+        - leaves payload without the key when utterance_id is None
+    """
+    if utterance_id is not None: payload[ "utterance_id" ] = utterance_id
+    return payload
+
 def get_whisper_pipeline():
     """
-    Dependency to get Whisper pipeline from main module.
-
-    Post-carve-out (2026-05-16) note: this dependency still exists because
-    the in-process local-mode path needs the pipeline handle. The
-    `SpeechToTextProvider` injected via `get_speech_provider()` accepts the
-    pipeline as a kwarg and dispatches to it when running in local mode;
-    in remote mode the pipeline arg is unused and may be None.
+    Dependency to get the Whisper pipeline from the main module.
 
     Requires:
         - lupin_app.main module is available
@@ -203,13 +243,17 @@ def get_whisper_pipeline():
 
     Ensures:
         - Returns the Whisper pipeline instance if loaded
-        - Returns None when running in remote (model-server) mode — the
-          provider's dispatch will route the call via HTTP and ignore the
-          None pipeline. (No more 503 from this dep — the provider raises
-          a 503 only when BOTH local-load failed AND remote-mode is off.)
+        - Returns None when running in remote (model-server) mode. The provider's
+          dispatch routes the call over HTTP and ignores the None pipeline. This
+          dependency raises no 503 any more. The provider raises a 503 only when both
+          the local load failed and remote mode is off.
 
     Raises:
         - ImportError if main module not available
+
+    The in-process local-mode path needs the pipeline handle. The `SpeechToTextProvider`
+    injected through `get_speech_provider()` accepts the pipeline as a kwarg and dispatches to
+    it in local mode. In remote mode the pipeline arg is unused and may be None.
     """
     import lupin_app.main as main_module
     return getattr( main_module, "whisper_pipeline", None )
@@ -219,15 +263,13 @@ def get_speech_provider() -> SpeechToTextProvider:
     """
     Dependency returning the `SpeechToTextProvider` singleton.
 
-    Phase 3.3 hook for the model-server carve-out. The provider's
-    `transcribe()` method dispatches between in-process Whisper (local mode)
-    and HTTP proxy to lupin-model-server (remote mode). Until the Phase 3.6
-    lifespan switch lands AND the compute container is bounced with
-    `LUPIN_MODEL_SERVER_URL` injected, the provider defaults to local mode
-    and delegates to the existing `whisper_pipeline` handle — identical
-    behavior to the pre-carve-out call path.
+    The provider's `transcribe()` method dispatches between in-process Whisper (local mode)
+    and an HTTP proxy to lupin-model-server (remote mode). The provider defaults to local mode
+    and delegates to the existing `whisper_pipeline` handle. That is identical to the
+    behavior before the model-server carve-out. It stays that way until the lifespan switch
+    lands and the compute container is bounced with `LUPIN_MODEL_SERVER_URL` injected.
 
-    See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+    Design: src/docs/decisions/2026.05.16-model-server-carveout.md
     """
     import lupin_app.main as main_module
     return SpeechToTextProvider(
@@ -301,18 +343,18 @@ def get_ask_flow():
     """
     Dependency to get the v2 AskFlow from the main module.
 
-    Door 8, 2026-08-21. Rick: there are two ways to ask — post your text to the ask
-    endpoint, or SPEAK, which gets transcribed and then passed to the ask endpoint. So
-    this route's agent branch hands the transcription to the same flow the typed door
-    uses, in-process. The route is NOT a tombstone: its other branch is dictation,
-    snapshot search and insert-at-cursor, which have no text-endpoint replacement.
-
-    Read off the module the same way the other routers read the queue, and for the
-    same reason: lifespan builds it and hangs it there.
-
     Ensures:
         - Returns the flow, or None before lifespan has finished. The agent branch
           fails loud on None rather than falling back to a direct queue push.
+
+    There are two ways to ask. One is to post text to the ask endpoint. The other is to
+    speak, which is transcribed and then passed to the ask endpoint. This route's agent
+    branch hands the transcription to the same flow the typed door uses, in-process. The
+    route is not a tombstone. Its other branch is dictation, snapshot search and
+    insert-at-cursor, which have no text-endpoint replacement.
+
+    The flow is read off the module the same way the other routers read the queue, and for the
+    same reason: lifespan builds it and hangs it there.
     """
     import lupin_app.main as main_module
     return main_module.ask_flow
@@ -336,8 +378,8 @@ async def upload_and_transcribe_mp3_file(
     current_user: Optional[dict] = Depends(get_optional_user)
 ):
     """
-    Upload and transcribe MP3 audio file using Whisper model with multimodal processing.
-    
+    Upload and transcribe an MP3 audio file with Whisper and multimodal processing.
+
     Requires:
         - request.body() contains valid base64 encoded MP3 audio data
         - whisper_pipeline is initialized and functional
@@ -347,24 +389,24 @@ async def upload_and_transcribe_mp3_file(
 
     Ensures:
         - Audio is saved to a new uniquely named file (save_audio_upload) and that
-          file is removed when the request ends — success, OOM or any error
+          file is removed when the request ends, on success, OOM or any error
         - Whisper transcription is completed with chunked processing
         - MultiModalMunger processes transcription with agent detection
-        - Agent requests go through the v2 ask flow and REQUIRE a signed-in user
+        - Agent requests go through the v2 ask flow and require a signed-in user
           (401 otherwise); the flow's result lands in munger.results
         - Non-agent requests (dictation, snapshot search, insert-at-cursor) are
           logged to InputAndOutputTable and still need no token at all
         - Response is saved to /io/last_response.json in JSON format
         - Returns JSONResponse with processed transcription results
-        
+
     Raises:
-        - HTTPException with 401 status if the transcription is an AGENT request and
+        - HTTPException with 401 status if the transcription is an agent request and
           no signed-in user was supplied
         - HTTPException with 500 status if base64 decoding fails
         - HTTPException with 500 status if file writing fails
         - HTTPException with 500 status if Whisper transcription fails
         - HTTPException with 500 status if multimodal processing fails
-        
+
     Args:
         request: FastAPI request containing base64 encoded MP3 audio
         prefix: Optional prefix for transcription processing context
@@ -372,7 +414,7 @@ async def upload_and_transcribe_mp3_file(
         prompt_verbose: Verbosity level for processing (default: "verbose")
         websocket_id: Optional session id for routing the answer's events back to
             this client; derived from the user id when the caller does not send one
-        
+
     Returns:
         JSONResponse: Processed transcription with munger JSON format
     """
@@ -623,6 +665,7 @@ async def get_tts_audio(
         
         session_id = request_data.get("session_id")
         msg = request_data.get("text")
+        utterance_id = read_utterance_id( request_data )
 
         if app_debug and app_verbose: print(f"[TTS-DEBUG] Extracted - session_id: '{session_id}', text: '{msg}'")
 
@@ -648,6 +691,9 @@ async def get_tts_audio(
         if not msg:
             raise HTTPException(status_code=400, detail="Text message cannot be empty after trimming whitespace")
 
+        # Speech says a link's label and "URL omitted", never its address
+        msg = strip_markdown_links_for_speech( msg ).strip()
+
         # Register session with authenticated user
         if app_debug and app_verbose: print(f"[TTS-DEBUG] Registering session {session_id} for user {current_user_id}")
         ws_manager.register_session_user(session_id, current_user_id)
@@ -668,15 +714,15 @@ async def get_tts_audio(
         if app_debug and app_verbose: print(f"[TTS-SUCCESS] Starting TTS for session: {session_id}, msg: '{msg}'")
         
         # Start hybrid TTS streaming in background
-        task = asyncio.create_task(stream_tts_hybrid(session_id, msg, ws_manager))
+        task = asyncio.create_task(stream_tts_hybrid(session_id, msg, ws_manager, utterance_id))
         active_tasks[session_id] = task
-        
+
         # Return immediate status response
-        return JSONResponse({
+        return JSONResponse( stream_frame( {
             "status": "success",
             "message": "TTS generation started",
             "session_id": session_id
-        })
+        }, utterance_id ) )
         
     except HTTPException:
         raise
@@ -764,7 +810,8 @@ async def get_tts_audio_elevenlabs(
         speed = request_data.get("speed", 1.0)
         quality_profile = request_data.get("quality_profile", "balanced")
         debug_simulate_error = request_data.get("debug_simulate_error", False)
-        
+        utterance_id = read_utterance_id( request_data )
+
         # Validate required fields
         if not session_id or not msg:
             error_msg = f"Missing session_id or text - session_id: {session_id}, text: {msg}"
@@ -797,6 +844,9 @@ async def get_tts_audio_elevenlabs(
         if not msg:
             raise HTTPException(status_code=400, detail="Text message cannot be empty after trimming whitespace")
 
+        # Speech says a link's label and "URL omitted", never its address
+        msg = strip_markdown_links_for_speech( msg ).strip()
+
         if app_debug and app_verbose:
             print(f"[TTS-ELEVENLABS-DEBUG] Extracted - session_id: '{session_id}', text: '{msg}', voice_id: '{voice_id}'")
             if debug_simulate_error:
@@ -824,18 +874,19 @@ async def get_tts_audio_elevenlabs(
         # Start ElevenLabs TTS streaming in background
         task = asyncio.create_task(stream_tts_elevenlabs(
             session_id, msg, ws_manager, voice_id, model_id, stability, 
-            similarity_boost, style, use_speaker_boost, speed, quality_profile, config_mgr, debug_simulate_error
+            similarity_boost, style, use_speaker_boost, speed, quality_profile, config_mgr, debug_simulate_error,
+            utterance_id
         ))
         active_tasks[session_id] = task
-        
+
         # Return immediate status response
-        return JSONResponse({
+        return JSONResponse( stream_frame( {
             "status": "success",
             "message": "ElevenLabs TTS generation started",
             "session_id": session_id,
             "provider": "elevenlabs",
             "voice_id": voice_id
-        })
+        }, utterance_id ) )
         
     except HTTPException:
         raise
@@ -944,7 +995,7 @@ async def upload_and_transcribe_wav_file(
     finally:
         remove_audio_upload( temp_file )
 
-async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketManager):
+async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketManager, utterance_id: str = None):
     """
     Hybrid TTS streaming with OpenAI: Forward chunks immediately for low-latency playback.
     
@@ -963,14 +1014,16 @@ async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketMana
         - Sends completion signal with timing and chunk count statistics
         - Handles connection loss gracefully with appropriate cleanup
         - Provides error messages via WebSocket on failures
-        
+        - Every JSON frame of this stream carries utterance_id when one was given
+
     Raises:
         - None (handles all exceptions gracefully with error reporting)
-        
+
     Args:
         session_id: Session ID for active WebSocket connection
         msg: Text content to convert to speech
         ws_manager: WebSocket manager instance for connection handling
+        utterance_id: The client's id for this utterance, or None
     """
     websocket = ws_manager.active_connections.get(session_id)
     if not websocket:
@@ -987,11 +1040,11 @@ async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketMana
         print(f"[TTS-HYBRID] Starting generation for: '{msg}'")
         
         # Send status update
-        await websocket.send_json({
+        await websocket.send_json( stream_frame( {
             "type": "audio_streaming_status",
             "text": "Generating and streaming audio...",
             "status": "loading"
-        })
+        }, utterance_id ) )
         
         # Stream from OpenAI directly to WebSocket - no buffering, no format logic
         try:
@@ -1018,31 +1071,31 @@ async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketMana
                     chunk_count += 1
                 
                 # Send completion signal
-                await websocket.send_json({
+                await websocket.send_json( stream_frame( {
                     "type": "audio_streaming_complete",
                     "text": f"Streaming complete ({chunk_count} chunks, {time.time() - start_time:.1f}s)",
                     "status": "success"
-                })
+                }, utterance_id ) )
                 
                 print(f"[TTS-HYBRID] ✓ Complete - {chunk_count} chunks in {time.time() - start_time:.2f}s")
                 
         except Exception as e:
             print(f"[TTS-HYBRID] OpenAI API error: {e}")
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "error",
                 "text": f"TTS generation failed: {str(e)}",
                 "status": "error"
-            })
+            }, utterance_id ) )
             
     except Exception as e:
         print(f"[TTS-HYBRID] General error: {e}")
         if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L773-775)
             try:
-                await websocket.send_json({
+                await websocket.send_json( stream_frame( {
                     "type": "error", 
                     "text": f"TTS error: {str(e)}",
                     "status": "error"
-                })
+                }, utterance_id ) )
             except:
                 pass  # Connection might be lost
 
@@ -1059,11 +1112,12 @@ async def stream_tts_elevenlabs(
     speed: float = 1.0,
     quality_profile: str = "balanced",
     config_mgr = None,
-    debug_simulate_error: bool = False
+    debug_simulate_error: bool = False,
+    utterance_id: str = None
 ):
     """
-    ElevenLabs WebSocket streaming with optimized low-latency configuration for conversational AI.
-    
+    Stream TTS through the ElevenLabs WebSocket with a low-latency configuration.
+
     Requires:
         - session_id exists in ws_manager.active_connections
         - msg is a non-empty string for TTS conversion
@@ -1072,7 +1126,7 @@ async def stream_tts_elevenlabs(
         - voice_id is a valid ElevenLabs voice identifier
         - stability and similarity_boost are floats between 0.0-1.0
         - ElevenLabs WebSocket streaming API is accessible
-        
+
     Ensures:
         - Establishes WebSocket connection to ElevenLabs streaming endpoint
         - Configures optimized chunk length schedule for low latency (~150-250ms)
@@ -1082,10 +1136,11 @@ async def stream_tts_elevenlabs(
         - Handles ElevenLabs protocol messages (audio, isFinal, error)
         - Sends completion signal with timing and chunk count statistics
         - Gracefully handles connection failures and API errors
-        
+        - Every JSON frame of this stream carries utterance_id when one was given
+
     Raises:
         - None (handles all exceptions gracefully with error reporting)
-        
+
     Args:
         session_id: Session ID for active WebSocket connection
         msg: Text content to convert to speech
@@ -1093,6 +1148,7 @@ async def stream_tts_elevenlabs(
         voice_id: ElevenLabs voice ID (default: Rachel voice)
         stability: Voice stability setting for consistent output (0.0-1.0)
         similarity_boost: Voice similarity enhancement (0.0-1.0)
+        utterance_id: The client's id for this utterance, or None
     """
     websocket = ws_manager.active_connections.get(session_id)
     if not websocket:
@@ -1164,33 +1220,33 @@ Speed            : {speed:.2f}"""
             if app_debug and app_verbose: print(f"[TTS-ELEVENLABS-DEBUG] 🧪 Simulating quota_exceeded error for testing")
             
             # Send initial status
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "audio_streaming_status",
                 "text": "Connecting to ElevenLabs...",
                 "status": "loading",
                 "provider": "elevenlabs"
-            })
+            }, utterance_id ) )
             
             # Small delay to simulate connection attempt
             await asyncio.sleep(0.5)
             
             # Simulate the quota_exceeded error
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "tts_error",
                 "text": "TTS service temporarily unavailable",
                 "status": "error",
                 "provider": "elevenlabs",
                 "details": "Please try again in a moment"
-            })
+            }, utterance_id ) )
             return
         
         # Send status update
-        await websocket.send_json({
+        await websocket.send_json( stream_frame( {
             "type": "audio_streaming_status",
             "text": "Connecting to ElevenLabs...",
             "status": "loading",
             "provider": "elevenlabs"
-        })
+        }, utterance_id ) )
         
         # ElevenLabs WebSocket streaming endpoint with dynamic model and PCM 24000 format
         # PCM 24000 enables smooth Web Audio API playback without MP3 decoding gaps
@@ -1235,12 +1291,12 @@ Speed            : {speed:.2f}"""
             await elevenlabs_ws.send(json.dumps({"text": ""}))
             
             # Update status
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "audio_streaming_status",
                 "text": "Streaming audio from ElevenLabs...",
                 "status": "streaming",
                 "provider": "elevenlabs"
-            })
+            }, utterance_id ) )
             
             chunk_count = 0
             start_time = time.time()
@@ -1297,14 +1353,14 @@ Speed            : {speed:.2f}"""
                             error_code   = "auth_error"
                             user_message = "TTS authentication failed."
 
-                        await websocket.send_json( {
+                        await websocket.send_json( stream_frame( {
                             "type"       : "tts_error",
                             "text"       : user_message,
                             "error_code" : error_code,
                             "status"     : "error",
                             "provider"   : "elevenlabs",
                             "details"    : error_msg
-                        } )
+                        }, utterance_id ) )
 
                         # Break instead of raise to allow graceful completion
                         break
@@ -1315,12 +1371,12 @@ Speed            : {speed:.2f}"""
                     continue
                 
             # Send completion signal
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "audio_streaming_complete",
                 "text": f"ElevenLabs streaming complete ({chunk_count} chunks, {time.time() - start_time:.1f}s)",
                 "status": "success",
                 "provider": "elevenlabs"
-            })
+            }, utterance_id ) )
             
             print(f"[TTS-ELEVENLABS] ✓ Complete - {chunk_count} chunks in {time.time() - start_time:.2f}s")
             
@@ -1328,12 +1384,12 @@ Speed            : {speed:.2f}"""
         print(f"[TTS-ELEVENLABS] ElevenLabs WebSocket connection closed")
         if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L895-897)
             try:
-                await websocket.send_json({
+                await websocket.send_json( stream_frame( {
                     "type": "error",
                     "text": "ElevenLabs connection closed",
                     "status": "error",
                     "provider": "elevenlabs"
-                })
+                }, utterance_id ) )
             except:
                 pass
                 
@@ -1341,12 +1397,12 @@ Speed            : {speed:.2f}"""
         print(f"[TTS-ELEVENLABS] Error: {e}")
         if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L895-897)
             try:
-                await websocket.send_json({
+                await websocket.send_json( stream_frame( {
                     "type": "error",
                     "text": f"ElevenLabs TTS error: {str(e)}",
                     "status": "error",
                     "provider": "elevenlabs"
-                })
+                }, utterance_id ) )
             except:
                 pass  # Connection might be lost
 
@@ -1360,9 +1416,9 @@ async def websocket_pcm_tts_endpoint(
     """
     WebSocket endpoint for PCM 24000 streaming from ElevenLabs.
 
-    Connects to ElevenLabs with output_format=pcm_24000 and forwards
-    raw PCM chunks to the browser for Web Audio API playback with
-    precise scheduling (similar to Gemini Live approach).
+    Connects to ElevenLabs with output_format=pcm_24000 and forwards raw PCM chunks to
+    the browser. The browser plays them through the Web Audio API with precise scheduling,
+    similar to the Gemini Live approach.
 
     Requires:
         - ElevenLabs API key available via du.get_api_key("eleven11")

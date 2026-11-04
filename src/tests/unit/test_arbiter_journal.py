@@ -22,7 +22,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.agents.heartbeat_arbiter.arbiter_journal import (
-    DEFAULT_TZ_NAME, DELIVERED_OUTCOMES, TS_LOCAL_FORMAT, OUTREACH_TS_FORMAT,
+    DELIVERED_OUTCOMES, TS_LOCAL_FORMAT, OUTREACH_TS_FORMAT,
     format_ts_local, format_outreach_ts, make_log_fn, quick_smoke_test, resolve_tz,
 )
 
@@ -44,11 +44,9 @@ def test_resolve_tz_valid_name():
     assert err is None and format_ts_local( JUNE, tz ).endswith( "-(EDT)" )
 
 
-def test_resolve_tz_none_uses_default():
-    tz, err = resolve_tz( None )
-    assert err is None
-    assert DEFAULT_TZ_NAME == "America/New_York"
-    assert format_ts_local( JUNE, tz ).endswith( "-(EDT)" )
+def test_resolve_tz_none_raises_because_the_zone_comes_from_configuration():
+    with pytest.raises( ValueError, match="no default" ):
+        resolve_tz( None )
 
 
 def test_resolve_tz_invalid_falls_back_to_utc_with_error():

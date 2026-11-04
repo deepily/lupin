@@ -31,6 +31,8 @@ from typing  import Any, Callable, Dict, List, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp import fleet_size_cap
+from lupin_mcp import respin_credit
+from lupin_mcp import skeleton_crew
 from lupin_mcp import reap_memento
 from lupin_mcp import reap_branch
 from cosa.agents.shared import seat_teardown
@@ -637,7 +639,22 @@ def _main_checkout_of( start ):
     return start
 
 
-def default_fleet_gate( requested, config_fn=None, census_fn=None ):
+def _credit_held( respin_credit_fn ):
+    """
+    Whether the re-spin credit check says yes.
+
+    Ensures:
+        - returns True only when the check returns a truthy value
+        - a check that raises counts as no credit
+        - never raises
+    """
+    try:
+        return bool( respin_credit_fn() )
+    except Exception:
+        return False
+
+
+def default_fleet_gate( requested, config_fn=None, census_fn=None, respin_credit_fn=None ):
     """
     The live fleet-cap check: read the cap, count the fleet, return a refusal or None.
 
@@ -645,8 +662,10 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
         - requested >= 1
         - config_fn() -> a ConfigurationManager, or None
         - census_fn() -> an iterable of (bridge_path, session_id, persona) triples
+        - respin_credit_fn() -> True when this spawn holds a fresh re-spin credit, or None
 
     Ensures:
+        - returns the skeleton crew refusal first when the switch is on
         - returns None when the spawn fits under the cap
         - otherwise returns the refusal string, naming cap, total, split and headroom
         - NEVER raises and NEVER reaps — an unreadable fleet ALLOWS the spawn
@@ -664,6 +683,20 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
     inconsistency somebody missed.
     """
     try:
+        # The skeleton crew switch answers before the cap does: with it on, no spawn is
+        # allowed even when the fleet has room. It follows the same boundary as the cap
+        # below. The default source reads the file fresh, and an injected configuration
+        # is taken as the configuration.
+        if config_fn is None:
+            skeleton_refusal = skeleton_crew.skeleton_crew_refusal(
+                None, disk_fn=skeleton_crew.default_disk_skeleton_reader )
+        else:
+            skeleton_refusal = skeleton_crew.skeleton_crew_refusal( config_fn() )
+        if skeleton_refusal is not None:
+            # A re-spin that holds a credit goes on to the cap check. The credit is only
+            # looked at here. The launcher spends it, where the seat actually starts.
+            if respin_credit_fn is None or not _credit_held( respin_credit_fn ):
+                return skeleton_refusal
         # 🔴 THE FRESH DISK READ APPLIES TO THE DEFAULT SOURCE ONLY, AND THAT BOUNDARY IS
         # THE WHOLE OF IT. When nobody injects a config the cap comes from the
         # process-lifetime ConfigurationManager singleton, which has no reload — so in
@@ -710,7 +743,8 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
         # leaves it empty, which is right: a caller supplying its own population is
         # stating that population in full.
         sessions = census_fn()
-        counts   = fleet_size_cap.census( sessions, fleet_size_cap.default_counting_classifier,
+        sessions = list( sessions )
+        counts   = fleet_size_cap.census( sessions, fleet_size_cap.counting_classifier_for( sessions ),
                                           unreadable=len( unreadable_paths ) )
         return fleet_size_cap.refusal_for_spawn( requested, counts, cap )
     except Exception as e:
@@ -864,10 +898,17 @@ def spawn_sessions(
     # past the gate was to replace it wholesale, which is the thing that comment warns
     # against. `fleet_config_fn` / `fleet_census_fn` are threaded through when given, so
     # a caller can pin the world without stubbing the policy.
+    # A one-for-one re-spin may go on while skeleton crew is on. The credit is looked for
+    # only when the default gate is in use, so an injected gate keeps its own signature.
+    respin_slug = respin_credit.respin_slug( persona_preference, seed_memento, count )
+    gate_extra  = {}
+    if respin_slug is not None and fleet_gate_fn is default_fleet_gate:
+        gate_extra[ "respin_credit_fn" ] = (
+            lambda: respin_credit.find( manager_session_id, respin_slug ) is not None )
     if fleet_config_fn is not None or fleet_census_fn is not None:
-        refusal = fleet_gate_fn( count, config_fn=fleet_config_fn, census_fn=fleet_census_fn )
+        refusal = fleet_gate_fn( count, config_fn=fleet_config_fn, census_fn=fleet_census_fn, **gate_extra )
     else:
-        refusal = fleet_gate_fn( count )
+        refusal = fleet_gate_fn( count, **gate_extra )
     if refusal:
         raise ValueError( refusal )
 
@@ -1121,6 +1162,10 @@ def spawn_sessions(
         chain_csv = persona_chain_csv( persona_preference )
         if chain_csv:
             env[ "COSA_VOICE_PERSONA_CHAIN" ] = chain_csv
+        # A re-spin hands the launcher the credit it will spend. A spawn that is not a
+        # re-spin carries nothing, so the launcher has nothing to spend.
+        if respin_slug is not None:
+            env[ respin_credit.CREDIT_ENV ] = respin_credit.env_value( manager_session_id, respin_slug )
         result = runner( argv, env=env )
         ok     = getattr( result, "returncode", 1 ) == 0
 
@@ -1622,7 +1667,7 @@ def dismiss_sessions(
         - SEAT TEARDOWN (row 129cc96b, P3): when `seat_teardown_fn` is provided it runs
           AFTER the kill, once per REAPED seat (never a withheld one), as
           seat_teardown_fn( session_name, cwd ) with the cwd captured before the bridge
-          was unlinked. `seat_trees` maps each seat to its outcome and
+          was unlinked. `seat_trees` maps each seat to its outcome, with the long lists cut to a count and a capped sample, and
           `seat_tree_notice` is the TOP-LEVEL line naming every tree kept for work in it
           (uncommitted, unmerged, data files) — None when there is none. FAIL-SAFE: a
           raising teardown is recorded as that seat's outcome and never breaks the reap
@@ -1903,6 +1948,24 @@ def dismiss_sessions(
             retained_slugs.append( persona_slug( name_persona ) )
     retained_unmatched = sorted( respin_slugs - set( retained_slugs ) )
 
+    # One credit per persona that was killed and is coming straight back. It is what lets
+    # that one spawn through while skeleton crew is on. A folder that cannot be written
+    # never breaks the reap. The credit is simply not there, and the spawn is refused.
+    # Only a seat this call actually killed earns one. A seat that was already gone would
+    # make the spawn it licenses a net new seat.
+    killed_slugs = set()
+    for entry in dismissed:
+        if entry[ "status" ] != "killed":
+            continue
+        killed_persona = _identity_persona_name( identities.get( entry[ "session_name" ] ) )
+        if killed_persona and persona_slug( killed_persona ) in respin_slugs:
+            killed_slugs.add( persona_slug( killed_persona ) )
+    respin_credits_minted = []
+    try:
+        respin_credits_minted = respin_credit.mint( manager_session_id, sorted( killed_slugs ) )
+    except Exception:
+        pass
+
     for name in reaped_names:
         ident = identities.get( name )
         if not ident:
@@ -1962,7 +2025,7 @@ def dismiss_sessions(
         # the top of a result. None when every reaped seat's work is already on the line.
         "branch_alarm"       : reap_branch.branch_alarm( branch_outcomes ),
         "branch_outcomes"    : branch_outcomes,
-        "seat_trees"         : seat_trees,
+        "seat_trees"         : { name: seat_teardown.summarise_outcome( outcome ) for name, outcome in seat_trees.items() },
         "seat_tree_notice"   : seat_teardown.teardown_notice( seat_trees ),
         "withhold_notice"    : reap_memento.withhold_notice( withheld ),
         "memento_outcomes"   : memento_outcomes,
@@ -1971,7 +2034,8 @@ def dismiss_sessions(
         "holds_cleared"      : holds_cleared,
         "reconciliation"     : reconciliation,
         "retained_owner_personas" : sorted( set( retained_slugs ) ),
-        "retained_unmatched"      : retained_unmatched
+        "retained_unmatched"      : retained_unmatched,
+        "respin_credits_minted"   : respin_credits_minted
     }
 
 

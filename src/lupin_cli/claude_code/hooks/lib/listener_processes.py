@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-Listener process discovery + exclusive-flock primitives for the CC hook family.
+Listener process discovery and exclusive-flock primitives for the CC hook family.
 
 Shared by:
-    - register_session.py (F1 singleton spawn guard)
-    - session_end.py      (F2 reap-all-matching listeners)
-    - cc_notification_listener.py (F4 tmux injection mutex)
+    - register_session.py (singleton spawn guard)
+    - session_end.py      (reaps all matching listeners)
+    - cc_notification_listener.py (tmux injection mutex)
 
 Root cause served: the documented `--continue` SessionStart double-fire spawned
-TWO cc_notification_listener processes for one session; the bridge remembered
-only the last PID, so SessionEnd orphaned one, and the duplicates raced each
-other's two-step tmux injections (text, text, Enter, Enter) — silently
-corrupting USER BROADCAST delivery.
-
-See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md
-     src/rnd/v0.1.8/2026.06.11-broadcast-miss-f1-f4-implementation.md
+two cc_notification_listener processes for one session. The bridge remembered
+only the last PID, so SessionEnd orphaned one. The duplicates also raced each
+other's two-step tmux injections (text, text, Enter, Enter), which silently
+corrupted user broadcast delivery.
 """
 
 import fcntl
@@ -42,9 +39,8 @@ def find_live_listener_pids( session_hash ):
     Find every live CC notification listener serving the given session hash.
 
     Matches process command lines via `pgrep -f` against the pattern
-    `cc_notification_listener.*--session-id <hash>` — ground truth for
-    "a listener for this session exists", independent of what any bridge
-    file remembers.
+    `cc_notification_listener.*--session-id <hash>`. This is ground truth for
+    "a listener for this session exists", independent of any bridge file.
 
     Requires:
         - session_hash is a non-empty string (8-char session hash)
@@ -93,9 +89,8 @@ def exclusive_flock( lock_path ):
     """
     Hold an exclusive (blocking) flock on lock_path for the with-block.
 
-    Fail-open by design: if the lock file cannot be created or locked, the
-    block still runs — listener spawn and tmux injection must never be
-    blocked by lock infrastructure (the hook layer's never-raise contract).
+    The lock fails open. If it cannot be created or taken, the block still runs.
+    Listener spawn and tmux injection must never be blocked by lock infrastructure.
     Callers can inspect the yielded bool when lock-held matters.
 
     Requires:
@@ -136,8 +131,10 @@ def exclusive_flock( lock_path ):
 
 def listener_spawn_lock( session_hash ):
     """
-    Per-session-hash spawn lock — serializes the F1 check-then-spawn critical
-    section across concurrent SessionStart hooks (the `--continue` double-fire).
+    Return the per-session-hash spawn lock for the listener check-then-spawn step.
+
+    It serializes the check-then-spawn critical section across concurrent
+    SessionStart hooks (the `--continue` double-fire).
 
     Requires:
         - session_hash is a non-empty string
@@ -157,9 +154,11 @@ def listener_spawn_lock( session_hash ):
 
 def tmux_injection_lock( tmux_session ):
     """
-    Per-tmux-session injection mutex — keeps the two-step send-keys sequence
-    (literal text, then Enter) atomic against any other lock-honoring injector,
-    so concurrent injections cannot interleave keystrokes in one pane (F4).
+    Return the per-tmux-session injection mutex for the two-step send-keys sequence.
+
+    It keeps the sequence (literal text, then Enter) atomic against any other
+    lock-honoring injector. Concurrent injections therefore cannot interleave
+    keystrokes in one pane.
 
     Requires:
         - tmux_session is a non-empty string (tmux session name)

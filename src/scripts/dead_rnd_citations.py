@@ -1,23 +1,21 @@
 """
-Scan the repo for `src/rnd/…` citations that no longer resolve, and REPORT ITS OWN CORPUS.
+Scan the repo for `src/rnd/…` citations that no longer resolve, and report its own corpus.
 
-Row 88f4dfdb. This module exists because the same population exclusion was made TWICE by the
-same author, in two sessions, and the correction in between was recorded as PROSE in a task-store
-row rather than as code. A defect recorded in a document is not a control; only the code is.
+This module records the population exclusion as code rather than prose. A defect recorded in a
+document is not a control; only the code is.
 
-🔴 THE EXCLUSION THAT BIT TWICE, AND WHY IT IS SPLIT HERE.
-The obvious rule is `if path.startswith( "src/rnd/" ): skip` — a research doc citing a sibling
-research doc is a RECORD, not an instruction, so skipping the tree is right for the DOCUMENTS.
-It is WRONG for `src/rnd/README.md`, which is the one file in that tree whose entire job is to
-send readers somewhere. Both sweeps skipped the index along with the documents and both hid the
-same 52 dead links.
+The exclusion that bit twice, and why it is split here. The obvious rule is
+`if path.startswith( "src/rnd/" ): skip`. A research doc citing a sibling research doc is a record,
+not an instruction, so skipping the tree is right for the documents. It is wrong for
+`src/rnd/README.md`, the one file in that tree whose entire job is to send readers somewhere.
+Skipping the index along with the documents hides its dead links.
 
-⇒ `INDEX_FILES` is carved out of the exclusion by name, and
+`INDEX_FILES` is carved out of the exclusion by name, and
 `src/tests/unit/test_dead_rnd_citation_corpus_includes_the_index.py` fails if it stops being.
 
-⚠️ THIS SCANNER DOES NOT ASSERT A COUNT AND MUST NOT BE MADE TO. A guard written today against
-the live dead-citation total would ship RED on 133 sites, and a guard that ships red is one
-somebody deletes. It guards the CORPUS — that the search can see what it claims to search.
+Warning: this scanner does not assert a count and must not be made to. A guard written against the
+live dead-citation total would ship red, and a guard that ships red is one somebody deletes.
+It guards the corpus: that the search can see what it claims to search.
 """
 
 import os
@@ -107,7 +105,7 @@ def tracked_files( repo_root ):
 
 def is_archive( path ):
     """
-    Ensures: True iff `path` is a frozen historical record rather than an instructing document.
+    Ensures: True iff `path` is a frozen historical record, not an instructing document.
     """
     return path.startswith( ARCHIVE_PREFIX ) or ".backup-" in path
 
@@ -116,8 +114,8 @@ def in_corpus( path ):
     """
     Decide whether a tracked file belongs in the scanned corpus.
 
-    🔴 THE INDEX CARVE-OUT LIVES HERE. `src/rnd/` is skipped because a research doc citing a
-    sibling is a record — but `INDEX_FILES` is scanned, because an index instructs.
+    The index carve-out lives here. `src/rnd/` is skipped because a research doc citing a
+    sibling is a record, but `INDEX_FILES` is scanned, because an index instructs.
 
     Requires:
         - path is a repo-relative path string
@@ -198,7 +196,7 @@ def cross_repo_names( ini_path=_INI_PATH ):
         - ini_path names lupin-app.ini, carrying an `external repos = a, b, c` key
 
     Ensures:
-        - returns a tuple of repo names, LONGEST FIRST so alternation cannot settle for a
+        - returns a tuple of repo names, longest first so alternation cannot settle for a
           shorter name that is a prefix of a longer one
         - THIS_REPO is absent from the result and UNREGISTERED_SIBLINGS are present in it
         - no name carries a trailing slash; the separator is the pattern's business
@@ -243,14 +241,14 @@ CROSS_REPO_RE    = cross_repo_pattern( CROSS_REPO_NAMES )
 
 def is_cross_repo( line, col ):
     """
-    Decide whether the `src/rnd/…` match at `col` is the tail of ANOTHER repo's path.
+    Decide whether the `src/rnd/…` match at `col` is the tail of another repo's path.
 
     Requires:
         - line is the full source line (or a dewrapped logical line), col is the match start
 
     Ensures:
         - returns True iff the text immediately before the match names a sibling repo,
-          in the slash form OR separated from it by a short run of punctuation
+          in the slash form or separated from it by a short run of punctuation
         - returns False for a bare lupin-relative citation, so those are still resolved here
         - returns False for a lookalike directory that is not a registered sibling
     """
@@ -259,8 +257,9 @@ def is_cross_repo( line, col ):
 
 def is_annotated( line, col ):
     """
-    Ensures: True iff the match at `col` is already-fixed text rather than a live dead citation —
-             either it sits inside a recovery command, or its line carries the REMOVED marker.
+    Decide whether the match at `col` is already-fixed text, not a live dead citation.
+
+    Ensures: True iff the match sits inside a recovery command, or its line carries the `REMOVED` marker.
     """
     return bool( ANNOTATED_NEAR.search( line[ max( 0, col - 45 ) : col ] ) ) \
         or bool( ANNOTATED_LINE.search( line ) )
@@ -292,7 +291,7 @@ def wrap_head( line ):
         - line is one physical source line, newline optional
 
     Ensures:
-        - returns the text to join FROM iff it ends in `-` or `/` once a trailing line
+        - returns the text to join from iff it ends in `-` or `/` once a trailing line
           continuation backslash and one trailing quote have been removed
         - returns None otherwise, so an ordinary line is never joined to its neighbour
     """
@@ -304,13 +303,13 @@ def wrap_head( line ):
 
 def wrap_tail( line ):
     """
-    Return `line` stripped of what an author put at the START of a continuation line.
+    Return `line` stripped of what an author put at the start of a continuation line.
 
     Requires:
         - line is one physical source line, newline optional
 
     Ensures:
-        - returns the text to join TO, with leading whitespace, a comment marker and one
+        - returns the text to join to, with leading whitespace, a comment marker and one
           opening quote removed — the marker matters because an INI or shell comment wraps
           with a `#` that is not part of the path
     """
@@ -366,7 +365,7 @@ def _python_call_argument_lines( source ):
     Ensures:
         - returns a set of 1-based line numbers spanned by string literals that appear as an
           argument (positional or keyword) to some Call node
-        - returns an EMPTY set when the file does not parse — a file we cannot parse is one we
+        - returns an empty set when the file does not parse — a file we cannot parse is one we
           cannot make claims about, so it declines rather than guessing
         - a docstring is never included: it is an expression statement, not a call argument
     """
@@ -391,7 +390,7 @@ def _python_call_argument_lines( source ):
 
 def citation_instructs( rel, text, col, call_arg_lines, line_no ):
     """
-    Decide whether ONE citation instructs, by the property rather than by its file.
+    Decide whether one citation instructs, by the property rather than by its file.
 
     Requires:
         - rel is the repo-relative path of the file the citation sits in
@@ -419,7 +418,7 @@ def citation_instructs( rel, text, col, call_arg_lines, line_no ):
 
 def scan( repo_root ):
     """
-    Scan the corpus and report BOTH the findings and the corpus they came from.
+    Scan the corpus and report both the findings and the corpus they came from.
 
     Requires:
         - repo_root is a directory inside a git working tree
@@ -429,7 +428,7 @@ def scan( repo_root ):
         - `scanned` counts files actually read, so a caller can tell an empty result from an
           empty search — an absence is the one finding that looks identical either way
         - `index_scanned` names every INDEX_FILES member that was reached, so the exclusion
-          that bit twice is visible in the OUTPUT rather than only in the source
+          that bit twice is visible in the output rather than only in the source
         - already-annotated sites are not reported as dead
     """
     scanned, skipped   = [], 0
@@ -512,9 +511,9 @@ def scan_index_links( repo_root, index_rel="src/rnd/README.md" ):
     """
     Resolve the markdown links in the rnd index, whose targets are relative to `src/rnd/`.
 
-    Kept separate from `scan` on purpose: these are a DIFFERENT POPULATION with a different fix
-    shape — a list of links in one file, versus per-citation prose surgery across the tree. They
-    must not be merged into one headline number.
+    Kept separate from `scan`. These are a different population with a different fix shape.
+    That shape is a list of links in one file, versus per-citation prose surgery across the tree.
+    They must not be merged into one headline number.
 
     Requires:
         - index_rel names a markdown file inside the repo

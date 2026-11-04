@@ -52,6 +52,7 @@ Venue: :7999-eligible. Pure in-process; no DB, no docker, no network.
 import importlib.util
 import os
 import subprocess
+import sys
 
 import pytest
 
@@ -186,6 +187,45 @@ def test_an_unreachable_database_names_the_DATABASE( monkeypatch ):
     assert "database's current revision" in reason
 
 
+_LOGIN_ROOT = None   # where the .env is read from; None is the project root, a test points it at a scratch one
+
+
+def _read_as_the_test_venue():
+    """
+    Run read_revisions as the test venue: LUPIN_ENV=testing and the test role's login.
+
+    The login is chosen once under the ambient environment, which is the host role when the .env
+    carries the host and test keys. The host role may not connect to lupin_db_test, so the login is
+    chosen again for the block.
+    """
+    from tests.helpers.testing_venue import reselected_for_testing
+    with reselected_for_testing( _LOGIN_ROOT ):
+        return csah.read_revisions()
+
+
+def test_the_healthy_read_connects_as_the_test_role_not_the_host_role( monkeypatch, tmp_path ):
+    """The wiring: with a host-role seed, the engine the read opens carries the test role's name."""
+    import sqlalchemy
+    from cosa.utils import dotenv_password
+    for key in ( "DB_USER", "DB_PASSWORD", "LUPIN_ENV", "DATABASE_URL", "DB_NAME" ):
+        monkeypatch.setenv( key, "placeholder" )
+        monkeypatch.delenv( key )
+    monkeypatch.setattr( dotenv_password, "_SEEDED", { } )
+    ( tmp_path / ".env" ).write_text( "LUPIN_HOST_DB_USER=lupin_host\nLUPIN_HOST_DB_PASSWORD=hostpw\n"
+                                      "LUPIN_TEST_DB_USER=lupin_test\nLUPIN_TEST_DB_PASSWORD=testpw\n" )
+    dotenv_password.seed_db_password_from_dotenv( root=str( tmp_path ) )
+    monkeypatch.setattr( sys.modules[ __name__ ], "_LOGIN_ROOT", str( tmp_path ) )
+    seen = [ ]
+    def stop_at_the_engine( url, *args, **kwargs ):
+        seen.append( str( url ) )
+        raise RuntimeError( "stop: only the login is under test" )
+    monkeypatch.setattr( sqlalchemy, "create_engine", stop_at_the_engine )
+    head, current, reason = _read_as_the_test_venue()
+    assert ( head, current ) == ( None, None ) and reason, "the read should have stopped at the engine"
+    assert seen and "lupin_test:testpw@" in seen[ 0 ], f"the read did not connect as the test role: {seen}"
+    assert "lupin_db_test" in seen[ 0 ]
+
+
 def test_a_healthy_read_returns_a_pair_and_no_reason( monkeypatch ):
     """
     CONTROL for the three failure tests above. Each of them asserts that a reason is
@@ -213,11 +253,7 @@ def test_a_healthy_read_returns_a_pair_and_no_reason( monkeypatch ):
     to `lupin_db_test` while destroying the vacuity guard three siblings depend
     on — Mr Radio ruled against exactly that (see the module note below).
     """
-    monkeypatch.setenv( "LUPIN_ENV", "testing" )
-    monkeypatch.delenv( "DATABASE_URL", raising=False )
-    monkeypatch.delenv( "DB_NAME",      raising=False )
-
-    head, _current, reason = csah.read_revisions()
+    head, _current, reason = _read_as_the_test_venue()
     assert reason is None, f"the healthy path is broken here, so the failure tests prove nothing: {reason}"
     assert head, "no head revision resolved from this tree"
 

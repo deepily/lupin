@@ -649,3 +649,59 @@ test( "L1: a SECOND verdict on the same tick waits for the fresh read too, rathe
   await Promise.all( [ a, b ] );
   assert.deepEqual( order.slice( 0, 4 ), [ "start 1", "end 1", "start 2", "end 2" ] );
 } );
+
+// ─────────────── row fa5415af — the per-persona request badge ───────────────
+
+const filedBy = ( id: string, who: string, move: string | null ) => ( { ...row( id, "not_approved", move ), created_by: who } );
+const groupBadge = ( filer: string ): HTMLElement | null =>
+  document.querySelector<HTMLElement>( `#holding-area-container .holding-area-group[data-filer="${ filer }"] .holding-area-group-request-badge` );
+
+test( "each persona group shows its own pending-request count on the closed header, and none when it has none", () => {
+  const { ui } = newUI();
+  ui.renderHoldingArea( { status: "ok", tasks: [
+    filedBy( "a1", "krishna 420f5ec9", "admit" ),
+    filedBy( "a2", "krishna 420f5ec9", "admit" ),
+    filedBy( "a3", "krishna 420f5ec9", null ),
+    filedBy( "b1", "mr radio 0e61abe3", "admit" ),
+    filedBy( "c1", "sam 11112222", null ),
+  ] } );
+
+  assert.equal( groupBadge( "Krishna" )!.textContent, "2 requests" );
+  assert.equal( groupBadge( "Krishna" )!.getAttribute( "role" ), "img", "a label on a bare span is not announced" );
+  assert.equal( groupBadge( "Krishna" )!.getAttribute( "aria-label" ), "2 pending requests" );
+  assert.equal( groupBadge( "Mr Radio" )!.textContent, "1 request" );
+  assert.equal( groupBadge( "Mr Radio" )!.getAttribute( "aria-label" ), "1 pending request" );
+  assert.ok( groupBadge( "Sam" ) === null, "no request means no badge, not a zero" );
+  assert.equal( document.querySelectorAll( "#holding-area-container .holding-area-group:not(.collapsed)" ).length, 0 );
+} );
+
+test( "a repaint after the request is answered drops the badge", () => {
+  const { ui } = newUI();
+  ui.renderHoldingArea( { status: "ok", tasks: [ filedBy( "a1", "krishna 420f5ec9", "admit" ) ] } );
+  assert.ok( groupBadge( "Krishna" ) );
+  ui.renderHoldingArea( { status: "ok", tasks: [ { ...filedBy( "a1", "krishna 420f5ec9", "admit" ), request_state: "approved" } ] } );
+  assert.ok( groupBadge( "Krishna" ) === null, "answering the request must drop the badge" );
+} );
+
+test( "without the shared module the group still paints, just with no badge", () => {
+  const { ui } = newUI();
+  const shared = window.LUPIN_TASK_REQUEST;
+  window.LUPIN_TASK_REQUEST = undefined;
+  try {
+    ui.renderHoldingArea( { status: "ok", tasks: [ filedBy( "a1", "krishna 420f5ec9", "admit" ) ] } );
+    assert.ok( document.querySelector( '#holding-area-container .holding-area-group[data-filer="Krishna"]' ) );
+    assert.ok( groupBadge( "Krishna" ) === null, "no shared module means no badge" );
+  } finally {
+    window.LUPIN_TASK_REQUEST = shared;
+  }
+} );
+
+test( "a pending request on a row inside a plan sub-group is counted", () => {
+  const { ui } = newUI();
+  const planned = ( id: string, move: string | null ) => ( { ...filedBy( id, "krishna 420f5ec9", move ), correlation_key: "epic:docs-and-reuse" } );
+  ui.renderHoldingArea( { status: "ok", tasks: [ planned( "p1", "admit" ), planned( "p2", null ), filedBy( "l1", "krishna 420f5ec9", null ) ] } );
+
+  const plan = document.querySelector( '#holding-area-container .holding-area-group[data-filer="Krishna"] .holding-plan-group' );
+  assert.ok( plan, "the fixture made no plan sub-group" );
+  assert.equal( groupBadge( "Krishna" )!.textContent, "1 request", "a request inside a plan was not counted" );
+} );

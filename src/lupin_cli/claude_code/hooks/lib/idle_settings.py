@@ -29,23 +29,10 @@ def load_idle_settings() -> dict:
     """
     Load idle-detection settings from ~/.claude/settings.json with defaults.
 
-    Schema in settings.json:
-        {
-          "idle_detection": {
-            "enabled"        : bool,
-            "backoff_minutes": [int, int, ...]
-          }
-        }
-
-    Behavior:
-      - File missing → returns defaults
-      - Top-level "idle_detection" key missing → returns defaults
-      - Individual fields missing → use individual defaults
-      - "enabled" not bool → coerce to bool (Python truthiness)
-      - "backoff_minutes" not a non-empty list of positive ints → raise ValueError
+    Settings shape: an "idle_detection" object holding "enabled" (bool) and "backoff_minutes" (list of int).
 
     Requires:
-      - ~/.claude/settings.json is either missing OR valid JSON
+      - ~/.claude/settings.json is either missing or valid JSON
 
     Ensures:
       - Returns dict with exactly two keys: "enabled" (bool), "backoff_minutes"
@@ -59,6 +46,15 @@ def load_idle_settings() -> dict:
     Raises:
       ValueError: malformed backoff_minutes (non-list, empty list, non-int
         values, or values <= 0)
+
+    Behavior:
+      - A missing file, an unreadable or unparsable file, or a missing
+        "idle_detection" object returns the defaults.
+      - Unparsable JSON does not raise because the file is shared with other
+        Claude Code features, which report their own parse errors.
+      - A missing individual field uses that field's default.
+      - A non-bool "enabled" is coerced to bool by Python truthiness.
+      - A "backoff_minutes" that is not a non-empty list of positive ints raises ValueError.
     """
     settings_path = Path( os.path.expanduser( "~/.claude/settings.json" ) )
 
@@ -92,7 +88,7 @@ def load_idle_settings() -> dict:
 
 
 def _defaults() -> dict:
-    """Return a fresh copy of the defaults — list is copied to avoid mutation."""
+    """Return a fresh copy of the defaults, with the list copied to avoid mutation."""
     return {
         "enabled"         : DEFAULT_ENABLED,
         "backoff_minutes" : list( DEFAULT_BACKOFF_MINUTES ),

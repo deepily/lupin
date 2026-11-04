@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
 """
-Heartbeat Arbiter — fleet event glob/tail (Rachel's wiring lane).
+Heartbeat arbiter fleet event glob and tail: reads new hook records per poll.
 
-The Arbiter consumes the local Hook's exhaust: per-session append-only JSONL
-event files under the fleet dir `~/.claude/heartbeat-events/<session>.jsonl`
-(canonical design §0.2; arbiter design `03` §3). This module is the
-read/sense I/O: glob the dir + tail each session file from a tracked byte
-offset, returning only the NEW records since the last poll.
+The arbiter consumes the local hook's exhaust: per-session append-only JSONL
+event files under the fleet dir `~/.claude/heartbeat-events/<session>.jsonl`.
+This module is the read/sense I/O. It globs the dir and tails each session file
+from a tracked byte offset, returning only the new records since the last poll.
 
-Design choices (arbiter `03` §3 "track a per-file read offset"):
-    - **Byte-offset tail** (not full re-read): seek to the last offset, read
-      only new bytes → O(new data) per poll, not O(file). Bounded latency as
-      event files grow.
+Design choices:
+    - **Byte-offset tail** (not full re-read): seek to the last offset and read
+      only new bytes. Cost per poll is O(new data), not O(file), so latency stays
+      bounded as event files grow.
     - **Partial-line safe**: a trailing line still being written (no closing
-      newline yet) is NOT consumed — the offset advances only to the last
+      newline yet) is not consumed. The offset advances only to the last
       complete newline, so the partial line is re-read intact next poll.
-    - **Rotation/truncation safe**: if a file SHRANK below the tracked offset
+    - **Rotation/truncation safe**: if a file shrank below the tracked offset
       (rotated or recreated), reset to offset 0 and re-read from the top.
-    - **Never raises** (the §0 #2 observer invariant): a missing dir, an
-      unreadable file, or a malformed line yields empty/partial results, never
-      an exception — the Arbiter degrades safe, the Hooks are unaffected.
+    - **Never raises** (the observer invariant): a missing dir, an unreadable
+      file, or a malformed line yields empty or partial results, never an
+      exception. The arbiter degrades safe and the hooks are unaffected.
     - **`:7999`-free**: pure local filesystem reads.
 
-This is the same never-raises discipline as the `transcript_reader` /
+This is the same never-raises discipline as the `transcript_reader` and
 `heartbeat_events.read_events` modules.
 """
 import glob
@@ -54,7 +53,7 @@ def _session_id_from_path( path ):
 
 def tail_session_file( path, offset=0 ):
     """
-    Read NEW complete JSONL records from one session file since `offset`.
+    Read the new complete JSONL records from one session file since `offset`.
 
     Requires:
         - path is a path-like to a session events JSONL file
@@ -64,12 +63,12 @@ def tail_session_file( path, offset=0 ):
         - Returns ( records, new_offset ):
             records    = list of parsed dict records appended since `offset`,
                          in file order
-            new_offset = byte position up to the LAST COMPLETE line consumed
+            new_offset = byte position up to the last complete line consumed
                          (a partial trailing line is left for the next poll)
         - Missing / unreadable file → ( [], offset )  (offset unchanged)
         - File shrank below `offset` (rotation/truncation) → re-read from 0
         - Blank / malformed / non-object JSON lines are skipped
-        - NEVER raises
+        - never raises
     """
     try:
         size = os.path.getsize( path )
@@ -124,13 +123,13 @@ def tail_fleet_events( events_dir=None, offsets=None ):
 
     Ensures:
         - Returns ( events_by_session, new_offsets ):
-            events_by_session = {session_id: [new records]} — ONLY sessions
+            events_by_session = {session_id: [new records]} — only sessions
                                 with at least one new record this poll
-            new_offsets       = {session_id: byte_offset} for EVERY session
+            new_offsets       = {session_id: byte_offset} for every session
                                 file seen (carried forward for the next poll)
         - Missing dir → ( {}, {} of any pre-existing offsets )  (never raises)
         - A file that errors mid-read is skipped (its offset is preserved)
-        - NEVER raises
+        - never raises
     """
     base = Path( events_dir ) if events_dir is not None else heartbeat_events.FLEET_EVENTS_DIR
     offsets = dict( offsets ) if offsets else { }
@@ -159,16 +158,10 @@ def tail_fleet_events( events_dir=None, offsets=None ):
 
 def save_offsets( path, offsets ):
     """
-    Persist the per-session byte-offset map atomically (bug 5a1f17f8 (b): durable
-    offsets across restarts). The arbiter holds `self._offsets` in memory, so a
-    :8001 restart re-reads every events file from byte 0 and re-consumes historical
-    cap_reached as fresh (the STUCK-poke replay). Saving after each poll lets a bounce
-    RESUME where it left off — no replay.
+    Persist the per-session byte-offset map atomically, so offsets survive restarts.
 
-    Atomic (temp file + os.replace) so a mid-write crash never leaves a torn file the
-    next startup would misread. Swallow-safe: any IO error → return False, never raise
-    (an offset-store hiccup must not crash the poll loop — it degrades to the in-memory
-    behavior on the next start, exactly the pre-fix path).
+    Without it a :8001 restart re-reads every events file from byte 0 and replays
+    historical cap_reached events as fresh (the stuck-poke replay).
 
     Requires:
         - path is a path-like target; offsets is a { session_id: int } map
@@ -176,6 +169,10 @@ def save_offsets( path, offsets ):
     Ensures:
         - writes offsets as JSON to `path` atomically; returns True on success
         - any OSError / serialization error → returns False (never raises)
+        - the write is temp file plus os.replace, so a mid-write crash never
+          leaves a torn file for the next startup to misread
+        - swallow-safe: an offset-store hiccup must not crash the poll loop, and
+          the next start falls back to the in-memory behavior
     """
     path = Path( path )
     tmp  = path.parent / ( path.name + ".tmp" )
@@ -189,15 +186,10 @@ def save_offsets( path, offsets ):
 
 def load_offsets( path ):
     """
-    Load the persisted per-session byte-offset map (bug 5a1f17f8 (b)). Read at arbiter
-    startup so a restart resumes tailing from the last consumed byte instead of byte 0.
+    Load the persisted per-session byte-offset map at arbiter startup.
 
-    Swallow-safe + shape-guarded: a missing file (first-ever start), unreadable path,
-    corrupt JSON, or a non-dict payload all yield {} — the fail-SAFE default that
-    reproduces today's fresh-start behavior (read from the top) rather than crashing or
-    trusting garbage. A shrunk/rotated file is still handled downstream by
-    tail_session_file (offset > size → reset to 0), so a stale-but-parseable offset is
-    self-correcting.
+    A restart then resumes tailing from the last consumed byte instead of byte 0.
+    The load is swallow-safe and shape-guarded.
 
     Requires:
         - path is a path-like source
@@ -205,6 +197,10 @@ def load_offsets( path ):
     Ensures:
         - returns the persisted { session_id: int } map on a clean read
         - missing / unreadable / corrupt / non-dict → returns {} (never raises)
+        - {} is the fail-safe default: the arbiter reads from the top rather
+          than crash or trust garbage
+        - a stale-but-parseable offset corrects itself, because tail_session_file
+          resets to 0 when a shrunk or rotated file has offset > size
     """
     try:
         data = json.loads( Path( path ).read_text() )

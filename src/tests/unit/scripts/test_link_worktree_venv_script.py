@@ -26,13 +26,16 @@ import pytest
 
 _ROOT   = os.environ.get( "LUPIN_ROOT", os.getcwd() )
 _SCRIPT = os.path.join( _ROOT, "src", "scripts", "link-worktree-venv.sh" )
+_LIB    = os.path.join( _ROOT, "src", "scripts", "lib", "worktree-link-lib.sh" )
 
 
 @pytest.fixture( scope="module" )
 def source():
     assert os.path.exists( _SCRIPT ), f"the script under test is missing: {_SCRIPT}"
-    with open( _SCRIPT ) as f:
-        return f.read()
+    assert os.path.exists( _LIB ), f"the library the script sources is missing: {_LIB}"
+    with open( _SCRIPT ) as f, open( _LIB ) as lib:
+        # The list is read in the library now, so the guards read the script and the library together.
+        return f.read() + "\n" + lib.read()
 
 
 def _code_lines( source ):
@@ -71,7 +74,7 @@ class TestNoEarlyClosingPipe:
     def test_the_resolution_reads_the_whole_list_before_matching( self, source ):
         """The positive half: the replacement shape is present, not merely the old one absent."""
         code = "\n".join( _code_lines( source ) )
-        assert "WORKTREE_LIST=" in code
+        assert "WT_LIST=" in code
         assert '${line#worktree }' in code, (
             "the parameter-expansion spelling is also what preserves worktree paths containing "
             "spaces, which awk '{print $2}' truncated"

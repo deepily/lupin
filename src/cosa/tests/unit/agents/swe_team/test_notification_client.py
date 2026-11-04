@@ -43,10 +43,14 @@ class TestInit( unittest.TestCase ):
         self.assertIsNone( c._thread )
 
 
+_UNSET = object()      # not given; None is a real value here, meaning the user was not found
+
+
 class TestLogin( unittest.TestCase ):
 
-    def _patched_jwt_modules( self, user=MagicMock(), token="TKN" ):
+    def _patched_jwt_modules( self, user=_UNSET, token="TKN" ):
         """Inject fake jwt_service / db modules so _login's late imports resolve."""
+        if user is _UNSET: user = MagicMock()
         jwt_mod = MagicMock()
         jwt_mod.create_access_token = MagicMock( return_value=token )
 

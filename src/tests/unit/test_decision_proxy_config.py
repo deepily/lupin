@@ -71,11 +71,10 @@ class TestDecisionProxyConfig:
 
     def test_active_hours_defaults( self ):
         from cosa.agents.decision_proxy.config import (
-            DEFAULT_ACTIVE_HOURS_START, DEFAULT_ACTIVE_HOURS_END, DEFAULT_TIMEZONE
+            DEFAULT_ACTIVE_HOURS_START, DEFAULT_ACTIVE_HOURS_END
         )
         assert DEFAULT_ACTIVE_HOURS_START == 9
         assert DEFAULT_ACTIVE_HOURS_END == 22
-        assert DEFAULT_TIMEZONE == "America/Chicago"
 
     def test_circuit_breaker_defaults( self ):
         from cosa.agents.decision_proxy.config import (

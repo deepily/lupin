@@ -1,67 +1,43 @@
 """
-The ONE place the closed-vs-new ratio's window and threshold live.
+The one place the closed-vs-new ratio's window and threshold live.
 
-WHY THIS MODULE EXISTS. The two numbers were hardcoded in THREE places:
+The two numbers were once hardcoded in three places. One was the endpoint's window in
+`tasks.py` (24 hours). Another was the header's verdict in `tasks.py` (allow when ratio < 1.0).
+The third was the create gate in `task_store_rules.py` (ratio < 1.0). Editing one literal and not the others would leave
+the board reporting "allow" while a create is refused, with nothing reporting the
+disagreement. One module read by all three removes that.
 
-    tasks.py             RATIO_DEFAULT_WINDOW_HOURS = 24     the endpoint's window
-    tasks.py             verdict = "allow" if ratio < 1.0    the header's verdict
-    task_store_rules.py  if ratio < 1.0: return None         the CREATE gate
+Three layers, highest wins:
 
-The endpoint's own docstring already promised the verdict is computed in one place "so
-the header and the gate cannot drift apart" — but the THRESHOLD itself was duplicated,
-so they could. Editing one literal and not the other would leave the board reporting
-"allow" while a create is refused, with nothing anywhere reporting the disagreement.
-One module, read by both, removes that by construction.
+    1. persisted override   the live value    written by the API, a JSON file on disk
+    2. INI                  the boot default  `task flow ratio window hours` / `... allow below`
+    3. module fallback      last resort       the shipped behaviour, written down
 
-THREE LAYERS, HIGHEST WINS:
+A config file is not a runtime control. A server reads it at boot, so a slider that wrote
+only to the INI would move a number the running server never re-reads.
 
-    1. persisted override   the LIVE value    written by the API, a JSON file on disk
-    2. INI                  the BOOT default  `task flow ratio window hours` / `... allow below`
-    3. module fallback      last resort       today's shipped behaviour, written down
+The override is a file, not process memory. An in-process override dies at the next bounce
+and is invisible to other processes. `:7999` and `:8000` are separate processes. The create gate runs in
+whichever one received the write. A memory-only override would give two servers two
+different live thresholds and lose both on restart. The file is read on each
+access, guarded by mtime so the common case is a `stat`. That keeps the value persistent and
+consistent across processes on this box.
 
-A config file is not a runtime control — a server reads it at boot, so a slider that
-wrote only to the INI would move a number the running server never re-reads and would
-feel broken. Hence layer 1.
+The file lives under `fleet_data_root()`, the fleet runtime-data directory outside the repo.
+A gitignored path inside the tree would be listed as "would remove" by `git clean -xdf`.
 
-WHY A FILE AND NOT PROCESS MEMORY. An in-process override dies at the next bounce and
-is invisible to every other process. `:7999` and `:8000` are separate processes and the
-create gate runs in whichever one received the write, so a memory-only override would
-give two servers two different live thresholds and lose both on restart. The file is
-read on each access (guarded by mtime, so it is a `stat` in the common case), which is
-what makes the value both PERSISTENT and CONSISTENT across processes on this box.
+No number in this file is a recommendation. The fallbacks are the shipped behaviour (24
+hours; opens below 1.0), so moving these settings into config cannot change what the gate
+does. Choosing another threshold is the operator's call. "Consistent" means one box and one
+data root; a second host does not share the value.
 
-It lives under `fleet_data_root()` — the fleet runtime-data directory OUTSIDE the repo.
-Not a gitignored path inside the tree: measured 2026-07-26, `git clean -xdf` lists
-gitignored runtime files as "would remove", so in-tree state is on the kill list rather
-than shielded by it.
-
-⚠️ NO NUMBER IN THIS FILE IS A RECOMMENDATION. The fallbacks are today's shipped
-behaviour written down (24 hours; opens below 1.0) so that moving these settings into
-config cannot silently change what the gate does. Choosing a different threshold is the
-operator's call, made with the live board in front of them — which is what the slider
-is for.
-
-⚠️ SCOPE OF "CONSISTENT": one box, one data root. Every process resolving the same
-`fleet_data_root()` shares the value, so dev and test agree. A second host does not.
-
-🔴 AND THE DIRECTORY IS NOT THIS MODULE'S ALONE — `task_approval_settings.override_path()`
-reads `task-approval-settings.json` out of the SAME `LUPIN_FLOW_RATIO_DIR`. That matters
-because the paragraph above was cited, correctly, to justify leaving the var unset on a
-second host (`test_compose_service_parity.py`, exemption dated 2026-09-01) on the grounds
-that such a host would simply run the configured default. TRUE OF THE NUMBERS HERE — every
-fallback in this file is today's shipped behaviour written down, so falling through to it
-changes nothing. NOT TRUE next door: `FALLBACK_MANAGER_PULL_DISABLED` is `True`, the CLOSED
-side, so the same fall-through withdraws an access a manager's classification grants.
-Measured 2026-09-26 on lupin-host-test — `manager_pull_disabled` True there, False on dev,
-and `refusal_for_pull` refusing every manager pull of a row it did not own (row fbd1b273).
-
-✅ UPDATE 2026-09-29 (row 80513825): the approval settings moved into the `approval_settings`
-table and `task-approval-settings.json` is no longer read, so the paragraph above is history
-for THAT file. THIS module's own file is unchanged and is still a single-UID file layer.
-
-⇒ A judgement about "the settings dir" WAS a judgement about BOTH files. If you are weighing
-whether some host needs this variable, read `task_approval_settings`' fallbacks too; this
-module's own harmlessness does not extend to them.
+`task-approval-settings.json` is retired. `task_approval_settings.legacy_override_path()`
+names it in the same `LUPIN_FLOW_RATIO_DIR` only for the one-time import, and nothing
+reads it live. The fallbacks here are harmless on a host that leaves the variable unset
+because they are the shipped behaviour. The approval settings keep their live values in a
+database table, and `FALLBACK_MANAGER_PULL_DISABLED` there is `True`, the closed side.
+Falling through to it withdraws an access a manager's classification grants, so check
+those fallbacks before assuming the same.
 """
 
 import json
@@ -139,6 +115,26 @@ _cache       = { "window_hours": None, "allow_below": None }
 _cache_mtime = None
 
 
+def settings_override_path( filename ):
+    """
+    The path of one settings file in the flow-ratio directory.
+
+    Requires:
+        - filename is a non-empty file name, not a path
+
+    Ensures:
+        - returns $LUPIN_FLOW_RATIO_DIR/<filename> when the variable is set and
+          non-empty (the container's mount point — see the note beside _SETTINGS_DIR_ENV)
+        - otherwise <fleet_data_root()>/flow-ratio/<filename>, with OVERRIDE_SUBDIR
+          appended so both branches name the same directory
+        - does not create the file or the directory
+    """
+    override_dir = os.environ.get( _SETTINGS_DIR_ENV )
+    if override_dir:
+        return os.path.join( override_dir, filename )
+    return os.path.join( fleet_data_root(), OVERRIDE_SUBDIR, filename )
+
+
 def override_path():
     """
     The persisted override file.
@@ -148,35 +144,15 @@ def override_path():
           set (the container's mount point — see the note beside _SETTINGS_DIR_ENV)
         - otherwise <fleet_data_root()>/flow-ratio/flow-ratio-settings.json — the
           host-side convention hold files and the rest of the fleet's runtime state
-          already use, with OVERRIDE_SUBDIR appended so this names the SAME file the
-          env-var branch does. The subdirectory is not decoration; see below.
-        - does NOT create the file or the directory (reads tolerate absence)
-
-    🔴 THE FALLBACK MUST APPEND `flow-ratio/`, AND FOR THREE DAYS IT DID NOT. Measured
-    2026-09-01 in the running containers and on the host:
-
-        lupin-rest-dev    /var/lupin/flow-ratio/flow-ratio-settings.json
-        lupin-rest-test   /var/lupin/flow-ratio/flow-ratio-settings.json
-        host (before)     <fleet_data_root>/flow-ratio-settings.json        <-- one level up
-        host (after)      <fleet_data_root>/flow-ratio/flow-ratio-settings.json
-
-    The mount hands the container `<fleet_data_root>/flow-ratio` as its whole world, so a
-    fallback stopping at `<fleet_data_root>` named a different file than every server
-    writes — and this block claimed the opposite, that "both name the SAME physical
-    directory". `dm.py`, which this resolver was copied from, gets it right: its fallback
-    is `fleet_data_root()/dm-corpus`, subdirectory included. The subdirectory was dropped
-    in the copy. Adding it back is the whole fix, and the claim is now true.
-
-    Nothing had to be migrated: `<fleet_data_root>/flow-ratio-settings.json` did not
-    exist, because no host-side caller has ever written one. That is also why this sat
-    unnoticed — the wrong path was only ever going to be read by a host process, and
-    there is not one yet.
-
+          already use, with OVERRIDE_SUBDIR appended so this names the same file the
+          env-var branch does; the subdirectory is not decoration
+        - the fallback appends `flow-ratio/` because the container mount hands each
+          server `<fleet_data_root>/flow-ratio` as its whole world; a fallback that
+          stopped at `<fleet_data_root>` would name a different file than every server
+          writes (`dm.py` does the same with its `dm-corpus` subdirectory)
+        - does not create the file or the directory (reads tolerate absence)
     """
-    override_dir = os.environ.get( _SETTINGS_DIR_ENV )
-    if override_dir:
-        return os.path.join( override_dir, OVERRIDE_FILENAME )
-    return os.path.join( fleet_data_root(), OVERRIDE_SUBDIR, OVERRIDE_FILENAME )
+    return settings_override_path( OVERRIDE_FILENAME )
 
 
 def _read_overrides():
@@ -186,8 +162,8 @@ def _read_overrides():
     Ensures:
         - returns a dict with keys "window_hours" / "allow_below" /
           "enforcement_active", each a value or None
-        - a MISSING file is the ordinary no-override case and returns both None
-        - a CORRUPT file is REPORTED on stdout and treated as no-override. It does not
+        - a missing file is the ordinary no-override case and returns every value as None
+        - a corrupt file is reported on stdout and treated as no-override. It does not
           raise: a bad settings file must not take the board's header down, and silence
           would leave an operator's write apparently ignored with no clue why.
     """
@@ -230,7 +206,7 @@ def _ini_value( key, return_type, fallback ):
     Ensures:
         - returns the configured value, or `fallback`
         - never raises — a malformed INI must not take the endpoint down. A bad value is
-          REPORTED rather than swallowed, because a silent fallback is how an operator's
+          reported rather than swallowed, because a silent fallback is how an operator's
           edit appears to do nothing at all.
     """
     try:
@@ -262,6 +238,25 @@ def _clamp_threshold( value, fallback ):
     return max( MIN_ALLOW_BELOW, min( MAX_ALLOW_BELOW, value ) )
 
 
+def _stored_or_ini( key, ini_key, kind, fallback, clamp ):
+    """
+    Resolve one numeric setting: persisted override, else INI, else fallback.
+
+    Requires:
+        - key names a field of the override file
+        - kind is the ConfigurationManager return type for ini_key ("int", "float")
+        - clamp is a function ( value, fallback ) that coerces and bounds the value
+
+    Ensures:
+        - returns clamp( stored, fallback ) when an override is stored
+        - otherwise clamp( INI value or fallback, fallback )
+    """
+    stored = _read_overrides()[ key ]
+    if stored is not None:
+        return clamp( stored, fallback )
+    return clamp( _ini_value( ini_key, kind, fallback ), fallback )
+
+
 def get_window_hours():
     """
     The live window, in hours — persisted override, else INI, else fallback.
@@ -269,42 +264,32 @@ def get_window_hours():
     Ensures:
         - always an int inside [ MIN_WINDOW_HOURS, MAX_WINDOW_HOURS ]
     """
-    stored = _read_overrides()[ "window_hours" ]
-    if stored is not None:
-        return _clamp_window( stored, FALLBACK_WINDOW_HOURS )
-    return _clamp_window( _ini_value( INI_KEY_WINDOW_HOURS, "int", FALLBACK_WINDOW_HOURS ),
-                          FALLBACK_WINDOW_HOURS )
+    return _stored_or_ini( "window_hours", INI_KEY_WINDOW_HOURS, "int", FALLBACK_WINDOW_HOURS, _clamp_window )
 
 
 def get_allow_below():
     """
-    The live threshold — the gate OPENS on a ratio strictly below this number.
+    The live threshold — the gate opens on a ratio strictly below this number.
 
     Ensures:
         - persisted override, else INI, else fallback
         - always a float inside [ MIN_ALLOW_BELOW, MAX_ALLOW_BELOW ]
     """
-    stored = _read_overrides()[ "allow_below" ]
-    if stored is not None:
-        return _clamp_threshold( stored, FALLBACK_ALLOW_BELOW )
-    return _clamp_threshold( _ini_value( INI_KEY_ALLOW_BELOW, "float", FALLBACK_ALLOW_BELOW ),
-                             FALLBACK_ALLOW_BELOW )
+    return _stored_or_ini( "allow_below", INI_KEY_ALLOW_BELOW, "float", FALLBACK_ALLOW_BELOW, _clamp_threshold )
 
 
 def get_enforcement_active():
     """
-    Does the ratio gate actually REFUSE a create, or only warn about it?
+    Does the ratio gate refuse a create, or only warn about it?
 
-    This is the switch that decides whether the window and the threshold have teeth.
-    It lives here, beside them, because Rick asked for it here (2026-09-02) — and the
-    asymmetry he objected to was real: the two numbers were live-adjustable while the
-    one that made them matter needed a code edit and a deploy.
+    This switch decides whether the window and the threshold have teeth. It lives here, beside
+    them, so all three settings are adjustable at runtime without a code edit and a deploy.
 
     Ensures:
         - persisted override, else INI, else FALLBACK_ENFORCEMENT_ACTIVE
         - always a bool — an unparseable value falls back rather than raising, because
           the caller is on the create path and must not 500 over a settings file
-        - the FALLBACK IS False: an absent or broken config warns, it does not start
+        - the fallback is False: an absent or broken config warns, it does not start
           refusing every create. Failing open is the safe direction here; failing closed
           would take the board's write path down over a missing file.
     """
@@ -335,7 +320,7 @@ def set_overrides( window_hours=None, allow_below=None, enforcement_active=None 
           resolving the same data root
         - an omitted (None) argument leaves that setting alone — this is a PATCH, not a
           replace, so an operator moving one slider cannot silently reset the other
-        - the write is ATOMIC (temp file + os.replace), so a concurrent reader sees the
+        - the write is atomic (temp file + os.replace), so a concurrent reader sees the
           old file or the new one, never a half-written one
         - returns the live pair after the write, so a caller reports what actually took
           effect rather than what it asked for. Those differ when a value clamps, and a
@@ -343,9 +328,9 @@ def set_overrides( window_hours=None, allow_below=None, enforcement_active=None 
 
     Raises:
         - ValueError naming the offending argument when a supplied value is not a
-          number. It REFUSES rather than falling back: a fallback here would answer an
+          number. It refuses rather than falling back: a fallback here would answer an
           operator's explicit write with a different number and report success.
-        - OSError if the data root cannot be written. Deliberately NOT swallowed — a
+        - OSError if the data root cannot be written. It is not swallowed — a
           slider that reports success while persisting nothing is the failure this whole
           module exists to avoid.
     """
@@ -404,7 +389,7 @@ def _write_overrides( values ):
         - the parent directory exists
         - the file is replaced atomically, so no reader observes a partial write
         - the in-process cache is invalidated, so the very next read re-parses. Without
-          this, a write followed by a read inside the same second could return the OLD
+          this, a write followed by a read inside the same second could return the old
           value: mtime has one-second granularity on some filesystems, which is the same
           whole-second trap that defeats .pyc invalidation elsewhere in this repo.
     """
@@ -431,8 +416,8 @@ def current_settings():
         - returns { window_hours, allow_below, window_source, threshold_source } where
           each source is "override" or "config"
         - the sources are reported because a number alone cannot tell an operator
-          whether their INI edit is in force or is being MASKED by a persisted override
-          — which is exactly the confusion a two-layer scheme otherwise creates
+          whether their INI edit is in force or is being masked by a persisted override
+          — the confusion a two-layer scheme otherwise creates
     """
     stored = _read_overrides()
     return {

@@ -136,6 +136,97 @@ def test_artifact_registry_uses_immutable_tags():
     assert "immutable_tags = true" in _read( MODULES, "artifact-registry", "main.tf" )
 
 
+# ── cloud run model server: matches the live service (row 2f4fd59e, Rick 2026-10-30) ──
+
+LIVE_MODEL_SERVER_DIGEST = "sha256:fe60f72445174909ad9bf2c9cd8720e5878bc6b0c2c673e474d0487205a1f8ae"
+
+
+def _variable_default( source, name ):
+    """Return the raw text after `default =` inside a variable block."""
+    block = _variable_block( source, name )
+    match = re.search( r'^\s*default\s*=\s*(.+)$', block, re.MULTILINE )
+    assert match, f'variable "{name}" has no default'
+    return match.group( 1 ).strip()
+
+
+def test_model_server_defaults_match_the_live_service():
+    source   = _read( ENV_TEST, "variables.tf" )
+    expected = {
+        "model_server_image_digest"          : f'"{LIVE_MODEL_SERVER_DIGEST}"',
+        "model_server_image_tag"             : '"20261030-role-document"',
+        "model_server_max_instances"         : "3",
+        "model_server_scaling_mode"          : '"MANUAL"',
+        "model_server_manual_instance_count" : "1",
+        "model_server_min_instances"         : "0",
+    }
+    for name, value in expected.items():
+        assert _variable_default( source, name ) == value, f"{name} drifted from the live service"
+
+
+def test_model_server_image_is_pinned_by_digest_when_one_is_set():
+    main = _read( ENV_TEST, "main.tf" )
+    assert 'lupin-model-server@${var.model_server_image_digest}' in main
+    assert 'var.model_server_image_digest != ""' in main
+
+
+def test_model_server_scaling_is_wired_from_env_to_module():
+    main = _read( ENV_TEST, "main.tf" )
+    for line in (
+        "max_instances         = var.model_server_max_instances",
+        "scaling_mode          = var.model_server_scaling_mode",
+        "manual_instance_count = var.model_server_manual_instance_count",
+    ):
+        assert line in main, f"envs/test does not pass {line.split()[0]} to the module"
+
+
+def test_model_server_module_emits_service_level_scaling_only_when_asked():
+    module = _read( MODULES, "cloud-run-model-server", "main.tf" )
+    assert 'dynamic "scaling"' in module
+    assert 'for_each = var.scaling_mode != "" ? [1] : []' in module
+    assert "scaling_mode          = var.scaling_mode" in module
+    assert "manual_instance_count = var.manual_instance_count" in module
+    assert _variable_default( _read( MODULES, "cloud-run-model-server", "variables.tf" ), "scaling_mode" ) == '""'
+
+
+def test_model_server_ignores_deployer_stamps_but_not_the_image():
+    module = _read( MODULES, "cloud-run-model-server", "main.tf" )
+    ignore = _ignore_changes( module )
+    assert "client," in ignore and "client_version," in ignore
+    assert "image" not in ignore, "ignoring the image would hide the rollback hazard"
+
+
+def _ignore_changes( module ):
+    """The text between the brackets of the module's ignore_changes list."""
+    return re.search( r"ignore_changes\s*=\s*\[(.*?)\n\s*\]", module, re.DOTALL ).group( 1 )
+
+
+def _ignored_attributes( module ):
+    """The entries of the ignore_changes list, in order, one string each."""
+    return [ entry.strip().rstrip( "," ) for entry in _ignore_changes( module ).splitlines() if entry.strip() ]
+
+
+MODEL_SERVER_IGNORED = [ "template[0].scaling[0].min_instance_count", "client", "client_version" ]
+
+
+def test_model_server_ignores_exactly_the_scheduler_field_and_the_deployer_stamps():
+    """The list holds the scheduler field and the deployer stamps only: any addition hides drift."""
+    module = _read( MODULES, "cloud-run-model-server", "main.tf" )
+
+    assert _ignored_attributes( module ) == MODEL_SERVER_IGNORED
+
+
+def test_the_ignore_list_pin_reddens_when_an_entry_is_added():
+    """Mutants: max_instance_count and scaling each added to the real module text break the pin."""
+    module = _read( MODULES, "cloud-run-model-server", "main.tf" )
+    anchor = "      client_version,\n"
+    assert module.count( anchor ) == 1
+
+    for extra in ( "template[0].scaling[0].max_instance_count", "scaling" ):
+        mutant = module.replace( anchor, anchor + f"      {extra},\n" )
+        assert _ignored_attributes( mutant ) != MODEL_SERVER_IGNORED, extra
+        assert _ignored_attributes( mutant ) == MODEL_SERVER_IGNORED + [ extra ]
+
+
 # ── cloud sql ─────────────────────────────────────────────────────────────────────
 
 def test_cloud_sql_is_private_ip_only():

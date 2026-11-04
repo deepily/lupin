@@ -1,67 +1,44 @@
 #!/usr/bin/env python3
 """
-Is another test suite running right now? — row `e2099400`, Rick's decision 4.
+Detect another running test suite, so a coverage run can refuse to share the box.
 
-🔴 WHY THIS EXISTS. Measured 2026-08-26: a `pytest --cov` tier run that shared
-the box with a second suite reported **82% / 1320 missing statements**. The
-identical tree, run alone minutes later, reported **89% / 853**. Same command,
-same isolated `COVERAGE_FILE`, same pass / skip / xfail counts, and **no warning
-of any kind** — coverage.py has no "I could not measure that" state, so it
+A `pytest --cov` tier run that shared the box with a second suite reported 82%
+with 1320 missing statements. The identical tree run alone reported 89% with 853.
+The command, the isolated `COVERAGE_FILE` and the pass, skip and xfail counts were
+the same, and nothing warned. Coverage.py has no "could not measure" state, so it
 reports a number under conditions where the number means nothing.
 
-The loss concentrated in modules reached through spawned subprocesses
-(`cc_notification_listener` 0 → 155 missing, `register_session` 84 → 191,
-`hook_common` 34 → 136, `session_end` 12 → 55), while every module that had
-tests added that day *improved* in the same run.
+The loss concentrated in modules reached through spawned subprocesses. The error
+is hostile in direction: it makes coverage look worse, so the reflex is to write
+tests for a hole that does not exist. It also has teeth. `fail_under` rises per
+milestone, so a floor set from a contended run lands about 7 points too low, and
+nothing goes red to say so.
 
-**The error is directionally hostile.** It makes coverage look WORSE, so the
-reflex is to spend a day writing tests for a hole that does not exist.
+The mechanism is a suspect, not a finding. Contention is the obvious difference and
+subprocess-timed coverage the plausible victim, but the causal chain is unproven.
+This module refuses the condition under which the number stopped being trustworthy.
 
-**And it now has teeth.** `fail_under` rises per milestone (Rick, same day), so a
-floor set from a contended run lands ~7 points too low — and being too low,
-nothing ever goes red to say so.
+`find_foreign_pytest( ... )` returns the pytest processes that are not this process
+or one of its ancestors. Ancestors are excluded because the runner script that
+invokes this check may be named `run-pytest-direct.sh`, and a substring match would
+make every run refuse itself.
 
-⚠️ THE MECHANISM IS A SUSPECT, NOT A FINDING. Contention is the obvious
-difference and subprocess-timed coverage the plausible victim; the causal chain
-is unproven. This module does not claim to know why — it refuses the condition
-under which the number stopped being trustworthy. Full write-up:
-`src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md`. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md
+An offender must pass both tests. Its command line must be suite-shaped
+(`looks_like_a_running_suite`), and its kernel `comm` must be a python or pytest
+binary (`comm_could_be_pytest`). The command line says what somebody wrote. The
+comm says what the process is. Only the pair is sufficient.
 
-## Contract
+The shape half has two independent clauses, kept apart:
+  1. `looks_like_pytest`: a `pytest` token in a program position.
+  2. `looks_like_a_direct_test_file_run`: an interpreter running a `test_*.py` path
+     directly, with no pytest token at all. Many unit test files run a real suite as
+     `python <file>.py`, because their `__main__` calls `pytest.main(...)`.
+Clause 2 is separate because widening clause 1's token rule would re-admit the
+quoted-search-pattern and spawn-brief false positives it was tightened to close.
 
-`find_foreign_pytest( ... )` returns the list of pytest processes that are NOT
-this process or one of its ancestors. Ancestors are excluded because the runner
-script that invokes this check may itself be named `run-pytest-direct.sh` — a
-substring match would otherwise have every run refuse itself.
-
-An offender must pass BOTH tests: its command line must be suite-SHAPED
-(`looks_like_a_running_suite`) AND the kernel must agree the process IS a python or
-pytest binary (`comm_could_be_pytest`, read from /proc/<pid>/comm). The two answer
-different questions — the command line says what somebody WROTE, comm says what
-the process IS — and only the pair is sufficient. See the docstring on
-`comm_could_be_pytest` for the measurements that forced this.
-
-The shape half is itself TWO INDEPENDENT CLAUSES, and they are independent on
-purpose (row from 2026-08-30, Rachel's second gap):
-
-  1. `looks_like_pytest`             — a `pytest` token in a program position.
-  2. `looks_like_a_direct_test_file_run` — an interpreter running a `test_*.py`
-                                       path directly, which carries NO pytest
-                                       token at all.
-
-Clause 2 exists because **181 of 699 files under `src/tests/unit/` run a real
-suite when invoked as `python <file>.py`** — their `__main__` calls
-`pytest.main(...)` or `unittest.main(...)`. Measured 2026-08-30:
-`.venv/bin/python src/tests/unit/test_outreach_ledger.py` prints "12 passed" and
-read False under clause 1 alone. It is a second clause rather than a widening of
-clause 1's token rule precisely because widening that rule re-admits the
-quoted-search-pattern and spawn-brief false positives clause 1 was tightened
-TWICE to close.
-
-CLI: `python3 -m cosa.utils.coverage_contention` — exit **0** clear, **1**
-contended (offenders printed to stderr), **2** unknown (could not read the
-process table). ⚠️ **UNKNOWN IS NOT CLEAR**, and the caller decides what to do
-about it; this module does not soften it into a pass.
+CLI: `python3 -m cosa.utils.coverage_contention`. Exit 0 is clear, 1 is contended
+(offenders on stderr), 2 is unknown (the process table could not be read). Unknown
+is not clear: the caller decides what to do, and this module never softens it.
 """
 
 import os
@@ -88,46 +65,34 @@ ESCAPE_HATCH_ENV = "LUPIN_ALLOW_CONTENDED_COVERAGE"
 
 def looks_like_pytest( cmdline: str ) -> bool:
     """
-    True when `cmdline` looks like a pytest INVOCATION rather than a mention.
+    Return True when `cmdline` looks like a pytest invocation rather than a mention.
 
-    A token counts as an invocation when its basename is exactly "pytest" AND it is
-    in a program position: first on the line (a PATH-resolved `pytest -q`), given as
-    an ABSOLUTE path (`/opt/venv/bin/pytest`), or preceded by `-m` (`python3 -m pytest`).
+    A token counts as an invocation when its basename is exactly "pytest" and it is in
+    a program position. That means first on the line (a PATH-resolved `pytest -q`),
+    an absolute path (`/opt/venv/bin/pytest`), or preceded by `-m` (`python3 -m pytest`).
 
     Requires:
         - cmdline is a string (may be empty)
 
     Ensures:
         - returns True only for an invocation-shaped command line
-        - a path that merely CONTAINS the word pytest (a runner script named
+        - a path that merely contains the word pytest (a runner script named
           run-pytest-direct.sh, an open editor buffer, /usr/bin/pytest-watch)
           returns False
-        - a RELATIVE path ending in pytest returns False UNLESS IT LEADS THE LINE —
-          `.venv/bin/pytest -q` is True (index 0); the same path in any later position
-          is overwhelmingly a quoted `pgrep -f "bin/pytest ..."` search pattern rather
-          than a program
+        - a relative path ending in pytest returns False unless it leads the line. `.venv/bin/pytest -q` is True (index 0). The same path in any later position is overwhelmingly a quoted `pgrep -f "bin/pytest ..."` search pattern rather than a program
         - never raises
 
-    ⚠️ TWO KNOWN GAPS, both accepted deliberately, and for the same reason: every
-    sanctioned runner in this tree resolves pytest through
-    src/scripts/lib/resolve-venv-pytest.sh, which resolves under $LUPIN_ROOT and refuses
-    to fall back to a bare `python3 -m pytest`. (This read "every sanctioned runner
-    invokes pytest by an ABSOLUTE path" — over-broad, per Rachel 2026-08-30: CLAUDE.md's
-    own comm-matching note shows the relative script form. What the code leans on is the
-    RESOLVER, not the spelling.) So neither shape is expected here, and
-    widening the rule to cover either one re-admits the false positives above — which
-    cost more, because a false positive refuses EVERY coverage run in the tree.
-        1. a bare `pytest` behind an env prefix (`env FOO=1 pytest -q`) — neither
-           first, nor absolute, nor after -m.
-        2. a RELATIVE path in a NON-LEADING position. Measured:
-           `.venv/bin/python3 .venv/bin/pytest src/tests/unit/ -q` -> False.
-           ⚠️ This example was WRONG until 2026-08-30 (Rachel's review). It read
-           `.venv/bin/pytest -q`, which the code CATCHES, because that token leads the
-           line — so the docstring named a gap the code does not have and missed the one
-           it does: the script form, which is how `run-*-tests.sh` actually launches.
-           The gap opened on 2026-08-26 to close the quoted-pattern false positive, and
-           it is still the cheaper trade: the false positive was silent and total,
-           refusing EVERY coverage run in the tree.
+    Two known gaps are accepted for one reason. Every sanctioned runner in this tree
+    resolves pytest through src/scripts/lib/resolve-venv-pytest.sh, which resolves under
+    $LUPIN_ROOT and refuses a bare `python3 -m pytest` fallback. The code leans on that
+    resolver, not on one spelling. Widening the rule re-admits the false positives
+    above, and a false positive refuses every coverage run in the tree.
+        1. a bare `pytest` behind an env prefix (`env FOO=1 pytest -q`): not first,
+           not absolute, not after -m.
+        2. a relative path in a non-leading position, for example
+           `.venv/bin/python3 .venv/bin/pytest src/tests/unit/ -q` -> False. This is
+           the script form `run-*-tests.sh` uses. It is the cheaper trade, because the
+           quoted-pattern false positive it closes was silent and total.
     """
     if not cmdline: return False
     tokens = cmdline.split()
@@ -182,33 +147,30 @@ _TEST_FILE_BASENAME = re.compile( r"^(test_.+|.+_test)\.py$" )
 
 def looks_like_a_direct_test_file_run( cmdline: str ) -> bool:
     """
-    True when `cmdline` is an interpreter running a TEST FILE directly.
+    Return True when `cmdline` is an interpreter running a test file directly.
 
-    The shape is `<python> [options] <path/to/test_something.py> [args]` — no pytest
-    token anywhere on the line, which is why `looks_like_pytest` cannot see it and why
-    this is a separate clause rather than a relaxation of that one.
+    The shape is `<python> [options] <path/to/test_something.py> [args]`, with no
+    pytest token anywhere. That is why `looks_like_pytest` cannot see it.
 
     Requires:
         - cmdline is a string (may be empty)
 
     Ensures:
-        - True for an interpreter LEADING the line whose first non-option argument has a
+        - True for an interpreter leading the line whose first non-option argument has a
           basename matching `test_*.py` or `*_test.py`, by absolute or relative path
-        - False when the leading token is not an interpreter — an editor, a grep, a
+        - False when the leading token is not an interpreter: an editor, a grep, a
           `pytest` invocation (that one is clause 1's job)
-        - False when `-c` or `-m` appears before the script: under `-c` the next token is
-          CODE and under `-m` it is a MODULE NAME, so neither is a file being run, and both
-          are shapes a peer's command line quotes verbatim
+        - False when `-c` or `-m` appears before the script. Under `-c` the next token
+          is code and under `-m` it is a module name, so neither is a file being run
+          and both are shapes a peer's command line quotes verbatim
         - False when the first non-option token is an ordinary script (`manage.py`)
         - never raises
 
-    ⚠️ ONE ACCEPTED NARROWING: an option that takes a SEPARATE value before the script
-    (`python -X importtime test_x.py`) is read as `-X` then `importtime`, and `importtime`
-    is not test-shaped, so the line returns False. It fails toward a MISS rather than a
-    false refusal, which is the direction this module can afford — a false refusal blocks
-    every coverage run in the tree, a miss blocks none. No sanctioned or observed
-    invocation uses that form; widening to a table of value-taking options would add a
-    second thing to keep in sync with CPython for no measured gain.
+    One narrowing is accepted. An option that takes a separate value before the script
+    (`python -X importtime test_x.py`) is read as `-X` then `importtime`, which is not
+    test-shaped, so the line returns False. It fails toward a miss rather than a false
+    refusal. A false refusal blocks every coverage run in the tree; a miss blocks none.
+    A table of value-taking options would be one more thing to keep in sync with CPython.
     """
     if not cmdline: return False
     tokens = cmdline.split()
@@ -224,22 +186,20 @@ def looks_like_a_direct_test_file_run( cmdline: str ) -> bool:
 
 def looks_like_a_running_suite( cmdline: str ) -> bool:
     """
-    The whole shape half of the gate: either clause is sufficient.
+    Return True when either shape clause matches: the whole shape half of the gate.
 
-    🔴 ONE SHAPE PREDICATE, AND THIS IS IT. The comm half of this module carries the same
-    rule ("THERE IS EXACTLY ONE comm PREDICATE") for the same reason: when two callers each
-    compose the clauses themselves, they drift, and a guard with two sources of truth for
-    one question answers differently depending on which door you came in. `find_foreign_pytest`
-    calls this and nothing else.
+    There is one shape predicate, and this is it. When two callers each compose the
+    clauses themselves they drift, and a guard with two sources of truth answers
+    differently depending on the door. `find_foreign_pytest` calls this and nothing else.
 
     Requires:
         - cmdline is a string (may be empty)
 
     Ensures:
-        - True when EITHER a pytest token is in a program position (clause 1) OR an
+        - True when either a pytest token is in a program position (clause 1) or an
           interpreter is running a test file directly (clause 2)
-        - the two clauses are disjoint in practice — clause 2 requires no pytest token —
-          so neither can mask a regression in the other
+        - the two clauses are disjoint in practice, since clause 2 requires no pytest
+          token, so neither can mask a regression in the other
         - never raises
     """
     return looks_like_pytest( cmdline ) or looks_like_a_direct_test_file_run( cmdline )
@@ -282,14 +242,14 @@ def looks_like_a_running_suite( cmdline: str ) -> bool:
 
 def _default_comm_of( pid: int ) -> Optional[str]:
     """
-    The kernel's name for a process, or None when it cannot be determined.
+    Return the kernel's name for a process, or None when it cannot be determined.
 
     Ensures:
         - returns the stripped contents of /proc/<pid>/comm when readable
-        - returns None when the process has EXITED (its /proc entry is gone) — the
+        - returns None when the process has exited (its /proc entry is gone), the
           same race `_default_process_table` already absorbs, one step later
         - returns "" when /proc/<pid> still exists but comm could not be read, which
-          keeps the caller FAIL-CLOSED: an unreadable live process stays an offender
+          keeps the caller fail-closed: an unreadable live process stays an offender
           rather than being waved through on a technicality
     """
     try:
@@ -324,54 +284,36 @@ _PYTHON_COMM = re.compile( r"^python[0-9.]*$" )
 
 def comm_could_be_pytest( comm: str ) -> bool:
     """
-    True when a process's `comm` is one a pytest run could actually have.
-
-    ⚠️ THIS IS THE HALF THE COMMAND LINE CANNOT ANSWER, and it is why the guard reads
-    /proc/<pid>/comm at all. `comm` says what a process IS; the command line says what
-    somebody WROTE about it. A Claude seat carries its entire spawn brief in argv, so a
-    brief that merely QUOTES a command — `.venv/bin/python -B -m pytest src/tests/unit/`
-    — is indistinguishable from a running suite to any argv-only check.
-
-    MEASURED 2026-08-30 (row 9078a035, while taking a coverage measurement that could not
-    start). The guard refused a --cov run naming two processes as live suites:
-
-        pid  22130  comm=claude   argv contains "-m pytest"   (spawn brief for row a8222a71)
-        pid 124554  comm=claude   argv contains "-m pytest"   (spawn brief for row c89cec9b)
-
-    Neither was running anything. Both are long-lived seats, so the guard would not have
-    opened again for as long as they lived — the "gate never opens on an idle box" failure,
-    which is worse than the contention it guards against because it has no timeout. The
-    real suite on the box at that moment appeared in NEITHER of the guard's two named rows.
-
-    This is the same family as the quoted-search-pattern case fixed above on 2026-08-26,
-    one vector over: that one was a peer's `pgrep -f "bin/pytest src/"`, this one is a
-    peer's spawn brief. Requiring an absolute path closed the first and cannot close the
-    second, because "-m pytest" is exactly the shape a brief quotes.
-
-    ⇒ The positive form is the one CLAUDE.md § "IS ANOTHER SUITE RUNNING?" already
-    prescribes: match `comm`, never the command line.
+    Return True when a process's `comm` is one a pytest run could actually have.
 
     Requires:
         - comm is a string (may be empty)
 
     Ensures:
-        - True for "pytest" and for a WHOLE interpreter name (python, python3,
-          python3.13) — a real pytest runs under one of these
+        - True for "pytest" and for a whole interpreter name (python, python3,
+          python3.13), since a real pytest runs under one of these
         - False for "claude", and for anything else that is not interpreter-shaped
         - False for "python3-config" and "python3.10-config", which a
-          startswith("python") test called interpreters. Krishna measured both on
-          /usr/bin here; I checked and they are present, with the honest
-          qualification that their shebang is #!/bin/sh, so a real invocation's comm
-          is "sh" and the practical exposure was nil. The predicate should still
-          answer its own question correctly.
-        - an EMPTY comm returns True, so an unreadable comm can never turn a real
-          suite invisible — unknown stays a refusal, never a pass
+          startswith("python") test called interpreters. Their shebang is #!/bin/sh,
+          so a real invocation's comm is "sh"; the predicate should still answer its
+          own question correctly
+        - an empty comm returns True, so an unreadable comm can never turn a real
+          suite invisible: unknown stays a refusal, never a pass
 
-    ⚠️ THE WHOLE-NAME MATCH IS A NARROWING, so it owes the argument against itself: a
-    tighter test risks MISSING a real suite, which takes somebody's box away. It does
-    not here, because the excluded names provably cannot run pytest. "Looser is safer
-    under fail-closed doctrine" — which I argued first and Krishna corrected — holds
-    only when the excluded thing COULD be an interpreter. These cannot.
+    Why comm matters: it says what a process is, while the command line says what
+    somebody wrote about it. A Claude seat carries its entire spawn brief in argv, so
+    a brief that merely quotes a command such as `.venv/bin/python -B -m pytest
+    src/tests/unit/` looks like a running suite to any argv-only check. Such seats are
+    long-lived, so the guard would stay shut for as long as they live. That failure is
+    worse than the contention it guards against, because it has no timeout. The same
+    family as the quoted `pgrep -f "bin/pytest src/"` pattern, one vector over:
+    requiring an absolute path closed the first and cannot close the second. The
+    positive form is to match `comm`, never the command line.
+
+    The whole-name match is a narrowing. A tighter test risks missing a real suite,
+    which takes somebody's box away. It does not here, because the excluded names
+    provably cannot run pytest. "Looser is safer under fail-closed doctrine" holds only
+    when the excluded thing could be an interpreter. These cannot.
     """
     if not comm: return True
     return comm == "pytest" or bool( _PYTHON_COMM.match( comm ) )
@@ -379,14 +321,12 @@ def comm_could_be_pytest( comm: str ) -> bool:
 
 def _default_process_table() -> List[ Tuple[ int, str ] ]:
     """
-    Every readable (pid, cmdline) from /proc. Raises OSError if /proc is unusable.
+    Return every readable (pid, cmdline) from /proc; raise OSError if /proc is unusable.
 
-    ⚠️ THE comm FILTER LIVES IN find_foreign_pytest, NOT HERE, AND DELIBERATELY SO. It sat
-    in both places for a few hours on 2026-08-30, when this row's fix and row 9078a035's
-    landed independently on the same function. Two gates meant the REAL path was filtered
-    twice and an INJECTED process_table only once — so a test could pass against a shape
-    production never sees, which is the asymmetry that turns a green into a claim. One
-    gate, one code path, every caller gets the same answer.
+    The comm filter lives in find_foreign_pytest, not here. With the
+    filter in both places, the real path was filtered twice and an injected
+    process_table only once. A test could then pass against a shape production never
+    sees. One gate, one code path, so every caller gets the same answer.
     """
     rows = []
     for entry in os.listdir( "/proc" ):
@@ -402,34 +342,7 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
 
 def _comm_admits_a_running_suite( comm: Optional[str] ) -> bool:
     """
-    Whether a comm value leaves a pytest-shaped command line counting as an offender.
-
-    🔴 THE THREE VALUES ARE THREE DIFFERENT FACTS, and collapsing any two of them breaks
-    the guard in one direction or the other. Measured against HEAD 2026-08-30 (row
-    9078a035) before this existed: an injected table holding one real pytest command line
-    reported offenders=[999] for comm "python3" and offenders=[] for BOTH "" and None —
-    so a live process whose comm could not be read was waved through.
-
-        real name   ("python3", "bash")  ->  ASK THE PREDICATE. A named non-interpreter
-                                             is a seat quoting a command, not a suite.
-        ""          (alive, unreadable)  ->  OFFENDER. We could not look, and "could not
-                                             look" is not "nothing there". Refusing costs
-                                             a wait; passing costs a silently wrong
-                                             coverage number, which is what this whole
-                                             module exists to prevent.
-        None        (exited)             ->  NOT an offender. The process is gone; there
-                                             is nothing to contend with.
-
-    _default_comm_of already draws this distinction deliberately and its docstring already
-    promised the caller was FAIL-CLOSED on "". The caller was not: it passed "" to
-    the predicate, which returned False for "" exactly as ITS OWN docstring
-    says, and the process was dropped. Neither function was wrong on its own — the two
-    contracts simply did not meet, which is why reading either one alone finds nothing.
-
-    ⚠️ A POSITIVE CONTROL THAT TESTS ONE VALUE CANNOT SEE THIS. Two of the three inputs
-    produce the same observable answer under the old code, so a fixture exercising only a
-    readable interpreter name passes identically before and after the fix. The test for
-    this must supply all three.
+    Return whether a comm value leaves a pytest-shaped command line an offender.
 
     Requires:
         - comm is a real name, "" for a live process whose comm could not be read, or
@@ -438,6 +351,22 @@ def _comm_admits_a_running_suite( comm: Optional[str] ) -> bool:
     Ensures:
         - returns False only for None, or for a real name that is not an interpreter
         - returns True for "", keeping an unreadable live process an offender
+
+    The three values are three different facts, and collapsing any two breaks the
+    guard in one direction or the other:
+
+        real name ("python3", "bash")  ->  ask the predicate. A named non-interpreter
+                                           is a seat quoting a command, not a suite.
+        "" (alive, unreadable)         ->  offender. "Could not look" is not "nothing
+                                           there". Refusing costs a wait; passing costs
+                                           a silently wrong coverage number.
+        None (exited)                  ->  not an offender. There is nothing to contend with.
+
+    _default_comm_of already makes this distinction and promises fail-closed on "".
+    The caller once passed "" straight to the predicate, whose own contract said False,
+    and the process was dropped. Neither function was wrong alone; the two contracts
+    did not meet. A test must supply all three values: with only a readable
+    interpreter name, the old and new code answer identically.
     """
     if comm is None:  return False
     # ⚠️ DELIBERATELY REDUNDANT with comm_could_be_pytest's own `if not comm: return True`
@@ -502,11 +431,11 @@ def find_foreign_pytest(
 
 def escape_hatch_engaged( environ=None ) -> bool:
     """
-    True when the operator has deliberately allowed a contended coverage run.
+    Return True when the operator has chosen to allow a contended coverage run.
 
     Ensures:
         - only an explicit truthy value engages it; "0", "false", "" and absent
-          all read as NOT engaged, so a leftover `=0` in a shell profile cannot
+          all read as not engaged, so a leftover `=0` in a shell profile cannot
           silently disable the guard
     """
     raw = ( environ if environ is not None else os.environ ).get( ESCAPE_HATCH_ENV, "" )
@@ -514,7 +443,9 @@ def escape_hatch_engaged( environ=None ) -> bool:
 
 
 def render_refusal( offenders: List[ Tuple[ int, str ] ] ) -> str:
-    """The message a refused run prints. Names the offender AND the remedy."""
+    """
+    Build the message a refused run prints, naming the offenders and the remedy.
+    """
     lines = [
         "REFUSING a --cov run: another test suite is already running on this box.",
         "",
@@ -541,7 +472,9 @@ def render_refusal( offenders: List[ Tuple[ int, str ] ] ) -> str:
 
 def main( argv=None ) -> int:
     """
-    Exit 0 clear · 1 contended · 2 unknown. UNKNOWN IS NOT CLEAR.
+    Run the check and return an exit code: 0 clear, 1 contended, 2 unknown.
+
+    Unknown is not clear. The environment escape hatch skips the check and returns 0.
     """
     if escape_hatch_engaged():
         print( f"[coverage-contention] {ESCAPE_HATCH_ENV} set — check skipped.", file=sys.stderr )

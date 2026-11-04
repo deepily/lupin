@@ -21,6 +21,7 @@ import { computeTtsPreview, type TtsPreviewSettings } from "./shared/ttsPreview"
 
 // The narrow consume-surface: the wire touches ONLY enqueue() (never advance /
 // current / clear) — Pass-2 minimal-interface discipline.
+/** The part of the TTS queue store this wire uses: only `enqueue( item )`. */
 export type TtsQueueEnqueuer = Pick<TtsQueueStore, "enqueue">;
 
 /**

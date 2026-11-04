@@ -146,6 +146,82 @@ def test_verify_false_when_too_small_zero_byte_defeat():
     assert ok is False and "too small" in reason
 
 
+_SHORT_BODY = "# Handoff\n\nDone: fixed the guard. Open: nothing. Next: merge.\n"
+
+
+def _short_memento( sid8="abc12345" ):
+    """A complete memento well under the old 1,000-byte floor."""
+    header = f"<!-- memento-record: persona=Rio session_id={sid8} written_at=2026-08-14T15:00:00+00:00 slot=io -->\n"
+    return header + _SHORT_BODY * 8
+
+
+def _stub_memento( sid8="abc12345" ):
+    """A header plus a title and nothing else, padded past the byte floor with comment lines."""
+    header = f"<!-- memento-record: persona=Rio session_id={sid8} written_at=2026-08-14T15:00:00+00:00 slot=io -->\n"
+    return header + "<!-- " + "p" * 300 + " -->\n# Handoff\n\n"
+
+
+def test_verify_true_for_a_complete_short_memento_under_the_old_floor():
+    """Kills the mutant that restores a 1,000-byte floor as the only size gate."""
+    text = _short_memento()
+    assert 450 < len( text.encode( "utf-8" ) ) < 1000
+    ok, reason = _verify( text, min_bytes=reap_memento.DEFAULT_MIN_BYTES )
+    assert ok is True and "short, has content lines" in reason
+
+
+def test_verify_a_long_memento_keeps_the_complete_wording():
+    ok, reason = _verify( _memento(), min_bytes=reap_memento.DEFAULT_MIN_BYTES )
+    assert ok is True and "verified: complete" in reason and "short" not in reason
+
+
+def test_verify_false_for_a_header_only_stub_past_the_byte_floor():
+    """Kills the mutant that deletes the body-line check."""
+    text = _stub_memento()
+    assert len( text.encode( "utf-8" ) ) > reap_memento.DEFAULT_MIN_BYTES
+    ok, reason = _verify( text, min_bytes=reap_memento.DEFAULT_MIN_BYTES )
+    assert ok is False and "header-only stub" in reason and "too small" not in reason
+
+
+def test_verify_false_for_an_empty_file_and_names_the_size_gate():
+    ok, reason = _verify( "", min_bytes=reap_memento.DEFAULT_MIN_BYTES )
+    assert ok is False and "too small" in reason
+
+
+def test_body_lines_skip_comments_blanks_and_every_heading():
+    """Kills the mutant that counts a heading as content."""
+    text = "<!-- c -->\n\n# Title\n## 1. Section\nbody\n   \n### Sub\nmore\n"
+    assert reap_memento.memento_body_lines( text ) == 2
+    assert reap_memento.memento_body_lines( "" ) == 0
+
+
+def test_verify_false_for_a_skeleton_of_headings_with_no_text():
+    """The template skeleton, nine headings and nothing under them, is not a memento."""
+    header   = "<!-- memento-record: persona=Rio session_id=abc12345 written_at=2026-08-14T15:00:00+00:00 slot=io -->\n"
+    skeleton = header + "# Handoff\n\n" + "".join( f"## {n}. Section {n}\n\n" for n in range( 1, 10 ) )
+    assert len( skeleton.encode( "utf-8" ) ) > reap_memento.DEFAULT_MIN_BYTES
+    ok, reason = _verify( skeleton, min_bytes=reap_memento.DEFAULT_MIN_BYTES )
+    assert ok is False and "header-only stub" in reason
+
+
+def test_the_wording_changes_at_exactly_the_old_floor():
+    """Kills the mutant that moves the short or complete boundary: 999 is short, 1000 complete."""
+    header = "<!-- memento-record: persona=Rio session_id=abc12345 written_at=2026-08-14T15:00:00+00:00 slot=io -->\n"
+    for size, word in ( ( reap_memento.SHORT_MEMENTO_BYTES - 1, "short" ), ( reap_memento.SHORT_MEMENTO_BYTES, "complete" ) ):
+        text = header + "x" * ( size - len( header ) )
+        assert len( text.encode( "utf-8" ) ) == size
+        ok, reason = _verify( text, min_bytes=reap_memento.DEFAULT_MIN_BYTES )
+        assert ok is True and f"verified: {word}" in reason
+
+
+def test_the_ini_floor_and_the_code_default_agree():
+    """The live INI value overrides the default, so a default changed alone would change nothing."""
+    import re
+    import cosa.utils.util as cu
+    with open( f"{cu.get_project_root()}/src/conf/lupin-app.ini", encoding="utf-8" ) as handle:
+        floor = int( re.search( r"^cc session reap memento min bytes\s*=\s*(\d+)", handle.read(), re.M ).group( 1 ) )
+    assert floor == reap_memento.DEFAULT_MIN_BYTES
+
+
 def test_verify_false_when_header_absent_big_body():
     # Header-less file is a REAL input (older / hand-written mementos). Must ASK.
     ok, reason = _verify( "y" * 5000 )

@@ -1,0 +1,139 @@
+[
+  {
+    "file": "p1-aphorism-park-reason.txt",
+    "pattern": 1,
+    "repo": "lupin",
+    "source": "src/cosa/rest/task_store_owed.py",
+    "sha": "164e24224",
+    "first_line": 315,
+    "last_line": 322,
+    "sha256": "7f0ef631ceb637df6a4700a8c4f714f31c660f0354275961f96c62512dee85e1",
+    "expected_rules": [
+      "tic",
+      "caps"
+    ],
+    "provenance_checked_by_test": true
+  },
+  {
+    "file": "p2-incident-history-park-reason.txt",
+    "pattern": 2,
+    "repo": "lupin",
+    "source": "src/cosa/rest/task_store_owed.py",
+    "sha": "164e24224",
+    "first_line": 314,
+    "last_line": 426,
+    "sha256": "59500f1c99c4f7454f0152aed84131ceafbebe004396ee68df5e35fc193817c7",
+    "expected_rules": [
+      "preface-length",
+      "iso-date",
+      "bare-ref",
+      "caps",
+      "glyph"
+    ],
+    "provenance_checked_by_test": true
+  },
+  {
+    "file": "p3-ruling-quoted-retired-doors.txt",
+    "pattern": 3,
+    "repo": "lupin",
+    "source": "src/cosa/rest/routers/_retired_doors.py",
+    "sha": "164e24224",
+    "first_line": 1,
+    "last_line": 39,
+    "sha256": "72ef230d667e5331571615206ef36f6fe9b0c618388b50ceb67525f76b83d177",
+    "expected_rules": [
+      "iso-date",
+      "caps"
+    ],
+    "provenance_checked_by_test": true
+  },
+  {
+    "file": "p5-bare-refs-events-tail.txt",
+    "pattern": 5,
+    "repo": "lupin",
+    "source": "src/cosa/agents/heartbeat_arbiter/events_tail.py",
+    "sha": "164e24224",
+    "first_line": 2,
+    "last_line": 27,
+    "sha256": "604061ab52753d8941c15abe24a81089ca599365b7951f810380313466100794",
+    "expected_rules": [
+      "bare-ref"
+    ],
+    "provenance_checked_by_test": true
+  },
+  {
+    "file": "p5-bare-refs-job-factory.txt",
+    "pattern": 5,
+    "repo": "lupin",
+    "source": "src/cosa/rest/agentic_job_factory.py",
+    "sha": "164e24224",
+    "first_line": 183,
+    "last_line": 188,
+    "sha256": "c1ab30fc5b719fd693cf08c94d089f38bdc50eac2a78e23582bb7a3337c44212",
+    "expected_rules": [
+      "bare-ref"
+    ],
+    "provenance_checked_by_test": true
+  },
+  {
+    "file": "p6-shouting-model-server-liveness.txt",
+    "pattern": 6,
+    "repo": "lupin",
+    "source": "src/cosa/utils/model_server_liveness.py",
+    "sha": "164e24224",
+    "first_line": 1,
+    "last_line": 22,
+    "sha256": "56bef6eb71baf8a565130b258e3e882733b946bdf11293bdace7fc5bcc877b68",
+    "expected_rules": [
+      "caps"
+    ],
+    "provenance_checked_by_test": true
+  },
+  {
+    "file": "p4-palimpsest-tmux-runbook.md",
+    "pattern": 4,
+    "repo": "lupin",
+    "source": "src/rnd/v0.1.9/2026.07.14-tmux-supervise-runbook.md",
+    "sha": "b113a3a7^",
+    "first_line": 1,
+    "last_line": 656,
+    "sha256": "883ac78a7d028c0ec2f9d9cd51a30116e9cf02542a773c75411f9bf11676d3aa",
+    "expected_rules": [
+      "dated-banner",
+      "iso-date",
+      "bare-ref",
+      "caps",
+      "glyph"
+    ],
+    "provenance_checked_by_test": true
+  },
+  {
+    "file": "p3-ruling-quoted-group-by-filer.txt",
+    "pattern": 3,
+    "repo": "lupin-mobile",
+    "source": "lib/features/holding_area/data/holding_area_models.dart",
+    "sha": "cf5be6ff1",
+    "first_line": 61,
+    "last_line": 105,
+    "sha256": "ae76e17c239b98b7717e4f1b468eb8b73b55b30fc27dfc1f0085386e3ee923b3",
+    "expected_rules": [
+      "iso-date",
+      "caps"
+    ],
+    "provenance_checked_by_test": false
+  },
+  {
+    "file": "p6-shouting-transcript-stream-bloc.txt",
+    "pattern": 6,
+    "repo": "lupin-mobile",
+    "source": "lib/features/transcript/domain/transcript_stream_bloc.dart",
+    "sha": "cf5be6ff1",
+    "first_line": 731,
+    "last_line": 742,
+    "sha256": "d1c903935e18930e3f157ce487ff8e63a4272e98c9be00c98fb46f1d62a2993f",
+    "expected_rules": [
+      "caps"
+    ],
+    "provenance_checked_by_test": false
+  }
+]

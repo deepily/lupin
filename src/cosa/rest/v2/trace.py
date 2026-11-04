@@ -1,17 +1,17 @@
 """StageTrace — a multi-mark, per-request tracer for CJ Flow v2.
 
-The whole question of whether the v2 control logic is fast enough turns on
-*which* stage dominates, so a single ``t_cache_lookup`` would hide the answer.
-StageTrace records a monotonic ``perf_counter_ns()`` mark per named stage plus
-arbitrary metadata fields (``path``, ``route_reason``, ``best_score``,
-``id_hash`` on write-back, …), then emits one JSONL record — the authoritative
+Whether the v2 control logic is fast enough depends on which stage dominates.
+A single ``t_cache_lookup`` would hide the answer.
+StageTrace records a monotonic ``perf_counter_ns()`` mark per named stage. It also
+records arbitrary metadata fields, such as ``path``, ``route_reason``, ``best_score``
+and ``id_hash`` on write-back. It then emits one JSONL record, the authoritative
 metric source (``io/v2-flow/trace-YYYY-MM-DD.jsonl``).
 
 Design notes:
     - The clock is injectable so tests are deterministic (no wall-clock reads).
-    - Container values handed to ``set()`` are copied at the boundary — v2's
-      standing rule is that no dict/list leaves or enters a shared structure by
-      reference, so a caller's later mutation can never rewrite a recorded field.
+    - Container values handed to ``set()`` are copied at the boundary. v2's
+      standing rule is that no dict or list leaves or enters a shared structure by
+      reference. A caller's later mutation therefore can never rewrite a recorded field.
     - Nothing here imports heavy machinery; the module depends only on stdlib
       plus ``cosa.utils.util`` for the project-root path.
 """

@@ -20,6 +20,7 @@ from cosa.rest.auth_models import (
     ChangePasswordRequest,
     MessageResponse
 )
+from cosa.rest.password_service import validate_password_strength
 from cosa.rest.user_service import (
     create_user,
     authenticate_user,
@@ -276,7 +277,7 @@ async def register( request: RegisterRequest, http_request: Request ) -> Registe
 )
 async def login( login_request: LoginRequest, request: Request ) -> LoginResponse:
     """
-    Authenticate user and return tokens with rate limiting (Phase 8).
+    Authenticate user and return tokens with rate limiting.
 
     Requires:
         - Valid email and password
@@ -382,12 +383,7 @@ async def login( login_request: LoginRequest, request: Request ) -> LoginRespons
 )
 async def refresh( request: RefreshRequest ) -> RefreshResponse:
     """
-    Refresh access token using refresh token.
-
-    Implements token rotation security pattern:
-    - Old refresh token is revoked
-    - New refresh token is issued
-    - New access token is issued
+    Refresh access token using refresh token, rotating the refresh token.
 
     Requires:
         - Valid, non-revoked refresh token
@@ -404,6 +400,9 @@ async def refresh( request: RefreshRequest ) -> RefreshResponse:
 
     Returns:
         RefreshResponse: New token pair
+
+    Rotation means the old refresh token is revoked, and a new refresh token and a new access
+    token are issued.
     """
     # Rotate token (validates, revokes old, issues new)
     success, message, new_refresh_token = rotate_refresh_token(
@@ -639,7 +638,7 @@ async def change_password( request: ChangePasswordRequest, authorization: Option
     token = authorization.replace( "Bearer ", "" )
 
     try:
-        payload = decode_and_validate_token( token )
+        payload = decode_and_validate_token( token, expected_type="access" )
         user_id = payload.get( "sub" )  # JWT standard: "sub" = subject (user_id)
 
         if not user_id:
@@ -894,13 +893,12 @@ async def reset_password( request: ResetPasswordRequest ) -> MessageResponse:
         - New password meets strength requirements
 
     Ensures:
-        - Token validated
-        - Password strength validated
+        - Password strength validated first, so a weak password leaves the token unused
+        - Token validated, and marked used at that point
         - Password updated
-        - Token marked as used
         - Returns 200 on success
+        - Returns 400 if password weak, with the token still usable
         - Returns 400 if token invalid/expired/used
-        - Returns 400 if password weak
 
     Raises:
         - HTTPException 400 if token invalid/expired/used
@@ -911,7 +909,17 @@ async def reset_password( request: ResetPasswordRequest ) -> MessageResponse:
         MessageResponse: Success message
     """
     try:
-        # Validate reset token
+        # Strength first: validate_password_reset_token marks the token used as soon as it
+        # accepts it, so a weak password checked after it would spend the link and change nothing.
+        is_strong, strength_message = validate_password_strength( request.new_password )
+
+        if not is_strong:
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail      = strength_message
+            )
+
+        # Validate reset token (this marks it used)
         success, message, user_id = validate_password_reset_token( request.token )
 
         if not success:

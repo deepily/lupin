@@ -23,11 +23,13 @@
 
 import { html } from "../html";
 
+/** The callback the badge calls when its dismiss button is clicked. */
 export interface ListenerErrorBadgeHandlers {
   /** Dismiss click — the renderer clears the count and empties its root. */
   onDismiss(): void;
 }
 
+/** What the badge shows: the error count, the last message and the event type that threw. */
 export interface ListenerErrorBadgeOpts {
   /** How many listener errors since the last dismiss. Caller guarantees >= 1. */
   count     : number;

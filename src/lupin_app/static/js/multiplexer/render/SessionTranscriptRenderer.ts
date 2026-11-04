@@ -32,6 +32,11 @@ import type { SessionTranscriptSnapshot, TranscriptBlock } from "../stores/Sessi
 import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 
+/**
+ * The slice of the transcript store the console uses.
+ *
+ * It is open, close, load earlier and the snapshot.
+ */
 export interface SessionTranscriptStoreLike {
   open( ccSessionId: string ): Promise<void>;
   close(): void;
@@ -39,6 +44,11 @@ export interface SessionTranscriptStoreLike {
   snapshot(): SessionTranscriptSnapshot;
 }
 
+/**
+ * The slice of the reading pane store the console uses.
+ *
+ * It is the pane content and the two calls that switch between the console and the reading stack.
+ */
 export interface ReadingPaneConsoleLike {
   getPaneContent(): PaneContent;
   showConsole( title: string ): boolean;
@@ -46,6 +56,11 @@ export interface ReadingPaneConsoleLike {
   showReading(): boolean;
 }
 
+/**
+ * The live console of one watched seat, painted inside the reading pane.
+ *
+ * Newest content is at the bottom. The list follows the live end until the reader scrolls up.
+ */
 export interface SessionTranscriptRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -67,6 +82,11 @@ export interface SessionTranscriptRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createSessionTranscriptRenderer`.
+ *
+ * The bus, the transcript store and the reading pane store are required.
+ */
 export interface SessionTranscriptRendererOptions {
   eventBus : EventBus;
   stores   : {
@@ -86,6 +106,9 @@ const FOLDED_LABELS: ReadonlyMap<string, string> = new Map( [
   [ "tool_result", "tool result" ],
 ] );
 
+/**
+ * Models the session transcript console with a scrolling block list and controls.
+ */
 class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
   private readonly bus         : EventBus;
   private readonly transcript  : SessionTranscriptStoreLike;
@@ -108,12 +131,18 @@ class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
   private onEarlier !: () => void;
   private onJump    !: () => void;
 
+  /**
+   * Takes the event bus and the transcript and reading pane stores.
+   */
   constructor( opts: SessionTranscriptRendererOptions ) {
     this.bus         = opts.eventBus;
     this.transcript  = opts.stores.transcript;
     this.readingPane = opts.stores.readingPane;
   }
 
+  /**
+   * Builds the console markup in the root and wires its handlers.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "SessionTranscriptRenderer.mount: already mounted" );
     this.root    = root;
@@ -150,6 +179,9 @@ class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
     this.paint();
   }
 
+  /**
+   * Removes listeners, closes any watched session and empties the root.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -161,6 +193,9 @@ class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Shows the console in the reading pane and starts watching a session.
+   */
   openSeat( ccSessionId: string, title: string ): boolean {
     if ( !this.readingPane.showConsole( title ) ) return false;
     this.following     = true;
@@ -169,6 +204,9 @@ class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
     return true;
   }
 
+  /**
+   * Opens a session in the console, or closes it when already shown.
+   */
   toggleSeat( ccSessionId: string, title: string ): boolean {
     if ( this.showingSeat() !== ccSessionId ) return this.openSeat( ccSessionId, title );
     // The same exit as the pane's close button: the pane-changed listener below unwatches.
@@ -176,13 +214,22 @@ class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
     return false;
   }
 
+  /**
+   * Returns the session ID the console is showing, or null.
+   */
   showingSeat(): string | null {
     if ( this.readingPane.getPaneContent() !== "console" ) return null;
     return this.transcript.snapshot().watchedCcSessionId;
   }
 
+  /**
+   * Reports whether the list is pinned to the live end.
+   */
   isFollowing(): boolean { return this.following; }
 
+  /**
+   * Repaints the list and controls at once; used by tests.
+   */
   forceRenderForTesting(): void { this.paint(); }
 
   // ── lifecycle ────────────────────────────────────────────────────────────
@@ -262,6 +309,7 @@ export function describeState( snapshot: SessionTranscriptSnapshot ): string {
 const REFUSED_MESSAGES: ReadonlyMap<string, string> = new Map( [
   [ "not_found", "Session not found" ],
 ] );
+/** The status line for a refused watch whose reason is missing or unknown. */
 export const REFUSED_FALLBACK = "Watch refused";
 
 /**
@@ -311,19 +359,29 @@ export function renderTranscriptBlock( block: TranscriptBlock ): HTMLElement {
   return el;
 }
 
+/**
+ * Returns the first line of a tool call's text, trimmed to the chip limit.
+ */
 function chipLine( text: string ): string {
   const first = text.split( "\n", 1 )[ 0 ] as string;
   return first.length > TOOL_CHIP_MAX ? `${ first.slice( 0, TOOL_CHIP_MAX ) }…` : first;
 }
 
+/**
+ * Wraps text in a pre element as plain text.
+ */
 function plain( text: string ): HTMLElement {
   const pre = document.createElement( "pre" );
   pre.textContent = text;
   return pre;
 }
 
+/** The label of a thinking block that came with no text. */
 export const UNRECORDED_THINKING_LABEL = "💭 thinking (not recorded)";
 
+/**
+ * Builds the dim label shown for a thinking block that came with no text.
+ */
 function unrecordedThinking(): HTMLElement {
   const label = document.createElement( "div" );
   label.className   = "session-transcript-unrecorded";
@@ -331,8 +389,12 @@ function unrecordedThinking(): HTMLElement {
   return label;
 }
 
+/** The label above the text of a thinking block that has text. */
 export const THINKING_LABEL = "💭 thinking";
 
+/**
+ * Builds a thinking block with a dim label above its text shown as plain text.
+ */
 function inlineThinking( text: string ): HTMLElement {
   const wrap  = document.createElement( "div" );
   const label = document.createElement( "div" );
@@ -343,6 +405,9 @@ function inlineThinking( text: string ): HTMLElement {
   return wrap;
 }
 
+/**
+ * Builds a collapsed details element with a label and plain text inside.
+ */
 function folded( label: string, text: string ): HTMLElement {
   const details = document.createElement( "details" );
   const summary = document.createElement( "summary" );
@@ -351,6 +416,11 @@ function folded( label: string, text: string ): HTMLElement {
   return details;
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 export function createSessionTranscriptRenderer( opts: SessionTranscriptRendererOptions ): SessionTranscriptRenderer {
   return new SessionTranscriptRendererImpl( opts );

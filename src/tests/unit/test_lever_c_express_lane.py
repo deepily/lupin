@@ -13,6 +13,7 @@ Decision: priority field = express (Rick, 2026-06-02).
 Venue: :7999-eligible (pure unit; stubs emission + io_tbl, no DB/WS).
 """
 
+import sys
 import types
 
 import pytest
@@ -23,6 +24,8 @@ import cosa.rest.notification_fifo_queue as nfq
 def _queue( monkeypatch ):
     """A NotificationFifoQueue with emission + io_tbl stubbed (no DB / no WebSocket)."""
     monkeypatch.setattr( nfq, "InputAndOutputTable", lambda **k: types.SimpleNamespace() )
+    monkeypatch.setattr( nfq, "get_app_timezone", lambda config_mgr: "America/New_York" )
+    monkeypatch.setitem( sys.modules, "lupin_app.main", types.SimpleNamespace( config_mgr=None, app_debug=False ) )
     q = nfq.NotificationFifoQueue( websocket_mgr=None, emit_enabled=False )
     monkeypatch.setattr( q, "_emit_notification_added", lambda *a, **k: None )
     monkeypatch.setattr( q, "_log_to_io_tbl", lambda *a, **k: None )

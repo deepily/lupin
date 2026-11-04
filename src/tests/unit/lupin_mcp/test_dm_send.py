@@ -5,7 +5,7 @@ Unit tests for `_dm_send_impl` — the testable core of the `dm_send` MCP tool.
 inline) that replaces the deprecated commons claim-check DM path. HTTP is
 injected via `post_fn`, so these tests need no live server.
 
-Design: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
+Design: src/docs/decisions/2026.06.15-notification-native-ai-to-ai-messaging.md
 """
 
 from lupin_mcp.cosa_voice_mcp import _dm_send_impl

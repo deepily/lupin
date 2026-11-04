@@ -42,22 +42,30 @@ import {
 } from "./templates/sectionHeader";
 import { renderAgentSelect } from "../../shared/agent-select.js";
 import { renderArgQuestion, clearArgQuestion } from "../../shared/arg-interview.js";
+import { teardownScaffold } from "./dom";
 
 /** The one thing this pane writes on AudioStore (§6a ruling 3). */
 export interface QaTtsModeWriter {
   setTtsMode( mode: TtsMode ): void;
 }
 
+/** The stores the Q&A pane uses: the question store and a speech mode writer. */
 export interface QaPaneRendererStores {
   qa    : QaStore;
   audio : QaTtsModeWriter;
 }
 
+/** The Q&A Interface pane: agent select, input, mic, submit, metrics and response. */
 export interface QaPaneRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
 }
 
+/**
+ * Options for `createQaPaneRenderer`.
+ *
+ * The bus and the stores are required. Without a mic handler the mic button does nothing.
+ */
 export interface QaPaneRendererOptions {
   eventBus : EventBus;
   stores   : QaPaneRendererStores;
@@ -83,6 +91,11 @@ function anyMetric( m: QaMetrics ): boolean {
   return m.ttt !== null || m.ttfa !== null || m.rtt !== null;
 }
 
+/**
+ * Models the Q&A pane of the multiplexer and keeps it painted from the Q&A store.
+ *
+ * Builds the header and chrome on mount, wires the controls, and repaints when the store changes.
+ */
 class QaPaneRendererImpl implements QaPaneRenderer {
   private readonly bus        : EventBus;
   private readonly stores     : QaPaneRendererStores;
@@ -102,12 +115,20 @@ class QaPaneRendererImpl implements QaPaneRenderer {
   // repaint while the operator is typing cannot discard what they have typed.
   private renderedQuestion: unknown = null;
 
+  /**
+   * Stores the event bus, the stores and an optional mic handler from the options.
+   */
   constructor( opts: QaPaneRendererOptions ) {
     this.bus        = opts.eventBus;
     this.stores     = opts.stores;
     this.micHandler = opts.micHandler ?? null;
   }
 
+  /**
+   * Renders the Q&A header and body into the root, wires the controls and paints.
+   *
+   * Subscribes to store changes and starts loading the agents and voice mode. Throws when already mounted.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "QaPaneRenderer already mounted" );
     this.mounted = true;
@@ -141,17 +162,15 @@ class QaPaneRendererImpl implements QaPaneRenderer {
     void this.stores.qa.loadVoiceMode();
   }
 
+  /**
+   * Removes the Q&A pane's subscriptions and listeners and clears its root element.
+   *
+   * Allows the pane to be mounted again.
+   */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.els    = null;
     this.header = null;
     this.renderedAgents = null;
@@ -289,6 +308,11 @@ class QaPaneRendererImpl implements QaPaneRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createQaPaneRenderer( opts: QaPaneRendererOptions ): QaPaneRenderer {
   return new QaPaneRendererImpl( opts );

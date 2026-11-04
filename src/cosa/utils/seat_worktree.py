@@ -1,49 +1,39 @@
 """
-Give a spawned seat its own private worktree, so two seats are never mid-edit in one
-working tree (row 9d654899 — Rick ruled "Adopt, with drift disclosure", 2026-09-03).
+Give a spawned seat its own private worktree, so two seats are never mid-edit in one tree.
 
-THE DEFECT THIS CLOSES. `git commit -- <path>` commits that path's WORKING-TREE
-CONTENT, so a seat that legitimately claims a file still commits whatever a peer left
-uncommitted inside it. Every control the fleet has is per-FILE and the hazard is
-per-HUNK: the manifest says the file is yours and it IS yours; the commit scope guard
-checks the PATH and it passes; a pathspec cannot help because you named exactly the
-file you meant. It has fired three times, once as a completed hit — 57 of one seat's
-uncommitted lines landed in a peer's commit, under his name, with every control saying
-yes and the author sincerely reporting it clean.
+The defect this closes: `git commit -- <path>` commits that path's working-tree content. A seat
+that legitimately claims a file still commits whatever a peer left uncommitted inside it. Every
+control the fleet has is per file, and the risk is per hunk. The manifest says the file is
+yours and it is. The commit scope guard checks the path and it passes. A pathspec cannot help,
+because you named the file you meant. It has fired three times. Once it landed: 57 of one seat's
+uncommitted lines went into a peer's commit under his name, with every control saying yes.
 
-WHY THIS IS PROVISIONING AND NOT A LOUDER ALARM. `session_spawner` already DETECTS the
-condition and returns `placement_alarm`. An alarm tells a seat it is standing somewhere
-unsafe and then leaves it there — and this repo's own doctrine is that a rule which
-depends on someone acting on a message is not a control. Under the ruling the DEFAULT
-is what is wrong, so the detection becomes the fix.
+Why this is provisioning and not a louder alarm: `session_spawner` already detects the condition
+and returns `placement_alarm`. An alarm tells a seat it is standing somewhere unsafe and then
+leaves it there. A rule that depends on someone acting on a message is not a control. The
+default placement is what is wrong, so the detection becomes the fix.
 
-WHY IT DELEGATES RATHER THAN REIMPLEMENTING. `src/scripts/provision-seat-worktree.sh`
-owns the predicate: it resolves the main checkout from git rather than from a path
-shape, reuses a registered worktree instead of recreating it, refuses a path that
-exists and is not one, and verifies the tree before claiming success. A second
-implementation of that predicate is a second thing to keep in sync. Deliberately no
-"is it already provisioned" fast path here, for the same reason.
+Why it delegates rather than reimplementing: `src/scripts/provision-seat-worktree.sh` owns the
+predicate. It resolves the main checkout from git rather than from a path shape. It reuses a
+registered worktree instead of recreating it. It refuses a path that exists and is not one. It
+verifies the tree before claiming success. A second implementation would be a second thing to
+keep in sync, so there is no "is it already provisioned" fast path here either.
 
-⚠️ IT NEVER RAISES, DELIBERATELY. Same fail-open shape as `provision_worktree_venv`: a
-seat in the shared checkout is worse off, a spawn that DIES because provisioning failed
-is worse still. Every non-recoverable outcome is logged at WARNING naming the target
-and the exit code, because the failure this row exists to kill is the one that looks
-like success.
+It never raises. This has the same fail-open shape as `provision_worktree_venv`. A seat in the
+shared checkout is worse off, but a spawn that dies because provisioning failed is worse still.
+Every non-recoverable outcome is logged at `WARNING` with the target and exit code. The failure
+to prevent is the one that looks like success.
 
-⚠️ IT NEVER REMOVES A WORKTREE. `cosa.agents.shared.seat_teardown` does when the seat is
-reaped or exits (row 129cc96b P3, 2026-09-18), and the arbiter's worktree janitor is the
-backstop once the seat is gone (row 033538f6, 2026-09-14: seat trees live in
-`<main>/.claude/worktrees/`, locked while the seat lives).
+It never removes a worktree. `cosa.agents.shared.seat_teardown` does that when the seat is reaped
+or exits. The arbiter's worktree janitor is the backstop once the seat is gone. Seat trees live in
+`<main>/.claude/worktrees/` and stay locked while the seat lives.
 
-🔴 A TEST RUN MUST NOT PROVISION INTO THE REAL CHECKOUT (row 033538f6). Several spawn
-tests call `spawn_sessions` for real with a fake runner, and never stub this function, so
-every unit-tier run created one permanent tree per seat name in the box's own repo:
-`lupin-wt-cc-reviewer-sid-chain-e-1` and its siblings were part of the 227 removed on
-2026-09-14, and a single tier run that day re-created 26 of them. The guard below refuses
-any main checkout named in `LUPIN_SEAT_WORKTREE_REFUSE_ROOT`, and the unit conftest sets
-it to the real checkout. It is an ENVIRONMENT check here, not a stub in the conftest: a
-local fixture can override a module attribute, and cannot un-set a variable the
-provisioner reads for itself.
+A test run must not provision into the real checkout. Spawn tests that call `spawn_sessions` with
+a fake runner would otherwise create one permanent tree per seat name in the box's own repo. The
+guard refuses any main checkout named in `LUPIN_SEAT_WORKTREE_REFUSE_ROOT`, which the unit
+conftest sets to the real checkout. It is an environment check, not a stub in the conftest. A
+local fixture can override a module attribute, but it cannot unset a variable the provisioner
+reads for itself.
 """
 
 import logging
@@ -86,8 +76,10 @@ def _main_checkout_of( path ):
 
 def _parse_keys( stdout ):
     """
+    Parse the provisioning script's machine-readable upper-case `NAME=value` lines.
+
     Ensures:
-        - returns the script's machine-readable KEY=value lines as a dict
+        - returns those lines as a dict
         - prose lines (no '=') are ignored, so the human text can change freely
         - never raises
     """
@@ -112,31 +104,31 @@ def provision_seat_worktree( main_root, seat_name, debug=False ):
     Ensures:
         - returns a dict with keys: provisioned (bool), status (str), work_dir (str or
           None), drift_behind (int or None), exit_code (int or None), message (str)
-        - `work_dir` is the directory the seat should be placed in. It is the NEW
-          worktree on success, and None on every failure — the caller keeps whatever
-          it had, so a failure degrades to today's behaviour rather than to a guess.
+        - `work_dir` is the directory the seat should be placed in. It is the new
+          worktree on success, and None on every failure. The caller keeps whatever
+          it had, so a failure degrades to the old behaviour rather than to a guess.
         - a falsy main_root or seat_name is a no-op reported as status "no_target",
           never an error: an explicit project=None inherits the caller's own cwd and
           this code does not know where that seat will land, so it must not guess
         - a missing script is a no-op reported as status "script_absent" — an older
           checkout must still be able to spawn
-        - a main_root whose MAIN checkout is the one named in
+        - a main_root whose main checkout is the one named in
           LUPIN_SEAT_WORKTREE_REFUSE_ROOT is a no-op reported as status "refused_root"
           (the unit tier's guard against creating trees in the real repo)
         - status is "created" for a new tree, "reused" for one that was already there
           (a re-spun seat comes back to its own tree with its work still in it), and
-          "already_seat_tree" when the path handed in IS this seat's own tree
+          "already_seat_tree" when the path handed in is this seat's own tree
+        - provisioned is True only for "created" and "reused"
         - status is "occupied" when the seat's existing tree has a live process with its
           cwd inside it, or uncommitted changes no memento claims: work_dir is None,
           provisioned is False, and `occupied_tree` / `occupied_reason` say which tree
           and why. The caller picks another slot; it never falls back to that tree
-        - drift_behind is the DISCLOSURE half of Rick's ruling: how many commits the
-          tree is behind the main checkout's HEAD. 0 at creation; non-zero for a reused
-          tree. The row's own precondition was that this costs nothing to compute
-          (`git rev-list --count` is 0.00s at any depth) and that nothing prints it.
-        - every other non-zero exit is reported as status "failed" AND logged at
-          WARNING — never silently swallowed
-        - NEVER raises, and never blocks a spawn
+        - drift_behind is how many commits the tree is behind the main checkout's HEAD:
+          0 at creation, non-zero for a reused tree. It is disclosed because computing it
+          costs nothing (`git rev-list --count` is instant at any depth)
+        - every other non-zero exit is reported as status "failed" and logged at
+          `WARNING`, never silently swallowed
+        - never raises, and never blocks a spawn
     """
     if not main_root or not seat_name:
         return { "provisioned": False, "status": "no_target", "work_dir": None,
@@ -212,22 +204,19 @@ def provision_seat_worktree( main_root, seat_name, debug=False ):
 
 def drift_disclosure( provisioning ):
     """
-    The second half of Rick's ruling, rendered for a caller that reads the TOP of a
-    result rather than a nested dict.
+    Render the tree's drift as one sentence, for a caller that reads the top of a result.
 
-    WHY IT IS A DISCLOSURE AND NOT A GATE (row 9d654899). The case against per-session
-    worktrees was drift — a seat working a stale tree. The row's own re-diagnosis is
-    that the problem was never drift but UNSTATED drift: the tree furthest behind was
-    the harmless one, because its pin was declared. So this prints a number and
-    forbids nothing.
+    Why it is a disclosure and not a gate: the case against per-session worktrees was drift, a seat
+    working a stale tree. The real problem was unstated drift. The tree furthest behind was the
+    harmless one, because its pin was declared. So this prints a number and forbids nothing.
 
     Requires:
         - provisioning is the dict returned by provision_seat_worktree, or None
 
     Ensures:
-        - returns None when there is nothing to disclose — no provisioning, an
+        - returns None when there is nothing to disclose: no provisioning, an
           unknown drift, or a tree that is level with the main checkout. None means
-          the line does not appear at all, so when it DOES appear it means something.
+          the line does not appear at all, so when it does appear it means something.
         - otherwise returns one sentence naming the tree and how far behind it is
     """
     if not provisioning:                                    return None

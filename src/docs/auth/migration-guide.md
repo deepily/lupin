@@ -1,7 +1,6 @@
 # Mock to JWT Migration Guide
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Target Audience**: DevOps Engineers, Team Leads
 
 ---
@@ -694,5 +693,4 @@ WHERE event_type = 'password_changed'
 ---
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Maintained By**: Lupin Migration Team

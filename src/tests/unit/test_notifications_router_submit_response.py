@@ -40,6 +40,8 @@ import cosa.rest.routers.notifications as notif
 
 _NID          = "11111111-2222-3333-4444-555555555555"
 _GRACE        = 300
+_RECIPIENT    = "99999999-8888-4777-8666-555555555555"   # the card's addressee
+_BY           = { "user_id": _RECIPIENT, "account_email": None, "method": "jwt" }   # the addressee answering
 
 
 class _Row:
@@ -48,7 +50,7 @@ class _Row:
     def __init__( self, state="delivered", expires_at=None ):
         self.state          = state
         self.expires_at     = expires_at
-        self.recipient_id   = "RECIPIENT-VALUE"
+        self.recipient_id   = _RECIPIENT
         self.job_id         = "JOB-VALUE"
         self.sender_id      = "SENDER-VALUE"
         self.sender_persona = "PERSONA-VALUE"
@@ -110,14 +112,14 @@ class TestTheThreeRefusals:
     def test_a_missing_row_is_a_404_naming_the_id( self, wire ):
         wire( None )
         with pytest.raises( HTTPException ) as exc:
-            notif._submit_response_sync( _NID, "yes" )
+            notif._submit_response_sync( _NID, "yes", _BY )
         assert exc.value.status_code == 404
         assert _NID in exc.value.detail
 
     def test_an_already_responded_row_is_a_400_saying_so( self, wire ):
         wire( _Row( state="responded" ) )
         with pytest.raises( HTTPException ) as exc:
-            notif._submit_response_sync( _NID, "yes" )
+            notif._submit_response_sync( _NID, "yes", _BY )
         assert exc.value.status_code == 400
         assert "already responded" in exc.value.detail.lower()
 
@@ -126,7 +128,7 @@ class TestTheThreeRefusals:
         long_ago = datetime.now( timezone.utc ) - timedelta( seconds=_GRACE + 60 )
         wire( _Row( state="expired", expires_at=long_ago ) )
         with pytest.raises( HTTPException ) as exc:
-            notif._submit_response_sync( _NID, "yes" )
+            notif._submit_response_sync( _NID, "yes", _BY )
         assert exc.value.status_code == 400
         assert "grace" in exc.value.detail.lower()
         assert "already responded" not in exc.value.detail.lower()
@@ -134,7 +136,7 @@ class TestTheThreeRefusals:
     def test_a_failed_update_is_a_500( self, wire ):
         wire( _Row(), updated=False )
         with pytest.raises( HTTPException ) as exc:
-            notif._submit_response_sync( _NID, "yes" )
+            notif._submit_response_sync( _NID, "yes", _BY )
         assert exc.value.status_code == 500
 
 
@@ -165,8 +167,8 @@ class TestTheGraceBoundary:
 
         monkeypatch.setattr( notif, "datetime", _Clock )
         wire( _Row( state="expired", expires_at=fixed - timedelta( seconds=_GRACE ) ) )
-        out = notif._submit_response_sync( _NID, "yes" )
-        assert out[ "recipient_id" ] == "RECIPIENT-VALUE"
+        out = notif._submit_response_sync( _NID, "yes", _BY )
+        assert out[ "recipient_id" ] == _RECIPIENT
 
     def test_one_second_past_the_limit_is_refused( self, wire, monkeypatch ):
         """
@@ -183,28 +185,28 @@ class TestTheGraceBoundary:
         monkeypatch.setattr( notif, "datetime", _Clock )
         wire( _Row( state="expired", expires_at=fixed - timedelta( seconds=_GRACE + 1 ) ) )
         with pytest.raises( HTTPException ) as exc:
-            notif._submit_response_sync( _NID, "yes" )
+            notif._submit_response_sync( _NID, "yes", _BY )
         assert exc.value.status_code == 400
         assert "grace" in exc.value.detail.lower()
 
     def test_an_expired_row_inside_the_grace_period_is_accepted( self, wire ):
         recent = datetime.now( timezone.utc ) - timedelta( seconds=_GRACE - 60 )
         wire( _Row( state="expired", expires_at=recent ) )
-        out = notif._submit_response_sync( _NID, "yes" )
-        assert out[ "recipient_id" ] == "RECIPIENT-VALUE"
+        out = notif._submit_response_sync( _NID, "yes", _BY )
+        assert out[ "recipient_id" ] == _RECIPIENT
 
     def test_an_expired_row_with_no_expires_at_is_accepted( self, wire ):
         # 🔴 the `expires_at and ...` guard. Without this case a helper that dropped
         # the None check raises TypeError on a row the design says to accept.
         wire( _Row( state="expired", expires_at=None ) )
-        out = notif._submit_response_sync( _NID, "yes" )
+        out = notif._submit_response_sync( _NID, "yes", _BY )
         assert out[ "job_id" ] == "JOB-VALUE"
 
     def test_an_expired_row_well_past_the_grace_period_is_refused( self, wire ):
         long_ago = datetime.now( timezone.utc ) - timedelta( seconds=_GRACE + 600 )
         wire( _Row( state="expired", expires_at=long_ago ) )
         with pytest.raises( HTTPException ):
-            notif._submit_response_sync( _NID, "yes" )
+            notif._submit_response_sync( _NID, "yes", _BY )
 
     def test_the_grace_window_is_read_from_config_not_hard_coded( self, wire ):
         """
@@ -214,7 +216,7 @@ class TestTheGraceBoundary:
         """
         aged = datetime.now( timezone.utc ) - timedelta( seconds=500 )
         wire( _Row( state="expired", expires_at=aged ), grace=1000 )
-        out = notif._submit_response_sync( _NID, "yes" )
+        out = notif._submit_response_sync( _NID, "yes", _BY )
         assert out[ "sender_id" ] == "SENDER-VALUE"
 
 
@@ -222,9 +224,9 @@ class TestTheResponseWrapping:
 
     def test_a_bare_string_is_wrapped_with_its_source( self, wire ):
         repo = wire( _Row() )
-        notif._submit_response_sync( _NID, "yes" )
+        notif._submit_response_sync( _NID, "yes", _BY )
         _nid, payload = repo.updates[ 0 ]
-        assert payload == { "value": "yes", "source": "ui" }
+        assert payload == { "value": "yes", "source": "ui", "answered_by": _BY }
 
     def test_a_dict_is_passed_through_unwrapped( self, wire ):
         """
@@ -233,13 +235,13 @@ class TestTheResponseWrapping:
         """
         repo = wire( _Row() )
         given = { "value": "no", "source": "cli", "extra": 1 }
-        notif._submit_response_sync( _NID, given )
+        notif._submit_response_sync( _NID, given, _BY )
         _nid, payload = repo.updates[ 0 ]
-        assert payload == given
+        assert payload == { **given, "answered_by": _BY }   # the dict's own keys untouched; the door adds who answered
 
     def test_the_update_is_keyed_by_a_uuid_not_the_raw_string( self, wire ):
         repo = wire( _Row() )
-        notif._submit_response_sync( _NID, "yes" )
+        notif._submit_response_sync( _NID, "yes", _BY )
         nid, _payload = repo.updates[ 0 ]
         assert nid == uuid.UUID( _NID )
         assert isinstance( nid, uuid.UUID )
@@ -250,9 +252,9 @@ class TestTheHandback:
     def test_all_four_fields_come_back_under_their_own_keys( self, wire ):
         # 🔴 four DIFFERENT values, so a dict built from the wrong attribute is visible.
         wire( _Row() )
-        out = notif._submit_response_sync( _NID, "yes" )
+        out = notif._submit_response_sync( _NID, "yes", _BY )
         assert out == {
-            "recipient_id"   : "RECIPIENT-VALUE",
+            "recipient_id"   : _RECIPIENT,
             "job_id"         : "JOB-VALUE",
             "sender_id"      : "SENDER-VALUE",
             "sender_persona" : "PERSONA-VALUE",
@@ -261,17 +263,17 @@ class TestTheHandback:
     def test_the_recipient_id_is_stringified( self, wire ):
         class _Weird:
             def __str__( self ):
-                return "the-stringified-recipient"
+                return _RECIPIENT
         row = _Row()
         row.recipient_id = _Weird()
         wire( row )
-        out = notif._submit_response_sync( _NID, "yes" )
-        assert out[ "recipient_id" ] == "the-stringified-recipient"
+        out = notif._submit_response_sync( _NID, "yes", _BY )
+        assert out[ "recipient_id" ] == _RECIPIENT
         assert isinstance( out[ "recipient_id" ], str )
 
     def test_it_is_a_dict_not_the_old_two_tuple( self, wire ):
         # the §4.3 shape change, pinned: a tuple would unpack silently at some call
         # sites and lose the two routing keys at the rest.
         wire( _Row() )
-        out = notif._submit_response_sync( _NID, "yes" )
+        out = notif._submit_response_sync( _NID, "yes", _BY )
         assert isinstance( out, dict )

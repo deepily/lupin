@@ -3,10 +3,11 @@
 Cosa Task Dispatcher - Routes tasks to appropriate Claude Code runtime.
 
 Supports two modes:
-    Option A (BOUNDED): Print mode for discrete tasks with natural completion
-    Option B (INTERACTIVE): SDK client for open-ended sessions with bidirectional control
+    `TaskType.BOUNDED`: print mode for discrete tasks with natural completion
+    `TaskType.INTERACTIVE`: SDK client for open-ended sessions with bidirectional control
 
 Usage:
+```
     from cosa.orchestration import ClaudeCodeDispatcher, Task, TaskType
 
     dispatcher = ClaudeCodeDispatcher()
@@ -26,6 +27,7 @@ Usage:
         prompt="Let's work on the auth refactor",
         type=TaskType.INTERACTIVE
     ) )
+```
 
 Requirements:
     pip install claude-agent-sdk  # For interactive mode only
@@ -38,13 +40,19 @@ Environment Variables:
 """
 
 import asyncio
+import logging
 import subprocess
 import json
 import os
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Callable, Any, TypedDict
 from datetime import datetime
+
+from cosa.agents.shared.sdk_error_result import error_result_text, login_hint, raise_error_result
+
+logger = logging.getLogger( __name__ )
 
 # SDK imports - graceful fallback if not installed
 try:
@@ -209,7 +217,7 @@ class ClaudeCodeDispatcher:
 
         Requires:
             - task.type is a valid TaskType
-            - For INTERACTIVE: claude-agent-sdk installed
+            - For `TaskType.INTERACTIVE`: claude-agent-sdk installed
 
         Ensures:
             - Returns TaskResult with execution outcome
@@ -240,15 +248,13 @@ class ClaudeCodeDispatcher:
 
     async def _run_bounded( self, task: Task ) -> TaskResult:
         """
-        Option A: Print mode for bounded tasks with streaming output.
+        Run a bounded task in print mode with streaming output.
 
-        Runs Claude Code with -p flag and stream-json output format.
-        Streams output line by line to the on_message callback.
-        Claude can use MCP tools to ask questions, but user cannot
-        inject input unprompted.
+        Runs Claude Code with -p and stream-json, passing each output line to on_message.
+        Claude can use MCP tools to ask questions, but the user cannot inject input.
 
         Requires:
-            - task is a valid Task with BOUNDED type
+            - task is a valid Task with type `TaskType.BOUNDED`
             - self.on_message callback is set
 
         Ensures:
@@ -355,6 +361,19 @@ class ClaudeCodeDispatcher:
             cost_str = f"${final_result.get( 'cost_usd' ) or final_result.get( 'total_cost_usd' )}" if final_result else "N/A"
             print( f"[DEBUG] _run_bounded: RESULT → success={process.returncode == 0}, cost={cost_str}" )
 
+            if final_result and final_result.get( "is_error" ):
+                # The CLI's own text lives in the result line, not in stderr; any exit code
+                error = login_hint( error_result_text( SimpleNamespace(
+                    subtype=final_result.get( "subtype" ), result=final_result.get( "result" ),
+                    errors=final_result.get( "errors" ) ) ) )
+                if stderr_data: error += f"; stderr: {stderr_data.decode()[ :500 ]}"
+                return TaskResult(
+                    task_id=task.id,
+                    success=False,
+                    error=error,
+                    exit_code=process.returncode
+                )
+
             if process.returncode == 0 and final_result:
                 return TaskResult(
                     task_id=task.id,
@@ -411,6 +430,7 @@ class ClaudeCodeDispatcher:
         """
         options = ClaudeAgentOptions(
             cwd=task.working_dir,
+            max_turns=task.max_turns,
             permission_mode="acceptEdits",
             allowed_tools=[
                 "Read", "Write", "Bash",
@@ -436,7 +456,7 @@ Voice tools available:
 Use notify() for progress. Use converse() when you need input."""
         )
 
-        try:
+        async def session():
             # Import MessageHistory here to avoid circular imports
             from cosa.orchestration.claude_code.message_history import MessageHistory
 
@@ -476,6 +496,7 @@ Use notify() for progress. Use converse() when you need input."""
 
                         # Capture final result
                         if isinstance( message, ResultMessage ):
+                            if message.is_error: raise_error_result( message, f"ClaudeCodeDispatcher {task.id}", logger )
                             result_data = {
                                 "session_id": message.session_id,
                                 "result": message.result,
@@ -509,6 +530,17 @@ Use notify() for progress. Use converse() when you need input."""
                         error="No result received"
                     )
 
+        try:
+            # The whole session, injected follow-ups included, shares one deadline, as _run_bounded does
+            return await asyncio.wait_for( session(), timeout=task.timeout_seconds )
+        except asyncio.TimeoutError:
+            self.active_sessions.pop( task.id, None )
+            return TaskResult(
+                task_id=task.id,
+                success=False,
+                error=f"Task timed out after {task.timeout_seconds}s",
+                exit_code=-1
+            )
         except Exception as e:
             if task.id in self.active_sessions:
                 del self.active_sessions[task.id]
@@ -524,15 +556,12 @@ Use notify() for progress. Use converse() when you need input."""
         """
         Inject a message into an active interactive session.
 
-        Queues the message for the session to process. If preserve_context is True,
-        the conversation history from the current session is prepended to the message
-        so Claude has context when the new session starts.
-
-        If force_interrupt is True, also interrupts the current response so the
-        queued message is processed immediately after the current response loop exits.
+        Queues the message. With preserve_context, the session history is prepended.
+        With force_interrupt, the current response is also interrupted, so the queued
+        message is processed as soon as the current response loop exits.
 
         Requires:
-            - task_id corresponds to an active INTERACTIVE session
+            - task_id corresponds to an active `TaskType.INTERACTIVE` session
             - Session is in active_sessions dictionary
 
         Ensures:

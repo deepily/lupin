@@ -2,7 +2,7 @@
 """
 Case-Based Reasoning (CBR) Decision Store.
 
-Implements a Retrieve → Reuse CBR pipeline for proxy decisions:
+Implements a Retrieve-then-Reuse CBR pipeline for proxy decisions:
   1. Retrieve: Find most similar past decisions via embedding similarity
   2. Reuse: Majority vote among retrieved cases to predict a verdict
 
@@ -10,7 +10,7 @@ The CBR store is stateless — it delegates retrieval to ProxyDecisionEmbeddings
 and computes predictions from the returned cases.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from dataclasses import dataclass, field
@@ -72,11 +72,9 @@ class CBRDecisionStore:
         """
         Predict a decision value using CBR retrieval and majority vote.
 
-        Algorithm:
-            1. Retrieve top_k similar cases from embedding store
-            2. If 0 cases: return empty prediction
-            3. Majority vote on decision_value among retrieved cases
-            4. confidence = max_similarity * verdict_consistency
+        Steps: (1) retrieve top_k similar cases from the embedding store.
+        (2) With 0 cases, return an empty prediction. (3) Majority vote on decision_value.
+        (4) confidence = max_similarity * verdict_consistency.
 
         Requires:
             - question is a non-empty string

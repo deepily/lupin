@@ -1,11 +1,11 @@
 """
 Shared git strategy engine for agentic repair agents.
 
-Extracted from cosa.agents.bug_fix_expediter.orchestrator (Session 1cfcdf73,
-2026-04-10) so BugFixExpediter and TestFixExpediter can share the same
-trust-level → git-strategy mapping and commit/branch/PR execution machinery.
+Shared by BugFixExpediter and TestFixExpediter so both use the same mapping from
+trust level to git strategy and the same commit, branch and PR machinery.
+Extracted from cosa.agents.bug_fix_expediter.orchestrator.
 
-This module is a PEER of the agent packages — it does not import from any
+This module is a peer of the agent packages and does not import from any
 specific agent. The caller (orchestrator) is responsible for:
   - Constructing commit messages, PR titles, PR bodies (agent-specific)
   - Providing an async `notify_fn(message, priority)` callable for voice I/O
@@ -17,7 +17,6 @@ GitStrategist owns:
   - Branch slug generation (fix/YYYY-MM-DD-{words})
   - `commit_and_pr_single` — BFE path (one commit or one branch+PR)
   - `commit_and_pr_multi` — TFE path (one branch, N commits, one PR)
-    — STUB in this commit; full implementation in TFE step 11
 
 See: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/07-phase5-multi-cluster-git-plan.md
 """
@@ -34,13 +33,11 @@ logger = logging.getLogger( __name__ )
 
 class GitStrategist:
     """
-    Shared trust-level → git-strategy engine.
+    Shared engine that maps a trust level to a git strategy.
 
-    Trust-to-git mapping:
-        - L1-L2 (shadow/suggest): commit_only on current branch
-        - L3+ (active): branch_and_pr via gh CLI
-        - gh CLI missing: degrade L3+ → branch_only
-        - Proxy unavailable / error: commit_only (conservative fallback)
+    Trust 1-2 (shadow, suggest): commit_only on the current branch.
+    Trust 3+ (active): branch_and_pr via the gh CLI, or branch_only without gh.
+    A missing or erroring proxy gives commit_only (conservative fallback).
 
     Requires:
         - debug / verbose are bool flags
@@ -61,14 +58,14 @@ class GitStrategist:
     @staticmethod
     def resolve_trust_level( proxy ) -> int:
         """
-        Return trust level 1-5 from the proxy, falling back to L1 on failure.
+        Return trust level 1-5 from the proxy, falling back to level 1 on failure.
 
         Requires:
-            - proxy is None OR has a `trust_tracker` attribute with `get_level()` or `level`
+            - proxy is None or has a `trust_tracker` attribute with `get_level()` or `level`
 
         Ensures:
             - Always returns int between 1 and 5
-            - L1 on any error (conservative default)
+            - Trust level 1 on any error (conservative default)
 
         Args:
             proxy: Optional decision proxy (SWE EngineeringStrategy or equivalent)
@@ -120,9 +117,11 @@ class GitStrategist:
         pr_body: str,
         trust_level: int,
         notify_fn: Callable,
+        push_enabled: bool = False,
+        push_flag_key: str = "bug fix expediter push fix branch enabled",
     ) -> dict:
         """
-        Single-fix git strategy: commit_only (L1-L2) OR branch+PR (L3+).
+        Single-fix git strategy: commit_only (trust 1-2) or branch plus PR (trust 3+).
 
         Requires:
             - git_ops is a GitOps instance (async git/gh wrapper)
@@ -136,14 +135,16 @@ class GitStrategist:
             - git_strategy in {"commit_only", "branch_and_pr", "branch_only", None}
             - Any key may be None on failure
             - Never raises
-            - On L3+ error, checks out original branch before returning
+            - On a trust level 3 and above error, checks out original branch before returning
+            - Trust 3 and above with push_enabled false (the default): commits on the fix branch, pushes nothing,
+              opens no PR, restores the original branch; the error says so and names push_flag_key
 
         Args:
             git_ops: GitOps instance
             files_changed: List of files modified
             commit_message: Commit message subject+body
-            pr_title: PR title (used only in L3+ path)
-            pr_body: PR body markdown (used only in L3+ path)
+            pr_title: PR title (used only in the trust level 3 and above path)
+            pr_body: PR body markdown (used only in the trust level 3 and above path)
             trust_level: Resolved trust level (from resolve_trust_level)
             notify_fn: Async notification callable
 
@@ -182,6 +183,22 @@ class GitStrategist:
                 return result
 
             result[ "branch_name" ] = br_result[ "branch_name" ]
+
+            if not push_enabled:
+                # Flag off: keep the fix as a local commit on its branch, push nothing, open no PR.
+                commit_result = await git_ops.commit_on_branch( files_changed, commit_message )
+                if commit_result[ "success" ]:
+                    result[ "git_strategy" ] = "commit_only"
+                    result[ "commit_hash" ]  = commit_result[ "commit_hash" ]
+                    result[ "error" ] = (
+                        f"push disabled ({push_flag_key} is false): nothing was pushed and no pull request was opened"
+                    )
+                else:
+                    result[ "error" ] = commit_result[ "error" ]
+                await notify_fn( result[ "error" ], priority="high" )
+                if original_branch:
+                    await git_ops.checkout_branch( original_branch )
+                return result
 
             push_result = await git_ops.commit_and_push( slug, files_changed, commit_message )
             if not push_result[ "success" ]:
@@ -232,17 +249,15 @@ class GitStrategist:
         pr_title: str,
         pr_body: str,
         branch_slug_hint: Optional[ str ] = None,
+        push_enabled: bool = False,
+        push_flag_key: str = "test fix expediter push fix branch enabled",
     ) -> dict:
         """
         Multi-cluster git strategy: one branch, N commits (one per cluster), one PR.
 
-        Used by TFE Phase 5 — each selected cluster becomes one commit within
-        a single branch, and the whole batch goes out as one PR.
-
-        Branch strategy (same trust-to-git mapping as commit_and_pr_single):
-          - L1-L2: commit_only — N sequential commits on the current branch
-          - L3+  : branch_and_pr — new fix/... branch, N commits, push, PR via gh
-          - gh missing: degrade L3+ → branch_only (branch + commits + push, no PR)
+        Used by TFE, with the same trust mapping as commit_and_pr_single. Trust 1-2 makes
+        N commits on the current branch; trust 3+ makes a new fix branch, N commits,
+        a push and a PR. Without gh it degrades to branch_only (no PR).
 
         Requires:
             - git_ops is a GitOps instance
@@ -250,8 +265,8 @@ class GitStrategist:
                 (cluster_id, cluster_title, files_list, commit_message)
             - trust_level is 1-5
             - notify_fn is async callable(message, priority)
-            - pr_title and pr_body are non-empty strings (used only in L3+ path)
-            - branch_slug_hint is optional — defaults to "multi-cluster-fix"
+            - pr_title and pr_body are non-empty strings (used only in the trust level 3 and above path)
+            - branch_slug_hint is optional; when absent the slug source is "multi-cluster-" plus the cluster count
 
         Ensures:
             - Returns dict: {git_strategy, branch_name, commit_hashes, pr_url, error}
@@ -261,15 +276,17 @@ class GitStrategist:
             - git_strategy in {"commit_only", "branch_and_pr", "branch_only", None}
             - Any field may be None on failure; error is set
             - Never raises
-            - On L3+ error, checks out original branch before returning
+            - On a trust level 3 and above error, checks out original branch before returning
+            - No successful push (push_enabled false, no push_branch, or it failed): commit_only, error set, no PR
+            - push_enabled is false by default; the error then says nothing was pushed and names push_flag_key
 
         Args:
             git_ops: GitOps instance (async git/gh wrapper)
             clusters: List of (cluster_id, title, files, commit_message) tuples
             trust_level: Resolved trust level (from resolve_trust_level)
             notify_fn: Async notification callable
-            pr_title: PR title (L3+ path only)
-            pr_body: PR body markdown (L3+ path only)
+            pr_title: PR title (trust level 3 and above path only)
+            pr_body: PR body markdown (trust level 3 and above path only)
             branch_slug_hint: Optional slug hint for branch naming
 
         Returns:
@@ -371,22 +388,29 @@ class GitStrategist:
                     await git_ops.checkout_branch( original_branch )
                 return result
 
-            # Push the branch (GitOps.commit_and_push is commit-and-push-combined;
-            # since we already committed separately, we use the dedicated push if
-            # available, else fall through to commit_and_push with an empty file
-            # list — but most GitOps implementations don't support that. Prefer
-            # a push primitive if present; otherwise call create_pr directly which
-            # many implementations will preflight push.)
-            push_ok = True
-            if hasattr( git_ops, "push_branch" ):
+            # Push the branch. GitOps.commit_and_push commits AND pushes, so after separate
+            # commits only a dedicated push_branch can push. When the caller's flag is off,
+            # or git_ops has no push_branch, nothing was pushed: say so and open no PR
+            # (row c07aef9f).
+            push_ok = False
+            if not push_enabled:
+                result[ "error" ] = (
+                    f"push disabled ({push_flag_key} is false): nothing was pushed and no pull request was opened"
+                )
+                await notify_fn( result[ "error" ], priority="high" )
+            elif hasattr( git_ops, "push_branch" ):
                 push_result = await git_ops.push_branch( slug )
-                if not push_result.get( "success" ):
-                    push_ok = False
+                if push_result.get( "success" ):
+                    push_ok = True
+                else:
                     result[ "error" ] = push_result.get( "error" )
                     await notify_fn(
                         f"Push failed: {push_result.get( 'error' )}",
                         priority="high",
                     )
+            else:
+                result[ "error" ] = "git_ops has no push_branch: nothing was pushed, so no PR was opened"
+                await notify_fn( result[ "error" ], priority="high" )
 
             if not push_ok:
                 # Branch + local commits exist but push failed — restore branch
@@ -469,18 +493,37 @@ def quick_smoke_test():
         assert gs.verbose is False
         print( "✓ Constructor works" )
 
-        # 4: commit_and_pr_multi is a stub
+        # 4: commit_and_pr_multi — empty clusters answer with an error dict, never a raise
         import asyncio
-        async def test_multi_stub():
+        async def test_multi_empty():
             gs2 = GitStrategist( debug=False )
-            try:
-                await gs2.commit_and_pr_multi( None, [], 1, None, "", "" )
-                return False
-            except NotImplementedError:
-                return True
+            return await gs2.commit_and_pr_multi( None, [], 1, None, "", "" )
 
-        assert asyncio.run( test_multi_stub() ), "multi should raise NotImplementedError"
-        print( "✓ commit_and_pr_multi stub raises NotImplementedError as expected" )
+        empty = asyncio.run( test_multi_empty() )
+        assert empty[ "git_strategy" ] is None and empty[ "commit_hashes" ] == [], "empty clusters → nothing done"
+        assert "empty clusters" in empty[ "error" ], "empty clusters → error names the cause"
+        print( "✓ commit_and_pr_multi empty clusters returns an error dict" )
+
+        # 5: commit_and_pr_multi at trust 1 — one commit per cluster on the current branch
+        class FakeGitOps:
+            def __init__( self ): self.committed = []
+            async def commit_on_branch( self, files, message ):
+                self.committed.append( ( files, message ) )
+                return { "success": True, "commit_hash": f"hash{len( self.committed )}00000000", "error": None }
+
+        async def fake_notify( message, priority="low" ): pass
+
+        async def test_multi_l1():
+            ops = FakeGitOps()
+            clusters = [ ( "c1", "one", [ "a.py" ], "msg one" ), ( "c2", "two", [ "b.py" ], "msg two" ) ]
+            res = await GitStrategist( debug=False ).commit_and_pr_multi( ops, clusters, 1, fake_notify, "", "" )
+            return ops, res
+
+        ops, res = asyncio.run( test_multi_l1() )
+        assert res[ "git_strategy" ] == "commit_only" and res[ "error" ] is None
+        assert res[ "commit_hashes" ] == [ "hash100000000", "hash200000000" ], "one hash per cluster, in order"
+        assert [ m for _f, m in ops.committed ] == [ "msg one", "msg two" ]
+        print( "✓ commit_and_pr_multi trust 1 commits each cluster in order" )
 
         print( "\n✓ Shared GitStrategist smoke test completed successfully" )
 

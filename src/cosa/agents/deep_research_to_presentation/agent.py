@@ -22,6 +22,7 @@ import os
 from datetime import datetime
 from typing import Optional, List
 
+from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from .state import ChainedResult, PipelineState
 
 
@@ -84,9 +85,9 @@ class DeepResearchToPresentationAgent:
             no_confirm: Skip confirmation prompts in DR
             audience: Expertise level (beginner/general/expert/academic)
             audience_context: Custom audience description
-            source_document: Absolute paths to local documents the RESEARCH LEG reads
-                FIRST, as seed context (row 5726e3c5). Already scope-validated and
-                resolved by the v2 door; this constructor receives real paths.
+            source_document: Absolute paths to local documents the research leg reads
+                first, as seed context. Already scope-validated and resolved by the
+                v2 door; this constructor receives real paths.
 
             # Presentation Generator options
             target_duration_minutes: Override target duration (None = use default)
@@ -131,7 +132,7 @@ class DeepResearchToPresentationAgent:
 
     def _set_modality( self ) -> None:
         """
-        Set voice/CLI mode on BOTH underlying agents.
+        Set voice/CLI mode on both underlying agents.
 
         Both Deep Research and Presentation Generator have their own voice_io modules.
         We must set cli_mode on both to ensure consistent behavior.
@@ -220,11 +221,10 @@ class DeepResearchToPresentationAgent:
             self.result.marp_path = pg_result.get( "marp_path" )
             self.result.pg_cost = pg_result.get( "cost", 0.0 )
             self.result.pg_artifacts = pg_result.get( "artifacts", {} )
-            # Surface slide_count as a top-level field for downstream consumers
+            # Surface the slide count as a top-level field for downstream consumers
             # (R2P job.py copies it onto its own artifacts dict so live tests can
-            # assert on it). PG sets artifacts["slide_count"] in its _execute path
-            # (presentation_generator/job.py); we read through pg_artifacts here.
-            self.result.slide_count = self.result.pg_artifacts.get( "slide_count" )
+            # assert on it). _run_presentation_generator reports it as "total_slides".
+            self.result.slide_count = self.result.pg_artifacts.get( "total_slides" )
             self.result.state = PipelineState.COMPLETED
 
             await self._notify(
@@ -263,6 +263,7 @@ class DeepResearchToPresentationAgent:
         from cosa.agents.deep_research import cosa_interface as dr_cosa_interface
         dr_voice_io.reconfigure()
         dr_cosa_interface.TARGET_USER = self.user_email
+        set_dispatch_context( target_user=self.user_email )
 
         # Import Deep Research components
         from cosa.agents.deep_research.config import ResearchConfig
@@ -415,6 +416,7 @@ class DeepResearchToPresentationAgent:
         from cosa.agents.presentation_generator import cosa_interface as pg_cosa_interface
         pg_voice_io.reconfigure()
         pg_cosa_interface.TARGET_USER = self.user_email
+        set_dispatch_context( target_user=self.user_email )
 
         # Import Presentation Generator components
         from cosa.agents.presentation_generator.orchestrator import PresentationOrchestratorAgent

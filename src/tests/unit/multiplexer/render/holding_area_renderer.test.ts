@@ -46,7 +46,7 @@ function legacyPaneSource(): string {
   const src   = readFileSync( LEGACY_PATH, "utf8" );
   const start = src.indexOf( "renderHoldingArea( composite ) {" );
   assert.ok( start !== -1, "legacy renderHoldingArea not found — the extraction is pointing at nothing" );
-  const end   = src.indexOf( "_renderHoldingAreaGroup( filer, tasks ) {", start );
+  const end   = src.indexOf( "_renderHoldingAreaGroup( filer, tasks, plans, ungrouped ) {", start );
   assert.ok( end > start, "legacy _renderHoldingAreaGroup not found after the pane renderer" );
   return src.slice( start, end );
 }
@@ -459,4 +459,67 @@ test( "row 52142a84: Enter and Space on a focused header toggle it; other keys a
   assert.ok( !key( g.querySelector( ".holding-wont-fix-all-reason" ) as HTMLElement, " " ).defaultPrevented,
     "Space typed in the reason box is NOT swallowed" );
   assert.ok( g.classList.contains( "collapsed" ) );
+} );
+
+// ---------------------------------------------------------------------------
+// Row fa5415af — the per-persona request badge, through the assembled pane.
+// ---------------------------------------------------------------------------
+
+function withRequest( t: TaskItem, state: string | null, move: string | null ): TaskItem {
+  return { ...t, request_state: state, request_move: move, request_ts: "2026-09-10T09:00:00Z" } as unknown as TaskItem;
+}
+
+function badgeOf( container: HTMLElement, filer: string ): HTMLElement | null {
+  return groupOf( container, filer ).querySelector<HTMLElement>( ".holding-area-group-request-badge" );
+}
+
+test( "row fa5415af: each persona's badge counts ITS pending requests; none, one and several all read right", () => {
+  const { container } = mountPane( { tasks: [
+    withRequest( heldTask( "k1", "Krishna 420f5ec9" ), "pending", "admit" ),
+    withRequest( heldTask( "k2", "Krishna 420f5ec9" ), "pending", "demote" ),
+    heldTask( "k3", "Krishna 420f5ec9" ),
+    withRequest( heldTask( "m1", "mr radio 0e61abe3" ), "pending", "admit" ),
+    heldTask( "s1", "Sam 11112222" ),
+  ] } );
+
+  assert.equal( badgeOf( container, "Krishna" )!.textContent, "2 requests" );
+  assert.equal( badgeOf( container, "Mr Radio" )!.textContent, "1 request" );
+  assert.equal( badgeOf( container, "Sam" ), null, "a persona with no request must show no badge at all" );
+  // Everything is still collapsed: the badge is the at-a-glance signal, with nothing expanded.
+  assert.equal( container.querySelectorAll( ".holding-area-group:not(.collapsed)" ).length, 0 );
+} );
+
+test( "row fa5415af: the badge follows the poll — a verdict that clears the request removes it, a new one adds it", () => {
+  const { bus, store, container } = mountPane( { tasks: [
+    withRequest( heldTask( "k1", "Krishna 420f5ec9" ), "pending", "admit" ),
+    heldTask( "s1", "Sam 11112222" ),
+  ] } );
+  assert.equal( badgeOf( container, "Krishna" )!.textContent, "1 request" );
+  assert.equal( badgeOf( container, "Sam" ), null );
+
+  store.setComposite( { tasks: [
+    withRequest( heldTask( "k1", "Krishna 420f5ec9" ), "approved", "admit" ),
+    withRequest( heldTask( "s1", "Sam 11112222" ), "pending", "admit" ),
+  ] } );
+  repaint( bus );
+
+  assert.equal( badgeOf( container, "Krishna" ), null, "an answered request must not keep its badge" );
+  assert.equal( badgeOf( container, "Sam" )!.textContent, "1 request" );
+} );
+
+test( "row fa5415af: a pending request on a row inside a plan sub-group is counted", () => {
+  const planned = ( id: string ): TaskItem =>
+    ( { ...heldTask( id, "Krishna 420f5ec9" ), correlation_key: "epic:docs-and-reuse" } ) as unknown as TaskItem;
+  const { container } = mountPane( { tasks: [
+    withRequest( planned( "p1" ), "pending", "admit" ),
+    planned( "p2" ),
+    heldTask( "loose1", "Krishna 420f5ec9" ),
+  ] } );
+
+  // Control: the pending row really is under a plan header, and the loose row is outside it.
+  const plan = groupOf( container, "Krishna" ).querySelector<HTMLElement>( ".holding-plan-group" );
+  assert.ok( plan, "the fixture made no plan sub-group" );
+  assert.equal( plan.querySelectorAll( "tr.task-row" ).length, 2 );
+  assert.equal( badgeOf( container, "Krishna" )!.textContent, "1 request", "a request inside a plan was not counted" );
+  assert.equal( badgeOf( container, "Krishna" )!.getAttribute( "aria-label" ), "1 pending request" );
 } );

@@ -1,7 +1,7 @@
 """
 Coverage ramp for `src/scripts/scan-prose-task-refs.py` — a straggler at zero on the
 coverage-gate frame (unit + cosa, one data file), claimed in
-`src/rnd/v0.2.1/2026.08.30-coverage-straggler-claim-ledger.md`.
+`2026.08.30-coverage-straggler-claim-ledger.md (deleted)`.
 
 LOAD MECHANISM: by-path `importlib.util.spec_from_file_location`. The dashed filename is not
 an identifier, and by-path load beats `runpy` for the two reasons
@@ -225,6 +225,14 @@ class TestFetchBoard:
         assert "unscoped_audit=true"    in url
         assert "hide_parked=false"      in url
         assert f"limit={mod.PAGE_SIZE}" in url
+
+    def test_the_module_page_size_sets_the_limit_of_the_first_request( self, mod, wired, monkeypatch ):
+        """PAGE_SIZE is read at call time, so lowering it lowers the request."""
+        monkeypatch.setattr( mod, "PAGE_SIZE", 100 )
+
+        mod.fetch_board( SETTINGS, "k", 1000 )
+
+        assert _limit_of( wired[ "calls" ][ 0 ][ 1 ] ) == 100
 
     def test_paging_continues_while_has_more_and_advances_the_offset_by_rows_seen( self, mod, wired ):
         wired[ "pages" ] = [ { "tasks": [ _row( "a", "queued" ), _row( "b", "queued" ) ],

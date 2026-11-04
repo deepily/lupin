@@ -18,8 +18,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { LupinEvent, StoreMissedChangedPayload } from "../shared/types";
 
-// Narrowed ApiClient surface (Pass 2 F4 idiom — depend only on what we use).
-// The production ApiClient satisfies this structurally.
+/** The slice of the API client the store needs: a `post` that returns the body. */
 export interface MissedApiClient {
   post<T>( path: string, body: unknown ): Promise<T>;
 }
@@ -36,6 +35,7 @@ interface DismissResponse {
   undelivered_count? : unknown;
 }
 
+/** The server path that soft-dismisses the missed notifications. */
 export const DISMISS_ENDPOINT = "/api/notifications/undelivered/dismiss";
 
 /**
@@ -51,6 +51,7 @@ export function coerceCount( v: unknown ): number {
   return Math.floor( n );
 }
 
+/** The count of missed notifications and the reset that soft-dismisses them. */
 export interface MissedStore {
   count(): number;
   /**
@@ -63,12 +64,16 @@ export interface MissedStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createMissedStore`: the bus, the API client and a clock for tests. */
 export interface MissedStoreOptions {
   bus    : EventBus;
   api    : MissedApiClient;
   nowFn? : () => number;
 }
 
+/**
+ * Holds the count of undelivered missed notifications.
+ */
 class MissedStoreImpl implements MissedStore {
   private readonly bus   : EventBus;
   private readonly api   : MissedApiClient;
@@ -77,6 +82,9 @@ class MissedStoreImpl implements MissedStore {
   private undeliveredCount = 0;
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Builds the store from a bus, an API client and an optional clock.
+   */
   constructor( opts: MissedStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
@@ -87,10 +95,16 @@ class MissedStoreImpl implements MissedStore {
     );
   }
 
+  /**
+   * Returns the current count of undelivered notifications.
+   */
   count(): number {
     return this.undeliveredCount;
   }
 
+  /**
+   * Asks the server to dismiss undelivered notifications and stores the count.
+   */
   async reset(): Promise<number> {
     if ( this.undeliveredCount <= 0 ) return 0;
     // POST with no body; ApiClient sends the Authorization header.
@@ -100,6 +114,9 @@ class MissedStoreImpl implements MissedStore {
     return remaining;
   }
 
+  /**
+   * Unsubscribes from bus events so a test can finish cleanly.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for ( const off of this.unsubscribers ) off();
@@ -130,6 +147,7 @@ class MissedStoreImpl implements MissedStore {
   }
 }
 
+/** Build the store. It takes the missed count from each `auth_success` event. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createMissedStore( opts: MissedStoreOptions ): MissedStore {
   return new MissedStoreImpl( opts );

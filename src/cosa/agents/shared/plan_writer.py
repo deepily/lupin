@@ -5,9 +5,9 @@ Originally extracted from cosa.agents.bug_fix_expediter.plan_writer into this
 shared module so both BugFixExpediter and TestFixExpediter (and future repair
 agents) can reuse the same plan-doc machinery.
 
-This module has zero back-dependencies on any specific agent package. The
-`write_plan()` method accepts any object with the attributes it reads
-(duck-typed), so a BFE DeadJobContext and a TFE TestRemediationContext can
+This module has zero back-dependencies on any specific agent package.
+The `write_plan()` method accepts any object with the attributes it reads
+(duck-typed). A BFE DeadJobContext and a TFE TestRemediationContext can
 both be passed in without changes here.
 """
 
@@ -67,7 +67,7 @@ class PlanWriter:
             - Directory created if needed
 
         Args:
-            dead_job_context: Forensic context (BFE dead job OR TFE test remediation)
+            dead_job_context: Forensic context (BFE dead job or TFE test remediation)
             diagnosis: Root cause analysis result
             proposed_fixes: List of proposed fixes
             selected_fix: The user-selected fix (optional)
@@ -229,9 +229,10 @@ class PlanWriter:
         coder_output: str = "",
     ) -> None:
         """
-        Update an existing plan document's Implementation Log section.
+        Replace the placeholder in a plan's Implementation Log section with the fix results.
 
-        Reads the plan file and replaces the placeholder with actual results.
+        Reads the plan file and writes the results in place of the placeholder.
+        Does nothing but a debug line if the file is missing or the placeholder is absent.
 
         Requires:
             - plan_path exists and is writable
@@ -284,9 +285,9 @@ class PlanWriter:
         fix_result,
     ) -> None:
         """
-        Update an existing plan document's Git References section (Phase 5).
+        Replace the placeholder in a plan's Git References section with the git results.
 
-        Reads the plan file and replaces the placeholder with git strategy results.
+        Reads the plan file and writes the git strategy results in place of the placeholder.
         Silently no-ops if plan file missing or placeholder already replaced.
 
         Requires:
@@ -299,7 +300,7 @@ class PlanWriter:
 
         Args:
             plan_path: Path to existing plan file
-            fix_result: FixResult with Phase 5 git fields populated
+            fix_result: FixResult with its git fields populated
         """
         if not os.path.exists( plan_path ):
             if self.debug: print( f"[PlanWriter] Plan file not found: {plan_path}" )

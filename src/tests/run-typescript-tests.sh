@@ -217,6 +217,13 @@ TS_CONCURRENCY="${TS_CONCURRENCY:-4}"           # matches package.json's cap
 source "$PROJECT_ROOT/src/scripts/lib/jstest-slice.sh"
 JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-$(( TS_TIMEOUT_SECS + 100 ))}"
 
+# START FROM A PRODUCTION BUNDLE. the_shipped_bundle_carries_the_source.test.ts reads the
+# built dist/, and what is there depends on what ran before this tier. Measured 2026-10-08:
+# a smoke run had left an unminified watch build, and ts-1d6399b9 failed that file's two
+# tests with 5,866 others passing. The build is ~1 s and runs BEFORE the tree-state line, so
+# the bundle hash the line reports is the one the tests read. A failed build stops the tier.
+bash "$PROJECT_ROOT/src/scripts/build-multiplexer.sh" || { echo "run-typescript-tests: production bundle build failed" >&2; exit 2; }
+
 # STATE THE TREE BEFORE THE RUN, not after (store row 11253df9, gap 3). This tier is
 # node/c8, so the root conftest's hook never fires and a green here carried no tree at
 # all. It is emitted BEFORE the run for two reasons: after the run it would be the LAST
@@ -289,6 +296,11 @@ jstest_slice_exec timeout "$TS_TIMEOUT_SECS" npx c8 \
     --include='src/lupin_app/static/js/multiplexer/**/*.ts' \
     --include='src/lupin_app/static/js/nav/**/*.ts' \
     --include='src/lupin_app/static/js/diagnostic/**/*.ts' \
+    --include='src/scripts/ts_doc_extract.mjs' \
+    --include='src/scripts/ts_export_extract.mjs' \
+    --include='src/cosa/repo/symindex/ts_extract.js' \
+    --include='src/lupin_mcp/reuse_needset/needset_strip.js' \
+    --include='src/cosa/repo/symindex/ts_kind_names.cjs' \
     --exclude='**/*.test.ts' \
     --exclude='**/boot.ts' \
     --exclude='**/types.ts' \

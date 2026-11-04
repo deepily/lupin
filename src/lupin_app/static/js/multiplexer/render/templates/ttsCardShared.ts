@@ -9,6 +9,7 @@
 // on only one card and be easy to miss).
 
 import type { TtsQueueItem } from "../../shared/types";
+import { formatClock } from "../time";
 
 /**
  * Legacy parity icon: ⚠️ for an action-required prompt, 🔔 otherwise. A missing
@@ -34,9 +35,9 @@ export function truncateTtsText( text: string, max: number ): string {
  * the legacy cards' time logic.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-export function ttsCardTime( item: TtsQueueItem ): string {
+export function ttsCardTime( item: TtsQueueItem, appTimezone?: string ): string {
   const disp = item.notification?.time_display;
   if ( disp ) return disp;
   const ts = new Date( item.addedAt ?? 0 );
-  return ts.toLocaleTimeString( "en-US", { hour: "2-digit", minute: "2-digit", hour12: false } );
+  return formatClock( ts, appTimezone, "en-US", { hour: "2-digit", minute: "2-digit", hour12: false } );
 }

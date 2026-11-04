@@ -1,0 +1,620 @@
+{
+    "plan_ref": "src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.24-reuse-detection-remediation-plan.md",
+    "project": "lupin",
+    "prefix": "LUPIN",
+    "plan_number": 3,
+    "plan_name": "Reuse detection remediation",
+    "correlation_key": "epic:v022-reuse-remediation",
+    "owner_persona": "cheech",
+    "phases": [
+        {
+            "phase": 1,
+            "name": "Checker fixes",
+            "steps": [
+                {
+                    "key": "ph1-s1",
+                    "name": "1.1 Retire NEW",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "NO_MATCH cause and no_new policy in verdict.py, shadow_audit and docs updated, listed red tests fixed, stored-NEW receipt replays frozen-equal; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph1-s2",
+                    "name": "S0-S3 shared index change",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "suffix constant, end_line and scope fields, read_searchable with every read_symbols caller classified, search_sha, searchable replay snapshot, language and include_tests in the receipt id; private-method receipt replays with differences.frozen == []",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph1-s3",
+                    "name": "1.5 and 1.7 extractor commit",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "TS private/protected members indexed with class named, doc_full, optional contract keys, algorithm_changed fires once; TypeScript tests fail rather than skip when node_modules is absent",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s2"
+                    ]
+                },
+                {
+                    "key": "ph1-s4",
+                    "name": "1.4 required language parameter",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "check_exists and fetch_similar refuse a missing language with LANGUAGE_REQUIRED and a bad one with LANGUAGE_INVALID before any request; every measurement driver pinned to language all by a test and a census",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s2"
+                    ]
+                },
+                {
+                    "key": "ph1-s5",
+                    "name": "1.3 Exit gate",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "DISTINCT with no logged search is refused and None fails closed; five new statuses, parse_searched and the RULING_RE edges tested; mutation arms redden named tests",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s1"
+                    ]
+                },
+                {
+                    "key": "ph1-s6",
+                    "name": "1.2 record_search tool",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "record_search mounted as a fifth reuse tool and greps the same working-tree state its spans come from; unit, mount and stdio tests pass; SKILL.md updated in the same commit; three mutation arms redden named tests",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s2",
+                        "ph1-s4",
+                        "ph1-s5"
+                    ]
+                },
+                {
+                    "key": "ph1-s7",
+                    "name": "1.6 Tests as a separate scope",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "build and ensure take an optional spec; include_tests=True takes the sweep-only route with its own budget; a default call never reads a test record",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s2",
+                        "ph1-s4"
+                    ]
+                },
+                {
+                    "key": "ph1-s8",
+                    "name": "1.7 Purpose line, JS roots, dropped entries",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "judge sees doc_full and purpose only when the record has them; script census guard green; dropped entries reported with reasons; cold-sweep call count before and after in the PR",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s3"
+                    ]
+                },
+                {
+                    "key": "ph1-s9",
+                    "name": "1.8 Index rebuilt during a run",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "probe shows each layer finds a definition written mid-run with a text-derived fake embedder; bound measured on the real tree and committed; INDEX_REFRESH_SLOW tested; isolation test with negative control",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph1-s3",
+                        "ph1-s4",
+                        "ph1-s7",
+                        "ph1-s8"
+                    ]
+                },
+                {
+                    "key": "ph1-s10",
+                    "name": "Phase 1 exit checks",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "full unit tier run last and again at merge, run-census-guards.sh green, coverage gate table shows 100% for every changed file, mutation arms listed in the plan all redden, searchable-entry count before and after in the PR",
+                    "owner_role": "tester",
+                    "depends_on": [
+                        "ph1-s1",
+                        "ph1-s3",
+                        "ph1-s6",
+                        "ph1-s7",
+                        "ph1-s9"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 2,
+            "name": "Semantic duplicate checker",
+            "steps": [
+                {
+                    "key": "ph2-s14",
+                    "name": "C0 Shared pure moves with direct tests",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "dups.jaccard, harness_runner.run_parallel, need_writer.name_hits and vector_build.embed_all moved without changing any result; each has a direct test against literal values or a golden captured at d0bd4f604; existing run_all and own_words_found tests pass unchanged",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph2-s1",
+                    "name": "C1 Freeze machinery",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "build_config takes backend, temperature and unscorable_policy with no default; freeze raises CONFIG_UNDECIDED while backend or temperature is empty, CONFIG_DRIFT on any changed field, CONFIG_ALREADY_FROZEN on a second freeze; aggregate_runs raises POLICY_UNDECIDED on an unscorable report while the policy is empty; mutation arms redden named tests",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph2-s2",
+                    "name": "C2 Extraction",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Python via py_index.extract_python plus end_line, text, calls, nodes, declared; TypeScript and JavaScript via the opt-in bodies flag on shapes() with no third walker; completeness raises EXTRACT_INCOMPLETE; a Python SyntaxError file lands in skipped_python; the shapes output without the flag equals a golden captured at d0bd4f604; ts_extract.js 100% under c8 via extract.test.ts on a verified-idle :8000, with doc-lint-ts-counts.json regenerated; extraction census over 207 script files closes with zero skipped",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s1"
+                    ]
+                },
+                {
+                    "key": "ph2-s3",
+                    "name": "C3 Blindness",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "scrub holds only reuse-tool-unique strings; assert_blind raises BLINDNESS_BREACH; identical definitions under two worktree paths give identical prompts; candidate order is stable under reordering; the blindness census over the frozen server and the existing client reports zero breaches, with a positive control",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s1"
+                    ]
+                },
+                {
+                    "key": "ph2-s4",
+                    "name": "C4 Candidates",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "embedding, word and structural lists fused with depth=list_depth, limit 10, head 2; jscpd added as a pinned dependency; a real jscpd report parsed; the live jscpd test fails (never skips) when node or jscpd is missing; the 50% clone cover boundary is covered by a mutation arm",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s2",
+                        "ph2-s14"
+                    ]
+                },
+                {
+                    "key": "ph2-s5",
+                    "name": "C5 Judge",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "one call per new definition through model_transport, harness_runner.run_parallel and the Ledger; no call cap set; unreadable replies retried once; resume makes no repeat call; a parallel failure keeps finished records; OR rule on pair verdicts",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s3",
+                        "ph2-s4",
+                        "ph2-s14"
+                    ]
+                },
+                {
+                    "key": "ph2-s6",
+                    "name": "C6 Clusters and the score",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "surplus per 100 passing tests matches the hand-worked cases; an unscorable run (EXTRACT_INCOMPLETE, NO_PASSING_TESTS, BLINDNESS_BREACH, RUN_INCOMPLETE) writes a report with its cause and exits 2, each cause tested; a scored run exits 0",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s5"
+                    ]
+                },
+                {
+                    "key": "ph2-s7",
+                    "name": "C7 Proof code",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "planted rewrites and Opus work-alikes, monolith pairs with source tags, banned_names, strip_names, select_originals, evaluate_bar at exact thresholds, the self-agreement count (hand-worked 4/5 flag against 2/5 four-way, one-pass pairs excluded), per-stratum figures with intervals and the append-only proof ledger tested, with mutation arms",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s6",
+                        "ph2-s14"
+                    ]
+                },
+                {
+                    "key": "ph2-s8",
+                    "name": "C8 Live smoke and throughput measurement",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "20 real definitions judged through the Max-plan door in the 10 a.m. to 1 p.m. Eastern window; a smoke file records date, host, sha, config sha, seconds per call, failure rate and the concurrency that held; a failure rate above the stated bound reopens the backend decision",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s7"
+                    ]
+                },
+                {
+                    "key": "ph2-s15",
+                    "name": "Rick decides P4 (judge temperature) and P5",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick has named the judge backend and its temperature (Max plan, which cannot set one, or the work server at 0) and the unscorable policy; both fields are filled in the config template",
+                    "owner_role": "rick",
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph2-s9",
+                    "name": "Rick approves the frozen prompt; freeze is committed",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick has approved the prompt text, freeze is committed with backend, temperature and unscorable_policy filled, and the config sha is recorded",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph2-s8",
+                        "ph2-s15"
+                    ],
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph2-s10",
+                    "name": "Rick nominates monolith pairs",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick has named the nominated monolith pairs (source nominated)",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph2-s7"
+                    ],
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph2-s11",
+                    "name": "Rick and the second reviewer label the proof set",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "every planted pair, monolith pair and flag is labelled blind and independently by both people through the packet tool of Phase 3 step D5",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph2-s7",
+                        "ph3-s2",
+                        "ph3-s6"
+                    ],
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph2-s12",
+                    "name": "Run the proof",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "proof_run passes 80% found, 80% of flags right and 90% self-agreement on the flag, with every run kept in the proof ledger, the pool size and each stratum printed",
+                    "owner_role": "tester",
+                    "depends_on": [
+                        "ph2-s9",
+                        "ph2-s11"
+                    ]
+                },
+                {
+                    "key": "ph2-s13",
+                    "name": "Rick names the passing proof record",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick has named the passing record and the frozen commit used for scoring",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph2-s12"
+                    ],
+                    "gate_class": "operator"
+                }
+            ]
+        },
+        {
+            "phase": 3,
+            "name": "400-need diagnostic set",
+            "steps": [
+                {
+                    "key": "ph3-s1",
+                    "name": "D1 Schema, quota and the draw",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "plan_quota without kind_split raises KIND_SPLIT_UNSET; with a split it sums to 240 ts, 160 py, 300 matched, 100 none via quota_split.quotas; draw raises QUOTA_UNFILLABLE naming the cell; the manifest records the seed, kind table and source commit before the first draft",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph3-s2",
+                    "name": "Rick finds the second reviewer",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "a second reviewer is named and available for labelling",
+                    "owner_role": "rick",
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph3-s3",
+                    "name": "D2 Seeds and key evidence",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "seed pool, stripped need input, twin groups through reuse_need_check.twin_groups and a dups adapter, and key evidence built; work-alike candidates by the vector route and the sampled route, with selection_route recorded; tests include a neighbour only the sampled route finds",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s1",
+                        "ph3-s7",
+                        "ph2-s14"
+                    ]
+                },
+                {
+                    "key": "ph3-s13",
+                    "name": "D3a identifier_tokens TypeScript branch",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "identifier_tokens on a real TypeScript signature returns names only: no string, number or other TS_TYPE_WORDS; destructured, rest, generic and default parameters covered; Python behaviour unchanged",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph3-s4",
+                    "name": "D3 Drafting",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "needs drafted by Fable through run_parallel and the Ledger after a 10-need live smoke that uses a test-only split and commit and marks every row smoke: true that also measures the sampled route's yield; leak_check passes before the checker sees a draft; replacements are reported per cell and reason with the original seed list kept",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s3",
+                        "ph3-s13",
+                        "ph2-s14"
+                    ]
+                },
+                {
+                    "key": "ph3-s5",
+                    "name": "D4 Second model check",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "a second model checks every drafted key and records agreement",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s4"
+                    ]
+                },
+                {
+                    "key": "ph3-s6",
+                    "name": "D5 Labelling tools",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "select_for_labelling, blind packet export with PACKET_LEAK, kappa and dispute tools tested by hand-worked cases",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s5"
+                    ]
+                },
+                {
+                    "key": "ph3-s7",
+                    "name": "Rick names the source commit and fills in the kind split (P6)",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick has named the source commit and filled in the kind_split table; the manifest records who set it and when",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph3-s1"
+                    ],
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph3-s8",
+                    "name": "Rick and the second reviewer label blind",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "both reviewers have labelled every packet item independently",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph3-s2",
+                        "ph3-s6"
+                    ],
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph3-s9",
+                    "name": "Rick breaks the ties",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "every disputed item has Rick's tiebreak recorded",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph3-s8"
+                    ],
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph3-s10",
+                    "name": "D6 Finalize and verify",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "400 labelled needs finalized with keys, no smoke rows, and verify_manifest passing; needset-status.json is committed as pending until the flip",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s9"
+                    ]
+                },
+                {
+                    "key": "ph3-s15",
+                    "name": "Rick flips the needset status to final",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "needset-status.json reads final in the commit that adds needset-final.jsonl and needset-manifest.json, and the census test passes",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph3-s10"
+                    ],
+                    "gate_class": "operator"
+                },
+                {
+                    "key": "ph3-s11",
+                    "name": "D7 Statistics",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "the 95% miss-rate bound comes from harness_report.upper_bound, pinned to 0.0099 for 0 in 300 and 0.0256 for 3 in 300 against an independent bisection; kappa tested by hand-worked cases in Phase 3 step D5",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph3-s10"
+                    ]
+                },
+                {
+                    "key": "ph3-s12",
+                    "name": "D8 Loss tracing",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "loss-report produced from the Phase 1 checker through a ledgered, resumable probe with the isolation profile; lost_at counts by kind, language and selection_route; ALT_MATCH and FALSE_MATCH listed for review; miss rate and bound computed after confirmations",
+                    "owner_role": "tester",
+                    "depends_on": [
+                        "ph3-s10",
+                        "ph1-s10",
+                        "ph3-s15"
+                    ]
+                },
+                {
+                    "key": "ph3-s14",
+                    "name": "Reviewers confirm ALT_MATCH and FALSE_MATCH items",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "Rick and the second reviewer have ruled every ALT_MATCH and FALSE_MATCH item; confirmed alternatives are added to their keys and the affected needs are re-traced",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph3-s12"
+                    ],
+                    "gate_class": "operator"
+                }
+            ]
+        },
+        {
+            "phase": 4,
+            "name": "Feature list, plan and tests",
+            "steps": [],
+            "expand_trigger": "Rick freezes the plan",
+            "depends_on": []
+        },
+        {
+            "phase": 5,
+            "name": "Run harness",
+            "steps": [],
+            "expand_trigger": "Phases 1 and 4 close",
+            "depends_on": [
+                "ph1",
+                "ph4"
+            ]
+        },
+        {
+            "phase": 6,
+            "name": "Pilot pair and the cap",
+            "steps": [],
+            "expand_trigger": "Phases 2 and 5 close",
+            "depends_on": [
+                "ph2",
+                "ph5"
+            ]
+        },
+        {
+            "phase": 7,
+            "name": "Five scored pairs",
+            "steps": [],
+            "expand_trigger": "Rick gives the build checkpoint go after Phase 6",
+            "depends_on": [
+                "ph6"
+            ]
+        },
+        {
+            "phase": 8,
+            "name": "Scoring, stop rule and report",
+            "steps": [],
+            "expand_trigger": "Phases 3 and 7 close; Rick decides P5",
+            "depends_on": [
+                "ph3",
+                "ph7"
+            ]
+        },
+        {
+            "phase": 9,
+            "name": "Section 12 rollout and the plan-time workflow",
+            "steps": [
+                {
+                    "key": "ph9-s1",
+                    "name": "12.3 A: the workflow text (done)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Already done: A1 merged at 3ee7a00 plus 8810c4a and 4ba1151 in planning-is-prompting; A2 merged at 762d72753. Create this row closed, as a record",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph9-s2",
+                    "name": "12.3 D: fast lookups on (D1, D6, D2, D4, D3, D5)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track D passes: D4's Pass line met on 5 lookups and D5's Pass line met, results in a row comment on 2f6b83a1; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s1"
+                    ]
+                },
+                {
+                    "key": "ph9-s3",
+                    "name": "12.3 B: the REUSE-OUTCOME checker (B1 to B6)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track B passes: a real malformed line is refused and a definition with no line is refused, by an actual run; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s1"
+                    ]
+                },
+                {
+                    "key": "ph9-s4",
+                    "name": "12.3 C: gate scope, then turning enforcement on (C1 to C5)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track C passes: the gate exits 3 on an unreadable key and refuses a diff missing its receipt; the flip (C3) happens only after B, C1 and C2 merge, with Cheech's go as a row comment; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s3"
+                    ]
+                },
+                {
+                    "key": "ph9-s5",
+                    "name": "12.3 E: the daily duplicate-check job (E1 to E3)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track E passes: the job ran unattended on days 2 and 3 with dated result files; E3 starts only after Open sub-question 3 is answered; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s1"
+                    ]
+                },
+                {
+                    "key": "ph9-s6",
+                    "name": "12.3 F: shadow audit rule and two-week checkpoint (F1 to F3)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "12.4 track F passes: F2's branch tests pass; a store row on 2f6b83a1 is chased at the flip date plus 14 days; changed files 100% lines/branches/functions",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s2",
+                        "ph9-s5"
+                    ]
+                },
+                {
+                    "key": "ph9-s7",
+                    "name": "12.3 G: re-size the diagnostic set (deferred)",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Deferred: no work until D is live and two weeks of enforced use have gone by. Create this row not approved until then",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph9-s2",
+                        "ph9-s6"
+                    ]
+                },
+                {
+                    "key": "ph9-s8",
+                    "name": "12.3 H: record only",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Record only, no code: ruling 7's two findings stand (owner Chloe). Create this row closed, as a record",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph9-s1"
+                    ]
+                }
+            ]
+        }
+    ]
+}

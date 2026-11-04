@@ -1,7 +1,7 @@
 # Backup Command - Dry Run (Safe Default)
 
 **Project**: Lupin
-**Prefix**: [LUPIN]
+**Prefix**: `[LUPIN]`
 **Version**: 1.0
 
 ---

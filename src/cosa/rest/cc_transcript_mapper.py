@@ -2,37 +2,42 @@
 """
 Map Claude Code transcript JSONL records to console display blocks.
 
-Plan: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md` §2 item 1, ACs A2.4/A2.8.
+Plan: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`
 
 A transcript is mostly not messages
 -----------------------------------
-Census of 8,115 records across four recent lupin transcripts (plan, P2): `user` +
-`assistant` are **34%** of records, spread over THIRTEEN record types — `attachment`,
-`system`, `mode`, `atis-latch`, `last-prompt`, `ai-title`, `file-history-snapshot`,
-`queue-operation`, `permission-mode`, `file-history-delta`, `cost-state` and more. So the
-mapper's normal case is a record it does not display.
+
+In a census of 8,115 records across four recent lupin transcripts, `user` and
+`assistant` were **34%** of records. The rest spread over thirteen record types:
+`attachment`, `system`, `mode`, `atis-latch`, `last-prompt`, `ai-title`,
+`file-history-snapshot`, `queue-operation`, `permission-mode`, `file-history-delta`,
+`cost-state` and more.
+
+So the mapper's normal case is a record it does not display.
 
 Three rules, each one a defect someone would otherwise ship
 -----------------------------------------------------------
-**(a) Unknown record types are SKIPPED BY DEFAULT, not by enumeration.** The type set is
-demonstrably not closed: `atis-latch` and `cost-state` appear in recent files and not in
-older ones. So the predicate is "map the types you know, skip everything else" — never a
-list of things to ignore, which is a list that goes stale silently
-(CLAUDE.md § "Writing a rule or a guard": write the predicate, not the enumeration).
 
-**(b) A block's `kind` comes from the CONTENT BLOCK's type, never from the record's role.**
+**(a) Unknown record types are skipped by default, not by enumeration**. The type set is
+not closed: `atis-latch` and `cost-state` appear in recent files and not in older ones.
+So the predicate is "map the types you know, skip everything else".
+A list of things to ignore would go stale silently, so write the predicate, not the
+enumeration (CLAUDE.md § "Writing a rule or a guard").
+
+**(b) A block's `kind` comes from the content block's type, never from the record's role**.
 760 of the 1,026 `user` records in the census carry tool_results. Mapping on role would
-render three quarters of them as fake human turns — the reader would see the machine's own
-tool output attributed to the person.
+render three quarters of them as fake human turns. The reader would see the machine's
+own tool output attributed to the person.
 
-**(c) `message.content` has two shapes.** A bare string in 260 cases, a list in the rest.
+**(c) `message.content` has two shapes**. A bare string in 260 cases, a list in the rest.
 Both are real and both must map.
 
 `thinking` is emitted, and folded by the client
 -----------------------------------------------
-Ruling OSQ-7: shown folded and expandable, like tool results. It is not a rare case —
-`thinking` outnumbered assistant `text` 424 to 520 in the census. The mapper emits it as
-`kind: thinking`; the fold is the client's business, not this module's.
+
+Thinking is shown folded and expandable, like tool results. It is not a rare case:
+the census held 424 `thinking` blocks against 520 assistant `text` blocks. The mapper
+emits it as `kind: thinking`; the fold is the client's business, not this module's.
 """
 
 import cosa.utils.util as cu
@@ -68,7 +73,7 @@ def remember_tool_name( tool_names, tool_use_id, name, cap=None ):
 
     Ensures:
         - after the call `tool_names` holds at most `cap` pairings (default TOOL_NAME_CAP)
-        - a repeated id keeps its FIRST position and takes the new name
+        - a repeated id keeps its first position and takes the new name
         - never raises
     """
     if not isinstance( tool_use_id, str ) or not tool_use_id: return
@@ -85,16 +90,16 @@ def map_records( records, budget=0, tool_names=None ):
 
     Requires:
         - records is an iterable of parsed JSONL records (dicts); non-dicts are skipped
-        - budget is a non-negative int byte budget per block; **0 means UNBOUNDED**, the
+        - budget is a non-negative int byte budget per block; **0 means unbounded**, the
           sense `routers/tasks.py` already uses in this tree — not "allow nothing"
-        - tool_names is a dict tool_use_id -> name that the caller keeps ACROSS calls (the live
+        - tool_names is a dict tool_use_id -> name that the caller keeps across calls (the live
           tailer passes the same one every poll), or None for a fresh one covering just
           these records. It is mutated in place
 
     Ensures:
         - returns a list of blocks, each { ts, role, kind, text, truncated }, plus `name` on a
-          tool_call and on a tool_result whose call this index has seen (row 687310b7). A
-          result whose call is not in view carries NO name: never a guess, and the client
+          tool_call and on a tool_result whose call this index has seen. A
+          result whose call is not in view carries no name: never a guess, and the client
           falls back
         - a record whose `type` is not displayable is skipped silently (rule a)
         - a block's `kind` comes from the content block's type, never the record's role
@@ -113,7 +118,7 @@ def map_records( records, budget=0, tool_names=None ):
 
 def map_record( record, budget=0, tool_names=None ):
     """
-    Map ONE transcript record to zero or more display blocks.
+    Map one transcript record to zero or more display blocks.
 
     Requires:
         - record is a parsed JSONL record; anything else yields []
@@ -125,7 +130,7 @@ def map_record( record, budget=0, tool_names=None ):
         - returns [] for a non-dict, for an unrecognised `type`, and for a record whose
           message carries no content block of a recognised type — all silently, because a
           transcript is mostly not messages
-        - a recognised block with EMPTY text is still emitted; see the note in
+        - a recognised block with empty text is still emitted; see the note in
           `_map_content_block` for why dropping it hid the whole thinking path
         - returns one block per renderable content block, in order
         - never raises
@@ -218,9 +223,11 @@ def _map_content_block( ts, role, raw_block, budget, tool_names ):
 
 def _tool_name( raw_block ):
     """
+    Return the tool_use block's name, falling back to "tool" when it is missing.
+
     Ensures:
         - returns the tool_use block's `name` as a str, or "tool" when it is absent or empty
-        - the SAME fallback the one-line chip uses, so `name` and the chip agree
+        - the same fallback the one-line chip uses, so `name` and the chip agree
         - never raises
     """
     return str( raw_block.get( "name" ) or "tool" )
@@ -239,7 +246,7 @@ def _text_for( kind, raw_block ):
 
     Ensures:
         - returns a stripped string, possibly empty (the caller emits it anyway)
-        - a tool_call renders as `Name( … )` — the one-line chip of ruling Q2
+        - a tool_call renders as `Name( … )` — the one-line chip
         - never raises
     """
     if kind == "text":     return str( raw_block.get( "text" ) or "" ).strip()
@@ -325,7 +332,7 @@ def _block( ts, role, kind, text, budget, name=None ):
         - returns { ts, role, kind, text, truncated }, plus `name` when one was given —
           i.e. on every tool_call block, and on a tool_result only when its call was seen
         - truncated is True iff `text` exceeded `budget` and was cut
-        - the budget is measured in BYTES of UTF-8, because that is what the offsets and
+        - the budget is measured in bytes of UTF-8, because that is what the offsets and
           the ring are measured in; cutting on characters would make a multi-byte block
           overrun a byte budget while reporting that it fit
         - never raises

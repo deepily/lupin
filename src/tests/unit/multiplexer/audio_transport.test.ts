@@ -7,12 +7,12 @@
 //     keeps running)
 //   - text envelopes flow through the same payload-mapping rule as Queue.
 
-import { test } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
-  createAudioTransport,
+  createAudioTransport as createAudioTransportUntracked,
 } from "../../../lupin_app/static/js/multiplexer/transport/AudioTransport";
 import type { AuthManager } from "../../../lupin_app/static/js/multiplexer/auth/AuthManager";
 import type { LupinEvent, TransportReadyPayload } from "../../../lupin_app/static/js/multiplexer/shared/types";
@@ -20,6 +20,23 @@ import type { LupinEvent, TransportReadyPayload } from "../../../lupin_app/stati
 // ---------------------------------------------------------------------------
 // Test infrastructure (mirrors queue_transport.test.ts shim).
 // ---------------------------------------------------------------------------
+
+// Every transport a test starts arms a handshake timer, and a handshake that times out reconnects
+// on a backoff timer, forever. Left running, those timers keep the process alive after the last
+// assertion passes and the file never exits (row 0c695d2a). Track each one and stop it afterwards.
+const startedTransports: Array<{ stop(): void }> = [];
+
+function createAudioTransport(
+  options: Parameters<typeof createAudioTransportUntracked>[0],
+): ReturnType<typeof createAudioTransportUntracked> {
+  const transport = createAudioTransportUntracked(options);
+  startedTransports.push(transport);
+  return transport;
+}
+
+afterEach(() => {
+  for (const transport of startedTransports.splice(0)) transport.stop();
+});
 
 function makeCloseEvent(code: number, reason: string): CloseEvent {
   if (typeof CloseEvent !== "undefined") return new CloseEvent("close", { code, reason });

@@ -11,11 +11,11 @@
          this slice (monolith de-duplication is a later, separately-verified pass).
          See src/rnd/v0.1.9/2026.06.19-multiplexer-layout-parity-methodology/. -->
     <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
-    <link rel="stylesheet" href="/static/css/notifications.css?v=20260927a">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=e49fc8430eb4">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
-    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260918a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260924a">
-    <link rel="stylesheet" href="/static/css/epic-board.css?v=20260904a">
+    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=1faeb24503c1">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=e130f2059619">
+    <link rel="stylesheet" href="/static/css/epic-board.css?v=864498666830">
 </head>
 <body>
     <!-- Master-detail two-pane shell (2026-05-21 — see
@@ -89,6 +89,14 @@
              not a section toggle. Hands off to POST /api/system/bounce, which the
              host-side watcher turns into the sanctioned warn → restart → all-clear. -->
         <button class="bounce-server-btn" id="bounce-dev-server-btn" data-testid="notifications-bounce-dev-server" type="button" title="Bounce the dev server (:7999) — warns the fleet, then restarts (~20s)">🔄</button>
+        <!-- Row 6f72dc83: HIDDEN, not removed. The skeleton crew switch in the Fleet Status
+             pane now mutes the poke too, so this separate control is out of sight; its
+             handlers and paint stay, and deleting `hidden` below brings it back. -->
+        <!-- Heartbeat stop poke switch (row 3526fb95). Same action-button class as the
+             bounce button: no data-section, so the section-visibility dispatcher ignores
+             it. Starts disabled and unknown; refreshPokeMute paints the real state, and
+             only an admin gets a working button. -->
+        <button class="bounce-server-btn" id="poke-mute-btn" data-testid="notifications-poke-mute" data-muted="unknown" type="button" hidden disabled title="Heartbeat stop poke: loading…">❔</button>
     </div>
 
     <div class="container">
@@ -661,26 +669,39 @@
                     </div>
                 </div>
 
-                <!-- CC Session Selector Strip + Focus Mode (2026-04-30 — see src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md).
+                <!-- CC Session Selector Strip + Focus Mode (2026-04-30 — see src/docs/decisions/2026.04.30-cc-session-selector-strip-and-focus-mode.md).
                      Sticky chrome above #notifications-list. One icon per active CC session, leftmost = most recently
                      updated. Embedded toggle pill enters/exits exclusive focus mode (only the focused session's
                      card is rendered). Hidden until ≥1 CC sender card exists. -->
                 <div id="cc-session-strip" class="cc-session-strip" hidden>
                     <div class="cc-strip-icons" id="cc-strip-icons"></div>
-                    <button type="button"
-                            class="cc-strip-toggle"
-                            id="cc-strip-toggle"
-                            data-focus-active="false"
-                            title="Focus mode: hide all sessions except the one you click">
-                        👁 Focus
-                    </button>
-                    <button type="button"
-                            class="cc-strip-toggle"
-                            id="cc-hide-inactive-toggle"
-                            data-hide-inactive="false"
-                            title="Hide icons for sessions whose voice persona has been deallocated (showing all sessions in the last 24 h)">
-                        👁 All
-                    </button>
+                    <!-- The Focus, Active and Keep place toggles sit on their own row under the persona badges (Rick 2026-11-02). -->
+                    <div class="cc-strip-toggles" id="cc-strip-toggles" data-testid="notifications-cc-strip-toggles">
+                        <button type="button"
+                                class="cc-strip-toggle"
+                                id="cc-strip-toggle"
+                                data-focus-active="false"
+                                title="Focus mode: hide all sessions except the one you click">
+                            👁 Focus
+                        </button>
+                        <button type="button"
+                                class="cc-strip-toggle"
+                                id="cc-hide-inactive-toggle"
+                                data-hide-inactive="false"
+                                title="Hide icons for sessions whose voice persona has been deallocated (showing all sessions in the last 24 h)">
+                            👁 All
+                        </button>
+                        <button type="button"
+                                class="cc-strip-toggle"
+                                id="cc-keep-place-toggle"
+                                role="switch"
+                                aria-checked="false"
+                                data-keep-place="false"
+                                data-testid="notifications-cc-keep-place-toggle"
+                                title="Keep place: stop new cards from scrolling the list back to the top while you read">
+                            📌 Keep place
+                        </button>
+                    </div>
                 </div>
 
                 <div id="notifications-list">
@@ -756,6 +777,22 @@
                                min="1" step="1"
                                title="The fleet-wide session cap the spawn path enforces — EVERY session counts, managers included. Over cap refuses new spawns and reaps nobody. Drag and release to set it: the value is written to `cc session fleet size cap` in the configuration file and survives a restart. The slider's maximum is `cc session fleet size cap maximum`." />
                     </span>
+                    <!-- Skeleton crew switch (row 6f72dc83). Painted by the same call as the
+                         dial, from the same payload (`skeleton_crew`), so it stays hidden until
+                         the server sends a boolean. The state is said in text, not colour. -->
+                    <span class="fleet-skeleton-crew-field" id="skeleton-crew-field"
+                          data-testid="skeleton-crew-field" hidden>
+                        <label class="fleet-skeleton-crew-label">
+                            <input type="checkbox" role="switch" id="skeleton-crew-toggle"
+                                   data-testid="skeleton-crew-toggle"
+                                   aria-labelledby="skeleton-crew-state"
+                                   title="Skeleton crew. On: managers may not spawn seats or ask for them, and the heartbeat stop poke is muted. Off: managers may spawn inside the fleet cap. The state is written to `cc session skeleton crew enabled` in the configuration file and survives a restart." />
+                            <span id="skeleton-crew-state" data-testid="skeleton-crew-state"
+                                  class="fleet-skeleton-crew-state">Skeleton crew</span>
+                        </label>
+                    </span>
+                    <span class="fleet-skeleton-crew-warning" id="skeleton-crew-warning"
+                          data-testid="skeleton-crew-warning" hidden>Warning: the stop poke is still muted by ~/.claude/settings.json while skeleton crew is off.</span>
                     <span id="fleet-size-cap-status"
                           data-testid="fleet-size-cap-status"
                           class="fleet-size-cap-status"></span>
@@ -926,6 +963,13 @@
                             data-testid="task-new-ticket"
                             onclick="window.notificationsUI.openNewTicketCard()"
                             title="Create a new ticket">＋ New</button>
+                    <!-- Status filter (Rick, row 8eb71f8e): All is the default and shows the whole
+                         list; the four chips are additive and show the union of those selected.
+                         All four selected, or none, is All. The chips are built by
+                         renderTaskStatusChips() from the table in shared/task-status-filter.js,
+                         so the words and the statuses each stands for live in one place. -->
+                    <div id="task-status-chips" class="task-status-chips" data-testid="task-status-chips"
+                         role="group" aria-label="Filter the task list by status"></div>
                     <!-- role=status announces the answer to a screen reader without
                          stealing focus back from the input mid-typing. -->
                     <div id="task-lookup-result" class="task-lookup-result"
@@ -985,6 +1029,17 @@
                 <button class="toggle-button" id="holding-area-toggle">▼</button>
             </div>
             <div class="section-content" id="holding-area-section">
+                <!-- Picks whether the rows below group by creator or by assignee; the choice is per browser. -->
+                <div id="holding-group-toggle" class="holding-group-toggle" role="group"
+                     aria-label="Group held rows by" data-testid="holding-group-toggle">
+                    <span class="holding-group-toggle-label">Group by</span>
+                    <button type="button" class="holding-group-toggle-btn" data-group-by="creator"
+                            data-testid="holding-group-by-creator" aria-pressed="true"
+                            title="Group by who CREATED the row (created_by)">Creator</button>
+                    <button type="button" class="holding-group-toggle-btn" data-group-by="assignee"
+                            data-testid="holding-group-by-assignee" aria-pressed="false"
+                            title="Group by who the row is ASSIGNED to (owner_persona)">Assignee</button>
+                </div>
                 <!-- Operator controls for the ratio gate. MOVED HERE FROM THE TASK LIST
                      2026-09-04 on Rick's ruling: the gate runs at CREATE time, upstream of
                      both panes (ratio_gate_advisory inside create_task — "evaluated BEFORE
@@ -1464,6 +1519,7 @@
     <!-- Third-party libraries for markdown rendering -->
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
+    <script src="/static/js/idb-cache-kit.js"></script>
     <script src="/static/js/tts-audio-cache.js"></script>
     <script src="/static/js/job-completion-cache.js"></script>
     <script src="/static/js/audio-recorder.js"></script>
@@ -1471,7 +1527,7 @@
          A module so the same file can be `import`ed there; it publishes
          window.LUPIN_TASK_LIST_QUERY for the classic script below, which reads
          it at call time (the poll starts well after module execution). -->
-    <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
+    <script type="module" src="/static/js/shared/task-list-query.js?v=4dcbfcbed442"></script>
     <!-- The ONE task-verb vocabulary. A module so the TypeScript tier can `import`
          it as the ORACLE for the per-pane control guard; it publishes
          window.LUPIN_TASK_VERB_SPECS for the classic script below, read at call
@@ -1483,24 +1539,26 @@
          hard reload. That is the likeliest reason Rick reported un-park missing from the
          actions list on THIS client; row 75044ab5 blamed the stale multiplexer bundle and
          recorded this client as fine because the SOURCE had the verb. Bumped 2026-09-09. -->
-    <script type="module" src="/static/js/shared/task-verbs.js?v=20260909a"></script>
+    <script type="module" src="/static/js/shared/task-verbs.js?v=f6e38a76c579"></script>
     <!-- The ONE ticket-reference classifier + lookup URL builder (Rick's P0, row
          732151f2). A module so the TypeScript multiplexer can `import` the same
          file rather than keeping a second copy of the matching rule — the drift
          taskVerbs.ts is the standing receipt for. It publishes
          window.LUPIN_TASK_LOOKUP_PATH for the classic script below, read at CALL
          time so module execution order cannot matter. -->
-    <script type="module" src="/static/js/shared/task-lookup.js?v=20260909c"></script>
+    <script type="module" src="/static/js/shared/task-lookup.js?v=0a01055b00f8"></script>
+    <!-- Row 8eb71f8e: the task-list status chips table. Publishes window.LUPIN_TASK_STATUS_FILTER, read at CALL time. -->
+    <script type="module" src="/static/js/shared/task-status-filter.js?v=4cea22f3443d"></script>
     <!-- Row c9fafb9d — a manager's promote/demote REQUEST: the chip's words, the verdict body
          and the badge text, shared with the multiplexer so the two clients cannot drift.
          Publishes window.LUPIN_TASK_REQUEST for the classic script below, read at CALL time. -->
-    <script type="module" src="/static/js/shared/task-request.js?v=20260910a"></script>
+    <script type="module" src="/static/js/shared/task-request.js?v=e738b286eb4f"></script>
     <!-- Rick's New Ticket card (row c9895403) — form, validation and outcome wording
          shared with the multiplexer. Publishes window.LUPIN_OPEN_NEW_TICKET_CARD for the
          classic script below, read at CALL time. -->
-    <script type="module" src="/static/js/shared/task-create.js?v=20260918a"></script>
-    <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
-    <script type="module" src="/static/js/shared/arg-interview.js?v=20260905a"></script>
+    <script type="module" src="/static/js/shared/task-create.js?v=675efde3d576"></script>
+    <script type="module" src="/static/js/shared/agent-select.js?v=a3e0634d210d"></script>
+    <script type="module" src="/static/js/shared/arg-interview.js?v=c549b6ac78f3"></script>
     <!-- 🔴 CACHE TOKENS PICKED BY THE MERGER, BY HAND, 2026-09-04 (john) — per the
          standing ruling in 0da963f4: this value belongs to whoever merges, not to
          either author, because two authors both bumping it is what produced that
@@ -1529,10 +1587,10 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=20260929c"></script>
+    <script src="/static/js/notifications.js?v=7df55dbb3ecf"></script>
     <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
-    <script src="/static/js/broadcast-panel.js?v=20260926a"></script>
+    <script src="/static/js/broadcast-panel.js?v=02bdb607cf2a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
         // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md

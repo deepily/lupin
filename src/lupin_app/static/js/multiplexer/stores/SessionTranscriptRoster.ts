@@ -19,6 +19,7 @@
 
 import type { EventBus } from "../shared/EventBus";
 
+/** The slice of the API client the roster needs: a `get` that returns the parsed body. */
 export interface SessionTranscriptRosterApiClient {
   get<T>( path: string ): Promise<T>;
 }
@@ -37,6 +38,7 @@ export interface TranscriptChipIdentity {
   personaName : string | null;
 }
 
+/** The roster of watchable seats, and the lookup from a chip to a seat's full session id. */
 export interface SessionTranscriptRoster {
   /** Re-read the roster. A non-admin never reads it — the endpoint would refuse anyway. */
   refresh(): Promise<void>;
@@ -47,6 +49,7 @@ export interface SessionTranscriptRoster {
   destroy(): void;
 }
 
+/** Options for `createSessionTranscriptRoster`: bus, API client, admin check and hooks. */
 export interface SessionTranscriptRosterOptions {
   bus       : EventBus;
   api       : SessionTranscriptRosterApiClient;
@@ -55,6 +58,7 @@ export interface SessionTranscriptRosterOptions {
   logFn?    : ( message: string ) => void;
 }
 
+/** The server path that lists the seats whose transcript can be watched. */
 export const SESSION_TRANSCRIPT_ROSTER_ENDPOINT = "/api/cc-transcript-roster";
 
 interface RosterBody {
@@ -114,12 +118,18 @@ export function resolveTranscriptSeat(
   return candidates.length === 1 ? ( candidates[ 0 ] as TranscriptRosterRow ).session_id : null;
 }
 
+/**
+ * Returns the entries of a value that look like roster rows.
+ */
 function rowsOf( value: unknown ): TranscriptRosterRow[] {
   if ( !Array.isArray( value ) ) return [];
   return value.filter( ( row ): row is TranscriptRosterRow =>
     typeof row === "object" && row !== null && typeof ( row as TranscriptRosterRow ).session_id === "string" );
 }
 
+/**
+ * Models the seats whose transcripts can be watched, for admin users.
+ */
 class SessionTranscriptRosterImpl implements SessionTranscriptRoster {
   private readonly bus      : EventBus;
   private readonly api      : SessionTranscriptRosterApiClient;
@@ -131,6 +141,9 @@ class SessionTranscriptRosterImpl implements SessionTranscriptRoster {
   private rows        : TranscriptRosterRow[] = [];
   private statusValue : string | null = null;
 
+  /**
+   * Stores the bus, API client and admin check, and subscribes to refresh events.
+   */
   constructor( opts: SessionTranscriptRosterOptions ) {
     this.bus      = opts.bus;
     this.api      = opts.api;
@@ -149,6 +162,9 @@ class SessionTranscriptRosterImpl implements SessionTranscriptRoster {
     );
   }
 
+  /**
+   * Reads the roster from the server for admin users and emits a change event.
+   */
   async refresh(): Promise<void> {
     if ( !this.isAdmin() ) return;
     let body: RosterBody;
@@ -168,18 +184,32 @@ class SessionTranscriptRosterImpl implements SessionTranscriptRoster {
     } );
   }
 
+  /**
+   * Returns the session ID that matches a sender chip, or null.
+   */
   resolve( chip: TranscriptChipIdentity ): string | null {
     return resolveTranscriptSeat( chip, this.rows );
   }
 
+  /**
+   * Returns the status text from the last roster read, or null.
+   */
   status(): string | null { return this.statusValue; }
 
+  /**
+   * Removes the bus subscriptions.
+   */
   destroy(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
   }
 }
 
+/**
+ * Build the roster.
+ *
+ * It re-reads on `auth_success` and when the strip adds or hydrates sessions.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 export function createSessionTranscriptRoster( opts: SessionTranscriptRosterOptions ): SessionTranscriptRoster {
   return new SessionTranscriptRosterImpl( opts );

@@ -9,11 +9,12 @@
 // minutes ago sorts below every row created today. `task_events` is
 // append-only, one row per state change, already ordered ts DESC.
 //
-// Like FleetStatusStore and TaskListStore this is an AUTONOMOUS 60s poller: it
-// does not subscribe to the EventBus and rides none of the WS transports. It
-// only emits `store_finished_tasks_changed`.
+// Like FleetStatusStore and TaskListStore this is a 60s poller. Row 8796333b slice 2 adds one
+// EventBus subscription, `task_store_changed` (a server invalidation push), which calls
+// refreshAfterWrite(); the poll stays as the safety net. It emits `store_finished_tasks_changed`.
 
 import type { EventBus } from "../shared/EventBus";
+import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreFinishedTasksChangedPayload } from "../shared/types";
 import {
   FINISHED_STATUSES,
@@ -37,8 +38,14 @@ interface EventStreamResponse {
   count  : number;
 }
 
+/** The server path that lists task events. */
 export const FINISHED_TASKS_ENDPOINT = "/api/tasks/events";
 
+/**
+ * The finished-task events of every status, over a window of days.
+ *
+ * A status whose fetch failed is absent from the map, not empty.
+ */
 export interface FinishedTasksStore {
   /** Events keyed by status. A status whose fetch FAILED is ABSENT, not empty. */
   eventsByStatus(): FinishedEventsByStatus;
@@ -52,6 +59,11 @@ export interface FinishedTasksStore {
   setWindowDays( days: number ): void;
   /** Fetch every status → cache → emit. Debounced by an in-flight guard. */
   refresh(): Promise<void>;
+  /**
+   * The read to take after a server push or a write: waits out a read in flight, then takes
+   * one that began after this call. Ensures: a burst of callers shares one trailing read.
+   */
+  refreshAfterWrite(): Promise<void>;
   /** Start the 60s poll: one immediate refresh, then the interval. Idempotent. */
   startPolling(): void;
   /** Stop the poll. Idempotent. */
@@ -59,6 +71,7 @@ export interface FinishedTasksStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createFinishedTasksStore`: the bus, the API client and timer hooks for tests. */
 export interface FinishedTasksStoreOptions {
   bus              : EventBus;
   api              : FinishedTasksApiClient;
@@ -67,53 +80,101 @@ export interface FinishedTasksStoreOptions {
   clearIntervalFn? : ( handle: number ) => void;
 }
 
+/**
+ * Holds finished-task events by terminal status for a chosen window of days.
+ */
 class FinishedTasksStoreImpl implements FinishedTasksStore {
   private readonly bus : EventBus;
+  private readonly poller : PushPoller;
   private readonly api : FinishedTasksApiClient;
   private readonly nowFn : () => number;
-  private readonly setIntervalFn   : ( cb: () => void, ms: number ) => number;
-  private readonly clearIntervalFn : ( handle: number ) => void;
 
   private cache      : Record<string, ReadonlyArray<FinishedTaskEvent>> = {};
   private lastError  : string | null = null;
   private days       : number = FINISHED_WINDOW_DEFAULT_DAYS;
   private inFlight   = false;
-  private pollHandle : number | null = null;
+  private inFlightRun : Promise<void> | null = null;
 
+  /**
+   * Builds the store from a bus, an API client and optional clock and timer hooks.
+   */
   constructor( opts: FinishedTasksStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? ( () => Date.now() );
-    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
-    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
-    /* c8 ignore next */ // production-default fallback: pairs with the setInterval default above.
-    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+    const { nowFn, setIntervalFn, clearIntervalFn } = resolveRuntimeDefaults( opts );
+    this.nowFn = nowFn;
+    this.poller = createPushPoller( {
+      bus              : this.bus,
+      setIntervalFn,
+      clearIntervalFn,
+      intervalMs       : FINISHED_TASKS_POLL_INTERVAL_MS,
+      refresh          : () => this.refresh(),
+      refreshAfterWrite: () => this.refreshAfterWrite(),
+    } );
   }
 
+  /**
+   * Returns the cached finished-task events keyed by status.
+   */
   eventsByStatus(): FinishedEventsByStatus {
     return this.cache;
   }
 
+  /**
+   * Returns the statuses that have a cached result, in the fixed status order.
+   */
   measuredStatuses(): ReadonlyArray<string> {
     return FINISHED_STATUSES.filter( ( s ) => this.cache[ s ] !== undefined );
   }
 
+  /**
+   * Returns the first failure message from the last read, or null when it was clean.
+   */
   error(): string | null {
     return this.lastError;
   }
 
+  /**
+   * Returns the number of days of history the store reads.
+   */
   windowDays(): number {
     return this.days;
   }
 
+  /**
+   * Sets the history window in days, clamping it to the allowed range.
+   */
   setWindowDays( days: number ): void {
     this.days = clampWindowDays( days );
   }
 
+  /**
+   * Reads finished tasks for every status and emits a change event.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // a manual ⟳ landing on a tick must not double-fetch
     this.inFlight = true;
+    // Cleared by identity AFTER assignment: fetchAll() can reject before its first await (a
+    // throwing nowFn), and clearing inside it would run before this assignment and leave the
+    // settled rejection parked here for every later refreshAfterWrite() to rethrow.
+    const run: Promise<void> = this.fetchAll().finally( () => {
+      if ( this.inFlightRun === run ) this.inFlightRun = null;
+    } );
+    this.inFlightRun = run;
+    return run;
+  }
+
+  /**
+   * Waits for any read in flight, then returns a read that began after the write.
+   */
+  async refreshAfterWrite(): Promise<void> {
+    if ( this.inFlightRun !== null ) await this.inFlightRun;
+    // A run in flight now began after this call: join it rather than let refresh() skip it.
+    if ( this.inFlightRun !== null ) return this.inFlightRun;
+    return this.refresh();
+  }
+
+  private async fetchAll(): Promise<void> {
     try {
       const since = windowSinceIso( this.days, this.nowFn() );
       // 🔴 THE RESULT IS BUILT INTO A FRESH OBJECT AND SWAPPED IN AT THE END.
@@ -153,19 +214,23 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
     }
   }
 
+  /**
+   * Refreshes now, then on an interval and on each task-store-changed event.
+   */
   startPolling(): void {
-    this.stopPolling();
-    void this.refresh();
-    this.pollHandle = this.setIntervalFn( () => void this.refresh(), FINISHED_TASKS_POLL_INTERVAL_MS );
+    this.poller.start();
   }
 
+  /**
+   * Cancels the poll timer and unsubscribes from the task-store-changed event.
+   */
   stopPolling(): void {
-    if ( this.pollHandle !== null ) {
-      this.clearIntervalFn( this.pollHandle );
-      this.pollHandle = null;
-    }
+    this.poller.stop();
   }
 
+  /**
+   * Stops polling so a test can finish cleanly.
+   */
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
@@ -197,6 +262,7 @@ function describeFailure( err: unknown, status: string ): string {
   return `${ message ?? String( err ) } (${ status })`;
 }
 
+/** Build the store. It fetches nothing when it is built. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFinishedTasksStore( opts: FinishedTasksStoreOptions ): FinishedTasksStore {
   return new FinishedTasksStoreImpl( opts );

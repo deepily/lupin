@@ -29,6 +29,11 @@ const ICONS = {
 
 type IconKey = keyof typeof ICONS;
 
+/**
+ * One link of the nav bar: its label, URL, icon key and test id.
+ *
+ * The `auth` flag marks a link that is shown only to an authenticated user.
+ */
 export interface NavItem {
   label  : string;
   url    : string;
@@ -46,19 +51,24 @@ const NAV_ITEMS: readonly NavItem[] = [
   { label : "Profile",       url : "/app/auth/profile",  icon : "user", auth : true,  testid : "nav-profile-link"       },
 ];
 
+/** What the nav bar draws: whether the user is signed in, the email and the current path. */
 export interface NavBarData {
   authenticated : boolean;
   email         : string | null;
   activePath    : string;   // window.location.pathname
 }
 
+/** The callback the nav bar calls when the logout button is clicked. */
 export interface NavBarHandlers {
   /** Logout button click. */
   onLogout(): void;
 }
 
-// Active-page test — ported from lupin-nav.js:82-92. Exact match for the /app
-// landing (with/without trailing slash); startsWith for every deeper page.
+/**
+ * Say whether a nav link is the current page.
+ *
+ * The `/app` landing matches only itself, with or without a trailing slash. Every other link matches any path that starts with its URL.
+ */
 export function isActivePage( itemUrl: string, currentPath: string ): boolean {
   if ( itemUrl === "/app" ) {
     return currentPath === "/app" || currentPath === "/app/";

@@ -27,7 +27,8 @@
 
 import { ApiError } from "../api/ApiClient";
 import { recordingManager, type RecordingManagerStartOptions } from "../audio/recordingManager";
-import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
+import type { TaskMutation, TaskPatchFields, TransitionOutcome } from "../stores/TaskListStore";
+import { alreadyThereMessage } from "../stores/alreadyAtTarget";
 import { insertTranscriptionText } from "./insertTranscriptionText";
 import {
   transitionExtras,
@@ -39,6 +40,7 @@ import {
 } from "./taskVerbs";
 import { renderRowError as paintRowError, toggleDisclosure } from "./templates/rowDisclosure";
 import type { OperatorStateHandlers } from "./operatorState";
+import { openTaskBodyOverlay, dismissTaskBodyOverlay } from "./taskBodyOverlay";
 import {
   DROP_REASON_DATALIST_ID,
   PRIORITY_UPDATE_IDLE_TITLE,
@@ -58,6 +60,12 @@ export interface TaskRowRecorderLike {
   getActiveContextId(): string | null;
 }
 
+/**
+ * What a pane passes to build its row controller.
+ *
+ * `container` scopes every lookup. `writer` performs the edits.
+ * `onTransitionSettled` runs after a transition succeeds, and also when the server answers 404 and `gone` is true.
+ */
 export interface TaskRowControllerOptions {
   /** The pane's persistent container — every lookup and every stripe is scoped to it. */
   container : HTMLElement;
@@ -76,6 +84,7 @@ export interface TaskRowControllerOptions {
 
 // How long the transient "copied" flash stays on the ID cell (F1 2026.07.01).
 // Mirrors the notifications.js checkmark dwell (~1.2s).
+/** How long the copied flash stays on a row id cell, in milliseconds. */
 export const COPIED_FLASH_MS = 1200;
 
 /** The stripe a mic shows when its row has no reason box. Carbon copy of `_handleReasonSttClick`. */
@@ -86,6 +95,12 @@ export function reasonMicContextId( id: string ): string {
   return `task-reason-${id}`;
 }
 
+/**
+ * Handles the clicks, changes and keys of the shared task row for one pane.
+ *
+ * `handleClick` returns false for anything that is not a row control, so the pane can route it.
+ * Edits and transitions go through the writer, and a refusal is shown as a stripe on the row.
+ */
 export class TaskRowController {
   private readonly container : HTMLElement;
   private readonly writer    : TaskRowWriter;
@@ -105,9 +120,9 @@ export class TaskRowController {
   // `recordingManager.isProcessing()`.
   private readonly micProcessing : Set<string> = new Set();
 
-  // The document-level Esc listener for the body overlay (null when closed).
-  private overlayKeyListener : ( ( e: KeyboardEvent ) => void ) | null = null;
-
+  /**
+   * Stores the container, writer, recorder, and timing hooks from the options.
+   */
   constructor( opts: TaskRowControllerOptions ) {
     this.container = opts.container;
     this.writer    = opts.writer;
@@ -140,7 +155,7 @@ export class TaskRowController {
 
   /** Close the body overlay, if one is open. Call from the pane's unmount. */
   dispose(): void {
-    this.dismissTaskBodyOverlay();
+    dismissTaskBodyOverlay();
   }
 
   // -------------------------------------------------------------------------
@@ -162,7 +177,7 @@ export class TaskRowController {
     if ( emoji !== null ) {
       if ( !emoji.classList.contains( "task-detail-empty" ) ) {
         const span = emoji as HTMLElement;
-        this.openTaskBodyOverlay( span.dataset.taskBody ?? "", span.dataset.taskId ?? "" );
+        openTaskBodyOverlay( span.dataset.taskBody ?? "", span.dataset.taskId ?? "" );
       }
       return true;
     }
@@ -479,7 +494,11 @@ export class TaskRowController {
     this.commitMutation(
       `${id}:${verb}`, id, button,
       () => this.writer.transitionTask( id, needs.status, extras ),
-      ( gone ) => this.onTransitionSettled( id, needs.status, gone ),
+      ( gone, alreadyAt ) => {
+        this.onTransitionSettled( id, needs.status, gone );
+        // Row 71a11ed7: the row was already there, so say that rather than claim this click did it.
+        if ( alreadyAt !== null ) this.rowError( button, id, alreadyThereMessage( verbLabel( verb ), alreadyAt ) );
+      },
     );
   }
 
@@ -594,14 +613,14 @@ export class TaskRowController {
    * `onSuccess` runs on both success outcomes, told which: `gone` is true for the 404.
    * `control` is the element that was pressed; its group is where the stripe goes.
    */
-  private commitMutation( key: string, id: string, control: Element, run: () => TaskMutation, onSuccess?: ( gone: boolean ) => void ): void {
+  private commitMutation( key: string, id: string, control: Element, run: () => TaskMutation, onSuccess?: ( gone: boolean, alreadyAt: string | null ) => void ): void {
     if ( this.editInFlight.has( key ) ) return;   // rapid re-activation is a no-op until settle
     this.editInFlight.add( key );
     const { restoreState, done } = run();
     done
-      .then( () => { onSuccess?.( false ); } )
+      .then( ( outcome ) => { onSuccess?.( false, ( outcome as TransitionOutcome | undefined )?.alreadyAt ?? null ); } )
       .catch( ( err: unknown ) => {
-        if ( err instanceof ApiError && err.status === 404 ) { onSuccess?.( true ); return; }
+        if ( err instanceof ApiError && err.status === 404 ) { onSuccess?.( true, null ); return; }
         restoreState();
         this.rowError( control, id, deriveEditErrorMessage( err ) );
       } )
@@ -650,64 +669,11 @@ export class TaskRowController {
     return Array.from( this.container.querySelectorAll<HTMLElement>( "tbody" ) )
       .find( ( t ) => identity.every( ( [ k, v ] ) => t.dataset[ k ] === v ) ) ?? this.container;
   }
-
-  // -------------------------------------------------------------------------
-  // Body overlay (row redesign 2026.06.29 / D2 — renders the task `body`)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Show a small dismissible overlay rendering the task-store `body`. All DOM via
-   * createElement + textContent. Dismiss on backdrop click or Escape.
-   *
-   * Ensures:
-   *   - any prior overlay is removed first (single instance)
-   *   - the overlay carries an id header + the body in a <pre> (whitespace kept)
-   *   - a backdrop click OR Escape removes the overlay AND detaches its keydown listener
-   */
-  private openTaskBodyOverlay( bodyText: string, idLabel: string ): void {
-    this.dismissTaskBodyOverlay();
-
-    const overlay = document.createElement( "div" );
-    overlay.id        = "task-body-overlay";
-    overlay.className = "task-body-overlay";
-
-    const panel = document.createElement( "div" );
-    panel.className = "task-body-overlay-content";
-
-    const header = document.createElement( "div" );
-    header.className = "task-body-overlay-header";
-    header.textContent = idLabel ? `Task ${idLabel}` : "Task detail";
-
-    const pre = document.createElement( "pre" );
-    pre.className = "task-body-overlay-body";
-    pre.textContent = bodyText;
-
-    panel.appendChild( header );
-    panel.appendChild( pre );
-    overlay.appendChild( panel );
-
-    overlay.addEventListener( "click", () => this.dismissTaskBodyOverlay() );
-    panel.addEventListener( "click", ( e ) => e.stopPropagation() );
-
-    this.overlayKeyListener = ( e: KeyboardEvent ): void => {
-      if ( e.key === "Escape" ) this.dismissTaskBodyOverlay();
-    };
-    document.addEventListener( "keydown", this.overlayKeyListener );
-
-    document.body.appendChild( overlay );
-  }
-
-  /** Remove the body overlay and its Esc listener. Idempotent. */
-  private dismissTaskBodyOverlay(): void {
-    if ( this.overlayKeyListener !== null ) {
-      document.removeEventListener( "keydown", this.overlayKeyListener );
-      this.overlayKeyListener = null;
-    }
-    const existing = document.getElementById( "task-body-overlay" );
-    if ( existing !== null ) existing.remove();
-  }
 }
 
+/**
+ * Turns an edit failure into a short message for display.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 function deriveEditErrorMessage( err: unknown ): string {
   if ( err instanceof ApiError ) return `Edit failed (HTTP ${err.status})`;

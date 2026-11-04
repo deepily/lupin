@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Code synchronous notification client with SSE blocking (Phase 2.3).
+Claude Code synchronous notification client with SSE blocking.
 
 This script allows Claude Code to send response-required notifications via SSE,
 blocking until the user responds or timeout occurs. Uses Pydantic models for
@@ -53,9 +53,9 @@ class HumanAskInTestError( RuntimeError ):
     """
     Raised when a test tries to block on a human.
 
-    Its OWN type rather than a bare RuntimeError, so a test that legitimately exercises
-    this boundary can assert on the CLASS instead of matching message text — a string
-    match would pin the wording and break on the next edit to the refusal.
+    It is its own type rather than a bare RuntimeError. A test that exercises this
+    boundary can assert on the class instead of matching message text.
+    A string match would pin the wording and break on the next edit to the refusal.
     """
 
 # Import constants (fallbacks)
@@ -90,7 +90,7 @@ def consume_sse_stream(
         - Validates event structure with Pydantic
 
     Raises:
-        - No exceptions raised (all handled internally)
+        - No error propagates to the caller (all are handled internally)
 
     Args:
         response: Streaming HTTP response from /api/notify
@@ -249,9 +249,10 @@ def consume_sse_stream(
 
 def _poll_notification_response( notification_id, base_url, headers, timeout=5 ):
     """
-    GET /api/notifications/response/{notification_id} — the re-attach poll read
-    (§4.5 E-b). Returns the parsed { state, response_value, responded_at } dict, or
-    None on any non-200 / transport failure. Never raises.
+    Read GET /api/notifications/response/{notification_id} for the re-attach poll.
+
+    Returns the parsed { state, response_value, responded_at } dict, or None on any
+    non-200 status or transport failure. Never raises.
     """
     try:
         resp = requests.get(
@@ -271,20 +272,14 @@ def _reattach_after_stream_death(
     poll_fn=None, poll_interval=2.0, debug=False
 ):
     """
-    Re-attach after the SSE stream died (§4.5 E-c). Poll the response-by-id endpoint
-    against the remaining wall-clock budget; decide the outcome on the §3 invariant
-    **`responded_at IS NOT NULL`** — never on `state` moving or `response_value`
-    being non-null.
+    Re-attach after the SSE stream died by polling the response-by-id endpoint.
 
-    ⚠️ POST-CASCADE CONTRACT AMENDMENT (María, ruling b): a LANDED answer is RETURNED
-    to the caller and the row is LEFT OWED — **no ack fires here**. Acking on poll-land
-    would mark the row delivered before the value reached the caller ("ack on consume,
-    never on serve" one level in), so a death in that window would lose the answer. The
-    receipt is the next-turn catch-up's ack (setter b). Fails toward re-delivery (a
-    bounded double-SEE), never toward silence.
+    Polls within the remaining budget; the outcome rests on `responded_at IS NOT NULL`, never on `state` or `response_value`.
+    A landed answer is returned and the row stays owed, with no ack here; the next-turn catch-up acks it.
+    Acking on poll-land would mark it delivered before the caller got the value, so a death then loses it. This fails toward re-delivery (a bounded double-see), never toward silence.
 
     Requires:
-        - notification_id: the ack id captured from the opening frame (None ⇒ no
+        - notification_id: the ack id captured from the opening frame (None means no
           re-attach is possible)
         - remaining_seconds: the wall-clock budget left for the whole ask
         - poll_fn(notification_id) -> row dict|None (dependency-injected in tests;
@@ -292,14 +287,14 @@ def _reattach_after_stream_death(
 
     Ensures:
         - returns a NotificationResponse with `reattach_state` set:
-            * `reattach_unavailable` when notification_id is None (surfaced LOUD)
+            * `reattach_unavailable` when notification_id is None (surfaced loudly)
             * `reattach_armed` once at least one poll has fired
-        - responded_at NOT NULL ⇒ RespondedEvent-shaped (status="responded",
-          default_used=False), NO ack
-        - responded_at NULL WITH a response_value ⇒ manufactured default ⇒
-          status="expired", default_used=True, is_timeout=True, NO ack, never responded
-        - budget exhausted with no landed answer ⇒ status="expired", is_timeout=True
-        - ALWAYS fires at least one poll before returning (E-V3), even at budget≤0
+        - responded_at not null means a RespondedEvent-shaped result (status="responded",
+          default_used=False), no ack
+        - responded_at null with a response_value means a manufactured default, so
+          status="expired", default_used=True, is_timeout=True, no ack, never responded
+        - budget exhausted with no landed answer gives status="expired", is_timeout=True
+        - always fires at least one poll before returning (E-V3), even at budget<=0
         - never raises
     """
     if not notification_id:
@@ -613,10 +608,9 @@ def notify_user_sync(
     bearer_token: Optional[str] = None
 ) -> NotificationResponse:
     """
-    Send response-required notification with SSE blocking.
+    Send a response-required notification and block on SSE until a reply or timeout.
 
-    Sends notification to Lupin API and blocks until user responds or timeout.
-    Uses Pydantic models for type-safe request/response handling.
+    Blocks until the user responds or the timeout expires, using Pydantic models for type-safe handling.
 
     Requires:
         - request is a validated NotificationRequest model
@@ -635,18 +629,12 @@ def notify_user_sync(
         - Uses SSE streaming for blocking until response
 
     Raises:
-        - HumanAskInTestError when a TEST tries to block on a human (row e625e608).
-          This is the ONE deliberate exception, and the exemption is stated rather
-          than quietly taken: every other failure here — network, validation,
-          timeout — is a condition the CALLER may reasonably continue past, and is
-          still returned as an exit code. A test reaching this line is not a runtime
-          condition, it is a defect in the test, and it must STOP that test.
-
-          Returning exit_code 1 instead was considered and REJECTED: the test would
-          go GREEN having silently failed to ask anybody, which is this repo's "a
-          clean exit is not evidence the work happened" defect exactly — and the
-          whole point of the row is that nothing told anyone. Production never sees
-          it: outside pytest the guard returns None and nothing is raised.
+        - HumanAskInTestError when a test tries to block on a human. This is the one
+          deliberate exception, stated rather than quietly taken; every other failure (network, validation, timeout) is a
+          condition the caller may continue past and is returned as an exit code.
+          A test reaching this guard is not a runtime condition but a defect, so it must stop that test.
+          Returning exit_code 1 was rejected: the test would go green having silently
+          failed to ask anybody. Outside pytest the guard returns None, so production never sees it and nothing is raised.
 
     Args:
         request: NotificationRequest model (already validated)

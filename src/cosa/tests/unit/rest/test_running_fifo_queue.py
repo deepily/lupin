@@ -45,6 +45,7 @@ class _Job:
             solution_summary="summary", thoughts="thoughts", runtime_stats={},
             answer_is_correct=None, question="what time is it?",
             brake_terminal_claimed=False,   # protocol member (row cdfedc41) — read directly by the brake
+            snapshotable=True,              # AgentBase default; the queued executor sets it per job
             _do_all_return="output", _do_all_exc=None, _code_ok=True, _fmt_ok=True,
             _code_response={ "return_code": 0, "output": "ok" }, _formatted="fmt",
         )
@@ -317,6 +318,16 @@ class TestOnAgenticComplete( _RFQBase ):
 # ── _transition_to_done ─────────────────────────────────────────────────────
 class TestTransitionToDone( _RFQBase ):
 
+    def test_done_is_a_no_op_when_the_job_already_went_terminal( self ):
+        for debug in ( True, False ):
+            with self.subTest( debug=debug ):
+                rq = self.build( **{ "app debug": debug } )
+                job = _AgenticFake( id_hash="d9", brake_terminal_claimed=True ); self._enqueue( rq, job )
+                rq._transition_to_done( job, "late duplicate" )
+                self.emit.assert_not_called()
+                rq.jobs_done_queue.push.assert_not_called()
+                self.assertIn( "d9", rq.queue_dict )
+
     def test_done_happy_path_with_duration( self ):
         rq = self.build(); job = _AgenticFake( id_hash="d1" ); self._enqueue( rq, job )
         with patch( "cosa.rest.test_suite_completion_watchdog.get_watchdog" ) as gw:
@@ -356,6 +367,16 @@ class TestTransitionToDone( _RFQBase ):
 # ── _transition_to_stalled ──────────────────────────────────────────────────
 class TestTransitionToStalled( _RFQBase ):
 
+    def test_stalled_is_a_no_op_when_the_job_already_went_terminal( self ):
+        for debug in ( True, False ):
+            with self.subTest( debug=debug ):
+                rq = self.build( **{ "app debug": debug } )
+                job = _AgenticFake( id_hash="s9", brake_terminal_claimed=True ); self._enqueue( rq, job )
+                rq._transition_to_stalled( job, "late" )
+                self.emit.assert_not_called()
+                rq.jobs_done_queue.push.assert_not_called()
+                self.assertIn( "s9", rq.queue_dict )
+
     def test_stalled_happy( self ):
         rq = self.build(); job = _AgenticFake( id_hash="s1" ); self._enqueue( rq, job )
         rq._transition_to_stalled( job, "out" )
@@ -376,6 +397,16 @@ class TestTransitionToStalled( _RFQBase ):
 
 # ── _transition_to_dead ─────────────────────────────────────────────────────
 class TestTransitionToDead( _RFQBase ):
+
+    def test_dead_is_a_no_op_when_the_job_already_went_terminal( self ):
+        rq = self.build( **{ "app debug": True } )
+        job = _AgenticFake( id_hash="x9", brake_terminal_claimed=True, error=None ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_dead( job, "second report" )
+        rq.jobs_dead_queue.push.assert_not_called()
+        ev.assert_not_called()
+        self.assertIsNone( job.error )
+        self.assertIn( "x9", rq.queue_dict )
 
     def test_dead_string_cause( self ):
         rq = self.build(); job = _AgenticFake( id_hash="x1", error=None ); self._enqueue( rq, job )
@@ -982,6 +1013,19 @@ class TestProcessJob( _RFQBase ):
         rq._process_job( _AgentBaseFake() )
         rq._format_cached_result.assert_called_once()
 
+    def test_an_exact_hit_whose_second_gate_declines_runs_the_agent( self ):
+        """The serve can decline mid-way; nothing user-visible happened, so the agent runs instead."""
+        rq = self.build()
+        rq._format_cached_result = MagicMock( return_value=None )
+        rq._handle_base_agent    = MagicMock( return_value="ran" )
+        snap = _SnapFake( run_date="2026", answer_is_correct=True )
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, snap ) ]
+
+        rq._process_job( _AgentBaseFake() )
+
+        rq._format_cached_result.assert_called_once()
+        rq._handle_base_agent.assert_called_once()
+
     def test_a_near_match_is_no_longer_accepted_without_asking( self ):
         """
         INVERTED BY STEP 7b, not deleted. This used to assert that a 95% match was
@@ -1029,6 +1073,32 @@ class TestProcessJob( _RFQBase ):
         rq._process_job( _AgentBaseFake() )
 
         rq._format_cached_result.assert_called_once()
+
+    def test_an_exact_hit_moves_the_job_to_done_by_itself( self ):
+        """
+        A served cache hit leaves the running queue once and reaches the done queue once.
+
+        `_process_job` returns nothing and keeps nothing, because `_format_cached_result` is
+        what delivers. One copy carrying the original id_hash reaches the done queue. The old
+        `running_job = served` store was never read.
+
+        Mutant check: make `_format_cached_result` skip the done push (or the delete) and
+        this fails; the agent must not run on a served hit.
+        """
+        rq = self.build()
+        rq.delete_by_id_hash = MagicMock( name="delete_by_id_hash" )
+        rq._handle_base_agent = MagicMock( name="_handle_base_agent" )
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [
+            ( 100.0, _SnapFake( id_hash="c9", run_date="2026", answer_is_correct=True, runtime_stats={ "first_run_ms": 1000 } ) )
+        ]
+        original = _AgentBaseFake( id_hash="orig9" )
+
+        self.assertIsNone( rq._process_job( original ) )
+
+        rq.delete_by_id_hash.assert_called_once_with( "orig9" )
+        rq.jobs_done_queue.push.assert_called_once()
+        self.assertEqual( rq.jobs_done_queue.push.call_args.args[ 0 ].id_hash, "orig9" )
+        rq._handle_base_agent.assert_not_called()
 
     # ── row 54589356: the READ guard on the QUEUE layer ──────────────────────────
     #
@@ -1294,8 +1364,114 @@ class TestConfirmCorrectness( _RFQBase ):
         rq._confirm_correctness( _SnapFake(), "q", "a" )   # must not raise
 
 
+# ── _confirm_correctness: test-suite lineage skips the ask (row 4cbd4858) ───
+class _Node:
+    """A queue job stand-in carrying only what the lineage walk reads."""
+    def __init__( self, spawned_by=None, job_type=None ):
+        if spawned_by is not None: self.spawned_by_id_hash = spawned_by
+        if job_type   is not None: self.job_type           = job_type
+
+
+class TestCorrectnessLineageSkip( _RFQBase ):
+
+    def _snap( self, parent ):
+        snap = _SnapFake()
+        snap.id_hash = "child"
+        if parent is not None: snap.spawned_by_id_hash = parent
+        return snap
+
+    def test_a_test_suite_child_is_not_asked_and_takes_the_yes_default( self ):
+        rq = self.build()
+        rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
+        snap = self._snap( "suite" )
+        rq._confirm_correctness( snap, "q", "a" )
+        self.notify_fn.assert_not_called()
+        self.assertTrue( snap.answer_is_correct )
+        rq.snapshot_mgr.save_snapshot.assert_called_once_with( snap )
+        rq.websocket_mgr.emit.assert_called_once()
+
+    def test_a_grandchild_of_a_test_suite_is_not_asked( self ):
+        rq = self.build()
+        rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
+        rq.queue_dict[ "mid" ]   = _Node( spawned_by="suite" )
+        rq._confirm_correctness( self._snap( "mid" ), "q", "a" )
+        self.notify_fn.assert_not_called()
+
+    def test_the_skip_with_no_websocket_manager_still_records( self ):
+        rq = self.build(); rq.websocket_mgr = None
+        rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
+        snap = self._snap( "suite" )
+        rq._confirm_correctness( snap, "q", "a" )
+        self.assertTrue( snap.answer_is_correct )
+
+    def test_a_job_with_no_lineage_is_still_asked( self ):
+        rq = self.build()
+        resp = MagicMock(); resp.status="responded"; resp.response_value="no"
+        self.notify_fn.return_value = resp
+        snap = self._snap( None )
+        rq._confirm_correctness( snap, "q", "a" )
+        self.notify_fn.assert_called_once()
+        self.assertFalse( snap.answer_is_correct )
+
+    def test_a_job_spawned_by_a_non_test_suite_job_is_still_asked( self ):
+        rq = self.build()
+        rq.queue_dict[ "other" ] = _Node( job_type="podcast_generator" )
+        resp = MagicMock(); resp.status="responded"; resp.response_value="yes"
+        self.notify_fn.return_value = resp
+        rq._confirm_correctness( self._snap( "other" ), "q", "a" )
+        self.notify_fn.assert_called_once()
+
+    def test_a_parent_no_longer_in_the_queue_is_unverifiable_so_the_ask_stays( self ):
+        rq = self.build()
+        resp = MagicMock(); resp.status="timeout"
+        self.notify_fn.return_value = resp
+        rq._confirm_correctness( self._snap( "gone" ), "q", "a" )
+        self.notify_fn.assert_called_once()
+
+    def test_a_lineage_cycle_terminates_and_asks( self ):
+        rq = self.build()
+        rq.queue_dict[ "a" ] = _Node( spawned_by="b" )
+        rq.queue_dict[ "b" ] = _Node( spawned_by="a" )
+        self.assertFalse( rq._lineage_traces_to_test_suite( self._snap( "a" ) ) )
+
+    def test_a_chain_longer_than_the_hop_cap_is_not_followed( self ):
+        rq = self.build()
+        n = rq.LINEAGE_MAX_HOPS
+        for i in range( n ): rq.queue_dict[ f"n{i}" ] = _Node( spawned_by=f"n{i + 1}" )
+        rq.queue_dict[ f"n{n}" ] = _Node( job_type="test_suite" )
+        self.assertFalse( rq._lineage_traces_to_test_suite( self._snap( "n0" ) ) )
+
+
 # ── _handle_base_agent ──────────────────────────────────────────────────────
 class TestHandleBaseAgent( _RFQBase ):
+
+    # ── row 4cbd4858: the CRUD agent is told its lineage at dispatch ──
+    def test_crud_agent_with_suite_lineage_is_flagged_before_do_all( self ):
+        rq = self.build()
+        rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
+        job = _CrudFake( id_hash="c1", spawned_by_id_hash="suite", lineage_is_test_suite=False )
+        seen = []
+        job.do_all = lambda: seen.append( job.lineage_is_test_suite ) or "output"   # what the agent saw WHEN it ran
+        self._enqueue( rq, job )
+        rq._confirm_correctness = MagicMock()
+        rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        self.assertEqual( seen, [ True ] )
+
+    def test_crud_agent_without_suite_lineage_stays_unflagged( self ):
+        rq = self.build()
+        job = _CrudFake( id_hash="c2", lineage_is_test_suite=False )
+        self._enqueue( rq, job )
+        rq._confirm_correctness = MagicMock()
+        rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        self.assertIs( job.lineage_is_test_suite, False )
+
+    def test_non_crud_agent_is_not_given_the_flag( self ):
+        rq = self.build()
+        job = _AgentBaseFake( id_hash="c3" )
+        self._enqueue( rq, job )
+        rq._confirm_correctness = MagicMock()
+        rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        self.assertFalse( hasattr( job, "lineage_is_test_suite" ) )
 
     def test_do_all_raises_routes_error_case( self ):
         rq = self.build(); rq._handle_error_case = MagicMock( return_value="err" )
@@ -1338,6 +1514,23 @@ class TestHandleBaseAgent( _RFQBase ):
         rq._confirm_correctness = MagicMock()
         out = rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
         self.assertIsInstance( out, _SnapFake )
+
+    def test_a_job_the_flow_marked_not_snapshotable_is_not_written_to_the_cache( self ):
+        rq = self.build()
+        job = _AgentBaseFake( id_hash="b4a", snapshotable=False ); self._enqueue( rq, job )
+        rq._confirm_correctness = MagicMock()
+        out = rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        rq.snapshot_mgr.save_snapshot.assert_not_called()
+        rq._confirm_correctness.assert_not_called()
+        self.assertIs( out, job )
+        self.assertEqual( out.answer, "raw answer" )
+
+    def test_ephemeral_weather_keeps_the_placeholder_answer_and_is_not_serialized( self ):
+        rq = self.build()
+        job = _WeatherFake( id_hash="b4w" ); self._enqueue( rq, job )
+        out = rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        self.assertEqual( out.answer, "no code executed by non-serializing/ephemeral objects" )
+        rq.snapshot_mgr.save_snapshot.assert_not_called()
 
     def test_ephemeral_receptionist_not_serialized( self ):
         rq = self.build()

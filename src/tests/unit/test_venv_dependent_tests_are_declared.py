@@ -96,6 +96,41 @@ BREAKS_WITHOUT_VENV = {
     #     .venv      14 passed
     #     no .venv   12 failed ·  2 passed   (restore control)
     "test_runner_filtered_run_banner.py",
+    # The documentation lint gate's runner and the pre-push hook (row 2c48c717). Both fixtures
+    # link PROJECT_ROOT/.venv into a scratch tree, and the scripts under test find their
+    # interpreter through resolve-venv-pytest.sh, which accepts that link or /opt/venv. Neither
+    # file skips when both are absent, so the tests fail by name.
+    #
+    # Measured both ways in one worktree (mr-radio-2c48c717-doclint-gate, on 0225b7535 plus this
+    # change), the `.venv` link moved aside and restored, the interpreter pinned to the main
+    # checkout, the two files run together, on a host with no /opt/venv:
+    #     .venv      37 passed
+    #     no .venv   26 failed, 11 passed
+    #     .venv      37 passed   (restore control)
+    "test_doclint_gate_runner.py",
+    # The reuse gate's runner (Plan 3 step C3). Its `repo` fixture links PROJECT_ROOT/.venv into a
+    # scratch git tree, and the script under test finds its interpreter through
+    # resolve-venv-pytest.sh. The file does not skip when both are absent, so the tests fail by name.
+    # Measured both ways in one worktree (seat-cc-author-cheech-1, on 578eac2e2 plus this change), the
+    # `.venv` link moved aside and restored, the interpreter pinned to the main checkout, on a host
+    # with no /opt/venv:
+    #     .venv      7 passed
+    #     no .venv   7 failed
+    #     .venv      7 passed   (restore control)
+    "test_reuse_gate_runner.py",
+    "test_pre_push_chain.py",
+    # 3 of its 24 cases. Its `tree` fixture links PROJECT_ROOT/.venv into a scratch git
+    # tree, and the census runner it drives resolves its interpreter through
+    # resolve-venv-pytest.sh. With no venv the three tests that run the runner fail:
+    # `test_the_runner_lists_a_named_file_whole_and_a_guard_function_in_an_ordinary_file_by_node_id`,
+    # `test_the_runner_refuses_with_two_when_the_selection_cannot_read_a_file` and
+    # `test_the_runner_refuses_with_two_when_nothing_is_selected`. The other 21 never run the runner.
+    # Measured at f4033cc08 in one worktree, the `.venv` symlink added and removed, the
+    # interpreter pinned to the seat's venv so only the target moved:
+    #     no .venv   3 failed · 21 passed
+    #     .venv      24 passed
+    #     no .venv   3 failed · 21 passed   (restore control)
+    "test_census_selection_helper.py",
 }
 
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next
@@ -141,6 +176,38 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "suite. Measured BOTH ways at b78c7651 in this worktree, the `.venv` symlink moved "
         "aside and restored between the two runs, the second driven by the main checkout's "
         "interpreter: 14 passed with a `.venv`, 14 passed without.",
+    "test_run_test_suite_live_smoke.py":
+        "the one `.venv/bin/pytest` it names is planted BY THE FIXTURE inside a scratch copy of the "
+        "runner (`root / \".venv/bin\"` under tmp_path, with a fake pytest script written into it), "
+        "so the path is a property of the temp tree it builds and never of the tree running the "
+        "suite. Measured BOTH ways at 7aa064187 in one worktree, the `.venv` symlink moved aside "
+        "and restored between the runs, the interpreter pinned to the main checkout so only the "
+        "target moved: 12 passed with a `.venv`, 12 passed without, 12 passed with again.",
+    "test_reuse_harness_acceptance.py":
+        "the one `os.path.join( tree[ \"path\" ], \".venv\", \"bin\", \"python\" )` (the "
+        "pytest-environment test) is the argv the test EXPECTS the adapter to build for a "
+        "throwaway git repo in tmp_path. The adapter is handed a recording Runner there, so "
+        "nothing is executed; the two cases that run a real pytest pass `python=sys.executable`. "
+        "The path is a property of the fixture tree, never of the tree running the suite. "
+        "Measured BOTH ways at 9d978cb0a in this worktree, the `.venv` symlink moved aside and "
+        "restored between the arms with `readlink` read before and after, the interpreter "
+        "pinned to the main checkout so only the target moved: 39 passed with a `.venv`, "
+        "39 passed without, 39 passed with again.",
+    "test_install_cosa_voice_keeps_reuse_settings.py":
+        "the `.venv/bin/python` it names is planted BY THE FIXTURE (`home` writes an empty file "
+        "at `root / \".venv/bin/python\"` inside a tmp_path tree the installer is pointed at), so "
+        "the path is a property of the temp tree it builds and never of the tree running the "
+        "suite. Measured BOTH ways at 3aae6575b in one worktree, the `.venv` symlink moved aside "
+        "and restored with `readlink` read before and after, the interpreter pinned to the main "
+        "checkout so only the target moved: 12 passed with a `.venv`, 12 passed without, "
+        "12 passed with again.",
+    "test_reuse_behaviour.py":
+        "the two `/r/.venv/bin/python` strings are the interpreter argument the cron-line test hands "
+        "to `cron_lines` and expects back inside the line it builds. Nothing opens, runs or checks "
+        "that path, so it is text in the test and never a property of the tree running the suite. "
+        "Measured BOTH ways at c7c456cb6 in one worktree, the `.venv` symlink moved aside and "
+        "restored, the interpreter pinned to the main checkout so only the target moved: 33 passed "
+        "with a `.venv`, 33 passed without, 33 passed with again.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "

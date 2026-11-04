@@ -270,16 +270,21 @@ class GitDiffParser:
         lines = output.split( '\n' )
         diff_lines = []
         current_file = None
+        in_hunk = False
 
         for i, line in enumerate( lines ):
-            # Track current file
+            # Track current file; a new file header ends the previous file's hunks
             if line.startswith( 'diff --git' ):
+                in_hunk = False
                 parts = line.split()
                 if len( parts ) >= 4:
-                    current_file = parts[3].lstrip( 'b/' )
+                    current_file = parts[3].removeprefix( 'b/' )
 
             # Determine operation
-            operation = self._classify_diff_line( line )
+            operation = self._classify_diff_line( line, in_hunk )
+
+            # Once the first '@@' of a file is seen, every '+' / '-' line is content
+            if line.startswith( '@@ ' ): in_hunk = True
 
             diff_lines.append( DiffLine(
                 content     = line,
@@ -290,9 +295,19 @@ class GitDiffParser:
 
         return diff_lines
 
-    def _classify_diff_line( self, line: str ) -> str:
-        """Classify diff line by operation."""
+    def _classify_diff_line( self, line: str, in_hunk: bool = False ) -> str:
+        """
+        Classify diff line by operation.
+
+        Inside a hunk the first character decides. A content line whose own text
+        begins '++' shows as '+++' and is still an add; '--' is a remove likewise.
+        Outside a hunk the '--- ' and '+++ ' file headers are meta.
+        """
         if not line:
+            return 'context'
+        elif in_hunk and not line.startswith( ('@@ ', 'diff ') ):
+            if line[0] == '+': return 'add'
+            if line[0] == '-': return 'remove'
             return 'context'
         elif line.startswith( '+' ) and not line.startswith( '+++' ):
             return 'add'

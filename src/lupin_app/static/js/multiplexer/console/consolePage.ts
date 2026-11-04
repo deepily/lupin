@@ -55,6 +55,11 @@ export interface ConsoleWindowEvents {
   addEventListener( type: "online" | "offline", listener: () => void ): void;
 }
 
+/**
+ * What `bootConsolePage` needs from the browser.
+ *
+ * `connect` is called only after the login guard passes. `newSessionId` supplies this tab's own queue session id.
+ */
 export interface ConsolePageDeps {
   doc          : Document;
   win          : ConsoleWindowEvents;
@@ -65,13 +70,26 @@ export interface ConsolePageDeps {
   newSessionId : () => string;
 }
 
+/**
+ * How booting the console page ended.
+ *
+ * `error` is a missing or malformed seat, shown on the page with nothing connected. `redirected` is the login guard sending the tab away.
+ * `watching` carries the live store and renderer and the queue session id this tab started on.
+ */
 export type ConsolePageResult =
   | { status : "error";      error : string }
   | { status : "redirected" }
   | { status : "watching";   seat : string; sessionId : string; store : SessionTranscriptStore; renderer : SessionTranscriptRenderer };
 
+/** The id of the element the transcript renderer mounts into. */
 export const CONSOLE_PAGE_MOUNT_ID = "session-transcript-mount";
+/**
+ * The `<h1>` in console.html.
+ *
+ * Its text and `document.title` are both set to the seat title from the query.
+ */
 export const CONSOLE_PAGE_TITLE_ID = "console-page-title";
+/** The id of the element that shows a missing or malformed seat error. */
 export const CONSOLE_PAGE_ERROR_ID = "console-page-error";
 
 /**
@@ -186,8 +204,11 @@ export function bootConsolePage( deps: ConsolePageDeps ): ConsolePageResult {
   return { status : "watching", seat : query.seat, sessionId, store, renderer };
 }
 
-// The queue transport's reconnect machine listens for these, as it does in the multiplexer:
-// a tab coming back into view or a network coming back reconnects now rather than on backoff.
+/**
+ * Forwards page visibility and network online or offline events onto the event bus.
+ *
+ * The queue transport's reconnect logic listens for these to reconnect sooner.
+ */
 function attachLifecycle( deps: ConsolePageDeps ): void {
   const emit = ( type: "page_hidden" | "page_visible" | "network_online" | "network_offline" ): void => {
     const ts = Date.now();
@@ -200,6 +221,11 @@ function attachLifecycle( deps: ConsolePageDeps ): void {
   deps.win.addEventListener( "offline", () => emit( "network_offline" ) );
 }
 
+/**
+ * Returns the element with the given id from the document.
+ *
+ * Throws an error naming the id when no such element exists.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: the never-run CJS export annotation maps onto the last function.
 function requireElement( doc: Document, id: string ): HTMLElement {
   const el = doc.getElementById( id );

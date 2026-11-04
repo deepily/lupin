@@ -1,0 +1,2737 @@
+"""
+The external-tool runners, the commit gate, and the pre-commit chain wrapper.
+
+The gate's promises are checked here. A missing tool prints a loud line. A crash never blocks a commit.
+With --blocking, a finding on a staged line refuses the commit, except in the five record locations.
+The chain tests run the real pre-commit-chain.sh in a scratch repository.
+"""
+
+import io
+import json
+import os
+import shutil
+import subprocess
+from types import SimpleNamespace
+
+import pytest
+
+import cosa.utils.util as cu
+from cosa.repo.doc_lint import changed_ranges as cr, cli, counts, gate, md_lint, tool_runners as tr, tsdoc_lint, word_list
+from cosa.repo.doc_lint.text_rules import Finding
+
+WORDS = [ "not", "never", "the" ]
+
+
+def _git( root, *args ):
+    res = subprocess.run( [ "git", "-C", str( root ), "-c", "user.email=t@t", "-c", "user.name=t", *args ], capture_output=True, text=True )
+    assert res.returncode == 0, res.stderr
+    return res.stdout
+
+
+@pytest.fixture
+def repo( tmp_path ):
+    _git( tmp_path, "init", "-q" )
+    ( tmp_path / "src" / "conf" ).mkdir( parents=True )
+    ( tmp_path / "src" / "conf" / "dm-tutor-lowercase-words.txt" ).write_text( "\n".join( WORDS ) + "\n", encoding="utf-8" )
+    yield tmp_path
+    word_list._state[ "root" ] = None
+    word_list._state[ "words" ] = None
+
+
+def _fake( returncode=0, stdout="", stderr="" ):
+    calls = []
+    def run( cmd, **kwargs ):
+        calls.append( ( cmd, kwargs ) )
+        return SimpleNamespace( returncode=returncode, stdout=stdout, stderr=stderr )
+    run.calls = calls
+    return run
+
+
+@pytest.fixture
+def no_tools( monkeypatch, tmp_path ):
+    for var in ( "LUPIN_RUFF", "LUPIN_MARKDOWNLINT", "LUPIN_DART" ): monkeypatch.delenv( var, raising=False )
+    monkeypatch.setattr( tr.shutil, "which", lambda name: None )
+    return tmp_path
+
+
+# ---- find_tool -------------------------------------------------------------------------------
+
+def test_find_tool_prefers_the_env_override_then_the_tree_then_the_search_path( tmp_path, monkeypatch ):
+    ( tmp_path / "bin" ).mkdir()
+    in_tree = tmp_path / "bin" / "tool"
+    in_tree.write_text( "x", encoding="utf-8" )
+    override = tmp_path / "override"
+    override.write_text( "x", encoding="utf-8" )
+    monkeypatch.setattr( tr.shutil, "which", lambda name: "/on/path/" + name )
+    monkeypatch.delenv( "DL_TOOL", raising=False )
+    assert tr.find_tool( str( tmp_path ), [ "bin/tool" ], "tool", "DL_TOOL" ) == str( in_tree )
+    assert tr.find_tool( str( tmp_path ), [ "bin/missing" ], "tool", "DL_TOOL" ) == "/on/path/tool"
+    monkeypatch.setenv( "DL_TOOL", str( override ) )
+    assert tr.find_tool( str( tmp_path ), [ "bin/tool" ], "tool", "DL_TOOL" ) == str( override )
+    monkeypatch.setenv( "DL_TOOL", str( tmp_path / "does-not-exist" ) )
+    assert tr.find_tool( str( tmp_path ), [ "bin/tool" ], "tool", "DL_TOOL" ) == str( in_tree )
+    monkeypatch.setattr( tr.shutil, "which", lambda name: None )
+    assert tr.find_tool( str( tmp_path ), [ "bin/missing" ], "tool", "DL_TOOL" ) is None
+
+
+def test_missing_tool_warning_is_loud_and_names_what_was_not_checked():
+    line = tr.missing_tool_warning( "ruff", "docstring layout rules" )
+    assert line.startswith( "[doc-lint] WARNING:" ) and "SKIPPED" in line and "ruff" in line and "NOT checked" in line
+
+
+# ---- ruff ------------------------------------------------------------------------------------
+
+RUFF_JSON = json.dumps( [ { "filename": "/r/src/a.py", "code": "D205", "message": "1 blank line required", "location": { "row": 7, "column": 5 } },
+                          { "filename": "/r/src/b.py", "code": "D213", "message": "summary on the second line", "location": { "row": 3, "column": 5 } } ] )
+
+
+def test_run_ruff_parses_findings_with_the_rule_as_ruff_code( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    fake = _fake( 1, RUFF_JSON )
+    findings, warnings = tr.run_ruff( "/r", [ "src/a.py", "src/b.py" ], fake )
+    assert warnings == []
+    assert [ ( f.path, f.line, f.rule ) for f in findings ] == [ ( "src/a.py", 7, "ruff:D205" ), ( "src/b.py", 3, "ruff:D213" ) ]
+    cmd = fake.calls[ 0 ][ 0 ]
+    assert cmd[ 1 : 3 ] == [ "check", "--config" ] and cmd[ 3 ] == "/r/pyproject.toml" and cmd[ -2: ] == [ "src/a.py", "src/b.py" ]
+    assert tr.run_ruff( "/r", [ "src/a.py" ], _fake( 0, "[]" ) ) == ( [], [] )
+
+
+def test_run_ruff_warns_loudly_when_missing_and_when_ruff_itself_fails( no_tools, monkeypatch, tmp_path ):
+    findings, warnings = tr.run_ruff( str( no_tools ), [ "a.py" ] )
+    assert findings == [] and len( warnings ) == 1 and "ruff not found, SKIPPED" in warnings[ 0 ]
+    assert tr.run_ruff( str( no_tools ), [] ) == ( [], [] )                       # nothing to check, nothing to warn about
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    findings, warnings = tr.run_ruff( "/r", [ "a.py" ], _fake( 2, "", "bad config" ) )
+    assert findings == [] and "ruff cannot run here (exit 2), so no file was checked by it: bad config" in warnings[ 0 ]
+    assert not isinstance( warnings[ 0 ], tr.Unchecked )                                  # a tool that fails on a blank file fails on every commit, so it is not a refusal
+
+
+def test_run_ruff_says_so_when_the_program_it_ran_prints_no_ruff_report( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    findings, warnings = tr.run_ruff( "/r", [ "a.py" ], _fake( 0, "" ) )
+    assert findings == [] and len( warnings ) == 1 and not isinstance( warnings[ 0 ], tr.Unchecked )
+    assert warnings[ 0 ] == ( f"[doc-lint] WARNING: {tmp_path} did not print the JSON report ruff prints, so it is not ruff or not this ruff, and no file was checked by it; "
+                              "fix: install the ruff version pyproject.toml pins, or point LUPIN_RUFF at it" )
+    assert tr.run_ruff( "/r", [ "a.py" ], _fake( 1, "   \n" ) )[ 1 ] == warnings                          # exit 1 with a blank report reads the same
+    assert tr.run_ruff( "/r", [ "a.py" ], _fake( 0, "usage: not-ruff [-h]" ) )[ 1 ] == warnings            # text that is not JSON reads the same
+    assert tr.run_ruff( "/r", [ "a.py" ], _fake( 0, "{}" ) )[ 1 ] == warnings                              # JSON that is not a list reads the same
+
+
+def test_run_ruff_refuses_only_the_input_it_failed_on_when_it_checks_a_blank_file_fine( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    calls = []
+    def run( cmd, **kwargs ):
+        calls.append( kwargs.get( "input" ) )
+        return SimpleNamespace( returncode=2 if kwargs.get( "input" ) == "BOOM" else 0, stdout="[]", stderr="crashed on this file" )
+    findings, warnings = tr.run_ruff( "/r", [ "a.py" ], run, sources={ "a.py": "BOOM" } )
+    assert findings == [] and isinstance( warnings[ 0 ], tr.Unchecked ) and "ruff failed (exit 2), SKIPPED: crashed on this file" in warnings[ 0 ]
+    assert calls == [ "BOOM", "" ]                                                         # the blank probe came after the failure and not before it
+
+
+def test_real_ruff_output_parses_when_ruff_is_installed( tmp_path ):
+    tool = tr.find_tool( cu.get_project_root(), tr.RUFF_RELATIVE, "ruff", "LUPIN_RUFF" )
+    if tool is None: pytest.skip( "ruff is not installed in this environment" )
+    shutil.copy( os.path.join( cu.get_project_root(), "pyproject.toml" ), tmp_path / "pyproject.toml" )
+    ( tmp_path / "a.py" ).write_text( 'def f():\n    """Summary.\n    Description without a blank line.\n    """\n', encoding="utf-8" )
+    findings, warnings = tr.run_ruff( str( tmp_path ), [ "a.py" ] )
+    assert warnings == [] and "ruff:D205" in [ f.rule for f in findings ] and findings[ 0 ].path == "a.py"
+
+
+def test_run_ruff_with_sources_checks_each_staged_text_through_stdin( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    one = json.dumps( [ { "filename": "src/a.py", "code": "D205", "message": "m", "location": { "row": 4, "column": 1 } } ] )
+    fake = _fake( 1, one )
+    findings, warnings = tr.run_ruff( "/r", [ "src/a.py", "src/b.py" ], fake, sources={ "src/a.py": "A TEXT", "src/b.py": "B TEXT" } )
+    assert warnings == [] and [ ( f.path, f.line ) for f in findings ] == [ ( "src/a.py", 4 ), ( "src/b.py", 4 ) ]         # the path asked for, not the name ruff printed
+    assert [ ( c[ 0 ][ -2: ], c[ 1 ][ "input" ] ) for c in fake.calls ] == [ ( [ "--stdin-filename=src/a.py", "-" ], "A TEXT" ), ( [ "--stdin-filename=src/b.py", "-" ], "B TEXT" ) ]
+    failing = tr.run_ruff( "/r", [ "src/a.py" ], _fake( 2, "", "boom" ), sources={ "src/a.py": "x" } )
+    assert failing[ 0 ] == [] and "so no file was checked by it: boom" in failing[ 1 ][ 0 ]
+
+
+def test_real_ruff_reads_the_staged_text_not_the_disk_copy_when_installed( repo ):
+    if tr.find_tool( cu.get_project_root(), tr.RUFF_RELATIVE, "ruff", "LUPIN_RUFF" ) is None: pytest.skip( "ruff is not installed in this environment" )
+    shutil.copy( os.path.join( cu.get_project_root(), "pyproject.toml" ), repo / "pyproject.toml" )
+    bad = 'def f():\n    """Summary.\n    Description without a blank line.\n    """\n'
+    _stage( repo, { "src/a.py": bad } )
+    ( repo / "src" / "a.py" ).write_text( 'def f():\n    """Summary."""\n', encoding="utf-8" )       # fixed on disk, not staged
+    err = io.StringIO()
+    gate.main( [ "--repo-root", str( repo ) ], err )
+    assert "src/a.py:2: ruff:D205" in err.getvalue()
+
+
+# ---- markdownlint ----------------------------------------------------------------------------
+
+MDL_OUT = "a.md:12 error MD040/fenced-code-language Fenced code blocks should have a language specified [Context: \"```\"]\nb.md:3:5 error MD051/link-fragments Link fragments should be valid\nSummary: 2 error(s)\n"
+
+
+def test_run_markdownlint_parses_lines_with_and_without_columns( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    fake = _fake( 1, "Linting: 2 file(s)\n", MDL_OUT )
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md", "b.md" ], fake )
+    assert warnings == [] and [ ( f.path, f.line, f.rule ) for f in findings ] == [ ( "a.md", 12, "markdownlint:MD040/fenced-code-language" ), ( "b.md", 3, "markdownlint:MD051/link-fragments" ) ]
+    assert fake.calls[ 0 ][ 0 ][ 1 : ] == [ "--no-globs", "--", "a.md", "b.md" ]
+    assert tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0, "Linting: 1 file(s)\n" ) ) == ( [], [] )
+
+
+MDL_FIXTURES = os.path.join( cu.get_project_root(), "src", "tests", "unit", "fixtures", "doc_lint" )
+
+
+def _mdl_fixture( name ):
+    with open( os.path.join( MDL_FIXTURES, name ), encoding="utf-8" ) as f: return f.read()
+
+
+def test_run_markdownlint_parses_the_captured_output_of_the_pinned_tool( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    captured = _mdl_fixture( "markdownlint-cli2-0.18.1-stderr.txt" )
+    assert " error " not in captured and " warning " not in captured        # the real tool prints neither word
+    findings, warnings = tr.run_markdownlint( "/r", [ "bad.md" ], _fake( 1, "Linting: 1 file(s)\n", captured ) )
+    assert warnings == []
+    assert [ ( f.line, f.rule ) for f in findings ] == [
+        ( 3, "markdownlint:MD001/heading-increment" ), ( 5, "markdownlint:MD037/no-space-in-emphasis" ), ( 5, "markdownlint:MD037/no-space-in-emphasis" ),
+        ( 5, "markdownlint:MD042/no-empty-links" ), ( 5, "markdownlint:MD059/descriptive-link-text" ), ( 7, "markdownlint:MD040/fenced-code-language" ),
+        ( 11, "markdownlint:MD047/single-trailing-newline" ) ]
+
+
+def test_run_markdownlint_refuses_to_pass_when_the_tool_reports_findings_and_none_are_read( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 1, "Linting: 1 file(s)\n", "a.md(3,1) MD040 a format this reader does not know\n" ) )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert "reported findings (exit 1) but none could be read" in warnings[ 0 ]
+
+
+def test_run_markdownlint_refuses_a_name_the_tool_read_as_a_glob_and_did_not_lint( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    dropped = _mdl_fixture( "markdownlint-cli2-0.18.1-glob-name-stdout.txt" )
+    assert "Linting: 0 file(s)" in dropped                                  # captured: exit 0, nothing linted, nothing on stderr
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0, dropped, "" ) )     # a name the predicate lets through, so the count is the backstop
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert "linted 0 of 1 file(s)" in warnings[ 0 ]
+
+
+def test_run_markdownlint_accepts_a_run_that_linted_every_file_it_was_given( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    plain = _mdl_fixture( "markdownlint-cli2-0.18.1-plain-name-stdout.txt" )
+    assert "Linting: 1 file(s)" in plain
+    findings, warnings = tr.run_markdownlint( "/r", [ "plain.md" ], _fake( 1, plain, _mdl_fixture( "markdownlint-cli2-0.18.1-plain-name-stderr.txt" ) ) )
+    assert warnings == [] and [ f.line for f in findings ] == [ 3 ]
+
+
+GLOB_READ_NAMES = [ "{a,b}.md", "docs/@(x).md", "docs/+(x).md", "a*b.md", "docs/q?.md", "docs/[ab].md", "#x.md", "!x.md", "docs/a(b).md", "docs/a\\b.md" ]
+
+
+@pytest.mark.parametrize( "name", GLOB_READ_NAMES )
+def test_run_markdownlint_refuses_a_name_with_a_glob_character_without_handing_it_to_the_tool( monkeypatch, tmp_path, name ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    def never( cmd, **kwargs ): pytest.fail( "a name the tool reads as a glob was handed to it" )
+    findings, warnings = tr.run_markdownlint( "/r", [ name ], never )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert name in warnings[ 0 ] and "glob" in warnings[ 0 ]
+
+
+def test_run_markdownlint_hands_over_a_name_with_a_hash_or_bang_inside_the_path( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    fake = _fake( 0, "Linting: 2 file(s)\n" )
+    assert tr.run_markdownlint( "/r", [ "docs/#x.md", "docs/!y.md" ], fake ) == ( [], [] )
+    assert fake.calls[ 0 ][ 0 ][ 3: ] == [ "docs/#x.md", "docs/!y.md" ]
+
+
+def test_run_markdownlint_refuses_a_count_above_the_names_given( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    more = _mdl_fixture( "markdownlint-cli2-0.18.1-star-name-with-neighbour-stdout.txt" )
+    assert "Linting: 2 file(s)" in more                                         # captured: a*b.md given, its neighbour linted too
+    findings, warnings = tr.run_markdownlint( "/r", [ "plain.md" ], _fake( 1, more, "" ) )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert "linted 2 of 1 file(s)" in warnings[ 0 ]
+
+
+def _real_markdownlint( monkeypatch, tmp_path ):
+    """
+    Skip unless markdownlint-cli2 is installed, else link it under tmp_path.
+
+    The file system and the search path decide whether the tool is installed. find_tool plays no part.
+    So a find_tool that stops finding the tool turns the test red.
+    The link sits at node_modules/.bin under tmp_path, the root the test gives run_markdownlint.
+    So the root-relative search is the one that has to find it.
+    """
+    local = os.path.join( cu.get_project_root(), "node_modules", ".bin", "markdownlint-cli2" )
+    found = [ c for c in ( os.environ.get( "LUPIN_MARKDOWNLINT" ), local, shutil.which( "markdownlint-cli2" ) ) if c and os.path.isfile( c ) ]
+    if not found: pytest.skip( "markdownlint-cli2 is not installed in this environment" )
+    monkeypatch.delenv( "LUPIN_MARKDOWNLINT", raising=False )
+    ( tmp_path / "node_modules" / ".bin" ).mkdir( parents=True )
+    os.symlink( os.path.realpath( found[ 0 ] ), tmp_path / "node_modules" / ".bin" / "markdownlint-cli2" )
+
+
+def test_real_markdownlint_does_not_pass_a_name_whose_pattern_matches_a_good_neighbour_when_installed( monkeypatch, tmp_path ):
+    _real_markdownlint( monkeypatch, tmp_path )
+    shutil.copy( os.path.join( cu.get_project_root(), ".markdownlint-cli2.jsonc" ), tmp_path / ".markdownlint-cli2.jsonc" )
+    bad, good = "# T\n\n```\ncode\n```\n", "# T\n"
+    for name, neighbour in ( ( "{a,b}.md", "a.md" ), ( "@(x).md", "x.md" ), ( "+(x).md", "xx.md" ) ):
+        ( tmp_path / name ).write_text( bad, encoding="utf-8" )
+        ( tmp_path / neighbour ).write_text( good, encoding="utf-8" )
+        findings, warnings = tr.run_markdownlint( str( tmp_path ), [ name ] )
+        assert findings == [] and [ isinstance( w, tr.Unchecked ) for w in warnings ] == [ True ], name
+
+
+def test_run_markdownlint_refuses_when_the_tool_prints_no_count_of_files_linted( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0, "", "" ) )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert "printed no count of files linted" in warnings[ 0 ]
+
+
+def test_real_markdownlint_lints_or_refuses_every_name_it_is_given_when_installed( monkeypatch, tmp_path ):
+    _real_markdownlint( monkeypatch, tmp_path )
+    shutil.copy( os.path.join( cu.get_project_root(), ".markdownlint-cli2.jsonc" ), tmp_path / ".markdownlint-cli2.jsonc" )
+    page = "# T\n\n```\ncode\n```\n"
+    outcomes = {}
+    for name in ( "plain.md", "a(1).md", "c\\d.md", "#h.md", "!i.md", "b{x}.md" ):
+        ( tmp_path / name ).write_text( page, encoding="utf-8" )
+        findings, warnings = tr.run_markdownlint( str( tmp_path ), [ name ] )
+        outcomes[ name ] = ( len( findings ), [ isinstance( w, tr.Unchecked ) for w in warnings ] )
+    for name, ( found, held ) in outcomes.items(): assert found == 1 or held == [ True ], f"{name!r} was neither linted nor refused: {outcomes[ name ]}"
+    assert outcomes[ "plain.md" ] == ( 1, [] )
+
+
+def test_run_markdownlint_warns_loudly_when_missing_and_when_the_tool_fails( no_tools, monkeypatch, tmp_path ):
+    findings, warnings = tr.run_markdownlint( str( no_tools ), [ "a.md" ] )
+    assert findings == [] and "markdownlint-cli2 not found, SKIPPED" in warnings[ 0 ]
+    assert tr.run_markdownlint( str( no_tools ), [] ) == ( [], [] )
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 2, "", "config error" ) )
+    assert findings == [] and "exit 2), SKIPPED: config error" in warnings[ 0 ]
+
+
+def test_real_markdownlint_output_parses_when_the_tool_is_installed( monkeypatch, tmp_path ):
+    _real_markdownlint( monkeypatch, tmp_path )
+    ( tmp_path / "a.md" ).write_text( "# T\n\n```\ncode\n```\n", encoding="utf-8" )
+    findings, warnings = tr.run_markdownlint( str( tmp_path ), [ "a.md" ] )
+    assert warnings == [] and [ ( f.path, f.line ) for f in findings if f.rule.startswith( "markdownlint:MD040" ) ] == [ ( "a.md", 3 ) ]
+
+
+# ---- dart analyze ----------------------------------------------------------------------------
+
+DART_OUT = ( "INFO|LINT|public_member_api_docs|/r/lib/a.dart|10|7|3|Missing documentation for a public member.\n"
+             "ERROR|COMPILE_TIME_ERROR|URI_DOES_NOT_EXIST|/r/lib/a.dart|1|8|22|Target of URI doesn't exist.\n"
+             "INFO|LINT|slash_for_doc_comments|/r/lib/b.dart|4|1|2|Use /// | not /** */.\n" )
+
+
+def test_run_dart_analyze_keeps_documentation_diagnostics_and_ignores_the_rest( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_DART", str( tmp_path ) )
+    fake = _fake( 3, DART_OUT )
+    findings, warnings = tr.run_dart_analyze( "/r", "lib", fake )
+    assert warnings == []
+    assert [ ( f.path, f.line, f.rule ) for f in findings ] == [ ( "lib/a.dart", 10, "dart:public_member_api_docs" ), ( "lib/b.dart", 4, "dart:slash_for_doc_comments" ) ]
+    assert findings[ 1 ].message == "Use /// | not /** */."
+    assert fake.calls[ 0 ][ 0 ][ 1 : ] == [ "analyze", "--format=machine", "lib" ]
+
+
+def test_run_dart_analyze_warns_when_dart_is_missing_or_crashes( no_tools, monkeypatch, tmp_path ):
+    findings, warnings = tr.run_dart_analyze( str( no_tools ), "lib" )
+    assert findings == [] and "dart not found, SKIPPED" in warnings[ 0 ]
+    monkeypatch.setenv( "LUPIN_DART", str( tmp_path ) )
+    findings, warnings = tr.run_dart_analyze( "/r", "lib", _fake( 64, "", "usage" ) )
+    assert findings == [] and "exit 64), SKIPPED: usage" in warnings[ 0 ]
+
+
+# ---- gate ------------------------------------------------------------------------------------
+
+def _stage( repo, files ):
+    for rel, text in files.items():
+        full = repo / rel
+        full.parent.mkdir( parents=True, exist_ok=True )
+        full.write_text( text, encoding="utf-8" )
+    _git( repo, "add", "-f", *files )
+
+
+def _no_external( monkeypatch ):
+    monkeypatch.setattr( gate, "run_ruff", lambda root, paths, sources=None: ( [], [] ) )
+    monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths, sources=None: ( [], [] ) )
+    monkeypatch.setattr( gate, "markdownlint_unnamed", lambda root, paths: [], raising=False )      # the tool is not installed for these tests
+
+
+def test_staged_paths_lists_added_and_modified_files_in_scope_only( repo ):
+    _stage( repo, { "src/a.py": "x\n", "src/tests/t.py": "x\n", "docs/b.md": "x\n", "src/c.txt": "x\n" } )
+    assert gate.staged_paths( str( repo ) ) == [ "docs/b.md", "src/a.py", "src/c.txt" ]
+
+
+def test_staged_paths_and_staged_source_and_toplevel_name_git_errors( tmp_path ):
+    with pytest.raises( RuntimeError, match="not a git working tree" ):
+        gate.git_toplevel( str( tmp_path ) )
+    with pytest.raises( RuntimeError, match="git diff --cached failed" ):
+        gate.staged_paths( str( tmp_path ) )
+    with pytest.raises( RuntimeError, match="git show" ):
+        gate.staged_source( str( tmp_path ), "nope.py" )
+
+
+def test_gate_reports_findings_on_staged_lines_only_and_reads_the_index_not_the_disk( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _git( repo, "commit", "-q", "--allow-empty", "-m", "base" )
+    source = 'def f():\n    """\n    Return it.\n\n    This is NOT fine.\n    """\n'
+    _stage( repo, { "src/lupin_mcp/a.py": source, "docs/p.md": "Line one is NOT fine.\n" } )
+    ( repo / "src" / "lupin_mcp" / "a.py" ).write_text( source + "\n# NEVER committed\n", encoding="utf-8" )     # unstaged edit must not be linted
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    text = err.getvalue()
+    assert "[doc-lint] src/lupin_mcp/a.py:5: caps: ALL-CAPS word NOT" in text and "[doc-lint] docs/p.md:1: caps: ALL-CAPS word NOT" in text
+    assert "NEVER" not in text and "2 findings on staged lines (warn mode, commit allowed)" in text
+    err = io.StringIO()
+    assert gate.REFUSAL_EXIT == 3 and gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == gate.REFUSAL_EXIT
+    lines = err.getvalue().split( "\n" )
+    assert "[doc-lint] REFUSED src/lupin_mcp/a.py:5: caps: ALL-CAPS word NOT" in lines and "[doc-lint] REFUSED docs/p.md:1: caps: ALL-CAPS word NOT" in lines
+    assert "[doc-lint] 2 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again" in lines
+    assert "warn mode" not in err.getvalue() and "refusals, commit REFUSED" not in err.getvalue()
+
+
+def test_gate_lints_what_is_staged_even_when_the_disk_copy_was_cleaned_afterwards( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/p.md": "Line one is NOT fine.\n" } )
+    ( repo / "docs" / "p.md" ).write_text( "Line one is fine.\n", encoding="utf-8" )           # fixed on disk, not re-staged
+    err = io.StringIO()
+    gate.main( [ "--repo-root", str( repo ) ], err )
+    assert "docs/p.md:1: caps: ALL-CAPS word NOT" in err.getvalue()
+    bad = 'def f():\n    """\n    Return it.\n\n    This is NOT fine.\n    """\n'
+    _stage( repo, { "src/lupin_mcp/a.py": bad } )
+    ( repo / "src" / "lupin_mcp" / "a.py" ).write_text( bad.replace( "NOT ", "" ), encoding="utf-8" )
+    err = io.StringIO()
+    gate.main( [ "--repo-root", str( repo ) ], err )
+    assert "src/lupin_mcp/a.py:5: caps: ALL-CAPS word NOT" in err.getvalue()
+
+
+def test_gate_drops_findings_on_lines_the_commit_did_not_touch( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    old = "line one\nThis is NOT fine.\n"
+    _stage( repo, { "docs/p.md": old } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "docs/p.md": old + "a new clean line\n" } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == 0
+    assert "0 findings on staged lines (blocking)" in err.getvalue()
+
+
+# ---- blocking, and the five record locations it leaves in warn mode ---------------------------
+
+SEEDED    = "This is NOT fine.\n"
+CAPS      = "caps: ALL-CAPS word NOT"
+WARN_MARK = " (warn mode, commit allowed)"
+WARN_SET  = "history/ or todo-history/"
+RECORDS   = [ "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+ROOT_RECORDS = [ "history.md", "TODO.md", "bug-fix-queue.md" ]
+ALIKE     = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md", "src/cosa/history.md" ]
+REFUSE_1  = "[doc-lint] 1 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again"
+
+
+def _blocking( repo ):
+    err = io.StringIO()
+    rc  = gate.main( [ "--repo-root", str( repo ), "--blocking" ], err )
+    return rc, err.getvalue().split( "\n" )
+
+
+def test_the_warn_only_set_is_exactly_the_two_archive_folders_and_the_root_files_are_not_in_it():
+    assert gate.WARN_ONLY_PATHS == ()
+    assert gate.WARN_ONLY_PREFIXES == ( "history/", "todo-history/" )
+    assert gate.RECORD_PATHS == ( "history.md", "TODO.md", "bug-fix-queue.md" )
+    assert len( RECORDS ) == 2 and len( ALIKE ) == 9
+    for path in RECORDS: assert gate.is_warn_only( path ), path
+    for path in ALIKE + ROOT_RECORDS: assert not gate.is_warn_only( path ), path
+    for path in ( "docs/history.md", "./history.md", "history.md.bak", "old-history.md", "todo.md", "history", "todo-history", "" ): assert not gate.is_warn_only( path ), path
+
+
+@pytest.mark.parametrize( "rel", RECORDS )
+def test_blocking_prints_a_finding_in_a_warn_only_file_with_the_marking_and_allows_the_commit( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == 0
+    assert f"[doc-lint] {rel}:1: {CAPS}{WARN_MARK}" in lines
+    assert f"[doc-lint] 1 findings in {WARN_SET}{WARN_MARK}" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+@pytest.mark.parametrize( "rel", ALIKE + [ "docs/history.md", "docs/TODO.md" ] )
+def test_blocking_refuses_a_finding_in_a_file_that_only_looks_like_a_record_location( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert f"[doc-lint] REFUSED {rel}:1: {CAPS}" in lines and REFUSE_1 in lines
+    assert not [ ln for ln in lines if "warn mode" in ln ]
+
+
+def test_blocking_refuses_for_the_other_file_when_a_warn_only_file_also_holds_a_finding( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "history/a.md": SEEDED, "todo-history/a.md": SEEDED, "docs/p.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    refused = [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ]
+    assert refused == [ f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" ]
+    assert f"[doc-lint] history/a.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] todo-history/a.md:1: {CAPS}{WARN_MARK}" in lines
+    assert f"[doc-lint] 2 findings in {WARN_SET}{WARN_MARK}" in lines and REFUSE_1 in lines
+
+
+# ---- rule set B for the root record files (row 486cc499, Rick's ruling of 2026-10-14) ----------
+
+CONFORMING = "Moved the lint rule set into gate.py; commit subject first, row 8dbe659a last.\n"
+DATED      = "Measured 2026-10-14 at 0123abc4 (commit 0123abc4def5), row 8dbe659a.\n"
+SHOUTED    = "This is NOT fine and NEVER was.\n"
+
+
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+def test_a_conforming_entry_added_to_a_root_record_file_passes_the_blocking_gate( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: CONFORMING } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+@pytest.mark.parametrize( "text,rule", [
+    ( "Fixed it, see [gone](nope.md).\n",             "dead-link" ),
+    ( "Kept it deliberately small.\n",                 "tic" ),
+    ( "Done \U0001f534 and shipped.\n",                 "glyph" ),
+] )
+def test_a_non_conforming_entry_added_to_a_root_record_file_is_refused( repo, monkeypatch, rel, text, rule ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: text } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( f"[doc-lint] REFUSED {rel}:1: {rule}:" ) ], lines
+    assert not [ ln for ln in lines if "warn mode" in ln ]
+
+
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+def test_an_added_date_sha_or_row_id_in_a_root_record_file_does_not_refuse( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: DATED } )
+    rc, lines = _blocking( repo )
+    assert rc == 0, lines
+    assert not [ ln for ln in lines if f"{rel}:" in ln ]
+
+
+def test_the_same_dated_and_shouted_text_in_an_ordinary_page_is_still_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/p.md": DATED + SHOUTED } )
+    rc, lines = _blocking( repo )
+    rules = { ln.split( ": " )[ 1 ] for ln in lines if ln.startswith( "[doc-lint] REFUSED docs/p.md:" ) }
+    assert rc == gate.REFUSAL_EXIT and { "iso-date", "bare-ref", "caps" } <= rules
+
+
+def test_a_section_or_label_bare_ref_in_a_record_file_still_blocks_while_a_row_id_does_not( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    labelled = Finding( "history.md", 1, "bare-ref", "bare reference 'AC3'" )
+    row_id   = Finding( "history.md", 1, "bare-ref", "bare reference '8dbe659a'" )
+    assert not gate.is_record_exempt( labelled ) and gate.is_record_exempt( row_id )
+    for rule in ( "iso-date", "dated-banner" ): assert gate.is_record_exempt( Finding( "TODO.md", 1, rule, "m" ) )
+    for rule in ( "tic", "glyph", "dead-link", "agent-imperative", "dead-design", "caps", "sentence-length" ): assert not gate.is_record_exempt( Finding( "TODO.md", 1, rule, "m" ) )
+    assert not gate.is_record_exempt( Finding( "docs/history.md", 1, "iso-date", "m" ) )
+
+
+def test_the_caps_and_sentence_length_rules_are_on_for_the_root_record_files( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    assert gate.RECORD_RULES_OFF == frozenset()
+    for rule in ( "caps", "sentence-length" ): assert not gate.is_record_exempt( Finding( "history.md", 1, rule, "m" ) )
+    _stage( repo, { "history.md": SHOUTED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED history.md:1: caps:" ) ], lines
+    _stage( repo, { "history.md": "word " * 30 + "end.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED history.md:1: sentence-length:" ) ], lines
+    _stage( repo, { "history.md": DATED } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ], lines
+
+
+@pytest.mark.parametrize( "rel", RECORDS )
+def test_an_archive_folder_file_still_only_warns_for_every_rule_set_b_drops_and_for_the_rest( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: DATED + SHOUTED + "Kept it deliberately small.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0
+    assert [ ln for ln in lines if ln.startswith( f"[doc-lint] {rel}:" ) and ln.endswith( WARN_MARK ) ]
+    assert not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+def test_blocking_refuses_a_python_finding_on_a_touched_line_whichever_linter_reports_it( repo, monkeypatch ):
+    monkeypatch.setattr( gate, "run_ruff", lambda root, paths, sources=None: ( [ Finding( "src/pkg/a.py", 1, "ruff:D205", "m" ) ], [] ) )
+    monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths: ( [ Finding( "docs/p.md", 1, "markdownlint:MD040", "m" ) ], [] ) )
+    _stage( repo, { "src/pkg/a.py": "x = 1  # This is NOT fine.\n", "docs/p.md": "clean\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    refused = sorted( ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) )
+    assert refused == [ "[doc-lint] REFUSED docs/p.md:1: markdownlint:MD040: m", f"[doc-lint] REFUSED src/pkg/a.py:1: {CAPS}", "[doc-lint] REFUSED src/pkg/a.py:1: ruff:D205: m" ]
+    assert "[doc-lint] 3 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again" in lines
+
+
+def test_blocking_counts_a_swept_refusal_and_a_finding_on_a_staged_line_each_on_its_own_line( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": _doc( "This is NOT fine." ), "docs/p.md": SEEDED, "history/a.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert "[doc-lint] 1 refusals, commit REFUSED" in lines and REFUSE_1 in lines
+    assert f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines and f"[doc-lint] history/a.md:1: {CAPS}{WARN_MARK}" in lines
+    assert f"[doc-lint] 1 findings in {WARN_SET}{WARN_MARK}" in lines
+
+
+def test_without_blocking_a_finding_in_a_warn_only_file_is_marked_and_nothing_is_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "history/a.md": SEEDED, "docs/p.md": SEEDED } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    lines = err.getvalue().split( "\n" )
+    assert f"[doc-lint] history/a.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] docs/p.md:1: {CAPS}" in lines
+    assert "[doc-lint] 2 findings on staged lines (warn mode, commit allowed)" in lines and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert not [ ln for ln in lines if "findings in history/ or todo-history/" in ln ]            # that summary belongs to --blocking
+
+
+def test_an_empty_prefix_tuple_excepts_nothing( monkeypatch ):
+    monkeypatch.setattr( gate, "WARN_ONLY_PATHS", () )
+    monkeypatch.setattr( gate, "WARN_ONLY_PREFIXES", () )
+    for path in ( "history.md", "TODO.md", "history/2026-01.md", "docs/p.md", "" ): assert not gate.is_warn_only( path )
+
+
+def test_a_prefix_entry_excepts_the_files_under_that_folder_and_no_sibling_that_starts_with_the_same_letters( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "WARN_ONLY_PATHS", ( "history.md", "TODO.md" ) )
+    monkeypatch.setattr( gate, "WARN_ONLY_PREFIXES", ( "history/", ) )
+    for path in ( "history/2026-01.md", "history/deep/er.md", "history.md", "TODO.md" ): assert gate.is_warn_only( path )
+    for path in ( "history-old/x.md", "historyx.md", "src/history/x.md", "history", "docs/history/x.md" ): assert not gate.is_warn_only( path )
+    _stage( repo, { "history/2026-01.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and f"[doc-lint] history/2026-01.md:1: {CAPS}{WARN_MARK}" in lines
+    assert "[doc-lint] 1 findings in history.md or TODO.md or history/ (warn mode, commit allowed)" in lines
+    _stage( repo, { "history-old/x.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED history-old/x.md:1: {CAPS}" in lines
+
+
+# ---- file names git quotes ---------------------------------------------------------------------
+
+ODD_NAMES = [ "docs/caf\u00e9.md", "docs/two words.md", 'docs/a"quote.md', "docs/tab\there.md", "docs/back\\slash.md" ]
+
+
+@pytest.mark.parametrize( "name", ODD_NAMES )
+def test_blocking_lints_and_names_a_file_whose_name_git_would_quote( repo, monkeypatch, name ):
+    _no_external( monkeypatch )
+    _stage( repo, { name: SEEDED } )
+    assert gate.staged_paths( str( repo ) ) == [ name ]
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert f"[doc-lint] REFUSED {name.replace( chr( 9 ), chr( 92 ) + 't' )}:1: {CAPS}" in lines and REFUSE_1 in lines
+
+
+def test_a_python_file_with_a_quoted_name_is_linted_too( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/lupin_mcp/caf\u00e9 one.py": "x = 1  # This is NOT fine.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED src/lupin_mcp/caf\u00e9 one.py:1: {CAPS}" in lines
+
+
+def test_the_diff_reader_unquotes_file_names_and_drops_the_tab_git_puts_after_a_name_with_a_space():
+    diff = ( 'diff --git x\n+++ "b/docs/caf\\303\\251.md"\n@@ -0,0 +1 @@\n'
+             "diff --git x\n+++ b/docs/two words.md\t\n@@ -0,0 +1,2 @@\n"
+             'diff --git x\n+++ "b/docs/a\\"q\\\\b\\tc\\nd.md"\n@@ -3 +3 @@\n'
+             "diff --git x\n+++ /dev/null\n@@ -1 +0,0 @@\n"
+             'diff --git x\n+++ "/dev/null"\n@@ -1 +0,0 @@\n'
+             "diff --git x\n+++ b/plain.md\n@@ -1 +1 @@\n" )
+    assert cr.parse_diff_ranges( diff ) == { "docs/caf\u00e9.md": [ ( 1, 1 ) ], "docs/two words.md": [ ( 1, 2 ) ], 'docs/a"q\\b\tc\nd.md': [ ( 3, 3 ) ], "plain.md": [ ( 1, 1 ) ] }
+    assert cr.unquote_path( '"a\\141\\142"' ) == "aab" and cr.unquote_path( "plain" ) == "plain" and cr.unquote_path( '"' ) == '"'
+
+
+def test_the_real_diff_of_a_file_with_a_quoted_name_gives_its_touched_lines( repo ):
+    for name in ODD_NAMES:
+        _stage( repo, { name: "one\ntwo\n" } )
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { name: [ ( 1, 2 ) ] for name in ODD_NAMES }
+
+
+def test_the_tracked_file_listings_read_names_git_would_quote( repo ):
+    _stage( repo, { "docs/caf\u00e9.md": "x\n", "src/tests/caf\u00e9 t.py": "x = 1\n", "src/web/caf\u00e9 a.ts": "x\n", "src/pkg/caf\u00e9.py": "x = 1\n" } )
+    assert cli.tracked_files( str( repo ), ( ".md", ) ) == [ "docs/caf\u00e9.md" ] and cli.tracked_files( str( repo ), ( ".py", ) ) == [ "src/pkg/caf\u00e9.py" ]
+    assert counts.counted_paths( str( repo ) ) == [ "src/tests/caf\u00e9 t.py" ]
+    assert tsdoc_lint.tracked_files( str( repo ) ) == [ "src/web/caf\u00e9 a.ts" ]
+
+
+# ---- a content line that looks like a file header ----------------------------------------------
+
+LOOKALIKES = [ '++ "a\\"', '++ "\\9"', '++ "C:\\path"', '++ "\\777"', '++ "' ]
+
+
+@pytest.mark.parametrize( "line", LOOKALIKES )
+def test_an_added_line_that_looks_like_a_quoted_header_does_not_crash_the_gate( repo, monkeypatch, line ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/p.md": f"# P\n\n{line}\n", "src/pkg/a.py": _doc( "This is NOT fine." ) } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == gate.REFUSAL_EXIT
+    assert "GATE CRASHED" not in err.getvalue() and "[doc-lint] 1 refusals, commit REFUSED" in err.getvalue().split( "\n" )
+
+
+@pytest.mark.parametrize( "text", [ '"a\\"', '"\\9"', '"C:\\path"', '"\\777"', '"\\"', '"\\1"', '"\\12"', '"\\400"' ] )
+def test_unquote_path_returns_what_it_cannot_decode_unchanged_and_never_raises( text ):
+    assert cr.unquote_path( text ) == text
+    assert cr.unquote_path( text + "\t" ) == text + "\t"
+
+
+def _ten( changes ):
+    return "".join( changes.get( n, f"Line {n} is fine." ) + "\n" for n in range( 1, 11 ) )
+
+
+@pytest.mark.parametrize( "lookalike", [ "++ something", "++ b/docs/other.md", '++ "b/docs/other.md"', "++ /dev/null" ] )
+def test_a_finding_in_a_hunk_after_a_line_that_looks_like_a_header_is_still_refused( repo, monkeypatch, lookalike ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/p.md": _ten( {} ), "docs/other.md": _ten( {} ) } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "docs/p.md": _ten( { 2: lookalike, 9: "This is NOT fine." } ) } )
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { "docs/p.md": [ ( 2, 2 ), ( 9, 9 ) ] }
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:9: {CAPS}" in lines and REFUSE_1 in lines
+
+
+def test_a_python_statement_that_looks_like_a_header_does_not_hide_a_comment_finding_below_it( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    plain = "".join( f"x{n} = {n}\n" for n in range( 1, 11 ) )
+    _stage( repo, { "src/lupin_mcp/c.py": plain } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "src/lupin_mcp/c.py": plain.replace( "x2 = 2\n", "++ x1\n" ).replace( "x9 = 9\n", "x9 = 9  # This is NOT fine.\n" ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED src/lupin_mcp/c.py:9: {CAPS}" in lines
+
+
+def test_the_diff_reader_reads_a_header_only_between_the_diff_line_and_the_first_hunk():
+    diff = ( "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1 @@\n-old\n+++ b/z.md\n@@ -5 +5,2 @@\n+x\n+++ /dev/null\n@@ -9 +9 @@\n"
+             "diff --git a/b.md b/b.md\n--- a/b.md\n+++ b/b.md\n@@ -3 +3 @@\n" )
+    assert cr.parse_diff_ranges( diff ) == { "a.md": [ ( 1, 1 ), ( 5, 6 ), ( 9, 9 ) ], "b.md": [ ( 3, 3 ) ] }
+    assert cr.parse_diff_ranges( "+++ b/stray.md\n@@ -1 +1 @@\n" ) == {}                        # no diff line, so no file
+
+
+# ---- a file name that is not UTF-8, or holds a control character --------------------------------
+
+LATIN_NAME = "docs/caf\udce9.md"                                                              # the byte 0xE9, as Python reads a name from the file system
+LATIN_SHOWN = "docs/caf\\xe9.md"
+
+
+def test_a_clean_file_whose_name_is_not_utf8_does_not_crash_the_gate( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { LATIN_NAME: "clean\n", "src/pkg/a.py": _doc( "This is NOT fine." ) } )
+    assert os.fsencode( LATIN_NAME ) == b"docs/caf\xe9.md" and gate.staged_paths( str( repo ) ) == [ LATIN_NAME, "src/pkg/a.py" ]
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == gate.REFUSAL_EXIT
+    assert "GATE CRASHED" not in err.getvalue() and "[doc-lint] 1 refusals, commit REFUSED" in err.getvalue().split( "\n" )
+
+
+def test_a_finding_in_a_file_whose_name_is_not_utf8_is_refused_and_named_readably_on_a_strict_stream( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { LATIN_NAME: SEEDED } )
+    raw = io.BytesIO()
+    err = io.TextIOWrapper( raw, encoding="utf-8", errors="strict" )
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == gate.REFUSAL_EXIT
+    err.flush()
+    assert f"[doc-lint] REFUSED {LATIN_SHOWN}:1: {CAPS}" in raw.getvalue().decode( "utf-8" ).split( "\n" )
+
+
+def test_a_file_name_with_a_newline_is_printed_on_one_line( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/new\nline.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/new\\nline.md:1: {CAPS}" in lines
+
+
+def test_shown_makes_a_name_printable_and_leaves_plain_text_alone():
+    assert cli.shown( LATIN_NAME ) == LATIN_SHOWN and cli.shown( "a\tb\nc" ) == "a\\tb\\nc"
+    assert cli.shown( "docs/caf\u00e9 two.md" ) == "docs/caf\u00e9 two.md" and cli.shown( 'a"b\\c' ) == 'a"b\\c'
+
+
+def test_the_listings_and_the_diff_reader_keep_a_name_that_is_not_utf8( repo ):
+    _stage( repo, { LATIN_NAME: "one\ntwo\n", "src/tests/caf\udce9.py": "x = 1\n", "src/web/caf\udce9.ts": "x\n", "src/pkg/caf\udce9.py": "x = 1\n" } )
+    assert cli.tracked_files( str( repo ), ( ".md", ) ) == [ LATIN_NAME ] and cli.tracked_files( str( repo ), ( ".py", ) ) == [ "src/pkg/caf\udce9.py" ]
+    assert counts.counted_paths( str( repo ) ) == [ "src/tests/caf\udce9.py" ] and tsdoc_lint.tracked_files( str( repo ) ) == [ "src/web/caf\udce9.ts" ]
+    assert cr.changed_line_ranges( str( repo ), None, cached=True )[ LATIN_NAME ] == [ ( 1, 2 ) ]
+    assert gate.staged_changes( str( repo ) )[ 0 ] == [ LATIN_NAME, "src/pkg/caf\udce9.py", "src/tests/caf\udce9.py", "src/web/caf\udce9.ts" ]
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "rm", "-q", "--cached", LATIN_NAME )
+    assert gate.staged_deleted( str( repo ) ) == [ LATIN_NAME ]
+
+
+def test_the_diff_is_asked_for_with_quoted_names_whatever_the_users_setting( repo ):
+    _git( repo, "config", "core.quotePath", "false" )
+    _stage( repo, { LATIN_NAME: "one\n", "docs/caf\u00e9.md": "one\n" } )
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { LATIN_NAME: [ ( 1, 1 ) ], "docs/caf\u00e9.md": [ ( 1, 1 ) ] }
+
+
+# ---- a comment finding beside a waived docstring finding ----------------------------------------
+
+SAME_LINE = 'def f():\n    """Return NOT it."""  # This is NOT fine. doc-lint: waive caps -- quoting a log line\n'
+
+
+@pytest.mark.parametrize( "rel,waivers", [ ( "src/lupin_mcp/d.py", 0 ), ( "src/pkg/d.py", 1 ) ] )
+def test_a_waived_docstring_finding_does_not_take_the_comment_finding_on_its_line_with_it( repo, monkeypatch, rel, waivers ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: SAME_LINE } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED {rel}:2: {CAPS}" ] and REFUSE_1 in lines
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] swept scope: " ) and f" {waivers} waivers honoured" in ln ]
+    _stage( repo, { rel: 'def f():\n    """Return NOT it."""  # doc-lint: waive caps -- quoting a log line\n' } )         # no comment finding now
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+
+
+# ---- concluding a merge or a cherry-pick --------------------------------------------------------
+
+MERGED_MARK = " (warn mode, commit allowed: this line came in with the merged or picked commit)"
+
+
+def _conflicted( repo, how, resolution ):
+    """Leave repo in a resolved merge or cherry-pick whose other side brings a finding."""
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    _git( repo, "checkout", "-q", "-b", "side" )
+    _stage( repo, { "docs/a.md": "# A\n\nThe side text.\n", "docs/legacy.md": SEEDED } )
+    _git( repo, "commit", "-q", "-m", "side" )
+    _git( repo, "checkout", "-q", "main" )
+    _stage( repo, { "docs/a.md": "# A\n\nThe main text.\n" } )
+    _git( repo, "commit", "-q", "-m", "main" )
+    res = subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", how, "side" ], capture_output=True, text=True )
+    assert res.returncode != 0 and "onflict" in res.stdout + res.stderr
+    _stage( repo, { "docs/a.md": resolution } )
+
+
+@pytest.mark.parametrize( "how,head", [ ( "merge", "MERGE_HEAD" ), ( "cherry-pick", "CHERRY_PICK_HEAD" ) ] )
+def test_a_finding_that_came_in_with_the_merged_or_picked_commit_is_allowed_with_its_own_marking( repo, monkeypatch, how, head ):
+    _no_external( monkeypatch )
+    _conflicted( repo, how, "# A\n\nThe merged text.\n" )
+    assert os.path.exists( repo / ".git" / head )
+    rc, lines = _blocking( repo )
+    assert rc == 0
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in lines and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert "[doc-lint] 1 findings came in with the merged or picked commit (warn mode, commit allowed)" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+
+
+def test_an_octopus_merge_lets_off_the_findings_that_came_in_with_each_of_its_parents( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    for name in ( "one", "two", "three" ):
+        _git( repo, "checkout", "-q", "-b", name, "main" )
+        _stage( repo, { f"docs/legacy-{name}.md": SEEDED } )
+        _git( repo, "commit", "-q", "-m", name )
+    _git( repo, "checkout", "-q", "main" )
+    res = subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", "merge", "--no-commit", "--no-ff", "one", "two", "three" ], capture_output=True, text=True )
+    assert res.returncode == 0, res.stdout + res.stderr
+    heads = ( repo / ".git" / "MERGE_HEAD" ).read_text( encoding="utf-8" ).split()
+    assert len( heads ) == 3
+    rc, lines = _blocking( repo )
+    for name in ( "one", "two", "three" ): assert f"[doc-lint] docs/legacy-{name}.md:1: {CAPS}{MERGED_MARK}" in lines
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert "[doc-lint] 3 findings came in with the merged or picked commit (warn mode, commit allowed)" in lines
+    assert gate.incoming_commits( str( repo ) ) == ( heads, [] ) and gate.incoming_commit( str( repo ) ) == ( heads[ 0 ], [] )
+
+
+def test_a_range_replay_of_an_octopus_merge_judges_each_parent_with_the_real_gate( repo, monkeypatch, tmp_path ):
+    from cosa.repo.doc_lint import range_gate
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n", "src/conf/dm-tutor-lowercase-words.txt": "\n".join( WORDS ) + "\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    base = _git( repo, "rev-parse", "HEAD" ).strip()
+    for name in ( "one", "two", "three" ):
+        _git( repo, "checkout", "-q", "-b", name, "main" )
+        _stage( repo, { f"docs/legacy-{name}.md": SEEDED } )
+        _git( repo, "commit", "-q", "-m", name )
+    _git( repo, "checkout", "-q", "main" )
+    _git( repo, "merge", "-q", "--no-ff", "-m", "merge three", "one", "two", "three" )
+    merge = _git( repo, "rev-parse", "HEAD" ).strip()
+    assert len( _git( repo, "rev-list", "--parents", "-n", "1", merge ).split() ) == 5
+    work = str( tmp_path.parent / f"{tmp_path.name}-replay" )
+    _git( repo, "worktree", "add", "-q", "--detach", work, base )
+    seen = []
+    def runner( worktree, blocking=False ):
+        err  = io.StringIO()
+        code = gate.main( [ "--repo-root", worktree ] + ( [ "--blocking" ] if blocking else [] ), err )
+        seen.append( err.getvalue() )
+        return code, err.getvalue()
+    result = range_gate.check_commit( str( repo ), work, merge, runner, epoch=base )
+    assert result.blocking is True and result.verdict == "passed", ( result.verdict, result.lines, seen )
+    for name in ( "one", "two", "three" ): assert f"docs/legacy-{name}.md:1: {CAPS}{MERGED_MARK}" in seen[ 0 ]
+    parents = _git( repo, "rev-list", "--parents", "-n", "1", merge ).split()[ 2: ]
+    assert result.lines == [ f"merge commit: judged with {', '.join( sha[ :9 ] for sha in parents )} as the incoming commits, so a line that came in unchanged with one of them was not enforced" ]
+
+
+def test_an_octopus_merge_still_refuses_a_finding_that_no_parent_brought( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    for name in ( "one", "two" ):
+        _git( repo, "checkout", "-q", "-b", name, "main" )
+        _stage( repo, { f"docs/{name}.md": "# Clean\n\nFine text.\n" } )
+        _git( repo, "commit", "-q", "-m", name )
+    _git( repo, "checkout", "-q", "main" )
+    subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", "merge", "--no-commit", "--no-ff", "one", "two" ], capture_output=True, text=True, check=True )
+    _stage( repo, { "docs/own.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/own.md:1: {CAPS}" ]
+
+
+@pytest.mark.parametrize( "how", [ "merge", "cherry-pick" ] )
+def test_a_finding_the_resolution_itself_adds_is_refused( repo, monkeypatch, how ):
+    _no_external( monkeypatch )
+    _conflicted( repo, how, "# A\n\nThe merged text is NOT fine.\n" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/a.md:3: {CAPS}" ]
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in lines and REFUSE_1 in lines
+
+
+def test_a_line_changed_while_resolving_in_a_file_from_the_other_side_is_enforced( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _conflicted( repo, "merge", "# A\n\nThe merged text.\n" )
+    _stage( repo, { "docs/legacy.md": SEEDED + "This is NEVER fine.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ "[doc-lint] REFUSED docs/legacy.md:2: caps: ALL-CAPS word NEVER" ]
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in lines
+
+
+def test_the_marking_shows_without_blocking_and_its_summary_does_not( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _conflicted( repo, "merge", "# A\n\nThe merged text.\n" )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in err.getvalue().split( "\n" ) and "findings came in with" not in err.getvalue()
+
+
+def test_a_revert_in_progress_gets_no_such_treatment( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "clean\n", "docs/p.md": SEEDED } )
+    _git( repo, "commit", "-q", "-m", "holds the page" )
+    held = _git( repo, "rev-parse", "HEAD" )
+    _git( repo, "rm", "-q", "docs/p.md" )
+    _git( repo, "commit", "-q", "-m", "drops the page" )
+    ( repo / ".git" / "REVERT_HEAD" ).write_text( held, encoding="utf-8" )
+    _stage( repo, { "docs/p.md": SEEDED } )                                                    # the same page that commit holds
+    assert gate.incoming_commit( str( repo ) ) == ( None, [] )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines and not [ ln for ln in lines if "came in with" in ln ]
+
+
+@pytest.mark.parametrize( "head,content", [ ( "MERGE_HEAD", "0123456789abcdef0123456789abcdef01234567\n" ), ( "CHERRY_PICK_HEAD", "not a sha\n" ), ( "MERGE_HEAD", "" ) ] )
+def test_a_stale_merge_head_is_ignored_with_a_loud_line_and_every_finding_is_enforced( repo, monkeypatch, head, content ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "clean\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / ".git" / head ).write_text( content, encoding="utf-8" )
+    _stage( repo, { "docs/p.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines
+    assert f"[doc-lint] WARNING: {head} names no commit in this repository, so it was ignored and every finding is enforced" in lines
+    assert not [ ln for ln in lines if "GATE CRASHED" in ln ]
+
+
+def test_the_merge_rule_reads_the_git_dir_of_a_linked_worktree( repo, monkeypatch, tmp_path ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    linked = tmp_path / "linked"
+    _git( repo, "worktree", "add", "-q", "-b", "side", str( linked ) )
+    ( linked / "src" / "conf" ).mkdir( parents=True )
+    shutil.copy( repo / "src" / "conf" / "dm-tutor-lowercase-words.txt", linked / "src" / "conf" / "dm-tutor-lowercase-words.txt" )
+    _stage( linked, { "docs/legacy.md": SEEDED } )
+    _git( linked, "commit", "-q", "-m", "side" )
+    side = _git( linked, "rev-parse", "HEAD" ).strip()
+    _git( linked, "checkout", "-q", "--detach", "main" )
+    _git( linked, "merge", "-q", "--no-commit", "--no-ff", side )
+    assert not os.path.exists( repo / ".git" / "MERGE_HEAD" ) and gate.incoming_commit( str( linked ) ) == ( side, [] )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( linked ), "--blocking" ], err ) == 0
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in err.getvalue().split( "\n" )
+    assert gate.incoming_commit( str( repo ) ) == ( None, [] )
+
+
+# ---- which line-level findings a marker waives -------------------------------------------------
+
+WAIVER = " doc-lint: waive caps -- quoting a log line"
+
+
+def test_blocking_honours_the_waiver_marker_on_a_docstring_finding_outside_the_swept_scope( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/lupin_mcp/b.py": _doc( "This is NOT fine." + WAIVER ) } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines and not [ ln for ln in lines if "caps" in ln ]
+    _stage( repo, { "src/lupin_mcp/b.py": _doc( "This is NOT fine. doc-lint: waive caps -- ok" ) } )                 # a reason needs a word of three letters
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED src/lupin_mcp/b.py:5: {CAPS}" in lines
+    _stage( repo, { "src/lupin_mcp/b.py": _doc( "This is NOT fine. doc-lint: waive iso-date -- another rule" ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED src/lupin_mcp/b.py:5: {CAPS}" in lines
+
+
+@pytest.mark.parametrize( "rel,text,line", [ ( "docs/p.md", "This is NOT fine." + WAIVER + "\n", 1 ), ( "src/lupin_mcp/c.py", "x = 1  # This is NOT fine." + WAIVER + "\n", 1 ) ] )
+def test_the_waiver_marker_does_not_waive_a_markdown_or_a_comment_finding( repo, monkeypatch, rel, text, line ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: text } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {rel}:{line}: {CAPS}" in lines
+
+
+# ---- page-level findings that predate the commit -----------------------------------------------
+
+CAP_PAGE      = "src/docs/wiki/capabilities/x.md"
+PREDATES_MARK = " (warn mode, commit allowed: this condition predates the commit)"
+
+
+def _page( count, changed=() ):
+    return "# Page\n" + "".join( f"Line {n} is {'still ' if n in changed else ''}fine.\n" for n in range( 2, count + 1 ) )
+
+
+def _cap( count ):
+    return f"capability-length: capability page of {count} lines, limit 40"
+
+
+def _page_base( repo, files ):
+    _stage( repo, files )
+    _git( repo, "commit", "-q", "-m", "base" )
+
+
+def test_the_page_level_rules_are_the_one_category_the_filter_and_the_gate_share():
+    assert gate.PAGE_LEVEL_RULES is cr.PAGE_LEVEL_RULES and "capability-length" in cr.PAGE_LEVEL_RULES and "caps" not in cr.PAGE_LEVEL_RULES
+
+
+def test_a_page_condition_is_the_rule_and_the_message_without_its_numbers_and_the_first_number():
+    assert gate.page_condition( Finding( "p", 1, "capability-length", "capability page of 41 lines, limit 40" ) ) == ( ( "capability-length", "capability page of # lines, limit #" ), 41 )
+    assert gate.page_condition( Finding( "p", 1, "runbook-template", "runbook has no steps section" ) ) == ( ( "runbook-template", "runbook has no steps section" ), None )
+
+
+def test_a_one_line_edit_to_a_page_that_was_already_over_its_limit_is_allowed_with_the_marking( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { CAP_PAGE: _page( 41 ) } )
+    _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ) } )
+    rc, lines = _blocking( repo )
+    assert rc == 0
+    assert f"[doc-lint] {CAP_PAGE}:1: {_cap( 41 )}{PREDATES_MARK}" in lines
+    assert "[doc-lint] 1 page-level findings predate this commit (warn mode, commit allowed)" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+@pytest.mark.parametrize( "before,after,changed", [ ( 40, 41, () ), ( 41, 42, () ), ( 41, 45, ( 3, ) ) ] )
+def test_an_edit_that_puts_a_page_over_its_limit_or_makes_an_over_limit_page_longer_is_refused( repo, monkeypatch, before, after, changed ):
+    _no_external( monkeypatch )
+    _page_base( repo, { CAP_PAGE: _page( before ) } )
+    _stage( repo, { CAP_PAGE: _page( after, changed ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( after )}" in lines and REFUSE_1 in lines
+    assert not [ ln for ln in lines if "predate" in ln ]
+
+
+def test_an_edit_that_shrinks_an_over_limit_page_is_allowed_while_it_is_still_over( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { CAP_PAGE: _page( 44 ) } )
+    _stage( repo, { CAP_PAGE: _page( 42, changed=( 5, ) ) } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and f"[doc-lint] {CAP_PAGE}:1: {_cap( 42 )}{PREDATES_MARK}" in lines
+
+
+def test_a_new_over_limit_page_is_refused_with_and_without_an_earlier_commit( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { CAP_PAGE: _page( 41 ) } )
+    rc, lines = _blocking( repo )                                                              # no commit at all yet
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 41 )}" in lines
+    _git( repo, "reset", "-q" )
+    _page_base( repo, { "docs/other.md": "clean\n" } )
+    _stage( repo, { CAP_PAGE: _page( 41 ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 41 )}" in lines
+
+
+def test_a_renamed_over_limit_page_is_compared_with_the_page_it_was_renamed_from( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { "src/docs/wiki/capabilities/old.md": _page( 41 ) } )
+    _git( repo, "mv", "src/docs/wiki/capabilities/old.md", CAP_PAGE )
+    _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ) } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and f"[doc-lint] {CAP_PAGE}:1: {_cap( 41 )}{PREDATES_MARK}" in lines
+    _stage( repo, { CAP_PAGE: _page( 42, changed=( 5, ) ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 42 )}" in lines
+
+
+@pytest.mark.parametrize( "old,new,expected", [
+    ( "docs/x.md",   CAP_PAGE,              [ f"[doc-lint] REFUSED {CAP_PAGE}:1: " + "capability-length: capability page of 45 lines, limit 40" ] ),
+    ( "docs/ops.md", "docs/ops-runbook.md", sorted( f"[doc-lint] REFUSED docs/ops-runbook.md:1: runbook-template: runbook has no {s} section" for s in md_lint.RUNBOOK_SECTIONS ) ),
+] )
+def test_a_page_moved_to_a_path_that_brings_a_limit_is_refused_since_the_commit_created_the_condition( repo, monkeypatch, old, new, expected ):
+    _no_external( monkeypatch )
+    _page_base( repo, { old: _page( 45 ) } )
+    ( repo / new ).parent.mkdir( parents=True, exist_ok=True )
+    _git( repo, "mv", old, new )
+    _stage( repo, { new: _page( 45, changed=( 5, ) ) } )
+    assert gate.staged_changes( str( repo ) )[ 1 ] == { new: old }
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and sorted( ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ) == expected
+    assert not [ ln for ln in lines if "predate" in ln ]
+
+
+def test_a_commit_that_only_deletes_a_runbook_section_is_refused_for_that_section( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { RUNBOOK: RUNBOOK_FULL } )
+    _stage( repo, { RUNBOOK: RUNBOOK_FULL.replace( "\n## Rollback\n\nFour.\n", "" ) } )
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { RUNBOOK: [] }             # a hunk, and no added line
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED {RUNBOOK}:1: runbook-template: runbook has no rollback section" ]
+
+
+def test_a_commit_that_only_deletes_an_unrelated_line_from_a_broken_runbook_is_allowed_with_the_marking( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { RUNBOOK: "# Ops\n\nSome text.\n\nMore text.\n", "docs/p.md": "one\nThis is NOT fine.\nthree\n" } )
+    _stage( repo, { RUNBOOK: "# Ops\n\nSome text.\n", "docs/p.md": "one\nThis is NOT fine.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and len( [ ln for ln in lines if ln.endswith( PREDATES_MARK ) ] ) == 4
+    assert not [ ln for ln in lines if CAPS in ln ]                                                 # a line-level finding still needs a touched line
+
+
+def test_a_reference_page_over_its_word_limit_follows_the_same_rule( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( md_lint, "REFERENCE_MAX_WORDS", 6 )
+    _page_base( repo, { "src/docs/big.md": "one two three four\nfive six seven eight\n" } )
+    _stage( repo, { "src/docs/big.md": "one two three four\nfive six seven nine\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and f"[doc-lint] src/docs/big.md:1: reference-length: reference page of 8 words, limit 6{PREDATES_MARK}" in lines
+    _stage( repo, { "src/docs/big.md": "one two three four\nfive six seven nine ten\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and "[doc-lint] REFUSED src/docs/big.md:1: reference-length: reference page of 9 words, limit 6" in lines
+
+
+RUNBOOK      = "docs/ops-runbook.md"
+RUNBOOK_FULL = "# Ops\n\n## Prerequisites\n\nOne.\n\n## Steps\n\nTwo.\n\n## Verify\n\nThree.\n\n## Rollback\n\nFour.\n"
+
+
+def test_a_page_moved_unedited_out_of_an_unjudged_folder_is_judged_like_a_new_file( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { "src/rnd/x.md": SEEDED, "src/rnd/ops-runbook.md": "# Ops\n\nSome text.\n", "docs/keep.md": "# K\n\nFine.\n" } )
+    _git( repo, "mv", "src/rnd/x.md", "docs/x.md" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/x.md:1: {CAPS}" ]
+    _git( repo, "reset", "-q", "--hard" )
+    _git( repo, "mv", "src/rnd/ops-runbook.md", RUNBOOK )
+    rc, lines = _blocking( repo )
+    refused = [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ]
+    assert rc == gate.REFUSAL_EXIT and len( refused ) == 4 and not [ ln for ln in lines if ln.endswith( PREDATES_MARK ) ]
+
+
+def test_a_page_moved_unedited_between_judged_folders_keeps_its_earlier_findings( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { "docs/old/x.md": SEEDED, "docs/old/ops-runbook.md": "# Ops\n\nSome text.\n" } )
+    _git( repo, "mv", "docs/old/x.md", "docs/x.md" )
+    _git( repo, "mv", "docs/old/ops-runbook.md", RUNBOOK )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+def test_a_symlink_named_like_a_page_is_not_linted_as_its_target_path_text( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/real.md": "# Real\n\nFine text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    os.symlink( "This is NOT fine.md", repo / "docs" / "link.md" )
+    _git( repo, "add", "docs/link.md" )
+    assert _git( repo, "ls-files", "-s", "docs/link.md" ).split()[ 0 ] == "120000"
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln or "docs/link.md:1" in ln ]
+    assert "[doc-lint] WARNING: docs/link.md is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked" in lines
+    assert gate.staged_entries( str( repo ) )[ 4 ] == [ "docs/link.md" ] and "docs/link.md" not in gate.staged_entries( str( repo ) )[ 0 ]
+    assert "docs/link.md" not in gate.staged_paths( str( repo ) )
+
+
+def test_a_symlink_replacing_a_page_is_named_and_the_target_page_is_still_judged( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/real.md": "# Real\n\nFine text.\n", "docs/swap.md": "# Swap\n\nFine text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / "docs" / "swap.md" ).unlink()
+    os.symlink( "real.md", repo / "docs" / "swap.md" )
+    _stage( repo, { "docs/real.md": SEEDED } )
+    _git( repo, "add", "docs/swap.md" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/real.md:1: {CAPS}" ]
+    assert "[doc-lint] WARNING: docs/swap.md is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked" in lines
+
+
+@pytest.mark.parametrize( "link,target", [ ( "src/cosa/evil.py", "../rnd/impl.py" ), ( "src/pkg/evil.py", "../rnd/impl.py" ), ( "src/web/evil.ts", "../rnd/impl.ts" ) ] )
+def test_a_symlink_named_like_a_swept_source_file_is_refused_when_the_commit_adds_it( repo, monkeypatch, link, target ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/rnd/impl.py": "def f( x ):\n    return x\n", "src/rnd/impl.ts": "export const x = 1;\n", "docs/keep.md": "# K\n\nFine.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / link ).parent.mkdir( parents=True, exist_ok=True )
+    os.symlink( target, repo / link )
+    _git( repo, "add", link )
+    assert _git( repo, "ls-files", "-s", link ).split()[ 0 ] == "120000"
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT, ( link, lines )
+    assert [ ln for ln in lines if link in ln and "symbolic link" in ln and "NOT checked" in ln ]
+
+
+def _link_case( repo, link, target ):
+    """Stage a symlink to target at link over a source folder, and return the gate's answer."""
+    _stage( repo, { "src/rnd/pkg/impl.py": "def f( x ):\n    return x\n", "src/rnd/pkg/impl.ts": "export const x = 1;\n", "src/rnd/notes/a.md": "# A\n\nFine.\n", "docs/keep.md": "# K\n\nFine.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / link ).parent.mkdir( parents=True, exist_ok=True )
+    os.symlink( target, repo / link )
+    _git( repo, "add", link )
+    assert _git( repo, "ls-files", "-s", link ).split()[ 0 ] == "120000"
+    return _blocking( repo )
+
+
+@pytest.mark.parametrize( "link,target", [ ( "src/cosa/pkg", "../rnd/pkg" ), ( "src/web/dir", "../rnd/pkg" ), ( "tools/pkg", "../src/rnd/pkg" ), ( "scripts/dir", "../src/rnd/pkg" ),
+                                           ( "pkg", "src/rnd/pkg" ), ( "tools/up", "../src/rnd" ), ( "tools/root", ".." ),
+                                           ( "src/cosa/ghost", "../nowhere" ), ( "tools/out", "../../elsewhere" ), ( "tools/abs", "/etc" ) ] )
+def test_a_symlink_that_stands_for_source_files_or_for_nothing_the_index_knows_is_refused_when_the_commit_adds_it( repo, monkeypatch, link, target ):
+    _no_external( monkeypatch )
+    rc, lines = _link_case( repo, link, target )
+    assert rc == gate.REFUSAL_EXIT, ( link, lines )
+    assert [ ln for ln in lines if link in ln and "symbolic link" in ln and "NOT checked" in ln ]
+
+
+@pytest.mark.parametrize( "link,target", [ ( "docs/dirlink", "." ), ( "docs/link.txt", "keep.md" ), ( "src/cosa/ref", "../rnd/pkg/impl.py" ), ( "tools/notes", "../src/rnd/notes" ), ( "src/rnd/dirlink", "pkg" ), ( "src/tests/dirlink", "../rnd/pkg" ) ] )
+def test_a_symlink_to_a_folder_with_no_source_file_or_in_an_unjudged_folder_is_not_refused( repo, monkeypatch, link, target ):
+    _no_external( monkeypatch )
+    rc, lines = _link_case( repo, link, target )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ], ( link, lines )
+
+
+def _chain_case( repo, hops, link="tools/a" ):
+    """Commit the links in hops, stage link to the first, and return the gate's answer."""
+    _stage( repo, { "src/rnd/pkg/impl.py": "def f( x ):\n    return x\n", "src/rnd/notes/a.md": "# A\n\nFine.\n", "docs/keep.md": "# K\n\nFine.\n" } )
+    for path, target in hops:
+        ( repo / path ).parent.mkdir( parents=True, exist_ok=True )
+        os.symlink( target, repo / path )
+        _git( repo, "add", path )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / link ).parent.mkdir( parents=True, exist_ok=True )
+    os.symlink( hops[ 0 ][ 0 ].rsplit( "/", 1 )[ -1 ], repo / link )
+    _git( repo, "add", link )
+    assert _git( repo, "ls-files", "-s", link ).split()[ 0 ] == "120000"
+    return _blocking( repo )
+
+
+@pytest.mark.parametrize( "hops", [
+    [ ( "tools/b", "../src/rnd/pkg" ) ],
+    [ ( "tools/b", "c" ), ( "tools/c", "../src/rnd/pkg" ) ],
+    [ ( "tools/b", "c" ), ( "tools/c", "d" ), ( "tools/d", "e" ), ( "tools/e", "f" ), ( "tools/f", "g" ), ( "tools/g", "h" ), ( "tools/h", "i" ), ( "tools/i", "j" ), ( "tools/j", "../src/rnd/notes" ) ],
+    [ ( "tools/b", "c" ), ( "tools/c", "b" ) ],
+] )
+def test_a_symlink_to_a_tracked_symlink_is_judged_by_the_end_of_the_chain_and_refused_when_it_stands_for_source( repo, monkeypatch, hops ):
+    _no_external( monkeypatch )
+    rc, lines = _chain_case( repo, hops )
+    assert rc == gate.REFUSAL_EXIT, lines
+    assert [ ln for ln in lines if "tools/a" in ln and "symbolic link" in ln and "NOT checked" in ln ]
+
+
+def test_a_symlink_to_a_tracked_symlink_that_ends_at_a_folder_with_no_source_file_is_not_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    rc, lines = _chain_case( repo, [ ( "tools/b", "c" ), ( "tools/c", "../src/rnd/notes" ) ] )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ], lines
+
+
+def _notes_chain( count ):
+    """Hops for a chain of count links with tools/a included, ending at notes."""
+    names = [ "b", "c", "d", "e", "f", "g", "h", "i" ][ : count - 1 ]
+    return [ ( f"tools/{n}", nxt ) for n, nxt in zip( names, names[ 1: ] + [ "../src/rnd/notes" ] ) ]
+
+
+@pytest.mark.parametrize( "links,refused", [ ( 8, False ), ( 9, True ) ] )
+def test_a_chain_of_eight_links_is_judged_and_a_chain_of_nine_is_refused( repo, monkeypatch, links, refused ):
+    _no_external( monkeypatch )
+    rc, lines = _chain_case( repo, _notes_chain( links ) )
+    assert ( rc == gate.REFUSAL_EXIT ) is refused, lines
+    assert bool( [ ln for ln in lines if "REFUSED" in ln ] ) is refused, lines
+
+
+def test_a_symlink_in_the_swept_scope_that_the_commit_only_moves_is_a_plain_warning( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    ( repo / "src" / "cosa" ).mkdir( parents=True )
+    os.symlink( "../rnd/impl.py", repo / "src" / "cosa" / "old.py" )
+    _git( repo, "add", "src/cosa/old.py" )
+    _stage( repo, { "docs/keep.md": "# K\n\nFine.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "mv", "src/cosa/old.py", "src/cosa/new.py" )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert [ ln for ln in lines if "src/cosa/new.py" in ln and "symbolic link" in ln ]
+
+
+def test_a_runbook_finding_that_predates_the_commit_is_allowed_and_one_the_commit_introduces_is_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )
+    _stage( repo, { RUNBOOK: "# Ops\n\nSome text.\n\nOne more line.\n" } )
+    rc, lines = _blocking( repo )
+    marked = [ ln for ln in lines if ln.endswith( PREDATES_MARK ) ]
+    assert rc == 0 and sorted( marked ) == sorted( f"[doc-lint] {RUNBOOK}:1: runbook-template: runbook has no {section} section{PREDATES_MARK}" for section in md_lint.RUNBOOK_SECTIONS )
+    assert len( marked ) == 4 and "[doc-lint] 4 page-level findings predate this commit (warn mode, commit allowed)" in lines
+    _stage( repo, { RUNBOOK: "# Ops\n\n## Steps\n\nSome text.\n" } )
+    _git( repo, "commit", "-q", "-m", "one section" )
+    _stage( repo, { RUNBOOK: "# Ops\n\n## Procedure\n\nSome text.\n" } )                     # the steps heading is gone
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED {RUNBOOK}:1: runbook-template: runbook has no steps section" ]
+    assert "[doc-lint] 3 page-level findings predate this commit (warn mode, commit allowed)" in lines and REFUSE_1 in lines
+
+
+def test_a_new_runbook_without_its_sections_is_refused_and_a_complete_one_passes( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and len( [ ln for ln in lines if ln.startswith( f"[doc-lint] REFUSED {RUNBOOK}:1: runbook-template: " ) ] ) == 4
+    _stage( repo, { RUNBOOK: RUNBOOK_FULL } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+
+
+def test_a_predating_page_finding_is_marked_without_blocking_and_a_warn_only_file_keeps_its_own_marking( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "WARN_ONLY_PREFIXES", ( "src/docs/wiki/capabilities/w/", ) )
+    _page_base( repo, { CAP_PAGE: _page( 41 ), "src/docs/wiki/capabilities/w/y.md": _page( 41 ) } )
+    _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ), "src/docs/wiki/capabilities/w/y.md": _page( 41, changed=( 5, ) ) } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    lines = err.getvalue().split( "\n" )
+    assert f"[doc-lint] {CAP_PAGE}:1: {_cap( 41 )}{PREDATES_MARK}" in lines and f"[doc-lint] src/docs/wiki/capabilities/w/y.md:1: {_cap( 41 )}{WARN_MARK}" in lines
+    assert not [ ln for ln in lines if "page-level findings predate" in ln ]                     # that summary belongs to --blocking
+
+
+def test_gate_prints_every_missing_tool_warning_and_includes_tool_findings( repo, monkeypatch ):
+    monkeypatch.setattr( gate, "run_ruff", lambda root, paths, sources=None: ( [ Finding( "src/lupin_mcp/a.py", 1, "ruff:D205", "m" ) ], [ "[doc-lint] WARNING: ruff not found, SKIPPED: x were NOT checked" ] ) )
+    monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths: ( [], [ "[doc-lint] WARNING: markdownlint-cli2 not found, SKIPPED: y were NOT checked" ] ) )
+    _stage( repo, { "src/lupin_mcp/a.py": "x = 1\n", "docs/p.md": "clean\n", "notes.txt": "NOT linted\n" } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    text = err.getvalue()
+    assert "ruff not found, SKIPPED" in text and "markdownlint-cli2 not found, SKIPPED" in text and "src/lupin_mcp/a.py:1: ruff:D205" in text
+
+
+def test_gate_allows_the_commit_and_says_so_loudly_when_it_crashes( repo, monkeypatch ):
+    def boom( root ): raise ValueError( "injected crash" )
+    monkeypatch.setattr( gate, "collect", boom )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == 0
+    assert "[doc-lint] GATE CRASHED, commit allowed: ValueError: injected crash" in err.getvalue()
+
+
+def test_gate_allows_the_commit_outside_a_repository( tmp_path ):
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( tmp_path ) ], err ) == 0
+    assert "GATE CRASHED, commit allowed: RuntimeError" in err.getvalue()
+
+
+# ---- the blocking allowlist ------------------------------------------------------------------
+
+def _doc( line ):
+    return f'def f():\n    """\n    Return it.\n\n    {line}\n    """\n'
+
+
+KIND_CASES = [
+    ( "dated-banner",     "Added on 2026-01-02 for the parser." ),
+    ( "iso-date",         "The version was cut on 2026-01-02." ),
+    ( "agent-imperative", "You must call this first." ),
+    ( "bare-ref",         "Tracked in row 8dbe659a." ),
+    ( "bare-ref",         "Introduced in 91574fce for speed." ),
+]
+
+
+DESTINATION = {
+    "dated-banner"     : "the commit message or the Decisions Log",
+    "iso-date"         : "the commit message or the Decisions Log",
+    "bare-ref"         : "the commit message, the task row or a post-game",
+    "agent-imperative" : "a prompt or skill file; the docstring states what the code does",
+}
+
+
+def test_the_allowlist_ships_empty_so_merging_the_gate_changes_nobodys_commits():
+    assert gate.BLOCKING_PACKAGES == ()
+
+
+@pytest.mark.parametrize( "rule,line", KIND_CASES )
+def test_each_mechanical_kind_on_an_untouched_line_is_refused_when_its_package_is_listed( repo, monkeypatch, rule, line ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/lupin_mcp/pkg/", ) )
+    old = _doc( line )
+    _stage( repo, { "src/lupin_mcp/pkg/a.py": old } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "src/lupin_mcp/pkg/a.py": old + "\nx = 1\n" } )                      # the docstring line is not in the diff
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == gate.REFUSAL_EXIT
+    text = err.getvalue()
+    refusal = [ ln for ln in text.split( "\n" ) if ln.startswith( f"[doc-lint] REFUSED src/lupin_mcp/pkg/a.py:5: {rule}: " ) ]
+    assert len( refusal ) == 1 and refusal[ 0 ].endswith( f"; this history belongs in {DESTINATION[ rule ]}" )
+    assert "commit REFUSED" in text and text.count( f"REFUSED src/lupin_mcp/pkg/a.py:5: {rule}:" ) == 1
+
+
+@pytest.mark.parametrize( "rule,line", KIND_CASES )
+def test_the_same_line_in_an_unlisted_package_is_only_warned_and_only_when_touched( repo, monkeypatch, rule, line ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/lupin_mcp/other/", ) )
+    old = _doc( line )
+    _stage( repo, { "src/lupin_mcp/pkg/a.py": old } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0                  # new file: every line is touched, so it warns
+    assert f"[doc-lint] src/lupin_mcp/pkg/a.py:5: {rule}: " in err.getvalue() and "REFUSED" not in err.getvalue()
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "src/lupin_mcp/pkg/a.py": old + "\nx = 1\n" } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    assert "0 findings on staged lines (warn mode, commit allowed)" in err.getvalue()
+
+
+def test_a_refused_finding_on_a_touched_line_is_printed_once_as_a_refusal_not_also_as_a_warning( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/lupin_mcp/pkg/", ) )
+    _stage( repo, { "src/lupin_mcp/pkg/a.py": _doc( "The version was cut on 2026-01-02." ) } )   # a new file: the line is touched
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == gate.REFUSAL_EXIT
+    assert "[doc-lint] src/lupin_mcp/pkg/a.py:5: iso-date" not in err.getvalue() and "REFUSED src/lupin_mcp/pkg/a.py:5: iso-date" in err.getvalue()
+
+
+def test_a_clean_file_passes_whether_its_package_is_listed_or_not( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/lupin_mcp/pkg/a.py": _doc( "Return the thing." ), "docs/p.md": "A clean line.\n" } )
+    for packages in ( ( "src/lupin_mcp/pkg/", "docs/" ), () ):
+        monkeypatch.setattr( gate, "BLOCKING_PACKAGES", packages )
+        err = io.StringIO()
+        assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+        assert "0 findings on staged lines (warn mode, commit allowed)" in err.getvalue()
+
+
+def test_markdown_in_a_listed_package_is_refused_on_an_untouched_line( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "docs/", ) )
+    _stage( repo, { "docs/p.md": "Measured 2026-01-02 here.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "docs/p.md": "Measured 2026-01-02 here.\nA new clean line.\n" } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == gate.REFUSAL_EXIT
+    assert "REFUSED docs/p.md:1: dated-banner" in err.getvalue()
+
+
+def test_an_incident_story_and_the_non_id_references_are_not_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/lupin_mcp/pkg/", ) )
+    story = "The parser once dropped a column after a bad merge, so the loader now checks the width. See section 4 of this module, ruling 3, AC4 and D4."
+    _stage( repo, { "src/lupin_mcp/pkg/a.py": _doc( story ) } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    assert "REFUSED" not in err.getvalue()
+
+
+def test_is_mechanical_sorts_the_history_kinds_from_the_rest():
+    def f( rule, message="m" ): return Finding( "a.py", 1, rule, message )
+    for rule in ( "dated-banner", "iso-date", "agent-imperative" ): assert gate.is_mechanical( f( rule ) )
+    assert gate.is_mechanical( f( "bare-ref", "bare reference 'row 8dbe659a'" ) )
+    assert gate.is_mechanical( f( "bare-ref", "bare reference '91574fce'" ) )
+    assert not gate.is_mechanical( f( "bare-ref", "bare reference 'ruling 3'" ) )
+    assert not gate.is_mechanical( f( "bare-ref", "bare reference 'AC4'" ) )
+    assert not gate.is_mechanical( f( "bare-ref", "section reference '\u00a74' has no path" ) )
+    assert not gate.is_mechanical( f( "caps" ) ) and not gate.is_mechanical( f( "ruff:D205" ) )
+
+
+def test_in_blocking_package_matches_a_directory_prefix_only():
+    assert gate.in_blocking_package( "src/lupin_mcp/pkg/a.py", ( "src/x/", "src/lupin_mcp/pkg/" ) )
+    assert not gate.in_blocking_package( "src/pkg2/a.py", ( "src/lupin_mcp/pkg/", ) ) and not gate.in_blocking_package( "src/lupin_mcp/pkg/a.py", () )
+
+
+def test_the_real_gate_in_a_listed_package_makes_the_real_chain_refuse_the_commit( repo ):
+    pkg = repo / "src" / "cosa" / "repo"
+    shutil.copytree( os.path.join( cu.get_project_root(), "src", "cosa", "repo", "doc_lint" ), pkg / "doc_lint", ignore=shutil.ignore_patterns( "__pycache__" ) )
+    for d in ( repo / "src" / "cosa", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+    gate_file = pkg / "doc_lint" / "gate.py"
+    source    = gate_file.read_text( encoding="utf-8" )
+    assert source.count( "BLOCKING_PACKAGES = ()" ) == 1                   # the copy gets the one listed package, nothing else changes
+    gate_file.write_text( source.replace( "BLOCKING_PACKAGES = ()", 'BLOCKING_PACKAGES = ( "src/lupin_mcp/pkg/", )' ), encoding="utf-8" )
+    _stage( repo, { "src/lupin_mcp/pkg/a.py": _doc( "Added on 2026-01-02 for the parser." ) } )
+    res = _run_chain( repo )
+    assert res.returncode == 1
+    assert "[doc-lint] REFUSED src/lupin_mcp/pkg/a.py:5: dated-banner" in res.stderr and "doc-lint gate REFUSED the commit" in res.stderr
+
+
+def test_the_chain_refuses_the_commit_on_exit_three_and_allows_every_other_gate_failure( repo ):
+    pkg = repo / "src" / "cosa" / "repo" / "doc_lint"
+    pkg.mkdir( parents=True )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+    ( pkg / "gate.py" ).write_text( "raise SystemExit( 3 )\n", encoding="utf-8" )
+    res = _run_chain( repo )
+    assert res.returncode == 1 and "doc-lint gate REFUSED the commit" in res.stderr
+
+
+# ---- the chain wrapper -----------------------------------------------------------------------
+
+CHAIN = os.path.join( cu.get_project_root(), "src", "scripts", "pre-commit-chain.sh" )
+
+
+def _install_real_doc_lint( repo ):
+    """Copy the real doc_lint package into the test repo, untracked, so the chain runs the real gate."""
+    dest = repo / "src" / "cosa" / "repo" / "doc_lint"
+    shutil.copytree( os.path.join( cu.get_project_root(), "src", "cosa", "repo", "doc_lint" ), dest, ignore=shutil.ignore_patterns( "__pycache__" ) )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo" ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+
+
+def _tool_stubs( folder ):
+    """Write stand-ins for ruff and markdownlint-cli2 that report nothing."""
+    folder.mkdir( exist_ok=True )
+    for name in ( "ruff", "markdownlint-cli2" ):
+        ( folder / name ).write_text( "#!/bin/sh\n" + ( 'n=0; for a in "$@"; do case "$a" in --|--no-globs) ;; *) n=$((n+1));; esac; done; echo "Linting: $n file(s)"\n' if name == "markdownlint-cli2" else "" ) + "exit 0\n", encoding="utf-8" )
+        os.chmod( folder / name, 0o755 )
+    return { "LUPIN_RUFF": str( folder / "ruff" ), "LUPIN_MARKDOWNLINT": str( folder / "markdownlint-cli2" ) }
+
+
+def _run_chain( repo, env_extra=None ):
+    env = { **os.environ, "PLANNING_IS_PROMPTING_ROOT": "", **_tool_stubs( repo.parent / f"{repo.name}-tools" ), **( env_extra or {} ) }
+    return subprocess.run( [ "bash", CHAIN ], cwd=repo, capture_output=True, text=True, env=env )
+
+
+def _chain_allowed( code ):
+    return f"[pre-commit-chain] doc-lint gate exited {code} without a refusal verdict, commit ALLOWED: findings above, if any, were NOT enforced. If this tree's gate.py predates blocking, rebase."
+
+
+CHAIN_REFUSE = "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each REFUSED line above, stage the fix with git add and commit again"
+
+
+def test_the_chain_runs_the_gate_blocking_and_refuses_a_finding_on_a_staged_line( repo ):
+    _install_real_doc_lint( repo )
+    _stage( repo, { "docs/p.md": "This is NOT fine.\n" } )
+    res = _run_chain( repo )
+    assert res.returncode == 1
+    assert "[doc-lint] REFUSED docs/p.md:1: caps: ALL-CAPS word NOT" in res.stderr.split( "\n" ) and CHAIN_REFUSE in res.stderr.split( "\n" )
+    assert "commit allowed" not in res.stderr and "ALLOWED" not in res.stderr
+
+
+def test_the_chain_allows_a_finding_in_an_archive_file_and_prints_the_warn_marking( repo ):
+    _install_real_doc_lint( repo )
+    _stage( repo, { "history/2026-08-history.md": "This is NOT fine.\n" } )
+    res = _run_chain( repo )
+    assert res.returncode == 0
+    assert "[doc-lint] history/2026-08-history.md:1: caps: ALL-CAPS word NOT (warn mode, commit allowed)" in res.stderr.split( "\n" )
+    assert "REFUSED" not in res.stderr and "[pre-commit-chain] doc-lint" not in res.stderr
+
+
+def test_the_chain_allows_the_commit_when_the_gate_process_itself_fails( repo ):
+    pkg = repo / "src" / "cosa" / "repo" / "doc_lint"
+    pkg.mkdir( parents=True )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+    ( pkg / "gate.py" ).write_text( "raise SystemExit( 7 )\n", encoding="utf-8" )
+    res = _run_chain( repo )
+    assert res.returncode == 0
+    assert _chain_allowed( 7 ) in res.stderr.split( "\n" )
+    assert "REFUSED" not in res.stderr and "CRASHED" not in res.stderr
+
+
+def _exiting_gate( repo, code ):
+    pkg = repo / "src" / "cosa" / "repo" / "doc_lint"
+    pkg.mkdir( parents=True )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+    ( pkg / "gate.py" ).write_text( f"import os\nos._exit( {code} )\n", encoding="utf-8" )
+
+
+@pytest.mark.parametrize( "code", [ 1, 2, 4, 7, 127, 130, 137, 143, 255 ] )
+def test_the_chain_refuses_only_on_the_refusal_exit_and_allows_exit_one( repo, code ):
+    _exiting_gate( repo, code )
+    res = _run_chain( repo )
+    assert res.returncode == 0
+    assert [ ln for ln in res.stderr.split( "\n" ) if ln.startswith( "[pre-commit-chain] doc-lint" ) ] == [ _chain_allowed( code ) ]
+
+
+def test_exit_three_is_the_only_gate_exit_that_refuses_the_commit( repo ):
+    _exiting_gate( repo, 3 )
+    res = _run_chain( repo )
+    assert res.returncode == 1
+    assert [ ln for ln in res.stderr.split( "\n" ) if ln.startswith( "[pre-commit-chain] doc-lint" ) ] == [ CHAIN_REFUSE ]
+
+
+def test_a_gate_that_exits_zero_makes_the_chain_say_nothing_and_allow_the_commit( repo ):
+    _exiting_gate( repo, 0 )
+    res = _run_chain( repo )
+    assert res.returncode == 0 and "[pre-commit-chain] doc-lint" not in res.stderr
+
+
+def test_the_chain_passes_the_blocking_flag_to_the_gate( repo ):
+    pkg = repo / "src" / "cosa" / "repo" / "doc_lint"
+    pkg.mkdir( parents=True )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+    ( pkg / "gate.py" ).write_text( "import sys\nprint( 'ARGV', sys.argv[ 1: ], file=sys.stderr )\n", encoding="utf-8" )
+    res = _run_chain( repo )
+    assert res.returncode == 0
+    assert f"ARGV ['--blocking', '--repo-root', '{os.path.realpath( repo )}']" in res.stderr.split( "\n" )
+
+
+def test_the_chain_gate_does_not_depend_on_planning_is_prompting_root( repo ):
+    _install_real_doc_lint( repo )
+    _stage( repo, { "docs/p.md": "clean text\n" } )
+    res = _run_chain( repo )
+    assert "SKIPPED rnd-guard" in res.stderr                      # the other gate is skipped without the variable
+    assert "0 findings on staged lines" in res.stderr              # this one ran anyway
+
+
+# ---- the swept-scope refusal -----------------------------------------------------------------
+
+SWEPT_CAPS = _doc( "This is NOT fine." )
+
+
+def _gate( repo, *extra ):
+    err = io.StringIO()
+    return gate.main( [ "--repo-root", str( repo ), *extra ], err ), err.getvalue()
+
+
+def test_a_swept_file_with_a_capitals_docstring_is_refused_and_the_message_names_the_fix( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )
+    rc, text = _gate( repo )
+    assert rc == gate.REFUSAL_EXIT == 3
+    line = [ ln for ln in text.split( "\n" ) if ln.startswith( "[doc-lint] REFUSED src/pkg/a.py:5: caps: ALL-CAPS word NOT" ) ]
+    assert len( line ) == 1
+    assert "line: 'This is NOT fine.'" in line[ 0 ] and f"fix: {gate.FIX_HOME[ 'caps' ]}" in line[ 0 ]
+    assert "to waive, end the line with: doc-lint: waive caps -- <reason>" in line[ 0 ]
+    assert "1 refusals, commit REFUSED" in text
+
+
+def test_the_refusal_covers_a_finding_on_a_line_the_commit_did_not_touch( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS + "\nx = 1\n" } )
+    rc, text = _gate( repo )
+    assert rc == 3 and "REFUSED src/pkg/a.py:5: caps" in text
+
+
+def test_a_finding_from_a_rule_other_than_caps_is_refused_with_that_rules_home( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": _doc( "word " * 30 + "end." ) } )
+    rc, text = _gate( repo )
+    assert rc == 3 and "REFUSED src/pkg/a.py:5: sentence-length" in text and f"fix: {gate.FIX_HOME[ 'sentence-length' ]}" in text
+
+
+def test_every_rule_the_docstring_lint_can_emit_has_a_named_home():
+    for rule in ( "summary-length", "preface-length", "sentence-length", "caps", "glyph", "tic", "bare-ref", "dated-banner", "iso-date", "agent-imperative", "docstring-length", "dead-design" ):
+        assert rule in gate.FIX_HOME and gate.FIX_HOME[ rule ]
+
+
+def test_the_refusal_line_cuts_a_long_text_and_falls_back_for_an_unnamed_rule():
+    f    = Finding( "src/a.py", 7, "brand-new-rule", "m" )
+    line = gate.swept_refusal_line( f, "  " + "x" * 200, "none" )
+    assert "x" * gate.TEXT_LIMIT + "...'" in line and "x" * ( gate.TEXT_LIMIT + 1 ) not in line
+    assert "fix: plain wording that states what the code does" in line and "gives no reason" not in line
+    assert "a waiver marker is on this line but gives no reason, so it waives nothing" in gate.swept_refusal_line( f, "x", "no-reason" )
+
+
+@pytest.mark.parametrize( "path,swept", [
+    ( "src/pkg/a.py",                 True ),
+    ( "src/cosa/deep/er/nest/a.py",   True ),
+    ( "brand_new_package/a.py",       True ),
+    ( "docker/lupin/scripts/a.py",    True ),
+    ( "src/lupin_mcp/a.py",           False ),
+    ( "src/lupin_mcp/sub/dir/a.py",   False ),
+    ( "src/lupin_mcp_extra/a.py",     True ),
+    ( "src/tests/unit/a.py",          False ),
+    ( "src/pkg/test_a.py",            False ),
+    ( "src/pkg/conftest.py",          False ),
+    ( "src/rnd/v1/a.py",              False ),
+    ( "src/pkg/.venv/lib/a.py",       False ),
+    ( "src/pkg/a.md",                 False ),
+    ( "history.md",                   False ),
+    ( "src/pkg/a.pyi",                False ),
+] )
+def test_the_swept_predicate_matches_on_the_path_alone( path, swept ):
+    assert gate.is_swept( path ) is swept
+
+
+def test_files_outside_the_swept_scope_are_warned_not_refused_and_the_tracking_files_commit( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    md = "Measured 2026-01-02. This is NOT fine. Row 8dbe659a.\n"
+    _stage( repo, {
+        "src/lupin_mcp/a.py"  : SWEPT_CAPS,
+        "src/tests/t.py"      : SWEPT_CAPS,
+        "src/pkg/test_b.py"   : SWEPT_CAPS,
+        "src/rnd/doc.py"      : SWEPT_CAPS,
+        "history/a.md"        : md,
+        "todo-history/a.md"   : md,
+    } )
+    rc, text = _gate( repo )
+    assert rc == 0 and "REFUSED" not in text
+    assert "src/lupin_mcp/a.py:5: caps" in text and "history/a.md:1:" in text and "todo-history/a.md:1:" in text
+    assert "swept scope: 0 files checked, 0 docstrings checked, 0 findings, 0 waivers honoured, 0 unparsed" in text
+
+
+def test_a_rename_is_refused_and_a_deletion_is_not( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/old.py": SWEPT_CAPS } )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+    _git( repo, "mv", "src/pkg/old.py", "src/pkg/new.py" )
+    rc, text = _gate( repo )
+    assert rc == 3 and "REFUSED src/pkg/new.py:5: caps" in text
+    _git( repo, "reset", "-q", "--hard" )
+    _git( repo, "rm", "-q", "src/pkg/old.py" )
+    rc, text = _gate( repo )
+    assert rc == 0 and "REFUSED" not in text and "0 files checked" in text
+
+
+def test_a_swept_file_that_does_not_parse_is_refused_counted_and_cannot_be_waived( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": 'def f(:\n    """This is NOT fine.  doc-lint: waive parse-error -- trying"""\n', "src/pkg/b.py": SWEPT_CAPS.replace( "NOT", "not" ) } )
+    rc, text = _gate( repo )
+    assert rc == 3
+    assert "REFUSED src/pkg/a.py:1: parse-error: does not parse:" in text and "this cannot be waived" in text
+    assert "[doc-lint] src/pkg/a.py:1: parse-error: does not parse" not in text
+    assert "2 files checked, 1 docstrings checked, 0 findings, 0 waivers honoured, 1 unparsed" in text
+
+
+def test_a_file_with_a_byte_order_mark_is_read_like_any_other( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )
+    ( repo / "src" / "pkg" / "a.py" ).write_bytes( b"\xef\xbb\xbf" + SWEPT_CAPS.encode( "utf-8" ) )
+    _git( repo, "add", "-f", "src/pkg/a.py" )
+    rc, text = _gate( repo )
+    assert rc == 3 and "REFUSED src/pkg/a.py:5: caps" in text and "parse-error" not in text and "0 unparsed" in text
+    ( repo / "src" / "pkg" / "a.py" ).write_bytes( b"\xef\xbb\xbf" + _doc( "Return it." ).encode( "utf-8" ) )
+    _git( repo, "add", "-f", "src/pkg/a.py" )
+    rc, text = _gate( repo )
+    assert rc == 0 and "1 files checked, 1 docstrings checked, 0 findings" in text and "0 unparsed" in text
+
+
+def test_a_waiver_with_a_reason_is_honoured_and_counted( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": _doc( "This is NOT fine.  doc-lint: waive caps -- the capitals are quoted from the SQL standard" ) } )
+    rc, text = _gate( repo )
+    assert rc == 0 and "REFUSED" not in text
+    assert "1 files checked, 1 docstrings checked, 1 findings, 1 waivers honoured, 0 unparsed" in text
+    assert "src/pkg/a.py:5: caps" not in text
+
+
+def test_a_waiver_after_the_closing_quotes_on_a_one_line_docstring_is_honoured( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": 'def f():\n    """This is NOT fine.  doc-lint: waive caps -- SQL"""\n' } )
+    rc, text = _gate( repo )
+    assert rc == 0 and "1 waivers honoured" in text
+
+
+def test_a_waiver_without_a_reason_does_not_waive_and_the_gate_says_so( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    for marker in ( "doc-lint: waive caps", "doc-lint: waive caps -- ", 'doc-lint: waive caps -- "', "doc-lint: waive caps -- -", "doc-lint: waive caps -- n/a", "doc-lint: waive caps -- ok" ):
+        _stage( repo, { "src/pkg/a.py": _doc( f"This is NOT fine.  {marker}" ) } )
+        rc, text = _gate( repo )
+        assert rc == 3, marker
+        assert "REFUSED src/pkg/a.py:5: caps" in text and "gives no reason, so it waives nothing" in text and "0 waivers honoured" in text
+
+
+def test_a_waiver_that_names_a_different_rule_waives_nothing( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": _doc( "This is NOT fine.  doc-lint: waive tic -- wrong rule" ) } )
+    rc, text = _gate( repo )
+    assert rc == 3 and "REFUSED src/pkg/a.py:5: caps" in text and "gives no reason" not in text
+
+
+def test_a_waiver_on_another_line_does_not_cover_the_finding( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": 'def f():\n    """\n    Return it.\n\n    This is NOT fine.\n    doc-lint: waive caps -- next line\n    """\n' } )
+    rc, text = _gate( repo )
+    assert rc == 3 and "REFUSED src/pkg/a.py:5: caps" in text
+
+
+def test_a_clean_swept_file_prints_the_denominator_and_commits( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": _doc( "Return the thing." ), "src/pkg/b.py": _doc( "Return the other thing." ) } )
+    rc, text = _gate( repo )
+    assert rc == 0 and "swept scope: 2 files checked, 2 docstrings checked, 0 findings, 0 waivers honoured, 0 unparsed" in text
+
+
+def test_a_finding_already_refused_by_a_listed_package_is_printed_once( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/pkg/", ) )
+    _stage( repo, { "src/pkg/a.py": _doc( "The version was cut on 2026-01-02." ) } )
+    rc, text = _gate( repo )
+    assert rc == 3 and text.count( "REFUSED src/pkg/a.py:5: iso-date" ) == 1 and "1 refusals" in text
+
+
+def test_a_crash_still_allows_the_commit_with_the_loud_line_even_for_a_swept_file( repo, monkeypatch ):
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )
+    monkeypatch.setattr( gate.docstring_lint, "lint_source", lambda *a, **k: ( _ for _ in () ).throw( ValueError( "linter crash" ) ) )
+    rc, text = _gate( repo )
+    assert rc == 0 and "[doc-lint] GATE CRASHED, commit allowed: ValueError: linter crash" in text
+
+
+def test_the_real_chain_refuses_a_seeded_swept_commit_and_names_the_waiver( repo ):
+    _install_real_doc_lint( repo )
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )
+    res = _run_chain( repo )
+    assert res.returncode == 1
+    assert "[doc-lint] REFUSED src/pkg/a.py:5: caps" in res.stderr and "doc-lint gate REFUSED the commit" in res.stderr
+
+
+def test_a_refused_swept_finding_on_a_touched_line_is_printed_once_as_a_refusal_not_also_as_a_warning( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )                                   # a new file: line 5 is touched
+    rc, text = _gate( repo )
+    assert rc == 3
+    assert "[doc-lint] src/pkg/a.py:5: caps" not in text                             # the warning form of the same finding
+    assert text.count( "src/pkg/a.py:5: caps" ) == 1 and "REFUSED src/pkg/a.py:5: caps" in text
+
+
+def _stage_bytes( repo, rel, data ):
+    full = repo / rel
+    full.parent.mkdir( parents=True, exist_ok=True )
+    full.write_bytes( data )
+    _git( repo, "add", "-f", rel )
+
+
+LATIN_1 = b'def f():\n    """This is NOT fine \xe9."""\n'
+
+
+def test_a_swept_file_that_is_not_utf8_is_refused_by_name_and_does_not_crash_the_gate( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "src/pkg/a.py", LATIN_1 )
+    _stage( repo, { "src/pkg/b.py": SWEPT_CAPS } )
+    rc, text = _gate( repo )
+    assert rc == 3 and "GATE CRASHED" not in text
+    assert "REFUSED src/pkg/a.py: not UTF-8: " in text and "'utf-8' codec can't decode" in text and "this cannot be waived" in text
+    assert "REFUSED src/pkg/b.py:5: caps" in text                                  # the other staged file is still linted
+    assert "2 files checked, 1 docstrings checked, 1 findings, 0 waivers honoured, 0 unparsed, 1 undecodable" in text
+
+
+def test_a_swept_file_that_is_not_utf8_is_refused_when_it_is_the_only_staged_file( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "src/pkg/a.py", LATIN_1 )
+    rc, text = _gate( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert "[doc-lint] REFUSED src/pkg/a.py: not UTF-8: " in text and "1 refusals, commit REFUSED" in text
+    assert "WARNING: src/pkg/a.py" not in text
+
+
+def test_a_file_outside_the_swept_scope_that_is_not_utf8_is_skipped_with_a_warning( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "src/lupin_mcp/a.py", LATIN_1 )
+    _stage_bytes( repo, "docs/p.md", b"caf\xe9 is NOT fine\n" )
+    rc, text = _gate( repo )
+    assert rc == 0 and "GATE CRASHED" not in text and "REFUSED" not in text
+    assert "WARNING: src/lupin_mcp/a.py is not UTF-8, it was NOT checked" in text and "WARNING: docs/p.md is not UTF-8, it was NOT checked" in text
+    assert "0 files checked" in text and "0 undecodable" in text
+
+
+@pytest.mark.parametrize( "name,data", [ ( "docs/u16.md", "# T\n\nSome text.\n".encode( "utf-16" ) ), ( "docs/l1.md", b"# T\n\nSome caf\xe9 text.\n" ),
+                                         ( "src/lupin_mcp/u16.py", "x = 1\n".encode( "utf-16" ) ), ( "src/lupin_mcp/l1.py", b"x = '\xe9'\n" ) ] )
+def test_a_page_the_gate_cannot_read_is_refused_when_the_commit_changes_it_whatever_the_encoding( repo, monkeypatch, name, data ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "docs/keep.md", b"# K\n\nFine.\n" )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage_bytes( repo, name, data )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT, ( name, lines )
+    assert [ ln for ln in lines if ln.startswith( f"[doc-lint] REFUSED: {name} " ) or ln.startswith( f"[doc-lint] REFUSED {name}: " ) ]
+
+
+def test_a_page_the_gate_cannot_read_but_the_commit_does_not_change_is_only_warned_about( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    for name, data in ( ( "docs/old/l1.md", b"# T\n\nSome caf\xe9 text.\n" ), ( "docs/old/u16.md", "# T\n\nSome text.\n".encode( "utf-16" ) ) ):
+        _stage_bytes( repo, name, data )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "mv", "docs/old/l1.md", "docs/l1.md" )
+    _git( repo, "mv", "docs/old/u16.md", "docs/u16.md" )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert "[doc-lint] WARNING: docs/l1.md is not UTF-8, it was NOT checked" in lines and "[doc-lint] WARNING: docs/u16.md is not UTF-8, it was NOT checked" in lines
+
+
+@pytest.mark.parametrize( "name,data", [ ( "l1.md", b"# T\n\nSome caf\xe9 text. NOT fine.\n" ), ( "u16.md", "# T\n\nSome text.\n".encode( "utf-16" ) ),
+                                         ( "bin.md", b"# T\n\x00\nSome text.\n" ) ] )
+def test_a_page_the_gate_cannot_read_moved_unedited_out_of_an_unjudged_folder_is_refused_like_a_new_file( repo, monkeypatch, name, data ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "docs/keep.md", b"# K\n\nFine.\n" )
+    _stage_bytes( repo, f"src/rnd/{name}", data )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "mv", f"src/rnd/{name}", f"docs/{name}" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT, ( name, lines )
+    assert [ ln for ln in lines if f"docs/{name}" in ln and ( "NOT checked" in ln or "could NOT be checked" in ln or "REFUSED" in ln ) ]
+
+
+def test_staged_source_raises_the_decode_error_for_non_utf8_bytes( repo ):
+    _stage_bytes( repo, "src/pkg/a.py", LATIN_1 )
+    with pytest.raises( UnicodeDecodeError ):
+        gate.staged_source( str( repo ), "src/pkg/a.py" )
+
+
+def test_a_file_that_is_not_utf8_is_not_handed_to_ruff_or_markdownlint( repo, monkeypatch ):
+    seen = { "ruff": None, "md": None }
+    def fake_ruff( root, paths, sources=None ):
+        seen[ "ruff" ] = list( paths )
+        return [], []
+    def fake_md( root, paths, sources=None ):
+        seen[ "md" ] = list( paths )
+        return [], []
+    monkeypatch.setattr( gate, "run_ruff", fake_ruff )
+    monkeypatch.setattr( gate, "run_markdownlint", fake_md )
+    _stage_bytes( repo, "src/lupin_mcp/a.py", LATIN_1 )
+    _stage_bytes( repo, "docs/p.md", b"caf\xe9\n" )
+    _stage( repo, { "src/lupin_mcp/ok.py": "x = 1\n", "docs/ok.md": "fine\n" } )
+    rc, _ = _gate( repo )
+    assert rc == 0 and seen == { "ruff": [ "src/lupin_mcp/ok.py" ], "md": [ "docs/ok.md" ] }
+
+
+# ---- the counted scope -----------------------------------------------------------------------
+
+from cosa.repo.doc_lint import counts
+
+TABLE = counts.TABLE_PATH
+CLEAN = _doc( "Return the thing." )
+ONE   = _doc( "This is NOT fine." )                                  # one caps finding
+TWO   = _doc( "This is NOT fine and NEVER good." )                   # two caps findings
+TIC   = _doc( "At the end of the day it works." )                    # one tic finding
+
+
+@pytest.fixture
+def stamped( repo ):
+    for rel in counts.STAMP_FILES:
+        full = repo / rel
+        if not full.exists():
+            full.parent.mkdir( parents=True, exist_ok=True )
+            full.write_text( f"stamp file {rel}\n", encoding="utf-8" )
+    return repo
+
+
+def _table( repo, files, stamp=None ):
+    text = counts.table_text( files, stamp if stamp is not None else counts.rules_stamp( str( repo ) ) )
+    ( repo / TABLE ).parent.mkdir( parents=True, exist_ok=True )
+    ( repo / TABLE ).write_text( text, encoding="utf-8" )
+    _git( repo, "add", "-f", TABLE )
+
+
+def _base( repo, files, table, stamp=None ):
+    """Commit the files and the table as the base the next commit is judged against."""
+    _stage( repo, files )
+    _table( repo, table, stamp )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+
+
+def test_the_counted_scope_without_a_table_is_reported_not_checked_and_refuses_nothing( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text
+    assert "WARNING: there is no count table at HEAD or staged, so the counted scope was NOT checked" in text
+    assert "counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table absent" in text
+
+
+def test_with_no_counted_file_staged_and_no_table_there_is_nothing_to_warn_about( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/pkg/a.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "no count table" not in text and "table absent" in text
+
+
+def test_a_counted_file_that_rises_above_its_entry_is_refused_with_the_count_and_the_findings( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( stamped )
+    assert rc == 3
+    assert "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1); reword the text you added, or waive a finding on its own line with: doc-lint: waive <rule> -- <reason>" in text
+    assert "[doc-lint]   src/lupin_mcp/a.py:5: caps: ALL-CAPS word NOT" in text and "[doc-lint]   src/lupin_mcp/a.py:5: caps: ALL-CAPS word NEVER" in text
+    assert "1 over" in text and "table ok" in text and "1 refusals, commit REFUSED" in text
+
+
+def test_a_counted_file_at_or_below_its_entry_is_allowed( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/tests/t.py": TWO }, { "src/tests/t.py": 2 } )
+    _stage( stamped, { "src/tests/t.py": TWO + "\nx = 1\n" } )                       # flat
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 files checked, 1 at or below their count, 0 over" in text
+    _stage( stamped, { "src/tests/t.py": CLEAN } )                                   # fell, the table not lowered
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_a_new_counted_file_starts_at_zero( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/new_a.py": ONE } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/tests/new_a.py: 1 findings, the count table allows 0 (+1)" in text
+    assert "also deletes" not in text and "rename" not in text                      # nothing was deleted, so no rename hint
+    _git( stamped, "reset", "-q", "--hard" )
+    _stage( stamped, { "src/tests/new_b.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_a_rule_swap_at_a_flat_count_is_allowed( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )
+    _stage( stamped, { "src/lupin_mcp/a.py": TIC } )                                 # one caps finding became one tic finding
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "1 at or below their count" in text
+
+
+def test_a_renamed_counted_file_keeps_its_entry_and_a_rise_in_it_is_refused( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    body = "".join( f"value_{i} = {i}\n" for i in range( 40 ) )                         # enough shared text for git to see a rename
+    _base( stamped, { "src/lupin_mcp/old.py": TWO + body }, { "src/lupin_mcp/old.py": 2 } )
+    _git( stamped, "mv", "src/lupin_mcp/old.py", "src/lupin_mcp/new.py" )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 at or below their count" in text
+    _stage( stamped, { "src/lupin_mcp/new.py": _doc( "This is NOT fine and NEVER good and NOT again." ) + body } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/new.py: 3 findings, the count table allows 2 (+1)" in text
+
+
+def test_a_copy_of_a_counted_file_inherits_nothing( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/old.py": TWO }, { "src/lupin_mcp/old.py": 2 } )
+    _stage( stamped, { "src/lupin_mcp/copy.py": TWO } )                              # old.py stays, so this is an addition
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/copy.py: 2 findings, the count table allows 0 (+2)" in text
+
+
+def test_a_waiver_lowers_a_counted_files_count_and_is_counted( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": _doc( "This is NOT fine.  doc-lint: waive caps -- quoted from the standard" ) } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 files checked, 1 at or below their count, 0 over, 1 waivers honoured" in text
+    _stage( stamped, { "src/tests/t.py": _doc( "This is NOT fine.  doc-lint: waive caps" ) } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/tests/t.py: 1 findings, the count table allows 0" in text
+
+
+def test_the_refusal_shows_ten_findings_with_the_touched_ones_first_and_says_how_many_more( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    words = [ "NOT", "NEVER", "NOT", "NEVER", "NOT", "NEVER", "NOT", "NEVER", "NOT", "NEVER", "NOT", "NEVER" ]
+    old   = "def f():\n    \"\"\"\n    Return it.\n\n" + "".join( f"    This is {w} line {i}.\n" for i, w in enumerate( words ) ) + "    \"\"\"\n"
+    _base( stamped, { "src/tests/t.py": old }, { "src/tests/t.py": 12 } )
+    _stage( stamped, { "src/tests/t.py": old[ : -len( "    \"\"\"\n" ) ] + "    This is NOT last.\n    \"\"\"\n" } )
+    rc, text = _gate( stamped )
+    shown = [ ln for ln in text.split( "\n" ) if ln.startswith( "[doc-lint]   src/tests/t.py:" ) ]
+    assert rc == 3 and len( shown ) == gate.SHOWN_FINDINGS and shown[ 0 ] == "[doc-lint]   src/tests/t.py:17: caps: ALL-CAPS word NOT"
+    assert "[doc-lint]   and 3 more" in text and "13 findings, the count table allows 12 (+1)" in text
+
+
+def test_a_counted_file_that_is_not_utf8_counts_as_one_finding( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage_bytes( stamped, "src/tests/t.py", LATIN_1.replace( b" NOT", b"" ) )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/tests/t.py: 1 findings, the count table allows 0 (+1)" in text and "not-utf-8" in text
+    _git( stamped, "reset", "-q", "--hard" )
+    _base( stamped, { "src/pkg/keep2.py": CLEAN }, { "src/tests/t.py": 1 } )
+    _stage_bytes( stamped, "src/tests/t.py", LATIN_1.replace( b" NOT", b"" ) )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_markdown_and_other_files_are_not_in_the_counted_scope( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "history.md": "This is NOT fine.\n", "TODO.md": "NEVER mind.\n", "src/tests/data.txt": "NOT\n" } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "0 files checked, 0 at or below their count, 0 over" in text
+
+
+def test_a_staged_table_that_raises_an_entry_or_adds_one_is_refused( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )
+    _table( stamped, { "src/lupin_mcp/a.py": 2 } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED {TABLE}: src/lupin_mcp/a.py raised from 1 to 2; the table may only fall" in text
+    _table( stamped, { "src/lupin_mcp/a.py": 1, "src/lupin_mcp/b.py": 1 } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED {TABLE}: src/lupin_mcp/b.py raised from 0 to 1; the table may only fall" in text
+
+
+def test_a_staged_table_that_lowers_or_deletes_an_entry_is_allowed_and_is_the_allowance_for_the_commit( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": TWO, "src/lupin_mcp/b.py": ONE }, { "src/lupin_mcp/a.py": 2, "src/lupin_mcp/b.py": 1 } )
+    _stage( stamped, { "src/lupin_mcp/a.py": ONE, "src/lupin_mcp/b.py": CLEAN } )
+    _table( stamped, { "src/lupin_mcp/a.py": 1 } )                                   # a lowered, b deleted
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "2 at or below their count" in text
+    _stage( stamped, { "src/lupin_mcp/a.py": _doc( "This is NOT fine and NEVER bad." ) } )   # the file now rises against the staged entry
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1)" in text
+
+
+def test_a_regenerated_table_under_a_new_stamp_may_raise_when_it_equals_the_census( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 }, stamp="oldstamp" )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    _table( stamped, { "src/lupin_mcp/a.py": 2 } )                                   # the stamp is now the current one
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table regenerated" in text
+
+
+def test_a_regenerated_table_that_does_not_equal_the_census_is_refused_and_the_problems_are_named( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 }, stamp="oldstamp" )
+    _table( stamped, { "src/lupin_mcp/a.py": 5 } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED {TABLE}: a regenerated table must equal a census of the staged tree under the current rules" in text
+    assert "[doc-lint]   src/lupin_mcp/a.py: table 5, census 1" in text and "table stale" in text
+    _table( stamped, { "src/lupin_mcp/a.py": 1 }, stamp="notcurrent" )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "is not the current" in text
+
+
+def test_a_regenerated_table_with_many_problems_shows_ten_and_counts_the_rest( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    files = { f"src/lupin_mcp/f{i:02d}.py": ONE for i in range( 12 ) }
+    _base( stamped, files, {}, stamp="oldstamp" )
+    _table( stamped, {} )                                                            # the census holds 12 files the table lacks
+    rc, text = _gate( stamped )
+    assert rc == 3 and "[doc-lint]   and 2 more" in text and text.count( "table 0, census 1" ) == gate.SHOWN_FINDINGS
+
+
+def test_the_first_table_is_allowed_only_when_it_equals_the_census( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/lupin_mcp/a.py": ONE } )
+    _table( stamped, { "src/lupin_mcp/a.py": 1 } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "table regenerated" in text
+    _table( stamped, { "src/lupin_mcp/a.py": 0 + 3 } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "a regenerated table must equal a census" in text
+
+
+def test_a_table_cut_under_other_rules_refuses_a_commit_that_stages_a_counted_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {}, stamp="oldstamp" )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED: the count table was cut under other rules (stamp oldstamp, now " in text and "table stale" in text
+    assert "if this tree holds only part of a landed rule change, take the landed table by merging or rebasing instead" in text
+    assert 'regenerate it with: LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.counts --repo-root "$PWD" --write and stage the table with the rule change' in text
+    _git( stamped, "reset", "-q", "--hard" )
+    _stage( stamped, { "history.md": "A note.\n", "src/pkg/other.py": CLEAN } )     # no counted file staged
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table stale" in text
+
+
+def test_a_malformed_staged_table_is_refused_and_a_malformed_committed_table_refuses_unless_a_readable_one_is_staged( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/pkg/keep.py": CLEAN, TABLE: "garbage" } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED {TABLE}: the staged table is malformed: table is not JSON" in text and "table malformed" in text
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "bad table" )
+    _stage( stamped, { "src/tests/t.py": ONE } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "table malformed" in text
+    assert f"[doc-lint] REFUSED {TABLE}: the count table at HEAD is malformed (table is not JSON" in text and "stage a regenerated one" in text
+    assert "python3 -m cosa.repo.doc_lint.counts --repo-root \"$PWD\" --write" in text
+    _table( stamped, { "src/tests/t.py": 1 } )                                          # a readable replacement under the current stamp
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table regenerated" in text
+
+
+def test_a_malformed_committed_table_does_not_stop_a_commit_that_stages_no_counted_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { TABLE: "garbage" } )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "bad table" )
+    _stage( stamped, { "notes.md": "A note.\n" } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "[doc-lint] WARNING: the count table at HEAD is malformed" in text
+
+
+def test_a_staged_table_nested_too_deeply_to_read_is_refused_and_does_not_crash_the_gate( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/pkg/keep.py": CLEAN, TABLE: "[" * 200000 + "]" * 200000 } )
+    rc, text = _gate( stamped )
+    assert "GATE CRASHED" not in text
+    assert rc == 3 and f"REFUSED {TABLE}: the staged table is malformed: table is nested too deeply to read (RecursionError)" in text and "table malformed" in text
+
+
+def test_a_table_that_runs_the_parser_out_of_memory_is_a_malformed_table_too( monkeypatch ):
+    def boom( text ): raise MemoryError( "out of memory" )
+    monkeypatch.setattr( counts.json, "loads", boom )
+    with pytest.raises( counts.TableError, match=r"nested too deeply to read \(MemoryError\)" ): counts.parse_table( "{}" )
+
+
+def test_staged_counted_reads_paths_renames_and_the_table_with_odd_names( stamped ):
+    shared = "".join( f"value_{i} = {i}\n" for i in range( 40 ) )
+    _stage( stamped, { "src/tests/old name.py": CLEAN + shared, "src/pkg/swept.py": "swept = 1\n", "src/tests/unï.py": "other = 2\n" } )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    _git( stamped, "mv", "src/tests/old name.py", "src/tests/new name.py" )
+    _stage( stamped, { "src/pkg/swept2.py": "swept = 3\n", "src/lupin_mcp/b.py": "unrelated = 4\n", TABLE: "{}", "notes.md": "x\n" } )
+    paths, renamed, table_staged = gate.staged_counted( str( stamped ) )
+    assert paths == [ "src/lupin_mcp/b.py", "src/tests/new name.py" ] and renamed == { "src/tests/new name.py": "src/tests/old name.py" } and table_staged is True
+    with pytest.raises( RuntimeError, match="git diff --cached failed" ):
+        gate.staged_counted( str( stamped / "nope" ) )
+
+
+def test_staged_counted_without_a_table_or_a_rename_says_so( stamped ):
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    assert gate.staged_counted( str( stamped ) ) == ( [ "src/tests/t.py" ], {}, False )
+    assert gate.staged_counted( str( stamped ) )[ 0 ] and gate.head_table_text( str( stamped ) ) is None
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    assert gate.head_table_text( str( stamped ) ) is None
+    _base( stamped, { "src/pkg/a.py": CLEAN }, { "src/tests/t.py": 1 } )
+    assert counts.parse_table( gate.head_table_text( str( stamped ) ) ).files == { "src/tests/t.py": 1 }
+
+
+def test_a_crash_in_the_counted_check_still_allows_the_commit_with_the_loud_line( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": ONE } )
+    monkeypatch.setattr( gate.counts, "rules_stamp", lambda root, read=None: ( _ for _ in () ).throw( OSError( "rule file gone" ) ) )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "[doc-lint] GATE CRASHED, commit allowed: OSError: rule file gone" in text
+
+
+def test_the_real_chain_refuses_a_counted_file_that_rises_and_allows_one_that_does_not( repo ):
+    stamped = repo                                                                     # the real rule files, copied in
+    _install_real_doc_lint( stamped )
+    _stage( stamped, { "src/tests/t.py": ONE } )
+    _table( stamped, { "src/tests/t.py": 1 } )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    _stage( stamped, { "src/tests/t.py": TWO } )
+    res = _run_chain( stamped )
+    assert res.returncode == 1
+    assert "[doc-lint] REFUSED src/tests/t.py: 2 findings, the count table allows 1 (+1)" in res.stderr and "doc-lint gate REFUSED the commit" in res.stderr
+    _stage( stamped, { "src/tests/t.py": ONE + "\nx = 1\n" } )
+    res = _run_chain( stamped )
+    assert res.returncode == 0 and "counted scope: 1 files checked, 1 at or below their count" in res.stderr
+
+
+def test_a_new_file_beside_a_deleted_entry_is_told_it_may_be_a_rename_git_could_not_pair( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    unique = "".join( f"unique_{i} = {i * 7}\n" for i in range( 30 ) )                          # nothing in common with the new file
+    old    = TWO + "".join( f"old_{i} = {i}\n" for i in range( 30 ) )
+    _base( stamped, { "src/lupin_mcp/old.py": old, "src/lupin_mcp/other.py": unique }, { "src/lupin_mcp/old.py": 2 } )
+    _git( stamped, "rm", "-q", "src/lupin_mcp/old.py", "src/lupin_mcp/other.py" )
+    _stage( stamped, { "src/lupin_mcp/new.py": _doc( "This is NOT fine and NEVER bad." ) } )         # too different for git to pair with old.py
+    assert sorted( gate.staged_deleted( str( stamped ) ) ) == [ "src/lupin_mcp/old.py", "src/lupin_mcp/other.py" ]
+    rc, text = _gate( stamped )
+    assert rc == 3
+    assert "REFUSED src/lupin_mcp/new.py: 2 findings, the count table allows 0 (+2)" in text
+    assert "this commit also deletes src/lupin_mcp/old.py, which had an entry: if this file is a rename that git no longer pairs because too much changed, rename it in one commit and rewrite it in the next" in text
+    assert "other.py" not in text                                                                      # a deleted file with no entry is not named
+
+
+def test_a_rise_in_a_file_with_an_entry_gets_no_rename_hint_even_when_something_is_deleted( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE, "src/lupin_mcp/gone.py": TWO }, { "src/lupin_mcp/a.py": 1, "src/lupin_mcp/gone.py": 2 } )
+    _git( stamped, "rm", "-q", "src/lupin_mcp/gone.py" )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1)" in text and "also deletes" not in text
+
+
+def test_staged_deleted_lists_the_deletions_and_names_a_git_error( stamped ):
+    _stage( stamped, { "src/tests/a b.py": CLEAN, "src/tests/c.py": CLEAN } )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    assert gate.staged_deleted( str( stamped ) ) == []
+    _git( stamped, "rm", "-q", "src/tests/a b.py" )
+    assert gate.staged_deleted( str( stamped ) ) == [ "src/tests/a b.py" ]
+    with pytest.raises( RuntimeError, match="git diff --cached failed" ):
+        gate.staged_deleted( str( stamped / "nope" ) )
+
+
+def test_a_regeneration_commit_counts_the_staged_file_not_the_one_on_disk( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 }, stamp="oldstamp" )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )                                  # two findings go into the index
+    ( stamped / "src" / "lupin_mcp" / "a.py" ).write_text( ONE, encoding="utf-8" )     # and the disk copy is put back
+    _table( stamped, { "src/lupin_mcp/a.py": 1 } )                                    # a table that matches the disk, not the index
+    rc, text = _gate( stamped )
+    assert rc == 3 and "[doc-lint]   src/lupin_mcp/a.py: table 1, census 2" in text and "table stale" in text
+
+
+def test_a_stale_table_commit_prints_no_counted_file_refusal_and_checks_no_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 }, stamp="oldstamp" )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )                                  # would rise against the entry, if the table were trusted
+    rc, text = _gate( stamped )
+    assert rc == 3 and text.count( "REFUSED" ) == 2 and "the count table was cut under other rules" in text   # one refusal line plus the summary line
+    assert "findings, the count table allows" not in text
+    assert "counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table stale" in text
+
+
+RULE_FILE = counts.STAMP_FILES[ 0 ]
+
+
+def _commit_rules_and_table( repo, files, table ):
+    """Commit the rule files too, so the index holds them, with a table cut under the rules as they stand."""
+    for rel in ( "src/cosa/repo/doc_lint/gate.py", "src/cosa/repo/doc_lint/swept_scope.py", "src/scripts/pre-commit-chain.sh" ):
+        full = repo / rel
+        full.parent.mkdir( parents=True, exist_ok=True )
+        full.write_text( f"rule file {rel}\n", encoding="utf-8" )
+        _git( repo, "add", "-f", rel )
+    _git( repo, "add", "-f", *counts.STAMP_FILES )
+    _base( repo, files, table )
+
+
+def test_a_staged_rule_edit_makes_the_table_stale( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "an edited rule\n", encoding="utf-8" )
+    _git( stamped, "add", "-f", RULE_FILE )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "the count table was cut under other rules" in text and "table stale" in text
+
+
+DIVERGED = "is not the same staged and in the working tree, so the findings were counted under rules that are not the ones being committed; stage the edit with git add, or restore the file with git checkout, then commit again"
+
+
+def test_a_rule_file_that_differs_between_the_index_and_the_disk_refuses_a_commit_that_stages_a_counted_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "an edit nobody staged\n", encoding="utf-8" )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED: rule file {RULE_FILE} {DIVERGED}" in text and "table diverged" in text
+    assert "1 refusals, commit REFUSED" in text
+
+
+def test_a_rule_file_that_differs_refuses_a_lone_swept_file_and_names_every_differing_rule_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / counts.STAMP_FILES[ 0 ] ).write_text( "one\n", encoding="utf-8" )
+    ( stamped / counts.STAMP_FILES[ 2 ] ).write_text( "two\n", encoding="utf-8" )
+    _stage( stamped, { "src/pkg/swept.py": CLEAN } )                                  # nothing wrong with the file itself
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"rule file {', '.join( sorted( [ counts.STAMP_FILES[ 0 ], counts.STAMP_FILES[ 2 ] ] ) )} {DIVERGED}" in text
+
+
+def test_a_rule_file_that_differs_gives_no_verdict_on_a_swept_file_that_has_a_finding( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "one\n", encoding="utf-8" )
+    _stage( stamped, { "src/pkg/swept.py": SWEPT_CAPS } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and DIVERGED in text and "REFUSED src/pkg/swept.py" not in text and "0 files checked, 0 docstrings checked" in text
+
+
+def test_a_rule_file_that_differs_refuses_a_lone_staged_table( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "one\n", encoding="utf-8" )
+    _table( stamped, {} )                                                            # the table is the only thing staged
+    rc, text = _gate( stamped )
+    assert rc == 3 and DIVERGED in text
+
+
+def test_a_staged_rule_edit_put_back_on_disk_is_a_divergence_not_a_silent_pass( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    original = ( stamped / RULE_FILE ).read_text( encoding="utf-8" )
+    ( stamped / RULE_FILE ).write_text( "an edited rule\n", encoding="utf-8" )
+    _git( stamped, "add", "-f", RULE_FILE )
+    ( stamped / RULE_FILE ).write_text( original, encoding="utf-8" )                 # the disk copy matches the table again
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"rule file {RULE_FILE} {DIVERGED}" in text
+
+
+def test_a_rule_file_edit_with_nothing_judged_in_the_commit_does_not_stop_it( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "work in progress\n", encoding="utf-8" )
+    _stage( stamped, { "history.md": "A note.\n", "src/pkg/notes.txt": "x\n" } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table ok" in text and "not the same staged" not in text
+
+
+def test_rule_files_that_are_the_same_staged_and_on_disk_leave_the_commit_alone( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": CLEAN, "src/pkg/swept.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table ok" in text and "not the same staged" not in text
+
+
+def test_a_clean_tree_has_no_divergence_and_the_stamp_is_the_staged_one( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "table ok" in text and "differ from the staged ones" not in text
+
+
+def test_staged_bytes_reads_the_index_then_the_working_tree_then_raises( stamped ):
+    _stage( stamped, { "src/tests/a.py": "indexed\n" } )
+    ( stamped / "src" / "tests" / "a.py" ).write_text( "on disk\n", encoding="utf-8" )
+    assert gate.staged_bytes( str( stamped ), "src/tests/a.py" ) == b"indexed\n"
+    ( stamped / "loose.txt" ).write_text( "untracked\n", encoding="utf-8" )
+    assert gate.staged_bytes( str( stamped ), "loose.txt" ) == b"untracked\n"
+    with pytest.raises( OSError ):
+        gate.staged_bytes( str( stamped ), "nowhere.txt" )
+
+
+def test_the_rename_hint_names_at_most_three_deleted_entries( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    old   = lambda i: TWO + "".join( f"old{i}_{n} = {n}\n" for n in range( 30 ) )          # four unrelated files, none pairable
+    files = { f"src/lupin_mcp/d{i}.py": old( i ) for i in range( 4 ) }
+    _base( stamped, files, { path: 2 for path in files } )
+    _git( stamped, "rm", "-q", *files )
+    _stage( stamped, { "src/lupin_mcp/new.py": _doc( "This is NOT fine and NEVER bad." ) } )
+    rc, text = _gate( stamped )
+    named = text.split( "also deletes " )[ 1 ].split( ", which had an entry" )[ 0 ]
+    assert rc == 3 and named == "src/lupin_mcp/d0.py, src/lupin_mcp/d1.py, src/lupin_mcp/d2.py" and "d3.py" not in text
+
+
+def _weaken_the_linter( monkeypatch ):
+    """Stand in for a docstring_lint.py whose working copy was edited, unstaged, to report nothing."""
+    monkeypatch.setattr( gate.docstring_lint, "lint_source", lambda path, source, root=None, stats=None: [] )
+
+
+def test_weakened_rule_code_in_the_working_tree_cannot_let_a_swept_finding_through( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/pkg/swept.py": SWEPT_CAPS } )
+    rc, text = _gate( stamped )                                                       # the rule files are equal: the finding is refused
+    assert rc == 3 and "REFUSED src/pkg/swept.py:5: caps" in text
+    _weaken_the_linter( monkeypatch )
+    ( stamped / "src/cosa/repo/doc_lint/docstring_lint.py" ).write_text( "def lint_source( *a, **k ): return []\n", encoding="utf-8" )
+    rc, text = _gate( stamped )                                                       # the rule file now differs: refused for that, not passed
+    assert rc == 3 and "rule file src/cosa/repo/doc_lint/docstring_lint.py is not the same staged and in the working tree" in text
+
+
+def test_weakened_rule_code_in_the_working_tree_cannot_let_a_counted_rise_through( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( stamped )                                                       # the rule files are equal: the rise is refused
+    assert rc == 3 and "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1)" in text
+    _weaken_the_linter( monkeypatch )
+    ( stamped / "src/cosa/repo/doc_lint/docstring_lint.py" ).write_text( "def lint_source( *a, **k ): return []\n", encoding="utf-8" )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "rule file src/cosa/repo/doc_lint/docstring_lint.py is not the same staged and in the working tree" in text
+    assert "findings, the count table allows" not in text
+
+
+@pytest.mark.parametrize( "rule_path", [
+    "src/cosa/repo/doc_lint/gate.py",
+    "src/cosa/repo/doc_lint/swept_scope.py",
+    "src/scripts/pre-commit-chain.sh",
+    "src/conf/dm-tutor-lowercase-words.txt",
+] )
+def test_an_unstaged_edit_to_any_tracked_rule_file_refuses_a_lone_judged_file( stamped, monkeypatch, rule_path ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / rule_path ).write_text( "edited and not staged\n", encoding="utf-8" )
+    _stage( stamped, { "src/pkg/swept.py": CLEAN } )
+    rc, text = _gate( stamped )
+    listed = [ ln for ln in _git( stamped, "ls-files", "--", "src/cosa/repo/doc_lint", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh" ).split( "\n" ) if ln ]
+    assert rc == 3 and f"rule file {rule_path} {DIVERGED}" in text and f"(1 of {len( listed )} rule files differ)" in text
+
+
+def test_a_tracked_rule_file_outside_the_old_list_of_seven_is_compared_too( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    extra = "src/cosa/repo/doc_lint/brand_new_module.py"
+    ( stamped / extra ).write_text( "x = 1\n", encoding="utf-8" )
+    _git( stamped, "add", "-f", extra )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "a new rule module" )
+    ( stamped / extra ).write_text( "x = 2\n", encoding="utf-8" )
+    _stage( stamped, { "src/lupin_mcp/a.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert extra not in counts.STAMP_FILES and rc == 3 and f"rule file {extra} {DIVERGED}" in text
+
+
+def test_the_gate_prints_how_many_rule_files_it_compared_and_the_number_is_what_git_lists( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    listed = [ ln for ln in _git( stamped, "ls-files", "--", "src/cosa/repo/doc_lint", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh" ).split( "\n" ) if ln ]
+    assert rc == 0 and len( listed ) > 0
+    assert f"[doc-lint] rule files compared: {len( listed )}, differing: 0" in text
+
+
+def test_a_tree_with_no_tracked_rule_files_compares_none_and_stops_nothing( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert "[doc-lint] rule files compared: 0, differing: 0" in text and "REFUSED" not in text
+
+
+def test_the_real_chain_refuses_a_commit_when_a_tracked_rule_file_is_edited_and_not_staged( repo ):
+    _install_real_doc_lint( repo )
+    _git( repo, "add", "-f", "src/cosa/repo/doc_lint/swept_scope.py" )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+    scope = repo / "src/cosa/repo/doc_lint/swept_scope.py"
+    scope.write_text( scope.read_text( encoding="utf-8" ) + "\n# an edit that is not staged\n", encoding="utf-8" )
+    _stage( repo, { "src/pkg/swept.py": SWEPT_CAPS } )
+    res = _run_chain( repo )
+    assert res.returncode == 1 and "rule file src/cosa/repo/doc_lint/swept_scope.py is not the same staged and in the working tree" in res.stderr
+
+
+# ---- the TypeScript and JavaScript counted scope ---------------------------------------------
+
+from cosa.repo.doc_lint import ts_counts
+
+TS_TABLE = "src/conf/doc-lint-ts-counts.json"
+TS_NAME  = "TypeScript and JavaScript"
+
+
+def _ts_block( text ):
+    return f"/** {text} */\nexport const x = 1;\n"
+
+
+TS_CLEAN = _ts_block( "Return the thing." )
+TS_ONE   = _ts_block( "This is NOT fine." )
+TS_TWO   = _ts_block( "This is NOT fine and NEVER good." )
+
+
+def _fake_extract( root, texts ):
+    """Stand in for the Node extractor: a one-line JSDoc block becomes one record."""
+    fake_extract.seen.append( dict( texts ) )
+    out = {}
+    for path, text in texts.items():
+        records = [ { "kind": "file", "file": path, "ts_version": "5.9.3", "parse_errors": [] } ]
+        for i, line in enumerate( text.split( "\n" ) ):
+            if "/**" in line and "*/" in line:
+                records.append( { "kind": "jsdoc", "file": path, "text": line.split( "/**", 1 )[ 1 ].split( "*/", 1 )[ 0 ].strip(), "start_line": i + 1, "end_line": i + 1,
+                                  "symbol_key": None, "directive": False, "tags": [], "ts_version": "5.9.3", "commented_code": False } )
+        out[ path ] = records
+    return out
+
+
+def fake_extract( root, texts ):
+    return _fake_extract( root, texts )
+
+
+fake_extract.seen = []
+
+
+@pytest.fixture
+def ts_stamped( stamped, monkeypatch ):
+    fake_extract.seen.clear()
+    for rel in ts_counts.STAMP_FILES:
+        full = stamped / rel
+        if not full.exists():
+            full.parent.mkdir( parents=True, exist_ok=True )
+            full.write_text( f"stamp file {rel}\n", encoding="utf-8" )
+    monkeypatch.setattr( ts_counts, "extract", fake_extract )
+    _no_external( monkeypatch )
+    return stamped
+
+
+def _ts_table( repo, files, stamp=None ):
+    text = counts.table_text( files, stamp if stamp is not None else ts_counts.rules_stamp( str( repo ) ) )
+    ( repo / TS_TABLE ).parent.mkdir( parents=True, exist_ok=True )
+    ( repo / TS_TABLE ).write_text( text, encoding="utf-8" )
+    _git( repo, "add", "-f", TS_TABLE )
+
+
+def _ts_base( repo, files, table, stamp=None ):
+    _stage( repo, files )
+    _ts_table( repo, table, stamp )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+
+
+def test_a_staged_ts_file_with_no_table_is_reported_not_checked_and_refused_nothing( ts_stamped ):
+    _stage( ts_stamped, { "src/a.ts": TS_TWO } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text
+    assert f"WARNING: there is no {TS_NAME} count table at HEAD or staged, so the {TS_NAME} counted scope was NOT checked" in text
+    assert f"{TS_NAME} counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table absent" in text
+
+
+def test_a_commit_with_no_ts_file_runs_no_extractor_and_still_prints_the_ts_denominator( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE }, { "src/a.ts": 1 } )
+    fake_extract.seen.clear()
+    _stage( ts_stamped, { "src/pkg/a.py": CLEAN, "notes.md": "x\n" } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and fake_extract.seen == [] and "no TypeScript" not in text
+    assert f"{TS_NAME} counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table ok" in text
+
+
+def test_a_ts_file_that_rises_above_its_entry_is_refused_with_the_count_and_the_findings( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE }, { "src/a.ts": 1 } )
+    _stage( ts_stamped, { "src/a.ts": TS_TWO } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3
+    assert "REFUSED src/a.ts: 2 findings, the count table allows 1 (+1); reword the text you added, or waive a finding on its own line with: doc-lint: waive <rule> -- <reason>" in text
+    assert "[doc-lint]   src/a.ts:1: caps: ALL-CAPS word NOT" in text and "[doc-lint]   src/a.ts:1: caps: ALL-CAPS word NEVER" in text
+    assert f"{TS_NAME} counted scope: 1 files checked, 0 at or below their count, 1 over, 0 waivers honoured, table ok" in text and "1 refusals, commit REFUSED" in text
+
+
+def test_a_ts_file_at_or_below_its_entry_is_allowed( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_TWO }, { "src/a.ts": 2 } )
+    _stage( ts_stamped, { "src/a.ts": TS_TWO + "export const y = 2;\n" } )                  # flat
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and f"{TS_NAME} counted scope: 1 files checked, 1 at or below their count, 0 over" in text
+    _stage( ts_stamped, { "src/a.ts": TS_CLEAN } )                                         # fell, the table not lowered
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_a_new_ts_file_starts_at_zero_and_a_javascript_file_is_counted_too( ts_stamped ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {} )
+    _stage( ts_stamped, { "src/new.js": TS_ONE } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/new.js: 1 findings, the count table allows 0 (+1)" in text and "rename" not in text
+    _git( ts_stamped, "reset", "-q", "--hard" )
+    _stage( ts_stamped, { "src/new.mjs": TS_CLEAN } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_a_renamed_ts_file_keeps_its_entry_and_a_rise_in_it_is_refused( ts_stamped ):
+    body = "".join( f"export const value_{i} = {i};\n" for i in range( 40 ) )
+    _ts_base( ts_stamped, { "src/old.ts": TS_TWO + body }, { "src/old.ts": 2 } )
+    _git( ts_stamped, "mv", "src/old.ts", "src/new.ts" )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "1 at or below their count" in text
+    _stage( ts_stamped, { "src/new.ts": _ts_block( "This is NOT fine and NEVER good and NOT again." ) + body } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/new.ts: 3 findings, the count table allows 2 (+1)" in text
+
+
+def test_a_waiver_lowers_a_ts_files_count_and_a_waiver_without_a_reason_does_not( ts_stamped ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {} )
+    _stage( ts_stamped, { "src/a.ts": "/** This is NOT fine. */ // doc-lint: waive caps -- quoted from the standard\n" } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and f"{TS_NAME} counted scope: 1 files checked, 1 at or below their count, 0 over, 1 waivers honoured" in text
+    _stage( ts_stamped, { "src/a.ts": "/** This is NOT fine. */ // doc-lint: waive caps\n" } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/a.ts: 1 findings, the count table allows 0" in text
+
+
+def test_the_extractor_is_given_only_the_staged_files_and_the_text_in_the_index_not_the_disk( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE, "src/b.ts": TS_ONE }, { "src/a.ts": 1, "src/b.ts": 1 } )
+    fake_extract.seen.clear()
+    _stage( ts_stamped, { "src/a.ts": TS_ONE + "export const staged = 1;\n" } )
+    ( ts_stamped / "src/a.ts" ).write_text( TS_TWO, encoding="utf-8" )                    # the disk copy is worse than the staged one
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text
+    assert fake_extract.seen == [ { "src/a.ts": TS_ONE + "export const staged = 1;\n" } ]
+
+
+def test_a_ts_file_that_is_not_utf8_counts_as_one_finding( ts_stamped ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {} )
+    _stage_bytes( ts_stamped, "src/a.ts", b"/** caf\xe9 */\n" )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/a.ts: 1 findings, the count table allows 0 (+1)" in text and "not-utf-8" in text
+
+
+def test_a_staged_ts_table_that_raises_an_entry_or_adds_one_is_refused( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE }, { "src/a.ts": 1 } )
+    _ts_table( ts_stamped, { "src/a.ts": 2 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED {TS_TABLE}: src/a.ts raised from 1 to 2; the table may only fall" in text
+    _ts_table( ts_stamped, { "src/a.ts": 1, "src/b.ts": 1 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED {TS_TABLE}: src/b.ts raised from 0 to 1; the table may only fall" in text
+
+
+def test_a_staged_ts_table_that_lowers_or_deletes_an_entry_is_the_allowance_for_the_commit( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_TWO, "src/b.ts": TS_ONE }, { "src/a.ts": 2, "src/b.ts": 1 } )
+    _stage( ts_stamped, { "src/a.ts": TS_ONE, "src/b.ts": TS_CLEAN } )
+    _ts_table( ts_stamped, { "src/a.ts": 1 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text and "2 at or below their count" in text
+    _stage( ts_stamped, { "src/a.ts": _ts_block( "This is NOT fine and NEVER good, again." ) } )    # two findings against the staged entry of one
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/a.ts: 2 findings, the count table allows 1 (+1)" in text
+
+
+def test_a_regenerated_ts_table_under_a_new_stamp_may_raise_only_when_it_equals_the_census( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE }, { "src/a.ts": 1 }, stamp="oldstamp" )
+    _stage( ts_stamped, { "src/a.ts": TS_TWO } )
+    _ts_table( ts_stamped, { "src/a.ts": 2 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text and "table regenerated" in text
+    _ts_table( ts_stamped, { "src/a.ts": 5 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED {TS_TABLE}: a regenerated table must equal a census of the staged tree under the current rules" in text
+    assert "[doc-lint]   src/a.ts: table 5, census 2" in text and "table stale" in text
+
+
+def test_a_ts_table_cut_under_other_rules_refuses_a_commit_that_stages_a_ts_file_and_names_the_command( ts_stamped ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {}, stamp="oldstamp" )
+    _stage( ts_stamped, { "src/a.ts": TS_CLEAN } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED: the {TS_NAME} count table was cut under other rules (stamp oldstamp, now " in text
+    assert 'regenerate it with: LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.ts_counts --repo-root "$PWD" --write and stage the table with the rule change' in text
+    _git( ts_stamped, "reset", "-q", "--hard" )
+    _stage( ts_stamped, { "notes.md": "x\n" } )                                            # no TS file staged
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text
+
+
+def test_a_malformed_staged_ts_table_is_refused_and_a_malformed_committed_one_refuses_unless_a_readable_one_is_staged( ts_stamped ):
+    _stage( ts_stamped, { "src/keep.ts": TS_CLEAN, TS_TABLE: "garbage" } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED {TS_TABLE}: the staged table is malformed: table is not JSON" in text
+    _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "bad table" )
+    _stage( ts_stamped, { "src/a.ts": TS_ONE } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"[doc-lint] REFUSED {TS_TABLE}: the {TS_NAME} count table at HEAD is malformed (table is not JSON" in text and "stage a regenerated one" in text
+    _ts_table( ts_stamped, { "src/a.ts": 1 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text and "table regenerated" in text
+
+
+def test_the_python_and_ts_tables_are_independent( ts_stamped ):
+    _base( ts_stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )          # a Python table, no TS table
+    _stage( ts_stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1)" in text and f"no {TS_NAME} count table" not in text
+    _git( ts_stamped, "reset", "-q", "--hard" )
+    _ts_table( ts_stamped, { "src/a.ts": 1 } )                                             # a TS table, the Python one untouched at HEAD
+    _stage( ts_stamped, { "src/a.ts": TS_ONE } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "table regenerated" in text
+
+
+def test_a_rule_file_that_differs_between_the_index_and_the_disk_refuses_a_commit_that_stages_a_ts_file( ts_stamped ):
+    rule = "src/cosa/repo/doc_lint/tsdoc_lint.py"
+    _git( ts_stamped, "add", "-f", rule )
+    _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "rules" )
+    ( ts_stamped / rule ).write_text( "weakened\n", encoding="utf-8" )                    # an unstaged edit to the comment linter
+    _stage( ts_stamped, { "src/a.ts": TS_CLEAN } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"rule file {rule} is not the same staged and in the working tree" in text and "table diverged" in text
+    assert f"{TS_NAME} counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table diverged" in text
+    _git( ts_stamped, "reset", "-q", "--hard" )
+    ( ts_stamped / rule ).write_text( "weakened\n", encoding="utf-8" )
+    _stage( ts_stamped, { "notes.md": "x\n" } )                                            # nothing judged is staged
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text
+
+
+def test_a_staged_ts_table_alone_is_judged_so_the_divergence_check_applies_to_it( ts_stamped ):
+    rule = "src/scripts/ts_doc_extract.mjs"
+    _git( ts_stamped, "add", "-f", rule )
+    _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "rules" )
+    ( ts_stamped / rule ).write_text( "weakened\n", encoding="utf-8" )
+    _ts_table( ts_stamped, {} )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"rule file {rule} is not the same staged and in the working tree" in text
+
+
+def test_a_crash_in_the_ts_counted_check_still_allows_the_commit_with_the_loud_line( ts_stamped, monkeypatch ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {} )
+    _stage( ts_stamped, { "src/a.ts": TS_ONE } )
+    def boom( root, texts ): raise RuntimeError( "extractor failed: node is gone" )
+    monkeypatch.setattr( ts_counts, "extract", boom )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "[doc-lint] GATE CRASHED, commit allowed: RuntimeError: extractor failed: node is gone" in text
+
+
+def test_staged_ts_counted_reads_paths_renames_and_the_table( ts_stamped ):
+    shared = "".join( f"export const value_{i} = {i};\n" for i in range( 40 ) )
+    _stage( ts_stamped, { "src/old name.ts": TS_CLEAN + shared, "src/skip.py": "x = 1\n" } )
+    _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    _git( ts_stamped, "mv", "src/old name.ts", "src/new name.ts" )
+    _stage( ts_stamped, { "src/b.js": TS_CLEAN, "node_modules/c.js": TS_CLEAN, TS_TABLE: "{}", "notes.md": "x\n" } )
+    paths, renamed, table_staged = gate.staged_ts_counted( str( ts_stamped ) )
+    assert paths == [ "src/b.js", "src/new name.ts" ] and renamed == { "src/new name.ts": "src/old name.ts" } and table_staged is True
+    with pytest.raises( RuntimeError, match="git diff --cached failed" ):
+        gate.staged_ts_counted( str( ts_stamped / "nope" ) )
+
+
+def test_staged_counted_still_lists_python_only_when_ts_files_are_staged( ts_stamped ):
+    _stage( ts_stamped, { "src/tests/t.py": CLEAN, "src/a.ts": TS_CLEAN, TS_TABLE: "{}" } )
+    assert gate.staged_counted( str( ts_stamped ) ) == ( [ "src/tests/t.py" ], {}, False )
+
+
+def test_head_ts_table_text_is_none_until_a_table_is_committed( ts_stamped ):
+    assert gate.head_table_text( str( ts_stamped ), TS_TABLE ) is None
+    _ts_base( ts_stamped, { "src/a.ts": TS_CLEAN }, { "src/a.ts": 1 } )
+    assert counts.parse_table( gate.head_table_text( str( ts_stamped ), TS_TABLE ) ).files == { "src/a.ts": 1 }
+    assert gate.head_table_text( str( ts_stamped ) ) is None                                # the Python table has its own default

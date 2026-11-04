@@ -38,7 +38,7 @@ LIVE PRECONDITIONS (must hold on the target server or the run fails by construct
   via `or None` — exactly where the guard's read_jsonl_trace_ids looks. So trace-parity has its
   instrument regardless. An earlier draft wrongly called this a precondition.)
 
-Design: src/rnd/v0.2.0/2026.08.14-cj-flow-v2-phases-2-3-and-evaluation.md (§1, §7, §9);
+Design: src/docs/decisions/2026.08.14-cj-flow-v2-go-no-go-and-phases-2-3.md;
 scope split: src/rnd/v0.2.0/2026.08.14-krishna-unit-f-wiring-scope.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.14-krishna-unit-f-wiring-scope.md
 """
 
@@ -62,10 +62,15 @@ BASE_URL  = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 _EMAIL    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
 _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
-# Utterances-per-command cap. Small default keeps an ad-hoc run cheap; the scheduled
-# submission tunes it up via the LUPIN_TEST_ env allowlist (e.g. LUPIN_TEST_V2_EVAL_LIMIT=60
-# for the pre-declared n=60/command sample). None = full corpus.
-_LIMIT_RAW = os.environ.get( "LUPIN_TEST_V2_EVAL_LIMIT", "20" )
+# Utterances-per-command cap. The default is the SHORT PROXY Rick ruled on 2026-10-05
+# (row 4cbd4858): 5 per command, so 5 commands x 5 x 2 passes = 50 asks inside the
+# integration suite. At 20 per command (200 asks) the file ran into its 15-minute cap:
+# measured that day at about 7.4 s per ask. The full sample is a separate scheduled
+# run, which raises the cap through the LUPIN_TEST_ env allowlist
+# (LUPIN_TEST_V2_EVAL_LIMIT=20, or 60 for the pre-declared n=60/command sample).
+# None = full corpus.
+PROXY_LIMIT_PER_COMMAND = "5"
+_LIMIT_RAW = os.environ.get( "LUPIN_TEST_V2_EVAL_LIMIT", PROXY_LIMIT_PER_COMMAND )
 _LIMIT     = None if _LIMIT_RAW.strip().lower() in ( "", "none", "all" ) else int( _LIMIT_RAW )
 
 
@@ -75,8 +80,34 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _clear_v2_store():
+    """
+    Empty v2's snapshot and synonym tables on the test database.
+
+    Nothing else in the tier empties them, so the cold pass would start on the last run's rows.
+    The primitive refuses a wrong config table or a non-measurement database before any statement.
+
+    Requires:
+        - the process engine points at lupin_db_test (the integration session fixture checks it)
+
+    Ensures:
+        - solution_snapshots and canonical_synonyms hold no rows afterwards
+        - returns the snapshot table's name, as the primitive does
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.rest.db import database as db_module
+    with db_module.engine.connect() as connection:
+        return ve.clean_v2_snapshot_store( connection, ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+
+
+@pytest.fixture
+def cold_v2_store():
+    """Start the test with an empty replay store, so its cold pass is cold."""
+    return _clear_v2_store()
+
+
 @pytest.mark.integration
-def test_v2_eval_two_pass_live():
+def test_v2_eval_two_pass_live( cold_v2_store ):
     """
     Run the two-pass v2-only eval against the live server and prove it is real.
 

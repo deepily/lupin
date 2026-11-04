@@ -37,6 +37,15 @@ from pathlib import Path
 
 # Python path configured by src/tests/conftest.py
 
+# Per-file wall-clock cap (row 4cbd4858): no integration file may run longer than
+# LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES (default 15). Imported by name so pytest picks the
+# three hooks up from this conftest, and so they apply to this directory only.
+from tests.helpers.file_budget import (   # noqa: E402,F401
+    pytest_runtest_makereport,
+    pytest_runtest_protocol,
+    pytest_runtest_setup,
+)
+
 # Test server configuration — defaults to the dedicated test container (port 8000).
 # Override via LUPIN_TEST_BASE_URL env var for custom setups or Docker-internal routing.
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
@@ -189,8 +198,8 @@ def clean_test_db():
     which points to lupin_db_test.
 
     Companion seed restoration:
-        After drop+recreate, immediately re-runs the same companion seed that
-        the test container runs at startup (src/scripts/seed_test_companions.py).
+        After the row-level cleanup, the companions are checked against the same
+        seed the test container runs at startup (src/scripts/seed_test_companions.py).
         This keeps service-account logins (e.g. PQW polling :8000) working
         across the whole `all`-suite run instead of failing 401 mid-suite the
         moment the first user-management test wipes the users table.
@@ -199,8 +208,9 @@ def clean_test_db():
         - Asserts engine.url contains 'lupin_db_test' before any destructive ops
         - Verifies users table contains exactly the companion rows after reset
           (anything else is a leftover from a prior test or seed regression)
-        - DROP/CREATE provides complete isolation between tests EXCEPT for the
-          companion seed, which is intentional shared infrastructure
+        - Row-level DELETE and TRUNCATE isolate the tests EXCEPT for the
+          companion seed, which is intentional shared infrastructure. No table
+          is dropped, so the grants on the test database survive every run
 
     Requires:
         - PostgreSQL Docker container running (lupin-postgres)
@@ -208,7 +218,8 @@ def clean_test_db():
         - lupin_db_dev populated with companion users (seed source)
 
     Ensures:
-        - Fresh database schema before each test
+        - Empty application tables before each test; the schema and its grants stay.
+          The one exception is job_history: pending jobs scheduled in the future are kept
         - Complete isolation between tests for application data
         - Companion users (interactive.job.tester@..., admin@..., etc.) always
           present at test entry
@@ -230,13 +241,15 @@ def clean_test_db():
     from seed_test_companions import COMPANION_EMAILS
 
     # Row-level DELETE: wipe test-generated rows, companions survive via is_protected
+    from tests.helpers.job_history_cleanup import clean_job_history
     with engine.begin() as conn:
         conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
-            "job_history, proxy_decisions, trust_states, "
+            "proxy_decisions, trust_states, "
             "task_items, task_events, task_promotion_tickets, fcm_tokens, refresh_tokens"
         ) )
+        clean_job_history( conn )   # keeps pending jobs scheduled in the future (row a80630a4)
 
     with engine.connect() as conn:
         count    = conn.execute( text( "SELECT count(*) FROM users WHERE is_protected" ) ).scalar()
@@ -706,3 +719,28 @@ def server_embedder():
         return resp.json()[ "embeddings" ][ 0 ]
 
     return embed
+
+
+@pytest.fixture( scope="function" )
+def seeded_task_rows( clean_test_db ):
+    """
+    Live `queued` task rows inserted straight into lupin_db_test, removed after the test.
+
+    The create door files at `not_approved` and only an approver may admit a row, so tests that
+    need a row to park or go stale take it from here instead. The guard in
+    tests/integration/seeded_task_rows.py refuses any database not named lupin_db_test.
+
+    Requires:
+        - the in-process engine is bound to lupin_db_test (clean_test_db has asserted it)
+
+    Ensures:
+        - yields a SeededRows; every row it created is deleted on teardown, also when the test fails
+    """
+    from cosa.rest.db import database as db_module
+    from tests.integration.seeded_task_rows import SeededRows
+
+    rows = SeededRows( db_module.engine.url, db_module.get_db )
+    try:
+        yield rows
+    finally:
+        rows.delete_all()

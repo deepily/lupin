@@ -59,16 +59,28 @@ pfv_manifest_field() {
 # Ensures:
 #   - prints the field with NO trailing newline
 #   - returns 2 and prints nothing when the row has fewer than $3 fields
+#   - returns 3 and prints nothing to stdout when awk or cut itself fails; stderr
+#     names the tool and its exit status. A failed tool is not a short row, and
+#     reading it as one dropped a contract row without a word (row 5c1413eb)
 #   - the arity floor is a PARAMETER, not a constant, so the manifest (5 columns)
 #     and the env contract (6 columns) share one implementation and cannot drift
 #     into two subtly different parsers — which is the very defect class this
 #     whole body of work exists to remove
 pfv_row_field() {
     local row="$1" idx="$2" min="$3"
-    local n
-    n="$( printf '%s' "$row" | awk -F'\t' '{ print NF }' )"
+    local n field rc
+    n="$( printf '%s' "$row" | awk -F'\t' '{ print NF }' )"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "pfv_row_field: awk failed (exit $rc) counting the fields of: $row" >&2
+        return 3
+    fi
     [ "$n" -ge "$min" ] 2>/dev/null || return 2
-    printf '%s' "$( printf '%s' "$row" | cut -d"$( printf '\t' )" -f"$idx" )"
+    field="$( printf '%s' "$row" | cut -d"$( printf '\t' )" -f"$idx" )"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "pfv_row_field: cut failed (exit $rc) reading field $idx of: $row" >&2
+        return 3
+    fi
+    printf '%s' "$field"
 }
 
 # ── pfv_contract_field ───────────────────────────────────────────────────────
@@ -167,14 +179,19 @@ pfv_req_effective() {
 #     deliberately distinguished from the unreadable case above
 #   - malformed rows (fewer than 6 fields) are SKIPPED, not guessed at; the
 #     contract's own well-formedness is check A1's assertion, not this one's
+#   - returns 1 when awk or cut fails on a row, with the cause on stderr; the
+#     names printed before the failure are not a complete set and must be
+#     discarded. A tool failure is never read as a malformed row
 pfv_contract_push_env_names() {
-    local contract="$1" row name surface writer
+    local contract="$1" row name surface writer rc
     [ -r "$contract" ] || return 1
     while IFS= read -r row; do
         [ -n "$row" ] || continue
-        name="$( pfv_contract_field "$row" 1 )" || continue
-        surface="$( pfv_contract_field "$row" 2 )"
-        writer="$(  pfv_contract_field "$row" 3 )"
+        name="$( pfv_contract_field "$row" 1 )"; rc=$?
+        [ "$rc" -eq 2 ] && continue
+        [ "$rc" -eq 0 ] || return 1
+        surface="$( pfv_contract_field "$row" 2 )" || return 1
+        writer="$(  pfv_contract_field "$row" 3 )" || return 1
         case "$surface" in HOST|BOTH) ;; *) continue ;; esac
         case "$writer"  in *push-env*) ;; *) continue ;; esac
         printf '%s\n' "$name"
@@ -988,6 +1005,45 @@ pfv_deployed_ref_status() {
     echo "STALE"; return 1
 }
 
+# ── pfv_dist_present ─────────────────────────────────────────────────────────
+# List the bundles that hold a manifest.json under a dist folder.
+#
+# Requires:
+#   - $1 = the dist folder; $2 = space-separated bundle names to look for
+# Ensures:
+#   - echoes the names whose <dist>/<name>/manifest.json is a regular file, space-separated, in the order given
+#   - a folder with no manifest.json is NOT present: an empty folder serves nothing
+pfv_dist_present() {
+    local dist="$1" name out=""
+    for name in $2; do
+        [ -f "$dist/$name/manifest.json" ] && out="$out $name"
+    done
+    echo "${out# }"
+}
+
+# ── pfv_dist_status ──────────────────────────────────────────────────────────
+# Classify the built esbuild bundles on the VM checkout (bug 527fec6e).
+#
+# The compose file bind-mounts the VM checkout's ./src over the image's, so the bundles baked into the image
+# are hidden and static/dist/ (gitignored) must be on the checkout. A page whose bundle is absent still loads;
+# its script 404s and the feature it carries (the doc viewer's podcast button) silently never appears.
+#
+# Requires:
+#   - $1 = space-separated bundle names that are required
+#   - $2 = space-separated names of the bundle folders on the checkout that hold a manifest.json ("" for none)
+# Ensures:
+#   - echoes OK and returns 0 when every required name is present
+#   - otherwise echoes MISSING: followed by the absent names, in the order required, and returns 1
+#   - pure: both facts are passed in, so the classification is tested without a VM
+pfv_dist_status() {
+    local required="$1" present=" $2 " name missing=""
+    for name in $required; do
+        case "$present" in *" $name "*) ;; *) missing="$missing $name" ;; esac
+    done
+    [ -z "$missing" ] && { echo "OK"; return 0; }
+    echo "MISSING:${missing}"; return 1
+}
+
 # ── pfv_environ_lookup ───────────────────────────────────────────────────────
 # Read ONE variable out of a container's real process environment.
 #
@@ -1086,4 +1142,311 @@ pfv_env_file_supplies() {
     esac
     [ -n "$value" ] || return 1
     return 0
+}
+
+# ── pfv_heartbeat_settings_status ────────────────────────────────────────────
+# Row 31344c5f (2026-09-30). The Stop-hook poke is OFF unless settings.json carries a
+# `heartbeat` block: the loader's default is enabled=False (heartbeat_settings.py),
+# so a VM with no block drops every poke silently — measured on lupin-host-test.
+#
+# Requires:
+#   - $1 = path to the CC user's settings.json
+#   - python3 on PATH
+# Ensures:
+#   - prints OK and returns 0 when heartbeat.enabled, heartbeat.owed_source_from_store
+#     and task_store.enabled are all literally true
+#   - otherwise prints the missing/false keys, comma-separated, and returns 1
+#   - prints UNREADABLE (return 2) for a missing file, UNPARSEABLE (return 3) for bad JSON
+pfv_heartbeat_settings_status() {
+    local file="$1"
+    [ -r "$file" ] || { printf 'UNREADABLE'; return 2; }
+    python3 - "$file" <<'PY'
+import sys, json
+try:
+    d = json.load( open( sys.argv[1] ) )
+except Exception:
+    print( "UNPARSEABLE", end="" ); raise SystemExit( 3 )
+hb = d.get( "heartbeat" ) if isinstance( d, dict ) else None
+ts = d.get( "task_store" ) if isinstance( d, dict ) else None
+hb = hb if isinstance( hb, dict ) else {}
+ts = ts if isinstance( ts, dict ) else {}
+want = [
+    ( "heartbeat.enabled",                hb.get( "enabled" ) ),
+    ( "heartbeat.owed_source_from_store", hb.get( "owed_source_from_store" ) ),
+    ( "task_store.enabled",               ts.get( "enabled" ) ),
+]
+bad = [ k for k, v in want if v is not True ]
+if bad:
+    print( ",".join( bad ), end="" ); raise SystemExit( 1 )
+print( "OK", end="" )
+PY
+}
+
+# ── pfv_flow_ratio_status ────────────────────────────────────────────────────
+# The test host's closed-vs-new ratio gate values, as RULED 2026-09-30 ~19:58 EDT (row 08691779,
+# Mr. Radio's call, Rick delegated it): window 24h, allow_below 2.0. A near-empty store needs the
+# headroom. They live here, once, so the check and its tests read one pair.
+PFV_FLOW_RATIO_WINDOW_HOURS=24
+PFV_FLOW_RATIO_ALLOW_BELOW=2.0
+
+# Requires:
+#   - $1 = the text of flow-ratio-settings.json
+#   - python3 on PATH
+# Ensures:
+#   - prints OK and returns 0 only when window_hours == 24 and allow_below == 2.0 (numbers, never
+#     booleans or strings)
+#   - otherwise prints what it found ("window_hours=120, allow_below=1.1"; an absent key reads
+#     as "absent") and returns 1
+#   - prints UNPARSEABLE (return 3) for text that is not a JSON object
+pfv_flow_ratio_status() {
+    python3 - "$1" "$PFV_FLOW_RATIO_WINDOW_HOURS" "$PFV_FLOW_RATIO_ALLOW_BELOW" <<'PY'
+import sys, json
+try:
+    d = json.loads( sys.argv[1] )
+except Exception:
+    d = None
+if not isinstance( d, dict ):
+    print( "UNPARSEABLE", end="" ); raise SystemExit( 3 )
+want = { "window_hours": float( sys.argv[2] ), "allow_below": float( sys.argv[3] ) }
+def num( v ):
+    return float( v ) if isinstance( v, ( int, float ) ) and not isinstance( v, bool ) else None
+found = { k: d.get( k, "absent" ) for k in want }
+if all( num( found[ k ] ) == want[ k ] for k in want ):
+    print( "OK", end="" ); raise SystemExit( 0 )
+print( ", ".join( f"{k}={found[ k ]}" for k in want ), end="" ); raise SystemExit( 1 )
+PY
+}
+
+# ── pfv_roster_project_key ───────────────────────────────────────────────────
+# Requires: $1 = a repo directory name (e.g. weil-nda-drafting-suite)
+# Ensures:  prints the roster key suffix: upper-case, every non-alphanumeric run -> _
+#           (WEIL_NDA_DRAFTING_SUITE), matching fleet-roster.env.template's spelling
+pfv_roster_project_key() {
+    printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | sed -E 's/[^A-Z0-9]+/_/g'
+}
+
+# ── pfv_roster_declares ──────────────────────────────────────────────────────
+# Requires: $1 = fleet-roster.env path, $2 = key suffix, or "" to ask "any manager line?"
+# Ensures:
+#   - returns 0 when an uncommented COSA_VOICE_MANAGERS__<suffix>= line has a non-empty value
+#     (with $2 empty: when ANY COSA_VOICE_MANAGERS__* line does)
+#   - returns 1 when none does; 3 when the file is missing/unreadable
+pfv_roster_declares() {
+    local file="$1" key="$2" pat
+    [ -r "$file" ] || return 3
+    if [ -n "$key" ]; then pat="^[[:space:]]*(export[[:space:]]+)?COSA_VOICE_MANAGERS__${key}=[\"']?[^\"'[:space:]]"
+    else                   pat="^[[:space:]]*(export[[:space:]]+)?COSA_VOICE_MANAGERS__[A-Z0-9_]+=[\"']?[^\"'[:space:]]"
+    fi
+    grep -Eq "$pat" "$file"
+}
+
+# ── pfv_cc_project_dirname ───────────────────────────────────────────────────
+# Requires: $1 = an absolute host path
+# Ensures:  prints the directory name Claude Code uses under ~/.claude/projects for a
+#           session run in that path (every non-alphanumeric char -> '-'). Lets the
+#           preflight DERIVE "projects actually worked on this VM" from live state.
+pfv_cc_project_dirname() {
+    printf '%s' "$1" | sed -E 's/[^A-Za-z0-9]/-/g'
+}
+
+# ── pfv_mcp_registration_env ──────────────────────────────────
+# Read one environment variable out of every registration of an MCP server in one file.
+#
+# The cosa-voice server reads the worker-model setting through LUPIN_CONFIG_MGR_CLI_ARGS.
+# A registration without it spawns every worker on the user's default model, and nothing
+# reports it (row c9252819). The container's own copy of that variable is a different
+# surface and is checked elsewhere.
+#
+# One file can register a server more than once: ~/.claude.json holds the user-scope
+# entry at the top level and a local-scope entry under projects.<path>, and a project's
+# .mcp.json has the same top-level shape. Every entry found is reported, because a session
+# started in a project directory may run the local one.
+#
+# Requires:
+#   - $1 = path to a Claude Code config (~/.claude.json or a project .mcp.json)
+#   - $2 = MCP server name, $3 = environment variable name
+#   - $4 = optional name for the file's top-level entry, default "user". A project
+#     .mcp.json has the same shape and its top-level entry is project scope
+# Ensures:
+#   - returns 0 when every registration of the server carries the variable as a usable
+#     string, and prints one line per registration: scope, a tab, the value, unchanged.
+#     Scope is the top-level name or "local:<path>". The caller judges each value
+#   - returns 1 and prints one scope per line for each registration where the variable
+#     is absent, empty, not a string, or holds whitespace other than single spaces
+#     between words. The settings reader splits the value on single spaces only, so a
+#     tab or a doubled space gives it a word it cannot use; such a line ends with
+#     " (value has whitespace other than single spaces)"
+#   - returns 2 when the file does not exist or registers the server nowhere
+#   - returns 3 when the file is not a JSON object, or a registration is not an object
+#   - returns 4 when the file exists and cannot be read, or the reader itself fails
+#     (the cause goes to stderr). Only 2 means "nothing to check"
+pfv_mcp_registration_env() {
+    local file="$1" server="$2" name="$3" top="${4:-user}"
+    [ -e "$file" ] || return 2
+    [ -r "$file" ] || return 4
+    python3 - "$file" "$server" "$name" "$top" <<'PFV_PY'
+import json, sys
+path, server, name, top = sys.argv[ 1 ], sys.argv[ 2 ], sys.argv[ 3 ], sys.argv[ 4 ]
+try:
+    try:
+        with open( path, encoding="utf-8" ) as f: doc = json.load( f )
+    except OSError:
+        sys.exit( 4 )
+    except ValueError:
+        sys.exit( 3 )
+    if not isinstance( doc, dict ): sys.exit( 3 )
+    found   = []
+    servers = doc.get( "mcpServers" )
+    if isinstance( servers, dict ) and server in servers:
+        found.append( ( top, servers[ server ] ) )
+    projects = doc.get( "projects" )
+    if isinstance( projects, dict ):
+        for project in sorted( projects ):
+            settings = projects[ project ]
+            local    = settings.get( "mcpServers" ) if isinstance( settings, dict ) else None
+            if isinstance( local, dict ) and server in local:
+                found.append( ( "local:" + project, local[ server ] ) )
+    if not found: sys.exit( 2 )
+    lacking, carried = [], []
+    for scope, entry in found:
+        if not isinstance( entry, dict ): sys.exit( 3 )
+        env   = entry.get( "env" )
+        value = env.get( name ) if isinstance( env, dict ) else None
+        if not isinstance( value, str ) or not value.strip(): lacking.append( scope )
+        elif value != " ".join( value.split() ): lacking.append( scope + " (value has whitespace other than single spaces)" )
+        else: carried.append( scope + "\t" + value )
+    if lacking:
+        sys.stdout.write( "\n".join( lacking ) )
+        sys.exit( 1 )
+    sys.stdout.write( "\n".join( carried ) )
+except Exception as e:
+    sys.stderr.write( "pfv_mcp_registration_env: reader failed: %r\n" % ( e, ) )
+    sys.exit( 4 )
+PFV_PY
+}
+
+# ── pfv_config_mgr_args_resolve ───────────────────────────────
+# Does a LUPIN_CONFIG_MGR_CLI_ARGS value name two settings files and a block that exist?
+#
+# A value that is present but names nothing fails the same way as an absent one: the
+# server cannot build its settings reader, and a spawned worker gets no model. The reader
+# needs all three words: it reads config_path and splainer_path, and looks the block up.
+#
+# Requires:
+#   - $1 = the value (space-separated key=value words)
+#   - $2 = the repo root that a path starting /src/ is joined to
+# Ensures:
+#   - returns 0 when config_path and splainer_path each name a readable file under the
+#     root and the config file has a section header for config_block_id ("+" in the id
+#     stands for a space). A header is matched as a whole line that starts in the first
+#     column, ignoring trailing spaces, tabs and a carriage return. The settings reader
+#     reads an indented line as the continuation of the option above it, not as a
+#     header, so an indented header does not count. It would also accept text after
+#     the closing bracket; this check does not, and so refuses a file that reader
+#     takes. The character list is spelled out because the VM's awk may not know
+#     [[:space:]]
+#   - returns 1 and prints the reason otherwise
+pfv_config_mgr_args_resolve() {
+    local value="$1" root="$2" word config_path="" splainer_path="" block=""
+    local -a words
+    read -r -a words <<< "$value"
+    for word in "${words[@]}"; do
+        case "$word" in
+            config_path=*)     config_path="${word#config_path=}" ;;
+            splainer_path=*)   splainer_path="${word#splainer_path=}" ;;
+            config_block_id=*) block="${word#config_block_id=}" ;;
+        esac
+    done
+    [ -n "$config_path" ]   || { printf 'no config_path= in the value'; return 1; }
+    [ -n "$splainer_path" ] || { printf 'no splainer_path= in the value'; return 1; }
+    [ -n "$block" ]         || { printf 'no config_block_id= in the value'; return 1; }
+    [ -f "$root$config_path" ] && [ -r "$root$config_path" ] \
+        || { printf 'config_path %s is not a readable file under %s' "$config_path" "$root"; return 1; }
+    [ -f "$root$splainer_path" ] && [ -r "$root$splainer_path" ] \
+        || { printf 'splainer_path %s is not a readable file under %s' "$splainer_path" "$root"; return 1; }
+    PFV_HEADER="[${block//+/ }]" awk '
+        { sub( /[ \t\r]+$/, "" ); if ( $0 == ENVIRON[ "PFV_HEADER" ] ) found = 1 }
+        END { exit !found }' "$root$config_path" \
+        || { printf 'no [%s] block in %s' "${block//+/ }" "$config_path"; return 1; }
+}
+
+# ── pfv_git_hook_status ─────────────────────────────────────────────────────
+# Say whether one git hook is a link to the script the repo ships for it.
+#   pfv_git_hook_status <hooks_dir> <hook_name> <script_path> [<checkout_root>]
+# Prints one word and returns: MATCH 0 · NO_SCRIPT 2 (the checkout has no such script, so it
+# predates the hook) · ABSENT 3 · NOT_LINK 4 (a file someone copied; it goes stale on the next
+# update) · WRONG_TARGET 5 (prints the word, a tab, and where the link lands) · DANGLING 6 (a link
+# whose target does not exist, or loops; prints the word, a tab, and where it points) · OUTSIDE 7
+# (a link to a different file that lies outside the checkout; prints the word, a tab, where it lands;
+# only when checkout_root is given) · NOT_EXECUTABLE 8 (the right link, but the script has no
+# executable bit, so git skips the hook with a warning).
+# The hook is compared by where it lands, so a relative and an absolute link both pass.
+pfv_git_hook_status() {
+    local hooks_dir="$1" hook="$2" script="$3" root="${4:-}"
+    local path="$hooks_dir/$hook" lands wants
+    [ -f "$script" ] || { echo "NO_SCRIPT"; return 2; }
+    if [ ! -e "$path" ] && [ ! -L "$path" ]; then echo "ABSENT"; return 3; fi
+    [ -L "$path" ] || { echo "NOT_LINK"; return 4; }
+    if [ ! -e "$path" ]; then
+        printf 'DANGLING\t%s\n' "$( readlink -m "$path" 2>/dev/null || readlink "$path" )"; return 6
+    fi
+    lands="$( readlink -f "$path" 2>/dev/null || printf '' )"
+    wants="$( readlink -f "$script" )"
+    if [ "$lands" = "$wants" ]; then
+        [ -x "$wants" ] || { echo "NOT_EXECUTABLE"; return 8; }
+        echo "MATCH"; return 0
+    fi
+    if [ -n "$root" ]; then
+        case "$lands/" in
+            "$( readlink -f "$root" )"/*) ;;
+            *) printf 'OUTSIDE\t%s\n' "$lands"; return 7 ;;
+        esac
+    fi
+    printf 'WRONG_TARGET\t%s\n' "${lands:-nowhere}"; return 5
+}
+
+# ── pfv_compose_service ─────────────────────────────────────────────────────
+# Name the compose SERVICE whose container_name is the given container.
+#   pfv_compose_service <compose_file> <container_name>
+# Prints the service name and returns 0; prints nothing and returns 1 when no service
+# sets that container_name (or the file cannot be read). `docker compose ... up` wants the
+# service name, not the container name, so a remedy line must never print the container.
+pfv_compose_service() {
+    local file="$1" container="$2" found
+    [ -r "$file" ] || return 1
+    found="$( awk -v want="$container" '
+        /^services:/                          { in_services = 1; next }
+        in_services && /^[^ #]/               { in_services = 0 }
+        in_services && /^  [A-Za-z0-9_.-]+:[ ]*(#.*)?$/ { service = $1; sub(/:$/, "", service); next }
+        in_services && /^    container_name:/ {
+            value = $2; gsub(/["\047]/, "", value)
+            if ( value == want ) { print service; exit }
+        }' "$file" )"
+    [ -n "$found" ] || return 1
+    printf '%s\n' "$found"
+}
+
+# ── pfv_test_login_env_status ────────────────────────────────────────────────
+# Does the VM's env file supply the test role's password?
+#
+# The VM has no secrets directory. The test role's password reaches the container as
+# LUPIN_TEST_DB_PASSWORD, from the Secret Manager secret lupin-db-test-password, through the
+# env file. An empty or absent value is plain mode: tests that create databases then run as
+# DB_USER. This cannot say whether the secret exists in Secret Manager: the VM has no gcloud
+# call here, so the env file is the only witness.
+#
+# Requires:  $1 = path to the env file
+# Ensures:
+#   - prints SUPPLIED and returns 0 when the file holds a non-empty LUPIN_TEST_DB_PASSWORD
+#   - prints PLAIN and returns 1 when the key is absent or empty
+#   - prints UNREADABLE and returns 3 when the file cannot be read
+#   - never prints the value
+pfv_test_login_env_status() {
+    local rc=0
+    pfv_env_file_supplies "$1" LUPIN_TEST_DB_PASSWORD || rc=$?
+    case "$rc" in
+        0) printf 'SUPPLIED'; return 0 ;;
+        1|2) printf 'PLAIN'; return 1 ;;
+        *) printf 'UNREADABLE'; return 3 ;;
+    esac
 }

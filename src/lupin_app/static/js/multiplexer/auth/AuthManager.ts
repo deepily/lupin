@@ -26,11 +26,22 @@ import type {
 // tested in Node where `navigator.locks` is unavailable.
 // ---------------------------------------------------------------------------
 
+/**
+ * A named lock.
+ *
+ * `request( name, callback )` runs the callback once no other holder of that name is running.
+ */
 export interface LockManager {
   request<T>(name: string, callback: () => Promise<T>): Promise<T>;
 }
 
+/**
+ * Lock manager backed by the browser's navigator.locks, shared across tabs.
+ */
 class NavigatorLockManager implements LockManager {
+  /**
+   * Runs the callback under an exclusive navigator.locks lock of the given name.
+   */
   /* c8 ignore start */
   // Browser-only by design — wraps `navigator.locks` which is a Web API
   // unavailable in Node. Tests use ChainMutexLockManager instead.
@@ -42,14 +53,24 @@ class NavigatorLockManager implements LockManager {
 
 // Simple promise-chain mutex; works in Node and browser. Exported for tests
 // (and as a fallback if `navigator.locks` is somehow unavailable).
+/**
+ * A lock manager for places without `navigator.locks`, such as tests.
+ *
+ * Callbacks of one name run one at a time in request order, within this page only. It does not lock across tabs.
+ */
 export class ChainMutexLockManager implements LockManager {
   private readonly tails = new Map<string, Promise<unknown>>();
 
+  /**
+   * Queues the callback behind earlier ones of the same name, then runs it.
+   *
+   * Returns the callback's result and releases the lock even if it throws.
+   */
   async request<T>(name: string, callback: () => Promise<T>): Promise<T> {
     const prev = this.tails.get(name) ?? Promise.resolve();
-    /* c8 ignore next 3 */
     // TS "definitely assigned" placeholder — the Promise constructor below
     // synchronously overwrites `release` before any caller can reach this body.
+    /* c8 ignore next */
     let release: () => void = () => { /* unreachable */ };
     const next = new Promise<void>((res) => {
       release = res;
@@ -143,6 +164,12 @@ const authMachine = setup({
 // AuthManager
 // ---------------------------------------------------------------------------
 
+/**
+ * Holds the access token and refreshes it on demand.
+ *
+ * `getToken()` returns the cached token while it is valid. Otherwise it refreshes under a lock, so concurrent callers share one refresh.
+ * `invalidate()` marks the token expired. The user's email, roles and id are read from the access-token claims, as hints only.
+ */
 export interface AuthManager {
   getToken(): Promise<Token>;
   invalidate(): void;
@@ -160,6 +187,12 @@ export interface AuthManager {
   readonly state: AuthState;
 }
 
+/**
+ * What the manager is built from.
+ *
+ * The refresh is posted to `refreshUrl`. A token counts as expired `expiryBufferMs` early, 30 seconds by default.
+ * `supersedeGraceMs`, 1 second by default, is how long to wait for another tab's replacement refresh token after a 401.
+ */
 export interface AuthManagerOptions {
   refreshUrl       : string;             // e.g. "/auth/refresh"
   defaultTimeoutMs : number;             // 10_000 default in production
@@ -183,9 +216,25 @@ const LOCK_NAME = "lupin-token-refresh";
 // of a copy that drifts. The server answers 401 for an invalid, expired or
 // revoked refresh token (cosa/rest/routers/auth.py `refresh`); a timeout, a
 // network error or a 5xx is transient and must not log anyone out.
+/**
+ * The refresh-failure message when no refresh token is stored.
+ *
+ * `authGuard` matches on it to recognise a dead session.
+ */
 export const REFRESH_MISSING_ERROR  = "no refresh token available";
+/**
+ * The refresh-failure message when the server answers the refresh with 401.
+ *
+ * `authGuard` matches on it to recognise a dead session.
+ */
 export const REFRESH_REJECTED_ERROR = "refresh failed: HTTP 401";
 
+/**
+ * The `AuthManager` behind `createAuthManager`.
+ *
+ * At construction it takes a stored, unexpired token without refreshing. It reports changes on the bus as `auth_state_change` and `refresh_*` events.
+ * A 401 on refresh is retried once with the token another tab has stored in its place.
+ */
 export class AuthManagerImpl implements AuthManager {
   private readonly refreshUrl       : string;
   private readonly defaultTimeoutMs : number;
@@ -199,6 +248,11 @@ export class AuthManagerImpl implements AuthManager {
   // The refresh token the current attempt last posted; reported on refresh_failed.
   private lastSentRefresh           : string | null = null;
 
+  /**
+   * Builds the auth manager from its options and starts the auth state machine.
+   *
+   * Publishes state changes on the event bus. If a valid token is stored, it moves straight to the ready state.
+   */
   constructor(opts: AuthManagerOptions) {
     this.refreshUrl       = opts.refreshUrl;
     this.defaultTimeoutMs = opts.defaultTimeoutMs;
@@ -230,38 +284,63 @@ export class AuthManagerImpl implements AuthManager {
     }
   }
 
+  /**
+   * Exposes the current auth state from the state machine.
+   */
   get state(): AuthState {
     return this.actor.getSnapshot().value as AuthState;
   }
 
+  /**
+   * Tells the state machine the current token is no longer good.
+   *
+   * A refresh happens on next use.
+   */
   invalidate(): void {
     this.actor.send({ type: "INVALIDATE" });
   }
 
+  /**
+   * Returns the email claim of the current access token, or null when there is no token.
+   *
+   * Falls back to the stored token when none is in memory.
+   */
   getCurrentUserEmail(): string | null {
     // Prefer the in-memory token; fall back to the stored access token. The
     // email claim is stable across refresh, so an expired-but-present token
     // still yields the correct address — usable before hydration completes.
-    const accessToken =
-      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    const accessToken = this.currentAccessToken();
     if (accessToken === null) return null;
     return jwtEmail(accessToken);
   }
 
+  /**
+   * Returns true when the current access token carries the admin role.
+   *
+   * Returns false when there is no token.
+   */
   isCurrentUserAdmin(): boolean {
     // Same token source as getCurrentUserEmail: roles are stable across refresh.
-    const accessToken =
-      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    const accessToken = this.currentAccessToken();
     if (accessToken === null) return false;
     return jwtRoles(accessToken).includes("admin");
   }
 
+  /**
+   * Returns the subject claim of the current access token, or null when there is no token.
+   */
   getCurrentUserId(): string | null {
     // Same token source as getCurrentUserEmail: the sub claim is stable across refresh.
-    const accessToken =
-      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    const accessToken = this.currentAccessToken();
     if (accessToken === null) return null;
     return jwtSub(accessToken);
+  }
+
+  /**
+   * The access token the claim readers decode: the in-memory one, else the stored one.
+   */
+  private currentAccessToken(): string | null {
+    return this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
   }
 
   // Reconstruct a Token from the canonical raw token strings, deriving expiry
@@ -276,6 +355,11 @@ export class AuthManagerImpl implements AuthManager {
     return { accessToken, refreshToken, expiresAt };
   }
 
+  /**
+   * Returns a valid token, refreshing under a lock when it is missing or near expiry.
+   *
+   * Concurrent callers share one refresh.
+   */
   async getToken(): Promise<Token> {
     // Hot path: snapshot the in-memory token; if still valid, return without
     // any lock or fetch.
@@ -412,6 +496,11 @@ export class AuthManagerImpl implements AuthManager {
 // both the production storage + bus singletons. No top-level export — boot
 // owns the lifecycle.
 
+/**
+ * Build an auth manager.
+ *
+ * There is no module-level instance. Boot creates one and owns it.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAuthManager(opts: AuthManagerOptions): AuthManager {
   return new AuthManagerImpl(opts);
@@ -419,6 +508,11 @@ export function createAuthManager(opts: AuthManagerOptions): AuthManager {
 
 // Re-export types consumed by tests / boot.
 export type { Token };
+/**
+ * The four event types the manager emits on the bus.
+ *
+ * `auth_state_change` fires each time the state machine moves. The three `refresh_*` events fire around one refresh attempt.
+ */
 export type AuthEvent =
   | LupinEvent<AuthStateChangePayload>
   | LupinEvent<RefreshStartedPayload>

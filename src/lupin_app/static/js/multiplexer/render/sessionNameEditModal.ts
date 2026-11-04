@@ -12,6 +12,11 @@
 
 import { html } from "./html";
 
+/**
+ * What the rename modal is built from.
+ *
+ * `currentName` prefills the input. `onSave` receives the trimmed new name.
+ */
 export interface SessionNameEditModalOptions {
   doc         : Document;
   currentName : string;

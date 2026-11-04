@@ -35,7 +35,7 @@ DEMOTE   = approval.MOVE_DEMOTE
 
 
 class _RecordingSession:
-    def __init__( self ):  self.added = [ ]
+    def __init__( self ):  self.added = [ ]; self.info = { }   # a real Session always has .info; the change notifier parks events there
     def add( self, obj ):  self.added.append( obj )
     def flush( self ):     pass
 

@@ -7,7 +7,7 @@ to PostgreSQL lupin_auth database.
 
 Features:
 - Migrates users, active refresh tokens, API keys, recent audit logs
-- Type conversions (INTEGER→BOOLEAN, TEXT→UUID, JSON→JSONB, etc.)
+- Type conversions (`INTEGER` to `BOOLEAN`, `TEXT` to `UUID`, `JSON` to `JSONB`, etc.)
 - Foreign key validation
 - Transaction support (all-or-nothing)
 - Dry-run mode for preview

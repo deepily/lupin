@@ -1,29 +1,33 @@
 """
 Repo-owned `.docview.yml` manifest parser for the unified scope registry.
 
-Per Q2-C of the doc-viewer scope unification design, each registered repo
-MAY ship a `.docview.yml` at its root declaring what the doc viewer is
-allowed to serve under its scope. Missing manifest = wildcard access
-(subject to the universal floor blocklist in `_scope_registry.py`).
+Each registered repo may ship a `.docview.yml` at its root declaring what
+the doc viewer is allowed to serve under its scope.
+A missing manifest means wildcard access, subject to the universal floor
+blocklist in `_scope_registry.py`.
 
 Schema (version 1):
 
     version           : 1
-    allowed_prefixes  : [ src/, docs/, ... ]      # path prefixes within scope root
-    allowed_root_files: [ README.md, CHANGELOG.md, ... ]   # exact filenames at root
-    extra_blocklist   : [ "regex1", "regex2" ]    # ADDITIONS to universal floor
-                                                  # (cannot WEAKEN floor per Q4-B)
+    allowed_prefixes  : [ src/, docs/, ... ]
+    allowed_root_files: [ README.md, CHANGELOG.md, ... ]
+    extra_blocklist   : [ "regex1", "regex2" ]
+
+The `allowed_prefixes` entries are path prefixes within the scope root.
+The `allowed_root_files` entries are exact filenames at the root.
+The `extra_blocklist` entries are additions to the universal floor and
+cannot weaken the floor.
 
 Strict mode (`ConfigDict(extra="forbid")`): any unknown field is rejected at
 parse time. This catches malicious or careless manifests trying to declare
-e.g. `remove_from_blocklist` (which is intentionally absent — per Q4-B
-repos cannot weaken the floor).
+e.g. `remove_from_blocklist`. That field is left out so that repos
+cannot weaken the floor.
 
-File-size cap: callers MUST enforce a ≤64 KB cap on the raw YAML BEFORE
-invoking `yaml.safe_load`. Oversized manifests are treated as absent
-(wildcard fallback) with a WARN log. See AC3.5.
+File-size cap: callers must enforce a cap of 64 KB or less on the raw YAML
+before invoking `yaml.safe_load`. Oversized manifests are treated as absent
+(wildcard fallback) with a `WARN` log.
 
-Design anchor: `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` §5.3 + §7 Phase 3.
+Design anchor: `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` §5.3 + §7.
 """
 
 from __future__ import annotations
@@ -44,7 +48,7 @@ class DocviewManifest( BaseModel ):
     """
     Pydantic model for `.docview.yml` repo manifest.
 
-    Strict mode: unknown fields are REJECTED. This is the load-bearing defense
+    Strict mode: unknown fields are rejected. This is the key defense
     that prevents a repo from declaring `remove_from_blocklist` or any other
     floor-weakening field.
     """
@@ -60,8 +64,10 @@ class DocviewManifest( BaseModel ):
     @classmethod
     def compile_blocklist_patterns( cls, value: List[ str ] ) -> List[ str ]:
         """
-        Reject malformed regex at parse time so /api/init surfaces the error
-        instead of failing later during a serve request.
+        Reject malformed regex at parse time.
+
+        This way /api/init surfaces the error instead of failing later during
+        a serve request.
         """
         for pattern in value:
             try:
@@ -73,9 +79,10 @@ class DocviewManifest( BaseModel ):
 
 def load_manifest_for_scope( scope_root: str ) -> Optional[ DocviewManifest ]:
     """
-    Load `<scope_root>/.docview.yml` if it exists, is under the size cap, and
-    parses cleanly. Return None for any failure mode (caller treats None as
-    wildcard semantics per Q2-C).
+    Load `<scope_root>/.docview.yml` if it is usable.
+
+    The file must be present, under the size cap, and valid. Any failure mode
+    returns None, which the caller treats as wildcard semantics.
 
     Requires:
         - scope_root is an absolute path string to a directory that exists
@@ -88,7 +95,7 @@ def load_manifest_for_scope( scope_root: str ) -> Optional[ DocviewManifest ]:
           * yaml.safe_load raises
           * Pydantic validation raises (including unknown fields per
             extra="forbid")
-        - All non-fatal failures emit a WARN to stdout with the path + reason
+        - All non-fatal failures emit a `WARN` to stdout with the path + reason
     """
     manifest_path = Path( scope_root ) / ".docview.yml"
     if not manifest_path.is_file():

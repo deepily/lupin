@@ -1,31 +1,30 @@
 #!/usr/bin/env python3
 """
-Run the (A)-arm prose-ref scan against the live task store — store row 00a6bde2, item 4.
+Run the prose task-reference scan against the live task store.
 
-WHY THIS SCRIPT EXISTS AND NOT JUST THE MODULE
-----------------------------------------------
-`cosa/rest/task_store_prose_refs.py` is the pure detector. A detector with no caller is
-still silence — that is row `1dd41cde` ("Nothing RUNS verify") on this same board, and
-shipping a scanner nobody invokes would have been an instance of it. This is the caller.
+Why a script and not just the module: `cosa/rest/task_store_prose_refs.py` is the pure
+detector. A detector with no caller is still silence, because nothing runs it.
+Shipping a scanner nobody invokes would repeat that failure. This script is the
+caller.
 
-WHAT IT DOES
-    1. Pages the WHOLE board once (include_terminal + unscoped_audit + hide_parked=false)
-       so one fetch yields BOTH the bodies to scan and the id -> status map to resolve
+What it does:
+    1. Pages the whole board once (include_terminal + unscoped_audit + hide_parked=false)
+       so one fetch yields both the bodies to scan and the id -> status map to resolve
        against. No second round-trip, no per-row lookup.
-    2. Scans every NON-TERMINAL body for id-shaped citations.
-    3. Prints findings, the three buckets, and the MANDATORY scope disclosure.
+    2. Scans every non-terminal body for id-shaped citations.
+    3. Prints findings, the three buckets, and the mandatory scope disclosure.
 
-⚠️ TRUNCATION IS REPORTED, NEVER SWALLOWED. If the board exceeds `--max-rows`, the status
-map is incomplete and every unresolvable citation lands in `unresolved_canonical` — the
-SAFE direction (no false finding), but it silently narrows what the scan could see. The
-script says so loudly and exits 3, because a partial scan reporting CLEAN is precisely
-the false-green this whole row is about.
+Truncation is reported, never swallowed. If the board exceeds `--max-rows`, the status
+map is incomplete and every unresolvable citation lands in `unresolved_canonical`. That
+is the safe direction (no false finding), but it silently narrows what the scan could
+see. The script says so loudly and exits 3, because a partial scan reporting clean is
+the false green this scan exists to prevent.
 
-EXIT CODES
+Exit codes:
     0  scanned, no findings
     1  findings present
     2  could not reach the store / auth failure
-    3  scanned, but the board was truncated — the result is PARTIAL, treat as unknown
+    3  scanned, but the board was truncated. The result is partial, so treat as unknown
 
 Usage:
     PYTHONPATH=src python src/scripts/scan-prose-task-refs.py [--max-rows 2000] [--json]
@@ -43,12 +42,13 @@ src_path = os.path.join( lupin_root, "src" )
 if src_path not in sys.path: sys.path.insert( 0, src_path )
 
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request, FETCH_BOARD_PAGE_SIZE
+from lupin_cli.claude_code.hooks.lib.task_store_client import fetch_board as _shared_fetch_board
 
 from cosa.rest.task_store_prose_refs import scan_rows
 from cosa.rest.task_store_rules import TERMINAL_STATUSES
 
-PAGE_SIZE = 500      # the router's hard `le=500` cap; not a tunable
+PAGE_SIZE = FETCH_BOARD_PAGE_SIZE
 
 
 def fetch_board( settings, api_key, max_rows ):
@@ -61,38 +61,10 @@ def fetch_board( settings, api_key, max_rows ):
 
     Ensures:
         - returns ( rows, truncated ) where `truncated` is True iff the board has more
-          rows than were fetched — the caller MUST surface that, never absorb it
+          rows than were fetched — the caller must surface that, never absorb it
         - never raises on an empty board
     """
-    rows      = [ ]
-    offset    = 0
-    truncated = False
-
-    while True:
-        # Ask for no more than the caller still has room for. A flat PAGE_SIZE here made
-        # `--max-rows` a page-stop THRESHOLD rather than a cap (row 9124b70a): `--max-rows 100`
-        # fetched 500 and then reported "truncated at 100 rows" — a figure the run never
-        # honoured. `max( 1, … )` is reachable only via a direct non-positive max_rows; the
-        # break below guarantees the subtraction is >= 1 on every later pass.
-        limit = max( 1, min( PAGE_SIZE, max_rows - len( rows ) ) )
-        query = ( f"include_terminal=true&unscoped_audit=true&hide_parked=false"
-                  f"&limit={limit}&offset={offset}" )
-        # _request NEVER raises — it returns ( ok, status, body ). An unchecked `ok` is how
-        # a 401 becomes an empty board that scans CLEAN, so it is raised here on purpose.
-        ok, status, page = _request( "GET", f"{settings[ 'api_base_url' ]}/api/tasks?{query}",
-                                     api_key, settings[ "timeout_seconds" ] )
-        if not ok:
-            raise RuntimeError( f"HTTP {status}: {page.get( 'error' ) or page.get( 'detail' ) or page}" )
-        batch = page.get( "tasks", [ ] )
-        rows.extend( batch )
-        offset += len( batch )
-
-        if not page.get( "has_more" ) or not batch: break
-        if len( rows ) >= max_rows:
-            truncated = True
-            break
-
-    return ( rows, truncated )
+    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=True, request=_request, page_size=PAGE_SIZE )
 
 
 def main( argv=None ):

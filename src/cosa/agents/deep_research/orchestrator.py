@@ -11,16 +11,12 @@ Design Pattern: Top-Level Orchestrator
 - Queryable state for external monitoring
 - Controllable via pause/resume/stop
 
-STATUS (2026-06-01): RESERVED FOR PHASE 3 — NOT YET WIRED INTO PRODUCTION.
-    The production entry point ``run_research()`` ( cli.py ) deliberately uses a
-    simplified Phase-2 inline flow and does NOT instantiate this orchestrator
-    ( see the explicit "doesn't use the full orchestrator" comment in run_research ).
-    This class is kept as intentional forward-investment for the Phase-3
-    full-orchestrator path — ratified KEEP (not delete) by Rick, 2026-06-01, after
-    an investigation confirmed zero production callers. Its ``cli.py`` import is
-    currently unused BY DESIGN. Do NOT delete as "dead code" and do NOT pragma its
-    lines as bug-blocked — re-confirm product intent before any removal. Its test
-    suites ( test_orchestrator_phases / _helpers / integration ) remain valid coverage.
+Status: reserved for the future full-orchestrator path and not wired into production.
+The production entry point `run_research()` in cli.py uses a simplified inline flow
+and does not instantiate this orchestrator. The class is kept as forward investment,
+so its `cli.py` import is unused. The class must stay: it is not dead code, and its lines
+are not untestable. Confirm product intent before any removal.
+Its test suites (test_orchestrator_phases, _helpers, integration) remain valid coverage.
 """
 
 import asyncio
@@ -51,10 +47,8 @@ class ResearchOrchestratorAgent:
     """
     Top-level orchestrator - single job, multi-phase, async execution.
 
-    This is a standalone class (not inheriting from AgentBase) because:
-    - AgentBase is synchronous, this is async
-    - Different execution model (yields on await vs blocking)
-    - Composition over inheritance for COSA integration
+    Not an `AgentBase` subclass: `AgentBase` is synchronous, this class is async and yields on await.
+    Composition is preferred over inheritance for COSA integration.
 
     Requires:
         - query is a non-empty string
@@ -131,13 +125,6 @@ class ResearchOrchestratorAgent:
         Main execution - yields on I/O, doesn't block other jobs.
 
         Each `await` is a potential yield point where other jobs can execute.
-        This method implements the full research workflow:
-        1. Clarification - Understand the query
-        2. Planning - Create research strategy
-        3. Research - Execute parallel subagents
-        4. Synthesis - Combine findings
-        5. Review - Get user feedback
-        6. Citation - Add sources
 
         Requires:
             - COSA interface is configured (for human feedback)
@@ -149,6 +136,10 @@ class ResearchOrchestratorAgent:
 
         Returns:
             str or None: Final research report, or None if cancelled
+
+        Notes:
+            The workflow runs six steps: clarification, planning, parallel subagent research,
+            synthesis, user review, and citation.
         """
         self.metrics[ "start_time" ] = time.time()
 
@@ -353,7 +344,7 @@ class ResearchOrchestratorAgent:
         Resume from paused state.
 
         Ensures:
-            - Clears pause flag if in PAUSED state
+            - Clears pause flag if in `PAUSED` state
             - Returns True if resumed, False if not paused
 
         Returns:
@@ -370,7 +361,7 @@ class ResearchOrchestratorAgent:
 
         Ensures:
             - Cancels all running sub-tasks
-            - Sets state to STOPPED
+            - Sets state to `STOPPED`
             - Returns partial findings
 
         Returns:
@@ -712,13 +703,10 @@ class ResearchOrchestratorAgent:
 
     async def _add_citations_async( self, report: str ) -> str:
         """
-        Citation pass-through (handled by synthesis prompt).
+        Citation pass-through, since the synthesis prompt already requests inline citations.
 
-        The synthesis prompt already requests inline citations, so this
-        method serves as a pass-through. Future enhancements could:
-        - Verify citations match sources
-        - Standardize citation format
-        - Add missing citations
+        Future enhancements could verify that citations match sources, standardize their
+        format, or add missing ones.
 
         Args:
             report: Report (already contains inline citations from synthesis)

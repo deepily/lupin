@@ -65,6 +65,11 @@ function paneRoot( container: HTMLElement, id: string ): HTMLDivElement {
   return pane;
 }
 
+/**
+ * Builds the accordion test page from a scenario with task list, holding and epic panes.
+ *
+ * Returns a number and throws if the container is missing.
+ */
 function mount( scenario: AccordionScenario ): number {
   const container = document.getElementById( "accordion-panes-container" );
   /* c8 ignore next */ // defensive: the harness page always provides the mount node.
@@ -134,6 +139,9 @@ function inertMutation(): TaskMutation {
 }
 /* c8 ignore stop */
 
+/**
+ * Returns a task list store stub that serves a fixed composite and does nothing on writes.
+ */
 function fakeTaskStore( composite: TaskListComposite ) {
   return {
     composite         : () => composite,
@@ -147,13 +155,12 @@ function fakeTaskStore( composite: TaskListComposite ) {
   };
 }
 
-// ⚠️ A SEPARATE FAKE, BECAUSE THE TWO SEAMS GENUINELY DIFFER. The holding pane's
-// `transitionTask` resolves to a RESULT and never rejects (a batch is a loop, and
-// a throwing body abandons every row after the first refusal); the task list's
-// returns an optimistic `{ restoreState, done }` handle and DOES reject. That is
-// the whole difference now — BOTH stores carry `refreshAfterWrite` as of §6 item
-// 18, so the read seam no longer tells them apart. Collapsing them into one fake
-// would erase the write-shape distinction the seam exists to make.
+/**
+ * Returns a holding area store stub that serves a fixed composite.
+ *
+ * Writes answer with success.
+ * It differs from the task list stub in its write shape.
+ */
 function fakeHoldingStore( composite: TaskListComposite ) {
   return {
     composite         : () => composite,
@@ -166,6 +173,11 @@ function fakeHoldingStore( composite: TaskListComposite ) {
   };
 }
 
+/**
+ * Wraps a list of tasks into a task list composite with ok status and the given time zone.
+ *
+ * Non-array input gives an empty list.
+ */
 function compositeOf( tasks: unknown, zone: string | null ): TaskListComposite {
   const rows = Array.isArray( tasks ) ? tasks : [];
   return {
@@ -179,6 +191,11 @@ function compositeOf( tasks: unknown, zone: string | null ): TaskListComposite {
   } as unknown as TaskListComposite;
 }
 
+/**
+ * Builds the accordion test page from a scenario using real renderers over stub stores.
+ *
+ * Returns a number and throws if the container is missing.
+ */
 function mountRenderers( scenario: AccordionScenario ): number {
   const container = document.getElementById( "accordion-panes-container" );
   /* c8 ignore next */ // defensive: the harness page always provides the mount node.

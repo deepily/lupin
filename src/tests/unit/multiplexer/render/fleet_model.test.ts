@@ -246,13 +246,17 @@ test("formatFleetTimestamp: valid IANA zone formats without throwing", () => {
   assert.match(out, /\d{2}:\d{2}:\d{2}/);
 });
 
-test("formatFleetTimestamp: invalid zone degrades to local (no throw)", () => {
-  const out = formatFleetTimestamp(new Date("2026-06-10T18:30:07Z"), "Not/AZone");
-  assert.match(out, /\d{2}:\d{2}:\d{2}/);
+test("formatFleetTimestamp: invalid zone degrades to UTC (no throw)", () => {
+  assert.equal(formatFleetTimestamp(new Date("2026-06-10T18:30:07Z"), "Not/AZone"), "18:30:07 UTC");
 });
 
-test("formatFleetTimestamp: absent zone uses browser-local", () => {
-  const out = formatFleetTimestamp(new Date("2026-06-10T18:30:07Z"), undefined);
-  assert.match(out, /\d{2}:\d{2}:\d{2}/);
-  assert.equal(formatFleetTimestamp(new Date("2026-06-10T18:30:07Z"), null), out);
+test("formatFleetTimestamp: absent zone shows UTC, whatever the browser zone is", () => {
+  const saved = process.env.TZ;
+  process.env.TZ = "Asia/Tokyo";
+  try {
+    assert.equal(formatFleetTimestamp(new Date("2026-06-10T18:30:07Z"), undefined), "18:30:07 UTC");
+    assert.equal(formatFleetTimestamp(new Date("2026-06-10T18:30:07Z"), null), "18:30:07 UTC");
+  } finally {
+    if (saved === undefined) delete process.env.TZ; else process.env.TZ = saved;
+  }
 });

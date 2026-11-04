@@ -39,6 +39,13 @@ interface WindowGlobals {
 // <details> all reached the bubble. Pinned in a real browser by
 // src/tests/e2e_ui/test_the_bubble_sanitizer_keeps_only_its_allowlist.py, and by the config
 // test in markdown.test.ts.
+/**
+ * The sanitizer settings for rendered markdown.
+ *
+ * Tags outside `ALLOWED_TAGS` are removed. Attributes outside `ALLOWED_ATTR` are removed too, except `data-*` and `aria-*`.
+ * Links may use http, https and mailto, and a relative href is kept.
+ * It sets no `USE_PROFILES`, because a profile would override the two lists.
+ */
 export const DOMPURIFY_CONFIG = {
   ALLOWED_TAGS : [
     "h1", "h2", "h3", "h4", "h5", "h6",
@@ -64,6 +71,11 @@ export const DOMPURIFY_CONFIG = {
   RETURN_TRUSTED_TYPE     : false,
 };
 
+/**
+ * Returns the marked and DOMPurify globals from the window.
+ *
+ * Throws an error when either library has not been loaded.
+ */
 function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {
   /* c8 ignore next */ // defensive: typeof window is "undefined" only in pre-DOM Node runtime; happy-dom's GlobalRegistrator (tests) AND every real browser provide window. The fallback to globalThis exists for non-browser contexts that don't apply to the multiplexer.
   const win = (typeof window !== "undefined" ? window : globalThis) as unknown as WindowGlobals;
@@ -78,6 +90,11 @@ function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {
 // sanitized and quoted; an unquoted href is not a shape it emits.
 const HREF_ATTR_RE = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
 
+/**
+ * Adds a new-tab target and noopener rel to every anchor that has no target.
+ *
+ * In-app doc links are left unchanged.
+ */
 function postProcessAnchors(html: string): string {
   // Rewrite anchor target/rel — ported from `notifications.js:12203-12247`.
   //

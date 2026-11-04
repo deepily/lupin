@@ -65,7 +65,7 @@ def _ini_value_for( key ):
 
 def _code_default_for( key ):
     """
-    The `default=` literal on the config_mgr.get call for `key` in main.py.
+    The `default=` literal on config_mgr.get( key ) in main.py or lifespan_steps.py.
 
     Read from the source text deliberately: the call sits inside `lifespan`,
     which cannot be executed in a unit test without booting the app. The regex
@@ -74,9 +74,10 @@ def _code_default_for( key ):
     Returns None when no such call is found — which this file's own control
     turns into a failure rather than a quiet pass.
     """
-    path = cu.get_project_root() + "/src/lupin_app/main.py"
-    with open( path ) as handle:
-        source = handle.read()
+    source = ""
+    for name in ( "main.py", "lifespan_steps.py" ):
+        with open( cu.get_project_root() + "/src/lupin_app/" + name ) as handle:
+            source += handle.read()
     match = re.search(
         r'config_mgr\.get\(\s*"' + re.escape( key ) + r'"\s*,\s*default\s*=\s*(\w+)',
         source

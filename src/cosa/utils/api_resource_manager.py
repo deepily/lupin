@@ -1,10 +1,9 @@
 """
-API Resource Manager — centralized rate-limit / API contention surface.
+API Resource Manager: centralized rate-limit and API contention surface.
 
-Phase 1 (v0.1.7 CJ Flow async multi-lane): stub that wraps the existing
-WebSearchRateLimiter and passes through for other providers. No agents
-call this module yet — init_arm() wires the singleton into server startup
-so the infrastructure is alive from boot; per-agent migration is Phase 2/3.
+This is a stub. It wraps the existing WebSearchRateLimiter and passes through for other
+providers. No agent calls it yet; `init_arm()` wires the singleton into server startup so
+the infrastructure is alive from boot. Per-agent migration comes later.
 
 Design anchor: src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/02-phase-1-rlock-config-and-resource-manager.md
 Singleton pattern mirrors: src/cosa/rest/test_suite_completion_watchdog.py:327-354
@@ -82,13 +81,9 @@ class ApiResourceManager:
     """
     Singleton managing contention decisions across external APIs.
 
-    Phase 1 scope: thin wrapper around existing per-agent rate limiters.
-    Primary backing: WebSearchRateLimiter for Anthropic web-search.
-    Other providers: pass-through (no limit enforced beyond what the SDK
-    itself does) until their per-agent logic migrates here.
-
-    Future scope (Phase 2+): per-provider sliding-window call history,
-    cost estimation, dispatcher back-pressure.
+    A thin wrapper around the per-agent rate limiters. Anthropic web search is backed by
+    WebSearchRateLimiter; other providers pass through, with no limit beyond the SDK's own.
+    Future scope: per-provider call history, cost estimation, dispatcher back-pressure.
 
     Requires:
         - Accessed through init_arm() / get_arm() module helpers
@@ -96,7 +91,7 @@ class ApiResourceManager:
 
     Ensures:
         - acquire() delegates to WebSearchRateLimiter for anthropic_web_search
-        - acquire() is a no-op (immediate return) for other providers in Phase 1
+        - acquire() is a no-op (immediate return) for other providers
         - record_call() delegates to WebSearchRateLimiter.record_usage for
           anthropic_web_search, no-op for others
         - get_status() returns a snapshot suitable for /api/queue/pool-status
@@ -185,7 +180,7 @@ class ApiResourceManager:
 
         Ensures:
             - For anthropic_web_search: delegates to WebSearchRateLimiter.record_usage(tokens)
-            - For other providers: no-op in Phase 1
+            - For other providers: no-op
 
         Args:
             provider: one of "anthropic_web_search", "anthropic", "openai", "gemini"
@@ -209,7 +204,7 @@ class ApiResourceManager:
 
         Ensures:
             - Returns a dict with keys for all four providers
-            - anthropic_web_search section is a VERBATIM passthrough of
+            - anthropic_web_search section is a verbatim passthrough of
               WebSearchRateLimiter.get_status() (keys: tokens_in_window,
               tokens_per_minute_limit, calls_in_window, window_seconds,
               time_until_oldest_expires, would_need_delay)

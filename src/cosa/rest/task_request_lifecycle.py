@@ -1,41 +1,21 @@
 """
-A MANAGER'S PROMOTE/DEMOTE REQUEST: what moves it, and what deliberately does not.
+A manager's promote or demote request: what moves it, and what does not.
 
-Row c9fafb9d, rules 3 and 4. Rick ruled the POLICY on 2026-09-08 ~11:58 EDT by keypress:
+Only the operator may promote a task into the live list or demote it out. A manager can
+only file a request, and a request defaults to no. Three rules follow from that:
+    - a request persists until the operator acts on it; it never expires or times out
+    - a timeout leaves it pending, because a timeout is not a denial
+    - a denial closes the request and forces a re-file; the verdict lives on the request row
 
-    "it is me and me alone not managers that gets to promote and demote task items into
-     the live list and out of it back into the task area me alone. Only thing managers
-     can do is request And there's requests default to no"
+The tree already holds machinery that looks right for this and is wrong. `TaskPromotionTicket`
+carries a `resolves_by` stamped at mint, a background resolver, and a sweeper that marks an
+unanswered ticket `stalled`. All of that is expiry, which these rules forbid. A request door
+built on it would die on a clock. So the no-timeout rule lives here as a callable function and
+a guard that can refuse, not as a sentence a later implementer must remember.
 
-and the SEMANTICS across 2026-09-09 ~17:40 and ~18:55, relayed by Mr. Radio 🦉:
-
-    · a request PERSISTS until he acts on it — it does not expire and does not time out
-    · a TIMEOUT leaves it PENDING. A timeout is not a denial
-    · a DENIAL is a different thing: it CLOSES the row and forces a RE-FILE
-    · the verdict is recorded ON THE REQUEST ROW, not carried by a notification
-
-🔴 WHY THIS IS A MODULE AND NOT A FEW LINES INSIDE WHATEVER DOOR LANDS. The tree already
-contains machinery that looks exactly right for this and is exactly wrong:
-`TaskPromotionTicket` carries a `resolves_by` stamped at mint, a background resolver, and
-a sweeper that marks an unanswered ticket `stalled`. Every one of those is EXPIRY, and
-expiry is the thing Rick ruled against. Anyone building the request door by reaching for
-the nearest similar thing gets a request that dies on a clock.
-
-⇒ So the rule that a timeout is a NON-EVENT is written here, once, as a function that can
-be called and a guard that can refuse — rather than as a sentence in a design document the
-next implementer has to have read. A rule that depends on remembering is not installed.
-
-⚠️ WHAT THIS MODULE DELIBERATELY DOES NOT DECIDE, because nobody has ruled it:
-  · WHERE a request is stored — a task-store row, a new table, something else.
-  · The HTTP shape of the door that files one.
-Neither changes the answers below, which is why this can be built while they are open. If
-one of them turns out to change an answer here, THAT is a finding — and this module would
-be the cheapest possible place in the tree to discover it.
-
-⚠️ AND IT HOLDS NO STORAGE AND NO I/O ON PURPOSE. Pulled out for the reason
-`refusal_for_admission` and `promotion_precheck` were: inline, the only way to watch this
-refuse is to stand up a database and drive a door, so the cheap tests would have to assert
-on something adjacent and call THAT the control.
+This module does not decide where a request is stored or the HTTP shape of the door that files
+one. Neither changes the answers here. It holds no storage and no I/O, so a test can watch it
+refuse without a database.
 """
 
 # The two verbs one door serves. A re-export of the approval module's own set rather than a
@@ -121,27 +101,22 @@ def is_terminal( state ):
 
 def outcome_of_silence( state ):
     """
-    What an unanswered request is, after any amount of time — including forever.
+    What an unanswered request is after any amount of time, including forever.
 
-    🔴 THE WHOLE POINT OF THIS FUNCTION IS THAT IT TAKES NO CLOCK. There is no `now`, no
-    deadline, no elapsed argument, and that absence IS the ruling made mechanical: a
-    request cannot be aged out because there is nothing here to age it against. A future
-    edit adding a timestamp parameter is the defect, not the fix.
-
-    ⚠️ THIS IS NOT IN TENSION WITH "A REQUEST DEFAULTS TO NO". Silence NEVER GRANTS — a
-    pending request has authorised nothing and the row has not moved, which is what
-    "defaults to no" protects. What silence also does not do is DENY: a denial is a verdict
-    Rick gives, and it closes the request. Reading "defaults to no" as "an old request is
-    refused" would quietly delete the requests he has not got to yet, which is the opposite
-    of a queue he works through.
+    This function takes no clock: no `now`, no deadline, no elapsed argument. A request cannot be
+    aged out with nothing to age it against, so adding a timestamp parameter is the defect.
 
     Requires:
         - state is one of REQUEST_STATES
 
     Ensures:
-        - a PENDING request is still PENDING, whatever the elapsed time
-        - an already-answered request keeps its verdict — silence cannot overturn a
-          keypress in either direction
+        - silence never grants: a pending request authorises nothing
+        - silence does not deny either, because a denial is a verdict the operator gives and it
+          closes the request; reading "defaults to no" as "an old request is refused" would
+          quietly delete requests not yet reached
+        - a pending request is still pending, whatever the elapsed time
+        - an already-answered request keeps its verdict; silence cannot overturn a decision in
+          either direction
         - never raises for a valid state
     """
     return state
@@ -152,8 +127,8 @@ def grants_the_move( state ):
     Whether this request authorises the promote or demote it asks for.
 
     Ensures:
-        - True ONLY for an explicit approval
-        - False for pending AND for denied — those two differ in whether the manager must
+        - True only for an explicit approval
+        - False for pending and for denied; those two differ in whether the manager must
           re-file, not in whether anything is authorised now
         - never raises
     """
@@ -162,12 +137,11 @@ def grants_the_move( state ):
 
 def requires_a_refile( state ):
     """
-    Whether the manager must file a NEW request in order to ask again.
+    Whether the manager must file a new request in order to ask again.
 
-    ⚠️ THE ANSWER FOR `pending` IS FALSE, AND IT IS THE ONE PEOPLE WILL GET WRONG. A
-    request that has sat for a day is still in front of Rick; re-filing it would put the
-    same question in his queue twice and cost him the interruption his own no-batches rule
-    exists to prevent. Only a DENIAL clears the way for a fresh ask.
+    The answer for `pending` is False. A request that has sat for a day is still in front of
+    the operator. Re-filing it would put the same question in the queue twice. Only a denial
+    clears the way for a fresh ask.
 
     Ensures:
         - True only for a denied request
@@ -178,39 +152,29 @@ def requires_a_refile( state ):
 
 def refusal_for_verdict( state, verdict, actor_is_operator ):
     """
-    Why this verdict may not be recorded on this request — or None if it may.
+    Why this verdict may not be recorded on this request, or None if it may.
 
-    Three separate refusals, kept apart because collapsing them would tell a caller the
-    wrong thing about what to do next:
-
-        · NOT THE OPERATOR — Rick alone answers. A manager may file and may read; the
-          verdict is his. This is rules 1 and 2 one layer over: if a manager could answer
-          their own request, the request door would BE a way to promote without him, which
-          is the thing it exists to prevent.
-        · ALREADY ANSWERED — a terminal request is finished. Overwriting a verdict would
-          let a second caller silently replace his answer with another.
-        · NOT A VERDICT — `pending` is where a request already is, not something anyone
-          decides. Accepting it here would make "un-answer this request" a reachable
-          operation, and nothing has ruled that it should be.
+    Three separate refusals, kept apart so a caller learns what to do next: not the operator,
+    already answered, or not a verdict.
 
     Requires:
-        - state is the request's CURRENT state, one of REQUEST_STATES
+        - state is the request's current state, one of REQUEST_STATES
         - verdict is the state being recorded
-        - actor_is_operator is a SERVER-RESOLVED boolean, never a caller-declared string
+        - actor_is_operator is a server-resolved boolean, never a caller-declared string
 
     Ensures:
-        - returns None only when an operator records approved or denied on a PENDING
-          request
-        - otherwise a non-empty detail naming which of the three refusals it is, and what
-          to do instead
+        - returns None only when an operator records approved or denied on a pending request
+        - otherwise a non-empty detail naming which of the three refusals it is, and what to do
+          instead
         - never raises
-
-    ⚠️ `actor_is_operator` IS A BOOLEAN THIS FUNCTION TRUSTS, AND THAT IS THE SEAM RATHER
-    THAN A HOLE. Deciding operator-hood belongs to whatever resolved the caller's validated
-    account; re-deciding it here would be a SECOND derivation of an authorization answer,
-    fed weaker inputs than the first. Row b8205986 records what happens when a
-    caller-declared string gets to answer this question — so callers of this function must
-    pass a FACT, never a claim.
+        - not the operator: managers may file and read, but only the operator answers; a manager
+          answering their own request would make the door a way to promote without the operator
+        - already answered: a terminal request is final, and overwriting would replace the answer
+        - not a verdict: `pending` is where a request already is, so recording it would make
+          "un-answer this request" reachable
+        - actor_is_operator is trusted as given: deciding operator-hood belongs to whatever
+          resolved the caller's validated account, and re-deciding it here would be a second
+          derivation fed weaker inputs, so callers must pass a fact, never a claim
     """
     if not actor_is_operator:
         return (
@@ -257,16 +221,15 @@ def refusal_for_filing( move, current_status ):
 
     Requires:
         - move is the caller's requested move string
-        - current_status is the row's status as READ UNDER THE LOCK
+        - current_status is the row's status as read under the lock
 
     Ensures:
-        - returns None iff move is requestable AND the row can make that move from where
-          it is: `admit` only out of the holding area, `demote` only from a live,
-          non-terminal status
-        - a move that is not requestable names the two that are — won't-fix and un-park
-          are approver-only and nobody has ruled that a manager may ask for them
-        - a move the row cannot make says where the row is, so the caller learns it is
-          asking the wrong question rather than being refused permission
+        - returns None iff move is requestable and the row can make that move from where it is:
+          `admit` only out of the holding area, `demote` only from a live, non-terminal status
+        - a move that is not requestable names the two that are; won't-fix and un-park are
+          approver-only and nobody has ruled that a manager may ask for them
+        - a move the row cannot make says where the row is, so the caller learns it is asking
+          the wrong question rather than being refused permission
         - never raises
     """
     if move not in REQUESTABLE_MOVES:
@@ -294,18 +257,18 @@ def request_is_stale( state, pending_move, current_status ):
     """
     Whether a request must be withdrawn because the row can no longer make its move.
 
-    🔴 THE SAME RULE AS FILING, READ AFTER A MOVE. A request is stale exactly when it could
-    not be filed against the row as it now stands — so "may this be asked" and "may this
-    still be waiting" cannot disagree about where a move is possible.
+    This is the filing rule read after a move. A request is stale exactly when it could not be
+    filed against the row as it now stands. So "may this be asked" and "may this still be
+    waiting" cannot disagree.
 
     Requires:
         - state is the row's request state or None; pending_move its move or None
-        - current_status is the row's status AFTER the transition
+        - current_status is the row's status after the transition
 
     Ensures:
-        - True only for a PENDING request whose move `refusal_for_filing` now refuses
-        - False for no request and for an answered one — a verdict is history, not a
-          question, and withdrawing it would erase Rick's answer
+        - True only for a pending request whose move `refusal_for_filing` now refuses
+        - False for no request and for an answered one; a verdict is history, not a question,
+          and withdrawing it would erase the answer
         - never raises
     """
     if state != REQUEST_PENDING: return False
@@ -314,19 +277,19 @@ def request_is_stale( state, pending_move, current_status ):
 
 def refusal_for_refiling( state, pending_move ):
     """
-    Why a new request may not be filed while this one stands — or None if it may.
+    Why a new request may not be filed while this one stands, or None if it may.
 
     Requires:
-        - state is the row's current request state, one of REQUEST_STATES, or None when
-          no request has ever been filed
+        - state is the row's current request state, one of REQUEST_STATES, or None when no
+          request has ever been filed
         - pending_move is the move that request asked for, or None
 
     Ensures:
         - returns None when nothing was ever filed, or when the last request is answered:
           a denial forces a re-file, and an approval has already moved the row
-        - returns a detail naming the pending move while one is PENDING — a second filing
-          would put the same question in Rick's queue twice, which his one-at-a-time rule
-          (2026-09-04) exists to prevent
+        - returns a detail naming the pending move while one is pending; a second filing would
+          put the same question in the operator's queue twice, which the one-at-a-time rule
+          exists to prevent
         - never raises
     """
     if state != REQUEST_PENDING: return None
@@ -372,8 +335,8 @@ def badge_for_move( move ):
 
     Ensures:
         - MOVE_DEMOTE -> BADGE_TASK_AREA; MOVE_ADMIT -> BADGE_HOLDING_AREA
-        - RAISES rather than guessing for anything else — a move nobody has ruled a badge
-          for must not be silently dropped from a count a human reads as complete
+        - raises rather than guessing for anything else; a move with no ruled badge must not be
+          silently dropped from a count a human reads as complete
     """
     from cosa.rest.task_approval_settings import MOVE_ADMIT, MOVE_DEMOTE
 
@@ -388,21 +351,20 @@ def badge_for_move( move ):
 
 def badge_counts( requests ):
     """
-    How many requests each badge shows — two independent counts, never a sum.
+    How many requests each badge shows: two independent counts, never a sum.
 
-    🔴 ONLY PENDING REQUESTS ARE COUNTED, AND THIS IS THE ONE PLACE THE "DEFAULTS TO NO"
-    CONFUSION WOULD SURFACE AS A NUMBER ON RICK'S SCREEN. A denied request is finished and
-    the manager must re-file to ask again; counting it would keep an answered question
-    pulsing at him forever. An approved one has already moved the row.
+    Only pending requests are counted. A denied request is finished and the manager must re-file
+    to ask again, so counting it would keep an answered question showing forever. An approved one
+    has already moved the row.
 
     Requires:
         - requests is an iterable of ( move, state ) pairs
 
     Ensures:
-        - returns { BADGE_TASK_AREA: int, BADGE_HOLDING_AREA: int }, both keys ALWAYS
-          present, so no caller has to tell "zero" from "absent"
+        - returns { BADGE_TASK_AREA: int, BADGE_HOLDING_AREA: int }, both keys always present,
+          so no caller has to tell "zero" from "absent"
         - counts only requests whose state is REQUEST_PENDING
-        - every counted request lands in exactly ONE badge
+        - every counted request lands in exactly one badge
         - never raises for a well-formed input
     """
     counts = { BADGE_TASK_AREA: 0, BADGE_HOLDING_AREA: 0 }

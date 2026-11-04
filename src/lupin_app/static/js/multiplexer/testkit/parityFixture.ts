@@ -37,6 +37,11 @@ import type { SenderRecord, Notification, VoicePersona } from "../shared/types";
 // Canonical scenario shape (matches notifications-parity-scenario.json).
 // ---------------------------------------------------------------------------
 
+/**
+ * A sender's voice persona as the canonical scenario file stores it.
+ *
+ * The senders-visible shape adds `assigned_at`, set to the sender's `last_activity`.
+ */
 export interface ParityVoicePersona {
   name     : string;
   voice_id : string;
@@ -45,6 +50,11 @@ export interface ParityVoicePersona {
   borrowed : boolean;
 }
 
+/**
+ * One notification in the canonical scenario.
+ *
+ * Timestamps are ISO strings. A responded notification carries `response_value` and `responded_at`.
+ */
 export interface ParityScenarioNotification {
   id                 : string;
   message            : string;
@@ -58,6 +68,12 @@ export interface ParityScenarioNotification {
   response_value    ?: { value: string } | null;
 }
 
+/**
+ * One sender in the canonical scenario.
+ *
+ * On the mux side `new_count` becomes `unread_count`.
+ * `last_activity` becomes `last_active_ts` in milliseconds.
+ */
 export interface ParityScenarioSender {
   sender_id      : string;
   display_name   : string;
@@ -68,6 +84,11 @@ export interface ParityScenarioSender {
   notifications  : ReadonlyArray<ParityScenarioNotification>;
 }
 
+/**
+ * The canonical scenario file.
+ *
+ * Three adapters derive the mux model, the conversation-by-date shape and the senders-visible shape from it.
+ */
 export interface ParityScenario {
   schema_version: number;
   description   : string;
@@ -79,8 +100,14 @@ export interface ParityScenario {
 // Mux model (component-isolation harness — direct render calls).
 // ---------------------------------------------------------------------------
 
+/** Which side a message bubble is on: a prompt is incoming and the response is outgoing. */
 export type ParityDirection = "incoming" | "outgoing";
 
+/**
+ * What `toMuxModel` returns.
+ *
+ * It holds the senders, each sender's notifications, and the expected direction of each notification.
+ */
 export interface MuxParityModel {
   senders              : SenderRecord[];
   // Mux Notification[] per sender_id, in the order legacy emits them (original
@@ -93,8 +120,16 @@ export interface MuxParityModel {
 }
 
 // Synthetic-outgoing id suffix — verbatim legacy convention (`${id}-response`).
+/**
+ * The suffix that names a notification's synthetic outgoing response.
+ *
+ * The legacy client builds the same id, `${id}-response`.
+ */
 export const RESPONSE_ID_SUFFIX = "-response";
 
+/**
+ * Project a test voice persona onto the five-field client persona shape.
+ */
 function muxPersona( p: ParityVoicePersona ): VoicePersona {
   // Explicit 5-field projection (D-E canonical shape) — no assigned_at on the
   // client VoicePersona.
@@ -107,6 +142,9 @@ function muxPersona( p: ParityVoicePersona ): VoicePersona {
   };
 }
 
+/**
+ * Convert a scenario sender into a multiplexer sender record.
+ */
 function muxSenderRecord( s: ParityScenarioSender ): SenderRecord {
   const record: SenderRecord = {
     sender_id                : s.sender_id,
@@ -121,6 +159,9 @@ function muxSenderRecord( s: ParityScenarioSender ): SenderRecord {
   return record;
 }
 
+/**
+ * Convert a scenario notification into an incoming multiplexer notification.
+ */
 function muxIncoming( senderId: string, n: ParityScenarioNotification ): Notification {
   const norm: Notification = {
     id_hash         : n.id,
@@ -135,6 +176,9 @@ function muxIncoming( senderId: string, n: ParityScenarioNotification ): Notific
   return norm;
 }
 
+/**
+ * Build the synthetic outgoing notification carrying a scenario response value.
+ */
 function muxOutgoing( senderId: string, n: ParityScenarioNotification, value: string ): Notification {
   // Synthetic outgoing response — mirrors legacy notifications.js:14321-14328.
   return {
@@ -193,6 +237,7 @@ export function toMuxModel( scenario: ParityScenario ): MuxParityModel {
 // One row of /api/notifications/conversation-by-date — the shape BOTH clients
 // hydrate from. Carries the legacy responded-split inputs (response_value +
 // responded_at) so legacy's render-time split fires under golden-capture.
+/** One row of the conversation-by-date answer, the shape both clients hydrate from. */
 export interface ConversationRow {
   id              : string;
   sender_id       : string;
@@ -206,8 +251,12 @@ export interface ConversationRow {
 }
 
 // { sender_id → { "YYYY-MM-DD" → ConversationRow[] } }
+/** Rows by sender id, then by calendar date, as the conversation-by-date endpoint answers. */
 export type ConversationByDate = Record<string, Record<string, ConversationRow[]>>;
 
+/**
+ * Convert a scenario notification into a conversation-by-date row.
+ */
 function conversationRow( senderId: string, n: ParityScenarioNotification ): ConversationRow {
   const row: ConversationRow = {
     id        : n.id,
@@ -250,6 +299,11 @@ export function toConversationByDate( scenario: ParityScenario ): ConversationBy
 }
 
 // One row of /api/notifications/senders-visible (mux cold-load + golden-capture).
+/**
+ * One row of the senders-visible answer.
+ *
+ * `count` is the sender's total messages and `new_count` is the unread number.
+ */
 export interface SendersVisibleRow {
   sender_id      : string;
   last_activity  : string;
@@ -282,6 +336,11 @@ export function toSendersVisible( scenario: ParityScenario ): SendersVisibleRow[
 // field-unification to-do, Doc 01 / Doc 00 §3 Premise C).
 // ---------------------------------------------------------------------------
 
+/**
+ * One field's name in the canonical scenario, in the legacy client and in the multiplexer.
+ *
+ * `note` says how the two clients' values differ.
+ */
 export interface FieldMapEntry {
   canonical: string;
   legacy   : string;
@@ -289,6 +348,11 @@ export interface FieldMapEntry {
   note     : string;
 }
 
+/**
+ * The field-name mapping between the canonical scenario and the two clients.
+ *
+ * It is the written record of where the clients' data models differ.
+ */
 /* c8 ignore start */ // pure-data literal; c8 reports a phantom statement/branch on the array's closing `];` line (tsx source-map artifact). Contents ARE asserted by parity_fixture.test.ts "FIELD_MAP" — the ignore suppresses only the bookend phantom.
 export const FIELD_MAP: ReadonlyArray<FieldMapEntry> = [
   { canonical: "notification.timestamp",      legacy: "notification.timestamp (ISO)",        mux: "Notification.ts (ms epoch)",        note: "legacy parses ISO at render; mux normalizes to ms epoch in the store" },

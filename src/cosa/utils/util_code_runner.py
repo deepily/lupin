@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import uuid
@@ -45,7 +46,7 @@ def _ensure_proper_appendages( code: list[str], always_appended: list[str] ) -> 
     # Instantiate an ordered dictionary using the code list to populate the keys and the values. The key string should have all of the spaces removed and lowercased
     code_dict = { line.replace( " ", "" ).lower(): line for i, line in enumerate( code ) }
     # Print the dictionary in Json format
-    if debug: print( du.get_debug_json( code_dict ) )
+    if debug: print( json.dumps( code_dict, indent=2 ) )
     
     # Iterate through the always_appended list and check if the key is in the code dictionary
     for line in always_appended:
@@ -254,7 +255,7 @@ def _remove_quietly( path: str ) -> None:
 
     Ensures:
         - the file is gone if it was there
-        - NEVER raises — cleanup failure must not mask or replace the execution result the
+        - never raises — cleanup failure must not mask or replace the execution result the
           caller is about to return, which is the actual answer to the user's question
 
     Raises:
@@ -286,7 +287,7 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
         - Captures both stdout and stderr from the execution
         
     Raises:
-        - No exceptions raised directly, errors are captured in return dict
+        - no exception is raised directly; errors are captured in the return dict
     """
     if debug and verbose:
         du.print_banner( "Solution code BEFORE:", prepend_nl=True)
@@ -311,6 +312,7 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
         solution_code = response_dict[ "code" ]
         
     from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.config.app_timezone import get_app_timezone
     
     # Get the code execution file path, with a fallback for test environments
     try:
@@ -321,7 +323,12 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
         du.print_banner( f"ConfigurationManager error: {str(e)}", expletive=True, chunk="🤔" )
         print("Using fallback code execution file path for testing")
         code_file_path = "/io/code_execution.py"
-        
+        config_mgr     = None
+
+    # The zone has no test-environment fallback: without configuration there is no user zone to run in.
+    if config_mgr is None: raise ValueError( "Cannot read [app timezone]: no configuration is loaded" )
+    user_zone = get_app_timezone( config_mgr )
+
     code_path = du.get_project_root() + code_file_path
 
     # 🔴 ONE FILE PER INVOCATION — row 7b9094d8, Rick's ruling 2026-08-19 ("fix the race only").
@@ -355,11 +362,16 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
     # directory it always had, without the parent ever changing its own.
     run_cwd = du.get_project_root() + "/io"
 
+    # The child reads the user's clock, never the host's ( Rick's "configured user zone" ruling ).
+    # The VM sits in us-central1 and answered "12:25 PM" in Central.
+    # A bare datetime.now() in generated code follows TZ, so the zone goes into the child's env.
+    child_env = { **os.environ, "TZ": user_zone }
+
     if debug: print( "Code runner executing [{}]... ".format( code_path ), end="" )
 
     # ¡OJO! Hardcoded value of python runtime... Make this runtime configurable
     try:
-        results = run( [ python_runtime, code_path ], stdout=PIPE, stderr=PIPE, universal_newlines=True, timeout=60, cwd=run_cwd )
+        results = run( [ python_runtime, code_path ], stdout=PIPE, stderr=PIPE, universal_newlines=True, timeout=60, cwd=run_cwd, env=child_env )
     except subprocess.TimeoutExpired as e:
         
         du.print_stack_trace( e, explanation="subprocess.TimeExpired calling run(...)", caller="assemble_and_run_solution" )

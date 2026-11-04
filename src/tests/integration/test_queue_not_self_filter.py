@@ -9,11 +9,15 @@ Requires:
     - Clean test database (via clean_test_db fixture)
 """
 
+import os
+
 import pytest
 import requests
 import time
 
 from .conftest import BASE_URL
+
+from tests.helpers.suite_lineage import lineage_request
 
 
 def register_and_login( email, password ):
@@ -104,8 +108,8 @@ def push_job( token, question, session_id="test_session" ):
     """
     return requests.post(
         f"{BASE_URL}/api/v2/ask",
-        json={ "question": question, "websocket_id": session_id },
-        headers={ "Authorization": f"Bearer {token}" }
+        **lineage_request( { "question": question, "websocket_id": session_id },
+                           { "Authorization": f"Bearer {token}" } )
     )
 
 

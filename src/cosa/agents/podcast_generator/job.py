@@ -287,8 +287,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
             # Build relative paths under io/ for URL generation + UI job-card metadata.
             # Mirrors presentation_generator/job.py:301-341 — match the receiving
             # logic in cosa/rest/routers/io_files.py:88-98 (handles abs / "io/" / "/" prefixes).
-            import urllib.parse
             from cosa.agents.podcast_generator.config import LANGUAGE_NAMES
+            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
             io_base = cu.get_project_root() + "/io/"
 
             def _to_rel( p ):
@@ -328,6 +328,12 @@ class PodcastGeneratorJob( AgenticJobBase ):
             self.artifacts[ "audio_paths_by_language" ]  = { l: _to_rel( p ) for l, p in audio_by_lang.items() }
             self.artifacts[ "script_paths_by_language" ] = { l: _to_rel( p ) for l, p in script_by_lang.items() }
 
+            # Optional Google Drive copy (flag off = no-op and no Google import). full_path is the
+            # resolved source document path computed above, never the possibly-relative research_path.
+            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive
+            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, full_path, config=config, user_email=self.user_email )
+            if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
+
             # Build cost summary
             api_cost = agent.api_client.cost_estimate.estimated_cost_usd if agent._api_client else 0.0
             self.cost_summary = {
@@ -362,16 +368,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
             #   - Play Here → &embed=1: floating in-place overlay (Rick's on-stage default).
             #   - Listen → no flag: opens the player as a standalone tab.
             #   - Download streams the raw mp3 with attachment disposition.
-            def _script_link( rel ):
-                return f"[📝 Script](/app/docs?path={urllib.parse.quote( rel )})" if rel else None
-
-            def _audio_triplet( rel ):
-                enc = urllib.parse.quote( rel )
-                return (
-                    f"[▶️ Play Here](/app/audio?path={enc}&embed=1) | "
-                    f"[🎧 Listen](/app/audio?path={enc}) | "
-                    f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
-                )
+            # The original document rides the link when it lives inside the project.
+            source_rel = source_ref( full_path, cu.get_project_root() )
 
             # One line per language: "**Mexican Spanish**: 📝 Script | ▶️ Play Here | 🎧 Listen | ⬇️ Download"
             per_language_lines = []
@@ -380,9 +378,12 @@ class PodcastGeneratorJob( AgenticJobBase ):
                 a_rel  = _to_rel( audio_by_lang.get( lang ) )
                 s_rel  = _to_rel( script_by_lang.get( lang ) )
                 parts  = []
-                s_link = _script_link( s_rel )
+                s_link = script_link( s_rel )
                 if s_link: parts.append( s_link )
-                if a_rel:  parts.append( _audio_triplet( a_rel ) )
+                if a_rel:
+                    title = read_script_title( io_base + s_rel ) if s_rel else None
+                    parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
+                if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
                 if parts:
                     per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
 
@@ -391,6 +392,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             lines.append( f"**Segments**: {n_segments} (~{script_minutes:.1f} min)" )
             lines.append( f"**Languages**: {', '.join( languages )}" )
             lines.extend( per_language_lines )
+            lines.extend( drive[ "extra_lines" ] )
             if self.cost_summary:  # pragma: no branch - cost_summary is set unconditionally (3-key dict) earlier, so it is always truthy here; the False arc is unreachable
                 total_cost = self.cost_summary.get( "total_cost_usd", 0.0 )
                 lines.append( f"**Cost**: ${total_cost:.4f}" )
@@ -494,12 +496,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
         # Clickable audio links — same shape as the real path (job.py:346-348):
         #   Play Here → &embed=1 floating overlay (auto-starts) · Listen → standalone
         #   tab · Download → raw mp3 attachment.
-        encoded     = urllib.parse.quote( audio_rel )
-        audio_links = (
-            f"[▶️ Play Here](/app/audio?path={encoded}&embed=1) | "
-            f"[🎧 Listen](/app/audio?path={encoded}) | "
-            f"[⬇️ Download](/api/io/file?path={encoded}&download=true)"
-        )
+        from cosa.agents.podcast_generator.play_links import audio_triplet
+        audio_links = audio_triplet( audio_rel )
 
         # Mock cost summary
         self.cost_summary = {

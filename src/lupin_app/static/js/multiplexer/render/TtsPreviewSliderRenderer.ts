@@ -32,24 +32,30 @@
 import type { StorageService } from "../shared/StorageService";
 import { renderTtsPreviewSlider } from "./templates/ttsPreviewSlider";
 
-// StorageService key + schema for the persisted runtime override. The legacy
-// key was `notifications_tts_preview_fraction_runtime` (raw float string); the
-// multiplexer uses the StorageService envelope under this prefixed key.
+/**
+ * The storage key of the saved preview fraction in the storage service.
+ *
+ * The legacy client used a raw key of its own, `LEGACY_TTS_FRACTION_KEY`.
+ */
 export const TTS_FRACTION_STORAGE_KEY    = "tts_preview_fraction";
+/** The schema version of the saved preview fraction. */
 export const TTS_FRACTION_STORAGE_SCHEMA = 1;
 
-// P0 5ebd2aff — the legacy client's raw key (notifications.js:235), shared with it.
+/** The legacy client's raw storage key for the preview fraction, shared with it. */
 export const LEGACY_TTS_FRACTION_KEY = "notifications_tts_preview_fraction_runtime";
 
-// Conservative fallback when neither a valid stored override nor a valid INI
-// default is available — matches legacy `this.ttsPreviewFraction = 0.25`.
+/**
+ * The fraction used when there is no valid stored override and no valid INI default.
+ *
+ * It is 0.25, as in the legacy client.
+ */
 export const DEFAULT_TTS_FRACTION = 0.25;
 
 interface StoredFraction {
   fraction : number;
 }
 
-// The raw (un-enveloped) storage the legacy client writes. `null` = none available.
+/** The raw storage the legacy client writes: `getItem` and `setItem` only. */
 export type SharedFractionStorage = Pick<Storage, "getItem" | "setItem">;
 
 /**
@@ -131,6 +137,11 @@ export function resolveLiveFraction(
   return resolveInitialFraction( storedOverride, iniDefaultFraction );
 }
 
+/**
+ * The TTS preview-fraction slider.
+ *
+ * `getFraction` returns the current value. `seedIniDefault` applies the server default after mount, unless the user already chose a value.
+ */
 export interface TtsPreviewSliderRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -147,6 +158,11 @@ export interface TtsPreviewSliderRenderer {
   seedIniDefault( fraction: number ): void;
 }
 
+/**
+ * Options for `createTtsPreviewSliderRenderer`.
+ *
+ * The storage service and the INI default fraction are required. `onChange` is told of every user change.
+ */
 export interface TtsPreviewSliderRendererOptions {
   storage            : StorageService;
   /** INI default fraction from /api/multiplexer/config (boot-supplied). */
@@ -160,6 +176,9 @@ export interface TtsPreviewSliderRendererOptions {
   sharedStorage?     : SharedFractionStorage | null;
 }
 
+/**
+ * Renders the slider that sets what fraction of a message a TTS preview speaks.
+ */
 class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
   private readonly storage  : StorageService;
   private readonly onChange : ( ( fraction: number ) => void ) | null;
@@ -174,6 +193,9 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
   // session — a late INI-default seed must NOT clobber the user's choice.
   private userOverride : boolean;
 
+  /**
+   * Creates the renderer and picks the starting fraction from stored values.
+   */
   constructor( opts: TtsPreviewSliderRendererOptions ) {
     this.storage  = opts.storage;
     this.onChange = opts.onChange ?? null;
@@ -191,6 +213,9 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
     this.fraction = resolveInitialFraction( override, opts.iniDefaultFraction );
   }
 
+  /**
+   * Draws the slider into the root element and keeps its label and input.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "TtsPreviewSliderRenderer already mounted" );
@@ -207,6 +232,9 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
     root.replaceChildren( control );
   }
 
+  /**
+   * Empties the root element and clears the slider label and input handles.
+   */
   unmount(): void {
     if ( this.root !== null ) {
       this.root.replaceChildren();
@@ -217,10 +245,16 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Returns the current preview fraction.
+   */
   getFraction(): number {
     return this.fraction;
   }
 
+  /**
+   * Applies an INI default fraction unless the user has already chosen a value.
+   */
   seedIniDefault( fraction: number ): void {
     if ( this.userOverride ) return;           // user choice wins over a late INI seed
     const f = clampFraction( fraction );
@@ -265,6 +299,11 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It reads the saved fraction at once and paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createTtsPreviewSliderRenderer(
   opts: TtsPreviewSliderRendererOptions,

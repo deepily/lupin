@@ -1,10 +1,10 @@
 """
-Heartbeat Arbiter — pure consumer leaves (Tiffany 💍's lane, v2 fleet arbiter).
+Heartbeat arbiter: the pure decision leaves the arbiter consumer composes.
 
 The arbiter (design: lupin src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md)
 extends the agentic HeartbeatPokerJob to consume the fleet heartbeat-events
-exhaust and drive auto-ping / idle-roster / dependency-graph behaviors. THIS
-package holds the PURE, 100%-tested decision leaves the consumer composes:
+exhaust and drive auto-ping, idle-roster and dependency-graph behaviors. This
+package holds the pure, fully tested decision leaves the consumer composes:
 
     - dependency_graph : who-waits-on-whom cycle (deadlock) detection
     - ping_throttle    : per-edge backoff + global rate-cap decisions

@@ -1,7 +1,6 @@
 # Authentication Security Guide
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Target Audience**: DevOps, Security Engineers, Backend Developers
 
 ---
@@ -38,7 +37,7 @@ The Lupin Authentication System implements defense-in-depth with multiple securi
 - **Least Privilege**: Default user role has minimal permissions
 - **Defense in Depth**: Multiple security layers
 - **Fail Secure**: Errors default to denying access
-- **Privacy by Design**: No email enumeration, secure error messages
+- **Privacy-by-Design framework**: No email enumeration, secure error messages
 
 ---
 
@@ -342,7 +341,7 @@ localStorage.setItem( 'session_id', sessionId );
 
 #### Output Encoding
 - [ ] **Escape HTML in Responses** - Prevent reflected XSS
-- [ ] **Content-Type Headers** - Set correct MIME types
+- [ ] **Content-Type Headers** - Set correct mime types
   ```http
   Content-Type: application/json; charset=utf-8
   ```
@@ -724,5 +723,4 @@ async def export_user_data( user_id: int ):
 ---
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Maintained By**: Lupin Security Team

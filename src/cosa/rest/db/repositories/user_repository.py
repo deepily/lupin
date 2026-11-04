@@ -102,7 +102,7 @@ class UserRepository(BaseRepository[User]):
 
     def update_password( self, user_id: uuid.UUID, new_password_hash: str ) -> Optional[User]:
         """
-        Update user password.
+        Set a user's password hash.
 
         Requires:
             - user_id: User UUID
@@ -119,7 +119,7 @@ class UserRepository(BaseRepository[User]):
 
     def update_last_login( self, user_id: uuid.UUID ) -> Optional[User]:
         """
-        Update last login timestamp to current UTC time.
+        Set a user's last login timestamp to the current UTC time.
 
         Requires:
             - user_id: User UUID
@@ -138,7 +138,7 @@ class UserRepository(BaseRepository[User]):
 
     def update_roles( self, user_id: uuid.UUID, roles: List[str] ) -> Optional[User]:
         """
-        Update user roles.
+        Replace a user's roles list.
 
         Requires:
             - user_id: User UUID
@@ -261,7 +261,7 @@ class UserRepository(BaseRepository[User]):
         Count total number of active users.
 
         Ensures:
-            - Efficient COUNT query
+            - Efficient `COUNT` query
             - Only counts is_active = True users
 
         Returns:

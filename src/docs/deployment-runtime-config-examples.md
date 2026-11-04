@@ -1,6 +1,5 @@
 # Runtime Configuration Examples - Multi-Environment Docker Deployment
 
-**Date**: 2025-11-15
 **Purpose**: Demonstrate runtime environment variable configuration pattern
 **Status**: Reference document for deployment workflows
 
@@ -10,7 +9,7 @@
 
 Lupin uses a **runtime configuration pattern** that enables a single Docker image to be deployed across multiple environments (development, testing, production) without rebuilding.
 
-**Key Principle**: Configuration is selected at **runtime via environment variables**, NOT hardcoded in the Docker image.
+**Key Principle**: Configuration is selected at **runtime via environment variables**, not hardcoded in the Docker image.
 
 ---
 
@@ -263,7 +262,7 @@ gcloud storage buckets add-iam-policy-binding gs://bucket/ \
   --role="roles/storage.objectViewer"
 ```
 
-**Alternative**: If you must use gsutil, run from outside project directory:
+**Alternative**: If gsutil is required, run from outside project directory:
 ```bash
 cd /tmp
 gsutil iam ch serviceAccount:$SERVICE_ACCOUNT:roles/storage.objectViewer gs://lupin-lancedb-test/
@@ -330,7 +329,7 @@ docker run -p 7999:7999 \
 - **Dockerfile**: `docker/lupin/Dockerfile` - Contains runtime configuration documentation
 - **Deployment Scripts**:
   - `src/scripts/cloud-run-build.sh` - Build multi-environment image
-  - Deploy: `src/terraform/envs/test` (terraform) — `cloud-run-deploy.sh` retired 2026-07-11 (monolith-on-Cloud-Run path)
+  - Deploy: `src/terraform/envs/test` (terraform) — `cloud-run-deploy.sh` retired (monolith-on-Cloud-Run path)
 - **Configuration File**: `src/conf/lupin-app.ini` - Defines all config blocks
 - **ConfigurationManager**: `src/cosa/config/configuration_manager.py` - Handles env var parsing
 
@@ -338,4 +337,4 @@ docker run -p 7999:7999 \
 
 ## Version History
 
-- **2025-11-15**: Created documentation for runtime configuration pattern
+- Created documentation for runtime configuration pattern

@@ -30,6 +30,8 @@
 
 set -euo pipefail
 
+source "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/lib/worktree-link-lib.sh"
+
 TARGET="${1:-$PWD}"
 CHECK_ONLY=0
 if [[ "${1:-}" == "--check" ]]; then
@@ -43,35 +45,13 @@ if [[ ! -d "$TARGET" ]]; then
 fi
 
 # The main repo is the worktree list's first entry — git reports the primary tree first,
-# which is the one that actually owns a .venv.
-#
-# 🔴 NO PIPE HERE, DELIBERATELY (row f8f7d54b). This line used to read
-#     git ... worktree list --porcelain | awk '/^worktree /{print $2; exit}'
-# and died with SIGPIPE on 17 of 30 runs on a box with 152 lines of worktree list: awk
-# closes the pipe on its first match while git is still writing, git takes SIGPIPE, and
-# `pipefail` + `set -e` turn that into a silent exit 141 before any of this script's own
-# messages. It reads to a caller exactly like "ran fine, nothing to do" with no .venv.
-# The failure rate rises with the length of git's output, which is why the author never
-# saw it and why the fleet hits it more every week. Reading the whole output into a
-# variable first is the shape that CANNOT race — there is no reader to close early.
-#
-# Bonus: ${line#worktree } keeps worktree paths containing spaces, which awk '{print $2}'
-# silently truncated at the first space.
-if ! WORKTREE_LIST="$( git -C "$TARGET" worktree list --porcelain 2>/dev/null )"; then
-    WORKTREE_LIST=""
-fi
-
-MAIN_REPO=""
-while IFS= read -r line; do
-    if [[ "$line" == "worktree "* ]]; then
-        MAIN_REPO="${line#worktree }"
-        break
-    fi
-done <<< "$WORKTREE_LIST"
-if [[ -z "$MAIN_REPO" ]]; then
+# which is the one that actually owns a .venv. wt_resolve_main reads the list without a pipe
+# (row f8f7d54b); the reason is written beside it in lib/worktree-link-lib.sh.
+if ! wt_resolve_main "$TARGET"; then
     echo "ERROR: $TARGET is not inside a git repository" >&2
     exit 2
 fi
+MAIN_REPO="$WT_MAIN"
 
 SOURCE_VENV="$MAIN_REPO/.venv"
 LINK="$TARGET/.venv"
@@ -87,7 +67,7 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
     exit 1
 fi
 
-if [[ "$( cd "$TARGET" && pwd -P )" == "$( cd "$MAIN_REPO" && pwd -P )" ]]; then
+if wt_same_dir "$TARGET" "$MAIN_REPO"; then
     echo "REFUSING: $TARGET is the MAIN repo, which owns the real .venv."
     echo "  Linking it to itself would replace a real directory with a loop."
     exit 3

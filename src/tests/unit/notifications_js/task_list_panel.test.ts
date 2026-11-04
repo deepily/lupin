@@ -404,17 +404,16 @@ test( "_formatTaskChaseTime: unparseable string → em-dash", () => {
   assert.equal( ui._formatTaskChaseTime( "not-a-date", "America/New_York" ), "—" );
 } );
 
-test( "_formatTaskChaseTime: invalid IANA zone degrades to browser-local (no throw)", () => {
+test( "_formatTaskChaseTime: invalid IANA zone degrades to labelled UTC (no throw)", () => {
   const ui = newUI();
   const out = ui._formatTaskChaseTime( "2026-06-17T14:30:00Z", "Not/AZone" );
-  assert.match( out, /\d{2}\D\d{2}/ );   // month/day present
-  assert.match( out, /\d{2}:\d{2}/ );
+  assert.match( out, /14:30 UTC$/ );
 } );
 
-test( "_formatTaskChaseTime: absent zone uses browser-local", () => {
+test( "_formatTaskChaseTime: absent zone shows labelled UTC", () => {
   const ui = newUI();
   const out = ui._formatTaskChaseTime( "2026-06-17T14:30:00Z", null );
-  assert.match( out, /\d{2}:\d{2}/ );
+  assert.match( out, /14:30 UTC$/ );
 } );
 
 // ─────────────────────────── groupTasksByOwner (pure) ───────────────────────────

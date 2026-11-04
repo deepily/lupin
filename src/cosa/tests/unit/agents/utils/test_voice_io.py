@@ -257,6 +257,33 @@ def test_ask_yes_no_voice_failure_non_interactive_honours_declaration():
         assert _run( mod.ask_yes_no( "Proceed?", unattended_default=True ) ) is True
 
 
+def _dispatcher_iface():
+    """A cosa_interface whose ask_confirmation is the dispatcher's own method, not a mock."""
+    from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher
+    d = AgentNotificationDispatcher( agent_type="test.agent" )
+    return _fake_iface( ask_confirmation=d.ask_confirmation )
+
+
+@pytest.mark.parametrize( "unattended, default", [ ( False, "yes" ), ( True, "no" ) ] )
+def test_ask_yes_no_dispatcher_error_non_interactive_answers_with_unattended_default( unattended, default ):
+    # Entered where the bug entered: through the real dispatcher, not a mocked
+    # ask_confirmation. The answer must come from unattended_default, never `default`.
+    import cosa.agents.utils.agent_notification_dispatcher as disp
+    _enter_voice_mode( _dispatcher_iface() )
+    with patch.object( disp, "_notify_user_sync", side_effect=RuntimeError( "weird" ) ), \
+         patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.ask_yes_no( "Proceed?", default=default, unattended_default=unattended ) ) is unattended
+
+
+def test_ask_yes_no_dispatcher_error_non_interactive_refuses_without_declaration():
+    import cosa.agents.utils.agent_notification_dispatcher as disp
+    _enter_voice_mode( _dispatcher_iface() )
+    with patch.object( disp, "_notify_user_sync", side_effect=RuntimeError( "weird" ) ), \
+         patch.object( mod, "_is_interactive", return_value=False ):
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.ask_yes_no( "Proceed?", default="yes" ) )
+
+
 def test_ask_yes_no_voice_failure_interactive_cli_fallback():
     iface = _fake_iface( ask_confirmation=AsyncMock( side_effect=RuntimeError( "x" ) ) )
     _enter_voice_mode( iface )
@@ -510,6 +537,29 @@ def test_present_choices_cli_interactive_multi_custom_text():
         assert _run( mod.present_choices( _Q_MULTI ) )[ "answers" ] == { "Pick": [ "freeform" ] }
 
 
+@pytest.mark.parametrize( "questions,typed,source", [
+    ( _Q_SINGLE, "",    "cli_blank_entry" ),
+    ( _Q_MULTI,  "",    "cli_blank_entry" ),
+    ( _Q_MULTI,  "9",   mod._DEFAULT_SOURCE_CLI_BAD_INDEX ),
+] )
+def test_present_choices_cli_blank_or_bad_index_defers_to_the_declared_default( questions, typed, source ):
+    mod.set_cli_mode( True )
+    with patch.object( mod, "_is_interactive", return_value=True ), \
+         patch( "builtins.input", return_value=typed ):
+        out = _run( mod.present_choices( questions, response_default={ "Pick": "a" } ) )
+        assert out[ "default_used" ] is True
+        assert out[ "default_source" ] == source
+        assert out[ "answers" ] == { "Pick": "a" }
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.present_choices( questions ) )
+
+
+def test_present_choices_voice_non_dict_result_is_returned_untouched():
+    iface = _fake_iface( present_choices=AsyncMock( return_value=[ "a" ] ) )
+    _enter_voice_mode( iface )
+    assert _run( mod.present_choices( _Q_SINGLE ) ) == [ "a" ]
+
+
 def test_present_choices_voice_success():
     iface = _fake_iface( present_choices=AsyncMock( return_value={ "answers": { "Pick": "a" } } ) )
     _enter_voice_mode( iface )
@@ -630,6 +680,24 @@ def test_select_themes_voice_failure_notifies_and_raises():
     with pytest.raises( RuntimeError, match="Theme selection failed" ):
         _run( mod.select_themes( _THEMES ) )
     iface.notify_progress.assert_awaited()   # failure notice fired
+
+
+def test_select_themes_voice_timeout_resolves_the_declared_default():
+    from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
+    err   = VoiceGateTimeoutError( "choices", "no answer", delivered=True )
+    iface = _fake_iface( present_choices=AsyncMock( side_effect=err ) )
+    _enter_voice_mode( iface )
+    assert _run( mod.select_themes( _THEMES, response_default=[ 1 ] ) ) == [ 1 ]
+    iface.notify_progress.assert_not_awaited()   # a silence is not a failure to announce
+
+
+def test_select_themes_voice_timeout_without_a_default_refuses():
+    from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
+    err   = VoiceGateTimeoutError( "choices", "no answer", delivered=True )
+    iface = _fake_iface( present_choices=AsyncMock( side_effect=err ) )
+    _enter_voice_mode( iface )
+    with pytest.raises( mod.VoiceGateNoDefaultError ):
+        _run( mod.select_themes( _THEMES ) )
 
 
 # =========================================================================== #

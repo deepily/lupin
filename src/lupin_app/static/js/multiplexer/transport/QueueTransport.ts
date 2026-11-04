@@ -50,13 +50,26 @@ const PERMANENT_CLOSE_CODES = new Set<number>([ 4001, 4002, 4003 ]);
 // the reconnect budget (→ socket_close → backoff → eventually max_attempts → failed).
 const HANDSHAKE_TIMEOUT_MS = 10000;
 
+/**
+ * A WebSocket transport the stores talk to.
+ *
+ * `start( sessionId )` opens the socket and runs the auth handshake. `send` posts an envelope.
+ * `state` is the connection state.
+ */
 export interface Transport {
   start(sessionId: string): void;
   stop(): void;
+  /** Leave `failed` and open a fresh socket. A no-op in any other state. */
+  restart(): void;
   send(envelope: unknown): void;
   readonly state: ConnectionState;
 }
 
+/**
+ * What a transport is built from.
+ *
+ * It needs the auth manager, the bus and the base URL. `WebSocketCtor`, `graceMs` and `maxAttempts` are optional.
+ */
 export interface BaseTransportOptions {
   authManager   : AuthManager;
   bus           : EventBus;
@@ -109,6 +122,11 @@ export abstract class BaseTransportImpl implements Transport {
   protected csmUnsub        : (() => void) | null = null;
   protected stopped         : boolean = false;
 
+  /**
+   * Stores the auth manager, event bus, WebSocket constructor and retry limits.
+   *
+   * Strips any trailing slash from the base URL.
+   */
   constructor(opts: BaseTransportOptions) {
     this.authManager = opts.authManager;
     this.bus         = opts.bus;
@@ -118,11 +136,19 @@ export abstract class BaseTransportImpl implements Transport {
     if (opts.graceMs !== undefined) this.graceMs = opts.graceMs;
   }
 
+  /**
+   * Exposes the connection state, or connecting before the transport has started.
+   */
   get state(): ConnectionState {
     // Pre-start: report initial CSM state.
     return this.csm?.state ?? "connecting";
   }
 
+  /**
+   * Begins the connection for a session ID and opens the WebSocket.
+   *
+   * Starting again with the same session does nothing. Throws if stopped or given a different session.
+   */
   start(sessionId: string): void {
     if (this.stopped) {
       throw new Error(`${this.transportName}: cannot start a stopped transport`);
@@ -153,6 +179,9 @@ export abstract class BaseTransportImpl implements Transport {
     this.openSocket();
   }
 
+  /**
+   * Stops the transport for good: cancels timers, subscriptions and the WebSocket channel.
+   */
   stop(): void {
     this.stopped = true;
     this.cancelBackoffTimer();
@@ -174,6 +203,22 @@ export abstract class BaseTransportImpl implements Transport {
     this.authReady = false;
   }
 
+  /**
+   * The operator's way out of `failed` (row 5a8bd0c6, Rick's ruling 2026-10-07): sends the
+   * machine's `restart` event, whose move into `connecting` opens a fresh socket in
+   * `onStateChange`. Only `failed` accepts the event, so a double click or a stale button
+   * cannot disturb a socket that is already trying.
+   */
+  restart(): void {
+    if (this.csm === null) return;
+    this.csm.send({ type: "restart" });
+  }
+
+  /**
+   * Sends an envelope over the open WebSocket channel.
+   *
+   * Throws if the transport has not been started.
+   */
   send(envelope: unknown): void {
     if (!this.wsChannel) {
       throw new Error(`${this.transportName}: cannot send — channel is not started`);
@@ -355,6 +400,12 @@ export abstract class BaseTransportImpl implements Transport {
     } else if (state === "reconnecting") {
       this.cancelBackoffTimer();
       this.openSocket();
+    } else if (state === "connecting") {
+      // The initial `connecting` never reaches here (start() opens the first socket itself and the
+      // machine emits no transition for it). The only way back into `connecting` is `restart`
+      // from `failed`, whose entry stopped the socket, so a restart must open a fresh one.
+      this.cancelBackoffTimer();
+      this.openSocket();
     } else if (state === "offline" || state === "failed") {
       this.cancelBackoffTimer();
       this.cancelHandshakeTimer();
@@ -437,24 +488,41 @@ const QUEUE_SUBSCRIBED_EVENTS: ReadonlyArray<string> = [
   // carry console traffic (B4.9, the legacy half asserts the same split).
   "cc_transcript_append",
   "cc_transcript_state",
+  // Row 8796333b slice 1: task panes re-read when the store commits a change.
+  "task_store_changed",
   "auth_success",
   "auth_error",
   "connect",
   "sys_ping",
 ];
 
+/**
+ * The transport for `/ws/queue`.
+ *
+ * It adds only the endpoint path and its subscribe list. The list covers job state, notifications, TTS requests, the clock tick,
+ * task-store changes and the console transcript, plus the handshake and ping events. The audio socket subscribes to a different list.
+ */
 export class QueueTransportImpl extends BaseTransportImpl {
   protected readonly transportName    : string                  = "QueueTransport";
   protected readonly endpointPath     : string                  = "/ws/queue";
   protected readonly subscribedEvents : ReadonlyArray<string>   = QUEUE_SUBSCRIBED_EVENTS;
 }
 
+/**
+ * The options of a queue transport.
+ *
+ * `baseUrl` is the server origin. The socket opens at `<baseUrl>/ws/queue/<session id>`.
+ */
 export type QueueTransportOptions = BaseTransportOptions;
 
+/** Build a queue transport for `/ws/queue`; no socket opens until `start` is called. */
 export function createQueueTransport(opts: QueueTransportOptions): Transport {
   return new QueueTransportImpl(opts);
 }
 
+/**
+ * Removes any trailing slashes from a URL.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");

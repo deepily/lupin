@@ -3,7 +3,7 @@
 Elaboration Prompts for Presentation Generator.
 
 Provides system prompts, prompt builders, and response parsers for the
-elaboration phase (Orchestrator Phase 4: Elaborate).
+elaboration phase (the orchestrator's Elaborate step).
 
 The LLM takes a slide outline and the source document, then produces
 fully elaborated slide content with presenter notes.
@@ -123,7 +123,7 @@ def get_elaboration_prompt(
         - Appends human feedback for revisions if provided
 
     Args:
-        slide_outlines: Slide outlines from Phase 3
+        slide_outlines: Slide outlines from the outline step
         source_content: Original source document content
         target_duration_minutes: Target presentation duration in minutes
         audience: Audience level (beginner/general/expert/academic)
@@ -236,7 +236,7 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
         - Ensures presenter_notes has all required subfields
 
     Raises:
-        - ValueError (D6-STRICT fail-loud) when the response has no recoverable
+        - ValueError (strict fail-loud policy) when the response has no recoverable
           JSON object, the "slides" value is missing / not a list / empty, or
           every entry is a non-dict (zero usable slides).
 
@@ -363,14 +363,11 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
 
 def summarize_timing_clamps( slides: List[ dict ] ) -> dict:
     """
-    Report how the timing clamp altered the model's raw per-slide timing across
-    a parsed deck (bug d5ecb753).
+    Report how the timing clamp changed the raw per-slide timing of a parsed deck.
 
-    The clamp at MAX_TIMING_PER_SLIDE flattens every over-budget slide to a flat
-    ceiling value, which is why an over-emitting model reads as a "pinned
-    constant" and why deck-duration reports built from the clamped field are a
-    fiction. This summary makes the clamp visible: how many slides it hit, and
-    by how much the model overshot.
+    The clamp at MAX_TIMING_PER_SLIDE sets every over-budget slide to one ceiling
+    value. An over-emitting model therefore looks pinned to a constant, and
+    duration reports built from the clamped field are wrong. This shows the slides hit.
 
     Requires:
         - slides is a list of slide dicts as returned by
@@ -384,8 +381,8 @@ def summarize_timing_clamps( slides: List[ dict ] ) -> dict:
         - Only slides carrying a raw model value (timing_seconds_raw is not None)
           contribute to raw_total / clamped_total / clamped — a slide the model
           left blank had no value for the clamp to alter, so it is never counted
-        - raw_total and clamped_total are summed over the SAME slides, so their
-          difference is exactly what the clamp removed
+        - raw_total and clamped_total are summed over the same slides, so their
+          difference is what the clamp removed
         - max_overshoot is the largest single-slide (raw - clamped), or 0 when
           nothing was clamped
         - Never raises

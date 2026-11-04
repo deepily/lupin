@@ -2,7 +2,7 @@
 """
 CrudForDataFramesAgent — Base agent for voice-driven DataFrame CRUD.
 
-Connects the COSA voice pipeline to Phase 1 CRUD operations via LLM-based
+Connects the COSA voice pipeline to the CRUD operations layer through LLM
 intent extraction. Overrides run_prompt(), run_code(), and run_formatter()
 while leaving do_all() untouched so RunningFifoQueue._handle_base_agent()
 works unchanged.
@@ -31,12 +31,8 @@ class CrudForDataFramesAgent( AgentBase ):
     """
     Base agent for voice-driven CRUD operations on per-user DataFrames.
 
-    Extracts intent from natural language via Phi-4 14B (or configured LLM),
-    dispatches to crud_operations, and formats results for TTS. Falls back to
-    Claude Code headless if the local LLM fails.
-
-    Subclassed by TodoCrudAgent and CalendarCrudAgent for domain-specific
-    prompts, schemas, and voice formatting.
+    Extracts intent via Phi-4 14B (or the configured LLM), dispatches to crud_operations,
+    and formats results for TTS. TodoCrudAgent and CalendarCrudAgent subclass it.
 
     Requires:
         - Configuration keys in lupin-app.ini:
@@ -46,9 +42,19 @@ class CrudForDataFramesAgent( AgentBase ):
 
     Ensures:
         - do_all() works unchanged with RunningFifoQueue._handle_base_agent()
-        - Falls back to Claude Code headless on dispatch errors
+        - Falls back to Claude Code headless on dispatch errors, and when the local LLM fails
         - Raises CodeGenerationFailedException if both paths fail
     """
+
+    # Set by RunningFifoQueue at dispatch (row 4cbd4858): True when this job's lineage traces
+    # to a test-suite job, which takes the confirmation default without asking. A class-level
+    # default, not a constructor line, so an agent built without __init__ (several unit
+    # fixtures do) still has the attribute and keeps the ask.
+    lineage_is_test_suite = False
+
+    # The schema a domain subclass works on; None on the base agent. __init__ copies it to
+    # self.default_schema_type, so a subclass sets this one constant and needs no __init__.
+    DEFAULT_SCHEMA_TYPE = None
 
     def __init__( self, question="", question_gist="", last_question_asked="",
                   push_counter=-1,
@@ -66,6 +72,7 @@ class CrudForDataFramesAgent( AgentBase ):
             - self.storage is initialized for per-user parquet I/O
             - self.prompt is built with available lists (XML injected by PromptTemplateProcessor)
             - self.crud_intent is None (set in run_prompt)
+            - self.default_schema_type is the class constant DEFAULT_SCHEMA_TYPE
         """
         super().__init__(
             df_path_key          = None,
@@ -104,6 +111,8 @@ class CrudForDataFramesAgent( AgentBase ):
         # NO xml_response_tag_names — using CRUDIntent.from_xml() directly
 
         if self.debug: print( f"CrudForDataFramesAgent: prompt length={len( self.prompt )}, user={user_email}" )
+
+        self.default_schema_type = self.DEFAULT_SCHEMA_TYPE
 
     def run_prompt( self, include_raw_response=False ):
         """
@@ -151,11 +160,8 @@ class CrudForDataFramesAgent( AgentBase ):
         """
         Dispatch CRUDIntent to CRUD operations with error-based fallback.
 
-        Overrides AgentBase.run_code() entirely — no code generation or execution.
-        Instead, dispatches the parsed CRUDIntent to crud_operations functions.
-
-        If dispatch fails, falls back to Claude Code headless for intent extraction.
-        If both paths fail, raises CodeGenerationFailedException.
+        Overrides AgentBase.run_code() entirely: no code is generated or executed.
+        The parsed CRUDIntent goes to crud_operations functions instead.
 
         Requires:
             - self.crud_intent is set from run_prompt()
@@ -163,6 +169,7 @@ class CrudForDataFramesAgent( AgentBase ):
         Ensures:
             - self.code_response_dict is set with return_code and output
             - self.error is None on success
+            - Falls back to Claude Code headless for intent extraction if dispatch fails
             - Raises CodeGenerationFailedException if all paths fail
         """
         # Voice confirmation for destructive operations
@@ -297,9 +304,16 @@ class CrudForDataFramesAgent( AgentBase ):
         Ensures:
             - Returns True if user confirms (says yes)
             - Returns False on denial, timeout, or error (safe default)
+            - Returns False without asking when self.lineage_is_test_suite is True (the test
+              harness's own listener makes the user look online, so every ask would sit out
+              its 30 s window); every other job keeps the ask
         """
         operation   = self.crud_intent.operation
         target_list = self.crud_intent.target_list or "your list"
+
+        if self.lineage_is_test_suite:
+            print( f"[CRUD] Test-suite lineage — not asking to {operation} from {target_list}, taking the 'no' default" )
+            return False
 
         message = f"Are you sure you want to {operation} from {target_list}?"
 
@@ -326,6 +340,41 @@ class CrudForDataFramesAgent( AgentBase ):
         if self.debug: print( f"User confirmation response: [{selected}]" )
 
         return selected is not None and selected.strip().lower().startswith( "yes" )
+
+
+def smoke_check_schema_agent( agent_cls, schema_type ):
+    """
+    Smoke-check a domain CRUD agent class and print the result.
+
+    Requires:
+        - agent_cls is a domain subclass of CrudForDataFramesAgent
+        - schema_type is the schema its DEFAULT_SCHEMA_TYPE should name
+
+    Ensures:
+        - returns True when the constant matches and the class inherits the base agent, else False
+        - a failure prints the error and its traceback and is returned, never raised
+        - the full constructor is not run: it needs config and an LLM
+    """
+    name = agent_cls.__name__
+    print( f"Testing {name} module..." )
+
+    try:
+        assert agent_cls.DEFAULT_SCHEMA_TYPE == schema_type
+        print( f"  ✓ DEFAULT_SCHEMA_TYPE is '{schema_type}'" )
+
+        # Verify inheritance
+        assert issubclass( agent_cls, CrudForDataFramesAgent )
+        print( "  ✓ Inherits from CrudForDataFramesAgent" )
+
+        print( "  ○ Full constructor: requires config + LLM (tested in unit tests)" )
+        print( f"✓ {name} module smoke test PASSED" )
+        return True
+
+    except Exception as e:
+        print( f"✗ {name} module smoke test FAILED: {e}" )
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 def quick_smoke_test():

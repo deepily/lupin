@@ -390,6 +390,13 @@ people copy a subtraction out of.
 | terraform provider cache | 1 | 1 — unchanged, still absent |
 | wrong-tree `LUPIN_ROOT` | 1 | 1 — unchanged, fires only if you skip the export |
 
+⚠️ **UPDATE 2026-09-30 (row 31344c5f follow-on): the terraform provider cache is now borrowed too.**
+`link-worktree-artifacts.sh` links `src/terraform/envs/test/.terraform/providers` — and ONLY that
+subdirectory, never `.terraform`, whose `terraform.tfstate` and `modules/` a worktree run writes. So
+in a PROVISIONED tree the `test_terraform_provider_cache_is_present` row is **0**, while a hand-typed
+`git worktree add` still reads **1**. The rows above are dated records of the tree as it was then;
+`ls -L src/terraform/envs/test/.terraform/providers` first, as with `cloud-run.env`.
+
 ⚠️ **THE 9 IS NOT DEAD, IT IS CONDITIONAL — AND THE CONDITION IS HOW THE TREE WAS CREATED.**
 Provisioning lives in the PYTHON spawn path only, so **a hand-typed `git worktree add` still gets
 nothing** and still sees all 9. ⇒ **Do not replace one fixed number with another.** `ls

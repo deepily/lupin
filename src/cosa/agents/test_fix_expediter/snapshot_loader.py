@@ -55,8 +55,8 @@ def load_from_path(
         user_id: User ID for downstream plan doc + WS routing
         user_email: User email for PlanWriter partitioning
         session_id: WebSocket session ID
-        original_test_types: Suites the original job ran (for Phase 6 rerun)
-        original_pytest_args: Original pytest args (for Phase 6 rerun)
+        original_test_types: Suites the original job ran (for the validation rerun)
+        original_pytest_args: Original pytest args (for the validation rerun)
 
     Returns:
         TestRemediationContext: Validated context for downstream phases

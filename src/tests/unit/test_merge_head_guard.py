@@ -148,6 +148,28 @@ class TestTheVerdict:
     def test_a_commit_with_dash_a_is_refused( self ):
         assert _guard( "git commit -am 'sweep'" ) is not None
 
+    def test_a_commit_tree_is_allowed_mid_merge_and_git_is_never_read( self ):
+        """
+        `git commit-tree` writes an object and concludes no merge.
+
+        The shared matcher once read it as `git commit`, so a live merge refused it.
+        The reader must not be asked either: the match decides before git is read.
+        """
+        reader = _recording_reader()
+        for command in ( "git commit-tree abc123 -m x", "git commit-graph write", "git commit-msg f" ):
+            assert _guard( command, merge_reader=reader ) is None, f"{command!r} was refused"
+        assert reader.seen == [], f"git was read for a non-commit: {reader.seen!r}"
+
+    def test_a_real_commit_after_a_commit_tree_is_still_refused_mid_merge( self ):
+        """
+        A commit-tree in front must not hide the real commit behind it.
+
+        Without this, a guard that stopped at the first `git commit`-looking word
+        would allow the line, and every case above would still pass.
+        """
+        for command in ( "git commit-tree abc && git commit -m x", "git commit-tree abc; git commit -m x" ):
+            assert _guard( command ) is not None, f"{command!r} was allowed"
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # WHAT THE REFUSAL SAYS

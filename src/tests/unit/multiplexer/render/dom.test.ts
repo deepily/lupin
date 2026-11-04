@@ -9,6 +9,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   replaceChildren,
   keyedListMerge,
+  cssEscape,
+  messageEl,
+  teardownScaffold,
   type KeyedEntry,
 } from "../../../../lupin_app/static/js/multiplexer/render/dom";
 
@@ -336,4 +339,57 @@ test("keyedListMerge: without moveBefore every move uses insertBefore", () => {
 
   assert.deepEqual(calls.inserted, [ "b", "n" ]);
   assert.deepEqual(ids(parent), [ "b", "n", "a" ]);
+});
+
+// ---------------------------------------------------------------------------
+// cssEscape / messageEl / teardownScaffold — the helpers the board renderers share
+// ---------------------------------------------------------------------------
+
+function withCss(value: unknown, body: () => void): void {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "CSS");
+  Object.defineProperty(globalThis, "CSS", { value, configurable: true, writable: true });
+  try {
+    body();
+  } finally {
+    if (saved === undefined) delete (globalThis as { CSS?: unknown }).CSS;
+    else Object.defineProperty(globalThis, "CSS", saved);
+  }
+}
+
+test("cssEscape: uses the built-in CSS.escape when the runtime has one", () => {
+  withCss({ escape: (s: string) => `built-in(${s})` }, () => {
+    assert.equal(cssEscape("a b"), "built-in(a b)");
+  });
+});
+
+test("cssEscape: falls back to a backslash escape of every character outside [a-zA-Z0-9_-]", () => {
+  withCss({}, () => {
+    assert.equal(cssEscape("ab-9_Z"), "ab-9_Z");
+    assert.equal(cssEscape('a b"c.d'), 'a\\ b\\"c\\.d');
+  });
+});
+
+test("messageEl: builds a <p> whose class is the board prefix plus the extra class, with the text", () => {
+  const p = messageEl("holding-area", "signin", "Please sign in");
+  assert.equal(p.tagName, "P");
+  assert.equal(p.className, "holding-area-message signin");
+  assert.equal(p.textContent, "Please sign in");
+  assert.equal(messageEl("fleet-status", "unreachable", "x").className, "fleet-status-message unreachable");
+});
+
+test("teardownScaffold: runs each off-function once, empties the list, runs collapseOff, clears the root", () => {
+  const order: string[] = [];
+  const unsubscribers = [ () => order.push("a"), () => order.push("b") ];
+  const root = document.createElement("div");
+  root.appendChild(document.createElement("span"));
+  teardownScaffold(unsubscribers, () => order.push("collapse"), root);
+  assert.deepEqual(order, [ "a", "b", "collapse" ]);
+  assert.equal(unsubscribers.length, 0);
+  assert.equal(root.childNodes.length, 0);
+});
+
+test("teardownScaffold: a null collapseOff and a null root are skipped without error", () => {
+  const unsubscribers = [ () => undefined ];
+  teardownScaffold(unsubscribers, null, null);
+  assert.equal(unsubscribers.length, 0);
 });

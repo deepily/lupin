@@ -2,7 +2,7 @@
 Configuration for fine-tuning Ministral-8B-Instruct-2410 model.
 
 This configuration module defines the parameters needed by the PEFT Trainer to fine-tune
-the Mistral AI's Ministral-8B-Instruct-2410 model, which is a distilled version of the
+the Mistral AI's Ministral-8B-Instruct-2410 model. That model is a distilled version of the
 larger Mistral model. The configuration is organized into four dictionaries that provide
 model-specific parameters for the fine-tuning process:
 

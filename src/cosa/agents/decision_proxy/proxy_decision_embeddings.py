@@ -7,7 +7,7 @@ similarity search, backed by PostgreSQL + pgvector through
 PredictionDecisionRepository. Used for Case-Based Reasoning (CBR) retrieval.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 import threading
@@ -172,7 +172,7 @@ class ProxyDecisionEmbeddings:
 
     def update_ratification_state( self, id, new_state ):
         """
-        Update the ratification state of an existing decision record.
+        Set the ratification state of an existing decision record.
 
         Requires:
             - id is a string matching an existing record

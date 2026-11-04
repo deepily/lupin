@@ -25,12 +25,9 @@ def main( argv=None ):
     """
     Render the markdown report for the rows JSON named by `argv[1]`.
 
-    THIS USED TO BE MODULE-LEVEL CODE, and line 5 was `rows = json.load(open(sys.argv[1]))`
-    — so merely IMPORTING this file read argv and parsed a file, which means it could
-    not be imported at all: bare, it raised IndexError; under pytest, whose argv[1] is
-    a test path, FileNotFoundError. Same shape as its sibling loc_rollup.py but one
-    notch worse, since that one at least imported successfully before doing its damage.
-    Wrapping changes nothing about running the script; it only makes importing it free.
+    This code used to run at module level, so importing the file read argv and parsed a file.
+    Bare import raised IndexError; under pytest (argv[1] a test path) FileNotFoundError.
+    Wrapping changes nothing about running the script and makes importing it free.
 
     Requires:
         - argv[1] names a JSON file of row dicts as written by count.py

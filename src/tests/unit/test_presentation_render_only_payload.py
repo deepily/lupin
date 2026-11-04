@@ -81,6 +81,41 @@ class TestRenderOnlyPayload( unittest.TestCase ):
         self.assertNotIn( "parent_id_hash", payload )
 
 
+class _Refused:
+    """A false deck verdict that carries a reason."""
+    reason = "stub"
+    def __bool__( self ): return False
+
+
+class TestRenderOnlyDeckPath( unittest.TestCase ):
+    """
+    Tests where the render-only smoke looks for the finished deck.
+
+    Ensures:
+        - a pptx_path recorded relative to io/ is checked at {LUPIN_ROOT}/io/<path>
+        - an absolute pptx_path is checked as given
+    """
+
+    def _checked_path( self, recorded ):
+        """Return the path `_check_deck_file` hands the deck verdict for a recorded pptx_path."""
+        seen = []
+        def _verdict( path ):
+            seen.append( path )
+            return _Refused()
+        with patch( "cosa.utils.util.get_project_root", return_value="/var/lupin" ), \
+             patch( "cosa.agents.presentation_generator.deck_verdict.verify_presentation_deck", _verdict ):
+            _obj( "unused" )._check_deck_file( { "artifacts": { "pptx_path": recorded } } )
+        return seen
+
+    def test_io_relative_path_is_joined_under_io( self ):
+        """Ensures: job.py records pptx_path without its io/ prefix; the check puts it back."""
+        self.assertEqual( self._checked_path( "presentations/u/deck.pptx" ), [ "/var/lupin/io/presentations/u/deck.pptx" ] )
+
+    def test_absolute_path_is_checked_as_given( self ):
+        """Ensures: an absolute pptx_path is not re-rooted."""
+        self.assertEqual( self._checked_path( "/var/lupin/io/presentations/u/deck.pptx" ), [ "/var/lupin/io/presentations/u/deck.pptx" ] )
+
+
 def quick_smoke_test():
     """Run this module's unit tests with a banner + pass/fail summary."""
     print( "=" * 72 )

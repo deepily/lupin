@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Heartbeat Arbiter — idle-roster assembly + trust labeling (pure).
+Heartbeat arbiter idle-roster assembly with trust labels (pure).
 
-The arbiter (doc 03 §6.2, Rick's HYBRID ruling) surfaces the fleet's idle /
-nothing-owed sessions to the manager, each entry TRUST-LABELED so the manager
-can weight reassignment confidence:
-    - declared-available — the session emitted a genuine-idle beacon
-      (heartbeat_events EVENT_IDLE; sticky-until-superseded → its LAST emitted
-      outcome is "idle"). Authoritative.
-    - quiet (inferred) — no beacon, but the session is ALIVE AND QUIET (no
-      activity — events OR commons — past the idle threshold). Heuristic
-      ("quiet" can be a long tool-run).
+The arbiter surfaces the fleet's idle or nothing-owed sessions to the manager.
+Each entry carries a trust label, so the manager can weight reassignment confidence:
+    - declared-available: the session emitted an idle beacon (heartbeat_events
+      EVENT_IDLE, sticky until superseded, so its last emitted outcome is
+      "idle"). Authoritative.
+    - quiet (inferred): no beacon, but the session is alive and quiet. It has no
+      activity, from events or commons, past the idle threshold. This is a
+      heuristic, since "quiet" can be a long tool-run.
 
-HYBRID = declared ∪ inferred. Pure: the consumer feeds the fleet_view (from
-fleet_data_model, which already merged events + commons_who into
-last_activity_ts + alive); this returns the trust-labeled roster. Never raises.
+The roster is hybrid: declared ∪ inferred. The consumer feeds the fleet_view from
+fleet_data_model, which has already merged events and commons_who into
+last_activity_ts and alive. This module returns the trust-labeled roster and
+never raises.
 
 Design authority: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md §6.2.
@@ -48,17 +48,17 @@ def _quiet_for_seconds( ts, now ):
 
 def classify_idle( view, now, quiet_threshold_seconds ):
     """
-    Trust-classify a session view's idle status, or None if it is NOT idle.
+    Trust-classify a session view's idle status, or None if it is not idle.
 
     Requires:
-        - view is a fleet_data_model VIEW dict
+        - view is a fleet_data_model view dict
         - now is an aware datetime
         - quiet_threshold_seconds is a positive number (the "quiet" window)
 
     Ensures:
         - last_outcome == EVENT_IDLE → (IDLE_SOURCE_DECLARED, TRUST_DECLARED)
           — the sticky beacon wins outright
-        - else, ALIVE AND quiet (now - last_activity_ts >= idle_threshold) →
+        - else, alive and quiet (now - last_activity_ts >= idle_threshold) →
           (IDLE_SOURCE_INFERENCE, TRUST_INFERRED)
         - otherwise → None (working / not-yet-quiet / dead / unknown ts)
         - Never raises
@@ -75,28 +75,28 @@ def classify_idle( view, now, quiet_threshold_seconds ):
 
 def build_roster( fleet_view, now, quiet_threshold_seconds, alive_threshold_seconds=None ):
     """
-    Build the trust-labeled fleet idle-roster (HYBRID: declared ∪ inferred).
+    Build the trust-labeled fleet idle-roster (hybrid: declared ∪ inferred).
 
     Requires:
-        - fleet_view is a dict { session_id: VIEW } (build_fleet_view output)
+        - fleet_view is a dict { session_id: view } (build_fleet_view output)
         - now is an aware datetime
         - quiet_threshold_seconds is a positive number
         - alive_threshold_seconds is a positive number (the staleness window) or
-          None (the additive default → NO staleness gate, byte-identical to the
+          None (the additive default → no staleness gate, byte-identical to the
           pre-filter behavior; existing 3-arg callers/tests are unaffected)
 
     Ensures:
         - Returns a list of { session_id, persona, idle_source, trust_label,
-          last_activity_ts } for ONLY the idle sessions (classify_idle non-None)
-          THAT ARE ALSO NOT STALE (free-count fix, 2026-06-24): an idle/quiet
-          entry is dropped when dependency_graph.session_is_stale (the SAME
-          predicate the peer-edge / ping-storm fixes use — one source of truth)
-          judges its SESSION beyond alive_threshold_seconds. Applied UNIFORMLY to
-          declared AND inferred entries, so a DEAD session's sticky EVENT_IDLE
+          last_activity_ts } for only the idle sessions (classify_idle non-None)
+          that are also not stale: an idle/quiet entry is dropped when
+          dependency_graph.session_is_stale (the same predicate the peer-edge and
+          ping-storm fixes use, so there is one source of truth) judges its
+          session beyond alive_threshold_seconds. The filter applies uniformly to
+          declared and inferred entries, so a dead session's sticky EVENT_IDLE
           beacon no longer inflates the "free fleet-wide" count.
-        - Fail-SAFE: session_is_stale returns False (KEEP) for a missing/None/
+        - Fail-safe: session_is_stale returns False (keep) for a missing/None/
           unparseable last_activity_ts or an un-threaded alive_threshold_seconds
-          (None) — the count never under-reports genuinely-live capacity.
+          (None), so the count never under-reports live capacity.
         - Sorted by last_activity_ts descending (most-recent first; missing last)
         - Non-dict views are skipped; never raises
     """

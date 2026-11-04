@@ -278,6 +278,14 @@ class TestThePerBroadcastAckRead:
         harness.repo.raises( "get_latest_acks_for_broadcast", RuntimeError( "connection reset" ) )
         assert _get( harness ).status_code == 500
 
+    def test_an_http_error_raised_by_the_query_keeps_its_own_status( self, harness ):
+        """Only unexpected faults become a 500; a deliberate HTTP error passes through untouched."""
+        from fastapi import HTTPException
+        harness.repo.raises( "get_latest_acks_for_broadcast", HTTPException( status_code=503, detail="shedding load" ) )
+        r = _get( harness )
+        assert r.status_code == 503
+        assert r.json()[ "detail" ] == "shedding load"
+
     def test_a_dead_database_is_a_500_and_not_an_empty_tally( self, harness ):
         """
         🔴 THE WORST POSSIBLE ANSWER IS 200 WITH AN EMPTY LIST. "Nobody acked" and

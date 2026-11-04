@@ -46,6 +46,12 @@ INCIDENT_COMMAND = (
 )
 
 
+@pytest.fixture( autouse=True )
+def _isolated_hook_log( tmp_path, monkeypatch ):
+    """A failed probe writes a hook-log line; keep it out of the real log directory."""
+    monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path / "hooklogs" ) )
+
+
 def _no_claude( pid ):
     """comm_reader stub: nothing on the box is a seat."""
     return "pytest"
@@ -195,8 +201,9 @@ def test_a_scoped_listing_does_not_excuse_a_later_unscoped_one():
 
 
 def test_ps_without_an_all_selector_is_not_a_fleet_wide_listing():
-    """A bare `ps` shows this terminal's processes, not the box's."""
-    assert _deny( "ps | xargs kill" ) is None
+    """A bare `ps` is not a fleet listing; the wrapper rule refuses the xargs."""
+    reason = _deny( "ps | xargs kill" )
+    assert reason is not None and "fleet-wide" not in reason and "`xargs` runs the text" in reason
 
 
 def test_the_word_kill_inside_a_quoted_argument_is_not_a_kill():
@@ -494,8 +501,46 @@ def test_a_pattern_sweep_that_would_hit_a_seat_is_denied( command ):
     assert "127519" in reason
 
 
-def test_the_same_sweep_is_ALLOWED_when_no_seat_matches():
-    """21 of 6,492 real fleet commands are this shape, nearly all of them safe."""
+def test_the_same_sweep_is_ALLOWED_when_no_seat_matches_and_it_reaches_only_my_own( tmp_path ):
+    """The pytest pattern is allowed only while every match is the caller's own."""
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    ( tree / ".git" ).write_text( "gitdir: /elsewhere\n" )
+
+    class _Proc:
+        def ppid( self, pid ): return 500   # the caller's claude, so a descendant
+        def cwd( self, pid ):  return str( tree )
+
+    reason = kill_deny_reason(
+        "Bash", { "command": 'pkill -f "pytest src/tests/unit"' }, enabled=True,
+        comm_reader=lambda pid: CLAUDE_COMM if pid == "500" else "pytest",
+        pgrep_probe=_hits( [ "999" ] ), cwd=str( tree ), proc=_Proc(), caller_pid=500,
+    )
+    assert reason is None
+
+
+def test_the_same_sweep_is_DENIED_when_it_reaches_a_process_in_another_tree( tmp_path ):
+    """The pytest pattern is no longer a free pass when another tree's run matches."""
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    ( tree / ".git" ).write_text( "gitdir: /elsewhere\n" )
+
+    class _Proc:
+        def ppid( self, pid ): return 1                      # not a descendant of anyone here
+        def cwd( self, pid ):  return "/some/other/worktree"
+
+    reason = kill_deny_reason(
+        "Bash", { "command": 'pkill -f "pytest src/tests/unit"' }, enabled=True,
+        comm_reader=lambda pid: CLAUDE_COMM if pid == "500" else "pytest",
+        pgrep_probe=_hits( [ "999" ] ), cwd=str( tree ), proc=_Proc(), caller_pid=500,
+    )
+    assert reason is not None
+    assert "999" in reason
+    assert "/some/other/worktree" in reason
+
+
+def test_the_old_call_shape_without_a_cwd_still_allows_a_non_seat_match():
+    """No cwd in the payload means the ownership check is skipped, as before."""
     assert _sweep( 'pkill -f "pytest src/tests/unit"', _hits( [ "999" ] ), _no_claude ) is None
 
 
@@ -557,7 +602,7 @@ def test_a_quoted_pattern_with_spaces_stays_one_token():
     ( " -9 -f claude",            [ "-f", "claude" ] ),
     ( " -KILL -f claude",         [ "-f", "claude" ] ),
     ( " -SIGTERM -f claude",      [ "-f", "claude" ] ),
-    ( " -s TERM -f claude",       [ "-f", "claude" ] ),
+    ( " -s 1 -f claude",          [ "-s", "1", "-f", "claude" ] ),   # pkill: -s is a session id
     ( " --signal TERM -f claude", [ "-f", "claude" ] ),
     ( " --signal=9 -f claude",    [ "-f", "claude" ] ),
 ] )
@@ -807,3 +852,246 @@ def test_hatch_in_prefix_on_the_empty_and_absent_cases():
     assert _hatch_in_prefix( "" )               is False
     assert _hatch_in_prefix( None )             is False
     assert _hatch_in_prefix( "pkill -f x" )     is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# GAPS LEFT OPEN WHEN THE FIRST KILL GUARD ROW CLOSED
+#
+# A redirection written before the command word. Bash runs the verb all the same
+# (`2>&1 pkill -f T` signals), so it is one more transparent prefix.
+# A heredoc marker inside a comment or a quoted span is text, not a heredoc.
+# It used to strip the next line, which is where the sweep sat.
+# The forms the guard cannot see are pinned below as allowed, so a change in
+# that list is a decision and not an accident.
+# ═════════════════════════════════════════════════════════════════════════════
+
+REDIRECT_PREFIXES = [
+    "2>&1 ", ">/dev/null ", "</dev/null ", "2>/dev/null ", "&>/dev/null ",
+    ">> out.log ", "> /dev/null ", "2> err.log ", "2>&1 sudo ", "FOO=1 2>&1 ",
+    "<<< hello ", "{fd}>f ", "{log_fd}>>out ", "{fd}<in ",
+]
+
+
+@pytest.mark.parametrize( "shape", sorted( SHAPES ) )
+@pytest.mark.parametrize( "prefix", REDIRECT_PREFIXES )
+def test_a_redirection_before_the_command_word_does_not_hide_any_shape( shape, prefix ):
+    """Each cell was allowed before the fix. The bare form of each shape denies."""
+    command, reader = SHAPES[ shape ]
+    assert _deny( prefix + command, comm_reader=reader ) is not None, (
+        f"{prefix!r} walked shape {shape} past the guard"
+    )
+
+
+def test_a_redirection_before_a_pattern_sweep_is_denied():
+    """Shape C with a live foreign process: `2>&1 pkill -f TOK` runs the pkill."""
+    probe = lambda selector: [ "4242" ]
+    for command in ( "2>&1 pkill -f TOK", ">/dev/null pkill -f TOK", "</dev/null sudo pkill -f TOK" ):
+        assert _deny( command, comm_reader=_all_claude, pgrep_probe=probe ) is not None, command
+
+
+def test_redirections_before_ordinary_commands_stay_allowed():
+
+    for command in ( "2>&1 ls -la", ">/dev/null echo hi", "2>&1 pkill -P $$ -f pytest", "> out.txt echo kill 123" ):
+        assert _deny( command, comm_reader=_all_claude ) is None, command
+
+
+def test_a_redirection_run_is_linear_time():
+    """A thousand redirections must not turn the prefix span quadratic."""
+    import time
+    timings = []
+    for count in ( 2000, 4000 ):
+        started = time.perf_counter()
+        _deny( "2>&1 " * count + "ls", comm_reader=_no_claude )
+        timings.append( time.perf_counter() - started )
+    assert timings[ 1 ] < max( timings[ 0 ] * 6, 0.5 )
+
+
+@pytest.mark.parametrize( "command", [
+    "# see <<EOF\npgrep -f pytest | xargs kill",
+    "echo hi # <<'E'\npgrep -f pytest | xargs kill",
+    "echo '<<EOF'\npgrep -f pytest | xargs kill",
+    'echo "<<EOF"\npgrep -f pytest | xargs kill',
+    "cat <<<EOF\npgrep -f pytest | xargs kill",
+] )
+def test_a_heredoc_marker_that_is_text_does_not_strip_the_next_line( command ):
+    """The sweep on the second line was dropped as heredoc body."""
+    assert _deny( command ) is not None
+    assert _strip_heredocs( command ) == command
+
+
+def test_a_real_heredoc_after_a_comment_with_a_marker_is_still_stripped():
+
+    command = "# note <<X\ncat <<'EOF'\nps -e | xargs kill\nEOF\necho done"
+    assert _deny( command ) is None
+
+
+def test_a_hash_inside_a_word_is_not_a_comment():
+    """`a#b <<EOF` has no comment: the heredoc is real and its body is data."""
+    assert _deny( "cat a#b <<EOF\nps -e | xargs kill\nEOF" ) is None
+
+
+def test_an_escaped_hash_and_an_escaped_quote_do_not_open_a_comment_or_a_span():
+
+    assert _deny( "echo \\# <<EOF\nps -e | xargs kill\nEOF" ) is None
+    assert _deny( "echo \\\" <<EOF\nps -e | xargs kill\nEOF" ) is None
+
+
+@pytest.mark.parametrize( "command", [
+    'p""kill -f TOK', "pk\\ill -f TOK", "$PKILL -f TOK", "$(which pkill) -f TOK",
+] )
+def test_the_forms_the_guard_documents_as_unseen_stay_unseen( command ):
+    """A form on this list is a known gap. Seeing one means moving it out of this list."""
+    assert _deny( command, comm_reader=_all_claude, pgrep_probe=lambda selector: [ "4242" ] ) is None
+
+
+def test_env_dash_s_is_seen_although_the_review_listed_it_as_unseen():
+    """`env -S 'pkill -f TOK'` is refused, though an earlier review listed it as unseen."""
+    assert _deny( "env -S 'pkill -f TOK'", comm_reader=_all_claude, pgrep_probe=lambda selector: [ "4242" ] ) is not None
+
+
+def test_a_marker_after_a_closed_quote_is_a_real_heredoc():
+    """A quote that closes before the marker must not hide it: its body is data."""
+    assert _deny( "echo 'a b' \"c\" <<EOF\nps -e | xargs kill\nEOF" ) is None
+
+
+@pytest.mark.parametrize( "command", [
+    "echo $((1<<n))\npgrep -f pytest | xargs kill",
+    "echo ${x:-<<EOF}\npgrep -f pytest | xargs kill",
+    "(( a<<b ))\npgrep -f pytest | xargs kill",
+    "case x in <<EOF) :;; esac\npgrep -f pytest | xargs kill",
+    "echo $(( 1 << 3 )) $(( x<<EOF ))\npgrep -f pytest | xargs kill",
+    "x=$((a<<b)); echo ${y}\npgrep -f pytest | xargs kill",
+] )
+def test_a_shift_or_a_pattern_that_looks_like_a_heredoc_does_not_strip_the_next_line( command ):
+    """`<<` is a shift, or text, in these places. None of them opens a heredoc."""
+    assert _deny( command ) is not None
+    assert _strip_heredocs( command ) == command
+
+
+def test_a_real_heredoc_after_arithmetic_and_an_expansion_is_still_stripped():
+
+    command = "echo $((1<<2)) ${x}\ncat <<EOF\nps -e | xargs kill\nEOF\necho done"
+    assert _deny( command ) is None
+
+
+def test_a_closed_arithmetic_span_does_not_hide_a_later_marker_on_the_line():
+
+    assert _deny( "echo $((1+2)) ${x} <<EOF\nps -e | xargs kill\nEOF" ) is None
+
+
+def test_an_unclosed_expansion_is_text_to_the_end_of_the_line_and_the_next_line_is_read():
+    """`${x` never closes, so the marker is inside it. Reading the next line is the safe side."""
+    assert _deny( "echo ${x <<EOF\npgrep -f pytest | xargs kill" ) is not None
+
+
+# ---------------------------------------------------------------------------
+# One level of `bash -c '<literal>'`, and xargs in front of kill, pkill or killall
+# ---------------------------------------------------------------------------
+
+_PROBE_ONE_SEAT = lambda selector: [ "4242" ]
+
+SHELL_C_SHAPES = {
+    "B-pgrep-xargs" : ( "pgrep -f pytest | xargs kill",                                   _no_claude  ),
+    "A-literal"     : ( "kill 4242",                                                        _all_claude ),
+    "B-awk"         : ( 'ps -eo pid,args | grep pytest | awk "{print \\$1}" | xargs kill',  _no_claude  ),
+    "C-pkill"       : ( "pkill -f pytest",                                                  _all_claude ),
+}
+
+SHELL_WRAPPERS = [
+    "bash -c {q}", "sh -c {q}", "dash -c {q}", "zsh -c {q}", "/bin/bash -c {q}", "bash -lc {q}",
+    "bash -x -c {q}", "bash --norc -c {q}", "sudo bash -c {q}", "env FOO=1 bash -c {q}",
+    "timeout 30 bash -c {q}", "FOO=1 sh -c {q}", "nohup bash -c {q}", "2>&1 bash -c {q}",
+]
+
+
+@pytest.mark.parametrize( "shape", sorted( SHELL_C_SHAPES ) )
+def test_the_bare_shell_c_literal_denies( shape ):
+    """The positive control: the literal alone is denied, so the wrapped verdicts say something."""
+    command, reader = SHELL_C_SHAPES[ shape ]
+    assert _deny( command, comm_reader=reader, pgrep_probe=_PROBE_ONE_SEAT ) is not None
+
+
+@pytest.mark.parametrize( "shape", sorted( SHELL_C_SHAPES ) )
+@pytest.mark.parametrize( "wrapper", SHELL_WRAPPERS )
+def test_a_shell_c_literal_is_judged_like_the_same_command_typed_bare( shape, wrapper ):
+
+    command, reader = SHELL_C_SHAPES[ shape ]
+    quoted          = "'" + command.replace( "'", "'\\''" ) + "'"
+    assert _deny( wrapper.format( q=quoted ), comm_reader=reader, pgrep_probe=_PROBE_ONE_SEAT ) is not None, wrapper
+
+
+def test_a_double_quoted_shell_c_literal_is_judged_too():
+
+    assert _deny( 'bash -c "kill 4242"', comm_reader=_all_claude ) is not None
+    assert _deny( 'bash -c "pkill -f \\"pytest\\""', comm_reader=_all_claude, pgrep_probe=_PROBE_ONE_SEAT ) is not None
+
+
+def test_a_shell_c_after_a_separator_is_judged():
+
+    assert _deny( "echo start; bash -c 'kill 4242' && echo done", comm_reader=_all_claude ) is not None
+
+
+@pytest.mark.parametrize( "command", [
+    "bash -c 'echo hi'",
+    "bash -c 'ls | wc -l'",
+    "bash script.sh",
+    "bash -c 'pkill -P $$ -f pytest'",
+    "bash -c 'kill $!'",
+    'bash -c "echo kill 4242"',
+    "bash -c ''",
+    "bash -c",
+    "bash -l",
+    "bash --version",
+    "zsh -c 'echo $((1+2))'",
+] )
+def test_an_ordinary_shell_c_is_allowed( command ):
+
+    assert _deny( command, comm_reader=_no_claude, pgrep_probe=lambda selector: [] ) is None
+
+
+def test_the_hatch_outside_a_shell_c_unlocks_it_and_the_hatch_inside_unlocks_that_literal():
+
+    assert _deny( "LUPIN_ALLOW_UNSCOPED_KILL=1 bash -c 'kill 4242'", comm_reader=_all_claude ) is None
+    assert _deny( "bash -c 'LUPIN_ALLOW_UNSCOPED_KILL=1 kill 4242'", comm_reader=_all_claude ) is None
+
+
+def test_a_second_level_of_shell_c_is_refused_by_the_wrapper_rule():
+    """A shell inside a literal names kill, so it is refused."""
+    assert _deny( "bash -c \"bash -c 'kill 4242'\"", comm_reader=_no_claude ) is not None
+
+
+def test_an_heredoc_inside_a_shell_c_literal_is_data():
+
+    assert _deny( "bash -c 'cat <<EOF\nkill 4242\nEOF'", comm_reader=_all_claude ) is None
+
+
+@pytest.mark.parametrize( "command", [
+    "xargs pkill -f TOK",
+    "xargs -r pkill -f TOK",
+    "xargs -n1 -P4 pkill -f TOK",
+    "echo a | xargs -r killall -r TOK",
+    "echo 1 | xargs kill 4242",
+    "FOO=1 xargs sudo pkill -f TOK",
+] )
+def test_xargs_in_front_of_kill_pkill_or_killall_is_judged_like_the_bare_verb( command ):
+
+    assert _deny( command, comm_reader=_all_claude, pgrep_probe=_PROBE_ONE_SEAT ) is not None
+
+
+def test_xargs_with_a_stdin_pattern_or_an_unknowable_pid_list_is_refused():
+    """`cat pids.txt | xargs kill` names nothing readable, so the wrapper rule refuses it."""
+    for command in ( "cat pids.txt | xargs kill", "echo TOK | xargs pkill -f", "xargs -r kill < pids.txt" ):
+        assert _deny( command, comm_reader=_no_claude, pgrep_probe=lambda selector: [] ) is not None, command
+
+
+def test_xargs_in_front_of_an_ordinary_program_is_allowed():
+
+    assert _deny( "git ls-files | xargs wc -l", comm_reader=_all_claude ) is None
+
+
+def test_a_pid_typed_into_the_pipe_of_xargs_kill_is_refused():
+    """A pid piped into xargs kill is refused with no /proc lookup."""
+    seat = lambda selector: [ "4242" ]
+    assert _deny( "kill 4242", comm_reader=_all_claude, pgrep_probe=seat ) is not None
+    for command in ( "echo 4242 | xargs kill", "xargs -a pids.txt kill", "echo 4242 | xargs sh -c 'kill $0'" ):
+        assert _deny( command, comm_reader=_no_claude, pgrep_probe=seat ) is not None, command

@@ -82,6 +82,36 @@ class TestInit( unittest.TestCase ):
                                          config=SweTeamConfig( trust_mode="shadow" ) )
         self.assertEqual( o.proxy, "PROXY" )
 
+    def test_ask_switch_defaults_off_and_reads_ini_value( self ):
+        # The switch comes from swe_cfg["ask_before_act"]; absent / failed INI read => False.
+        def build( swe_cfg ):
+            fake_proxy_mod = types.ModuleType( "cosa.agents.swe_team.proxy" )
+            fake_proxy_mod.EngineeringStrategy = MagicMock( return_value="PROXY" )
+            tt_mod  = types.ModuleType( "cosa.agents.decision_proxy.trust_tracker" )
+            tt_mod.TrustTracker = MagicMock()
+            cb_mod  = types.ModuleType( "cosa.agents.decision_proxy.circuit_breaker" )
+            cb_mod.CircuitBreaker = MagicMock()
+            cfg_mod = types.ModuleType( "cosa.agents.decision_proxy.config" )
+            cfg_mod.trust_proxy_config_from_config_mgr = MagicMock( return_value={} )
+            sweproxy_cfg_mod = types.ModuleType( "cosa.agents.swe_team.proxy.config" )
+            sweproxy_cfg_mod.swe_proxy_config_from_config_mgr = MagicMock( return_value=swe_cfg )
+            cm_mod = types.ModuleType( "cosa.config.configuration_manager" )
+            cm_mod.ConfigurationManager = MagicMock()
+            mods = {
+                "cosa.agents.swe_team.proxy"                : fake_proxy_mod,
+                "cosa.agents.decision_proxy.trust_tracker"  : tt_mod,
+                "cosa.agents.decision_proxy.circuit_breaker": cb_mod,
+                "cosa.agents.decision_proxy.config"         : cfg_mod,
+                "cosa.agents.swe_team.proxy.config"         : sweproxy_cfg_mod,
+                "cosa.config.configuration_manager"         : cm_mod,
+            }
+            with patch.dict( sys.modules, mods ):
+                return SweTeamOrchestrator( task_description="t", config=SweTeamConfig( trust_mode="shadow" ) )
+
+        self.assertTrue(  build( { "accepted_senders": [ "a" ], "ask_before_act": True } )._ask_before_act )
+        self.assertFalse( build( { "accepted_senders": [ "a" ], "ask_before_act": False } )._ask_before_act )
+        self.assertFalse( _mk_orch( trust_mode="disabled" )._ask_before_act )   # no proxy built => off
+
     def test_proxy_enabled_inner_config_failure_uses_defaults( self ):
         fake_proxy_mod = types.ModuleType( "cosa.agents.swe_team.proxy" )
         fake_proxy_mod.EngineeringStrategy = MagicMock( return_value="PROXY" )
@@ -184,6 +214,60 @@ class TestGatedConfirmation( unittest.TestCase ):
             out = _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, t ) )
         self.assertTrue( out )
         t.ask_confirmation.assert_not_awaited()   # auto-approved, never asked user
+
+    def test_active_act_with_ask_switch_on_asks_and_does_not_auto_approve( self ):
+        # Switch ON + action "act": the "[Auto-approved by proxy]" return must NOT happen;
+        # the gate falls through to ask_confirmation exactly once.
+        o = _mk_orch()
+        o._ask_before_act = True
+        o.proxy, _ = self._proxy( "act", value="approved" )
+        t = self._team_io( confirm=False )
+        with patch.object( o, "_notify", AsyncMock() ) as notify, \
+             patch.object( o, "_persist_trust_feedback" ) as persist, \
+             patch.object( o, "_emit_proxy_summary_notification" ):
+            out = _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, t ) )
+        self.assertFalse( out )   # the user's answer, not the proxy's "approved"
+        t.ask_confirmation.assert_awaited_once()
+        notify.assert_not_awaited()   # no "[Auto-approved by proxy]" message sent
+        persist.assert_called_once()  # trust feedback recorded after the asked answer
+
+    def test_active_act_with_ask_switch_off_still_auto_approves( self ):
+        # Switch OFF (explicit): path = step-2 auto-approve, user never asked.
+        o = _mk_orch()
+        o._ask_before_act = False
+        o.proxy, _ = self._proxy( "act", value="approved" )
+        t = self._team_io( confirm=False )
+        with patch.object( o, "_notify", AsyncMock() ) as notify:
+            out = _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, t ) )
+        self.assertTrue( out )
+        t.ask_confirmation.assert_not_awaited()
+        self.assertIn( "[Auto-approved by proxy]", notify.await_args.kwargs[ "message" ] )
+
+    def test_ask_switch_on_with_suggest_behaves_as_today( self ):
+        # Switch ON + action "suggest": path = step-2 suggest note, then step-3 ask (unchanged).
+        o = _mk_orch()
+        o._ask_before_act = True
+        o.proxy, _ = self._proxy( "suggest", value="approved" )
+        t = self._team_io( confirm=True )
+        with patch.object( o, "_persist_trust_feedback" ), \
+             patch.object( o, "_emit_proxy_summary_notification" ):
+            out = _run( o._gated_confirmation( "q?", "lead", "no", 60, "base", t ) )
+        self.assertTrue( out )
+        t.ask_confirmation.assert_awaited_once()
+        self.assertIn( "Proxy suggestion", t.ask_confirmation.await_args.args[ 4 ] )
+
+    def test_ask_switch_on_with_defer_behaves_as_today( self ):
+        # Switch ON + action "defer": path = step-3 ask, step-4 summary (unchanged).
+        o = _mk_orch()
+        o._ask_before_act = True
+        o.proxy, _ = self._proxy( "defer", value="requires_review" )
+        t = self._team_io( confirm=False )
+        with patch.object( o, "_persist_trust_feedback" ), \
+             patch.object( o, "_emit_proxy_summary_notification" ) as summary:
+            out = _run( o._gated_confirmation( "q?", "lead", "no", 60, None, t ) )
+        self.assertFalse( out )
+        t.ask_confirmation.assert_awaited_once()
+        summary.assert_called_once()
 
     def test_active_suggest_appends_note_then_asks( self ):
         o = _mk_orch( debug=True )

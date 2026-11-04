@@ -8,8 +8,8 @@ fallback. Returns dual-format HTML with video tag + img fallback.
 
 Handles "title_video", "flow_animation", and "process_video" visual types.
 
-This is a file-producing renderer: it writes MP4 + PNG files to an output
-directory and returns HTML video tags, unlike MermaidRenderer which returns
+This is a file-producing renderer. It writes MP4 + PNG files to an output
+directory and returns HTML video tags. MermaidRenderer, unlike it, returns
 inline code blocks.
 """
 
@@ -68,7 +68,7 @@ class VeoRenderer( VisualRenderer ):
         Check if ffmpeg is installed (cached after first call).
 
         Ensures:
-            - Returns True if ffmpeg is on PATH
+            - Returns True if ffmpeg is on `PATH`
             - Caches result for subsequent calls
         """
         if self._ffmpeg_available is None:

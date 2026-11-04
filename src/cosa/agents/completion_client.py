@@ -162,10 +162,7 @@ class CompletionClient( LlmClientInterface ):
             timeout: Seconds the underlying call may take, or None for unbounded.
                      Named explicitly rather than left to **kwargs, because
                      run_async rebuilds the generation arguments by hand and
-                     anything arriving in kwargs that is not on that list is
-                     dropped without a word — which is how the configured
-                     `commons llm disambiguator timeout seconds` came to be read
-                     from the INI and never applied (row abe4188d).
+                     silently drops anything in kwargs that is not on that list.
                      Both branches honour it — streaming via aiohttp's ClientTimeout.
             
         Returns:

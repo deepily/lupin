@@ -363,6 +363,13 @@ def test_extension_day_arms_raises_when_impossible( monkeypatch ):
         GEN._extension_day_arms( random.Random( 1 ) )
 
 
+def test_week2_day_arms_raises_when_impossible( monkeypatch ):
+    monkeypatch.setattr( GEN, "MAX_RUN", 0 )                  # no arrangement can satisfy this
+    monkeypatch.setattr( GEN, "MAX_SHUFFLE_ATTEMPTS", 50 )
+    with pytest.raises( ValueError, match="week-2" ):
+        GEN._week2_day_arms( random.Random( 1 ) )
+
+
 def test_utc_intervals_are_one_hour_edt( schedule ):
     slot = schedule[ "slots" ][ 0 ]                 # Tue 09:00 EDT
     start = datetime.datetime.fromisoformat( slot[ "start_utc" ] )

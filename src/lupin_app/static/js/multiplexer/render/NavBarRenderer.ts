@@ -26,9 +26,13 @@
 import type { EventBus } from "../shared/EventBus";
 import type { AuthStateChangePayload } from "../shared/types";
 import { renderNavBar } from "./templates/navBar";
+import { teardownScaffold } from "./dom";
 
-// Narrow auth surface the nav needs. boot.ts supplies the production adapter;
-// tests inject a fake.
+/**
+ * The narrow auth surface the nav bar needs.
+ *
+ * It is whether a token is present, the user's email and logout. Boot supplies the adapter and tests supply a fake.
+ */
 export interface NavAuthPort {
   /** True when a persisted access token is present (legacy presence-semantics). */
   isAuthenticated(): boolean;
@@ -38,6 +42,11 @@ export interface NavAuthPort {
   logout(): void;
 }
 
+/**
+ * Options for `createNavBarRenderer`.
+ *
+ * All three are required: the bus, the auth port and a getter for the active path.
+ */
 export interface NavBarRendererOptions {
   eventBus      : EventBus;
   auth          : NavAuthPort;
@@ -45,6 +54,11 @@ export interface NavBarRendererOptions {
   getActivePath : () => string;
 }
 
+/**
+ * The top nav bar, painted from the auth port and painted again on `auth_state_change`.
+ *
+ * `mount` throws on a second call without an `unmount`.
+ */
 export interface NavBarRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -54,6 +68,11 @@ export interface NavBarRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Draws the navigation bar with the user's email, the active path and login or logout.
+ *
+ * It redraws when the auth state changes.
+ */
 class NavBarRendererImpl implements NavBarRenderer {
   private readonly bus           : EventBus;
   private readonly auth          : NavAuthPort;
@@ -63,12 +82,20 @@ class NavBarRendererImpl implements NavBarRenderer {
   private root    : HTMLElement | null = null;
   private mounted = false;
 
+  /**
+   * Stores the bus, the auth port and the function that returns the active path.
+   */
   constructor( opts: NavBarRendererOptions ) {
     this.bus           = opts.eventBus;
     this.auth          = opts.auth;
     this.getActivePath = opts.getActivePath;
   }
 
+  /**
+   * Draws the bar into the root and redraws on every auth state change.
+   *
+   * A second mount without unmount throws.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "NavBarRenderer already mounted" );
@@ -88,16 +115,18 @@ class NavBarRendererImpl implements NavBarRenderer {
     );
   }
 
+  /**
+   * Unsubscribes from the bus and clears the root. Safe to call more than once.
+   */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, null, this.root );
+    this.root = null;
     this.mounted = false;
   }
 
+  /**
+   * Redraws the bar right away when mounted, for tests.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderNow();
   }
@@ -117,6 +146,11 @@ class NavBarRendererImpl implements NavBarRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createNavBarRenderer( opts: NavBarRendererOptions ): NavBarRenderer {
   return new NavBarRendererImpl( opts );

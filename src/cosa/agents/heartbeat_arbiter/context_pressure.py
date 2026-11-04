@@ -2,27 +2,28 @@
 Fleet context-pressure assessment — pure-logic leaf.
 
 Reads each Claude Code worker's transcript JSONL out-of-band and estimates how
-full its context window is, so the fleet can WARN/CRITICAL on a worker *before*
-it silently autocompacts mid-task.
+full its context window is. The fleet can then warn on a worker (`WARN`,
+`CRITICAL`) before it silently autocompacts mid-task.
 
-Design provenance + the expert review that shaped every number here:
-    src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.08-context-pressure-revised-plan.md
+Design: src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.08-context-pressure-revised-plan.md
 
-PURITY GUARDRAIL (Tiberius's architectural call): this module is a pure leaf in
-`heartbeat_arbiter` (the shared engine both arbiter hosts import from). It imports
-stdlib only on the hot path. `session_bridge` and `ConfigurationManager` are
-imported LAZILY, inside the fleet helper only — never at module scope — so the
-leaf never reaches up into any host / cosa.rest / HTTP layer.
+Purity guardrail: this module is a pure leaf in `heartbeat_arbiter`, the shared
+engine both arbiter hosts import from. It imports stdlib only on the hot path.
+`session_bridge` and `ConfigurationManager` are imported lazily, inside the fleet
+helper only, never at module scope. The leaf therefore never reaches up into any
+host, cosa.rest or HTTP layer.
 
-The pressure number (per expert review, Decision 2 ruled 2026-06-08):
+The pressure number:
 
-    last_prompt_size      = input + cache_creation + cache_read           # the auditable A1 sum
-    pending_input_estimate = Σ ceil( len(content)/4 )  for msgs after the last assistant turn
-    next_prompt_estimate  = last_prompt_size + last_output + pending_input_estimate   # thresholds ride THIS
+    last_prompt_size       = input + cache_creation + cache_read
+
+    pending_input_estimate = Σ ceil( len(content)/4 ) over msgs after the last assistant turn
+
+    next_prompt_estimate   = last_prompt_size + last_output + pending_input_estimate
 
 Thresholds ride `next_prompt_estimate / effective_ceiling`, where
-    effective_ceiling = window_size - autocompact_reserve - max_response_tokens
-and `window_size` is read from the bridge (pinned at spawn), never inferred.
+effective_ceiling = window_size - autocompact_reserve - max_response_tokens.
+The `window_size` is read from the bridge (pinned at spawn), never inferred.
 """
 
 import json
@@ -77,17 +78,17 @@ class Usage:
     @property
     def last_prompt_size( self ):
         """
-        The authoritative A1 sum — the prompt actually sent that turn.
+        The prompt size actually sent that turn: input plus both cache counts.
 
         Ensures:
-            - returns input + cache_creation + cache_read (output EXCLUDED)
+            - returns input + cache_creation + cache_read (output excluded)
         """
         return self.input + self.cache_creation + self.cache_read
 
 
 @dataclass
 class ContextPressure:
-    """Per-worker pressure assessment (the §2 return shape)."""
+    """Per-worker pressure assessment."""
     last_prompt_size       : int
     last_output_tokens     : int
     pending_input_estimate : int
@@ -118,7 +119,7 @@ class WorkerContextPressure:
 # ---------------------------------------------------------------------------
 def _read_tail_lines( transcript_path, max_bytes=DEFAULT_TAIL_BYTES ):
     """
-    Read up to `max_bytes` from the END of the transcript and return whole lines.
+    Read up to `max_bytes` from the end of the transcript and return whole lines.
 
     Requires:
         - transcript_path points at a readable file
@@ -154,10 +155,9 @@ def _coerce_cache_creation( usage ):
     """
     Read cache-creation tokens, hardened against the nested-dict format drift.
 
-    The live `usage` carries BOTH a flat `cache_creation_input_tokens` and a
-    nested `cache_creation` breakdown (ephemeral_5m/1h). The flat field is the
-    sum of the nested one today; if it is ever dropped, fall back to the nested
-    values rather than crashing on None.
+    The live `usage` carries a flat `cache_creation_input_tokens` and a nested
+    `cache_creation` breakdown (ephemeral_5m/1h). The flat field is the sum of the
+    nested one. If it is dropped, fall back to the nested values, never None.
 
     Ensures:
         - returns an int (0 when neither form is present)
@@ -175,8 +175,8 @@ def read_last_usage( transcript_path, max_bytes=DEFAULT_TAIL_BYTES ):
     """
     Tail-read the newest assistant turn's usage.
 
-    NOTE: `server_tool_use` tokens are DELIBERATELY ignored — they are consumed
-    server-side (web_search/web_fetch) and are NOT in the context window.
+    Note that `server_tool_use` tokens are ignored. They are consumed server-side
+    (web_search/web_fetch) and are not in the context window.
 
     Requires:
         - transcript_path is a path-like to a Claude Code transcript JSONL
@@ -221,18 +221,18 @@ def read_last_usage( transcript_path, max_bytes=DEFAULT_TAIL_BYTES ):
 
 def estimate_pending_input( transcript_path, max_bytes=DEFAULT_TAIL_BYTES ):
     """
-    Estimate unread tokens accumulated AFTER the last assistant turn.
+    Estimate unread tokens accumulated after the last assistant turn.
 
-    Between assistant turns, tool_results (multi-KB stdout/file views) and user
-    messages pile up that the last-turn usage never sees. A worker can read 60%
-    while sitting on 40k of queued output that lands the moment it speaks again.
-    We sum a conservative `ceil(len(content)/4)` Latin-char heuristic (Decision 4,
-    zero-dep, pure leaf).
+    Tool results and user messages pile up between assistant turns, and the
+    last-turn usage never sees them. We sum a conservative `ceil(len(content)/4)`
+    Latin-char heuristic, which needs no dependency.
 
     Ensures:
         - returns ( pending_tokens: int, parse_failures: int )
         - 0 when there are no messages after the last assistant turn
         - never raises
+        - the pending count matters because a worker can read 60% while sitting
+          on 40k of queued output that lands the moment it speaks again
     """
     lines          = _read_tail_lines( transcript_path, max_bytes )
     parse_failures = 0
@@ -305,27 +305,27 @@ def _pid_alive( pid ):
 
 def assess_liveness( listener_pid, mtime, *, now, cc_pid=None, idle_mtime_seconds=DEFAULT_IDLE_MTIME_SECONDS ):
     """
-    Three-state liveness: process-alive OR-gate, then mtime freshness.
+    Three-state liveness: process-alive (either pid), then mtime freshness.
 
-    Process-alive is the OR of TWO pids — the listener pid AND the claude-CLI
-    pid (`cc_pid`, pinned in the bridge at spawn). Either one passing `kill -0`
-    proves the worker exists. The OR (vs the prior single-pid AND) protects the
-    false-DEAD case, which is the worse error under the arbiter's bias-to-alive
-    liveness (Decision #2, 2026-06-08): a session is DEAD only when NO recent
-    signal exists, so we must not declare it dead while a pid still answers.
+    Process-alive is the logical or of two pids, the listener pid and the claude-CLI pid
+    (`cc_pid`, pinned in the bridge at spawn). Either one passing `kill -0` proves
+    the worker exists.
 
     Requires:
-        - listener_pid is an int pid or None (None / non-int ⇒ not-alive)
-        - cc_pid is an int pid or None (None / non-int ⇒ not-alive; falls back
+        - listener_pid is an int pid or None (None / non-int → not-alive)
+        - cc_pid is an int pid or None (None / non-int → not-alive; falls back
           to listener_pid alone, e.g. a pre-rename bridge with no cc_pid field)
         - now is an epoch-seconds float; mtime is the bridge-file mtime
 
     Ensures:
-        - DEAD   when BOTH pids are gone/None (definitive phantom signal)
-        - ACTIVE when EITHER pid is alive AND mtime within idle_mtime_seconds
-        - IDLE   when EITHER pid is alive but mtime stale (skip pressure, age)
+        - `DEAD`   when both pids are gone/None (definitive phantom signal)
+        - `ACTIVE` when either pid is alive and mtime within idle_mtime_seconds
+        - `IDLE`   when either pid is alive but mtime stale (skip pressure, age)
         - a PermissionError on either pid counts as alive (exists, not ours)
         - pure (stdlib only); never raises
+        - the or-gate protects against a false `DEAD`, which is the worse error under
+          the arbiter's bias-to-alive liveness: a session is `DEAD` only when no
+          recent signal exists, so it is never declared dead while a pid answers
     """
     if not ( _pid_alive( listener_pid ) or _pid_alive( cc_pid ) ):
         return Liveness.DEAD
@@ -357,8 +357,8 @@ def assess_context_pressure(
 
     Ensures:
         - returns a ContextPressure
-        - state == UNKNOWN (no crash) when the transcript has no assistant turn
-        - pct rides next_prompt_estimate / effective_ceiling (Decision 2 + A4)
+        - state == `UNKNOWN` (no crash) when the transcript has no assistant turn
+        - pct rides next_prompt_estimate / effective_ceiling
         - effective_ceiling is floored at 1 to avoid division by zero
     """
     usage, uf, last_ts = read_last_usage( transcript_path, max_bytes )
@@ -412,7 +412,7 @@ def recommend( liveness, state ):
     Map (liveness, pressure state) → a one-line manager recommendation.
 
     Ensures:
-        - DEAD → sweep; IDLE → defer; CRITICAL → harvest; WARN → compact soon; else none
+        - `DEAD` → sweep; `IDLE` → defer; `CRITICAL` → harvest; `WARN` → compact soon; else none
     """
     if liveness == Liveness.DEAD:
         return "sweep dead bridge"
@@ -443,21 +443,21 @@ def assess_fleet_context_pressure(
     """
     Assess every active fleet worker.
 
-    Lazily imports `session_bridge` to enumerate live persona sessions, reads each
-    bridge's transcript_path / listener_pid / tmux_session / window_size, gates on
-    liveness, and assesses pressure for ACTIVE workers.
+    Lazily imports `session_bridge` to enumerate live persona sessions. It reads
+    each bridge's transcript_path / listener_pid / tmux_session / window_size and
+    gates on liveness. It assesses pressure for `ACTIVE` workers only.
 
     Ensures:
         - returns a list[ WorkerContextPressure ]
         - window_size is read from the bridge (pinned at spawn); falls back to
           default_window when the key is absent
-        - a live seat with NO persona allocated is ENUMERATED too, with
-          persona=None (row 9c720767). The persona-required projection
-          (find_active_voice_persona_sessions) hides a nameless seat entirely,
-          so the pressure feed could never show the one seat nobody is watching.
-          Reading the all-sessions view (require_persona=False) restores it; the
-          writer then reports it explicitly with its age.
-        - DEAD/IDLE workers get pressure=None + an explanatory recommendation
+        - a live seat with no persona allocated is enumerated too, with
+          persona=None. The persona-required projection
+          (find_active_voice_persona_sessions) hides a nameless seat entirely, so
+          the pressure feed could never show the one seat nobody is watching.
+          Reading the all-sessions view (require_persona=False) restores it, and
+          the writer then reports it explicitly with its age.
+        - `DEAD`/`IDLE` workers get pressure=None + an explanatory recommendation
         - never raises on a single bad bridge (skips it)
     """
     from lupin_cli.claude_code.hooks.lib import session_bridge   # lazy: keep the leaf pure

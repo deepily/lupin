@@ -278,7 +278,7 @@ def test_a_threshold_well_inside_the_ceiling_is_ACCEPTED( client, isolated ):
     """
     The upper clamp on `allow_below` was asserted NOWHERE, and lowering it from
     1000.0 to 10.0 left all fourteen tests in this file green (audit 2026-09-01,
-    src/rnd/v0.2.1/2026.09.01-guard-audit-sixteen-files-run-against-broken-arms.md).
+    the R&D write-up "guard audit sixteen files run against broken arms").
     Every value the file exercised — 1.4, 1.25, 0.8, 1.9, 1.0, -1, "banana" — sits
     below 10, so nothing could tell the two ceilings apart.
 

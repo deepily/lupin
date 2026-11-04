@@ -25,6 +25,7 @@ replacement for the retired soft-preference `preferred_persona_name`):
     See TestPersonaChainQueryParam and
     src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
 """
+import copy
 import os
 import sys
 import sqlalchemy.sql.compiler  # noqa: F401 — module-scope (row cda78c70): keep it resident in
@@ -185,8 +186,9 @@ class TestPickRequestedPersona:
 
 # ── allocate_requested_persona_for_session ───────────────────────────────────
 
-def _make_mock_config_mgr( pool=POOL_6, stale_seconds=43200 ):
+def _make_mock_config_mgr( pool=None, stale_seconds=43200 ):
     """Mock config_mgr that backs load_persona_pool_from_config."""
+    if pool is None: pool = copy.deepcopy( POOL_6 )
     mgr = MagicMock()
 
     persona_table = {

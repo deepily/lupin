@@ -2,9 +2,9 @@
 """
 Notification Router / Responder for the Notification Proxy Agent.
 
-Receives notification events from the WebSocket listener, determines
-if a response is needed, routes to the appropriate strategy (rules
-or LLM fallback), and submits the response via REST API.
+Receives notification events from the WebSocket listener and decides whether a
+response is needed. It routes to the right strategy, rules or LLM fallback, and
+submits the response through the REST API.
 
 References:
     - src/cosa/rest/routers/notifications.py (POST /api/notify/response)
@@ -31,6 +31,7 @@ from cosa.agents.notification_proxy.config import (
     LLM_SCRIPT_MATCHER_BATCH_TEMPLATE,
 )
 import cosa.utils.util as cu
+from cosa.agents.utils.proxy_agents.base_responder import print_stats_table
 
 # Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
 # ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
@@ -76,8 +77,7 @@ CHOICE_ESCAPE_LABELS = ( DOC_CHOICE_DESCRIBE_LABEL, DOC_CHOICE_CANCEL_LABEL )
 
 class NotificationResponder:
     """
-    Routes response-required notifications to the appropriate strategy
-    and submits answers via the REST API.
+    Routes notifications that need a response to a strategy and posts the answer.
 
     Requires:
         - At least one strategy is available
@@ -446,7 +446,7 @@ class NotificationResponder:
 
         Ensures:
             - POSTs to /api/notify/response
-            - sends the token authorization_fn returns when one is wired (row e20e249a)
+            - sends the token authorization_fn returns when one is wired
             - Returns True on success (HTTP 200)
             - Returns False on any error
             - Logs the response for debugging
@@ -498,13 +498,7 @@ class NotificationResponder:
 
     def print_stats( self ):
         """Print summary statistics."""
-        print( f"\n{'=' * 50}" )
-        print( "Notification Proxy Statistics" )
-        print( f"{'=' * 50}" )
-        for key, value in self.stats.items():
-            label = key.replace( "_", " " ).title()
-            print( f"  {label:30s} : {value}" )
-        print( f"{'=' * 50}" )
+        print_stats_table( "Notification Proxy Statistics", self.stats )
 
 
 # ============================================================================

@@ -262,7 +262,7 @@ function formatDate( isoString ) {
     if ( diffHours < 24 ) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
     if ( diffDays < 7 ) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
 
-    return date.toLocaleDateString();
+    return LupinAppZone.day( date );
 }
 
 /**
@@ -311,11 +311,11 @@ async function showUserDetails( userId ) {
             </div>
             <div class="detail-row">
                 <span class="detail-label">Created:</span>
-                <span class="detail-value">${new Date( user.created_at ).toLocaleString()}</span>
+                <span class="detail-value">${LupinAppZone.dateTime( new Date( user.created_at ) )}</span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Last Login:</span>
-                <span class="detail-value">${user.last_login_at ? new Date( user.last_login_at ).toLocaleString() : 'Never'}</span>
+                <span class="detail-value">${user.last_login_at ? LupinAppZone.dateTime( new Date( user.last_login_at ) ) : 'Never'}</span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Audit Logs:</span>

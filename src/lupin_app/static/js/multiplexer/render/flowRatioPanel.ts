@@ -28,6 +28,12 @@ import {
   type ManagerPullState,
 } from "./flowRatioModel";
 
+/**
+ * The flow-ratio store calls the panel makes.
+ *
+ * It reads the ratio, the settings, the manager-pull state and the controls message.
+ * It saves or resets the settings and saves the manager-pull switch.
+ */
 export interface FlowRatioStoreLike {
   ratio(): FlowRatioPayload | null;
   settings(): FlowRatioSettings | null;
@@ -38,6 +44,11 @@ export interface FlowRatioStoreLike {
   resetSettings(): Promise<void>;
 }
 
+/**
+ * The panel's two elements and its cleanup.
+ *
+ * The caller places `readout` in the Holding Area header and `controls` under it. `dispose` removes the bus subscription.
+ */
 export interface FlowRatioPanel {
   /** The header readout. The caller places it after the count and the request badge. */
   readout  : HTMLSpanElement;
@@ -56,6 +67,9 @@ interface Els {
   status         : HTMLSpanElement;
 }
 
+/**
+ * Create an output element with the given test id and a dash placeholder.
+ */
 function output( testid: string ): HTMLOutputElement {
   const o = document.createElement( "output" );
   o.setAttribute( "data-testid", testid );
@@ -63,6 +77,9 @@ function output( testid: string ): HTMLOutputElement {
   return o;
 }
 
+/**
+ * Create a range input with the given id, bounds, step and tooltip.
+ */
 function range( id: string, min: string, max: string, step: string, title: string ): HTMLInputElement {
   const r = document.createElement( "input" );
   r.type = "range";
@@ -135,6 +152,12 @@ function buildControls(): { root: HTMLDivElement; els: Els } {
   return { root, els: { threshold, thresholdValue, window: windowEl, windowValue, managerPull, reset, status } };
 }
 
+/**
+ * Build the flow-ratio readout and its operator controls.
+ *
+ * The controls are built once with their listeners. The sliders repaint only when the store hands back a different settings body.
+ * A poll that returns the same body leaves a drag in progress alone.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFlowRatioPanel( opts: { bus: EventBus; store: FlowRatioStoreLike } ): FlowRatioPanel {
   const { bus, store } = opts;

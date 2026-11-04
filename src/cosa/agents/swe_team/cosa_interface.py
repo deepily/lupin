@@ -8,7 +8,7 @@ role-specific sender_id for routing and display.
 
 Uses AgentNotificationDispatcher for shared async dispatch logic.
 
-CONTRACT:
+Contract:
     This module is the orchestrator's notification layer. It provides:
     - Role-aware sender IDs (swe.lead@, swe.coder@, swe.tester@)
     - job_id routing for CJ Flow integration

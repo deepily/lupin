@@ -8,7 +8,7 @@ Covers:
     - clear_idle_waiter_pid: returns prior PID + clears it
     - kill_idle_waiter: dead-PID guard, no-waiter case, real-PID case
 
-Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+Design: src/docs/decisions/2026.04.29-idle-aware-stop-hook.md
 """
 
 import json
@@ -174,9 +174,18 @@ class TestKillIdleWaiter:
         block = sb.get_idle_detection( "test-sid" )
         assert block[ "waiter_pid" ] is None
 
-    def test_kills_real_short_lived_subprocess( self, fake_bridge ):
+    def test_kills_real_short_lived_subprocess( self, fake_bridge, tmp_path ):
         # Spawn a real sleep process; our kill should reach it
-        proc = subprocess.Popen( [ sys.executable, "-c", "import time; time.sleep(30)" ] )
+        module_dir = tmp_path / "fake_tree"
+        for part in ( "lupin_cli", "claude_code", "hooks", "lib" ):
+            module_dir = module_dir / part
+            module_dir.mkdir( parents=True, exist_ok=True )
+            ( module_dir / "__init__.py" ).write_text( "" )
+        ( module_dir / "idle_waiter.py" ).write_text( "import time\ntime.sleep( 30 )\n" )
+        proc = subprocess.Popen(
+            [ sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter" ],
+            cwd=str( tmp_path / "fake_tree" ),
+        )
         try:
             sb.set_idle_detection_field( "test-sid", waiter_pid=proc.pid )
             killed = sb.kill_idle_waiter( "test-sid" )
@@ -197,6 +206,7 @@ class TestKillIdleWaiter:
     def test_custom_signal_accepted( self, fake_bridge, monkeypatch ):
         sb.set_idle_detection_field( "test-sid", waiter_pid=99 )
         monkeypatch.setattr( sb, "_is_pid_alive", lambda _p: True )
+        monkeypatch.setattr( sb, "process_runs", lambda _p, _m: True )
 
         captured = { }
         def _fake_kill( pid, sig ):
@@ -206,3 +216,24 @@ class TestKillIdleWaiter:
 
         assert sb.kill_idle_waiter( "test-sid", signal=signal.SIGINT ) is True
         assert captured == { "pid": 99, "signal": signal.SIGINT }
+
+
+class TestKillIdleWaiterChecksWhatTheProcessIs:
+    """A live pid that is not the idle waiter is not signalled."""
+
+    def test_a_live_pid_running_another_program_is_not_signalled( self, fake_bridge, monkeypatch ):
+        sb.set_idle_detection_field( "test-sid", waiter_pid=99 )
+        monkeypatch.setattr( sb, "_is_pid_alive", lambda _p: True )
+        monkeypatch.setattr( sb, "process_runs", lambda _p, _m: False )
+        sent = []
+        monkeypatch.setattr( sb.os, "kill", lambda pid, sig: sent.append( ( pid, sig ) ) )
+        assert sb.kill_idle_waiter( "test-sid" ) is False
+        assert sent == []
+
+    def test_the_marker_asked_for_is_the_idle_waiter_module( self, fake_bridge, monkeypatch ):
+        sb.set_idle_detection_field( "test-sid", waiter_pid=99 )
+        monkeypatch.setattr( sb, "_is_pid_alive", lambda _p: True )
+        asked = []
+        monkeypatch.setattr( sb, "process_runs", lambda p, m: asked.append( ( p, m ) ) or False )
+        sb.kill_idle_waiter( "test-sid" )
+        assert asked == [ ( 99, "lupin_cli.claude_code.hooks.lib.idle_waiter" ) ]

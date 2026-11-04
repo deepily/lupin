@@ -1,33 +1,27 @@
 """
-Compare two pytest/Playwright junit XML runs BY TEST ID and return a gate verdict.
+Compare two pytest/Playwright junit XML runs by test id and return a gate verdict.
 
-WHY THIS EXISTS
-    Row 19a417fa carries an E2E run — ts-a5b8ad03, 2026-08-21 02:18 — that came
-    back red with 18 non-passing cases and NO clean-HEAD comparison. The first
-    E2E run of the brain-integration build IS that comparison, and a comparison
-    read by eye across ~700 cases is a comparison nobody can check.
+Why this exists:
+    An E2E run came back red with 18 non-passing cases and no clean-HEAD comparison.
+    Reading two runs by eye across about 700 cases is a comparison nobody can check.
 
-WHAT IT ANSWERS
-    · REGRESSIONS  — passing in the baseline, non-passing now. The only bucket
-                     that blocks a merge.
-    · PRE-EXISTING — non-passing in BOTH runs. Not this build's doing.
-    · FIXED        — non-passing in the baseline, passing now.
-    · SKIPPED      — reported SEPARATELY and never folded into "passed". A test
-                     that is skipped where it must run is RED, not green (the
-                     two integration cases held behind step 10 are exactly this
-                     shape), so a summary line reading "0 failed" over a skip is
-                     the false green this tool exists to make impossible.
+What it answers:
+    - regressions: passing in the baseline, non-passing now. Only this bucket blocks a merge.
+    - pre-existing: non-passing in both runs. Not this build's doing.
+    - fixed: non-passing in the baseline, passing now.
+    - skipped: reported separately and never folded into "passed". A test skipped where
+      it must run is red, not green, so a summary reading "0 failed" over a skip is
+      the false green this tool exists to prevent.
 
-🔴 A COUNTING TRAP, found while building this and pinned by a test
-    `e2e-junit-20260821-021831.xml` carries `<testsuite tests="697">` but holds
-    only 692 `<testcase>` elements — 672 clean + 13 failure + 5 error + 2
-    skipped. The gap is exactly the error count. Headline totals and per-case
-    tallies therefore never reconcile, and a reader mixing the two thinks five
-    cases vanished. THIS TOOL COUNTS ELEMENTS, NEVER THE ATTRIBUTE.
+Counting trap:
+    One real junit file carries <testsuite tests="697"> but holds only 692 <testcase>
+    elements (672 clean, 13 failure, 5 error, 2 skipped). The gap equals the error
+    count, so headline totals and per-case tallies never reconcile. This tool counts
+    elements and never reads the attribute. A test pins this.
 
-USAGE
+Usage:
     python src/scripts/e2e_junit_diff.py <baseline.xml> <new.xml>
-    exit 0 — no regressions · exit 1 — regressions · exit 2 — bad invocation
+    exit 0 - no regressions; exit 1 - regressions; exit 2 - bad invocation
 """
 
 import sys
@@ -47,7 +41,7 @@ def load( path: str ) -> Dict[ str, str ]:
 
     Ensures:
         - returns { "<classname>::<name>" : "passed"|"failure"|"error"|"skipped" }
-        - counts <testcase> ELEMENTS, never the <testsuite tests="..."> attribute
+        - counts <testcase> elements, never the <testsuite tests="..."> attribute
 
     Raises:
         - ET.ParseError if the file is not well-formed XML
@@ -74,7 +68,7 @@ def classify( baseline: Dict[ str, str ], new: Dict[ str, str ] ) -> Dict[ str, 
     Ensures:
         - returns sorted lists under keys: regressions, pre_existing, fixed,
           skipped_now, only_in_baseline, only_in_new
-        - a case absent from the baseline is treated as having PASSED there, so
+        - a case absent from the baseline is treated as having passed there, so
           a brand-new failing test counts as a regression rather than vanishing
     """
     bad = lambda outcome: outcome in NON_PASSING

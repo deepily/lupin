@@ -1,0 +1,40 @@
+---
+capability: web-client-notification-panes
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pins:
+  - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.NotificationsListRendererImpl@3e37d70724
+  - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@a043ea5b2c
+  - src.lupin_app.static.js.multiplexer.stores.ActionRequiredStore.ActionRequiredStoreImpl.respondAndAwait@5bf13c5c25
+  - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@ffe2082dc8
+  - src.lupin_app.static.js.multiplexer.render.BroadcastAckTallyRenderer.BroadcastAckTallyRendererImpl@c827b16ffb
+  - src.lupin_app.static.js.multiplexer.render.CommonsActivityRenderer.CommonsActivityRendererImpl@3c39de597e
+  - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.FleetStatusRendererImpl@3c6bf1a792
+---
+# Web client: notification panes
+
+Each pane renderer owns one mount node and repaints from store events on the bus. Stores are in [[web-client-stores]]; frames are in [[websocket-events]].
+
+## What it does
+- `NotificationsListRendererImpl` paints sender cards and throws on mount without `#sender-cards-container`. Notification, sender and vote events only schedule one microtask render. When the `notifications_keep_place` preference is `true`, a render captures the reader's place and restores it afterwards, and also each card's scrolled notification-history panes ([[web-client-render-operator-state-and-keep-place]]).
+- Action-required rows are filtered out of the cards. A card keeps its node when its inputs or rendered signature are unchanged. Appended rows are patched in only under `canPatchCard`; otherwise the card is replaced.
+- Card controls: ✨ POSTs `/api/notifications/generate-gist`; × DELETEs `/api/notifications/conversation/<sender>/<email>`; a date × DELETEs `/api/notifications/date/...`.
+- `SenderCardRecorderRenderer` wires mic, send (POST `/api/notify`) and conversation mode (POST `/api/cosa-voice/speakerphone/<hash>`). `SenderCardConsoleButtons` adds a console button to a card only when a seat resolves.
+- `NotificationsHeaderRenderer` counts `list()`. Clear All sends one `DELETE /api/notifications/<id>` per visible entry. The Mine / Not Mine / All Users switch is hidden unless `isAdmin()`.
+- `ActionRequiredRendererImpl` paints the store's first item as the full card and the rest as queue rows, unless the first awaits activation. A change to a queued item repaints only the rows. Given `predictionVoteStore` and no `predictionVote`, it builds the vote bridge itself; a refused or thrown vote repaints the card.
+- Submit and ✕ call `respondAndAwait`, which POSTs `/api/notify/response`. P and Esc click the first card's own controls, and Y, N, C do on a yes/no card, unless focus is in an input. Esc does nothing while a card microphone is recording, so it stops the recording and not the card.
+- `BroadcastCardRendererImpl` loads `/api/commons/active-sessions`. After a confirm modal it POSTs `/api/commons/broadcast-to-cc-sessions` and hands the returned id to the tally.
+- `CommonsActivityRendererImpl` inserts a `prepended` row alone when it matches the filter. `hydrated` and `filter-changed` redraw all rows.
+- `FleetStatusRendererImpl` repaints on `store_fleet_status_changed`. It paints a skeleton crew switch beside the size dial. The switch is hidden when the payload has no `skeleton_crew` field, and disabled while its write is in flight. The store polls `/api/arbiter/fleet-state` every 60000 ms once boot calls `startPolling`.
+
+## Don't
+- A card input has to be added to `inputsFor` or the caches dropped, as `setAppTimezone` does. A `Notification` row is never mutated in place, because rows are compared by identity.
+- Don't answer a card by another route. This tree's `.ts` files POST `/api/notify/response` only from `respondAndAwait`, which refuses states other than pending or failed.
+- Don't wait for a `BroadcastStore` event; it emits none. `BroadcastCardRenderer` must call `recipientsChanged` on the tally after the latest fetch settles, passing `false` when it failed.
+
+## Invariants
+- A finished card stays 600 ms (responded, expired) or 1500 ms (cancelled), then the store removes it. A card never started is removed at once.
+- `togglePause` returns true only when it pauses; it returns false on resume or when the card is not first, pending and started. The header count includes only pending, submitting and failed cards.
+- `AckStore` keeps the latest ack per session id; acks without one are kept apart. `hydrate` replaces the fold rather than merging.
+- Until the roster loads the tally shows "loading the recipient list…", or "could not load the recipient list" after a failed fetch. A deadline that fires first waits, then times out or dismisses once the list lands. Restore skips a tally older than ten minutes.
+- `FleetStatusStore` maps a 401 to `auth_required` and any other failure to `unreachable`. The cap slider writes on `change`, not `input`.
+- Once hydration has started, the empty list does not read "No notifications yet" while history loads or fails.

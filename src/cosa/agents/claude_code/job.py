@@ -6,8 +6,8 @@ within the CJ Flow (COSA Job Flow) queue system. Enables users to submit
 Claude Code tasks via the API and receive results asynchronously.
 
 Supports both task types:
-    - BOUNDED: Fire-and-forget, runs to completion
-    - INTERACTIVE: Bidirectional via notification service
+    - `BOUNDED`: Fire-and-forget, runs to completion
+    - `INTERACTIVE`: Bidirectional via notification service
 
 Example:
     job = ClaudeCodeJob(
@@ -123,7 +123,7 @@ class ClaudeCodeJob( AgenticJobBase ):
             - task_type is stored upper-cased, and is one of the two legal values
 
         Raises:
-            - ValueError if task_type is neither BOUNDED nor INTERACTIVE
+            - ValueError if task_type is neither `BOUNDED` nor `INTERACTIVE`
 
         Args:
             prompt: The task prompt for Claude Code
@@ -205,40 +205,7 @@ class ClaudeCodeJob( AgenticJobBase ):
         Returns:
             str: Conversational answer summarizing results
         """
-        if self.debug:
-            print( f"[ClaudeCodeJob] Starting do_all() for: {self.prompt[ :50 ]}..." )
-
-        self.state      = JobState.RUNNING
-        self.started_at = cu.get_current_datetime_iso()
-
-        try:
-            result = asyncio.run( self._execute() )
-
-            self.state        = JobState.COMPLETED
-            self.completed_at = cu.get_current_datetime_iso()
-            self.result       = result
-            self.answer_conversational = result
-
-            if self.debug:
-                duration = self.get_execution_duration_seconds()
-                print( f"[ClaudeCodeJob] Completed in {duration:.1f}s" )
-
-            return result
-
-        except Exception as e:
-            self.state        = JobState.FAILED
-            self.completed_at = cu.get_current_datetime_iso()
-            self.error        = str( e )
-            self.answer_conversational = f"Claude Code task failed: {str( e )}"
-
-            if self.debug:
-                print( f"[ClaudeCodeJob] Failed: {e}" )
-                import traceback
-                traceback.print_exc()
-
-            # Re-raise so the agentic-pool Future captures the exception.
-            # Backlog item 5 (2026-04-29): canonical Future contract.
-            raise
+        return self._run_execute( "ClaudeCodeJob", self.prompt[ :50 ], "Claude Code task failed" )
 
     async def _execute( self ) -> str:
         """
@@ -363,7 +330,7 @@ class ClaudeCodeJob( AgenticJobBase ):
         """
         Dispatch dry-run execution to mode-specific handler.
 
-        Routes to _execute_dry_run_interactive() for INTERACTIVE tasks,
+        Routes to _execute_dry_run_interactive() for `INTERACTIVE` tasks,
         _execute_dry_run_bounded() for everything else.
 
         Returns:
@@ -375,7 +342,7 @@ class ClaudeCodeJob( AgenticJobBase ):
 
     async def _execute_dry_run_bounded( self ) -> str:
         """
-        Simulate BOUNDED ClaudeCodeJob execution for testing queue flow.
+        Simulate `BOUNDED` ClaudeCodeJob execution for testing queue flow.
 
         Loops through DRY_RUN_BOUNDED_LABELS with configurable phase count
         and delay, sending low-priority notifications at each phase.
@@ -461,26 +428,21 @@ This was a dry-run simulation. No actual Claude Code execution occurred."""
 
     async def _execute_dry_run_interactive( self ) -> str:
         """
-        Simulate INTERACTIVE ClaudeCodeJob execution for testing queue flow.
+        Simulate `INTERACTIVE` ClaudeCodeJob execution for testing queue flow.
 
-        Exercises MessageHistory and multi-turn conversation simulation,
-        validating the bidirectional flow that the real dispatcher uses
-        (dispatcher.py:388-509) without touching the dispatcher.
-
-        Phases:
-            1. Session init — create MessageHistory, set original prompt
-            2. Initial response — add_assistant_text with mock analysis
-            3. Pause for input — notification: "waiting for user"
-            4. Injected message — add_user_message + get_context_prompt
-            5. Resume with context — add_assistant_text showing context awareness
-            6. Second cycle — another user+assistant turn
-            7. Session end — final notification + stats
+        Exercises MessageHistory and a multi-turn conversation, validating the
+        bidirectional flow the real dispatcher uses, without touching the dispatcher.
 
         Requires:
             - self.dry_run is True
             - self.task_type is "INTERACTIVE"
 
         Ensures:
+            - Runs seven phases in order: session init (create MessageHistory, set
+              original prompt), initial response (add_assistant_text), pause for input
+              (notification "waiting for user"), injected message (add_user_message
+              then get_context_prompt), resume with context (add_assistant_text),
+              second user+assistant cycle, session end (final notification + stats)
             - MessageHistory tracks 5 messages (2 assistant, 2 user, 1 assistant)
             - get_context_prompt() returns non-empty string
             - Sets cost_summary dict and artifacts with conversation stats

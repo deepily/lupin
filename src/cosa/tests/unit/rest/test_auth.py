@@ -180,8 +180,8 @@ class TestVerifyToken( unittest.IsolatedAsyncioTestCase ):
     Ensures:
         - AUTH_MODE env override bypasses ConfigurationManager
         - Config-sourced mode used when env unset
-        - jwt / mock / firebase modes dispatch to the matching verifier
-        - An unsupported mode raises 401
+        - jwt / mock modes dispatch to the matching verifier
+        - An unsupported mode, firebase included, raises 401
     """
 
     async def test_env_override_dispatches_jwt( self ):
@@ -213,16 +213,22 @@ class TestVerifyToken( unittest.IsolatedAsyncioTestCase ):
         mock_mock.assert_awaited_once_with( "tok" )
         mock_cm_instance.get.assert_called_once_with( "auth mode", default="mock" )
 
-    async def test_firebase_mode_dispatch( self ):
+    async def test_firebase_mode_answers_401_and_does_not_recurse( self ):
         """
+        Firebase mode is unsupported and says so.
+
         Ensures:
-            - AUTH_MODE=firebase routes to verify_firebase_token
+            - AUTH_MODE=firebase answers 401 through the real verifier chain, with no verifier patched
+            - the legacy verify_firebase_token name answers the same 401 and does not loop
         """
         with patch.dict( os.environ, { "AUTH_MODE": "firebase" }, clear=False ):
-            with patch( "cosa.rest.auth.verify_firebase_token", new=AsyncMock( return_value={ "uid": "f" } ) ) as mock_fb:
-                result = await verify_token( "tok" )
-        self.assertEqual( result, { "uid": "f" } )
-        mock_fb.assert_awaited_once_with( "tok" )
+            with self.assertRaises( HTTPException ) as direct:
+                await verify_token( "tok" )
+            with self.assertRaises( HTTPException ) as legacy:
+                await verify_firebase_token( "tok" )
+        for caught in ( direct, legacy ):
+            self.assertEqual( caught.exception.status_code, 401 )
+            self.assertIn( "firebase", caught.exception.detail )
 
     async def test_unsupported_mode_raises_401( self ):
         """

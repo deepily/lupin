@@ -1,6 +1,5 @@
 # Database Migrations with Alembic
 
-**Created**: 2025-12-30
 **Database**: PostgreSQL (lupin_db_dev / lupin_db_prod)
 
 ---
@@ -49,10 +48,10 @@ src/migrations/
 
 ## Migration History
 
-| Revision | Description | Date |
-|----------|-------------|------|
-| `210acf4d54dd` | Initial schema (stamped) | 2025-11-17 |
-| `275fb8d9c75c` | Add notifications table | 2025-12-30 |
+| Revision | Description |
+|----------|-------------|
+| `210acf4d54dd` | Initial schema (stamped) |
+| `275fb8d9c75c` | Add notifications table |
 
 ---
 

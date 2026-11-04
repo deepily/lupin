@@ -23,6 +23,7 @@ Venue: :7999-eligible. The kagiapi client is faked and the backoff is zeroed, so
 LupinSearch → KagiSearch → retry path runs with no network, no Kagi spend and no waiting.
 """
 
+import copy
 import os
 import sys
 
@@ -61,7 +62,8 @@ def _http_error( status_code ):
 
 class _FakeKagiClient:
     """Stand-in for kagiapi.KagiClient that fails a scripted number of times, then answers."""
-    def __init__( self, failures, error, payload=_PAYLOAD ):
+    def __init__( self, failures, error, payload=None ):
+        if payload is None: payload = copy.deepcopy( _PAYLOAD )
         self.failures = failures
         self.error    = error
         self.payload  = payload

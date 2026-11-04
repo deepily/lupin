@@ -1,0 +1,37 @@
+---
+capability: claude-code-dispatch
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
+pins:
+  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@cf95a5e1a7
+  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher.dispatch@06780c00bc
+  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher.inject@293ad2efde
+  - cosa.orchestration.claude_code.dispatcher.Task@85461d6614
+  - cosa.orchestration.claude_code.dispatcher.TaskResult@3cae189ac0
+  - cosa.orchestration.claude_code.dispatcher.TaskType@516e546e49
+  - cosa.orchestration.claude_code.message_history.MessageHistory@8e4f5bfd84
+  - cosa.orchestration.claude_code.message_history.MessageHistory.get_context_prompt@91ce45a3f6
+  - cosa.orchestration.claude_code.dispatcher.SessionInfo@70455f8ece
+  - cosa.orchestration.claude_code.dispatcher.main@901f46bccb
+---
+# Claude Code dispatch
+
+`ClaudeCodeDispatcher` runs one Claude Code task and returns a `TaskResult`. A task is either `BOUNDED`, a `claude -p` subprocess, or `INTERACTIVE`, an SDK client session. The queue job that wraps it is described in [[bounded-claude-code-jobs]]. The only other module that uses it is `ClaudeCodeJob`; the dispatcher file's own `main()` also calls `dispatch`.
+
+## The task
+- `Task` carries an id, project, prompt and type. The defaults are 50 turns, a 3600 second timeout and `LUPIN_ROOT` as the working directory, else `/home/projects`.
+- `ClaudeCodeDispatcher()` raises `RuntimeError` when `LUPIN_ROOT` is unset or empty. Unless an `mcp_config_path` is passed, it picks `cosa_mcp_docker.json` when the root is exactly `/var/lupin`, else `cosa_mcp.json`.
+- Bounded runs and the interactive session loop catch their errors and return them in `TaskResult.error`. An interactive task without the SDK, or an unknown type, also returns an error result.
+
+## Bounded mode
+- It starts `claude -p <prompt>` in the working directory with stream-json output, `--max-turns`, accept-edits permission and the MCP config.
+- The allowed tools are `Read`, `Write`, `Bash` and the `converse`, `notify` and `ask_yes_no` voice tools.
+- Each non-blank stdout line goes to the `on_message` callback, as parsed JSON or as a `text` record. The record of type `result` supplies the session id, text and cost.
+- Past the timeout it kills the process and returns exit code -1. A result record with `is_error` is a failure at any exit code. Its error is the CLI's result text, first 500 characters, with its subtype and errors, and a renew-login sentence on a 401. When stderr is not empty, `; stderr:` and its first 500 characters follow. Otherwise exit code 0 is success, with or without a result record. Any other code returns stderr as the error, else `Unknown error`.
+- The bounded path prints `[DEBUG]` lines whatever the `debug` flag says.
+
+## Interactive mode
+- It opens a `ClaudeSDKClient` with the same tools, the task's `max_turns`, a stdio `cosa-voice` server and a system prompt that names the task's `sender_id`.
+- It streams every message to `on_message`, then sends the next queued message, if any. A result message with `is_error` is raised and returned as the error, with the same renew-login sentence on a 401. It succeeds only if a result message arrived; otherwise the error is `No result received`. The whole session, queued follow-ups included, shares one deadline of `timeout_seconds`. Past it the session is dropped and the result is a failure, `Task timed out after Ns`, exit code -1.
+- `inject`, `interrupt`, `end_session` and `get_active_sessions` work on the open session. `inject` queues the message and, by default, interrupts the session. With `preserve_context` on, its default, and some history, it prepends `MessageHistory.get_context_prompt`. No code outside the tests calls them.
+- `SessionInfo` holds one open session's client, its pending-message queue, a running flag and its history.
+- `MessageHistory` keeps the original prompt and the turns. By default it keeps the first 500 characters of each and adds `...` to any that were longer.

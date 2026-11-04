@@ -345,6 +345,7 @@ class KillIdleWaiterTest( unittest.TestCase ):
     def test_a_live_waiter_is_signalled_and_reported_as_killed( self ):
         with mock.patch.object( sb, "clear_idle_waiter_pid", return_value=4242 ), \
              mock.patch.object( sb, "_is_pid_alive", return_value=True ), \
+             mock.patch.object( sb, "process_runs", return_value=True ), \
              mock.patch.object( sb.os, "kill" ) as killed:
             self.assertIs( sb.kill_idle_waiter( "wise-penguin" ), True )
         self.assertEqual( killed.call_args.args[ 0 ], 4242 )
@@ -353,12 +354,14 @@ class KillIdleWaiterTest( unittest.TestCase ):
         """The race the liveness check cannot close: it exits in the microseconds after we look."""
         with mock.patch.object( sb, "clear_idle_waiter_pid", return_value=4242 ), \
              mock.patch.object( sb, "_is_pid_alive", return_value=True ), \
+             mock.patch.object( sb, "process_runs", return_value=True ), \
              mock.patch.object( sb.os, "kill", side_effect=ProcessLookupError ):
             self.assertIs( sb.kill_idle_waiter( "wise-penguin" ), False )
 
     def test_a_waiter_we_may_not_signal_is_reported_as_not_killed( self ):
         with mock.patch.object( sb, "clear_idle_waiter_pid", return_value=4242 ), \
              mock.patch.object( sb, "_is_pid_alive", return_value=True ), \
+             mock.patch.object( sb, "process_runs", return_value=True ), \
              mock.patch.object( sb.os, "kill", side_effect=PermissionError ):
             self.assertIs( sb.kill_idle_waiter( "wise-penguin" ), False )
 

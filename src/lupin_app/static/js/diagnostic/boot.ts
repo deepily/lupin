@@ -14,6 +14,12 @@ import type { DiagnosticDeps, WebSocketLike, ResponseLike } from "./websocketDia
 /* c8 ignore start */ // browser-binding seams: wrap real WebSocket/fetch/URL/Date/
 // setTimeout globals; not meaningfully unit-testable. The bound behaviour is covered
 // via the injected-deps unit tests in websocket_diagnostic_port.test.ts.
+/**
+ * Build the diagnostic tool's dependencies from the real browser globals.
+ *
+ * Returns the document, the page host, the clock, and wrappers around `WebSocket`, `fetch`,
+ * object URLs, audio elements and `setTimeout`.
+ */
 export function createBrowserDeps(): DiagnosticDeps {
     return {
         doc            : document,

@@ -40,11 +40,17 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type { SenderRecord, StoreSendersChangedPayload } from "../shared/types";
+import { cssEscape } from "./dom";
 
 interface SenderStoreLike {
   list(): ReadonlyArray<SenderRecord>;
 }
 
+/**
+ * Marks the pinned conversation-mode sender card and flashes it when the pin moves.
+ *
+ * It reads the sender store and writes data attributes that the stylesheet turns into the glow.
+ */
 export interface ConversationModePinRenderer {
   /** Attach to a root DOM node and start subscribing to store events. */
   mount( root: HTMLElement ): void;
@@ -54,6 +60,11 @@ export interface ConversationModePinRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createConversationModePinRenderer`.
+ *
+ * The bus and the sender store are required. The flash duration and timer hooks are for tests.
+ */
 export interface ConversationModePinRendererOptions {
   eventBus         : EventBus;
   stores           : { senders: SenderStoreLike };
@@ -67,6 +78,11 @@ export interface ConversationModePinRendererOptions {
 
 const DEFAULT_FLASH_DURATION_MS = 1200;
 
+/**
+ * Tags the pinned sender's notification card and flashes it when the pin moves.
+ *
+ * It reacts to sender store changes and list renders.
+ */
 class ConversationModePinRendererImpl implements ConversationModePinRenderer {
   private readonly bus             : EventBus;
   private readonly stores          : { senders: SenderStoreLike };
@@ -84,6 +100,9 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
   private lastPinned  : string | null = null;
   private mounted     : boolean = false;
 
+  /**
+   * Creates the renderer from its bus, sender store and options, with default timers.
+   */
   constructor( opts: ConversationModePinRendererOptions ) {
     this.bus             = opts.eventBus;
     this.stores          = opts.stores;
@@ -92,6 +111,11 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
     this.clearTimeoutFn  = opts.clearTimeoutFn ?? ((id)     => globalThis.clearTimeout(id as ReturnType<typeof globalThis.setTimeout>));
   }
 
+  /**
+   * Subscribes to sender and list-render events and paints any existing pin.
+   *
+   * Throws if already mounted.
+   */
   mount( root: HTMLElement ): void {
     if (this.mounted) {
       throw new Error("ConversationModePinRenderer.mount: already mounted");
@@ -119,6 +143,9 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
     this.reconcile();
   }
 
+  /**
+   * Removes subscriptions, cancels pending flash timers and clears the mounted state.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -133,6 +160,9 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
     this.mounted    = false;
   }
 
+  /**
+   * Runs a reconcile pass of the pin tags; used by tests.
+   */
   forceRenderForTesting(): void {
     this.reconcile();
   }
@@ -216,18 +246,6 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
     }, this.flashDurationMs);
     this.flashTimers.set(senderId, id);
   }
-}
-
-// CSS.escape polyfill for selectors in legacy / Node / older browser contexts
-// (mirror of NotificationsListRenderer.ts:423-428 — same util locally scoped
-// rather than imported to keep this module self-contained; if a third copy
-// surfaces, hoist to a shared helper).
-function cssEscape(value: string): string {
-  if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
-    return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
-  }
-  /* c8 ignore next */ // polyfill fallback for legacy / Node / pre-2017 browser runtimes lacking globalThis.CSS.escape; unreachable in happy-dom test env and modern browsers.
-  return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
 }
 
 /**

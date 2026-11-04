@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from cosa.agents import model_window
 from cosa.agents.model_window import (
-    _server_root, clamp_max_tokens, count_tokens, get_context_window,
+    _server_root, clamp_max_tokens, count_tokens, get_context_window, resolve_vllm_spec,
 )
 
 BASE = "http://192.168.1.21:3001/v1/completions"
@@ -134,6 +134,23 @@ class TestGetContextWindow( unittest.TestCase ):
             with self.assertRaises( RuntimeError ) as ctx:
                 get_context_window( BASE, MODEL )
         self.assertIn( "/v1/models", str( ctx.exception ) )
+
+
+class TestResolveVllmSpec( unittest.TestCase ):
+
+    def test_a_spec_splits_into_completions_url_and_model( self ):
+        """Ensures: host:port becomes the completions URL; the text after @ is the model."""
+        self.assertEqual(
+            resolve_vllm_spec( "vllm://192.168.1.21:3001@kaitchup/Phi-4@x" ),
+            ( "http://192.168.1.21:3001/v1/completions", "kaitchup/Phi-4@x" ) )
+
+    def test_a_bad_spec_raises_naming_the_value( self ):
+        """Raises: ValueError for an empty value, a non-vllm scheme, or a spec with no @model."""
+        for bad in ( "", None, "http://h:1@m", "vllm://h:1" ):
+            with self.subTest( bad=bad ):
+                with self.assertRaises( ValueError ) as ctx:
+                    resolve_vllm_spec( bad )
+                self.assertIn( str( bad ), str( ctx.exception ) )
 
 
 if __name__ == "__main__":

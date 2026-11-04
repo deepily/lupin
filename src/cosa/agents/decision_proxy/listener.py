@@ -6,7 +6,7 @@ Extends BaseWebSocketListener with decision-proxy-specific event
 subscription and log prefix.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from cosa.agents.utils.proxy_agents.base_listener import BaseWebSocketListener

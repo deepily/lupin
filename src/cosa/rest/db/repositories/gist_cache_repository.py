@@ -1,11 +1,8 @@
 """
 GistCacheRepository — Postgres storage for the ``gist_cache`` table.
 
-RELATIONAL ONLY — P0-confirmed no vector column. Two-tier exact lookup (verbatim
-then normalized). Text normalization stays in the Lane-C memory layer; this
-repository stores + fetches by the exact keys it is handed.
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+Relational only, with no vector column. It does a two-tier exact lookup (verbatim, then normalized).
+Text normalization stays in the memory layer. This repository stores and fetches by the exact keys it is handed.
 """
 
 from typing import Any, Dict, Optional

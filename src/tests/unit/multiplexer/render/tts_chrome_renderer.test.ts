@@ -440,6 +440,28 @@ test("Lane 0a: clicking the TTS header toggles session-only collapse (data-colla
 // WP4 — active/pending/empty rendering + store_tts_queue_changed + handlers
 // ===========================================================================
 
+test("the card times are in the server zone, or in labelled UTC without one", () => {
+  const timesOf = (appTimezoneFn?: () => string | undefined): string[] => {
+    const bus      = createEventBusForTesting();
+    const audio    = makeAudioStore("playing", 0);
+    const ttsQueue = makeTtsQueueStore();
+    const raf      = makeRafHarness();
+    ttsQueue.setActive(ttsItem("A", { addedAt: 0 }));
+    ttsQueue.setPending([ttsItem("p1", { addedAt: 0 })]);
+    const renderer = createTtsChromeRenderer({
+      eventBus: bus, stores: { audio: audio.store, ttsQueue: ttsQueue.store },
+      requestAnimationFrameFn: raf.raf, cancelAnimationFrameFn: raf.caf, appTimezoneFn,
+    });
+    const root = document.createElement("div");
+    renderer.mount(root);
+    const times = Array.from(root.querySelectorAll(".message-time")).map((e) => e.textContent ?? "");
+    renderer.unmount();
+    return times;
+  };
+  assert.deepEqual(timesOf(), ["00:00 UTC", "00:00 UTC"]);
+  assert.deepEqual(timesOf(() => "Asia/Tokyo"), ["09:00", "09:00"]);
+});
+
 test("WP4: active + pending render one .tts-active-card + N .tts-minimized; header count = TOTAL", () => {
   const { renderer, root, ttsQueue } = setupRenderer("playing", 0);
   ttsQueue.setActive(ttsItem("A"));

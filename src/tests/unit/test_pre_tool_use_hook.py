@@ -294,7 +294,7 @@ BLOCK  = "lupin_cli.claude_code.hooks.lib.branch_lock_guard"
 
 
 def _run( payload=None, gov=None, stash=None, kill=None, merge=None, branch_lock=None,
-          deny_reason=None, notice=None, messages=None, voice_ctx=None ):
+          deny_reason=None, notice=None, messages=None, voice_ctx=None, capture=None ):
     """Drive main() with every guard and collaborator stubbed.
 
     Returns the dict handed to emit_json. Guards are silent (None) unless a test
@@ -327,7 +327,8 @@ def _run( payload=None, gov=None, stash=None, kill=None, merge=None, branch_lock
         _p( f"{STASH}.build_stash_deny_response", side_effect=lambda r: { "denied": "stash", "reason": r } )
         block = _p( f"{BLOCK}.branch_lock_deny_reason", return_value=branch_lock )
         _p( f"{BLOCK}.build_branch_lock_deny_response", side_effect=lambda r: { "denied": "branch_lock", "reason": r } )
-        _p( f"{KILL}.kill_deny_reason",     return_value=kill )
+        kill_mock = _p( f"{KILL}.kill_deny_reason",     return_value=kill )
+        if capture is not None: capture[ "kill" ] = kill_mock
         _p( f"{KILL}.build_kill_deny_response", side_effect=lambda r: { "denied": "kill", "reason": r } )
         _p( f"{MERGE}.merge_head_deny_reason", return_value=merge )
         _p( f"{MERGE}.build_merge_head_deny_response", side_effect=lambda r: { "denied": "merge", "reason": r } )
@@ -369,6 +370,18 @@ class TestEachGuardDeniesIndependently:
         _run( payload={ "session_id": "s1", "tool_name": "Bash", "cwd": "/seat/tree",
                         "tool_input": { "command": "ls" } } )
         call = _run.last_branch_lock_check.call_args
+        assert call.args == ( "Bash", { "command": "ls" } )
+        assert call.kwargs == { "cwd": "/seat/tree" }
+
+    def test_the_kill_guard_is_handed_the_payload_cwd( self ):
+        """The ownership rule needs the caller's tree, which is the payload cwd."""
+        captured = {}
+        _run(
+            payload={ "session_id": "s1", "tool_name": "Bash", "cwd": "/seat/tree",
+                      "tool_input": { "command": "ls" } },
+            capture=captured,
+        )
+        call = captured[ "kill" ].call_args
         assert call.args == ( "Bash", { "command": "ls" } )
         assert call.kwargs == { "cwd": "/seat/tree" }
 

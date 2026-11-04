@@ -3,7 +3,7 @@
 Outline Generation Prompts for Presentation Generator.
 
 Provides system prompts, prompt builders, and response parsers for the
-outline generation phase (Orchestrator Phase 3: Outline).
+outline generation phase (the orchestrator's Outline step).
 
 The LLM takes narrative sections and generates a slide-by-slide outline
 with assertion-style titles and visual type assignments.
@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from .narrative import AUDIENCE_COMPLEXITY_GUIDELINES
 from .json_recovery import recover_json_object
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_metadata
 
 logger = logging.getLogger( __name__ )
 
@@ -262,7 +263,7 @@ def parse_outline_response( response_content: str ) -> List[ dict ]:
           arc_position, type, title, visual_type, source_hint
 
     Raises:
-        - ValueError (D6-STRICT fail-loud) when the response has no recoverable
+        - ValueError (strict fail-loud policy) when the response has no recoverable
           JSON object, the "outline" value is missing / not a list / empty, or
           every entry is a non-dict (zero usable entries).
 
@@ -356,22 +357,7 @@ def extract_outline_metadata( response_content: str ) -> dict:
     Returns:
         dict with total_slides and narrative_coherence_note, or empty dict
     """
-    content = response_content.strip()
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    elif content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-
-    try:
-        parsed = json.loads( content.strip() )
-        return {
-            "total_slides"             : parsed.get( "total_slides", 0 ),
-            "narrative_coherence_note" : parsed.get( "narrative_coherence_note", "" ),
-        }
-    except json.JSONDecodeError:
-        return {}
+    return extract_json_metadata( response_content, { "total_slides" : 0, "narrative_coherence_note" : "" } )
 
 
 # =============================================================================

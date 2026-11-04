@@ -405,6 +405,21 @@ class TestQueuedAndFactory:
         assert out.status == "failed"
         assert "queue refused the push" in out.error
 
+    @pytest.mark.parametrize( "flag", [ True, False ] )
+    def test_the_job_carries_the_flows_snapshotable_verdict_into_the_queue( self, flag: bool ) -> None:
+        """The queue reads job.snapshotable when it decides whether to write the answer cache."""
+        agent = FakeAgent( id_hash="base-s" )
+        QueuedExecutor( FakeTodoQueue() ).submit( _work( "agent", agent, snapshotable=flag ),
+                                                  StageTrace( trace_dir="/tmp/unused" ) )
+        assert agent.snapshotable is flag
+
+    def test_a_replay_job_is_not_given_a_snapshotable_flag( self ) -> None:
+        """A replay's job is a stored snapshot; only agent jobs carry the flag the queue reads."""
+        snapshot = FakeSnapshot( id_hash="stored-2" )
+        QueuedExecutor( FakeTodoQueue() ).submit( _work( "replay", snapshot, snapshotable=False ),
+                                                  StageTrace( trace_dir="/tmp/unused" ) )
+        assert not hasattr( snapshot, "snapshotable" )
+
     @pytest.mark.parametrize( "kind", [ "agent", "replay", "receptionist" ] )
     def test_every_kind_is_queued( self, kind: str ) -> None:
         """No per-kind policy lives here: what the flow hands over gets queued.

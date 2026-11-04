@@ -31,6 +31,12 @@ import {
   holdingBatchFinalStatus,
   HOLDING_BATCH_BLANK_REASON,
   HOLDING_BATCH_NO_ROWS,
+  HOLDING_BATCH_ARMED_CLASS,
+  holdingBatchRestLabel,
+  holdingBatchConfirmLabel,
+  holdingBatchArmedStatus,
+  holdingPlanConfirmLabel,
+  holdingPlanArmedStatus,
 } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch";
 
 const HERE        = dirname( fileURLToPath( import.meta.url ) );
@@ -249,4 +255,68 @@ test( "won't-fix posts the group reason under `reason`", () => {
 
 test( "an unknown verb contributes no extras rather than an empty reason", () => {
   assert.deepEqual( holdingBatchExtras( "park", "anything" ), {} );
+} );
+
+
+// ---------------------------------------------------------------------------
+// Arm, then confirm (row 376dd4cb)
+// ---------------------------------------------------------------------------
+
+test( "the resting label is the one the template renders, for each verb", () => {
+  assert.equal( holdingBatchRestLabel( "approve" ),  "Approve all" );
+  assert.equal( holdingBatchRestLabel( "wont_fix" ), "Won't fix all" );
+  assert.equal( holdingBatchRestLabel( "anything-else" ), "Approve all", "an unknown verb must fall to the non-destructive label" );
+} );
+
+test( "the confirm label names the verb and the row count, and the two verbs read differently", () => {
+  assert.equal( holdingBatchConfirmLabel( "approve", 3 ),  "Confirm approve all 3" );
+  assert.equal( holdingBatchConfirmLabel( "wont_fix", 12 ), "Confirm won't fix all 12" );
+  assert.notEqual( holdingBatchConfirmLabel( "approve", 3 ), holdingBatchConfirmLabel( "wont_fix", 3 ) );
+} );
+
+test( "the armed status line says what the NEXT click will do", () => {
+  assert.equal( holdingBatchArmedStatus( "approve", 3 ),  "Click again to approve 3 rows." );
+  assert.equal( holdingBatchArmedStatus( "wont_fix", 3 ), "Click again to close 3 rows as won't fix with this reason." );
+} );
+
+test( "the armed class is the per-row Submit's, so one sheet rule styles both", () => {
+  assert.equal( HOLDING_BATCH_ARMED_CLASS, "task-submit-armed" );
+} );
+
+test( "every arming string is a carbon copy of notifications.js, compared against the file on disk", () => {
+  const templates = legacyTemplates();
+  const quoted    = legacyQuotedStrings();
+  for ( const verb of [ "approve", "wont_fix" ] ) {
+    const confirm = holdingBatchConfirmLabel( verb, 7 ).replace( "7", "${count}" );
+    const status  = holdingBatchArmedStatus( verb, 7 ).replace( "7", "${count}" );
+    assert.ok( templates.includes( confirm ), `legacy has no template reading ${ JSON.stringify( confirm ) }` );
+    assert.ok( templates.includes( status ),  `legacy has no template reading ${ JSON.stringify( status ) }` );
+    assert.ok( quoted.includes( holdingBatchRestLabel( verb ) ), `legacy has no resting label ${ holdingBatchRestLabel( verb ) }` );
+  }
+  assert.ok( templates.length > 0 && quoted.length > 0, "the legacy region yielded nothing to compare against" );
+} );
+
+// ---------------------------------------------------------------------------
+// Arm, then confirm — the plan header's button (row 376dd4cb, plan-level half)
+// ---------------------------------------------------------------------------
+
+test( "the plan confirm label and armed status name the row count", () => {
+  assert.equal( holdingPlanConfirmLabel( 3 ),  "Confirm approve all 3" );
+  assert.equal( holdingPlanArmedStatus( 3 ), "Click again to approve 3 rows in this plan." );
+} );
+
+test( "the plan arming strings are carbon copies of notifications.js, compared against the file on disk", () => {
+  const src   = readFileSync( LEGACY_PATH, "utf8" );
+  const start = src.indexOf( "_paintHoldingPlanArmed( button, id, count ) {" );
+  assert.ok( start !== -1, "legacy _paintHoldingPlanArmed not found — the extraction is pointing at nothing" );
+  const end   = src.indexOf( "async _handleHoldingPlanApproveClick( button ) {", start );
+  assert.ok( end > start, "legacy plan handler not found after the arming helpers — the slice boundaries have moved" );
+  const disarm = src.indexOf( "_disarmHoldingPlanButtons() {", start );
+  assert.ok( disarm !== -1 && disarm < end, "the slice no longer spans the disarm helper — the boundaries have moved" );
+  const templates = Array.from( src.slice( start, end ).matchAll( /`([^`\n]{6,})`/g ) ).map( ( m ) => m[ 1 ] as string );
+  assert.ok( templates.length > 0, "the legacy plan region yielded no templates" );
+  const confirm   = holdingPlanConfirmLabel( 7 ).replace( "7", "${count}" );
+  const status    = holdingPlanArmedStatus( 7 ).replace( "7", "${count}" );
+  assert.ok( templates.includes( confirm ), `legacy has no template reading ${ JSON.stringify( confirm ) }` );
+  assert.ok( templates.includes( status ),  `legacy has no template reading ${ JSON.stringify( status ) }` );
 } );

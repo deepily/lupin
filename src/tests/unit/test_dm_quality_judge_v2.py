@@ -575,6 +575,14 @@ class TestVersionFactory:
                     side_effect=RuntimeError( "no config" ) ):
             assert isinstance( get_dm_quality_judge( qualitative_enabled=False ), DmQualityJudge )
 
+    def test_the_ini_version_key_selects_the_judge_when_no_version_is_passed( self ):
+        mgr = MagicMock()
+        mgr.get.return_value = 2
+        with patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=mgr ):
+            judge = get_dm_quality_judge( qualitative_enabled=False )
+        assert isinstance( judge, DmQualityJudgeV2 )
+        mgr.get.assert_called_once_with( "dm quality judge version", default=DEFAULT_JUDGE_VERSION, return_type="int" )
+
     def test_the_default_version_is_1( self ):
         assert DEFAULT_JUDGE_VERSION == 1
 

@@ -1,5 +1,6 @@
 #!/bin/bash
-# Runs the in-tree CoSA test suite: src/cosa/tests/** (~8,800 tests).
+# Runs the in-tree CoSA test suite: src/cosa/tests/** (~8,800 tests) and the two per-agent
+# test dirs under src/cosa/agents/ (286 tests, row 4c88947e; the count is from a collect-only run).
 #
 # Usage:
 #   run-cosa-tests.sh [pytest flags...]
@@ -52,5 +53,9 @@ source "$PROJECT_ROOT/src/scripts/lib/coverage-opt-in.sh"
 COV_FLAGS="$( coverage_opt_in_flags )" || exit $?
 
 source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
-run_pytest_with_diagnosis "$PYTEST" src/cosa/tests/ $COV_FLAGS "$@"
+# The per-agent dirs sit outside src/cosa/tests/ and were collected by no runner (row 4c88947e).
+# test_cosa_runner_collects_every_in_tree_test_dir.py fails when a tracked test dir is left out.
+CORE_DIRS="src/cosa/tests/ src/cosa/agents/podcast_generator/tests/ src/cosa/agents/prediction_engine/tests/"
+# shellcheck disable=SC2086  # the dirs are a fixed list of paths without spaces
+run_pytest_with_diagnosis "$PYTEST" $CORE_DIRS $COV_FLAGS "$@"
 exit $?

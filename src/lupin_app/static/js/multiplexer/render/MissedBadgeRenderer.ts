@@ -17,16 +17,24 @@
 import type { EventBus } from "../shared/EventBus";
 import type { StoreMissedChangedPayload } from "../shared/types";
 import { renderMissedBadge } from "./templates/missedBadge";
+import { teardownScaffold } from "./dom";
 
+/** The slice of the missed store the renderer uses: the count and the reset. */
 export interface MissedStoreLike {
   count(): number;
   reset(): Promise<number>;
 }
 
+/** The stores the missed badge reads: only the missed store. */
 export interface MissedBadgeRendererStores {
   missed : MissedStoreLike;
 }
 
+/**
+ * The "missed while away" badge and its Reset button.
+ *
+ * Both are shown only while the count is above zero.
+ */
 export interface MissedBadgeRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -36,11 +44,15 @@ export interface MissedBadgeRenderer {
   forceRenderForTesting(): void;
 }
 
+/** Options for `createMissedBadgeRenderer`: the bus and the stores. */
 export interface MissedBadgeRendererOptions {
   eventBus : EventBus;
   stores   : MissedBadgeRendererStores;
 }
 
+/**
+ * Renders the missed notification badge and reset button from the store's count.
+ */
 class MissedBadgeRendererImpl implements MissedBadgeRenderer {
   private readonly bus    : EventBus;
   private readonly stores : MissedBadgeRendererStores;
@@ -49,11 +61,17 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
   private root    : HTMLElement | null = null;
   private mounted = false;
 
+  /**
+   * Creates the renderer from its bus and stores.
+   */
   constructor( opts: MissedBadgeRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
   }
 
+  /**
+   * Attaches to a root element, paints the badge, and listens for count changes.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "MissedBadgeRenderer already mounted" );
@@ -70,16 +88,18 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
     );
   }
 
+  /**
+   * Removes the subscriptions and empties the root element.
+   */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, null, this.root );
+    this.root = null;
     this.mounted = false;
   }
 
+  /**
+   * Repaints the badge at once, for tests, when mounted.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderNow();
   }
@@ -107,6 +127,11 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
   }
 }
 
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createMissedBadgeRenderer(
   opts: MissedBadgeRendererOptions,

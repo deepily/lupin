@@ -1,20 +1,20 @@
 """
 The retired Deep Research to Presentation submission door.
 
-This module used to submit chained research→presentation jobs to the CJ Flow queue. It now
-holds a single tombstone: the route stays registered and answers 410 Gone naming
-`/api/v2/submit`, which is where that work enters now.
+This module used to submit chained research→presentation jobs to the CJ Flow queue. It now holds a single
+tombstone: the route stays registered and answers 410 Gone naming `/api/v2/submit`,
+which is where that work enters now.
 
 The request and response models went with the handler, and so did the todo-queue
 dependency. A Pydantic model no route reads is a shape a caller can still find and
 reasonably believe in.
 
-What a caller sends instead:
+What a caller sends instead.
 
     POST /api/v2/submit
     {
         "command": "agent router go to research to presentation",
-        "args": { "query": "State of AI safety in 2026", "budget": 3.00, "target_duration_minutes": 15 }
+        "args": { "query": "AI safety in 2026", "budget": 3, "target_duration_minutes": 15 }
     }
 """
 
@@ -23,7 +23,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from cosa.rest.routers._retired_doors import RETIRED_DOORS, gone, refusal_detail, tombstone_description
+from cosa.rest.routers._retired_doors import RETIRED_DOORS, check_tombstone_router, gone, tombstone_description
 import cosa.utils.util as cu
 
 
@@ -87,7 +87,7 @@ async def submit_research_to_presentation():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          `REMOVE BY` text built from the `REMOVE_BY` constant
     """
     gone( "/api/deep-research-to-presentation/submit" )
 
@@ -106,8 +106,7 @@ def quick_smoke_test():
 
         # Test 2: Router configuration
         print( "Testing router configuration..." )
-        assert router.prefix == "/api/deep-research-to-presentation"
-        assert "deep-research-to-presentation" in router.tags
+        detail = check_tombstone_router( router, "/api/deep-research-to-presentation", "deep-research-to-presentation", "/api/deep-research-to-presentation/submit", "/api/v2/submit" )
         print( f"✓ Router prefix: {router.prefix}" )
 
         # Test 3: the door is a tombstone, mounted at the path the table names
@@ -118,17 +117,10 @@ def quick_smoke_test():
         # twice-prefixed and the door would answer 404 — the one answer a tombstone must
         # never give.
         print( "Testing the retired route..." )
-        paths = [ r.path for r in router.routes ]
-        assert paths == [ "/api/deep-research-to-presentation/submit" ], paths
-        assert "/api/deep-research-to-presentation/submit" in RETIRED_DOORS
-        assert RETIRED_DOORS[ "/api/deep-research-to-presentation/submit" ] == "/api/v2/submit"
-        print( f"✓ Routes: {paths} -> {RETIRED_DOORS[ '/api/deep-research-to-presentation/submit' ]}" )
+        print( f"✓ Routes: {[ r.path for r in router.routes ]} -> {RETIRED_DOORS[ '/api/deep-research-to-presentation/submit' ]}" )
 
         # Test 4: the refusal names its replacement and its removal date
         print( "Testing the refusal..." )
-        detail = refusal_detail( "/api/deep-research-to-presentation/submit" )
-        assert "/api/v2/submit" in detail
-        assert "REMOVE BY" in detail
         print( f"✓ {detail}" )
 
         print( "\n✓ Smoke test completed successfully" )

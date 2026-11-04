@@ -28,7 +28,7 @@ from cosa.agents.utils.feedback_analysis import (
     is_approval, is_rejection, extract_feedback_intent,
     APPROVAL_SIGNALS, REJECTION_SIGNALS
 )
-from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher
+from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher, make_interface_functions
 
 logger = logging.getLogger( __name__ )
 
@@ -69,127 +69,7 @@ TARGET_USER: Optional[ str ]  = None
 # Primary Interface Functions
 # =============================================================================
 
-async def notify_progress(
-    message: str,
-    priority: str = "medium",
-    abstract: Optional[ str ] = None,
-    session_name: Optional[ str ] = None,
-    job_id: Optional[ str ] = None,
-    queue_name: Optional[ str ] = None,
-    progress_group_id: Optional[ str ] = None
-) -> None:
-    """
-    Send fire-and-forget progress notification.
-
-    Args:
-        message: Progress message to announce
-        priority: "low", "medium", "high", or "urgent"
-        abstract: Optional supplementary context (markdown, URLs, details)
-        session_name: Optional human-readable session name for UI display
-        job_id: Optional agentic job ID for routing to job cards
-        queue_name: Optional queue where job is running
-        progress_group_id: Optional progress group ID for in-place DOM updates
-    """
-    _dispatcher.sender_id    = SENDER_ID
-    _dispatcher.session_name = SESSION_NAME
-    _dispatcher.target_user  = TARGET_USER
-    await _dispatcher.notify_progress(
-        message, priority=priority, abstract=abstract,
-        session_name=session_name, job_id=job_id,
-        queue_name=queue_name, progress_group_id=progress_group_id
-    )
-
-
-async def ask_confirmation(
-    question: str,
-    default: str = "no",
-    timeout: int = 60,
-    abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None,
-    priority: str = None
-) -> bool:
-    """
-    Ask a yes/no question and return boolean result.
-
-    Args:
-        question: The yes/no question to ask
-        default: Default answer if timeout ("yes" or "no")
-        timeout: Seconds to wait for response
-        abstract: Optional supplementary context
-        job_id: Optional job ID for routing to job card
-        priority: "low"/"medium"/"high"/"urgent" (default: dispatcher default, which is "high" for SWE)
-
-    Returns:
-        bool: True if user said yes, False otherwise
-    """
-    _dispatcher.sender_id   = SENDER_ID
-    _dispatcher.target_user = TARGET_USER
-    return await _dispatcher.ask_confirmation(
-        question, default=default, timeout=timeout, abstract=abstract, job_id=job_id, priority=priority
-    )
-
-
-async def get_feedback(
-    prompt: str,
-    timeout: int = 300,
-    job_id: Optional[ str ] = None,
-    priority: str = None,
-    response_default: Optional[ str ] = None
-) -> Optional[ str ]:
-    """
-    Get open-ended feedback from user via voice.
-
-    Args:
-        prompt: Text to speak to the user
-        timeout: Maximum seconds to wait for response
-        job_id: Optional job ID for routing to job card
-        priority: "low"/"medium"/"high"/"urgent" (default: dispatcher default, "high" for SWE)
-        response_default: Optional default returned when user is offline (else 503).
-
-    Returns:
-        str or None: User's transcribed voice response
-    """
-    _dispatcher.sender_id   = SENDER_ID
-    _dispatcher.target_user = TARGET_USER
-    return await _dispatcher.get_feedback(
-        prompt, timeout=timeout, job_id=job_id, priority=priority,
-        response_default=response_default,
-    )
-
-
-async def present_choices(
-    questions: list,
-    timeout: int = 120,
-    title: Optional[ str ] = None,
-    abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None,
-    priority: str = None,
-    response_default: Optional[ str ] = None
-) -> dict:
-    """
-    Present multiple-choice questions and get user's selection.
-
-    Args:
-        questions: List of question objects with options
-        timeout: Seconds to wait for response
-        title: Optional title for the notification
-        abstract: Optional supplementary context
-        job_id: Optional job ID for routing to job card
-        priority: "low"/"medium"/"high"/"urgent" (default: dispatcher default, "high" for SWE)
-        response_default: Optional default (e.g. "{}") returned when user is offline;
-                          otherwise /api/notify returns 503. Clean-stall path for
-                          unattended runs — empty-answers normalization (Bug 7)
-                          then raises VoiceGateTimeoutError for the caller.
-
-    Returns:
-        dict: {"answers": {...}} with selections keyed by header
-    """
-    _dispatcher.sender_id   = SENDER_ID
-    _dispatcher.target_user = TARGET_USER
-    return await _dispatcher.present_choices(
-        questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id,
-        priority=priority, response_default=response_default,
-    )
+notify_progress, ask_confirmation, get_feedback, present_choices = make_interface_functions( globals(), notify_extras=( "progress_group_id", ), ask_extras=( "priority", ), feedback_extras=( "priority", "response_default" ), choices_extras=( "priority", "response_default" ) )
 
 
 # =============================================================================

@@ -4,7 +4,7 @@ Video Generation Prompts for Presentation Generator.
 
 Prompt builder for generating short-form video via Google Veo 2/3
 from natural-language visual descriptions. Used by VeoRenderer
-during Phase 7 (Visual Rendering).
+during the visual rendering phase.
 
 Pattern: Same structure as image_gen.py
   - Duration map

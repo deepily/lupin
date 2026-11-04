@@ -4,8 +4,6 @@ WebSocket administration endpoints for connection and session management.
 Provides comprehensive administrative capabilities for WebSocket connection
 monitoring, session management, cleanup operations, policy configuration,
 and event type introspection.
-
-Generated on: 2025-01-25
 """
 
 from fastapi import APIRouter, Depends, HTTPException

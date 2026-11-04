@@ -209,7 +209,9 @@ python -m cosa.repo.run_git_loc_delta [OPTIONS]
   --base REF               Base ref for --branch mode (default: main)
 
   Filters:
-  --include-merges         Include merge commits (default: exclude)
+  --include-merges         Count merge commits (default: exclude). A merge counts what it
+                           brought in over its first parent, so lines already counted on the
+                           merged branch count again. Needs git 2.31 or newer.
   --author EMAIL           Filter by commit author email
                            (passed to git log --author; substring/regex per git)
 

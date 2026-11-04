@@ -127,6 +127,16 @@ def test_a_cap_larger_than_a_page_still_asks_for_only_a_page( monkeypatch ):
     assert _limit_of( calls[ 0 ] ) == scan.PAGE_SIZE
 
 
+def test_the_module_page_size_sets_the_limit_of_the_first_request( monkeypatch ):
+    """PAGE_SIZE is read at call time, so lowering it lowers the request."""
+    calls = _honouring_pages( monkeypatch, [ _row( "a", "epic:x" ) ], has_more=False )
+    monkeypatch.setattr( scan, "PAGE_SIZE", 100 )
+
+    scan.fetch_board( SETTINGS, "key", 1000 )
+
+    assert _limit_of( calls[ 0 ] ) == 100
+
+
 def test_each_later_page_asks_for_only_the_room_that_is_left( monkeypatch ):
     calls = _honouring_pages( monkeypatch, [ _row( f"r{i}", "epic:x" ) for i in range( 4 ) ] )
 

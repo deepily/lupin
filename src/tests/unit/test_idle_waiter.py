@@ -17,7 +17,7 @@ env. The waiter itself goes through `notify_user_sync()` which honors that
 env via the existing config_loader path; in these tests we mock the
 `fire_anything_else_ask` helper directly so we don't actually touch HTTP.
 
-Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+Design: src/docs/decisions/2026.04.29-idle-aware-stop-hook.md
 """
 
 import json

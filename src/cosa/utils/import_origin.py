@@ -1,56 +1,54 @@
 """
-Which TREE the run's code was IMPORTED from — the half `[tree-state]` cannot see.
+Which tree the run's code was imported from: the half `[tree-state]` cannot see.
 
 `[tree-state]` reports the git state of the directory you are standing in. It says nothing
-about where Python actually loaded the code from, and on this fleet those are routinely two
-different checkouts — sometimes within a single run.
+about where Python loaded the code from. On this fleet those are routinely two different
+checkouts, sometimes within a single run.
 
-THE DEFECT THIS NAMES (CLAUDE.md § A TIER RUN FROM A WORKTREE…, measured 2026-09-01 by
-Rio ⚡). Every seat's shell exports `PYTHONPATH=/…/lupin/src`. A run pinned on `LUPIN_ROOT`
-but NOT on `PYTHONPATH` assembles `lupin_app.*` from your worktree and `cosa.*` from the main
-repo:
+The defect this names: every seat's shell exports `PYTHONPATH=/.../lupin/src`. A run pinned
+on `LUPIN_ROOT` but not on `PYTHONPATH` assembles `lupin_app.*` from your worktree and
+`cosa.*` from the main repo:
 
-    main module file : /…/lupin-wt-rio-routeaudit/src/lupin_app/main.py   <- WORKTREE
-    tasks module file: /…/lupin/src/cosa/rest/routers/tasks.py            <- MAIN REPO
+    main module file : /.../lupin-wt-rio-routeaudit/src/lupin_app/main.py   <- worktree
+    tasks module file: /.../lupin/src/cosa/rest/routers/tasks.py            <- main repo
 
-The assembled application exists in NO checkout, and the receipt is what it cost: two guards
-written for a real route-shadowing defect reported `6 passed` against a mutation that had
-never been loaded. Pin both and the same arm gives `2 failed`.
+The assembled application exists in no checkout. Two guards written for a real
+route-shadowing defect reported `6 passed` against a mutation that had never been loaded.
+Pin both variables and the same arm gives `2 failed`.
 
-⚠️ THE SPLIT IS THE FINDING, NOT "ONE MODULE IS FOREIGN" — Rio's correction to this module's
-first cut, which checked `cosa` alone against `LUPIN_ROOT`. Two modules that agree with each
-other are a coherent tree even when it is not the one you meant; two that disagree are a tree
-that exists nowhere, and only the second can produce a green about code nobody has. Checking
-one module can see a symptom; comparing two is what names the disease.
+The split is the finding, not "one module is foreign". Checking `cosa` alone against
+`LUPIN_ROOT` sees a symptom. Two modules that agree with each other are a coherent tree,
+even when it is not the one you meant. Two that disagree are a tree that exists nowhere,
+and only that can produce a green about code nobody has.
 
-⚠️ `run-span=unmoved` STILL PRINTS ON SUCH A RUN, correctly, because it describes the
-worktree's git state and knows nothing about what was imported. That is why this is a separate
-field rather than a clause of the tree-state line: two questions, two instruments.
+`run-span=unmoved` still prints on such a run, correctly, because it describes the
+worktree's git state and knows nothing about what was imported. That is why this is a
+separate field rather than a clause of the tree-state line: two questions, two instruments.
 
-WHY A VERDICT AND NOT TWO BARE PATHS. The paths differ in one segment out of eight and run to
-~60 characters each; comparing them by eye is the failure mode this exists to catch, and it has
-cost this fleet hours more than once. The reader is told `same-tree`, or handed the specific
-disagreement — never two long strings to diff themselves.
+Why a verdict and not two bare paths: the paths differ in one segment out of eight and run
+to about 60 characters each. Comparing them by eye is the failure this exists to catch.
+The reader is told `same-tree`, or handed the specific disagreement.
 
-Kept standard-library only and dependency-free: the root conftest imports it early, alongside
+Standard library only and dependency-free: the root conftest imports it early, alongside
 `cosa.utils.tree_state` and `cosa.utils.secret_redaction`.
 
-Venue: :7999-eligible — no subprocess, no network, no mutation.
+Venue: :7999-eligible. No subprocess, no network, no mutation.
 """
 import os
 
 
 def _checkout_of( module ):
     """
-    The `src` a module was loaded through, or a reason it could not be determined.
+    The file a module was loaded from, or a reason it could not be determined.
 
-    Returns `( path, None )` on success and `( None, reason )` on failure, so the caller can
-    distinguish "could not look" from "looked and agreed" — which is this family's whole point.
+    Returns `( path, None )` on success and `( None, reason )` on failure. The caller can then
+    tell "could not look" from "looked and agreed", which is this family's whole point. The path
+    is the module's `__file__`; `_src_root` turns it into a `src` directory.
 
-    Compared at the `src` level rather than the package level because the question is WHICH
-    CHECKOUT, not which directory. `…/src/cosa/utils/import_origin.py` and
-    `…/src/lupin_app/main.py` sit at different depths below their package roots, so each
-    caller passes a module whose depth it knows; see `import_origin_field`.
+    The comparison is made at the `src` level rather than the package level, because the
+    question is which checkout, not which directory. `.../src/cosa/utils/import_origin.py` and
+    `.../src/lupin_app/main.py` sit at different depths below their package roots. Each caller
+    therefore passes a module whose depth it knows; see `import_origin_field`.
     """
     if module is None:                       return ( None, "not loaded by this run" )
     origin = getattr( module, "__file__", None )
@@ -68,41 +66,28 @@ def import_origin_field( modules, lupin_root ):
     The `imports=` field: one verdict about where this run's code actually came from.
 
     Requires:
-        - modules is a sequence of `( name, module_or_None, depth )`, where `depth` is how
-          many directories separate the module's file from its `src` root. Injected rather
-          than imported here so every arm is drivable by a test that does not own the
-          interpreter's real import state — the same reason `tree_state` injects its git
-          reader.
-          ⚠️ THE CALLER READS `sys.modules`; THIS NEVER IMPORTS ANYTHING. A diagnostic that
-          imports is a diagnostic that changes the run it describes — and worse here than
-          usual, since importing a module would CREATE the very resolution it claims to be
-          observing. `None` therefore means "this run never loaded it", which is a fact
-          about the run and not a fact about the module.
+        - modules is a sequence of `( name, module_or_None, depth )`, where `depth` is how many
+          directories separate the module's file from its `src` root. Injected rather than imported here so every arm is drivable by a test that does not own the interpreter's real import state, the same
+          reason `tree_state` injects its git reader.
+          The caller reads `sys.modules` and this function never imports anything, because a diagnostic that imports changes the run it describes, and importing a module would create the very resolution it claims to observe. `None` therefore means "this run never loaded it", which is a fact about the run and not a fact about the module.
         - lupin_root is the run's `LUPIN_ROOT`, or None/"" when unset.
 
     Ensures:
-        - returns a single `imports=…` token, ALWAYS. A field that goes quiet when it cannot
-          answer is indistinguishable from one that was never computed — the rule
+        - returns a single `imports=...` token, always. A field that goes quiet when it cannot
+          answer is indistinguishable from one that was never computed, the rule
           `tree_state._run_span` follows when it prints `unmoved` rather than nothing
-        - REPORTS A SPLIT AS A SPLIT, naming every distinct checkout and which module came
-          from which. This is the finding; a single module disagreeing with `LUPIN_ROOT` is
-          only a symptom of it (Rio ⚡, correcting the first cut)
-        - DISTINGUISHES A COHERENT FOREIGN TREE FROM A SPLIT ONE. Both modules agreeing with
-          each other but not with `LUPIN_ROOT` is a real, self-consistent checkout — wrong
-          tree, honest result. A split is an application assembled from two, and only that
-          one can produce a green about code that exists nowhere. Different severities, so
-          they get different words
-        - SAYS WHICH MODULES IT COULD NOT LOCATE, rather than silently judging on the rest.
-          A verdict reached over a subset, presented as a verdict over the whole, is the
-          narrowed-population defect this repo documents at length
-        - NEVER SAYS `same-tree` OFF A SINGLE MODULE. One module cannot agree with anything,
-          so a split is UNDETECTABLE from a sample of one and the verdict says so
-          (`single-module …`) rather than borrowing a word that means agreement. The tail
-          already named the absent module, but a reader skims the verdict and not the
-          parenthetical — which is how this field committed, in its first shipped form, the
-          exact defect it was written to catch
-        - COMPARES REAL PATHS, so a worktree reached through a symlink does not read as
-          foreign. A false alarm here is expensive: it trains readers to ignore the field
+        - reports a split as a split, naming every distinct checkout and which module came from
+          which. A single module disagreeing with `LUPIN_ROOT` is only a symptom of it
+        - distinguishes a coherent foreign tree from a split one. Modules that agree with each
+          other but not with `LUPIN_ROOT` are a real, self-consistent checkout: wrong tree,
+          honest result. A split is an application assembled from two, and only that one can produce a green about code that exists nowhere. Different severities get different words
+        - says which modules it could not locate, rather than silently judging on the rest. A
+          verdict over a subset, presented as a verdict over the whole, is the narrowed-population defect, which this repo documents at length
+        - never says `same-tree` off a single module. One module cannot agree with anything, so a
+          split is undetectable from a sample of one, and the verdict says `single-module ...`
+          instead. A reader skims the verdict and not the parenthetical naming the absent module
+        - compares real paths, so a worktree reached through a symlink does not read as foreign.
+          A false alarm here trains readers to ignore the field
 
     Raises:
         - nothing. Every operand is checked before use, and `os.path.realpath` does not raise

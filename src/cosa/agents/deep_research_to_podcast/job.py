@@ -102,11 +102,11 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
             audience_context: Custom audience description
-            source_document: Absolute paths to local documents the RESEARCH LEG reads
-                FIRST, as seed context. Already scope-validated and resolved by the v2
-                door ( cosa/rest/v2/source_document.py ) — this constructor receives real
-                paths and does not re-decide whether they may be read. None or [] means
-                the run behaves exactly as it did before.
+            source_document: Absolute paths to local documents the research leg reads
+                first, as seed context. The v2 door ( cosa/rest/v2/source_document.py )
+                has already scope-validated and resolved them. This constructor receives
+                real paths and does not re-decide whether they may be read. None or []
+                means no seed documents.
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -156,55 +156,15 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
         Returns:
             str: Conversational answer summarizing pipeline results
         """
-        if self.debug:
-            print( f"[DeepResearchToPodcastJob] Starting do_all() for: {self.query[ :50 ]}..." )
-
-        self.state      = JobState.RUNNING
-        self.started_at = cu.get_current_datetime_iso()
-
-        try:
-            result = asyncio.run( self._execute() )
-
-            self.state        = JobState.COMPLETED
-            self.completed_at = cu.get_current_datetime_iso()
-            self.result       = result
-            self.answer_conversational = result
-
-            if self.debug:
-                duration = self.get_execution_duration_seconds()
-                print( f"[DeepResearchToPodcastJob] Completed in {duration:.1f}s" )
-
-            return result
-
-        except Exception as e:
-            self.state        = JobState.FAILED
-            self.completed_at = cu.get_current_datetime_iso()
-            self.error        = str( e )
-            self.answer_conversational = f"Research→Podcast pipeline failed: {str( e )}"
-
-            if self.debug:
-                print( f"[DeepResearchToPodcastJob] Failed: {e}" )
-                import traceback
-                traceback.print_exc()
-
-            # Re-raise so the agentic-pool Future captures the exception.
-            # Backlog item 5 (2026-04-29): canonical Future contract.
-            raise
+        return self._run_execute( "DeepResearchToPodcastJob", self.query[ :50 ], "Research→Podcast pipeline failed" )
 
     def _make_agent( self ):
-        """Build the chained agent this job runs. Extracted so the JOIN can be driven.
+        """
+        Build the chained agent this job runs.
 
-        🔴 WHY THIS IS A METHOD AND NOT AN EXPRESSION INSIDE `_execute` (row 5726e3c5).
-        `_execute` runs the whole pipeline — notifications, research, audio, storage —
-        so a test cannot reach the agent this job actually builds without running all of
-        it against real services. That left the job→agent hand-off provable only by a
-        test that rebuilt the argument list itself, which proves the test's copy and not
-        the job's.
-
-        That is the seam slice 1 died in one layer out: the door and the job were both
-        correct and the factory between them dropped the argument, and every test stopped
-        at a seam. `test_source_document_reaches_the_model_*` drives THIS method on a job
-        the REAL factory built, so nothing between the door and `run_research` is a copy.
+        This is a method, not an inline expression in `_execute`, so a test can reach the agent the job
+        builds without running the whole pipeline. A test that rebuilt the argument list would prove only
+        its own copy. Driving this method on a job from the real factory leaves no copy.
 
         Ensures:
             - returns a fully-configured agent carrying this job's own arguments
@@ -309,6 +269,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             #    9b481811, but a missing BUILD, not just a missing store). Mirrors
             #    podcast_generator/job.py:358-406. ──
             import urllib.parse
+            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
             io_base = cu.get_project_root() + "/io/"
 
             def _to_rel( p ):
@@ -317,16 +278,8 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 if p.startswith( "io/" ):   return p[ 3: ]
                 return p.lstrip( "/" )
 
-            def _script_link( rel ):
-                return f"[📝 Script](/app/docs?path={urllib.parse.quote( rel )})" if rel else None
-
-            def _audio_triplet( rel ):
-                enc = urllib.parse.quote( rel )
-                return (
-                    f"[▶️ Play Here](/app/audio?path={enc}&embed=1) | "
-                    f"[🎧 Listen](/app/audio?path={enc}) | "
-                    f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
-                )
+            # The original document rides the link when it lives inside the project.
+            source_rel = source_ref( result.research_path, cu.get_project_root() )
 
             # One labelled link set PER language (bug 00e6aba1: a two-language run
             # writes two mp3s but must link BOTH, not just the primary). The maps ride
@@ -346,15 +299,25 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
                 if l not in ordered_langs:
                     ordered_langs.append( l )
 
+            # Optional Google Drive copy (flag off = no-op and no Google import). The source document is
+            # the generated research report; the hook loads the config and resolves the path inside its
+            # own boundary, so a config error here cannot fail the job.
+            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive
+            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path, user_email=self.user_email )
+            if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
+
             per_language_lines = []
             for lang in ordered_langs:
                 label  = _LANGUAGE_NAMES.get( lang, lang )
                 a_rel  = _to_rel( audio_by_lang.get( lang ) )
                 s_rel  = _to_rel( script_by_lang.get( lang ) )
                 parts  = []
-                s_link = _script_link( s_rel )
+                s_link = script_link( s_rel )
                 if s_link: parts.append( s_link )
-                if a_rel:  parts.append( _audio_triplet( a_rel ) )
+                if a_rel:
+                    title = read_script_title( io_base + s_rel ) if s_rel else None
+                    parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
+                if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
                 if parts:
                     per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
 
@@ -363,6 +326,10 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             if r_rel:
                 lines.append( f"**Research Report**: [📄 View](/app/docs?path={urllib.parse.quote( r_rel )})" )
             lines.extend( per_language_lines )
+            lines.extend( drive[ "extra_lines" ] )
+            skipped_names = [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
+            if skipped_names:
+                lines.append( f"**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names ) )
             lines.append( f"**Cost**: ${result.total_cost:.4f}" )
             completion_abstract = "\n".join( lines )
 
@@ -372,7 +339,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
 
             try:
                 await voice_io.notify(
-                    f"Research to podcast complete. Total cost ${result.total_cost:.4f}.",
+                    f"Research to podcast complete. Total cost ${result.total_cost:.4f}." + ( f" {len( skipped_names )} topics were skipped; see the card." if skipped_names else "" ),
                     priority   = "medium",
                     abstract   = completion_abstract,
                     job_id     = self.id_hash,

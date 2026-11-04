@@ -1,7 +1,7 @@
 """
 E2E UI tests for the CC session selector strip + exclusive focus mode.
 
-Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+Design: src/docs/decisions/2026.04.30-cc-session-selector-strip-and-focus-mode.md
 
 The tests in this file exercise the strip and focus-mode behaviors on the
 notifications page. Where possible they DRIVE the UI by simulating sender
@@ -1204,3 +1204,100 @@ class TestMultiplexerFocusHeight:
         after = _card_a_max_height()
         assert after == "250px", \
             f"exiting focus mode reverts to legacy's 250px; got {after}"
+
+
+# ---------------------------------------------------------------------------
+# Keep place — a card arriving at the top does not move what the reader sees
+# ---------------------------------------------------------------------------
+
+KEEP_PLACE_KEY = "notifications_keep_place"
+
+
+def _seed_tall_cards( page, count=8, height_px=420 ):
+    """Inject `count` CC sender cards and give each a fixed height so the page scrolls."""
+    ids = [ f"claude.code@lupin.deepily.ai#{ i:08x}" for i in range( 0x1000, 0x1000 + count ) ]
+    for sid in ids:
+        _inject_cc_sender_card( page, sid )
+    page.add_style_tag( content=f"#notifications-list > .sender-card {{ min-height: {height_px}px; }}" )
+    page.wait_for_timeout( 100 )
+    return ids
+
+
+def _card_top( page, sender_id ):
+    sanitized = sender_id.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+    return page.evaluate(
+        f"() => document.getElementById( 'sender-card-{sanitized}' ).getBoundingClientRect().top"
+    )
+
+
+def _speak_card_below( page, sender_id ):
+    """
+    Start the audio indicator on a notification in the card, as starting audio does.
+
+    Chromium's scroll anchoring holds the view when a card is inserted above it. So a plain
+    card move never shifts the view, and the reveal is the scroll the reader sees.
+    """
+    sanitized = sender_id.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+    page.evaluate(
+        """( args ) => {
+            const spoken = document.createElement( "div" );
+            spoken.id = "kp-spoken-notification";
+            document.getElementById( args.cardId ).appendChild( spoken );
+            window.notificationsUI.startTTSPlayingIndicator( spoken.id );
+        }""",
+        { "cardId": f"sender-card-{sanitized}" }
+    )
+    page.wait_for_timeout( 800 )                           # the reveal scrolls smoothly
+
+
+class TestKeepPlaceToggle:
+    """
+    The Keep place switch in #cc-session-strip.
+
+    Off by default: a spoken card is scrolled into view as it always was.
+    Turned on, speaking a card below must not move the card the reader is looking at, and the choice
+    survives a reload.
+    """
+
+    def test_pill_is_present_and_off_by_default( self, notifications_page_with_strip ):
+        page = notifications_page_with_strip
+        pill = page.locator( "#cc-keep-place-toggle" )
+        assert pill.count() == 1, "Keep place pill should exist in the strip markup"
+        assert pill.get_attribute( "data-keep-place" ) == "false"
+        assert page.evaluate( f"() => localStorage.getItem( '{KEEP_PLACE_KEY}' )" ) is None
+
+    def test_by_default_a_spoken_card_below_scrolls_the_view( self, notifications_page_with_strip ):
+        page = notifications_page_with_strip
+        ids  = _seed_tall_cards( page )
+        watched   = ids[ len( ids ) // 2 ]
+        sanitized = watched.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        page.evaluate(
+            "( sid ) => window.scrollTo( 0, document.getElementById( sid ).offsetTop - 120 )",
+            f"sender-card-{sanitized}"
+        )
+        page.wait_for_timeout( 100 )
+        before = _card_top( page, watched )
+        _speak_card_below( page, ids[ 0 ] )                # the bottom card is spoken
+        after = _card_top( page, watched )
+        assert abs( after - before ) >= 100, f"by default the spoken card should have been scrolled to, moved {after - before}"
+
+    def test_on_keeps_the_card_in_view_and_survives_a_reload( self, notifications_page_with_strip ):
+        page = notifications_page_with_strip
+        ids  = _seed_tall_cards( page )
+        page.locator( "#cc-keep-place-toggle" ).click()
+        assert page.locator( "#cc-keep-place-toggle" ).get_attribute( "data-keep-place" ) == "true"
+        assert page.evaluate( f"() => localStorage.getItem( '{KEEP_PLACE_KEY}' )" ) == "true"
+        watched   = ids[ len( ids ) // 2 ]
+        sanitized = watched.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        page.evaluate(
+            "( sid ) => window.scrollTo( 0, document.getElementById( sid ).offsetTop - 120 )",
+            f"sender-card-{sanitized}"
+        )
+        page.wait_for_timeout( 100 )
+        before = _card_top( page, watched )
+        _speak_card_below( page, ids[ 0 ] )
+        after = _card_top( page, watched )
+        assert abs( after - before ) <= 1, f"the watched card moved from {before} to {after}"
+        page.reload()
+        page.wait_for_load_state( "networkidle" )
+        assert page.locator( "#cc-keep-place-toggle" ).get_attribute( "data-keep-place" ) == "true"

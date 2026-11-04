@@ -20,6 +20,7 @@ import { html } from "../html";
 import { PREDICTION_VOTE_MIN_PCT } from "../../stores/PredictionVoteStore";
 import type { PredictionVoteDir } from "../../shared/types";
 
+/** The callback the vote controls call with the direction of a click. */
 export interface PredictionVoteHandlers {
   onVote( dir: PredictionVoteDir ): void;
 }
@@ -31,9 +32,14 @@ export interface PredictionVoteHandlers {
  * render options (senderCard → dateAccordion → notificationItem). The template
  * stays pure: it reads `getVote` for the `.selected` highlight and forwards
  * clicks to `onVote`. Absent in the storeless component-isolation parity harness
- * — there the controls still RENDER (presence is pure-data, driven by
- * `notification.prediction_hint`), and clicks are inert (no orchestrator), so
- * the harness stays store-free.
+ * — there the action-required card (`predictionHintBox`) does NOT mount the
+ * controls at all, because a button with no orchestrator behind it is a dead
+ * control. The notification-item path (notificationItem.ts) still mounts the
+ * controls without an integration: its handler is `integration?.onVote`, so a
+ * click paints the local highlight and posts nothing. That behaviour is pinned
+ * by the notificationItem test "prediction_hint at/above the gate mounts the
+ * vote controls (pure-data, no integration)". This change covers the card path
+ * only.
  */
 export interface PredictionVoteIntegration {
   /** Authoritative cast vote for the notification id (for the `.selected` highlight on (re)render). */
@@ -42,6 +48,7 @@ export interface PredictionVoteIntegration {
   onVote( notificationId: string, dir: PredictionVoteDir ): void;
 }
 
+/** What the vote controls draw: notification id, confidence in percent and a cast vote. */
 export interface PredictionVoteOpts {
   notificationId : string;
   confidencePct  : number;

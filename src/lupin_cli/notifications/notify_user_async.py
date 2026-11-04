@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Code async notification client with Pydantic validation (Phase 2.4).
+Claude Code async notification client with Pydantic validation.
 
 This script sends fire-and-forget notifications to Lupin via WebSocket delivery.
 Uses Pydantic models for type-safe validation and structured responses.
@@ -40,7 +40,8 @@ from cosa.utils.config_loader import get_api_config, load_api_key
 # Import constants (fallbacks)
 from lupin_cli.notifications.notification_types import (
     DEFAULT_SERVER_URL,
-    ENV_SERVER_URL
+    ENV_SERVER_URL,
+    validate_server_environment
 )
 
 
@@ -48,11 +49,9 @@ def calculate_retry_intervals( timeout_seconds: int ) -> list:
     """
     Calculate adaptive retry intervals based on timeout duration.
 
-    For short timeouts (≤10s): Aggressive linear retries to catch WebSocket
-    auth completion (which takes 5-10 seconds empirically).
-
-    For long timeouts (>10s): Exponential backoff with 5s cap to reduce
-    server load while maintaining responsiveness.
+    Short timeouts (10s or less) get aggressive linear retries to catch WebSocket
+    auth completion, which takes 5-10 seconds empirically.
+    Longer timeouts get exponential backoff capped at 5s to reduce server load.
 
     Requires:
         - timeout_seconds is a positive integer
@@ -117,7 +116,7 @@ def notify_user_async(
         - Uses Pydantic validation for all data
 
     Raises:
-        - No exceptions raised (all handled internally)
+        - No error propagates to the caller (all are handled internally)
 
     Args:
         request: AsyncNotificationRequest model (already validated)
@@ -305,7 +304,7 @@ def notify_user_async(
             )
 
     # Exhausted all retries (should never reach here due to is_last_attempt logic)
-    return AsyncNotificationResponse(
+    return AsyncNotificationResponse(  # pragma: no cover -- every branch of the last attempt returns above, and all_delays always holds the immediate attempt
         success     = False,
         status      = "user_not_available",
         message     = f"User not available after {total_attempts} attempts",
@@ -315,48 +314,19 @@ def notify_user_async(
 
 def validate_environment() -> bool:
     """
-    Validate environment setup for notification system.
+    Validate environment setup for the notification system.
 
     Requires:
-        - urllib.parse module is available
+        - validate_server_environment is importable from notification_types
 
     Ensures:
-        - Returns True if all environment checks pass
-        - Returns False if any validation issues found
-        - Prints detailed validation results
+        - Returns whatever validate_server_environment returns
+        - Prints the validation result
 
     Raises:
-        - None (handles all exceptions gracefully)
-
-    Returns:
-        bool: True if environment is properly configured
+        - None
     """
-
-    issues = []
-
-    # Check server URL
-    server_url = os.getenv( ENV_SERVER_URL, DEFAULT_SERVER_URL )
-    if not server_url.startswith( ('http://', 'https://') ):
-        issues.append( f"{ENV_SERVER_URL} must start with http:// or https://" )
-
-    # Validate URL format
-    try:
-        import urllib.parse
-        parsed = urllib.parse.urlparse( server_url )
-        if not parsed.netloc:
-            issues.append( f"Invalid server URL format: {server_url}" )
-    except Exception as e:
-        issues.append( f"Error parsing server URL: {e}" )
-
-    if issues:
-        print( "❌ Environment validation failed:" )
-        for issue in issues:
-            print( f"  - {issue}" )
-        return False
-
-    print( "✅ Environment validation passed" )
-    print( f"  Server URL: {server_url}" )
-    return True
+    return validate_server_environment()
 
 
 def main():

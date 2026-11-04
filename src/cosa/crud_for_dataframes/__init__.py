@@ -2,10 +2,10 @@
 DataFrame CRUD Storage Layer.
 
 Voice-driven CRUD operations over per-user pandas DataFrames backed by
-parquet files. Phase 1 of a 3-layer architecture:
-    Layer 1: Storage + schemas + CRUD operations (this package)
-    Layer 2: Phi-4 14B intent extraction + Claude Code headless fallback
-    Layer 3: Dispatcher with semantic caching + voice I/O
+parquet files. The design has 3 layers:
+    - Layer 1: Storage + schemas + CRUD operations (this package)
+    - Layer 2: Phi-4 14B intent extraction + Claude Code headless fallback
+    - Layer 3: Dispatcher with semantic caching + voice I/O
 """
 
 __version__ = "0.1.0"

@@ -8,19 +8,23 @@ levels, and either acts autonomously, queues for ratification, or
 shadows for training data.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 import json
 from typing import Optional
 
 from cosa.agents.utils.proxy_agents.base_responder import BaseResponder
+from cosa.agents.decision_proxy.base_decision_strategy import DecisionResult
 from cosa.agents.decision_proxy.config import (
+    DEFAULT_ACTIVE_HOURS_START,
+    DEFAULT_ACTIVE_HOURS_END,
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
     DEFAULT_TRUST_MODE,
 )
 from cosa.agents.decision_proxy.smart_router import SmartRouter
+from cosa.agents.decision_proxy.user_presence import user_connected_or_default
 
 
 class DecisionResponder( BaseResponder ):
@@ -36,13 +40,14 @@ class DecisionResponder( BaseResponder ):
         - Trust mode is one of: shadow, suggest, active
 
     Ensures:
-        - Decisions at L1 are logged but never acted on
-        - Decisions at L2 are queued as provisional
-        - Decisions at L3+ are committed with audit trail
+        - Decisions at level 1 are logged but never acted on
+        - Decisions at level 2 are queued as provisional
+        - Decisions at level 3 and above are committed with audit trail
         - All decisions are logged regardless of action
     """
 
-    LOG_PREFIX = "[DecisionResponder]"
+    LOG_PREFIX  = "[DecisionResponder]"
+    STATS_TITLE = "Decision Proxy Statistics"
 
     def __init__(
         self,
@@ -54,7 +59,12 @@ class DecisionResponder( BaseResponder ):
         dry_run             = False,
         debug               = False,
         verbose             = False,
-        enabled             = True
+        enabled             = True,
+        active_hours_start  = DEFAULT_ACTIVE_HOURS_START,
+        active_hours_end    = DEFAULT_ACTIVE_HOURS_END,
+        timezone            = None,
+        user_connected_fn   = None,
+        now_fn              = None
     ):
         """
         Initialize the decision responder.
@@ -62,7 +72,7 @@ class DecisionResponder( BaseResponder ):
         Args:
             trust_mode: Operating mode ("shadow", "suggest", "active")
             accepted_senders: Allowlist of sender IDs this proxy will respond to.
-                     FAIL-CLOSED (960a4ec9): an empty/omitted list rejects EVERY
+                     Fails closed: an empty or omitted list rejects every
                      sender, never accepts all. The shipped path populates it with
                      the swe.* bot addresses.
             embedding_provider: Optional EmbeddingProvider for generating question embeddings
@@ -71,11 +81,17 @@ class DecisionResponder( BaseResponder ):
             dry_run: Display decisions without acting
             debug: Enable debug output
             verbose: Enable verbose output
-            enabled: Master run switch (960a4ec9). When False the proxy processes
-                     no decision events and cannot submit — enforcing the
+            enabled: Master run switch. When False the proxy processes
+                     no decision events and cannot submit, which enforces the
                      `decision proxy enabled` INI flag the splainer promises
                      ("when false, the proxy will not run"). Constructor default is
                      True (permissive library default); __main__ passes the INI value.
+            active_hours_start: Hour (0-23) when the human's active hours begin
+            active_hours_end: Hour (0-23) when they end
+            timezone: IANA timezone the hours are read in; None reads `decision proxy timezone`
+            user_connected_fn: Callable returning True when the human is connected.
+                     None means "not connected", so the proxy answers at any hour.
+            now_fn: Callable returning the current datetime (None reads the clock)
         """
         super().__init__(
             host    = host,
@@ -88,7 +104,14 @@ class DecisionResponder( BaseResponder ):
         self.trust_mode         = trust_mode
         self.enabled            = enabled
         self.accepted_senders   = accepted_senders or []
-        self.smart_router       = SmartRouter( debug=debug )
+        self.smart_router       = SmartRouter(
+            active_hours_start = active_hours_start,
+            active_hours_end   = active_hours_end,
+            timezone           = timezone,
+            debug              = debug
+        )
+        self.user_connected_fn  = user_connected_fn
+        self.now_fn             = now_fn
         self.domain_strategy    = None  # Set by profile loader
         self.embedding_provider = embedding_provider
         self._embedding_store   = None  # Lazy-init on first use
@@ -100,6 +123,7 @@ class DecisionResponder( BaseResponder ):
             "decisions_suggested"  : 0,
             "decisions_acted"      : 0,
             "decisions_deferred"   : 0,
+            "decisions_deferred_to_user" : 0,
             "sender_rejected"      : 0,
             "disabled_skipped"     : 0,
         } )
@@ -153,13 +177,9 @@ class DecisionResponder( BaseResponder ):
         """
         Process a notification_queue_update event through the decision pipeline.
 
-        Steps:
-            1. Extract notification fields
-            2. Check sender ID against accepted list
-            3. Skip non-response-requested notifications
-            4. Classify decision category
-            5. Check trust level and gate action
-            6. Act, suggest, shadow, or defer
+        Steps: extract fields, check the sender against the accepted list, and skip
+        notifications that request no response. Then classify the category, gate
+        on trust level, and act, suggest, shadow, or defer.
 
         Args:
             event_data: notification_queue_update event payload
@@ -254,6 +274,20 @@ class DecisionResponder( BaseResponder ):
             if self.debug:
                 print( f"{self.LOG_PREFIX} SUGGEST: {result.category} -> {result.value}" )
 
+        elif result.action == "act" and result.value is not None and self._user_is_available():
+            self.stats[ "decisions_deferred_to_user" ] += 1
+            deferred = DecisionResult(
+                action      = "defer",
+                value       = result.value,
+                category    = result.category,
+                confidence  = result.confidence,
+                trust_level = result.trust_level,
+                reason      = f"user available (active hours, connected); the proxy would have answered: {result.reason}",
+            )
+            self._persist_decision( notification_id, deferred, message )
+            if self.debug:
+                print( f"{self.LOG_PREFIX} DEFER TO USER: {result.category} — user available" )
+
         elif result.action == "act":
             self.stats[ "decisions_acted" ] += 1
             self._persist_decision( notification_id, result, message, requires_ratification=False )
@@ -270,6 +304,20 @@ class DecisionResponder( BaseResponder ):
             self._persist_decision( notification_id, result, message )
             if self.debug:
                 print( f"{self.LOG_PREFIX} DEFER: {result.category} — {result.reason}" )
+
+    def _user_is_available( self ):
+        """
+        Ask the smart router whether the human should answer instead of the proxy.
+
+        Ensures:
+            - Returns True only inside active hours with the human connected
+            - Does not call the feed outside active hours
+            - Returns False when no feed is wired; a failing feed reads through user_presence
+        """
+        now = self.now_fn() if self.now_fn is not None else None
+        if not self.smart_router.is_active_hours( now ): return False
+        connected = user_connected_or_default( self.user_connected_fn ) if self.user_connected_fn is not None else False
+        return self.smart_router.should_defer_to_user( now=now, user_connected=connected )
 
     def _get_embedding_store( self ):
         """
@@ -433,13 +481,3 @@ class DecisionResponder( BaseResponder ):
                 result[ "conformal" ] = wrapper.get_status()
 
         return result
-
-    def print_stats( self ):
-        """Print decision proxy statistics."""
-        print( f"\n{'=' * 50}" )
-        print( "Decision Proxy Statistics" )
-        print( f"{'=' * 50}" )
-        for key, value in self.stats.items():
-            label = key.replace( "_", " " ).title()
-            print( f"  {label:30s} : {value}" )
-        print( f"{'=' * 50}" )

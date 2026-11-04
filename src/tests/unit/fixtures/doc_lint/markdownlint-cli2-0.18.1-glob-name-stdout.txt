@@ -1,0 +1,3 @@
+Finding: a(1).md
+Linting: 0 file(s)
+Summary: 0 error(s)

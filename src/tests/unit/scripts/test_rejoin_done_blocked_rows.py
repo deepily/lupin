@@ -249,6 +249,17 @@ class TestFetchBoard:
 
         assert _limit_of( calls[ 0 ] ) == mod.PAGE_SIZE
 
+    def test_the_module_page_size_sets_the_limit_of_the_first_request( self, mod, monkeypatch ):
+        """PAGE_SIZE is read at call time, so lowering it lowers the request."""
+        calls = self._pages( mod, monkeypatch, [
+            ( True, 200, { "tasks": [ _row( "a", "done" ) ], "has_more": False } ),
+        ] )
+        monkeypatch.setattr( mod, "PAGE_SIZE", 100 )
+
+        mod.fetch_board( SETTINGS, "key", 1000 )
+
+        assert _limit_of( calls[ 0 ] ) == 100
+
     def test_each_later_page_asks_for_only_the_room_that_is_left( self, mod, monkeypatch ):
         calls = self._pages( mod, monkeypatch, [
             ( True, 200, { "tasks": [ _row( f"a{i}", "done" ) for i in range( 4 ) ], "has_more": True } ),

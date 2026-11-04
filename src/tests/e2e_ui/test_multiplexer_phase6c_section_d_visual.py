@@ -137,6 +137,7 @@ _STABILIZE_LAST_ACTIVITY_JS = """
 # Snapshot 1 — baseline (no conv-mode active)
 # ---------------------------------------------------------------------------
 
+
 def test_multiplexer_phase6c_section_d_baseline_visual(
     request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
@@ -164,7 +165,7 @@ def test_multiplexer_phase6c_section_d_baseline_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
-    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_baseline.png" )
+    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_baseline.png", snap_y=True )
     print( "✓ multiplexer_phase6c_section_d_baseline: visual snapshot compared" )
 
 
@@ -207,7 +208,7 @@ def test_multiplexer_phase6c_section_d_pinned_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
-    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_pinned.png" )
+    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_pinned.png", snap_y=True )
     print( "✓ multiplexer_phase6c_section_d_pinned: visual snapshot compared" )
 
 
@@ -265,5 +266,5 @@ def test_multiplexer_phase6c_section_d_pin_moved_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
-    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_pin_moved.png" )
+    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_pin_moved.png", snap_y=True )
     print( "✓ multiplexer_phase6c_section_d_pin_moved: visual snapshot compared" )

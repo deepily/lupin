@@ -2531,6 +2531,30 @@ class TestEveryEntryPointLogsItsQuestion:
 
         assert log.rows[ -1 ][ "query_verbatim" ] == "agent router go to math"
 
+    def test_a_submit_never_runs_the_llm_gist_before_it_answers( self, tmp_path, notifier, monkeypatch ):
+        """
+        A command-only submit does not run the LLM gist for its query-log row.
+
+        The gist is a model call. On the test VM it never returned, so the caller timed out on a queued job.
+        The row logs the normalized command instead. Reverting to a gist call makes the extra call show.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        bare   = FakeCache()
+        f_bare = _make_flow( tmp_path, bare, FakeRouter(), FakeExpeditor(),
+                             FakeExecutor( _outcome() ), FakePending(), notifier )
+        f_bare.submit( command="agent router go to math", args={}, **_CTX )
+
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome() ), FakePending(), notifier )
+        log   = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, **_CTX )
+
+        assert cache.gist_calls == bare.gist_calls, "the query log ran an LLM gist of its own"
+        assert log.rows[ -1 ][ "query_gist" ] == "agent router go to math", "the row carries the normalized text, not nothing"
+
     def test_resume_logs_the_original_question( self, tmp_path, notifier, monkeypatch ):
         """
         The resumed turn belongs to the question that started the interview, not to
@@ -4032,3 +4056,95 @@ class TestTheDegradeExitReportsTheRouteThatWasChosen:
         assert delivered[ "command" ] == "agent router go to math", (
             "the flow told the truth and the response model handed the client something else" )
         assert delivered[ "path" ] == "receptionist"
+
+
+# ────────────────────────────────────────────────────────────── row 4cbd4858 — parent lineage
+
+@pytest.mark.parametrize( "sent, recorded", [ ( "suite-job-hash", "suite-job-hash" ), ( None, None ), ( "", None ) ] )
+def test_ask_records_the_parent_on_the_trace_the_executor_sees( tmp_path, notifier, monkeypatch, sent, recorded ):
+    """`parent_id_hash` reaches the executor on the trace; absent or empty, the trace carries no such key."""
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+    seen = []
+    class _TraceSpy( FakeExecutor ):
+        def submit( self, work, trace ):
+            seen.append( trace.fields.get( "parent_id_hash" ) )
+            return super().submit( work, trace )
+    exe = _TraceSpy( _outcome( status="done", answer="42", answer_raw="42" ) )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
+    f.ask( "what time is it", parent_id_hash=sent, **_CTX )
+    assert seen == [ recorded ]
+
+
+# ──────────────────────────────────── the read guard runs before a replay is queued
+
+def _replay_flow( tmp_path, notifier, snap, exe ):
+    cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+    return _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
+                       exe, FakePending(), notifier )
+
+
+def test_a_replay_is_judged_by_the_read_guard_before_the_executor_sees_it( tmp_path, notifier, monkeypatch ):
+    """
+    The queued executor does not check whether a row may be served; the flow does, first.
+
+    Order is recorded across the two calls. A guard that ran after the hand-off
+    would leave the same final state and serve the row.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( label="math" ) )
+    snap   = _snapshot( routing_command="agent router go to math" )
+    events = [ ]
+
+    class _Exe( FakeExecutor ):
+        def submit( self, work, trace ):
+            events.append( ( "submit", work.kind, work.job ) )
+            return super().submit( work, trace )
+
+    real_guard = AskFlow._may_serve.__func__
+
+    def _spy_guard( cls, trace, snapshot, why ):
+        events.append( ( "guard", why, snapshot ) )
+        return real_guard( cls, trace, snapshot, why )
+
+    monkeypatch.setattr( AskFlow, "_may_serve", classmethod( _spy_guard ) )
+    f = _replay_flow( tmp_path, notifier, snap, _Exe( _outcome( status="done", answer="6", answer_raw="6" ) ) )
+
+    f.ask( "what is 3 plus 3", **_CTX )
+
+    assert events[ 0 ] == ( "guard", "exact_hit", snap )
+    assert events[ 1 ] == ( "submit", "replay", snap )
+
+
+def test_a_replay_of_a_row_the_user_marked_wrong_never_reaches_the_executor( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( label="math" ) )
+    snap = _snapshot( routing_command="agent router go to math", answer_is_correct=False )
+    exe  = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None, job_id=_SCOPED_JOB_ID ) )
+    f    = _replay_flow( tmp_path, notifier, snap, exe )
+
+    f.ask( "what is 3 plus 3", **_CTX )
+
+    assert [ w for w in exe.works if w.kind == "replay" ] == [ ], "a refused row was queued as a replay"
+
+
+def test_the_read_guard_is_not_asked_about_a_lookup_that_is_not_a_replay_hit( tmp_path, notifier, monkeypatch ):
+    """
+    The guard judges a row that is about to be replayed. On a miss it has nothing to judge.
+
+    Putting the guard first would run it, and write its refusal marks, on every lookup.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( label="math" ) )
+    asked      = [ ]
+    real_guard = AskFlow._may_serve.__func__
+
+    def _spy_guard( cls, trace, snapshot, why ):
+        asked.append( why )
+        return real_guard( cls, trace, snapshot, why )
+
+    monkeypatch.setattr( AskFlow, "_may_serve", classmethod( _spy_guard ) )
+    snap = _snapshot( routing_command="agent router go to math" )
+    cache = FakeCache( lookup_result=_lookup( is_replay_hit=False, snapshot=snap ) )
+    f = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
+                    FakeExecutor( _outcome( status="done", answer="6", answer_raw="6" ) ), FakePending(), notifier )
+
+    f.ask( "what is 3 plus 3", **_CTX )
+
+    assert "exact_hit" not in asked

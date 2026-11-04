@@ -71,7 +71,7 @@ it failed in the *safe* direction, which is luck, not design — the same collis
 still live reads as **green**.
 
 Full measurement, six remedies priced, and the still-open repo-wide question:
-`src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+the R&D write-up "stale pyc defeats mutation testing".
 
 ## 🔴 A GREEN THAT DEPENDS ON AN UNCOMMITTED FILE IS YOURS, NOT THE BRANCH'S
 
@@ -103,7 +103,7 @@ marker is what separates *"I fixed it"* from *"my directory differs from the bra
 one command.
 
 ⚠️ **The class is wider than the secret scanner**, and it splits in two. The audit is at
-`src/rnd/v0.2.1/2026.08.30-working-tree-artifact-gate-audit.md`; the short version:
+the R&D write-up "working tree artifact gate audit"; the short version:
 
 - **TRACKED records** — the secret-scan fixture, the parity-oracle goldens, `pyproject.toml`'s
   `fail_under`. Editing one turns red into green, and the `" M"` above catches all of them.
@@ -282,7 +282,7 @@ kill -0 $(cat /tmp/e2e-ui-tests.pid) 2>/dev/null && echo running || echo done
    Pass it only for a deliberate, authorised rebaseline of a UI change you can
    name, and check afterwards that every baseline which moved moved for the reason
    you expected. A baseline that changes unexpectedly is a finding, not a refresh.
-4. Failures produce diff images under `io/test-suite/visual-failures/`.
+4. Failures produce diff images under `io/test-suite/visual-failures/<run_id>/` (run_id = the ts- job id, else a UTC timestamp; only visual sessions write there, and no session deletes another run's folder — row d51ffc36).
 5. `io/` is gitignored and backed up outside the repo, so baselines survive a clean
    checkout but do NOT travel with a commit.
 
@@ -551,6 +551,9 @@ not rediscover.
 | 3 | E2E UI Tests | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 100% pass |
 | 4 | Visual Regression | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
 | 5 | Integration Tests | `./src/tests/run-integration-tests.sh --bg -v` | 100% pass (FINAL GATE) |
+
+The pyramid also has a host-only step, `docker_smoke` (`./src/tests/run-docker-smoke-gate.sh`), that runs the three
+docker smoke files and counts any skip as a failure. Inside a container those files skip, so run it on the host.
 
 ```bash
 # Complete pre-merge validation sequence

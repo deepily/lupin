@@ -247,6 +247,22 @@ DEFAULT_EXPERT_HOST = HostPersonality(
 )
 
 
+OWNER_EMAIL_KEY = "podcast drive owner email"
+
+
+def read_owner_email( config_mgr ) -> str:
+    """
+    Read the Drive owner's email, the one reader of `podcast drive owner email`.
+
+    Requires:
+        - config_mgr has get( key, default=, silent= )
+
+    Ensures:
+        - returns the stripped email, or "" when the key is absent or blank
+    """
+    return config_mgr.get( OWNER_EMAIL_KEY, default="", silent=True ).strip()
+
+
 @dataclass
 class PodcastConfig:
     """
@@ -314,6 +330,15 @@ class PodcastConfig:
     # Levels: beginner, general, expert, academic (default)
     audience         : Literal[ "beginner", "general", "expert", "academic" ] = "academic"
     audience_context : Optional[ str ] = None  # Custom description (e.g., "AI architect with ML background")
+
+    # === Google Drive Publishing (off by default; see src/docs/agents/podcast-generator-google-drive.md) ===
+    publish_to_google_drive       : bool = False
+    drive_folder_name             : str  = "Lupin Podcasts"
+    drive_upload_script           : bool = False
+    drive_upload_source_document  : bool = True
+    drive_token_path              : str  = "/src/conf/keys/google-drive-oauth-token.json"  # joined to the project root at run time
+    drive_upload_users            : str  = "owner"  # owner | all | comma list of emails; who may be uploaded
+    drive_owner_email             : str  = ""       # the user "owner" means; empty means nobody
 
     # === COSA Integration ===
     stream_thoughts_to_voice   : bool  = True
@@ -469,6 +494,13 @@ class PodcastConfig:
             stream_thoughts_to_voice  = _get( "podcast stream thoughts to voice",  "True", "boolean" ),
             narrate_progress          = _get( "podcast narrate progress",           "True", "boolean" ),
             target_languages          = target_languages,
+            publish_to_google_drive      = _get( "podcast publish to google drive",           "False", "boolean" ),
+            drive_folder_name            = _get( "podcast drive folder name",                 "Lupin Podcasts" ),
+            drive_upload_script          = _get( "podcast drive upload script",               "False", "boolean" ),
+            drive_upload_source_document = _get( "podcast drive upload source document",      "True",  "boolean" ),
+            drive_token_path             = _get( "podcast drive token path",                  "/src/conf/keys/google-drive-oauth-token.json" ),
+            drive_upload_users           = _get( "podcast drive upload users",                "owner" ),
+            drive_owner_email            = read_owner_email( config_mgr ),
         )
 
         # Handle audience_context

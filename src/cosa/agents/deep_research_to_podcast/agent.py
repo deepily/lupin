@@ -83,9 +83,9 @@ class DeepResearchToPodcastAgent:
             no_confirm: Skip confirmation prompts in DR
             audience: Expertise level (beginner/general/expert/academic)
             audience_context: Custom audience description
-            source_document: Absolute paths to local documents the RESEARCH LEG reads
-                FIRST, as seed context (row 5726e3c5). Already scope-validated and
-                resolved by the v2 door; this constructor receives real paths.
+            source_document: Absolute paths to local documents the research leg reads
+                first, as seed context. The v2 door has already scope-validated and
+                resolved them; this constructor receives real paths.
 
             # Podcast Generator options
             target_languages: List of ISO language codes (default: ["en"])
@@ -128,7 +128,7 @@ class DeepResearchToPodcastAgent:
 
     def _set_modality( self ) -> None:
         """
-        Set voice/CLI mode on BOTH underlying agents.
+        Set voice/CLI mode on both underlying agents.
 
         Both Deep Research and Podcast Generator have their own voice_io modules.
         We must set cli_mode on both to ensure consistent behavior.
@@ -197,8 +197,12 @@ class DeepResearchToPodcastAgent:
                 f"**Duration**: {dr_artifacts.get( 'duration_seconds', 0 ):.0f}s"
             )
 
+            skipped_names = [ g[ "topic" ] for g in dr_artifacts.get( "skipped_topics", [] ) ]
+            if skipped_names:
+                checkpoint_abstract += f"\n\n**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names )
+
             await self._notify(
-                f"Deep Research complete! Cost: ${self.result.dr_cost:.4f}",
+                f"Deep Research complete! Cost: ${self.result.dr_cost:.4f}" + ( f" ({len( skipped_names )} topics skipped)" if skipped_names else "" ),
                 priority="medium",
                 abstract=checkpoint_abstract
             )
@@ -333,6 +337,7 @@ class DeepResearchToPodcastAgent:
             # deliberately NOT folded into `self.query`, which also feeds the session-name
             # gist above, the pipeline notifications, and the saved report's frontmatter —
             # a whole file in any of those is unreadable. One call site, one enrichment.
+            skipped_topics = []
             report = await run_research(
                 query        = query_with_seed_context( self.query, self.source_document ),
                 config       = config,
@@ -340,7 +345,8 @@ class DeepResearchToPodcastAgent:
                 user_email   = self.user_email,
                 no_confirm   = self.no_confirm,
                 debug        = self.debug,
-                verbose      = self.verbose
+                verbose      = self.verbose,
+                skipped_topics = skipped_topics
             )
 
             if report is None:
@@ -379,6 +385,7 @@ class DeepResearchToPodcastAgent:
                 "cost"        : summary.total_cost_usd,
                 "artifacts"   : {
                     "report"          : report,
+                    "skipped_topics"  : skipped_topics,
                     "session_name"    : session_name,
                     "semantic_topic"  : semantic_topic,
                     "tokens_used"     : summary.total_input_tokens + summary.total_output_tokens,

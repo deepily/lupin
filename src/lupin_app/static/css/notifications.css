@@ -1749,7 +1749,7 @@
          * Per-Session Voice Persona Badge
          * (2026-04-28 — sender card header chip showing
          *  the voice this CC session was assigned at SessionStart)
-         * Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+         * Design: src/docs/decisions/2026.04.28-per-session-voice-personas.md
          * ======================================== */
 
         .persona-badge {
@@ -1974,13 +1974,14 @@
            Embedded toggle pill enters/exits focus mode: when ON, all
            sender cards except the focused one are hidden via
            data-focus-hidden="true" → display:none.
-           Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+           Design: src/docs/decisions/2026.04.30-cc-session-selector-strip-and-focus-mode.md
            Orthogonal to conversation-mode pin.
            ======================================== */
         .cc-session-strip {
             display: flex;
-            align-items: center;
-            gap: 12px;
+            flex-direction: column;   /* persona badges on the first row, the toggles on their own row below */
+            align-items: stretch;
+            gap: 8px;
             padding: 10px 16px;   /* more internal room inside the focus bar (Rick 2026-06-08) */
             margin-bottom: 12px;
             background: linear-gradient( to bottom, #fff, #f8f9fa );
@@ -2220,14 +2221,23 @@
             }
         }
 
+        .cc-strip-toggles {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 0 0 auto;
+        }
+
         .cc-strip-toggle {
             flex: 0 0 auto;
             background: rgb( 108, 117, 125, 0.15 );
             border: 1px solid rgb( 108, 117, 125, 0.3 );
-            border-radius: 16px;
+            border-radius: var( --persona-badge-radius );
             cursor: pointer;
-            padding: 5px 12px;
-            font-size: 13px;
+            padding: var( --persona-badge-padding );
+            font-size: var( --persona-badge-font-size );
+            /* A badge's box is as tall as its icon line, so the toggles take the icon's line height. */
+            line-height: calc( var( --persona-badge-icon-size ) * var( --persona-badge-line-height ) );
             font-weight: 500;
             color: #495057;
             opacity: 0.9;
@@ -2272,6 +2282,19 @@
         }
 
         .cc-strip-toggle[data-hide-inactive="true"]:hover {
+            background: #343a40;
+            border-color: #212529;
+        }
+
+        /* Keep place pill active state — the same dark fill as hide-inactive, so all three pills read alike when ON. */
+        .cc-strip-toggle[data-keep-place="true"] {
+            background: #495057;
+            border-color: #343a40;
+            color: #fff;
+            opacity: 1;
+        }
+
+        .cc-strip-toggle[data-keep-place="true"]:hover {
             background: #343a40;
             border-color: #212529;
         }
@@ -2984,6 +3007,8 @@
         }
 
         .podcast-overlay-title {
+            flex: 1 1 auto;
+            min-width: 0;
             font-size: 14px;
             font-weight: 600;
             color: #e8f0fe;
@@ -2993,6 +3018,7 @@
             margin-right: 8px;
         }
 
+        .podcast-overlay-expand,
         .podcast-overlay-dismiss {
             background: none;
             border: none;
@@ -3006,6 +3032,7 @@
             transition: color 0.2s ease, background 0.2s ease;
         }
 
+        .podcast-overlay-expand:hover,
         .podcast-overlay-dismiss:hover {
             color: #fff;
             background: rgb( 255, 255, 255, 0.1 );

@@ -103,7 +103,7 @@ test( "the shipped page reads 🔎 Find → ✕ clear → ＋ New, and loads the
   const clear = html.indexOf( 'id="task-lookup-clear"' );
   assert.ok( find > 0 && clear > find && newer > clear, "button order must be Find → clear → New" );
   assert.match( html, /id="task-new-ticket"[\s\S]*?onclick="window\.notificationsUI\.openNewTicketCard\(\)"/ );
-  assert.match( html, /<script type="module" src="\/static\/js\/shared\/task-create\.js\?v=\d{8}[a-z]"><\/script>/ );
+  assert.match( html, /<script type="module" src="\/static\/js\/shared\/task-create\.js\?v=[0-9a-f]{12}"><\/script>/ );
 } );
 
 // ---------------------------------------------------------------------------
@@ -340,11 +340,11 @@ test( "dictating does not file the ticket: the mic click sends no POST", async (
   assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) );
 } );
 
-test( "the shipped page's cache-bust on the shared module moved with this change", () => {
-  // A mic that exists only in the repo is a mic Rick does not have. The module is
-  // served with a `?v=` and the browser caches it hard, so the version is part of the fix.
+test( "the shipped page's cache-bust on the shared module is a content token", () => {
+  // The token is the first 12 hex of the SHA-256 of the module's bytes (lupin_app/asset_tokens.py),
+  // so it moves by itself whenever the module does. Whether it matches the CURRENT bytes is
+  // asserted once, in test_task_body_overlay_cache_bust.py; here we only check the shape.
   const html  = readFileSync( NOTIFICATIONS_HTML, "utf8" );
-  const match = html.match( /shared\/task-create\.js\?v=(\d{8})([a-z])/ );
-  assert.ok( match, "the module must still be loaded with a cache-bust" );
-  assert.ok( Number( match![ 1 ] ) >= 20260917, `the bust must name this change's day or later, read ${ match![ 1 ] }` );
+  const match = html.match( /shared\/task-create\.js\?v=([0-9a-f]{12})"/ );
+  assert.ok( match, "the module must still be loaded with a 12-hex content token" );
 } );

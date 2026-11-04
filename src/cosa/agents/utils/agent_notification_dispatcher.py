@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-Shared Agent Notification Dispatcher for COSA Agents.
+Shared agent notification dispatcher for COSA agents.
 
-Encapsulates the common async wrapper + notification dispatch pattern that
-was previously copy-pasted across every agent's cosa_interface.py. All
-methods use asyncio.to_thread() to bridge the blocking notification API
-with async agent orchestrators.
+Encapsulates the common async wrapper and notification dispatch pattern shared by every agent's cosa_interface module. All methods use asyncio.to_thread() to bridge the blocking notification API with async agent orchestrators.
 
-Usage:
+Example:
     dispatcher = AgentNotificationDispatcher( agent_type="deep.research" )
     await dispatcher.notify_progress( "Starting research..." )
     approved  = await dispatcher.ask_confirmation( "Proceed?" )
     feedback  = await dispatcher.get_feedback( "Any preferences?" )
     selection = await dispatcher.present_choices( questions, timeout=120 )
 
-For role-aware agents (SWE Team):
+    # For role-aware agents (SWE Team):
     dispatcher = AgentNotificationDispatcher(
         agent_type="swe", supports_role=True, default_priority="high"
     )
@@ -70,11 +67,74 @@ ctx_target_user  : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher
 ctx_session_name : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_session_name", default=None )
 
 
+def set_dispatch_context(
+    sender_id    : Optional[ str ] = None,
+    target_user  : Optional[ str ] = None,
+    session_name : Optional[ str ] = None,
+) -> dict:
+    """
+    Set the per-task dispatch context for this asyncio task / thread.
+
+    Use this rather than changing module-level `SENDER_ID`, `TARGET_USER` or `SESSION_NAME`
+    inside the agentic pool. Concurrent jobs share those globals and the shared `_dispatcher`,
+    so writing to them leaks state across jobs. ContextVars isolate each task.
+
+    Requires:
+        - At least one of sender_id, target_user, session_name is provided.
+          (None values are skipped — only set what's provided.)
+
+    Ensures:
+        - Each provided value is stored in its corresponding ContextVar.
+        - Returns a dict of {var_name: token} that callers can pass to
+          `reset_dispatch_context()` for explicit teardown.
+
+    Args:
+        sender_id    : Per-task sender_id override (None = leave ContextVar unchanged).
+        target_user  : Per-task target_user override.
+        session_name : Per-task session_name override.
+
+    Returns:
+        dict[str, contextvars.Token]: Tokens for resetting the ContextVars
+            via `reset_dispatch_context()`. Pool workers running a single
+            job typically don't need to reset (the asyncio.run() context
+            ends when the worker finishes), but explicit cleanup is good
+            hygiene.
+    """
+    tokens = { }
+    if sender_id is not None:
+        tokens[ "sender_id" ] = ctx_sender_id.set( sender_id )
+    if target_user is not None:
+        tokens[ "target_user" ] = ctx_target_user.set( target_user )
+    if session_name is not None:
+        tokens[ "session_name" ] = ctx_session_name.set( session_name )
+    return tokens
+
+
+def reset_dispatch_context( tokens: dict ) -> None:
+    """
+    Reset the per-task dispatch context to its prior state.
+
+    Args:
+        tokens: dict returned by `set_dispatch_context()`.
+
+    Ensures:
+        - Each ContextVar is reset to the value it held before the matching
+          set_dispatch_context() call.
+        - Missing keys in `tokens` are silently skipped.
+    """
+    if "sender_id" in tokens:
+        ctx_sender_id.reset( tokens[ "sender_id" ] )
+    if "target_user" in tokens:
+        ctx_target_user.reset( tokens[ "target_user" ] )
+    if "session_name" in tokens:
+        ctx_session_name.reset( tokens[ "session_name" ] )
+
+
 def _prepend_operator_routing( abstract: Optional[ str ], original_target: str ) -> str:
     """
-    Prefix an abstract with an 'Operator routing:' context line so the operator
-    answering a voice gate understands they're acting on behalf of a service
-    account. See Bug 10 (2026-04-15).
+    Prefix an abstract with an operator-routing context line.
+
+    The operator answering a voice gate then understands they are acting on behalf of a service account.
     """
     header = f"**Operator routing**: originally owned by `{original_target}`"
     if not abstract:
@@ -150,15 +210,8 @@ class AgentNotificationDispatcher:
         """
         Resolve the sender_id for a notification call.
 
-        Priority order:
-          1. Role-aware agents with a role parameter — build role-specific sender_id
-          2. ContextVar `ctx_sender_id` — per-task isolation, set by job execution
-          3. self.sender_id — instance default (CLI / single-job paths)
-
-        Role-aware path is checked first because it constructs a role-suffixed
-        ID that's orthogonal to the per-job sender. ContextVar takes priority
-        over instance state so concurrent agentic-pool jobs don't see each
-        other's sender_id leaking through the shared dispatcher instance.
+        Priority: a role-aware agent with a role builds a role-specific sender_id. Otherwise the `ctx_sender_id` ContextVar wins (per-task isolation, set by job execution). Otherwise `self.sender_id` applies (the instance default for CLI and single-job paths).
+        The role-aware path comes first because its role-suffixed id is orthogonal to the per-job sender. The ContextVar takes priority over instance state so concurrent agentic-pool jobs never see each other's sender_id leaking through the shared dispatcher instance.
 
         Args:
             role: Optional role name for role-aware agents
@@ -209,14 +262,8 @@ class AgentNotificationDispatcher:
         """
         Resolve the effective target_user for a blocking voice call.
 
-        When target_user is a configured service account AND an operator fallback
-        is configured, swap to the operator so TTS reaches a human. See Bug 10
-        (2026-04-15): service accounts have no WebSocket sessions, causing
-        /api/notify to 503 on blocking calls.
-
-        Reads two INI keys (cached on first call):
-            - voice gate operator email       : str   (blank disables rerouting)
-            - voice gate service accounts     : comma-separated list of emails
+        When target_user is a configured service account and an operator fallback is configured, swap to the operator so TTS reaches a human. Service accounts have no WebSocket sessions, so a blocking call to one would make /api/notify answer 503.
+        It reads two INI keys, cached on first call. `voice gate operator email` is a str, and blank disables rerouting. `voice gate service accounts` is a comma-separated list of emails.
 
         Args:
             target_user: The user the caller originally intended to notify.
@@ -326,6 +373,10 @@ class AgentNotificationDispatcher:
 
         Returns:
             bool: True if user said yes, False otherwise
+
+        Raises:
+            VoiceGateTimeoutError: when the question was asked and no answer was received
+            VoiceGateUnreachableError: when an unexpected error broke the asking itself
         """
         try:
             effective_target, was_redirected, original_target = self._resolve_routing( self._resolve_target_user() )
@@ -393,8 +444,13 @@ class AgentNotificationDispatcher:
                     phase   = "confirmation",
                     message = f"ask_confirmation pre-MCP failure ({type( e ).__name__}): {str( e )[:200]}"
                 )
+            # An unexpected error means the asking broke and nobody answered. Returning
+            # `default` would present it to the caller as the user's answer and skip the
+            # caller's own unattended_default. It is not a timeout either: the question
+            # may never have been asked. Raise the type that says so.
             logger.warning( f"ask_confirmation failed: {e}" )
-            return default == "yes"
+            from cosa.agents.test_fix_expediter.state import VoiceGateUnreachableError
+            raise VoiceGateUnreachableError( "confirmation", e )
 
     async def get_feedback(
         self,
@@ -414,7 +470,7 @@ class AgentNotificationDispatcher:
             job_id: Optional job ID for routing to job cards
             role: Optional agent role (for role-aware dispatchers)
             priority: "low"/"medium"/"high"/"urgent" (default: "high" for blocking calls)
-            response_default: If set AND user is offline, /api/notify returns 200
+            response_default: If set and the user is offline, /api/notify returns 200
                               with default rather than 503. Leave None to preserve
                               the 503-for-offline behavior (caller handles stall).
 
@@ -503,7 +559,7 @@ class AgentNotificationDispatcher:
             job_id: Optional job ID for routing to job cards
             role: Optional agent role (for role-aware dispatchers)
             priority: "low"/"medium"/"high"/"urgent" (default: "high" for blocking calls)
-            response_default: If set AND user is offline, /api/notify returns 200
+            response_default: If set and the user is offline, /api/notify returns 200
                               with this default rather than 503. Pass literal "{}"
                               (empty JSON) for the clean-stall path — dispatcher
                               interprets empty answers as timeout via Bug 7
@@ -600,6 +656,113 @@ class AgentNotificationDispatcher:
                 )
             logger.warning( f"present_choices failed: {e}" )
             return { "answers": {} }
+
+
+_UNSET = object()
+
+
+def make_interface_functions( namespace, notify_extras=(), ask_extras=(), feedback_extras=(), choices_extras=(), push_session_name=True ):
+    """
+    Build the four async wrappers an agent's cosa_interface module exposes.
+
+    Each wrapper copies the module's identity onto the module's dispatcher, then awaits one dispatcher method.
+    Everything is read from `namespace` on every call, never captured, because callers assign `SENDER_ID`, `TARGET_USER` and `SESSION_NAME` at run time and tests patch `_dispatcher`.
+
+    Requires:
+        - namespace is the calling module's globals(), holding _dispatcher, SENDER_ID and TARGET_USER
+        - namespace also holds SESSION_NAME when push_session_name is True
+        - each *_extras is a tuple naming the optional keywords that wrapper forwards, drawn from priority, response_default and progress_group_id
+
+    Ensures:
+        - Returns ( notify_progress, ask_confirmation, get_feedback, present_choices ), all coroutine functions
+        - Each wrapper forwards its named extras on every call (None when the caller gave none) and nothing else
+        - An extra the module does not forward raises TypeError when the caller passes it, even as None
+        - Only notify_progress copies SESSION_NAME onto the dispatcher, and only when push_session_name is True
+    """
+
+    def extras_for( fn_name, supported, given ):
+        for name, value in given.items():
+            if value is not _UNSET and name not in supported:
+                raise TypeError( f"{fn_name}() got an unexpected keyword argument '{name}'" )
+        return { name: ( None if given[ name ] is _UNSET else given[ name ] ) for name in supported }
+
+    def push_identity( dispatcher ):
+        dispatcher.sender_id   = namespace[ "SENDER_ID" ]
+        dispatcher.target_user = namespace[ "TARGET_USER" ]
+
+    async def notify_progress(
+        message: str,
+        priority: str = "medium",
+        abstract: Optional[ str ] = None,
+        session_name: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        queue_name: Optional[ str ] = None,
+        progress_group_id: Optional[ str ] = _UNSET
+    ) -> None:
+        """
+        Send fire-and-forget progress notification.
+
+        Non-blocking: the dispatcher runs it in a thread pool.
+        """
+        extras     = extras_for( "notify_progress", notify_extras, { "progress_group_id": progress_group_id } )
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        if push_session_name: dispatcher.session_name = namespace[ "SESSION_NAME" ]
+        await dispatcher.notify_progress(
+            message, priority=priority, abstract=abstract,
+            session_name=session_name, job_id=job_id, queue_name=queue_name, **extras
+        )
+
+    async def ask_confirmation(
+        question: str,
+        default: str = "no",
+        timeout: int = 60,
+        abstract: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        priority: Optional[ str ] = _UNSET
+    ) -> bool:
+        """Ask a yes/no question and return boolean result."""
+        extras     = extras_for( "ask_confirmation", ask_extras, { "priority": priority } )
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.ask_confirmation(
+            question, default=default, timeout=timeout, abstract=abstract, job_id=job_id, **extras
+        )
+
+    async def get_feedback(
+        prompt: str,
+        timeout: int = 300,
+        job_id: Optional[ str ] = None,
+        priority: Optional[ str ] = _UNSET,
+        response_default: Optional[ str ] = _UNSET
+    ) -> Optional[ str ]:
+        """Get open-ended feedback from user via voice."""
+        extras     = extras_for( "get_feedback", feedback_extras, { "priority": priority, "response_default": response_default } )
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.get_feedback( prompt, timeout=timeout, job_id=job_id, **extras )
+
+    async def present_choices(
+        questions: list,
+        timeout: int = 120,
+        title: Optional[ str ] = None,
+        abstract: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        priority: Optional[ str ] = _UNSET,
+        response_default: Optional[ str ] = _UNSET
+    ) -> dict:
+        """Present multiple-choice questions and get user's selection."""
+        extras     = extras_for( "present_choices", choices_extras, { "priority": priority, "response_default": response_default } )
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.present_choices(
+            questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id, **extras
+        )
+
+    wrappers = ( notify_progress, ask_confirmation, get_feedback, present_choices )
+    for wrapper in wrappers:
+        wrapper.__module__ = namespace[ "__name__" ]
+    return wrappers
 
 
 def quick_smoke_test():

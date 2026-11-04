@@ -1,7 +1,7 @@
 """
 Coverage ramp for `src/scripts/run-heartbeat-arbiter.py` — a straggler at zero on the
 coverage-gate frame (unit + cosa, one data file), claimed in
-`src/rnd/v0.2.1/2026.08.30-coverage-straggler-claim-ledger.md`.
+`2026.08.30-coverage-straggler-claim-ledger.md (deleted)`.
 
 LOAD MECHANISM: by-path `importlib.util.spec_from_file_location`, matching the other dashed
 scripts in this directory. By-path load is what makes the module RE-loadable, which is the
@@ -370,6 +370,16 @@ class TestMainPolling:
         assert "cycles=0"      in out
         assert "pings_fired=0" in out
         assert "roster=3"      in out
+
+    def test_the_loop_timestamp_names_no_zone_so_the_configured_one_applies( self, mod, wired, monkeypatch ):
+        """The loop passes no tz_name, so the helper reads the configured zone."""
+        seen = []
+        monkeypatch.setattr( mod.cu, "get_current_datetime", lambda **kwargs: seen.append( kwargs ) or "00:00:00 ZZZ" )
+        _FakeArbiter.polls = 1
+
+        mod.main()
+
+        assert seen == [ { "format_str": "%H:%M:%S %Z" } ]
 
     def test_the_poll_counter_advances_rather_than_reprinting_one( self, mod, wired, capsys ):
         """The `n[ 0 ] += 1` closure. A stuck counter makes a live loop look like one poll."""

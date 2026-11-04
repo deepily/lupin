@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
 """
-Sub-bug B investigation probe (Candidate V) — direct-write path.
+Probe `CommonsStore.post()` directly with bodies of escalating length.
 
-Tests `CommonsStore.post()` directly with bodies of escalating length to
-isolate whether the truncation cap lives in the fastmcp transport layer or
-in the store itself.
+The probe finds out whether a truncation cap lives in the fastmcp transport layer
+or in the store itself.
 
-Per `src/rnd/v0.1.7/2026.05.17-commons-dm-topic-case-and-truncation/90-execution-log.md`
-Phase 4 Candidate V.
+Evidence: src/rnd/v0.1.7/2026.05.17-commons-dm-topic-case-and-truncation/90-execution-log.md
 
-**What it does NOT test**: the fastmcp transport (commons_post called via MCP).
-That's the inline-MCP-tool probe done separately by the active Claude Code
-session.
+**What it does not test**: the fastmcp transport (commons_post called via MCP).
+That is the inline MCP-tool probe, done separately from a live Claude Code session.
 
-**What it DOES test**: the layer BELOW fastmcp — `CommonsStore.post()` reading
-the body string in-process and writing it to disk under flock. If this layer
-truncates, my prior code-review (which concluded "no length cap exists") was
-wrong. If this layer survives all lengths cleanly, the cap is fastmcp-specific.
+**What it tests**: the layer below fastmcp. `CommonsStore.post()` reads the body
+string in-process and writes it to disk under flock. If this layer truncates, the
+earlier code review that found no length cap was wrong. If it survives every
+length cleanly, the cap is specific to fastmcp.
 
 **Usage**:
     export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin
     python3 src/scripts/probe_commons_post_direct.py
 
-Writes to a TEMPORARY directory (no pollution of `io/commons/`); cleans up after.
+It writes to a temporary directory, so `io/commons/` is not touched, and cleans up after.
 """
 
 import os

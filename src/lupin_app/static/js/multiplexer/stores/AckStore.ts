@@ -41,7 +41,7 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-// One folded ack. `session_id` is the fold key when present.
+/** One acknowledgement of a broadcast, folded by session id when it has one. */
 export interface BroadcastAck {
   session_id    : string | null;
   persona_name  : string | null;
@@ -68,11 +68,16 @@ interface BroadcastAcksResponse {
   acks ?: ReadonlyArray<ServerAckRow>;
 }
 
-// Loose ApiClient surface — AckStore only needs `get<T>`.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface BroadcastAcksApiClient {
   get<T>( path: string ): Promise<T>;
 }
 
+/**
+ * The tally of which seats acknowledged each user broadcast.
+ *
+ * It folds live bus events and rows loaded from the server.
+ */
 export interface AckStore {
   /** The folded acks for one broadcast, one per acking session. Defensive copy. */
   acksFor( broadcastId: string ): ReadonlyArray<BroadcastAck>;
@@ -86,6 +91,7 @@ export interface AckStore {
   start(): () => void;
 }
 
+/** Options for `createAckStore`: the event bus that carries the live acknowledgement events. */
 export interface AckStoreOptions {
   bus : EventBus;
 }
@@ -96,16 +102,25 @@ export interface AckStoreOptions {
 
 const ACKS_URL_PREFIX = "/api/notifications/broadcast-acks/";
 
+/**
+ * Builds the key an ack is stored under: the session ID or a unique anonymous key.
+ */
 function foldKey( sessionId: string | null | undefined, ordinal: number ): string {
   // An unattributed ack gets its own key so several of them cannot collapse into
   // one. `ordinal` is stable within a hydrate and monotonic across live arrivals.
   return sessionId ? `sid:${sessionId}` : `anon:${ordinal}`;
 }
 
+/**
+ * Returns the value when it is a string and null otherwise.
+ */
 function normalizeText( value: string | null | undefined ): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/**
+ * Stores broadcast acknowledgements folded by session and emits change events.
+ */
 class AckStoreImpl implements AckStore {
   private readonly bus : EventBus;
   // broadcast_id → (foldKey → ack). A Map of Maps: insertion order is the render
@@ -113,25 +128,40 @@ class AckStoreImpl implements AckStore {
   private readonly byBroadcast = new Map<string, Map<string, BroadcastAck>>();
   private anonCounter = 0;
 
+  /**
+   * Creates the store with the event bus it emits changes on.
+   */
   constructor( options: AckStoreOptions ) {
     this.bus = options.bus;
   }
 
+  /**
+   * Returns the acknowledgements recorded for a broadcast in arrival order.
+   */
   acksFor( broadcastId: string ): ReadonlyArray<BroadcastAck> {
     const fold = this.byBroadcast.get( broadcastId );
     return fold ? Array.from( fold.values() ) : [];
   }
 
+  /**
+   * Returns how many sessions have acknowledged the broadcast.
+   */
   countFor( broadcastId: string ): number {
     const fold = this.byBroadcast.get( broadcastId );
     return fold ? fold.size : 0;
   }
 
+  /**
+   * Forgets the acknowledgements for a broadcast and emits a cleared event.
+   */
   clear( broadcastId: string ): void {
     if ( !this.byBroadcast.delete( broadcastId ) ) return;
     this.emit( "cleared", broadcastId );
   }
 
+  /**
+   * Listens for live ack events on the bus and returns a function to stop.
+   */
   start(): () => void {
     return this.bus.on<BroadcastAckPayload>(
       COMMONS_BROADCAST_ACK_TYPE,
@@ -139,6 +169,9 @@ class AckStoreImpl implements AckStore {
     );
   }
 
+  /**
+   * Loads a broadcast's saved acks from the server and replaces the held ones.
+   */
   async hydrate( api: BroadcastAcksApiClient, broadcastId: string ): Promise<void> {
     const body = await api.get<BroadcastAcksResponse>(
       `${ACKS_URL_PREFIX}${encodeURIComponent( broadcastId )}` );
@@ -196,6 +229,11 @@ class AckStoreImpl implements AckStore {
   }
 }
 
+/**
+ * Build the store.
+ *
+ * It listens to nothing until `start()` is called, and `start()` returns the unsubscribe.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two (verified: locations=1), and the function itself is called by every test in ack_store.test.ts.
 export function createAckStore( options: AckStoreOptions ): AckStore {
   return new AckStoreImpl( options );

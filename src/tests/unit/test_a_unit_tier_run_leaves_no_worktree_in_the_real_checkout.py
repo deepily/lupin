@@ -53,6 +53,10 @@ def test_the_guard_does_not_touch_a_temporary_repo( tmp_path ):
     ( repo / "src" / "scripts" ).mkdir( parents=True )
     script = Path( cu.get_project_root() ) / "src" / "scripts" / "provision-seat-worktree.sh"
     ( repo / "src" / "scripts" / "provision-seat-worktree.sh" ).write_text( script.read_text() )
+    # The script sources this library from the folder beside it.
+    ( repo / "src" / "scripts" / "lib" ).mkdir()
+    lib = Path( cu.get_project_root() ) / "src" / "scripts" / "lib" / "worktree-link-lib.sh"
+    ( repo / "src" / "scripts" / "lib" / "worktree-link-lib.sh" ).write_text( lib.read_text() )
     for args in ( [ "init", "-q" ], [ "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A" ],
                   [ "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "seed" ] ):
         subprocess.run( [ "git", "-C", str( repo ), *args ], check=True )

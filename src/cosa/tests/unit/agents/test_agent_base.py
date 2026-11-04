@@ -104,6 +104,11 @@ class TestAgentBase( unittest.TestCase ):
     # __init__                                                            #
     # ------------------------------------------------------------------ #
 
+    def test_a_new_agent_may_be_written_to_the_answer_cache( self ):
+        """The queue skips the cache write only when the flow says so, so the default must be True."""
+        agent, _ = self._make_agent()
+        self.assertIs( agent.snapshotable, True )
+
     def test_init_question_only_with_df( self ):
         """
         Test construction from `question` only, with a df_path_key loading a DataFrame.

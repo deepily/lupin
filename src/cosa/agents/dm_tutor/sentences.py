@@ -1,32 +1,30 @@
 #!/usr/bin/env python3
 """
-The sentence counter — the tutor's trigger, and the one thing it never asks a model.
+The sentence counter: the tutor's trigger, and the one thing it never asks a model.
 
-Rick's instruction is the whole reason this module exists: *LLMs do not count
-well.* So the decision "is this DM over three sentences" is made deterministically
-here, in code, and the model is only ever asked to rewrite.
+LLMs do not count well. So the decision "is this DM over three sentences" is made
+deterministically here, in code, and the model is only ever asked to rewrite.
 
-🔑 THE RULE, and every case follows FROM it rather than sitting beside it
-(María, 2026-08-11):
+One rule decides every case. Every case follows from it rather than sitting beside it:
 
-    A sentence is a unit that CARRIES A CLAIM.
-    Anything that asserts nothing is STRUCTURE — not counted, not rewritten.
+    A sentence is a unit that carries a claim.
+    Anything that asserts nothing is structure: it is not counted and not rewritten.
 
-That single rule settles the cases a hand-written list would have to enumerate
-one at a time, and it settles the ones nobody has thought of yet:
+That single rule settles the cases a hand-written list would have to enumerate one at a time.
+It also settles the ones nobody has thought of yet:
 
-    a table row          asserts nothing on its own          → structure
-    a fenced code block  is quoted material, not a claim     → structure
-    a heading            labels, it does not assert          → structure
-    an attachment pointer is a reference to structure        → structure
-    a bullet with prose  DOES assert                         → counts
+    - A table row asserts nothing on its own, so it is structure.
+    - A fenced code block is quoted material, not a claim, so it is structure.
+    - A heading labels and does not assert, so it is structure.
+    - An attachment pointer is a reference to structure, so it is structure.
+    - A bullet with prose does assert, so it counts.
 
-The measured reason it matters: 42% of DMs over 250 words and 25% of the 150-250
-band contain a list or a table. This is not a corner case, it is the target band.
+The reason it matters is measured: 42% of DMs over 250 words and 25% of the 150-250
+band contain a list or a table. That is the target band, not a corner case.
 
-WHAT IS NOT HANDLED, and deliberately: prose that carries two claims in one
-sentence joined by a semicolon reads as one. Splitting on meaning needs a model,
-and the point of this module is that no model is involved.
+Not handled: prose that carries two claims in one sentence joined by a
+semicolon reads as one. Splitting on meaning needs a model, and the point of this
+module is that no model is involved.
 """
 
 import re
@@ -216,7 +214,7 @@ def _mask( text ):
         - text is a string
 
     Ensures:
-        - returns text of the SAME LENGTH with non-terminal periods masked
+        - returns text of the same length with non-terminal periods masked
         - abbreviations, decimals, versions, filenames and ellipses are masked
 
     Raises:
@@ -238,7 +236,7 @@ def prose_lines( text ):
 
     Ensures:
         - returns a list of prose lines, structure removed by the rule above
-        - a bullet or quote marker is stripped but its prose is KEPT, because a
+        - a bullet or quote marker is stripped but its prose is kept, because a
           bullet with prose asserts something
         - fenced and inline code are removed before any line is judged
 
@@ -268,26 +266,10 @@ def prose_lines( text ):
 
 def pointer_tokens( text ):
     """
-    The pointer TOKENS in a body — paths, URLs, bare filenames and row ids, wherever
-    they sit, whole-line OR mid-sentence.
+    Return the pointer tokens in a body: paths, URLs, bare filenames and row ids.
 
-    WHY THIS EXISTS (Cheech, 2026-08-13): the tutor PARAPHRASED A PATH out of a live
-    DM, leaving the literal words "probe script path" where the path had been. The
-    house rule is "three sentences and a path", so the one element the rule names by
-    name is the element that did not survive the rewrite.
-
-    WHY IT COUNTS TOKENS, NOT LINES (row a74f2176): the first fix scanned whole lines
-    with the structure rule, so it only saw a pointer that OWNED its line. A path or an
-    8-hex row id written mid-sentence — "(running_fifo_queue.py:422)", "recording to
-    row e0bb5a94" — was invisible to it and got paraphrased away with the sentence
-    around it. Measured on the served sha: 4 of 26 rewrites dropped a file path, 9
-    dropped a row id. This scans TOKENS anywhere, so a pointer buried in prose is
-    lifted out of the model's reach the same as one standing alone.
-
-    The fix is the same one this whole module rests on — Rick's "LLMs do not count
-    well", generalised: do not ASK a model to preserve something exactly when you can
-    take it out of the model's reach and put it back yourself. A prompt instruction to
-    keep paths verbatim is a request; this is a guarantee.
+    Tokens are found anywhere, whole-line or mid-sentence, and lifted out of the model's reach.
+    The restore step then puts them back, so the path the house rule names survives a rewrite.
 
     Requires:
         - text is a string
@@ -295,12 +277,25 @@ def pointer_tokens( text ):
     Ensures:
         - returns the pointer tokens, first-seen order, de-duplicated
         - returns [] when the body carries none
-        - a restored token is re-appended as its own line, which _ATTACHMENT now
+        - a restored token is re-appended as its own line, which _ATTACHMENT
           recognises as a whole-line pointer, so repairing a message can never push its
           claim count back over the trigger
 
     Raises:
         - nothing
+
+    Why tokens and not lines: scanning whole lines with the structure rule only sees a pointer
+    that owns its line. A path or an 8-hex row id inside a sentence, such as
+    "(running_fifo_queue.py:422)" or "recording to row <8-hex id>", would be paraphrased away
+    with the sentence around it. Measured on the served sha, 4 of 26 rewrites dropped a file
+    path and 9 dropped a row id.
+
+    The token is used two ways that must never disagree. It is the body of the whole-line
+    structure rule `_ATTACHMENT`, and it is what the restore lifts out of the model's reach.
+
+    Asking a model to preserve something exactly is a request. Taking it out of the model's reach
+    and putting it back yourself is a guarantee. A prompt instruction to keep paths verbatim is
+    only the first. This function is the second.
     """
     body  = _FENCE.sub( " ", text )
     found = []
@@ -317,57 +312,35 @@ def pointer_tokens( text ):
 
 def is_bare_identifier( token ):
     """
-    True when a pointer token is a bare identifier — an id with nowhere to look.
+    True when a pointer token is a bare identifier, an id with nowhere to look.
 
-    WHY THE DISTINCTION EXISTS (Rick, 2026-08-21, row a0151611): "What is obviously
-    pointless and nonsensical is 10 to 12 lines of hashes. A standalone nonsensical
-    out-of-context hash has no place there." A path, a URL and a bare filename each
-    tell a reader WHERE TO LOOK, and survive the loss of the sentence around them. An
-    8-hex row id does not: once the sentence that gave it meaning is rewritten away,
-    the id is eight characters of nothing.
-
-    The test is structural, not a second pattern to keep in sync: by construction of
-    _POINTER_TOKEN, a token with neither a slash nor a dot can only be the bare 8-hex
-    row-id shape — a URL carries "://", a slashed path carries "/", and a bare
-    filename carries its extension's dot.
+    A path, a URL and a bare filename each tell a reader where to look. They survive the loss
+    of the sentence around them. An 8-hex row id does not. Once its sentence is rewritten away,
+    it is eight characters of nothing, and a run of such hashes has no place in a message.
 
     Requires:
         - token is a non-empty string produced by _POINTER_TOKEN
 
     Ensures:
-        - True for a bare 8-hex row id ("e0bb5a94")
+        - True for a bare 8-hex row id
         - False for URLs, slashed paths and bare filenames ("job.py:1163")
 
     Raises:
         - nothing
+
+    The test is structural, not a second pattern to keep in sync. `_POINTER_TOKEN` is built so
+    that a token with neither a slash nor a dot can only be the bare 8-hex row id shape. A URL carries "://", a slashed path carries "/", and a bare filename
+    carries its extension's dot.
     """
     return "/" not in token and "." not in token
 
 
 def is_bare_row_id( value ):
     """
-    True when a RAW string is exactly an 8-hex row id. Safe on untrusted input.
+    True when a raw string is exactly an 8-hex row id; safe on untrusted input.
 
-    🔴 WHY THIS EXISTS AND `is_bare_identifier` COULD NOT BE USED (María, row 6dbba874).
-    That function's precondition is "a token produced by _POINTER_TOKEN" — given one,
-    "no slash and no dot" can only be the row-id shape. Handed a RAW value it degenerates
-    into exactly that test and eats every extensionless real filename: Makefile, README,
-    LICENSE, Dockerfile, src, io. Three of those are tracked files in this repo. A
-    precondition is not a suggestion, and borrowing a filter across the line where its
-    precondition holds is how a narrow guard silently becomes a wide one.
-
-    So callers holding a raw string — the tutor's path SLOT, whose contents are whatever
-    the model typed — use this, which asks the question directly instead.
-
-    ⚠️ SURROUNDING PUNCTUATION IS STRIPPED FIRST, and that is a second lesson from the
-    same family (María, row 68601b65). The anchors that make this predicate safe on raw
-    input are defeated by one adjacent character: "#fb9faba7", "fb9faba7," and
-    "fb9faba7." all sailed past the guard and arrived as bare lines. Whitespace was
-    already stripped, so punctuation was simply the case `strip()` does not cover.
-
-    The trade is named rather than hidden: a hidden file literally named ".deadbeef"
-    would be suppressed. That is the guard's existing bargain — a file named "deadbeef"
-    was already unreachable — and it buys the shape the fleet actually writes.
+    `is_bare_identifier` cannot be used here. Its precondition is a token produced by `_POINTER_TOKEN`.
+    Handed a raw value, "no slash and no dot" also matches extensionless filenames: Makefile, README, Dockerfile, src, io.
 
     Requires:
         - value is a string ( or None )
@@ -383,6 +356,22 @@ def is_bare_row_id( value ):
 
     Raises:
         - nothing
+
+    Callers holding a raw string, such as the tutor's path slot whose contents are whatever the
+    model typed, use this function because it asks the question directly. A precondition is not
+    a suggestion. Borrowing a filter outside the line where its precondition holds turns a
+    narrow guard into a wide one.
+
+    Surrounding punctuation is stripped first. One adjacent character defeats the anchors that
+    make this predicate safe on raw input, so a row id with a leading "#", a trailing
+    comma or a trailing period would otherwise arrive as a bare line. `strip()` covers whitespace only, so `_SLOT_PUNCTUATION` is
+    stripped as well. Hyphen and underscore are in that set. A real hyphen or underscore
+    filename carries an extension, so stripping them can never make it match. Leaving them out
+    would let a row id wrapped in hyphens or underscores through.
+
+    The trade is named: a hidden file literally named ".deadbeef" would be suppressed. That
+    bargain already existed, since a file named "deadbeef" was unreachable, and it buys the
+    shape the fleet actually writes.
     """
     return bool( _BARE_ROW_ID.fullmatch(
         ( value or "" ).strip().strip( _SLOT_PUNCTUATION ).strip()
@@ -391,17 +380,11 @@ def is_bare_row_id( value ):
 
 def restorable_pointers( text ):
     """
-    The pointer tokens worth putting BACK when a rewrite drops them — paths only.
+    Return the pointer tokens worth restoring after a rewrite drops them: paths only.
 
-    🔴 THIS IS A SEPARATE SELECTOR ON PURPOSE — DO NOT NARROW `pointer_tokens` TO GET
-    THE SAME EFFECT. That function is used two ways that must not disagree (its own
-    docstring says so): it is the body of the whole-line structure rule _ATTACHMENT,
-    so a restored line counts as structure and repairing a message can never push it
-    back over the trigger. Narrowing it would ALSO change the sentence counter, and a
-    bare id line would start counting as a claim.
-
-    So the structure rule keeps seeing all four pointer shapes, and only the RESTORE
-    path is narrowed — which is the only place Rick's complaint lives.
+    This is a separate selector, because narrowing `pointer_tokens` would not give the same effect.
+    `pointer_tokens` is also the body of the structure rule `_ATTACHMENT`. Narrowing it would change the
+    sentence counter, and a bare id line would count as a claim. Only the restore path is narrowed.
 
     Requires:
         - text is a string
@@ -452,7 +435,7 @@ def over_limit( text, limit=3 ):
         - limit is a positive integer
 
     Ensures:
-        - returns True only when the body carries MORE than `limit` claims
+        - returns True only when the body carries more than `limit` claims
 
     Raises:
         - nothing

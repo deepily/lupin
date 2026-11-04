@@ -69,7 +69,11 @@ done
 # pyramid has spent half an hour reaching the same verdict.
 # "stylelint" joined 2026-09-18 (row d3d4a18c, Rick's ruling 21:06), SECOND for the same
 # reason: 1.5s of static analysis over every tracked .css file (measured).
-SUITES=( "typecheck" "stylelint" "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e_a" "e2e_b" )
+# "doclint" joined with row 2c48c717 (Rick's ruling), third for the same reason:
+# 4.6s of static analysis over every swept-scope Python file's docstrings (measured).
+# "reuse" joined with Plan 3 step C3 (ruling 12), fourth: it reads the outcome lines the branch adds
+# and the call log, makes no model call, and takes seconds.
+SUITES=( "typecheck" "stylelint" "doclint" "reuse" "unit" "cosa" "coverage" "typescript" "smoke" "docker_smoke" "websocket" "integration" "e2e_a" "e2e_b" )
 declare -A SCRIPTS=(
     # The three tsc projects as a blocking gate (row 7bc67019). Prints
     # "Total Tests: / Passed: / Failed:" whose unit is PROJECTS, not tests.
@@ -77,6 +81,13 @@ declare -A SCRIPTS=(
     # Every git-tracked .css file under stylelint (row d3d4a18c). Prints
     # "Total Tests: / Passed: / Failed:" whose unit is FILES, not tests.
     [stylelint]="src/tests/run-stylelint-gate.sh"
+    # Every swept-scope Python file's docstrings under the documentation lint (row 2c48c717).
+    # Its second step checks the metrics dashboard page. Prints "Total Tests: / Passed: / Failed:"
+    # whose unit is files plus one for that check, and "Errors:" in findings plus that check's lines.
+    [doclint]="src/tests/run-doclint-gate.sh"
+    # The outcome lines the branch adds, judged against the call log (Plan 3 step C3). Prints
+    # "Total Tests: / Passed: / Failed:" whose unit is checks. Exits 3 with no summary when it could not check.
+    [reuse]="src/tests/run-reuse-gate.sh"
     [unit]="src/tests/run-unit-tests.sh"
     [cosa]="src/tests/run-cosa-tests.sh"
     # The Python coverage gate (row e2099400, 2026-08-29). Placed straight after the two
@@ -102,6 +113,9 @@ declare -A SCRIPTS=(
     [coverage]="src/tests/run-coverage-gate.sh"
     [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
+    # The three docker smoke files, on the host, a skip counted as a failure. The smoke step above
+    # runs them too, and inside the merge gate's containers every one of their tests skips there.
+    [docker_smoke]="src/tests/run-docker-smoke-gate.sh"
     [websocket]="src/scripts/run-websocket-smoke-tests.sh"
     [integration]="src/tests/run-integration-tests.sh"
     # ⚠️ THE SLOT IS NAMED `e2e`; THE DIRECTORY IT SWEEPS IS `src/tests/e2e_ui/`.
@@ -178,6 +192,9 @@ for suite in "${SUITES[@]}"; do
         SUITES_FAILED=$(( SUITES_FAILED + 1 ))
         OVERALL_EXIT=$EXIT
         echo "  ✗ $suite FAILED (exit=$EXIT, ${DUR}s)" | tee -a "$COMBINED_LOG"
+        if [ "$suite" = "unit" ] && [ "$EXIT" -eq 72 ]; then
+            echo "    unit: OUT OF MEMORY — the unit scope was killed for memory (exit 72), not a test failure" | tee -a "$COMBINED_LOG"
+        fi
 
         if [ $FAIL_FAST -eq 1 ]; then
             echo "" | tee -a "$COMBINED_LOG"
@@ -194,6 +211,7 @@ echo "==================================================================" | tee 
 for suite in "${SUITES[@]}"; do
     if [ -n "${EXIT_CODES[$suite]}" ]; then
         status=$( [ "${EXIT_CODES[$suite]}" -eq 0 ] && echo "PASS" || echo "FAIL" )
+        if [ "$suite" = "unit" ] && [ "${EXIT_CODES[$suite]}" -eq 72 ]; then status="FAIL (out of memory)"; fi
         printf "  %-12s %s (%ss)\n" "$suite" "$status" "${DURATIONS[$suite]}" | tee -a "$COMBINED_LOG"
     else
         printf "  %-12s SKIPPED\n" "$suite" | tee -a "$COMBINED_LOG"

@@ -34,8 +34,15 @@ call and credential read is injected.
 
 import pytest
 import requests
+from types import SimpleNamespace
 
 import lupin_mcp.cosa_voice_mcp as cv
+
+
+@pytest.fixture( autouse=True )
+def _isolated_alert_state( monkeypatch, tmp_path ):
+    """The validation-alert cooldown file must never be the real ~/.lupin one (row: 6h throttle)."""
+    monkeypatch.setattr( cv.validation_alert_throttle, "STATE_PATH", tmp_path / "mcp-validation-alerts.json" )
 
 
 @pytest.fixture( autouse=True )
@@ -180,9 +187,11 @@ class TestResolveCanonicalProject:
 class TestSendValidationError:
     def test_sends_an_urgent_task_notification_from_the_error_sender( self, monkeypatch ):
         sent = {}
-        monkeypatch.setattr( cv, "notify_user_async",
-                             lambda request, debug: sent.update( req=request, debug=debug ) )
-        cv._send_validation_error( "something is wrong" )
+        def _deliver( request, debug ):
+            sent.update( req=request, debug=debug )
+            return SimpleNamespace( success=True )
+        monkeypatch.setattr( cv, "notify_user_async", _deliver )
+        cv._send_validation_error( "something is wrong", "lupin" )
 
         assert sent[ "req" ].sender_id == cv.ERROR_SENDER_ID
         assert sent[ "req" ].priority.value == "urgent"
@@ -197,7 +206,7 @@ class TestSendValidationError:
         monkeypatch.setattr( cv, "notify_user_async", boom )
 
         with caplog.at_level( "DEBUG", logger=cv.logger.name ):
-            cv._send_validation_error( "detail here" )      # must not raise
+            cv._send_validation_error( "detail here", "lupin" )      # must not raise
 
         assert "COSA-VOICE MCP VALIDATION FAILED" in caplog.text
         assert "Could not send validation error notification" in caplog.text
@@ -212,7 +221,7 @@ class TestValidateRepoAccount:
         sent = []
         monkeypatch.setattr( hc, "get_hook_credentials", _creds_ok )
         monkeypatch.setattr( cv.requests, "post", lambda *a, **k: _resp( 200 ) )
-        monkeypatch.setattr( cv, "_send_validation_error", lambda d: sent.append( d ) )
+        monkeypatch.setattr( cv, "_send_validation_error", lambda d, project: sent.append( d ) )
 
         cv._validate_repo_account( "lupin" )
 
@@ -226,7 +235,7 @@ class TestValidateRepoAccount:
         def boom( p ):
             raise exc
         monkeypatch.setattr( hc, "get_hook_credentials", boom )
-        monkeypatch.setattr( cv, "_send_validation_error", lambda d: sent.append( d ) )
+        monkeypatch.setattr( cv, "_send_validation_error", lambda d, project: sent.append( d ) )
 
         cv._validate_repo_account( "lupin" )
 
@@ -241,7 +250,7 @@ class TestValidateRepoAccount:
         sent = []
         monkeypatch.setattr( hc, "get_hook_credentials", _creds_ok )
         monkeypatch.setattr( cv.requests, "post", lambda *a, **k: _resp( 401 ) )
-        monkeypatch.setattr( cv, "_send_validation_error", lambda d: sent.append( d ) )
+        monkeypatch.setattr( cv, "_send_validation_error", lambda d, project: sent.append( d ) )
 
         cv._validate_repo_account( "lupin" )
 
@@ -269,7 +278,7 @@ class TestValidateRepoAccount:
             raise exc_cls( "transport" )
         monkeypatch.setattr( hc, "get_hook_credentials", _creds_ok )
         monkeypatch.setattr( cv.requests, "post", boom )
-        monkeypatch.setattr( cv, "_send_validation_error", lambda d: sent.append( d ) )
+        monkeypatch.setattr( cv, "_send_validation_error", lambda d, project: sent.append( d ) )
 
         cv._validate_repo_account( "lupin" )                # must not raise
 

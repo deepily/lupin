@@ -12,6 +12,11 @@
 // without a DOM; SenderCardRecorderRenderer owns the element-level half
 // (stash-before-repaint + focus/caret restore after repaint).
 
+/**
+ * The outcome of splicing a transcription into a field.
+ *
+ * `caret` is the index after the inserted text. It is null when the field exposed no caret and the text was appended.
+ */
 export interface InsertTranscriptionResult {
   /** The field's new value after the splice. */
   value : string;

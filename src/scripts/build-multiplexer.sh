@@ -4,6 +4,7 @@
 # Modes:
 #   bash src/scripts/build-multiplexer.sh           # production: minified + sourcemap + content-hashed copy
 #   bash src/scripts/build-multiplexer.sh --watch   # dev: rebuilds on .ts changes
+#   bash src/scripts/build-multiplexer.sh --watch --outfile <path>   # dev, written to <path> not dist/
 #
 # Outputs (production):
 #   src/lupin_app/static/dist/multiplexer/boot.js          — stable filename, loaded by multiplexer.html
@@ -40,6 +41,13 @@ mkdir -p "$OUTDIR"
 WATCH_FLAG=""
 if [ "${1:-}" = "--watch" ]; then
   WATCH_FLAG="--watch"
+  # --outfile <path> sends the dev build (and its sourcemap) somewhere other than dist/, so a
+  # watcher started by a test cannot leave an unminified boot.js where the page and the
+  # bundle gate read it. Unlike restoring a production build on exit, it also holds when the
+  # watcher is killed rather than interrupted.
+  if [ "${2:-}" = "--outfile" ]; then
+    OUTFILE="${3:?build-multiplexer: --outfile needs a path}"
+  fi
   echo "build-multiplexer: dev mode (--watch=forever); rebuilding on changes to $ENTRY ..."
   # --watch=forever keeps the watcher alive even when stdin is closed (subprocess /
   # background invocation). Plain --watch exits on stdin close, which is the wrong

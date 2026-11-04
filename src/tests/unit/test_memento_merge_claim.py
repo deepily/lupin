@@ -324,3 +324,64 @@ def test_the_gate_runs_after_freshness_not_before():
     )
     assert usable is False
     assert "stale" in reason
+
+
+# ---------------------------------------------------------------------------
+# The claim's key, not any sha on the line (row 4160d748)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "line", [
+    "## Unmerged stack on top of 7ae2b708a",
+    "## My unmerged stack (on branch head 09644c845 when built)",
+    "...rachel-base (d0bd4f604). ... none holds unmerged work.",
+] )
+def test_a_merged_base_or_a_denied_claim_is_not_a_claim_about_that_sha( line ):
+    """The row's three lines: the sha is a base, or the line says nothing is unmerged."""
+    assert find_merge_claims( line ) == [], line
+
+
+@pytest.mark.parametrize( "line", [
+    "## Unmerged stack based on 7ae2b708a",
+    "unmerged work built on 7ae2b708a",
+    "## Unmerged: forked from 7ae2b708a",
+] )
+def test_other_base_phrasings_clear_the_sha( line ):
+    assert find_merge_claims( line ) == [], line
+
+
+@pytest.mark.parametrize( "line", [
+    "nothing else is pending, but 7ae2b708a is unmerged",
+    "No, wait: 7ae2b708a is unmerged",
+] )
+def test_a_negation_clears_only_a_claim_it_precedes_in_the_clause( line ):
+    assert [ sha for _, sha, _ in find_merge_claims( line ) ] == [ "7ae2b708a" ], line
+
+
+def test_a_sha_that_is_the_claims_subject_is_still_found_beside_a_base_sha():
+    """A line may name a merged base and also an unmerged tip; the tip is still a claim."""
+    found = find_merge_claims( "Unmerged on top of 7ae2b708a: `f2ee98cf` is unmerged" )
+    assert [ sha for _, sha, _ in found ] == [ "f2ee98cf" ]
+
+
+@pytest.mark.parametrize( "line", [
+    "`abc1234` is tagged, none is unmerged",
+    "`abc1234` tagged; nothing unmerged",
+    "`abc1234` is in, none of these are unmerged",
+] )
+def test_a_denial_alone_clears_the_claim( line ):
+    """No base phrase here: only the denial before the claim word clears these."""
+    assert find_merge_claims( line ) == [], line
+
+
+def test_a_denial_four_words_back_no_longer_clears_the_claim():
+    assert [ sha for _, sha, _ in find_merge_claims( "no tests are red and abc1234 is unmerged" ) ] == [ "abc1234" ]
+
+
+@pytest.mark.parametrize( "line", [
+    "firebase abc1234 is unmerged",
+    "the rebase abc1234 is unmerged",
+    "photon abc1234 is unmerged",
+    "vonto abc1234 is unmerged",
+] )
+def test_a_base_phrase_inside_a_longer_word_does_not_clear_the_sha( line ):
+    assert [ sha for _, sha, _ in find_merge_claims( line ) ] == [ "abc1234" ], line

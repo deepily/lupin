@@ -1,28 +1,27 @@
 """
 Pure decision logic for the container OAuth credential watcher.
 
-WHY THIS EXISTS (row c7c60896): Claude Code's access token lives 8 hours and is
-REPLACED on refresh, minting a new inode. The host follows the new file; a
-docker single-file bind resolved at container start does not. So both Lupin
-containers strand on a dead token roughly 3x/day and every bounded-CC path in
-them — podcast, BFE, TFE, deep research, presentation — goes dark until someone
-restarts them.
+Claude Code's access token lives 8 hours and is replaced on refresh, which mints a new
+inode. The host follows the new file. A docker single-file bind resolved at container
+start does not. So both Lupin containers strand on a dead token about three times a
+day. Every bounded-CC path in them goes dark until someone restarts them. Those paths
+are podcast, BFE, TFE, deep research and presentation.
 
-WHY A WATCHER AND NOT A TIMER. The refresh fires 8 hours after the LAST refresh,
-which moves every time the host happens to call at a different hour. A fixed
-schedule drifts out of alignment and then does the worst of both things: it
-restarts while the token is still good (a free outage on the fleet's notify
-channel) and it sleeps through the hours after one actually died. Watching the
-inode fires when — and only when — the event we care about has happened.
+This is a watcher and not a timer. The refresh fires 8 hours after the last refresh,
+which moves whenever the host calls at a different hour. A fixed schedule drifts out
+of alignment and then does the worst of both things. It restarts while the token is
+still good, which is a free outage on the fleet's notify channel. It also sleeps
+through the hours after a token has died. Watching the inode fires when, and only
+when, the event we care about has happened.
 
-⚠️ THIS IS A BRIDGE, NOT THE FIX. The fix is the dedicated-directory mount in
-c7c60896: a directory bind resolves through on every open, so the container sees
-the host's current credential with no restart at all. Once that lands this
-watcher has nothing left to do and should be retired, not maintained.
+This is a bridge, not the fix. The fix is a dedicated-directory mount. A directory
+bind resolves through on every open, so the container sees the host's current
+credential with no restart at all. Once that lands, this watcher has nothing left to
+do and should be retired, not maintained.
 
 All I/O (docker, filesystem, clock, sleep) lives in
-src/scripts/credential-refresh-watcher.py; everything here is pure so it can be
-tested without a container.
+src/scripts/credential-refresh-watcher.py. Everything here is pure so it can be tested
+without a container.
 """
 
 from typing import Optional, Tuple
@@ -49,11 +48,11 @@ def should_restart_containers(
         - previous_inode is None on the watcher's first observation
 
     Ensures:
-        - returns ( act, reason ); reason is always non-empty and names WHY,
+        - returns ( act, reason ); reason is always non-empty and names why,
           so the log says what the watcher saw rather than only what it did
-        - returns False on the first observation (nothing to compare against —
-          a watcher that "acts on startup" would bounce the fleet every time
-          systemd restarted it)
+        - returns False on the first observation, because there is nothing to compare
+          against and a watcher that acts on startup would bounce the fleet every
+          time systemd restarted it
         - returns False when the inode is unchanged
         - returns False when the new token is already expired or expires within
           min_remaining_s — restarting onto a dead credential is the failure
@@ -97,14 +96,14 @@ def container_is_busy( ps_output: str, markers = BUSY_PROCESS_MARKERS ) -> Tuple
 
     Requires:
         - ps_output is the raw text of `ps -ef` from inside the container
-          (empty string is treated as "could not tell", i.e. BUSY)
+          (an empty string is treated as "could not tell", which counts as busy)
 
     Ensures:
         - returns ( busy, reason )
-        - **fails SAFE**: an empty / unreadable ps_output returns busy=True.
+        - fails safe: an empty or unreadable ps_output returns busy=True.
           A watcher that cannot see inside a container must not assume the
-          container is free — "I saw nothing" and "there is nothing" are the
-          two states this whole c7c60896 family is about not confusing.
+          container is free, because "I saw nothing" and "there is nothing" are
+          different states
 
     Raises:
         - None

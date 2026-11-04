@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-D2 Renderer — LLM-backed diagram code generation with CLI rendering.
+Renders a visual description to SVG through the Claude API and the d2 CLI.
 
-Calls Claude API with a natural-language visual description, extracts
-the D2 syntax from the response, renders it to SVG via the d2 CLI,
-and returns a markdown image reference.
+Calls the Claude API with a natural-language visual description and
+extracts the d2 syntax from the response. Renders it to SVG via the
+d2 CLI and returns a markdown image reference.
 
 Handles "flowchart_d2" and "architecture" visual types — producing
 significantly prettier output than Mermaid for these use cases.
@@ -29,15 +29,15 @@ logger = logging.getLogger( __name__ )
 
 class D2Renderer( VisualRenderer ):
     """
-    LLM-backed renderer that generates D2 diagrams compiled to SVG.
+    LLM-backed renderer that generates d2 diagrams compiled to SVG.
 
-    Calls Claude API with a visual description, extracts D2 syntax,
+    Calls Claude API with a visual description, extracts d2 syntax,
     renders via d2 CLI to SVG, and returns a markdown image reference.
 
     Requires:
         - api_client is a PresentationAPIClient instance (passed via kwargs)
         - output_dir is a writable directory path (passed via kwargs)
-        - d2 CLI is installed and on PATH
+        - d2 CLI is installed and on `PATH`
 
     Ensures:
         - Returns a markdown image reference on success
@@ -51,7 +51,7 @@ class D2Renderer( VisualRenderer ):
 
         Requires:
             - debug and verbose are booleans
-            - d2_theme is a valid D2 theme ID (0=default, 100=sketch, etc.)
+            - d2_theme is a valid d2 theme ID (0=default, 100=sketch, etc.)
 
         Ensures:
             - Renderer is ready to call render()
@@ -67,7 +67,7 @@ class D2Renderer( VisualRenderer ):
         Check if d2 CLI is installed (cached after first call).
 
         Ensures:
-            - Returns True if d2 is on PATH
+            - Returns True if d2 is on `PATH`
             - Caches result for subsequent calls
         """
         if self._d2_available is None:
@@ -80,7 +80,7 @@ class D2Renderer( VisualRenderer ):
 
     async def render( self, visual_type: str, visual_description: str, **kwargs ) -> Optional[ str ]:
         """
-        Generate D2 diagram from natural-language description via Claude API.
+        Generate a d2 diagram from natural-language description via Claude API.
 
         Requires:
             - visual_type is "flowchart_d2" or "architecture"
@@ -159,12 +159,12 @@ class D2Renderer( VisualRenderer ):
 
     async def _render_d2( self, d2_code: str, output_path: str, theme: int = 0 ) -> bool:
         """
-        Execute d2 CLI to render D2 syntax to SVG.
+        Execute d2 CLI to render d2 syntax to SVG.
 
         Requires:
-            - d2_code is valid D2 syntax
+            - d2_code is valid d2 syntax
             - output_path is a writable file path
-            - theme is a valid D2 theme ID
+            - theme is a valid d2 theme ID
 
         Ensures:
             - Returns True if SVG file was created
@@ -208,22 +208,19 @@ class D2Renderer( VisualRenderer ):
     @staticmethod
     def _extract_d2_code( response_content: str ) -> Optional[ str ]:
         """
-        Extract D2 code from Claude's response.
+        Extract d2 code from Claude's response.
 
-        Handles:
-            - Fenced ```d2 ... ``` blocks
-            - Fenced ``` ... ``` blocks (no d2 label)
-            - Bare code with D2-like patterns (arrows, containers)
+        Handles fenced d2 blocks, fenced unlabelled blocks, and bare code with d2-like patterns.
 
         Requires:
             - response_content is a string
 
         Ensures:
-            - Returns raw D2 code (no fences) on success
-            - Returns None if no D2 found
+            - Returns raw d2 code (no fences) on success
+            - Returns None if no d2 found
 
         Returns:
-            str: Raw D2 code, or None
+            str: Raw d2 code, or None
         """
         if not response_content:
             return None

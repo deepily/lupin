@@ -2,35 +2,28 @@
 """
 The DM tutor agent — distills one verbose DM into the shape Rick specified.
 
-    headline (a declaration OR a question)
+    headline (a declaration or a question)
     supporting statement
     supporting statement
     the most relevant path or URL, when the message carries one
 
-This is the object the DM send path calls, not a research script. Its contract
-is FAIL-CLOSED and that is the whole design: `rewrite_dm( body )` returns the
-distilled lines, or `None`. `None` always means "deliver the original" — never
-"deliver something shorter that might be wrong". A tutor that occasionally
-mangles a message is worse than no tutor at all, because the recipient cannot
-tell which kind of message they are holding.
+This is the object the DM send path calls, not a research script. Its contract is
+fail-closed, and that is the whole design. `rewrite_dm( body )` returns the distilled lines,
+or `None`. `None` always means "deliver the original", never "deliver something shorter that
+might be wrong". A tutor that occasionally mangles a message is worse than no tutor at all.
+The recipient cannot tell which kind of message they are holding.
 
-WHY THIS EXISTS AS AN AGENT AND NOT A SCRIPT. The prompt was proven on 2026-08-11
-by calling the LLM client directly, deliberately bypassing `AgentBase` — the only
-agent available then validated against a schema requiring a `compressed` field
-this prompt never produces, so good answers were being discarded. `DmTutorResponse`
-removes that reason. Going through the standard path also fixes the envelope
-problem by construction: `PromptTemplateProcessor` appends the `</stop>` sentinel
-the vLLM stop list is configured to catch (`prompt_template_processor.py:130`,
-`lupin-app.ini` `dm_tutor/phi_4_params`), which a hand-rolled prompt never did.
+It is an agent and not a script so that it goes through the standard `AgentBase` path.
+`AgentBase` validates against a schema, and `DmTutorResponse` is the schema that fits this
+prompt. A schema requiring a `compressed` field, which this prompt never produces, would
+discard good answers. The standard path also supplies the `</stop>` sentinel.
+`PromptTemplateProcessor` appends it, and the vLLM stop list is configured to catch it
+(see `lupin-app.ini`, `dm_tutor/phi_4_params`). A hand-rolled prompt never carried it.
 
-⚠️ THE SENTINEL DID NOT CAUSE THE 2026-08-11 RESULT, AND THE RECORD SHOULD SAY SO.
-That run came back clean on all four bands WITHOUT it — `dm.txt` contains no
-mention of `stop`, and the harness substituted its example bare. The five-slot
-scaffold is what made it work; the sentinel is a separate, independently measured
-win (3,004 words / 56.2s → 114 / 3.2s on a 250+ message). Promoting to `AgentBase`
-therefore ADDS a real change rather than preserving one, which is why this class
-carries `include_stop_sentinel` — so the two can be measured apart instead of
-being credited to each other.
+The sentinel is not what makes the prompt work. The five-slot scaffold does that. The
+sentinel is a separate win: it cut a 250-word-plus message from 3,004 words in 56.2s to 114
+words in 3.2s. This class carries `include_stop_sentinel` so the two effects can be measured
+apart instead of being credited to each other.
 """
 
 import cosa.utils.util as du
@@ -43,9 +36,9 @@ class DmTutorAgent( AgentBase ):
     """
     Rewrites one DM body into a headline, two supporting statements, a pointer.
 
-    Shaped after `DmCompressionAgent` — the minimal `AgentBase` form used by the
-    sibling arm — and carrying its two hard-won constraints: no synchronous
-    retry, and `.replace()` instead of `.format()`.
+    Shaped after `DmCompressionAgent`, the minimal `AgentBase` form of the sibling arm.
+    It carries that arm's two constraints: no synchronous retry, and `.replace()`
+    instead of `.format()`.
     """
 
     ROUTING_COMMAND = "dm tutor rewrite"
@@ -71,8 +64,8 @@ class DmTutorAgent( AgentBase ):
         Requires:
             - dm_body is a non-empty string
             - the routing command is registered in MODEL_MAPPING, in
-              agent_model_map, and in the INI (all four sites — see §3.4 of the
-              plan; a miss in any one ships a silently broken prompt)
+              agent_model_map, and in the INI (all four sites; a miss in any one
+              ships a silently broken prompt)
 
         Ensures:
             - self.prompt holds the template with the DM body substituted
@@ -129,9 +122,9 @@ class DmTutorAgent( AgentBase ):
         """
         Call the model and return the lines a recipient would see.
 
-        FAIL-CLOSED. Every failure mode — an unreachable model, malformed XML, a
-        dropped required slot, a validation error — returns None, and None means
-        the caller delivers the original message unchanged.
+        Fail-closed. Every failure returns None: an unreachable model, malformed XML,
+        a dropped required slot, or a validation error. None means the caller
+        delivers the original message unchanged.
 
         Requires:
             - self.prompt is built (the constructor guarantees it)
@@ -139,7 +132,7 @@ class DmTutorAgent( AgentBase ):
         Ensures:
             - returns the headline, both supporting statements, and the pointer
               when present, newline-joined
-            - returns None on ANY failure, having raised nothing
+            - returns None on any failure, having raised nothing
             - self.response holds the parsed DmTutorResponse on success, None
               otherwise
 
@@ -194,10 +187,9 @@ def rewrite_dm( dm_body: str, include_stop_sentinel: bool=True,
     """
     The DM send path's entry point: one body in, distilled lines or None out.
 
-    A free function rather than a method so a caller needs to know nothing about
-    agent construction, and so CONSTRUCTION failures fail closed too — a missing
-    INI key or an unregistered routing command must deliver the original
-    message, not raise into the sender's call stack.
+    A free function, so a caller needs to know nothing about agent construction.
+    Construction failures fail closed too: a missing INI key or an unregistered
+    routing command must deliver the original, not raise into the sender.
 
     Requires:
         - dm_body is a string

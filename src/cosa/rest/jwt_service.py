@@ -34,24 +34,11 @@ config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 # failure rather than tokens signed with a value anyone can read. Row adce3547.
 def _missing_tree_hint( here=None ):
     """
-    Name the missing TREE when the refusal above is really a worktree-provisioning gap.
+    Name the missing tree when the refusal above is really a worktree-provisioning gap.
 
-    THE DEFECT THIS ADDRESSES (row dde8b87a). The repo-root `.env` is gitignored, so it
-    is present in the main checkout and absent from EVERY worktree. It carries
-    JWT_SECRET_KEY, so `import lupin_app.main` REFUSES at import inside a worktree — and
-    the refusal names a missing VARIABLE, which reads as a configuration mistake the
-    reader made. It is not: it is a file that `git worktree add` could not have produced.
-
-    🔴 THE FILE IS NOT PROVISIONED AND MUST NOT BE. It also carries POSTGRES_PASSWORD.
-    A venv is a build artifact; this is a secret, and the ruling on `src/conf/keys/**`
-    (Mr. Radio, 2026-09-01) is the same ruling. So the remedy for this member is a
-    message that tells the truth about WHY the variable is absent, not a symlink.
-
-    ⚠️ NO SUBPROCESS, NO CONFIG, NO `LUPIN_ROOT`. This runs during a module import that
-    is already failing; anything that can itself fail would replace a clear refusal with
-    an obscure one. The repo root comes from this file's own location — the tree that is
-    actually running — and a worktree announces itself by having a `.git` FILE rather
-    than a directory, whose `gitdir:` line names the main checkout.
+    The repo-root `.env` is gitignored, so every worktree lacks it, and it carries JWT_SECRET_KEY.
+    So `import lupin_app.main` refuses at import there, and the refusal names a missing variable.
+    That reads as the reader's own configuration mistake, but `git worktree add` could not have made the file.
 
     Requires:
         - here is a repo root path, or None to use this file's own tree. The parameter
@@ -61,6 +48,14 @@ def _missing_tree_hint( here=None ):
     Ensures:
         - returns a sentence naming this tree and the main checkout when this is a
           worktree whose `.env` is absent while the main checkout has one
+        - the `.env` file is not provisioned into a worktree and must not be: it also carries
+          POSTGRES_PASSWORD, and a venv is a build artifact while this is a secret, like
+          `src/conf/keys/**`; the remedy is a message saying why the variable is absent, not a symlink
+        - it uses no subprocess, no config and no `LUPIN_ROOT`, because it runs during a module
+          import that is already failing, and anything that can itself fail would replace a clear
+          refusal with an obscure one; the repo root comes from this file's own location (the
+          tree actually running), and a worktree is recognised by a `.git` file rather than a
+          directory, whose `gitdir:` line names the main checkout
         - returns "" in every other case, including any error — a hint that cannot be
           computed must never turn a legible refusal into a traceback
         - never raises
@@ -96,14 +91,11 @@ def _missing_tree_hint( here=None ):
 
 def _missing_secret_message( here=None ):
     """
-    The whole refusal text: the standing advice, plus the missing-tree hint when one
-    applies.
+    Build the refusal text: the standing advice plus the missing-tree hint, when one applies.
 
-    ⚠️ IT IS A FUNCTION SO THE COMPOSITION CAN BE TESTED. The `raise` below runs at
-    module-import time and only when the variable is unset, so under a tier that always
-    sets it the line is unreachable — and a test that exercised `_missing_tree_hint`
-    alone would pass whether or not the hint ever reaches a reader. A component can be
-    correct, covered, and never wired in.
+    It is a function so the composition can be tested. The `raise` below runs at import time,
+    and only when the variable is unset. Under a tier that always sets it, the line is unreachable.
+    So a test of `_missing_tree_hint` alone would pass whether or not the hint reaches a reader.
 
     Requires:
         - here is a repo root path, or None to use this file's own tree

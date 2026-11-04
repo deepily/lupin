@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Audio Stitcher for COSA Podcast Generator Agent - Phase 2.
+Audio Stitcher for COSA Podcast Generator Agent.
 
 Concatenates TTS-generated PCM audio segments into a single podcast MP3 file.
 Uses pydub for audio manipulation and ffmpeg for MP3 encoding.

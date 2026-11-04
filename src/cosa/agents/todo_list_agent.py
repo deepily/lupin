@@ -1,4 +1,3 @@
-import json
 from typing import Any, Optional
 
 import cosa.utils.util as du
@@ -160,25 +159,7 @@ class TodoListAgent( AgentBase ):
             - KeyError if required fields missing
         """
         
-        print( f"Restoring from {file_path}..." )
-        
-        # Read the file and parse JSON
-        with open( file_path, 'r' ) as file:
-            data = json.load( file )
-        
-        # Create a new object instance with the parsed data
-        restored_agent = TodoListAgent(
-            data[ "question" ], debug=data[ "debug" ], verbose=data[ "verbose" ], auto_debug=data[ "auto_debug" ], inject_bugs=data[ "inject_bugs" ]
-        )
-        # Set the remaining attributes from the parsed data, skipping the ones that we've already set
-        keys_to_skip = [ "question", "debug", "verbose", "auto_debug", "inject_bugs"]
-        for k, v in data.items():
-            if k not in keys_to_skip:
-                setattr( restored_agent, k, v )
-            else:
-                print( f"Skipping key [{k}], it's already been set" )
-        
-        return restored_agent
+        return AgentBase._restore_from_file( TodoListAgent, file_path, ( "question", ), ( "debug", "verbose", "auto_debug", "inject_bugs" ) )
     
 def quick_smoke_test():
     """Quick smoke test to validate TodoListAgent functionality."""

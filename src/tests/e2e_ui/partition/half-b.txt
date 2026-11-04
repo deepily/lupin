@@ -22,11 +22,14 @@ src/tests/e2e_ui/test_commons_activity_filters_and_strip_chrono.py
 src/tests/e2e_ui/test_dm_recent_activity.py
 src/tests/e2e_ui/test_doc_viewer_directory.py
 src/tests/e2e_ui/test_doc_viewer_multi_repo.py
+src/tests/e2e_ui/test_doc_viewer_podcast_button.py
 src/tests/e2e_ui/test_doc_viewer_scope_discovery.py
 src/tests/e2e_ui/test_epic_board_card.py
 src/tests/e2e_ui/test_fleet_status_panel.py
 src/tests/e2e_ui/test_font_stack_fingerprint.py
 src/tests/e2e_ui/test_history_card_parity.py
+src/tests/e2e_ui/test_holding_area_plan_approve_both_clients.py
+src/tests/e2e_ui/test_holding_area_group_by_toggle_both_clients.py
 src/tests/e2e_ui/test_layout_mode_toolbar_centering.py
 src/tests/e2e_ui/test_manager_badge_strip.py
 src/tests/e2e_ui/test_multiplexer_action_required_in_pane.py
@@ -34,6 +37,7 @@ src/tests/e2e_ui/test_multiplexer_auth_bounce.py
 src/tests/e2e_ui/test_multiplexer_broadcast_card.py
 src/tests/e2e_ui/test_multiplexer_card_move_keeps_scroll.py
 src/tests/e2e_ui/test_multiplexer_doc_viewer_iframe_embedding.py
+src/tests/e2e_ui/test_multiplexer_keep_place_holds_the_history_pane.py
 src/tests/e2e_ui/test_multiplexer_jobs_filter_mode.py
 src/tests/e2e_ui/test_multiplexer_manager_badge.py
 src/tests/e2e_ui/test_multiplexer_phase6a_visual.py
@@ -53,6 +57,7 @@ src/tests/e2e_ui/test_notifications_sections.py
 src/tests/e2e_ui/test_page_smoke.py
 src/tests/e2e_ui/test_podcast_overlay_dry_run.py
 src/tests/e2e_ui/test_podcast_overlay_playhere.py
+src/tests/e2e_ui/test_podcast_play_here_two_faces.py
 src/tests/e2e_ui/test_profile.py
 src/tests/e2e_ui/test_queue_display.py
 src/tests/e2e_ui/test_register.py
@@ -74,3 +79,8 @@ src/tests/e2e_ui/test_selector_altitude_control.py
 src/tests/e2e_ui/test_holding_area_accordion_and_cj_flow_toggles.py
 src/tests/e2e_ui/test_doc_link_pane_is_in_the_viewport_in_vertical.py
 src/tests/e2e_ui/test_doc_link_renders_in_app_without_a_new_page.py
+src/tests/e2e_ui/test_legacy_podcast_card_yes_and_no.py
+src/tests/e2e_ui/test_multiplexer_focus_bar_toggles_row.py
+src/tests/e2e_ui/test_multiplexer_keep_place_toggle_style.py
+src/tests/e2e_ui/test_task_list_status_chips.py
+src/tests/e2e_ui/test_doc_viewer_relative_link_resolves.py

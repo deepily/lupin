@@ -20,15 +20,19 @@ import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 import type { LayoutMode } from "../shared/types";
 
+/** The DOM id of the abstract tooltip element. */
 export const ABSTRACT_TOOLTIP_ID = "abstract-tooltip";
 
 /** Gap between the indicator and the tooltip, and the minimum viewport margin (legacy values). */
 const GAP_PX    = 8;
 const MARGIN_PX = 10;
 
+/** A rectangle's top, bottom, left and width, in pixels. */
 export interface Rect { top: number; bottom: number; left: number; width: number; }
+/** A width and a height, in pixels. */
 export interface Size { width: number; height: number; }
 
+/** What the abstract tooltip needs: the layout mode, and an optional frame scheduler. */
 export interface AbstractTooltipDeps {
   /** The live layout mode; the tooltip acts only when this is not "horizontal". */
   getLayoutMode(): LayoutMode;
@@ -36,9 +40,16 @@ export interface AbstractTooltipDeps {
   schedule?: ( fn: () => void ) => void;
 }
 
+/**
+ * The floating abstract tooltip for the vertical layout.
+ *
+ * `mount` adds one element to the body and click and key listeners to the document. `unmount` removes them.
+ */
 export interface AbstractTooltip {
   mount(): void;
   unmount(): void;
+  /** Show `abstract` beside `anchor`, as a click on a 📋 indicator does; a no-op until mounted. */
+  showFor( anchor: Element, abstract: string ): void;
 }
 
 /**
@@ -63,6 +74,9 @@ export function computeTooltipPosition( indicator: Rect, tip: Size, viewport: Si
   return { top, left };
 }
 
+/**
+ * Shows a notification's abstract in a tooltip when its indicator is clicked.
+ */
 class AbstractTooltipImpl implements AbstractTooltip {
   private tooltip  : HTMLElement | null = null;
   private readonly schedule : ( fn: () => void ) => void;
@@ -72,10 +86,16 @@ class AbstractTooltipImpl implements AbstractTooltip {
     if ( ev.key === "Escape" ) this.hide();
   };
 
+  /**
+   * Creates the tooltip controller with its dependencies and a frame scheduler.
+   */
   constructor( private readonly deps: AbstractTooltipDeps ) {
     this.schedule = deps.schedule ?? ( ( fn ) => { requestAnimationFrame( fn ); } );
   }
 
+  /**
+   * Adds the tooltip to the page and listens for document clicks and Escape.
+   */
   mount(): void {
     if ( this.tooltip !== null ) return;
     const frag = html`<div id="${ABSTRACT_TOOLTIP_ID}" class="abstract-tooltip" role="dialog" aria-label="Notification details"><div class="abstract-tooltip-header"><span>📋 Details</span><button type="button" class="abstract-tooltip-close" title="Close">×</button></div><div class="abstract-tooltip-content"></div></div>`;
@@ -87,12 +107,20 @@ class AbstractTooltipImpl implements AbstractTooltip {
     document.addEventListener( "keydown", this.onKeyDown );
   }
 
+  /**
+   * Removes the document listeners and the tooltip element from the page.
+   */
   unmount(): void {
     if ( this.tooltip === null ) return;
     document.removeEventListener( "click", this.onDocClick );
     document.removeEventListener( "keydown", this.onKeyDown );
     this.tooltip.remove();
     this.tooltip = null;
+  }
+
+  showFor( anchor: Element, abstract: string ): void {
+    if ( this.tooltip === null ) return;
+    this.show( anchor, abstract );
   }
 
   private handleClick( ev: MouseEvent ): void {
@@ -138,6 +166,11 @@ class AbstractTooltipImpl implements AbstractTooltip {
   }
 }
 
+/**
+ * Build the tooltip.
+ *
+ * It adds nothing to the page until `mount()` is called.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAbstractTooltip( deps: AbstractTooltipDeps ): AbstractTooltip {
   return new AbstractTooltipImpl( deps );

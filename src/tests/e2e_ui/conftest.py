@@ -34,6 +34,8 @@ _THIS_DIR = os.path.dirname( os.path.abspath( __file__ ) )
 if _THIS_DIR not in _sys_vt.path:
     _sys_vt.path.insert( 0, _THIS_DIR )
 from visual_height_tolerance import (
+    PIXEL_THRESHOLD,
+    forgiven_line,
     compare_pngs_height_tolerant,
     compare_pngs_structure_only,
     compare_pngs_content_shift_tolerant,
@@ -256,7 +258,7 @@ def assert_snapshot( assert_snapshot ):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def assert_snapshot_height_tolerant( pytestconfig, request ):
+def assert_snapshot_height_tolerant( pytestconfig, request, record_property ):
     """
     A snapshot assertion that tolerates a bounded HEIGHT-only delta.
 
@@ -272,8 +274,8 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
 
     Requires:
         - the pytest-playwright-visual-snapshot ini keys are set
-          (`playwright_visual_snapshots_path`, `..._threshold`,
-          `..._failures_path`) — the same config the stock fixture reads
+          (`playwright_visual_snapshots_path`, `..._failures_path`; the pixel threshold
+          is PIXEL_THRESHOLD, not the ini key — row 4f5301ad) — the same config the stock fixture reads
         - the passed object is a Playwright Locator/Page (screenshotted here) or
           raw PNG bytes
 
@@ -286,11 +288,11 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
     """
     from pathlib import Path as _Path
     from playwright.sync_api import Locator as _Locator, Page as _Page
+    from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
 
     root_dir       = _Path( pytestconfig.rootdir )
     snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
-    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
-    threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
+    failures_path  = _Path( SnapshotPaths.failures_path )   # the run-scoped dir (row d51ffc36)
     update         = bool( request.config.getoption( "--update-snapshots" ) )
 
     test_file_stem = _Path( request.node.fspath ).stem
@@ -314,9 +316,13 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
 
         result = compare_pngs_height_tolerant(
             img, baseline_file.read_bytes(),
-            threshold=threshold, max_height_delta=max_height_delta,
+            max_height_delta=max_height_delta,
         )
         if result.matched:
+            line = forgiven_line( name, result, PIXEL_THRESHOLD )
+            if line is not None:
+                print( line )
+                record_property( "tolerance_forgiven", line )
             return
 
         # Save artifacts for triage (parity with the stock fixture's layout).
@@ -366,7 +372,7 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
 
     Requires:
         - the pytest-playwright-visual-snapshot ini keys are set
-          (`playwright_visual_snapshots_path`, `..._threshold`, `..._failures_path`)
+          (`playwright_visual_snapshots_path`, `..._failures_path`; the pixel threshold is PIXEL_THRESHOLD, not the ini key — row 4f5301ad)
         - the passed object is a Playwright Locator/Page (screenshotted here) or
           raw PNG bytes
 
@@ -381,11 +387,11 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
     """
     from pathlib import Path as _Path
     from playwright.sync_api import Locator as _Locator, Page as _Page
+    from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
 
     root_dir       = _Path( pytestconfig.rootdir )
     snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
-    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
-    threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
+    failures_path  = _Path( SnapshotPaths.failures_path )   # the run-scoped dir (row d51ffc36)
     update         = bool( request.config.getoption( "--update-snapshots" ) )
 
     test_file_stem = _Path( request.node.fspath ).stem
@@ -412,14 +418,14 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
 
         shift = compare_pngs_content_shift_tolerant(
             img, baseline,
-            threshold=threshold, max_shift=max_shift, max_height_delta=max_height_delta,
+            max_shift=max_shift, max_height_delta=max_height_delta,
         )
         if shift.matched:
             return
 
         scatter = compare_pngs_aa_scatter_tolerant(
             img, baseline,
-            threshold=threshold, max_height_delta=max_height_delta,
+            max_height_delta=max_height_delta,
             max_isolated_cluster=max_isolated_cluster,
         )
         if scatter.matched:
@@ -478,10 +484,11 @@ def assert_snapshot_structure_only( pytestconfig, request ):
     """
     from pathlib import Path as _Path
     from playwright.sync_api import Locator as _Locator, Page as _Page
+    from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
 
     root_dir       = _Path( pytestconfig.rootdir )
     snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
-    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    failures_path  = _Path( SnapshotPaths.failures_path )   # the run-scoped dir (row d51ffc36)
     update         = bool( request.config.getoption( "--update-snapshots" ) )
 
     test_file_stem = _Path( request.node.fspath ).stem
@@ -626,14 +633,16 @@ def clean_test_db():
     """
     Clean PostgreSQL test database before each test.
 
-    Reuses the same pattern as integration tests: drop all tables,
-    recreate schema, verify empty state.
+    Reuses the same pattern as integration tests: delete the unprotected
+    users, truncate the history tables, verify the companions remain.
+    No table is dropped, so the grants on the test database survive.
 
     Requires:
         - Server hot-swapped to Testing config (lupin_db_test)
 
     Ensures:
-        - Fresh database schema before each test
+        - Empty application tables before each test; the schema and its grants stay.
+          The one exception is job_history: pending jobs scheduled in the future are kept
         - Complete isolation between tests
         - Tests never affect development database
     """
@@ -653,12 +662,15 @@ def clean_test_db():
     from seed_test_companions import COMPANION_EMAILS
 
     # Row-level DELETE: wipe test-generated rows, companions survive via is_protected
+    from tests.helpers.job_history_cleanup import clean_job_history
     with engine.begin() as conn:
         conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
-            "job_history, proxy_decisions, trust_states, refresh_tokens"
+            "proxy_decisions, trust_states, "
+            "task_items, task_events, task_promotion_tickets, fcm_tokens, refresh_tokens"
         ) )
+        clean_job_history( conn )   # keeps pending jobs scheduled in the future (row a80630a4)
 
     with engine.connect() as conn:
         count    = conn.execute( text( "SELECT count(*) FROM users WHERE is_protected" ) ).scalar()

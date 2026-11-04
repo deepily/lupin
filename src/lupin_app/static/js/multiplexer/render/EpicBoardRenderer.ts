@@ -51,6 +51,7 @@ import {
   wireSectionCollapse,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { teardownScaffold, messageEl } from "./dom";
 
 /**
  * The pane's messages. Carbon-copied from notifications.js `renderEpicBoard`.
@@ -60,10 +61,17 @@ import {
  * a stale epic invites a decision about work that has already moved.
  */
 export const EPIC_BOARD_SIGNIN_MESSAGE = "🔒 Sign-in required.";
+/** The message shown when the shared task-list query script did not load. */
 export const EPIC_BOARD_QUERY_UNAVAILABLE_MESSAGE =
   "🧩 Task-list query did not load — /static/js/shared/task-list-query.js is missing or failed to parse. This is a deploy problem, not a store outage.";
+/** The message shown when the task store is unreachable, so the pane shows no rows. */
 export const EPIC_BOARD_UNREACHABLE_MESSAGE = "⚠️ Store unreachable — showing nothing rather than something stale.";
 
+/**
+ * The slice of the task list store the epic board uses.
+ *
+ * It is the composite, the two reads and the row writes.
+ */
 export interface EpicBoardTaskStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
@@ -74,6 +82,11 @@ export interface EpicBoardTaskStoreLike {
   transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation;
 }
 
+/**
+ * The epic board pane, which groups the task list's rows by epic.
+ *
+ * It shares the task list's store and makes no fetch of its own.
+ */
 export interface EpicBoardRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -84,6 +97,7 @@ export interface EpicBoardRenderer {
   forceRenderForTesting(): void;
 }
 
+/** Options for `createEpicBoardRenderer`: the bus, the shared task store and optional hooks. */
 export interface EpicBoardRendererOptions {
   eventBus   : EventBus;
   /** The TASK LIST's store — shared on purpose; this pane never fetches. */
@@ -99,13 +113,11 @@ export interface EpicBoardRendererOptions {
   getAuthToken? : () => string | null;
 }
 
-function messageEl( className: string, text: string ): HTMLParagraphElement {
-  const p = document.createElement( "p" );
-  p.className = `task-list-message ${ className }`;
-  p.textContent = text;
-  return p;
-}
-
+/**
+ * Paints the epic board pane: tasks grouped by epic, with row controls and a refresh button.
+ *
+ * Reads tasks from its store and repaints when the store changes.
+ */
 class EpicBoardRendererImpl implements EpicBoardRenderer {
   private readonly bus       : EventBus;
   private readonly store     : EpicBoardTaskStoreLike;
@@ -127,6 +139,11 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   private pressGuard : PressHoldGuard | null = null;
   private mounted   = false;
 
+  /**
+   * Stores the event bus and task store plus the optional stories, clock and timer.
+   *
+   * Missing stories and clock options get defaults.
+   */
   constructor( opts: EpicBoardRendererOptions ) {
     this.bus   = opts.eventBus;
     this.store = opts.store;
@@ -139,6 +156,12 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     this.getAuthToken = opts.getAuthToken;
   }
 
+  /**
+   * Builds the board's refresh button and container inside the root.
+   *
+   * Wires row controls and subscribes to the store.
+   * Throws if already mounted. Paints the current store state.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "EpicBoardRenderer already mounted" );
@@ -239,21 +262,17 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     );
   }
 
+  /**
+   * Disposes row controls, subscriptions and guards, and clears the root.
+   */
   unmount(): void {
     this.rows?.dispose();
     this.rows = null;
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
     this.pressGuard = null;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.countEl = null;
     this.updatedEl = null;
@@ -277,6 +296,9 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     if ( this.mounted ) this.renderFromStore( false );
   }
 
+  /**
+   * Repaints the board from the store at once, stamping the updated time; used by tests.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }
@@ -295,14 +317,14 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     const composite = this.store.composite();
 
     if ( composite && composite.status === "auth_required" ) {
-      this.container.replaceChildren( messageEl( "task-list-signin", EPIC_BOARD_SIGNIN_MESSAGE ) );
+      this.container.replaceChildren( messageEl( "task-list", "task-list-signin", EPIC_BOARD_SIGNIN_MESSAGE ) );
       this.setCount( 0 );
       return;
     }
 
     if ( composite && composite.status === "query_unavailable" ) {
       this.container.replaceChildren(
-        messageEl( "task-list-query-unavailable", EPIC_BOARD_QUERY_UNAVAILABLE_MESSAGE ) );
+        messageEl( "task-list", "task-list-query-unavailable", EPIC_BOARD_QUERY_UNAVAILABLE_MESSAGE ) );
       this.setCount( 0 );
       return;
     }
@@ -312,7 +334,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
       // Zeroing it would ASSERT there are no epics; leaving it says the last
       // known figure is the last thing anyone measured. The message beside it
       // already says the rows are not being shown.
-      this.container.replaceChildren( messageEl( "task-list-unreachable", EPIC_BOARD_UNREACHABLE_MESSAGE ) );
+      this.container.replaceChildren( messageEl( "task-list", "task-list-unreachable", EPIC_BOARD_UNREACHABLE_MESSAGE ) );
       return;
     }
 
@@ -475,10 +497,13 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
    *   - a failed read leaves the edit alone and marks this pane stale
    */
   private rowWrite( mutation: TaskMutation ): TaskMutation {
-    const done = mutation.done.then( () => readBackAfterWrite(
-      () => this.store.refreshAfterWrite(),
-      () => this.stampReadBackFailed(),
-    ) );
+    const done = mutation.done.then( async ( outcome ) => {
+      await readBackAfterWrite(
+        () => this.store.refreshAfterWrite(),
+        () => this.stampReadBackFailed(),
+      );
+      return outcome;
+    } );
     return { restoreState: mutation.restoreState, done };
   }
 
@@ -506,6 +531,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   }
 }
 
+/** Build the renderer. It paints nothing until `mount()` is called. */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" (the identifier itself) where a real conditional carries two, and the factory is called by every test in the suite.
 export function createEpicBoardRenderer( opts: EpicBoardRendererOptions ): EpicBoardRenderer {
   return new EpicBoardRendererImpl( opts );

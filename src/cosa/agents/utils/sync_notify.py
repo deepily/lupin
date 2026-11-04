@@ -122,6 +122,38 @@ def notify(
         return False
 
 
+def build_notify_kwargs(
+    message: str,
+    sender_id: str,
+    priority: str = "low",
+    host: str = None,
+    port: int = None,
+    target_user: str = None,
+    debug: bool = False
+) -> dict:
+    """
+    Build the keyword arguments a proxy's voice_io.notify() hands to notify().
+
+    Requires:
+        - message and sender_id are strings
+
+    Ensures:
+        - Returns a dict with message, sender_id, priority and debug always set
+        - Adds host, port and target_user only when they are not None, so notify() keeps its own defaults
+    """
+    kwargs = {
+        "message"   : message,
+        "sender_id" : sender_id,
+        "priority"  : priority,
+        "debug"     : debug,
+    }
+    if host is not None: kwargs[ "host" ] = host
+    if port is not None: kwargs[ "port" ] = port
+    if target_user is not None: kwargs[ "target_user" ] = target_user
+
+    return kwargs
+
+
 def quick_smoke_test():
     """Quick smoke test for sync_notify module."""
     import cosa.utils.util as cu

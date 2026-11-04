@@ -6,7 +6,7 @@ Models for trust decision responses, classification results, and
 ratification records.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from pydantic import BaseModel, ConfigDict, Field

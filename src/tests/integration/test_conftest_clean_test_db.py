@@ -52,38 +52,41 @@ def test_clean_test_db_preserves_companions( clean_test_db ):
     assert not missing, f"clean_test_db dropped companion seeds: missing={missing}"
 
 
-def test_clean_test_db_removes_prior_test_users( clean_test_db ):
+STRAY_EMAIL = "should-not-survive@test.local"
+
+
+@pytest.fixture
+def a_stray_user():
     """
-    Insert a fake test user, re-trigger clean_test_db semantics by re-running
-    drop+recreate+reseed, then confirm only the companions remain (the fake
-    user got wiped). This validates that the fix doesn't preserve random
-    leftovers — only the explicit companion seed.
+    Insert one unprotected, non-companion user and yield its email.
+
+    Requested BEFORE clean_test_db in the test's argument list, so pytest builds this fixture
+    first and the real cleanup then runs over the stray user. The insert is read back, so a
+    stray user that never went in cannot make the test pass.
     """
     from cosa.rest.db import database as db_module
-    from cosa.rest.postgres_models import Base
-    engine = db_module.engine
-
-    # Insert a non-companion user
-    fake_email = "should-not-survive@test.local"
-    with engine.begin() as conn:
+    with db_module.engine.begin() as conn:
         conn.execute( text(
             "INSERT INTO users ( id, email, password_hash, is_active, email_verified, roles ) "
-            "VALUES ( gen_random_uuid(), :email, 'x', true, true, '[\"user\"]'::jsonb )"
-        ), { "email": fake_email } )
+            "VALUES ( gen_random_uuid(), :email, 'x', true, true, '[\"user\"]'::jsonb ) "
+            "ON CONFLICT ( email ) DO NOTHING"
+        ), { "email": STRAY_EMAIL } )
+    assert STRAY_EMAIL in _query_user_emails(), "test setup: the stray user did not insert"
+    yield STRAY_EMAIL
 
-    assert fake_email in _query_user_emails(), "test setup: fake user did not insert"
 
-    # Re-trigger the fixture's destructive cycle by manually replaying its
-    # body (cannot re-invoke the fixture mid-test cleanly).
-    Base.metadata.drop_all( bind=engine )
-    Base.metadata.create_all( bind=engine )
-    from seed_test_companions import seed_if_missing
-    seed_if_missing()
+def test_clean_test_db_removes_prior_test_users( a_stray_user, clean_test_db ):
+    """
+    The real clean_test_db fixture wipes a stray user and leaves every companion in place.
 
+    a_stray_user is built first, so the fixture's own cleanup runs over it. No copy of the
+    cleanup statements lives here: a change to the fixture changes what this test measures.
+    No table is dropped, so every grant on the test database survives.
+    """
     after = _query_user_emails()
-    assert fake_email not in after, "fake user survived clean_test_db cycle"
+    assert a_stray_user not in after, "the stray user survived clean_test_db"
     assert set( COMPANION_EMAILS ).issubset( after ), \
-        f"companions missing after second cycle: {set(COMPANION_EMAILS) - after}"
+        f"companions missing after clean_test_db: {set( COMPANION_EMAILS ) - after}"
 
 
 def test_companion_emails_constant_nonempty():

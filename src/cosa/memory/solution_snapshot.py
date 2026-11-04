@@ -73,18 +73,11 @@ class SolutionSnapshot( RunnableCode ):
     @staticmethod
     def remove_non_alphanumerics( input: str, replacement_char: str="" ) -> str:
         """
-        ╔══════════════════════════════════════════════════════════════════════════════╗
-        ║  🔥🔥🔥 DEPRECATED - DO NOT USE THIS FUNCTION! 🔥🔥🔥                         ║
-        ║                                                                              ║
-        ║  This function DESTROYS mathematical operators (+, -, *, /) and punctuation! ║
-        ║  It caused HOURS of debugging pain. Use Normalizer.normalize() instead.      ║
-        ║                                                                              ║
-        ║  Example of destruction:                                                     ║
-        ║    "What's 4 + 4?" → "whats 4 4"  (CORRUPTED!)                              ║
-        ║                                                                              ║
-        ║  Use instead: cosa.memory.normalizer.Normalizer.normalize()                  ║
-        ║  The Normalizer preserves MATH_OPERATORS and expands contractions properly.  ║
-        ╚══════════════════════════════════════════════════════════════════════════════╝
+        Deprecated: replace non-alphanumerics with replacement_char and lowercase the text.
+
+        It destroys math operators (+, -, *, /) and punctuation, so "What's 4 + 4?"
+        becomes "whats 4 4". It prints a loud warning and a stack trace on every call.
+        Normalizer.normalize() in cosa.memory.normalizer replaces it.
         """
         # 🚨🚨🚨 SCREAM DEPRECATION WARNING TO CONSOLE 🚨🚨🚨
         print( "" )
@@ -192,13 +185,13 @@ class SolutionSnapshot( RunnableCode ):
         """
         return np.dot( this_embedding, that_embedding ) * 100
     
-    def __init__( self, push_counter: int=-1, question: str="", question_normalized: str="", question_gist: str="", synonymous_questions: OrderedDict=OrderedDict(), synonymous_question_gists: OrderedDict=OrderedDict(), non_synonymous_questions: list=[],
+    def __init__( self, push_counter: int=-1, question: str="", question_normalized: str="", question_gist: str="", synonymous_questions: OrderedDict=None, synonymous_question_gists: OrderedDict=None, non_synonymous_questions: list=None,
                   last_question_asked: str="", answer: str="", answer_conversational: str="", error: str="", routing_command: str="", agent_class_name: Optional[str]=None,
                   created_date: str=None, updated_date: str=None, run_date: str=None,
-                  runtime_stats: dict=get_default_stats_dict(),
-                  id_hash: str="", solution_summary: str="", code: list[str]=[], solution_summary_gist: str="", code_returns: str="", code_example: str="", code_type: str="raw", thoughts: str="",
+                  runtime_stats: dict=None,
+                  id_hash: str="", solution_summary: str="", code: list[str]=None, solution_summary_gist: str="", code_returns: str="", code_example: str="", code_type: str="raw", thoughts: str="",
                   programming_language: str="Python", language_version: str="3.10",
-                  question_embedding: list[float]=[ ], question_normalized_embedding: list[float]=[ ], question_gist_embedding: list[float]=[ ], solution_embedding: list[float]=[ ], code_embedding: list[float]=[ ], thoughts_embedding: list[float]=[ ], solution_gist_embedding: list[float]=[ ],
+                  question_embedding: list[float]=None, question_normalized_embedding: list[float]=None, question_gist_embedding: list[float]=None, solution_embedding: list[float]=None, code_embedding: list[float]=None, thoughts_embedding: list[float]=None, solution_gist_embedding: list[float]=None,
                   solution_directory: str="/src/conf/long-term-memory/solutions/", solution_file: Optional[str]=None, user_id: str="ricardo_felipe_ruiz_6bdc", user_email: str="", session_id: str="",
                   replay_history: list=None, replay_stats: dict=None, is_cache_hit: bool=False,
                   answer_is_correct: bool=None,
@@ -284,6 +277,9 @@ class SolutionSnapshot( RunnableCode ):
         self.brake_terminal_claimed = False
 
         # Is there is no synonymous questions to be found then just recycle the current question
+        # None means "not given": each snapshot builds its own containers, so none is shared through a signature default
+        if synonymous_questions is None: synonymous_questions = OrderedDict()
+        if synonymous_question_gists is None: synonymous_question_gists = OrderedDict()
         # Handle corrupted data: ensure synonymous_questions is a valid dict/OrderedDict
         if not isinstance( synonymous_questions, dict ):
             if self.debug: print( f"WARNING: synonymous_questions is invalid type {type(synonymous_questions)}, defaulting to empty OrderedDict" )
@@ -307,13 +303,13 @@ class SolutionSnapshot( RunnableCode ):
         else:
             self.synonymous_question_gists = synonymous_question_gists
             
-        self.non_synonymous_questions = non_synonymous_questions
+        self.non_synonymous_questions = non_synonymous_questions if non_synonymous_questions is not None else []
             
         self.last_question_asked   = last_question_asked
         
         self.solution_summary      = solution_summary
 
-        self.code                  = code
+        self.code                  = code if code is not None else []
         self.solution_summary_gist = solution_summary_gist  # Gist of solution_summary (generated after first successful execution)
         self.code_returns          = code_returns
         self.code_example          = code_example
@@ -326,7 +322,7 @@ class SolutionSnapshot( RunnableCode ):
         self.updated_date          = updated_date if updated_date else self.get_timestamp()
         self.created_date          = created_date if created_date else self.get_timestamp()
         self.run_date              = run_date if run_date else self.get_timestamp( microseconds=True )
-        self.runtime_stats         = runtime_stats
+        self.runtime_stats         = runtime_stats if runtime_stats is not None else SolutionSnapshot.get_default_stats_dict()
         
         if id_hash == "":
             self.id_hash           = SolutionSnapshot.generate_id_hash( self.push_counter, self.run_date )
@@ -337,6 +333,15 @@ class SolutionSnapshot( RunnableCode ):
         self.solution_directory    = solution_directory
         self.solution_file         = solution_file
         
+        # None means "not given": each snapshot builds its own embedding lists
+        if question_embedding is None:            question_embedding            = [ ]
+        if question_normalized_embedding is None: question_normalized_embedding = [ ]
+        if question_gist_embedding is None:       question_gist_embedding       = [ ]
+        if solution_embedding is None:            solution_embedding            = [ ]
+        if code_embedding is None:                code_embedding                = [ ]
+        if thoughts_embedding is None:            thoughts_embedding            = [ ]
+        if solution_gist_embedding is None:       solution_gist_embedding       = [ ]
+
         # If the question embedding is empty, generate it
         if question != "" and not question_embedding:
             self.question_embedding = self._embedding_provider.generate_embedding( question, content_type="prose" )
@@ -392,15 +397,11 @@ class SolutionSnapshot( RunnableCode ):
     @classmethod
     def from_json_file( cls, filename: str, debug: bool=False ) -> 'SolutionSnapshot':
         """
-        DEPRECATED: Load snapshot from JSON file.
+        Deprecated: load a snapshot from a JSON file.
 
-        This method is deprecated as of 2025.09.17. Deserialization should be handled
-        by the manager, not the snapshot object.
+        The manager should handle deserialization, not the snapshot. Use
+        manager.get_snapshots_by_question() or similar manager methods instead.
 
-        Use: manager.get_snapshots_by_question() or similar manager methods instead.
-
-        Load snapshot from JSON file.
-        
         Requires:
             - filename is a valid file path
             - File contains valid JSON data
@@ -533,7 +534,7 @@ class SolutionSnapshot( RunnableCode ):
         """
         return list( self.synonymous_questions.keys() )[ -1 ]
         
-    def complete( self, answer: str, code: list[str]=[ ], solution_summary: str="" ) -> None:
+    def complete( self, answer: str, code: list[str]=None, solution_summary: str="" ) -> None:
         """
         Complete the snapshot with execution results.
         
@@ -589,6 +590,7 @@ class SolutionSnapshot( RunnableCode ):
             - None
         """
         # ¡OJO! code is a list of strings, not a string!
+        if code is None: code = [ ]
         self.code           = code
         self.code_embedding = self._embedding_provider.generate_embedding( " ".join( code ), content_type="code" )
         self.updated_date   = self.get_timestamp()
@@ -607,9 +609,7 @@ class SolutionSnapshot( RunnableCode ):
         Raises:
             - ValueError if either embedding is missing
         """
-        if not self.question_embedding or not other_snapshot.question_embedding:
-            raise ValueError( "Both snapshots must have a question embedding to compare." )
-        return np.dot( self.question_embedding, other_snapshot.question_embedding ) * 100
+        return self._embedding_similarity( other_snapshot, "question_embedding", "question embedding" )
     
     def get_solution_summary_similarity( self, other_snapshot: 'SolutionSnapshot' ) -> float:
         """
@@ -625,10 +625,7 @@ class SolutionSnapshot( RunnableCode ):
         Raises:
             - ValueError if either embedding is missing
         """
-        if not self.solution_embedding or not other_snapshot.solution_embedding:
-            raise ValueError( "Both snapshots must have a solution summary embedding to compare." )
-        
-        return np.dot( self.solution_embedding, other_snapshot.solution_embedding ) * 100
+        return self._embedding_similarity( other_snapshot, "solution_embedding", "solution summary embedding" )
     
     def get_code_similarity( self, other_snapshot: 'SolutionSnapshot' ) -> float:
         """
@@ -644,17 +641,32 @@ class SolutionSnapshot( RunnableCode ):
         Raises:
             - ValueError if either embedding is missing
         """
-        if not self.code_embedding or not other_snapshot.code_embedding:
-            raise ValueError( "Both snapshots must have a code embedding to compare." )
-        
-        return np.dot( self.code_embedding, other_snapshot.code_embedding ) * 100
+        return self._embedding_similarity( other_snapshot, "code_embedding", "code embedding" )
+
+    def _embedding_similarity( self, other_snapshot: 'SolutionSnapshot', attr: str, label: str ) -> float:
+        """
+        Dot-product similarity of one named embedding on two snapshots.
+
+        Requires:
+            - attr names an embedding attribute on SolutionSnapshot
+            - label is the noun used in the error message
+
+        Ensures:
+            - Returns similarity score as percentage (0-100)
+
+        Raises:
+            - ValueError if either embedding is missing
+        """
+        mine, theirs = getattr( self, attr ), getattr( other_snapshot, attr )
+        if not mine or not theirs:
+            raise ValueError( f"Both snapshots must have a {label} to compare." )
+        return self.get_embedding_similarity( mine, theirs )
     
     def to_jsons( self, verbose: bool=True ) -> str:
         """
-        DEPRECATED: Serialize snapshot to JSON string.
+        Deprecated: serialize the snapshot to a JSON string.
 
-        This method is deprecated as of 2025.09.17. Serialization should be handled
-        by the manager, not the snapshot object.
+        The manager should handle serialization, not the snapshot.
         """
         import warnings
         warnings.warn(
@@ -674,29 +686,9 @@ class SolutionSnapshot( RunnableCode ):
         """
         Create a copy of this snapshot for queue execution.
 
-        Note: user_email and user_id are passed here (not in constructor) because
-        snapshots are loaded from storage without user context. The REQUESTING
-        user's identity is injected at copy time — the email for TTS routing, the
-        id for WebSocket delivery.
-
-        🔴 user_id JOINED user_email HERE ON 2026-08-30 (row `0e7c9214`), and its
-        absence made a WebSocket frame undeliverable, not merely untidy. The copy kept
-        the ORIGINAL creator's id straight through to `_transition_to_done`, which
-        emits with `user_id = job.user_id`, so on a repeat ask the frame was addressed
-        to a stored id nobody holds a session under —
-
-            [WS] emit_to_user: user ricardo_felipe_ruiz_6bdc not in user_sessions
-                 — delivery skipped
-
-        while that browser session was registered under the asker's UUID. The
-        principle was already written in this docstring; only the email obeyed it.
-
-        ⚠️ SCOPE — this closes the DROPPED job_state_transition FRAMES and nothing
-        else. The same row reports the spoken answer never arriving either; that has
-        a SEPARATE cause, upstream of this copy, where `job.user_email` arrives empty
-        (`fifo_queue.py`, the `if not resolved_email ...` branch). An earlier draft of
-        this docstring joined the two with a "because" and that join was never
-        measured — it was inferred from two log lines being adjacent.
+        user_email and user_id come here, not from the constructor, because stored snapshots
+        carry no requester. The email is used for TTS routing and the id for WebSocket
+        delivery; a stale creator id makes the WebSocket frame undeliverable.
 
         Requires:
             - None
@@ -706,7 +698,7 @@ class SolutionSnapshot( RunnableCode ):
             - Shallow copy (references shared)
             - user_email is set on copy if provided
             - user_id is set on copy if provided
-            - the ORIGINAL is never mutated — it is shared and gets saved back
+            - the original is never mutated — it is shared and gets saved back
             - a falsy user_email / user_id means "no requester context" and leaves
               the stored value alone; it never blanks it, since an erased id is as
               undeliverable as a stale one
@@ -723,12 +715,9 @@ class SolutionSnapshot( RunnableCode ):
     
     def write_current_state_to_file( self ) -> None:
         """
-        DEPRECATED: Write snapshot to JSON file.
+        Deprecated: write the snapshot to a JSON file.
 
-        This method is deprecated as of 2025.09.17. Serialization should be handled
-        by the manager, not the snapshot object.
-
-        Use: manager.add_snapshot(snapshot) instead.
+        The manager should handle serialization. Use manager.add_snapshot(snapshot) instead.
 
         Requires:
             - solution_directory is valid path
@@ -784,12 +773,10 @@ class SolutionSnapshot( RunnableCode ):
         
     def delete_file( self ) -> None:
         """
-        DEPRECATED: Delete snapshot file from filesystem.
+        Deprecated: delete the snapshot file from the filesystem.
 
-        This method is deprecated as of 2025.09.17. File management should be handled
-        by the manager, not the snapshot object.
-
-        Use: manager.delete_snapshot(question, delete_physical=True) instead.
+        The manager should handle files. Use manager.delete_snapshot(question,
+        delete_physical=True) instead.
 
         Requires:
             - solution_file and solution_directory are set
@@ -908,20 +895,11 @@ class SolutionSnapshot( RunnableCode ):
 
     def run_code( self, debug: bool=False, verbose: bool=False ) -> dict:
         """
-        Execute stored code, OR replay a codeless agent's cached answer.
+        Execute stored code, or replay a codeless agent's cached answer.
 
-        Most agents (MathAgent, CrudForDataFramesAgent, etc.) generate Python at
-        first-run time and save it on the snapshot's `code` field; replay then
-        re-executes that code. CalculatorAgent and similar deterministic-dispatch
-        agents have no Python to save — their `run_code()` dispatches a parsed
-        intent struct to pure-Python helpers — so their snapshots persist with
-        `code = ['']` BY DESIGN. On replay, those snapshots' answers come from
-        the cached `self.answer` field, not from re-execution.
-
-        2026-04-28 fix: prior to this, replay of a codeless-agent snapshot raised
-        ValueError on the empty-code guard, which the consumer thread caught and
-        dead-lettered. The fix mirrors the existing CalculatorAgent special-case
-        in run_formatter() (lines 943-953 of this file).
+        Most agents save generated Python in `code` and replay re-executes it.
+        CalculatorAgent and similar agents have no Python to save, so their snapshots
+        hold `code = ['']`. Replay returns their cached `self.answer`.
 
         Requires:
             - code, code_example, code_returns are populated for code-generating agents

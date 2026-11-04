@@ -29,10 +29,12 @@ answer, the exact inverse of the e5f21fff defect this epic exists for.
 should" are different claims, and a sweeper that marked everything would satisfy
 the first. The in-grace arm is the one that carries the finding.
 """
+import io
 import os
 import sys
 import uuid
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 
 # jwt_service.py raises AT IMPORT when JWT_SECRET_KEY is unset, and the repo-root
@@ -195,7 +197,7 @@ class TheSweeperNeverStampsAnAnswerNobodyGave( unittest.TestCase ):
     ever reached anyone.
     """
 
-    def _run( self, rows, grace_seconds=300, batch_limit=200 ):
+    def _run( self, rows, grace_seconds=300, batch_limit=200, debug=False ):
         repo = _Repo( rows )
 
         class _Session:
@@ -208,7 +210,7 @@ class TheSweeperNeverStampsAnAnswerNobodyGave( unittest.TestCase ):
         real_repo_cls = repo_mod.NotificationRepository
         repo_mod.NotificationRepository = lambda session: repo
         try:
-            result = sweep_once( _Session, grace_seconds, batch_limit, now=_now() )
+            result = sweep_once( _Session, grace_seconds, batch_limit, now=_now(), debug=debug )
         finally:
             repo_mod.NotificationRepository = real_repo_cls
         return repo, result
@@ -229,6 +231,39 @@ class TheSweeperNeverStampsAnAnswerNobodyGave( unittest.TestCase ):
 
         self.assertEqual( repo.marks, [] )
         self.assertEqual( result, { "scanned": 1, "swept": 0, "refused": 0, "skipped_in_grace": 1 } )
+
+    def test_a_row_with_no_expiry_is_neither_swept_nor_counted_in_grace( self ):
+        past = _now() - timedelta( days=1 )
+        rows = [ _Row( "no-expiry", None ), _Row( "old", past ) ]
+        self.assertEqual( _partition( rows, grace_seconds=300, now=_now() ), ( [ "old" ], 0 ) )
+
+    def test_debug_reports_what_a_pass_swept( self ):
+        out = io.StringIO()
+        with redirect_stdout( out ):
+            self._run( [ _Row( str( uuid.uuid4() ), _now() - timedelta( days=1 ) ),
+                         _Row( str( uuid.uuid4() ), _now() - timedelta( seconds=30 ) ) ], debug=True )
+        self.assertEqual(
+            out.getvalue().strip(),
+            "[NOTIFY-SWEEP] swept 1 orphaned notification(s) (scanned 2, 1 still in grace, "
+            "0 refused \u2014 answered between scan and mark)" )
+
+    def test_debug_reports_a_pass_that_only_refused( self ):
+        out = io.StringIO()
+        with redirect_stdout( out ):
+            self._run( [ _Row( str( uuid.uuid4() ), _now() - timedelta( days=1 ), state="answered" ) ], debug=True )
+        self.assertIn( "swept 0 orphaned notification(s) (scanned 1, 0 still in grace, 1 refused", out.getvalue() )
+
+    def test_debug_is_silent_when_a_pass_touches_nothing( self ):
+        out = io.StringIO()
+        with redirect_stdout( out ):
+            self._run( [ _Row( str( uuid.uuid4() ), _now() - timedelta( seconds=30 ) ) ], debug=True )
+        self.assertEqual( out.getvalue(), "" )
+
+    def test_without_debug_a_pass_prints_nothing( self ):
+        out = io.StringIO()
+        with redirect_stdout( out ):
+            self._run( [ _Row( str( uuid.uuid4() ), _now() - timedelta( days=1 ) ) ] )
+        self.assertEqual( out.getvalue(), "" )
 
     def test_the_batch_limit_caps_one_pass_without_dropping_the_rest( self ):
         rows = [ _Row( str( uuid.uuid4() ), _now() - timedelta( days=1 ) ) for _ in range( 5 ) ]

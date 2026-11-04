@@ -1,43 +1,42 @@
 """
-Task-store mirror — per-session correlation map artifact.
+Task-store mirror per-session correlation map artifact.
 
-The hook-side memory of "which store item does harness task N correspond to,
-and what status did we last mirror?". One JSON file per session,
-`.task-store-map-<session_id>.json`, co-located with the heartbeat hold/acked
-artifacts via the SAME base-dir resolver (single source of truth for the
-directory; gitignored runtime-state family; per-session ⇒ multi-writer safe).
+The hook-side memory of which store item each harness task corresponds to, and
+what status was last mirrored. One JSON file per session,
+`.task-store-map-<session_id>.json`, sits beside the heartbeat hold and acked
+artifacts via the same base-dir resolver. That gives one source of truth for
+the directory, a gitignored runtime-state family, and multi-writer safety.
 
-Schema (post bug 9b23d5bc — generation-keyed):
-    {
-      "tasks"      : { "<generation>:<harness_id>": { "item_id": "<uuid>", "last_status": "<harness status>" } },
-      "flagged_at" : "<iso ts>" | null     # I4 flag-once marker (write-failure flagged)
-      "generation" : <int>                 # bumped on each /clear counter-reset
-    }
+Schema, generation-keyed. The three top-level keys are:
 
-Why the generation key (bug 9b23d5bc): harness task ids are per-session
-ordinal COUNTERS ("1","2","3"…) that RESTART after a `/clear`. A counter-keyed
-map persists across /clear (the session id is stable) so a post-clear
-TaskUpdate taskId="1" would resolve to the PRE-clear item and mutate the wrong
-store row. Keying every entry by `<generation>:<counter>` — where the
-generation is bumped the moment a counter is re-seen within the live
-generation — gives post-clear tasks a DISTINCT slot, so the old row is never
-adopted or mutated. The correlation key (task_store_mirror.build_correlation_key)
-carries the same generation so the server-side idempotency probe is re-keyed
-in lockstep.
+    "tasks": maps "<generation>:<harness_id>" to { "item_id": "<uuid>",
+        "last_status": "<harness status>" }.
+    "flagged_at": an iso timestamp or null, the flag-once marker that records
+        a flagged write failure.
+    "generation": an int, bumped on each /clear counter reset.
 
-LEGACY-MAP RESET (no-migration doctrine for local ephemeral stores): a map
-file written by the PRE-fix code has no `generation` field and counter-only
-task keys. Such a map is RESET on read — its (colliding) task entries are
-dropped, generation starts at 0, flagged_at is preserved. We deliberately do
-NOT migrate the old keys (drop+recreate over migration for local stores).
+Why the generation key: harness task ids are per-session ordinal counters
+("1","2","3"...) that restart after a `/clear`. A counter-keyed map persists
+across /clear because the session id is stable. A post-clear TaskUpdate
+taskId="1" would then resolve to the pre-clear item and mutate the wrong store row.
+Every entry is keyed by `<generation>:<counter>`, and the generation is bumped
+the moment a counter is re-seen within the live generation. Post-clear tasks
+then get a distinct slot, so the old row is never adopted or mutated. The
+correlation key (task_store_mirror.build_correlation_key) carries the same
+generation, so the server-side idempotency probe is re-keyed in lockstep.
 
-Reads are degrade-safe (any error ⇒ empty map — never raises, never breaks
-the hook). Writes are atomic (tmp-write + rename) with a per-writer pid+uuid
-tmp suffix, mirroring heartbeat_acked_ledger.
+Legacy map reset (no-migration doctrine for local ephemeral stores): a map file
+written by the earlier code has no `generation` field and counter-only task
+keys. Such a map is reset on read: its colliding task entries are dropped,
+generation starts at 0, and flagged_at is preserved. Old keys are not migrated,
+because dropping and recreating beats migrating for local stores.
+
+Reads are degrade-safe: any error gives an empty map, never raises, and never
+breaks the hook. Writes are atomic (tmp-write + rename) with a per-writer
+pid+uuid tmp suffix, mirroring heartbeat_acked_ledger.
 
 Design authority: lupin ->
-    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md §1.3
-    (bug 9b23d5bc — its write-up was intended and never authored).
+    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md section 1.3
 """
 
 import json
@@ -75,9 +74,9 @@ def map_key( generation, harness_id ):
         - generation is an int; harness_id is a string (or stringifiable)
 
     Ensures:
-        - Returns "<generation>:<harness_id>" — the SAME key shape used by both
+        - Returns "<generation>:<harness_id>" — the same key shape used by both
           record_task (write) and lookup_task (read), so a counter that
-          restarts after /clear in a NEW generation never aliases the old slot
+          restarts after /clear in a new generation never aliases the old slot
     """
     return f"{generation}:{harness_id}"
 
@@ -93,10 +92,10 @@ def read_map( session_id, base_dir=None ):
     Ensures:
         - Returns { "tasks": dict, "flagged_at": str|None, "generation": int }
           — normalized shape even when the file is missing, unreadable, or
-          malformed (DEGRADE-SAFE: never raises; any error ⇒ empty map)
-        - LEGACY RESET: a present map lacking a valid non-negative int
-          `generation` (pre-bug-9b23d5bc format) drops its counter-only task
-          entries, resets generation to 0, and PRESERVES flagged_at
+          malformed (degrade-safe: never raises; any error gives an empty map)
+        - Legacy reset: a present map lacking a valid non-negative int
+          `generation` (the earlier format) drops its counter-only task
+          entries, resets generation to 0, and preserves flagged_at
         - Only dict-valued task entries are kept
     """
     empty = { "tasks": { }, "flagged_at": None, "generation": 0 }
@@ -112,7 +111,7 @@ def read_map( session_id, base_dir=None ):
     flagged    = flagged if isinstance( flagged, str ) else None
     generation = raw.get( "generation" )
 
-    # LEGACY-MAP RESET: no valid generation ⇒ pre-fix counter-only map. Drop the
+    # LEGACY-MAP RESET: no valid generation => pre-fix counter-only map. Drop the
     # colliding task entries (no-migration doctrine), start at generation 0,
     # keep the I4 flag so an in-flight outage is not silently un-flagged.
     if not isinstance( generation, int ) or isinstance( generation, bool ) or generation < 0:
@@ -156,7 +155,7 @@ def current_generation( session_id, base_dir=None ):
 
     Ensures:
         - Returns the int generation (0 for a fresh / missing / legacy map)
-        - DEGRADE-SAFE: never raises (read_map's belt)
+        - Degrade-safe: never raises (read_map's belt)
     """
     return read_map( session_id, base_dir )[ "generation" ]
 
@@ -165,9 +164,9 @@ def bump_generation( session_id, base_dir=None ):
     """
     Advance the generation by one (read-modify-write) and return the new value.
 
-    Called when a TaskCreate arrives for a harness counter ALREADY live in the
-    current generation — the unambiguous proof that the harness counter has
-    restarted (post-/clear), so subsequent tasks must occupy a fresh generation.
+    Called when a TaskCreate arrives for a harness counter already live in the
+    current generation. That is unambiguous proof that the harness counter has
+    restarted (post-/clear), so later tasks must occupy a fresh generation.
 
     Requires:
         - session_id is a string
@@ -214,14 +213,14 @@ def lookup_task( session_id, generation, harness_id, base_dir=None ):
     Ensures:
         - Returns the { "item_id": ..., "last_status": ... } dict, or None when
           no entry exists for this (generation, harness_id)
-        - DEGRADE-SAFE: never raises (read_map's belt)
+        - Degrade-safe: never raises (read_map's belt)
     """
     return read_map( session_id, base_dir )[ "tasks" ].get( map_key( generation, harness_id ) )
 
 
 def set_flagged( session_id, flagged_at, base_dir=None ):
     """
-    Set or clear the I4 flag-once marker.
+    Set or clear the flag-once marker.
 
     Requires:
         - session_id is a string

@@ -13,6 +13,12 @@
 // → audio/webm → audio/ogg;codecs=opus → audio/ogg → "". The browser-native
 // `MediaRecorder.isTypeSupported(...)` decides which entry to use.
 
+/**
+ * What the recorder is built from; every field is optional.
+ *
+ * The upload is a POST to `/api/upload-and-transcribe-mp3` unless `uploadEndpoint` or `uploadMethod` say otherwise. Recording stops by itself after `maxDurationMs`, 30 seconds by default.
+ * The callbacks report the start, the stop, the transcript and any error.
+ */
 export interface AudioRecorderOptions {
   uploadEndpoint?    : string;
   uploadMethod?      : string;
@@ -37,6 +43,12 @@ const MIME_FALLBACK_CHAIN  = [
   "audio/ogg",
 ];
 
+/**
+ * Records from the microphone, uploads the audio as base64, and reports the transcript.
+ *
+ * It uses `audioFormat` if the browser supports it, else the first supported format in a fixed list.
+ * A denied or missing microphone is reported through `onError` with a typed reason.
+ */
 export class AudioRecorder {
   private readonly uploadEndpoint   : string;
   private readonly uploadMethod     : string;
@@ -55,6 +67,11 @@ export class AudioRecorder {
   private audioChunks          : Blob[] = [];
   private maxDurationTimeout   : ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * Sets the upload endpoint, auth token, audio format, maximum duration and callbacks.
+   *
+   * Each falls back to a default when not given.
+   */
   constructor( opts: AudioRecorderOptions = {} ) {
     this.uploadEndpoint   = opts.uploadEndpoint   ?? DEFAULT_ENDPOINT;
     this.uploadMethod     = opts.uploadMethod     ?? "POST";

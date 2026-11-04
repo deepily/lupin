@@ -176,7 +176,7 @@ class TestCommitAndPrMultiL3:
 
         result = await strategist.commit_and_pr_multi(
             git_ops=git_ops, clusters=clusters, trust_level=3,
-            notify_fn=_noop_notify,
+            notify_fn=_noop_notify, push_enabled=True,
             pr_title="TFE Fix Title", pr_body="TFE Fix Body",
             branch_slug_hint="tfe-unit-2-clusters",
         )
@@ -204,7 +204,7 @@ class TestCommitAndPrMultiL3:
         clusters = [ ( "C1", "x", [ "a" ], "m" ) ]
         result = await strategist.commit_and_pr_multi(
             git_ops=git_ops, clusters=clusters, trust_level=3,
-            notify_fn=_noop_notify, pr_title="x", pr_body="y",
+            notify_fn=_noop_notify, push_enabled=True, pr_title="x", pr_body="y",
         )
 
         assert result[ "error" ] == "branch exists"
@@ -223,7 +223,7 @@ class TestCommitAndPrMultiL3:
         clusters = [ ( "C1", "x", [ "a" ], "m" ) ]
         result = await strategist.commit_and_pr_multi(
             git_ops=git_ops, clusters=clusters, trust_level=3,
-            notify_fn=_noop_notify, pr_title="x", pr_body="y",
+            notify_fn=_noop_notify, push_enabled=True, pr_title="x", pr_body="y",
         )
 
         assert result[ "git_strategy" ] == "commit_only"  # degrades to local-only
@@ -241,7 +241,7 @@ class TestCommitAndPrMultiL3:
         clusters = [ ( "C1", "x", [ "a" ], "m" ) ]
         result = await strategist.commit_and_pr_multi(
             git_ops=git_ops, clusters=clusters, trust_level=3,
-            notify_fn=_noop_notify, pr_title="x", pr_body="y",
+            notify_fn=_noop_notify, push_enabled=True, pr_title="x", pr_body="y",
         )
 
         assert result[ "git_strategy" ] == "branch_only"

@@ -47,6 +47,28 @@ os.environ.setdefault(
     "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
 )
 
+# ── Collection-time guard: a unit-tier file must not change the config block ───
+# Pytest imports every test file before the first test runs, so an import-time write to the variable
+# stays for the whole run, and the module fixture below then snapshots the damaged value. Two unit tests
+# failed that way in a whole run while passing alone. The watch names the first offending file.
+from tests.helpers.config_block_watch import ConfigBlockWatch, unit_dir_of
+
+_config_block_watch = ConfigBlockWatch( os.environ.get( "LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+
+
+@pytest.hookimpl( hookwrapper=True )
+def pytest_make_collect_report( collector ):
+    """After each collector runs, note whether importing it changed the config block variable."""
+    yield
+    _config_block_watch.note( collector.nodeid, os.environ.get( "LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+
+
+def pytest_collection_finish( session ):
+    """Refuse a unit-tier run whose collection changed the config block variable."""
+    message = _config_block_watch.verdict( [ item.fspath for item in session.items ], unit_dir_of( os.path.dirname( os.path.abspath( __file__ ) ) ) )
+    if message is not None: raise pytest.UsageError( message )
+
+
 # ── Collection-time JWT secret floor (row adce3547) ───────────────────────────
 # cosa/rest/jwt_service.py has no default signing secret — unset JWT_SECRET_KEY raises at
 # MODULE IMPORT, which for a test file means at COLLECTION time, before any fixture runs.

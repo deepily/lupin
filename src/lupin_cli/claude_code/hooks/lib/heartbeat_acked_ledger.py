@@ -1,25 +1,21 @@
 #!/usr/bin/env python3
 """
-Heartbeat Hook — acked-inbound ledger read/write module.
+Heartbeat Hook: acked-inbound ledger read/write module.
 
-Spec part (c) of the work-owed oracle acked-inbound ledger (Rick 2026-06-10,
-"the self-poke backlog is way too goddamn big... pull these things off and mark
-them as looked at"): an EXPLICIT looked-at ledger a manager can bulk-write so
-the unanswered-inbound gatherer SUBTRACTS already-reviewed question-ids from the
-owed count.
+An explicit looked-at ledger a manager can bulk-write, so the unanswered-inbound
+gatherer subtracts already-reviewed question-ids from the owed count.
 
-Artifact: per-session JSON file `.heartbeat-acked-<session_id>.json` in the
-project root — same runtime-state family as `.heartbeat-hold-<session_id>.json`
-(gitignored, per-session ⇒ multi-writer safe; each instance reads/writes only
-its own file). The base-dir resolver is REUSED from `heartbeat_hold` so the two
-artifacts always co-locate (single source of truth for the directory).
+Artifact: per-session JSON file `.heartbeat-acked-<session_id>.json` in the project root.
+It is in the same runtime-state family as `.heartbeat-hold-<session_id>.json`.
+It is gitignored and per-session, so it is safe with many writers: each instance touches only its own file.
+The base-dir resolver is reused from `heartbeat_hold` so the two artifacts always co-locate.
 
 Schema: a JSON array of question-id strings the owner has marked "looked at":
     [ "6e9aca6f-...", "53a95e30-...", ... ]
 
-Reads are degrade-safe (any error ⇒ empty set — never raises, never blocks the
-Stop). Writes MERGE (idempotent union) so repeated bulk-marks accrete instead of
-clobbering, and are atomic (tmp-write + rename) like the hold artifact.
+Reads are degrade-safe: any error gives an empty set, and a read never raises or blocks the Stop.
+Writes merge as an idempotent union, so repeated bulk-marks accrete instead of clobbering.
+Writes are atomic (tmp-write plus rename), like the hold artifact.
 """
 
 import json
@@ -63,7 +59,7 @@ def read_acked_qids( session_id, base_dir=None ):
         - Returns a set[str] of qids (empty set when the file is missing,
           unreadable, malformed, or not a JSON array)
         - Only string entries are kept (non-string array members are skipped)
-        - DEGRADE-SAFE: never raises — any error ⇒ empty set (the gatherer
+        - Degrade-safe: never raises, and any error gives an empty set (the gatherer
           must never break the Stop on a ledger read)
     """
     try:
@@ -87,17 +83,18 @@ def mark_acked( session_id, qids, base_dir=None ):
         - base_dir is a path-like / string / None
 
     Ensures:
-        - The ledger file contains the UNION of its prior contents and the
+        - The ledger file contains the union of its prior contents and the
           string members of `qids` (existing entries are preserved — bulk-marks
           accrete, never clobber)
         - Non-string members of `qids` are ignored
         - Write is atomic (tmp-write + rename), mirroring the hold artifact
         - The temp file carries a per-writer pid+uuid suffix, so two managers
-          bulk-marking the SAME session ledger concurrently never share one
+          bulk-marking the same session ledger concurrently never share one
           `.tmp` path (a shared name lets writer A's partial json be renamed
-          into place by writer B). Each writer's `replace()` is still atomic;
-          last-writer-wins on the final file (acceptable — both merge over the
-          same prior contents, so neither loses the other's prior-state union)
+          into place by writer B). Each writer's `replace()` is still atomic.
+          The last writer wins on the final file. That is acceptable because
+          both merge over the same prior contents, so neither loses the other's
+          prior-state union
         - Returns the resulting sorted list[str] of acked qids
         - Raises OSError if the target directory is not writable
     """

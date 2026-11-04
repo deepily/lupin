@@ -1,37 +1,35 @@
 #!/usr/bin/env python3
 """
-Run the epic-key drift scan against the live task store — store row `5246bb67`.
+Run the epic-key drift scan against the live task store.
 
-WHY THIS SCRIPT EXISTS AND NOT JUST THE MODULE
-----------------------------------------------
-`cosa/rest/task_store_epic_keys.py` is the pure detector. A detector with no caller is
-still silence — the lesson `scan-prose-task-refs.py` already carries on this same board.
-This is the caller.
+Why a script and not just the module: `cosa/rest/task_store_epic_keys.py` is the pure
+detector. A detector with no caller is still silence, as `scan-prose-task-refs.py`
+already shows on this same board. This script is the caller.
 
-WHAT IT DOES
-    1. Pages the LIVE board (non-terminal rows only, which is what the epic accordion
+What it does:
+    1. Pages the live board (non-terminal rows only, which is what the epic accordion
        renders) plus the known epic keys from GET /api/epic-stories, in two fetches.
     2. Buckets every row's `correlation_key` by tenant and reports the ungroupable ones.
-    3. Prints the MANDATORY reach disclosure — on a clean run as well as a dirty one.
+    3. Prints the reach disclosure, on a clean run as well as a dirty one.
 
-⚠️ REACH, STATED HERE AND AGAIN IN THE OUTPUT. This covers EVERY creation path — the MCP
-verb, the hook lane, a raw POST, a future direct-repo call, hand-written SQL — because it
-reads the ROWS rather than the doors. What it does NOT do is PREVENT drift: between two
-runs the board can be wrong and nobody is told. And it cannot judge a `cc-task:*` mirror
-row, whose key is load-bearing for the mirror's idempotency probe and therefore not
-re-stampable; those are counted, never flagged. The module docstring has the full table.
+Reach, stated here and again in the output. The scan covers every creation path: the
+MCP verb, the hook lane, a raw POST, a future direct-repo call and hand-written SQL.
+It reads the rows rather than the doors. It does not prevent drift: between two runs
+the board can be wrong and nobody is told. It cannot judge a `cc-task:*` mirror row.
+Its key backs the mirror's idempotency probe and so cannot be re-stamped. Those rows
+are counted, never flagged. The module docstring has the full table.
 
-⚠️ THE API KEY IS GITIGNORED (`src/conf/keys/**`) AND IS THEREFORE ABSENT FROM EVERY
-WORKTREE. `read_api_key()` returns "" degrade-safe, the store answers 401, and a scan
-that swallowed that would read an EMPTY BOARD as a CLEAN BOARD — a confident negative to
-a question it never got to ask. So a bad fetch raises here and exits 2. Run from the main
-checkout, or point `--key-root` at it.
+The API key is gitignored (`src/conf/keys/**`), so it is absent from every worktree.
+`read_api_key()` then returns "" without failing, and the store answers 401. A scan
+that swallowed that would read an empty board as a clean board, a confident negative
+to a question it never got to ask. So a bad fetch raises here and exits 2. Run from
+the main checkout, or point `--key-root` at it.
 
-EXIT CODES
-    0  scanned, every row groupable
-    1  findings present (blank / foreign / unknown-slug keys)
-    2  could not reach the store / auth failure
-    3  scanned, but the board was truncated — the result is PARTIAL, treat as unknown
+Exit codes:
+    0  scanned, every row groupable.
+    1  findings present (blank / foreign / unknown-slug keys).
+    2  could not reach the store / auth failure.
+    3  scanned, but the board was truncated. The result is partial, so treat as unknown
 
 Usage:
     PYTHONPATH=src python src/scripts/scan-epic-key-drift.py [--max-rows 2000]
@@ -51,7 +49,8 @@ src_path = os.path.join( lupin_root, "src" )
 if src_path not in sys.path: sys.path.insert( 0, src_path )
 
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request, FETCH_BOARD_PAGE_SIZE
+from lupin_cli.claude_code.hooks.lib.task_store_client import fetch_board as _shared_fetch_board
 
 from cosa.rest.task_store_epic_keys import audit_rows, reach_disclosure
 
@@ -59,7 +58,7 @@ from cosa.rest.task_store_epic_keys import audit_rows, reach_disclosure
 # CEILING, not a forced value, and this IS tunable anywhere in 0..500 — the old comment said
 # "not a tunable", which was simply wrong (Tiberius, reviewing 2026-08-30). Kept at the
 # ceiling to minimise round-trips; lower it freely, raise it above 500 and the router 422s.
-PAGE_SIZE = 500
+PAGE_SIZE = FETCH_BOARD_PAGE_SIZE
 
 
 def fetch_board( settings, api_key, max_rows, include_terminal=False ):
@@ -72,39 +71,12 @@ def fetch_board( settings, api_key, max_rows, include_terminal=False ):
 
     Ensures:
         - returns ( rows, truncated ) where `truncated` is True iff the board has more
-          rows than were fetched — the caller MUST surface that, never absorb it
-        - RAISES on any non-ok response: a 401 that returned an empty list would scan
-          CLEAN, which is the exact false-green this scan exists to prevent
-        - never raises on a genuinely empty board
+          rows than were fetched — the caller must surface that, never absorb it
+        - raises on any non-ok response: a 401 that returned an empty list would scan
+          clean, which is the false green this scan exists to prevent
+        - never raises on an empty board
     """
-    rows      = [ ]
-    offset    = 0
-    truncated = False
-
-    while True:
-        # Ask for no more than the caller still has room for. A flat PAGE_SIZE here made
-        # `--max-rows` a page-stop THRESHOLD rather than a cap (row 9124b70a): `--max-rows 100`
-        # fetched 500 and then reported "truncated at 100 rows" — a figure the run never
-        # honoured. `max( 1, … )` is reachable only via a direct non-positive max_rows; the
-        # break below guarantees the subtraction is >= 1 on every later pass.
-        limit = max( 1, min( PAGE_SIZE, max_rows - len( rows ) ) )
-        query = ( f"include_terminal={'true' if include_terminal else 'false'}"
-                  f"&unscoped_audit=true&hide_parked=false"
-                  f"&limit={limit}&offset={offset}" )
-        ok, status, page = _request( "GET", f"{settings[ 'api_base_url' ]}/api/tasks?{query}",
-                                     api_key, settings[ "timeout_seconds" ] )
-        if not ok:
-            raise RuntimeError( f"HTTP {status}: {page.get( 'error' ) or page.get( 'detail' ) or page}" )
-        batch = page.get( "tasks", [ ] )
-        rows.extend( batch )
-        offset += len( batch )
-
-        if not page.get( "has_more" ) or not batch: break
-        if len( rows ) >= max_rows:
-            truncated = True
-            break
-
-    return ( rows, truncated )
+    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=include_terminal, request=_request, page_size=PAGE_SIZE )
 
 
 def fetch_known_epic_keys( settings, api_key ):
@@ -116,8 +88,8 @@ def fetch_known_epic_keys( settings, api_key ):
 
     Ensures:
         - returns a list of `epic:<slug>` strings with the `_README` key excluded
-        - returns None (NOT an empty list) when the endpoint cannot be read, so the
-          caller SKIPS the unknown-slug check rather than reporting every epic key as
+        - returns None (not an empty list) when the endpoint cannot be read, so the
+          caller skips the unknown-slug check rather than reporting every epic key as
           unknown — an unreadable key list must not manufacture findings
         - never raises
     """

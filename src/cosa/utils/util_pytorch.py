@@ -50,15 +50,14 @@ def release_gpu_memory( model: Optional[torch.nn.Module] ) -> None:
         - Model is moved to CPU device if provided
         - Garbage collection is triggered
         - CUDA cache is emptied if available
+        - The caller's reference to the model is untouched and still usable, now on the CPU
         
     Notes:
         - See: https://www.phind.com/search?cache=kh81ys0uelwxs8zpykdzv0d8
-        - This function attempts to free GPU memory
-        - Model parameter becomes None after function returns
+        - GPU memory is fully freed only once the caller drops its own reference to the model
     """
     if model is not None:
         model.to( torch.device( "cpu" ) )
-        del model
     
     gc.collect()
     if torch.cuda.is_available():

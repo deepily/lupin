@@ -10,7 +10,7 @@ Falls back to "general" if no category matches.
 
 Dependency Rule:
     This module imports from decision_proxy (Layer 3) for the ABC.
-    This module NEVER imports from notification_proxy.
+    This module never imports from notification_proxy.
 """
 
 from cosa.agents.decision_proxy.category_classifier import CategoryClassifier

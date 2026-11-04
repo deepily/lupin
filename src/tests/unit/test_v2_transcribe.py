@@ -11,6 +11,7 @@ Hermetic: the router is mounted on a bare FastAPI app and identity, the speech p
 pipeline and the config manager are overridden; the io-row writer is monkeypatched. :7999-eligible.
 """
 
+import copy
 import io
 import os
 import types
@@ -61,7 +62,8 @@ def io_rows( monkeypatch ):
     return rows
 
 
-def _app( provider, upload_dir, user=USER ):
+def _app( provider, upload_dir, user=None ):
+    if user is None: user = copy.deepcopy( USER )
     app = FastAPI()
     app.include_router( v2_ask.router )
     app.dependency_overrides[ v2_ask.get_current_user ]     = lambda: user

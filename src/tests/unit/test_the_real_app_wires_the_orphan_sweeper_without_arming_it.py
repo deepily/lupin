@@ -87,6 +87,16 @@ class TheAssembledAppWiresTheSweeperWithoutArmingIt( unittest.TestCase ):
         cls.names  = _names_reachable_from( lifespan.__code__ )
         cls.consts = _consts_reachable_from( lifespan.__code__ )
 
+        # The lifespan hands the INI gates to the step functions in lifespan_steps. A step the
+        # lifespan references contributes its own names and constants, because the gate keys
+        # live inside it now.
+        from lupin_app import lifespan_steps
+        for name in sorted( cls.names ):
+            step = getattr( lifespan_steps, name, None )
+            if step is not None and hasattr( step, "__code__" ):
+                cls.names  |= _names_reachable_from( step.__code__ )
+                cls.consts |= _consts_reachable_from( step.__code__ )
+
     def test_the_sweep_loop_exists_on_the_module_the_app_assembles( self ):
         self.assertTrue(
             hasattr( self.main, "notification_expiry_sweep_loop" ),

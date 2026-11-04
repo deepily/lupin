@@ -153,14 +153,11 @@ class CalculatorAgent( AgentBase ):
         """
         Dispatch CalcIntent to calc_operations — pure Python, no sandbox.
 
-        Overrides AgentBase.run_code() entirely — no code generation or execution.
-        Instead, dispatches the parsed CalcIntent to calc_operations functions.
-
-        When _fallback_to_math is True, delegates the entire pipeline to MathAgent
-        (which generates Python code via LLM — slower but handles anything).
+        Replaces AgentBase.run_code() entirely; nothing is generated or executed.
+        When _fallback_to_math is True, MathAgent (LLM-written code, slower, handles anything) takes over.
 
         Requires:
-            - self.calc_intent is set from run_prompt(), OR _fallback_to_math is True
+            - self.calc_intent is set from run_prompt(), or _fallback_to_math is True
 
         Ensures:
             - self.code_response_dict is set with return_code and output

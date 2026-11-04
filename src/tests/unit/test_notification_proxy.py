@@ -655,6 +655,29 @@ class TestProfileCoverage:
                 f"Profile 'all_agents' missing answer for '{arg_name}'"
 
 
+# Script files the live tests read by path, with no TEST_PROFILES key. Remove an entry when its profile lands.
+SCRIPTS_WITHOUT_A_PROFILE = { "tfe.json" }
+
+
+class TestProfileScriptPairing:
+    """Tests that each profile pairs with a Q&A script, found as the proxy finds it."""
+
+    def test_every_profile_resolves_to_a_script_file( self ):
+        """Every TEST_PROFILES key resolves, through the proxy's own resolver, to an existing file."""
+        assert TEST_PROFILES, "no profiles to check"
+        missing = [ k for k in TEST_PROFILES if not os.path.isfile( resolve_script_path( k ) ) ]
+        assert missing == [], f"profiles with no script file: {missing}"
+
+    def test_every_non_template_script_file_is_reached_by_a_profile( self ):
+        """Every script file, templates aside, is the target of some profile key."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        files       = sorted( f for f in os.listdir( scripts_dir ) if f.endswith( ".json" ) and not f.startswith( "_" ) )
+        assert files, "no script files found"
+        reached     = { os.path.basename( resolve_script_path( k ) ) for k in TEST_PROFILES }
+        orphans     = [ f for f in files if f not in reached and f not in SCRIPTS_WITHOUT_A_PROFILE ]
+        assert orphans == [], f"script files no profile reaches: {orphans}"
+
+
 # ============================================================================
 # Test Keyword Ordering Regression
 # ============================================================================
@@ -1621,7 +1644,7 @@ class TestMultiSenderIntegration:
         with open( path, "r" ) as f:
             script = json.load( f )
 
-        query_entries = [ e for e in script[ "entries" ] if e[ "arg_name" ] == "query" ]
+        query_entries = [ e for e in script[ "entries" ] if e.get( "arg_name" ) == "query" ]
         assert len( query_entries ) >= 1, "No query entries found"
 
     def test_integration_script_has_crud_entries( self ):

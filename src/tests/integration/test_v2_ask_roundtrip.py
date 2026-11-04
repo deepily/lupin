@@ -25,6 +25,9 @@ the full cold→warm cycle. Restoring THAT needs a consumer which is not the tes
 itself, AND a confirmation of the written row — see the xfail's own reason below,
 which used to name only the first and promised an XPASS it could not deliver.
 
+⚠️ 2026-10-02: the replay test's xfail mark was removed after it reported XPASS(strict) in
+ts-84720dde; the paragraph above describes the state before that. See the test's docstring.
+
 ⚠️ PART of the lost ground has since been retaken, and the distinction is worth
 keeping straight rather than reading this file as the last word.
 `test_v2_ask_serves_a_confirmed_row.py` proves on :8000 that a CONFIRMED row is
@@ -52,12 +55,25 @@ import pytest
 import requests
 
 from tests.integration.v2_queued import (
-    DRAIN_XFAIL_TIMEOUT, REPLAY_NEEDS_DRAIN_AND_CONFIRMATION, assert_handed_off,
+    assert_handed_off,
     assert_queued_in_todo, drop_from_todo, snapshot_id_for_question, wait_for_done,
 )
 
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
+
+def _with_lineage( body ):
+    """
+    Tag an /api/v2/ask body with its monopolizing suite job, when there is one.
+
+    Under a monopoly hold the queue defers every job that is not the monopolizer's own
+    child, so an untagged ask sits in `todo` until the suite ends (row 4cbd4858). The suite
+    job exports its id as LUPIN_TEST_MONOPOLIZE_PARENT_ID; `/api/v2/ask` takes it as
+    `parent_id_hash`. Outside a suite the variable is unset and the body is unchanged.
+    """
+    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+    return { **body, "parent_id_hash": parent_id } if parent_id else body
+
 
 _EMAIL    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
 _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
@@ -124,7 +140,7 @@ def test_v2_ask_hands_a_cold_question_to_the_queue( auth_headers ):
     from a slow consumer.
     """
     question, _expected_sum = _unique_math_question()
-    body   = { "question": question, "speak": False, "interactive": False }
+    body   = _with_lineage( { "question": question, "speak": False, "interactive": False } )
     job_id = None
     try:
         r1 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
@@ -148,42 +164,22 @@ def test_v2_ask_hands_a_cold_question_to_the_queue( auth_headers ):
         _cleanup_snapshot( snapshot_id_for_question( question ) )
 
 
-@pytest.mark.xfail( reason=REPLAY_NEEDS_DRAIN_AND_CONFIRMATION, strict=True )
 def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_headers ):
     """First ask queues, runs and writes back (cold miss); the second identical ask replays it.
 
-    🔴 STRICT XFAIL, NOT SKIP, AND NOT DELETED. This is the only end-to-end proof that the
-    shipped app writes a row and then serves it; nothing else covers it. Strict xfail keeps
-    it RUNNING, so a blocked claim cannot quietly turn into an unmade one — which is what a
-    skip would do.
+    🔴 THE XFAIL MARK CAME OFF 2026-10-02. In ts-84720dde (222ba140c) this test reported
+    `[XPASS(strict)]`, which strict xfail turns into a failure. The mark named two blockers
+    (the monopolized drain, row ce29cd20, and an unconfirmed answer refused by the step-9b
+    read guard, row 734bd1bf); the test passed with both named in the mark, after
+    /api/v2/ask lineage (933287956, fa08ea851) let a monopolizing suite job's asks run.
+    NOT MEASURED: why the unconfirmed row was replayed, given that
+    `test_v2_ask_serves_a_confirmed_row.py` still reports the unconfirmed case as `replay`
+    in the same run. Treat a later red here as a real regression, not a parked claim.
 
-    🔴 TWO THINGS BLOCK IT, AND THIS DOCSTRING USED TO NAME ONLY ONE. It said it would XPASS
-    "the day the box gains a consumer which is not the test itself." It would not, and a
-    reader acting on that sentence would take the mark off and get a red they could not
-    explain. A free consumer is NECESSARY and NOT SUFFICIENT:
-
-      1. THE DRAIN. Under monopolize the suite is itself the consumer, so the first job
-         never runs and no row is ever written. This is the half the old reason named.
-      2. THE READ GUARD. The second ask expects `path="replay"`, and `_may_serve`
-         (v2/flow.py, step 9b) serves a row only when `answer_is_correct is True`. Nothing
-         in this test ever confirms the answer — grep it: no `answer_is_correct`, no
-         confirmation step. So even with a free consumer, the row lands UNCONFIRMED, the
-         guard refuses, and the response comes back `path="agent"`.
-
-    ⇒ To make this XPASS honestly, a free consumer must be paired with a confirmation of
-    the written row between the two asks. Found by Tiffany while working row 734bd1bf; the
-    second cause is not theory — `test_v2_ask_serves_a_confirmed_row.py` drives the
-    confirmed and unconfirmed cases side by side and gets `replay` and `agent` respectively.
-
-    THE CLAIM IS STILL WORTH KEEPING AS AN XFAIL. Its subject is the cold→warm round trip
-    THROUGH THE QUEUE, which is genuinely drain-blocked; the seeded-row test proves a
-    confirmed row is served, which is a narrower claim and does not replace this one.
-
-    Its waits are bounded well under the usual ladder (DRAIN_XFAIL_TIMEOUT) — a body that
-    runs every gate costs every gate. Everything else below is the original test, unchanged.
+    Its waits use the standard hang guard, with no latency assertion. Everything else below is the original test, unchanged.
     """
     question, _expected_sum = _unique_math_question()
-    body       = { "question": question, "speak": False, "interactive": False }
+    body       = _with_lineage( { "question": question, "speak": False, "interactive": False } )
     queued_ids = [ ]
     try:
         # ── first ask: cold. Routed, then HANDED OFF — not run on this thread.
@@ -197,7 +193,7 @@ def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_hea
         )
 
         # ── the queue runs it. Landing in the done queue means the write-back has landed.
-        done = wait_for_done( BASE_URL, first[ "job_id" ], auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
+        done = wait_for_done( BASE_URL, first[ "job_id" ], auth_headers )
         assert done, f"first job completed with no metadata: {done}"
 
         snapshot_id = snapshot_id_for_question( question )
@@ -213,7 +209,7 @@ def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_hea
         queued_ids.append( assert_handed_off( second, expect_cache_hit=True, expect_path="replay" ) )
 
         # ── and the replay itself reaches a terminal answer, which is the point of a cache.
-        replayed = wait_for_done( BASE_URL, second[ "job_id" ], auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
+        replayed = wait_for_done( BASE_URL, second[ "job_id" ], auth_headers )
         assert replayed.get( "response_text" ) or replayed.get( "answer" ), (
             f"the replay completed with no answer — a cache hit that serves nothing is a "
             f"miss with extra steps: {replayed}"

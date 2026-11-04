@@ -23,7 +23,8 @@ from typing import Optional, Callable
 
 import cosa.utils.util as cu
 
-from cosa.agents.bug_fix_expediter.state import BFEPhase, DiagnosisResult, ProposedFix, FixResult
+from cosa.agents.shared.sdk_error_result import raise_error_result
+from cosa.agents.bug_fix_expediter.state import BFEPhase, BFE_PHASE_ORDINALS, DiagnosisResult, ProposedFix, FixResult
 from cosa.agents.bug_fix_expediter.prompts.diagnosis import (
     DIAGNOSIS_SYSTEM_PROMPT,
     build_diagnosis_prompt,
@@ -41,6 +42,7 @@ from cosa.agents.bug_fix_expediter.prompts.fix import (
 )
 from cosa.agents.bug_fix_expediter.plan_writer import PlanWriter
 from cosa.agents.shared.git_strategist import GitStrategist
+from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.fix_executor import FixExecutor
 
 # SWE Team reuse — safety, hooks, test runner (kept for back-compat;
@@ -125,6 +127,9 @@ class BFEOrchestrator:
         self.debug             = debug
         self.verbose           = verbose
         self.current_phase     = BFEPhase.PACKAGING
+
+        # Set by set_resume_phase() on a resumed run; None means every phase runs.
+        self._resume_from_ordinal : Optional[ int ] = None
 
         # Checkpoint state (Session 9056c113 Phase E.2) — phase methods populate
         # these as a side effect so save_checkpoint() can serialize mid-pipeline.
@@ -237,8 +242,10 @@ class BFEOrchestrator:
 
     def set_resume_phase( self, phase_ordinal: int ) -> None:
         """
-        Mark phases up to phase_ordinal as completed so phase methods can skip
-        work that has already been done on resume.
+        Record the checkpoint's phase ordinal so a resumed run reuses finished work.
+
+        run_diagnosis and run_proposal read it through resume_covers and skip the Lead agent
+        when the checkpoint already holds their output. The stalled gate is asked again.
 
         Requires:
             - phase_ordinal >= 0
@@ -267,6 +274,16 @@ class BFEOrchestrator:
             DiagnosisResult: Structured root cause analysis
         """
         from cosa.agents.bug_fix_expediter import voice_io, cosa_interface
+
+        # Resume short-circuit: the checkpoint already holds the diagnosis, so do not
+        # run the Lead agent again. A stall at the diagnosis gate still owes the human
+        # an answer; a stall at the proposal gate means this gate was already passed.
+        if resume_covers( self._resume_from_ordinal, BFE_PHASE_ORDINALS, BFEPhase.DIAGNOSING ) and self.diagnosis is not None:
+            if self.debug: print( f"[BFEOrchestrator] Diagnosis skipped via resume (ordinal={self._resume_from_ordinal})" )
+            self.current_phase = BFEPhase.DIAGNOSING
+            if resume_covers( self._resume_from_ordinal, BFE_PHASE_ORDINALS, BFEPhase.PROPOSING ):
+                return self.diagnosis
+            return await self._diagnosis_gate_or_stall( self.diagnosis, voice_io, cosa_interface )
 
         if not SDK_AVAILABLE:
             logger.error( "Claude Agent SDK not available — cannot run diagnosis" )
@@ -350,25 +367,7 @@ class BFEOrchestrator:
             best_diagnosis = self._fallback_diagnosis( "All diagnosis iterations produced no result" )
 
         # --- Voice gate (natural break point) ---
-        if not self._is_cancelled():
-            from cosa.agents.bug_fix_expediter.state import (
-                VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
-            )
-            try:
-                best_diagnosis = await self._voice_gate_diagnosis( best_diagnosis, voice_io, cosa_interface )
-            except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
-                # No human approved — whether the ask timed out or the gate itself
-                # broke. Same clean yield either way: checkpoint + stall so a human
-                # can answer on resume. The message names which, because the two
-                # are not the same event. (Session 9056c113 doc 16 Phase 1; row 421b9498)
-                self.diagnosis = best_diagnosis   # populate for save_checkpoint
-                checkpoint = self.save_checkpoint()
-                why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
-                raise StalledException(
-                    checkpoint = checkpoint,
-                    phase      = BFEPhase.DIAGNOSING.value,
-                    message    = f"Voice gate {why} at diagnosis",
-                )
+        best_diagnosis = await self._diagnosis_gate_or_stall( best_diagnosis, voice_io, cosa_interface )
 
         # --- Completion notification ---
         abstract = self._build_diagnosis_abstract( best_diagnosis )
@@ -378,6 +377,44 @@ class BFEOrchestrator:
         )
 
         return best_diagnosis
+
+    async def _diagnosis_gate_or_stall( self, diagnosis, voice_io, cosa_interface ):
+        """
+        Ask the diagnosis gate, or checkpoint and stall when no human answers.
+
+        Requires:
+            - diagnosis is a DiagnosisResult
+
+        Ensures:
+            - returns the approved or refined diagnosis, or the input when the run is cancelled
+            - a stall saves a checkpoint whose phase is diagnosing, the phase that was gated
+
+        Raises:
+            - StalledException when the gate timed out or could not reach a human
+        """
+        if self._is_cancelled(): return diagnosis
+
+        from cosa.agents.bug_fix_expediter.state import (
+            VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
+        )
+        try:
+            return await self._voice_gate_diagnosis( diagnosis, voice_io, cosa_interface )
+        except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
+            # No human approved — whether the ask timed out or the gate itself
+            # broke. Same clean yield either way: checkpoint + stall so a human
+            # can answer on resume. The message names which, because the two
+            # are not the same event. (Session 9056c113 doc 16 Phase 1; row 421b9498)
+            # The gate leaves current_phase at WAITING_CONFIRMATION, which has no
+            # ordinal, so name the phase that was gated before saving.
+            self.diagnosis     = diagnosis   # populate for save_checkpoint
+            self.current_phase = BFEPhase.DIAGNOSING
+            checkpoint = self.save_checkpoint()
+            why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
+            raise StalledException(
+                checkpoint = checkpoint,
+                phase      = BFEPhase.DIAGNOSING.value,
+                message    = f"Voice gate {why} at diagnosis",
+            )
 
     def queue_user_message( self, message: str, urgent: bool = False ) -> None:
         """
@@ -438,6 +475,7 @@ class BFEOrchestrator:
                 elif isinstance( message, TextBlock ):
                     collected_text.append( message.text )
                 elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "BFEOrchestrator", logger )
                     msg_text = getattr( message, "text", str( message ) )[ :200 ]
                     await self._notify( voice_io, msg_text, priority="low" )
                 elif isinstance( message, RateLimitEvent ):
@@ -487,11 +525,8 @@ class BFEOrchestrator:
         """
         Parse a DiagnosisResult from the Lead agent's raw text response.
 
-        Handles:
-            - Clean JSON objects
-            - JSON wrapped in markdown fences
-            - JSON embedded in prose text
-            - Parse failures (returns low-confidence fallback)
+        Handles clean JSON objects, JSON wrapped in markdown fences and JSON embedded in
+        prose. A parse failure returns a low-confidence fallback.
 
         Args:
             raw_response: Raw text from Lead agent
@@ -555,7 +590,7 @@ class BFEOrchestrator:
         """
         Create a low-confidence fallback DiagnosisResult.
 
-        The 0.1 confidence is deliberately below the default threshold (0.7)
+        The 0.1 confidence is set below the default threshold (0.7)
         to trigger refinement if iterations remain.
 
         Args:
@@ -598,10 +633,86 @@ class BFEOrchestrator:
         """
         from cosa.agents.bug_fix_expediter import voice_io, cosa_interface
 
+        # Resume short-circuit: the checkpoint already holds the proposals, so do not run
+        # the Lead agent again. Go straight to the gate that stalled; that is why we resumed.
+        if resume_covers( self._resume_from_ordinal, BFE_PHASE_ORDINALS, BFEPhase.PROPOSING ) and self.proposed_fixes:
+            if self.debug: print( f"[BFEOrchestrator] Proposal generation skipped via resume (ordinal={self._resume_from_ordinal}, {len( self.proposed_fixes )} proposals rehydrated)" )
+            self._last_diagnosis = diagnosis
+            self.current_phase   = BFEPhase.PROPOSING
+            fixes                = list( self.proposed_fixes )
+            plan_path            = self.plan_path or ""
+        else:
+            fixes, plan_path, done = await self._generate_proposals( diagnosis, voice_io )
+            if done: return ( fixes, None, plan_path )
+
+        # --- Voice gate (natural break point) ---
+        selected_fix = None
+        if not self._is_cancelled():
+            from cosa.agents.bug_fix_expediter.state import (
+                VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
+            )
+            try:
+                selected_fix = await self._voice_gate_proposal( fixes, voice_io, cosa_interface )
+            except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
+                # Nobody approved applying a fix — the ask timed out, or the gate
+                # broke. Either way: checkpoint + stall, never apply. (row 421b9498)
+                # Populate orchestrator state first so save_checkpoint captures it.
+                # The gate leaves current_phase at WAITING_CONFIRMATION, which has no
+                # ordinal, so name the phase that was gated before saving.
+                self.diagnosis      = diagnosis
+                self.proposed_fixes = fixes
+                self.plan_path      = plan_path
+                self.current_phase  = BFEPhase.PROPOSING
+                checkpoint = self.save_checkpoint()
+                why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
+                raise StalledException(
+                    checkpoint = checkpoint,
+                    phase      = BFEPhase.PROPOSING.value,
+                    message    = f"Voice gate {why} at proposal",
+                )
+
+            # Re-write plan with selection if user chose a fix
+            if selected_fix and plan_path:
+                try:
+                    writer = PlanWriter( user_email=self.dead_job_context.user_email, debug=self.debug )
+                    writer.write_plan(
+                        dead_job_context = self.dead_job_context,
+                        diagnosis        = diagnosis,
+                        proposed_fixes   = fixes,
+                        selected_fix     = selected_fix,
+                    )
+                except Exception as e:
+                    logger.warning( f"Plan document re-write failed: {e}" )
+
+        # --- Completion notification ---
+        fix_summary = f"{len( fixes )} fix(es) proposed"
+        if selected_fix:
+            fix_summary += f", selected: '{selected_fix.title}'"
+
+        await self._notify(
+            voice_io, f"Proposal complete. {fix_summary}",
+            priority="medium",
+            abstract=self._build_proposal_abstract( fixes, selected_fix )
+        )
+
+        return ( fixes, selected_fix, plan_path )
+
+    async def _generate_proposals( self, diagnosis: DiagnosisResult, voice_io ) -> tuple:
+        """
+        Have the Lead agent propose fixes and write the plan document.
+
+        Requires:
+            - diagnosis is a valid DiagnosisResult
+
+        Ensures:
+            - returns ( fixes, plan_path, done )
+            - done is True when the SDK is missing or the run was cancelled, and the caller returns at once
+            - a plan write failure is logged and leaves plan_path empty
+        """
         if not SDK_AVAILABLE:
             logger.error( "Claude Agent SDK not available — cannot run proposal" )
             fallback = self._fallback_proposal( "Claude Agent SDK not installed" )
-            return ( fallback, None, "" )
+            return ( fallback, "", True )
 
         # Store for voice gate retry access
         self._last_diagnosis = diagnosis
@@ -618,7 +729,7 @@ class BFEOrchestrator:
 
         # --- Cancellation check ---
         if self._is_cancelled():
-            return ( self._fallback_proposal( "Cancelled" ), None, "" )
+            return ( self._fallback_proposal( "Cancelled" ), "", True )
 
         # --- Drain user messages ---
         user_messages = self._drain_user_messages()
@@ -659,53 +770,7 @@ class BFEOrchestrator:
         except Exception as e:
             logger.warning( f"Plan document write failed: {e}" )
 
-        # --- Voice gate (natural break point) ---
-        selected_fix = None
-        if not self._is_cancelled():
-            from cosa.agents.bug_fix_expediter.state import (
-                VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
-            )
-            try:
-                selected_fix = await self._voice_gate_proposal( fixes, voice_io, cosa_interface )
-            except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
-                # Nobody approved applying a fix — the ask timed out, or the gate
-                # broke. Either way: checkpoint + stall, never apply. (row 421b9498)
-                # Populate orchestrator state first so save_checkpoint captures it.
-                self.diagnosis      = diagnosis
-                self.proposed_fixes = fixes
-                self.plan_path      = plan_path
-                checkpoint = self.save_checkpoint()
-                why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
-                raise StalledException(
-                    checkpoint = checkpoint,
-                    phase      = BFEPhase.PROPOSING.value,
-                    message    = f"Voice gate {why} at proposal",
-                )
-
-            # Re-write plan with selection if user chose a fix
-            if selected_fix and plan_path:
-                try:
-                    writer.write_plan(
-                        dead_job_context = self.dead_job_context,
-                        diagnosis        = diagnosis,
-                        proposed_fixes   = fixes,
-                        selected_fix     = selected_fix,
-                    )
-                except Exception as e:
-                    logger.warning( f"Plan document re-write failed: {e}" )
-
-        # --- Completion notification ---
-        fix_summary = f"{len( fixes )} fix(es) proposed"
-        if selected_fix:
-            fix_summary += f", selected: '{selected_fix.title}'"
-
-        await self._notify(
-            voice_io, f"Proposal complete. {fix_summary}",
-            priority="medium",
-            abstract=self._build_proposal_abstract( fixes, selected_fix )
-        )
-
-        return ( fixes, selected_fix, plan_path )
+        return ( fixes, plan_path, False )
 
     def _build_proposal_options( self ):
         """
@@ -734,11 +799,8 @@ class BFEOrchestrator:
         """
         Parse a list of ProposedFix from the Lead agent's raw text response.
 
-        Handles:
-            - Clean JSON arrays
-            - JSON wrapped in markdown fences
-            - JSON embedded in prose text
-            - Parse failures (returns single fallback proposal)
+        Handles clean JSON arrays, JSON wrapped in markdown fences and JSON embedded in
+        prose. A parse failure returns a single fallback proposal.
 
         Args:
             raw_response: Raw text from Lead agent
@@ -912,7 +974,7 @@ class BFEOrchestrator:
             # Was: fall through to `return diagnosis` — an auto-approval whose
             # return value was indistinguishable from a real one (row 421b9498).
             from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, VoiceGateUnreachableError
-            if isinstance( e, VoiceGateTimeoutError ):
+            if isinstance( e, ( VoiceGateTimeoutError, VoiceGateUnreachableError ) ):
                 raise
             logger.warning( f"Voice gate confirmation failed: {e} — refusing to approve for an absent human" )
             await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.DIAGNOSING )
@@ -990,9 +1052,7 @@ class BFEOrchestrator:
 
         Natural break point where user selects from proposals and approves.
         Auto-selects if single high-confidence fix. Supports feedback-driven
-        retry on rejection.
-
-        Future: Phase 5 will add trust proxy L1-L5 gating here.
+        retry on rejection. A later phase is meant to add trust proxy gating here.
 
         Args:
             fixes: List of ProposedFix proposals
@@ -1039,7 +1099,7 @@ class BFEOrchestrator:
                 # caller; they stay distinct types so the record says which.
                 # Was: fall through to `return auto` (row 421b9498).
                 from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, VoiceGateUnreachableError
-                if isinstance( e, VoiceGateTimeoutError ):
+                if isinstance( e, ( VoiceGateTimeoutError, VoiceGateUnreachableError ) ):
                     raise
                 logger.warning( f"Voice gate failed: {e} — refusing to apply a fix nobody approved" )
                 await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.PROPOSING )
@@ -1140,10 +1200,9 @@ class BFEOrchestrator:
         """
         Run the fix phase: Coder applies fix, Tester validates.
 
-        Session 1cfcdf73 (2026-04-10): Thin shim delegating to shared FixExecutor.
-        The BFE-specific concerns (state transitions, plan doc update, completion
-        notification, files_changed exposure) stay in this shim; the SDK loop,
-        retry logic, and escalation live in `shared/fix_executor.py`.
+        Thin shim delegating to shared FixExecutor. State transitions, plan document update,
+        completion notification and files_changed exposure stay in this shim.
+        The SDK loop, retry logic and escalation live in `shared/fix_executor.py`.
 
         Requires:
             - diagnosis is a valid DiagnosisResult
@@ -1232,12 +1291,10 @@ class BFEOrchestrator:
         plan_path: str,
     ) -> FixResult:
         """
-        Phase 5: Run git operations post-fix (commit / branch / PR).
+        Run git operations after the fix: commit only, or branch plus pull request.
 
-        Trust-to-git mapping:
-            - L1-L2 (shadow/suggest): commit_only on current branch
-            - L3+ (active): branch_and_pr via gh
-            - Proxy unavailable: commit_only (safe default)
+        Trust levels 1-2 (shadow, suggest) commit only, on the current branch.
+        Level 3 and above (active) use branch_and_pr via gh. An unavailable proxy commits only.
 
         Requires:
             - fix_result is a FixResult
@@ -1247,7 +1304,7 @@ class BFEOrchestrator:
         Ensures:
             - fix_result.git_strategy / commit_hash / branch_name / pr_url populated on success
             - Plan document Git References section updated
-            - State transitions: FIXING → COMMITTING → COMPLETED
+            - State transitions: `FIXING` to `COMMITTING` to `COMPLETED`
             - Skipped (no-op) if fix not successful or no files changed
 
         Args:
@@ -1295,6 +1352,7 @@ class BFEOrchestrator:
             pr_body=pr_body,
             trust_level=trust_level,
             notify_fn=_notify_fn,
+            push_enabled=self.config.push_fix_branch_enabled,
         )
 
         # Apply git result fields to FixResult
@@ -1310,7 +1368,7 @@ class BFEOrchestrator:
         return self._finalize_git_strategy( fix_result, plan_path, voice_io )
 
     def _finalize_git_strategy( self, fix_result: FixResult, plan_path: str, voice_io ) -> FixResult:
-        """Update plan doc with git references; used by run_git_strategy as exit hook."""
+        """Write git references into the plan doc; used by run_git_strategy as its exit hook."""
         try:
             writer = PlanWriter( user_email=self.dead_job_context.user_email, debug=self.debug )
             writer.update_git_references( plan_path, fix_result )
@@ -1320,15 +1378,14 @@ class BFEOrchestrator:
 
     def _resolve_trust_level( self ) -> int:
         """
-        Return trust level 1-5 from the proxy, falling back to L1 on failure.
+        Return trust level 1-5 from the proxy, falling back to level 1 on failure.
 
-        Session 1cfcdf73: Thin shim delegating to shared GitStrategist. Kept on
-        BFEOrchestrator for backwards compatibility with existing unit tests
-        that call `orch._resolve_trust_level()`.
+        Thin shim delegating to shared GitStrategist. Kept on BFEOrchestrator for
+        backwards compatibility with existing unit tests that call `orch._resolve_trust_level()`.
 
         Ensures:
             - Always returns int between 1 and 5
-            - L1 on any error (conservative default)
+            - Level 1 on any error (conservative default)
         """
         return GitStrategist.resolve_trust_level( self.proxy )
 
@@ -1337,9 +1394,8 @@ class BFEOrchestrator:
         """
         Generate a fix/YYYY-MM-DD-{slug} branch name from text.
 
-        Session 1cfcdf73: Thin shim delegating to shared GitStrategist. Kept on
-        BFEOrchestrator for backwards compatibility with existing unit tests
-        that call `BFEOrchestrator._generate_slug(...)`.
+        Thin shim delegating to shared GitStrategist. Kept on BFEOrchestrator for
+        backwards compatibility with existing unit tests that call `BFEOrchestrator._generate_slug(...)`.
 
         Requires:
             - text is a string (may be empty)
@@ -1398,6 +1454,7 @@ class BFEOrchestrator:
                 elif isinstance( message, TextBlock ):
                     collected_text.append( message.text )
                 elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "BFEOrchestrator", logger )
                     msg_text = getattr( message, "text", str( message ) )[ :200 ]
                     await self._notify( voice_io, msg_text, priority="low" )
                 elif isinstance( message, RateLimitEvent ):
@@ -1499,45 +1556,27 @@ class BFEOrchestrator:
     @asynccontextmanager
     async def worktree_scope( self ):
         """
-        Enter worktree isolation for Phase 3 + Phase 5 (run_fix + run_git_strategy).
+        Async context manager giving a job worktree isolation for run_fix and run_git_strategy.
 
-        Caller pattern (from job.py):
-            async with orchestrator.worktree_scope():
-                fix_result = await orchestrator.run_fix( ... )
-                if fix_result.success and orchestrator.last_files_changed:
-                    fix_result = await orchestrator.run_git_strategy( ... )
-
-        When `cosa worktree enabled` is true, a dedicated worktree is created
-        under `<sandbox_root>/<job_id>`. `_build_coder_options`,
-        `_build_tester_options`, and `run_git_strategy` automatically route
-        through `self._worktree_cwd`.
-
-        When disabled, the context is a no-op and emits a warning if the
-        current working tree has uncommitted changes (safety guard).
+        The caller in job.py wraps run_fix, then run_git_strategy when the fix succeeded and last_files_changed is set.
+        When `cosa worktree enabled` is true, a worktree is created under `<sandbox_root>/<job_id>`.
+        `_build_coder_options`, `_build_tester_options` and `run_git_strategy` then route through `self._worktree_cwd`.
 
         Ensures:
             - self._worktree_cwd is None on entry and exit (no leaked state)
             - Cleanup runs even if the caller raises
+            - When `cosa worktree enabled` is false the context is a no-op and warns if the current working tree has uncommitted changes (safety guard)
         """
-        from cosa.agents.shared.worktree_context import WorktreeContext
-        async with WorktreeContext( job_id=self.job_id, debug=self.debug ) as wt:
-            if wt.enabled:
-                self._worktree_cwd = wt.path
-                if self.debug: print( f"[BFEOrchestrator] Worktree isolation active: {wt.path}" )
-            else:
-                self._worktree_cwd = None
-                await self._warn_on_uncommitted_changes_if_any()
-            try:
-                yield wt
-            finally:
-                self._worktree_cwd = None
+        from cosa.agents.shared.worktree_context import worktree_scope
+        async with worktree_scope( self, "BFEOrchestrator" ) as wt:
+            yield wt
 
     async def _warn_on_uncommitted_changes_if_any( self ) -> None:
         """
-        Safety guard (Bug 9): when worktree isolation is disabled AND the
-        current working tree has uncommitted changes, log a visible warning.
+        Warn when worktree isolation is off and the working tree has uncommitted changes.
 
-        Does NOT block execution — the user opted into this mode by leaving
+        This is the safety guard for that mode. It logs a visible warning.
+        It never blocks execution, because the user opted into this mode by leaving
         `cosa worktree enabled=false`. Purely a heads-up.
         """
         try:
@@ -1587,7 +1626,7 @@ class BFEOrchestrator:
         Render the 'Worktree Artifacts' section of the BFE completion abstract.
 
         Pure static helper so unit tests can drive it directly. Returns an
-        empty list when no fix was applied AND no commit was made (nothing
+        empty list when no fix was applied and no commit was made (nothing
         to report).
 
         BFE is single-fix (vs. TFE's multi-cluster), so this reads a single
@@ -1618,11 +1657,8 @@ class BFEOrchestrator:
         """
         Compact single-line summary of a ToolUseBlock for progress notifications.
 
-        Replaces the old bare `Coder: {block.name}` breadcrumbs with a
-        tool-specific digest that surfaces the key argument. Parity with TFE's
-        `TFEOrchestrator._summarize_tool_use`. Truncated to 100 chars.
-
-        Filed 2026-04-18 (Session be57a252).
+        Gives a tool-specific digest that surfaces the key argument instead of the bare
+        tool name. Parity with TFE's `TFEOrchestrator._summarize_tool_use`. Truncated to 100 chars.
         """
         name = block.name
         inp  = block.input or {}

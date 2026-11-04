@@ -34,9 +34,16 @@ import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
+import { handleApproveLinkClick, handleApprovePriorityLinkClick, handleBatchApproveLinkClick, handleBatchViewLinkClick, handleViewLinkClick, observeApproveLinks, type ApproveSender, type TaskReader } from "./approveLink";
 import { buildConsolePageHref } from "../console/consolePageUrl";
+import { bindPodcastLinks } from "./podcastLinks";
 
-// Store surface this renderer drives (subset of ReadingPaneStore).
+/**
+ * The slice of the reading pane store the renderer drives.
+ *
+ * It is the layout, split ratio, current entry, open and back state, and the calls that change them.
+ * It also carries the action-required, abstract and console state and the pane content.
+ */
 export interface ReadingPaneStoreLike {
   getLayoutMode(): LayoutMode;
   getSplitRatio(): number;
@@ -57,21 +64,28 @@ export interface ReadingPaneStoreLike {
   showReading(): boolean;
 }
 
-// WP5 lift/drain reads each item's `state` — ActionRequiredStore.list() retains
-// responded/expired/cancelled items in a TERMINAL state (it never removes
-// them), so a raw `.length` never drains. We filter to the still-blocking
-// states (pending / submitting / failed).
+/**
+ * The state of one action-required item.
+ *
+ * The store keeps finished items in a terminal state, so the pane counts only pending, submitting and failed ones.
+ */
 export interface ActionRequiredItemLike {
   state: string;
 }
+/** The slice of the action-required store the pane counts from: its list. */
 export interface ActionRequiredCountLike {
   list(): ReadonlyArray<ActionRequiredItemLike>;
 }
 
-// Minimal window surface for bust-out (dependency-injected for testing).
+/**
+ * The slice of the window the pane uses to open a tab.
+ *
+ * It is `open`, called for the bust-out page, doc links and the console pop-out.
+ */
 export interface WindowLike {
   open(url?: string, target?: string, features?: string): WindowDocLike | null;
 }
+/** The document of a window opened for bust-out: it can be opened, written and closed. */
 export interface WindowDocLike {
   document: {
     open(): void;
@@ -80,6 +94,11 @@ export interface WindowDocLike {
   };
 }
 
+/**
+ * The master-detail reading pane: chrome, content, splitter and layout toggle.
+ *
+ * `mount` takes the `.content-shell` root and finds `.left-column` under it. The content pane, its buttons, the layout toggle and the doc-roots toggle are found by id on the document.
+ */
 export interface ReadingPaneRenderer {
   /** Attach to the `.content-shell` root (must contain the full pane DOM). */
   mount( root: HTMLElement ): void;
@@ -89,6 +108,11 @@ export interface ReadingPaneRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createReadingPaneRenderer`.
+ *
+ * The bus and the two stores are required. Without `consoleSeat`, bust-out stays disabled while the console shows.
+ */
 export interface ReadingPaneRendererOptions {
   eventBus : EventBus;
   stores   : {
@@ -102,12 +126,19 @@ export interface ReadingPaneRendererOptions {
    * it the pane cannot name a seat, so bust-out stays disabled while the console shows.
    */
   consoleSeat? : () => string | null;
+  /** The sender behind a one-click approve link; without it, approve links are left alone. */
+  approveSender? : ApproveSender;
+  /** Reads a row for a card's 📄 link and for the redraw check; without it both are off. */
+  taskReader? : TaskReader;
+  /** The abstract tooltip for the 📄 link in vertical layout. */
+  tooltip? : { showFor( anchor: Element, abstract: string ): void };
 }
 
-// Row 47759aa3 — the roots landing: /app/docs with NO ?path=. The doc viewer answers a
-// bare visit with the Roots panel expanded (Rick's ruling 2026-09-26, "A roots page, fully
-// open"), listing io/ plus every scope the LIVE /api/docs/scopes returns. No scope list
-// lives here, which is the whole point of bug 3d41fcba.
+/**
+ * The doc viewer's roots page: `/app/docs` with no `path` query.
+ *
+ * A bare visit lists every scope the live scope API returns.
+ */
 export const DOC_ROOTS_HREF = "/app/docs";
 const NAV_OFFSET_PX      = 100;   // nav strip height (legacy `:11140`)
 const TITLE_MAX          = 60;
@@ -116,12 +147,21 @@ const BUSTOUT_BASE_CSS   =
 
 interface ScrollAnchor { el: Element; top: number; }
 
+/**
+ * Paints the reading pane and wires its buttons, splitter and scroll anchoring.
+ *
+ * Reads state from the reading pane store and the action-required count.
+ */
 class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private readonly bus            : EventBus;
   private readonly store          : ReadingPaneStoreLike;
   private readonly actionRequired : ActionRequiredCountLike;
   private readonly win            : WindowLike;
   private readonly consoleSeat    : ( () => string | null ) | null;
+  private readonly approveSender  : ApproveSender | null;
+  private readonly taskReader     : TaskReader | null;
+  private readonly tooltip        : { showFor( anchor: Element, abstract: string ): void } | null;
+  private stopApproveWatch        : ( () => void ) | null = null;
   private readonly unsubscribers  : Array<() => void> = [];
 
   private mounted   : boolean = false;
@@ -155,11 +195,16 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private onBustClick      !: () => void;
   private onSplitterDown   !: ( ev: MouseEvent ) => void;
   private onDocClick       !: ( ev: MouseEvent ) => void;
+  // Play Here and Download on a finished podcast card (row 4bf48f78); the unbinder for unmount.
+  private unbindPodcast    : ( () => void ) | null = null;
   // Drag-session listeners (attached/detached per drag).
   private onDragMove       : ( ( ev: MouseEvent ) => void ) | null = null;
   private onDragUp         : ( () => void ) | null = null;
   private dragging         : boolean = false;
 
+  /**
+   * Stores the event bus, reading pane store, action-required count and window.
+   */
   constructor( opts: ReadingPaneRendererOptions ) {
     this.bus            = opts.eventBus;
     this.store          = opts.stores.readingPane;
@@ -167,12 +212,21 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     /* c8 ignore next */ // default-arg fallback to global window; tests always inject windowRef.
     this.win            = opts.windowRef ?? ( globalThis as unknown as { window: WindowLike } ).window;
     this.consoleSeat    = opts.consoleSeat ?? null;
+    this.approveSender  = opts.approveSender ?? null;
+    this.taskReader     = opts.taskReader ?? null;
+    this.tooltip        = opts.tooltip ?? null;
   }
 
   // -------------------------------------------------------------------------
   // Mount / unmount
   // -------------------------------------------------------------------------
 
+  /**
+   * Attaches the renderer to the content shell and subscribes to store changes.
+   *
+   * Finds its pane elements by selector and ID.
+   * Throws if already mounted or a required element is missing. Paints the initial state.
+   */
   mount( root: HTMLElement ): void {
     if (this.mounted) throw new Error("ReadingPaneRenderer.mount: already mounted");
 
@@ -213,6 +267,8 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.bustBtn.addEventListener("click", this.onBustClick);
     this.splitter.addEventListener("mousedown", this.onSplitterDown);
     document.addEventListener("click", this.onDocClick);
+    this.unbindPodcast = bindPodcastLinks();
+    if (this.taskReader !== null) this.stopApproveWatch = observeApproveLinks(document.body, this.taskReader);
 
     this.updateToggleTooltip();
 
@@ -235,6 +291,9 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.applyState();
   }
 
+  /**
+   * Removes every listener and subscription the renderer added and clears its root.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -246,6 +305,10 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.bustBtn.removeEventListener("click", this.onBustClick);
     this.splitter.removeEventListener("mousedown", this.onSplitterDown);
     document.removeEventListener("click", this.onDocClick);
+    this.unbindPodcast?.();
+    this.unbindPodcast = null;
+    this.stopApproveWatch?.();
+    this.stopApproveWatch = null;
     this.detachDragListeners();
 
     // Surrender any lifted AR widget back home so unmount leaves the DOM clean.
@@ -255,6 +318,9 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the pane from the store immediately; used by tests.
+   */
   forceRenderForTesting(): void {
     this.applyState();
   }
@@ -491,6 +557,15 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     // horizontal intercepted and rendered in the pane, vertical did not.
     // Rick's ruling 2026-09-26: a history doc link renders in the content area
     // wherever the layout puts it — on top of the accordion, or to the right.
+    // Row a3975cf4 — an approve link is claimed ahead of the doc-link branch: on a pane-resident
+    // surface (the action-required card) the doc-link branch opens a new tab for what it claims,
+    // and an approve link must never navigate anywhere.
+    if (this.approveSender !== null && handleApproveLinkClick(ev, target, this.approveSender)) return;
+    if (this.approveSender !== null && handleApprovePriorityLinkClick(ev, target, this.approveSender)) return;
+    if (this.approveSender !== null && handleBatchApproveLinkClick(ev, target, this.approveSender)) return;
+    if (this.taskReader !== null && handleViewLinkClick(ev, target, this.taskReader, (a, text, title) => this.showAbstractFor(a, text, title))) return;
+    if (this.taskReader !== null && handleBatchViewLinkClick(ev, target, this.taskReader, (a, text, title) => this.showAbstractFor(a, text, title))) return;
+
     if (this.routeDocLinkClick(ev, target)) return;
 
     // Everything below remains horizontal-only. The ruling was about doc links;
@@ -510,15 +585,36 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
       // encodeURIComponent to BOTH mux writer + reader — the opposite of this
       // fix. The raw/raw symmetry is the intended end-state.
       const abstract = indicator.getAttribute("data-abstract") ?? "";
-      // Second click on the SAME abstract toggles the pane closed (97bfb8c).
-      if (this.store.isAbstractShown(abstract)) {
-        this.store.close();
-        return;
-      }
-      this.store.open("abstract", abstract, this.deriveIndicatorTitle(indicator));
+      this.openAbstractInPane(abstract, this.deriveIndicatorTitle(indicator));
       return;
     }
 
+  }
+
+  /**
+   * Open an abstract in the pane, or close it when already showing.
+   *
+   * A second click on the identical abstract toggles the pane closed (97bfb8c).
+   * Returns false when the pane refused to open, because a live action-required card owns it.
+   */
+  private openAbstractInPane( abstract: string, title: string ): boolean {
+    if (this.store.isAbstractShown(abstract)) {
+      this.store.close();
+      return true;
+    }
+    return this.store.open("abstract", abstract, title);
+  }
+
+  /**
+   * Show text the way an abstract 📋 click does.
+   *
+   * Horizontal layout uses the pane and any other layout uses the tooltip beside `anchor`.
+   * When a live action-required card owns the pane the tooltip is used, as in the legacy client.
+   * The 📄 ticket link calls this, so it cannot open anything else.
+   */
+  private showAbstractFor( anchor: Element, abstract: string, title: string ): void {
+    if (this.store.getLayoutMode() === "horizontal" && this.openAbstractInPane(abstract, title)) return;
+    if (this.tooltip !== null) this.tooltip.showFor(anchor, abstract);
   }
 
   /**
@@ -723,14 +819,19 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   }
 }
 
-// Mount-time element resolvers — throw with a clear message when the required
-// shell DOM is absent (mirrors the FocusTrayRenderer/PersonaModalRenderer
-// pattern; after these run, every field is non-null at every use site).
+/**
+ * Returns the descendant of root matching the selector, and throws if there is none.
+ *
+ * Used at mount time so every pane element is known to exist.
+ */
 function req<T extends HTMLElement>( root: HTMLElement, selector: string ): T {
   const el = root.querySelector<T>(selector);
   if (el === null) throw new Error(`ReadingPaneRenderer.mount: ${selector} not found`);
   return el;
 }
+/**
+ * Returns the element with the given ID, and throws if the page has none.
+ */
 function reqId<T extends HTMLElement = HTMLElement>( id: string ): T {
   const el = document.getElementById(id) as T | null;
   if (el === null) throw new Error(`ReadingPaneRenderer.mount: #${id} not found`);

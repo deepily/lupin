@@ -14,11 +14,17 @@
 
 import type { StorageService } from "./StorageService";
 
+/** The four storage calls the resolver uses: read and write the queue id and the audio id. */
 export type TransportSessionIdStorage = Pick<
   StorageService,
   "getSessionId" | "setSessionId" | "getAudioSessionId" | "setAudioSessionId"
 >;
 
+/**
+ * The two session ids, one for the queue socket and one for the audio socket.
+ *
+ * They differ because the server keeps one socket per id.
+ */
 export interface TransportSessionIds {
   queueSessionId : string;
   audioSessionId : string;
@@ -27,6 +33,11 @@ export interface TransportSessionIds {
 // Attempts to draw an audio id that differs from the queue id before failing
 // loud. The production generator has 100 combinations, so 32 straight
 // collisions is a broken generator, not bad luck.
+/**
+ * How many times to draw an audio id before giving up.
+ *
+ * An id generator with 100 combinations that keeps matching the queue id is broken.
+ */
 export const MAX_AUDIO_ID_ATTEMPTS = 32;
 
 /**

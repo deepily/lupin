@@ -10,7 +10,7 @@ when anomalies are detected:
   - Recovery cooldown: prevents immediate re-graduation after trip
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 import time
