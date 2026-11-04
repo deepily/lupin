@@ -2,7 +2,7 @@
 capability: deep-research-voice-interface
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.deep_research.cosa_interface.reset_dispatch_context@906fca2640
+  - cosa.agents.utils.agent_notification_dispatcher.reset_dispatch_context@906fca2640
   - cosa.agents.utils.agent_notification_dispatcher.make_interface_functions@326b64aaa7
 ---
 # Deep research voice interface
@@ -16,7 +16,7 @@ pins:
 - `get_feedback` asks an open question and returns the transcribed answer, or `None`.
 - `present_choices` sends multiple-choice questions and returns a dict with the answers keyed by header. It forwards an optional `priority`.
 - Each call copies the module-level `SENDER_ID`, `TARGET_USER` and (for progress) `SESSION_NAME` into the dispatcher first.
-- `set_dispatch_context` stores per-task sender, user and session in context variables and returns tokens. `reset_dispatch_context` restores the earlier values and skips missing keys.
+- `set_dispatch_context` and `reset_dispatch_context` are defined in `agent_notification_dispatcher` and re-exported here. `set_dispatch_context` stores per-task sender, user and session in context variables and returns tokens. `reset_dispatch_context` restores the earlier values and skips missing keys.
 
 ## Don't
 - Don't set the module globals from pool jobs. Concurrent jobs share them; use `set_dispatch_context`.

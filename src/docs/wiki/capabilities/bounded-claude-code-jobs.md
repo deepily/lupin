@@ -5,7 +5,7 @@ pins:
   - cosa.agents.claude_code.job.ClaudeCodeJob@93cc5db2e6
   - cosa.agents.claude_code.job.ClaudeCodeJob.do_all@53e24c548b
   - cosa.orchestration.claude_code.dispatcher.TaskType@516e546e49
-  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@669f3fae51
+  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@cf95a5e1a7
   - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher.dispatch@06780c00bc
   - cosa.agents.utils.proxy_agents.base_config.get_anthropic_api_key@4d25966729
 ---
@@ -15,7 +15,7 @@ A `ClaudeCodeJob` runs one Claude Code task as a queue job. It rides the CJ Flow
 
 ## What it does
 - `ClaudeCodeJob` is an `AgenticJobBase` subclass; `do_all` runs the task through `AgenticJobBase._run_execute` and returns the conversational answer. A failure stores `Claude Code task failed: <error>` and is raised again.
-- `ClaudeCodeDispatcher.dispatch` routes on `TaskType`. `BOUNDED` runs to completion; `INTERACTIVE` is bidirectional and needs `claude-agent-sdk`.
+- `ClaudeCodeDispatcher.dispatch` routes on `TaskType`. `BOUNDED` runs to completion; `INTERACTIVE` is bidirectional and needs `claude-agent-sdk`. Both honour the task's `max_turns` and `timeout_seconds`.
 - Submit through `POST /api/v2/submit`, command `agent router go to claude code`, `args.task_type=BOUNDED`. A missing SDK fails only interactive tasks.
 
 ## Why it costs differently

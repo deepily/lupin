@@ -1,7 +1,10 @@
 ---
 capability: task-approve-priority-link
+pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.rest.task_priority_firewall.refusal_for_promote_priority
+  - cosa.rest.task_priority_firewall.refusal_for_promote_priority@b03a59afc5
+  - src.lupin_app.static.js.multiplexer.render.approveLink.approvePriorityLink@b9090ffbe4
+  - src.lupin_app.static.js.multiplexer.render.approveLink.handleApprovePriorityLinkClick@7ba0308cfc
 ---
 # One-click priority link
 

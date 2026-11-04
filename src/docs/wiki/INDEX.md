@@ -43,6 +43,8 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[app-timezone-readers]] — the one reader of the three INI time zone keys, with no default: a missing or unknown zone raises. `cosa.config` (app_timezone)
 - [[shared-utilities]] — path and project-root helpers, memory watch, Vertex logging, checked-hash bytecode. `cosa.utils`, `cosa.tools`
 - [[utils-admin-script-helpers]] — the banner runner, table-shape check and key-file writer shared by the one-off admin scripts. `cosa.utils` (admin_script_helpers)
+- [[utils-review-verdict-gate]] — the one-line reviewer verdict (tree, census counts, Merge or Fix) and the merger's check of it. `cosa.utils` (review_verdict)
+- [[utils-speech-text]] — turns markdown links and bare addresses into speakable text for the TTS doors and the spoken-length cap. `cosa.utils` (speech_text)
 - [[utils-atomic-json]] — the whole-file atomic JSON write and the never-raising section read. `cosa.utils` (atomic_json)
 - [[utils-stoppable-daemon]] — the start and stop of a polling daemon thread, shared by the arbiter and watcher classes. `cosa.utils` (stoppable_daemon)
 
@@ -334,6 +336,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[task-approve-link]] — the one-click approve link in a card: the line writer and both clients' click handlers. `cosa.rest` (task_approve_link) and `src/lupin_app/static/js/multiplexer` (render)
 - [[task-approve-priority-link]] — the optional third card link that admits a held row at a higher priority in one click. It covers the line writer, the click handlers and the operator-only check. `cosa.rest` (task_approve_link, task_priority_firewall), `lupin_mcp` and `src/lupin_app/static/js/multiplexer` (render)
 - [[task-approve-batch-link]] — one card link that moves a whole list of held rows: the line writer, the MCP verb and both clients' handlers. `cosa.rest` (task_approve_link), `lupin_mcp` and `src/lupin_app/static/js/multiplexer` (render)
+- [[task-approve-priority-link]] — the third link that admits a held row at a higher priority in one click, and the server rule on who may. `cosa.rest` (task_approve_link, task_priority_firewall) and `src/lupin_app/static/js/multiplexer` (render)
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
 - [[mcp-commons-ask-async]] — the polling-mode question post behind the `commons_ask_async` tool. `lupin_mcp` (commons_ask)
 - [[mcp-commons-archiver]] — the rotation of aged commons entries into daily archive files. `lupin_mcp` (commons_archival)
@@ -364,6 +367,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-nav-and-diagnostics]] — the navigation bar and the WebSocket diagnostic pages. `src/lupin_app/static/js`
 - [[web-client-task-forms-create]] — the shared create, lookup and agent-select scripts. `src/lupin_app/static/js`
 - [[web-client-task-forms-request]] — the shared task-request and argument-interview scripts. `src/lupin_app/static/js`
+- [[web-client-task-status-filter]] — the status chips of the live task list and the one table that defines them. `src/lupin_app/static/js/shared` (task-status-filter)
 - [[web-client-notifications-script]] — the older notifications page script and the chunk sequencer. `src/lupin_app/static/js`
 - [[web-client-testkit]] — the accordion and parity harnesses and fixtures used by the multiplexer tests. `src/lupin_app/static/js`
 - [[web-client-experimental-tts]] — the experimental TTS scripts. `src/lupin_app/static/js`
@@ -680,6 +684,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-render-action-required-readonly-and-queue]] — the non-interactive card, the empty line and the minimized row for a queued card. `src.lupin_app.static.js.multiplexer.render` (templates/actionRequiredReadOnly, actionRequiredQueueRow)
 - [[web-client-render-broadcast-and-commons-cards]] — the broadcast compose card and one row of its recent-activity list. `src.lupin_app.static.js.multiplexer.render` (templates/broadcastCard, commonsActivityEntry)
 - [[web-client-render-dom-and-doc-links]] — the small dom-update primitives the renderers share and the one place that decides what a doc link is. `src.lupin_app.static.js.multiplexer.render` (dom, docLink)
+- [[web-client-doc-relative-links]] — rewrites a document's relative markdown links to doc-viewer links. `src/lupin_app/static/js/multiplexer` (render, docPodcast)
 - [[web-client-render-html-tag]] — the html tagged template that builds a fragment and escapes every interpolated value as text. `src.lupin_app.static.js.multiplexer.render` (html)
 - [[web-client-render-job-bucket]] — one jobs bucket drawn as a section, its toggle, and the job card. `src.lupin_app.static.js.multiplexer.render` (templates/jobBucket, templates/jobCard)
 - [[web-client-render-job-meta]] — the size-capped fill of a job card's meta block so large json cannot freeze the page. `src.lupin_app.static.js.multiplexer.render` (templates/jobCard)

@@ -13,10 +13,13 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.keepPlace.paneIsOpen@3d66295cc7
   - src.lupin_app.static.js.multiplexer.render.keepPlace.captureKeepPlace@30f76b2bfc
   - src.lupin_app.static.js.multiplexer.render.keepPlace.restoreKeepPlace@6fef938518
+  - src.lupin_app.static.js.multiplexer.render.keepPlace.captureHistoryScroll@970d858c84
+  - src.lupin_app.static.js.multiplexer.render.keepPlace.historyKey@3c1f8c03fd
+  - src.lupin_app.static.js.multiplexer.render.keepPlace.restoreHistoryScroll@c37c593834
 ---
 # Multiplexer operator state and keep place
 
-Two helpers that carry the operator's context across a repaint: typed input and open controls, and the reader's scroll place in the card list.
+Two helpers carry the operator's context across a repaint. One keeps typed input and open controls. The other keeps the reader's scroll place in the card list and in each card's history.
 
 ## Operator state (`operatorState`)
 - `captureOperatorState( container )` reads state off markup about to be replaced. That is inputs, verb selects, pending priorities, error stripes, disclosed rows, and focus with the caret. It reads only inside `container`.
@@ -30,3 +33,5 @@ Two helpers that carry the operator's context across a repaint: typed input and 
 - `paneIsOpen( doc )` is true when `.content-shell` has `pane-open`, so the left column owns the scroll.
 - `captureKeepPlace( mount, doc, win )` is null when the reader is at the top. Otherwise it remembers a few cards at or below the strip.
 - `restoreKeepPlace( mount, candidates, doc, win )` anchors on the first remembered card still listed that did not move up. It scrolls by how far that card's top moved.
+- `captureHistoryScroll( mount )` remembers, before the cards are merged, every `.date-accordion-messages` pane scrolled away from its top. The key is `historyKey( cardKey, dayKey )`: the card's `data-id-hash`, then the day's `data-date-key`, empty when none. An empty map means nothing is scrolled.
+- `restoreHistoryScroll( mount, remembered )` writes those offsets back after the merge, onto the pane that now stands for that card and day. Moving a card resets its scrollers. A pane that is gone is skipped.

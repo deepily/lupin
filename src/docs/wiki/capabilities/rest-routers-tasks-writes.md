@@ -3,7 +3,7 @@ capability: rest-routers-tasks-writes
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.routers.tasks.TaskCreateIn@ca33745685
-  - cosa.rest.routers.tasks.TaskTransitionIn@e00e7dcdc2
+  - cosa.rest.routers.tasks.TaskTransitionIn@dabc2c8071
   - cosa.rest.routers.tasks.UnparkAskIn@287a548d04
   - cosa.rest.routers.tasks.TaskCorrelateIn@22e61de319
   - cosa.rest.routers.tasks.TaskAmendIn@2696c629b7
@@ -21,7 +21,7 @@ The routes of `cosa.rest.routers.tasks` that change an item, under `/api`. All t
 
 ## What it does
 - `create_task`, `POST /tasks` (`TaskCreateIn`): makes one row with 201. An omitted status takes the approval default. An over-long title is trimmed. The overflow becomes the body when the body is empty, and is appended to it after an overflow marker line when it is not. The priority firewall answers 403 for a priority the caller may not set. A manager relaying the operator's word for P0 is filed as a petition at P1 instead.
-- `transition_task`, `POST /tasks/{id}/transition` (`TaskTransitionIn`): one state change. Done needs `receipt_refs`, blocked needs typed `blocked_by`, dropped needs a `reason`, parked needs `park_reason`. Returns `{ item, event }`. With `asynchronous: true` and the operator flag on, a promotion that needs the owner's answer writes only a promotion ticket. It returns 202 `{ status: "awaiting_human_approval", ticket_id, ... }`.
+- `transition_task`, `POST /tasks/{id}/transition` (`TaskTransitionIn`): one state change. Done needs `receipt_refs`, blocked needs typed `blocked_by`, dropped needs a `reason`, parked needs `park_reason`. Returns `{ item, event }`. A body `promote_priority` (`P0` to `P5`) raises the priority and admits the row in one event. Only the operator's login may ([[rest-services-task-feed-and-priority-firewall]]). With `asynchronous: true` and the operator flag on, a promotion that needs the owner's answer writes only a promotion ticket. It returns 202 `{ status: "awaiting_human_approval", ticket_id, ... }`.
 - `correlate_task`, `.../correlate` (`TaskCorrelateIn`): re-stamps the `correlation_key`. A terminal row is 422.
 - `ask_to_unpark`, `.../unpark-ask` (`UnparkAskIn`): a manager seat asks the operator to un-park a row. The server makes a yes or no card and pushes it. It is 403 for a non-manager and 404 for no such row or no operator account. It is 409 for a row not parked, one with no recorded park time, or one with a card already waiting. It writes no task event.
 - `amend_task`, `.../amend` (`TaskAmendIn`): appends a stamped note to the body, and a blank note is 422. It is allowed on a closed row, where the note is marked a post-terminal addendum.

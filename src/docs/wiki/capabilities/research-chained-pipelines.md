@@ -3,9 +3,9 @@ capability: research-chained-pipelines
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@4a1d837f6a
-  - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@7b8bd235de
+  - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@bd6ea9a38b
   - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@72e351514a
-  - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@062895fbcb
+  - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@26f026a7b9
   - cosa.agents.deep_research_to_podcast.state.ChainedResult@69c6756c1a
   - cosa.agents.deep_research_to_presentation.state.ChainedResult@5d8d002f2d
   - cosa.agents.deep_research_to_podcast.state.PipelineState@4b3355bdf0
@@ -16,7 +16,7 @@ pins:
 Two queue jobs run [[deep-research]] and then hand its saved report to [[podcast-generation]] or [[presentation-generation]], as one job. `DeepResearchToPodcastJob` and `DeepResearchToPresentationJob` are `AgenticJobBase` subclasses (see [[agentic-job-contract]]); each builds a chained agent and runs it.
 
 ## What it does
-- The agent runs research first, then passes the saved report path to the second generator: as `research_doc_path` for the podcast, as `source_path` for the presentation.
+- The agent runs research first, then passes the saved report path to the second generator: as `research_doc_path` for the podcast, as `source_path` for the presentation. Each leg of the podcast chain sets the module-level `TARGET_USER`. The presentation chain also sets it per task in the dispatch context ([[agent-voice-io]]).
 - The agent skips the second step if research was cancelled (state `CANCELLED`) or returned no `report_path` (state `FAILED`). Topics that research skipped show as a "Skipped topics" line on the cards ([[deep-research]]).
 - Any exception after the voice setup ends the run with state `FAILED` and `error` set; the agent returns the result instead of raising. The job then raises on `FAILED`, so the queue records a failure. A cancelled run returns a text answer and does not raise.
 - `ChainedResult` carries both legs' cost (`dr_cost`, `pg_cost`) and `total_cost`, their sum. `is_partial()`, shared through `ChainedResultMixin`, is true when the state is `DEEP_RESEARCH_DONE` or `FAILED`, `research_path` is set and the final artifact is `None`. The final artifact is `audio_path` for the podcast and `yaml_path` for the presentation. A cancelled run is not partial.

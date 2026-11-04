@@ -15,7 +15,7 @@ pins:
 ---
 # DOM merge helpers and doc-link rules
 
-`dom.ts` holds the small DOM-update primitives the renderers share, and `docLink.ts` is the one place that decides what a doc link is.
+`dom.ts` holds the small DOM-update primitives the renderers share, and `docLink.ts` is the one place that decides what a doc link is. Relative links in a document are in [[web-client-doc-relative-links]].
 
 ## What it does
 - `replaceChildren( parent, incoming )` calls the native `parent.replaceChildren( incoming )`. It gives wholesale replacement one name.
@@ -30,7 +30,6 @@ pins:
 - `normalizeDocLinkHref` strips a leading `http(s)://localhost`, `127.0.0.1` or `0.0.0.0` origin, with its port. It returns null for a null or empty href.
 - `isDocLinkHref` is true when the normalized href starts with `/app/docs?path=`.
 - `isPaneResidentAnchor` is true when the anchor sits inside `#action-required-content`, `#action-required-section` or `.abstract-tooltip`.
-
 ## How the parts work together
 Renderers call `keyedListMerge` so a repaint changes only the cards that changed. Doc links go through `isDocLinkHref`, so the markdown emitter and the reading pane agree on what a doc link is. A pane-resident anchor keeps opening a new tab, because routing it into the reading pane would delete the live response buttons.
 

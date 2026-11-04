@@ -9,7 +9,7 @@ pins:
   - cosa.agents.utils.voice_io.read_gate_answer@c775d66871
   - cosa.agents.utils.voice_io.VoiceGateNoDefaultError@8a7e015aa2
   - cosa.agents.utils.agent_notification_dispatcher.AgentNotificationDispatcher@5c85fcc6a7
-  - cosa.agents.deep_research.cosa_interface.set_dispatch_context@fb2623d695
+  - cosa.agents.utils.agent_notification_dispatcher.set_dispatch_context@fb2623d695
   - cosa.agents.deep_research.voice_io.reconfigure@8265f4719a
   - cosa.agents.utils.sender_id.build_sender_id@e3f42ed236
   - cosa.agents.utils.sync_notify.notify@71446723de
@@ -30,7 +30,7 @@ How a job tells the user something or asks a question: by voice when a notificat
 
 ## Invariants
 - One module-level interface binding serves the whole process, so the last `configure()` wins. Six agents define `voice_io.reconfigure()` (bug_fix_expediter, deep_research, podcast_generator, presentation_generator, swe_team, test_suite); it re-asserts that agent's binding, so call it at the start of a job.
-- Inside the agentic pool, set the sender, user and session name with the agent's `set_dispatch_context()` (ContextVars). Writing the module-level `SENDER_ID` or `TARGET_USER` leaks one job's identity onto a concurrent job's notifications.
+- Inside the agentic pool, set the sender, user and session name with `set_dispatch_context()` (ContextVars), defined in `agent_notification_dispatcher` and re-exported by each agent's `cosa_interface`. Writing the module-level `SENDER_ID` or `TARGET_USER` leaks one job's identity onto a concurrent job's notifications.
 - `notify` never raises: a failed dispatch falls back to `print`.
 
 ## How to extend
