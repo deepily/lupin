@@ -16,6 +16,13 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-04 (Cheech 🌿 `ebd974b4`, crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped; times Eastern)
+
+- **Wiki clean-up before the PR.** Rick released the 13 held PR-readiness and wiki rows by voice and said to staff up and dispatch them. The wiki lint went from 204 findings to 0.
+- **Park anything that needs a full test rerun** (broadcast `87304695`). It resumes on the new branch, once everyone agrees the PR work is finished. Parked: María's duplicate-check fixes (`refs/parked/v0.2.3-maria-dupcheck-fixes`), rows 10691b4f and 77718bf0, and Rio's two P3 rows.
+- **The session-end ritual, with a push and a backup, comes before the PR** (Rick, 16:45, comment on the push ask).
+- **Pending, for Rick**: whether to free GPU 0 for María's duplicate-check rerun, since vLLM holds 17 GB. Also, the slug for wip-v0.2.3.
+
 ## 📚 Decisions log 2026-11-03 (Cheech 🌿 `d5ed7a66`, crew Sam; times Eastern)
 
 - **Push on this branch is routine.** Rick: a push of the working branch is everyday work and needs no ask. An allow rule for the branch is wanted, to be moved to the new branch at the switchover.

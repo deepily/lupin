@@ -12,6 +12,7 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-10-14-to-23](2026-10-14-to-23-history.md) | Oct 14 – Oct 23, 2026 | 9 entries | Mr. Radio's and Cheech's manager sessions of 2026-10-14 through 10-23, moved verbatim; not summarised here, read the entry titles |
 | [2026-10-06-to-08](2026-10-06-to-08-history.md) | Oct 6 – Oct 8, 2026 | 7 entries | Mr. Radio's and Cheech's manager sessions of 2026-10-06 through 10-08, moved verbatim; not summarised here, read the entry titles |
 | [2026-09-23-to-10-05](2026-09-23-to-10-05-history.md) | Sep 23 – Oct 5, 2026 | 19 entries | Mr. Radio's and Cheech's manager sessions of 2026-09-23 through 10-05, moved verbatim; not summarised here, read the entry titles |
 | [2026-09-06-to-19](2026-09-06-to-19-history.md) | Sep 6 – Sep 19, 2026 | 13 entries | Mr. Radio's manager sessions of 2026-09-06 through 09-19, moved verbatim; not summarised here, read the entry titles |
