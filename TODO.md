@@ -16,6 +16,16 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-03 (Cheech 🌿 `d5ed7a66`, crew Sam; times Eastern)
+
+- **Push on this branch is routine.** Rick: a push of the working branch is everyday work and needs no ask. An allow rule for the branch is wanted, to be moved to the new branch at the switchover.
+- **What's new is strategic.** Rick: the v0.2.2 section had too much detail. It keeps strategic changes only, with no record of what Rick said or did. Older sections move into `VERSION-HISTORY.md`, rewritten to pass doclint.
+- **What's new links the docstring explainer and the doc viewer's "Make a podcast" flow.**
+- **The 60 labelled pairs are parked until 17 Nov** (row 8f2df1b7).
+- **No deadline for Mr. Radio's tickets.** The PR waits until his crew is done; it opens only on Rick's word.
+- **The v2_ask cap fix: "Keep it and drop the cap"** (row 3b78303b, merged as `189018592`).
+- **Container drift turned out to be a probe bug.** No rebuild was needed. Row e067c6b3 (rebuild containers) is held but its premise was wrong; Rick should not approve it.
+
 ## 📚 Decisions log 2026-11-02 evening (Cheech 🌿, crew John, Pocholo, Sam, Rachel, Chloé; times Eastern)
 
 - **Plan 3's rollout section, from Rick's cards 17:26 to 17:50.** His first nine rulings are in the rollout section's table of `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.24-reuse-detection-remediation-plan.md`. María's workflow (track A) landed first, as Rick asked at 17:53.
