@@ -1280,7 +1280,7 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
                 units.append( ( f"{field}[{i}].question", q[ "question" ] ) )
 
     for label, text in units:
-        n = len( strip_markdown_links_for_speech( text ).strip() )   # speech says a link's label only
+        n = len( strip_markdown_links_for_speech( text ).strip() )   # the cap counts what is spoken: a link is its label plus the URL-omitted marker
         if n > cap:
             raise ValueError(
                 f"Spoken `{label}` is {n} chars (cap {cap}). The spoken channel is "
