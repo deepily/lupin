@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.03 - Session d5ed7a66 (Cheech 🌿, manager; crew Sam) | What's new for v0.2.2 rewritten, the PR's merge gates run at d8747550c, three smoke rows filed
+
+- **What's new.** `WHATS-NEW.md` now holds only v0.2.2, rewritten for the strategic picture (about 690 words, `210e13d00`). The older sections moved into `VERSION-HISTORY.md`, reworded to pass doclint (`09b8de142`). The README's what's-new paragraph names v0.2.2 (`d87173ae1`).
+- **Merges this evening** (Mr. Radio's crew): the e2e tooltip race fix (`dd2f102bb`), the v2_ask hang-guard fix (`189018592`) and the decision-proxy explainer (`d8747550c`, the pushed head).
+- **Gates at d8747550c**: typecheck 3/3, stylelint 42/42, doclint 1,026/1,026 and reuse all pass. Unit and cosa pass (Sam). Coverage exit 2: it needs the :8000 server's coverage of `main.py`, from one run with `LUPIN_SERVER_COVERAGE=1`.
+- **Smoke at 210e13d00**: 5 failed, 559 passed.
+  - The phase6b gate passes when run alone.
+  - The two compose-drift reds are a probe bug (row 21b96c4f, Rio). The secret mounts and `GH_TOKEN` are present.
+  - The research-to-presentation test sends its asks to Rick's account, then loses the job (row 61c7123f, Chloé).
+  - The SWE team proxy test gets no answer to its notification (row 72d25810, Chloé).
+  - All three rows are held for Rick.
+- **PR body draft** (strategic style, gate table empty): `/tmp/claude-1001/-mnt-DATA01-include-www-deepily-ai-projects-lupin/daeedcae-ec34-4635-b1f9-09eb30025393/scratchpad/pr-body-v0.2.2-draft.md`, copied to `io/mementos/cheech-pr-body-v0.2.2-draft.md`.
+- **Owed next session**: the :8000 coverage run with e2e_a and integration in the same pass, the three smoke rows, then the PR on Rick's word.
+
 ## 2026.11.02 - Session ade365b2 (Mr. Radio 🦉, manager; crew Clayton, Rio, Maya, all reaped) | One 1.1.6 image on :7999, :8000 and the test VM; Keep place fixed in both clients; the SDK bump reviewed
 
 ### Checkpoint | 2026.11.02 22:45 | 📷 for Rick's 22:45 ritual
