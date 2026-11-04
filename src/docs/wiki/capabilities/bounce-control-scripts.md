@@ -13,13 +13,13 @@ pins:
   - scripts.capture-bounce-resubmit.format_report@ec464d881b
   - scripts.capture-bounce-resubmit.main@48e89fdc14
   - scripts.compose_drift_probe.compose_tmpfs@328800b350
-  - scripts.compose_drift_probe.compose_mounts@ab88babe8d
+  - scripts.compose_drift_probe.compose_mounts@ecc751a14c
   - scripts.compose_drift_probe.inspect_mounts@65370334c8
   - scripts.compose_drift_probe.inspect_env@6049eb4b38
-  - scripts.compose_drift_probe.drifted_fields@d1002af11c
+  - scripts.compose_drift_probe.drifted_fields@2611ec68f3
   - scripts.compose_drift_probe.run_json@a48f9396f3
   - scripts.compose_drift_probe.compose_argv@a9c3e13752
-  - scripts.compose_drift_probe.probe@a5354e75e8
+  - scripts.compose_drift_probe.probe@77e8596b89
   - scripts.compose_drift_probe.main@9c17bfd4f9
 ---
 # Server bounce control scripts
@@ -30,5 +30,6 @@ Scripts that guard a container bounce ([[dev-server-lifecycle]]). A bounce of th
 - `run_capture_bounce_resubmit` runs the whole control, `format_report` renders it, and `main` returns 0 for ok, 2 for missing credentials and 1 when the bounce fails.
 - `bounce_dev_warn.py` posts the pre-bounce warning and waits for each recipient to ack. Its `main` is the entry point.
 - `compose_drift_probe.py` compares a running container with the compose service that built it. A restart keeps old tmpfs, mounts and environment values.
-- `compose_tmpfs`, `compose_mounts`, `inspect_mounts` and `inspect_env` put both sides in one shape. `drifted_fields` names every compose value the container lacks.
-- `run_json` and `compose_argv` run the docker commands. `probe` makes the comparison, and `main` prints the verdict. For tmpfs or mount drift, exit 10, it adds one `RECREATE_ARG=` line per argument of the recreate command. For environment drift, exit 11, it prints that command for a person instead.
+- `compose_tmpfs`, `compose_mounts`, `inspect_mounts` and `inspect_env` put both sides in one shape. `compose_mounts` also counts each file-backed compose secret as a read-only bind mount at `/run/secrets/<target>`, because compose lists secrets apart from volumes. A tmpfs mount has an empty source on both sides, so it never reads as drift on that alone.
+- `drifted_fields` names every compose value the container lacks. A blank environment key in compose is skipped when the container holds a value. The blank came from a shell variable the caller did not export.
+- `run_json` and `compose_argv` run the docker commands. `probe` makes the comparison (it passes the rendered secrets' host files to `drifted_fields`), and `main` prints the verdict. For tmpfs or mount drift, exit 10, it adds one `RECREATE_ARG=` line per argument of the recreate command. For environment drift, exit 11, it prints that command for a person instead.

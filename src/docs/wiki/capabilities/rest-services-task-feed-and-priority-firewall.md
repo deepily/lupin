@@ -13,6 +13,7 @@ pins:
   - cosa.rest.task_priority_firewall.caller_is_manager_by_bridge@28a178a2e9
   - cosa.rest.task_priority_firewall.session_id_from_actor@669dd8ec84
   - cosa.rest.task_priority_firewall.petition_is_available@0c4a2104d7
+  - cosa.rest.task_priority_firewall.refusal_for_promote_priority@b03a59afc5
 ---
 # Task change feed and priority firewall
 
@@ -27,6 +28,8 @@ The push that tells web panes a task changed, and the rules on who may set a pri
 - `caller_is_manager( bridge_role, account_email )` is true for a bridge role of `manager` or for the operator. `caller_is_manager_by_bridge` resolves the role from the session id inside `actor`, and is false if the bridge cannot be read.
 - `session_id_from_actor( actor )` returns the last token when it looks like a session id (8 or more hex-like characters), else `None`.
 - `petition_is_available` is true only for a manager, not the operator, asking for P0 with `authority` exactly `user_direct`. A worker escalates through a manager.
+
+- `refusal_for_promote_priority( promote_priority, current_priority, from_status, to_status, account_email )` judges a one-click raise-and-admit request. It returns `None` when none was asked for. Otherwise it returns a refusal unless four things hold. The caller is the operator's validated login. The move is `not_approved` to `queued`. The value is exactly `P0` to `P5`. It ranks above the row's current priority. It never reads `actor` and never raises. The transition route turns a refusal into a 403 before any other gate.
 
 ## Don't
 - Don't use a savepoint in code that writes task events. A savepoint rollback drops parked events and a release can push early.

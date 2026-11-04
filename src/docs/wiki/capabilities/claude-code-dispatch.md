@@ -2,7 +2,7 @@
 capability: claude-code-dispatch
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@669f3fae51
+  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@cf95a5e1a7
   - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher.dispatch@06780c00bc
   - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher.inject@293ad2efde
   - cosa.orchestration.claude_code.dispatcher.Task@85461d6614
@@ -30,8 +30,8 @@ pins:
 - The bounded path prints `[DEBUG]` lines whatever the `debug` flag says.
 
 ## Interactive mode
-- It opens a `ClaudeSDKClient` with the same tools, a stdio `cosa-voice` server and a system prompt that names the task's `sender_id`.
-- It streams every message to `on_message`, then sends the next queued message, if any. A result message with `is_error` is raised and returned as the error, with the same renew-login sentence on a 401. It succeeds only if a result message arrived; otherwise the error is `No result received`.
+- It opens a `ClaudeSDKClient` with the same tools, the task's `max_turns`, a stdio `cosa-voice` server and a system prompt that names the task's `sender_id`.
+- It streams every message to `on_message`, then sends the next queued message, if any. A result message with `is_error` is raised and returned as the error, with the same renew-login sentence on a 401. It succeeds only if a result message arrived; otherwise the error is `No result received`. The whole session, queued follow-ups included, shares one deadline of `timeout_seconds`. Past it the session is dropped and the result is a failure, `Task timed out after Ns`, exit code -1.
 - `inject`, `interrupt`, `end_session` and `get_active_sessions` work on the open session. `inject` queues the message and, by default, interrupts the session. With `preserve_context` on, its default, and some history, it prepends `MessageHistory.get_context_prompt`. No code outside the tests calls them.
 - `SessionInfo` holds one open session's client, its pending-message queue, a running flag and its history.
 - `MessageHistory` keeps the original prompt and the turns. By default it keeps the first 500 characters of each and adds `...` to any that were longer.

@@ -2,7 +2,7 @@
 capability: web-client-notification-panes
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.NotificationsListRendererImpl@59a443eed9
+  - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.NotificationsListRendererImpl@3e37d70724
   - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@a043ea5b2c
   - src.lupin_app.static.js.multiplexer.stores.ActionRequiredStore.ActionRequiredStoreImpl.respondAndAwait@5bf13c5c25
   - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@ffe2082dc8
@@ -15,7 +15,7 @@ pins:
 Each pane renderer owns one mount node and repaints from store events on the bus. Stores are in [[web-client-stores]]; frames are in [[websocket-events]].
 
 ## What it does
-- `NotificationsListRendererImpl` paints sender cards and throws on mount without `#sender-cards-container`. Notification, sender and vote events only schedule one microtask render. When the `notifications_keep_place` preference is `true`, a render captures the reader's place and restores it afterwards.
+- `NotificationsListRendererImpl` paints sender cards and throws on mount without `#sender-cards-container`. Notification, sender and vote events only schedule one microtask render. When the `notifications_keep_place` preference is `true`, a render captures the reader's place and restores it afterwards, and also each card's scrolled notification-history panes ([[web-client-render-operator-state-and-keep-place]]).
 - Action-required rows are filtered out of the cards. A card keeps its node when its inputs or rendered signature are unchanged. Appended rows are patched in only under `canPatchCard`; otherwise the card is replaced.
 - Card controls: ✨ POSTs `/api/notifications/generate-gist`; × DELETEs `/api/notifications/conversation/<sender>/<email>`; a date × DELETEs `/api/notifications/date/...`.
 - `SenderCardRecorderRenderer` wires mic, send (POST `/api/notify`) and conversation mode (POST `/api/cosa-voice/speakerphone/<hash>`). `SenderCardConsoleButtons` adds a console button to a card only when a seat resolves.
