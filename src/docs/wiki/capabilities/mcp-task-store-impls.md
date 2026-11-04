@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.task_store_tools.task_ask_unpark_impl@a7493a0e99
   - lupin_mcp.task_store_tools.task_get_impl@4c0524d2d4
   - lupin_mcp.task_store_tools.task_query_impl@6c4bbd9e7a
-  - lupin_mcp.task_store_tools.task_approve_line_impl@8982a3674e
+  - lupin_mcp.task_store_tools.task_approve_line_impl@b29379f4f5
 ---
 # Task-store tool implementations
 
@@ -29,7 +29,7 @@ Nine functions in `task_store_tools.py` carry the verbs [[mcp-task-store-tools]]
 ## Reads
 - `task_get_impl` fetches one row by its full id and returns the whole row, body included. A missing row is an error dict, never an empty success.
 - A filtered query that comes back empty does not prove a row is absent, so use this call to check one.
-- `task_approve_line_impl` writes the card bullet for one held row. It fetches the title with `task_get_impl` and builds the line with `approve_link_line`, so the verb and the Python caller write the same link ([[task-approve-link]]).
+- `task_approve_line_impl` writes the card bullet for one held row. It takes an optional `priority` (P0 to P5). A level outside that range returns `invalid_priority` without asking the server. A valid one adds the raise link ([[task-approve-priority-link]]). It fetches the title with `task_get_impl` and builds the line with `approve_link_line`, so the verb and the Python caller write the same link ([[task-approve-link]]).
 - It returns `{ line }`. A malformed id returns `invalid_row_id` and asks the server nothing. A row the server could not return comes back as that error dict. A blank title returns `blank_title`, and it never raises.
 - To ask Rick to approve many rows, send one `task_approve_batch_line` result instead ([[task-approve-batch-link]]).
 - `task_query_impl` drops every unset filter and canonicalizes `project`. It returns the server envelope unchanged: `count` is the page length and `has_more` says whether to keep paging.
