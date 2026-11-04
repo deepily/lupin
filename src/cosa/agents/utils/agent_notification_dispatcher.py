@@ -67,6 +67,69 @@ ctx_target_user  : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher
 ctx_session_name : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_session_name", default=None )
 
 
+def set_dispatch_context(
+    sender_id    : Optional[ str ] = None,
+    target_user  : Optional[ str ] = None,
+    session_name : Optional[ str ] = None,
+) -> dict:
+    """
+    Set the per-task dispatch context for this asyncio task / thread.
+
+    Use this rather than changing module-level `SENDER_ID`, `TARGET_USER` or `SESSION_NAME`
+    inside the agentic pool. Concurrent jobs share those globals and the shared `_dispatcher`,
+    so writing to them leaks state across jobs. ContextVars isolate each task.
+
+    Requires:
+        - At least one of sender_id, target_user, session_name is provided.
+          (None values are skipped — only set what's provided.)
+
+    Ensures:
+        - Each provided value is stored in its corresponding ContextVar.
+        - Returns a dict of {var_name: token} that callers can pass to
+          `reset_dispatch_context()` for explicit teardown.
+
+    Args:
+        sender_id    : Per-task sender_id override (None = leave ContextVar unchanged).
+        target_user  : Per-task target_user override.
+        session_name : Per-task session_name override.
+
+    Returns:
+        dict[str, contextvars.Token]: Tokens for resetting the ContextVars
+            via `reset_dispatch_context()`. Pool workers running a single
+            job typically don't need to reset (the asyncio.run() context
+            ends when the worker finishes), but explicit cleanup is good
+            hygiene.
+    """
+    tokens = { }
+    if sender_id is not None:
+        tokens[ "sender_id" ] = ctx_sender_id.set( sender_id )
+    if target_user is not None:
+        tokens[ "target_user" ] = ctx_target_user.set( target_user )
+    if session_name is not None:
+        tokens[ "session_name" ] = ctx_session_name.set( session_name )
+    return tokens
+
+
+def reset_dispatch_context( tokens: dict ) -> None:
+    """
+    Reset the per-task dispatch context to its prior state.
+
+    Args:
+        tokens: dict returned by `set_dispatch_context()`.
+
+    Ensures:
+        - Each ContextVar is reset to the value it held before the matching
+          set_dispatch_context() call.
+        - Missing keys in `tokens` are silently skipped.
+    """
+    if "sender_id" in tokens:
+        ctx_sender_id.reset( tokens[ "sender_id" ] )
+    if "target_user" in tokens:
+        ctx_target_user.reset( tokens[ "target_user" ] )
+    if "session_name" in tokens:
+        ctx_session_name.reset( tokens[ "session_name" ] )
+
+
 def _prepend_operator_routing( abstract: Optional[ str ], original_target: str ) -> str:
     """
     Prefix an abstract with an operator-routing context line.

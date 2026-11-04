@@ -26,7 +26,12 @@ from cosa.utils.notification_utils import format_questions_for_tts, convert_ques
 # Shared utilities
 from cosa.agents.utils.sender_id import build_sender_id
 from cosa.agents.utils.feedback_analysis import is_approval, is_rejection
-from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher, make_interface_functions
+from cosa.agents.utils.agent_notification_dispatcher import (
+    AgentNotificationDispatcher,
+    make_interface_functions,
+    set_dispatch_context,
+    reset_dispatch_context,
+)
 
 logger = logging.getLogger( __name__ )
 
