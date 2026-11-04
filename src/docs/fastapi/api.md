@@ -6214,6 +6214,7 @@ validated by task_store_rules.validate_transition in the handler.
 | blocked_by |  |  |
 | reason |  | free-text justification; REQUIRED non-blank for ->dropped (C12) |
 | park_reason |  | REQUIRED non-blank for ->parked; MUST quote the row's OWN decisive sentence, not a paraphrase |
+| promote_priority |  | P0..P5: admits a held row to queued at that higher priority in one store event. Honoured only for the operator's login on not_approved -> queued, and only when it raises the row; anything else is a 403. |
 | asynchronous |  | opt in to the asynchronous promotion path (202 + ticket). Boolean ONLY — a string is refused. Ignored unless the operator flag 'task approval promotion ask asynchronous' is on. |
 
 

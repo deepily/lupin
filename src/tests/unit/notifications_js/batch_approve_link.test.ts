@@ -167,7 +167,7 @@ test( "one click applies every row, then shows 'N of N applied' and one line per
   const out = document.querySelector( ".approve-link-result" ) as HTMLElement;
   assert.equal( out.textContent, "2 of 2 applied\na3975cf4 applied ✅\n0b1c2d3e applied ✅" );
   assert.ok( out.classList.contains( "approve-link-approved" ) );
-  assert.equal( document.querySelector( "#action-required-content a" ), null );
+  assert.equal( document.querySelectorAll( "#action-required-content a" ).length, 0 );
   assert.deepEqual( tabOpens, [] );
 } );
 
