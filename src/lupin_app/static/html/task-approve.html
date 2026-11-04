@@ -31,7 +31,9 @@
             const ROW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
             const rowId     = new URLSearchParams( window.location.search ).get( "row" );
             // A priority link (?row=<id>&priority=P0): the same one button, but it admits the row at that level. Only Rick's login is honoured; the server says so to anyone else.
-            const priorityParam = new URLSearchParams( window.location.search ).get( "priority" );
+            // A link whose ampersand arrived as the literal text "&amp;" names the parameter "amp;priority"; read it too, so the raise is not silently dropped (row 526bfd86).
+            const queryParams   = new URLSearchParams( window.location.search );
+            const priorityParam = queryParams.get( "priority" ) ?? queryParams.get( "amp;priority" );
             const promoteTo     = /^P[0-5]$/.test( priorityParam || "" ) ? priorityParam : null;
             const errorEl   = document.getElementById( "task-approve-error" );
             const rowEl     = document.getElementById( "task-approve-row" );
