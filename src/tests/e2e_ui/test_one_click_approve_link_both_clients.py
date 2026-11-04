@@ -235,11 +235,11 @@ def _expect_row_shown( page, row ):
     so the abstract 📋 itself shows in the tooltip there. No separate overlay may exist.
     The card's own list holds every row title, so the wait is on the ticket's own facts line.
     """
-    tip = page.locator( "#abstract-tooltip .abstract-tooltip-content" )
-    expect( tip ).to_contain_text( "Priority: P3", timeout=TIMEOUT_MS )
-    text = tip.inner_text()
-    assert row[ "title" ] in text and "Owner: unowned" in text and "Status: not_approved" in text, text
-    assert f"E2E body {row[ 'index' ]}" in text and f"second line {row[ 'index' ]}" in text, text
+    tip     = page.locator( "#abstract-tooltip .abstract-tooltip-content" )
+    needed  = [ "Priority: P3", row[ "title" ], "Owner: unowned", "Status: not_approved", f"E2E body {row[ 'index' ]}", f"second line {row[ 'index' ]}" ]
+    # ONE retrying expect over every string. Reading inner_text() after a wait on one of them was a
+    # second, non-waiting look: the tooltip can empty between the two, and the red saw text == "".
+    expect( tip ).to_contain_text( re.compile( "".join( f"(?=.*{re.escape( n )})" for n in needed ), re.DOTALL ), timeout=TIMEOUT_MS )
     assert page.locator( "#task-body-overlay" ).count() == 0, "the 📋 link must not open a separate overlay"
 
 
