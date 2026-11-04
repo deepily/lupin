@@ -46,7 +46,7 @@ import pytest
 import requests
 
 from tests.integration.v2_queued import (
-    DRAIN_UNOBSERVABLE, DRAIN_XFAIL_TIMEOUT, assert_handed_off, assert_queued_in_todo,
+    DRAIN_UNOBSERVABLE, XFAIL_EXPECTED_HANG_TIMEOUT, assert_handed_off, assert_queued_in_todo,
     drop_from_todo, wait_for_done,
 )
 
@@ -171,7 +171,7 @@ def test_v2_ask_parks_then_resume_reaches_terminal_done( auth_headers ):
     proof that a parked flow, resumed, produces a real agent answer on the shipped app; the
     unit tier does it with a fake executor. Strict xfail keeps it running, so the day the
     run has a consumer which is not the test itself it XPASSes and the gate goes red rather
-    than staying quiet. Its wait is bounded (DRAIN_XFAIL_TIMEOUT) because a body that runs
+    than staying quiet. Its wait is bounded (XFAIL_EXPECTED_HANG_TIMEOUT) because a body that runs
     every gate costs every gate. Everything below is the original test, unchanged.
     """
     snapshot_id = None
@@ -215,7 +215,7 @@ def test_v2_ask_parks_then_resume_reaches_terminal_done( auth_headers ):
         )
 
         # ── the queue runs the weather agent and the resumed flow reaches its answer.
-        done = wait_for_done( BASE_URL, job_id, auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
+        done = wait_for_done( BASE_URL, job_id, auth_headers, timeout=XFAIL_EXPECTED_HANG_TIMEOUT )
         assert done.get( "response_text" ) or done.get( "answer" ), (
             f"the resumed job completed with no answer — the parked flow never produced "
             f"one, which is the DoD-4 failure this test guards: {done}"
