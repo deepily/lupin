@@ -449,8 +449,8 @@ def test_a_renamed_file_makes_only_its_new_functions_new( repo, data, tmp_path )
     assert ( count( text, "Total Tests" ), count( text, "Failed" ) ) == ( 2, 1 )
 
 
-FLIP_SINCE  = "a8be4dbd62c4aafe4be38a780d5884bfd41c13ef"                                     # the commit at the C3 flip (row 3f6b7e79, 3 Nov 2026)
-FLIP_BASE   = "wip-v0.2.2-2026.09.30-code-wiki-and-jev-for-reuse-planning-review"           # the integration branch the flip measures from
+FLIP_SINCE  = "d0180365caa7c8c8e6b189af6b98daa93fb43d72"                                     # the v0.2.2 squash merge on main, which carries the C3 flip (row 3f6b7e79, 3 Nov 2026; re-pointed 4 Nov after the squash)
+FLIP_BASE   = "main"                                                                       # the branch v0.2.3 merges into
 FLIP_VALUES = { mg.SINCE_KEY: FLIP_SINCE, mg.BASE_KEY: FLIP_BASE }
 
 
