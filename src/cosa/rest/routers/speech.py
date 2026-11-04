@@ -691,10 +691,8 @@ async def get_tts_audio(
         if not msg:
             raise HTTPException(status_code=400, detail="Text message cannot be empty after trimming whitespace")
 
-        # Speech says a markdown link's label, never its address
+        # Speech says a link's label and "URL omitted", never its address
         msg = strip_markdown_links_for_speech( msg ).strip()
-        if not msg:
-            raise HTTPException(status_code=400, detail="Text message has nothing to speak after removing link targets")
 
         # Register session with authenticated user
         if app_debug and app_verbose: print(f"[TTS-DEBUG] Registering session {session_id} for user {current_user_id}")
@@ -846,10 +844,8 @@ async def get_tts_audio_elevenlabs(
         if not msg:
             raise HTTPException(status_code=400, detail="Text message cannot be empty after trimming whitespace")
 
-        # Speech says a markdown link's label, never its address
+        # Speech says a link's label and "URL omitted", never its address
         msg = strip_markdown_links_for_speech( msg ).strip()
-        if not msg:
-            raise HTTPException(status_code=400, detail="Text message has nothing to speak after removing link targets")
 
         if app_debug and app_verbose:
             print(f"[TTS-ELEVENLABS-DEBUG] Extracted - session_id: '{session_id}', text: '{msg}', voice_id: '{voice_id}'")

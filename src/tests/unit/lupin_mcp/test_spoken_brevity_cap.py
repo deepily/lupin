@@ -113,8 +113,10 @@ class TestSpokenBrevityCap:
         )
 
 
-class TestSpokenCapCountsLinkLabelsOnly:
-    """A markdown link is spoken as its label, so the cap counts the label alone."""
+class TestSpokenCapCountsWhatIsSpoken:
+    """A link is spoken as its label plus ", URL omitted", so the cap counts that."""
+
+    MARKER = len( ", URL omitted" )
 
     @pytest.fixture( autouse=True )
     def _force_enforce_on( self, monkeypatch ):
@@ -125,11 +127,17 @@ class TestSpokenCapCountsLinkLabelsOnly:
         assert len( raw ) > CAP
         _enforce_spoken_brevity( raw, False )
 
-    def test_long_label_still_raises( self ):
-        with pytest.raises( ValueError ):
-            _enforce_spoken_brevity( "[" + "x" * ( CAP + 1 ) + "](http://x.test)", False )
+    def test_label_plus_marker_at_cap_passes( self ):
+        _enforce_spoken_brevity( "[" + "x" * ( CAP - self.MARKER ) + "](http://x.test)", False )
 
-    def test_question_list_counts_label_only( self ):
+    def test_label_plus_marker_one_over_cap_raises( self ):
+        with pytest.raises( ValueError ):
+            _enforce_spoken_brevity( "[" + "x" * ( CAP - self.MARKER + 1 ) + "](http://x.test)", False )
+
+    def test_bare_url_counts_as_the_marker_only( self ):
+        _enforce_spoken_brevity( "https://x.test/" + "a" * ( CAP * 2 ), False )
+
+    def test_question_list_counts_what_is_spoken( self ):
         raw = "[ok](/" + "a" * ( CAP * 2 ) + ")"
         _enforce_spoken_brevity( [ { "question": raw } ], False, field="questions" )
 
