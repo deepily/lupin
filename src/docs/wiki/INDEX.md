@@ -336,7 +336,6 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[task-approve-link]] — the one-click approve link in a card: the line writer and both clients' click handlers. `cosa.rest` (task_approve_link) and `src/lupin_app/static/js/multiplexer` (render)
 - [[task-approve-priority-link]] — the optional third card link that admits a held row at a higher priority in one click. It covers the line writer, the click handlers and the operator-only check. `cosa.rest` (task_approve_link, task_priority_firewall), `lupin_mcp` and `src/lupin_app/static/js/multiplexer` (render)
 - [[task-approve-batch-link]] — one card link that moves a whole list of held rows: the line writer, the MCP verb and both clients' handlers. `cosa.rest` (task_approve_link), `lupin_mcp` and `src/lupin_app/static/js/multiplexer` (render)
-- [[task-approve-priority-link]] — the third link that admits a held row at a higher priority in one click, and the server rule on who may. `cosa.rest` (task_approve_link, task_priority_firewall) and `src/lupin_app/static/js/multiplexer` (render)
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
 - [[mcp-commons-ask-async]] — the polling-mode question post behind the `commons_ask_async` tool. `lupin_mcp` (commons_ask)
 - [[mcp-commons-archiver]] — the rotation of aged commons entries into daily archive files. `lupin_mcp` (commons_archival)
