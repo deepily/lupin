@@ -111,7 +111,7 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 
 ## What's new in v0.2.2
 
-v0.2.2 ran from 30 September to 3 November 2026. It asked one question: before a seat writes a new function, can it find out whether the code base already has one? It built a wiki of 676 capability pages written from the code, and lookup tools that search it. It also built a **reuse gate** that refuses a merge whose new definitions carry no lookup record. Enforcement began on 3 November. A daily duplicate check now files what it finds, and coverage reached 100% across the whole frame. A docstring sweep took 29,838 lint findings to 0 behind a new `doclint` gate. The measurements of the checker itself were reported as found, including the negative ones.
+v0.2.2 ran from 30 September to 3 November 2026. It asked one question: before a seat writes a new function, can it find out whether the code base already has one? It built a wiki of 696 capability pages written from the code, and lookup tools that search it. It also built a **reuse gate** that refuses a merge whose new definitions carry no lookup record. Enforcement began on 3 November. A daily duplicate check now files what it finds, and coverage reached 100% across the whole frame. A docstring sweep took 29,838 lint findings to 0 behind a new `doclint` gate. The measurements of the checker itself were reported as found, including the negative ones.
 
 Full highlights: [WHATS-NEW.md](WHATS-NEW.md) · per-version summaries: [VERSION-HISTORY.md](VERSION-HISTORY.md) · per-feature detail: [CHANGELOG.md](CHANGELOG.md)
 
