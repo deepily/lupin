@@ -113,6 +113,35 @@ class TestSpokenBrevityCap:
         )
 
 
+class TestSpokenCapCountsWhatIsSpoken:
+    """A link is spoken as its label plus ", URL omitted", so the cap counts that."""
+
+    MARKER = len( ", URL omitted" )
+
+    @pytest.fixture( autouse=True )
+    def _force_enforce_on( self, monkeypatch ):
+        monkeypatch.setattr( cv, "_get_spoken_enforce", lambda: True )
+
+    def test_long_target_short_label_passes( self ):
+        raw = "[approve](/app/tasks/approve?row=" + "a" * ( CAP * 2 ) + ")"
+        assert len( raw ) > CAP
+        _enforce_spoken_brevity( raw, False )
+
+    def test_label_plus_marker_at_cap_passes( self ):
+        _enforce_spoken_brevity( "[" + "x" * ( CAP - self.MARKER ) + "](http://x.test)", False )
+
+    def test_label_plus_marker_one_over_cap_raises( self ):
+        with pytest.raises( ValueError ):
+            _enforce_spoken_brevity( "[" + "x" * ( CAP - self.MARKER + 1 ) + "](http://x.test)", False )
+
+    def test_bare_url_counts_as_the_marker_only( self ):
+        _enforce_spoken_brevity( "https://x.test/" + "a" * ( CAP * 2 ), False )
+
+    def test_question_list_counts_what_is_spoken( self ):
+        raw = "[ok](/" + "a" * ( CAP * 2 ) + ")"
+        _enforce_spoken_brevity( [ { "question": raw } ], False, field="questions" )
+
+
 class TestEnforceKillSwitch:
     """Global enforce flag (Rick 2026-06-09): False disables the guard for everyone."""
 

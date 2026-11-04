@@ -93,6 +93,7 @@ from cosa.utils.notification_utils import (
     is_known_project
 )
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
+from cosa.utils.speech_text import strip_markdown_links_for_speech
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
     get_claude_session_id_with_source, wait_for_session_id_with_source,
@@ -1254,7 +1255,8 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
     Ensures:
         - returns None when override_size_limitation is True
         - returns None when the global enforce flag is OFF (kill-switch)
-        - returns None when every spoken unit is <= the configured cap
+        - returns None when every spoken unit is <= the configured cap, counting a
+          markdown link as its label alone (the address is never spoken)
         - raises ValueError naming the over-cap unit + its measured length otherwise
 
     Raises:
@@ -1278,7 +1280,7 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
                 units.append( ( f"{field}[{i}].question", q[ "question" ] ) )
 
     for label, text in units:
-        n = len( text )
+        n = len( strip_markdown_links_for_speech( text ).strip() )   # the cap counts what is spoken: a link is its label plus the URL-omitted marker
         if n > cap:
             raise ValueError(
                 f"Spoken `{label}` is {n} chars (cap {cap}). The spoken channel is "
