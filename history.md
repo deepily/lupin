@@ -8,7 +8,13 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
-## 2026.11.04 - Session ebd974b4 (Cheech 🌿, manager; crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped) | v0.2.2 PR ready: every merge gate green at 38eb5ac3e, wiki lint 204 to 0
+## 2026.11.04 - Session ebd974b4 (Cheech 🌿, manager; crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped) | v0.2.2 merged into main and released; wip-v0.2.3 cut; wiki lint 204 to 0
+
+- **Evening, after the first ritual**:
+  - **The release.** PR #23 was squash-merged into main as `d0180365c`, and release v0.2.2 is published there with the source zip.
+  - **Who ran what.** Auto mode refused the merge call, and the branch guard refused branch creation. Rick ran both scripts himself, with `BRANCH_GUARD_ALLOW=rick` for the branch.
+  - **The new branch** is `wip-v0.2.3-2026.11.04-online-preference-learning`. María's parked fixes are cherry-picked onto it as `aee873d2b` and `1b21c4413`, so the old line stays out of its history. Her 165 tests pass, and so do the 1,594 census guards. Local wip-v0.2.1 and wip-v0.2.2 are deleted after content checks.
+  - **The squash stranded three gate settings.** The doclint push epoch and the reuse gate's `since` were no longer ancestors. The gate's `base` named the deleted branch. Pre-push doclint skipped everything, and the reuse gate exited 3. `fb62363bc` re-points them at `d0180365c` and main. María owes its review and 3 reuse outcome lines (row e69ab353).
 
 - **The three smoke reds are fixed and merged.** The compose-drift probe counts compose secrets as mounts (`69dcf6bb0`). Presentation and chain jobs send their asks to the right user (`131116482`). The SWE-team proxy test and the two live presentation smokes skip without a running proxy (`acefc4184`, `401135a53`).
 - **Rick's voice reports, fixed**: a relative markdown link in the doc viewer opens the file it names (`f66c5b4f5`). The approve landing page reads an escaped P0 link (`dfaf35e75`). The README marks the Bayesian trust proxy as deprecated, with Rick's Coming Soon text, and its figures are re-derived (`401135a53`, `f1307a14a`, `a03a28525`).
@@ -24,7 +30,10 @@
   - A sed by line number after an earlier edit can delete a function and still pass py_compile. After a scripted edit, run `pytest --collect-only` and read the diff (Rio).
   - A worktree added from inside a seat tree nests under it. Give an absolute path under the main repo's `.claude/worktrees/` (Krishna).
   - The decision proxy's trust gate runs only the `count` model. Beta, BLR, Thompson, conformal and ICRL are reached only from tests (Pocholo, measured 4 Nov 01:51 UTC, read-only).
-- **Owed**: the PR into main on Rick's word, then Mr. Radio's test VM deploy (row a7177417) and wip-v0.2.3.
+- **Owed**:
+  - María's review of `fb62363bc` and her outcome lines (row e69ab353, held for Rick).
+  - Mr. Radio's test VM deploy at `d0180365c` (row a7177417).
+  - The parked v0.2.3 rows.
 
 ## 2026.11.03 - Session d5ed7a66 (Cheech 🌿, manager; crew Sam) | What's new for v0.2.2 rewritten, the PR's merge gates run at d8747550c, three smoke rows filed
 

@@ -21,7 +21,9 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **Wiki clean-up before the PR.** Rick released the 13 held PR-readiness and wiki rows by voice and said to staff up and dispatch them. The wiki lint went from 204 findings to 0.
 - **Park anything that needs a full test rerun** (broadcast `87304695`). It resumes on the new branch, once everyone agrees the PR work is finished. Parked: María's duplicate-check fixes (`refs/parked/v0.2.3-maria-dupcheck-fixes`), rows 10691b4f and 77718bf0, and Rio's two P3 rows.
 - **The session-end ritual, with a push and a backup, comes before the PR** (Rick, 16:45, comment on the push ask).
-- **Pending, for Rick**: whether to free GPU 0 for María's duplicate-check rerun, since vLLM holds 17 GB. Also, the slug for wip-v0.2.3.
+- **Squash-merge, done by Cheech's script** (Rick's card, about 17:00). PR #23 is d0180365c. Rick asked for the zipped release artifact, and release v0.2.2 carries the source zip.
+- **Next branch**: `wip-v0.2.3-2026.11.04-online-preference-learning` (Rick's comment on the PR ask).
+- **Pending, for Rick**: whether to free GPU 0 for María's duplicate-check rerun, since vLLM holds 17 GB. Also, whether to delete the remote wip-v0.2.2 branch; it is kept for now.
 
 ## 📚 Decisions log 2026-11-03 (Cheech 🌿 `d5ed7a66`, crew Sam; times Eastern)
 
