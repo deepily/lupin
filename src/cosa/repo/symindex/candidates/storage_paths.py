@@ -25,6 +25,9 @@ HANDOFF_NOT_IN_CONTAINER = "HANDOFF_NOT_IN_CONTAINER"
 ARM_KEY                  = ( "reuse candidate shortlist arm", "LUPIN_REUSE_CANDIDATE_ARM" )      # not in the key table: a blank value means the shipped default, never an error
 EXPANSION_KEY            = ( "reuse candidate need expansion enabled", "LUPIN_REUSE_CANDIDATE_NEED_EXPANSION" )     # not in the key table: absent or blank means off, never an error
 TRUE_WORDS               = ( "true", "1", "yes", "on" )
+PROTECTED_HEAD_KEY       = ( "reuse candidate need expansion protected head", "LUPIN_REUSE_CANDIDATE_NEED_EXPANSION_PROTECTED_HEAD" )      # not in the key table: blank or absent means the default
+PROTECTED_HEAD_DEFAULT   = 64
+PROTECTED_HEAD_INVALID   = "PROTECTED_HEAD_INVALID"
 
 
 def build_config():
@@ -240,3 +243,28 @@ def need_expansion_enabled( config=None, environ=None ):
     manager = config if config is not None else build_config()
     value   = manager.get( EXPANSION_KEY[ 0 ], silent=True )
     return value is not None and str( value ).strip().lower() in TRUE_WORDS
+
+
+def need_expansion_protected_head( config=None, environ=None ):
+    """
+    Return how many of the plain need's own top ids an expanded shortlist keeps.
+
+    Ensures:
+        - returns the override variable's value when set and not blank, else the INI key `reuse candidate need expansion protected head`, else 64
+        - the value is a whole number of 0 or more; 0 keeps no id back, which is plain expansion
+        - a blank or missing value is the default, never an error
+
+    Raises:
+        - CandidateError PROTECTED_HEAD_INVALID when the value is not a whole number of 0 or more
+        - CandidateError DEPENDENCY_MISSING when the INI has to be read and no manager can be built
+    """
+    environ   = os.environ if environ is None else environ
+    env_value = environ.get( PROTECTED_HEAD_KEY[ 1 ], "" ).strip()
+    if env_value: text = env_value
+    else:
+        manager = config if config is not None else build_config()
+        value   = manager.get( PROTECTED_HEAD_KEY[ 0 ], silent=True )
+        text    = "" if value is None else str( value ).strip()
+    if not text: return PROTECTED_HEAD_DEFAULT
+    if not text.isdigit(): raise CandidateError( PROTECTED_HEAD_INVALID, f"{PROTECTED_HEAD_KEY[ 0 ]} is {text!r}, not a whole number of 0 or more" )
+    return int( text )

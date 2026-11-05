@@ -46,6 +46,7 @@ def validate_request( request, with_index=True ):
         - checks fusion, when present, holds k and depth as positive ints of at most FUSION_MAX and head as an int from 0 to depth
         - checks purposes, vectors_dir and wiki when present are a string, a string and a list of strings
         - checks skip_lost_ids, when present, is a boolean
+        - checks protect_head, when present, is an integer of 0 or more
         - checks extra_queries, when present, is a list of { need, query_vectors } and needs vectors_dir when it is not empty
         - checks query_vectors is a non-empty dict of lists of numbers, each finite and within float32 range, when vectors_dir is set
         - compares each value with the float32 limit directly, so a 400-digit integer is refused and never converted
@@ -70,6 +71,7 @@ def validate_request( request, with_index=True ):
         if fusion[ "k" ] > FUSION_MAX or fusion[ "depth" ] > FUSION_MAX: bad( f"fusion k and depth must be at most {FUSION_MAX}" )
         if not is_count( fusion[ "head" ], 0 ) or fusion[ "head" ] > fusion[ "depth" ]: bad( "fusion head must be an integer from 0 to depth" )
     if request.get( "extra_queries" ) is not None: validate_extra_queries( request, bad )
+    if request.get( "protect_head" ) is not None and not is_count( request[ "protect_head" ], 0 ): bad( "protect_head is not a non-negative integer" )
     if request.get( "vectors_dir" ) is None: return
     if not isinstance( request[ "vectors_dir" ], str ): bad( "vectors_dir is not a string" )
     validate_query_vectors( request.get( "query_vectors" ), "query_vectors", bad )
@@ -253,6 +255,7 @@ def answer_for_stage( request, stage, load_vectors ):
         - manifest_hash is the vector set's, or None when no vectors were asked for
         - index_ids_without_vectors counts index entries the set has no row for, or is None without vectors
         - the shortlist holds at most K ids
+        - with protect_head above 0 and extra_queries, the plain need's own first protect_head ids are always kept, as candidate_stage.shortlist does
         - with extra_queries, each one adds its own BM25 code and prose lists and its own cosine lists, named x<n>_code, x<n>_prose and x<n>_vector_<matrix>, and they are fused with the rest; without it nothing changes
         - with skip_lost_ids true, vector ids the index lacks are left out of every cosine list and counted in ids_lost,
           and the answer carries ids_lost; without it such an id is refused
@@ -265,6 +268,7 @@ def answer_for_stage( request, stage, load_vectors ):
         - CandidateError HEAD_EXCEEDS_LIMIT when the heads of the lists do not fit in K
     """
     extra, scores, manifest_hash, without_vectors, lost = {}, {}, None, None, []
+    expanded = set()
     if request.get( "vectors_dir" ) is not None:
         try:
             vectors = load_vectors( request[ "vectors_dir" ] )
@@ -283,8 +287,10 @@ def answer_for_stage( request, stage, load_vectors ):
             scores.update( more_scores )
             for source, index in ( ( "code", stage.code ), ( "prose", stage.prose ) ):
                 extra[ f"x{n}_{source}" ] = [ doc_id for doc_id, _ in bm25.rank_scored( index, query[ "need" ] ) ]
+            expanded.update( name for name in extra if name.startswith( f"x{n}_" ) )
     if request.get( "wiki" ): extra[ "wiki" ] = list( request[ "wiki" ] )
-    result = cs.shortlist( request[ "need" ], stage, request[ "K" ], extra )
+    protect = { "head": request[ "protect_head" ], "skip": sorted( expanded ) } if request.get( "protect_head" ) and expanded else None
+    result = cs.shortlist( request[ "need" ], stage, request[ "K" ], extra, protect )
     result[ "scores" ].update( scores )
     result.update( { "K": request[ "K" ], "manifest_hash": manifest_hash, "bm25": stage.manifest(), "index_ids_without_vectors": without_vectors } )
     if request.get( "skip_lost_ids" ) is True: result[ "ids_lost" ] = len( lost )

@@ -380,6 +380,7 @@ def _candidate_stage( top ):
         - the server address and key are the ones the embeddings client resolves, pinned to the FastAPI server
         - the stage refreshes a vector set that is behind the index before a lookup, through candidate_build.run under its build lock
         - the stage expands each need first only when the INI key `reuse candidate need expansion enabled` or its override variable reads true; the shipped key is false and the stage is then built as it always was
+        - the key `reuse candidate need expansion protected head` is read only when the switch is on; with the switch off it is never read
 
     Raises:
         - ReuseError CANDIDATE_STAGE_UNCONFIGURED naming the storage error when a key is missing
@@ -395,13 +396,14 @@ def _candidate_stage( top ):
         purposes = storage_paths.candidate_dir( "purpose", data ) / "purpose.jsonl"
         arm      = storage_paths.shortlist_arm( reuse_candidates.DEFAULT_ARM )
         expand   = storage_paths.need_expansion_enabled()
+        head     = storage_paths.need_expansion_protected_head() if expand else None
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_UNCONFIGURED", str( e ) ) from e
     base_url, api_key, _prefix = EmbeddingProvider._resolve_http_target( True )
 
     expander = reuse_expansion.make_expander() if expand else None
     return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, arm=arm,
-                                            refresher=make_refresher( top, vector_build.EndpointClient(), os.environ ), expander=expander )
+                                            refresher=make_refresher( top, vector_build.EndpointClient(), os.environ ), expander=expander, protected_head=head )
 
 
 def make_refresher( top, client, environ, **run_kwargs ):
@@ -1451,13 +1453,13 @@ def _stage_in_language( stage, every, language ):
 
 def _expansion_of( block ):
     """
-    Name the expansion a stage answer or receipt block recorded, as a keyword.
+    Name the expansion and protected head a block recorded, as keywords.
 
     Ensures:
-        - returns { "expansion": the recorded expansion } when the block holds one, and {} when it holds none
+        - returns the block's expansion and protected_head under those names, for each the block holds, and {} for a block with neither
         - so a lookup that was not expanded calls the client with the arguments it always had
     """
-    return { "expansion": block[ "expansion" ] } if "expansion" in block else {}
+    return { name: block[ name ] for name in ( "expansion", "protected_head" ) if name in block }
 
 
 def _widen( ctx, client, stage, routed, need, entries, every, whole, flags, policy, ranking_text, index_sha, exclude_id, language ):
@@ -1497,7 +1499,7 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
         - an error block names it and holds no manifest hash, so a failed stage never claims a vector set
         - ranking_text and wiki_ids are the two inputs a replay cannot rebuild from the snapshot
         - a widened run records K as the wide size, the extra ids as widened_ids, and a failed widening as widen_error
-        - a lookup that was expanded records the expansion, the other input a replay cannot rebuild; a lookup without one adds no key
+        - a lookup that was expanded records the expansion and the protected head, the other inputs a replay cannot rebuild; a lookup without one adds no key
         - a lookup that refreshed the vector set, or answered from a stale one, records freshness: the state, and for a stale set the
           error, the count of lost ids and the note "answered from a stale set, N ids lost"; a fresh set adds no key
     """
@@ -1510,6 +1512,7 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
             "stage_key": stage[ "stage_key" ], "wiki": stage[ "wiki" ], "wiki_ids": stage[ "wiki_ids" ] }
     if widen_error is not None: out[ "widen_error" ] = widen_error
     if "expansion" in stage: out[ "expansion" ] = stage[ "expansion" ]
+    if "protected_head" in stage: out[ "protected_head" ] = stage[ "protected_head" ]
     if "freshness" in stage and stage[ "freshness" ][ "state" ] in ( "refreshed", "stale" ): out[ "freshness" ] = stage[ "freshness" ]
     return out
 

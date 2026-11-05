@@ -30,3 +30,4 @@ pins:
 ## Extra queries (need expansion)
 - A request may carry `extra_queries`, a list of `{ need, query_vectors }`. Each adds its own BM25 code and prose lists and its own cosine lists. They are named `x<n>_code`, `x<n>_prose` and `x<n>_vector_<matrix>`. All of them are fused with the need's lists. An absent or empty list changes nothing. A non-empty list needs `vectors_dir`.
 - `cosine_lists` ranks the index by each stored matrix for one set of query vectors; `validate_query_vectors` and `validate_extra_queries` are the request checks.
+- `protect_head`, with a non-empty `extra_queries`, keeps the first `protect_head` ids of the fusion of the plain need's lists. The rest of K is filled from the fusion of all lists. Without extra queries, or at 0, it changes nothing.
