@@ -41,6 +41,7 @@ def _make_strategy( thompson_enabled=True, trust_mode="active", cb_error_rate=0.
         thompson_enabled           = thompson_enabled,
         thompson_act_threshold     = kwargs.get( "thompson_act_threshold", 0.90 ),
         thompson_suggest_threshold = kwargs.get( "thompson_suggest_threshold", 0.70 ),
+        audit_random               = kwargs.get( "audit_random" ),
         debug                      = False,
     )
 
@@ -182,3 +183,82 @@ class TestThompsonSamplingGate:
                 f"{cat_name}: p_act={diag[ 'p_act' ]}, p_suggest={diag[ 'p_suggest' ]}, "
                 f"p_shadow={diag[ 'p_shadow' ]}, sum={total}"
             )
+
+
+class TestThompsonRespectsLevelAndMode:
+    """The sampled action may lower the level-and-mode action, never raise it."""
+
+    @staticmethod
+    def _always( strategy, action ):
+        """Force the Thompson draw to a fixed action."""
+        strategy._gate_thompson = lambda category: action
+
+    def test_ts_act_cannot_raise_level_1_shadow( self ):
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        self._always( strategy, "act" )
+        assert strategy.gate( "testing", trust_level=1, confidence=0.99 ) == "shadow"
+
+    def test_ts_act_cannot_raise_level_2_suggest( self ):
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        self._always( strategy, "act" )
+        assert strategy.gate( "testing", trust_level=2, confidence=0.99 ) == "suggest"
+
+    def test_ts_act_cannot_exceed_suggest_mode( self ):
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="suggest" )
+        self._always( strategy, "act" )
+        assert strategy.gate( "testing", trust_level=5, confidence=0.99 ) == "suggest"
+
+    def test_ts_act_cannot_raise_low_confidence_level_3( self ):
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        self._always( strategy, "act" )
+        assert strategy.gate( "testing", trust_level=3, confidence=0.0 ) == "suggest"
+
+    def test_ts_can_still_lower_level_5_act( self ):
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        self._always( strategy, "shadow" )
+        assert strategy.gate( "testing", trust_level=5, confidence=0.99 ) == "shadow"
+
+    def test_ts_agreeing_with_graded_action_keeps_it( self ):
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        self._always( strategy, "act" )
+        assert strategy.gate( "testing", trust_level=5, confidence=0.99 ) == "act"
+
+
+class TestGradedActionLevelFour:
+    """The level-and-mode action that the sampled action is compared against."""
+
+    def test_level_4_destructive_suggests( self ):
+        """Destructive category at level 4 asks the human."""
+        strategy = _make_strategy( thompson_enabled=False, trust_mode="active" )
+        assert strategy.gate( "destructive", trust_level=4, confidence=0.99 ) == "suggest"
+
+    def test_level_4_low_confidence_suggests( self ):
+        """Level 4 below the minimum confidence asks the human."""
+        strategy = _make_strategy( thompson_enabled=False, trust_mode="active" )
+        assert strategy.gate( "testing", trust_level=4, confidence=0.1 ) == "suggest"
+
+    def test_level_4_audit_draw_suggests( self ):
+        """A draw under the audit rate sends a level 4 act to the human."""
+        strategy = _make_strategy( thompson_enabled=False, trust_mode="active", audit_random=lambda: 0.0 )
+        assert strategy.gate( "testing", trust_level=4, confidence=0.99 ) == "suggest"
+
+    def test_level_4_acts_without_audit_draw( self ):
+        """A draw at or above the audit rate lets level 4 act."""
+        strategy = _make_strategy( thompson_enabled=False, trust_mode="active", audit_random=lambda: 0.99 )
+        assert strategy.gate( "testing", trust_level=4, confidence=0.99 ) == "act"
+
+
+class TestThompsonGateEdges:
+    """Edges of the Thompson draw itself."""
+
+    def test_unknown_category_samples_shadow( self ):
+        """A category the tracker does not know samples to shadow."""
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        assert strategy._gate_thompson( "no-such-category" ) == "shadow"
+
+    def test_debug_prints_the_draw( self, capsys ):
+        """Debug mode prints the Beta parameters and the sample."""
+        strategy       = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        strategy.debug = True
+        strategy._gate_thompson( "testing" )
+        assert "TS draw: testing alpha=1, beta=1" in capsys.readouterr().out

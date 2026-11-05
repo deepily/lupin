@@ -226,6 +226,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
               and for a l4_audit_rate share of otherwise-act outcomes (the audit draw)
             - Level 5 always acts
             - Circuit breaker tripped → returns "defer"
+            - With Thompson Sampling on, the sampled action can only lower the result above, never raise it
 
         Args:
             category: Decision category name
@@ -256,10 +257,29 @@ class EngineeringStrategy( BaseDecisionStrategy ):
                         if self.debug: print( f"[EngineeringStrategy] Conformal defer: {category} (prob={prob:.4f})" )
                         return "defer"
 
-        # Thompson Sampling — probabilistic gate routing
+        # Graded outcome from mode and level first; Thompson may only lower it (row 8295ab5d)
+        action = self._graded_action( trust_level, confidence, category )
         if self.thompson_enabled:
-            return self._gate_thompson( category )
+            sampled = self._gate_thompson( category )
+            if self._ACTION_RANK[ sampled ] < self._ACTION_RANK[ action ]: action = sampled
+        return action
 
+    _ACTION_RANK = { "shadow": 0, "suggest": 1, "act": 2 }
+
+    def _graded_action( self, trust_level, confidence, category ):
+        """
+        Map mode and trust level to shadow, suggest or act (no breaker, conformal or Thompson).
+
+        Requires:
+            - self.trust_mode is "suggest" or "active"
+
+        Ensures:
+            - Suggest mode: "suggest" at level 2 and above, else "shadow"
+            - Active mode: levels as documented in gate()
+
+        Returns:
+            Action string: "shadow", "suggest" or "act"
+        """
         # Suggest mode — suggest at L2+, shadow at L1
         if self.trust_mode == "suggest":
             if trust_level >= 2:
