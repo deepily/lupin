@@ -218,11 +218,10 @@ class CategoryTrust:
 
     def _level_blr( self ):
         """
-        BLR trust level computation.
+        BLR trust level from the posterior mean rate.
 
-        Uses BayesianLogisticRegression.posterior_mean_rate() as a
-        conservative rate estimate. Falls back to Beta-Bernoulli if
-        fewer than 30 observations or BLR model not yet initialized.
+        Falls back to Beta-Bernoulli when there are fewer than 30 decisions or no model.
+        It also falls back when the model has under 30 observations, as after a demotion.
 
         Returns:
             int: Trust level 1-5
@@ -230,7 +229,7 @@ class CategoryTrust:
         n = self.total_decisions
 
         # Fall back to Beta if insufficient data or no BLR model
-        if n < 30 or self._blr_model is None:
+        if n < 30 or self._blr_model is None or self._blr_model.n_observations < 30:
             return self._level_beta()
 
         rate = self._blr_model.posterior_mean_rate()
@@ -420,12 +419,14 @@ class CategoryTrust:
         """
         Demote trust level by removing oldest decisions.
 
-        This effectively drops the effective count below a lower threshold.
+        The "beta" and "blr" models read counters, so those are lowered too (_shed_totals_to).
 
         Args:
             levels: Number of levels to demote (default: 1)
         """
         target_level = max( 1, self.level - levels )
+
+        if self.trust_model != "count": self._shed_totals_to( target_level )
 
         if target_level <= 1:
             # Drop to L1: clear all history
@@ -449,6 +450,33 @@ class CategoryTrust:
                 successes_kept += 1
 
         self.decisions = pruned
+
+    def _shed_totals_to( self, target_level ):
+        """
+        Lower the success counter until the Beta level is no higher than target_level.
+
+        Requires:
+            - trust_model is "beta" or "blr"
+            - target_level is 1-5
+
+        Ensures:
+            - total_successes becomes the largest value whose Beta level is at most target_level
+            - total_rejections is unchanged, and total_decisions is kept equal to the two counters' sum
+            - the BLR model is dropped, because its posterior cannot be un-updated; the level then
+              falls back to the Beta level until the BLR model is rebuilt by new decisions
+            - the level is computed without the trip cap, which the caller applies
+        """
+        self._blr_model = None
+
+        low, high = 0, self.total_successes
+        while low < high:
+            mid = ( low + high + 1 ) // 2
+            self.total_successes = mid
+            if self._level_beta() <= target_level: low = mid
+            else: high = mid - 1
+
+        self.total_successes = low
+        self.total_decisions = low + self.total_rejections
 
     def to_dict( self ):
         """Serialize state for persistence."""

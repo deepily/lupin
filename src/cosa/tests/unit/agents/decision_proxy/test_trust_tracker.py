@@ -159,10 +159,23 @@ def test_level_blr_uses_posterior_rate_when_ready():
     for _ in range( 30 ):
         c.record_decision( True, timestamp=now )
     c._blr_model = MagicMock()
+    c._blr_model.n_observations = 30
     c._blr_model.posterior_mean_rate.return_value = 0.99
     level = c.level
     c._blr_model.posterior_mean_rate.assert_called_once()
     assert level == 5
+
+
+def test_level_blr_falls_back_when_model_has_few_observations():
+    c = CategoryTrust( "x", trust_model="blr", min_samples=LOW_MIN_SAMPLES )
+    now = time.time()
+    for _ in range( 30 ):
+        c.record_decision( True, timestamp=now )
+    c._blr_model = MagicMock()
+    c._blr_model.n_observations = 5                      # young model: its posterior is not trusted
+    with patch( "scipy.stats.beta.ppf", return_value=0.99 ):
+        assert c.level == 5
+    c._blr_model.posterior_mean_rate.assert_not_called()
 
 
 def test_level_blr_breaks_when_posterior_rate_low():
@@ -171,6 +184,7 @@ def test_level_blr_breaks_when_posterior_rate_low():
     for _ in range( 30 ):
         c.record_decision( True, timestamp=now )
     c._blr_model = MagicMock()
+    c._blr_model.n_observations = 30
     c._blr_model.posterior_mean_rate.return_value = 0.1     # below L2 → break
     assert c.level == 1
 
