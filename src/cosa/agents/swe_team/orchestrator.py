@@ -438,7 +438,7 @@ class SweTeamOrchestrator:
             - approved is a bool (True if user agreed with proxy)
 
         Ensures:
-            - Counters updated in DB on success, and the stored level set to the tracker's level
+            - Counters updated in DB on success; the stored level follows in a separate transaction
             - Failure logged but never propagates
         """
         try:
@@ -456,12 +456,41 @@ class SweTeamOrchestrator:
                     category   = category,
                     approved   = approved,
                 )
-                # Store the tracker's own level too: nothing else writes it, so the dashboard
-                # showed L1 for every row (row 139cddd6).
-                if self.proxy is not None:
-                    repo.update_trust_level( user_email, "swe", category, self.proxy.trust_tracker.get_level( category ) )
         except Exception as e:
             logger.warning( f"Trust state DB persistence failed (non-fatal): {e}" )
+
+        # The level goes in its own transaction, so a failure here cannot roll back the counters.
+        self._persist_trust_level( category )
+
+    def _persist_trust_level( self, category ):
+        """
+        Store the tracker's current level for a category (non-fatal best-effort).
+
+        Nothing else writes the level, so the dashboard showed the lowest level for every row.
+        The circuit breaker demotes the tracker without any feedback, so its trip callback calls this too.
+
+        Requires:
+            - category is a string (decision category)
+
+        Ensures:
+            - the stored level equals self.proxy.trust_tracker.get_level( category ) on success
+            - does nothing when there is no proxy
+            - a DB failure is logged and never propagates
+        """
+        if self.proxy is None: return
+
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.proxy_decision_repository import TrustStateRepository
+
+            user_email = self._user_email or f"{self.session_id}@swe.deepily.ai"
+
+            with get_db() as session:
+                TrustStateRepository( session ).update_trust_level(
+                    user_email, "swe", category, self.proxy.trust_tracker.get_level( category )
+                )
+        except Exception as e:
+            logger.warning( f"Trust level DB persistence failed (non-fatal): {e}" )
 
     def _on_circuit_breaker_trip( self, category, reason ):
         """
@@ -474,9 +503,12 @@ class SweTeamOrchestrator:
             - reason is a human-readable string
 
         Ensures:
+            - Stores the demoted level, because the demotion happens in memory with no feedback to carry it
             - Sends one alert notification with high priority
             - Non-fatal: logs warning on failure, never raises
         """
+        self._persist_trust_level( category )
+
         try:
             import requests as http_requests
 
