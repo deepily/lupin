@@ -206,6 +206,39 @@ class TestGatedConfirmation( unittest.TestCase ):
         p.evaluate.return_value = result
         return p, result
 
+    def test_a_human_yes_at_l1_shadow_is_recorded_as_agreement_not_a_proxy_failure( self ):
+        # Row c73bcfa0 (D1): the REAL strategy and tracker, nothing mocked but the human and the DB.
+        # At L1 gate() returns "shadow"; evaluate() used to leave value None, so a human "yes"
+        # scored as disagreement and every L1 yes counted as a proxy failure.
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        o       = _mk_orch()
+        tracker = TrustTracker()
+        o.proxy = EngineeringStrategy( trust_tracker=tracker, trust_mode="shadow" )
+        t       = self._team_io( confirm=True )
+        with patch.object( o, "_persist_trust_feedback" ) as persist:
+            out = _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
+        self.assertTrue( out )
+        stats = tracker.get_stats()
+        recorded = { name: c for name, c in stats.items() if c[ "total_decisions" ] }
+        self.assertEqual( len( recorded ), 1, recorded )
+        cat = next( iter( recorded.values() ) )
+        self.assertEqual( ( cat[ "total_successes" ], cat[ "total_rejections" ] ), ( 1, 0 ), cat )
+        persist.assert_called_once()
+        self.assertTrue( persist.call_args.args[ 1 ], "the DB write must carry agreement=True too" )
+
+    def test_a_human_no_where_the_proxy_would_approve_is_still_a_disagreement( self ):
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        o       = _mk_orch()
+        tracker = TrustTracker()
+        o.proxy = EngineeringStrategy( trust_tracker=tracker, trust_mode="shadow" )
+        t       = self._team_io( confirm=False )
+        with patch.object( o, "_persist_trust_feedback" ):
+            _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
+        cat = next( c for c in tracker.get_stats().values() if c[ "total_decisions" ] )
+        self.assertEqual( ( cat[ "total_successes" ], cat[ "total_rejections" ] ), ( 0, 1 ), cat )
+
     def test_active_act_auto_approves( self ):
         o = _mk_orch()
         o.proxy, _ = self._proxy( "act", value="approved" )
