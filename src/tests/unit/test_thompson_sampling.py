@@ -223,6 +223,18 @@ class TestThompsonRespectsLevelAndMode:
         self._always( strategy, "act" )
         assert strategy.gate( "testing", trust_level=5, confidence=0.99 ) == "act"
 
+    def test_ts_shadow_lowers_level_2_suggest_to_shadow( self ):
+        """Shadow ranks below suggest, so a shadow draw lowers a level 2 suggest."""
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        self._always( strategy, "shadow" )
+        assert strategy.gate( "testing", trust_level=2, confidence=0.99 ) == "shadow"
+
+    def test_ts_suggest_cannot_raise_level_1_shadow( self ):
+        """Suggest ranks above shadow, so a suggest draw cannot raise a level 1 shadow."""
+        strategy = _make_strategy( thompson_enabled=True, trust_mode="active" )
+        self._always( strategy, "suggest" )
+        assert strategy.gate( "testing", trust_level=1, confidence=0.99 ) == "shadow"
+
 
 class TestGradedActionLevelFour:
     """The level-and-mode action that the sampled action is compared against."""
