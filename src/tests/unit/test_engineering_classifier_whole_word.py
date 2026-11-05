@@ -42,14 +42,44 @@ def test_whole_word_and_phrase_still_match( classifier, question, expected ):
     assert category == expected
 
 
+MAYA_ACCEPTANCE_WORDS = [
+    ( "deployments",   "deployment"  ),
+    ( "deployer",      "deployment"  ),
+    ( "containers",    "deployment"  ),
+    ( "containerized", "deployment"  ),
+    ( "dockerfile",    "deployment"  ),
+    ( "dockerized",    "deployment"  ),
+    ( "rollbacks",     "deployment"  ),
+    ( "truncated",     "destructive" ),
+    ( "truncates",     "destructive" ),
+    ( "purges",        "destructive" ),
+    ( "wipes",         "destructive" ),
+    ( "nukes",         "destructive" ),
+    ( "cleanup",       "destructive" ),
+    ( "cleanups",      "destructive" ),
+]
+
+
+@pytest.mark.parametrize( "word, expected", MAYA_ACCEPTANCE_WORDS )
+def test_capped_words_the_substring_match_caught_still_match( classifier, word, expected ):
+    category, _ = classifier.classify( f"Check the {word}?" )
+    assert category == expected
+
+
 @pytest.mark.parametrize( "question, expected", [
     ( "I deleted the old bucket, continue?",   "destructive" ),
-    ( "We are removing the old table, ok?",        "destructive" ),
-    ( "It was deployed to prod, roll forward?",    "deployment"  ),
+    ( "We are removing the old table, ok?",    "destructive" ),
+    ( "The old rows were dropped, continue?",  "destructive" ),
+    ( "It was deployed to prod, roll forward?", "deployment" ),
 ])
-def test_inflected_forms_of_capped_categories_still_match( classifier, question, expected ):
+def test_inflected_forms_follow_the_suffix_rule( classifier, question, expected ):
     category, _ = classifier.classify( question )
     assert category == expected
+
+
+def test_short_keyword_takes_only_a_plural():
+    assert keyword_in_text( "pip", "two pips" )
+    assert not keyword_in_text( "pip", "the pipes" )
 
 
 def test_keyword_in_text_boundaries():
@@ -58,3 +88,4 @@ def test_keyword_in_text_boundaries():
     assert not keyword_in_text( "test", "latest" )
     assert not keyword_in_text( "test", "test_utils" )
     assert keyword_in_text( "rm -rf", "run rm -rf now" )
+    assert not keyword_in_text( "rm -rf", "run rm -rfx now" )
