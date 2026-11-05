@@ -13,6 +13,8 @@ Dependency Rule:
     This module never imports from notification_proxy.
 """
 
+import re
+
 from cosa.agents.decision_proxy.category_classifier import CategoryClassifier
 from cosa.agents.swe_team.proxy.engineering_categories import ENGINEERING_CATEGORIES
 
@@ -23,6 +25,25 @@ SENDER_CATEGORY_HINTS = {
     "swe.coder"   : None,       # Coders produce all categories
     "swe.lead"    : None,       # Leads produce all categories
 }
+
+
+def keyword_in_text( keyword, text ):
+    """
+    Test whether a keyword occurs in text as a whole word or whole phrase.
+
+    A raw substring test let "pip" match inside "pipeline" and "test" inside
+    "latest", which could pull a question out of a capped category.
+
+    Requires:
+        - keyword is a non-empty string
+        - text is a lower-case string
+
+    Ensures:
+        - Returns True only when keyword is not preceded or followed by a letter,
+          digit or underscore
+        - Keywords with punctuation ( "rm -rf", "requirements.txt" ) match literally
+    """
+    return re.search( r"(?<!\w)" + re.escape( keyword ) + r"(?!\w)", text ) is not None
 
 
 class EngineeringClassifier( CategoryClassifier ):
@@ -82,7 +103,7 @@ class EngineeringClassifier( CategoryClassifier ):
                 continue  # General is the fallback, not scored
 
             keywords = cat_def[ "keywords" ]
-            match_count = sum( 1 for kw in keywords if kw in question_lower )
+            match_count = sum( 1 for kw in keywords if keyword_in_text( kw, question_lower ) )
 
             if match_count > 0:
                 # Base confidence: proportional to keyword matches (capped)
