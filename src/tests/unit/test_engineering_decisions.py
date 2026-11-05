@@ -278,8 +278,8 @@ class TestStrategyEvaluateWithTrust:
         assert result.action == "act"
         assert result.value == "approved"
 
-    def test_evaluate_shadow_mode_no_value( self ):
-        """In shadow mode, value should be None even at high trust."""
+    def test_evaluate_shadow_mode_predicts_a_value_but_does_not_act( self ):
+        """In shadow mode the action stays shadow while value holds the proxy's prediction."""
         strategy = self._make_strategy( trust_mode="shadow" )
         now = time.time()
         for i in range( 11 ):
@@ -287,7 +287,7 @@ class TestStrategyEvaluateWithTrust:
 
         result = strategy.evaluate( "Should I run the full test suite?" )
         assert result.action == "shadow"
-        assert result.value is None
+        assert result.value == "approved", "a shadow result carries the prediction the human answer is compared with"
 
     def test_evaluate_records_confidence_in_breaker( self ):
         """After evaluate(), circuit breaker should have a confidence entry."""

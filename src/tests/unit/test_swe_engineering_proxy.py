@@ -269,7 +269,7 @@ class TestEngineeringStrategy:
         assert isinstance( result, DecisionResult )
         assert result.action == "shadow"
         assert result.category == "testing"
-        assert result.value is None
+        assert result.value == "approved", "shadow still predicts; only the action says do not act"
         assert result.trust_level == 1
         assert result.confidence > 0
 
