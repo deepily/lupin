@@ -62,6 +62,13 @@ def test_a_fresh_bundle_prints_the_report_without_quiet():
     assert done.returncode == 0 and "checker says hello" in done.stdout
 
 
+def test_a_crashed_checker_warns_and_is_not_called_stale():
+    done, ran = _bounce( 3 )
+    assert done.returncode == 0 and ran == [ "ran" ]
+    assert "CRASHED" in done.stderr and "STALE" in done.stderr and "not a STALE verdict" in done.stderr
+    assert "serving a STALE client bundle" not in done.stderr
+
+
 @pytest.mark.parametrize( "rc", [ 2, 127 ] )
 def test_a_check_that_cannot_answer_warns_and_exits_zero( rc ):
     done, ran = _bounce( rc )

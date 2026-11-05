@@ -679,3 +679,33 @@ def test_main_in_process_refuses_when_a_bundle_is_refused_and_when_nothing_was_b
     monkeypatch.setattr( mod, "consumers_of", lambda root, outdir: [] )
     assert mod.main( [] ) == mod.EXIT_REFUSED                  # never built, nobody loads it: nothing measured
     assert "no bundle was built, so nothing was measured" in capsys.readouterr().err
+
+
+def _row( status ):
+    return { "name": status, "status": status, "sources": None, "shipped_hash": "aaa", "rebuilt_hash": "bbb", "reason": "" }
+
+
+@pytest.mark.parametrize( "statuses, expected", [
+    ( [ "REFUSED", "STALE" ],            "EXIT_STALE"   ),     # order must not matter
+    ( [ "STALE", "REFUSED" ],            "EXIT_STALE"   ),
+    ( [ "FRESH", "REFUSED", "STALE" ],   "EXIT_STALE"   ),
+    ( [ "FRESH", "REFUSED" ],            "EXIT_REFUSED" ),     # refused with no stale bundle still refuses
+] )
+def test_a_stale_bundle_is_never_hidden_by_one_that_could_not_be_checked( statuses, expected, tmp_path, monkeypatch, capsys ):
+    rows = [ _row( status ) for status in statuses ]
+    monkeypatch.setattr( mod, "PROJECT_ROOT", tmp_path )
+    monkeypatch.setattr( mod, "discover_bundles", lambda root: [ f"build-{i}.sh" for i in range( len( rows ) ) ] )
+    queue = iter( rows )
+    monkeypatch.setattr( mod, "check_bundle", lambda root, script, esbuild: next( queue ) )
+    monkeypatch.setattr( mod, "current_sha", lambda root: "abc123" )
+    assert mod.main( [] ) == getattr( mod, expected )
+
+
+def test_a_crash_exits_three_with_a_traceback_and_never_reads_as_stale( tmp_path, monkeypatch, capsys ):
+    monkeypatch.setattr( mod, "PROJECT_ROOT", tmp_path )
+    def boom( root ): raise RuntimeError( "scanner exploded" )
+    monkeypatch.setattr( mod, "discover_bundles", boom )
+    code = mod.main( [] )
+    err  = capsys.readouterr().err
+    assert code == mod.EXIT_CRASHED == 3 and code not in ( mod.EXIT_STALE, mod.EXIT_REFUSED, mod.EXIT_FRESH )
+    assert "RuntimeError: scanner exploded" in err and "not a STALE verdict" in err

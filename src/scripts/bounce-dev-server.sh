@@ -357,8 +357,9 @@ if "${SCRIPT_DIR}/lib/wait-for-health.sh" "${health_args[@]}"; then
     fi
     # The served client bundle (src/lupin_app/static/dist/): `:7999` serves raw source live, but dist/ only moves on a
     # rebuild, so merged TypeScript can sit unserved for hours (row a60f834e: the P0 link fix, 2 h 51 min). Ask
-    # check_bundle_freshness.py whether a rebuild would change the delivered bytes. STALE exits 5 after saying which
-    # command rebuilds it; a check that could not answer (exit 2) only warns, because a host without esbuild must
+    # check_bundle_freshness.py whether a rebuild would change the delivered bytes. STALE (exit 1, which wins over a bundle that
+    # could not be checked) exits 5 after saying which command rebuilds it; a check that could not answer (exit 2) or
+    # crashed (exit 3) only warns, because a host without esbuild must
     # still be able to bounce. LUPIN_BUNDLE_FRESHNESS_CHECK=skip turns the step off (tests that stub docker set it);
     # LUPIN_BUNDLE_FRESHNESS_CMD names a different checker (the tests' stub).
     if [ "${LUPIN_BUNDLE_FRESHNESS_CHECK:-on}" != "skip" ]; then
@@ -371,6 +372,7 @@ if "${SCRIPT_DIR}/lib/wait-for-health.sh" "${health_args[@]}"; then
             0) ;;
             1) echo "ERROR: $CONTAINER is healthy but it is serving a STALE client bundle: the merged TypeScript is not what browsers load. Run 'npm run build' in the repo root, then reload the page." >&2
                exit 5 ;;
+            3) echo "WARNING: the bundle freshness checker CRASHED (traceback above); the bundle's state is unknown, this is not a STALE verdict. Run src/scripts/check_bundle_freshness.py by hand." >&2 ;;
             *) echo "WARNING: the served client bundle could not be checked for staleness; run src/scripts/check_bundle_freshness.py by hand." >&2 ;;
         esac
     fi
