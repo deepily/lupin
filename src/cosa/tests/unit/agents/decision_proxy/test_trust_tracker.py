@@ -433,3 +433,43 @@ def test_get_stats_returns_per_category_dicts():
     assert "a" in stats
     assert stats[ "a" ][ "category_name" ] == "a"
     assert stats[ "a" ][ "total_decisions" ] == 1
+
+
+# ── restore_category (row 251f26fb, D2) ──────────────────────────────────────
+
+def _tracker_with( **kw ):
+    tracker = TrustTracker( **SMALL_COUNT_KW, **kw )
+    tracker.register_category( "testing" )
+    return tracker
+
+
+def test_restore_category_sets_totals_and_a_level_that_matches_the_stored_counts():
+    tracker = _tracker_with()
+    with _frozen_time( 1_000_000.0 ):
+        assert tracker.restore_category( "testing", 4, 1, 1_000_000.0 ) is True
+        cat = tracker.categories[ "testing" ]
+        assert ( cat.total_successes, cat.total_rejections, cat.total_decisions ) == ( 4, 1, 5 )
+        assert len( cat.decisions ) == 5 and sum( 1 for _, ok in cat.decisions if ok ) == 4
+        assert tracker.get_level( "testing" ) > 1, "four stored successes must lift the level above L1"
+
+
+def test_restore_category_history_decays_from_the_stored_timestamp():
+    tracker = _tracker_with( rolling_window_days=30 )
+    day = 86_400.0
+    with _frozen_time( 100 * day ):
+        assert tracker.restore_category( "testing", 3, 0, 99 * day ) is True       # inside the window
+        assert tracker.categories[ "testing" ].decisions[ 0 ][ 0 ] == 99 * day
+    other = _tracker_with( rolling_window_days=30 )
+    with _frozen_time( 100 * day ):
+        assert other.restore_category( "testing", 3, 0, 10 * day ) is True         # long outside it
+        cat = other.categories[ "testing" ]
+        assert cat.decisions == [] and cat.total_decisions == 3, "totals survive, stale history is pruned"
+        assert other.get_level( "testing" ) == 1
+
+
+def test_restore_category_refuses_an_unknown_category_and_a_category_that_already_has_decisions():
+    tracker = _tracker_with()
+    assert tracker.restore_category( "nope", 5, 0, 1.0 ) is False
+    tracker.record_decision( "testing", True )
+    assert tracker.restore_category( "testing", 9, 9, 1.0 ) is False
+    assert tracker.categories[ "testing" ].total_decisions == 1, "a refused restore must change nothing"

@@ -251,6 +251,7 @@ class SweTeamJob( AgenticJobBase ):
             config           = config,
             session_id       = self.id_hash,
             job_id           = self.id_hash,
+            user_email       = self.user_email,
             debug            = self.debug,
             verbose          = self.verbose
         )
