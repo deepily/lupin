@@ -13,13 +13,21 @@ URL_OMITTED = "URL omitted"
 
 # Alternative 1: [label](target) and ![alt](src), optionally with a "title" after the target.
 #   label : text, or text holding one level of [nested] brackets
-#   target: no spaces, or holding one level of (nested) parentheses
+#   target: no spaces, or holding (nested) parentheses up to _TARGET_PAREN_DEPTH levels deep
 # Alternative 2: a bare http or https address. Trailing sentence punctuation is not part of it.
 # Each character class stops at the closing bracket,
 # so two links in one string yield two labels, never one swallowed span.
+# A regular expression cannot match unbounded nesting, so the depth is a stated limit:
+# a target nested deeper than this still leaks its tail into the spoken text.
+_TARGET_PAREN_DEPTH = 6
+
+_PAREN_BODY = r'[^()]*'
+for _level in range( _TARGET_PAREN_DEPTH - 1 ):
+    _PAREN_BODY = r'(?:[^()]|\(' + _PAREN_BODY + r'\))*'
+
 _LINK_OR_BARE_URL = re.compile(
     r'!?\[((?:[^\[\]]|\[[^\[\]]*\])*)\]'
-    r'\(\s*((?:[^()\s]|\([^()]*\))+)(?:\s+"[^"]*")?\s*\)'
+    r'\(\s*((?:[^()\s]|\(' + _PAREN_BODY + r'\))+)(?:\s+"[^"]*")?\s*\)'
     r'|https?://[^\s<>\[\]()]*[^\s<>\[\]().,;:!?\'"]'
 )
 

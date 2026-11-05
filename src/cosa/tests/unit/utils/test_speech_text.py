@@ -25,6 +25,9 @@ APPROVE_LINE = (
     ( "[ a b ]( /app/x )",                       " a b , URL omitted" ),
     ( "[a [b] c](http://x.test)",                "a [b] c, URL omitted" ),
     ( "[label](/app/x?row=1(2))",                "label, URL omitted" ),
+    ( "[x](http://a/b(c(d)))",                   "x, URL omitted" ),
+    ( "[x](http://a/b(c(d(e)))) tail",           "x, URL omitted tail" ),
+    ( "[x](http://a/b(c(d))) and [y](http://z/q(r(s)))", "x, URL omitted and y, URL omitted" ),
     ( "[](http://x.test)",                       "URL omitted" ),
     ( "[one](http://a.test) and [two](http://b.test)", "one, URL omitted and two, URL omitted" ),
     ( "see https://x.test/bare now",             "see URL omitted now" ),
@@ -55,3 +58,12 @@ def test_a_link_is_never_dropped_silently():
 def test_non_string_raises_naming_the_type():
     with pytest.raises( TypeError, match="got int" ):
         strip( 5 )
+
+
+def test_unbalanced_deep_parentheses_finish_quickly_and_never_raise():
+    import time
+    text  = "[x](http://a/" + "b(" * 40 + " tail"
+    start = time.monotonic()
+    out   = strip( text )
+    assert time.monotonic() - start < 1.0
+    assert isinstance( out, str )
