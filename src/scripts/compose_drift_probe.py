@@ -35,6 +35,7 @@ Usage:
     compose_drift_probe.py <container>
 """
 import json
+import os
 import subprocess
 import sys
 
@@ -56,6 +57,9 @@ LABEL_WORKING_DIR  = "com.docker.compose.project.working_dir"
 LABEL_PROJECT      = "com.docker.compose.project"
 
 RECREATE_ARG_PREFIX = "RECREATE_ARG="
+
+# Exported for each blank key on the second render; see shell_pass_through_keys.
+PASS_THROUGH_MARKER = "LUPIN_DRIFT_PROBE_MARKER_"
 
 
 def compose_tmpfs( service ):
@@ -149,7 +153,7 @@ def inspect_env( container ):
     return env
 
 
-def drifted_fields( service, container, volume_names, secret_files=None ):
+def drifted_fields( service, container, volume_names, secret_files=None, pass_through=frozenset() ):
     """
     Name every compose value the running container does not carry.
 
@@ -157,11 +161,15 @@ def drifted_fields( service, container, volume_names, secret_files=None ):
         - service is the rendered compose service; container is its `docker inspect` object
         - volume_names maps each compose volume key to its rendered `name`
         - secret_files maps each compose secret key to its host file, or is None
+        - pass_through is the set of environment keys compose takes from the caller's shell
+          (see shell_pass_through_keys); the default names none
 
     Ensures:
-        - an environment key compose renders empty is not compared when the container holds a
-          value: compose rendered it from a shell variable this caller did not export
-          (`${GH_TOKEN:-}`), so the blank says nothing about what compose asks for
+        - an environment key compose renders empty is not compared when it is in pass_through
+          and the container holds a value: compose rendered it from a shell variable this caller
+          did not export (`${GH_TOKEN:-}`), so the blank says nothing about what compose asks for
+        - a key compose sets to a literal empty value is compared like any other, so
+          a deliberate change to "" counts as drift
         - returns a sorted list of human-readable field names, empty when nothing drifted
         - a mount the container has and compose no longer declares counts as drift too,
           since a recreate would remove it
@@ -183,11 +191,39 @@ def drifted_fields( service, container, volume_names, secret_files=None ):
     have_env = inspect_env( container )
     for key, value in sorted( ( service.get( "environment" ) or { } ).items() ):
         want = "" if value is None else str( value )
-        if want == "" and have_env.get( key ): continue
+        if want == "" and key in pass_through and have_env.get( key ): continue
         if have_env.get( key ) != want:
             fields.append( f"env {key}" )
 
     return fields
+
+
+def shell_pass_through_keys( runner, prefix, service, keys, environ=None ):
+    """
+    Name the environment keys compose takes from the caller's shell, not from a literal value.
+
+    Requires:
+        - runner( argv, env=None ) returns parsed JSON or raises, as run_json does
+        - prefix is the compose_argv prefix; service names the rendered service
+        - keys are environment keys compose rendered blank
+        - environ is None (inherit this process's environment) or the complete environment
+
+    Ensures:
+        - renders the service a second time with a unique marker exported for every key, and
+          returns the subset of keys whose rendered value is that marker: only a `${KEY:-}`
+          style reference picks the marker up, a literal "" does not
+        - makes no compose call and returns an empty set when keys is empty
+
+    Raises:
+        - whatever runner raises; the caller's probe turns it into EXIT_UNKNOWN
+    """
+    if not keys: return set()
+    marked   = dict( os.environ if environ is None else environ )
+    markers  = { key: f"{PASS_THROUGH_MARKER}{key}" for key in keys }
+    marked.update( markers )
+    rendered = runner( prefix + [ "config", "--format", "json", service ], env=marked )
+    values   = rendered[ "services" ][ service ].get( "environment" ) or { }
+    return { key for key in keys if values.get( key ) == markers[ key ] }
 
 
 def run_json( argv, env=None ):
@@ -264,7 +300,12 @@ def probe( container_name, runner=run_json, environ=None ):
         rendered  = runner( prefix + [ "config", "--format", "json", service ], env=environ )
         names     = { key: spec[ "name" ] for key, spec in ( rendered.get( "volumes" ) or { } ).items() }
         secrets   = { key: spec[ "file" ] for key, spec in ( rendered.get( "secrets" ) or { } ).items() if "file" in spec }
-        fields    = drifted_fields( rendered[ "services" ][ service ], container, names, secrets )
+        svc_spec  = rendered[ "services" ][ service ]
+        have_env  = inspect_env( container )
+        blank     = [ key for key, value in ( svc_spec.get( "environment" ) or { } ).items()
+                      if ( value is None or str( value ) == "" ) and have_env.get( key ) ]
+        passing   = shell_pass_through_keys( runner, prefix, service, blank, environ )
+        fields    = drifted_fields( svc_spec, container, names, secrets, passing )
     except ( OSError, ValueError, RuntimeError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired ) as e:
         return EXIT_UNKNOWN, [ f"{type( e ).__name__}: {e}" ], [ ]
     recreate = prefix + [ "up", "-d", "--force-recreate", "--no-deps", service ]
