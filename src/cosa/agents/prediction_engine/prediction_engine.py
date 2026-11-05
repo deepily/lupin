@@ -1224,19 +1224,24 @@ class PredictionEngine:
     @staticmethod
     def _cosine_similarity( vec_a, vec_b ):
         """
-        Compute cosine similarity between two unit-length vectors.
+        Compute the true cosine similarity between two vectors of any length.
 
-        For unit-length (normalized) vectors, as produced by EmbeddingProvider,
-        dot product equals cosine similarity.
+        EmbeddingProvider does not normalise its output, so a bare dot product
+        exceeds 1 for non-unit vectors. Divide by both norms instead.
 
         Requires:
             - vec_a and vec_b are lists/arrays of equal length
 
         Ensures:
-            - Returns float similarity score
+            - Returns a float in [ -1.0, 1.0 ] ( up to rounding )
+            - Returns 0.0 when either vector has zero length
         """
         import numpy as np
-        return float( np.dot( np.array( vec_a ), np.array( vec_b ) ) )
+        a      = np.array( vec_a, dtype=float )
+        b      = np.array( vec_b, dtype=float )
+        denom  = float( np.linalg.norm( a ) * np.linalg.norm( b ) )
+        if denom == 0.0: return 0.0
+        return float( max( -1.0, min( 1.0, float( np.dot( a, b ) ) / denom ) ) )
 
     def _enrich_with_embedding_similarity( self, actual_dict: dict,
                                             prediction_result: 'PredictionResult',
