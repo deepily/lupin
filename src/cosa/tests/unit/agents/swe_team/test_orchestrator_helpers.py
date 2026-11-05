@@ -243,29 +243,44 @@ class TestGatedConfirmation( unittest.TestCase ):
 
     @staticmethod
     def _fake_trust_db():
-        """An in-memory trust store whose rows are keyed by (user, domain, category)."""
+        """
+        An in-memory trust store with real transactions.
+
+        Rows are keyed by (user, domain, category).
+        A session works on copies; a clean exit commits them and an exception rolls them back.
+        """
+        import copy
         rows = {}
         class Row:
             def __init__( self, category ):
                 self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0; self.trust_level = 1
                 from datetime import datetime, timezone
                 self.updated_at = datetime.now( timezone.utc )
+        class Session:
+            def __init__( self ): self.work = { k: copy.copy( v ) for k, v in rows.items() }
         class Repo:
-            def __init__( self, session ): pass
+            def __init__( self, session ): self.work = session.work
             def update_after_ratification( self, user_email, domain, category, approved ):
-                row = rows.setdefault( ( user_email, domain, category ), Row( category ) )
+                row = self.work.setdefault( ( user_email, domain, category ), Row( category ) )
                 if approved: row.successful_decisions += 1
                 else:        row.rejected_decisions   += 1
                 return row
             def update_trust_level( self, user_email, domain, category, new_level ):
-                row = rows.setdefault( ( user_email, domain, category ), Row( category ) )
+                row = self.work.setdefault( ( user_email, domain, category ), Row( category ) )
                 row.trust_level = new_level
                 return row
             def get_all_for_user( self, user_email, domain=None ):
-                return [ r for ( u, d, _ ), r in rows.items() if u == user_email and d == domain ]
+                return [ r for ( u, d, _ ), r in self.work.items() if u == user_email and d == domain ]
         class Db:
-            def __enter__( self ): return object()
-            def __exit__( self, *a ): return False
+            def __enter__( self ):
+                self.session = Session()
+                return self.session
+            def __exit__( self, exc_type, exc, tb ):
+                if exc_type is None:                              # commit: keep object identity for rows that already exist
+                    for key, row in self.session.work.items():
+                        if key in rows: rows[ key ].__dict__.update( row.__dict__ )
+                        else:           rows[ key ] = row
+                return False                                      # on an exception nothing is committed
         return rows, Repo, Db
 
     def _job( self, user_email, session_id, Repo, Db, confirm=True, trust_mode="shadow" ):
@@ -354,7 +369,41 @@ class TestGatedConfirmation( unittest.TestCase ):
         self.assertLess( row.trust_level, before )
         self.assertEqual( row.trust_level, o.proxy.trust_tracker.get_level( row.category ) )
 
+    def test_a_breaker_demotion_survives_the_next_job_through_the_stored_level_ceiling( self ):
+        # Mr. Radio's call on D2's gap: restored level = min( level from counters, stored level ).
+        rows, Repo, Db = self._fake_trust_db()
+        o = self._level_job( Repo, Db )
+        self._answer( o, Repo, Db, times=3 )
+        row     = next( iter( rows.values() ) )
+        earned  = o.proxy.trust_tracker.get_level( row.category )
+        self.assertGreater( earned, 2 )
+        o.proxy.circuit_breaker.on_trip_callback = o._on_circuit_breaker_trip
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ), \
+             patch( "requests.post" ):
+            o.proxy.circuit_breaker.trip( row.category, "error rate" )              # the real breaker demotes, then calls back
+        demoted = o.proxy.trust_tracker.get_level( row.category )
+        self.assertLess( demoted, earned )
+        self.assertEqual( row.trust_level, demoted, "the trip stored the demoted level" )
+        self.assertEqual( row.successful_decisions, 3, "the counters are unchanged by a demotion" )
+
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            fresh = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( dry_run=True, trust_mode="shadow" ),
+                                         session_id="st-next", user_email="rick@example.com" )
+        # Same low thresholds as the first job, so the counters alone would earn the higher level again.
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        fresh.proxy = EngineeringStrategy( trust_tracker=TrustTracker( l2_threshold=1, l3_threshold=2, l4_threshold=3, l5_threshold=4 ),
+                                           trust_mode="shadow" )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            self.assertEqual( fresh._load_trust_state(), 1 )
+        self.assertEqual( fresh.proxy.trust_tracker.get_level( row.category ), demoted )
+
     def test_a_failing_level_write_keeps_the_counters_and_the_job_going( self ):
+        # John's D11 review: with transactional rows, a level write that raises must not take the committed
+        # counter update with it. Both writes in ONE transaction would roll the counters back and fail this test.
         rows, Repo, Db = self._fake_trust_db()
         def boom( self, *a, **k ): raise RuntimeError( "level write failed" )
         Repo.update_trust_level = boom
@@ -365,8 +414,17 @@ class TestGatedConfirmation( unittest.TestCase ):
             outs = [ _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) ) for _ in range( 2 ) ]
         self.assertEqual( outs, [ True, True ], "the job carries on with the human's answer" )
         row = next( iter( rows.values() ) )
-        self.assertEqual( row.successful_decisions, 2, "the counters were not rolled back by the level failure" )
-        self.assertEqual( row.trust_level, 1 )
+        self.assertEqual( row.successful_decisions, 2, "both counter updates were committed" )
+        self.assertEqual( row.trust_level, 1, "the level write failed and committed nothing" )
+
+    def test_the_fake_store_really_rolls_back_a_transaction_that_raises( self ):
+        # The control for the test above: prove the fake can lose a write, or its pass means nothing.
+        rows, Repo, Db = self._fake_trust_db()
+        with self.assertRaises( RuntimeError ):
+            with Db() as session:
+                Repo( session ).update_after_ratification( "u", "swe", "testing", True )
+                raise RuntimeError( "boom" )
+        self.assertEqual( rows, {} )
 
     def test_persisting_a_level_with_no_proxy_does_nothing( self ):
         o = _mk_orch( trust_mode="disabled" )

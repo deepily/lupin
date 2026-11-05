@@ -418,7 +418,8 @@ class SweTeamOrchestrator:
             with get_db() as session:
                 for row in TrustStateRepository( session ).get_all_for_user( self._user_email, domain="swe" ):
                     if self.proxy.trust_tracker.restore_category(
-                        row.category, row.successful_decisions, row.rejected_decisions, row.updated_at.timestamp()
+                        row.category, row.successful_decisions, row.rejected_decisions, row.updated_at.timestamp(),
+                        stored_level=row.trust_level
                     ):
                         restored += 1
             return restored

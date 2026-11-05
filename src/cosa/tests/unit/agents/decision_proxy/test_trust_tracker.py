@@ -473,3 +473,25 @@ def test_restore_category_refuses_an_unknown_category_and_a_category_that_alread
     tracker.record_decision( "testing", True )
     assert tracker.restore_category( "testing", 9, 9, 1.0 ) is False
     assert tracker.categories[ "testing" ].total_decisions == 1, "a refused restore must change nothing"
+
+
+def test_restore_category_treats_the_stored_level_as_a_ceiling_not_a_floor():
+    with _frozen_time( 1_000_000.0 ):
+        high = _tracker_with()
+        high.restore_category( "testing", 4, 0, 1_000_000.0 )                       # counters alone reach a high level
+        counters_level = high.get_level( "testing" )
+        assert counters_level > 2
+
+        capped = _tracker_with()
+        capped.restore_category( "testing", 4, 0, 1_000_000.0, stored_level=2 )
+        assert capped.get_level( "testing" ) == 2, "a demotion stored as level 2 must hold"
+
+        floor = _tracker_with()
+        floor.restore_category( "testing", 1, 0, 1_000_000.0, stored_level=5 )      # stored higher than the counters earn
+        assert floor.get_level( "testing" ) == _tracker_with_level_after( 1 ), "the ceiling never lifts a level"
+
+
+def _tracker_with_level_after( successes ):
+    tracker = _tracker_with()
+    tracker.restore_category( "testing", successes, 0, 1_000_000.0 )
+    return tracker.get_level( "testing" )

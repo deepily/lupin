@@ -106,6 +106,9 @@ class CategoryTrust:
         # BLR state (lazy-initialized on first record_decision_with_features call)
         self._blr_model = None
 
+        # Highest level a restore from storage allows; None means no ceiling (see restore_category)
+        self.level_ceiling = None
+
     @property
     def level( self ):
         """
@@ -117,13 +120,15 @@ class CategoryTrust:
         Ensures:
             - Returns 1 if below level 2 threshold
             - Returns highest level where threshold is met
-            - Capped at cap_level
+            - Capped at cap_level, and at level_ceiling when a restore set one
         """
         if self.trust_model == "blr":
-            return self._level_blr()
-        if self.trust_model == "beta":
-            return self._level_beta()
-        return self._level_count_based()
+            computed = self._level_blr()
+        elif self.trust_model == "beta":
+            computed = self._level_beta()
+        else:
+            computed = self._level_count_based()
+        return computed if self.level_ceiling is None else min( computed, self.level_ceiling )
 
     def _level_count_based( self ):
         """
@@ -496,7 +501,7 @@ class TrustTracker:
 
         if self.debug: print( f"[TrustTracker] Registered category: {category_name} (cap L{cap_level}, model={self.trust_model})" )
 
-    def restore_category( self, category_name, successes, rejections, as_of ):
+    def restore_category( self, category_name, successes, rejections, as_of, stored_level=None ):
         """
         Restore a category's counters and rolling history from stored totals.
 
@@ -506,9 +511,12 @@ class TrustTracker:
         Requires:
             - successes and rejections are non-negative ints
             - as_of is an epoch timestamp in seconds
+            - stored_level is the level saved with the row (1-5), or None for no ceiling
 
         Ensures:
             - returns True and sets the totals when the category is registered and empty
+            - the restored level is min( level from the counters, stored_level ), so a demotion,
+              which changes the stored level but not the counters, survives the reload
             - the rolling history gains one entry per restored decision, stamped as_of
             - returns False and changes nothing when the category is unknown or already has decisions
         """
@@ -519,6 +527,7 @@ class TrustTracker:
         cat.total_rejections = rejections
         cat.total_decisions  = successes + rejections
         cat.decisions        = [ ( as_of, True ) ] * successes + [ ( as_of, False ) ] * rejections
+        cat.level_ceiling    = stored_level
         cat._prune_rolling_window()
         return True
 
