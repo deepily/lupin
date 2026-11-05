@@ -25,6 +25,9 @@ APPROVE_LINE = (
     ( "[ a b ]( /app/x )",                       " a b , URL omitted" ),
     ( "[a [b] c](http://x.test)",                "a [b] c, URL omitted" ),
     ( "[label](/app/x?row=1(2))",                "label, URL omitted" ),
+    ( "[x](http://a/b(c(d)))",                   "x, URL omitted" ),
+    ( "[x](http://a/b(c(d(e)))) tail",           "x, URL omitted tail" ),
+    ( "[x](http://a/b(c(d))) and [y](http://z/q(r(s)))", "x, URL omitted and y, URL omitted" ),
     ( "[](http://x.test)",                       "URL omitted" ),
     ( "[one](http://a.test) and [two](http://b.test)", "one, URL omitted and two, URL omitted" ),
     ( "see https://x.test/bare now",             "see URL omitted now" ),
@@ -55,3 +58,47 @@ def test_a_link_is_never_dropped_silently():
 def test_non_string_raises_naming_the_type():
     with pytest.raises( TypeError, match="got int" ):
         strip( 5 )
+
+
+def _nested_link( depth ):
+    """A link whose target holds `depth` levels of balanced parentheses."""
+    return "[x](http://a/b" + "(c" * depth + ")" * depth + ")"
+
+
+@pytest.mark.parametrize( "depth", [ 1, 2, 6, 7, 50, 3000 ] )
+def test_any_depth_of_balanced_parentheses_is_one_link( depth ):
+    assert strip( _nested_link( depth ) + " tail" ) == "x, URL omitted tail"
+
+
+def test_balanced_deep_target_between_two_links_keeps_both_labels():
+    text = _nested_link( 50 ) + " and [y](http://z/q(r(s)))"
+    assert strip( text ) == "x, URL omitted and y, URL omitted"
+
+
+@pytest.mark.parametrize( "text, spoken", [
+    ( "[x](http://a/b(c(d tail",                "x, URL omitted tail" ),
+    ( "[x](http://a/" + "b(" * 40 + " tail",     "x, URL omitted tail" ),
+    ( "[x](http://a/b(c(d))",                    "x, URL omitted" ),
+    ( "[x](http://a/b(c(d)) tail",               "x, URL omitted tail" ),
+] )
+def test_unbalanced_target_is_dropped_never_spoken( text, spoken ):
+    out = strip( text )
+    assert out == spoken
+    assert "http" not in out and "a/b" not in out
+
+
+def test_unbalanced_deep_parentheses_finish_quickly():
+    import time
+    text  = "[x](http://a/" + "b(" * 5000 + " tail"
+    start = time.monotonic()
+    out   = strip( text )
+    assert time.monotonic() - start < 1.0
+    assert out == "x, URL omitted tail"
+
+
+def test_a_bracket_pair_followed_by_ordinary_parentheses_is_not_a_link():
+    assert strip( "[a](b c) rest" ) == "[a](b c) rest"
+
+
+def test_an_empty_target_is_not_a_link():
+    assert strip( "[x]() rest" ) == "[x]() rest"

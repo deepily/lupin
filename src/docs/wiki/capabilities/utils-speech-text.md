@@ -10,7 +10,7 @@ One helper that turns links into something safe to say aloud. The server's text-
 
 ## What it does
 - `strip_markdown_links_for_speech( text )` replaces each markdown link with its label and `URL omitted`. An image becomes its alt text and `URL omitted`. A bare `http` or `https` address becomes `URL omitted`. A link with an empty label becomes `URL omitted`.
-- A link target may hold one level of parentheses, a label one level of square brackets, and a `"title"` after the target is dropped. Trailing sentence punctuation is not part of a bare address.
+- A link target may hold balanced parentheses at any depth. A scanner counts them, so there is no depth limit. A target whose parenthesis never closes is dropped up to the next blank. So is a link with no closing `)` anywhere after it, so no part of the address is spoken. A label may hold one level of square brackets. A `"title"` after the target is dropped. Trailing sentence punctuation is not part of a bare address.
 - `[ref][id]` references and text without links come back unchanged.
 
 ## Don't
