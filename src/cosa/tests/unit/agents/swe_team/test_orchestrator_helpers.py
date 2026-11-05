@@ -247,7 +247,7 @@ class TestGatedConfirmation( unittest.TestCase ):
         rows = {}
         class Row:
             def __init__( self, category ):
-                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0
+                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0; self.trust_level = 1
                 from datetime import datetime, timezone
                 self.updated_at = datetime.now( timezone.utc )
         class Repo:
@@ -256,6 +256,10 @@ class TestGatedConfirmation( unittest.TestCase ):
                 row = rows.setdefault( ( user_email, domain, category ), Row( category ) )
                 if approved: row.successful_decisions += 1
                 else:        row.rejected_decisions   += 1
+                return row
+            def update_trust_level( self, user_email, domain, category, new_level ):
+                row = rows.setdefault( ( user_email, domain, category ), Row( category ) )
+                row.trust_level = new_level
                 return row
             def get_all_for_user( self, user_email, domain=None ):
                 return [ r for ( u, d, _ ), r in rows.items() if u == user_email and d == domain ]
@@ -282,6 +286,26 @@ class TestGatedConfirmation( unittest.TestCase ):
         cat = next( c for c in second.proxy.trust_tracker.get_stats().values() if c[ "total_decisions" ] )
         self.assertEqual( cat[ "total_decisions" ], 2, "job two started from job one's stored decision, then added its own" )
         self.assertEqual( cat[ "total_successes" ], 2 )
+
+    def test_the_stored_level_follows_the_trackers_level_instead_of_staying_at_one( self ):
+        # Row 139cddd6 (D11): nothing wrote trust_level, so every stored row read L1.
+        rows, Repo, Db = self._fake_trust_db()
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        o = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( dry_run=True, trust_mode="shadow" ),
+                                 session_id="st-x", user_email="rick@example.com" )
+        o.proxy = EngineeringStrategy( trust_tracker=TrustTracker( l2_threshold=1, l3_threshold=2, l4_threshold=3, l5_threshold=4 ),
+                                       trust_mode="shadow" )
+        t = self._team_io( confirm=True )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            for _ in range( 3 ):
+                _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
+        row   = next( iter( rows.values() ) )
+        level = o.proxy.trust_tracker.get_level( row.category )
+        self.assertGreater( level, 1, "three agreeing answers against thresholds 1/2/3/4 must lift the level" )
+        self.assertEqual( row.trust_level, level )
+        self.assertEqual( row.successful_decisions, 3 )
 
     def test_a_different_user_does_not_inherit_another_users_trust( self ):
         rows, Repo, Db = self._fake_trust_db()

@@ -438,7 +438,7 @@ class SweTeamOrchestrator:
             - approved is a bool (True if user agreed with proxy)
 
         Ensures:
-            - Trust state updated in DB on success
+            - Counters updated in DB on success, and the stored level set to the tracker's level
             - Failure logged but never propagates
         """
         try:
@@ -456,6 +456,10 @@ class SweTeamOrchestrator:
                     category   = category,
                     approved   = approved,
                 )
+                # Store the tracker's own level too: nothing else writes it, so the dashboard
+                # showed L1 for every row (row 139cddd6).
+                if self.proxy is not None:
+                    repo.update_trust_level( user_email, "swe", category, self.proxy.trust_tracker.get_level( category ) )
         except Exception as e:
             logger.warning( f"Trust state DB persistence failed (non-fatal): {e}" )
 
