@@ -77,7 +77,7 @@ Trust is tracked **per-user, per-domain, per-category**. The SWE domain has 6 ca
 | **Level 1** | Shadow | Observe only — logs what the proxy *would* decide but takes no action. The original notification still reaches you. (TODO, task 84b1ddd2a: recheck this row once the Level 1 change merges.) | No (not_required) |
 | **Level 2** | Provisional | Suggests a decision and queues it for ratification. Does not act autonomously. | Yes (pending) |
 | **Level 3** | Trusted | Acts when its classification confidence is at least 80% (`l3_act_confidence`). Below that it queues the decision as a suggestion. | Only below 80% |
-| **Level 4** | Autonomous | Acts, but queues **destructive** decisions, confidence under 50% (`l4_min_confidence`), and a random 10% audit sample (`l4_audit_rate`). | The queued cases |
+| **Level 4** | Autonomous | Acts, but queues **destructive** decisions, decisions under 50% confidence (`l4_min_confidence`) and a random 10% audit sample (`l4_audit_rate`). | The queued cases |
 | **Level 5** | Full Trust | Acts on all decisions in this category. Ratification available but not required. | No (not_required) |
 
 These levels apply in `ACTIVE` mode. The three numbers are `EngineeringStrategy` arguments
@@ -89,7 +89,7 @@ It is never passed to the strategy, so changing the key has no effect today (a h
 
 **How a category earns its level.** The default count model counts **approved** decisions. Each is weighted
 down with age (half-life 14 days, window 30 days). The levels start at 50, 200, 500 and 1000 weighted successes
-for Levels 2 to 5. Rejections earn nothing; the circuit breaker, below, uses them.
+for Levels 2 to 5. Rejections earn nothing and subtract nothing; the circuit breaker below uses them.
 Your ratification adds to the counters and sets no level. A SWE job rebuilds its tracker from the counters at start, and the level follows.
 The dashboard shows the level the SWE team orchestrator stores after each answered confirmation and each breaker trip.
 
