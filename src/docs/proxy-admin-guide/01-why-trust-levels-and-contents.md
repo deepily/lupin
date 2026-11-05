@@ -77,7 +77,7 @@ Trust is tracked **per-user, per-domain, per-category**. The SWE domain has 6 ca
 | **Level 1** | Shadow | Observe only — logs what the proxy *would* decide but takes no action. The original notification still reaches you. (TODO, task 84b1ddd2a: recheck this row once the Level 1 change merges.) | No (not_required) |
 | **Level 2** | Provisional | Suggests a decision and queues it for ratification. Does not act autonomously. | Yes (pending) |
 | **Level 3** | Trusted | Acts when its classification confidence is at least 80% (`l3_act_confidence`). Below that it queues the decision as a suggestion. | Only below 80% |
-| **Level 4** | Autonomous | Acts, except that it queues the decision when the category is **destructive**, when confidence is under 50% (`l4_min_confidence`), or when it falls in a random 10% audit sample (`l4_audit_rate`). | The queued cases |
+| **Level 4** | Autonomous | Acts, but queues **destructive** decisions, decisions under 50% confidence (`l4_min_confidence`) and a random 10% audit sample (`l4_audit_rate`). | The queued cases |
 | **Level 5** | Full Trust | Acts on all decisions in this category. Ratification available but not required. | No (not_required) |
 
 These levels apply in `ACTIVE` mode. The three numbers are `EngineeringStrategy` arguments
@@ -89,8 +89,7 @@ It is never passed to the strategy, so changing the key has no effect today (a h
 
 **How a category earns its level.** The default count model counts **approved** decisions. Each is weighted
 down with age (half-life 14 days, window 30 days). The levels start at 50, 200, 500 and 1000 weighted successes
-for Levels 2 to 5. Rejections earn nothing and subtract nothing.
-They matter to the circuit breaker, below.
+for Levels 2 to 5. Rejections earn nothing and subtract nothing; the circuit breaker below uses them.
 Your ratification adds to the counters and sets no level. A SWE job rebuilds its tracker from the counters at start, and the level follows.
 The dashboard shows the level the SWE team orchestrator stores after each answered confirmation and each breaker trip.
 
@@ -121,20 +120,19 @@ The proxy operates in one of four modes, set globally from the Trust Dashboard:
 Each category has an independent circuit breaker that protects against automation failures.
 It **trips** in either of two cases:
 
-- the rejection rate is above **15%** (`swe team trust proxy circuit breaker error rate threshold`) with at least 10 decisions recorded;
+- the rejection rate is above **15%** (`... circuit breaker error rate threshold`) with at least 10 decisions recorded;
 - the average classification confidence of the last 20 decisions is below **0.30**, with at least 5 recorded
   (`... circuit breaker confidence collapse threshold`).
 
 On a trip the category is demoted **2 levels** (`... auto demotion levels`).
-The gate then answers `defer` for the cooldown (`... recovery cooldown seconds`, shipped as 3600). The `defer` ends by itself when the
-cooldown ends. A reset by hand is not needed.
+The gate then answers `defer` for the cooldown (`... recovery cooldown seconds`, shipped as 3600). The `defer` ends by itself, with no manual reset.
 
 **The demotion does not end with the cooldown.** The tracker remembers the demoted level and the success count at the
 trip. It holds the category at or below that level until new successes earn it back.
 The gap is the next level's threshold minus the demoted level's own. Successes before the trip count for nothing.
-The trip is stored with the category, so a later job starts with the same cap.
-This holds for the default count model.
-(TODO: add Beta and BLR demotion when the demote fix merges.)
+The trip is stored, so a later job starts with the same cap.
+For the Beta and BLR models a demotion also lowers the success count, so `demote(k)` lands exactly k levels down.
+The BLR model is reset. The level comes from the Beta counters until it has 30 decisions of its own (`BLR_MIN_OBSERVATIONS`).
 
 | State | Indicator | Meaning |
 |-------|-----------|---------|
