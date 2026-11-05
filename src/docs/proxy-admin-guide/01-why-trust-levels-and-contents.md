@@ -80,17 +80,19 @@ Trust is tracked **per-user, per-domain, per-category**. The SWE domain has 6 ca
 | **Level 4** | Autonomous | Acts, except that it queues the decision when the category is **destructive**, when confidence is under 50% (`l4_min_confidence`), or when it falls in a random 10% audit sample (`l4_audit_rate`). | The queued cases |
 | **Level 5** | Full Trust | Acts on all decisions in this category. Ratification available but not required. | No (not_required) |
 
-These levels apply in `ACTIVE` mode. The three numbers are arguments of the SWE engineering strategy
-(`EngineeringStrategy` in `swe_team/proxy/engineering_strategy.py`) with the defaults shown. There is no
-`lupin-app.ini` key for them. In `SUGGEST` mode every category at Level 2 or above only suggests. In `SHADOW` mode every category shadows.
+These levels apply in `ACTIVE` mode. The three numbers are `EngineeringStrategy` arguments
+(`swe_team/proxy/engineering_strategy.py`) with these defaults. No `lupin-app.ini` key sets them.
+The 10% Level 4 audit draw is `l4_audit_rate` (default 0.10).
+The key `swe team trust proxy l4 audit sample rate` is read into `config.py` as `l4_audit_sample_rate`.
+It is never passed to the strategy, so changing the key has no effect today (a held task records the gap).
+`SUGGEST` mode only suggests from Level 2 up. `SHADOW` mode always shadows.
 
 **How a category earns its level.** The default count model counts **approved** decisions. Each is weighted
 down with age (half-life 14 days, window 30 days). The levels start at 50, 200, 500 and 1000 weighted successes
-for Levels 2 to 5 (`swe team trust proxy l2 threshold` and its siblings). Rejections earn nothing and do not subtract
-from the count. They matter to the circuit breaker, below.
-Your ratification adds to the counters. It does **not** set a level. A SWE job rebuilds its tracker from the stored counters when it starts, and the level follows from them.
-The Trust Dashboard shows the level stored by the SWE team orchestrator, which writes it after each answered
-confirmation and when the breaker trips.
+for Levels 2 to 5. Rejections earn nothing and subtract nothing.
+They matter to the circuit breaker, below.
+Your ratification adds to the counters and sets no level. A SWE job rebuilds its tracker from the counters at start, and the level follows.
+The dashboard shows the level the SWE team orchestrator stores after each answered confirmation and each breaker trip.
 
 ### The 6 SWE Categories
 
