@@ -356,6 +356,7 @@ class SweTeamOrchestrator:
                 )
                 # No trust feedback here: no human has answered, and an auto-approval that scored
                 # itself a success would let the proxy grade its own work (row 0bba595e).
+                self._persist_proxy_decision( role, question, proxy_result, None )
                 return proxy_result.value == "approved"
 
             if proxy_result.action == "suggest" and proxy_result.value:
@@ -376,6 +377,9 @@ class SweTeamOrchestrator:
 
                 # Persist trust state to DB (non-fatal)
                 self._persist_trust_feedback( proxy_result.category, agreement )
+
+                # Row 5ac3d5d7: the ratify page reads proxy_decisions, and this path wrote none
+                self._persist_proxy_decision( role, question, proxy_result, user_answer )
 
                 # Phase 7: Emit proxy summary notification for pending ratification decisions
                 # "suggest" and "defer" actions produce pending ratification decisions;
@@ -425,6 +429,51 @@ class SweTeamOrchestrator:
         except Exception as e:
             logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
             return 0
+
+    def _persist_proxy_decision( self, role, question, proxy_result, user_answer ):
+        """
+        Write one organic proxy_decisions row for a gated confirmation (non-fatal best-effort).
+
+        Requires:
+            - role is a string; question is a string
+            - proxy_result has action, value, category, confidence, trust_level, reason
+            - user_answer is the user's bool answer, or None when the proxy auto-approved
+
+        Ensures:
+            - a shadow result is logged as a shadow row; suggest and defer rows wait for ratification
+            - the row carries data_origin "organic"
+            - failure is logged and never propagates
+        """
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
+
+            common = {
+                "notification_id" : str( uuid.uuid4() ),
+                "domain"          : "swe",
+                "category"        : proxy_result.category,
+                "question"        : question[ :500 ],
+                "sender_id"       : get_sender_id( role, self.session_id ),
+                "confidence"      : proxy_result.confidence,
+                "trust_level"     : proxy_result.trust_level,
+                "reason"          : proxy_result.reason or "",
+                "metadata_json"   : { "job_id": self.job_id, "user_answer": user_answer },
+                "data_origin"     : "organic",
+            }
+            with get_db() as session:
+                repo = ProxyDecisionRepository( session )
+                if proxy_result.action == "shadow":
+                    repo.log_shadow( **common )
+                else:
+                    repo.log_decision(
+                        action                = proxy_result.action,
+                        decision_value        = proxy_result.value,
+                        requires_ratification = proxy_result.action in ( "suggest", "defer" ),
+                        **common
+                    )
+                session.commit()
+        except Exception as e:
+            logger.warning( f"Proxy decision DB persistence failed (non-fatal): {e}" )
 
     def _persist_trust_feedback( self, category, approved ):
         """
