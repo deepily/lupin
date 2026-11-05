@@ -9,6 +9,7 @@ import pathlib
 import sys
 
 from cosa.repo.symindex import build as sx_build
+from cosa.repo.symindex.candidates import bm25
 from cosa.repo.symindex.candidates import candidate_stage as cs
 from cosa.repo.symindex.candidates import rank_fusion as rf
 from cosa.repo.symindex.candidates.errors import CandidateError, DEPENDENCY_MISSING, VECTOR_SET_CORRUPT, VECTOR_SET_UNAVAILABLE
@@ -45,6 +46,8 @@ def validate_request( request, with_index=True ):
         - checks fusion, when present, holds k and depth as positive ints of at most FUSION_MAX and head as an int from 0 to depth
         - checks purposes, vectors_dir and wiki when present are a string, a string and a list of strings
         - checks skip_lost_ids, when present, is a boolean
+        - checks protect_head, when present, is an integer of 0 or more
+        - checks extra_queries, when present, is a list of { need, query_vectors } and needs vectors_dir when it is not empty
         - checks query_vectors is a non-empty dict of lists of numbers, each finite and within float32 range, when vectors_dir is set
         - compares each value with the float32 limit directly, so a 400-digit integer is refused and never converted
 
@@ -67,14 +70,54 @@ def validate_request( request, with_index=True ):
         if not is_count( fusion[ "k" ], 1 ) or not is_count( fusion[ "depth" ], 1 ): bad( "fusion k and depth must be positive integers" )
         if fusion[ "k" ] > FUSION_MAX or fusion[ "depth" ] > FUSION_MAX: bad( f"fusion k and depth must be at most {FUSION_MAX}" )
         if not is_count( fusion[ "head" ], 0 ) or fusion[ "head" ] > fusion[ "depth" ]: bad( "fusion head must be an integer from 0 to depth" )
+    if request.get( "extra_queries" ) is not None: validate_extra_queries( request, bad )
+    if request.get( "protect_head" ) is not None and not is_count( request[ "protect_head" ], 0 ): bad( "protect_head is not a non-negative integer" )
     if request.get( "vectors_dir" ) is None: return
     if not isinstance( request[ "vectors_dir" ], str ): bad( "vectors_dir is not a string" )
-    vectors = request.get( "query_vectors" )
-    if not isinstance( vectors, dict ) or not vectors: bad( "query_vectors is missing or empty" )
+    validate_query_vectors( request.get( "query_vectors" ), "query_vectors", bad )
+
+
+def validate_query_vectors( vectors, label, bad ):
+    """
+    Check one mapping of query vectors.
+
+    Requires:
+        - bad( detail ) raises the request error
+
+    Ensures:
+        - returns None when vectors is a non-empty dict of non-empty lists of numbers, each finite and within float32 range
+        - compares each value with the float32 limit directly, so a 400-digit integer is refused and never converted
+
+    Raises:
+        - whatever bad raises, naming label and the first vector that is wrong
+    """
+    if not isinstance( vectors, dict ) or not vectors: bad( f"{label} is missing or empty" )
     for name, vector in vectors.items():
         numbers = isinstance( vector, list ) and vector and all( isinstance( v, ( int, float ) ) and not isinstance( v, bool ) for v in vector )
         if not numbers: bad( f"query vector {name} is not a non-empty list of numbers" )
         if not all( abs( v ) <= FLOAT32_MAX for v in vector ): bad( f"query vector {name} holds a value that is not finite or is beyond float32 range" )
+
+
+def validate_extra_queries( request, bad ):
+    """
+    Check the extra queries of a request, the optional need-expansion field.
+
+    Requires:
+        - bad( detail ) raises the request error
+
+    Ensures:
+        - returns None when extra_queries is a list of { need, query_vectors } with a string need and valid query vectors, and vectors_dir is set
+        - an empty list is accepted and means no extra query
+
+    Raises:
+        - whatever bad raises, naming the first thing that is wrong
+    """
+    extra = request[ "extra_queries" ]
+    if not isinstance( extra, list ): bad( "extra_queries is not a list" )
+    if extra and request.get( "vectors_dir" ) is None: bad( "extra_queries needs vectors_dir" )
+    for n, query in enumerate( extra ):
+        if not isinstance( query, dict ) or not isinstance( query.get( "need" ), str ): bad( f"extra_queries[{n}] needs a string need" )
+        validate_query_vectors( query.get( "query_vectors" ), f"extra_queries[{n}].query_vectors", bad )
 
 
 def cosine_ranked( ids, matrix, query ):
@@ -165,6 +208,37 @@ def answer( request, load_vectors ):
     return answer_for_stage( request, stage, load_vectors )
 
 
+def cosine_lists( vectors, index_ids, query_vectors, prefix="" ):
+    """
+    Rank the index entries by each stored matrix for one set of query vectors.
+
+    Requires:
+        - vectors has ids, matrices; index_ids is the set of ids the stage holds
+        - query_vectors maps a matrix name to a query vector
+
+    Ensures:
+        - returns ( lists, scores ), each keyed prefix + "vector_" + matrix name, in sorted name order
+        - an id the index lacks is left out of every list
+        - the default prefix gives the names a single-query search has always used
+
+    Raises:
+        - CandidateError BAD_SEARCH_REQUEST for an unknown matrix or a wrong vector width
+        - CandidateError VECTOR_SET_CORRUPT when a matrix has a different row count from the ids
+    """
+    lists, scores = {}, {}
+    for name in sorted( query_vectors ):
+        if name not in vectors.matrices: raise CandidateError( REQUEST_ERROR, f"the vector set has no matrix {name}" )
+        rows, width = vectors.matrices[ name ].shape
+        if rows != len( vectors.ids ):
+            raise CandidateError( VECTOR_SET_CORRUPT, f"matrix {name} has {rows} rows for {len( vectors.ids )} ids" )
+        if len( query_vectors[ name ] ) != width:
+            raise CandidateError( REQUEST_ERROR, f"query vector {name} has {len( query_vectors[ name ] )} values, the matrix has {width}" )
+        pairs                         = [ p for p in cosine_ranked( vectors.ids, vectors.matrices[ name ], query_vectors[ name ] ) if p[ 0 ] in index_ids ]
+        lists[ f"{prefix}vector_{name}" ]  = [ doc_id for doc_id, _ in pairs ]
+        scores[ f"{prefix}vector_{name}" ] = [ score for _, score in pairs ]
+    return lists, scores
+
+
 def answer_for_stage( request, stage, load_vectors ):
     """
     Answer one search request against a built stage.
@@ -181,6 +255,8 @@ def answer_for_stage( request, stage, load_vectors ):
         - manifest_hash is the vector set's, or None when no vectors were asked for
         - index_ids_without_vectors counts index entries the set has no row for, or is None without vectors
         - the shortlist holds at most K ids
+        - with protect_head above 0 and extra_queries, the plain need's own first protect_head ids are always kept, as candidate_stage.shortlist does
+        - with extra_queries, each one adds its own BM25 code and prose lists and its own cosine lists, named x<n>_code, x<n>_prose and x<n>_vector_<matrix>, and they are fused with the rest; without it nothing changes
         - with skip_lost_ids true, vector ids the index lacks are left out of every cosine list and counted in ids_lost,
           and the answer carries ids_lost; without it such an id is refused
 
@@ -192,6 +268,7 @@ def answer_for_stage( request, stage, load_vectors ):
         - CandidateError HEAD_EXCEEDS_LIMIT when the heads of the lists do not fit in K
     """
     extra, scores, manifest_hash, without_vectors, lost = {}, {}, None, None, []
+    expanded = set()
     if request.get( "vectors_dir" ) is not None:
         try:
             vectors = load_vectors( request[ "vectors_dir" ] )
@@ -203,18 +280,17 @@ def answer_for_stage( request, stage, load_vectors ):
         if ghosts and request.get( "skip_lost_ids" ) is not True: raise CandidateError( VECTOR_IDS_NOT_INDEX, f"{len( ghosts )} vector ids are not in the index, first {ghosts[ :3 ]}" )
         lost            = ghosts
         without_vectors = len( index_ids.difference( vectors.ids ) )
-        for name in sorted( request[ "query_vectors" ] ):
-            if name not in vectors.matrices: raise CandidateError( REQUEST_ERROR, f"the vector set has no matrix {name}" )
-            rows, width = vectors.matrices[ name ].shape
-            if rows != len( vectors.ids ):
-                raise CandidateError( VECTOR_SET_CORRUPT, f"matrix {name} has {rows} rows for {len( vectors.ids )} ids" )
-            if len( request[ "query_vectors" ][ name ] ) != width:
-                raise CandidateError( REQUEST_ERROR, f"query vector {name} has {len( request[ 'query_vectors' ][ name ] )} values, the matrix has {width}" )
-            pairs          = [ p for p in cosine_ranked( vectors.ids, vectors.matrices[ name ], request[ "query_vectors" ][ name ] ) if p[ 0 ] in index_ids ]
-            extra[ f"vector_{name}" ]  = [ doc_id for doc_id, _ in pairs ]
-            scores[ f"vector_{name}" ] = [ score for _, score in pairs ]
+        extra, scores   = cosine_lists( vectors, index_ids, request[ "query_vectors" ] )
+        for n, query in enumerate( request.get( "extra_queries" ) or [] ):
+            more, more_scores = cosine_lists( vectors, index_ids, query[ "query_vectors" ], f"x{n}_" )
+            extra.update( more )
+            scores.update( more_scores )
+            for source, index in ( ( "code", stage.code ), ( "prose", stage.prose ) ):
+                extra[ f"x{n}_{source}" ] = [ doc_id for doc_id, _ in bm25.rank_scored( index, query[ "need" ] ) ]
+            expanded.update( name for name in extra if name.startswith( f"x{n}_" ) )
     if request.get( "wiki" ): extra[ "wiki" ] = list( request[ "wiki" ] )
-    result = cs.shortlist( request[ "need" ], stage, request[ "K" ], extra )
+    protect = { "head": request[ "protect_head" ], "skip": sorted( expanded ) } if request.get( "protect_head" ) and expanded else None
+    result = cs.shortlist( request[ "need" ], stage, request[ "K" ], extra, protect )
     result[ "scores" ].update( scores )
     result.update( { "K": request[ "K" ], "manifest_hash": manifest_hash, "bm25": stage.manifest(), "index_ids_without_vectors": without_vectors } )
     if request.get( "skip_lost_ids" ) is True: result[ "ids_lost" ] = len( lost )

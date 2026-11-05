@@ -35,3 +35,6 @@ Every location of the candidate stage comes from an INI key, and an environment 
 ## Shortlist arm
 - `shortlist_arm( default, config=None, environ=None )` returns the search arm the shipped stage runs. `LUPIN_REUSE_CANDIDATE_ARM` wins when set and not blank. Otherwise the INI key `reuse candidate shortlist arm` is used, and otherwise `default`.
 - The name is stripped and not checked here, because the stage refuses an unknown arm. It raises `DEPENDENCY_MISSING` when the INI must be read and no manager can be built.
+
+## Need expansion
+- `need_expansion_enabled( config=None, environ=None )` says whether the stage expands each need first. `LUPIN_REUSE_CANDIDATE_NEED_EXPANSION` decides alone when set. Otherwise the INI key `reuse candidate need expansion enabled` is used, and only `true`, `1`, `yes` or `on` turn it on. The shipped key is `false`. `need_expansion_protected_head( config=None, environ=None )` returns how many of the plain need's top ids an expanded shortlist keeps. `LUPIN_REUSE_CANDIDATE_NEED_EXPANSION_PROTECTED_HEAD`, then the INI key `reuse candidate need expansion protected head`, then 64. A value that is not a whole number of 0 or more raises `PROTECTED_HEAD_INVALID`.
