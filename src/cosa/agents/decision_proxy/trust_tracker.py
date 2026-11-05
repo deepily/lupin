@@ -247,12 +247,13 @@ class CategoryTrust:
         return min( computed_level, self.cap_level )
 
     @staticmethod
-    def build_feature_vector( question, category_index, hour_of_day=None ):
+    def build_feature_vector( question, category_index, hour_of_day=None, recent_error_rate=0.0 ):
         """
         Build a 4-dimensional feature vector for BLR.
 
         Features, all in [0, 1]: 0 category_index / 6.0, 1 min( word_count / 50, 1.0 ),
-        2 hour_of_day / 24.0. Feature 3 is recent_error_rate, a 0.0 placeholder the caller fills.
+        2 hour_of_day / 24.0, 3 recent_error_rate from CategoryTrust.recent_error_rate().
+        Feature 0 is constant inside one CategoryTrust and acts as a second bias term.
 
         Requires:
             - question is a string
@@ -262,6 +263,7 @@ class CategoryTrust:
             question: Question text for word count
             category_index: Ordinal category index (0-5)
             hour_of_day: Hour of day (0-23), defaults to current hour
+            recent_error_rate: Share of recent decisions rejected, in [0, 1] (default 0.0)
 
         Returns:
             numpy array of shape (4,)
@@ -278,8 +280,24 @@ class CategoryTrust:
             category_index / 6.0,
             min( word_count / 50.0, 1.0 ),
             hour_of_day / 24.0,
-            0.0,  # Placeholder — caller should set error_rate
+            recent_error_rate,
         ] )
+
+    def recent_error_rate( self, window=20 ):
+        """
+        Share of the most recent decisions that were rejected.
+
+        Requires:
+            - window is a positive integer
+
+        Ensures:
+            - returns a float in [0, 1]
+            - looks at the latest window entries of the rolling history, by timestamp
+            - returns 0.0 when the history is empty
+        """
+        recent = sorted( self.decisions, key=lambda d: d[ 0 ] )[ -window: ]
+        if not recent: return 0.0
+        return sum( 1 for _, ok in recent if not ok ) / len( recent )
 
     def record_decision_with_features( self, success, feature_vector, timestamp=None ):
         """
