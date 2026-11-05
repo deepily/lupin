@@ -1353,6 +1353,12 @@ class PredictionEngine:
             else:
                 actual_dict = { "value": str( actual_value ) }
 
+            # MC and batch answers reach the router as a JSON string, so the wrap above leaves
+            # them under "value" and the comparators find no "answers" key (row 4e8b56e0).
+            if response_type in ( RESPONSE_TYPE_MULTIPLE_CHOICE, RESPONSE_TYPE_OPEN_ENDED_BATCH ):
+                decoded = self._parse_mc_decision_value( actual_dict[ "value" ] ) if isinstance( actual_dict.get( "value" ), str ) else None
+                if decoded is not None: actual_dict = decoded
+
             # Enrich open-ended types with embedding similarity (injects transient _embedding_similarity key)
             if response_type in ( RESPONSE_TYPE_OPEN_ENDED, RESPONSE_TYPE_OPEN_ENDED_BATCH ):
                 self._enrich_with_embedding_similarity( actual_dict, prediction_result, response_type )
