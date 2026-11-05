@@ -467,14 +467,14 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
     def calibrate_conformal( self ):
         """
-        Calibrate the conformal wrapper using BLR predictions across categories.
+        Calibrate the conformal wrapper on the BLR's out-of-sample predictions.
 
-        Collects BLR predict() probabilities and corresponding labels from
-        all categories that have trained BLR models, then calibrates the
-        conformal wrapper.
+        Each trained BLR logs, for every point it learned, the probability it predicted
+        before seeing that point's outcome. Those pairs from every category are the
+        held-out calibration set.
 
         Ensures:
-            - Conformal wrapper is calibrated if sufficient BLR data exists
+            - Calibration uses only logged ( prediction, outcome ) pairs, never counts turned into repeated points
             - Safe to call even if no BLR models are trained
 
         Returns:
@@ -485,24 +485,11 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         probabilities = []
         labels        = []
 
-        for cat_name, cat in self.trust_tracker.categories.items():
-            if cat._blr_model is None or cat._blr_model._feature_count == 0:
-                continue
-
-            x_bar = cat._blr_model._feature_sum / cat._blr_model._feature_count
-            prob, _ = cat._blr_model.predict( x_bar )
-
-            # Use category success rate as proxy for true label
-            if cat.total_decisions > 0:
-                n_success = cat.total_successes
-                n_total   = cat.total_decisions
-                # Generate calibration points proportional to category size
-                for _ in range( n_success ):
-                    probabilities.append( prob )
-                    labels.append( 1 )
-                for _ in range( n_total - n_success ):
-                    probabilities.append( prob )
-                    labels.append( 0 )
+        for cat in self.trust_tracker.categories.values():
+            if cat._blr_model is None: continue
+            for prob, label in cat._blr_model.calibration_pairs:
+                probabilities.append( prob )
+                labels.append( label )
 
         wrapper.calibrate( probabilities, labels )
         return wrapper.get_status()
