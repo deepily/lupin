@@ -350,32 +350,23 @@ class TestConformalWrapper( unittest.TestCase ):
 
     def test_calibrate_conformal_collects_blr_points( self ):
         strat, tt, _ = _mk_strategy()
-        blr = MagicMock()
-        blr._feature_count = 2
-        blr._feature_sum   = 4.0
-        blr.predict.return_value = ( 0.7, None )
-        cat_with = SimpleNamespace( _blr_model=blr, total_decisions=3, total_successes=2 )
-        cat_skip = SimpleNamespace( _blr_model=None )
-        cat_zero = SimpleNamespace( _blr_model=MagicMock( _feature_count=0 ) )
-        tt.categories = { "a": cat_with, "b": cat_skip, "c": cat_zero }
+        with_pairs = SimpleNamespace( _blr_model=SimpleNamespace( calibration_pairs=[ ( 0.7, 1 ), ( 0.6, 1 ), ( 0.2, 0 ) ] ) )
+        other      = SimpleNamespace( _blr_model=SimpleNamespace( calibration_pairs=[ ( 0.9, 1 ) ] ) )
+        no_model   = SimpleNamespace( _blr_model=None )
+        tt.categories = { "a": with_pairs, "b": no_model, "c": other }
         wrapper = MagicMock()
         wrapper.get_status.return_value = { "calibrated": True }
         with patch.object( strat, "_get_conformal_wrapper", return_value=wrapper ):
             out = strat.calibrate_conformal()
         self.assertEqual( out, { "calibrated": True } )
-        # 2 success + 1 fail = 3 calibration points.
+        # The points are the logged ( prediction, outcome ) pairs of every trained model, in order.
         probs, labels = wrapper.calibrate.call_args.args
-        self.assertEqual( len( probs ), 3 )
-        self.assertEqual( labels.count( 1 ), 2 )
-        self.assertEqual( labels.count( 0 ), 1 )
+        self.assertEqual( probs, [ 0.7, 0.6, 0.2, 0.9 ] )
+        self.assertEqual( labels, [ 1, 1, 0, 1 ] )
 
-    def test_calibrate_conformal_no_decisions_skips_points( self ):
+    def test_calibrate_conformal_model_without_pairs_adds_no_points( self ):
         strat, tt, _ = _mk_strategy()
-        blr = MagicMock()
-        blr._feature_count = 2
-        blr._feature_sum   = 4.0
-        blr.predict.return_value = ( 0.7, None )
-        tt.categories = { "a": SimpleNamespace( _blr_model=blr, total_decisions=0, total_successes=0 ) }
+        tt.categories = { "a": SimpleNamespace( _blr_model=SimpleNamespace( calibration_pairs=[], total_decisions=9 ) ) }
         wrapper = MagicMock()
         with patch.object( strat, "_get_conformal_wrapper", return_value=wrapper ):
             strat.calibrate_conformal()
