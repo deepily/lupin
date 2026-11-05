@@ -17,6 +17,7 @@ from cosa.repo.symindex.candidates import search as cs_search
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates import wiki_list
 from cosa.repo.symindex.candidates.errors import CandidateError
+from lupin_mcp.reuse_needset import expansion_replay
 
 CANDIDATE_SEARCH_FAILED = "CANDIDATE_SEARCH_FAILED"
 QUERY_VECTOR_MISSING    = "QUERY_VECTOR_MISSING"
@@ -46,13 +47,14 @@ class CandidateStage:
         - embed_client has embed( texts, content_type, role ) and info()
         - arm is one of the names in the arms tuple, and K a positive integer
         - refresher is None, or a function with no arguments that runs the incremental vector build under the build lock
+        - expander is None, or a function that takes the ranking text and returns { paraphrases, identifiers } or None; None keeps every lookup as it was
 
     Ensures:
         - holds no state between lookups except the fact that a stage key was uploaded
     """
 
     def __init__( self, base_url, api_key, vectors_dir, query_cache_dir, embed_client, purposes_path=None, K=DEFAULT_K, arm=DEFAULT_ARM,
-                  fusion=None, timeout=TIMEOUT_SECONDS, urlopen=urllib.request.urlopen, refresher=None ):
+                  fusion=None, timeout=TIMEOUT_SECONDS, urlopen=urllib.request.urlopen, refresher=None, expander=None ):
         """Hold the endpoints, folders and settings, and check the arm and K."""
         if arm not in ARMS: raise ValueError( f"arm must be one of {sorted( ARMS )}, got {arm!r}" )
         if not isinstance( K, int ) or isinstance( K, bool ) or K < 1: raise ValueError( f"K must be a positive integer, got {K!r}" )
@@ -63,6 +65,7 @@ class CandidateStage:
         self.timeout, self._urlopen = timeout, urlopen
         self._uploaded = set()
         self._refresher = refresher
+        self._expander  = expander
 
     def freshen( self, index_manifest ):
         """
@@ -157,7 +160,7 @@ class CandidateStage:
         return hashlib.sha256( canonical( { "v": STAGE_VERSION, "index_sha": index_sha, "entries": len( entries ),
                                             "purposes": hashlib.sha256( canonical( purposes ).encode( "utf-8" ) ).hexdigest(), "fusion": self.fusion } ).encode( "utf-8" ) ).hexdigest()[ :32 ]
 
-    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None, index_manifest=None ):
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None, index_manifest=None, expansion=None ):
         """
         Choose the candidates for a need.
 
@@ -168,6 +171,7 @@ class CandidateStage:
             - wiki_ids is None, or the wiki list a receipt recorded, which then replaces the one built from pages
             - K is None for the client's own K, or the size of this one shortlist, such as the widened size when the first set sat inside the band
             - index_manifest is None, or the index generation's manifest name; with a refresher and without cache_only it is compared with the set's build info first
+            - expansion is None, or the { paraphrases, identifiers } a receipt recorded, which then replaces the expander's answer and is never asked again
 
         Ensures:
             - returns { ids, ranking, lists, manifest_hash, embed_models, arm, K, widened, stage_key, wiki, wiki_ids, ranking_hash, freshness }
@@ -177,6 +181,9 @@ class CandidateStage:
             - ranking is the fused order of those ids
             - lists names each list that fed the fusion with its size and its first ids
             - the wiki list is used only by the arms that take it
+            - with an expander, or a recorded expansion, the paraphrases and the identifier words are searched too and fused with the need's own lists, and the answer holds expansion; with neither, the body, the answer and the keys are those of a lookup without expansion
+            - cache_only never calls the expander: it uses the recorded expansion or none
+            - an expander that answers None is a lookup without expansion
             - cache_only never embeds and never uploads: it is the replay's read
 
         Raises:
@@ -198,6 +205,9 @@ class CandidateStage:
         asked    = K + ( 1 if exclude_id is not None else 0 )
         body     = { "stage_key": key, "need": ranking_text, "K": asked, "vectors_dir": self.vectors_dir, "query_vectors": vectors, "wiki": wiki,
                      "expect_manifest_hash": manifest[ "manifest_hash" ] }
+        if expansion is None and self._expander is not None and not cache_only: expansion = self._expander( ranking_text )
+        if expansion is not None:
+            body[ "extra_queries" ] = [ { "need": text, "query_vectors": self._vectors( text, manifest, cache_only ) } for text in expansion_replay.queries_for( ranking_text, expansion )[ 1: ] ]
         if fresh[ "state" ] == "stale": body[ "skip_lost_ids" ] = True
         status, answer = self._call( "POST", "/api/reuse-candidates/search", body )
         if status == 409 and answer.get( "error" ) == STAGE_UNKNOWN and not cache_only:
@@ -213,7 +223,9 @@ class CandidateStage:
             fresh = { **fresh, "ids_lost": lost, "note": f"answered from a stale set, {lost} ids lost" }
         ranking = [ i for i in answer[ "ranking" ] if i != exclude_id ][ :K ]
         lists   = { name: { "size": answer[ "list_sizes" ][ name ], "head": answer[ "lists" ][ name ] } for name in sorted( answer[ "lists" ] ) }
-        return { "ids": sorted( ranking ), "ranking": ranking, "lists": lists, "manifest_hash": answer[ "manifest_hash" ],
-                 "embed_models": { kind: manifest[ "engines" ][ kind ][ "model" ] for kind in ( "code", "prose" ) },
-                 "arm": self.arm, "K": K, "widened": False, "stage_key": key, "wiki": len( wiki ), "wiki_ids": wiki,
-                 "ranking_hash": hashlib.sha256( ranking_text.encode( "utf-8" ) ).hexdigest(), "freshness": fresh }
+        out = { "ids": sorted( ranking ), "ranking": ranking, "lists": lists, "manifest_hash": answer[ "manifest_hash" ],
+                "embed_models": { kind: manifest[ "engines" ][ kind ][ "model" ] for kind in ( "code", "prose" ) },
+                "arm": self.arm, "K": K, "widened": False, "stage_key": key, "wiki": len( wiki ), "wiki_ids": wiki,
+                "ranking_hash": hashlib.sha256( ranking_text.encode( "utf-8" ) ).hexdigest(), "freshness": fresh }
+        if expansion is not None: out[ "expansion" ] = expansion
+        return out

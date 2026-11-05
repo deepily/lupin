@@ -26,3 +26,7 @@ pins:
 - `read_purposes( path )` returns `{ pin: purpose }`, the first row for a pin winning, or `{}` for None. A last line that is not JSON, cut short by a write in progress, is skipped and appended to the optional `torn` list. A damaged earlier line still raises.
 - `default_loader( vectors_dir )` calls `vector_store.load_vectors`.
 - `main( stdin, stdout, load_vectors )` writes the answer and returns 0, or writes `{ error, detail }` and returns 2 for a `CandidateError`. Input that is not a JSON object also returns 2.
+
+## Extra queries (need expansion)
+- A request may carry `extra_queries`, a list of `{ need, query_vectors }`. Each adds its own BM25 code and prose lists and its own cosine lists. They are named `x<n>_code`, `x<n>_prose` and `x<n>_vector_<matrix>`. All of them are fused with the need's lists. An absent or empty list changes nothing. A non-empty list needs `vectors_dir`.
+- `cosine_lists` ranks the index by each stored matrix for one set of query vectors; `validate_query_vectors` and `validate_extra_queries` are the request checks.

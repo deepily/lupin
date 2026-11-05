@@ -379,6 +379,7 @@ def _candidate_stage( top ):
         - the stage's arm is the INI key `reuse candidate shortlist arm` or its override variable, and the concat-vector default arm when neither is set
         - the server address and key are the ones the embeddings client resolves, pinned to the FastAPI server
         - the stage refreshes a vector set that is behind the index before a lookup, through candidate_build.run under its build lock
+        - the stage expands each need first only when the INI key `reuse candidate need expansion enabled` or its override variable reads true; the shipped key is false and the stage is then built as it always was
 
     Raises:
         - ReuseError CANDIDATE_STAGE_UNCONFIGURED naming the storage error when a key is missing
@@ -386,19 +387,21 @@ def _candidate_stage( top ):
     from cosa.memory.embedding_provider import EmbeddingProvider
     from cosa.repo.symindex.candidates import storage_paths, vector_build
     from cosa.repo.symindex.candidates.errors import CandidateError
-    from lupin_mcp import reuse_candidates
+    from lupin_mcp import reuse_candidates, reuse_expansion
     try:
         data     = data_dir( top )
         vectors  = storage_paths.candidate_dir( "vectors", data )
         cache    = storage_paths.candidate_dir( "query_cache", data )
         purposes = storage_paths.candidate_dir( "purpose", data ) / "purpose.jsonl"
         arm      = storage_paths.shortlist_arm( reuse_candidates.DEFAULT_ARM )
+        expand   = storage_paths.need_expansion_enabled()
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_UNCONFIGURED", str( e ) ) from e
     base_url, api_key, _prefix = EmbeddingProvider._resolve_http_target( True )
 
+    expander = reuse_expansion.make_expander() if expand else None
     return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, arm=arm,
-                                            refresher=make_refresher( top, vector_build.EndpointClient(), os.environ ) )
+                                            refresher=make_refresher( top, vector_build.EndpointClient(), os.environ ), expander=expander )
 
 
 def make_refresher( top, client, environ, **run_kwargs ):
@@ -1446,13 +1449,24 @@ def _stage_in_language( stage, every, language ):
     return kept
 
 
+def _expansion_of( block ):
+    """
+    Name the expansion a stage answer or receipt block recorded, as a keyword.
+
+    Ensures:
+        - returns { "expansion": the recorded expansion } when the block holds one, and {} when it holds none
+        - so a lookup that was not expanded calls the client with the arguments it always had
+    """
+    return { "expansion": block[ "expansion" ] } if "expansion" in block else {}
+
+
 def _widen( ctx, client, stage, routed, need, entries, every, whole, flags, policy, ranking_text, index_sha, exclude_id, language ):
     """
     Widen a lookup whose first sweep sat near a cut-off.
 
     Ensures:
         - returns ( routed, stage, error )
-        - asks the stage for WIDE_K with the first call's wiki list, so the first set is the head of the wider one
+        - asks the stage for WIDE_K with the first call's wiki list and expansion, so the first set is the head of the wider one and the expander is not asked twice
         - gives the stage the whole list of every language, as the first call did, so one index has one stage whatever the language asked
         - drops the wider set's ids of another language, as the first set's were dropped
         - a stage that fails answers the first sweep's decision with CALL_FAILED added, and error names the failure
@@ -1460,7 +1474,7 @@ def _widen( ctx, client, stage, routed, need, entries, every, whole, flags, poli
         - otherwise the stage dict gains K, widened and widened_ids, and routed holds both sweeps
     """
     try:
-        wide = client.shortlist( ranking_text, whole, index_sha, ctx.pages, exclude_id=exclude_id, K=WIDE_K, wiki_ids=stage[ "wiki_ids" ] )
+        wide = client.shortlist( ranking_text, whole, index_sha, ctx.pages, exclude_id=exclude_id, K=WIDE_K, wiki_ids=stage[ "wiki_ids" ], **_expansion_of( stage ) )
     except CandidateError as x:
         d = vd.decide( routed[ "sw" ][ "answers" ], [ e[ "id" ] for e in routed[ "deciding" ] ], routed[ "sw" ][ "failed" ], flags | { "CALL_FAILED" }, policy )
         return { **routed, "d": d }, stage, { "code": x.code, "detail": x.detail }
@@ -1483,6 +1497,7 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
         - an error block names it and holds no manifest hash, so a failed stage never claims a vector set
         - ranking_text and wiki_ids are the two inputs a replay cannot rebuild from the snapshot
         - a widened run records K as the wide size, the extra ids as widened_ids, and a failed widening as widen_error
+        - a lookup that was expanded records the expansion, the other input a replay cannot rebuild; a lookup without one adds no key
         - a lookup that refreshed the vector set, or answered from a stale one, records freshness: the state, and for a stale set the
           error, the count of lost ids and the note "answered from a stale set, N ids lost"; a fresh set adds no key
     """
@@ -1494,6 +1509,7 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
             "ids": stage[ "ids" ], "widened_ids": stage[ "widened_ids" ] if "widened_ids" in stage else [], "ranking_hash": stage[ "ranking_hash" ],
             "stage_key": stage[ "stage_key" ], "wiki": stage[ "wiki" ], "wiki_ids": stage[ "wiki_ids" ] }
     if widen_error is not None: out[ "widen_error" ] = widen_error
+    if "expansion" in stage: out[ "expansion" ] = stage[ "expansion" ]
     if "freshness" in stage and stage[ "freshness" ][ "state" ] in ( "refreshed", "stale" ): out[ "freshness" ] = stage[ "freshness" ]
     return out
 
@@ -1838,7 +1854,7 @@ def _frozen_candidate_ids( ctx, stored, entries, left_out, language ):
     try:
         if client.manifest()[ "manifest_hash" ] != cs[ "manifest_hash" ]:
             raise ReuseError( "VECTOR_SET_REPLACED", f"the vector set on disk is not {cs[ 'manifest_hash' ][ :12 ]}" )
-        fresh = client.shortlist( cs[ "ranking_text" ], entries, stored[ "index_sha" ], [], exclude_id=left_out, cache_only=True, wiki_ids=cs[ "wiki_ids" ] )
+        fresh = client.shortlist( cs[ "ranking_text" ], entries, stored[ "index_sha" ], [], exclude_id=left_out, cache_only=True, wiki_ids=cs[ "wiki_ids" ], **_expansion_of( cs ) )
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_FAILED", str( e ) ) from e
     wide = cs[ "widened_ids" ] if "widened_ids" in cs else []
