@@ -40,12 +40,21 @@ A category with frequent rejections is held back by the breaker, not by a lower 
 
 ### How Circuit Breakers Protect Against Failures
 
-If a category's rejection rate rises above 15% (with at least 10 decisions), or its recent average confidence
-falls below 0.30, the circuit breaker **trips**:
+A category's breaker **trips** in either of two cases:
 
-1. **`TRIPPED`**: the category is demoted 2 levels and the gate defers every decision in it to you.
-2. **COOLDOWN**: after the cooldown (3600 seconds shipped) the `defer` ends by itself.
+- the rejection rate is above **15%** (`swe team trust proxy circuit breaker error rate threshold`) with at least 10 decisions recorded;
+- the average classification confidence of the last 20 decisions is below **0.30**, with at least 5 recorded (`... confidence collapse threshold`).
+
+1. **`TRIPPED`**: the category is demoted **2 levels** (`... auto demotion levels`) and the gate defers every decision in it to you.
+2. **COOLDOWN**: after the cooldown (`... recovery cooldown seconds`, shipped as 3600) the `defer` ends by itself, with no manual reset.
 3. **Closed (OK)**: normal operation resumes. The level stays capped at the demoted level until new approvals earn it back.
+
+**The demotion does not end with the cooldown.** The tracker remembers the demoted level and the success count at the
+trip. It holds the category at or below that level until new successes earn it back.
+The gap is the next level's threshold minus the demoted level's own. Successes before the trip count for nothing.
+The trip is stored, so a later job starts with the same cap.
+For the Beta and BLR models a demotion also lowers the success count, so `demote(k)` lands exactly k levels down.
+The BLR model is reset. The level comes from the Beta counters until it has 30 decisions of its own (`BLR_MIN_OBSERVATIONS`).
 
 This prevents runaway automation — if the proxy makes bad decisions, it stops acting and waits for human guidance.
 
@@ -61,13 +70,5 @@ The counts are illustrative; they follow the shipped thresholds (Level 2 at 50 w
 | **Day 4** | At Level 3 the proxy acts on decisions it classifies at 80% confidence or more and queues the rest. You approve the queued ones. | Level 3 |
 | **Day 5** | 1 queued decision, you reject it (wrong test strategy). | Level 3, rejection rate under 1%. Circuit breaker: OK |
 | **Day 7** | A burst of rejections takes the rate above 15%. | Breaker trips, category drops to Level 1 and defers to you for the cooldown |
-
------|---------|-------------------------------|
-| **Day 1** | Start in `SHADOW` mode. Proxy logs 8 shadow decisions overnight. | Level 1 Shadow, 0 total, no success rate |
-| **Day 2** | Switch to `SUGGEST` mode. Proxy queues 6 suggestions. You approve all 6. | Level 1 → Level 2 Provisional, 6 total, 100% rate |
-| **Day 3** | Switch to `ACTIVE` mode. Proxy acts on 4 high-confidence decisions, queues 2 lower-confidence. You approve all 2 queued. | Level 2, 8 total, 100% rate |
-| **Day 4** | Proxy acts on 5, queues 1. You approve it. | Level 2 → Level 3 Trusted, 9 total, 100% rate |
-| **Day 5** | Proxy acts autonomously on 7 testing decisions. 1 queued, you reject it (wrong test strategy). | Level 3, 10 total, 90% rate. Circuit breaker: OK |
-| **Day 7** | Continued high approval rate. | Level 3 stable, ready for Level 4 promotion |
 
 ---

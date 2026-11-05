@@ -74,7 +74,7 @@ Trust is tracked **per-user, per-domain, per-category**. The SWE domain has 6 ca
 
 | Level | Name | Behavior | Ratification Required? |
 |-------|------|----------|------------------------|
-| **Level 1** | Shadow | Observe only — logs what the proxy *would* decide but takes no action. The original notification still reaches you. (TODO, task 84b1ddd2a: recheck this row once the Level 1 change merges.) | No (not_required) |
+| **Level 1** | Shadow | Observe only — logs what the proxy *would* decide but takes no action. The original notification still reaches you. | No (not_required) |
 | **Level 2** | Provisional | Suggests a decision and queues it for ratification. Does not act autonomously. | Yes (pending) |
 | **Level 3** | Trusted | Acts when its classification confidence is at least 80% (`l3_act_confidence`). Below that it queues the decision as a suggestion. | Only below 80% |
 | **Level 4** | Autonomous | Acts, but queues **destructive** decisions, decisions under 50% confidence (`l4_min_confidence`) and a random 10% audit sample (`l4_audit_rate`). | The queued cases |
@@ -86,6 +86,16 @@ The 10% Level 4 audit draw is `l4_audit_rate` (default 0.10).
 The key `swe team trust proxy l4 audit sample rate` is read into `config.py` as `l4_audit_sample_rate`.
 It is never passed to the strategy, so changing the key has no effect today (a held task records the gap).
 `SUGGEST` mode only suggests from Level 2 up. `SHADOW` mode always shadows.
+
+**Where the level comes from.** Each strategy supplies its own level for a category.
+The SWE strategy reads it from the trust tracker, which answers Level 1 for a category it does not know.
+No base default of Level 1 sits behind it.
+
+**Category caps.** A category never rises above its cap, whatever it earns.
+Shipped caps are 3 for deployment, destructive and architecture, and 5 for testing, dependencies and general.
+The `lupin-app.ini` keys `swe engineering proxy deployment cap level`, `... destructive cap level` and `... architecture cap level` set the first three.
+They now take effect when a SWE job starts.
+A value outside 1 to 5 is refused with an error when the job builds its proxy.
 
 **How a category earns its level.** The default count model counts **approved** decisions. Each is weighted
 down with age (half-life 14 days, window 30 days). The levels start at 50, 200, 500 and 1000 weighted successes
@@ -118,21 +128,9 @@ The proxy operates in one of four modes, set globally from the Trust Dashboard:
 ### Circuit Breaker
 
 Each category has an independent circuit breaker that protects against automation failures.
-It **trips** in either of two cases:
-
-- the rejection rate is above **15%** (`... circuit breaker error rate threshold`) with at least 10 decisions recorded;
-- the average classification confidence of the last 20 decisions is below **0.30**, with at least 5 recorded
-  (`... circuit breaker confidence collapse threshold`).
-
-On a trip the category is demoted **2 levels** (`... auto demotion levels`).
-The gate then answers `defer` for the cooldown (`... recovery cooldown seconds`, shipped as 3600). The `defer` ends by itself, with no manual reset.
-
-**The demotion does not end with the cooldown.** The tracker remembers the demoted level and the success count at the
-trip. It holds the category at or below that level until new successes earn it back.
-The gap is the next level's threshold minus the demoted level's own. Successes before the trip count for nothing.
-The trip is stored, so a later job starts with the same cap.
-For the Beta and BLR models a demotion also lowers the success count, so `demote(k)` lands exactly k levels down.
-The BLR model is reset. The level comes from the Beta counters until it has 30 decisions of its own (`BLR_MIN_OBSERVATIONS`).
+It trips on a rejection rate above 15% or on collapsed confidence, demotes the category 2 levels and defers its decisions to you.
+The category stays capped until new approvals earn the levels back.
+The settings and the demotion rules are in [part 4](04-trust-feedback-loop.md#how-circuit-breakers-protect-against-failures).
 
 | State | Indicator | Meaning |
 |-------|-----------|---------|
