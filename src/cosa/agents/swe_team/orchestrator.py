@@ -169,6 +169,7 @@ class SweTeamOrchestrator:
         config            : SweTeamConfig = None,
         session_id        : str = None,
         job_id            : str = None,
+        user_email        : str = None,
         on_state_change   = None,
         debug             : bool = False,
         verbose           : bool = False,
@@ -199,7 +200,7 @@ class SweTeamOrchestrator:
 
         # Proxy notification state (Phase 7)
         self._proxy_pending_count = 0
-        self._user_email          = None    # Set from job context when available
+        self._user_email          = user_email    # The job's user; keys the persisted trust rows
 
         # Decision proxy (Phase 4 + Phase 5 INI integration)
         self.proxy          = None
@@ -257,6 +258,8 @@ class SweTeamOrchestrator:
                 )
             except ImportError:
                 logger.warning( "Decision proxy requested but proxy module unavailable" )
+
+        self._load_trust_state()
 
         # Metrics
         self.start_time   = None
@@ -391,6 +394,36 @@ class SweTeamOrchestrator:
                 logger.warning( f"Trust feedback recording failed: {e}" )
 
         return user_answer
+
+    def _load_trust_state( self ):
+        """
+        Load the user's persisted trust rows into the in-memory tracker (non-fatal).
+
+        Requires:
+            - self.proxy is an EngineeringStrategy or None
+
+        Ensures:
+            - returns the number of categories restored
+            - returns 0 without touching the DB when there is no proxy or no user email
+            - a DB failure is logged and returns 0; it never propagates
+        """
+        if self.proxy is None or self._user_email is None: return 0
+
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.proxy_decision_repository import TrustStateRepository
+
+            restored = 0
+            with get_db() as session:
+                for row in TrustStateRepository( session ).get_all_for_user( self._user_email, domain="swe" ):
+                    if self.proxy.trust_tracker.restore_category(
+                        row.category, row.successful_decisions, row.rejected_decisions, row.updated_at.timestamp()
+                    ):
+                        restored += 1
+            return restored
+        except Exception as e:
+            logger.warning( f"Trust state DB load failed (non-fatal): {e}" )
+            return 0
 
     def _persist_trust_feedback( self, category, approved ):
         """

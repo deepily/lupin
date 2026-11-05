@@ -496,6 +496,32 @@ class TrustTracker:
 
         if self.debug: print( f"[TrustTracker] Registered category: {category_name} (cap L{cap_level}, model={self.trust_model})" )
 
+    def restore_category( self, category_name, successes, rejections, as_of ):
+        """
+        Restore a category's counters and rolling history from stored totals.
+
+        A stored row keeps totals, not per-decision times, so every restored decision is
+        stamped with the row's last-update time and decays from there.
+
+        Requires:
+            - successes and rejections are non-negative ints
+            - as_of is an epoch timestamp in seconds
+
+        Ensures:
+            - returns True and sets the totals when the category is registered and empty
+            - the rolling history gains one entry per restored decision, stamped as_of
+            - returns False and changes nothing when the category is unknown or already has decisions
+        """
+        cat = self.categories.get( category_name )
+        if cat is None or cat.total_decisions: return False
+
+        cat.total_successes  = successes
+        cat.total_rejections = rejections
+        cat.total_decisions  = successes + rejections
+        cat.decisions        = [ ( as_of, True ) ] * successes + [ ( as_of, False ) ] * rejections
+        cat._prune_rolling_window()
+        return True
+
     def get_level( self, category_name ):
         """
         Get current trust level for a category.

@@ -239,6 +239,75 @@ class TestGatedConfirmation( unittest.TestCase ):
         cat = next( c for c in tracker.get_stats().values() if c[ "total_decisions" ] )
         self.assertEqual( ( cat[ "total_successes" ], cat[ "total_rejections" ] ), ( 0, 1 ), cat )
 
+    # ── D2 (row 251f26fb): trust persists across jobs, keyed by the user's email ──
+
+    @staticmethod
+    def _fake_trust_db():
+        """An in-memory trust store whose rows are keyed by (user, domain, category)."""
+        rows = {}
+        class Row:
+            def __init__( self, category ):
+                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0
+                from datetime import datetime, timezone
+                self.updated_at = datetime.now( timezone.utc )
+        class Repo:
+            def __init__( self, session ): pass
+            def update_after_ratification( self, user_email, domain, category, approved ):
+                row = rows.setdefault( ( user_email, domain, category ), Row( category ) )
+                if approved: row.successful_decisions += 1
+                else:        row.rejected_decisions   += 1
+                return row
+            def get_all_for_user( self, user_email, domain=None ):
+                return [ r for ( u, d, _ ), r in rows.items() if u == user_email and d == domain ]
+        class Db:
+            def __enter__( self ): return object()
+            def __exit__( self, *a ): return False
+        return rows, Repo, Db
+
+    def _job( self, user_email, session_id, Repo, Db, confirm=True, trust_mode="shadow" ):
+        cfg = SweTeamConfig( dry_run=True, trust_mode=trust_mode )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            o = SweTeamOrchestrator( task_description="t", config=cfg, session_id=session_id, user_email=user_email )
+            t = self._team_io( confirm=confirm )
+            _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
+        return o
+
+    def test_two_jobs_for_one_user_accumulate_trust_under_one_key_and_the_second_job_loads_it( self ):
+        rows, Repo, Db = self._fake_trust_db()
+        first  = self._job( "rick@example.com", "st-job-one", Repo, Db )
+        second = self._job( "rick@example.com", "st-job-two", Repo, Db )
+        self.assertEqual( { k[ 0 ] for k in rows }, { "rick@example.com" }, "rows must not be keyed by the per-job session id" )
+        self.assertEqual( sum( r.successful_decisions for r in rows.values() ), 2 )
+        cat = next( c for c in second.proxy.trust_tracker.get_stats().values() if c[ "total_decisions" ] )
+        self.assertEqual( cat[ "total_decisions" ], 2, "job two started from job one's stored decision, then added its own" )
+        self.assertEqual( cat[ "total_successes" ], 2 )
+
+    def test_a_different_user_does_not_inherit_another_users_trust( self ):
+        rows, Repo, Db = self._fake_trust_db()
+        self._job( "rick@example.com", "st-a", Repo, Db )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            other = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( dry_run=True, trust_mode="shadow" ),
+                                         session_id="st-b", user_email="someone@example.com" )
+        self.assertEqual( sum( c[ "total_decisions" ] for c in other.proxy.trust_tracker.get_stats().values() ), 0 )
+
+    def test_no_user_email_means_no_db_read( self ):
+        o = _mk_orch( trust_mode="shadow" )
+        with patch( "cosa.rest.db.database.get_db", side_effect=AssertionError( "must not read the DB" ) ):
+            self.assertEqual( o._load_trust_state(), 0 )
+
+    def test_no_proxy_means_nothing_to_load( self ):
+        o = _mk_orch( trust_mode="disabled" )
+        o._user_email = "rick@example.com"
+        self.assertEqual( o._load_trust_state(), 0 )
+
+    def test_a_failing_db_read_is_logged_and_returns_zero( self ):
+        o = _mk_orch( trust_mode="shadow" )
+        o._user_email = "rick@example.com"
+        with patch( "cosa.rest.db.database.get_db", side_effect=RuntimeError( "db down" ) ):
+            self.assertEqual( o._load_trust_state(), 0 )
+
     def test_active_act_auto_approves( self ):
         o = _mk_orch()
         o.proxy, _ = self._proxy( "act", value="approved" )
