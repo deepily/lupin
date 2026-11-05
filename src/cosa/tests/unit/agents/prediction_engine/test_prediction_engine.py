@@ -1273,3 +1273,56 @@ def test_get_accuracy_summary_exception_returns_error_dict( wired_engine, monkey
     assert out[ "total_predictions" ] == 0
     assert out[ "accuracy_rate" ] == 0.0
     assert "db-down" in out[ "error" ]
+
+
+# ---------------------------------------------------------------------------
+# Row 4e8b56e0: MC / batch answers arrive as a JSON string
+# Payloads below are the response_value strings of two dev-DB prediction_log rows
+# (read-only capture, 5 Nov 2026): MC notification 00e02924-105d-4c85-8731-bfb353e37439,
+# batch notification 70cba5ac-4759-4dbc-ad6b-6d9eea3a966d. Both stored empty_answers.
+# ---------------------------------------------------------------------------
+
+_CAPTURED_MC_RESPONSE    = '{"answers":{"Backup":"Skip"}}'
+_CAPTURED_BATCH_RESPONSE = '{"answers":{"Venv gate":"yes","Wedge fix":"yes"}}'
+
+
+def _record( engine, monkeypatch, predicted, actual, response_type ):
+    repos = []
+    _patch_db( monkeypatch, _FakeSession(), repos )
+    monkeypatch.setattr( engine, "_store_decision", lambda *a: None )
+    monkeypatch.setattr( engine, "_enrich_with_embedding_similarity", lambda *a: None )
+    pr = PredictionResult( response_type=response_type, category="c", strategy="x", predicted_value=predicted )
+    engine.record_outcome( "n5", pr, actual, response_type )
+    return repos[ 0 ].outcome
+
+
+def test_record_outcome_captured_mc_json_string_is_scored( wired_engine, monkeypatch ):
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "Backup": "Skip" } },
+                       _CAPTURED_MC_RESPONSE, cfg.RESPONSE_TYPE_MULTIPLE_CHOICE )
+    assert outcome[ "accuracy_match" ] is True
+    assert outcome[ "actual_value" ] == { "answers": { "Backup": "Skip" } }
+
+
+def test_record_outcome_captured_mc_mismatch_is_false_not_null( wired_engine, monkeypatch ):
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "Backup": "Run" } },
+                       _CAPTURED_MC_RESPONSE, cfg.RESPONSE_TYPE_MULTIPLE_CHOICE )
+    assert outcome[ "accuracy_match" ] is False
+
+
+def test_record_outcome_captured_batch_json_string_is_scored( wired_engine, monkeypatch ):
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "Venv gate": "yes", "Wedge fix": "yes" } },
+                       _CAPTURED_BATCH_RESPONSE, cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH )
+    assert outcome[ "accuracy_match" ] is True
+
+
+def test_record_outcome_mc_plain_text_answer_stays_unscored( wired_engine, monkeypatch ):
+    # A bare option label (captured shape {"value": "Approve"}) is not JSON: unchanged behavior.
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "_other": "Approve" } },
+                       "Approve", cfg.RESPONSE_TYPE_MULTIPLE_CHOICE )
+    assert outcome[ "accuracy_match" ] is None
+
+
+def test_record_outcome_mc_non_str_value_does_not_raise( wired_engine, monkeypatch ):
+    outcome = _record( wired_engine, monkeypatch, { "answers": { "Backup": "Skip" } },
+                       { "value": 5 }, cfg.RESPONSE_TYPE_MULTIPLE_CHOICE )
+    assert outcome[ "accuracy_match" ] is None
