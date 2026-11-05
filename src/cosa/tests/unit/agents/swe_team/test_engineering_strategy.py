@@ -29,6 +29,9 @@ def _mk_strategy( **overrides ):
     cb.check.return_value = True            # closed breaker by default
     kwargs = dict( trust_tracker=tt, circuit_breaker=cb, debug=False )
     kwargs.update( overrides )
+    # The L4 audit draw is random by design; pin it off unless a test asks for the real source,
+    # so no test's outcome depends on a 10 percent draw. Pass audit_random=None for the default.
+    if "audit_random" not in overrides: kwargs[ "audit_random" ] = lambda: 0.99
     strat = EngineeringStrategy( **kwargs )
     return strat, tt, cb
 
@@ -109,10 +112,49 @@ class TestGate( unittest.TestCase ):
         self.assertEqual( strat.gate( "testing", 1, 0.9 ), "shadow" )
 
     def test_active_mode_gating_levels( self ):
-        strat, _, _ = _mk_strategy( trust_mode="active" )
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=lambda: 0.99 )   # no audit draw
         self.assertEqual( strat.gate( "testing", 1, 0.9 ), "shadow" )
         self.assertEqual( strat.gate( "testing", 2, 0.9 ), "suggest" )
+        self.assertEqual( strat.gate( "testing", 3, 0.9 ), "act" )
         self.assertEqual( strat.gate( "testing", 4, 0.9 ), "act" )
+        self.assertEqual( strat.gate( "testing", 5, 0.9 ), "act" )
+
+    # --- graded autonomy (row d595321e, D7) ----------------------------------
+
+    def test_l3_acts_only_at_high_confidence( self ):
+        strat, _, _ = _mk_strategy( trust_mode="active" )
+        self.assertEqual( strat.gate( "testing", 3, 0.80 ), "act" )          # boundary is inclusive
+        self.assertEqual( strat.gate( "testing", 3, 0.79 ), "suggest" )
+
+    def test_l4_queues_low_confidence_and_the_destructive_category( self ):
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=lambda: 0.99 )
+        self.assertEqual( strat.gate( "testing", 4, 0.50 ), "act" )          # boundary is inclusive
+        self.assertEqual( strat.gate( "testing", 4, 0.49 ), "suggest" )
+        self.assertEqual( strat.gate( "destructive", 4, 0.99 ), "suggest" )
+
+    def test_l4_audit_draw_sends_a_share_of_acts_to_the_human( self ):
+        draws = iter( [ 0.05, 0.10, 0.50 ] )
+        strat, _, _ = _mk_strategy( trust_mode="active", l4_audit_rate=0.10, audit_random=lambda: next( draws ) )
+        self.assertEqual( strat.gate( "testing", 4, 0.9 ), "suggest" )       # 0.05 < 0.10: audited
+        self.assertEqual( strat.gate( "testing", 4, 0.9 ), "act" )           # 0.10 is not below the rate
+        self.assertEqual( strat.gate( "testing", 4, 0.9 ), "act" )
+
+    def test_l4_does_not_draw_when_it_would_queue_anyway( self ):
+        def boom(): raise AssertionError( "no audit draw for an outcome that is already a suggestion" )
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=boom )
+        self.assertEqual( strat.gate( "testing", 4, 0.1 ), "suggest" )
+        self.assertEqual( strat.gate( "destructive", 4, 0.9 ), "suggest" )
+
+    def test_l5_always_acts_and_never_draws( self ):
+        def boom(): raise AssertionError( "L5 has no audit draw" )
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=boom )
+        self.assertEqual( strat.gate( "destructive", 5, 0.0 ), "act" )
+
+    def test_the_default_audit_draw_is_a_real_random_source_at_ten_percent( self ):
+        strat, _, _ = _mk_strategy( trust_mode="active", audit_random=None )
+        self.assertEqual( strat.l4_audit_rate, 0.10 )
+        outcomes = { strat.gate( "testing", 4, 0.9 ) for _ in range( 400 ) }
+        self.assertEqual( outcomes, { "act", "suggest" }, "with the default draw both outcomes occur" )
 
     def test_thompson_delegation( self ):
         strat, _, _ = _mk_strategy( trust_mode="active", thompson_enabled=True )
@@ -161,7 +203,7 @@ class TestGate( unittest.TestCase ):
             self.assertEqual( strat.gate( "testing", 4, 0.9 ), "act" )
 
     def test_conformal_should_not_defer_falls_through( self ):
-        strat, tt, _ = _mk_strategy( trust_mode="active", conformal_enabled=True )
+        strat, tt, _ = _mk_strategy( trust_mode="active", conformal_enabled=True, audit_random=lambda: 0.99 )
         tt.categories = { "testing": self._cat_with_blr( prob=0.95 ) }
         wrapper = MagicMock( is_calibrated=True )
         wrapper.should_defer.return_value = False
