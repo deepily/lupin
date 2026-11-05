@@ -11,6 +11,8 @@ Dependency Rule:
     This module never imports from notification_proxy.
 """
 
+import random
+
 from scipy.stats import beta as beta_dist
 
 from cosa.agents.decision_proxy.base_decision_strategy import BaseDecisionStrategy, DecisionResult
@@ -73,6 +75,10 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         icrl_top_k                 = 5,
         llm_client                 = None,
         cbr_confidence_threshold   = None,
+        l3_act_confidence          = 0.80,
+        l4_min_confidence          = 0.50,
+        l4_audit_rate              = 0.10,
+        audit_random               = None,
         debug                      = False
     ):
         """
@@ -98,6 +104,10 @@ class EngineeringStrategy( BaseDecisionStrategy ):
             icrl_top_k: Number of similar cases to include in ICRL prompt
             llm_client: Optional LlmClient for ICRL queries
             cbr_confidence_threshold: Threshold below which CBR is considered low-confidence
+            l3_act_confidence: At trust level 3 the proxy acts only at or above this classification confidence (default 0.80)
+            l4_min_confidence: At trust level 4 the proxy queues anything below this confidence (default 0.50)
+            l4_audit_rate: Share of level 4 "act" outcomes sent to the human anyway as an audit sample (default 0.10)
+            audit_random: Zero-argument callable returning a float in [0, 1); random.random when None
             debug: Enable debug output
         """
         self.debug                      = debug
@@ -113,6 +123,10 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         self.icrl_enabled               = icrl_enabled
         self.icrl_top_k                 = icrl_top_k
         self.llm_client                 = llm_client
+        self.l3_act_confidence          = l3_act_confidence
+        self.l4_min_confidence          = l4_min_confidence
+        self.l4_audit_rate              = l4_audit_rate
+        self.audit_random               = audit_random if audit_random is not None else random.random
         self.cbr_confidence_threshold   = cbr_confidence_threshold if cbr_confidence_threshold is not None else DEFAULT_CBR_CONFIDENCE_THRESHOLD
 
         # Conformal wrapper (lazy-initialized on first use)
@@ -206,7 +220,11 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         Ensures:
             - In "shadow" mode: always returns "shadow"
             - In "suggest" mode: returns "suggest" for level 2 and above, "shadow" for level 1
-            - In "active" mode: trust-level gating (level 1 = shadow, level 2 = suggest, level 3 and above = act)
+            - In "active" mode: level 1 = shadow, level 2 = suggest
+            - Level 3 acts at confidence >= l3_act_confidence, else suggests
+            - Level 4 acts, except it suggests for the destructive category, below l4_min_confidence,
+              and for a l4_audit_rate share of otherwise-act outcomes (the audit draw)
+            - Level 5 always acts
             - Circuit breaker tripped → returns "defer"
 
         Args:
@@ -248,13 +266,18 @@ class EngineeringStrategy( BaseDecisionStrategy ):
                 return "suggest"
             return "shadow"
 
-        # Active mode — full trust-level gating
+        # Active mode — graded autonomy (row d595321e; levels as in the admin guide)
         if trust_level <= 1:
             return "shadow"
-        elif trust_level == 2:
+        if trust_level == 2:
             return "suggest"
-        else:
+        if trust_level == 3:
+            return "act" if confidence >= self.l3_act_confidence else "suggest"
+        if trust_level == 4:
+            if category == "destructive" or confidence < self.l4_min_confidence: return "suggest"
+            if self.audit_random() < self.l4_audit_rate: return "suggest"      # audit draw: ask the human anyway
             return "act"
+        return "act"
 
     def decide( self, question, category, context=None ):
         """

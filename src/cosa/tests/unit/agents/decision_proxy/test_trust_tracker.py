@@ -473,3 +473,56 @@ def test_restore_category_refuses_an_unknown_category_and_a_category_that_alread
     tracker.record_decision( "testing", True )
     assert tracker.restore_category( "testing", 9, 9, 1.0 ) is False
     assert tracker.categories[ "testing" ].total_decisions == 1, "a refused restore must change nothing"
+
+
+def test_a_stored_trip_caps_the_restored_level_and_no_trip_leaves_it_to_the_counters():
+    with _frozen_time( 1_000_000.0 ):
+        free = _tracker_with()
+        free.restore_category( "testing", 4, 0, 1_000_000.0 )
+        earned = free.get_level( "testing" )
+        assert earned > 2, "four stored successes against thresholds 1/2/3/4 earn a high level"
+
+        tripped = _tracker_with()
+        tripped.restore_category( "testing", 4, 0, 1_000_000.0, trip={ "tripped_level": 2, "successes_at_trip": 4 } )
+        assert tripped.get_level( "testing" ) == 2 and tripped.categories[ "testing" ].trip_active()
+
+
+def test_a_trip_is_earned_back_by_new_successes_and_then_stores_as_none():
+    # Thresholds 1/2/3/4: a trip at level 3 needs l4 - l3 = 1 new success; a trip at level 2 needs l3 - l2 = 1.
+    with _frozen_time( 1_000_000.0 ):
+        tracker = _tracker_with()
+        tracker.restore_category( "testing", 4, 0, 1_000_000.0, trip={ "tripped_level": 2, "successes_at_trip": 4 } )
+        cat = tracker.categories[ "testing" ]
+        assert cat.trip_state() == { "status": "tripped", "tripped_level": 2, "successes_at_trip": 4 }
+        tracker.record_decision( "testing", False, timestamp=1_000_000.0 )         # a rejection earns nothing back
+        assert cat.trip_active() and tracker.get_level( "testing" ) == 2
+        tracker.record_decision( "testing", True, timestamp=1_000_000.0 )
+        assert not cat.trip_active() and cat.trip_state() is None
+        assert tracker.get_level( "testing" ) > 2, "once earned back, the counters decide again"
+
+
+def test_record_trip_remembers_the_demoted_level_and_ignores_an_unknown_category():
+    with _frozen_time( 1_000_000.0 ):
+        tracker = _tracker_with()
+        tracker.restore_category( "testing", 4, 0, 1_000_000.0 )
+        tracker.demote_category( "testing", 2 )
+        tracker.record_trip( "testing" )
+        cat = tracker.categories[ "testing" ]
+        assert ( cat.trip_level, cat.trip_successes ) == ( tracker.get_level( "testing" ), 4 )
+        tracker.record_trip( "nope" )                                              # no category, no error
+
+
+def test_a_trip_at_the_top_level_never_caps():
+    cat = CategoryTrust( "testing", **SMALL_COUNT_KW )
+    cat.trip_level, cat.trip_successes = 5, 0
+    assert cat.trip_active() is False
+
+
+def test_a_stored_trip_carries_the_status_the_dashboard_reads():
+    # proxy-dashboard.js treats a circuit_breaker_state with no status as "closed", i.e. OK.
+    with _frozen_time( 1_000_000.0 ):
+        tracker = _tracker_with()
+        tracker.restore_category( "testing", 4, 0, 1_000_000.0, trip={ "tripped_level": 2, "successes_at_trip": 4 } )
+        state = tracker.categories[ "testing" ].trip_state()
+        assert state[ "status" ] == "tripped"
+        assert ( state.get( "status" ) or "closed" ).lower() != "closed", "the dashboard's own default must not apply"

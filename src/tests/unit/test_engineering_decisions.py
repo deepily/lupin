@@ -268,8 +268,9 @@ class TestStrategyEvaluateWithTrust:
         assert result.trust_level >= 3
 
     def test_evaluate_act_mode_produces_value( self ):
-        """In active mode at L3, action should be 'act' with a decision value."""
+        """In active mode at level 3 with the confidence bar met, the action is act."""
         strategy = self._make_strategy( trust_mode="active" )
+        strategy.l3_act_confidence = 0.5      # this question classifies at 0.7; the default bar is 0.80
         now = time.time()
         for i in range( 11 ):
             strategy.trust_tracker.record_decision( "testing", success=True, timestamp=now - i )
@@ -278,8 +279,20 @@ class TestStrategyEvaluateWithTrust:
         assert result.action == "act"
         assert result.value == "approved"
 
-    def test_evaluate_shadow_mode_no_value( self ):
-        """In shadow mode, value should be None even at high trust."""
+    def test_evaluate_at_l3_below_the_default_confidence_bar_suggests_instead_of_acting( self ):
+        """Level 3 acts only at confidence 0.80 or more; this question classifies at 0.7."""
+        strategy = self._make_strategy( trust_mode="active" )
+        now = time.time()
+        for i in range( 11 ):
+            strategy.trust_tracker.record_decision( "testing", success=True, timestamp=now - i )
+
+        result = strategy.evaluate( "Should I run the full test suite?" )
+        assert result.trust_level == 3 and result.confidence < 0.80
+        assert result.action == "suggest"
+        assert result.value == "approved"
+
+    def test_evaluate_shadow_mode_predicts_a_value_but_does_not_act( self ):
+        """In shadow mode the action stays shadow while value holds the proxy's prediction."""
         strategy = self._make_strategy( trust_mode="shadow" )
         now = time.time()
         for i in range( 11 ):
@@ -287,7 +300,7 @@ class TestStrategyEvaluateWithTrust:
 
         result = strategy.evaluate( "Should I run the full test suite?" )
         assert result.action == "shadow"
-        assert result.value is None
+        assert result.value == "approved", "a shadow result carries the prediction the human answer is compared with"
 
     def test_evaluate_records_confidence_in_breaker( self ):
         """After evaluate(), circuit breaker should have a confidence entry."""

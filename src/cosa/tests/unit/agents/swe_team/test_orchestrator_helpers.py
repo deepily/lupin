@@ -249,25 +249,48 @@ class TestGatedConfirmation( unittest.TestCase ):
 
     @staticmethod
     def _fake_trust_db():
-        """An in-memory trust store whose rows are keyed by (user, domain, category)."""
+        """
+        An in-memory trust store with real transactions.
+
+        Rows are keyed by (user, domain, category).
+        A session works on copies; a clean exit commits them and an exception rolls them back.
+        """
+        import copy
         rows = {}
         class Row:
             def __init__( self, category ):
-                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0
+                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0; self.trust_level = 1; self.circuit_breaker_state = None
                 from datetime import datetime, timezone
                 self.updated_at = datetime.now( timezone.utc )
+        class Session:
+            def __init__( self ): self.work = { k: copy.copy( v ) for k, v in rows.items() }
         class Repo:
-            def __init__( self, session ): pass
+            def __init__( self, session ): self.work = session.work
             def update_after_ratification( self, user_email, domain, category, approved ):
-                row = rows.setdefault( ( user_email, domain, category ), Row( category ) )
+                row = self.work.setdefault( ( user_email, domain, category ), Row( category ) )
                 if approved: row.successful_decisions += 1
                 else:        row.rejected_decisions   += 1
                 return row
+            def update_trust_level( self, user_email, domain, category, new_level ):
+                row = self.work.setdefault( ( user_email, domain, category ), Row( category ) )
+                row.trust_level = new_level
+                return row
+            def update_circuit_breaker_state( self, user_email, domain, category, cb_state ):
+                row = self.work.setdefault( ( user_email, domain, category ), Row( category ) )
+                row.circuit_breaker_state = cb_state
+                return row
             def get_all_for_user( self, user_email, domain=None ):
-                return [ r for ( u, d, _ ), r in rows.items() if u == user_email and d == domain ]
+                return [ r for ( u, d, _ ), r in self.work.items() if u == user_email and d == domain ]
         class Db:
-            def __enter__( self ): return object()
-            def __exit__( self, *a ): return False
+            def __enter__( self ):
+                self.session = Session()
+                return self.session
+            def __exit__( self, exc_type, exc, tb ):
+                if exc_type is None:                              # commit: keep object identity for rows that already exist
+                    for key, row in self.session.work.items():
+                        if key in rows: rows[ key ].__dict__.update( row.__dict__ )
+                        else:           rows[ key ] = row
+                return False                                      # on an exception nothing is committed
         return rows, Repo, Db
 
     def _job( self, user_email, session_id, Repo, Db, confirm=True, trust_mode="shadow" ):
@@ -288,6 +311,186 @@ class TestGatedConfirmation( unittest.TestCase ):
         cat = next( c for c in second.proxy.trust_tracker.get_stats().values() if c[ "total_decisions" ] )
         self.assertEqual( cat[ "total_decisions" ], 2, "job two started from job one's stored decision, then added its own" )
         self.assertEqual( cat[ "total_successes" ], 2 )
+
+    def test_the_stored_level_follows_the_trackers_level_instead_of_staying_at_one( self ):
+        # Row 139cddd6 (D11): nothing wrote trust_level, so every stored row read L1.
+        rows, Repo, Db = self._fake_trust_db()
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        o = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( dry_run=True, trust_mode="shadow" ),
+                                 session_id="st-x", user_email="rick@example.com" )
+        o.proxy = EngineeringStrategy( trust_tracker=TrustTracker( l2_threshold=1, l3_threshold=2, l4_threshold=3, l5_threshold=4 ),
+                                       trust_mode="shadow" )
+        t = self._team_io( confirm=True )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            for _ in range( 3 ):
+                _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
+        row   = next( iter( rows.values() ) )
+        level = o.proxy.trust_tracker.get_level( row.category )
+        self.assertGreater( level, 1, "three agreeing answers against thresholds 1/2/3/4 must lift the level" )
+        self.assertEqual( row.trust_level, level )
+        self.assertEqual( row.successful_decisions, 3 )
+
+    def _level_job( self, Repo, Db ):
+        """A shadow job whose tracker graduates quickly: thresholds 1/2/3/4."""
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        o = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( dry_run=True, trust_mode="shadow" ),
+                                 session_id="st-x", user_email="rick@example.com" )
+        o.proxy = EngineeringStrategy( trust_tracker=TrustTracker( l2_threshold=1, l3_threshold=2, l4_threshold=3, l5_threshold=4 ),
+                                       trust_mode="shadow" )
+        return o
+
+    def _answer( self, o, Repo, Db, times=1, confirm=True ):
+        t = self._team_io( confirm=confirm )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            for _ in range( times ):
+                _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
+
+    def test_a_demoted_tracker_level_is_what_gets_stored_on_the_next_answer( self ):
+        # John's D11 review: promotion alone is not enough; a LOWER level must be stored too.
+        rows, Repo, Db = self._fake_trust_db()
+        o = self._level_job( Repo, Db )
+        self._answer( o, Repo, Db, times=3 )
+        row    = next( iter( rows.values() ) )
+        before = row.trust_level
+        self.assertGreater( before, 1 )
+        o.proxy.trust_tracker.demote_category( row.category, 2 )                  # what a breaker trip does
+        lowered = o.proxy.trust_tracker.get_level( row.category )
+        self.assertLess( lowered, before )
+        self._answer( o, Repo, Db, times=1, confirm=False )                     # a rejection adds no graduation credit
+        self.assertEqual( row.trust_level, o.proxy.trust_tracker.get_level( row.category ) )
+        self.assertLess( row.trust_level, before, "the lower level must replace the old one in the store" )
+
+    def test_a_circuit_breaker_trip_stores_the_demoted_level_without_waiting_for_feedback( self ):
+        # Row d2d6a192: the breaker demotes in memory only; the trip callback must carry it to the store.
+        rows, Repo, Db = self._fake_trust_db()
+        o = self._level_job( Repo, Db )
+        self._answer( o, Repo, Db, times=3 )
+        row    = next( iter( rows.values() ) )
+        before = row.trust_level
+        o.proxy.trust_tracker.demote_category( row.category, 2 )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ), \
+             patch( "requests.post" ):
+            o._on_circuit_breaker_trip( row.category, "error rate" )
+        self.assertLess( row.trust_level, before )
+        self.assertEqual( row.trust_level, o.proxy.trust_tracker.get_level( row.category ) )
+
+    def test_a_breaker_demotion_survives_the_next_job_through_the_recorded_trip( self ):
+        # A trip is recorded in circuit_breaker_state and caps the restored level until it is earned back.
+        rows, Repo, Db = self._fake_trust_db()
+        o = self._level_job( Repo, Db )
+        self._answer( o, Repo, Db, times=3 )
+        row     = next( iter( rows.values() ) )
+        earned  = o.proxy.trust_tracker.get_level( row.category )
+        self.assertGreater( earned, 2 )
+        o.proxy.circuit_breaker.on_trip_callback = o._on_circuit_breaker_trip
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ), \
+             patch( "requests.post" ):
+            o.proxy.circuit_breaker.trip( row.category, "error rate" )              # the real breaker demotes, then calls back
+        demoted = o.proxy.trust_tracker.get_level( row.category )
+        self.assertLess( demoted, earned )
+        self.assertEqual( row.trust_level, demoted, "the trip stored the demoted level" )
+        self.assertEqual( row.circuit_breaker_state, { "status": "tripped", "tripped_level": demoted, "successes_at_trip": 3 } )
+        self.assertEqual( row.successful_decisions, 3, "the counters are unchanged by a demotion" )
+
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            fresh = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( dry_run=True, trust_mode="shadow" ),
+                                         session_id="st-next", user_email="rick@example.com" )
+        # Same low thresholds as the first job, so the counters alone would earn the higher level again.
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        fresh.proxy = EngineeringStrategy( trust_tracker=TrustTracker( l2_threshold=1, l3_threshold=2, l4_threshold=3, l5_threshold=4 ),
+                                           trust_mode="shadow" )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            self.assertEqual( fresh._load_trust_state(), 1 )
+        self.assertEqual( fresh.proxy.trust_tracker.get_level( row.category ), demoted )
+
+    def _fresh_load( self, Repo, Db ):
+        """A new job for the same user: fresh orchestrator and tracker, rows loaded."""
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            o = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( dry_run=True, trust_mode="shadow" ),
+                                     session_id="st-next", user_email="rick@example.com" )
+            o.proxy = EngineeringStrategy( trust_tracker=TrustTracker( l2_threshold=1, l3_threshold=2, l4_threshold=3, l5_threshold=4 ),
+                                           trust_mode="shadow" )
+            o._load_trust_state()
+        return o
+
+    def test_a_category_with_stored_level_one_and_no_trip_climbs_across_fresh_trackers( self ):
+        # Mr. Radio's follow-up: a stored level must not ratchet the next job down.
+        rows, Repo, Db = self._fake_trust_db()
+        o = self._level_job( Repo, Db )
+        self._answer( o, Repo, Db, times=2 )
+        row = next( iter( rows.values() ) )
+        row.trust_level = 1                                                       # e.g. a row only a human ratification wrote
+        self.assertIsNone( row.circuit_breaker_state )
+        second = self._fresh_load( Repo, Db )
+        self.assertGreater( second.proxy.trust_tracker.get_level( row.category ), 1, "counters alone must lift it past the stored 1" )
+        self._answer( second, Repo, Db, times=2 )
+        third = self._fresh_load( Repo, Db )
+        self.assertGreater( third.proxy.trust_tracker.get_level( row.category ), 2, "a later job starts from the climbed level" )
+        self.assertGreater( row.trust_level, 2, "two jobs later the category has climbed further" )
+
+    def test_a_tripped_category_stays_capped_across_fresh_trackers_until_it_earns_the_level_back( self ):
+        rows, Repo, Db = self._fake_trust_db()
+        o = self._level_job( Repo, Db )
+        self._answer( o, Repo, Db, times=4 )
+        row = next( iter( rows.values() ) )
+        o.proxy.circuit_breaker.on_trip_callback = o._on_circuit_breaker_trip
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ), \
+             patch( "requests.post" ):
+            o.proxy.circuit_breaker.trip( row.category, "error rate" )
+        capped = row.trust_level
+        self.assertIsNotNone( row.circuit_breaker_state )
+
+        second = self._fresh_load( Repo, Db )
+        self.assertEqual( second.proxy.trust_tracker.get_level( row.category ), capped, "the cap survives a new job" )
+        self.assertEqual( self._fresh_load( Repo, Db ).proxy.trust_tracker.get_level( row.category ), capped )
+
+        self._answer( second, Repo, Db, times=2 )                                 # earns back the gap above the cap
+        self.assertIsNone( row.circuit_breaker_state, "the trip is cleared once the level is earned back" )
+        self.assertGreater( second.proxy.trust_tracker.get_level( row.category ), capped )
+        self.assertGreater( self._fresh_load( Repo, Db ).proxy.trust_tracker.get_level( row.category ), capped )
+
+    def test_a_failing_level_write_keeps_the_counters_and_the_job_going( self ):
+        # John's D11 review: with transactional rows, a level write that raises must not take the committed
+        # counter update with it. Both writes in ONE transaction would roll the counters back and fail this test.
+        rows, Repo, Db = self._fake_trust_db()
+        def boom( self, *a, **k ): raise RuntimeError( "level write failed" )
+        Repo.update_trust_level = boom
+        o = self._level_job( Repo, Db )
+        t = self._team_io( confirm=True )
+        with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            outs = [ _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) ) for _ in range( 2 ) ]
+        self.assertEqual( outs, [ True, True ], "the job carries on with the human's answer" )
+        row = next( iter( rows.values() ) )
+        self.assertEqual( row.successful_decisions, 2, "both counter updates were committed" )
+        self.assertEqual( row.trust_level, 1, "the level write failed and committed nothing" )
+
+    def test_the_fake_store_really_rolls_back_a_transaction_that_raises( self ):
+        # The control for the test above: prove the fake can lose a write, or its pass means nothing.
+        rows, Repo, Db = self._fake_trust_db()
+        with self.assertRaises( RuntimeError ):
+            with Db() as session:
+                Repo( session ).update_after_ratification( "u", "swe", "testing", True )
+                raise RuntimeError( "boom" )
+        self.assertEqual( rows, {} )
+
+    def test_persisting_a_level_with_no_proxy_does_nothing( self ):
+        o = _mk_orch( trust_mode="disabled" )
+        with patch( "cosa.rest.db.database.get_db", side_effect=AssertionError( "must not touch the DB" ) ):
+            o._persist_trust_level( "testing" )
 
     def test_a_different_user_does_not_inherit_another_users_trust( self ):
         rows, Repo, Db = self._fake_trust_db()
