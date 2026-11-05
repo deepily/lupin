@@ -389,7 +389,7 @@ class TestGatedConfirmation( unittest.TestCase ):
         demoted = o.proxy.trust_tracker.get_level( row.category )
         self.assertLess( demoted, earned )
         self.assertEqual( row.trust_level, demoted, "the trip stored the demoted level" )
-        self.assertEqual( row.circuit_breaker_state, { "tripped_level": demoted, "successes_at_trip": 3 } )
+        self.assertEqual( row.circuit_breaker_state, { "status": "tripped", "tripped_level": demoted, "successes_at_trip": 3 } )
         self.assertEqual( row.successful_decisions, 3, "the counters are unchanged by a demotion" )
 
         with patch( "cosa.rest.db.database.get_db", lambda: Db() ), \

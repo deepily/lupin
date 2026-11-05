@@ -156,11 +156,12 @@ class CategoryTrust:
         Return the trip as a plain dict for storage, or None when none is active.
 
         Ensures:
-            - returns {"tripped_level", "successes_at_trip"} while the trip is active
+            - returns {"status": "tripped", "tripped_level", "successes_at_trip"} while the trip is active
+            - the status key is what the admin dashboard reads; without it a stored trip shows as closed
             - returns None otherwise, which clears a stored trip
         """
         if not self.trip_active(): return None
-        return { "tripped_level": self.trip_level, "successes_at_trip": self.trip_successes }
+        return { "status": "tripped", "tripped_level": self.trip_level, "successes_at_trip": self.trip_successes }
 
     def _level_count_based( self ):
         """

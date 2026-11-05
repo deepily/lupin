@@ -493,7 +493,7 @@ def test_a_trip_is_earned_back_by_new_successes_and_then_stores_as_none():
         tracker = _tracker_with()
         tracker.restore_category( "testing", 4, 0, 1_000_000.0, trip={ "tripped_level": 2, "successes_at_trip": 4 } )
         cat = tracker.categories[ "testing" ]
-        assert cat.trip_state() == { "tripped_level": 2, "successes_at_trip": 4 }
+        assert cat.trip_state() == { "status": "tripped", "tripped_level": 2, "successes_at_trip": 4 }
         tracker.record_decision( "testing", False, timestamp=1_000_000.0 )         # a rejection earns nothing back
         assert cat.trip_active() and tracker.get_level( "testing" ) == 2
         tracker.record_decision( "testing", True, timestamp=1_000_000.0 )
@@ -516,3 +516,13 @@ def test_a_trip_at_the_top_level_never_caps():
     cat = CategoryTrust( "testing", **SMALL_COUNT_KW )
     cat.trip_level, cat.trip_successes = 5, 0
     assert cat.trip_active() is False
+
+
+def test_a_stored_trip_carries_the_status_the_dashboard_reads():
+    # proxy-dashboard.js treats a circuit_breaker_state with no status as "closed", i.e. OK.
+    with _frozen_time( 1_000_000.0 ):
+        tracker = _tracker_with()
+        tracker.restore_category( "testing", 4, 0, 1_000_000.0, trip={ "tripped_level": 2, "successes_at_trip": 4 } )
+        state = tracker.categories[ "testing" ].trip_state()
+        assert state[ "status" ] == "tripped"
+        assert ( state.get( "status" ) or "closed" ).lower() != "closed", "the dashboard's own default must not apply"
