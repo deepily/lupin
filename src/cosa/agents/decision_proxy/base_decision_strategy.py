@@ -58,7 +58,7 @@ class BaseDecisionStrategy( ABC ):
     Subclasses provide domain-specific classification and decision logic.
 
     Requires:
-        - Subclass implements classify(), gate(), and decide()
+        - Subclass implements classify(), get_trust_level(), gate(), and decide()
         - Trust tracker and decision store are provided at construction
 
     Ensures:
@@ -115,6 +115,26 @@ class BaseDecisionStrategy( ABC ):
 
         Returns:
             Tuple of ( category_name, confidence )
+        """
+        ...
+
+    @abstractmethod
+    def get_trust_level( self, category ):
+        """
+        Return the current trust level for a category.
+
+        Requires:
+            - category is a valid category name
+
+        Ensures:
+            - Returns an int from 1 to 5
+            - A strategy with no trust tracker returns 1 from its own implementation
+
+        Args:
+            category: Decision category name
+
+        Returns:
+            int: Trust level 1-5
         """
         ...
 
@@ -187,8 +207,7 @@ class BaseDecisionStrategy( ABC ):
         """
         category, confidence = self.classify( question, sender_id, context )
 
-        # Default trust level 1 — overridden when trust tracker is wired in
-        trust_level = 1
+        trust_level = self.get_trust_level( category )
 
         action = self.gate( category, trust_level, confidence )
 

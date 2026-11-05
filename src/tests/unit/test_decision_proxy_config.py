@@ -215,6 +215,9 @@ class TestBaseDecisionStrategy:
                     return "deployment", 0.9
                 return "general", 0.5
 
+            def get_trust_level( self, category ):
+                return 1
+
             def gate( self, category, trust_level, confidence ):
                 if trust_level <= 1:
                     return "shadow"

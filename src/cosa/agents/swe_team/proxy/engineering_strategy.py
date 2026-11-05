@@ -79,6 +79,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         l4_min_confidence          = 0.50,
         l4_audit_rate              = 0.10,
         audit_random               = None,
+        cap_levels                 = None,
         debug                      = False
     ):
         """
@@ -108,7 +109,11 @@ class EngineeringStrategy( BaseDecisionStrategy ):
             l4_min_confidence: At trust level 4 the proxy queues anything below this confidence (default 0.50)
             l4_audit_rate: Share of level 4 "act" outcomes sent to the human anyway as an audit sample (default 0.10)
             audit_random: Zero-argument callable returning a float in [0, 1); random.random when None
+            cap_levels: Optional dict of category name to cap level (1-5) that overrides the built-in cap for those categories
             debug: Enable debug output
+
+        Raises:
+            - ValueError if cap_levels names an unknown category or a cap outside 1-5
         """
         self.debug                      = debug
         self.trust_mode                 = trust_mode
@@ -135,9 +140,13 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         # Create trust tracker if not provided
         self.trust_tracker = trust_tracker or TrustTracker( debug=debug )
 
-        # Register all engineering categories with their cap levels
+        # Register all engineering categories with their cap levels (cap_levels overrides the built-in cap)
+        cap_levels = cap_levels or {}
+        for cat_name, cap in cap_levels.items():
+            if cat_name not in get_category_names(): raise ValueError( f"cap_levels names unknown category {cat_name!r}" )
+            if cap not in ( 1, 2, 3, 4, 5 ): raise ValueError( f"cap level for {cat_name} must be 1-5, got {cap!r}" )
         for cat_name in get_category_names():
-            cap = get_category_cap_level( cat_name )
+            cap = cap_levels.get( cat_name, get_category_cap_level( cat_name ) )
             self.trust_tracker.register_category( cat_name, cap_level=cap )
 
         # Create circuit breaker if not provided
@@ -207,6 +216,18 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         self.circuit_breaker.record_confidence( category, confidence )
 
         return ( category, confidence )
+
+    def get_trust_level( self, category ):
+        """
+        Return the tracker's current level for a category.
+
+        Requires:
+            - category is a category name
+
+        Ensures:
+            - Returns the level from the trust tracker, 1 for an unregistered category
+        """
+        return self.trust_tracker.get_level( category )
 
     def gate( self, category, trust_level, confidence ):
         """
@@ -619,8 +640,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         """
         category, confidence = self.classify( question, sender_id, context )
 
-        # Get actual trust level from tracker (not default L1)
-        trust_level = self.trust_tracker.get_level( category )
+        trust_level = self.get_trust_level( category )
 
         action = self.gate( category, trust_level, confidence )
 

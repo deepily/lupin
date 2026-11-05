@@ -15,9 +15,9 @@ pins:
 A decision strategy turns a question into one of four actions: `shadow`, `suggest`, `act` or `defer`. `BaseDecisionStrategy` fixes the three steps, and domain packages fill them in. The shipped domain is [[swe-team-orchestrator]]. The trust and responder side is in [[decision-proxy]].
 
 ## What it does
-- `BaseDecisionStrategy` requires `name`, `classify`, `gate` and `decide`. `available` and `can_handle` default to `True`.
-- `evaluate` calls `classify`, then `gate`, then `decide`. It calls `decide` only when the gate said `act` or `suggest`, so `value` stays `None` for `shadow` and `defer`.
-- `evaluate` passes trust level 1 to `gate`. A caller that holds a real trust level calls the steps itself.
+- `BaseDecisionStrategy` requires `name`, `classify`, `get_trust_level`, `gate` and `decide`. `available` and `can_handle` default to `True`.
+- `evaluate` calls `classify`, then `get_trust_level`, then `gate`, then `decide`. It calls `decide` only when the gate said `act` or `suggest`, so `value` stays `None` for `shadow` and `defer`.
+- `evaluate` passes the level that `get_trust_level` returns to `gate`. A strategy with no tracker returns 1 from its own implementation; there is no default.
 - `DecisionResult` carries `action`, `value`, `category`, `confidence`, `trust_level` and `reason`. The defaults are category `unknown`, confidence 0.0 and level 1.
 - `CategoryClassifier` requires `classify`, which returns a category name and a confidence, and `get_categories`, which returns the category table.
 - `ClassificationResult` holds a category, a confidence from 0 to 1 and a method that defaults to `keyword`.

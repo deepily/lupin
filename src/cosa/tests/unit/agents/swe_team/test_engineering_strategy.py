@@ -92,6 +92,25 @@ class TestClassify( unittest.TestCase ):
         cb.record_confidence.assert_called_once_with( "testing", 0.8 )
 
 
+class TestGetTrustLevel( unittest.TestCase ):
+
+    def test_delegates_to_the_tracker( self ):
+        strat, tt, _ = _mk_strategy()
+        tt.get_level.return_value = 4
+        self.assertEqual( strat.get_trust_level( "testing" ), 4 )
+        tt.get_level.assert_called_once_with( "testing" )
+
+    def test_evaluate_reads_the_level_through_it( self ):
+        strat, tt, _ = _mk_strategy( trust_mode="active" )
+        strat.classifier = MagicMock()
+        strat.classifier.classify.return_value = ( "testing", 0.9 )
+        strat._get_cbr_prediction = MagicMock( return_value=None )
+        with patch.object( strat, "get_trust_level", return_value=2 ) as m:
+            result = strat.evaluate( "hello" )
+        m.assert_called_once_with( "testing" )
+        self.assertEqual( result.trust_level, 2 )
+
+
 class TestGate( unittest.TestCase ):
 
     def test_circuit_breaker_tripped_defers( self ):
