@@ -436,3 +436,18 @@ def _no_real_model_in_doc_lint_tests( request, monkeypatch ):
 from tests.helpers.no_real_drive import guard_fixture   # noqa: E402 - needs the sys.path bootstrap above
 
 _no_unit_test_builds_the_real_drive_service = guard_fixture()
+
+
+@pytest.fixture( autouse=True )
+def _no_unit_test_writes_a_real_proxy_decision_row():
+    """
+    Keep orchestrator gate tests off the real proxy_decisions table.
+
+    Ensures:
+        - SweTeamOrchestrator._persist_proxy_decision is a stub for every test under src/tests/unit
+        - the unit that tests the method itself lives under src/cosa/tests/unit, outside this fixture
+    """
+    from unittest.mock import patch
+    from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
+    with patch.object( SweTeamOrchestrator, "_persist_proxy_decision" ):
+        yield

@@ -186,6 +186,12 @@ class TestNotifyAndEmit( unittest.TestCase ):
 
 class TestGatedConfirmation( unittest.TestCase ):
 
+    def setUp( self ):
+        # _persist_proxy_decision opens a real DB session; these tests are about the gate, not the row
+        patcher = patch.object( SweTeamOrchestrator, "_persist_proxy_decision" )
+        patcher.start()
+        self.addCleanup( patcher.stop )
+
     def _team_io( self, confirm=True ):
         t = MagicMock()
         t.ask_confirmation = AsyncMock( return_value=confirm )
