@@ -11,6 +11,8 @@ pins:
   - cosa.repo.symindex.candidates.storage_paths.container_path@d87be61ec8
   - cosa.repo.symindex.candidates.storage_paths.purpose_label@8981cc9f26
   - cosa.repo.symindex.candidates.storage_paths.shortlist_arm@70d5d06fa0
+  - cosa.repo.symindex.candidates.storage_paths.need_expansion_enabled@093009df42
+  - cosa.repo.symindex.candidates.storage_paths.need_expansion_protected_head@6cc3f9e17c
 ---
 # Candidate storage paths
 
@@ -24,7 +26,6 @@ Every location of the candidate stage comes from an INI key, and an environment 
 ## Directories
 - `candidate_dir( name, data_directory )` takes `vectors`, `query_cache` or `purpose`. An INI value is relative to `data_directory`; an override must be absolute.
 - `search_interpreter()` returns the path that runs the search process and raises `DEPENDENCY_MISSING` when the key is absent or the file is not there.
-
 - `purpose_label( config=None, environ=None )` returns the last component of the purpose-lines folder, to tag a saved raw response. It raises `STORAGE_KEY_MISSING` when neither source is set.
 
 ## Handoff to a container
@@ -33,8 +34,7 @@ Every location of the candidate stage comes from an INI key, and an environment 
 - `container_path( host_path, root )` translates a host path under the main checkout to the container's path, or raises `HANDOFF_NOT_IN_CONTAINER`.
 
 ## Shortlist arm
-- `shortlist_arm( default, config=None, environ=None )` returns the search arm the shipped stage runs. `LUPIN_REUSE_CANDIDATE_ARM` wins when set and not blank. Otherwise the INI key `reuse candidate shortlist arm` is used, and otherwise `default`.
-- The name is stripped and not checked here, because the stage refuses an unknown arm. It raises `DEPENDENCY_MISSING` when the INI must be read and no manager can be built.
+- `shortlist_arm( default, config=None, environ=None )` returns the search arm the shipped stage runs. `LUPIN_REUSE_CANDIDATE_ARM` wins when set and not blank. Otherwise the INI key `reuse candidate shortlist arm` is used, and otherwise `default`. The name is stripped and not checked here, because the stage refuses an unknown arm. It raises `DEPENDENCY_MISSING` when the INI must be read and no manager can be built.
 
 ## Need expansion
 - `need_expansion_enabled( config=None, environ=None )` says whether the stage expands each need first. `LUPIN_REUSE_CANDIDATE_NEED_EXPANSION` decides alone when set. Otherwise the INI key `reuse candidate need expansion enabled` is used, and only `true`, `1`, `yes` or `on` turn it on. The shipped key is `false`. `need_expansion_protected_head( config=None, environ=None )` returns how many of the plain need's top ids an expanded shortlist keeps. `LUPIN_REUSE_CANDIDATE_NEED_EXPANSION_PROTECTED_HEAD`, then the INI key `reuse candidate need expansion protected head`, then 64. A value that is not a whole number of 0 or more raises `PROTECTED_HEAD_INVALID`.

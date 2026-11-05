@@ -211,6 +211,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[reuse-band-fit-run]] — the driver that measures how far Jev's per-entry overlap moves between repeats and fits the uncertain band. `lupin_mcp` (reuse_band_fit_run)
 - [[reuse-end-to-end-run]] — the end-to-end run: frozen inputs, one search read against its twins, the figures, and the runner with its canary. `lupin_mcp` (reuse_e2e, reuse_e2e_run)
 - [[reuse-need-check-and-stage-client]] — the mechanical check of need sentences, and the client of the resident candidate search. `lupin_mcp` (reuse_need_check, reuse_candidates)
+- [[reuse-need-expansion]] — the optional model call that rewrites a need as paraphrases and identifier words before the candidate search. `lupin_mcp` (reuse_expansion)
 - [[reuse-exit-review-gates-and-verdict-fit]] — the exit gate on reviewer rulings, the reuse review gating flag, and the verdict threshold receipt. `lupin_mcp` (reuse_exit_gate, reuse_review_gate, reuse_verdict_fit)
 - [[reuse-ledger-capacity-and-run-names]] — ledger run names, the run ceiling from a measured worst lookup, the seat capacity check, and the read-only ledger queries. `lupin_mcp` (reuse_ledger)
 - [[reuse-behaviour-weekly-page]] — the weekly fleet page of reuse lookups, outcome lines, refusals and audits, its week rules and cron lines. `lupin_mcp` (reuse_behaviour)
