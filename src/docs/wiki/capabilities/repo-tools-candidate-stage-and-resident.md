@@ -4,7 +4,8 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.candidate_stage.Stage@d96b26286b
   - cosa.repo.symindex.candidates.candidate_stage.build_stage@a4a5349bd4
-  - cosa.repo.symindex.candidates.candidate_stage.shortlist@e7dd9e8fbb
+  - cosa.repo.symindex.candidates.candidate_stage.shortlist@908c3c3e85
+  - cosa.repo.symindex.candidates.candidate_stage.protected_order@cc1ea209ad
   - cosa.repo.symindex.candidates.candidate_stage.shortlist_bytes@7871f266ef
   - cosa.repo.symindex.candidates.candidate_stage.replay@defe90f423
   - cosa.repo.symindex.candidates.resident.ResidentSearch@6b5d50efaa
@@ -16,7 +17,8 @@ A stage is the lexical half of one lookup: two BM25 indexes, one over code field
 
 ## Stage
 - `build_stage( entries, purposes=None, k=60, depth=512, head=5 )` returns a frozen `Stage`. A purpose line is joined to its entry by `pin`. The input entries are not changed.
-- `shortlist( need, stage, K, extra_lists=None )` ranks the need with both indexes, fuses them with any extra ranked lists in sorted source order. It returns `shortlist` (ids sorted), `ranking` (fused order), `lists` and `scores`. An extra list named `code` or `prose` raises `SOURCE_CLASH`.
+- `shortlist( need, stage, K, extra_lists=None, protect=None )` ranks the need with both indexes, fuses them with any extra ranked lists in sorted source order. It returns `shortlist` (ids sorted), `ranking` (fused order), `lists` and `scores`. An extra list named `code` or `prose` raises `SOURCE_CLASH`.
+- `protected_order( lists, order, stage, K, protect )` keeps the first `head` ids of the plain need's own fusion, then fills K from the all-source fusion. `shortlist` calls it only when `protect` has a head above 0.
 - `shortlist_bytes( result )` is the one serialisation: sorted-key UTF-8 JSON. `replay( need, stage, K, recorded, extra_lists )` recomputes and returns the sha256 when the bytes match, else raises `REPLAY_MISMATCH`.
 
 ## Resident search

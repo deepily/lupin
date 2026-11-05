@@ -18,7 +18,7 @@ pins:
   - lupin_mcp.reuse_need_check.load_index@9fae1cc3ff
   - lupin_mcp.reuse_need_check.main@e9bfcadee0
   - lupin_mcp.reuse_candidates.canonical@335bf66db1
-  - lupin_mcp.reuse_candidates.CandidateStage@1f35b7f484
+  - lupin_mcp.reuse_candidates.CandidateStage@22a0a9c8a2
 ---
 # Reuse need check and candidate stage client
 Two pieces of the end-to-end run ([[reuse-end-to-end-run]]). The need check tests that a need sentence describes its member without handing Jev the answer. The stage client asks the Lupin server for a shortlist.
@@ -35,4 +35,5 @@ Two pieces of the end-to-end run ([[reuse-end-to-end-run]]). The need check test
 ## Candidate stage client
 - `CandidateStage` is the client of the resident search for one vector set. The cosa-voice process cannot import numpy, so the search runs on the Lupin server.
 - Before a lookup it brings the live vector set up to the index and checks that the manifest hashes to itself. It uploads the entries once per index. It then asks for the shortlist by key. A failure is a named `CandidateError`, never a silent sweep. A failing refresher is tolerated. The lookup then answers from the set on disk and reports the state `stale`.
+- With an `expander`, the client also searches a need's paraphrases and identifier words, and records the expansion and `protected_head` with the answer. See [[reuse-need-expansion]].
 - `canonical( obj )` is sorted-key JSON with no spaces after separators.

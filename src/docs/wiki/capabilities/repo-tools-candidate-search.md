@@ -3,11 +3,14 @@ capability: repo-tools-candidate-search
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.search.is_count@56a9ad94d3
-  - cosa.repo.symindex.candidates.search.validate_request@8cdfd5284e
+  - cosa.repo.symindex.candidates.search.validate_request@27ce565a38
   - cosa.repo.symindex.candidates.search.cosine_ranked@1ddfdf614f
   - cosa.repo.symindex.candidates.search.read_purposes@91e8d918f1
   - cosa.repo.symindex.candidates.search.answer@3cd6eaba33
-  - cosa.repo.symindex.candidates.search.answer_for_stage@726c8a568b
+  - cosa.repo.symindex.candidates.search.answer_for_stage@6438df3228
+  - cosa.repo.symindex.candidates.search.cosine_lists@d4dcf25894
+  - cosa.repo.symindex.candidates.search.validate_query_vectors@a1cb5f1c91
+  - cosa.repo.symindex.candidates.search.validate_extra_queries@98280a9447
   - cosa.repo.symindex.candidates.search.default_loader@40bb70e85e
   - cosa.repo.symindex.candidates.search.main@abd00c678c
 ---
