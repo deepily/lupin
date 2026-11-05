@@ -909,6 +909,22 @@ def test_cosine_similarity_of_unit_vectors():
     assert PredictionEngine._cosine_similarity( [ 1.0, 0.0 ], [ 0.0, 1.0 ] ) == pytest.approx( 0.0 )
 
 
+def test_cosine_similarity_of_non_unit_vectors_is_true_cosine():
+    # Row 6a1a958f: a bare dot product gives 12.0 here, which is above 1
+    assert PredictionEngine._cosine_similarity( [ 3.0, 0.0 ], [ 4.0, 0.0 ] ) == pytest.approx( 1.0 )
+    assert PredictionEngine._cosine_similarity( [ 3.0, 4.0 ], [ 4.0, 3.0 ] ) == pytest.approx( 24.0 / 25.0 )
+    assert PredictionEngine._cosine_similarity( [ 2.0, 0.0 ], [ -5.0, 0.0 ] ) == pytest.approx( -1.0 )
+
+
+def test_cosine_similarity_zero_vector_is_zero():
+    assert PredictionEngine._cosine_similarity( [ 0.0, 0.0 ], [ 1.0, 2.0 ] ) == 0.0
+
+
+def test_cosine_similarity_clamps_rounding_overshoot():
+    v = [ 0.1, 0.2, 0.3 ]
+    assert PredictionEngine._cosine_similarity( v, v ) <= 1.0
+
+
 # ---------------------------------------------------------------------------
 # _enrich_with_embedding_similarity
 # ---------------------------------------------------------------------------
