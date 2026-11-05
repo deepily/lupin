@@ -354,7 +354,8 @@ class SweTeamOrchestrator:
                     role     = role,
                     priority = "low",
                 )
-                self.proxy.trust_tracker.record_decision( proxy_result.category, success=True )
+                # No trust feedback here: no human has answered, and an auto-approval that scored
+                # itself a success would let the proxy grade its own work (row 0bba595e).
                 return proxy_result.value == "approved"
 
             if proxy_result.action == "suggest" and proxy_result.value:

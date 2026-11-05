@@ -316,6 +316,23 @@ class TestGatedConfirmation( unittest.TestCase ):
             out = _run( o._gated_confirmation( "deploy?", "lead", "no", 60, None, t ) )
         self.assertTrue( out )
         t.ask_confirmation.assert_not_awaited()   # auto-approved, never asked user
+        o.proxy.trust_tracker.record_decision.assert_not_called()   # no human verdict, so no trust credit
+
+    def test_an_auto_approval_leaves_the_real_tracker_and_the_db_untouched( self ):
+        # Row 0bba595e (D3), real strategy and tracker: act at L5 in active mode with the ask switch off.
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        o       = _mk_orch()
+        tracker = TrustTracker()
+        o.proxy = EngineeringStrategy( trust_tracker=tracker, trust_mode="active" )
+        t       = MagicMock(); t.ask_confirmation = AsyncMock()
+        o.proxy.gate = MagicMock( return_value="act" )
+        with patch.object( o, "_notify", AsyncMock() ), patch.object( o, "_persist_trust_feedback" ) as persist:
+            out = _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
+        self.assertTrue( out )
+        t.ask_confirmation.assert_not_awaited()
+        self.assertEqual( sum( c[ "total_decisions" ] for c in tracker.get_stats().values() ), 0 )
+        persist.assert_not_called()
 
     def test_active_act_with_ask_switch_on_asks_and_does_not_auto_approve( self ):
         # Switch ON + action "act": the "[Auto-approved by proxy]" return must NOT happen;
