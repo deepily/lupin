@@ -17,9 +17,9 @@ pins:
   - cosa.repo.duplicate_check.candidates.word_list@c4866ab787
   - cosa.repo.duplicate_check.structural.clone_pairs@7e597bc8a3
   - cosa.repo.duplicate_check.structural.parse_jscpd@d21faa33ba
-  - cosa.repo.duplicate_check.structural.python_clones@594a21c09a
+  - cosa.repo.duplicate_check.structural.python_clones@c57b6e0b42
   - cosa.repo.duplicate_check.structural.run_jscpd@bef582c77d
-  - cosa.repo.duplicate_check.structural.script_clones@0706048594
+  - cosa.repo.duplicate_check.structural.script_clones@3f36ab5eaa
 ---
 # Duplicate checker: candidate stage
 For each new definition, three ranked lists are joined by rank fusion into a short candidate row for the judge.
@@ -30,5 +30,5 @@ For each new definition, three ranked lists are joined by rank fusion into a sho
 - `structural_list` lists structural clones. `partner_map` turns clone pairs into partners, and `outside_pool` counts partners not in the pool.
 - `candidates_for` fuses the three lists for one definition. `candidate_rows` does so for every new definition.
 - `run_jscpd` runs the installed jscpd with the frozen maximum file size, because jscpd skips a larger file without a word. `parse_jscpd` turns its report into pairs.
-- `python_clones` and `script_clones` map the pairs of `dups` onto Python and script definitions. A script definition pairs with script definitions only.
+- `python_clones` and `script_clones` map the pairs of `dups` onto Python and script definitions. A script definition pairs with script definitions only. A repeated name is numbered `~2`, `~3` as dups numbers it, and a left-out repeat keeps its slot.
 - `clone_pairs` merges the pair lists of both sources. The index-side ranking is on [[candidate-stage]].
