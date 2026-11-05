@@ -195,7 +195,7 @@ def _bounce( env, **extra ):
     ( fakebin / "docker" ).chmod( 0o755 )
     ( fakebin / "curl" ).write_text( "#!/bin/sh\nexit 0\n" )
     ( fakebin / "curl" ).chmod( 0o755 )
-    run_env = dict( env, LUPIN_ROOT=tmp, PATH=str( fakebin ) + os.pathsep + env[ "PATH" ], UNWARNED_PAUSE_SECS="0", HEALTH_CONSECUTIVE="1" )
+    run_env = dict( env, LUPIN_ROOT=tmp, PATH=str( fakebin ) + os.pathsep + env[ "PATH" ], UNWARNED_PAUSE_SECS="0", HEALTH_CONSECUTIVE="1", LUPIN_BUNDLE_FRESHNESS_CHECK="skip" )
     run_env.update( extra )
     return subprocess.run( [ "bash", BOUNCE, "--quiet" ], env=run_env, capture_output=True, text=True, timeout=60 )
 

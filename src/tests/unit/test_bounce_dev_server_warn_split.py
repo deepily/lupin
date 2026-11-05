@@ -68,6 +68,7 @@ def _run( warn_rc, extra_args=(), pause_secs="0" ):
     env[ "UNWARNED_PAUSE_SECS" ] = pause_secs
     env[ "LUPIN_DB_GRANTS_CHECK" ]  = "skip"     # the grants step has its own tests; these assert the exact docker calls
     env[ "LUPIN_CLAUDE_LOGIN_CHECK" ] = "skip"     # the login step has its own tests (test_dev_claude_login_check.py)
+    env[ "LUPIN_BUNDLE_FRESHNESS_CHECK" ] = "skip"     # the bundle step has its own tests (test_bounce_bundle_freshness.py)
     return subprocess.run(
         [ "bash", _SCRIPT, *extra_args ],
         env=env, capture_output=True, text=True, timeout=30,
