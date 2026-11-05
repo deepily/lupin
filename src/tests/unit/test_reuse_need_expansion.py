@@ -419,9 +419,9 @@ def test_without_an_expansion_or_with_a_zero_head_no_protect_head_is_sent( world
     lookup( make( protected_head=64 ), "profile" )                                                       # no expander: nothing to protect against
     assert "protect_head" not in bridge.seen[ -1 ][ 2 ] and "extra_queries" not in bridge.seen[ -1 ][ 2 ]
     got = lookup( make( expander=lambda text: copy.deepcopy( EXPANSION ), protected_head=0 ), "profile" )
-    assert "protect_head" not in bridge.seen[ -1 ][ 2 ] and "protected_head" not in got
+    assert "protect_head" not in bridge.seen[ -1 ][ 2 ] and got[ "protected_head" ] == 0
     got = lookup( make( expander=lambda text: copy.deepcopy( EXPANSION ) ), "profile" )                  # no head given at all
-    assert "protect_head" not in bridge.seen[ -1 ][ 2 ] and "protected_head" not in got
+    assert "protect_head" not in bridge.seen[ -1 ][ 2 ] and got[ "protected_head" ] == 0
 
 
 def test_a_recorded_protected_head_replaces_the_clients_own( world ):
@@ -429,3 +429,28 @@ def test_a_recorded_protected_head_replaces_the_clients_own( world ):
     lookup( make( expander=lambda text: copy.deepcopy( EXPANSION ), protected_head=64 ), "profile" )
     got = lookup( make( protected_head=2 ), "profile", cache_only=True, expansion=copy.deepcopy( EXPANSION ), protected_head=64 )
     assert bridge.seen[ -1 ][ 2 ][ "protect_head" ] == 64 and got[ "protected_head" ] == 64
+
+
+def test_a_replay_never_falls_back_to_the_clients_own_protected_head_and_the_receipt_records_zero( world ):
+    make, bridge, *_ = world
+    first = lookup( make( expander=lambda text: copy.deepcopy( EXPANSION ), protected_head=0 ), "profile" )
+    assert first[ "protected_head" ] == 0                                                              # a zero is recorded, not left out
+    for recorded in ( 0, None ):                                                                       # a recorded zero, and a receipt that recorded nothing
+        again = lookup( make( protected_head=64 ), "profile", cache_only=True, expansion=copy.deepcopy( EXPANSION ), protected_head=recorded )
+        assert "protect_head" not in bridge.seen[ -1 ][ 2 ] and again[ "protected_head" ] == 0
+    live = lookup( make( expander=lambda text: copy.deepcopy( EXPANSION ), protected_head=64 ), "profile" )
+    assert live[ "protected_head" ] == 64 and bridge.seen[ -1 ][ 2 ][ "protect_head" ] == 64             # a live lookup still uses its own
+
+
+def test_head_one_of_k_three_protects_exactly_one_id_and_fills_two_from_the_expanded_fusion():
+    from cosa.repo.symindex.candidates import candidate_stage as cstage
+    entries = [ dict( e, id=i ) for e, i in zip( SEARCH_ENTRIES + [ SEARCH_ENTRIES[ 0 ] ], [ "py:a", "py:b", "py:c", "py:d" ] ) ]
+    stage   = cstage.build_stage( entries, None, 60, 100, 0 )
+    lists   = { "vector_concat": [ "py:a", "py:b", "py:c", "py:d" ], "x0_vector_concat": [ "py:c", "py:d", "py:b", "py:a" ], "x1_vector_concat": [ "py:c", "py:d", "py:b", "py:a" ] }
+    skip    = [ "x0_vector_concat", "x1_vector_concat" ]
+    plain   = cstage.shortlist( "zzz", stage, 3, { "vector_concat": lists[ "vector_concat" ] } )[ "ranking" ]
+    full    = cstage.shortlist( "zzz", stage, 3, lists )[ "ranking" ]
+    held    = cstage.shortlist( "zzz", stage, 3, lists, { "head": 1, "skip": skip } )
+    assert plain[ 1 ] == "py:b" and "py:b" not in full[ :2 ] and full[ :2 ] == [ "py:c", "py:d" ]       # the plain second id is not the expanded second id
+    assert held[ "shortlist" ] == [ "py:a", "py:c", "py:d" ]                                           # plain top 1, then the expanded fusion's best two
+    assert "py:b" not in held[ "shortlist" ] and len( held[ "shortlist" ] ) == 3
