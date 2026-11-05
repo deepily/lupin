@@ -562,6 +562,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
         Ensures:
             - Returns DecisionResult with accurate trust level
+            - value holds the proxy's prediction for every action, shadow included
             - Circuit breaker check is performed
             - CBR metadata appended to reason string
 
@@ -580,9 +581,9 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
         action = self.gate( category, trust_level, confidence )
 
-        value = None
-        if action in ( "act", "suggest" ):
-            value = self.decide( question, category, context )
+        # Shadow predicts too: the orchestrator compares this value with the human's answer, and a
+        # missing prediction would be scored as "proxy would not approve" against every human yes.
+        value = self.decide( question, category, context )
 
         reason = f"Category '{category}' at L{trust_level} ({self.trust_mode} mode) → {action}"
 

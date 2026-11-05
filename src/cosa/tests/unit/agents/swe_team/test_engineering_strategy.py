@@ -406,7 +406,7 @@ class TestEvaluate( unittest.TestCase ):
         self.assertEqual( result.trust_level, 4 )
         self.assertIn( "CBR:", result.reason )
 
-    def test_evaluate_shadow_no_value_no_cbr( self ):
+    def test_evaluate_shadow_predicts_a_value_but_no_cbr( self ):
         strat, tt, cb = _mk_strategy( trust_mode="shadow" )
         strat.classifier = MagicMock()
         strat.classifier.classify.return_value = ( "general", 0.3 )
@@ -414,7 +414,7 @@ class TestEvaluate( unittest.TestCase ):
         strat._get_cbr_prediction = MagicMock( return_value=None )
         result = strat.evaluate( "hello" )
         self.assertEqual( result.action, "shadow" )
-        self.assertIsNone( result.value )
+        self.assertEqual( result.value, "approved" )
         self.assertNotIn( "CBR:", result.reason )
 
 
