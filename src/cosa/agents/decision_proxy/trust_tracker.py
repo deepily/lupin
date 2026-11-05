@@ -106,8 +106,10 @@ class CategoryTrust:
         # BLR state (lazy-initialized on first record_decision_with_features call)
         self._blr_model = None
 
-        # Highest level a restore from storage allows; None means no ceiling (see restore_category)
-        self.level_ceiling = None
+        # A recorded circuit-breaker trip: the demoted level and the success total when it happened.
+        # None means no trip; while one is active the level cannot exceed trip_level (see trip_active).
+        self.trip_level     = None
+        self.trip_successes = None
 
     @property
     def level( self ):
@@ -120,7 +122,7 @@ class CategoryTrust:
         Ensures:
             - Returns 1 if below level 2 threshold
             - Returns highest level where threshold is met
-            - Capped at cap_level, and at level_ceiling when a restore set one
+            - Capped at cap_level, and at trip_level while a recorded trip is active
         """
         if self.trust_model == "blr":
             computed = self._level_blr()
@@ -128,7 +130,37 @@ class CategoryTrust:
             computed = self._level_beta()
         else:
             computed = self._level_count_based()
-        return computed if self.level_ceiling is None else min( computed, self.level_ceiling )
+        return min( computed, self.trip_level ) if self.trip_active() else computed
+
+    def trip_active( self ):
+        """
+        Say whether a recorded circuit-breaker trip still caps the level.
+
+        Ensures:
+            - returns False when no trip is recorded or the demoted level is already the top level
+            - returns True until total_successes has grown past the trip total by the gap
+            - the gap is the next level's threshold minus the demoted level's own
+            - successes before the trip do not count
+
+        Notes:
+            The demotion pruned the history down to the demoted level's threshold,
+            so the category earns the cap back with new successes.
+        """
+        if self.trip_level is None or self.trip_level >= 5: return False
+
+        gap = self.thresholds[ self.trip_level + 1 ] - self.thresholds.get( self.trip_level, 0 )
+        return ( self.total_successes - self.trip_successes ) < gap
+
+    def trip_state( self ):
+        """
+        Return the trip as a plain dict for storage, or None when none is active.
+
+        Ensures:
+            - returns {"tripped_level", "successes_at_trip"} while the trip is active
+            - returns None otherwise, which clears a stored trip
+        """
+        if not self.trip_active(): return None
+        return { "tripped_level": self.trip_level, "successes_at_trip": self.trip_successes }
 
     def _level_count_based( self ):
         """
@@ -501,7 +533,7 @@ class TrustTracker:
 
         if self.debug: print( f"[TrustTracker] Registered category: {category_name} (cap L{cap_level}, model={self.trust_model})" )
 
-    def restore_category( self, category_name, successes, rejections, as_of, stored_level=None ):
+    def restore_category( self, category_name, successes, rejections, as_of, trip=None ):
         """
         Restore a category's counters and rolling history from stored totals.
 
@@ -511,12 +543,13 @@ class TrustTracker:
         Requires:
             - successes and rejections are non-negative ints
             - as_of is an epoch timestamp in seconds
-            - stored_level is the level saved with the row (1-5), or None for no ceiling
+            - trip is the stored trip dict ("tripped_level", "successes_at_trip"), or None for no trip
 
         Ensures:
             - returns True and sets the totals when the category is registered and empty
-            - the restored level is min( level from the counters, stored_level ), so a demotion,
-              which changes the stored level but not the counters, survives the reload
+            - a stored trip caps the restored level until it is earned back (see trip_active), so a
+              demotion, which changes the stored level but not the counters, survives the reload
+            - with no stored trip the level is whatever the counters earn, so a category can climb
             - the rolling history gains one entry per restored decision, stamped as_of
             - returns False and changes nothing when the category is unknown or already has decisions
         """
@@ -527,9 +560,28 @@ class TrustTracker:
         cat.total_rejections = rejections
         cat.total_decisions  = successes + rejections
         cat.decisions        = [ ( as_of, True ) ] * successes + [ ( as_of, False ) ] * rejections
-        cat.level_ceiling    = stored_level
+        if trip is not None:
+            cat.trip_level     = trip[ "tripped_level" ]
+            cat.trip_successes = trip[ "successes_at_trip" ]
         cat._prune_rolling_window()
         return True
+
+    def record_trip( self, category_name ):
+        """
+        Record that a circuit-breaker trip just demoted a category.
+
+        Requires:
+            - the demotion has already been applied
+
+        Ensures:
+            - the category remembers its demoted level and success total, so the cap can outlive this tracker
+            - an unknown category changes nothing
+        """
+        cat = self.categories.get( category_name )
+        if cat is None: return
+
+        cat.trip_level     = cat.level
+        cat.trip_successes = cat.total_successes
 
     def get_level( self, category_name ):
         """

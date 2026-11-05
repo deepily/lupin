@@ -419,7 +419,7 @@ class SweTeamOrchestrator:
                 for row in TrustStateRepository( session ).get_all_for_user( self._user_email, domain="swe" ):
                     if self.proxy.trust_tracker.restore_category(
                         row.category, row.successful_decisions, row.rejected_decisions, row.updated_at.timestamp(),
-                        stored_level=row.trust_level
+                        trip=row.circuit_breaker_state
                     ):
                         restored += 1
             return restored
@@ -475,6 +475,7 @@ class SweTeamOrchestrator:
 
         Ensures:
             - the stored level equals self.proxy.trust_tracker.get_level( category ) on success
+            - the stored circuit_breaker_state is the active trip, or None once it is earned back
             - does nothing when there is no proxy
             - a DB failure is logged and never propagates
         """
@@ -486,10 +487,14 @@ class SweTeamOrchestrator:
 
             user_email = self._user_email or f"{self.session_id}@swe.deepily.ai"
 
+            tracker = self.proxy.trust_tracker
             with get_db() as session:
-                TrustStateRepository( session ).update_trust_level(
-                    user_email, "swe", category, self.proxy.trust_tracker.get_level( category )
-                )
+                repo = TrustStateRepository( session )
+                repo.update_trust_level( user_email, "swe", category, tracker.get_level( category ) )
+                cat = tracker.categories.get( category )
+                if cat is not None:
+                    # A trip is stored while it caps the level and cleared once the level is earned back.
+                    repo.update_circuit_breaker_state( user_email, "swe", category, cat.trip_state() )
         except Exception as e:
             logger.warning( f"Trust level DB persistence failed (non-fatal): {e}" )
 
@@ -504,10 +509,11 @@ class SweTeamOrchestrator:
             - reason is a human-readable string
 
         Ensures:
-            - Stores the demoted level, because the demotion happens in memory with no feedback to carry it
+            - Records the trip and stores the demoted level, because the demotion happens in memory with no feedback to carry it
             - Sends one alert notification with high priority
             - Non-fatal: logs warning on failure, never raises
         """
+        if self.proxy is not None: self.proxy.trust_tracker.record_trip( category )
         self._persist_trust_level( category )
 
         try:
