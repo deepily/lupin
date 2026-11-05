@@ -40,9 +40,9 @@ A category with frequent rejections is held back by the breaker, not by a lower 
 
 ### How Circuit Breakers Protect Against Failures
 
-A category's breaker **trips** in either of two cases:
+A category's breaker **trips** in either of two cases. Below, `...` stands for `swe team trust proxy circuit breaker`:
 
-- the rejection rate is above **15%** (`swe team trust proxy circuit breaker error rate threshold`) with at least 10 decisions recorded;
+- the rejection rate is above **15%** (`... error rate threshold`) with at least 10 decisions recorded;
 - the average classification confidence of the last 20 decisions is below **0.30**, with at least 5 recorded (`... confidence collapse threshold`).
 
 1. **`TRIPPED`**: the category is demoted **2 levels** (`... auto demotion levels`) and the gate defers every decision in it to you.

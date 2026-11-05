@@ -93,7 +93,7 @@ No base default of Level 1 sits behind it.
 
 **Category caps.** A category never rises above its cap, whatever it earns.
 Shipped caps are 3 for deployment, destructive and architecture, and 5 for testing, dependencies and general.
-The `lupin-app.ini` keys `swe engineering proxy deployment cap level`, `... destructive cap level` and `... architecture cap level` set the first three.
+The `lupin-app.ini` keys `swe engineering proxy deployment cap level`, and the same with `destructive` or `architecture` in place of `deployment`, set the first three.
 They now take effect when a SWE job starts.
 A value outside 1 to 5 is refused with an error when the job builds its proxy.
 
