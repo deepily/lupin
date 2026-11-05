@@ -52,6 +52,8 @@ def main():
     Ensures:
         - the named account exists, is active, and holds roles ["user", "admin"]
         - the account's password is the one supplied
+        - the account is marked is_protected, so the test-database cleanups that run
+          "DELETE FROM users WHERE NOT is_protected" leave it in place
         - reports the email and roles; never echoes the password
 
     Raises:
@@ -83,11 +85,13 @@ def main():
                 password_hash = hash_password( password ),
                 roles         = ADMIN_ROLES
             )
+            user_repo.update( user.id, is_protected=True )
             session.commit()
             print( f"✓ created admin test account: {user.email} roles={user.roles}" )
         else:
             user_repo.update_password( existing.id, hash_password( password ) )
             user = user_repo.update_roles( existing.id, ADMIN_ROLES )
+            user_repo.update( existing.id, is_protected=True )
             session.commit()
             print( f"✓ promoted existing account: {user.email} roles={user.roles}" )
 
