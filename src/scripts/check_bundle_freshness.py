@@ -17,12 +17,15 @@ A check keyed on the input set cries wolf there. The precise claim is narrower.
 One comparison catches every drift that changes the delivered bytes (content or population).
 It is silent on drift that does not.
 
-Exit codes (four states, three codes):
+Exit codes (four states, four codes):
     0  every judged bundle is `FRESH`: a rebuild would produce byte-identical output.
        `NOT-BUILT` bundles do not block this.
     1  at least one bundle is `STALE`: a rebuild would change the delivered bytes.
+       This wins over 2: a bundle that could not be checked never hides one that is stale.
     2  `REFUSED`: could not answer (no esbuild, unparseable build script, a build that failed,
        or a bundle never built that something references). An unanswered question is never a clean 0.
+    3  the checker itself crashed. Python's own exit for an uncaught exception is 1, which
+       would read as `STALE`, so a crash is caught and reported with its traceback instead.
 
 """
 
@@ -35,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 
 from pathlib import Path
 
@@ -54,6 +58,7 @@ NOT_BUILT    = "NOT-BUILT"
 EXIT_FRESH   = 0
 EXIT_STALE   = 1
 EXIT_REFUSED = 2
+EXIT_CRASHED = 3
 
 # Paths that MENTION a bundle's output without LOADING it. A driver names its own outputs in
 # comments, a tsconfig names an outDir, and prose describes both — none of that is a consumer.
@@ -462,8 +467,9 @@ def main( argv=None ):
 
     Ensures:
         - returns EXIT_FRESH only when at least one bundle was judged and all were `FRESH`
-        - returns EXIT_REFUSED when any bundle could not be judged, and when none were found
-        - returns EXIT_STALE when any judged bundle was `STALE`
+        - returns EXIT_STALE when any judged bundle was `STALE`, even if another could not be judged
+        - returns EXIT_REFUSED when a bundle could not be judged and none was stale, and when none were found
+        - returns EXIT_CRASHED, with a traceback on stderr, when the checker itself raises
         - a NOT_BUILT bundle does not block EXIT_FRESH, but EXIT_FRESH still requires that at
           least one bundle was actually judged — an all-NOT_BUILT tree has measured nothing
           and must not report a clean zero
@@ -482,34 +488,40 @@ def main( argv=None ):
     parser.add_argument( "--quiet", action="store_true", help="print only the verdict lines" )
     args = parser.parse_args( argv )
 
-    root    = PROJECT_ROOT
-    esbuild = root / "node_modules" / ".bin" / "esbuild"
-    esbuild = str( esbuild ) if os.access( esbuild, os.X_OK ) else None
+    try:
+        root    = PROJECT_ROOT
+        esbuild = root / "node_modules" / ".bin" / "esbuild"
+        esbuild = str( esbuild ) if os.access( esbuild, os.X_OK ) else None
 
-    scripts = discover_bundles( root )
-    if not scripts:
-        print( "check_bundle_freshness: REFUSED — no build-*.sh driver emits a manifest.json",
-               file=sys.stderr )
-        return EXIT_REFUSED
+        scripts = discover_bundles( root )
+        if not scripts:
+            print( "check_bundle_freshness: REFUSED — no build-*.sh driver emits a manifest.json",
+                   file=sys.stderr )
+            return EXIT_REFUSED
 
-    results = [ check_bundle( root, script, esbuild ) for script in scripts ]
+        results = [ check_bundle( root, script, esbuild ) for script in scripts ]
 
-    lines = format_report( root, results, current_sha( root ) )
-    if args.quiet:
-        lines = [ line for line in lines if line.strip() ]
-    print( "\n".join( lines ) )
+        lines = format_report( root, results, current_sha( root ) )
+        if args.quiet:
+            lines = [ line for line in lines if line.strip() ]
+        print( "\n".join( lines ) )
 
-    if any( entry[ "status" ] == REFUSED for entry in results ): return EXIT_REFUSED
-    if any( entry[ "status" ] == STALE   for entry in results ): return EXIT_STALE
+        if any( entry[ "status" ] == STALE   for entry in results ): return EXIT_STALE
+        if any( entry[ "status" ] == REFUSED for entry in results ): return EXIT_REFUSED
 
-    if not any( entry[ "status" ] == FRESH for entry in results ):
-        # Every bundle was NOT_BUILT: nothing was measured. A clean exit here would be the
-        # vacuous green this file exists to prevent.
-        print( "check_bundle_freshness: REFUSED — no bundle was built, so nothing was measured",
-               file=sys.stderr )
-        return EXIT_REFUSED
+        if not any( entry[ "status" ] == FRESH for entry in results ):
+            # Every bundle was NOT_BUILT: nothing was measured. A clean exit here would be the
+            # vacuous green this file exists to prevent.
+            print( "check_bundle_freshness: REFUSED — no bundle was built, so nothing was measured",
+                   file=sys.stderr )
+            return EXIT_REFUSED
 
-    return EXIT_FRESH
+        return EXIT_FRESH
+
+    except Exception:
+        traceback.print_exc()
+        print( "check_bundle_freshness: CRASHED — the checker itself failed; this is not a STALE verdict", file=sys.stderr )
+        return EXIT_CRASHED
 
 
 if __name__ == "__main__":
