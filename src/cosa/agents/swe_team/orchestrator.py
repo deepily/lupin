@@ -249,7 +249,14 @@ class SweTeamOrchestrator:
                     debug                         = self.debug,
                 )
 
+                # INI cap keys; a key absent (INI read failed) keeps the built-in cap
+                cap_levels = {
+                    cat : swe_cfg[ f"{cat}_cap_level" ]
+                    for cat in ( "deployment", "destructive", "architecture" ) if f"{cat}_cap_level" in swe_cfg
+                }
+
                 self.proxy = EngineeringStrategy(
+                    cap_levels       = cap_levels,
                     trust_tracker    = trust_tracker,
                     circuit_breaker  = circuit_breaker,
                     accepted_senders = swe_cfg.get( "accepted_senders" ),
