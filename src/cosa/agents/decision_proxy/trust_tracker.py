@@ -34,6 +34,9 @@ from cosa.agents.decision_proxy.config import (
 )
 
 
+BLR_MIN_OBSERVATIONS = 30   # decisions, and observations of the BLR model itself, before its posterior sets the level
+
+
 class CategoryTrust:
     """
     Trust state for a single decision category.
@@ -220,8 +223,8 @@ class CategoryTrust:
         """
         BLR trust level from the posterior mean rate.
 
-        Falls back to Beta-Bernoulli when there are fewer than 30 decisions or no model.
-        It also falls back when the model has under 30 observations, as after a demotion.
+        Falls back to Beta-Bernoulli when there are fewer than BLR_MIN_OBSERVATIONS decisions or no model.
+        It also falls back when the model has fewer observations of its own, as after a demotion.
 
         Returns:
             int: Trust level 1-5
@@ -229,7 +232,7 @@ class CategoryTrust:
         n = self.total_decisions
 
         # Fall back to Beta if insufficient data or no BLR model
-        if n < 30 or self._blr_model is None or self._blr_model.n_observations < 30:
+        if n < BLR_MIN_OBSERVATIONS or self._blr_model is None or self._blr_model.n_observations < BLR_MIN_OBSERVATIONS:
             return self._level_beta()
 
         rate = self._blr_model.posterior_mean_rate()
