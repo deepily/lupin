@@ -208,6 +208,18 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
         return ( category, confidence )
 
+    def get_trust_level( self, category ):
+        """
+        Return the tracker's current level for a category.
+
+        Requires:
+            - category is a category name
+
+        Ensures:
+            - Returns the level from the trust tracker, 1 for an unregistered category
+        """
+        return self.trust_tracker.get_level( category )
+
     def gate( self, category, trust_level, confidence ):
         """
         Gate decision based on trust level, mode, and circuit breaker.
@@ -599,8 +611,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         """
         category, confidence = self.classify( question, sender_id, context )
 
-        # Get actual trust level from tracker (not default L1)
-        trust_level = self.trust_tracker.get_level( category )
+        trust_level = self.get_trust_level( category )
 
         action = self.gate( category, trust_level, confidence )
 

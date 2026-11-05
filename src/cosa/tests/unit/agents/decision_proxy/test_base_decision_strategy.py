@@ -65,8 +65,10 @@ def test_cannot_instantiate_abstract_strategy():
 class _Strategy( BaseDecisionStrategy ):
     """Concrete strategy whose gate decision is injectable for branch coverage."""
 
-    def __init__( self, gate_action="shadow" ):
+    def __init__( self, gate_action="shadow", level=1 ):
         self._gate_action = gate_action
+        self._level       = level
+        self.gate_levels  = []
 
     @property
     def name( self ):
@@ -75,7 +77,11 @@ class _Strategy( BaseDecisionStrategy ):
     def classify( self, question, sender_id="", context=None ):
         return ( "testing", 0.9 )
 
+    def get_trust_level( self, category ):
+        return self._level
+
     def gate( self, category, trust_level, confidence ):
+        self.gate_levels.append( trust_level )
         return self._gate_action
 
     def decide( self, question, category, context=None ):
@@ -130,3 +136,26 @@ def test_evaluate_suggest_sets_value():
     r = _Strategy( gate_action="suggest" ).evaluate( "Should I?" )
     assert r.action == "suggest"
     assert r.value == "decided-value"
+
+
+# ----------------------------------------------------------------------------
+# D17 (row c7b2b3e4): the trust level comes from the subclass, not a hard-coded 1
+# ----------------------------------------------------------------------------
+def test_a_strategy_that_does_not_supply_a_trust_level_cannot_be_built():
+    class _Silent( BaseDecisionStrategy ):
+        @property
+        def name( self ): return "silent"
+        def classify( self, question, sender_id="", context=None ): return ( "testing", 0.9 )
+        def gate( self, category, trust_level, confidence ): return "shadow"
+        def decide( self, question, category, context=None ): return "v"
+
+    with pytest.raises( TypeError, match="get_trust_level" ):
+        _Silent()
+
+
+def test_evaluate_uses_the_level_the_subclass_reports_for_the_gate_and_the_result():
+    strat = _Strategy( gate_action="act", level=4 )
+    r = strat.evaluate( "Should I?" )
+    assert strat.gate_levels == [ 4 ], "the gate must see the subclass's level, not 1"
+    assert r.trust_level == 4
+    assert "L4" in r.reason
