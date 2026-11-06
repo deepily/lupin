@@ -17,7 +17,7 @@ One comparator exists for each question type the prediction engine ([[prediction
 - `compare_yes_no` matches on the base yes or no value. A trailing comment in the value is kept as qualifier detail, not compared.
 - `compare_multiple_choice_single` matches only when every header maps to the same option label on both sides.
 - `compare_multiple_choice_multi` scores each header by Jaccard similarity of the chosen options. The overall match needs a score of at least 0.5.
-- `compare_open_ended` uses embedding similarity when the actual response carries one, and matches at 0.85 or more. Otherwise it compares the strings, ignoring case and outer whitespace.
+- `compare_open_ended` uses embedding similarity when the actual response carries one, and matches at 0.75 or more. The engine passes the cut-off in from the INI key `prediction engine open ended match threshold`. The built-in default is also 0.75. Otherwise it compares the strings, ignoring case and outer whitespace.
 - `compare_open_ended_batch` does the same per header. The match is the average similarity across headers meeting the threshold.
 
 ## Invariants

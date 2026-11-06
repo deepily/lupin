@@ -58,6 +58,15 @@ The BLR model is reset. The level comes from the Beta counters until it has 30 d
 
 This prevents runaway automation — if the proxy makes bad decisions, it stops acting and waits for human guidance.
 
+### How Free-Text Answers Are Scored
+
+A free-text prediction counts as a **match** when its cosine similarity to the actual answer is at least **0.75**.
+The cut-off is the INI key `prediction engine open ended match threshold`, in `lupin-app.ini`.
+Open-ended batch questions use the same key, applied to the average over their headers.
+It is separate from `prediction engine open ended cbr threshold` (0.85), which only controls which past answers are retrieved.
+Rick set 0.75 on 6 Nov 2026 from 133 hand-labelled pairs: precision 0.79 and recall 0.65, against recall 0.29 at the old 0.85.
+A change applies to new scores only, after a server bounce. Rows already scored are not rescored.
+
 ### Day-by-Day Example: Trust Progression
 
 The counts are illustrative; they follow the shipped thresholds (Level 2 at 50 weighted approvals, Level 3 at 200).
