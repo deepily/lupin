@@ -16,10 +16,11 @@ pins:
   - scripts.compose_drift_probe.compose_mounts@ecc751a14c
   - scripts.compose_drift_probe.inspect_mounts@65370334c8
   - scripts.compose_drift_probe.inspect_env@6049eb4b38
-  - scripts.compose_drift_probe.drifted_fields@2611ec68f3
+  - scripts.compose_drift_probe.drifted_fields@714d898028
+  - scripts.compose_drift_probe.shell_pass_through_keys@467b600c70
   - scripts.compose_drift_probe.run_json@a48f9396f3
   - scripts.compose_drift_probe.compose_argv@a9c3e13752
-  - scripts.compose_drift_probe.probe@77e8596b89
+  - scripts.compose_drift_probe.probe@d33d266caa
   - scripts.compose_drift_probe.main@9c17bfd4f9
 ---
 # Server bounce control scripts
@@ -31,5 +32,6 @@ Scripts that guard a container bounce ([[dev-server-lifecycle]]). A bounce of th
 - `bounce_dev_warn.py` posts the pre-bounce warning and waits for each recipient to ack. Its `main` is the entry point.
 - `compose_drift_probe.py` compares a running container with the compose service that built it. A restart keeps old tmpfs, mounts and environment values.
 - `compose_tmpfs`, `compose_mounts`, `inspect_mounts` and `inspect_env` put both sides in one shape. `compose_mounts` also counts each file-backed compose secret as a read-only bind mount at `/run/secrets/<target>`, because compose lists secrets apart from volumes. A tmpfs mount has an empty source on both sides, so it never reads as drift on that alone.
-- `drifted_fields` names every compose value the container lacks. A blank environment key in compose is skipped when the container holds a value. The blank came from a shell variable the caller did not export.
+- `drifted_fields` names every compose value the container lacks. A blank environment key is skipped only when it is a shell pass-through key and the container holds a value. Then the blank came from a shell variable the caller did not export. A key compose sets to a literal empty value is compared like any other.
+- `shell_pass_through_keys` finds those keys. It renders the service a second time with a unique marker exported for each blank key. A key that renders as the marker is a pass-through. A failed second render makes `probe` answer unknown.
 - `run_json` and `compose_argv` run the docker commands. `probe` makes the comparison (it passes the rendered secrets' host files to `drifted_fields`), and `main` prints the verdict. For tmpfs or mount drift, exit 10, it adds one `RECREATE_ARG=` line per argument of the recreate command. For environment drift, exit 11, it prints that command for a person instead.

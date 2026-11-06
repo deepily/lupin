@@ -2,7 +2,7 @@
 capability: utils-speech-text
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.utils.speech_text.strip_markdown_links_for_speech@3992ac4526
+  - cosa.utils.speech_text.strip_markdown_links_for_speech@eed1754e28
 ---
 # Speech text clean-up
 

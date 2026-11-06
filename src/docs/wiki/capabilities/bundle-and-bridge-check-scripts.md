@@ -9,7 +9,7 @@ pins:
   - scripts.check_bundle_freshness.discover_bundles@a141456a94
   - scripts.check_bundle_freshness.current_sha@92607d1989
   - scripts.check_bundle_freshness.format_report@1c3693769d
-  - scripts.check_bundle_freshness.main@4e8a0eb2f2
+  - scripts.check_bundle_freshness.main@e7d28e03ec
   - scripts.bridge_pin_sweep.helper_bodies@8fa5e3b6ff
   - scripts.bridge_pin_sweep.functions@93af722d2e
   - scripts.bridge_pin_sweep.classify@3a6cb5c350
@@ -23,7 +23,7 @@ Two check scripts under `src/scripts/`. Each reports and changes nothing.
 - `discover_bundles` finds each driver that emits a manifest, in sorted name order. A driver without a manifest is skipped.
 - `consumers_of` lists tracked files that load a bundle's output, not those that only name it. That tells a dormant port from a live 404.
 - `current_sha` names the commit the report was taken at. `format_report` gives every bundle's name, source count and both hashes.
-- `main` returns the fresh code only when at least one bundle was judged and all were fresh.
+- `main` returns the fresh code only when at least one bundle was judged and all were fresh. A stale bundle wins over one that could not be checked. A crash inside the checker returns exit 3 with a traceback. Python's own exit for an uncaught exception is 1, which would read as stale.
 - `bridge_pin_sweep.py` finds tests that read live session-bridge state without pinning it. Such a test is green on one machine and red on another.
 - `helper_bodies` maps each private helper to its body, so a pin inside a shared helper is seen. `functions` yields each test function and its body.
 - `classify` returns the label, test name, drivers and unpinned names for one source. `self_test` proves the detector still fires and still stays quiet.
