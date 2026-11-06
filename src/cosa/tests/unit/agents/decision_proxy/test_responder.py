@@ -473,14 +473,27 @@ def test_persist_embedding_never_stores_a_shadow_prediction_as_a_case_value():
     assert kwargs[ "ratification_state" ] == "shadow" and kwargs[ "decision_value" ] == ""
 
 
-def test_persist_embedding_still_stores_the_value_of_a_non_shadow_result():
+def test_persist_embedding_keeps_no_value_for_a_defer_row_either():
+    # Row fc9fb290: a defer row is state "shadow" and carries the proxy's own guess; stored, it would be
+    # read back as precedent.
     r = _responder( embedding_provider=MagicMock() )
     store = MagicMock()
     r._get_embedding_store = MagicMock( return_value=store )
     r.embedding_provider.generate_embedding.return_value = [ 0.1 ]
     r._persist_embedding( "nid", _result( action="defer", value="approved" ), "q", None )
     _, kwargs = store.add_decision.call_args
-    assert kwargs[ "decision_value" ] == "approved"
+    assert kwargs[ "ratification_state" ] == "shadow" and kwargs[ "decision_value" ] == ""
+
+
+def test_persist_embedding_still_stores_the_value_of_a_suggested_or_acted_result():
+    r = _responder( embedding_provider=MagicMock() )
+    store = MagicMock()
+    r._get_embedding_store = MagicMock( return_value=store )
+    r.embedding_provider.generate_embedding.return_value = [ 0.1 ]
+    for action, flag, state in ( ( "suggest", True, "pending" ), ( "act", False, "autonomous" ) ):
+        r._persist_embedding( "nid", _result( action=action, value="approved" ), "q", flag )
+        _, kwargs = store.add_decision.call_args
+        assert kwargs[ "decision_value" ] == "approved" and kwargs[ "ratification_state" ] == state
 
 
 def test_persist_embedding_swallows_exception( capsys ):
