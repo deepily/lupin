@@ -24,6 +24,15 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
   - Approve the 9 held rows (14170bef, 85f6848f, d2d6a192, 5d0eb55b, 6d7f809b, c5cfca7c, fc9fb290, da64aaab, fe2e8c8f). Approving 14170bef lets the parked secret-rescan fix merge and turns the unit tier fully green.
   - Row cfc7dd01 (the Beta and BLR trust models are never used): build it, or drop it for v0.2.3. Recommendation: drop. Next chase 10:30 on 6 Nov.
 
+## 📚 Decisions log 2026-11-05 (Cheech 🌿 `e801716f`, crew Krishna, Maya, Rio, Pocholo, all reaped; times Eastern)
+
+- **Manager calls Rick may overrule**: conformal calibration uses the BLR's predictions made before each update (row 50d8d3a1); BLR feature 0 stays constant.
+- **Not ruled, waiting on Rick**:
+  - Row a60aa733, the always-yes vote: Cheech recommends keeping the 79% always-yes rate as the v0.2.3 bar; Krishna's amendment recommends changing the vote. Next chase 10:30 on 6 Nov.
+  - Re-park Dart row f25c661d (recommended until 17 Nov); only his login can move it.
+  - Held rows 4e6d795d, 3570497d, b3ba8f11 and 3905b9d9; deleting the 43 leaked test rows (row 5ac3d5d7); switching on reuse need expansion.
+- **TODO.md is 856 lines.** The archive ask at 23:24 timed out to "next session", so archiving it is backlog.
+
 ## 📚 Decisions log 2026-11-04 (Cheech 🌿 `ebd974b4`, crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped; times Eastern)
 
 - **Wiki clean-up before the PR.** Rick released the 13 held PR-readiness and wiki rows by voice and said to staff up and dispatch them. The wiki lint went from 204 findings to 0.

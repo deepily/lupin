@@ -8,6 +8,27 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.05 - Session e801716f (Cheech 🌿, manager; crew Krishna, Maya, Rio, Pocholo, all reaped with mementos) | Nine decision proxy fixes merged onto wip-v0.2.3, plus optional need expansion for the reuse search
+
+- **Decision proxy fixes merged**, each reviewed before the merge:
+  - Each gated confirmation writes a best-effort organic proxy_decisions row (`31dc803cc`, row 5ac3d5d7).
+  - BLR feature 3 carries the recent error rate, and demotion lowers the trust level (`158031580`).
+  - Two tests pin the shadow and suggest order of the Thompson rank (`47965d78c`).
+  - Conformal calibration reads the BLR's out-of-sample predictions (`1038fd726`, row 50d8d3a1).
+  - The proxy admin guide matches the merged gate, breaker, demotion and cap code, in three passes (`7eae37082`, `777c823fe`, `14f0ecd33`, row 76d3462f).
+  - Free-text accuracy uses a true cosine (`00f8b8aaf`); multiple-choice and batch answers are scored (`6c41a7346`); the engineering classifier matches whole words (`39cf5cce5`).
+  - Mr. Radio's merges are in his entry below.
+- **Need expansion for the reuse search** is merged behind `reuse candidate need expansion enabled = false` (`d67643a8b`). Its wiki page is merged too (`d82c7be7a`). On the synthetic set, 60 of 70 rose to 69, with 9 recovered and 0 lost. On the real set, 27 of 27 keep their best answer and 4 secondary entries are lost. Rick decides whether to switch it on.
+- **Gates at `777c823fe`**: reuse 61 of 61; unit 43,974 passed with the 1 known red (`test_a_detector_change_forces_a_full_rescan`, its fix parked for Rick); cosa 10,178 passed. At `14f0ecd33`, a docs-only merge, reuse and unit were re-run with the same result.
+- **Merge lesson**: run `git log --oneline HEAD..<tip>` before every merge. `4422c0759` pulled in Rio's unreviewed Thompson rank tests because his reuse lines were stacked on them. They were reviewed afterwards and approved.
+- **Closed at the end of the shift**: María's rows 212d4058 and 589102de, whose fixes are on wip as `aee873d2b` and `1b21c4413`.
+- **Owed, waiting on Rick**:
+  - The design call on row a60aa733, the always-yes vote (Cheech recommends keeping the 79% always-yes rate as the v0.2.3 bar).
+  - Re-parking Dart row f25c661d (recommended for 17 Nov; only his login can move it).
+  - Held rows 4e6d795d, 3570497d, b3ba8f11 and 3905b9d9.
+  - Deleting the 43 test rows that leaked into the dev proxy_decisions table (row 5ac3d5d7).
+  - The need-expansion switch.
+
 ## 2026.11.05 - Session 7d6c85af (Mr. Radio 🦉, manager; crew Chloé, Tiberius, Rachel, John, all reaped) | Seven decision proxy defect fixes merged; unit tier red only on the held secret rescan
 
 - **Merged to wip, all reviewed** (Rick AFK per broadcast `c874731e`: run the list down, no pushes):
