@@ -869,3 +869,49 @@ class TestCaptureEmbeddingsEnabled:
 
     def test_true_is_returned_as_true( self ):
         assert capture_embeddings_enabled( _StubConfig( True ) ) is True
+
+
+class TestRunHonoursTheCaptureSwitch:
+    """Calls _run with the database, provider and fill stubbed out."""
+
+    @staticmethod
+    def _drive( monkeypatch, capture, command, only=None ):
+        import contextlib
+        import cosa.config.configuration_manager as cm
+        import cosa.memory.embedding_provider as ep
+        import cosa.rest.db.database as dbm
+        import cosa.rest.db.embedding_regeneration as er
+
+        seen = []
+
+        @contextlib.contextmanager
+        def fake_db():
+            yield object()
+
+        monkeypatch.setattr( cm, "ConfigurationManager", lambda **kwargs: _StubConfig( capture ) )
+        monkeypatch.setattr( dbm, "get_db", fake_db )
+        monkeypatch.setattr( ep, "get_embedding_provider", lambda: object() )
+        monkeypatch.setattr( er, "_probe_busy", lambda: False )
+        monkeypatch.setattr( er, "current_hour_in_configured_zone", lambda: 3 )
+        monkeypatch.setattr( er, "should_proceed", lambda **kwargs: None )
+        monkeypatch.setattr( er, "_fill", lambda session, spec, provider, **kwargs: seen.append( spec.label ) )
+        monkeypatch.setattr( er, "_verify", lambda session, spec, prefix: ( seen.append( spec.label ) or { "ok": True } ) )
+        monkeypatch.setattr( er, "_ensure_columns", lambda session, specs, prefix, apply: ( seen.extend( s.label for s in specs ) or 0 ) )
+        monkeypatch.setattr( er, "_plan", lambda session, prefix, specs: seen.extend( s.label for s in specs ) )
+        return er._run( command=command, only=only ), seen
+
+    @pytest.mark.parametrize( "command", [ "fill", "verify", "ensure-columns", "plan" ] )
+    def test_switch_off_never_touches_the_io_specs( self, monkeypatch, command ):
+        rc, seen = self._drive( monkeypatch, False, command )
+        assert rc == 0
+        assert seen == [ "decisions" ]
+
+    def test_switch_off_refuses_an_io_spec_by_name( self, monkeypatch ):
+        rc, seen = self._drive( monkeypatch, False, "fill", only="io_input" )
+        assert rc == 1
+        assert seen == []
+
+    def test_switch_on_fills_every_spec( self, monkeypatch ):
+        rc, seen = self._drive( monkeypatch, True, "fill" )
+        assert rc == 0
+        assert seen == [ spec.label for spec in REGEN_SPECS ]

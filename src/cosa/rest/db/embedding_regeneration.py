@@ -709,13 +709,13 @@ def _probe_busy( url=None ):   # pragma: no cover - live HTTP boundary
         return None
 
 
-def _plan( session, prefix="" ):   # pragma: no cover - live DB boundary
-    """Count what would be regenerated per spec. Issues SELECTs only."""
+def _plan( session, prefix="", specs=None ):   # pragma: no cover - live DB boundary
+    """Count what would be regenerated per spec, SELECTs only; specs defaults to REGEN_SPECS."""
     from sqlalchemy import text as sql_text
 
     grand_total = 0
     print( f"{'spec':12} {'table':22} {'to regen':>12} {'missing vec':>12} {'no text':>9}" )
-    for spec in REGEN_SPECS:
+    for spec in ( REGEN_SPECS if specs is None else specs ):
         table   = qualify( spec.table, prefix )
         # `excluded` keeps plan's headline count honest against what fill will
         # actually attempt — an excluded row is not an embedding call anyone owes.
@@ -976,7 +976,7 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
 
     with get_db() as session:
         if command == "plan":
-            _plan( session, prefix )
+            _plan( session, prefix, active_specs( capture ) )
             return 0
 
         if command == "ensure-columns":
