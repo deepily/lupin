@@ -169,6 +169,8 @@ def test_neighbouring_forms_of_the_four_fixes( text, spoken ):
     ( "[x](<http://a/b c>(d e) f) tail",           "x, URL omitted tail" ),
     ( "[x](<http://a/b c SECRET>end",              "x, URL omitted" ),
     ( "[x](<http://a/b c SECRET>(end tail",        "x, URL omitted tail" ),
+    ( "[x](<http://a/b SECRET>end next (y) z",     "x, URL omitted next (y) z" ),
+    ( "[x](<http://a/b SECRET> rest)",             "x, URL omitted rest)" ),
 ] )
 def test_an_angle_bracket_target_with_trailing_text_is_one_link_and_never_spoken( text, spoken ):
     out = strip( text )
@@ -182,6 +184,7 @@ def test_an_angle_bracket_target_with_trailing_text_is_one_link_and_never_spoken
     ( "(mailto:rick@x.test)",                      "(email address omitted)" ),
     ( "[mail me](mailto:rick@x.test)",             "mail me, URL omitted" ),
     ( "a mailto: alone stays",                     "a mailto: alone stays" ),
+    ( "gmailto:a@b.test and x_mailto:a@b.test",    "gmailto:a@b.test and x_mailto:a@b.test" ),
 ] )
 def test_a_bare_mailto_is_never_spoken( text, spoken ):
     out = strip( text )

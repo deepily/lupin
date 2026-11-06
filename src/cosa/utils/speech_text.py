@@ -22,7 +22,7 @@ EMAIL_OMITTED = "email address omitted"
 _LINK_OR_BARE_URL = re.compile(
     r'(!?\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(\s*)'
     r'|https?://[^\s<>\[\]()]*[^\s<>\[\]().,;:!?\'"]'
-    r'|(?i:(mailto:[^\s<>\[\]()]*[^\s<>\[\]().,;:!?\'"]))'
+    r'|(?<!\w)(?i:(mailto:[^\s<>\[\]()]*[^\s<>\[\]().,;:!?\'"]))'
 )
 _TITLE_AND_CLOSE = re.compile( r'(?:\s+"[^"]*")?\s*\)' )
 _ADDRESS_START   = re.compile( r'(?:https?://|mailto:)', re.IGNORECASE )
@@ -96,13 +96,16 @@ def _angle_target_end( text, start ):
         - the target runs to the first ">", blanks included, and may be followed by a title
         - text between the ">" and the link's closing ")" is part of the target and never spoken,
           as for any address target
-        - returns None when there is no ">", or nothing but a blank or ")" follows it
+        - when the closing ")" cannot be found, the target ends after the blank-free run that
+          follows the ">", so nothing inside the "<...>" is spoken
+        - returns None only when there is no ">"
     """
     close = text.find( ">", start )
     if close == -1: return None
     closing = _TITLE_AND_CLOSE.match( text, close + 1 )
     if closing is not None: return closing.end()
-    return _scan_run( text, close + 1, True )
+    ended = _scan_run( text, close + 1, True )
+    return _blank_free_run_end( text, close + 1 ) if ended is None else ended
 
 
 def _scan_target( text, start ):
