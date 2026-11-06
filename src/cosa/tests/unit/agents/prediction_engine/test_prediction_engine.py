@@ -154,6 +154,7 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine cbr top k"                     : 9,
                 "prediction engine cbr similarity threshold"      : 0.8,
                 "prediction engine confidence threshold"          : 0.65,
+                "prediction engine yes no no margin"              : 2.5,
                 "prediction engine lancedb table"                 : "tbl_x",
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
@@ -180,6 +181,7 @@ def test_init_with_config_mgr_reads_keys():
     assert eng.hint_vote_rejected_weight == 2.0
     assert eng.hint_voting_enabled is True
     assert eng.hint_vote_min_confidence_threshold == 0.5
+    assert eng.yes_no_no_margin == 2.5
     # debug = config(False) OR debug(True) = True
     assert eng.debug is True
     PredictionEngine.reset()
