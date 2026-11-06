@@ -161,3 +161,32 @@ def test_a_bare_address_holding_a_parenthesis_group_is_one_address_and_never_spo
 ] )
 def test_neighbouring_forms_of_the_four_fixes( text, spoken ):
     assert strip( text ) == spoken
+
+
+@pytest.mark.parametrize( "text, spoken", [
+    ( "[x](<http://a/b c SECRET>end)",             "x, URL omitted" ),
+    ( "[x](<http://a/b c SECRET>end) tail",        "x, URL omitted tail" ),
+    ( "[x](<http://a/b c>(d e) f) tail",           "x, URL omitted tail" ),
+    ( "[x](<http://a/b c SECRET>end",              "x, URL omitted" ),
+    ( "[x](<http://a/b c SECRET>(end tail",        "x, URL omitted tail" ),
+    ( "[x](<http://a/b SECRET>end next (y) z",     "x, URL omitted next (y) z" ),
+    ( "[x](<http://a/b SECRET> rest)",             "x, URL omitted rest)" ),
+] )
+def test_an_angle_bracket_target_with_trailing_text_is_one_link_and_never_spoken( text, spoken ):
+    out = strip( text )
+    assert out == spoken
+    assert "SECRET" not in out and "a/b" not in out
+
+
+@pytest.mark.parametrize( "text, spoken", [
+    ( "write mailto:rick@x.test now",              "write email address omitted now" ),
+    ( "write MAILTO:rick@x.test?subject=a%20b.",   "write email address omitted." ),
+    ( "(mailto:rick@x.test)",                      "(email address omitted)" ),
+    ( "[mail me](mailto:rick@x.test)",             "mail me, URL omitted" ),
+    ( "a mailto: alone stays",                     "a mailto: alone stays" ),
+    ( "gmailto:a@b.test and x_mailto:a@b.test",    "gmailto:a@b.test and x_mailto:a@b.test" ),
+] )
+def test_a_bare_mailto_is_never_spoken( text, spoken ):
+    out = strip( text )
+    assert out == spoken
+    assert "rick" not in out
