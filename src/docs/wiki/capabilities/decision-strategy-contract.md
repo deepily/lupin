@@ -2,7 +2,7 @@
 capability: decision-strategy-contract
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.base_decision_strategy.BaseDecisionStrategy@86a9e55272
+  - cosa.agents.decision_proxy.base_decision_strategy.BaseDecisionStrategy@d1dd304679
   - cosa.agents.decision_proxy.base_decision_strategy.DecisionResult@8b64d13727
   - cosa.agents.decision_proxy.category_classifier.CategoryClassifier@1c6c0bc795
   - cosa.agents.decision_proxy.xml_models.ClassificationResult@b9645b951d

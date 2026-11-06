@@ -2,7 +2,7 @@
 capability: decision-proxy-learning-models
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.bayesian_trust.BayesianLogisticRegression@1a36e567ff
+  - cosa.agents.decision_proxy.bayesian_trust.BayesianLogisticRegression@bb0b7b0250
   - cosa.agents.decision_proxy.conformal_wrapper.ConformalDecisionWrapper@fb9a2a2800
   - cosa.agents.decision_proxy.proxy_decision_embeddings.ProxyDecisionEmbeddings@5e3df3a239
   - cosa.agents.decision_proxy.cbr_decision_store.CBRDecisionStore@0f9d22a77f
@@ -17,9 +17,9 @@ These are the statistical parts the trust system draws on. They are a Bayesian r
 [[decision-proxy]] holds the tracker that uses the regression. [[decision-strategy-contract]] holds the interface they serve.
 
 ## Regression and conformal check
-- `BayesianLogisticRegression` keeps a weight vector and a covariance for four features by default. `update` takes one observation (outcome 1 or 0) and refines both in place.
+- `BayesianLogisticRegression` keeps a weight vector and a covariance for four features by default. `update` takes one observation (outcome 1 or 0) and refines both in place. First it keeps the model's prediction made before learning the point, with the outcome, as a calibration pair. The newest 500 pairs are kept, so the pairs are out of sample.
 - `predict` returns a success probability and an uncertainty. `sample_rate` draws one weight vector from the posterior and returns that draw's probability.
-- `posterior_mean_rate` scores the average feature vector seen so far, and gives 0.5 before any observation. `to_dict` and `from_dict` save and restore the state.
+- `posterior_mean_rate` scores the average feature vector seen so far, and gives 0.5 before any observation. `to_dict` and `from_dict` save and restore the state, pairs included. A model saved before pairs existed restores with none.
 - `ConformalDecisionWrapper` is calibrated on probability and label pairs. With fewer than `min_calibration_size` (30) pairs it stays uncalibrated.
 - `predict_set` returns `approve`, `reject` or both. `should_defer` is true when both are in the set, and also while uncalibrated.
 

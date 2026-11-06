@@ -2,14 +2,14 @@
 capability: decision-proxy
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.responder.DecisionResponder@9fd5fb16e3
-  - cosa.agents.decision_proxy.trust_tracker.TrustTracker@4b186feb3f
-  - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@827f2e8cf0
+  - cosa.agents.decision_proxy.responder.DecisionResponder@a28d093366
+  - cosa.agents.decision_proxy.trust_tracker.TrustTracker@87b090a185
+  - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@9a28bb3dc6
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker@ed1b3c7973
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker.check@37ecd22e31
   - cosa.agents.decision_proxy.smart_router.SmartRouter@6734207a13
-  - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy@014671267f
-  - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy.gate@fb75c7f680
+  - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy@0b7f9fefbf
+  - cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy.gate@0ee4450d30
 ---
 # Decision proxy
 
@@ -18,23 +18,23 @@ The decision proxy answers questions that ask for a response, on the user's beha
 ## What the responder does
 - `DecisionResponder` reacts to `notification_queue_update` events and ignores notifications that do not ask for a response. Its statistics print under the title `Decision Proxy Statistics`.
 - Checks run in this order. A disabled proxy does nothing. A sender outside the allowlist is rejected, and an empty allowlist rejects everyone. A dry run sends a decline. With no strategy loaded it only counts the event.
-- Otherwise the strategy returns one of four actions. `shadow` logs. `suggest` stores the decision for ratification. `act` stores it and sends the answer when it has a value, unless the smart router defers it (see Smart router). `defer` stores it and sends nothing.
+- Otherwise the strategy returns one of four actions. `shadow` logs. `suggest` stores the decision for ratification. `act` stores it and sends the answer when it has a value, unless the smart router defers it (see Smart router). `defer` stores it and sends nothing. A `shadow` or `defer` row keeps an empty decision value, so the proxy's own guess is never cited as precedent.
 - `python -m cosa.agents.decision_proxy --profile swe_team` starts it only when `decision proxy enabled` is true. The shipped INI sets it false, so by default it prints that and exits. If the profile fails to load it also exits.
 
 ## The gate
 - `EngineeringStrategy.gate` first asks the circuit breaker: a tripped category gives `defer`.
 - The conformal and Thompson options exist in `EngineeringStrategy`, but its three callers never turn them on. So trust mode `shadow` (the default) always gives `shadow`. In `suggest` mode, level 2 and above give `suggest` and level 1 gives `shadow`.
-- In `active` mode, level 1 gives `shadow`, level 2 gives `suggest`, and level 3 and above give `act`.
+- In `active` mode, level 1 gives `shadow` and level 2 gives `suggest`. Level 3 gives `act` at classification confidence 0.80 or more, else `suggest`.  Level 4 gives `act`, except `suggest` for the destructive category, below confidence 0.50, and for a 10% audit sample. Level 5 always gives `act`. A Thompson draw can only lower the result.
 - The strategy's heuristic answer is `approved`, except for deployment, destructive and architecture questions, which get `requires_review`. `EngineeringStrategy` has an optional model fallback, but no caller supplies the client and case store it needs, so it never runs.
 
 ## Trust
 - `TrustTracker` keeps one `CategoryTrust` per category. Its level runs from 1 to 5 and is capped per category.
-- The default model sums only the successful decisions, each weighted down as it ages, against thresholds for levels 2 to 5. A rejection adds nothing. `beta` and `blr` models are the alternatives.
+- The default model sums only the successful decisions, each weighted down as it ages, against thresholds for levels 2 to 5. A rejection adds nothing. `beta` and `blr` models are the alternatives. A circuit-breaker trip is recorded: the level stays capped at the demoted level until new successes close the gap to the next threshold. A stored trip is restored with the counters, so a demotion survives the next job.
 - The SWE orchestrator feeds the tracker: a success when the proxy acts alone, otherwise whether the proxy agreed with the user's answer. The ratify route updates stored counters, not the tracker.
 
 ## Circuit breaker
 - `check` trips a category when at least 10 decisions exist and the error rate is above its threshold. It also trips when 5 or more confidence samples average below the collapse threshold.
-- A trip starts a cooldown. Under the default count model it also demotes the category; the `beta` and `blr` models read lifetime totals that a trip leaves alone. After the cooldown, the breaker stops reporting a trip, but `check` reads the same lifetime counters, so a category still over the threshold trips again.
+- A trip starts a cooldown. It also demotes the category by the configured number of levels under every model: `beta` and `blr` have their counters lowered too. After the cooldown, `check` reads the same lifetime counters, so a category still over the threshold trips again.
 
 ## Smart router
 - `DecisionResponder` asks `SmartRouter` before posting an automatic answer. In active hours, with the named human connected, it posts nothing and records a defer. The feed is `user_presence.sessions_feed`; a failing feed reads as not connected. The SWE orchestrator does not consult the router. Router and responder take the zone for the active hours from `decision proxy timezone` when none is passed. An absent key raises.

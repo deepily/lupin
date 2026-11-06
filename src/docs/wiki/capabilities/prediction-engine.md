@@ -2,9 +2,9 @@
 capability: prediction-engine
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@1281e16093
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine@ce65999f2b
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.predict@399fd38a6c
-  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_outcome@b692b85786
+  - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_outcome@108d027a36
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.record_hint_vote@384d7e7edb
   - cosa.agents.prediction_engine.prediction_engine.PredictionEngine.get_accuracy_summary@c357538e8b
   - cosa.agents.prediction_engine.prediction_engine.get_prediction_engine@17a1a42f8d
@@ -20,9 +20,10 @@ A process-wide singleton that guesses how the user will answer a notification be
 
 ## What it does
 - `predict` classifies the message into one of six keyword categories or `uncategorized`, embeds it, and dispatches on the response type. It never raises; any failure returns a cold-start result.
-- `yes_no` and `multiple_choice` retrieve the top similar past cases and take a majority vote. Confidence is the best similarity times the vote's consistency.
+- `yes_no` and `multiple_choice` retrieve the top similar past cases and take a weighted vote. Confidence is the best similarity times the vote's consistency.
+- A `yes_no` vote says `no` only when the no tally beats the yes tally by `prediction engine yes no no margin`. That default is 1.35, the log-odds of the 79% yes prior. Otherwise it says `yes`. With five unit votes, `no` needs a lead of 2 or more.
 - `open_ended` and `open_ended_batch` try an exact question match first, then an LLM synthesis over the similar cases. If synthesis fails they fall back to retrieval.
-- `record_outcome` compares the prediction with the real answer, writes the `prediction_log` row, and stores the answer as a new case for retrieval.
+- `record_outcome` decodes a multiple-choice or batch answer sent as a JSON string. It compares the prediction with the real answer and writes the `prediction_log` row. It also stores the answer as a new case.
 - `record_hint_vote` stores a thumbs up or down as a case keyed `hintvote-<notification id>`, so a second vote flips the state in place.
 
 ## Invariants
@@ -30,8 +31,7 @@ A process-wide singleton that guesses how the user will answer a notification be
 - An approved case votes `+approved_weight`, a rejected case votes negative, and any other case votes `+1`. A rejected case is never the answer in the open-ended retrieval tiers.
 - Consistency is the winner's tally over the positive mass, clamped to 0 to 1. With no positive mass it is 0.
 - A multi-select option is kept when its weighted votes reach half the positive case mass.
-- `to_hint_dict` returns `None` for a cold start, so the card shows no hint.
-- Batch cases are keyed by the question's content, not the count preamble, so unrelated batches do not collide.
+- `to_hint_dict` returns `None` for a cold start, so the card shows no hint. Batch cases are keyed by the question's content, not the count preamble, so unrelated batches do not collide.
 
 ## How it is used
 - `lupin_app.main` builds the singleton with the config at startup. The notify route calls `predict` off the event loop and shows the hint only when confidence reaches `prediction engine confidence threshold`.
