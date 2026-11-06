@@ -49,6 +49,7 @@ from cosa.agents.prediction_engine.config import (
     RESPONSE_TYPE_OPEN_ENDED,
     RESPONSE_TYPE_OPEN_ENDED_BATCH,
 )
+from cosa.agents.decision_proxy.cbr_decision_store import is_blank_case
 from cosa.agents.prediction_engine.prediction_result import PredictionResult
 from cosa.agents.prediction_engine.notification_category_classifier import NotificationCategoryClassifier
 from cosa.agents.prediction_engine.accuracy_comparators import get_comparator, _extract_qualifier
@@ -424,6 +425,9 @@ class PredictionEngine:
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] find_similar error: {e}" )
             similar_cases = []
+
+        # Blank shadow/deferred rows cast no vote (they would otherwise count as "no")
+        similar_cases = [ ( sim, record ) for sim, record in similar_cases if not is_blank_case( record ) ]
 
         if not similar_cases:
             return PredictionResult(
