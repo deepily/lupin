@@ -41,6 +41,23 @@ def legacy_similarity_clause():
     )
 
 
+def legacy_confidence_clause():
+    """
+    SQL condition that is true for a row whose stored confidence is above 1.
+
+    Those rows were scored from a dot product of unnormalised vectors, so the confidence reached 420.
+    Rows written since the true-cosine fix top out at 1.0.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - Returns a SQLAlchemy boolean expression over PredictionLog
+        - True when prediction_confidence is above 1.0
+    """
+    return PredictionLog.prediction_confidence > 1.0
+
+
 class PredictionLogRepository( BaseRepository[PredictionLog] ):
     """
     Repository for prediction_log table operations.
@@ -163,6 +180,9 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             - Only includes predictions with actual outcomes for accuracy calc
             - Leaves out rows scored with a similarity above 1 ( see legacy_similarity_clause );
               their count is returned as excluded_legacy_similarity
+            - Also leaves out rows with a stored confidence above 1 ( see legacy_confidence_clause );
+              their count, without the rows already counted above, is returned as
+              excluded_legacy_confidence, so the two counts add up
         """
         cutoff = datetime.now( timezone.utc ) - timedelta( days=window_days )
 
@@ -180,7 +200,15 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         ).scalar() or 0
 
         # coalesce: a row with no similarity number is NULL here and must stay in
-        combined_filter = and_( window_filter, sa.not_( func.coalesce( legacy_similarity_clause(), False ) ) )
+        not_legacy_similarity = sa.not_( func.coalesce( legacy_similarity_clause(), False ) )
+
+        excluded_confidence = self.session.query( func.count( PredictionLog.id ) ).filter(
+            window_filter,
+            not_legacy_similarity,
+            legacy_confidence_clause()
+        ).scalar() or 0
+
+        combined_filter = and_( window_filter, not_legacy_similarity, sa.not_( legacy_confidence_clause() ) )
 
         # Total predictions
         total_predictions = self.session.query( func.count( PredictionLog.id ) ).filter(
@@ -219,6 +247,7 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             "total_correct"     : total_correct,
             "accuracy_rate"     : round( accuracy_rate, 4 ),
             "excluded_legacy_similarity" : excluded_legacy,
+            "excluded_legacy_confidence" : excluded_confidence,
             "avg_confidence"    : round( float( avg_confidence ), 4 ),
             "by_category"       : category_breakdown,
             "by_response_type"  : type_breakdown,
