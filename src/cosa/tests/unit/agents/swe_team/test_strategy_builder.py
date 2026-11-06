@@ -35,11 +35,11 @@ def ini_patches( proxy_cfg, swe_cfg ):
     ]
 
 
-def build( proxy_cfg, swe_cfg, **kwargs ):
+def build( proxy_cfg, swe_cfg, trust_mode="shadow", **kwargs ):
     from contextlib import ExitStack
     with ExitStack() as stack:
         for p in ini_patches( proxy_cfg, swe_cfg ): stack.enter_context( p )
-        return build_ini_engineering_strategy( trust_mode="shadow", **kwargs )
+        return build_ini_engineering_strategy( trust_mode=trust_mode, **kwargs )
 
 
 def test_ini_caps_audit_rate_and_senders_reach_the_strategy():
@@ -89,3 +89,9 @@ def test_any_other_ini_failure_is_non_fatal_and_builds_on_defaults():
     strategy, swe_cfg = build( ValueError( "invalid literal for int()" ), {} )
     assert strategy.l4_audit_rate == 0.10
     assert swe_cfg == {}
+
+
+@pytest.mark.parametrize( "mode", [ "shadow", "suggest", "active" ] )
+def test_the_callers_trust_mode_reaches_the_strategy_unchanged( mode ):
+    strategy, _ = build( {}, {}, trust_mode=mode )
+    assert strategy.trust_mode == mode

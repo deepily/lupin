@@ -78,5 +78,6 @@ def test_profile_strategy_carries_the_ini_caps_and_audit_rate():
                 return_value={ "accepted_senders": [ "a@x" ], "deployment_cap_level": 2 } ):
         assert dpmain._load_swe_team_profile( r ) is True
     assert r.domain_strategy.l4_audit_rate == 0.37
+    assert r.domain_strategy.trust_mode == "active"   # the responder's mode, not a fixed one
     assert r.domain_strategy.trust_tracker.categories[ "deployment" ].cap_level == 2
     assert r.accepted_senders == [ "a@x" ]
