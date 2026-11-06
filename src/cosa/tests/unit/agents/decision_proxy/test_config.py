@@ -8,6 +8,7 @@ runtime config dict. The ConfigurationManager is mocked at the boundary —
 no real INI / filesystem access.
 """
 
+import pytest
 from unittest.mock import MagicMock
 
 from cosa.agents.decision_proxy import config as cfg
@@ -48,7 +49,7 @@ def test_factory_falls_back_to_module_defaults():
     Ensures:
         - when the config manager returns the supplied default for every key,
           the factory output equals the module-level defaults
-        - all 36 generic trust-proxy keys are present
+        - all 37 generic trust-proxy keys are present
     """
     mgr = MagicMock()
     mgr.get.side_effect = lambda key, default=None, return_type=None: default
@@ -56,7 +57,8 @@ def test_factory_falls_back_to_module_defaults():
 
     out = cfg.trust_proxy_config_from_config_mgr( mgr )
 
-    assert len( out ) == 36
+    assert len( out ) == 37
+    assert out[ "trust_model" ] == "count"                            # the default leaves behaviour unchanged
     assert out[ "enabled" ] is False
     assert out[ "active_hours_start" ] == cfg.DEFAULT_ACTIVE_HOURS_START
     assert out[ "active_hours_end" ] == cfg.DEFAULT_ACTIVE_HOURS_END
@@ -86,9 +88,27 @@ def test_factory_passes_through_config_values():
     mgr = MagicMock()
     mgr.get.return_value = "SENTINEL"
     mgr.get_required.return_value = "America/Chicago"      # the zone is validated, so it cannot be a sentinel
+    mgr.get.side_effect = lambda key, default=None, return_type=None: "beta" if key == "swe team trust proxy trust model" else "SENTINEL"
 
     out = cfg.trust_proxy_config_from_config_mgr( mgr )
 
-    assert len( out ) == 36
+    assert len( out ) == 37
+    assert out.pop( "trust_model" ) == "beta"              # the model is validated, so it cannot be a sentinel
     assert out.pop( "timezone" ) == "America/Chicago"
     assert all( v == "SENTINEL" for v in out.values() )
+
+
+@pytest.mark.parametrize( "model", [ "count", "beta", "blr" ] )
+def test_factory_reads_each_valid_trust_model_from_its_key( model ):
+    mgr = MagicMock()
+    mgr.get.side_effect = lambda key, default=None, return_type=None: model if key == "swe team trust proxy trust model" else default
+    mgr.get_required.return_value = "America/Chicago"
+    assert cfg.trust_proxy_config_from_config_mgr( mgr )[ "trust_model" ] == model
+
+
+def test_factory_refuses_an_unknown_trust_model():
+    mgr = MagicMock()
+    mgr.get.side_effect = lambda key, default=None, return_type=None: "gaussian" if key == "swe team trust proxy trust model" else default
+    mgr.get_required.return_value = "America/Chicago"
+    with pytest.raises( ValueError, match="gaussian" ):
+        cfg.trust_proxy_config_from_config_mgr( mgr )

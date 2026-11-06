@@ -582,3 +582,27 @@ def test_restore_category_with_an_empty_history_restores_no_rolling_history_but_
         assert tracker.restore_category( "testing", 3, 1, now, history={} ) is True
         cat = tracker.categories[ "testing" ]
         assert cat.decisions == [] and cat.total_decisions == 4
+
+# ============================================================================
+# TrustTracker.record_decision_with_features (row cfc7dd01)
+# ============================================================================
+def test_tracker_feeds_blr_with_the_built_feature_vector():
+    t = TrustTracker( trust_model="blr", debug=True )
+    t.register_category( "a" ); t.register_category( "b" )
+    t.record_decision( "b", False )                       # b has one rejection, so its recent error rate is 1.0
+    with patch.object( CategoryTrust, "build_feature_vector", wraps=CategoryTrust.build_feature_vector ) as build:
+        lvl = t.record_decision_with_features( "b", True, "one two three" )
+    assert build.call_args.args == ( "one two three", 1 )          # b was registered second
+    assert build.call_args.kwargs[ "recent_error_rate" ] == 1.0
+    assert t.categories[ "b" ]._blr_model._feature_count == 1       # BLR was fed
+    assert t.categories[ "a" ]._blr_model is None                   # categories stay isolated
+    assert t.categories[ "b" ].total_decisions == 2                 # history recorded once for this call
+    assert lvl == t.categories[ "b" ].level
+
+
+def test_tracker_record_with_features_unknown_category_records_nothing( capsys ):
+    t = TrustTracker( trust_model="blr", debug=True )
+    assert t.record_decision_with_features( "nope", True, "q" ) == 1
+    assert "Unknown category: nope" in capsys.readouterr().out
+    t2 = TrustTracker( trust_model="blr" )
+    assert t2.record_decision_with_features( "nope", True, "q" ) == 1   # silent without debug

@@ -227,6 +227,12 @@ class SweTeamOrchestrator:
 
                 self._ask_before_act = swe_cfg.get( "ask_before_act", False )
 
+                # Beta rate thresholds and minimum samples; keys absent (INI read failed) keep the built-in values
+                beta_kwargs = {}
+                if "beta_l2_rate_threshold" in proxy_cfg:
+                    beta_kwargs[ "rate_thresholds" ] = { lvl : proxy_cfg[ f"beta_l{lvl}_rate_threshold" ] for lvl in ( 2, 3, 4, 5 ) }
+                    beta_kwargs[ "min_samples" ]     = { lvl : proxy_cfg[ f"beta_l{lvl}_min_samples" ] for lvl in ( 2, 3, 4, 5 ) }
+
                 # Build TrustTracker with INI values
                 trust_tracker = TrustTracker(
                     rolling_window_days  = proxy_cfg.get( "rolling_window_days", 30 ),
@@ -235,6 +241,8 @@ class SweTeamOrchestrator:
                     l3_threshold         = proxy_cfg.get( "l3_threshold", 200 ),
                     l4_threshold         = proxy_cfg.get( "l4_threshold", 500 ),
                     l5_threshold         = proxy_cfg.get( "l5_threshold", 1000 ),
+                    trust_model          = proxy_cfg.get( "trust_model", "count" ),
+                    **beta_kwargs,
                     debug                = self.debug,
                 )
 
@@ -382,7 +390,11 @@ class SweTeamOrchestrator:
             try:
                 proxy_would_approve = ( proxy_result.value == "approved" )
                 agreement           = ( proxy_would_approve == user_answer )
-                self.proxy.trust_tracker.record_decision( proxy_result.category, success=agreement )
+                if self.proxy.trust_tracker.trust_model == "blr":
+                    # Row cfc7dd01: the BLR model learns only from decisions that carry features
+                    self.proxy.trust_tracker.record_decision_with_features( proxy_result.category, agreement, question )
+                else:
+                    self.proxy.trust_tracker.record_decision( proxy_result.category, success=agreement )
                 if self.debug:
                     print( f"[Proxy Feedback] mode={self.proxy.trust_mode}, cat={proxy_result.category}, proxy={'approve' if proxy_would_approve else 'review'}, user={'yes' if user_answer else 'no'}, agree={agreement}" )
 

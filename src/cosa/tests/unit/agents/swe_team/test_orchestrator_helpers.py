@@ -143,6 +143,46 @@ class TestInit( unittest.TestCase ):
         self.assertEqual( build( { "l4_audit_sample_rate": 0.37 } )[ "l4_audit_rate" ], 0.37 )
         self.assertNotIn( "l4_audit_rate", build( {} ) )   # key absent => strategy default (0.10) applies
 
+    def test_ini_trust_model_and_beta_thresholds_reach_the_tracker_and_absent_keys_keep_count( self ):
+        # Row cfc7dd01: the trust model was never passed on, so beta and BLR could not be selected.
+        def build( proxy_cfg ):
+            tracker_cls = MagicMock()
+            fake_proxy_mod = types.ModuleType( "cosa.agents.swe_team.proxy" )
+            fake_proxy_mod.EngineeringStrategy = MagicMock( return_value="PROXY" )
+            tt_mod  = types.ModuleType( "cosa.agents.decision_proxy.trust_tracker" )
+            tt_mod.TrustTracker = tracker_cls
+            cb_mod  = types.ModuleType( "cosa.agents.decision_proxy.circuit_breaker" )
+            cb_mod.CircuitBreaker = MagicMock()
+            cfg_mod = types.ModuleType( "cosa.agents.decision_proxy.config" )
+            cfg_mod.trust_proxy_config_from_config_mgr = MagicMock( return_value=proxy_cfg )
+            sweproxy_cfg_mod = types.ModuleType( "cosa.agents.swe_team.proxy.config" )
+            sweproxy_cfg_mod.swe_proxy_config_from_config_mgr = MagicMock( return_value={ "accepted_senders": [ "a" ] } )
+            cm_mod = types.ModuleType( "cosa.config.configuration_manager" )
+            cm_mod.ConfigurationManager = MagicMock()
+            mods = {
+                "cosa.agents.swe_team.proxy"                : fake_proxy_mod,
+                "cosa.agents.decision_proxy.trust_tracker"  : tt_mod,
+                "cosa.agents.decision_proxy.circuit_breaker": cb_mod,
+                "cosa.agents.decision_proxy.config"         : cfg_mod,
+                "cosa.agents.swe_team.proxy.config"         : sweproxy_cfg_mod,
+                "cosa.config.configuration_manager"         : cm_mod,
+            }
+            with patch.dict( sys.modules, mods ):
+                SweTeamOrchestrator( task_description="t", config=SweTeamConfig( trust_mode="shadow" ) )
+            return tracker_cls.call_args.kwargs
+
+        beta_cfg = { "trust_model": "blr" }
+        for lvl, ( rate, n ) in zip( ( 2, 3, 4, 5 ), ( ( 0.1, 11 ), ( 0.2, 12 ), ( 0.3, 13 ), ( 0.4, 14 ) ) ):
+            beta_cfg[ f"beta_l{lvl}_rate_threshold" ] = rate
+            beta_cfg[ f"beta_l{lvl}_min_samples" ]    = n
+        kw = build( beta_cfg )
+        self.assertEqual( kw[ "trust_model" ], "blr" )
+        self.assertEqual( kw[ "rate_thresholds" ], { 2: 0.1, 3: 0.2, 4: 0.3, 5: 0.4 } )
+        self.assertEqual( kw[ "min_samples" ],     { 2: 11, 3: 12, 4: 13, 5: 14 } )
+        kw = build( {} )
+        self.assertEqual( kw[ "trust_model" ], "count" )                      # key absent => behaviour unchanged
+        self.assertNotIn( "rate_thresholds", kw ); self.assertNotIn( "min_samples", kw )
+
     def test_proxy_enabled_inner_config_failure_uses_defaults( self ):
         fake_proxy_mod = types.ModuleType( "cosa.agents.swe_team.proxy" )
         fake_proxy_mod.EngineeringStrategy = MagicMock( return_value="PROXY" )
@@ -263,6 +303,20 @@ class TestGatedConfirmation( unittest.TestCase ):
         self.assertEqual( ( cat[ "total_successes" ], cat[ "total_rejections" ] ), ( 1, 0 ), cat )
         persist.assert_called_once()
         self.assertTrue( persist.call_args.args[ 1 ], "the DB write must carry agreement=True too" )
+
+    def test_a_real_blr_tracker_learns_from_the_humans_answer_through_the_gate( self ):
+        # Row cfc7dd01, end to end: real strategy, real tracker; only the human and the DB are faked.
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        o       = _mk_orch()
+        tracker = TrustTracker( trust_model="blr" )
+        o.proxy = EngineeringStrategy( trust_tracker=tracker, trust_mode="shadow" )
+        t       = self._team_io( confirm=True )
+        with patch.object( o, "_persist_trust_feedback" ):
+            _run( o._gated_confirmation( "should we run the unit tests?", "lead", "no", 60, None, t ) )
+        fed = [ c for c in tracker.categories.values() if c._blr_model is not None ]
+        self.assertEqual( len( fed ), 1 )
+        self.assertEqual( fed[ 0 ]._blr_model._feature_count, 1 )
 
     def test_a_human_no_where_the_proxy_would_approve_is_still_a_disagreement( self ):
         from cosa.agents.swe_team.proxy import EngineeringStrategy
@@ -696,6 +750,24 @@ class TestGatedConfirmation( unittest.TestCase ):
         self.assertFalse( out )
         t.ask_confirmation.assert_awaited_once()
         summary.assert_called_once()   # defer → pending ratification
+
+    def test_blr_model_records_the_ratified_decision_with_features_and_others_do_not( self ):
+        # Row cfc7dd01: BLR is fed from the path that records the human's answer.
+        for model, fed in ( ( "blr", True ), ( "beta", False ), ( "count", False ) ):
+            o = _mk_orch()
+            o.proxy, _ = self._proxy( "shadow", value="approved", trust_mode="shadow" )
+            o.proxy.trust_tracker.trust_model = model
+            t = self._team_io( confirm=True )
+            with patch.object( o, "_persist_trust_feedback" ):
+                _run( o._gated_confirmation( "q words?", "lead", "no", 60, None, t ) )
+            tracker = o.proxy.trust_tracker
+            if fed:
+                tracker.record_decision_with_features.assert_called_once()
+                self.assertEqual( tracker.record_decision_with_features.call_args.args[ 1: ], ( True, "q words?" ) )
+                tracker.record_decision.assert_not_called()
+            else:
+                tracker.record_decision.assert_called_once()
+                tracker.record_decision_with_features.assert_not_called()
 
     def test_shadow_records_feedback_no_summary( self ):
         o = _mk_orch()

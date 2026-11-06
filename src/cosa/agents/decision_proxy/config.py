@@ -47,6 +47,14 @@ DEFAULT_TRUST_MODE = "shadow"
 
 
 # ============================================================================
+# Trust Model
+# ============================================================================
+
+TRUST_MODEL_CHOICES = [ "count", "beta", "blr" ]
+DEFAULT_TRUST_MODEL = "count"
+
+
+# ============================================================================
 # Trust Levels
 # ============================================================================
 
@@ -163,8 +171,12 @@ def trust_proxy_config_from_config_mgr( config_mgr ):
         - config_mgr is a ConfigurationManager instance with LUPIN_CONFIG_MGR_CLI_ARGS
 
     Ensures:
-        - Returns dict with all 36 generic trust proxy config values
+        - Returns dict with all 37 generic trust proxy config values
         - Falls back to module-level defaults for any missing keys
+        - "trust_model" is one of TRUST_MODEL_CHOICES
+
+    Raises:
+        - ValueError if the trust model key names a model outside TRUST_MODEL_CHOICES
 
     Args:
         config_mgr: ConfigurationManager instance
@@ -172,7 +184,13 @@ def trust_proxy_config_from_config_mgr( config_mgr ):
     Returns:
         dict: Config values keyed by runtime parameter names
     """
+    trust_model = config_mgr.get( "swe team trust proxy trust model", default=DEFAULT_TRUST_MODEL )
+    if trust_model not in TRUST_MODEL_CHOICES:
+        raise ValueError( f"swe team trust proxy trust model must be one of {TRUST_MODEL_CHOICES}, got {trust_model!r}" )
+
     return {
+        # Which trust model scores each category
+        "trust_model"                      : trust_model,
         # Core decision proxy settings
         "enabled"                          : config_mgr.get( "decision proxy enabled",                                             default=False,                                    return_type="boolean" ),
         "active_hours_start"               : config_mgr.get( "decision proxy active hours start",                                   default=DEFAULT_ACTIVE_HOURS_START,                return_type="int" ),
