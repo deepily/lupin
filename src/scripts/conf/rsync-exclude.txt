@@ -86,7 +86,9 @@ temp/
 # PostgreSQL data directory was relocated outside the project tree on 2026-04-30
 # (now at /mnt/DATA01/include/www.deepily.ai/projects/lupin-data/postgresql-dev-data),
 # so the rsync sweep no longer touches it from this project root.
-# Use backup-postgres.sh to create postgresql-backup.sql for portable backups.
+# Use backup-postgres.sh to create postgresql-backup.dump (pg_dump -Fc, zstd) for portable backups.
+# Its in-progress temporary file is never worth copying.
+/src/conf/long-term-memory/postgresql-backup.dump.tmp
 
 # LanceDB FTS indices (regeneratable, often created by root/docker)
 */_indices/fts/
