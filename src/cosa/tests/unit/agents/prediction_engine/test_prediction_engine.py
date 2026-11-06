@@ -523,15 +523,16 @@ def test_mc_single_select_no_valid_vote_is_cold_start( engine, monkeypatch ):
     assert r.metadata[ "reason" ] == "no_valid_options_after_filtering"
 
 
-def test_mc_header_not_in_options_kept_as_is( engine, monkeypatch ):
-    """A predicted header absent from the options structure is preserved (backward compat)."""
+def test_mc_header_not_in_options_is_not_predicted( engine, monkeypatch ):
+    """A past header the new question lacks is never predicted."""
     cases = [ _case( 90.0, decision_value=json.dumps( { "answers": { "Cache": "Redis" } } ) ) ]
     monkeypatch.setattr( engine, "_get_embedding_store", lambda: FakeStore( cases=cases ) )
     options = { "questions": [
         { "header": "DB", "multi_select": False, "options": [ { "label": "PostgreSQL" } ] },
     ] }
     r = engine._predict_multiple_choice( "m", "approach", [ 0.1 ], options )
-    assert r.predicted_value == { "answers": { "Cache": "Redis" } }
+    assert r.predicted_value is None
+    assert r.metadata[ "reason" ] == "no_valid_mc_cases"
 
 
 def test_mc_skips_unparseable_case_then_uses_valid( engine, monkeypatch ):

@@ -541,15 +541,16 @@ def test_mc_multi_validation_all_invalid_cold_start():
     assert r.metadata[ "reason" ] == "no_valid_options_after_filtering"
 
 
-def test_mc_validation_header_not_in_options_kept_as_is():
+def test_mc_validation_header_not_in_options_is_not_predicted():
     eng = _engine()
     cases = [ ( 90.0, { "decision_value": json.dumps( { "answers": { "DB": "PG" } } ) } ) ]
-    # options define a DIFFERENT header → option_info None for "DB" → keep prediction
+    # options define a DIFFERENT header → "DB" is never predicted (row fa884f81)
     options = { "questions": [ { "header": "Other", "multi_select": False,
                                  "options": [ { "label": "Z" } ] } ] }
     eng._get_embedding_store = lambda: _store( cases=cases )
     r = eng._predict_multiple_choice( "m", "approach", [ 0.1 ], options )
-    assert r.predicted_value == { "answers": { "DB": "PG" } }
+    assert r.predicted_value is None
+    assert r.metadata[ "reason" ] == "no_valid_mc_cases"
 
 
 # =========================================================================== #
