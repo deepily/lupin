@@ -22,7 +22,9 @@ _LINK_OR_BARE_URL = re.compile(
     r'|https?://[^\s<>\[\]()]*[^\s<>\[\]().,;:!?\'"]'
 )
 _TITLE_AND_CLOSE = re.compile( r'(?:\s+"[^"]*")?\s*\)' )
-_ADDRESS_START   = re.compile( r'https?://', re.IGNORECASE )
+_ADDRESS_START   = re.compile( r'(?:https?://|mailto:)', re.IGNORECASE )
+_ADDRESS_TAIL    = re.compile( r'[^\s<>\[\]()]*' )
+_TRAILING_PUNCT  = ".,;:!?'\""
 
 
 def _blank_free_run_end( text, start ):
@@ -59,6 +61,44 @@ def _balanced_close( text, start ):
     return None
 
 
+def _extend_bare_address( text, end ):
+    """
+    Return where a bare address that stops at end really stops, taking in any "(...)" groups.
+
+    Requires:
+        - text is a str and end is the index just after a bare address match
+
+    Ensures:
+        - returns end when no "(" follows
+        - each balanced "( ... )" group that follows, blanks included, is part of the address,
+          and so are the non-blank characters between and after groups, less trailing punctuation
+        - a "(" that never closes takes in the blank-free run it starts
+    """
+    while end < len( text ) and text[ end ] == "(":
+        close = _balanced_close( text, end + 1 )
+        if close is None: return _blank_free_run_end( text, end )
+        end = _ADDRESS_TAIL.match( text, close ).end()
+        while end > close and text[ end - 1 ] in _TRAILING_PUNCT: end -= 1
+    return end
+
+
+def _angle_target_end( text, start ):
+    """
+    Return the index just after the ")" that closes an "<...>" link target, or None.
+
+    Requires:
+        - text is a str and text[ start ] == "<"
+
+    Ensures:
+        - the target runs to the first ">", blanks included, and may be followed by a title
+        - returns None when there is no ">" or no closing ")" after it
+    """
+    close = text.find( ">", start )
+    if close == -1: return None
+    closing = _TITLE_AND_CLOSE.match( text, close + 1 )
+    return None if closing is None else closing.end()
+
+
 def _scan_target( text, start ):
     """
     Find where the link target that begins at start ends.
@@ -78,11 +118,19 @@ def _scan_target( text, start ):
         - a target that starts with http:// or https:// but holds blanks (inside a parenthesis
           group or after one) is still one link: it ends at the ")" that closes the link, or,
           when that never comes, after the last group read, so no part of it is spoken
+        - an angle-bracket target "<...>" may hold blanks and ends at its ">" plus the closing ")"
+        - mailto: counts as an address, like http:// and https://
+        - an address target whose parentheses never balance with the link's closing ")" ends
+          after the last group read inside its first blank-free run, so no part of it is spoken
         - runs in time linear in the text it reads, and never recurses
     """
+    if text.startswith( "<", start ):
+        angle_end = _angle_target_end( text, start )
+        if angle_end is not None: return angle_end
     size  = len( text )
     index = start
     units = 0
+    group = False
     while index < size:
         char = text[ index ]
         if char == "(":
@@ -97,6 +145,7 @@ def _scan_target( text, start ):
             if depth != 0: return _blank_free_run_end( text, start )
             index = probe + 1
             units += 1
+            group = True
         elif char == ")" or char.isspace(): break
         else:
             index += 1
@@ -108,8 +157,10 @@ def _scan_target( text, start ):
     if text.find( ")", index ) == -1:
         run_end = _blank_free_run_end( text, start )
         return max( run_end, index ) if address else run_end
-    if address: return _balanced_close( text, start )
-    return None
+    if not address: return None
+    closed = _balanced_close( text, start )
+    if closed is None and group: return index
+    return closed
 
 
 def _spoken_form( match ):
@@ -157,7 +208,7 @@ def strip_markdown_links_for_speech( text ):
         match = _LINK_OR_BARE_URL.search( text, search )
         if match is None: break
         if match.group( 1 ) is None:
-            end = match.end()
+            end = _extend_bare_address( text, match.end() )
         else:
             end = _scan_target( text, match.end() )
             if end is None:
