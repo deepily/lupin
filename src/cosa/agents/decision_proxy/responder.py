@@ -449,10 +449,11 @@ class DecisionResponder( BaseResponder ):
                 id                  = notification_id,
                 question            = question[ :500 ],
                 category            = result.category,
-                # A shadow result now carries the proxy's own prediction. The case base votes on
+                # A shadow or defer result carries the proxy's own prediction. The case base votes on
                 # decision_value and does not filter by ratification state, so storing that guess would
-                # let the proxy cite itself as precedent: shadow rows keep an empty value.
-                decision_value      = "" if ( result.action == "shadow" and requires_ratification is None ) else ( result.value or "" ),
+                # let the proxy cite itself as precedent: rows in state "shadow" (no ratification flag,
+                # which only shadow and defer produce) keep an empty value.
+                decision_value      = "" if ratification_state == "shadow" else ( result.value or "" ),
                 ratification_state  = ratification_state,
                 question_embedding  = embedding,
                 created_at          = datetime.now( timezone.utc ).isoformat(),
