@@ -31,7 +31,7 @@ BANDED = dict( BASE, band=BAND )
 
 
 def test_the_cause_list_names_near_cutoff_after_the_existing_causes():
-    assert vd.CAUSES[ -2: ] == ( "NEAR_CUTOFF", "NO_MATCH" ) and vd.CAUSES[ :-2 ] == ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE" )
+    assert vd.CAUSES[ -2: ] == ( "NEAR_CUTOFF", "NO_MATCH" ) and vd.CAUSES[ :-2 ] == ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "BUDGET_SPENT", "LOW_CONFIDENCE" )
 
 
 CUTS = ( ( "threshold", 0.5 ), ( "strong", 0.9 ) )

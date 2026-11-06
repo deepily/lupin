@@ -140,11 +140,18 @@ def test_a_sweep_stops_at_the_budget_and_reports_the_rest_as_not_checked( env, m
     assert r[ "stats" ][ "not_checked" ] == 1 and len( r[ "missing" ] ) == 1
 
 
+def test_a_fetch_similar_sweep_stopped_by_its_budget_says_budget_spent_not_call_failed( env, monkeypatch ):
+    """No call failed, so the cause must not say one did."""
+    counting_door( monkeypatch )
+    r = rt.fetch_similar_impl( "cosa.feeds.parse_feed", make_ctx( env, call_budget=1 ), language="all" )
+    assert r[ "uncertain" ] == "BUDGET_SPENT" and r[ "causes" ] == [ "BUDGET_SPENT" ] and r[ "stats" ][ "failed" ] == 0 and r[ "stats" ][ "not_checked" ] >= 1
+
+
 def test_an_unreached_entry_is_never_reported_as_new( env, monkeypatch ):
     """An entry left unasked makes the verdict uncertain; the control run with room says new."""
     counting_door( monkeypatch )
     cut = rt.check_exists_impl( NEED, make_ctx( env, call_budget=2 ), language="all" )
-    assert ( cut[ "verdict" ], cut[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "CALL_FAILED" )
+    assert ( cut[ "verdict" ], cut[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "BUDGET_SPENT" )
     assert cut[ "shortlist" ] == []
     full = rt.check_exists_impl( NEED + " [control]", make_ctx( env, call_budget=100 ), language="all" )
     assert full[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and full[ "stats" ][ "not_checked" ] == 0

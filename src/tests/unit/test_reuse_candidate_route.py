@@ -84,14 +84,31 @@ def test_a_failed_stage_receipt_replays_to_its_stored_verdict_and_sends_nothing(
     assert out[ "status" ] == "ok" and out[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and out[ "differences" ][ "frozen" ] == []
 
 
-@pytest.mark.parametrize( "call", [ lambda ctx, need: rt.sweep_need_impl( need, None, ctx, language="all" ), lambda ctx, need: rt.fetch_similar_impl( FEEDS_ID, ctx, language="all" ) ] )
-def test_a_sweep_only_question_and_a_fetch_similar_never_use_the_stage_and_ask_every_entry( env, call ):
+def test_a_sweep_only_question_never_uses_the_stage_and_asks_every_entry( env ):
     need  = "read an RSS feed [cand-off]"
     stage = FakeStage()
     fake  = PackedFake( need )
-    r     = call( ctx_with( env, fake, stage ), need )
+    r     = rt.sweep_need_impl( need, None, ctx_with( env, fake, stage ), language="all" )
     rec   = receipt_of( env, r )
     assert r[ "status" ] == "ok" and stage.calls == [] and rec[ "route" ] == "full" and "candidate_stage" not in rec
+
+
+def test_fetch_similar_goes_through_the_stage_and_asks_the_shortlist_only( env ):
+    """fetch_similar takes the check_exists route, not a 200-pack full sweep."""
+    stage = FakeStage()
+    fake  = PackedFake( "unused" )
+    r     = rt.fetch_similar_impl( FEEDS_ID, ctx_with( env, fake, stage ), language="all" )
+    rec   = receipt_of( env, r )
+    assert r[ "status" ] == "ok" and len( stage.calls ) == 1 and stage.calls[ 0 ][ "exclude_id" ] == FEEDS_ID
+    assert rec[ "route" ] == "candidates" and rec[ "candidate_stage" ][ "entries_total" ] == 2 and rec[ "candidate_stage" ][ "entries_asked" ] == 1
+    assert asked_ids( rec ) == [ MATH_ID ] and FEEDS_ID not in asked_ids( rec )
+    assert ( r[ "entries_total" ], r[ "entries_asked" ], r[ "entries_not_asked" ] ) == ( 2, 1, 1 ) and r[ "uncertain" ] != "BUDGET_SPENT"
+
+
+def test_fetch_similar_with_a_failed_stage_names_the_stage_error_and_sends_nothing( env ):
+    fake = PackedFake( "unused" )
+    r    = rt.fetch_similar_impl( FEEDS_ID, ctx_with( env, fake, FakeStage( error="QUERY_VECTOR_MISSING" ) ), language="all" )
+    assert r[ "uncertain" ] == "CALL_FAILED" and fake.bodies == [] and receipt_of( env, r )[ "candidate_stage" ][ "error" ][ "code" ] == "QUERY_VECTOR_MISSING"
 
 
 def test_a_left_out_entry_goes_to_the_stage_so_it_is_dropped_from_the_shortlist_and_the_asked_set( env ):

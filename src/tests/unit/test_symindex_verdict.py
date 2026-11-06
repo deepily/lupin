@@ -101,8 +101,27 @@ def test_coverage_is_set_equality_not_a_count():
     answers  = [ _ans( "a", _p( 0.05, 0.05, 0.9 ) ), _ans( "b", _p( 0.05, 0.05, 0.9 ) ), _ans( "x", _p( 0.05, 0.05, 0.9 ) ), _ans( "y", _p( 0.05, 0.05, 0.9 ) ) ]
     r = vd.decide( answers, expected, [], set() )
     assert r[ "verdict" ] == "UNCERTAIN_READ_SOURCE"
-    assert r[ "missing" ] == [ "c", "d" ] and r[ "causes" ] == [ "CALL_FAILED", "MALFORMED_ANSWER" ]
+    assert r[ "missing" ] == [ "c", "d" ] and r[ "causes" ] == [ "MALFORMED_ANSWER", "BUDGET_SPENT" ]
     assert [ m[ "reason" ] for m in r[ "malformed" ] ] == [ "unknown_id", "unknown_id" ]
+
+
+def test_entries_never_asked_hold_budget_spent_and_never_call_failed():
+    """A sweep stopped by its budget made no failed call, so it must not read as one."""
+    r = vd.decide( [ _ans( "a", _p( 0.05, 0.05, 0.9 ) ) ], [ "a", "b", "c" ], [], set() )
+    assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ], r[ "missing" ] ) == ( "UNCERTAIN_READ_SOURCE", "BUDGET_SPENT", [ "BUDGET_SPENT" ], [ "b", "c" ] )
+
+
+def test_a_failed_call_still_holds_call_failed_and_beside_a_budget_stop_holds_both():
+    r = vd.decide( [ _ans( "a", _p( 0.05, 0.05, 0.9 ) ) ], [ "a", "b", "c" ], [ "b" ], set() )
+    assert r[ "causes" ] == [ "CALL_FAILED", "BUDGET_SPENT" ] and r[ "missing" ] == [ "c" ]
+    assert vd.decide( [ _ans( "a", _p( 0.05, 0.05, 0.9 ) ) ], [ "a", "b" ], [ "b" ], set() )[ "causes" ] == [ "CALL_FAILED" ]
+
+
+def test_a_policy_stored_before_the_budget_cause_reports_never_asked_entries_as_call_failed():
+    """A receipt stored with the old policy replays as it was stored."""
+    old = { k: v for k, v in vd.POLICY.items() if k != "budget_cause" }
+    r   = vd.decide( [ _ans( "a", _p( 0.05, 0.05, 0.9 ) ) ], [ "a", "b" ], [], set(), policy=old )
+    assert r[ "causes" ] == [ "CALL_FAILED" ] and r[ "missing" ] == [ "b" ]
 
 
 def test_a_duplicate_answer_drops_every_copy():
