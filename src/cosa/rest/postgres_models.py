@@ -946,6 +946,7 @@ class TrustState( Base ):
         - updated_at tracks last modification
         - circuit_breaker_state stored as JSONB
         - decision_history holds per-day approved/rejected counts as JSONB (NULL before the column existed)
+        - blr_state holds the BLR trust model's serialized posterior as JSONB (NULL unless the "blr" trust model wrote it)
     """
     __tablename__ = "trust_states"
 
@@ -1001,6 +1002,13 @@ class TrustState( Base ):
     # Per-day decision buckets {"YYYY-MM-DD": [approved, rejected]} (UTC days). NULL on a row written
     # before the column existed: restore then stamps its decisions with updated_at, as it used to.
     decision_history: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
+    # BayesianLogisticRegression.to_dict() for the category (weights, covariance, counters). NULL for the
+    # "count" and "beta" trust models, which keep no such state. Row 5bb93a7b.
+    blr_state: Mapped[Optional[dict]] = mapped_column(
         JSONB,
         nullable=True
     )

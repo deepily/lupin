@@ -22,6 +22,9 @@ from cosa.rest.db.repositories.base import BaseRepository
 # It must be at least the tracker's rolling window (30 days by default), which prunes on restore anyway.
 DECISION_HISTORY_RETENTION_DAYS = 90
 
+# update_after_ratification default: leave blr_state as stored. None is a real value (clear it).
+KEEP_BLR_STATE = object()
+
 
 class ProxyDecisionRepository( BaseRepository[ProxyDecision] ):
     """
@@ -461,7 +464,7 @@ class TrustStateRepository( BaseRepository[TrustState] ):
             rejected_decisions   = 0
         )
 
-    def update_after_ratification( self, user_email, domain, category, approved ):
+    def update_after_ratification( self, user_email, domain, category, approved, blr_state=KEEP_BLR_STATE ):
         """
         Increment a category's trust counters after a ratification event.
 
@@ -470,9 +473,12 @@ class TrustStateRepository( BaseRepository[TrustState] ):
             - domain: Domain identifier
             - category: Decision category
             - approved: True if ratified (success), False if rejected
+            - blr_state: KEEP_BLR_STATE (default), None, or a BayesianLogisticRegression.to_dict() dict
 
         Ensures:
             - Trust state counters updated
+            - blr_state is stored as given, None clearing it; the default leaves the stored value alone
+              (the ratify endpoint has no tracker and must not wipe it)
             - decision_history gains this decision under today's UTC date, and days older than
               DECISION_HISTORY_RETENTION_DAYS are dropped
             - a row with no history yet (written before the column) first has its old totals
@@ -502,6 +508,7 @@ class TrustStateRepository( BaseRepository[TrustState] ):
 
         state.decision_history = history
         state.updated_at       = now
+        if blr_state is not KEEP_BLR_STATE: state.blr_state = blr_state
 
         self.session.flush()
         return state

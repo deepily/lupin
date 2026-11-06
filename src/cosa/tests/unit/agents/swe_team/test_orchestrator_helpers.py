@@ -13,6 +13,7 @@ CircuitBreaker, ConfigurationManager, requests (HTTP), get_db. NO LLM/SDK/networ
 Created 2026-05-31 by Extra 1 🪨 (CoSA coverage campaign, swe_team lane, orchestrator).
 """
 
+from datetime import datetime, timezone
 import asyncio
 import io
 import sys
@@ -384,15 +385,16 @@ class TestGatedConfirmation( unittest.TestCase ):
         rows = {}
         class Row:
             def __init__( self, category ):
-                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0; self.trust_level = 1; self.circuit_breaker_state = None; self.decision_history = None
+                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0; self.trust_level = 1; self.circuit_breaker_state = None; self.decision_history = None; self.blr_state = None
                 from datetime import datetime, timezone
                 self.updated_at = datetime.now( timezone.utc )
         class Session:
             def __init__( self ): self.work = { k: copy.copy( v ) for k, v in rows.items() }
         class Repo:
             def __init__( self, session ): self.work = session.work
-            def update_after_ratification( self, user_email, domain, category, approved ):
+            def update_after_ratification( self, user_email, domain, category, approved, **extra ):
                 row = self.work.setdefault( ( user_email, domain, category ), Row( category ) )
+                if "blr_state" in extra: row.blr_state = extra[ "blr_state" ]
                 if approved: row.successful_decisions += 1
                 else:        row.rejected_decisions   += 1
                 return row
@@ -854,6 +856,54 @@ class TestPersistAndAlerts( unittest.TestCase ):
                                         "cosa.rest.db.repositories.proxy_decision_repository": repo_mod } ):
             o._persist_trust_feedback( "testing", True )
         repo_mod.TrustStateRepository.return_value.update_after_ratification.assert_called_once()
+
+    def _persist_kwargs( self, o, tracker_model=None ):
+        """Run _persist_trust_feedback on a mocked repo; return the repo write's kwargs."""
+        db_mod = types.ModuleType( "cosa.rest.db.database" )
+        ctx = MagicMock(); ctx.__enter__ = MagicMock( return_value=MagicMock() ); ctx.__exit__ = MagicMock( return_value=False )
+        db_mod.get_db = MagicMock( return_value=ctx )
+        repo_mod = types.ModuleType( "cosa.rest.db.repositories.proxy_decision_repository" )
+        repo_mod.TrustStateRepository = MagicMock()
+        with patch.dict( sys.modules, { "cosa.rest.db.database": db_mod,
+                                        "cosa.rest.db.repositories.proxy_decision_repository": repo_mod } ):
+            o._persist_trust_feedback( "testing", True )
+        return repo_mod.TrustStateRepository.return_value.update_after_ratification.call_args.kwargs
+
+    def test_persist_stores_the_blr_state_with_the_blr_model( self ):
+        # Row 5bb93a7b, round trip: what persist writes is what load restores into a fresh tracker.
+        import numpy as np
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        tracker = TrustTracker( trust_model="blr" )
+        tracker.register_category( "testing" )
+        for i in range( 10 ): tracker.record_decision_with_features( "testing", i % 3 != 0, f"question number {i}?" )
+        o = _mk_orch(); o.proxy = EngineeringStrategy( trust_tracker=tracker, trust_mode="shadow" )
+        with patch.object( o, "_persist_trust_level" ):
+            kwargs = self._persist_kwargs( o )
+        self.assertEqual( kwargs[ "blr_state" ], tracker.blr_state_for( "testing" ) )
+
+        fresh = TrustTracker( trust_model="blr" ); fresh.register_category( "testing" )
+        o2 = _mk_orch(); o2._user_email = "rick@example.com"
+        o2.proxy = EngineeringStrategy( trust_tracker=fresh, trust_mode="shadow" )
+        row = MagicMock( category="testing", successful_decisions=6, rejected_decisions=4, circuit_breaker_state=None,
+                         decision_history=None, blr_state=kwargs[ "blr_state" ] )
+        row.updated_at = datetime.now( timezone.utc )
+        Repo = MagicMock(); Repo.return_value.get_all_for_user.return_value = [ row ]
+        with patch( "cosa.rest.db.database.get_db", MagicMock() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            self.assertEqual( o2._load_trust_state(), 1 )
+        probe = np.array( [ 1.0, 0.5, 0.25, 0.1 ] )
+        self.assertEqual( fresh.categories[ "testing" ]._blr_model.predict( probe ),
+                          tracker.categories[ "testing" ]._blr_model.predict( probe ) )
+
+    def test_persist_leaves_the_blr_state_alone_for_count_and_without_a_proxy( self ):
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        o = _mk_orch()
+        self.assertIsNone( o.proxy )
+        self.assertNotIn( "blr_state", self._persist_kwargs( o ) )
+        o.proxy = EngineeringStrategy( trust_tracker=TrustTracker( trust_model="count" ), trust_mode="shadow" )
+        self.assertNotIn( "blr_state", self._persist_kwargs( o ) )
 
     def test_persist_exception_swallowed( self ):
         o = _mk_orch()

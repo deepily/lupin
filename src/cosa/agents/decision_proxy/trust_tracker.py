@@ -584,7 +584,7 @@ class TrustTracker:
 
         if self.debug: print( f"[TrustTracker] Registered category: {category_name} (cap L{cap_level}, model={self.trust_model})" )
 
-    def restore_category( self, category_name, successes, rejections, as_of, trip=None, history=None ):
+    def restore_category( self, category_name, successes, rejections, as_of, trip=None, history=None, blr_state=None ):
         """
         Restore a category's counters and rolling history from stored totals.
 
@@ -597,6 +597,7 @@ class TrustTracker:
             - as_of is an epoch timestamp in seconds
             - trip is the stored trip dict ("tripped_level", "successes_at_trip"), or None for no trip
             - history is the stored {"YYYY-MM-DD": [approved, rejected]} dict (UTC days), or None
+            - blr_state is a stored BayesianLogisticRegression.to_dict() dict, or None
 
         Ensures:
             - returns True and sets the totals when the category is registered and empty
@@ -606,6 +607,8 @@ class TrustTracker:
             - the rolling history gains one entry per restored decision, stamped as_of, or, when
               history is given, one entry per decision in it, stamped with its UTC day; totals older
               than the history are counted but not in the rolling history
+            - the BLR model is rebuilt from blr_state only when the tracker's trust model is "blr";
+              the "count" and "beta" models ignore it
             - returns False and changes nothing when the category is unknown or already has decisions
         """
         cat = self.categories.get( category_name )
@@ -624,8 +627,26 @@ class TrustTracker:
         if trip is not None:
             cat.trip_level     = trip[ "tripped_level" ]
             cat.trip_successes = trip[ "successes_at_trip" ]
+        if blr_state is not None and self.trust_model == "blr":
+            from cosa.agents.decision_proxy.bayesian_trust import BayesianLogisticRegression
+            cat._blr_model = BayesianLogisticRegression.from_dict( blr_state )
         cat._prune_rolling_window()
         return True
+
+    def blr_state_for( self, category_name ):
+        """
+        Serialize a category's BLR model for storage.
+
+        Requires:
+            - category_name is a string
+
+        Ensures:
+            - returns the model's to_dict() when the trust model is "blr" and the category has a model
+            - returns None for the "count" and "beta" models, an unknown category, or a category with no model yet
+        """
+        cat = self.categories.get( category_name )
+        if self.trust_model != "blr" or cat is None or cat._blr_model is None: return None
+        return cat._blr_model.to_dict()
 
     def record_trip( self, category_name ):
         """

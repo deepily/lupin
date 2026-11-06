@@ -7,7 +7,7 @@ minimal stand-in for alembic's `op`. Each test names what it would catch:
   - a re-run that adds the column twice                             -> the idempotence test
   - an upgrade that touches existing rows                           -> the untouched-rows test
   - a table-absent database (fresh DB built from metadata)          -> the no-op tests
-  - a revision that is not the single head after d4bf48f78a01       -> the chain test
+  - a revision that does not follow d4bf48f78a01       -> the chain test
 """
 import importlib.util
 
@@ -119,4 +119,4 @@ def test_both_verbs_are_no_ops_when_trust_states_is_absent( monkeypatch ):
 def test_the_revision_follows_d4bf48f78a01_and_is_the_only_head():
     script = _script()
     assert script.get_revision( _REVISION ).down_revision == "d4bf48f78a01"
-    assert script.get_heads() == [ _REVISION ]
+    assert len( script.get_heads() ) == 1, "a later revision may sit on top of this one, but the chain must stay linear"

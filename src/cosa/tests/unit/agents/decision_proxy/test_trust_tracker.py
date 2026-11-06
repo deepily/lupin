@@ -606,3 +606,71 @@ def test_tracker_record_with_features_unknown_category_records_nothing( capsys )
     assert "Unknown category: nope" in capsys.readouterr().out
     t2 = TrustTracker( trust_model="blr" )
     assert t2.record_decision_with_features( "nope", True, "q" ) == 1   # silent without debug
+
+
+# ── BLR state survives a restart (row 5bb93a7b) ──────────────────────────────
+
+_BLR_QUESTIONS = [ "deploy the build?", "delete the old branch?", "merge the fix?", "retry the test run?", "push the commit?" ]
+
+
+def _trained_blr_tracker( model="blr" ):
+    tracker = TrustTracker( trust_model=model )
+    tracker.register_category( "testing" )
+    for i in range( 12 ):
+        tracker.record_decision_with_features( "testing", i % 3 != 0, _BLR_QUESTIONS[ i % len( _BLR_QUESTIONS ) ] )
+    return tracker
+
+
+def test_a_blr_model_saved_and_restored_into_a_fresh_tracker_predicts_the_same():
+    trained = _trained_blr_tracker()
+    saved   = trained.blr_state_for( "testing" )
+    probe   = np.array( [ 1.0, 0.5, 0.25, 0.1 ] )
+
+    fresh = TrustTracker( trust_model="blr" )
+    fresh.register_category( "testing" )
+    assert fresh.categories[ "testing" ]._blr_model is None, "a fresh tracker starts BLR from zero"
+    assert fresh.restore_category( "testing", 8, 4, 1_000_000.0, blr_state=saved ) is True
+
+    before = trained.categories[ "testing" ]._blr_model
+    after  = fresh.categories[ "testing" ]._blr_model
+    assert after.predict( probe ) == before.predict( probe )
+    assert after.n_observations == before.n_observations == 12
+    assert after.posterior_mean_rate() == before.posterior_mean_rate()
+
+
+def test_the_saved_blr_state_survives_a_json_round_trip():
+    import json
+    saved = json.loads( json.dumps( _trained_blr_tracker().blr_state_for( "testing" ) ) )
+    fresh = TrustTracker( trust_model="blr" )
+    fresh.register_category( "testing" )
+    fresh.restore_category( "testing", 8, 4, 1_000_000.0, blr_state=saved )
+    probe = np.array( [ 1.0, 0.5, 0.25, 0.1 ] )
+    assert fresh.categories[ "testing" ]._blr_model.predict( probe ) == _trained_blr_tracker().categories[ "testing" ]._blr_model.predict( probe )
+
+
+def test_blr_state_for_is_none_without_a_blr_model_to_save():
+    count = TrustTracker( **SMALL_COUNT_KW )
+    count.register_category( "testing" )
+    count.record_decision( "testing", True )
+    assert count.blr_state_for( "testing" ) is None, "the count model keeps no BLR state"
+
+    blr = TrustTracker( trust_model="blr" )
+    blr.register_category( "testing" )
+    assert blr.blr_state_for( "testing" ) is None, "no decision with features yet, so no model"
+    assert blr.blr_state_for( "nope" ) is None, "unknown category"
+
+
+def test_restore_ignores_blr_state_unless_the_trust_model_is_blr():
+    saved = _trained_blr_tracker().blr_state_for( "testing" )
+    for model in ( "count", "beta" ):
+        tracker = TrustTracker( trust_model=model )
+        tracker.register_category( "testing" )
+        assert tracker.restore_category( "testing", 8, 4, 1_000_000.0, blr_state=saved ) is True
+        assert tracker.categories[ "testing" ]._blr_model is None, model
+
+
+def test_restore_without_blr_state_leaves_a_blr_tracker_with_no_model():
+    tracker = TrustTracker( trust_model="blr" )
+    tracker.register_category( "testing" )
+    tracker.restore_category( "testing", 8, 4, 1_000_000.0 )
+    assert tracker.categories[ "testing" ]._blr_model is None
