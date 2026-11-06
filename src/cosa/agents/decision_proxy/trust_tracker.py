@@ -19,6 +19,7 @@ Dependency Rule:
 """
 
 import math
+from datetime import datetime, timezone
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -583,24 +584,28 @@ class TrustTracker:
 
         if self.debug: print( f"[TrustTracker] Registered category: {category_name} (cap L{cap_level}, model={self.trust_model})" )
 
-    def restore_category( self, category_name, successes, rejections, as_of, trip=None ):
+    def restore_category( self, category_name, successes, rejections, as_of, trip=None, history=None ):
         """
         Restore a category's counters and rolling history from stored totals.
 
-        A stored row keeps totals, not per-decision times, so every restored decision is
-        stamped with the row's last-update time and decays from there.
+        A row written before the history column existed has no per-day history. Every restored
+        decision is then stamped with the row's last-update time and decays from there. With
+        history, each day's decisions are stamped with that day, so old ones decay and age out.
 
         Requires:
             - successes and rejections are non-negative ints
             - as_of is an epoch timestamp in seconds
             - trip is the stored trip dict ("tripped_level", "successes_at_trip"), or None for no trip
+            - history is the stored {"YYYY-MM-DD": [approved, rejected]} dict (UTC days), or None
 
         Ensures:
             - returns True and sets the totals when the category is registered and empty
             - a stored trip caps the restored level until it is earned back (see trip_active), so a
               demotion, which changes the stored level but not the counters, survives the reload
             - with no stored trip the level is whatever the counters earn, so a category can climb
-            - the rolling history gains one entry per restored decision, stamped as_of
+            - the rolling history gains one entry per restored decision, stamped as_of, or, when
+              history is given, one entry per decision in it, stamped with its UTC day; totals older
+              than the history are counted but not in the rolling history
             - returns False and changes nothing when the category is unknown or already has decisions
         """
         cat = self.categories.get( category_name )
@@ -609,7 +614,13 @@ class TrustTracker:
         cat.total_successes  = successes
         cat.total_rejections = rejections
         cat.total_decisions  = successes + rejections
-        cat.decisions        = [ ( as_of, True ) ] * successes + [ ( as_of, False ) ] * rejections
+        if history is None:
+            cat.decisions = [ ( as_of, True ) ] * successes + [ ( as_of, False ) ] * rejections
+        else:
+            cat.decisions = []
+            for day, ( approved, rejected ) in sorted( history.items() ):
+                stamp = datetime.strptime( day, "%Y-%m-%d" ).replace( tzinfo=timezone.utc ).timestamp()
+                cat.decisions += [ ( stamp, True ) ] * approved + [ ( stamp, False ) ] * rejected
         if trip is not None:
             cat.trip_level     = trip[ "tripped_level" ]
             cat.trip_successes = trip[ "successes_at_trip" ]

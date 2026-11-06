@@ -434,7 +434,7 @@ class SweTeamOrchestrator:
                 for row in TrustStateRepository( session ).get_all_for_user( self._user_email, domain="swe" ):
                     if self.proxy.trust_tracker.restore_category(
                         row.category, row.successful_decisions, row.rejected_decisions, row.updated_at.timestamp(),
-                        trip=row.circuit_breaker_state
+                        trip=row.circuit_breaker_state, history=row.decision_history
                     ):
                         restored += 1
             return restored
