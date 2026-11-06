@@ -14,10 +14,11 @@ STRONG_MATCH = 0.9      # the best entry's overlap and confidence must both reac
 # threshold 0.3 is the fitted cut (seed 20261014, rate 0.05): projects-data/lupin/reuse-review/negatives-2026.10.14/verdict-fit-receipt-band-0.076.json, sha256 43428afca1631f00aac4a41b8802773974166a8e0bd08acc2db11d5b34a8deb7; strong is not fitted
 # the band is off by Rick's ruling (see the row a9c46718 history): the shipped policy has no "band" key, so NEAR_CUTOFF never holds and the candidate stage never widens. Kept for the later fix: band 0.076, the 95th percentile of how far a repeat sits from its entry's mean over the 30 band-fit needs (receipt projects-data/lupin/reuse-review/e2e-results/bandfit-4-receipt.json; the receipt above records it as given, not fitted); to turn the band on, add "band": 0.076 back to the policy
 # no_new: an empty shortlist is the cause NO_MATCH and the old verdict is gone, by Rick's ruling of the remediation plan; a policy without the key, such as one stored in an old receipt, still decides and replays as it did
+# budget_cause: an entry the sweep never asked (the budget was spent) holds BUDGET_SPENT, not CALL_FAILED, which now means a call failed (row 4e6d795d); a policy without the key, such as one stored in an old receipt, still reports it as CALL_FAILED and replays as it did
 # fold_constructors: a Dart constructor and its class share one shortlist slot, under the class id and the better of their two scores, so a family of near-identical classes is not cut at half its size (row 74d0db47); a policy without the key, such as one stored in an old receipt, still cuts and replays as it did
-POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH, "no_new": True, "fold_constructors": True }
+POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH, "no_new": True, "fold_constructors": True, "budget_cause": True }
 
-CAUSES  = ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE", "NEAR_CUTOFF", "NO_MATCH" )
+CAUSES  = ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "BUDGET_SPENT", "LOW_CONFIDENCE", "NEAR_CUTOFF", "NO_MATCH" )
 BAND_DECIMALS = 6       # the distance from a cut-off is rounded to this many places before it meets the band, as the stored numbers are
 ANSWERS = ( "reuse", "extend", "unrelated" )
 
@@ -157,8 +158,8 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
         - verdict is `REUSE`, `EXTEND`, `NEW` or `UNCERTAIN_READ_SOURCE`; cause is None unless `UNCERTAIN_READ_SOURCE`
         - a policy with `no_new` (the shipped one) never returns `NEW`: an empty shortlist from a sweep with no other cause holds the cause `NO_MATCH` alone, so it never rests on a failed or unsure call; a policy without it keeps the old `NEW` verdict
         - causes lists every cause that holds, in the order of `CAUSES`
-        - coverage is set equality: CALL_FAILED holds when any call failed or any expected id is
-          neither answered nor failed nor malformed; `missing` is the sorted list of those ids
+        - coverage is set equality: `missing` is the sorted list of expected ids that are neither answered nor failed nor malformed
+        - with policy["budget_cause"], CALL_FAILED holds when a call failed and BUDGET_SPENT when any id is missing (never asked); a policy without the key holds CALL_FAILED for both
         - MALFORMED_ANSWER holds when an answer has an invalid probability mapping, an id that is
           not expected, or an id answered twice (every copy is dropped); `malformed` lists
           { id, reason }, and such an answer never reaches a verdict
@@ -194,7 +195,10 @@ def decide( answers, expected_ids, failed_ids, flags, policy=None ):
     accounted = { r[ "id" ] for r in rows } | { m[ "id" ] for m in malformed } | failed
     missing   = sorted( expected - accounted )
     holds     = set( flags )
-    if failed or missing:   holds.add( "CALL_FAILED" )
+    if "budget_cause" in policy:
+        if failed:  holds.add( "CALL_FAILED" )
+        if missing: holds.add( "BUDGET_SPENT" )
+    elif failed or missing: holds.add( "CALL_FAILED" )
     if malformed:           holds.add( "MALFORMED_ANSWER" )
     ordered  = _order( rows )
     doubtful = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "floor" ] and r[ "confidence" ] < policy[ "confidence" ] ]
