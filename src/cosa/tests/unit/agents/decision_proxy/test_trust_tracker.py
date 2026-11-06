@@ -674,3 +674,12 @@ def test_restore_without_blr_state_leaves_a_blr_tracker_with_no_model():
     tracker.register_category( "testing" )
     tracker.restore_category( "testing", 8, 4, 1_000_000.0 )
     assert tracker.categories[ "testing" ]._blr_model is None
+
+
+def test_blr_state_for_is_none_for_count_and_beta_even_when_a_model_was_fed():
+    # Mutation guard: record_decision_with_features builds a model under any trust model,
+    # so only the trust_model check inside blr_state_for keeps count and beta from saving one.
+    for model in ( "count", "beta" ):
+        tracker = _trained_blr_tracker( model )
+        assert tracker.categories[ "testing" ]._blr_model is not None, model
+        assert tracker.blr_state_for( "testing" ) is None, model
