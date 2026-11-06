@@ -16,6 +16,9 @@ What it does to each multiple_choice row whose accuracy_detail.reason is "empty_
     - reruns get_comparator against the stored predicted_value
     - with --write, sets actual_value to the decoded dict, plus accuracy_match and accuracy_detail
     - never touches responded_at, which is when the user answered
+    - with --write, first dumps every row it will change to a JSON-lines file and flushes it to disk
+    - the dump holds id, notification_id, old actual_value, old accuracy_match and old accuracy_detail
+    - it does this because the write cannot be undone from the database, and it writes nothing if the dump fails
 
 Rows it skips, each counted under its own reason:
     - not_json_answers: actual_value holds no JSON with an "answers" mapping, such as a bare label
@@ -25,7 +28,8 @@ The 60 open_ended_batch rows are out of scope (Rick's ruling) and are never sele
 
 Usage:
     PYTHONPATH=src python src/scripts/rescore_empty_answers_mc.py             # report only
-    PYTHONPATH=src python src/scripts/rescore_empty_answers_mc.py --write     # rescore
+    PYTHONPATH=src python src/scripts/rescore_empty_answers_mc.py --write     # dump, then rescore
+    ... --write --dump-path /some/file.jsonl                                  # choose the dump file
 
 Exit codes:
     0  ran; read the counts
@@ -35,13 +39,17 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 
 try:
     from cosa.agents.prediction_engine.accuracy_comparators import get_comparator
     from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
     from cosa.rest.postgres_models import PredictionLog
+    import cosa.utils.util as cu
 except ImportError as err:
     print( f"FATAL: import failed ({err!r}). Run with the repo's interpreter and PYTHONPATH=<tree>/src.", file=sys.stderr )
     sys.exit( 3 )
@@ -86,19 +94,57 @@ def select_rows( session ):
     ).all()
 
 
-def rescore( session, write=False ):
+def default_dump_path():
     """
-    Classify every selected row and, with write, store the new score.
+    Return the default dump file path, stamped with the UTC time.
+
+    Ensures:
+        - returns a path under the project root's io/ directory, unique to the second
+    """
+    stamp = datetime.now( timezone.utc ).strftime( "%Y%m%dT%H%M%SZ" )
+    return os.path.join( cu.get_project_root(), "io", f"rescore-empty-answers-mc-{stamp}.jsonl" )
+
+
+def dump_old_values( planned, dump_path ):
+    """
+    Write the old stored values of every row about to change, then flush them to disk.
+
+    Requires:
+        - planned is a list of ( row, decoded, match, detail ) tuples
+
+    Ensures:
+        - dump_path holds one JSON line per row: id, notification_id, actual_value, accuracy_match, accuracy_detail
+        - the file is closed and fsynced before this returns, so a later write never runs ahead of it
+        - returns the number of lines written
+
+    Raises:
+        - OSError when the file cannot be written; the caller then writes nothing
+    """
+    os.makedirs( os.path.dirname( os.path.abspath( dump_path ) ), exist_ok=True )
+    with open( dump_path, "w", encoding="utf-8" ) as out:
+        for row, _decoded, _match, _detail in planned:
+            out.write( json.dumps( { "id": str( row.id ), "notification_id": str( row.notification_id ), "actual_value": row.actual_value,
+                                     "accuracy_match": row.accuracy_match, "accuracy_detail": row.accuracy_detail } ) + "\n" )
+        out.flush()
+        os.fsync( out.fileno() )
+    return len( planned )
+
+
+def rescore( session, write=False, dump_path=None ):
+    """
+    Classify every selected row; with write, dump the old values, then store the scores.
 
     Requires:
         - session is an open SQLAlchemy session
+        - dump_path is the dump file for a write run, or None for the default path
 
     Ensures:
-        - returns a Counter with selected, would_score, match, miss and skipped:<reason> keys
-        - writes only with write=True; then sets actual_value, accuracy_match and accuracy_detail and leaves responded_at alone
+        - returns a Counter with selected, would_score, match, miss and skipped:<reason> keys, plus dumped on a write run
+        - writes only with write=True; then dumps first, sets actual_value, accuracy_match and accuracy_detail, and leaves responded_at alone
+        - a failed dump raises before any row changes
         - commits every COMMIT_EVERY rows and once at the end
     """
-    rows, counts = select_rows( session ), Counter()
+    rows, counts, planned = select_rows( session ), Counter(), []
     counts[ "selected" ] = len( rows )
     for row in rows:
         outcome, decoded_or_reason, match, detail = classify( row.actual_value, row.predicted_value )
@@ -107,12 +153,15 @@ def rescore( session, write=False ):
             continue
         counts[ "would_score" ] += 1
         counts[ "match" if match else "miss" ] += 1
-        if write:
-            row.actual_value    = { k: v for k, v in decoded_or_reason.items() if not k.startswith( "_" ) }
-            row.accuracy_match  = match
-            row.accuracy_detail = detail
-            if counts[ "would_score" ] % COMMIT_EVERY == 0: session.commit()
-    if write: session.commit()
+        planned.append( ( row, decoded_or_reason, match, detail ) )
+    if not write: return counts
+    counts[ "dumped" ] = dump_old_values( planned, dump_path if dump_path is not None else default_dump_path() )
+    for done, ( row, decoded, match, detail ) in enumerate( planned, start=1 ):
+        row.actual_value    = { k: v for k, v in decoded.items() if not k.startswith( "_" ) }
+        row.accuracy_match  = match
+        row.accuracy_detail = detail
+        if done % COMMIT_EVERY == 0: session.commit()
+    session.commit()
     return counts
 
 
@@ -125,14 +174,17 @@ def main( argv=None, session_factory=None ):
         - returns 0
     """
     parser = argparse.ArgumentParser( description="Rescore old multiple-choice rows left unscored as empty_answers." )
-    parser.add_argument( "--write", action="store_true", help="store the new scores; without it nothing is written" )
+    parser.add_argument( "--write", action="store_true", help="dump the old values, then store the new scores; without it nothing is written" )
+    parser.add_argument( "--dump-path", default=None, help="the dump file for --write; default io/rescore-empty-answers-mc-<UTC stamp>.jsonl" )
     args = parser.parse_args( argv )
     if session_factory is None:
         from cosa.rest.db.database import get_db as session_factory
+    dump_path = ( args.dump_path if args.dump_path is not None else default_dump_path() ) if args.write else None
     with session_factory() as session:
-        counts = rescore( session, write=args.write )
+        counts = rescore( session, write=args.write, dump_path=dump_path )
     print( f"mode: {'WRITE' if args.write else 'report only'}" )
     for key in sorted( counts ): print( f"{key:32} {counts[ key ]}" )
+    if args.write: print( f"dump file: {dump_path}" )
     return 0
 
 

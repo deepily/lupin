@@ -22,8 +22,8 @@ PRED_COMMIT = { "answers": { "Commit": "Commit and push" } }
 def stored( answers ): return { "value": json.dumps( { "answers": answers } ) }
 
 
-def row( actual, predicted ):
-    return SimpleNamespace( actual_value=actual, predicted_value=predicted, accuracy_match=None,
+def row( actual, predicted, n=0 ):
+    return SimpleNamespace( id=f"row-{n}", notification_id=f"note-{n}", actual_value=actual, predicted_value=predicted, accuracy_match=None,
                             accuracy_detail={ "reason": "empty_answers" }, responded_at="2026-11-01" )
 
 
@@ -80,19 +80,19 @@ def test_a_report_run_counts_every_outcome_and_writes_nothing():
     assert [ ( r.actual_value, r.accuracy_match, r.accuracy_detail ) for r in rows ] == before and session.commits == 0
 
 
-def test_a_write_run_stores_the_score_keeps_responded_at_and_skips_the_rest():
+def test_a_write_run_stores_the_score_keeps_responded_at_and_skips_the_rest( tmp_path ):
     scored, bare = row( stored( { "Commit": "Commit and push" } ), PRED_COMMIT ), row( { "value": "Approve" }, PRED_COMMIT )
     session = FakeSession( [ scored, bare ] )
-    rm.rescore( session, write=True )
+    rm.rescore( session, write=True, dump_path=str( tmp_path / "d.jsonl" ) )
     assert scored.actual_value == { "answers": { "Commit": "Commit and push" } } and scored.accuracy_match is True
     assert scored.accuracy_detail[ "matches" ] == 1 and scored.responded_at == "2026-11-01"
     assert bare.accuracy_match is None and bare.accuracy_detail == { "reason": "empty_answers" } and session.commits == 1
 
 
-def test_a_write_run_commits_in_chunks(monkeypatch):
+def test_a_write_run_commits_in_chunks( monkeypatch, tmp_path ):
     monkeypatch.setattr( rm, "COMMIT_EVERY", 2 )
     session = FakeSession( [ row( stored( { "Commit": "x" } ), PRED_COMMIT ) for _ in range( 5 ) ] )
-    rm.rescore( session, write=True )
+    rm.rescore( session, write=True, dump_path=str( tmp_path / "d.jsonl" ) )
     assert session.commits == 3                                    # at rows 2 and 4, then the final commit
 
 
@@ -109,10 +109,13 @@ def test_main_prints_report_only_counts_and_returns_zero(capsys):
     assert "mode: report only" in out and "match" in out and session.commits == 0
 
 
-def test_main_write_flag_writes(capsys):
+def test_main_write_flag_writes( capsys, tmp_path ):
     session = FakeSession( [ row( stored( { "Commit": "Commit and push" } ), PRED_COMMIT ) ] )
-    assert rm.main( [ "--write" ], session_factory=lambda: session ) == 0
-    assert "mode: WRITE" in capsys.readouterr().out and session.commits == 1 and session.rows[ 0 ].accuracy_match is True
+    dump = tmp_path / "out" / "dump.jsonl"
+    assert rm.main( [ "--write", "--dump-path", str( dump ) ], session_factory=lambda: session ) == 0
+    out = capsys.readouterr().out
+    assert "mode: WRITE" in out and f"dump file: {dump}" in out and session.commits == 1 and session.rows[ 0 ].accuracy_match is True
+    assert dump.exists()
 
 
 def test_main_opens_the_real_session_factory_when_none_is_given(monkeypatch, capsys):
@@ -129,3 +132,54 @@ def test_a_failed_import_exits_3_with_a_fatal_line(monkeypatch, capsys):
     again = importlib.util.module_from_spec( spec )
     with pytest.raises( SystemExit ) as exit_info: spec.loader.exec_module( again )
     assert exit_info.value.code == 3 and "FATAL: import failed" in capsys.readouterr().err
+
+
+def test_a_write_run_dumps_the_old_values_before_any_row_changes( tmp_path ):
+    old_actual = stored( { "Commit": "Commit only" } )
+    changed, bare = row( old_actual, PRED_COMMIT, 1 ), row( { "value": "Approve" }, PRED_COMMIT, 2 )
+    dump = tmp_path / "dump.jsonl"
+
+    class WatchedRow( SimpleNamespace ):
+        def __setattr__( self, name, value ):
+            if name == "actual_value" and "actual_value" in self.__dict__: assert dump.exists(), "a row changed before the dump file existed"
+            super().__setattr__( name, value )
+
+    changed = WatchedRow( **vars( changed ) )
+
+    class WatchedSession( FakeSession ):
+        def commit( self ):
+            assert dump.exists(), "a commit ran before the dump file existed"
+            super().commit()
+
+    counts = rm.rescore( WatchedSession( [ changed, bare ] ), write=True, dump_path=str( dump ) )
+    lines  = [ json.loads( line ) for line in dump.read_text().splitlines() ]
+    assert counts[ "dumped" ] == 1 and len( lines ) == 1
+    assert lines[ 0 ] == { "id": "row-1", "notification_id": "note-1", "actual_value": old_actual, "accuracy_match": None, "accuracy_detail": { "reason": "empty_answers" } }
+    assert changed.actual_value == { "answers": { "Commit": "Commit only" } }
+
+
+def test_a_failed_dump_leaves_every_row_untouched_and_commits_nothing( tmp_path ):
+    target  = row( stored( { "Commit": "Commit only" } ), PRED_COMMIT )
+    session = FakeSession( [ target ] )
+    blocker = tmp_path / "a-file"
+    blocker.write_text( "x" )
+    with pytest.raises( OSError ): rm.rescore( session, write=True, dump_path=str( blocker / "dump.jsonl" ) )      # a file where the directory should be
+    assert target.accuracy_match is None and target.actual_value == stored( { "Commit": "Commit only" } ) and session.commits == 0
+
+
+def test_a_report_run_writes_no_dump( tmp_path ):
+    dump = tmp_path / "dump.jsonl"
+    rm.rescore( FakeSession( [ row( stored( { "Commit": "x" } ), PRED_COMMIT ) ] ), dump_path=str( dump ) )
+    assert not dump.exists()
+
+
+def test_the_default_dump_path_is_a_stamped_file_under_the_project_io_directory( monkeypatch ):
+    monkeypatch.setattr( rm.cu, "get_project_root", lambda: "/proj" )
+    path = rm.default_dump_path()
+    assert path.startswith( "/proj/io/rescore-empty-answers-mc-" ) and path.endswith( "Z.jsonl" )
+
+
+def test_a_write_run_without_a_dump_path_uses_the_default( monkeypatch, tmp_path ):
+    monkeypatch.setattr( rm, "default_dump_path", lambda: str( tmp_path / "default.jsonl" ) )
+    rm.rescore( FakeSession( [ row( stored( { "Commit": "x" } ), PRED_COMMIT ) ] ), write=True )
+    assert ( tmp_path / "default.jsonl" ).exists()
