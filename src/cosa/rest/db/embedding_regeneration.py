@@ -126,6 +126,43 @@ REGEN_SPECS: List[RegenSpec] = [
                "question_embedding",     "question_embedding_regen",     "prose" ),
 ]
 
+# Row 942d2b41. With the INI key `io table capture embeddings` False, the
+# input_and_output vectors were cleared to NULL (cleared 6 Nov 2026, row b08f6dd9),
+# and fill selects by source text, not by a NULL vector, so it would re-embed every
+# row. The simplest honest fix is to skip the whole table while the switch is off.
+CAPTURE_SWITCH_TABLE = "input_and_output"
+
+
+def capture_embeddings_enabled( config_mgr ) -> bool:
+    """
+    Read the INI key that says whether input_and_output rows carry vectors.
+
+    Requires:
+        - config_mgr has a ConfigurationManager-style get( key, default=, return_type= )
+
+    Ensures:
+        - returns the key's boolean value, True when the key is absent (the code default,
+          the same default InputAndOutputTable.insert_io_row uses)
+    """
+    return config_mgr.get( "io table capture embeddings", default=True, return_type="boolean" )
+
+
+def active_specs( capture_embeddings: bool, specs: Optional[Sequence[RegenSpec]] = None ) -> List[RegenSpec]:
+    """
+    Drop the input_and_output specs when their vectors were cleared and capture is off.
+
+    Requires:
+        - capture_embeddings is a bool; specs is a sequence of RegenSpec or None for REGEN_SPECS
+
+    Ensures:
+        - returns every spec when capture_embeddings is True
+        - returns the specs whose table is not input_and_output when it is False
+    """
+    specs = REGEN_SPECS if specs is None else specs
+    if capture_embeddings: return list( specs )
+    return [ spec for spec in specs if spec.table != CAPTURE_SWITCH_TABLE ]
+
+
 # Rows that exist to be wrong. `clamp-001` ("non-unit vector", norm exactly 3.0)
 # is a test fixture asserting the out-of-range clamp; regenerating it into a real
 # vector would silently disarm whatever asserts on it.
@@ -672,13 +709,13 @@ def _probe_busy( url=None ):   # pragma: no cover - live HTTP boundary
         return None
 
 
-def _plan( session, prefix="" ):   # pragma: no cover - live DB boundary
-    """Count what would be regenerated per spec. Issues SELECTs only."""
+def _plan( session, prefix="", specs=None ):   # pragma: no cover - live DB boundary
+    """Count what would be regenerated per spec, SELECTs only; specs defaults to REGEN_SPECS."""
     from sqlalchemy import text as sql_text
 
     grand_total = 0
     print( f"{'spec':12} {'table':22} {'to regen':>12} {'missing vec':>12} {'no text':>9}" )
-    for spec in REGEN_SPECS:
+    for spec in ( REGEN_SPECS if specs is None else specs ):
         table   = qualify( spec.table, prefix )
         # `excluded` keeps plan's headline count honest against what fill will
         # actually attempt — an excluded row is not an embedding call anyone owes.
@@ -926,9 +963,12 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
     """Open a session, dispatch the subcommand, print a report. Returns exit code."""
     from cosa.rest.db.database import get_db
 
-    specs = [ spec for spec in REGEN_SPECS if only is None or spec.label == only ]
+    from cosa.config.configuration_manager import ConfigurationManager
+    capture = capture_embeddings_enabled( ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+    if not capture: print( f"  io table capture embeddings = False: skipping {CAPTURE_SWITCH_TABLE} (its vectors were cleared)" )
+    specs = [ spec for spec in active_specs( capture ) if only is None or spec.label == only ]
     if not specs:
-        print( f"no spec matches --only={only!r}; valid: {[ s.label for s in REGEN_SPECS ]}" )
+        print( f"no spec matches --only={only!r}; valid: {[ s.label for s in active_specs( capture ) ]}" )
         return 1
 
     target = prefix or "LIVE TABLES"
@@ -936,7 +976,7 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
 
     with get_db() as session:
         if command == "plan":
-            _plan( session, prefix )
+            _plan( session, prefix, active_specs( capture ) )
             return 0
 
         if command == "ensure-columns":
