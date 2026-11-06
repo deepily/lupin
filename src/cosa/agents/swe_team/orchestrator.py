@@ -255,7 +255,11 @@ class SweTeamOrchestrator:
                     for cat in ( "deployment", "destructive", "architecture" ) if f"{cat}_cap_level" in swe_cfg
                 }
 
+                # INI audit rate; a key absent (INI read failed) keeps the strategy's own default
+                audit_kwargs = { "l4_audit_rate": proxy_cfg[ "l4_audit_sample_rate" ] } if "l4_audit_sample_rate" in proxy_cfg else {}
+
                 self.proxy = EngineeringStrategy(
+                    **audit_kwargs,
                     cap_levels       = cap_levels,
                     trust_tracker    = trust_tracker,
                     circuit_breaker  = circuit_breaker,
