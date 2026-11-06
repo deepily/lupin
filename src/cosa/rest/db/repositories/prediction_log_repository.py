@@ -11,10 +11,34 @@ from datetime import datetime, timezone, timedelta
 import uuid
 
 from sqlalchemy.orm import Session
+import sqlalchemy as sa
 from sqlalchemy import func, and_
 
 from cosa.rest.db.repositories.base import BaseRepository
 from cosa.rest.postgres_models import PredictionLog
+
+
+def legacy_similarity_clause():
+    """
+    SQL condition that is true for a row scored before similarity became a true cosine.
+
+    Those rows stored a similarity above 1, a bare dot product of unnormalised vectors.
+    Their match flag says nothing about the 0.85 threshold.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - Returns a SQLAlchemy boolean expression over PredictionLog
+        - True when accuracy_detail.similarity ( open_ended ) or accuracy_detail.avg_similarity
+          ( open_ended_batch ) is a number above 1.0
+        - NULL, never True, for rows with no such number
+    """
+    detail = PredictionLog.accuracy_detail
+    return sa.or_(
+        sa.cast( detail[ "similarity" ].astext,     sa.Float ) > 1.0,
+        sa.cast( detail[ "avg_similarity" ].astext, sa.Float ) > 1.0,
+    )
 
 
 class PredictionLogRepository( BaseRepository[PredictionLog] ):
@@ -137,6 +161,8 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             - Returns dict with total_predictions, total_responded, accuracy_rate,
               and per-category/per-type breakdowns
             - Only includes predictions with actual outcomes for accuracy calc
+            - Leaves out rows scored with a similarity above 1 ( see legacy_similarity_clause );
+              their count is returned as excluded_legacy_similarity
         """
         cutoff = datetime.now( timezone.utc ) - timedelta( days=window_days )
 
@@ -146,7 +172,15 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
         if response_type: filters.append( PredictionLog.response_type == response_type )
         if sender_id:     filters.append( PredictionLog.sender_id == sender_id )
 
-        combined_filter = and_( *filters )
+        window_filter = and_( *filters )
+
+        excluded_legacy = self.session.query( func.count( PredictionLog.id ) ).filter(
+            window_filter,
+            legacy_similarity_clause()
+        ).scalar() or 0
+
+        # coalesce: a row with no similarity number is NULL here and must stay in
+        combined_filter = and_( window_filter, sa.not_( func.coalesce( legacy_similarity_clause(), False ) ) )
 
         # Total predictions
         total_predictions = self.session.query( func.count( PredictionLog.id ) ).filter(
@@ -184,6 +218,7 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
             "total_responded"   : total_responded,
             "total_correct"     : total_correct,
             "accuracy_rate"     : round( accuracy_rate, 4 ),
+            "excluded_legacy_similarity" : excluded_legacy,
             "avg_confidence"    : round( float( avg_confidence ), 4 ),
             "by_category"       : category_breakdown,
             "by_response_type"  : type_breakdown,
