@@ -222,6 +222,9 @@ class SweTeamOrchestrator:
                     cfg_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
                     proxy_cfg = trust_proxy_config_from_config_mgr( cfg_mgr )
                     swe_cfg   = swe_proxy_config_from_config_mgr( cfg_mgr )
+                except ValueError:
+                    # A key with a bad value (an unknown trust model, say) is refused at startup, not run on defaults
+                    raise
                 except Exception as e:
                     logger.warning( f"INI config read failed, using defaults: {e}" )
 
