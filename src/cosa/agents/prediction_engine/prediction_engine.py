@@ -30,6 +30,7 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_CBR_TOP_K,
     DEFAULT_CBR_SIMILARITY_THRESHOLD,
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_YES_NO_NO_MARGIN,
     DEFAULT_LANCEDB_TABLE,
     DEFAULT_EMBEDDING_FALLBACK_PORT,
     DEFAULT_OPEN_ENDED_CBR_TOP_K,
@@ -104,6 +105,7 @@ class PredictionEngine:
             self.cbr_top_k            = config_mgr.get( "prediction engine cbr top k", default=str( DEFAULT_CBR_TOP_K ), return_type="int" )
             self.similarity_threshold = config_mgr.get( "prediction engine cbr similarity threshold", default=str( DEFAULT_CBR_SIMILARITY_THRESHOLD ), return_type="float" )
             self.confidence_threshold = config_mgr.get( "prediction engine confidence threshold", default=str( DEFAULT_CONFIDENCE_THRESHOLD ), return_type="float" )
+            self.yes_no_no_margin     = config_mgr.get( "prediction engine yes no no margin", default=str( DEFAULT_YES_NO_NO_MARGIN ), return_type="float" )
             self.lancedb_table        = config_mgr.get( "prediction engine lancedb table", default=DEFAULT_LANCEDB_TABLE )
             self._server_port         = config_mgr.get( "prediction engine embedding fallback port", default=str( DEFAULT_EMBEDDING_FALLBACK_PORT ), return_type="int" )
             # Open-ended prediction config
@@ -122,6 +124,7 @@ class PredictionEngine:
             self.cbr_top_k            = DEFAULT_CBR_TOP_K
             self.similarity_threshold = DEFAULT_CBR_SIMILARITY_THRESHOLD
             self.confidence_threshold = DEFAULT_CONFIDENCE_THRESHOLD
+            self.yes_no_no_margin     = DEFAULT_YES_NO_NO_MARGIN
             self.lancedb_table        = DEFAULT_LANCEDB_TABLE
             self._server_port         = DEFAULT_EMBEDDING_FALLBACK_PORT
             # Open-ended prediction defaults
@@ -386,7 +389,8 @@ class PredictionEngine:
 
         Ensures:
             - Retrieves top-k similar past yes/no responses
-            - Majority vote on "yes"/"no" values
+            - Prior-weighted vote on "yes"/"no" values: "no" wins only when its tally
+              beats the yes tally by at least yes_no_no_margin, otherwise "yes"
             - Confidence = max_similarity * consistency
             - Extracts qualifier from highest-similarity winning-side case
             - Returns cold_start if no similar cases found
@@ -445,8 +449,16 @@ class PredictionEngine:
 
         # Winner = highest (most positive) tally; consistency bounded to [0,1] via
         # positive-mass normalization so negative (steer-away) votes can't break it.
-        winner      = max( votes, key=votes.get )
-        consistency = self._bounded_consistency( votes, winner )
+        winner = max( votes, key=votes.get )
+
+        # D14 prior: answers are about 79% yes, and a plain majority said "no" far too
+        # often (35% right). "no" must beat "yes" by yes_no_no_margin to stand.
+        no_suppressed = False
+        if winner == "no" and votes[ "no" ] - votes.get( "yes", 0.0 ) < self.yes_no_no_margin:
+            winner        = "yes"
+            no_suppressed = True
+
+        consistency = self._bounded_consistency( { **votes, "yes": votes.get( "yes", 0.0 ) }, winner )
 
         # Confidence = max_similarity * consistency
         confidence = max_similarity * consistency
@@ -480,6 +492,7 @@ class PredictionEngine:
                 "votes"                : votes,
                 "max_similarity"       : round( max_similarity, 3 ),
                 "qualifier_similarity" : round( qualifier_similarity / 100.0, 3 ) if winning_qualifier else None,
+                "no_suppressed_by_prior" : no_suppressed,
             }
         )
 

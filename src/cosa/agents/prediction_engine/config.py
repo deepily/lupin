@@ -14,6 +14,13 @@ DEFAULT_CBR_TOP_K              = 5
 DEFAULT_CBR_SIMILARITY_THRESHOLD = 0.75
 DEFAULT_CONFIDENCE_THRESHOLD   = 0.60
 
+# Yes/no prior-weighted vote. "no" is predicted only when the
+# no tally beats the yes tally by at least this margin (in vote-weight units; an
+# ordinary neighbour counts 1.0). 1.35 = ln( 527 / 137 ), the log-odds of the 79.4%
+# yes prior (527 yes of 664 answered rows). With top-5 unit votes it
+# means a no-win needs a lead of 2 or more.
+DEFAULT_YES_NO_NO_MARGIN       = 1.35
+
 # Prediction-hint thumbs up/down voting → human-confirmed training signal.
 # A thumbs-up case (ratification_state="approved") contributes APPROVED_WEIGHT to its
 # decision_value in the CBR majority tally; a thumbs-down case ("rejected") casts a

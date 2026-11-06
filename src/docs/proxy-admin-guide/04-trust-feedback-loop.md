@@ -72,3 +72,15 @@ The counts are illustrative; they follow the shipped thresholds (Level 2 at 50 w
 | **Day 7** | A burst of rejections takes the rate above 15%. | Breaker trips, category drops to Level 1 and defers to you for the cooldown |
 
 ---
+
+### How a Yes/No Prediction Is Made
+
+For a yes/no question the proxy looks up the most similar past questions and lets them vote. Each past answer counts 1.0. A thumbs-up answer counts more, and a thumbs-down answer counts against its value.
+
+Answers are about 79% "yes" (527 of 664 answered rows, measured 5 Nov 2026). A plain majority said "no" too often and was right only 35% of the time. The proxy now predicts "no" only when the "no" tally beats the "yes" tally by at least a margin. Otherwise it predicts "yes".
+
+| Setting (`lupin-app.ini`) | Default | Meaning |
+|---|---|---|
+| `prediction engine yes no no margin` | `1.35` | Lead the "no" tally needs over the "yes" tally. With the default 5 neighbours that is a lead of 2 or more. 1.35 is ln(527/137), the log-odds of the yes prior. `0` restores a plain majority. |
+
+When the margin overturns a "no", the stored prediction carries `no_suppressed_by_prior: true` in its metadata. A "neither" answer still counts as "no" in the vote.
