@@ -56,8 +56,8 @@ def _ctx():
 
 
 def _orch( *, config=None, debug=False, **over ):
-    # Proxy init imports EngineeringStrategy; patch it to a harmless mock by default.
-    with patch( "cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy",
+    # Proxy init builds EngineeringStrategy through the shared builder; patch it to a harmless mock by default.
+    with patch( "cosa.agents.swe_team.proxy.EngineeringStrategy",
                 MagicMock() ):
         return BFEOrchestrator(
             dead_job_context = over.get( "ctx", _ctx() ),
@@ -90,7 +90,7 @@ def _fix( **over ):
 class TestInit( unittest.TestCase ):
 
     def test_proxy_init_success_debug( self ):
-        with patch( "cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy",
+        with patch( "cosa.agents.swe_team.proxy.EngineeringStrategy",
                     MagicMock( return_value="PROXY" ) ):
             orch = BFEOrchestrator(
                 dead_job_context=_ctx(), extra_context="", config=BugFixExpediterConfig(),
@@ -102,7 +102,7 @@ class TestInit( unittest.TestCase ):
     def test_proxy_import_error_defaults_none( self ):
         # Setting the module to None makes `from ... import EngineeringStrategy` raise ImportError.
         with patch.dict( sys.modules,
-                         { "cosa.agents.swe_team.proxy.engineering_strategy": None } ):
+                         { "cosa.agents.swe_team.strategy_builder": None } ):
             orch = BFEOrchestrator(
                 dead_job_context=_ctx(), extra_context="", config=BugFixExpediterConfig(),
                 session_id="s", job_id="bfe-1", debug=True,
@@ -110,7 +110,7 @@ class TestInit( unittest.TestCase ):
         self.assertIsNone( orch.proxy )
 
     def test_proxy_generic_exception_defaults_none( self ):
-        with patch( "cosa.agents.swe_team.proxy.engineering_strategy.EngineeringStrategy",
+        with patch( "cosa.agents.swe_team.proxy.EngineeringStrategy",
                     MagicMock( side_effect=ValueError( "boom" ) ) ):
             orch = BFEOrchestrator(
                 dead_job_context=_ctx(), extra_context="", config=BugFixExpediterConfig(),

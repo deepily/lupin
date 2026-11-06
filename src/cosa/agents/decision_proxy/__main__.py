@@ -64,17 +64,11 @@ def _load_swe_team_profile( responder, debug=False ):
     # factory whose `accepted_senders` (INI-overridable, defaulting to the three
     # swe.* addresses) is the allowlist.
     try:
-        from cosa.agents.swe_team.proxy import EngineeringStrategy
-        from cosa.agents.swe_team.proxy.config import swe_proxy_config_from_config_mgr
-        from cosa.config.configuration_manager import ConfigurationManager
+        from cosa.agents.swe_team.strategy_builder import build_ini_engineering_strategy
 
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        swe_cfg    = swe_proxy_config_from_config_mgr( config_mgr )
-
-        strategy = EngineeringStrategy(
-            accepted_senders = swe_cfg[ "accepted_senders" ],
-            trust_mode       = responder.trust_mode,
-            debug            = debug,
+        strategy, swe_cfg = build_ini_engineering_strategy(
+            trust_mode = responder.trust_mode,
+            debug      = debug,
         )
         responder.set_domain_strategy( strategy )
         responder.accepted_senders = swe_cfg[ "accepted_senders" ]
