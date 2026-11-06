@@ -9,17 +9,20 @@ silently.
 
 import re
 
-URL_OMITTED = "URL omitted"
+URL_OMITTED   = "URL omitted"
+EMAIL_OMITTED = "email address omitted"
 
 # Alternative 1: [label](target) and ![alt](src), optionally with a "title" after the target.
 #   label : text, or text holding one level of [nested] brackets
 #   target: found by _scan_target, which counts parentheses, so any nesting depth works
 # Alternative 2: a bare http or https address. Trailing sentence punctuation is not part of it.
+# Alternative 3 (group 3): a bare mailto: address, said as "email address omitted".
 # Each character class stops at the closing bracket,
 # so two links in one string yield two labels, never one swallowed span.
 _LINK_OR_BARE_URL = re.compile(
     r'(!?\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(\s*)'
     r'|https?://[^\s<>\[\]()]*[^\s<>\[\]().,;:!?\'"]'
+    r'|(?i:(mailto:[^\s<>\[\]()]*[^\s<>\[\]().,;:!?\'"]))'
 )
 _TITLE_AND_CLOSE = re.compile( r'(?:\s+"[^"]*")?\s*\)' )
 _ADDRESS_START   = re.compile( r'(?:https?://|mailto:)', re.IGNORECASE )
@@ -91,12 +94,15 @@ def _angle_target_end( text, start ):
 
     Ensures:
         - the target runs to the first ">", blanks included, and may be followed by a title
-        - returns None when there is no ">" or no closing ")" after it
+        - text between the ">" and the link's closing ")" is part of the target and never spoken,
+          as for any address target
+        - returns None when there is no ">", or nothing but a blank or ")" follows it
     """
     close = text.find( ">", start )
     if close == -1: return None
     closing = _TITLE_AND_CLOSE.match( text, close + 1 )
-    return None if closing is None else closing.end()
+    if closing is not None: return closing.end()
+    return _scan_run( text, close + 1, True )
 
 
 def _scan_target( text, start ):
@@ -127,6 +133,21 @@ def _scan_target( text, start ):
     if text.startswith( "<", start ):
         angle_end = _angle_target_end( text, start )
         if angle_end is not None: return angle_end
+    return _scan_run( text, start, _ADDRESS_START.match( text, start ) is not None )
+
+
+def _scan_run( text, start, address ):
+    """
+    Find where the link target whose unquoted part begins at start ends.
+
+    Requires:
+        - text is a str and start is the index just after "](" and any blank space,
+          or just after the ">" of an "<...>" target
+        - address is True when the target is an address, so its blanks never end it
+
+    Ensures:
+        - the guarantees of _scan_target hold for the text from start on
+    """
     size  = len( text )
     index = start
     units = 0
@@ -153,7 +174,6 @@ def _scan_target( text, start ):
     if units == 0: return None
     closing = _TITLE_AND_CLOSE.match( text, index )
     if closing is not None: return closing.end()
-    address = _ADDRESS_START.match( text, start ) is not None
     if text.find( ")", index ) == -1:
         run_end = _blank_free_run_end( text, start )
         return max( run_end, index ) if address else run_end
@@ -173,8 +193,10 @@ def _spoken_form( match ):
     Ensures:
         - a link with a label gives "label, URL omitted"
         - a link with an empty label gives "URL omitted"
-        - a bare address gives "URL omitted"
+        - a bare http or https address gives "URL omitted"
+        - a bare mailto: address gives "email address omitted"
     """
+    if match.group( 3 ) is not None: return EMAIL_OMITTED
     label = match.group( 2 )
     if label: return f"{label}, {URL_OMITTED}"
     return URL_OMITTED
@@ -192,6 +214,7 @@ def strip_markdown_links_for_speech( text ):
         - "![alt](src)" becomes "alt, URL omitted"
         - a link with an empty label becomes "URL omitted"
         - a bare http or https address becomes "URL omitted"
+        - a bare mailto: address becomes "email address omitted"
         - "[ref][id]" references and text without links are unchanged
         - the result is not stripped of surrounding whitespace; the caller decides
 
