@@ -50,7 +50,9 @@ STRATEGY_OPTION_SCORING        = "option_embedding_scoring"
 STRATEGY_COLD_START            = "cold_start"
 
 # Accuracy comparison thresholds
-OPEN_ENDED_SIMILARITY_THRESHOLD = 0.85
+# Default for INI key "prediction engine open ended match threshold" (Rick's ruling 6 Nov 2026, row 35a79890;
+# fitted on 133 labelled pairs: precision 0.79, recall 0.65 at 0.75, against recall 0.29 at 0.85)
+OPEN_ENDED_SIMILARITY_THRESHOLD = 0.75
 MULTI_SELECT_JACCARD_THRESHOLD  = 0.50
 
 # Response type identifiers (matching cosa-voice MCP server)

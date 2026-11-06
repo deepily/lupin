@@ -6,6 +6,7 @@ Used by PredictionEngine.record_outcome() to populate accuracy_match and accurac
 in the prediction_log table.
 """
 
+from functools import partial
 from typing import Tuple, Dict, Any, Optional
 
 from cosa.agents.prediction_engine.config import (
@@ -171,7 +172,7 @@ def compare_multiple_choice_multi( predicted: Optional[Dict], actual: Optional[D
     return ( match, detail )
 
 
-def compare_open_ended( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple[Optional[bool], Dict[str, Any]]:
+def compare_open_ended( predicted: Optional[Dict], actual: Optional[Dict], threshold: Optional[float] = None ) -> Tuple[Optional[bool], Dict[str, Any]]:
     """
     Compare open-ended prediction against actual response.
 
@@ -183,10 +184,13 @@ def compare_open_ended( predicted: Optional[Dict], actual: Optional[Dict] ) -> T
         - predicted and actual are dicts with "value" key
         - Or None
         - actual may contain transient "_embedding_similarity" float from enrichment
+        - threshold is a float in [0, 1], or None to use OPEN_ENDED_SIMILARITY_THRESHOLD
 
     Ensures:
         - Returns (match_bool, detail_dict)
-        - match is True if embedding similarity >= OPEN_ENDED_SIMILARITY_THRESHOLD (0.85)
+        - match is True if embedding similarity >= threshold (default 0.75; INI key
+          "prediction engine open ended match threshold" supplies it in production)
+        - detail[ "threshold" ] records the threshold actually applied
         - Falls back to exact string match if no embedding similarity available
     """
     if predicted is None or actual is None:
@@ -195,14 +199,16 @@ def compare_open_ended( predicted: Optional[Dict], actual: Optional[Dict] ) -> T
     predicted_value = predicted.get( "value", "" )
     actual_value    = actual.get( "value", "" )
 
+    if threshold is None: threshold = OPEN_ENDED_SIMILARITY_THRESHOLD
+
     # Strategy 1: Embedding cosine similarity (injected by _enrich_with_embedding_similarity)
     embedding_sim = actual.get( "_embedding_similarity" )
     if isinstance( embedding_sim, ( int, float ) ):
-        match = embedding_sim >= OPEN_ENDED_SIMILARITY_THRESHOLD
+        match = embedding_sim >= threshold
         detail = {
             "method"     : "embedding_similarity",
             "similarity" : round( float( embedding_sim ), 4 ),
-            "threshold"  : OPEN_ENDED_SIMILARITY_THRESHOLD,
+            "threshold"  : threshold,
             "predicted"  : predicted_value[ :100 ],
             "actual"     : actual_value[ :100 ],
         }
@@ -220,7 +226,7 @@ def compare_open_ended( predicted: Optional[Dict], actual: Optional[Dict] ) -> T
     return ( match, detail )
 
 
-def compare_open_ended_batch( predicted: Optional[Dict], actual: Optional[Dict] ) -> Tuple[Optional[bool], Dict[str, Any]]:
+def compare_open_ended_batch( predicted: Optional[Dict], actual: Optional[Dict], threshold: Optional[float] = None ) -> Tuple[Optional[bool], Dict[str, Any]]:
     """
     Compare open_ended_batch prediction against actual response.
 
@@ -231,9 +237,11 @@ def compare_open_ended_batch( predicted: Optional[Dict], actual: Optional[Dict] 
         - predicted and actual are dicts with "answers" key
         - Or None
         - actual may contain "_embedding_similarity" dict of per-header floats
+        - threshold is a float in [0, 1], or None to use OPEN_ENDED_SIMILARITY_THRESHOLD
 
     Ensures:
         - Returns (match_bool, detail_dict)
+        - detail[ "threshold" ] records the threshold actually applied
         - Per-header comparison with aggregated match decision
         - Falls back to exact string match per header if no embedding similarity
     """
@@ -249,6 +257,8 @@ def compare_open_ended_batch( predicted: Optional[Dict], actual: Optional[Dict] 
     # Per-header embedding similarity (injected by _enrich_with_embedding_similarity)
     embedding_sims = actual.get( "_embedding_similarity" )
     use_embedding  = isinstance( embedding_sims, dict ) and len( embedding_sims ) > 0
+
+    if threshold is None: threshold = OPEN_ENDED_SIMILARITY_THRESHOLD
 
     header_details = {}
     similarity_sum = 0.0
@@ -282,18 +292,18 @@ def compare_open_ended_batch( predicted: Optional[Dict], actual: Optional[Dict] 
         header_count += 1
 
     avg_similarity = similarity_sum / header_count if header_count > 0 else 0.0
-    match          = avg_similarity >= OPEN_ENDED_SIMILARITY_THRESHOLD
+    match          = avg_similarity >= threshold
 
     detail = {
         "avg_similarity"  : round( avg_similarity, 4 ),
-        "threshold"       : OPEN_ENDED_SIMILARITY_THRESHOLD,
+        "threshold"       : threshold,
         "header_details"  : header_details,
     }
 
     return ( match, detail )
 
 
-def get_comparator( response_type: str, actual_value: Any = None ):
+def get_comparator( response_type: str, actual_value: Any = None, open_ended_threshold: Optional[float] = None ):
     """
     Return the appropriate comparator function for a given response type.
 
@@ -301,9 +311,12 @@ def get_comparator( response_type: str, actual_value: Any = None ):
         - response_type is a valid response type string
         - actual_value: optional actual response dict for data-driven dispatch
           (used to detect multi-select multiple_choice)
+        - open_ended_threshold: float in [0, 1] or None (None keeps OPEN_ENDED_SIMILARITY_THRESHOLD)
 
     Ensures:
         - Returns a callable (predicted, actual) -> (match, detail)
+        - When open_ended_threshold is given, the open-ended and batch comparators
+          (including the unknown-type fallback) are bound to it
         - For multiple_choice: inspects actual_value answers for list values
           to choose compare_multiple_choice_multi vs compare_multiple_choice_single
         - Returns compare_open_ended as fallback for unknown types
@@ -322,7 +335,12 @@ def get_comparator( response_type: str, actual_value: Any = None ):
         RESPONSE_TYPE_OPEN_ENDED_BATCH : compare_open_ended_batch,
     }
 
-    return comparators.get( response_type, compare_open_ended )
+    comparator = comparators.get( response_type, compare_open_ended )
+
+    if open_ended_threshold is not None and comparator in ( compare_open_ended, compare_open_ended_batch ):
+        return partial( comparator, threshold=open_ended_threshold )
+
+    return comparator
 
 
 def _extract_binary( value: str ) -> str:

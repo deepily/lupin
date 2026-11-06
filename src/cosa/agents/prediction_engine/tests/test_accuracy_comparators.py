@@ -453,3 +453,45 @@ def test_extract_qualifier_with_closing_bracket():
 def test_extract_qualifier_unclosed_marker_returns_rest():
     # marker present, no closing "]" → returns text from start to end of string
     assert _extract_qualifier( "yes [comment: unclosed tail" ) == "unclosed tail"
+
+
+# =========================================================================== #
+# open-ended match threshold (INI key "prediction engine open ended match threshold", row 35a79890)
+# =========================================================================== #
+def test_default_open_ended_threshold_is_0_75():
+    assert OPEN_ENDED_SIMILARITY_THRESHOLD == 0.75
+
+
+def test_open_ended_default_threshold_matches_at_0_78_and_misses_at_0_70():
+    hit,  d_hit  = compare_open_ended( { "value": "a" }, { "value": "b", "_embedding_similarity": 0.78 } )
+    miss, d_miss = compare_open_ended( { "value": "a" }, { "value": "b", "_embedding_similarity": 0.70 } )
+    assert hit is True and miss is False
+    assert d_hit[ "threshold" ] == 0.75 and d_miss[ "threshold" ] == 0.75
+
+
+def test_open_ended_explicit_threshold_overrides_default():
+    match, detail = compare_open_ended( { "value": "a" }, { "value": "b", "_embedding_similarity": 0.70 }, threshold=0.65 )
+    assert match is True
+    assert detail[ "threshold" ] == 0.65
+
+
+def test_open_ended_batch_explicit_threshold_overrides_default():
+    actual = { "answers": { "T": "x" }, "_embedding_similarity": { "T": 0.70 } }
+    predicted = { "answers": { "T": "y" } }
+    assert compare_open_ended_batch( predicted, actual )[ 0 ] is False
+    match, detail = compare_open_ended_batch( predicted, actual, threshold=0.65 )
+    assert match is True
+    assert detail[ "threshold" ] == 0.65
+
+
+def test_get_comparator_binds_open_ended_threshold():
+    for rt in ( "open_ended", "open_ended_batch", "unknown_type" ):
+        cmp = get_comparator( rt, open_ended_threshold=0.5 )
+        assert cmp.keywords == { "threshold": 0.5 }
+    assert get_comparator( "open_ended", open_ended_threshold=0.5 ).func is compare_open_ended
+    assert get_comparator( "open_ended_batch", open_ended_threshold=0.5 ).func is compare_open_ended_batch
+
+
+def test_get_comparator_threshold_does_not_touch_other_types():
+    assert get_comparator( "yes_no", open_ended_threshold=0.5 ) is compare_yes_no
+    assert get_comparator( "multiple_choice", open_ended_threshold=0.5 ) is compare_multiple_choice_single

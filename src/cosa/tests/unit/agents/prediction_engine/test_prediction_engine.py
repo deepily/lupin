@@ -159,6 +159,7 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine embedding fallback port"       : 1234,
                 "prediction engine open ended cbr top k"          : 7,
                 "prediction engine open ended cbr threshold"      : 0.9,
+                "prediction engine open ended match threshold"    : 0.66,
                 "prediction engine open ended llm spec key"       : "spec/x",
                 "prediction engine open ended prompt template"    : "/src/conf/p.txt",
                 "prediction hint vote approved weight"            : 2.0,
@@ -176,6 +177,7 @@ def test_init_with_config_mgr_reads_keys():
     assert eng.lancedb_table == "tbl_x"
     assert eng._server_port == 1234
     assert eng.open_ended_cbr_threshold == 0.9
+    assert eng.open_ended_match_threshold == 0.66
     assert eng._llm_spec_key == "spec/x"
     assert eng.hint_vote_approved_weight == 2.0
     assert eng.hint_vote_rejected_weight == 2.0
@@ -1131,6 +1133,23 @@ def test_record_outcome_open_ended_enriches( wired_engine, monkeypatch ):
     pr = PredictionResult( response_type="open_ended", category="c", strategy="x", predicted_value="hi" )
     wired_engine.record_outcome( "n2", pr, "hi", cfg.RESPONSE_TYPE_OPEN_ENDED )
     assert enriched == [ cfg.RESPONSE_TYPE_OPEN_ENDED ]
+
+
+def test_record_outcome_scores_open_ended_at_the_engine_match_threshold( wired_engine, monkeypatch ):
+    """record_outcome hands the engine's own match threshold to get_comparator."""
+    seen = {}
+    def fake_get_comparator( response_type, actual_value=None, open_ended_threshold=None ):
+        seen[ "threshold" ] = open_ended_threshold
+        return lambda predicted, actual: ( True, {} )
+    session = _FakeSession()
+    _patch_db( monkeypatch, session, [] )
+    monkeypatch.setattr( wired_engine, "_store_decision", lambda *a: None )
+    monkeypatch.setattr( wired_engine, "_enrich_with_embedding_similarity", lambda *a: None )
+    monkeypatch.setattr( "cosa.agents.prediction_engine.prediction_engine.get_comparator", fake_get_comparator )
+    wired_engine.open_ended_match_threshold = 0.66
+    pr = PredictionResult( response_type="open_ended", category="c", strategy="x", predicted_value="hi" )
+    wired_engine.record_outcome( "n9", pr, "hi", cfg.RESPONSE_TYPE_OPEN_ENDED )
+    assert seen[ "threshold" ] == 0.66
 
 
 def test_record_outcome_normalizes_non_str_non_dict_actual( wired_engine, monkeypatch ):

@@ -35,6 +35,7 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_EMBEDDING_FALLBACK_PORT,
     DEFAULT_OPEN_ENDED_CBR_TOP_K,
     DEFAULT_OPEN_ENDED_CBR_THRESHOLD,
+    OPEN_ENDED_SIMILARITY_THRESHOLD,
     DEFAULT_OPEN_ENDED_LLM_SPEC_KEY,
     DEFAULT_HINT_VOTING_ENABLED,
     DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD,
@@ -112,6 +113,7 @@ class PredictionEngine:
             # Open-ended prediction config
             self.open_ended_cbr_top_k      = config_mgr.get( "prediction engine open ended cbr top k", default=str( DEFAULT_OPEN_ENDED_CBR_TOP_K ), return_type="int" )
             self.open_ended_cbr_threshold  = config_mgr.get( "prediction engine open ended cbr threshold", default=str( DEFAULT_OPEN_ENDED_CBR_THRESHOLD ), return_type="float" )
+            self.open_ended_match_threshold = config_mgr.get( "prediction engine open ended match threshold", default=str( OPEN_ENDED_SIMILARITY_THRESHOLD ), return_type="float" )
             self._llm_spec_key             = config_mgr.get( "prediction engine open ended llm spec key", default=DEFAULT_OPEN_ENDED_LLM_SPEC_KEY )
             self._synthesis_prompt_path    = config_mgr.get( "prediction engine open ended prompt template", default="/src/conf/prompts/prediction-engine-open-ended-synthesis.txt" )
             # Thumbs vote weights (human-confirmed training signal)
@@ -131,6 +133,7 @@ class PredictionEngine:
             # Open-ended prediction defaults
             self.open_ended_cbr_top_k     = DEFAULT_OPEN_ENDED_CBR_TOP_K
             self.open_ended_cbr_threshold = DEFAULT_OPEN_ENDED_CBR_THRESHOLD
+            self.open_ended_match_threshold = OPEN_ENDED_SIMILARITY_THRESHOLD
             self._llm_spec_key            = DEFAULT_OPEN_ENDED_LLM_SPEC_KEY
             self._synthesis_prompt_path   = "/src/conf/prompts/prediction-engine-open-ended-synthesis.txt"
             self.hint_vote_approved_weight = DEFAULT_HINT_VOTE_APPROVED_WEIGHT
@@ -1437,7 +1440,7 @@ class PredictionEngine:
                 self._enrich_with_embedding_similarity( actual_dict, prediction_result, response_type )
 
             # Compare prediction against actual (data-driven dispatch for multi-select MC)
-            comparator = get_comparator( response_type, actual_value=actual_dict )
+            comparator = get_comparator( response_type, actual_value=actual_dict, open_ended_threshold=self.open_ended_match_threshold )
             predicted_dict = prediction_result._wrap_predicted_value()
             accuracy_match, accuracy_detail = comparator( predicted_dict, actual_dict )
 

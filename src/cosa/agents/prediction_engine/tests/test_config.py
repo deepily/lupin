@@ -49,7 +49,7 @@ def test_strategy_constants_are_distinct():
 
 
 def test_accuracy_thresholds():
-    assert cfg.OPEN_ENDED_SIMILARITY_THRESHOLD == 0.85
+    assert cfg.OPEN_ENDED_SIMILARITY_THRESHOLD == 0.75
     assert cfg.MULTI_SELECT_JACCARD_THRESHOLD  == 0.50
 
 
