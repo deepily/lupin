@@ -290,7 +290,7 @@ class TestGatedConfirmation( unittest.TestCase ):
         rows = {}
         class Row:
             def __init__( self, category ):
-                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0; self.trust_level = 1; self.circuit_breaker_state = None
+                self.category = category; self.successful_decisions = 0; self.rejected_decisions = 0; self.trust_level = 1; self.circuit_breaker_state = None; self.decision_history = None
                 from datetime import datetime, timezone
                 self.updated_at = datetime.now( timezone.utc )
         class Session:
@@ -541,6 +541,27 @@ class TestGatedConfirmation( unittest.TestCase ):
         o = _mk_orch( trust_mode="disabled" )
         o._user_email = "rick@example.com"
         self.assertEqual( o._load_trust_state(), 0 )
+
+    def test_a_stored_decision_history_reaches_the_tracker_so_old_days_age_out( self ):
+        # Row da64aaab: without the history every restored decision was stamped with updated_at.
+        from datetime import datetime, timedelta, timezone
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        now = datetime.now( timezone.utc )
+        old, fresh = ( now - timedelta( days=60 ) ).strftime( "%Y-%m-%d" ), now.strftime( "%Y-%m-%d" )
+        row = MagicMock( category="testing", successful_decisions=5, rejected_decisions=2, circuit_breaker_state=None,
+                         decision_history={ old: [ 5, 0 ], fresh: [ 0, 2 ] } )
+        row.updated_at = now
+        Repo = MagicMock(); Repo.return_value.get_all_for_user.return_value = [ row ]
+        o = _mk_orch( trust_mode="shadow" )
+        o._user_email = "rick@example.com"
+        o.proxy = EngineeringStrategy( trust_tracker=TrustTracker( rolling_window_days=30 ), trust_mode="shadow" )
+        with patch( "cosa.rest.db.database.get_db", MagicMock() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            self.assertEqual( o._load_trust_state(), 1 )
+        cat = o.proxy.trust_tracker.categories[ "testing" ]
+        self.assertEqual( ( cat.total_successes, cat.total_rejections ), ( 5, 2 ) )
+        self.assertEqual( [ ok for _, ok in cat.decisions ], [ False, False ], "the 60-day-old successes left the window" )
 
     def test_a_row_the_tracker_refuses_is_skipped_not_counted( self ):
         o = _mk_orch( trust_mode="shadow" )

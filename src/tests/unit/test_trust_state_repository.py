@@ -145,3 +145,60 @@ class TestOrchestratorPersistTrustFeedback:
         with patch( "cosa.rest.db.database.get_db", side_effect=Exception( "DB connection failed" ) ):
             # Should NOT raise
             orch._persist_trust_feedback( "deployment", False )
+
+
+# =============================================================================
+# per-day decision history (row da64aaab)
+# =============================================================================
+
+class TestDecisionHistory:
+    """update_after_ratification files each decision under its own UTC day."""
+
+    @staticmethod
+    def _state( total=0, ok=0, bad=0, history=None, updated_at=None ):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            total_decisions = total, successful_decisions = ok, rejected_decisions = bad,
+            decision_history = history, updated_at = updated_at or datetime.now( timezone.utc ),
+        )
+
+    def _ratify( self, repo, state, approved ):
+        with patch.object( repo, "get_or_create", return_value=state ):
+            repo.update_after_ratification( user_email="u@test.com", domain="swe", category="testing", approved=approved )
+
+    @staticmethod
+    def _today():
+        return datetime.now( timezone.utc ).strftime( "%Y-%m-%d" )
+
+    def test_a_new_row_starts_a_history_with_todays_decision( self, repo ):
+        state = self._state()
+        self._ratify( repo, state, True )
+        assert state.decision_history == { self._today(): [ 1, 0 ] }
+
+    def test_a_rejection_counts_in_the_second_slot_and_a_second_decision_adds_to_the_same_day( self, repo ):
+        state = self._state()
+        self._ratify( repo, state, True )
+        self._ratify( repo, state, False )
+        self._ratify( repo, state, False )
+        assert state.decision_history == { self._today(): [ 1, 2 ] }
+
+    def test_a_row_with_no_history_is_seeded_with_its_old_totals_under_its_updated_at_day( self, repo ):
+        from datetime import timedelta
+        stamp = datetime.now( timezone.utc ) - timedelta( days=5 )
+        state = self._state( total=4, ok=3, bad=1, updated_at=stamp )
+        self._ratify( repo, state, True )
+        assert state.decision_history == { stamp.strftime( "%Y-%m-%d" ): [ 3, 1 ], self._today(): [ 1, 0 ] }
+        assert state.total_decisions == 5
+
+    def test_days_past_the_retention_are_dropped_and_the_stored_dict_is_replaced_not_mutated( self, repo ):
+        from datetime import timedelta
+        from cosa.rest.db.repositories.proxy_decision_repository import DECISION_HISTORY_RETENTION_DAYS
+        now      = datetime.now( timezone.utc )
+        old_day  = ( now - timedelta( days=DECISION_HISTORY_RETENTION_DAYS + 1 ) ).strftime( "%Y-%m-%d" )
+        keep_day = ( now - timedelta( days=DECISION_HISTORY_RETENTION_DAYS - 1 ) ).strftime( "%Y-%m-%d" )
+        stored   = { old_day: [ 9, 9 ], keep_day: [ 2, 0 ] }
+        state    = self._state( total=20, ok=11, bad=9, history=stored )
+        self._ratify( repo, state, False )
+        assert state.decision_history == { keep_day: [ 2, 0 ], self._today(): [ 0, 1 ] }
+        assert state.decision_history is not stored and old_day in stored, "a new dict, so the JSONB column sees the change"
+
