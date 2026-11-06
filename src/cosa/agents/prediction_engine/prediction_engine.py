@@ -544,6 +544,51 @@ class PredictionEngine:
         except ( TypeError, KeyError, ValueError ):
             return None
 
+    @staticmethod
+    def _remap_answers_to_question( answers: dict, valid_options: Dict[str, Dict] ) -> dict:
+        """
+        Re-key a past case's answers under the new question's own headers.
+
+        A past case answered its own headers, which a new question seldom shares.
+        Each new header takes the past answer stored under the same header.
+        Failing that, it takes the first unclaimed past answer whose labels it offers.
+
+        Requires:
+            - answers: { "Past header": "Label" | ["Label", ...] } from one stored case
+            - valid_options: { "New header": { "labels": set[str], ... } } (non-empty)
+
+        Ensures:
+            - Every key of the result is a key of valid_options
+            - A past header is claimed by at most one new header, exact matches first
+            - A new header with no usable past answer is absent from the result
+            - A list answer keeps only the labels the new header offers; a string answer
+              is kept only if the new header offers it
+            - Exact-header answers are kept as stored, so option validation still applies
+        """
+        remapped = {}
+        claimed  = set()
+
+        for header in valid_options:
+            if header in answers:
+                remapped[ header ] = answers[ header ]
+                claimed.add( header )
+
+        for header, option_info in valid_options.items():
+            if header in remapped: continue
+            for past_header, past_answer in answers.items():
+                if past_header in claimed: continue
+                if isinstance( past_answer, list ):
+                    offered = [ item for item in past_answer if item in option_info[ "labels" ] ]
+                    if not offered: continue
+                    remapped[ header ] = offered
+                else:
+                    if past_answer not in option_info[ "labels" ]: continue
+                    remapped[ header ] = past_answer
+                claimed.add( past_header )
+                break
+
+        return remapped
+
     def _predict_multiple_choice( self, message: str, category: str,
                                      embedding: Optional[list],
                                      options: Any = None ) -> PredictionResult:
@@ -637,6 +682,7 @@ class PredictionEngine:
             max_similarity = max( max_similarity, similarity_pct / 100.0 )
 
             answers     = parsed.get( "answers", {} )
+            if valid_options: answers = self._remap_answers_to_question( answers, valid_options )
             case_weight = self._ratified_weight( record )   # +approved / -rejected / 1.0
             positive_case_mass += max( case_weight, 0.0 )
             for header, option in answers.items():
@@ -663,6 +709,17 @@ class PredictionEngine:
                 strategy           = STRATEGY_COLD_START,
                 similar_case_count = len( similar_cases ),
                 metadata           = { "reason": "no_valid_mc_cases" }
+            )
+
+        # The new question's own headers are the only ones that may be answered. A header
+        # no similar case could speak to has no evidence, so there is nothing to predict.
+        if valid_options and any( header not in header_votes for header in valid_options ):
+            return PredictionResult(
+                response_type      = RESPONSE_TYPE_MULTIPLE_CHOICE,
+                category           = category,
+                strategy           = STRATEGY_COLD_START,
+                similar_case_count = len( similar_cases ),
+                metadata           = { "reason": "no_evidence_for_question_headers", "valid_cases": valid_cases }
             )
 
         # Use options structure to determine multi_select when available
@@ -704,13 +761,7 @@ class PredictionEngine:
         if valid_options:
             validated_answers = {}
             for header, prediction in predicted_answers.items():
-                option_info = valid_options.get( header )
-                if option_info is None:
-                    # Header not in options structure — keep as-is (backward compat)
-                    validated_answers[ header ] = prediction
-                    continue
-
-                valid_labels = option_info[ "labels" ]
+                valid_labels = valid_options[ header ][ "labels" ]
 
                 if isinstance( prediction, list ):
                     # Multi-select: filter to valid labels only
