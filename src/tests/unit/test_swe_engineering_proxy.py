@@ -200,9 +200,9 @@ class TestEngineeringClassifier:
 class TestEngineeringStrategy:
     """Tests for the EngineeringStrategy pipeline."""
 
-    def _make_strategy( self, trust_mode="shadow", debug=False ):
+    def _make_strategy( self, trust_mode="shadow", debug=False, audit_random=None ):
         from cosa.agents.swe_team.proxy.engineering_strategy import EngineeringStrategy
-        return EngineeringStrategy( trust_mode=trust_mode, debug=debug )
+        return EngineeringStrategy( trust_mode=trust_mode, debug=debug, audit_random=audit_random )
 
     def test_name_is_swe_engineering( self ):
         """Strategy name is 'swe_engineering'."""
@@ -242,10 +242,15 @@ class TestEngineeringStrategy:
         assert strategy.gate( "testing", 2, 0.80 ) == "suggest"
 
     def test_active_mode_l3_acts( self ):
-        """In active mode, L3+ returns 'act'."""
-        strategy = self._make_strategy( trust_mode="active" )
+        """In active mode, level 3 and above act, with the audit draw pinned above the rate."""
+        strategy = self._make_strategy( trust_mode="active", audit_random=lambda: 0.99 )
         assert strategy.gate( "testing", 3, 0.80 ) == "act"
         assert strategy.gate( "testing", 4, 0.80 ) == "act"
+
+    def test_active_mode_l4_audit_draw_suggests( self ):
+        """A draw under the audit rate makes level 4 suggest instead of act."""
+        strategy = self._make_strategy( trust_mode="active", audit_random=lambda: 0.0 )
+        assert strategy.gate( "testing", 4, 0.80 ) == "suggest"
 
     def test_decide_high_risk_requires_review( self ):
         """High-risk categories return 'requires_review'."""
