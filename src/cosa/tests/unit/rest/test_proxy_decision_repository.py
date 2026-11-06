@@ -231,7 +231,7 @@ class TestGetOrCreate( _TSRBase ):
 
 class TestUpdateAfterRatification( _TSRBase ):
     def test_approved_increments_successful( self ):
-        state = SimpleNamespace( total_decisions=0, successful_decisions=0, rejected_decisions=0 )
+        state = SimpleNamespace( total_decisions=0, successful_decisions=0, rejected_decisions=0, decision_history=None )
         self.repo.get_or_create = Mock( return_value=state )
         out = self.repo.update_after_ratification( "a@b.com", "swe", "cat", approved=True )
         self.assertIs( out, state )
@@ -241,7 +241,7 @@ class TestUpdateAfterRatification( _TSRBase ):
         self.session.flush.assert_called_once_with()
 
     def test_rejected_increments_rejected( self ):
-        state = SimpleNamespace( total_decisions=0, successful_decisions=0, rejected_decisions=0 )
+        state = SimpleNamespace( total_decisions=0, successful_decisions=0, rejected_decisions=0, decision_history=None )
         self.repo.get_or_create = Mock( return_value=state )
         self.repo.update_after_ratification( "a@b.com", "swe", "cat", approved=False )
         self.assertEqual( state.rejected_decisions, 1 )

@@ -540,3 +540,45 @@ def test_a_stored_trip_carries_the_status_the_dashboard_reads():
         state = tracker.categories[ "testing" ].trip_state()
         assert state[ "status" ] == "tripped"
         assert ( state.get( "status" ) or "closed" ).lower() != "closed", "the dashboard's own default must not apply"
+
+
+# ── restore_category with per-day history (row da64aaab) ─────────────────────
+
+def _epoch_of( day, hour=12 ):
+    from datetime import datetime, timezone
+    return datetime.strptime( day, "%Y-%m-%d" ).replace( hour=hour, tzinfo=timezone.utc ).timestamp()
+
+
+def test_restore_category_with_history_stamps_each_day_so_old_decisions_age_out_of_the_window():
+    # 190 old successes and 10 fresh failures. Without history all 200 load stamped "just now".
+    history = { "2026-09-20": [ 190, 0 ], "2026-11-06": [ 0, 10 ] }
+    now     = _epoch_of( "2026-11-06" )
+    with_hist, without = _tracker_with( rolling_window_days=30 ), _tracker_with( rolling_window_days=30 )
+    with _frozen_time( now ):
+        assert with_hist.restore_category( "testing", 190, 10, now, history=history ) is True
+        assert without.restore_category( "testing", 190, 10, now ) is True
+        a, b = with_hist.categories[ "testing" ], without.categories[ "testing" ]
+        assert len( { t for t, _ in b.decisions } ) == 1, "control: no history means one stamp for all 200"
+        assert len( b.decisions ) == 200 and b.recent_error_rate( window=200 ) == 0.05
+        assert len( a.decisions ) == 10 and a.recent_error_rate( window=200 ) == 1.0, "the 190 old ones aged out"
+        assert ( a.total_successes, a.total_rejections, a.total_decisions ) == ( 190, 10, 200 ), "totals are untouched"
+
+
+def test_restore_category_with_history_weights_a_day_old_success_above_a_two_week_old_one():
+    history = { "2026-10-23": [ 1, 0 ], "2026-11-05": [ 1, 0 ] }       # 14 days and 1 day before the frozen time
+    now     = _epoch_of( "2026-11-06" )
+    tracker = _tracker_with( rolling_window_days=30, decay_half_life_days=14 )
+    with _frozen_time( now ):
+        tracker.restore_category( "testing", 2, 0, now, history=history )
+        stamps = sorted( t for t, _ in tracker.categories[ "testing" ].decisions )
+        assert stamps == [ _epoch_of( "2026-10-23", 0 ), _epoch_of( "2026-11-05", 0 ) ], "stamped at the start of the UTC day"
+        assert 1.2 < tracker.categories[ "testing" ]._effective_decision_count() < 1.5     # about 0.5 + 0.95
+
+
+def test_restore_category_with_an_empty_history_restores_no_rolling_history_but_keeps_totals():
+    tracker = _tracker_with()
+    now     = _epoch_of( "2026-11-06" )
+    with _frozen_time( now ):
+        assert tracker.restore_category( "testing", 3, 1, now, history={} ) is True
+        cat = tracker.categories[ "testing" ]
+        assert cat.decisions == [] and cat.total_decisions == 4
