@@ -12,8 +12,9 @@
 #
 #   pg_dump custom format (-Fc), compressed with zstd level 3. Measured 6 Nov 2026 on
 #   the 8.9 GB dev database: 2.72 GB in 85 s, against 17.4 GB for the plain-SQL dump
-#   v1.0 wrote (row b08f6dd9). The custom format stores vectors in binary rather than
-#   as text, which is most of the saving.
+#   v1.0 wrote (row b08f6dd9). The saving is the compression: the custom format still
+#   stores each table's rows as COPY text, and the 949k notification rows' vectors are
+#   highly repetitive.
 #
 #   The dump is written to a temporary file and moved into place only after
 #   pg_restore can read its table of contents, so a failed run leaves the previous
