@@ -2,9 +2,9 @@
 capability: swe-team-orchestrator
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.swe_team.job.SweTeamJob@2e50adced1
+  - cosa.agents.swe_team.job.SweTeamJob@cb2a892368
   - cosa.agents.swe_team.job.SweTeamJob.do_all@ea4b930824
-  - cosa.agents.swe_team.orchestrator.SweTeamOrchestrator@6e88646c78
+  - cosa.agents.swe_team.orchestrator.SweTeamOrchestrator@3b109d27fc
   - cosa.agents.swe_team.orchestrator.SweTeamOrchestrator.run@5b89c1bd41
   - cosa.agents.swe_team.safety_limits.SafetyGuard@e7424558e3
   - cosa.agents.swe_team.agent_definitions.get_active_roles@6ad024b691
@@ -22,8 +22,7 @@ pins:
 - Before any work, the run asks "Proceed?" (120 seconds, default yes) through `_gated_confirmation`, so an active proxy may answer. A no, from either, ends the run with "Task cancelled by user after decomposition."
 
 ## The roles
-- `get_active_roles` returns the roles with `active=True`: lead, coder and tester. The architect, reviewer and debugger exist but are inactive.
-- The Lead has `Read`, `Glob` and `Task` and runs in `plan` mode. Coder and tester have `Read`, `Edit` and `Bash` in `acceptEdits` mode, with a `can_use_tool` callback tied to the safety guard.
+- `get_active_roles` returns the roles with `active=True`: lead, coder and tester. The architect, reviewer and debugger exist but are inactive. The Lead has `Read`, `Glob` and `Task` and runs in `plan` mode. Coder and tester have `Read`, `Edit` and `Bash` in `acceptEdits` mode, with a `can_use_tool` callback tied to the safety guard.
 
 ## The coder and tester loop
 - Each task goes to the Coder. When it succeeds and `swe team require test pass` is true (the default), the Tester checks it, at most `MAX_VERIFICATION_ITERATIONS` (3) times. A failed check re-delegates to the Coder with the test feedback; a re-delegation that fails ends that task as failed.
@@ -33,8 +32,9 @@ pins:
 ## The decision proxy
 - Unless `trust_mode` is `disabled`, an `EngineeringStrategy` proxy is built on the [[decision-proxy]] trust tracker and circuit breaker. `_gated_confirmation` asks it first, then acts on its trust mode; in `shadow` the user is still asked.
 - In an active mode, an `act` verdict approves or rejects without asking, with a low-priority notice. With `swe engineering proxy ask before act` true (shipped false), the user is asked instead. A `suggest` verdict adds its suggestion to the question's abstract.
-- After a user answer, agreement with the proxy is recorded in the trust tracker.
+- After a user answer, agreement with the proxy is recorded in the trust tracker. An auto-approval records no agreement, because no human answered and the proxy would be grading its own work.
+- `SweTeamJob` passes its `user_email` on. The orchestrator loads that user's stored `swe` trust rows (counts, level, any breaker trip), so trust carries over between jobs. After each answer, and on a breaker trip, the counters and level are stored. Every gated confirmation also writes a `proxy_decisions` row for the ratify page. Database failures are logged and never stop the run.
+- The strategy is built from INI values: trust thresholds, breaker settings, the three cap-level keys of [[swe-engineering-proxy-rules]] and the audit sample rate. An unreadable key keeps the default.
 
 ## Progress and states
-- `OrchestratorState` covers initializing, decomposing, delegating, coding, testing, reviewing, debugging, the waiting states, and the terminal and control states.
-- `ProgressLog` and `FeatureList` write under `io/swe-team/<session id>/`, and `report_path` is the log file.
+- `OrchestratorState` covers initializing, decomposing, delegating, coding, testing, reviewing, debugging, the waiting states, and the terminal and control states. `ProgressLog` and `FeatureList` write under `io/swe-team/<session id>/`, and `report_path` is the log file.
