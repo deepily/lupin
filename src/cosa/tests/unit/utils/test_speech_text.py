@@ -102,3 +102,22 @@ def test_a_bracket_pair_followed_by_ordinary_parentheses_is_not_a_link():
 
 def test_an_empty_target_is_not_a_link():
     assert strip( "[x]() rest" ) == "[x]() rest"
+
+
+@pytest.mark.parametrize( "text, spoken", [
+    ( "[x](http://a/b(c d SECRET) e)",            "x, URL omitted" ),
+    ( "[x](http://a/b c d) more (stuff)",         "x, URL omitted more (stuff)" ),
+    ( "[x](http://a/b(c d SECRET) e",             "x, URL omitted e" ),
+] )
+def test_an_address_target_holding_blanks_is_one_link_and_never_spoken( text, spoken ):
+    out = strip( text )
+    assert out == spoken
+    assert "SECRET" not in out and "a/b" not in out
+
+
+def test_a_non_address_target_holding_blanks_is_still_not_a_link():
+    assert strip( "[a](see b(c d) e) rest" ) == "[a](see b(c d) e) rest"
+
+
+def test_an_address_target_whose_link_never_closes_falls_back_to_the_bare_address():
+    assert strip( "[x](http://a/b (c) d" ) == "[x](URL omitted (c) d"
