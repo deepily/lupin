@@ -22,6 +22,7 @@ _LINK_OR_BARE_URL = re.compile(
     r'|https?://[^\s<>\[\]()]*[^\s<>\[\]().,;:!?\'"]'
 )
 _TITLE_AND_CLOSE = re.compile( r'(?:\s+"[^"]*")?\s*\)' )
+_ADDRESS_START   = re.compile( r'https?://', re.IGNORECASE )
 
 
 def _blank_free_run_end( text, start ):
@@ -37,6 +38,25 @@ def _blank_free_run_end( text, start ):
     end = start
     while end < len( text ) and not text[ end ].isspace(): end += 1
     return end
+
+
+def _balanced_close( text, start ):
+    """
+    Return the index just after the ")" that closes a "(" which opened just before start.
+
+    Requires:
+        - text is a str and 0 <= start <= len( text )
+
+    Ensures:
+        - returns None when parentheses never balance
+    """
+    depth = 1
+    for index in range( start, len( text ) ):
+        if text[ index ] == "(": depth += 1
+        elif text[ index ] == ")":
+            depth -= 1
+            if depth == 0: return index + 1
+    return None
 
 
 def _scan_target( text, start ):
@@ -55,6 +75,9 @@ def _scan_target( text, start ):
         - when a "(" is never closed, or no ")" follows the target at all, returns the index
           where the target's blank-free run ends, so the whole target is dropped and no part
           of the address is spoken
+        - a target that starts with http:// or https:// but holds blanks (inside a parenthesis
+          group or after one) is still one link: it ends at the ")" that closes the link, or,
+          when that never comes, after the last group read, so no part of it is spoken
         - runs in time linear in the text it reads, and never recurses
     """
     size  = len( text )
@@ -81,7 +104,11 @@ def _scan_target( text, start ):
     if units == 0: return None
     closing = _TITLE_AND_CLOSE.match( text, index )
     if closing is not None: return closing.end()
-    if text.find( ")", index ) == -1: return _blank_free_run_end( text, start )
+    address = _ADDRESS_START.match( text, start ) is not None
+    if text.find( ")", index ) == -1:
+        run_end = _blank_free_run_end( text, start )
+        return max( run_end, index ) if address else run_end
+    if address: return _balanced_close( text, start )
     return None
 
 
