@@ -24,6 +24,7 @@ from typing import Optional, Callable
 import cosa.utils.util as cu
 
 from cosa.agents.shared.sdk_error_result import raise_error_result
+from cosa.agents.decision_proxy.errors import InvalidTrustModelError
 from cosa.agents.bug_fix_expediter.state import BFEPhase, BFE_PHASE_ORDINALS, DiagnosisResult, ProposedFix, FixResult
 from cosa.agents.bug_fix_expediter.prompts.diagnosis import (
     DIAGNOSIS_SYSTEM_PROMPT,
@@ -162,12 +163,15 @@ class BFEOrchestrator:
         # to route git / SDK operations into an isolated sandbox.
         self._worktree_cwd: Optional[ str ] = None
         try:
-            from cosa.agents.swe_team.proxy.engineering_strategy import EngineeringStrategy
-            self.proxy = EngineeringStrategy(
+            from cosa.agents.swe_team.strategy_builder import build_ini_engineering_strategy
+            self.proxy, _ = build_ini_engineering_strategy(
                 trust_mode = self.config.trust_mode,
                 debug      = self.debug,
             )
             if self.debug: print( f"[BFEOrchestrator] Trust proxy initialized (mode={self.config.trust_mode})" )
+        except InvalidTrustModelError:
+            # An unknown trust model is refused at startup, not run on defaults (same rule as the SWE team orchestrator)
+            raise
         except ImportError as e:
             if self.debug: print( f"[BFEOrchestrator] Trust proxy import failed: {e} — defaulting to L1/commit_only" )
         except Exception as e:
