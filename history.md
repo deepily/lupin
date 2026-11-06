@@ -8,6 +8,29 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.05 - Session 7d6c85af (Mr. Radio 🦉, manager; crew Chloé, Tiberius, Rachel, John, all reaped) | Seven decision proxy defect fixes merged; unit tier red only on the held secret rescan
+
+- **Merged to wip, all reviewed** (Rick AFK per broadcast `c874731e`: run the list down, no pushes):
+  - Morning: three decision proxy fixes (rows c73bcfa0, 251f26fb, 0bba595e) in `96d6c8207`, `31760db88` and `92c6e1761`. Two more (rows 139cddd6, d595321e) landed with the breaker trip record and test follow-ups in `83522536f`.
+  - Same morning: the approve-link guard test `77cb117b3`, the bundle freshness check `903c2d685`, the compose drift probe fix `256858a43`, and nested speech-link stripping `556687aa5`.
+  - Afternoon: a strategy supplies its own trust level (row c7b2b3e4), and the three cap keys reach the engineering strategy (row c8f20219). Both landed in `cb801d88b` with the reuse review for 8 definitions; Rachel wrote them and John approved.
+- **The reuse gate went red on wip** with 12 definitions that had no outcome line. I split them by the commit that added each (`git log -S`): Rachel covered 8 in `993529f58`, and Cheech covered 6 in `4422c0759`.
+- **Gates on `14f0ecd33`**:
+  - Reuse gate: 61 of 61.
+  - Unit: 43,974 passed. The one red is `test_secret_scan::test_a_detector_change_forces_a_full_rescan`; merging the parked fix `refs/parked/v0.2.3-secret-rescan-14170bef` (`feb37011b`, approved by John) clears it once Rick approves row 14170bef.
+  - Cosa: 10,178 passed.
+  - `orchestrator.py` is at 99% coverage, missing 3 lines that predate today.
+- **Rows filed and held for Rick** (9; one-click approve line on tonight's card, `io/tmp/2026.11.05-evening-summary-mr-radio.md`):
+  - 14170bef, the secret rescan.
+  - 85f6848f and d2d6a192, already fixed in `83522536f`.
+  - 5d0eb55b, 6d7f809b, c5cfca7c, fc9fb290, da64aaab and fe2e8c8f.
+- **Row cfc7dd01** (the Beta and BLR trust models are never used): chased at 19:20 Eastern, but Rick was offline. Next chase is 10:30 Eastern on 6 Nov. Recommendation: drop it for v0.2.3.
+- **Lessons**:
+  - A fixed-string search for one spelling missed `l4_audit_rate`, and I claimed on row 6d7f809b that no level 4 audit sampling existed. Search for the noun alone before claiming something is absent.
+  - `assert '701' not in reason` matched pytest's temp folder `pytest-701`. An assertion that a number is absent from a string needs a word boundary (row c5cfca7c).
+  - fetch_similar answers CALL_FAILED here, so reuse rulings rest on record_search. Call record_search with `receipt_id`, or the search does not link to its receipt.
+- **Memento sweep**: 23 trashed, 11 kept for live seats (Mr. Radio, Cheech, María, Tiffany).
+
 ## 2026.11.04 - Session ebd974b4 (Cheech 🌿, manager; crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped) | v0.2.2 merged into main and released; wip-v0.2.3 cut; wiki lint 204 to 0
 
 - **Evening, after the first ritual**:

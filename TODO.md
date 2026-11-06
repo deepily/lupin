@@ -16,6 +16,14 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-11-05 (Mr. Radio 🦉 `7d6c85af`, crew Chloé, Tiberius, Rachel, John, all reaped; times Eastern)
+
+- **Rick's ruling** (broadcast `c874731e`, morning): he is away until evening. Run the list down, push nothing, leave held rows for him, and send one summary card tonight. Followed. The card is `io/tmp/2026.11.05-evening-summary-mr-radio.md`.
+- **Rick's ruling** (broadcast `246629be`, 23:20): full session-end ritual with a push and a backup.
+- **Not ruled, waiting on Rick**:
+  - Approve the 9 held rows (14170bef, 85f6848f, d2d6a192, 5d0eb55b, 6d7f809b, c5cfca7c, fc9fb290, da64aaab, fe2e8c8f). Approving 14170bef lets the parked secret-rescan fix merge and turns the unit tier fully green.
+  - Row cfc7dd01 (the Beta and BLR trust models are never used): build it, or drop it for v0.2.3. Recommendation: drop. Next chase 10:30 on 6 Nov.
+
 ## 📚 Decisions log 2026-11-04 (Cheech 🌿 `ebd974b4`, crew Rio, Rachel, Pocholo, Krishna, Sam, all reaped; times Eastern)
 
 - **Wiki clean-up before the PR.** Rick released the 13 held PR-readiness and wiki rows by voice and said to staff up and dispatch them. The wiki lint went from 204 findings to 0.
