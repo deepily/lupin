@@ -112,6 +112,37 @@ class TestInit( unittest.TestCase ):
         self.assertFalse( build( { "accepted_senders": [ "a" ], "ask_before_act": False } )._ask_before_act )
         self.assertFalse( _mk_orch( trust_mode="disabled" )._ask_before_act )   # no proxy built => off
 
+    def test_ini_l4_audit_sample_rate_reaches_the_strategy_and_absent_key_keeps_its_default( self ):
+        # Row 6d7f809b: the INI key was read into config but never passed on, so the rate stayed 0.10.
+        def build( proxy_cfg ):
+            strategy_cls = MagicMock( return_value="PROXY" )
+            fake_proxy_mod = types.ModuleType( "cosa.agents.swe_team.proxy" )
+            fake_proxy_mod.EngineeringStrategy = strategy_cls
+            tt_mod  = types.ModuleType( "cosa.agents.decision_proxy.trust_tracker" )
+            tt_mod.TrustTracker = MagicMock()
+            cb_mod  = types.ModuleType( "cosa.agents.decision_proxy.circuit_breaker" )
+            cb_mod.CircuitBreaker = MagicMock()
+            cfg_mod = types.ModuleType( "cosa.agents.decision_proxy.config" )
+            cfg_mod.trust_proxy_config_from_config_mgr = MagicMock( return_value=proxy_cfg )
+            sweproxy_cfg_mod = types.ModuleType( "cosa.agents.swe_team.proxy.config" )
+            sweproxy_cfg_mod.swe_proxy_config_from_config_mgr = MagicMock( return_value={ "accepted_senders": [ "a" ] } )
+            cm_mod = types.ModuleType( "cosa.config.configuration_manager" )
+            cm_mod.ConfigurationManager = MagicMock()
+            mods = {
+                "cosa.agents.swe_team.proxy"                : fake_proxy_mod,
+                "cosa.agents.decision_proxy.trust_tracker"  : tt_mod,
+                "cosa.agents.decision_proxy.circuit_breaker": cb_mod,
+                "cosa.agents.decision_proxy.config"         : cfg_mod,
+                "cosa.agents.swe_team.proxy.config"         : sweproxy_cfg_mod,
+                "cosa.config.configuration_manager"         : cm_mod,
+            }
+            with patch.dict( sys.modules, mods ):
+                SweTeamOrchestrator( task_description="t", config=SweTeamConfig( trust_mode="shadow" ) )
+            return strategy_cls.call_args.kwargs
+
+        self.assertEqual( build( { "l4_audit_sample_rate": 0.37 } )[ "l4_audit_rate" ], 0.37 )
+        self.assertNotIn( "l4_audit_rate", build( {} ) )   # key absent => strategy default (0.10) applies
+
     def test_proxy_enabled_inner_config_failure_uses_defaults( self ):
         fake_proxy_mod = types.ModuleType( "cosa.agents.swe_team.proxy" )
         fake_proxy_mod.EngineeringStrategy = MagicMock( return_value="PROXY" )
@@ -510,6 +541,27 @@ class TestGatedConfirmation( unittest.TestCase ):
         o = _mk_orch( trust_mode="disabled" )
         o._user_email = "rick@example.com"
         self.assertEqual( o._load_trust_state(), 0 )
+
+    def test_a_row_the_tracker_refuses_is_skipped_not_counted( self ):
+        o = _mk_orch( trust_mode="shadow" )
+        o._user_email = "rick@example.com"
+        row = MagicMock( category="nope", successful_decisions=1, rejected_decisions=0, circuit_breaker_state=None )
+        row.updated_at.timestamp.return_value = 1.0
+        Repo = MagicMock(); Repo.return_value.get_all_for_user.return_value = [ row ]
+        with patch( "cosa.rest.db.database.get_db", MagicMock() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ), \
+             patch.object( o.proxy.trust_tracker, "restore_category", return_value=False ):
+            self.assertEqual( o._load_trust_state(), 0 )
+
+    def test_persisting_a_level_for_a_category_the_tracker_lacks_skips_the_trip_write( self ):
+        o = _mk_orch( trust_mode="shadow" )
+        o._user_email = "rick@example.com"
+        Repo = MagicMock()
+        with patch( "cosa.rest.db.database.get_db", MagicMock() ), \
+             patch( "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository", Repo ):
+            o._persist_trust_level( "never-seen" )
+        Repo.return_value.update_trust_level.assert_called_once()
+        Repo.return_value.update_circuit_breaker_state.assert_not_called()
 
     def test_a_failing_db_read_is_logged_and_returns_zero( self ):
         o = _mk_orch( trust_mode="shadow" )
