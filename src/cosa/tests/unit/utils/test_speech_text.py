@@ -121,3 +121,43 @@ def test_a_non_address_target_holding_blanks_is_still_not_a_link():
 
 def test_an_address_target_whose_link_never_closes_falls_back_to_the_bare_address():
     assert strip( "[x](http://a/b (c) d" ) == "[x](URL omitted (c) d"
+
+
+# Row db72d167: four forms that still spoke part of a link target.
+
+def test_a_mailto_target_holding_blanks_is_one_link_and_never_spoken():
+    out = strip( "[x](mailto:a@b.com c SECRET) end" )
+    assert out == "x, URL omitted end"
+    assert "SECRET" not in out and "a@b.com" not in out
+
+
+def test_an_address_target_with_a_parenthesis_group_that_the_link_never_closes_after_is_never_spoken():
+    out = strip( "[x](http://a/b(c SECRET) end (more) z" )
+    assert out == "x, URL omitted end (more) z"
+    assert "SECRET" not in out and "a/b" not in out
+
+
+def test_an_angle_bracket_target_holding_blanks_is_one_link_and_never_spoken():
+    out = strip( "[x](<http://a/b c SECRET>) end" )
+    assert out == "x, URL omitted end"
+    assert "SECRET" not in out and "a/b" not in out
+
+
+def test_a_bare_address_holding_a_parenthesis_group_is_one_address_and_never_spoken():
+    out = strip( "see http://a/b(c d SECRET) end" )
+    assert out == "see URL omitted end"
+    assert "SECRET" not in out and "a/b" not in out
+
+
+@pytest.mark.parametrize( "text, spoken", [
+    ( "[x](<http://a/b c> \"title\") z",       "x, URL omitted z" ),
+    ( "[x](<a b>) z",                          "x, URL omitted z" ),
+    ( "[x](<http://a/b c) z",                  "[x](<URL omitted c) z" ),
+    ( "see http://a/b(c)(d e)f. now",          "see URL omitted. now" ),
+    ( "see http://a/b(c) now",                 "see URL omitted now" ),
+    ( "(see http://a/b(c))",                   "(see URL omitted)" ),
+    ( "see http://a/b(c d SECRET end",         "see URL omitted d SECRET end" ),
+    ( "[x](http://a/b (c) d",                  "[x](URL omitted (c) d" ),
+] )
+def test_neighbouring_forms_of_the_four_fixes( text, spoken ):
+    assert strip( text ) == spoken
