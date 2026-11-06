@@ -945,6 +945,7 @@ class TrustState( Base ):
         - id is automatically generated UUID
         - updated_at tracks last modification
         - circuit_breaker_state stored as JSONB
+        - decision_history holds per-day approved/rejected counts as JSONB (NULL before the column existed)
     """
     __tablename__ = "trust_states"
 
@@ -993,6 +994,13 @@ class TrustState( Base ):
 
     # Circuit breaker
     circuit_breaker_state: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
+    # Per-day decision buckets {"YYYY-MM-DD": [approved, rejected]} (UTC days). NULL on a row written
+    # before the column existed: restore then stamps its decisions with updated_at, as it used to.
+    decision_history: Mapped[Optional[dict]] = mapped_column(
         JSONB,
         nullable=True
     )
