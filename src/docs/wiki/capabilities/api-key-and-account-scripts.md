@@ -2,7 +2,7 @@
 capability: api-key-and-account-scripts
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - scripts.create_admin_test_account.main@9286cd2357
+  - scripts.create_admin_test_account.main@bfba17427d
   - scripts.create_service_account_postgres.generate_api_key@6698d96841
   - scripts.create_service_account_postgres.get_or_create_service_account@90bdda1bfc
   - scripts.create_service_account_postgres.store_api_key@6f914d69d9
@@ -23,6 +23,6 @@ One-off scripts under `src/scripts/` that create accounts and keys. Each writes 
 - `generate_model_server_key` makes a model-server key. That server has no database, so nothing is inserted.
 - `key_fingerprint` gives a stable one-way identifier for a key. The server computes it the same way.
 - `key_file_path` is the destination, `src/conf/keys/model-server-api`. `write_key` writes it at mode 600 and refuses to overwrite unless forced. The refusal names `src/scripts/cloud-run-setup-secrets.sh` as the place that states the rotation order, because the model server hashes its key at boot.
-- `main` in `create_admin_test_account` creates or promotes the dedicated admin test account named by the environment.
+- `main` in `create_admin_test_account` creates or promotes the dedicated admin test account named by the environment. It marks the account protected, so the test-database cleanups that delete every unprotected user leave it in place.
 - `main` in `create_test_mock_user` creates or resets the shared test-mock-jobs login named by `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` and `_PASSWORD`. The account holds the role `user` only, is active and email-verified, and an existing one has its password and roles reset. It exits 1 when a variable is unset or the password fails the live policy, and never echoes the password. Run it inside the app container, where the database is reachable.
 - `reset_password` resets one user's password, to a given one or the original.

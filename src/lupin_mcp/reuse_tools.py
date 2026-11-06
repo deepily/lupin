@@ -1533,7 +1533,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
         - `prepared` is the result of prepare(), when the caller already has it
         - with sweep_only the receipt records sweep_only and exclude_id, and both are part of its id
         - with write=False nothing is stored (used by replay at HEAD)
-        - a check_exists question on a context with a candidate stage asks the shortlist's entries only (route "candidates"), and the
+        - a check_exists or fetch_similar question on a context with a candidate stage asks the shortlist's entries only (route "candidates"), and the
           receipt's candidate_stage says how many entries were asked, how many were not and why
         - a failed candidate stage answers UNCERTAIN_READ_SOURCE with cause CALL_FAILED and no sweep; the receipt's candidate_stage.error names it
         - question "provides" asks the Noul and Score pair on the packed path: one sweep of every entry, no candidate stage,
@@ -1558,7 +1558,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if tool == "check_exists" and query == need: query = sent
     elif tool == "check_exists": query = reuse_redact.redact_need( query, routes )[ 0 ]
     need = sent
-    staged = ctx.candidate_stage if tool == "check_exists" and not sweep_only and not pair else None     # fetch_similar lists neighbours, so it sweeps every entry
+    staged = ctx.candidate_stage if tool in ( "check_exists", "fetch_similar" ) and not sweep_only and not pair else None     # a full sweep of the index is 200 packs and spends the lookup ceiling after 3 (row 4e6d795d)
     need_text = need if tool == "fetch_similar" and need != query and not any( e[ "id" ] == query for e in entries ) else None     # a private definition: the snapshot cannot give its text back
     whole   = entries                                                            # the stage holds the whole index of every language, and its key is built from this list
     entries = in_language( entries, language )                                    # after need_text: that test looks the query up among every language
