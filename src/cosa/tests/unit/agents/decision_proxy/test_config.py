@@ -12,6 +12,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from cosa.agents.decision_proxy import config as cfg
+from cosa.agents.decision_proxy.errors import InvalidTrustModelError
 
 
 # ----------------------------------------------------------------------------
@@ -110,5 +111,5 @@ def test_factory_refuses_an_unknown_trust_model():
     mgr = MagicMock()
     mgr.get.side_effect = lambda key, default=None, return_type=None: "gaussian" if key == "swe team trust proxy trust model" else default
     mgr.get_required.return_value = "America/Chicago"
-    with pytest.raises( ValueError, match="gaussian" ):
+    with pytest.raises( InvalidTrustModelError, match="gaussian" ):
         cfg.trust_proxy_config_from_config_mgr( mgr )

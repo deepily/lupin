@@ -183,26 +183,45 @@ class TestInit( unittest.TestCase ):
         self.assertEqual( kw[ "trust_model" ], "count" )                      # key absent => behaviour unchanged
         self.assertNotIn( "rate_thresholds", kw ); self.assertNotIn( "min_samples", kw )
 
-    def test_a_bad_ini_value_is_refused_at_startup_and_does_not_fall_back_to_defaults( self ):
-        # Sam's review of row cfc7dd01: the factory's ValueError for an unknown trust model was swallowed.
+    def _build_with_config_error( self, error ):
+        # Same stubs as the sibling tests: the decision_proxy config, trust_tracker and circuit_breaker are all faked,
+        # so the only thing that can raise out of the constructor is the error under test.
+        from cosa.agents.decision_proxy.errors import InvalidTrustModelError   # noqa: F401  (real module, never faked)
         fake_proxy_mod = types.ModuleType( "cosa.agents.swe_team.proxy" )
         fake_proxy_mod.EngineeringStrategy = MagicMock( return_value="PROXY" )
+        tt_mod  = types.ModuleType( "cosa.agents.decision_proxy.trust_tracker" )
+        tt_mod.TrustTracker = MagicMock()
+        cb_mod  = types.ModuleType( "cosa.agents.decision_proxy.circuit_breaker" )
+        cb_mod.CircuitBreaker = MagicMock()
         cfg_mod = types.ModuleType( "cosa.agents.decision_proxy.config" )
-        cfg_mod.trust_proxy_config_from_config_mgr = MagicMock( side_effect=ValueError( "trust model must be one of" ) )
+        cfg_mod.trust_proxy_config_from_config_mgr = MagicMock( side_effect=error )
         sweproxy_cfg_mod = types.ModuleType( "cosa.agents.swe_team.proxy.config" )
         sweproxy_cfg_mod.swe_proxy_config_from_config_mgr = MagicMock( return_value={} )
         cm_mod = types.ModuleType( "cosa.config.configuration_manager" )
         cm_mod.ConfigurationManager = MagicMock()
         mods = {
             "cosa.agents.swe_team.proxy"                : fake_proxy_mod,
+            "cosa.agents.decision_proxy.trust_tracker"  : tt_mod,
+            "cosa.agents.decision_proxy.circuit_breaker": cb_mod,
             "cosa.agents.decision_proxy.config"         : cfg_mod,
             "cosa.agents.swe_team.proxy.config"         : sweproxy_cfg_mod,
             "cosa.config.configuration_manager"         : cm_mod,
         }
         with patch.dict( sys.modules, mods ):
-            with self.assertRaisesRegex( ValueError, "trust model must be one of" ):
-                SweTeamOrchestrator( task_description="t", config=SweTeamConfig( trust_mode="shadow" ) )
-        fake_proxy_mod.EngineeringStrategy.assert_not_called()
+            o = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( trust_mode="shadow" ) )
+        return o, fake_proxy_mod
+
+    def test_an_unknown_trust_model_is_refused_at_startup_and_does_not_fall_back_to_defaults( self ):
+        # Sam's review of row cfc7dd01: the factory's error for an unknown trust model was swallowed.
+        from cosa.agents.decision_proxy.errors import InvalidTrustModelError
+        with self.assertRaisesRegex( InvalidTrustModelError, "trust model must be one of" ):
+            self._build_with_config_error( InvalidTrustModelError( "trust model must be one of" ) )
+
+    def test_any_other_ini_read_failure_stays_non_fatal_and_builds_the_proxy_on_defaults( self ):
+        # A non-numeric INI value (a plain ValueError) must not crash the constructor.
+        o, proxy_mod = self._build_with_config_error( ValueError( "invalid literal for int()" ) )
+        self.assertEqual( o.proxy, "PROXY" )
+        proxy_mod.EngineeringStrategy.assert_called_once()
 
     def test_proxy_enabled_inner_config_failure_uses_defaults( self ):
         fake_proxy_mod = types.ModuleType( "cosa.agents.swe_team.proxy" )

@@ -11,6 +11,7 @@ Dependency Rule:
 """
 
 from cosa.config.app_timezone import get_decision_proxy_timezone
+from cosa.agents.decision_proxy.errors import InvalidTrustModelError
 from cosa.agents.utils.proxy_agents.base_config import (   # noqa: F401
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
@@ -176,7 +177,7 @@ def trust_proxy_config_from_config_mgr( config_mgr ):
         - "trust_model" is one of TRUST_MODEL_CHOICES
 
     Raises:
-        - ValueError if the trust model key names a model outside TRUST_MODEL_CHOICES
+        - InvalidTrustModelError if the trust model key names a model outside TRUST_MODEL_CHOICES
 
     Args:
         config_mgr: ConfigurationManager instance
@@ -186,7 +187,7 @@ def trust_proxy_config_from_config_mgr( config_mgr ):
     """
     trust_model = config_mgr.get( "swe team trust proxy trust model", default=DEFAULT_TRUST_MODEL )
     if trust_model not in TRUST_MODEL_CHOICES:
-        raise ValueError( f"swe team trust proxy trust model must be one of {TRUST_MODEL_CHOICES}, got {trust_model!r}" )
+        raise InvalidTrustModelError( f"swe team trust proxy trust model must be one of {TRUST_MODEL_CHOICES}, got {trust_model!r}" )
 
     return {
         # Which trust model scores each category
