@@ -701,6 +701,41 @@ class TrustTracker:
 
         return new_level
 
+    def record_decision_with_features( self, category_name, success, question, timestamp=None ):
+        """
+        Record a decision outcome and feed the category's BLR model.
+
+        Requires:
+            - category_name is a registered category
+            - success is a bool
+            - question is a string
+
+        Ensures:
+            - Builds the 4-feature vector from the question, the category's registration
+              position, and the category's recent error rate before this decision
+            - Updates the category's history and its BLR model
+            - Returns 1 for an unknown category, and records nothing
+
+        Args:
+            category_name: Category name
+            success: True if ratified, False if rejected
+            question: Question text the feature vector is built from
+            timestamp: Optional epoch timestamp
+
+        Returns:
+            int: New trust level after recording
+        """
+        cat = self.categories.get( category_name )
+        if cat is None:
+            if self.debug: print( f"[TrustTracker] Unknown category: {category_name}" )
+            return 1
+
+        features = CategoryTrust.build_feature_vector(
+            question, list( self.categories ).index( category_name ), recent_error_rate=cat.recent_error_rate()
+        )
+        cat.record_decision_with_features( success, features, timestamp )
+        return cat.level
+
     def demote_category( self, category_name, levels=1 ):
         """
         Demote a category's trust level.
