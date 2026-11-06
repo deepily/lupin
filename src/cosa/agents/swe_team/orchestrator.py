@@ -386,7 +386,7 @@ class SweTeamOrchestrator:
                 for row in TrustStateRepository( session ).get_all_for_user( self._user_email, domain="swe" ):
                     if self.proxy.trust_tracker.restore_category(
                         row.category, row.successful_decisions, row.rejected_decisions, row.updated_at.timestamp(),
-                        trip=row.circuit_breaker_state, history=row.decision_history
+                        trip=row.circuit_breaker_state, history=row.decision_history, blr_state=row.blr_state
                     ):
                         restored += 1
             return restored
@@ -452,6 +452,7 @@ class SweTeamOrchestrator:
 
         Ensures:
             - Counters updated in DB on success; the stored level follows in a separate transaction
+            - with the "blr" trust model the category's BLR state is stored in the same write
             - Failure logged but never propagates
         """
         try:
@@ -461,6 +462,11 @@ class SweTeamOrchestrator:
             # Use job user_email if available, fallback to session_id
             user_email = getattr( self, '_user_email', None ) or f"{self.session_id}@swe.deepily.ai"
 
+            # Row 5bb93a7b: the BLR posterior is stored with the counters; other models keep the stored value
+            extra = {}
+            if self.proxy is not None and self.proxy.trust_tracker.trust_model == "blr":
+                extra[ "blr_state" ] = self.proxy.trust_tracker.blr_state_for( category )
+
             with get_db() as session:
                 repo = TrustStateRepository( session )
                 repo.update_after_ratification(
@@ -468,6 +474,7 @@ class SweTeamOrchestrator:
                     domain     = "swe",
                     category   = category,
                     approved   = approved,
+                    **extra,
                 )
         except Exception as e:
             logger.warning( f"Trust state DB persistence failed (non-fatal): {e}" )

@@ -202,3 +202,38 @@ class TestDecisionHistory:
         assert state.decision_history == { keep_day: [ 2, 0 ], self._today(): [ 0, 1 ] }
         assert state.decision_history is not stored and old_day in stored, "a new dict, so the JSONB column sees the change"
 
+
+
+# =============================================================================
+# BLR state (row 5bb93a7b)
+# =============================================================================
+
+class TestBlrState:
+    """update_after_ratification stores a given BLR state and otherwise leaves it alone."""
+
+    @staticmethod
+    def _state( blr_state="stored" ):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            total_decisions = 0, successful_decisions = 0, rejected_decisions = 0,
+            decision_history = None, updated_at = datetime.now( timezone.utc ), blr_state = blr_state,
+        )
+
+    def _ratify( self, repo, state, **extra ):
+        with patch.object( repo, "get_or_create", return_value=state ):
+            repo.update_after_ratification( user_email="u@test.com", domain="swe", category="testing", approved=True, **extra )
+
+    def test_a_given_state_is_stored( self, repo ):
+        state = self._state( blr_state=None )
+        self._ratify( repo, state, blr_state={ "w": [ 0.1 ] } )
+        assert state.blr_state == { "w": [ 0.1 ] }
+
+    def test_the_default_leaves_the_stored_state_alone( self, repo ):
+        state = self._state()
+        self._ratify( repo, state )          # the ratify endpoint has no tracker
+        assert state.blr_state == "stored"
+
+    def test_none_clears_the_stored_state( self, repo ):
+        state = self._state()
+        self._ratify( repo, state, blr_state=None )
+        assert state.blr_state is None
