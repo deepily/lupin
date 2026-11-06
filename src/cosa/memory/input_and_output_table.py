@@ -62,10 +62,14 @@ class InputAndOutputTable():
             
         Ensures:
             - Row is added to table with provided data
-            - Missing embeddings are generated if not provided (sync or async)
-            - Returns immediately if async_embedding is True
+            - When the INI key `io table capture embeddings` is True, missing
+              embeddings are generated (sync or async)
+            - When that key is False, no embedding is generated: the row is stored
+              at once, on the caller's thread, with only the embeddings the caller
+              supplied (None otherwise), and async_embedding is ignored
+            - Returns immediately if async_embedding is True and embeddings are captured
             - Table row count is incremented
-            
+
         Args:
             async_embedding: If True, generate embeddings asynchronously.
                            If None, use value from configuration.
@@ -85,7 +89,26 @@ class InputAndOutputTable():
         # Get debug text truncation length from config first (needed for timer message)
         debug_truncate_len = self._config_mgr.get( "debug text truncation length", default=48, return_type="int" )
         timer = Stopwatch( msg=f"insert_io_row( '{input[ :debug_truncate_len ]}...' )", silent=True )
-        
+
+        # Rick, 6 Nov 2026 (row b08f6dd9): capturing embeddings for this table is a switch.
+        # Nothing in production searches them, and the notification rows' vectors were
+        # 17 of the 22 GB backup. Off means store the row now and generate nothing.
+        capture_embeddings = self._config_mgr.get( "io table capture embeddings", default=True, return_type="boolean" )
+        if not capture_embeddings:
+            self._store_io_row( {
+                "date"                   : date,
+                "time"                   : time,
+                "input_type"             : input_type,
+                "input"                  : input,
+                "input_embedding"        : input_embedding,
+                "output_raw"             : output_raw,
+                "output_final"           : output_final,
+                "output_final_embedding" : output_final_embedding,
+                "solution_path_wo_root"  : solution_path_wo_root
+            } )
+            timer.print( "Done! Row stored without generating embeddings", use_millis=True, end="\n" )
+            return
+
         # Check if we should generate embeddings asynchronously
         if async_embedding is None:
             # Get from configuration, default to True
