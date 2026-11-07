@@ -196,7 +196,7 @@
     "src/lupin_app/static/js/notifications.js": 4136,
     "src/lupin_app/static/js/sequential-audio-manager.js": 2,
     "src/lupin_app/static/js/shared/agent-select.js": 70,
-    "src/lupin_app/static/js/shared/arg-interview.js": 41,
+    "src/lupin_app/static/js/shared/arg-interview.js": 39,
     "src/lupin_app/static/js/shared/task-create.d.ts": 2,
     "src/lupin_app/static/js/shared/task-create.js": 143,
     "src/lupin_app/static/js/shared/task-list-query.d.ts": 6,
