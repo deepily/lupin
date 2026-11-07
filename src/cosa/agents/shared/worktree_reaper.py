@@ -729,6 +729,7 @@ def _newest_mtime_age_hours( path: str, now_ts: float ) -> float:
 
 PROTECTED_BRANCHES = ( "main", "master" )
 PROTECTED_MARK     = "wip"      # any branch whose name holds it is a working line (María, 2026-09-18)
+PROTECTED_MARK_RE  = re.compile( r"(?<![a-z0-9])" + PROTECTED_MARK + r"(?![a-z0-9])", re.IGNORECASE )
 
 
 def is_protected_branch( branch: str, target: Optional[ str ] ) -> bool:
@@ -737,10 +738,11 @@ def is_protected_branch( branch: str, target: Optional[ str ] ) -> bool:
 
     Ensures:
         - True for main, master, the repo's current WIP branch (`target`), and any
-          branch whose name contains "wip" in any case — the numbered release lines
-          (`wip-v0.2.1-…`) are all merged into each other and would all qualify
+          branch whose name has "wip" in any case as a whole word between characters that
+          are not letters or digits; "fix-wipe-cache" does not count. The numbered release
+          lines (`wip-v0.2.1-…`) are all merged into each other and would all qualify
     """
-    return branch in PROTECTED_BRANCHES or branch == target or PROTECTED_MARK in branch.lower()
+    return branch in PROTECTED_BRANCHES or branch == target or PROTECTED_MARK_RE.search( branch ) is not None
 
 
 def checked_out_branches( project_root: str, run: Callable ) -> Optional[ set ]:
@@ -884,21 +886,60 @@ def delete_merged_branch(
 # Restore one with: git update-ref refs/heads/<name> <sha>
 
 
-def content_landed( project_root: str, branch: str, target: str, run: Callable ) -> Optional[ bool ]:
+def at_risk_work( project_root: str, branch: str, target: str, run: Callable ) -> Optional[ dict ]:
     """
-    Has every commit on `branch` already reached `target` by content, if not by ancestry?
+    The part of `branch` held nowhere safe: not on target, not on a protected remote line.
 
     Ensures:
-        - True when `git cherry refs/heads/<target> refs/heads/<branch>` lists no commit
-          marked "+" (each has a patch-equivalent on target, or the branch adds nothing)
-        - False when at least one commit is marked "+"
+        - a commit reachable from refs/heads/<target> or from a remote-tracking ref whose
+          short name passes is_protected_branch (main, master, target, any "wip" name) is
+          never counted: it is safe on a line that is kept. A branch pushed under its own
+          name does not protect its commits, because deleting it loses them
+          (a remote line whose name contains "wip" does protect commits, as intended: those lines
+          are kept, and the numbered release lines all carry the mark)
+        - returns { count, landed, files }:
+            count  - commits on the branch reachable from neither
+            landed - True when count is 0, or when `git cherry` finds a patch-equivalent
+                     on target for each of those commits; False otherwise
+            files  - sorted paths those commits touch, or None when git could not list them
         - None when git could not answer — "could not look", never "landed"
         - never raises
     """
-    res = _git( run, project_root, "cherry", f"refs/heads/{target}", f"refs/heads/{branch}", timeout=300 )
-    if not res[ "success" ]:
+    remotes = _git( run, project_root, "for-each-ref", "--format=%(refname)", "refs/remotes" )
+    if not remotes[ "success" ]:
         return None
-    return not any( line.startswith( "+" ) for line in res[ "stdout" ].splitlines() )
+    held = [ ref for ref in remotes[ "stdout" ].split() if is_protected_branch( ref.split( "/", 3 )[ -1 ], target ) ]
+    rng   = [ f"refs/heads/{branch}", "--not", f"refs/heads/{target}", *held ]
+    risky = _git( run, project_root, "rev-list", *rng, timeout=300 )
+    if not risky[ "success" ]:
+        return None
+    shas = set( risky[ "stdout" ].split() )
+    if not shas:
+        return { "count": 0, "landed": True, "files": [] }
+
+    cherry = _git( run, project_root, "cherry", f"refs/heads/{target}", f"refs/heads/{branch}", timeout=300 )
+    if not cherry[ "success" ]:
+        return None
+    unique = [ line for line in cherry[ "stdout" ].splitlines() if line.startswith( "+ " ) and line[ 2: ].strip() in shas ]
+
+    names = _git( run, project_root, "log", "--name-only", "--format=", *rng, timeout=300 )
+    files = sorted( set( names[ "stdout" ].split( "\n" ) ) - { "" } ) if names[ "success" ] else None
+    return { "count": len( shas ), "landed": not unique, "files": files }
+
+
+def content_landed( project_root: str, branch: str, target: str, run: Callable ) -> Optional[ bool ]:
+    """
+    Has every commit on `branch` that is not already on a remote reached `target` by content?
+
+    Ensures:
+        - True when at_risk_work finds no commit outside target and the remotes, or each
+          one has a patch-equivalent on target
+        - False when at least one such commit has none
+        - None when git could not answer — "could not look", never "landed"
+        - never raises
+    """
+    work = at_risk_work( project_root, branch, target, run )
+    return None if work is None else work[ "landed" ]
 
 
 def archive_branch( project_root: str, branch: str, run: Callable, now: Optional[ datetime ] = None ) -> dict:
@@ -957,8 +998,8 @@ def retire_branch(
         - starts from delete_merged_branch's outcome, unchanged for every result except
           kept "unmerged"
         - an unmerged branch is archived (archive_branch). The outcome then carries
-          kept_reason "archived", archive_ref, sha, and landed (content_landed, measured
-          before the ref moves): True means its commits are on the target by content,
+          kept_reason "archived", archive_ref, sha, and landed (measured before the ref moves, from at_risk_work),
+          unpushed_count and unpushed_files (None when git could not say): True means its commits are on the target by content,
           False means it holds work that never landed, None means git could not say
         - when the archive fails: kept_reason "archive_failed", error set, branch kept
         - never deletes an unmerged commit, never pushes, never raises
@@ -967,7 +1008,10 @@ def retire_branch(
     outcome = delete_merged_branch( project_root, branch, target, run=run )
     if outcome[ "kept_reason" ] != "unmerged":
         return outcome
-    outcome[ "landed" ] = content_landed( project_root, branch, target, run )
+    work = at_risk_work( project_root, branch, target, run )
+    outcome[ "landed" ]         = None if work is None else work[ "landed" ]
+    outcome[ "unpushed_count" ] = None if work is None else work[ "count" ]
+    outcome[ "unpushed_files" ] = None if work is None else work[ "files" ]
     moved = archive_branch( project_root, branch, run, now=now )
     outcome[ "archive_ref" ] = moved[ "archive_ref" ]
     outcome[ "sha" ]         = moved[ "sha" ]

@@ -264,6 +264,9 @@ def owner_for_branch( branch: str, project_root: Optional[ str ] = None, run: Op
     return _owner_from( resolve_creator( name, project_root=project_root, branch=branch, run=run, registry_fn=registry_fn ) )
 
 
+MAX_ROW_FILES = 30
+
+
 def compose_archive_row( outcome: dict ) -> dict:
     """
     The row fields for one archived branch whose work did not land.
@@ -275,7 +278,8 @@ def compose_archive_row( outcome: dict ) -> dict:
     Ensures:
         - returns { title, body, owner, accountable, project, correlation_key }; the key
           is "archive:" + the archive ref, one per archived tip
-        - the body names the ref, the sha, the count ahead, what landed means here, the
+        - the body names the ref, the sha, the count of commits held on no remote (the
+          ancestry count only when that count is unknown), the files they touch, the
           restore command and the 14-day deadline
     """
     branch  = outcome[ "branch" ]
@@ -286,9 +290,23 @@ def compose_archive_row( outcome: dict ) -> dict:
     ahead   = outcome.get( "commits_ahead" )
     state   = ( "could not be checked for content already on the working branch"
                 if outcome.get( "landed" ) is None else "holds commits whose content is not on the working branch" )
+    risky   = outcome.get( "unpushed_count" )
+    files   = outcome.get( "unpushed_files" )
+    target  = outcome.get( "target" )
+    if risky is None:
+        count_line = f"It is {ahead if ahead is not None else 'an unknown number of'} commits ahead of `{target}` by ancestry (the commits held on no remote could not be counted) and {state}."
+    else:
+        count_line = f"{risky} of its commits are held on neither `{target}` nor a protected remote line (main, master or a wip name), and {state}."
     lines = [
         f"The worktree janitor archived branch `{branch}` at `{ref}` (sha `{outcome.get( 'sha' )}`).",
-        f"It is {ahead if ahead is not None else 'an unknown number of'} commits ahead of `{outcome.get( 'target' )}` and {state}.",
+        count_line,
+    ]
+    if risky is not None and files is None:
+        lines.append( "The files those commits touch could not be listed." )
+    elif files:
+        lines += [ "Files those commits touch:" ] + [ f"- `{f}`" for f in files[ :MAX_ROW_FILES ] ]
+        if len( files ) > MAX_ROW_FILES: lines.append( f"- and {len( files ) - MAX_ROW_FILES} more" )
+    lines += [
         "",
         "Nothing was merged and nothing was deleted. The archive ref is removed 14 days after the day in its name.",
         f"Restore it with: `git update-ref refs/heads/{branch} {outcome.get( 'sha' )}`",
