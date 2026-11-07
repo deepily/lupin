@@ -398,7 +398,7 @@ class TestAudioCallbacks:
 
 
 # ===========================================================================
-# _load_research_async  (MID)
+# _load_research_async, a mid-level step
 # ===========================================================================
 class TestLoadResearch:
     def test_load_absolute_path_success_debug( self, capsys ):
@@ -444,7 +444,7 @@ class TestLoadResearch:
 
 
 # ===========================================================================
-# _analyze_content_async  (MID)
+# _analyze_content_async, a mid-level step
 # ===========================================================================
 class TestAnalyzeContent:
     def test_analyze_happy_path( self ):
@@ -526,7 +526,7 @@ class TestAnalyzeContent:
 
 
 # ===========================================================================
-# _generate_script_async  (MID)
+# _generate_script_async, a mid-level step
 # ===========================================================================
 class TestGenerateScript:
     def test_generate_happy_path( self ):
@@ -658,7 +658,7 @@ class TestGenerateScriptRetry:
 
 
 # ===========================================================================
-# _revise_script_async  (MID)
+# _revise_script_async, a mid-level step
 # ===========================================================================
 class TestReviseScript:
     def test_revise_happy_path( self ):
@@ -772,7 +772,7 @@ class TestSaveScript:
 
 
 # ===========================================================================
-# _delete_draft_script  (MID)
+# _delete_draft_script, a mid-level step
 # ===========================================================================
 class TestDeleteDraft:
     def test_delete_existing_file_debug( self, capsys ):
@@ -796,7 +796,7 @@ class TestDeleteDraft:
 
 
 # ===========================================================================
-# _generate_translated_script_async  (MID)
+# _generate_translated_script_async, a mid-level step
 # ===========================================================================
 class TestGenerateTranslated:
     def test_translated_happy_prosody_preserved( self, capsys ):
@@ -865,7 +865,7 @@ class TestGenerateTranslated:
 
 
 # ===========================================================================
-# _generate_audio_async  (MID)
+# _generate_audio_async, a mid-level step
 # ===========================================================================
 class TestGenerateAudio:
     def test_audio_happy_no_failures( self ):
@@ -910,7 +910,7 @@ class TestGenerateAudio:
 
 
 # ===========================================================================
-# _stitch_audio_async  (MID)
+# _stitch_audio_async, a mid-level step
 # ===========================================================================
 class TestStitchAudio:
     def test_stitch_success_debug( self, capsys ):
@@ -1739,7 +1739,7 @@ class TestPresentScriptReviewPriority:
 # the orchestrator; the passthrough file could only read the source text.
 #
 # TWO DIFFERENT FAILURES, NOT ONE. Both tag generators sit INSIDE the per-language
-# loop (orchestrator.py:706 and :709), so every language opens its own pair of UI
+# loop (podcast_generator/orchestrator.py), so every language opens its own pair of UI
 # lines — hoist either above the loop and the source text is byte-identical while
 # Spanish silently overwrites English. That is a line in the wrong place. The
 # callback rule is a different animal: `_audio_progress_callback` reports under

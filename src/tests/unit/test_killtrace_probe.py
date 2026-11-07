@@ -53,7 +53,7 @@ def test_stripped_env_with_nothing_to_strip():
 
 
 # ---------------------------------------------------------------------------
-# finders (pure)
+# the finder functions, which are pure
 # ---------------------------------------------------------------------------
 
 def test_find_self_sigterm_line_returns_last_match():

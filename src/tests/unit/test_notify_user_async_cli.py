@@ -177,7 +177,7 @@ class TestWhatTheHumanSees:
             connection_count=3, target_system_id=None ) )
         assert "3 connection(s)" in capsys.readouterr().out
 
-        _run( [ "msg" ] )   # connection_count = 0
+        _run( [ "msg" ] )   # zero connections
         assert "connection(s)" not in capsys.readouterr().out
 
     def test_a_validation_failure_names_the_offending_field( self, capsys ):

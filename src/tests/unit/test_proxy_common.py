@@ -248,7 +248,7 @@ class TestBaseWebSocketListener:
     # subclass's TIMESTAMPED centralized log. The cost was concrete: the downtime
     # behind every measured bounce had to be inferred from arrival times because
     # no timestamped reconnect line exists anywhere in the record
-    # (src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md §4).
+    # (the settle-deadline arithmetic 30-vs-40 note, section 4, removed by 8420e8b0a).
     # Routing them through _log lets a subclass persist them; these tests pin
     # that the routing exists, so a later "simplify" back to print goes red.
 

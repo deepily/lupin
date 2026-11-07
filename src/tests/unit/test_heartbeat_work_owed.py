@@ -603,7 +603,7 @@ def test_non_string_and_empty_are_not_pokes():
 # poke is delivered to the recipient session WRAPPED in a peer-DM <system-reminder>
 # envelope (build_peer_dm_reminder) — so the arbiter body is NOT at the START of the
 # delivered prompt. The c121037b matcher keyed ONLY on POKE_PROMPT_SENTINEL via
-# `startswith`, so the wrapped arbiter poke fell through → user_prompt_submit.py:86
+# `startswith`, so the wrapped arbiter poke fell through → user_prompt_submit.py
 # reset the Stop-hook poke-cap → each arbiter escalation reopened a fresh poke budget
 # (the two detectors could reset each other → token burn while the user is away).
 #
