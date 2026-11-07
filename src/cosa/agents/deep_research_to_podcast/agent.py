@@ -22,6 +22,7 @@ import os
 from datetime import datetime
 from typing import Optional, List
 
+from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from .state import ChainedResult, PipelineState
 
 
@@ -259,6 +260,7 @@ class DeepResearchToPodcastAgent:
         from cosa.agents.deep_research import cosa_interface as dr_cosa_interface
         dr_voice_io.reconfigure()
         dr_cosa_interface.TARGET_USER = self.user_email
+        set_dispatch_context( target_user=self.user_email )
 
         # Import Deep Research components
         from cosa.agents.deep_research.config import ResearchConfig
@@ -414,6 +416,7 @@ class DeepResearchToPodcastAgent:
         from cosa.agents.podcast_generator import cosa_interface as pg_cosa_interface
         pg_voice_io.reconfigure()
         pg_cosa_interface.TARGET_USER = self.user_email
+        set_dispatch_context( target_user=self.user_email )
 
         # Import Podcast Generator components
         from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent

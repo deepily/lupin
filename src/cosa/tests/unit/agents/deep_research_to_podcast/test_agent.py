@@ -440,6 +440,13 @@ class TestRunDeepResearch:
         # TARGET_USER propagated to DR cosa_interface
         assert graph.dr_cosa_iface.TARGET_USER == "u@test.com"
 
+    def test_research_phase_sets_the_per_task_target_user( self ):
+        graph = _DRGraph( cfg_values={ "deep research output directory": "io/dr" } )
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( "cosa.agents.deep_research_to_podcast.agent.set_dispatch_context" ) as set_ctx:
+            _run( self._agent()._run_deep_research() )
+        set_ctx.assert_called_once_with( target_user="u@test.com" )
+
     def test_absolute_output_dir_outside_root_is_root_prefixed( self ):
         graph = _DRGraph( cfg_values={ "deep research output directory": "/io/dr" } )
         agent = self._agent()
@@ -590,6 +597,13 @@ class TestRunPodcastGenerator:
         assert result[ "artifacts" ][ "title" ]         == "My Episode"
         assert result[ "artifacts" ][ "segment_count" ] == 7
         assert result[ "artifacts" ][ "duration_min" ]  == 12
+
+    def test_podcast_phase_sets_the_per_task_target_user( self ):
+        graph = _PGGraph()
+        with graph.patcher(), patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.agents.deep_research_to_podcast.agent.set_dispatch_context" ) as set_ctx:
+            _run( self._agent()._run_podcast_generator( "/io/dr/report.md" ) )
+        set_ctx.assert_called_once_with( target_user="u@test.com" )
 
     def test_script_none_returns_cancelled( self ):
         graph = _PGGraph( script=None )
