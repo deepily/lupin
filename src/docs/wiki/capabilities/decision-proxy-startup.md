@@ -6,7 +6,8 @@ pins:
   - cosa.agents.decision_proxy.__main__.parse_args@c1dbf85775
   - cosa.agents.decision_proxy.listener.DecisionListener@e9fab60778
   - cosa.agents.decision_proxy.voice_io.notify@1f32442af0
-  - cosa.agents.decision_proxy.config.trust_proxy_config_from_config_mgr@741f4346e1
+  - cosa.agents.decision_proxy.config.trust_proxy_config_from_config_mgr@5fc408d90f
+  - cosa.agents.decision_proxy.errors.InvalidTrustModelError@b7bf297afd
 ---
 # Decision proxy startup
 
@@ -19,7 +20,8 @@ pins:
 - It sends a low-priority notice on connect and on disconnect, stops the listener on interrupt or terminate, and prints the responder's statistics on exit.
 - `DecisionListener` extends the base listener from [[proxy-agent-base]]. It subscribes to `notification_queue_update`, `job_state_transition` and `sys_ping`.
 - `voice_io.notify` sends a status notice as `decision.proxy@lupin.deepily.ai` at low priority by default. It builds its keywords with `build_notify_kwargs` ([[proxy-shared-helpers]]) and returns whether the notice was sent.
-- `trust_proxy_config_from_config_mgr` reads 36 INI keys into one dict, each with a module default except the zone, which has none. Four start with `decision proxy`, the rest with `swe team trust proxy`.
+- `trust_proxy_config_from_config_mgr` reads 37 INI keys into one dict, each with a module default except the zone, which has none. Four start with `decision proxy`, the rest with `swe team trust proxy`.
+- One of them, `swe team trust proxy trust model`, picks the trust model: `count` (the default), `beta` or `blr`. Any other value raises `InvalidTrustModelError`, so a bad value stops startup instead of running on defaults.
 
 ## Don't
 - Don't expect `main` to refuse in the shipped setup with an error code. A disabled proxy prints a message and returns normally.

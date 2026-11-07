@@ -536,7 +536,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[podcast-mock-clients]] — Canned script and silent audio stand-ins for the podcast clients. `cosa.agents` (podcast_generator)
 - [[podcast-prompts]] — Podcast analysis, script and revision prompt builders, response parsers, host personality text. `cosa.agents` (podcast_generator)
 - [[podcast-script-state]] — Podcast state enums, typed dict, segment and prosody helpers, review-gate wording. `cosa.agents` (podcast_generator)
-- [[prediction-accuracy-comparators]] — Per-question-type comparators that score a prediction against the actual answer. `cosa.agents` (prediction_engine)
+- [[prediction-accuracy-comparators]] — Per-question-type comparators that score a prediction against the actual answer, and the one-off rescore of old multiple-choice rows. `cosa.agents` (prediction_engine), `scripts` (rescore_empty_answers_mc)
 - [[presentation-cli]] — Presentation generator command line and its content-phase API response type. `cosa.agents` (presentation_generator)
 - [[presentation-deck-model]] — Slide and arc models, Marp text renderer, deck verdict. `cosa.agents` (presentation_generator)
 - [[presentation-prompts]] — Narrative, outline, elaboration and visual prompt builders, parsers, timing clamp summary. `cosa.agents` (presentation_generator)

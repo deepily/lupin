@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob@9e3e736da9
   - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob.do_all@42afdb8dc9
-  - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator@b4721b38ba
+  - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator@61bb3a740e
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_diagnosis@47e97bb180
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_proposal@c395c18198
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_fix@01cb024310
@@ -31,7 +31,7 @@ BFE takes one dead (failed or interrupted) queue job and tries to fix the code t
 - When `bug fix expediter require user confirm` is false, the highest-confidence fix is taken without asking.
 
 ## Git, by trust level
-- `run_git_strategy` does nothing when the fix failed or no file changed. Levels 1 and 2 commit on the current branch only; an unreadable proxy gives level 1.
+- `run_git_strategy` does nothing when the fix failed or no file changed. Levels 1 and 2 commit on the current branch only; an unreadable proxy gives level 1. The proxy is built by the shared `build_ini_engineering_strategy` (see [[swe-team-orchestrator]]), so its caps, audit rate and trust model come from the INI. An unknown trust model is raised, not read as level 1.
 - Level 3 and above push a fix branch and open a pull request through `gh`. They do so only when `bug fix expediter push fix branch enabled` is true. The shipped INI has it false. With it false the fix is committed on its fix branch and nothing is pushed. No PR opens, the original branch is restored, and the run says so and names the key. With it true, a missing `gh` or a failed PR step leaves the branch pushed and no PR (`branch_only`).
 
 ## Worktree isolation
