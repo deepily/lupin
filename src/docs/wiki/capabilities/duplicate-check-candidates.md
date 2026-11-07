@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.body_vectors.body_text@c765892c19
   - cosa.repo.duplicate_check.body_vectors.engine_tag@73eaf52263
-  - cosa.repo.duplicate_check.body_vectors.ensure_vectors@971fcf34b4
+  - cosa.repo.duplicate_check.body_vectors.ensure_vectors@6c72c52211
   - cosa.repo.duplicate_check.candidates.build_pool@5aa79c432f
   - cosa.repo.duplicate_check.candidates.candidate_rows@e914cff432
   - cosa.repo.duplicate_check.candidates.candidates_for@ae0ccf4fb7
@@ -24,7 +24,7 @@ pins:
 # Duplicate checker: candidate stage
 For each new definition, three ranked lists are joined by rank fusion into a short candidate row for the judge.
 - `body_text` returns the text that is embedded and whether it was cut. `engine_tag` names the engine, so another engine's vectors are never reused.
-- `ensure_vectors` embeds every definition and reads earlier embeddings from a cache keyed by text sha. Each batch is written to the cache as it returns, so a crash part way keeps the batches already done.
+- `ensure_vectors` embeds every definition and reads earlier embeddings from a cache keyed by text sha. Each batch is written to the cache as it returns, so a crash part way keeps the batches already done. It passes `REFUSAL_LIMIT` (32) to `embed_all`, so a saturated embeddings service stops the check with `SERVICE_SATURATED` instead of halving and retrying batch after batch.
 - `build_pool` gathers the definitions a candidate may come from, with unit-length vectors. `same_slot` says whether two are one definition or its redefinition.
 - `embedding_list` lists the nearest by cosine. `word_index` and `word_list` rank by shared words with BM25.
 - `structural_list` lists structural clones. `partner_map` turns clone pairs into partners, and `outside_pool` counts partners not in the pool.
