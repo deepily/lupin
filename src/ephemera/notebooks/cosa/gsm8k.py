@@ -8,7 +8,6 @@ import pandas             as pd
 import cosa.utils.util as du
 import cosa.utils.util_xml as dux
 
-# from lib.memory.solution_snapshot    import SolutionSnapshot
 from cosa.utils.util_stopwatch import Stopwatch
 from cosa.agents.math_agent import MathAgent
 from cosa.agents import Llm
@@ -78,52 +77,41 @@ def call_llms(
             du.print_banner( f"Question [{i}] of [{max_rows}]: {question[ :100 ]}" )
             if do_math_agent:
                 
-                # timer = Stopwatch()
                 agent = MathAgent(
-                    # question=SolutionSnapshot.remove_non_alphanumerics( question ),
                     question=question,
                     last_question_asked=question,
                     routing_command="agent router go to math", debug=debug, verbose=verbose
                 )
                 answer = agent.do_all()
                 responses_math_agent.append( answer )
-                # timer.print( f"Math agent answered: {answer}", use_millis=True )
             else:
                 responses_math_agent.append( "" )
             
             if do_vanilla_llm:
                 
                 prefix = "Plain vanilla LLM"
-                # timer = Stopwatch( f"[{i}] {prefix}..." )
                 prompt_template = du.get_file_as_string(
                     du.get_project_root() + "/src/conf/prompts/agents/plain-vanilla-question.txt"
                     )
                 prompt = prompt_template.format( question=question )
                 answer = call_vanilla_llm( prefix, prompt, model=model, debug=debug, verbose=verbose )
                 responses_vanilla_llm.append( answer )
-                # timer.print( "Done!", use_millis=True )
             else:
                 responses_vanilla_llm.append( "" )
             
             if do_vanilla_llm_cot:
                 
                 prefix = "Plain vanilla LLM w/ ToC"
-                # timer = Stopwatch( f"[{i}] {prefix}..." )
                 prompt_template = du.get_file_as_string(
                     du.get_project_root() + "/src/conf/prompts/agents/plain-vanilla-question-toc.txt"
                 )
                 prompt = prompt_template.format( question=question )
                 answer = call_vanilla_llm( prefix, prompt, model=model, debug=debug, verbose=verbose )
                 responses_vanilla_llm_toc.append( answer )
-                # timer.print( "Done!", use_millis=True )
             
             else:
                 responses_vanilla_llm_toc.append( "" )
             
-            # # if we're only running vanilla, wait a bit before continuing so as to not overwhelm the server
-            # if do_vanilla and not do_vanilla_cot and not do_math_agent:
-            #     print( f"We're only running in vanilla mode, waiting [{seconds}]... before continuing" )
-            #     time.sleep( seconds )
             
             if sleep_seconds > 0:
                 print( f"Sleeping for [{sleep_seconds}] seconds..." )
@@ -148,8 +136,6 @@ def call_llms(
                 
     outer_timer.print( "Done!" )
     
-    # write final checkpoint AFTER decrementing the counter by one    
-    # i -= 1
     
     file_name = get_file_name( model, current_date, current_time )
     checkpoint_file = f"{checkpoint_path}/checkpoint-{starting_i}-{i - 1}-{file_name}"
@@ -321,10 +307,6 @@ if __name__ == "__main__":
     ground_truth    = sampled_df[ "answer" ].tolist()
     max_rows        = len( questions )
     model           = Llm.PHI_4_14B
-    # model           = Llm.QWEN_2_5_32B
-    # model           = Llm.PHIND_34B_v2
-    # model           = Llm.GROQ_LLAMA3_1_8B
-    # model           = Llm.GROQ_LLAMA3_1_70B
     
     llm_responses_dict = call_llms(
         max_rows, questions, ground_truth, model=model, starting_i=starting_i, checkpoint_interval=checkpoint_i, sleep_seconds=sleep_seconds,
