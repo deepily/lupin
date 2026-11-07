@@ -5,13 +5,14 @@ pins:
   - lupin_mcp.duplicate_check_daily.Counting@006524b7c4
   - lupin_mcp.duplicate_check_daily.findings_of@25bb8dd399
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
-  - lupin_mcp.duplicate_check_daily.run@9f2e1acacd
+  - lupin_mcp.duplicate_check_daily.run@4a87a6b583
   - lupin_mcp.duplicate_check_daily.cron_lines@832050592a
   - lupin_mcp.duplicate_check_daily.install_mode@920cbf8687
   - lupin_mcp.duplicate_check_daily.live_parts@2818695534
   - lupin_mcp.duplicate_check_daily.live_filer@832dcfdc1a
   - lupin_mcp.duplicate_check_daily.live_auditor@46c2ce1135
   - lupin_mcp.duplicate_check_daily.main@aec1af8919
+  - lupin_mcp.duplicate_check_daily.record@0c6e420b03
 ---
 # Duplicate check daily: run, cron and live parts
 The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplicate-check-daily-window]]; rows are in [[duplicate-check-filing]].
@@ -28,6 +29,7 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - A filer or auditor that raises is caught and recorded as `filing` or `audit` with an `error`. The run still advances.
 - The findings are kept in the file on every run, filer or not. The weekly page counts them and [[duplicate-check-refile]] can file them again.
 - The detached worktrees are removed whether the run ends or fails.
+- `record` writes the result file with `schema_version`, `started_at` and `mode`, and `None` for each measure a run that stopped early never reached. Then it appends the run's line to `runs.jsonl` (see [[duplicate-check-run-history]]).
 - `cron_lines` returns a daily line at 12:07 and a reboot line 300 seconds after boot. A branch other than `main` is added to both as `--branch`, shell-quoted; the default adds nothing. `install_mode` prints, installs, removes or reports them through the librarian's locked crontab editor.
 - `live_parts` builds the real parts and makes no call. `live_filer` files rows over HTTP. `live_auditor` queues known-miss audits (see [[duplicate-check-audit]]), with no model call.
 - `main` needs `--cap`, which has no default, unless it only removes or reports the cron lines. It exits 3 when the branch guard refused, 1 when anything else failed, else 0. (argparse's usage errors are 2.)

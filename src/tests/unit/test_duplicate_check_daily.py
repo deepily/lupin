@@ -11,6 +11,7 @@ from cosa.repo.duplicate_check import errors as err
 from cosa.repo.duplicate_check import judge as jd
 from cosa.repo.duplicate_check.proof import proof_cli
 from lupin_mcp import duplicate_check_daily as dd
+from lupin_mcp import duplicate_check_history as hist
 from tests.unit.test_duplicate_check_score_run import JSCPD, SCRUB, FakeBackend, FakeClient, function
 from tests.unit.test_librarian_tick import cron   # noqa: F401  (fixture: the fake crontab and the fake lock)
 
@@ -728,3 +729,23 @@ def test_an_idle_pinned_branch_with_only_older_branches_beside_it_is_not_refused
     assert dd.branch_guard( repo, "wip-pinned", NOW + datetime.timedelta( days=10 ) ) is None, "idle for days, still the newest work there is"
     branched( repo, "wip-newer", 2 )
     assert dd.branch_guard( repo, "wip-pinned", NOW )[ "newest" ] == "wip-newer", "the same pin is refused once a newer branch exists"
+
+
+def test_every_run_appends_one_history_line_and_the_result_file_carries_the_schema_version_and_start_time( repo, tmp_path ):
+    history( repo )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    doc    = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    lines  = hist.read_lines( folder )
+    assert len( lines ) == 1 and lines[ 0 ][ "run_file" ] == "2026-11-03-120000-hand.json" and lines[ 0 ][ "status" ] == "ok"
+    assert doc[ "schema_version" ] == hist.SCHEMA_VERSION and doc[ "started_at" ] == NOW.isoformat() and lines[ 0 ][ "started_at" ] == NOW.isoformat()
+    assert ( lines[ 0 ][ "judged" ], lines[ 0 ][ "judge_calls" ], lines[ 0 ][ "carried" ], lines[ 0 ][ "mode" ] ) == ( 3, 3, 0, "daily" )
+
+
+def test_a_failed_run_appends_a_line_with_the_same_keys_and_the_result_file_gains_the_unmeasured_keys_as_none( repo, tmp_path ):
+    history( repo )
+    folder = tmp_path / "io" / "duplicate-check-daily"
+    dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path ) )
+    doc = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", 10, None, parts_of( tmp_path ) )
+    good, bad = hist.read_lines( folder )
+    assert set( good ) == set( bad ) and bad[ "status" ] == "failed" and bad[ "failure" ].startswith( "claude_binary: " ) and bad[ "carried" ] is None
+    assert all( doc[ k ] is None for k in dd.UNREACHED ) and doc[ "schema_version" ] == hist.SCHEMA_VERSION

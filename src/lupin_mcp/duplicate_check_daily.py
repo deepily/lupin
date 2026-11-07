@@ -26,6 +26,7 @@ from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import vector_build
 from lupin_mcp import duplicate_check_audit as audit
 from lupin_mcp import duplicate_check_filing as filing
+from lupin_mcp import duplicate_check_history as history
 from lupin_mcp import reuse_behaviour as behaviour
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_tie as tie_mod
@@ -55,6 +56,7 @@ STALE_BRANCH      = "stale_branch"
 MISSING_BRANCH    = "missing_branch"
 STAGE_GUARD       = "branch_guard"
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
+UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
 CARRIED           = ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR", "COSA_VOICE_MANAGERS__LUPIN" )     # names copied into the cron lines from the installer's environment
 
 
@@ -224,6 +226,24 @@ def write_json( path, doc ):
     return path
 
 
+def record( folder, stem, doc, now ):
+    """
+    Write a run's result file and append its line to the run history.
+
+    Requires:
+        - doc is the result document; stem is the file name without its extension; now is the run's start time
+    Ensures:
+        - the document gains schema_version and started_at, and None for each measure the run did not reach, so a failed run has the keys of a successful one
+        - writes <folder>/<stem>.json, then appends one line to runs.jsonl
+        - returns the document
+    """
+    doc.update( schema_version=history.SCHEMA_VERSION, started_at=now.isoformat() )
+    for key in UNREACHED: doc.setdefault( key, None )
+    write_json( folder / f"{stem}.json", doc )
+    history.append_line( folder, history.line_of( doc, f"{stem}.json" ) )
+    return doc
+
+
 def findings_of( groups, fresh, pool, window, parts, commit_of=None ):
     """
     Turn the duplicate clusters into one finding per new definition.
@@ -359,7 +379,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     started = clock()
     folder  = pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER )
     stem    = f"{now.date().isoformat()}-{now.strftime( '%H%M%S' )}-{trigger}"
-    base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap }
+    base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap, "mode": history.MODE_DAILY }
     refused = branch_guard( root, branch, now )
     if refused is not None:
         command = reinstall_command( root, sys.executable, cap, cli_path, refused[ "newest" ] ) if refused[ "newest" ] is not None else None
@@ -368,13 +388,11 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
             try: sent = parts[ "notifier" ]( *refusal_message( refused, command ) )
             except Exception: sent = False       # a broken notifier must not hide the refusal: the file and the exit code still say it
         doc = { **base, "status": "failed", "stage": STAGE_GUARD, **refused, "reinstall": command, "notified": sent, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
-        write_json( folder / f"{stem}.json", doc )
-        return doc
+        return record( folder, stem, doc, now )
     miss    = failed_prerequisite( parts[ "client" ], cli_path, parts[ "verify" ], parts[ "version_fn" ] )
     if miss is not None:
         doc = { **base, "status": "failed", **miss, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
-        write_json( folder / f"{stem}.json", doc )
-        return doc
+        return record( folder, stem, doc, now )
     cfg    = parts[ "verify" ]()
     last   = read_last_success( folder )
     window = window_of( root, last, now, branch )
@@ -393,8 +411,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
             out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap, skip_breaching=True )
     except Exception as exc:               # the pool build, the embeddings or the judge failed: leave a record and change nothing else
         doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, elapsed_seconds=round( clock() - started, 3 ) )
-        write_json( folder / f"{stem}.json", doc )
-        return doc
+        return record( folder, stem, doc, now )
     finally:
         release( root, tree )
     ids    = [ d[ "id" ] for d in [ *fresh[ "defs" ], *pool ] if d[ "id" ] not in set( out[ "dropped" ][ "ids" ] ) ]
@@ -410,8 +427,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         try: doc[ key ] = parts[ hook ]( found, folder )
         except Exception as e: doc[ key ] = { "error": f"{type( e ).__name__}: {e}" }       # a broken store client or config must not stop last-success, or the next run re-judges and re-spends the cap
     write_json( folder / LAST_SUCCESS, { "commit": moved[ "advanced_to" ], "at": now.isoformat() } )
-    write_json( folder / f"{stem}.json", doc )
-    return doc
+    return record( folder, stem, doc, now )
 
 
 def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRANCH ):
