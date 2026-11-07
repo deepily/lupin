@@ -974,10 +974,10 @@ def collect( root ):
 
     Ensures:
         - returns ( findings, warnings, refusal_lines, tally ); refusal_lines are the printable lines
-        - findings are limited to lines the staged diff touched, minus anything already in refusals
+        - findings are limited to lines the staged diff touched, minus anything already in refusals; a git failure skips the dangling-path rule alone, with one plain warning
         - a finding is_record_exempt names is left out, so a root record file is judged under rule set B
         - a refused or waived finding is left out as that one finding; a finding of another linter with the same place and words stays
-        - a docstring finding with an honoured waiver marker on its line is left out of findings, in a swept file and in any other Python file
+        - a docstring finding, or a line-pointer, dangling-path or commented-out-code finding, with an honoured waiver marker on its line is left out, in any Python file; no other comment finding can be waived
         - refusals hold every mechanical finding anywhere in a staged file inside BLOCKING_PACKAGES
         - refusals also hold every docstring finding anywhere in a staged swept file that no waiver covers
         - a swept file that does not parse is refused, counted in tally["unparsed"], and cannot be waived
@@ -1035,6 +1035,7 @@ def collect( root ):
         warnings.append( Unchecked( line ) if executable and ( p in changed or p in moved_in ) and not is_warn_only( p ) else line )
     warnings  += [ ( Unchecked if p in created and not is_warn_only( p ) else str )( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
     skipped    = []
+    comment_lint.take_path_failure()
     decode_out = []
     for path in paths:
         try:
@@ -1052,11 +1053,18 @@ def collect( root ):
             if ranges.get( path ) and BARE_RETURN.search( source ): ranges[ path ] = [ ( 1, len( split_lines( source ) ) ) ]
             py_sources[ path ] = source
             doc_findings = docstring_lint.lint_source( path, source, root )
-            findings += doc_findings + comment_lint.lint_source( path, source, root )
+            comment_findings = comment_lint.lint_source( path, source, root )
+            findings += doc_findings + comment_findings
+            kept_lines = split_lines( source )
+            honoured   = [ f for f in comment_findings if f.rule in comment_lint.WAIVABLE_RULES and waiver_state( f, line_text( kept_lines, f.line ) ) == "honoured" ]
+            waived    += honoured
+            tally[ "waivers" ] += len( honoured )
             if is_swept( path ): swept.append( ( path, source, doc_findings ) )
             else: waived += [ f for f in doc_findings if waiver_state( f, line_text( split_lines( source ), f.line ) ) == "honoured" ]
         elif path.endswith( ".md" ):
             findings += md_lint.lint_source( path, source, root )
+    path_failure = comment_lint.take_path_failure()
+    if path_failure is not None: warnings.append( f"[doc-lint] WARNING: the dangling-path check was skipped, git could not answer ({path_failure}); every other rule ran" )
     py, md   = [ p for p in paths if p.endswith( ".py" ) and p not in skipped ], [ p for p in paths if p.endswith( ".md" ) and p not in skipped ]
     ruff_findings, ruff_warnings = run_ruff( root, py, sources=py_sources )
     md_findings, md_warnings     = run_markdownlint( root, md )

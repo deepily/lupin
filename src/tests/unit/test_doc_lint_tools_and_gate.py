@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -772,6 +773,34 @@ def test_a_waived_docstring_finding_does_not_take_the_comment_finding_on_its_lin
     _stage( repo, { rel: 'def f():\n    """Return NOT it."""  # doc-lint: waive caps -- quoting a log line\n' } )         # no comment finding now
     rc, lines = _blocking( repo )
     assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+
+
+# ---- the same-line waiver for the three comment rules -------------------------------------------
+
+@pytest.mark.parametrize( "rel", [ "src/lupin_mcp/w.py", "src/pkg/w.py" ] )
+@pytest.mark.parametrize( "body, rule", [
+    ( "# x = 1\n", "commented-out-code" ),
+    ( "# see notes.md:50\n", "line-pointer" ),
+    ( "# see src/gone.py\n", "dangling-path" ),
+] )
+def test_the_three_comment_rules_accept_a_same_line_waiver_and_other_comment_rules_do_not( repo, monkeypatch, rel, body, rule ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/keep.py": "y = 1\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { rel: body } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and any( f":1: {rule}" in ln for ln in lines )
+    waiver = f"  # doc-lint: waive {rule} -- the worked example the page quotes\n"
+    _stage( repo, { rel: body.rstrip( "\n" ) + waiver } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] swept scope: " ) and " 1 waivers honoured" in ln ]
+    _stage( repo, { rel: body.rstrip( "\n" ) + f"  # doc-lint: waive {rule} -- no\n" } )                          # no word of three letters
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    _stage( repo, { rel: "# This is NOT fine  doc-lint: waive caps -- quoting a log line\n" } )                  # caps stays unwaivable in a comment
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and any( ":1: caps" in ln for ln in lines )
 
 
 # ---- concluding a merge or a cherry-pick --------------------------------------------------------
@@ -2735,3 +2764,64 @@ def test_head_ts_table_text_is_none_until_a_table_is_committed( ts_stamped ):
     _ts_base( ts_stamped, { "src/a.ts": TS_CLEAN }, { "src/a.ts": 1 } )
     assert counts.parse_table( gate.head_table_text( str( ts_stamped ), TS_TABLE ) ).files == { "src/a.ts": 1 }
     assert gate.head_table_text( str( ts_stamped ) ) is None                                # the Python table has its own default
+
+
+# ---- a git failure turns off the dangling-path rule alone ---------------------------------------
+
+def _git_fails( monkeypatch, which, how ):
+    """Make the comment linter's git call of this kind fail; other process calls run for real."""
+    real  = subprocess.run
+    seen  = []
+    def run( cmd, *args, **kwargs ):
+        if cmd[ :1 ] == [ "git" ] and which in cmd and sys._getframe( 1 ).f_code.co_filename.endswith( "comment_lint.py" ):
+            seen.append( which )
+            if how == "missing": raise FileNotFoundError( 2, "No such file or directory: 'git'" )
+            if how == "timeout": raise subprocess.TimeoutExpired( cmd, kwargs[ "timeout" ] )
+            return SimpleNamespace( returncode=128, stdout="", stderr="fatal: injected" )
+        return real( cmd, *args, **kwargs )
+    monkeypatch.setattr( subprocess, "run", run )
+    return seen
+
+
+GIT_HOW = [ "nonzero", "missing", "timeout" ]
+
+
+@pytest.mark.parametrize( "how", GIT_HOW )
+@pytest.mark.parametrize( "which", [ "ls-files", "check-ignore" ] )
+def test_a_git_failure_skips_only_the_dangling_path_rule_and_another_rules_finding_still_refuses( repo, monkeypatch, which, how ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/keep.py": "y = 1\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    seen = _git_fails( monkeypatch, which, how )
+    _stage( repo, { "src/pkg/w.py": "# see src/gone.py\n# and src/also_gone.py\n# This is NOT fine\nz = 2\n" } )
+    rc, lines = _blocking( repo )
+    assert seen, "the injected git call was not reached"
+    assert rc == gate.REFUSAL_EXIT and any( ":3: caps" in ln for ln in lines )                                 # the other rule still refuses the commit
+    assert not any( "GATE CRASHED" in ln for ln in lines ) and not any( ": dangling-path:" in ln or " dangling-path:" in ln for ln in lines )
+    skipped = [ ln for ln in lines if "the dangling-path check was skipped" in ln ]
+    assert len( skipped ) == 1 and skipped[ 0 ].startswith( "[doc-lint] WARNING: " ) and "every other rule ran" in skipped[ 0 ]
+
+
+@pytest.mark.parametrize( "how", GIT_HOW )
+def test_a_git_failure_alone_warns_once_and_allows_the_commit( repo, monkeypatch, how ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/keep.py": "y = 1\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git_fails( monkeypatch, "ls-files", how )
+    _stage( repo, { "src/pkg/w.py": "# see src/gone.py\nz = 2\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and len( [ ln for ln in lines if "the dangling-path check was skipped" in ln ] ) == 1
+    assert "[doc-lint] 0 findings on staged lines (blocking)" in lines
+
+
+def test_a_git_failure_in_one_run_does_not_switch_the_rule_off_for_the_next( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/keep.py": "y = 1\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "src/pkg/w.py": "# see src/gone.py\n" } )
+    with monkeypatch.context() as patch:
+        _git_fails( patch, "ls-files", "missing" )
+        assert _blocking( repo )[ 0 ] == 0
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and any( ":1: dangling-path" in ln for ln in lines )
+    assert not any( "the dangling-path check was skipped" in ln for ln in lines )

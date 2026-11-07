@@ -502,3 +502,147 @@ def test_a_do_not_sentence_fires_on_a_plain_docstring_and_not_on_a_registered_to
     imperative = [ ( f.line, f.message ) for f in findings if f.rule == "agent-imperative" ]
     assert stats == { "exempted": 1 }
     assert imperative == [ ( 14, "text addressed to a model: 'Do not'" ) ]
+
+
+# ---- comment_lint: line pointers, dangling paths, commented-out code --------------------------
+
+@pytest.mark.parametrize( "text, expected", [
+    ( " x = 1", True ), ( " total += 2", True ), ( " import os", True ), ( " from a import b", True ), ( " del cache", True ),
+    ( " y: int = 3", True ), ( " print( x )", True ), ( " if ready:", True ), ( " else:", True ), ( " try:", True ), ( " finally:", True ),
+    ( " for item in items:", True ), ( " def helper( a ):", True ), ( " class Thing:", True ), ( " async def go():", True ),
+    ( " with open( p ) as f:", True ), ( " return self.value", True ), ( " raise ValueError( 'no' )", True ), ( " assert x == 1, 'bad'", True ),
+    ( "", False ), ( " ", False ), ( " yes", False ), ( " foo.bar", False ), ( " Note: a", False ), ( " noqa: E501", False ),
+    ( " for example x = 1", False ), ( " return early", False ), ( " raise alarm", False ), ( " assert truth", False ),
+    ( " x == 1", False ), ( " a = 1; b = 2", False ), ( " TODO( rick ): fix", False ), ( " if the file is missing:", False ),
+] )
+def test_commented_out_code_is_a_statement_that_parses_and_prose_is_not( text, expected ):
+    assert comment_lint.is_commented_out_code( text ) is expected
+    assert [ f.rule for f in comment_lint.commented_out_code_findings( text, "a.py", 3 ) ] == ( [ "commented-out-code" ] if expected else [] )
+
+
+def test_a_line_pointer_needs_a_known_extension_and_a_line_number():
+    found = comment_lint.line_pointer_findings( " see src/cosa/a.py:12 and notes.md:7, not host 127.0.0.1:8000 or example.com:443 or a.py", "a.py", 5 )
+    assert [ ( f.line, f.rule, f.message.split( "'" )[ 1 ] ) for f in found ] == [ ( 5, "line-pointer", "src/cosa/a.py:12" ), ( 5, "line-pointer", "notes.md:7" ) ]
+
+
+def test_a_cited_path_is_dangling_only_when_its_top_directory_is_tracked_and_the_file_is_not( repo ):
+    _commit( repo, { "src/a.py": "x = 1\n", "docs/real.md": "r\n" } )
+    text = " see src/a.py, docs/real.md, docs/gone.md, src/missing.py:4, scratch/none.py, /abs/src/gone.py, https://x.org/src/gone.py, src/*.py and ~/src/gone.py"
+    found = comment_lint.dangling_path_findings( text, "a.py", 9, repo )
+    assert [ ( f.line, f.rule, f.message.split( "'" )[ 1 ] ) for f in found ] == [ ( 9, "dangling-path", "docs/gone.md" ), ( 9, "dangling-path", "src/missing.py" ) ]
+    assert comment_lint.dangling_path_findings( text, "a.py", 9, None ) == []
+    assert comment_lint.dangling_path_findings( " no path here", "a.py", 9, repo ) == []
+
+
+def test_a_staged_new_file_counts_as_tracked_and_a_failed_listing_raises( repo, tmp_path ):
+    _commit( repo, { "src/a.py": "x = 1\n" } )
+    ( repo / "src" / "new.py" ).write_text( "y = 2\n" )
+    _git( repo, "add", "src/new.py" )
+    assert "src/new.py" in comment_lint.tracked_paths( str( repo ) )
+    with pytest.raises( RuntimeError, match="git ls-files failed" ):
+        comment_lint.tracked_paths( str( tmp_path / "not-a-repo" ) )
+
+
+def test_lint_source_applies_the_three_rules_per_comment_and_main_clears_the_path_cache( repo ):
+    source = "# x = 1\ny = 2  # see src/a.py:3 and src/gone.py\n# plain words\n"
+    _commit( repo, { "src/a.py": source } )
+    found = comment_lint.lint_source( "src/a.py", source, repo )
+    assert [ ( f.line, f.rule ) for f in found ] == [ ( 1, "commented-out-code" ), ( 2, "dangling-path" ), ( 2, "line-pointer" ) ]
+    assert [ f.rule for f in comment_lint.lint_source( "src/a.py", source ) ] == [ "commented-out-code", "line-pointer" ]
+    out = io.StringIO()
+    assert comment_lint.main( [ "--repo-root", str( repo ) ], out ) == 0
+    assert "src/a.py:2: dangling-path" in out.getvalue()
+    assert comment_lint.PATH_CACHE[ "listings" ] is None                                  # the cache lives for one run only
+
+
+def test_during_a_whole_corpus_run_the_listing_is_read_once_per_root( repo, monkeypatch ):
+    _commit( repo, { "src/a.py": "x = 1\n" } )
+    calls = []
+    real  = subprocess.run
+    monkeypatch.setattr( comment_lint.subprocess, "run", lambda *a, **k: calls.append( a ) or real( *a, **k ) )
+    comment_lint.PATH_CACHE[ "listings" ] = {}
+    try:
+        for _ in range( 3 ): comment_lint.tracked_paths( str( repo ) )
+    finally:
+        comment_lint.PATH_CACHE[ "listings" ] = None
+    assert len( calls ) == 1
+    for _ in range( 2 ): comment_lint.tracked_paths( str( repo ) )
+    assert len( calls ) == 3
+
+
+def test_a_dangling_path_skips_ignored_paths_dots_and_placeholder_names( repo ):
+    _commit( repo, { ".gitignore": "io/\n", "src/a.py": "x = 1\n", "io/keep.md": "k\n" } )
+    _git( repo, "add", "-f", "io/keep.md" )
+    text = " see io/mementos/rio.md, src/foo.py, src/a/b/x.py, src/....sh, src/lupin/.../lib/mf.py, src/tests/unit/test_foo.py and src/real_gone.py"
+    found = comment_lint.dangling_path_findings( text, "a.py", 2, repo )
+    assert [ f.message.split( "'" )[ 1 ] for f in found ] == [ "src/real_gone.py" ]
+    assert comment_lint.dangling_path_findings( " only src/foo.py and src/x.py here", "a.py", 2, repo ) == []     # every cited path is skipped, so git is not asked
+
+
+def test_ignored_paths_lists_the_matches_and_raises_when_git_cannot_answer( repo, tmp_path ):
+    _commit( repo, { ".gitignore": "io/\n", "src/a.py": "x = 1\n" } )
+    assert comment_lint.ignored_paths( str( repo ), [ "io/a.md", "src/z.md" ] ) == { "io/a.md" }
+    assert comment_lint.ignored_paths( str( repo ), [ "src/z.md" ] ) == set()
+    with pytest.raises( RuntimeError, match="git check-ignore failed" ):
+        comment_lint.ignored_paths( str( tmp_path / "not-a-repo" ), [ "x/y.md" ] )
+
+
+@pytest.mark.parametrize( "how", [ "nonzero", "missing", "timeout", "undecodable" ] )
+def test_a_git_failure_returns_no_dangling_finding_records_one_reason_and_stops_asking_git( repo, monkeypatch, how ):
+    _commit( repo, { "src/a.py": "x = 1\n" } )
+    calls = []
+    def run( cmd, *args, **kwargs ):
+        calls.append( cmd )
+        if how == "missing": raise FileNotFoundError( 2, "no git" )
+        if how == "timeout": raise subprocess.TimeoutExpired( cmd, kwargs[ "timeout" ] )
+        if how == "undecodable": raise UnicodeDecodeError( "utf-8", b"\xff", 0, 1, "bad name" )
+        return subprocess.CompletedProcess( cmd, 128, "", "fatal: injected" )
+    monkeypatch.setattr( comment_lint.subprocess, "run", run )
+    comment_lint.take_path_failure()
+    assert comment_lint.dangling_path_findings( " see src/gone.py", "a.py", 1, repo ) == []
+    assert comment_lint.dangling_path_findings( " see src/gone2.py", "a.py", 2, repo ) == []
+    assert len( calls ) == 1                                                                       # the second comment did not ask git again
+    assert all( c[ "timeout" ] == comment_lint.GIT_TIMEOUT_SECONDS for c in [ { "timeout": comment_lint.GIT_TIMEOUT_SECONDS } ] )
+    reason = comment_lint.take_path_failure()
+    assert reason is not None and reason.split( ":" )[ 0 ] in ( "RuntimeError", "FileNotFoundError", "TimeoutExpired", "UnicodeDecodeError" )
+    assert comment_lint.take_path_failure() is None                                                # reported once, then cleared
+
+
+def test_the_git_calls_carry_a_timeout( repo, monkeypatch ):
+    _commit( repo, { "src/a.py": "x = 1\n", ".gitignore": "io/\n" } )
+    seen = []
+    real = subprocess.run
+    monkeypatch.setattr( comment_lint.subprocess, "run", lambda *a, **k: seen.append( k.get( "timeout" ) ) or real( *a, **k ) )
+    comment_lint.tracked_paths( str( repo ) )
+    comment_lint.ignored_paths( str( repo ), [ "io/a.md" ] )
+    assert seen == [ comment_lint.GIT_TIMEOUT_SECONDS ] * 2
+
+
+def test_main_says_once_that_the_path_check_was_skipped_when_git_fails( repo, monkeypatch ):
+    _commit( repo, { "src/a.py": "# see src/gone.py\nx = 1\n" } )
+    monkeypatch.setattr( comment_lint, "tracked_paths", lambda root: ( _ for _ in () ).throw( OSError( 2, "no git" ) ) )
+    out = io.StringIO()
+    assert comment_lint.main( [ "--repo-root", str( repo ) ], out ) == 0
+    text = out.getvalue()
+    assert text.count( "the dangling-path check was skipped" ) == 1 and "dangling-path:" not in text
+    assert comment_lint.PATH_CACHE[ "failure" ] is None
+
+
+@pytest.mark.parametrize( "text, expected", [
+    ( " x = 1  doc-lint: waive commented-out-code -- the worked example", True ),                  # one hash: the marker no longer breaks the parse
+    ( " x = 1  # doc-lint: waive commented-out-code -- the worked example", True ),                # two hashes, as before
+    ( " x = 1  doc-lint: waive commented-out-code", True ),                                        # no reason: still code, so still refused
+    ( " if ready:  doc-lint: waive commented-out-code -- an example", True ),
+    ( " prose only doc-lint: waive commented-out-code -- an example", False ),
+    ( " doc-lint: waive line-pointer -- only a marker", False ),
+] )
+def test_a_waiver_marker_is_cut_off_before_the_commented_out_code_parse( text, expected ):
+    assert comment_lint.is_commented_out_code( text ) is expected
+
+
+def test_a_one_hash_marker_with_no_reason_is_refused_and_with_a_reason_is_honoured( repo ):
+    from cosa.repo.doc_lint.waivers import waiver_state
+    source = "# x = 1  doc-lint: waive commented-out-code\n# y = 2  doc-lint: waive commented-out-code -- the worked example\n"
+    found  = comment_lint.lint_source( "a.py", source )
+    lines  = source.split( "\n" )
+    assert [ ( f.line, waiver_state( f, lines[ f.line - 1 ] ) ) for f in found if f.rule == "commented-out-code" ] == [ ( 1, "no-reason" ), ( 2, "honoured" ) ]
