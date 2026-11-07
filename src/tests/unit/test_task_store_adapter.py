@@ -39,3 +39,10 @@ def test_the_tick_stamps_its_actor_on_both_calls_and_the_filing_stamps_its_reaso
     assert filing.calls[ 0 ][ 3 ] == { "title": "t" }
     assert filing.calls[ 1 ][ 4 ] == { "note": "n", "reason": ff.AMEND_REASON, "authority": "standing" }
     assert issubclass( lt.LiveStore, TaskStoreAdapter ) and issubclass( ff.LiveStore, TaskStoreAdapter )
+
+
+def test_a_stamped_field_beats_the_callers_own_and_the_callers_payload_is_left_alone():
+    tick, payload = Recorder(), { "title": "t", "created_by": "someone else", "authority": "user_direct" }
+    lt.LiveStore( { }, "k", tick ).create( payload )
+    assert tick.calls[ 0 ][ 3 ] == { "title": "t", "created_by": lt.ACTOR, "authority": "standing" }
+    assert payload == { "title": "t", "created_by": "someone else", "authority": "user_direct" }
