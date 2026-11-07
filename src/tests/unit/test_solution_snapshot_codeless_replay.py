@@ -38,7 +38,7 @@ def _make_snapshot_no_init( agent_class_name=None, code=None, answer="" ):
 
     This is a deliberate `__new__()` + attribute-set pattern because:
       1. Constructor loads ~1 GB of embedding models onto GPU 0
-      2. Per `feedback_never_grab_gpu`, tests must never touch GPU
+      2. Per `feedback_never_grab_gpu` and the no-GPU rule (planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU"), tests must never touch GPU
       3. We only exercise `run_code()` here, which doesn't need any
          embedding state — just `agent_class_name`, `code`, `answer`,
          `id_hash`.

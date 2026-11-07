@@ -681,7 +681,8 @@ def server_embedder():
     Tests use this to avoid instantiating `ProseEmbeddingEngine` in the
     pytest process, which would collide with the FastAPI server's already-
     loaded models on GPU 0 (user's GPU is maximally packed, <1 GB free
-    after server warm-up). The server exposes its cached singleton via
+    after server warm-up). This is the no-GPU rule applied: a test reaches the
+    models only through the service (planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU"). The server exposes its cached singleton via
     HTTP; tests just call the endpoint.
 
     Scope:

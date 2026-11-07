@@ -1886,6 +1886,7 @@ class PeftTrainer:
             "LUPIN_CONFIG_MGR_CLI_ARGS" ] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
         os.environ[ "WANDB_DISABLE_SERVICE" ] = wandb_disable_service
     
+    # Ruling (row d4fce2bb): Rick runs this training by hand after hours. It is not a test or a fleet job, so it is outside the no-GPU rule (planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU"), and a seat never starts it.
     def _start_vllm_server( self,
         model_path_or_hf_id: str, port: int=3000, max_model_len: int=2048, gpu_memory_utilization: float=0.75, timeout: int=180,
         quantization: str=None, verbose_server: bool=False
@@ -2066,6 +2067,7 @@ class PeftTrainer:
         log_tail = "\n".join( server_log[ -20: ] ) if server_log else "No log output captured"
         raise TimeoutError( f"vLLM server did not start within {timeout} seconds.\nLast log entries:\n{log_tail}" )
     
+    # Ruling (row d4fce2bb): Rick runs this training by hand after hours. It is not a test or a fleet job, so it is outside the no-GPU rule (planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU"), and a seat never starts it.
     def _stop_vllm_server( self, process: subprocess.Popen ) -> bool:
         """
         Stops the vLLM server process (spawned with start_new_session=True).

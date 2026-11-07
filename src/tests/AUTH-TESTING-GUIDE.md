@@ -1,5 +1,7 @@
 # Auth Testing Quick Reference
 
+> No test touches a GPU. Tests reach GPU-hosted models only through their services: planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU".
+
 ## ⚠️ CRITICAL: Know Your Testing Context
 
 ### Destructive vs Non-Destructive Testing
