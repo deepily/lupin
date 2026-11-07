@@ -18,3 +18,19 @@ def test_the_squash_test_does_not_need_the_squash( pushed ):
     _out( pushed, "commit", "-q", "-m", "squash of old-line" )
     with_squash = wr.at_risk_work( str( pushed ), "old-line", "wip-v9", wr._default_run )
     assert with_no_squash == with_squash
+
+
+def test_a_branch_pushed_under_a_wip_name_is_held( pushed ):
+    """The ruled convention: a wip-named remote line keeps its commits safe."""
+    _out( pushed, "push", "-q", "origin", "old-line:wip-my-feature" )
+    _out( pushed, "push", "-q", "origin", ":old-line" )
+    _out( pushed, "fetch", "-q", "origin", "--prune" )
+    assert wr.at_risk_work( str( pushed ), "old-line", "wip-v9", wr._default_run )[ "count" ] == 0
+
+
+def test_a_branch_pushed_under_a_name_with_wipe_in_it_is_not_held( pushed ):
+    """wipe is not a working line: the name contains the letters wip and nothing more."""
+    _out( pushed, "push", "-q", "origin", ":old-line" )
+    _out( pushed, "push", "-q", "origin", "old-line:fix-wipe-cache" )
+    _out( pushed, "fetch", "-q", "origin", "--prune" )
+    assert wr.at_risk_work( str( pushed ), "old-line", "wip-v9", wr._default_run )[ "count" ] == 3
