@@ -86,7 +86,7 @@ ALL_CHEVRON_HEADERS = [
 
 # 🔴 ADMIN-ONLY PANES ARE IN THE DOM AND NOT ON SCREEN, AND THAT SPLITS THIS FILE IN TWO.
 # 4c730b46b (2026-09-23) — "the two hide mechanisms ARE the admin gate" — made Filter
-# Settings `display: none` for a non-admin: FilterSettingsRenderer.ts:231 sets
+# Settings `display: none` for a non-admin: FilterSettingsRenderer.ts sets
 # `this.root.style.display = this.isAdmin() ? "block" : "none"`. That is AXIS 1, and it is
 # independent of the toolbar's show/hide (axis 2) — the renderer's own comment says so, so
 # clicking a toolbar button cannot reveal it.

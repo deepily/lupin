@@ -224,7 +224,7 @@ def test_root_session_card_keeps_count_and_no_data_worker( page ):
     assert s is not None, "root card must exist"
     assert s[ "data_worker" ]   is None,  "root card must NOT carry data-worker"
     assert s[ "has_new_count" ] is True,  "root card keeps its numeric count"
-    # A-2 #4 — legacy's wording, "N new" (notifications.js:19924), not a bare number.
+    # A-2 #4 — legacy's wording, "N new" (the legacy count badge in notifications.js), not a bare number.
     assert s[ "new_count_text" ] == "1 new",  "count reflects the single unread notification"
 
 

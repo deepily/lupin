@@ -166,7 +166,7 @@ def load_page_anchors( root=None ):
             # 🔴 TESTIDS COMPOSED AT RUNTIME FROM A TEMPLATE — the guard's THIRD blind state,
             # found 2026-09-23 by the census (row 04735b66) and false-DEAD until now.
             #
-            # `JobsPaneRenderer.ts:300` writes
+            # `JobsPaneRenderer.ts` (the filter-button builder) writes
             #     btn.setAttribute( "data-testid", `multiplexer-jobs-filter-${mode}-btn` )
             # so the name `multiplexer-jobs-filter-own-btn` EXISTS ON THE RUNNING PAGE and
             # appears NOWHERE in the source as a literal. A parse that only collects literals

@@ -191,11 +191,11 @@ class TestDocLinkPaneIsInTheViewportInVertical:
         # 2026-09-27). This test shipped with that call and it can never succeed on this
         # page: the helper's predicate is
         # `document.getElementById( "queue-ws-status" ).textContent.includes( "Connected" )`
-        # (conftest.py:1097), and `queue-ws-status` occurs ZERO times in
+        # (the page-load helper in this directory's conftest.py), and `queue-ws-status` occurs ZERO times in
         # static/html/multiplexer.html and once in static/html/notifications.html. It is
         # the LEGACY page's status readout. The multiplexer page has no ws-status element
         # at all — its status sections are `#fleet-status-pane` and `#system-status-pane`
-        # (multiplexer.html:252 and :361), which carry `data-testid` attributes of
+        # (both sections in multiplexer.html), which carry `data-testid` attributes of
         # `multiplexer-fleet-status-pane` / `multiplexer-system-status-pane`.
         #
         # ⚠️ THIS SENTENCE USED TO WRITE THE TEST IDS WITH A `#`, AS THOUGH THEY WERE THE
@@ -212,7 +212,7 @@ class TestDocLinkPaneIsInTheViewportInVertical:
         # ⚠️ The readiness signal this page DOES have is the one already waited on
         # immediately above — `__multiplexerTestHook.stores.readingPane`, which only
         # exists once boot has wired the stores. That is the in-tree pattern
-        # (`_open_multiplexer` in test_multiplexer_action_required_in_pane.py:40 waits on
+        # (`_open_multiplexer` in test_multiplexer_action_required_in_pane.py waits on
         # the hook and nothing else). Adding a second, page-appropriate socket wait would
         # need a multiplexer ws-status element to exist first; do not reach for the legacy
         # helper again.

@@ -239,8 +239,8 @@ def extract_literals( text ):
     found = set()
     # 🔴 SCANNED TWICE: once raw, once UNESCAPED. A selector nested inside another string
     # literal reaches the file as `"… '[data-testid=\\"multiplexer-x\\"] tr.row' …"`, and the
-    # backslashes stop the attribute pattern matching — `test_multiplexer_task_list.py:228`
-    # drives its polling predicate exactly that way, and it was INVISIBLE to this census.
+    # backslashes stop the attribute pattern matching — the polling predicate in `test_multiplexer_task_list.py`
+    # is driven exactly that way, and it was INVISIBLE to this census.
     # Found by Mr. Radio's review, 2026-09-23 18:32 EDT; the third escape from this extractor
     # after the quote-blindness and the invented bare names.
     #
@@ -268,7 +268,7 @@ def extract_literals( text ):
         found.add( normalise( m.group( 0 ).strip() ) )
 
     # 🔴 THE FOURTH SPELLING: an id looked up BY CALL rather than by CSS shape.
-    #     document.getElementById( "commons-recent-activity-entries" )
+    #     the getElementById lookup of "commons-recent-activity-entries"
     # usually inside a `page.evaluate( "…JS…" )` string. The census only ever looked for the
     # `#id` CSS form or a data-testid attribute, so these were invisible. MEASURED at
     # 5fa6bee3: 42 such lookups name a guarded surface, 26 were already in the population by

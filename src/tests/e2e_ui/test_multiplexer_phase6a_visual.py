@@ -266,7 +266,7 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     # ~1881px contiguous block on this pane → intermittent visual FAIL. The
     # `networkidle` wait above does NOT gate font loading. Await
     # document.fonts.ready + two animation frames so the final glyph is committed
-    # before capture. Mirrors test_multiplexer_task_editing.py:316-318 (the one
+    # before capture. Mirrors `test_task_editing_controls_visual` in test_multiplexer_task_editing.py (the one
     # test already doing this right). Pure load barrier — comparators/tolerances
     # untouched.
     page.evaluate( "() => document.fonts.ready" )

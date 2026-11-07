@@ -60,13 +60,13 @@ from .conftest import (
 #
 # Two further consequences of that silence, both fixed here:
 #   - #clock-display was the real element #clock, off by a suffix
-#     (notifications.html:100). /app/multiplexer builds a SECOND element with the
-#     same id at runtime (NotificationsHeaderRenderer.ts:173-175), but that page
+#     (notifications.html). /app/multiplexer builds a SECOND element with the
+#     same id at runtime (NotificationsHeaderRenderer.ts), but that page
 #     is not in PAGE_URLS, so it is out of this suite's scope — noted so the next
 #     reader does not re-derive it.
 #   - [data-testid="session-id"] exists only on scratch pages under static/html/test/.
 #     The live session ids on /app/notifications are #queue-session and
-#     #audio-session (notifications.js:2510-2511), and nothing was normalizing them.
+#     #audio-session (notifications.js), and nothing was normalizing them.
 #
 # Each spec: sel, text, pages. `pages` names PAGE_URLS keys and is checked
 # statically by test_normalize_specs_name_real_pages.
@@ -130,9 +130,9 @@ NORMALIZE_SPECS = (
 #
 # admin-users   Created / Last Login render via formatDate() as relative times
 #               ("Just now", "3 hours ago") that drift every run.
-# admin-ratify  proxy-ratify.js:192, column 7 — formatRelativeTime( created_at ).
-# admin-trust   proxy-dashboard.js:343, column 0 — the SAME function, a
-#               byte-identical second copy at proxy-dashboard.js:429.
+# admin-ratify  proxy-ratify.js, column 7 — formatRelativeTime( created_at ).
+# admin-trust   proxy-dashboard.js, column 0 — the SAME function, a
+#               byte-identical second copy later in proxy-dashboard.js.
 #
 # MEASURED at :7999 on 2026-09-15, read-only, no capture. admin-trust:
 #   50 of 50 column-0 cells drifting — "52m ago" x28, "53m ago" x7, "1h ago" x15
@@ -276,7 +276,7 @@ def normalize_table_columns( browser_page, page_name ):
 #
 # Clear-and-inject keeps the pane IN FRAME and makes it deterministic, so a later
 # change to the feed can still redden something. The pattern is not invented here —
-# test_dm_recent_activity.py:162-168 already does exactly this: empty the live
+# test_dm_recent_activity.py already does exactly this: empty the live
 # container, append one entry with a frozen timestamp, wait on a testid of its own.
 #
 # ── COVERAGE LEDGER ─────────────────────────────────────────────────────────────
@@ -297,7 +297,7 @@ def normalize_table_columns( browser_page, page_name ):
 # suspects from pixel bands and then measured directly — all text-stable across six
 # loads. Freezing them would have cost monitoring and bought no determinism.
 # ⇒ Residual pixel variance below the comparator's threshold is not a defect.
-# `playwright_visual_snapshot_threshold = 0.1` (pytest.ini:92) is the gate; a raw
+# `playwright_visual_snapshot_threshold = 0.1` (in pytest.ini) is the gate; a raw
 # pixel count taken with a stricter instrument is not (Mr. Radio 🦉's ruling).
 
 _FREEZE_COMMONS_FEED_JS = """
@@ -1028,7 +1028,7 @@ def test_no_admin_decision_table_spec_while_the_fixture_empties_the_table():
 #
 # ⚠️ WHAT IT STILL CANNOT SEE: an element the page builds at RUNTIME is absent from
 # the template and present in the DOM. /app/multiplexer's clock is exactly that
-# (NotificationsHeaderRenderer.ts:173) — it is not in PAGE_URLS, so no spec claims
+# (NotificationsHeaderRenderer.ts) — it is not in PAGE_URLS, so no spec claims
 # it, but a future spec on a JS-rendered element would need an exemption here with
 # a stated reason, NOT a relaxed assertion.
 

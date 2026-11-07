@@ -1025,7 +1025,7 @@ class TestJobHistoryEdgeCases:
 # Fix: `renderJobCard` now prefixes internal ids with `history-` when
 # `job._isHistory` is truthy; `toggleJobCard` takes a compound `idKey` arg.
 #
-# Plan: src/rnd/v0.1.6/2026.04.15-done-card-toggle-id-collision.md
+# Plan: the "Bug Fix — Done-card toggle silently no-ops (ID collision)" doc (removed by 8420e8b0a; recover it from 8420e8b0a^)
 # ===========================================================================
 
 class TestJobCardToggleIDCollision:

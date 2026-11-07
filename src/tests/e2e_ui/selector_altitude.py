@@ -57,7 +57,7 @@ Ensures:
       each should have used, never just the first
 """
 
-#: The class that marks a section wrapper on both surfaces. `enumerate.py:17` already resolved
+#: The class that marks a section wrapper on both surfaces. an earlier enumerating probe already resolved
 #: `el.closest( '.collapsible-section' )` on the legacy side — the correct altitude was
 #: sitting in a sibling probe the whole time, and the newer pixel probe hand-typed ids at the
 #: wrong level instead of reusing it.
