@@ -36,7 +36,7 @@ RECONNECT_JITTER_FRACTION = 0.5
 
 # ⚠️ The settle deadline (`managed bounce all-clear settle deadline seconds`) is DERIVED
 # from RECONNECT_MAX_DELAY — change one, change the other. SettleDeadlinePinTests enforces it.
-# src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md
+# (derivation doc removed from the tree; see 8420e8b0a^)
 
 
 def get_credentials( cli_email=None, cli_password=None ):

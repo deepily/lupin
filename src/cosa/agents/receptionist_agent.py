@@ -84,7 +84,6 @@ class ReceptionistAgent( AgentBase ):
         self.prompt                   = self._get_prompt()
         self.xml_response_tag_names   = [ "thoughts", "category", "answer" ]
         self.serialize_prompt_to_json = self.config_mgr.get( "agent receptionist serialize prompt to json", default=False, return_type="boolean" )
-        # self.serialize_code_to_json   = self.config_mgr.get( "agent_receptionist_serialize_code_to_json",   default=False, return_type="boolean" )
     
     def _get_prompt( self ) -> str:
         """

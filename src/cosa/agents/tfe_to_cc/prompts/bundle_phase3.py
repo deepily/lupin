@@ -72,7 +72,7 @@ def build_fix_bundle_prompt(
     lines.append( "" )
 
     # ──────────────────────────────────────────────────────────────
-    # Workflow (coordinator)
+    # Coordinator workflow
     # ──────────────────────────────────────────────────────────────
     lines.append( "## Your workflow" )
     lines.append( "" )

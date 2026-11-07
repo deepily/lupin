@@ -9,8 +9,6 @@ from cosa.agents.token_counter import TokenCounter
 
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
-# from pydantic_ai.models.openai import OpenAIModel
-# from pydantic_ai.providers.openai import OpenAIProvider
 
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -52,8 +50,6 @@ class LlmClient:
     OPENAI_GPT_01_MINI                = "openai:o1-mini-2024-09-12"
     GOOGLE_GEMINI_1_5_FLASH           = "google-gla:gemini-1.5-flash"
     ANTHROPIC_CLAUDE_SONNET_3_5       = "anthropic:claude-3-5-sonnet-latest"
-    
-    # QWEN_2_5_32B = "kaitchup/Qwen2.5-Coder-32B-Instruct-AutoRound-GPTQ-4bit"
     
     @staticmethod
     def get_model( mnt_point: str, prefix: str=DEEPILY_PREFIX ) -> str:
@@ -125,7 +121,6 @@ class LlmClient:
             self.model = LlmCompletion( base_url=base_url, model_name=model_name, api_key=api_key, **generation_args )
         else:
             # For normal chat mode, use the Agent class
-            # if self.debug: print( f"Using Agent with model: 'openai:{model_name}'" )
             du.print_banner( f"TODO: fetch and set system prompt HERE! for model 'openai:{model_name}'", prepend_nl=True, expletive=True )
             # Wrap generation parameters in ModelSettings for pydantic_ai API
             model_settings = ModelSettings( **generation_args )
@@ -405,9 +400,7 @@ def quick_smoke_test():
             print( f"✓ LlmClient created successfully for {test_case['name']}" )
             
             # For smoke test, we'll just validate client creation to avoid API costs
-            # In a full test, you could uncomment the line below:
-            # response = client.run( test_prompt, stream=False, max_tokens=50 )
-            # print( f"✓ Response received: {response[:50]}..." )
+            # In a full test, the client could be run against a real prompt here
             print( f"✓ Client is ready for LLM requests" )
             
         except Exception as e:

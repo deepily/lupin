@@ -6,7 +6,6 @@ from typing import Any, Optional, Union
 from pydantic_ai import Agent
 
 import cosa.utils.util as du
-# from cosa.utils.util_stopwatch import Stopwatch
 
 from cosa.agents.llm_client import LlmClient
 from cosa.agents.chat_client import ChatClient
@@ -197,11 +196,9 @@ class LlmClientFactory:
                     #
                     # api_key="EMPTY" is required, not cosmetic: a local vLLM wants no
                     # credential, but the OpenAI SDK underneath refuses to construct
-                    # without one. CompletionClient already defaults it to "EMPTY" for
-                    # every vllm:// client in this file (completion_client.py:82-84);
-                    # ChatClient only sets it when passed (chat_client.py:59-60), so the
-                    # factory has to supply it. Passing it here keeps the two vLLM paths
-                    # behaving identically rather than editing the shared client.
+                    # without one. ChatClient only sets it when passed (ChatClient.__init__ in
+                    # chat_client.py), so the factory has to supply it rather than editing the
+                    # shared client.
                     return ChatClient(
                         model_name=f"openai:{model_name}",
                         api_key="EMPTY",
