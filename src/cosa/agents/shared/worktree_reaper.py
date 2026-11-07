@@ -886,12 +886,13 @@ def delete_merged_branch(
 
 def at_risk_work( project_root: str, branch: str, target: str, run: Callable ) -> Optional[ dict ]:
     """
-    The part of `branch` held nowhere else: on neither target nor any remote.
+    The part of `branch` held nowhere safe: not on target, not on a protected remote line.
 
     Ensures:
-        - a commit reachable from refs/heads/<target> or from any remote-tracking ref is
-          never counted: it is safe on the remote (a branch can read thousands of commits
-          ahead by ancestry and a handful by this count)
+        - a commit reachable from refs/heads/<target> or from a remote-tracking ref whose
+          short name passes is_protected_branch (main, master, target, any "wip" name) is
+          never counted: it is safe on a line that is kept. A branch pushed under its own
+          name does not protect its commits, because deleting it loses them
         - returns { count, landed, files }:
             count  - commits on the branch reachable from neither
             landed - True when count is 0, or when `git cherry` finds a patch-equivalent
@@ -900,7 +901,11 @@ def at_risk_work( project_root: str, branch: str, target: str, run: Callable ) -
         - None when git could not answer — "could not look", never "landed"
         - never raises
     """
-    rng   = [ f"refs/heads/{branch}", "--not", f"refs/heads/{target}", "--remotes" ]
+    remotes = _git( run, project_root, "for-each-ref", "--format=%(refname)", "refs/remotes" )
+    if not remotes[ "success" ]:
+        return None
+    held = [ ref for ref in remotes[ "stdout" ].split() if is_protected_branch( ref.split( "/", 3 )[ -1 ], target ) ]
+    rng   = [ f"refs/heads/{branch}", "--not", f"refs/heads/{target}", *held ]
     risky = _git( run, project_root, "rev-list", *rng, timeout=300 )
     if not risky[ "success" ]:
         return None

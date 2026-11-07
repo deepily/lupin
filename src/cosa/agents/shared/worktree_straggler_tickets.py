@@ -296,7 +296,7 @@ def compose_archive_row( outcome: dict ) -> dict:
     if risky is None:
         count_line = f"It is {ahead if ahead is not None else 'an unknown number of'} commits ahead of `{target}` by ancestry (the commits held on no remote could not be counted) and {state}."
     else:
-        count_line = f"{risky} of its commits are reachable from neither `{target}` nor any remote-tracking ref, and {state}."
+        count_line = f"{risky} of its commits are held on neither `{target}` nor a protected remote line (main, master or a wip name), and {state}."
     lines = [
         f"The worktree janitor archived branch `{branch}` at `{ref}` (sha `{outcome.get( 'sha' )}`).",
         count_line,

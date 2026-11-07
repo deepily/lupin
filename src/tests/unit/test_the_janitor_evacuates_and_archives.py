@@ -520,7 +520,7 @@ def test_one_row_per_archived_branch_that_did_not_land_and_none_for_one_that_did
     assert ( seat[ "owner" ], seat[ "accountable" ], seat[ "project" ] ) == ( "cheech", "cheech", "lupin-mobile" )
     assert seat[ "correlation_key" ] == "archive:" + refs[ 0 ]
     assert seat[ "title" ] == "[LUPIN-MOBILE] Archived unmerged branch: wt-rescue/seat-cc-author-cheech-2-20261002T135947Z"
-    assert "2 of its commits are reachable from neither `wip-v9` nor any remote-tracking ref, and holds commits whose content is not on the working branch" in seat[ "body" ]
+    assert "2 of its commits are held on neither `wip-v9` nor a protected remote line (main, master or a wip name), and holds commits whose content is not on the working branch" in seat[ "body" ]
     assert "Files those commits touch:\n- `a.py`\n- `b.py`" in seat[ "body" ]
     assert "commits ahead" not in seat[ "body" ]
     assert "git update-ref refs/heads/wt-rescue/seat-cc-author-cheech-2-20261002T135947Z abc123" in seat[ "body" ]
@@ -559,7 +559,7 @@ def test_a_poll_with_nothing_archived_opens_nothing_and_logs_nothing():
 
 @pytest.fixture
 def pushed( repo, tmp_path ):
-    """The repo with a bare origin, and a branch `old-line` of three commits pushed to it."""
+    """A repo with a bare origin and `old-line`, three commits, pushed under its own name."""
     bare = tmp_path / "origin.git"
     _out( tmp_path, "init", "-q", "--bare", str( bare ) )
     _out( repo, "remote", "add", "origin", str( bare ) )
@@ -570,31 +570,39 @@ def pushed( repo, tmp_path ):
     return repo
 
 
-def test_a_squash_of_a_pushed_line_counts_zero_commits_at_risk( pushed ):
-    _out( pushed, "merge", "--squash", "old-line" )
-    _out( pushed, "commit", "-q", "-m", "squash of old-line" )
-    assert int( _out( pushed, "rev-list", "--count", "wip-v9..old-line" ) ) == 3      # ancestry says 3 ahead
-
+def test_a_line_pushed_under_a_wip_name_counts_zero_at_risk_squash_or_not( pushed ):
+    _out( pushed, "push", "-q", "origin", "old-line:wip-v0.2.2-line" )
+    _out( pushed, "fetch", "-q", "origin" )
     outcome = wr.retire_branch( str( pushed ), "old-line", "wip-v9", now=NOW )
+    assert ( outcome[ "commits_ahead" ], outcome[ "landed" ], outcome[ "unpushed_count" ] ) == ( 3, True, 0 )
+    assert outcome[ "unpushed_files" ] == []
 
-    assert ( outcome[ "kept_reason" ], outcome[ "commits_ahead" ] ) == ( "archived", 3 )
-    assert ( outcome[ "landed" ], outcome[ "unpushed_count" ], outcome[ "unpushed_files" ] ) == ( True, 0, [] )
 
-
-def test_the_same_squash_with_nothing_pushed_is_not_landed_and_counts_all_three( repo ):
-    tree = _tree( repo, "seat-q", "local-line" )
-    for n in ( "one.txt", "two.txt", "three.txt" ): _commit( tree, n, n + "\n" )
-    _out( repo, "worktree", "remove", str( tree ) )
-    _out( repo, "merge", "--squash", "local-line" )
-    _out( repo, "commit", "-q", "-m", "squash of local-line" )
-
-    outcome = wr.retire_branch( str( repo ), "local-line", "wip-v9", now=NOW )
-
+def test_a_branch_pushed_under_its_own_name_still_counts_all_its_commits( pushed ):
+    outcome = wr.retire_branch( str( pushed ), "old-line", "wip-v9", now=NOW )
     assert ( outcome[ "landed" ], outcome[ "unpushed_count" ] ) == ( False, 3 )
     assert outcome[ "unpushed_files" ] == [ "one.txt", "three.txt", "two.txt" ]
 
 
+def test_the_answer_turns_on_the_squash_when_the_branch_is_one_commit( repo ):
+    tree = _tree( repo, "seat-s", "one-commit" )
+    _commit( tree, "solo.txt", "solo\n" )
+    _out( repo, "worktree", "remove", str( tree ) )
+    before = wr.at_risk_work( str( repo ), "one-commit", "wip-v9", wr._default_run )
+    _out( repo, "merge", "--squash", "one-commit" )
+    _out( repo, "commit", "-q", "-m", "squash of one-commit" )
+    after = wr.at_risk_work( str( repo ), "one-commit", "wip-v9", wr._default_run )
+    assert ( before[ "landed" ], after[ "landed" ] ) == ( False, True )
+
+
+def test_a_failing_remote_listing_reads_could_not_look():
+    run, _ = _scripted( { ( "for-each-ref", ): ( 128, "" ) } )
+    assert wr.at_risk_work( "/x", "b", "t", run ) is None
+
+
 def test_one_auto_save_on_top_of_a_pushed_line_counts_one_commit_and_its_files( pushed ):
+    _out( pushed, "push", "-q", "origin", "old-line:wip-v0.2.2-line" )
+    _out( pushed, "fetch", "-q", "origin" )
     tree = _tree( pushed, "seat-r", "feat-autosave", )
     _out( tree, "reset", "-q", "--hard", "old-line" )
     _commit( tree, "autosave.txt", "WIP: auto-saved at reap\n" )
@@ -624,7 +632,7 @@ def test_a_cherry_mark_for_a_commit_a_remote_holds_is_ignored_and_unlistable_fil
                                     ( "cherry", ): ( 0, "+ zzz\n- aaa\n+ bbb" ),
                                     ( "log", ): ( 1, "" ) } )
     assert work == { "count": 2, "landed": False, "files": None }
-    assert [ c[ 0 ] for c in calls ] == [ "rev-list", "cherry", "log" ]
+    assert [ c[ 0 ] for c in calls ] == [ "for-each-ref", "rev-list", "cherry", "log" ]
     only_foreign, _ = _scripted_work( { ( "rev-list", ): ( 0, "aaa" ), ( "cherry", ): ( 0, "+ zzz" ),
                                         ( "log", ): ( 0, "f.py\n\nf.py\ng.py" ) } )
     assert only_foreign == { "count": 1, "landed": True, "files": [ "f.py", "g.py" ] }
@@ -636,7 +644,7 @@ def test_the_row_body_lists_files_capped_and_says_when_they_could_not_be_listed(
     body = st.compose_archive_row( _archived( "big", False, unpushed_count=40, unpushed_files=many ) )[ "body" ]
     assert body.count( "\n- `f" ) == st.MAX_ROW_FILES and "\n- and 5 more" in body
     body = st.compose_archive_row( _archived( "blind", False, unpushed_count=4, unpushed_files=None ) )[ "body" ]
-    assert "4 of its commits are reachable from neither" in body
+    assert "4 of its commits are held on neither" in body
     assert "The files those commits touch could not be listed." in body
     body = st.compose_archive_row( _archived( "empty", False, unpushed_count=1, unpushed_files=[] ) )[ "body" ]
     assert "Files those commits" not in body and "could not be listed" not in body
