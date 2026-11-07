@@ -214,7 +214,7 @@ def _parse_iso( value ):
 # in this path can provide.
 #
 # WHY A SENT STAMP DOES NOT BREACH THE NO-RECEIPT RULE — Mr Radio's ruling,
-# 2026-08-17, permitting the injector-side write at self_respin_core.py:231-236.
+# permitting the injector-side write at the keys_sent_path stamp in self_respin_core.py.
 # The argument is not "sent is all we can prove." It is that ANCHORING ON ARRIVAL
 # WOULD BE CIRCULAR: DEAD_NO_RETURN exists precisely to fire when no proof of
 # arrival ever shows up, so a clock started at arrival could never start in the one

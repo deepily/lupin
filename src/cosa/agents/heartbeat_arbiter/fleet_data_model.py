@@ -59,7 +59,7 @@ STUCK_REPEAT_THRESHOLD = 2
 #               fresh — from caps he had recovered from 8 hours earlier).
 # EXCLUDED, deliberately: `poked` (owed + under cap — the session is still IN the wedge);
 # `not_owed` (dead vocabulary — never written; the writer emits `idle` instead, see
-# heartbeat_events.py:441); `suppressed_stale_declared_owed` (an ARBITER-side suppression
+# emit_outcome in heartbeat_events.py); `suppressed_stale_declared_owed` (an ARBITER-side suppression
 # marker, not a session-emitted beacon — it fails the membership rule).
 RECOVERY_OUTCOMES = frozenset( { OUTCOME_HONORED, EVENT_IDLE } )
 

@@ -46,14 +46,14 @@ from cosa.agents.utils.proxy_agents.base_responder import print_stats_table
 # caller down alongside the request. That standalone mode is the documented,
 # actually-exercised one.
 #
-# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+# Full derivation: the dev-server-reload-availability doc, section 9(a), removed from the tree; see 8420e8b0a^.
 #
 # 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
 # inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
-# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+# (Cited by symbol, not by line: this used to cite a line range in notify_user_async.py and a
 #  seven-line fix above it silently repointed both copies at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
@@ -213,7 +213,7 @@ class NotificationResponder:
         elif event_type == "job_state_transition":
             if self.verbose:
                 # from_state / to_state are the keys emit_job_state_transition()
-                # actually sends (queue_util.py:65-71). This read from_queue /
+                # actually sends (cosa/rest/queue_util.py). This read from_queue /
                 # to_queue, which the event has never carried, so the "?" defaults
                 # meant this line printed "? -> ?" on every transition. Row e3417974.
                 job_id     = event_data.get( "job_id", "?" )

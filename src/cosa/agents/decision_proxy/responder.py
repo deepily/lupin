@@ -162,7 +162,7 @@ class DecisionResponder( BaseResponder ):
         elif event_type == "job_state_transition":
             if self.verbose:
                 # from_state / to_state are the keys emit_job_state_transition()
-                # actually sends (queue_util.py:65-71). This read from_queue /
+                # actually sends (cosa/rest/queue_util.py). This read from_queue /
                 # to_queue, which the event has never carried, so the "?" defaults
                 # meant this line printed "? -> ?" on every transition. Row e3417974.
                 job_id     = event_data.get( "job_id", "?" )

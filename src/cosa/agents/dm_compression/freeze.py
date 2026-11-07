@@ -63,12 +63,12 @@ _PATTERNS = [
     ( "MOUNT",    "HARD", re.compile( r"(?<![\w:])\.{0,2}/[\w./-]+:/[\w./-]+" ) ),
 
     ( "WINPATH",  "HARD", re.compile( r"\b[A-Za-z]:\\[^\s\"'⟦⟧]+" ) ),
-    # file.py:123 and every shape the corpus actually uses: ranges
-    # (job.py:249-256, en-dash included), comma lists (job.py:58,106,249),
-    # mixtures (orchestrator.py:1441,1456-1459), and line:col (file.py:12:34).
+    # file.py:123 and every shape the corpus actually uses: ranges  # doc-lint: waive line-pointer -- example shape the pattern parses
+    # (job.py:249-256, en-dash included), comma lists (job.py:58,106,249),  # doc-lint: waive line-pointer -- example shape the pattern parses
+    # mixtures (orchestrator.py:1441,1456-1459), and line:col (file.py:12:34).  # doc-lint: waive line-pointer -- example shape the pattern parses
     #
     # The tail matters more than it looks. Match only the first number and
-    # `job.py:58,106,249` freezes as `job.py:58` while `,106,249` travels on as
+    # `job.py:58,106,249` freezes as `job.py:58` while `,106,249` travels on as  # doc-lint: waive line-pointer -- example shape the pattern parses
     # ordinary prose for the rewriter to drop. What gets delivered is a
     # confident, valid-looking citation pointing at fewer sites than the author
     # named — and it passes every structural check in this module, because
@@ -79,10 +79,10 @@ _PATTERNS = [
     # spans left uncovered by this pattern). 2026-08-07.
     # ⚠️ The closing guard is `(?!\w)(?!\.\d)`, NOT `(?![\w.])`.
     #
-    # `(?![\w.])` was there to stop `file.py:12.5` matching as `file.py:12`, and
+    # `(?![\w.])` was there to stop `file.py:12.5` matching as `file.py:12`, and  # doc-lint: waive line-pointer -- example shape the pattern parses
     # it did — while also refusing to match at all when a citation ends a
-    # sentence. `judge.py:572.` matched nothing, and `judge.py:249-256.` matched
-    # `judge.py:249`, silently reintroducing the truncation bug this pattern was
+    # sentence. `judge.py:572.` matched nothing, and `judge.py:249-256.` matched  # doc-lint: waive line-pointer -- example shape the pattern parses
+    # `judge.py:249`, silently reintroducing the truncation bug this pattern was  # doc-lint: waive line-pointer -- example shape the pattern parses
     # widened to fix. 21 of 647 corpus citations end in a period.
     ( "FILELINE", "HARD", re.compile(
         r"\b[\w./-]+\.\w{1,6}:\d+(?:[-–]\d+)?(?:,\d+(?:[-–]\d+)?)*(?::\d+)?(?!\w)(?!\.\d)"
@@ -626,14 +626,14 @@ def count_all_literals( text, namespace="" ):
 
     # ⚠️ RESOLVE OVERLAPS. Counting each pattern independently is what the first
     # version did, and it silently defeats the very check this function is for:
-    # `lupin-app.ini:1398` ALSO matches FILENAME as `lupin-app.ini`, so the
+    # `lupin-app.ini:1398` also matches FILENAME as `lupin-app.ini`, so the  # doc-lint: waive line-pointer -- example shape the pattern parses
     # truncated form is already present in the original's counts and a rewrite
     # that drops the line number looks like it dropped nothing.
     #
     # `resolve_spans` is the module's existing answer — longest span wins, then
     # taxonomy rank, then leftmost — so each position contributes exactly one
     # literal, the enclosing one. Verified on the real case: the original now
-    # yields `lupin-app.ini:1398` and NOT `lupin-app.ini`, so the truncation
+    # yields `lupin-app.ini:1398` and not `lupin-app.ini`, so the truncation  # doc-lint: waive line-pointer -- example shape the pattern parses
     # registers as a literal that was never sent.
     # Resolved here rather than through `resolve_spans`, which ranks by
     # `_KIND_RANK` and therefore only knows the substitutable kinds — the
