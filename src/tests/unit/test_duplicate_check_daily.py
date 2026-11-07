@@ -183,6 +183,15 @@ def test_each_prerequisite_that_fails_writes_a_failed_record_naming_it_and_judge
     assert "the prompt changed" in doc[ "detail" ]
 
 
+def test_a_saturated_embeddings_service_is_recorded_as_the_judging_error_with_the_service_named( repo, tmp_path ):
+    from cosa.repo.symindex.candidates.errors import CandidateError, SERVICE_SATURATED
+    history( repo )
+    def saturated( tree, cfg ): raise CandidateError( SERVICE_SATURATED, "the embeddings service refused 33 calls" )
+    doc = dd.run( repo, NOW, "hand", 10, "/bin/claude", parts_of( tmp_path, structural=saturated ) )
+    assert ( doc[ "status" ], doc[ "stage" ] ) == ( "failed", dd.STAGE_JUDGING )
+    assert doc[ "error" ] == "CandidateError: SERVICE_SATURATED: the embeddings service refused 33 calls"
+
+
 def test_the_worktrees_are_removed_when_the_run_fails_part_way( repo, tmp_path ):
     history( repo )
     class Boom( FakeBackend ):

@@ -11,7 +11,7 @@ import pytest
 
 from cosa.repo.symindex.candidates import vector_build as vb
 from cosa.repo.symindex.candidates import vector_store as vs
-from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, ENGINE_NOT_LOADED
+from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, ENGINE_NOT_LOADED, SERVICE_SATURATED
 
 DIM = 4
 
@@ -463,6 +463,58 @@ def test_a_batch_the_server_takes_is_not_split():
     client = RefusingClient( 8 )
     vb.embed_all( client, [ "a", "b", "c" ], "code", "document", 8, 0, lambda s: None )
     assert client.batches == [ 3 ]
+
+
+def test_a_pass_stops_with_service_saturated_once_the_refusals_pass_the_limit_and_the_message_names_the_service():
+    client = RefusingClient( 0 )                  # refuses every call, a batch of one included
+    with pytest.raises( CandidateError ) as caught:
+        vb.embed_all( client, [ "t" * n for n in range( 1, 9 ) ], "code", "document", 8, 0, lambda s: None, refusal_limit=3 )
+    message = str( caught.value )
+    assert caught.value.code == SERVICE_SATURATED and client.batches == [ 8, 4, 2, 1 ], "the fourth refusal passes the limit of three, so no fifth call is made"
+    assert "embeddings service" in message and "/api/embeddings" in message and "refused 4 calls" in message and "limit of 3" in message and "RuntimeError" in message
+    assert "free" not in message.lower() and "GPU memory" not in message and "CUDA" not in message
+    assert isinstance( caught.value.__cause__, RuntimeError ), "the client's own error stays on the chain"
+
+
+def test_a_service_that_refuses_every_call_ends_the_pass_with_service_saturated_at_the_first_single_text_even_under_the_limit():
+    client = RefusingClient( 0 )
+    with pytest.raises( CandidateError ) as caught:
+        vb.embed_all( client, [ "t" * n for n in range( 1, 17 ) ], "code", "document", 16, 0, lambda s: None, refusal_limit=32 )
+    assert caught.value.code == SERVICE_SATURATED and client.batches == [ 16, 8, 4, 2, 1 ], "five refusals, well under 32"
+    assert "refused 5 calls" in str( caught.value ) and "HTTP 500" not in str( caught.value ) and isinstance( caught.value.__cause__, RuntimeError )
+
+
+def test_the_refused_server_text_is_kept_off_the_message_because_it_may_speak_of_hardware():
+    class Cuda:
+        def embed( self, texts, content_type, role ): raise RuntimeError( "HTTP 500: CUDA out of memory, free GPU memory" )
+    with pytest.raises( CandidateError ) as caught:
+        vb.embed_all( Cuda(), [ "a" ], "code", "document", 8, 0, lambda s: None, refusal_limit=0 )
+    assert "CUDA" not in str( caught.value ) and "GPU memory" not in str( caught.value ) and "CUDA" in str( caught.value.__cause__ )
+
+
+def test_refusals_at_or_under_the_limit_do_not_stop_the_pass():
+    client = RefusingClient( 2 )                  # eight texts: refusals at 8 and 4, then 4 again, three in all
+    out    = vb.embed_all( client, [ "t" * n for n in range( 1, 9 ) ], "code", "document", 8, 0, lambda s: None, refusal_limit=3 )
+    assert len( out ) == 8 and client.batches == [ 8, 4, 2, 2, 4, 2, 2 ]
+
+
+def test_without_a_limit_the_pass_keeps_halving_and_raises_what_the_client_raised():
+    client = RefusingClient( 0 )
+    with pytest.raises( RuntimeError, match="HTTP 500" ):
+        vb.embed_all( client, [ "a", "b", "c", "d" ], "code", "document", 8, 0, lambda s: None )
+    assert client.batches == [ 4, 2, 1 ], "no count, no saturation error: the single text raises the client's error"
+
+
+def test_the_count_is_shared_across_batches_of_one_pass():
+    class RefusesEveryFirstCall:
+        def __init__( self ): self.n = 0
+        def embed( self, texts, content_type, role ):
+            self.n += 1
+            if len( texts ) > 1: raise RuntimeError( "HTTP 500" )
+            return [ [ 1.0, 0.0 ] for _ in texts ]
+    with pytest.raises( CandidateError ) as caught:
+        vb.embed_all( RefusesEveryFirstCall(), [ "a", "b", "c", "d", "e", "f" ], "code", "document", 2, 0, lambda s: None, refusal_limit=2 )
+    assert caught.value.code == SERVICE_SATURATED and "refused 3 calls" in str( caught.value ), "one refusal per batch of two, three batches"
 
 
 class UnreachableError( Exception ):

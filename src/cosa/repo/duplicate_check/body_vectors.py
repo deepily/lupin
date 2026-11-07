@@ -12,6 +12,10 @@ from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE
 
 CONTENT_TYPE = "code"
 ROLE         = "document"
+# Refused embed calls one pass may take before it stops. A batch within the character budget is rarely refused, and
+# splitting one batch of 16 down to single texts refuses at most 15 calls, so 32 leaves room for two such batches.
+# Past it the service is saturated: the run fails fast with the service named (row d4fce2bb, the no-GPU rule).
+REFUSAL_LIMIT = 32
 
 
 def body_text( d, limit ):
@@ -105,6 +109,8 @@ def ensure_vectors( defs, client, cache_dir, body_chars, sleep=time.sleep ):
     Raises:
         - ValueError if body_chars is below 1
         - CandidateError EMBEDDING_SHAPE if the vectors differ in length, cached ones included
+        - CandidateError SERVICE_SATURATED once the embeddings service has refused more than REFUSAL_LIMIT calls; the batches already
+          returned stay cached
     """
     folder = pathlib.Path( cache_dir ) / engine_tag( client )
     folder.mkdir( parents=True, exist_ok=True )
@@ -123,6 +129,6 @@ def ensure_vectors( defs, client, cache_dir, body_chars, sleep=time.sleep ):
             for sha, vector in zip( missing[ start: ], vectors ):
                 found[ sha ] = [ float( x ) for x in vector ]
                 _write( folder, sha, found[ sha ] )
-        vb.embed_all( client, [ texts[ sha ] for sha in missing ], CONTENT_TYPE, ROLE, vb.BATCH_SIZE, vb.PAUSE_SECONDS, sleep, on_batch=keep )
+        vb.embed_all( client, [ texts[ sha ] for sha in missing ], CONTENT_TYPE, ROLE, vb.BATCH_SIZE, vb.PAUSE_SECONDS, sleep, on_batch=keep, refusal_limit=REFUSAL_LIMIT )
     if len( { len( v ) for v in found.values() } ) > 1: raise CandidateError( EMBEDDING_SHAPE, "the cached and new vectors differ in length" )
     return { "vectors": { i: found[ sha ] for i, sha in sha_of.items() }, "truncated": truncated, "embedded": len( missing ), "reused": len( texts ) - len( missing ) }
