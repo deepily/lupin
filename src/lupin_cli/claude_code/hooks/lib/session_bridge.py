@@ -112,7 +112,7 @@ def atomic_write_json( path, data ):
             # already landed, and mkstemp's hardcoded 0600 masks any dir ACL to
             # ---). Group-rw lets a cross-uid reader (container uid 1001 ⇄ host
             # OS-Login uid, sharing the sessions dir's setgid group) read+rewrite
-            # the bridge. See src/rnd/v0.1.9/2026.07.24-vm-persona-bridge-mount-uid-divergence.md.
+            # the bridge.
             os.fchmod( f.fileno(), 0o660 )
         os.replace( tmp, path )
         return True
@@ -326,7 +326,7 @@ def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
         # Find the LAST ")" to skip past comm field safely
         comm_end = stat_line.rindex( ")" )
         fields_after_comm = stat_line[comm_end + 2:].split()
-        # fields_after_comm[0] = state, fields_after_comm[1] = ppid
+        # the first field after the name is the state, the second is the parent pid
         gppid = int( fields_after_comm[1] )
         grandparent = SESSION_DIR / f"cc-{gppid}.json"
         if grandparent.exists():
@@ -1186,7 +1186,7 @@ BRIDGE_FORMAT_VERSION = 2
 # is_manager_figure — "is this session's allocated persona one of the repo's
 # NAMED standing personas (COSA_VOICE_PREFERRED_PERSONA__<PROJECT>)?" — can ONLY
 # be answered where the caller's real environment lives: the SessionStart hook.
-# The server (tasks.py:652 G1 guard, and any future v2 experiment stratum
+# The server (the manager-only blocked-mint guard in tasks.py, and any future v2 experiment stratum
 # classifier) runs in the lupin-rest-dev container, whose env carries ZERO
 # COSA_VOICE_PREFERRED_PERSONA__* vars and LUPIN_ROOT=/var/lupin — so a
 # server-side compute resolved every caller to project "lupin" with an empty

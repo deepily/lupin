@@ -87,8 +87,8 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
 )
 # Spine Step-2 (store-canonical task management) — the flag-gated store-count
 # owed source. DEFAULT-old (transcript replay) until the fleet cutover flips
-# heartbeat.owed_source_from_store. See cascade review §A/§B/§C, lupin ->
-# src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md
+# heartbeat.owed_source_from_store. See cascade review §A/§B/§C (the
+# review document is in git history).
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
 from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed, query_owed_breakdowns, query_blocked_user_rows
@@ -124,56 +124,9 @@ def _summarize_task( last_assistant_message ):
         return None
 
 
-# NOTE: classify_qualifier() is commented out because its synchronous LLM
+# Note: classify_qualifier() was removed because its synchronous LLM
 # call to phi4 exceeds Claude Code's stop hook subprocess timeout (~5-10s).
-# Preserved for future use in non-time-critical contexts.
-#
-# def classify_qualifier( qualifier ):
-#     """
-#     Classify a user qualifier as 'question' or 'instruction' via phi4 LLM.
-#
-#     Follows the established agent pattern:
-#         1. Load prompt template path from config
-#         2. Process template via PromptTemplateProcessor (injects XML example)
-#         3. Format with utterance
-#         4. Call LLM via LlmClientFactory
-#         5. Parse response via QualifierClassification.from_xml()
-#
-#     Requires:
-#         - qualifier is a non-empty string
-#
-#     Ensures:
-#         - Returns QualifierClassification instance on success
-#         - Returns None on any failure (LLM unreachable, parse error, etc.)
-#     """
-#     try:
-#         import cosa.utils.util as du
-#         from cosa.config.configuration_manager import ConfigurationManager
-#         from cosa.agents.llm_client_factory import LlmClientFactory
-#         from cosa.agents.io_models.xml_models import QualifierClassification
-#         from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
-#         from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
-#
-#         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-#
-#         # Load and process prompt template
-#         prompt_template_path = config_mgr.get( "prompt template for qualifier classification" )
-#         prompt_template      = du.get_file_as_string( du.get_project_root() + prompt_template_path )
-#
-#         processor       = PromptTemplateProcessor()
-#         prompt_template = processor.process_template( prompt_template, "qualifier classification" )
-#         prompt          = prompt_template.format( utterance=qualifier )
-#
-#         # Call LLM
-#         llm_spec_key = config_mgr.get( "llm spec key for qualifier classification" )
-#         llm_client   = LlmClientFactory().get_client( llm_spec_key )
-#         raw_response = llm_client.run( prompt )
-#
-#         # Parse structured XML response
-#         return QualifierClassification.from_xml( raw_response )
-#
-#     except ( XMLParsingError, Exception ):
-#         return None
+# It is in git history if a non-time-critical context needs it.
 
 
 # Minimum turn duration (seconds) to consider work "substantive"
@@ -939,7 +892,7 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
         #
         #   · notify_user_sync is TOTAL. It catches ConnectionError / Timeout /
         #     RequestException / bare Exception and RETURNS a NotificationResponse
-        #     (notify_user_sync.py:457-495; its docstring says "No exceptions raised").
+        #     (the except handlers in notify_user_sync.py; its docstring says nothing is raised).
         #     A dead :7999 therefore returns response_value=None, extract_qualifier_comment
         #     short-circuits, and we fall out of the `no` path. IT NEVER REACHES HERE.
         #   · Every other callable in the try body is total too — build_sender_id_for_cc,
@@ -1456,7 +1409,7 @@ def _gather_unanswered_inbound_questions( session_id ):
 # rejoin (an expired parked row still reads status="parked") nor avoid
 # double-counting one across a per-status loop.
 # Membership is otherwise UNCHANGED: blocked / claimed / review are still not
-# owed to this reader. Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
+# owed to this reader.
 
 
 def _owed_count_from_store( session_id ):
@@ -2243,8 +2196,7 @@ def _run_heartbeat( session_id, transcript_path, cwd=None, state=None ):
     # was DROPPED here — superseded by v2.1 direct-state visibility, which makes
     # liveness a cheap centrally-PULLED bridge-mtime age instead of an expensive
     # per-Stop push (the push was the FM-7 load multiplier). The poke, oracle log,
-    # and genuine-idle beacon below all remain live. See
-    # src/rnd/v0.1.8/2026.06.06-heartbeat-poke-scaffold-vs-v2.1-supersession.md.
+    # and genuine-idle beacon below all remain live.
 
     # ── 2b: genuine-idle DECLARATION beacon (Rick §6.2 = Option B) ─────────────
     # Edge-triggered: declare idle ONLY on the TRANSITION into genuine-idle
@@ -2270,8 +2222,9 @@ def _run_heartbeat( session_id, transcript_path, cwd=None, state=None ):
         # The poke emits decision:block (the logging + continue RECEIPT), but on a
         # genuinely-STOPPED session the block alone is silent re-prompt context
         # with no submit — it does NOT produce the continuation turn. The keystroke
-        # nudge is what fires it. Mirror the battle-tested pairing at stop.py:705 &
-        # 722 (qualifier-continue) and peer-DM delivery (hook_common.py:849): inject
+        # nudge is what fires it. Mirror the battle-tested pairing at the
+        # inject_qualifier_via_tmux calls in main() (qualifier-continue) and peer-DM delivery
+        # (deliver_pending_peer_dms in hook_common.py): inject
         # the poke reason ALONGSIDE the emit. wrap=False = VERBATIM (a system poke,
         # not a human-voice reply) → NO speakerphone rider → silent, so it composes
         # with auto-narrate without double-speak. This single site is the shared
