@@ -644,7 +644,7 @@ def _persist_response_required_sync(
         repo = NotificationRepository( session )
         # Calculate expiration time.
         # AWARE — this value goes straight into create_notification and lands in
-        # the TIMESTAMPTZ expires_at column (postgres_models.py:618). Naive here
+        # the TIMESTAMPTZ expires_at column (Notification.expires_at in postgres_models.py). Naive here
         # and naive in the sweep used to cancel when both ran under the same
         # session; across sessions an expired row was never swept at all. Fixed
         # together with notification_repository.get_expired_notifications
@@ -1116,10 +1116,8 @@ async def notify_user(
         if connection_count > 0:
             user_session_ids  = ws_manager.user_sessions.get( target_system_id, [] )
             active_sessions   = [ s for s in user_session_ids if s in ws_manager.active_connections ]
-            # listener_sessions = [ s for s in active_sessions if s.startswith( "cc-listener-" ) ]
             browser_sessions  = [ s for s in active_sessions if not s.startswith( "cc-listener-" ) ]
             print( f"[NOTIFY]   Browser sessions  : {len( browser_sessions )} {browser_sessions}" )
-            # print( f"[NOTIFY]   Listener sessions : {len( listener_sessions )} {listener_sessions}" )
 
             # Cross-user listener discovery: CC listeners authenticate as a service
             # account, so they appear under a different user_id than the target user.
@@ -1334,7 +1332,7 @@ async def notify_user(
                 # re-arrivals against hydrated history by id. None (persist
                 # failed — non-fatal by design) falls back to a generated uuid4
                 # inside NotificationItem, preserving prior behavior.
-                # See: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md §4
+                # See: the design note "2026.06.11-mux-cold-load-notification-hydration-design" (deleted in commit b113a3a7d) §4
                 id                      = db_notification_id,
                 title                   = title,
                 sender_id               = resolved_sender_id,

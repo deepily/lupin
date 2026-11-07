@@ -803,7 +803,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
     )
 
     # TTS preview-and-pause cost-reduction feature (2026-05-13)
-    # See src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-design.md
+    # See the design note "2026.05.13-tts-preview-and-pause-design" (deleted in commit b113a3a7d)
     tts_preview_enabled = config_mgr.get(
         "tts preview enabled",
         default=True, return_type="boolean"
@@ -818,7 +818,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
     )
 
     # Commons Traffic Visibility — broadcast-card Recent Activity feature flag (2026-05-14)
-    # See src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (Q9 — default True)
+    # See the design note "2026.05.14-commons-traffic-visibility-design" (deleted in commit b113a3a7d) (Q9 — default True)
     commons_traffic_visibility_enabled = config_mgr.get(
         "commons traffic visibility enabled",
         default=True, return_type="boolean"
@@ -877,13 +877,13 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
 
         # TTS interaction mode (chorus / solo) — drives mode-conditional icon
         # rendering for the per-session DND toggle on each sender card. Added
-        # 2026-05-14 evening per src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
+        # that evening, per the design note "2026.05.14-per-session-dnd-toggle-and-slider-move" (deleted in commit b113a3a7d)
         "tts_interaction_mode"           : config_mgr.get( "tts interaction mode", default="chorus" ),
 
         # Commons Traffic Visibility (2026-05-14) — feature flag for the broadcast-card
         # Recent Activity stream. JS-side reads this at constructor time to gate the
         # render block + WS subscription. Default True per Q9 ratification.
-        # See src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+        # See the design note "2026.05.14-commons-traffic-visibility-design" (deleted in commit b113a3a7d)
         "commons_traffic_visibility_enabled"              : bool( commons_traffic_visibility_enabled ),
         "commons_traffic_visibility_default_hours_window" : commons_traffic_visibility_default_hours_window,
     }

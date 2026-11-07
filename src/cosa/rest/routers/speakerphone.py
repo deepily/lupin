@@ -65,7 +65,7 @@ router = APIRouter( prefix="/api/cosa-voice", tags=[ "cosa-voice" ] )
 # to activate different sessions, the lock ensures one fully completes (including
 # displacing the other's previously-active session) before the second runs.
 # Single-process uvicorn assumed — see "Risks / gotchas" #7 in the design doc
-# addendum at src/rnd/v0.1.7/2026.04.27-conversation-mode-design.md §11 for
+# addendum at the design note "2026.04.27-conversation-mode-design" (deleted in commit b113a3a7d) §11 for
 # the multi-worker caveat. NOT taken in chorus mode (no displacement).
 _speakerphone_lock = asyncio.Lock()
 

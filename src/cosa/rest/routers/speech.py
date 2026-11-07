@@ -26,12 +26,10 @@ import torch
 from openai import OpenAI
 import cosa.utils.util as du
 from cosa.utils.speech_text import strip_markdown_links_for_speech
-# from lib.clients import lupin_client as gc
 from cosa.rest.websocket_manager import WebSocketManager
 from cosa.memory.input_and_output_table import InputAndOutputTable
 from cosa.memory.speech_to_text_provider import SpeechToTextProvider
 from cosa.rest import multimodal_munger as mmm
-# from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.auth import get_current_user_id, get_optional_user
 
 router = APIRouter(prefix="/api", tags=["speech"])

@@ -288,7 +288,7 @@ async def allocate_voice_persona_endpoint(
     # and drives the human notification; this is the full outcomes on every chain
     # success, so a nonexistent name that lands on a later NAMED element (silent
     # under chain_conflict, by design) is still visible to the caller. An outcome
-    # you cannot see is the same as one that did not happen (session_spawner.py:1004).
+    # you cannot see is the same as one that did not happen (lupin_mcp/session_spawner.py).
     # None on the non-chain paths.
     chain_outcomes: Optional[ dict ] = None
 
@@ -368,7 +368,7 @@ async def allocate_voice_persona_endpoint(
             # env-var chain). STRICT ordered-fallback walk: first FREE element
             # wins; `*` = "then take anything free"; exhaustion without `*` is
             # a LOUD predictable fail (409 + conflict notify, NO silent random).
-            # See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
+            # See: the design note "2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix" (deleted in commit b113a3a7d)
             # Reserve-from-random (Rick, 2026-06-11): the SessionStart hook
             # threads its project's COSA_VOICE_MANAGERS__<PROJECT> roster as
             # a CSV `declared_managers` query param on BOTH the chain and the
@@ -682,7 +682,7 @@ async def voice_persona_sample(
 
     # Match the streaming path's defaults so the reference samples sound
     # representative of what the live notification UI plays. Profile keys
-    # mirror the "balanced" profile from speech.py:846-855.
+    # mirror the "balanced" profile from the speech route in speech.py.
     model_id          = config_mgr.get( "elevenlabs tts default model",          default="eleven_turbo_v2_5", silent=True )
     stability         = config_mgr.get( "elevenlabs tts profile balanced stability",         default=0.5, return_type="float", silent=True )
     similarity_boost  = config_mgr.get( "elevenlabs tts profile balanced similarity boost",  default=0.8, return_type="float", silent=True )
