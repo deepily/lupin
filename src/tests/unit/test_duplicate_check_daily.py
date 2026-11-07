@@ -304,10 +304,10 @@ def lines_of( **over ):
     return dd.cron_lines( **{ **args, **over } )
 
 
-def test_the_daily_lines_run_at_twelve_oh_seven_and_six_oh_seven_with_trigger_cron_and_the_reboot_line_waits_after_a_boot_with_trigger_reboot():
-    daily, second, reboot = lines_of()
+def test_the_daily_line_runs_at_ten_every_day_with_trigger_cron_and_the_reboot_line_waits_after_a_boot_with_trigger_reboot():
+    daily, reboot = lines_of()
     tail = "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --cap 40 --claude-cli-path /bin/claude --trigger {} >> /log/daily.log 2>&1 # duplicate-check-daily"
-    assert daily == "7 12 * * * " + tail.format( "cron" ) and second == "7 18 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
+    assert daily == "0 10 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
 
 
 def test_the_cron_lines_carry_the_named_environment_shell_quoted_and_nothing_else():
@@ -322,9 +322,9 @@ def test_the_default_branch_adds_nothing_to_the_cron_lines():
 
 
 def test_a_given_branch_goes_into_every_cron_line_after_the_trigger():
-    daily, second, reboot = lines_of( branch="wip-v0.2.2" )
+    daily, reboot = lines_of( branch="wip-v0.2.2" )
     tail = "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --cap 40 --claude-cli-path /bin/claude --trigger {} --branch wip-v0.2.2 >> /log/daily.log 2>&1 # duplicate-check-daily"
-    assert daily == "7 12 * * * " + tail.format( "cron" ) and second == "7 18 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
+    assert daily == "0 10 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
 
 
 def test_a_branch_name_with_shell_characters_is_quoted_in_both_cron_lines():
@@ -335,16 +335,20 @@ def test_a_branch_name_with_shell_characters_is_quoted_in_both_cron_lines():
 def test_print_install_and_install_carry_the_branch_given_on_the_command_line( tmp_path, cron ):
     base = [ "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py", "--branch", "wip-x" ]
     code, out, _ = cron_main( tmp_path, [ "--print-install", *base ], cron )
-    assert code == 0 and out[ 0 ].count( "--branch wip-x >> " ) == 3
+    assert code == 0 and out[ 0 ].count( "--branch wip-x >> " ) == 2
     assert cron_main( tmp_path, [ "--install", *base ], cron, cron[ "env" ] )[ 0 ] == 0
-    assert cron[ "file" ].read_text().count( "--branch wip-x >> " ) == 3
+    assert cron[ "file" ].read_text().count( "--branch wip-x >> " ) == 2
     plain = cron_main( tmp_path, [ "--print-install", *base[ :-2 ] ], cron )[ 1 ][ 0 ]
     assert "--branch" not in plain
 
 
-def test_the_schedule_is_thirty_minutes_after_the_shadow_audit_drain():
+def test_no_slot_is_after_last_call_and_the_baseline_slot_sits_between_the_daily_run_and_the_shadow_audit_drain():
     from lupin_mcp import reuse_shadow
-    assert reuse_shadow.CRON_SCHEDULE == "37 11 * * *" and dd.CRON_SCHEDULE == "7 12 * * *"
+    hour = lambda schedule: int( schedule.split()[ 1 ] ) * 60 + int( schedule.split()[ 0 ] )
+    assert dd.CRON_SCHEDULE == "0 10 * * *" and dd.BASELINE_SCHEDULE == "7 11 * * *" and reuse_shadow.CRON_SCHEDULE == "37 11 * * *"
+    assert hour( dd.CRON_SCHEDULE ) < hour( dd.BASELINE_SCHEDULE ) < hour( reuse_shadow.CRON_SCHEDULE ), "the baseline slot waits an hour for the daily run and ends before the drain"
+    assert dd.CRON_SCHEDULE.split()[ 2: ] == [ "*", "*", "*" ] and dd.BASELINE_SCHEDULE.split()[ 2: ] == [ "*", "*", "*" ], "every day, weekends included"
+    assert not hasattr( dd, "SECOND_SCHEDULE" ), "the 18:07 slot is gone"
 
 
 def cron_main( tmp_path, argv, cron, environ=None ):
@@ -356,15 +360,15 @@ def cron_main( tmp_path, argv, cron, environ=None ):
 
 def test_print_install_prints_the_lines_and_changes_nothing( tmp_path, cron ):
     code, out, _ = cron_main( tmp_path, [ "--print-install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron, { "LUPIN_CONFIG_MGR_CLI_ARGS": "a b" } )
-    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 3 and "LUPIN_CONFIG_MGR_CLI_ARGS='a b'" in out[ 0 ] and not cron[ "file" ].exists()
+    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 2 and "LUPIN_CONFIG_MGR_CLI_ARGS='a b'" in out[ 0 ] and not cron[ "file" ].exists()
 
 
 def test_install_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron ):
     cron[ "file" ].write_text( "0 * * * * other\n" )
     argv = [ "--install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ]
-    assert cron_main( tmp_path, argv, cron, cron[ "env" ] )[ :2 ] == ( 0, [ "installed: 3 lines" ] )
+    assert cron_main( tmp_path, argv, cron, cron[ "env" ] )[ :2 ] == ( 0, [ "installed: 2 lines" ] )
     assert "lock-enter " + dd.LOCK_OWNER in cron[ "log" ].read_text()
-    assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 3 lines" ]
+    assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 2 lines" ]
     assert cron_main( tmp_path, [ "--uninstall" ], cron, cron[ "env" ] )[ 1 ] == [ "uninstalled" ]
     entered = [ line for line in cron[ "log" ].read_text().splitlines() if line.startswith( "lock-enter" ) ]
     assert entered == [ "lock-enter " + dd.LOCK_OWNER ] * 2, "the install and the uninstall each take the lock as this job, and nothing else enters it"
@@ -870,11 +874,11 @@ def test_a_daily_run_whose_backlog_is_falling_has_no_rising_key( repo, tmp_path 
     assert "rising" not in doc
 
 
-def test_the_cron_lines_with_a_ceiling_carry_ceiling_and_not_cap_and_a_baseline_line_runs_at_twenty_oh_seven_before_the_reboot_line():
+def test_the_cron_lines_with_a_ceiling_carry_ceiling_and_not_cap_and_a_baseline_line_runs_at_eleven_oh_seven_before_the_reboot_line():
     plain = lines_of( cap=None, ceiling=1500 )
-    assert len( plain ) == 3 and all( "--ceiling 1500 --claude-cli-path" in l and "--cap" not in l for l in plain )
+    assert len( plain ) == 2 and all( "--ceiling 1500 --claude-cli-path" in l and "--cap" not in l for l in plain )
     with_base = lines_of( cap=None, ceiling=1500, baseline=True )
-    assert len( with_base ) == 4 and with_base[ 2 ].startswith( "7 20 * * * " ) and " --trigger cron --baseline >> " in with_base[ 2 ] and with_base[ 3 ].startswith( "@reboot" )
+    assert len( with_base ) == 3 and with_base[ 1 ].startswith( "7 11 * * * " ) and " --trigger cron --baseline >> " in with_base[ 1 ] and with_base[ 2 ].startswith( "@reboot" )
     assert not any( "--baseline" in l for l in plain )
 
 
@@ -887,16 +891,16 @@ def test_the_reinstall_command_keeps_the_ceiling_a_run_was_given( repo, tmp_path
 def test_the_status_reads_none_partly_and_fully_installed_with_or_without_the_baseline_line():
     tag = dd.CRON_TAG
     status = lambda text: dd.lt.status_text( text, tag, dd.INSTALLED_LINES )
-    assert status( "" ) == "not installed" and status( f"0 1 * * * x {tag}\n@reboot y {tag}\n" ) == "partly installed: 2 lines"
-    assert status( f"a {tag}\nb {tag}\nc {tag}\nother\n" ) == "installed: 3 lines" and status( f"a {tag}\nb {tag}\nc {tag}\nd {tag}\n" ) == "installed: 4 lines"
+    assert status( "" ) == "not installed" and status( f"0 1 * * * x {tag}\n" ) == "partly installed: 1 lines"
+    assert status( f"a {tag}\nb {tag}\nother\n" ) == "installed: 2 lines" and status( f"a {tag}\nb {tag}\nc {tag}\n" ) == "installed: 3 lines"
     assert status( f"a {tag}\n" * 5 ) == "partly installed: 5 lines"
 
 
 def test_main_takes_a_ceiling_or_a_cap_but_not_both_and_installs_the_baseline_line_when_asked( tmp_path, cron ):
     with pytest.raises( SystemExit ): dd.main( [ "--cap", "1", "--ceiling", "2", "--root", "." ] )
     code, out, _ = cron_main( tmp_path, [ "--print-install", "--ceiling", "1500", "--with-baseline", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron )
-    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 4 and "--ceiling 1500" in out[ 0 ] and "--baseline" in out[ 0 ]
-    assert cron_main( tmp_path, [ "--install", "--ceiling", "1500", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 3 lines" ]
+    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 3 and "--ceiling 1500" in out[ 0 ] and "--baseline" in out[ 0 ]
+    assert cron_main( tmp_path, [ "--install", "--ceiling", "1500", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 2 lines" ]
 
 
 def test_main_passes_the_ceiling_the_baseline_flag_and_the_rise_limit_to_the_run( repo, tmp_path, monkeypatch ):
@@ -997,9 +1001,9 @@ def test_the_reinstall_command_names_the_baseline_line_when_a_baseline_run_refus
 
 def test_the_crontab_reader_finds_a_tagged_baseline_line_and_nothing_else( cron ):
     assert dd.baseline_installed( cron[ "cmd" ] ) is False, "no crontab at all"
-    cron[ "file" ].write_text( f"0 * * * * other --baseline\n7 20 * * * run --baseline {dd.CRON_TAG}\n" )
+    cron[ "file" ].write_text( f"0 * * * * other --baseline\n7 11 * * * run --baseline {dd.CRON_TAG}\n" )
     assert dd.baseline_installed( cron[ "cmd" ] ) is True
-    cron[ "file" ].write_text( f"7 12 * * * run --cap 1 {dd.CRON_TAG}\n0 * * * * other --baseline\n" )
+    cron[ "file" ].write_text( f"0 10 * * * run --cap 1 {dd.CRON_TAG}\n0 * * * * other --baseline\n" )
     assert dd.baseline_installed( cron[ "cmd" ] ) is False, "a baseline flag on another tool's line is not ours"
 
 
