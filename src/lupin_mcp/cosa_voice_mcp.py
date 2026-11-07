@@ -993,7 +993,7 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
 # Speakerphone TTS Contract (once-stated, single-sourced)
 # ============================================================================
 #
-# Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md §4: the full standing
+# Per the "cosa-voice Per-Turn Rider Slim" doc §4 (removed by 8420e8b0a; recover it from 8420e8b0a^): the full standing
 # TTS contract is stated ONCE here in the session-init `instructions` payload.
 # The per-turn `<system-reminder>` rider (hook_common._speakerphone_reminder_body)
 # is now slim and only points at this section. The brevity prose is
@@ -1297,7 +1297,7 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
 # On a FINAL notify send-failure, persist the request to an on-disk outbox and let
 # a background flusher retry it (reusing its idempotency_key, so the server de-dups)
 # until ack or TTL. Rides only local disk — no fleet, no messaging dependency.
-# Design: src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md (lever A1).
+# Design: the "Messaging-Coordination Plane" design doc, lever A1 (removed by 8420e8b0a; recover it from 8420e8b0a^).
 import uuid as _uuid
 from lupin_mcp import notify_outbox as _notify_outbox
 
@@ -2033,7 +2033,7 @@ def ask_yes_no(
             "return_len"   : len( result )
         } )
         # exit_code == 0 is NOT proof a human acted (row e5f21fff): an OfflineEvent
-        # lands here with default_used=True (notify_user_sync.py:295-303), and the
+        # lands here with default_used=True (the OfflineEvent branch of `_send_sync_notification` in notify_user_sync.py), and the
         # server can flag a substitution on a RespondedEvent. Mark it.
         if response.default_used:
             return f"{DEFAULT_USED_MARKER}{result}"
@@ -2126,7 +2126,7 @@ def ask_multiple_choice(
     # D1 (bug f433fbae) — plumb a server-side response_default so an OFFLINE
     # user does not 503. ask_yes_no has always passed its string default here
     # (:1528); the MULTIPLE_CHOICE path omitted it, so notifications.py raised
-    # HTTPException(503, "User is offline and no default response provided")
+    # an HTTP 503 error ("User is offline and no default response provided")
     # whenever is_connected read False — including the FALSE-offline window right
     # after a server bounce wipes the in-memory ws_manager, i.e. a user at the
     # keyboard. Serialized as the SAME shape _parse_multiple_choice_response
@@ -2161,7 +2161,7 @@ def ask_multiple_choice(
 
     if response.exit_code == 0:
         # 🔴 DROP SITE 1 of 2 (row e5f21fff) — and the one nobody filed.
-        # exit_code == 0 is NOT proof a human acted. notify_user_sync.py:295-303
+        # exit_code == 0 does not prove a human acted. The OfflineEvent branch of `_send_sync_notification` in notify_user_sync.py
         # maps an OfflineEvent to exit_code=0 / default_used=True, commented
         # "Offline with default = success", so a PROVABLY ABSENT user returns
         # through this success branch, is parsed as an answer, and never reaches
@@ -2957,7 +2957,7 @@ def request_persona( name: Optional[ str ] = None ) -> dict:
 # orchestration lives in session_spawner (100% unit-covered); these wrappers
 # only resolve the manager's identity + config and delegate.
 #
-# See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
+# See: the "Manager-Spawned Headless Reviewer Sessions" doc (removed by 8420e8b0a; recover it from 8420e8b0a^)
 
 def _spawn_script_path() -> str:  # pragma: no cover  # trivial path join; exercised live, not in units
     return os.path.join( os.environ.get( "LUPIN_ROOT", "" ), "src", "scripts", "start-cc-with-tmux.sh" )
@@ -3899,7 +3899,7 @@ dm_send = mcp.tool( _dm_send_fn )
 # reply (POST /api/dm/respond — like dm_send but reply_to + thread_id required);
 # `dm_get` fetches one DM by id; `dm_list` lists/polls a thread or the inbox.
 # Each testable core injects HTTP (post_fn / get_fn) so unit tests need no server.
-# Design: src/rnd/v0.1.8/2026.06.16-dm-api-namespace-design.md §3 + §5
+# Design: the "DM API Namespace Design" doc §3 + §5 (removed by 8420e8b0a; recover it from 8420e8b0a^)
 #
 # NOTE (post-Phase-1 unification): once dm_send's URL becomes /api/dm/send,
 # _dm_send_impl and _dm_respond_impl can collapse into one `_dm_post_impl(path,...)`.

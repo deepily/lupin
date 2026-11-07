@@ -80,7 +80,7 @@ def build_app():
     )
 
     app = FastAPI( title="handback-e2e-own-server" )
-    app.include_router( notifications.router )   # prefix="/api"
+    app.include_router( notifications.router )   # mounted under the /api prefix
     app.include_router( websocket.router )        # /ws/queue/{session_id}
     return app
 

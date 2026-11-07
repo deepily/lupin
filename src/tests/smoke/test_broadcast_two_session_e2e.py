@@ -270,7 +270,7 @@ def test_step9_two_session_e2e_persona_targeted_broadcast():
         # Per-recipient status, tightened 2026-08-26. Both were asserted as plain
         # "completed", which was the only value the handler could return when this
         # was written. `completed-with-withheld` was added 2026-07-18 (shipped in
-        # 1fa05b16, broadcast_handler.py:512) and fires whenever a line was withheld
+        # 1fa05b16, broadcast_handler.py) and fires whenever a line was withheld
         # from that persona — which is EXACTLY what this test arranges: the body
         # carries an "@Maria:" directive, so Maria gets the whole thing and Tiberius
         # has one line withheld. Tiberius was correctly reporting

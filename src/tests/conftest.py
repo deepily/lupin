@@ -139,7 +139,7 @@ def pytest_report_collectionfinish( config, start_path, items ):
 
 # ── FM-21: hermetic-config module boundary ────────────────────────────────────
 #
-# Design + nod trail: src/rnd/v0.1.8/2026.06.11-fm21-test-isolation-hermetic-config-fixture.md
+# Design + nod trail: the "FM-21: Test-Isolation Fixes" doc (removed by 8420e8b0a; recover it from 8420e8b0a^)
 # Verify pair: src/tests/unit/test_hermetic_config_fixture_{a,b}.py — the _b
 # module fails RED if this fixture is removed.
 

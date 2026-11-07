@@ -53,14 +53,14 @@ GOLDEN_PATH = repo_root() / "src" / "tests" / "e2e_ui" / "fixtures" / "golden" /
 # WS1 border-left CLOSED (Clayton, commit 7d5b4d51 + golden recapture): the
 # `.sender-card[:not](.sender-card-active){ border-left:3px solid var(--persona-color,transparent) }`
 # left-accent rules were ported byte-faithful into notifications-surface.css
-# (notifications.css:2086-2092), so the mux now computes border-left-width 3px =
+# (notifications.css), so the mux now computes border-left-width 3px =
 # legacy. It is no longer an allowlist exemption — Tier 2 asserts it as a PROVEN
 # match. WS2/C2-d direction is closed too (see above).
 
 # WS2/WS4 date-label rename seam CLOSED (Clayton commit d8980bc3 + golden
 # recapture): the shared sheet now styles `.date-text { font-size:13px;
 # font-weight:500; color:#495057 }` (byte-faithful to the legacy `.date-label`
-# intent, notifications.css:2776); the mux 11px placeholder + the dead `.date-label`
+# intent, notifications.css); the mux 11px placeholder + the dead `.date-label`
 # monolith rule were removed. Both clients now compute `.date-text` at 13px/19.5px
 # /500 — the ~7.5px header→first-message gap closed (the persona-less arbiter card
 # is fully parity-green). It was an allowlist exemption; the freshness guard fired

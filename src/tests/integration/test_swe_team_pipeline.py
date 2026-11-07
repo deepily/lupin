@@ -328,7 +328,7 @@ class TestSweTeamDryRunPipeline:
         assert resp.status_code == 200
 
         # The v2 hand-off status is "waiting", not "queued" — AskResponse.status is
-        # done | waiting | parked | needs_input | expired | failed (v2_ask.py:91), and
+        # done | waiting | parked | needs_input | expired | failed (`AskResponse` in v2_ask.py), and
         # AskResponse carries no queue_position at all. Both assertions predate the
         # move of this door to v2 in 4f1501a2. assert_handed_off() is the shared check
         # every other v2 caller uses, and it explains itself on failure.

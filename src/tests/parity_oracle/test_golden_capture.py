@@ -111,7 +111,7 @@ def test_capture_legacy_golden( page ):
 
     page.goto( LEGACY_URL, wait_until="networkidle", timeout=20_000 )
 
-    # Legacy renders sender cards into #notifications-list (notifications.js:11438).
+    # Legacy renders sender cards into #notifications-list (notifications.js).
     page.wait_for_selector( "#notifications-list .sender-card", timeout=15_000 )
 
     # --- Exploration dump: learn legacy's real contract DOM attributes --------
