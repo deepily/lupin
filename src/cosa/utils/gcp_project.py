@@ -28,9 +28,9 @@ from pathlib import Path
 PROJECT_ENV_KEY  = "LUPIN_GCP_PROJECT_ID"
 LOCATION_ENV_KEY = "LUPIN_GCP_LOCATION"
 
-# `global` serves gemini-3.1-flash-lite; us-central1 returns 404 NOT_FOUND for it (measured
-# 2026-08-16). That region also carries an older scar — vertex_env.py:90-92 records rawPredict
-# "genuinely 400s" there. Two APIs, two failure modes, same region.
+# `global` serves gemini-3.1-flash-lite; us-central1 returns 404 NOT_FOUND for it (measured in
+# August 2026). That region also carries an older scar — vertex_env.py's
+# CERTIFIED_VERTEX_REGIONS comment records rawPredict returning 400 there. Two APIs, two failure modes, same region.
 DEFAULT_LOCATION = "global"
 
 # KEY="value" / KEY='value' / KEY=value, with optional `export`, ignoring comments.

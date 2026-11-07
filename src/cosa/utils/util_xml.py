@@ -137,7 +137,6 @@ def get_nested_list( xml_string: str, tag_name: str="code", debug: bool=False, v
                 code_list.append( line )
                 if debug and verbose: print( line )
             else:
-                # code_list.append( "" )
                 if debug and verbose: print( "[]" )
         
     return code_list
