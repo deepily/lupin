@@ -295,15 +295,15 @@ def lines_of( **over ):
     return dd.cron_lines( **{ **args, **over } )
 
 
-def test_the_daily_line_runs_at_twelve_oh_seven_with_trigger_cron_and_the_reboot_line_waits_after_a_boot_with_trigger_reboot():
-    daily, reboot = lines_of()
+def test_the_daily_lines_run_at_twelve_oh_seven_and_six_oh_seven_with_trigger_cron_and_the_reboot_line_waits_after_a_boot_with_trigger_reboot():
+    daily, second, reboot = lines_of()
     tail = "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --cap 40 --claude-cli-path /bin/claude --trigger {} >> /log/daily.log 2>&1 # duplicate-check-daily"
-    assert daily == "7 12 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
+    assert daily == "7 12 * * * " + tail.format( "cron" ) and second == "7 18 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
 
 
 def test_the_cron_lines_carry_the_named_environment_shell_quoted_and_nothing_else():
-    daily, reboot = lines_of( carried={ "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/c block=Lupin:+Dev x", "DEEPILY_DATA_DIR": "/mnt/d" } )
-    for line in ( daily, reboot ):
+    daily, *rest, reboot = lines_of( carried={ "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/c block=Lupin:+Dev x", "DEEPILY_DATA_DIR": "/mnt/d" } )
+    for line in ( daily, *rest, reboot ):
         assert "LUPIN_CONFIG_MGR_CLI_ARGS='config_path=/c block=Lupin:+Dev x' DEEPILY_DATA_DIR=/mnt/d /py -m" in line
     assert "DEEPILY_DATA_DIR" not in lines_of()[ 0 ]
 
@@ -312,10 +312,10 @@ def test_the_default_branch_adds_nothing_to_the_cron_lines():
     assert lines_of( branch=dd.BRANCH ) == lines_of() and "--branch" not in "".join( lines_of( branch=dd.BRANCH ) )
 
 
-def test_a_given_branch_goes_into_both_cron_lines_after_the_trigger():
-    daily, reboot = lines_of( branch="wip-v0.2.2" )
+def test_a_given_branch_goes_into_every_cron_line_after_the_trigger():
+    daily, second, reboot = lines_of( branch="wip-v0.2.2" )
     tail = "cd /main && LUPIN_ROOT=/main PYTHONPATH=/main/src /py -m lupin_mcp.duplicate_check_daily --cap 40 --claude-cli-path /bin/claude --trigger {} --branch wip-v0.2.2 >> /log/daily.log 2>&1 # duplicate-check-daily"
-    assert daily == "7 12 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
+    assert daily == "7 12 * * * " + tail.format( "cron" ) and second == "7 18 * * * " + tail.format( "cron" ) and reboot == "@reboot sleep 300 && " + tail.format( "reboot" )
 
 
 def test_a_branch_name_with_shell_characters_is_quoted_in_both_cron_lines():
@@ -326,9 +326,9 @@ def test_a_branch_name_with_shell_characters_is_quoted_in_both_cron_lines():
 def test_print_install_and_install_carry_the_branch_given_on_the_command_line( tmp_path, cron ):
     base = [ "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py", "--branch", "wip-x" ]
     code, out, _ = cron_main( tmp_path, [ "--print-install", *base ], cron )
-    assert code == 0 and out[ 0 ].count( "--branch wip-x >> " ) == 2
+    assert code == 0 and out[ 0 ].count( "--branch wip-x >> " ) == 3
     assert cron_main( tmp_path, [ "--install", *base ], cron, cron[ "env" ] )[ 0 ] == 0
-    assert cron[ "file" ].read_text().count( "--branch wip-x >> " ) == 2
+    assert cron[ "file" ].read_text().count( "--branch wip-x >> " ) == 3
     plain = cron_main( tmp_path, [ "--print-install", *base[ :-2 ] ], cron )[ 1 ][ 0 ]
     assert "--branch" not in plain
 
@@ -345,17 +345,17 @@ def cron_main( tmp_path, argv, cron, environ=None ):
     return code, out, err
 
 
-def test_print_install_prints_both_lines_and_changes_nothing( tmp_path, cron ):
+def test_print_install_prints_the_lines_and_changes_nothing( tmp_path, cron ):
     code, out, _ = cron_main( tmp_path, [ "--print-install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron, { "LUPIN_CONFIG_MGR_CLI_ARGS": "a b" } )
-    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 2 and "LUPIN_CONFIG_MGR_CLI_ARGS='a b'" in out[ 0 ] and not cron[ "file" ].exists()
+    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 3 and "LUPIN_CONFIG_MGR_CLI_ARGS='a b'" in out[ 0 ] and not cron[ "file" ].exists()
 
 
 def test_install_status_and_uninstall_keep_other_lines_and_hold_the_lock( tmp_path, cron ):
     cron[ "file" ].write_text( "0 * * * * other\n" )
     argv = [ "--install", "--cap", "40", "--claude-cli-path", "/bin/claude", "--python", "/py" ]
-    assert cron_main( tmp_path, argv, cron, cron[ "env" ] )[ :2 ] == ( 0, [ "installed: 2 lines" ] )
+    assert cron_main( tmp_path, argv, cron, cron[ "env" ] )[ :2 ] == ( 0, [ "installed: 3 lines" ] )
     assert "lock-enter " + dd.LOCK_OWNER in cron[ "log" ].read_text()
-    assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 2 lines" ]
+    assert cron_main( tmp_path, [ "--status" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 3 lines" ]
     assert cron_main( tmp_path, [ "--uninstall" ], cron, cron[ "env" ] )[ 1 ] == [ "uninstalled" ]
     entered = [ line for line in cron[ "log" ].read_text().splitlines() if line.startswith( "lock-enter" ) ]
     assert entered == [ "lock-enter " + dd.LOCK_OWNER ] * 2, "the install and the uninstall each take the lock as this job, and nothing else enters it"
@@ -374,7 +374,7 @@ def test_an_install_without_the_shared_lock_is_refused_with_one_and_the_reason( 
     assert code == 1 and err[ 0 ].startswith( "duplicate-check-daily:" ) and out == [ ] and not cron[ "file" ].exists()
 
 
-def test_the_cron_modes_that_build_lines_need_a_cap_and_status_and_uninstall_do_not( tmp_path, cron ):
+def test_the_cron_modes_that_build_lines_need_a_limit_and_status_and_uninstall_do_not( tmp_path, cron ):
     for mode in ( "--print-install", "--install" ):
         with pytest.raises( SystemExit ):
             cron_main( tmp_path, [ mode ], cron, cron[ "env" ] )
@@ -749,3 +749,150 @@ def test_a_failed_run_appends_a_line_with_the_same_keys_and_the_result_file_gain
     good, bad = hist.read_lines( folder )
     assert set( good ) == set( bad ) and bad[ "status" ] == "failed" and bad[ "failure" ].startswith( "claude_binary: " ) and bad[ "carried" ] is None
     assert all( doc[ k ] is None for k in dd.UNREACHED ) and doc[ "schema_version" ] == hist.SCHEMA_VERSION
+
+
+def folder_of( tmp_path ): return tmp_path / "io" / "duplicate-check-daily"
+
+
+def test_with_a_ceiling_the_cap_is_the_number_of_definitions_to_judge_when_that_is_under_the_ceiling( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    doc   = dd.run( repo, NOW, "cron", None, "/bin/claude", parts, ceiling=10 )
+    assert ( doc[ "cap" ], doc[ "ceiling" ], doc[ "judge_calls" ], doc[ "status" ], doc[ "judged" ] ) == ( 3, 10, 3, "ok", 3 ), "three definitions, three calls, nothing carried"
+    again = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", None, "/bin/claude", parts, ceiling=10 )
+    assert ( again[ "cap" ], again[ "judge_calls" ], again[ "status" ] ) == ( 0, 0, "ok" ), "nothing new, so nothing to pay for"
+
+
+def test_with_a_ceiling_below_the_work_the_ceiling_is_the_cap_and_the_rest_carries_to_a_run_that_finishes_it( repo, tmp_path ):
+    history( repo )
+    parts = parts_of( tmp_path )
+    one   = dd.run( repo, NOW, "cron", None, "/bin/claude", parts, ceiling=2 )
+    assert ( one[ "cap" ], one[ "judge_calls" ], one[ "status" ], len( one[ "carried" ] ) ) == ( 2, 2, "carried", 1 )
+    two   = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "cron", None, "/bin/claude", parts, ceiling=2 )
+    assert ( two[ "status" ], two[ "judge_calls" ], two[ "carried" ] ) == ( "ok", 1, [] ), "the three-call day was finished in two runs of at most two calls"
+
+
+def test_a_baseline_run_judges_every_definition_of_the_tree_leaves_last_success_alone_and_marks_the_baseline_complete( repo, tmp_path ):
+    history( repo )
+    folder = folder_of( tmp_path )
+    doc    = dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path ), ceiling=100, baseline=True )
+    assert doc[ "mode" ] == "baseline" and doc[ "judged" ] == 5 and doc[ "judge_calls" ] == 5 and doc[ "status" ] == "ok", "s1, old, a1, a2 and a3: the tree, not the 24 hours"
+    assert not ( folder / dd.LAST_SUCCESS ).exists() and dd.read_baseline( folder )[ "status" ] == dd.BASELINE_DONE
+    assert hist.read_lines( folder )[ 0 ][ "mode" ] == "baseline"
+
+
+def test_a_baseline_that_the_cap_cuts_short_stays_in_progress_and_later_runs_finish_it_then_do_nothing( repo, tmp_path ):
+    history( repo )
+    folder = folder_of( tmp_path )
+    parts  = parts_of( tmp_path )
+    one    = dd.run( repo, NOW, "hand", 2, "/bin/claude", parts, baseline=True )
+    assert one[ "status" ] == "carried" and one[ "judge_calls" ] == 2 and len( one[ "carried" ] ) == 3
+    assert dd.read_baseline( folder ) == { "status": dd.BASELINE_OPEN, "end": git( repo, "rev-parse", "main" ), "carried": 3, "at": NOW.isoformat() }
+    two    = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 10, "/bin/claude", parts, baseline=True )
+    assert two[ "judge_calls" ] == 3 and two[ "status" ] == "ok" and dd.read_baseline( folder )[ "status" ] == dd.BASELINE_DONE
+    calls = parts[ "backend" ].calls
+    three  = dd.run( repo, NOW + datetime.timedelta( minutes=2 ), "hand", 10, "/bin/claude", parts, baseline=True )
+    assert three[ "note" ] == "baseline complete" and three[ "judge_calls" ] == 0 and parts[ "backend" ].calls == calls and three[ "mode" ] == "baseline"
+
+
+def test_a_baseline_run_does_not_move_the_daily_marker_so_the_daily_window_still_starts_where_it_did( repo, tmp_path ):
+    c1, c2, c3 = history( repo )
+    folder = folder_of( tmp_path )
+    dd.write_json( folder / dd.LAST_SUCCESS, { "commit": c1, "at": NOW.isoformat() } )
+    dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path ), ceiling=100, baseline=True )
+    assert dd.read_last_success( folder )[ "commit" ] == c1
+
+
+def test_the_baseline_window_is_the_whole_branch_and_a_tree_with_no_source_files_has_no_definitions( repo, tmp_path ):
+    first = commit( repo, { "README.md": "hi" }, "readme", 30 )
+    assert dd.baseline_window( repo ) == { "start": first, "end": first, "commits": [] }
+    assert dd.baseline_definitions( repo, dd.baseline_window( repo ) ) == { "defs": [], "commit_of": { } }
+    assert dd.read_baseline( folder_of( tmp_path ) ) is None
+
+
+def rows_of( *carried ):
+    """Ensures: returns daily history lines that carried these counts."""
+    return [ { "mode": "daily", "status": "carried", "carried": n } for n in carried ]
+
+
+def seed( tmp_path, *carried ):
+    """Ensures: writes the history lines of earlier daily runs."""
+    for row in rows_of( *carried ): hist.append_line( folder_of( tmp_path ), row )
+
+
+def test_the_rising_guard_names_the_series_and_tells_rick_once_per_run_through_the_notifier( tmp_path ):
+    seed( tmp_path, 1, 2 )
+    notifier = Notifier()
+    got = dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "carried": [ "a", "b", "c" ] }, NOW, 2, notifier )
+    assert got == { "runs": 2, "series": [ 1, 2, 3 ], "notified": True }
+    assert "rose on 2 runs in a row, to 3" in notifier.sent[ 0 ][ 0 ] and "1, 2, 3" in notifier.sent[ 0 ][ 1 ] and "/" not in notifier.sent[ 0 ][ 0 ]
+
+
+@pytest.mark.parametrize( "notifier,sent", [ ( None, False ), ( Notifier( answer=False ), False ), ( Notifier( answer=RuntimeError( "down" ) ), False ) ] )
+def test_a_missing_refusing_or_broken_notifier_leaves_the_guard_result_with_notified_false( tmp_path, notifier, sent ):
+    seed( tmp_path, 1, 2 )
+    got = dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "carried": [ "a", "b", "c" ] }, NOW, 2, notifier )
+    assert got[ "notified" ] is sent and got[ "series" ] == [ 1, 2, 3 ]
+
+
+def test_a_fall_or_a_flat_step_or_too_little_history_raises_no_alarm( tmp_path ):
+    seed( tmp_path, 5, 2 )
+    notifier = Notifier()
+    assert dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "carried": [ "a", "b", "c" ] }, NOW, 2, notifier ) is None
+    assert dd.rising_guard( folder_of( tmp_path ), { "status": "carried", "trigger": "cron", "carried": [ "a", "b" ] }, NOW, 1, notifier ) is None
+    assert dd.rising_guard( folder_of( tmp_path / "none" ), { "status": "carried", "trigger": "cron", "carried": [ "a" ] }, NOW, 2, notifier ) is None
+    assert notifier.sent == []
+
+
+def test_a_daily_run_whose_carried_count_rose_on_the_last_runs_records_rising_and_alerts_and_a_baseline_run_never_does( repo, tmp_path ):
+    history( repo )
+    seed( tmp_path, 0, 1 )
+    notifier = Notifier()
+    doc = dd.run( repo, NOW, "cron", 1, "/bin/claude", parts_of( tmp_path, notifier=notifier ), rise_limit=2 )
+    assert len( doc[ "carried" ] ) == 2 and doc[ "rising" ] == { "runs": 2, "series": [ 0, 1, 2 ], "notified": True } and len( notifier.sent ) == 1
+    base = dd.run( repo, NOW + datetime.timedelta( minutes=1 ), "hand", 1, "/bin/claude", parts_of( tmp_path, notifier=notifier ), baseline=True, rise_limit=1 )
+    assert "rising" not in base and len( notifier.sent ) == 1
+
+
+def test_a_daily_run_whose_backlog_is_falling_has_no_rising_key( repo, tmp_path ):
+    history( repo )
+    seed( tmp_path, 9, 8 )
+    doc = dd.run( repo, NOW, "cron", 1, "/bin/claude", parts_of( tmp_path, notifier=Notifier() ), rise_limit=2 )
+    assert "rising" not in doc
+
+
+def test_the_cron_lines_with_a_ceiling_carry_ceiling_and_not_cap_and_a_baseline_line_runs_at_twenty_oh_seven_before_the_reboot_line():
+    plain = lines_of( cap=None, ceiling=1500 )
+    assert len( plain ) == 3 and all( "--ceiling 1500 --claude-cli-path" in l and "--cap" not in l for l in plain )
+    with_base = lines_of( cap=None, ceiling=1500, baseline=True )
+    assert len( with_base ) == 4 and with_base[ 2 ].startswith( "7 20 * * * " ) and " --trigger cron --baseline >> " in with_base[ 2 ] and with_base[ 3 ].startswith( "@reboot" )
+    assert not any( "--baseline" in l for l in plain )
+
+
+def test_the_reinstall_command_keeps_the_ceiling_a_run_was_given( repo, tmp_path ):
+    stale_repo( repo )
+    doc = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path ), branch="wip-old", ceiling=1500 )
+    assert "--ceiling 1500" in doc[ "reinstall" ] and "--cap" not in doc[ "reinstall" ] and doc[ "ceiling" ] == 1500
+
+
+def test_the_status_reads_none_partly_and_fully_installed():
+    tag = dd.CRON_TAG
+    assert dd.status_text( "" ) == "not installed" and dd.status_text( f"0 1 * * * x {tag}\n@reboot y {tag}\n" ) == "partly installed: 2 lines"
+    assert dd.status_text( f"a {tag}\nb {tag}\nc {tag}\nother\n" ) == "installed: 3 lines"
+
+
+def test_main_takes_a_ceiling_or_a_cap_but_not_both_and_installs_the_baseline_line_when_asked( tmp_path, cron ):
+    with pytest.raises( SystemExit ): dd.main( [ "--cap", "1", "--ceiling", "2", "--root", "." ] )
+    code, out, _ = cron_main( tmp_path, [ "--print-install", "--ceiling", "1500", "--with-baseline", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron )
+    assert code == 0 and out[ 0 ].count( dd.CRON_TAG ) == 4 and "--ceiling 1500" in out[ 0 ] and "--baseline" in out[ 0 ]
+    assert cron_main( tmp_path, [ "--install", "--ceiling", "1500", "--claude-cli-path", "/bin/claude", "--python", "/py" ], cron, cron[ "env" ] )[ 1 ] == [ "installed: 3 lines" ]
+
+
+def test_main_passes_the_ceiling_the_baseline_flag_and_the_rise_limit_to_the_run( repo, tmp_path, monkeypatch ):
+    history( repo )
+    monkeypatch.setattr( dd.model_transport, "configure", lambda path=None: None )
+    seen = {}
+    monkeypatch.setattr( dd, "run", lambda *a, **k: seen.update( k ) or { "status": "ok", "trigger": "hand" } )
+    argv = [ "--ceiling", "7", "--baseline", "--rise-limit", "5", "--root", str( repo ), "--claude-cli-path", "/bin/claude" ]
+    assert dd.main( argv, parts=parts_of( tmp_path ), now=NOW, out=lambda text: None ) == 0
+    assert ( seen[ "ceiling" ], seen[ "baseline" ], seen[ "rise_limit" ] ) == ( 7, True, 5 )

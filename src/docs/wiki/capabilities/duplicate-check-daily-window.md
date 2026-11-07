@@ -13,6 +13,9 @@ pins:
   - lupin_mcp.duplicate_check_daily.pool_without_earlier_versions@157e09aba7
   - lupin_mcp.duplicate_check_daily.progress@29d6340dbb
   - lupin_mcp.duplicate_check_daily.write_json@d65f1e03d9
+  - lupin_mcp.duplicate_check_daily.baseline_window@bd338e256d
+  - lupin_mcp.duplicate_check_daily.baseline_definitions@808875bb59
+  - lupin_mcp.duplicate_check_daily.read_baseline@c51274d43b
 ---
 # Duplicate check daily: window and new definitions
 The first half of `lupin_mcp.duplicate_check_daily`: which commits a run judges, which definitions are new, and how far it got. The run itself is in [[duplicate-check-daily-run]].
@@ -26,6 +29,8 @@ The first half of `lupin_mcp.duplicate_check_daily`: which commits a run judges,
 - `changed_files` is the sorted new paths of Python and script files. `old_paths` maps each renamed file to the path it had at the start.
 - `new_definitions( tree, root, window )` returns `{ defs, commit_of }`, ordered by the commit that last touched the file, then file and line.
 - A definition is left out when the window's start held the same file, name and text. A renamed file is compared with its old path, so a rename alone judges nothing.
+- `baseline_window( root, branch )` is the whole branch, from its first commit. `baseline_definitions( tree, window )` lists every definition of the tree's Python and script files, in file and line order, each tied to the window's end.
+- `read_baseline( folder )` returns the parsed `baseline.json`, or None. Its status is `in_progress` or `complete`.
 - `release( root, tree )` unlocks and removes a detached worktree. It raises nothing.
 - `pool_without_earlier_versions` drops, from the tree's server and client definitions, any that share a file and name with a new one. No new definition pairs with its own earlier version.
 - `progress( defs, commit_of, unjudged, window )` returns `{ advanced_to, carried }`. A definition the cap or a failed call left unjudged is carried. An unreadable reply was ledgered and is not carried.
