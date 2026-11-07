@@ -45,7 +45,7 @@ from __future__ import annotations
 
 from .conftest import BASE_URL
 
-# Real emit format — matches podcast_generator/job.py:342 (unit-verified in
+# Real emit format — matches podcast_generator/job.py (unit-verified in
 # test_job.py::test_completion_abstract_emits_play_here_and_listen_links).
 # A REAL, playable podcast the test user can read (/api/io/file gates on auth +
 # path-traversal, NOT ownership — proven empirically by Rio: the test-user token

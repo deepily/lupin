@@ -56,7 +56,7 @@ CHROMIUM_EXPECTED_BUILD = "1208"
 # :8000 (container, …0.3), so a FULL-version assertion would false-fail the intentionally-
 # unaligned host. A MAJOR bump WOULD change rasterization enough to invalidate baselines, so
 # that remains load-bearing and asserted. Decision + rejected "pin both sides" alternatives:
-# src/rnd/v0.1.9/2026.06.30-visual-regression-env-drift-root-cause.md §Resolution (Option-2).
+# the "Bug a5559b49 — :8000 Visual Regression RED: Root-Cause" doc §Resolution (Option-2), removed by 8420e8b0a; recover it from 8420e8b0a^.
 FREETYPE_EXPECTED_MAJOR = "2"
 
 

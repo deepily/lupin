@@ -402,7 +402,7 @@ async ( container ) => {
 # the display value was constant across the two cases while the behaviour was
 # not, and could never have been the discriminator. The false mechanism
 # ("the cell computes flow-root, so the clamp cannot apply") is retracted in
-# `src/rnd/2026.09.04-row-display-progressive-disclosure.md`. The geometry
+# the 2026-09-04 row-display progressive-disclosure R&D note. The geometry
 # below is what actually discriminates, and it was available the whole time.
 _TITLE_CLAMP_JS = """
 ( args ) => {

@@ -137,14 +137,14 @@ def test_multiplexer_phase6c_section_a_chip_visual(
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the persona/badge NotoColorEmoji glyphs are
     # loaded before capture. networkidle does NOT gate fonts. See
-    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    # `test_task_editing_controls_visual` in test_multiplexer_task_editing.py. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     # Row f0e00f01: snapshot #sender-cards-container, NOT #notifications-pane.
     # Same unstable-baseline-by-construction defect ts-127620e1 fixed for the two
     # popover tests below, arriving here by a different route. #notifications-pane
     # holds #broadcast-card-mount, and the commons "Recent Activity" feed is nested
-    # inside that mount's rendered subtree (boot.ts:620). That feed is LIVE fleet
+    # inside that mount's rendered subtree (mounted in multiplexer/boot.ts). That feed is LIVE fleet
     # traffic and is never reset: clean_test_db truncates six auth/job tables and
     # never touches commons, and /api/commons/broadcast-history reads file-backed
     # topics plus the voice-persona bridge dir, capped at 200 entries. Measured
@@ -195,7 +195,7 @@ def test_multiplexer_phase6c_section_a_popover_open_visual(
     # (accent strip, name+icon row, voice_id row, no borrowed badge).
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the persona/badge NotoColorEmoji glyphs are
-    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    # loaded before capture. See `test_task_editing_controls_visual` in test_multiplexer_task_editing.py.
     #
     # OPAQUE BACKGROUND — the same corner bleed row 856c7c96 fixed for the borrowed
     # sibling below, whose comment carries the measurement. The popover's rounded
@@ -240,7 +240,7 @@ def test_multiplexer_phase6c_section_a_popover_borrowed_visual(
     # borrowed-badge surface lives entirely inside the popover element.
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the persona/badge NotoColorEmoji glyphs are
-    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    # loaded before capture. See `test_task_editing_controls_visual` in test_multiplexer_task_editing.py.
     #
     # OPAQUE BACKGROUND (row 856c7c96). The popover's 8px rounded corner is
     # transparent, so the capture's corner pixels are its shadow blended over

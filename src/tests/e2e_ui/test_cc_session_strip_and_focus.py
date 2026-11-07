@@ -459,7 +459,7 @@ class TestPersistence:
 
         # NEGATIVE CONTROL (gives this test teeth — it is NOT tautological): the
         # pill's VISUAL restore is deliberately gated on the focused sender's card
-        # being present. _restoreCcUiAfterLoad (notifications.js:9933) reverts the
+        # being present. _restoreCcUiAfterLoad (in notifications.js) reverts the
         # pill to OFF when the focused card is absent, PRESERVING the localStorage
         # intent (the 2026-04-30 design + icon-churn-race fix). Immediately after
         # reload the client-only card is gone, so the pill MUST be OFF. If the
@@ -1062,14 +1062,14 @@ class TestStripOrdering:
 # (NOT the retired FocusTray #focus-mode-toggle — removed in c87f066).
 #
 # Harness (Clayton review fix, 4bac3ce → this revision): the strip only
-# populates from STRIP_STATE_TYPES (SessionStripStore.ts:45) — a plain
+# populates from STRIP_STATE_TYPES (`STRIP_STATE_TYPES` in SessionStripStore.ts) — a plain
 # `notification_queue_update` of type 'task' does NOT add a strip icon. So per
 # sender we inject the message (builds the card + its .date-accordion-messages)
 # AND a `voice_persona_assigned` carrying a non-released voice_persona (adds the
 # strip icon), mirroring test_multiplexer_phase6c_section_a_visual.py. Focus is
 # entered by clicking the KNOWN sender's strip icon — selected by
 # `.cc-strip-icon[data-sender-id=...]` (the multiplexer icon has NO `id` attr;
-# it carries data-sender-id per sessionStripIcon.ts:94, so Clayton's
+# it carries data-sender-id per the strip-icon template in sessionStripIcon.ts, so Clayton's
 # id-form `#cc-strip-icon-...` is the legacy shape) — NOT the generic
 # `#cc-strip-toggle`, which focuses sorted[0] and would measure an ambient
 # (hydrated-server) card. We then assert the measured card's identity.

@@ -378,13 +378,13 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] directTtsRenderer:mounted",
                 "[multiplexer] navBarRenderer:mounted",
                 # Parity B-1 (2026-09-23) -- the Q&A Interface pane, the first of
-                # B-0's seven pre-allocated slots to be filled. It mounts at boot.ts:547,
+                # B-0's seven pre-allocated slots to be filled. It mounts in boot.ts,
                 # BEFORE the broadcast tally below it, so it is ordered before it here.
                 # B-1 and Maya's B-5 appended to this list independently and the rebase
                 # landed both on the same line; the order is settled by mount line, not
                 # by which branch arrived first.
                 "[multiplexer] qaPaneRenderer:mounted",
-                # Parity B-2 (2026-09-23) -- Submit Agentic Jobs. Mounts at boot.ts:578,
+                # Parity B-2 (2026-09-23) -- Submit Agentic Jobs. Mounts in boot.ts,
                 # after the Q&A pane and before the broadcast tally; ordered by mount line.
                 "[multiplexer] submitJobsPaneRenderer:mounted",
                 # Row 4f320c27 M1 — the broadcast ack tally. Mounted by

@@ -161,7 +161,7 @@ def test_multiplexer_phase6c_section_d_baseline_visual(
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the sender-card NotoColorEmoji glyphs are
     # loaded before capture. networkidle does NOT gate fonts. See
-    # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
+    # `test_task_editing_controls_visual` in test_multiplexer_task_editing.py. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
@@ -204,7 +204,7 @@ def test_multiplexer_phase6c_section_d_pinned_visual(
 
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the sender-card NotoColorEmoji glyphs are
-    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    # loaded before capture. See `test_task_editing_controls_visual` in test_multiplexer_task_editing.py.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
@@ -262,7 +262,7 @@ def test_multiplexer_phase6c_section_d_pin_moved_visual(
 
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the sender-card NotoColorEmoji glyphs are
-    # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    # loaded before capture. See `test_task_editing_controls_visual` in test_multiplexer_task_editing.py.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )

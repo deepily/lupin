@@ -269,11 +269,8 @@ class QueueWorkflowSmokeTests:
         assert response.status_code == 200, \
             f"A 1000-char question is within the 4000 limit and should be accepted, got {response.status_code}"
         
-        # Test job with special characters
-        # TODO: Re-enable when Kagi API is stable — submits to live queue which routes to Kagi FastGPT
-        # special_message = "Test job with special chars: !@#$%^&*(){}[]|\\:;\"'<>,.?/~`"
-        # response = await self.queue_helper.push_job( special_message )
-        # self.validator.assert_response_ok( response, 200 )
+        # The special-characters job is not submitted until the Kagi API is stable:
+        # a submit reaches the live queue, which routes to Kagi FastGPT.
     
     async def test_queue_websocket_events(self):
         """Test queue-related WebSocket events."""
@@ -284,7 +281,7 @@ class QueueWorkflowSmokeTests:
         # product defect. It is not: those three names appear ZERO times in
         # product code — only in this file and in the websocket smoke config —
         # and they are absent from `websocket available events` in
-        # lupin-app.ini:1507. Nothing has ever emitted them, so subscribing to
+        # lupin-app.ini. Nothing has ever emitted them, so subscribing to
         # them could only ever produce nothing.
         websocket = await self.client.websocket_connect(
             "/ws/queue/{session_id}",
@@ -427,18 +424,8 @@ class QueueWorkflowSmokeTests:
         if self.debug:
             print(f"[DEBUG] Initial queue states: {initial_states}")
         
-        # TODO: Re-enable when Kagi API is stable — submits to live queue which routes to Kagi FastGPT
-        # test_questions = [
-        #     "What is 2 + 2?",
-        #     "What time is it?",
-        #     "What day is today?"
-        # ]
-        #
-        # for question in test_questions:
-        #     response = await self.queue_helper.push_job( question )
-        #     self.validator.assert_response_ok( response, 200 )
-        #
-        # await asyncio.sleep( 2 )
+        # The test questions are not submitted until the Kagi API is stable:
+        # a submit reaches the live queue, which routes to Kagi FastGPT.
 
         # Check final state
         final_states = {}

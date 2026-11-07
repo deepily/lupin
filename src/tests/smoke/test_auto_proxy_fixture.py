@@ -170,7 +170,7 @@ def test_embedded_proxy_command_passes_optional_flags():
 #
 # This test replaces one that asserted the OPPOSITE. The previous version read
 #
-#     assert full[ full.index( "--password" ) + 1 ] == "pw"
+#     assert full[ full.index( "--password" ) + 1 ] == "pw" # doc-lint: waive commented-out-code -- quotes the rejected old assertion this test replaces
 #
 # and passed for months, because it was written to describe the code rather than to
 # constrain it. A credential in argv is readable by anyone on the box via `ps` and

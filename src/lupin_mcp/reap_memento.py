@@ -1245,7 +1245,7 @@ if __name__ == "__main__":   # pragma: no cover - process entry point
 # ── The withhold predicate (pure) — row ee3d3c82 ──────────────────────────────
 #
 # THE DEFECT THIS CLOSES. `memento_alarm` above is honest and LOUD, and it is
-# composed at `session_spawner.py:1738` — AFTER the kill loop at :1574. So the seat
+# composed in `dismiss_sessions` (session_spawner.py) — after its kill loop. So the seat
 # is already dead by the time anybody reads the sentence naming what it lost. The
 # coordinator runs BEFORE the kill (row 0a36d83d fixed the race) but its verdict has
 # never GATED the kill: the loop is `for name in targets:`, unconditional, and even

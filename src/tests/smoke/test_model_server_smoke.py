@@ -42,10 +42,10 @@ LUPIN_ROOT       = Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) )
 #
 # Changed 2026-08-26. This was hardcoded to "notification-api-claude-code-dev",
 # which is the model server's built-in code default
-# (lupin_model_server/main.py:76) — but docker-compose OVERRIDES
+# (lupin_model_server/main.py) — but docker-compose OVERRIDES
 # LUPIN_MODEL_SERVER_API_KEY_NAME to "model-server-api" on all three services,
-# and both client providers (memory/embedding_provider.py:273,
-# memory/speech_to_text_provider.py:156) default to "model-server-api" for
+# and both client providers (memory/embedding_provider.py,
+# memory/speech_to_text_provider.py) default to "model-server-api" for
 # exactly that reason. The two key files hold DIFFERENT keys, so this test was
 # presenting the wrong one and getting `401 Invalid X-API-Key` on all four
 # authenticated probes. Decision record:

@@ -111,7 +111,7 @@ RENDER_ONLY_SCENARIOS = [
 # YAML Fixture Resolution
 #
 # Auto-discovery removed 2026-04-30 (Session b195a160) — see Cluster E in
-# src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md. The discovered
+# the "Postmortem — 2026-04-29 17:39 EDT All-Test Run on `:8000`" doc (removed by 8420e8b0a; recover it from 8420e8b0a^). The discovered
 # YAML path was reachable from the test process but not from the server view,
 # producing a 404 mid-run. Pinning to a checked-in fixture removes the brittleness.
 # `--yaml-path` CLI flag still overrides the fixture for ad-hoc dev runs.

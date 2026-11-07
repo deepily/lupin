@@ -278,7 +278,7 @@ def _shadow_verdict( source_path ):
 
 # CPython has THREE pyc invalidation modes, not two, and the distinction is the whole safety
 # question (found by Tiberius 👑 reviewing 18593313; classification matches
-# src/scripts/migrate-pyc-to-checked-hash.sh:130, which had it right first).
+# the classification in src/scripts/migrate-pyc-to-checked-hash.sh, which had it right first).
 #
 #   flags bit 0 = hash-based   ·   flags bit 1 = check_source
 #
@@ -500,10 +500,10 @@ def describe_shadowing( shadowed ):
 # ---------------------------------------------------------------------------
 # Pytest fixture — opt in by IMPORTING it into your test module:
 #
-#     from tests.helpers.pyc_freshness import mutate_source     # noqa: F401
+#     from tests.helpers.pyc_freshness import mutate_source     # noqa: F401 # doc-lint: waive commented-out-code -- usage example of the fixture
 #
-#     def test_something( mutate_source ):
-#         mutate_source( SRC, SRC.read_text().replace( '"todo"', '"dead"' ) )
+#     def test_something( mutate_source ): # doc-lint: waive commented-out-code -- usage example of the fixture
+#         mutate_source( SRC, SRC.read_text().replace( '"todo"', '"dead"' ) ) # doc-lint: waive commented-out-code -- usage example of the fixture
 #         ...                                    # restored automatically at teardown
 #
 # Deliberately NOT registered in any conftest.py: a fixture that arrives without being asked for

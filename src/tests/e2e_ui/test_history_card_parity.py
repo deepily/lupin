@@ -162,9 +162,9 @@ class TestHistoryCardParity:
 
         # Two tell-tales of queueName='history' being threaded through correctly:
         #   1. The outer card DOM id is `job-card-history-{jobId}` (idKey logic
-        #      at notifications.js:6891 namespaces by queueName).
+        #      in the job-card builder of notifications.js namespaces by queueName).
         #   2. The status CSS class is `status-history` (statusClass at
-        #      notifications.js:6835 derives from queueName directly).
+        #      in the same builder of notifications.js derives from queueName directly).
         history_cards = page.locator( "[id^='job-card-history-']" )
         assert history_cards.count() >= 1, (
             "Expected at least one history-namespaced card DOM id "
