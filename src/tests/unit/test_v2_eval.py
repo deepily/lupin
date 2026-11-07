@@ -906,7 +906,7 @@ def test_default_client_factory_logs_in( monkeypatch ):
             return None
         def json( self ):
             # REAL /auth/login shape (B1): the token is NESTED under "tokens". This fixture
-            # exercises the real seam — it goes RED against the old flat read at v2_eval.py:1052.
+            # exercises the real seam — it goes red against the old flat read at v2_eval.py.
             return { "tokens": { "access_token": "jwt-123" } }
     class _FakeRequests:
         @staticmethod

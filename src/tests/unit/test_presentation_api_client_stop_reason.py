@@ -92,7 +92,7 @@ def test_unknown_stop_reason_reads_as_truncated_downstream():
     on an unknown state, so the chunked fallback becomes reachable."""
     out = _call( [ _FakeAssistantMessage( [ _FakeTextBlock( "partial" ) ] ),
                    _FakeResultMessage( stop_reason=None ) ] )
-    is_truncated = out.stop_reason != "end_turn"   # mirrors orchestrator.py:1061
+    is_truncated = out.stop_reason != "end_turn"   # mirrors the is_truncated line in presentation_generator/orchestrator.py
     assert is_truncated is True
 
 

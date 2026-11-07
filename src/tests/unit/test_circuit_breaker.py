@@ -86,7 +86,7 @@ class TestCircuitBreakerMinimumSample:
             tracker.record_decision( "testing", success=True, timestamp=now - i )
         for i in range( 4 ):
             tracker.record_decision( "testing", success=False, timestamp=now - 10 - i )
-        # Total = 9 < 10
+        # The total is 9, below the threshold of 10
         assert breaker.check( "testing" ) is True
 
 

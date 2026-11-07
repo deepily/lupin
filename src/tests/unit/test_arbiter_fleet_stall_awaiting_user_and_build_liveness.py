@@ -177,7 +177,7 @@ class TestBuildLivenessCreditedAsProgress:
         job = _job( bridge_mtime_fn=lambda sid: ( NOW - datetime.timedelta( seconds=WINDOW + 500 ) ).timestamp() )
         fv  = { "s1": _view( "s1", "Wkr", state="stuck" ) }
         assert job._check_fleet_stall( fv, NOW, [ ] ) == 0                                  # baseline
-        assert job._check_fleet_stall( fv, LATE, [ ] ) == 1                                 # fires (stale)
+        assert job._check_fleet_stall( fv, LATE, [ ] ) == 1                                 # fires because the row is stale
 
     def test_commons_chatter_still_stalls_blind_spot_closed( self ):
         """CHATTY-BUT-STUCK invariant PRESERVED: commons recency advancing is

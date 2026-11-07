@@ -325,7 +325,7 @@ def test_a_non_approver_is_REFUSED_at_the_gate_with_enforcement_on( isolated ):
     assert approval.legacy_override_path() not in refusal
 
     # REAIMED 2026-09-07 (row b8205986). The positive control was
-    #     assert approval.refusal_for_admission( "not_approved", "queued", "maria 611e3c47" ) is None
+    #     assert approval.refusal_for_admission( "not_approved", "queued", "maria 611e3c47" ) is None  # doc-lint: waive commented-out-code -- the retired positive control, quoted as the record of what moved
     # -- an approver by DECLARED NAME with no account, which is now the spoof Rick
     # closed. It moves to the door that authorizes; without SOME positive control this
     # test passes for a gate that refuses everybody.
@@ -407,7 +407,7 @@ def test_a_non_approver_cannot_close_a_row_as_wont_fix( isolated ):
     assert "wont_fix" in refusal
 
     # REAIMED 2026-09-07 (row b8205986). The positive control was
-    #     assert approval.refusal_for_admission( "queued", "wont_fix", "maria 611e3c47" ) is None
+    #     assert approval.refusal_for_admission( "queued", "wont_fix", "maria 611e3c47" ) is None  # doc-lint: waive commented-out-code -- the retired positive control, quoted as the record of what moved
     # i.e. an approver by DECLARED NAME, with no account. That is now the spoof Rick
     # closed, so the control moves to the door that actually authorizes.
     _write( isolated, approvers=[ "maria" ], enforcement_active=True,

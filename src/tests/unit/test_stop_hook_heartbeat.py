@@ -481,7 +481,7 @@ class TestRunHeartbeat:
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_emit_persona_and_awaiting_from_hold( self, mock_load, mock_read, mock_count, mock_incr ):
         self.mock_persona.return_value = { "name": "Rachel" }
-        mock_read.return_value         = _stale_owed_hold()      # awaiting="none"
+        mock_read.return_value         = _stale_owed_hold()      # its awaiting field is the word none
         # Oracle-owed so it POKES (Lever A: a stale declared hold with an EMPTY
         # oracle is now suppressed; the persona/awaiting emit is exercised on the
         # surviving oracle-owed poke path). awaiting still comes from the hold.

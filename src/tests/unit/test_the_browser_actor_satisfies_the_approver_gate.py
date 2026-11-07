@@ -300,7 +300,7 @@ def test_the_browser_actor_is_not_refused_by_the_approver_gate( client, repo, se
     r     = _post( client, item, actor )
 
     # 🔴 THIS ASSERTION COULD NEVER FIRE, AND NOTHING WOULD HAVE SAID SO. It read
-    #     assert not ( r.status_code == 403 and "not an approver" in ... )
+    #     assert not ( r.status_code == 403 and "not an approver" in ... )  # doc-lint: waive commented-out-code -- the assertion that could never fire, quoted as the defect
     #
     # ⚠️ MY FIRST DIAGNOSIS WAS WRONG AND IS CORRECTED HERE RATHER THAN QUIETLY
     # REPLACED. I reported it as phrase-staleness — the string left the refusal when

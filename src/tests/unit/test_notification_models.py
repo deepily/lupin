@@ -614,7 +614,7 @@ class TestAsyncNotificationResponse:
         )
         assert response.connection_count == 0
 
-        # Invalid (negative)
+        # Invalid because it is negative
         with pytest.raises( ValidationError ):
             AsyncNotificationResponse(
                 success=True,
@@ -936,7 +936,7 @@ def quick_smoke_test():
         try:
             AsyncNotificationRequest(
                 message="Test",
-                timeout=31  # Invalid (max is 30)
+                timeout=31  # Invalid because the maximum is 30
             )
             assert False, "Should have raised ValidationError"
         except ValidationError:

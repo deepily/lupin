@@ -113,7 +113,7 @@ BREAKS_WITHOUT_VENV = {
     # resolve-venv-pytest.sh. The file does not skip when both are absent, so the tests fail by name.
     # Measured both ways in one worktree (seat-cc-author-cheech-1, on 578eac2e2 plus this change), the
     # `.venv` link moved aside and restored, the interpreter pinned to the main checkout, on a host
-    # with no /opt/venv:
+    # with no /opt/venv present:
     #     .venv      7 passed
     #     no .venv   7 failed
     #     .venv      7 passed   (restore control)

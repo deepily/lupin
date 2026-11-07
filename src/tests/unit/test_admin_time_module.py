@@ -51,8 +51,8 @@ _DEFINITION = re.compile( r"\bfunction\s+" + _SYMBOL + r"\s*\(" )
 # A CALL OF THE GLOBAL — which is narrower than "the name appears with a paren".
 #
 # WHAT THIS HAD TO LEARN, measured 2026-09-15: notifications.js carries a CLASS
-# METHOD of the same name (notifications.js:18776, `formatRelativeTime( date ) {`)
-# called at :19798 as `this.formatRelativeTime( ... )`. It is a different function
+# method of the same name (`formatRelativeTime( date ) {` in notifications.js)
+# called as `this.formatRelativeTime( ... )`. It is a different function
 # in a different scope with a different contract — it takes a Date rather than an
 # ISO string and returns "5 min ago" where the admin one returns "5m ago". An
 # earlier cut of this pattern counted both as calls of the global, which put

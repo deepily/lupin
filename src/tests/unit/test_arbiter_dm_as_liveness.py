@@ -235,7 +235,7 @@ class TestPollOnceGating:
         job._poll_once()
         assert calls == [ 1 ]                                     # reader CALLED when flag ON
         rows = { r[ "session_id" ]: r for r in snaps[ -1 ][ "sessions" ] }
-        assert "dmsess" in rows                                   # published (LIVE, not pruned)
+        assert "dmsess" in rows                                   # published because the row is live, not pruned
         assert rows[ "dmsess" ][ "liveness" ][ "dm_age_s" ] == 6
         assert rows[ "dmsess" ][ "liveness" ][ "verdict" ] == "LIVE"
 

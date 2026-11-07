@@ -21,7 +21,7 @@ import pytest
 
 
 # Re-implementation of the fallback chain for direct unit-testability.
-# Mirrors src/cosa/rest/routers/mock_job.py:268-282 (post-fix).
+# Mirrors the voice-routing fallback chain in src/cosa/rest/routers/mock_job.py (post-fix).
 # Note: the "agent router go to test fix expediter resume" check at the end
 # of the prod chain raises HTTPException; here we raise ValueError to keep
 # tests independent of FastAPI imports.

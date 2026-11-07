@@ -96,7 +96,7 @@ def _scan_state_literals():
             for comp in node.comparators:
                 if isinstance( comp, ast.Constant ) and isinstance( comp.value, str ):
                     literals.append( comp.value )
-        # Notification.state.in_( [ ... ] )
+        # a call to Notification.state.in_ with a list of states
         if ( isinstance( node, ast.Call )
              and isinstance( node.func, ast.Attribute )
              and node.func.attr == "in_"

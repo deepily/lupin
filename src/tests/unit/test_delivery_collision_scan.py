@@ -192,7 +192,7 @@ def test_content_delivered_by_squash_is_not_reported( scan, repo ):
 
     collisions, _stats = scan.scan( "target", max_tip_age_days=365 )
 
-    # The cheap filter CANNOT clear this one — both branches are on src/shared.py,
+    # The cheap filter cannot clear this one — both branches are on src/shared.py,  doc-lint: waive dangling-path -- a file in the synthetic repo the test builds
     # so it reaches the probe by construction. Only content-presence can clear it.
     assert collisions == {}, (
         "delivered-by-squash content was reported as undelivered — the probe has "

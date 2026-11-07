@@ -636,8 +636,8 @@ def test_resolve_session_persona_name_skips_buffer_and_unreadable():
     with tempfile.TemporaryDirectory() as tmp:
         sd = Path( tmp )
         ( sd / "cc-buffer-x.json" ).write_text( json.dumps( {
-            "stable_session_id": "mgr-5", "voice_persona": { "name": "Ghost" } } ) )  # skipped (buffer)
-        ( sd / "cc-bad.json" ).write_text( "{ not json" )                              # skipped (unreadable)
+            "stable_session_id": "mgr-5", "voice_persona": { "name": "Ghost" } } ) )  # skipped because it is a buffer file
+        ( sd / "cc-bad.json" ).write_text( "{ not json" )                              # skipped because it is unreadable
         assert ss._resolve_session_persona_name( sd, "mgr-5" ) is None
 
 
@@ -792,7 +792,7 @@ def test_default_reconcile_latest_event_no_receipt_reassigns( monkeypatch ):
     monkeypatch.setattr( tst, "task_store_request",
         lambda method, path, api_url, api_key, **kw:
             { "events": [ { "id": 1, "receipt_refs": { "commit": "x" } },
-                          { "id": 2, "receipt_refs": None } ], "count": 2 } )   # latest = None
+                          { "id": 2, "receipt_refs": None } ], "count": 2 } )   # the latest receipt is None
     reassigns = []
     monkeypatch.setattr( tst, "task_reassign_impl",
         lambda api_url, api_key, actor, task_id, *a, **k: reassigns.append( task_id ) or { "item": {} } )

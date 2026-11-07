@@ -86,7 +86,7 @@ def test_newer_all_branches():
 # ── _who_matches / _commons_ts_for_session ───────────────────────────────────
 
 def test_who_matches():
-    assert m._who_matches( "abc12345", "abc12345-full-uuid" ) is True   # full.startswith(short)
+    assert m._who_matches( "abc12345", "abc12345-full-uuid" ) is True   # the full id starts with the short id
     assert m._who_matches( "abc12345-full-uuid", "abc12345" ) is True   # short prefixes full
     assert m._who_matches( "same", "same" ) is True
     assert m._who_matches( "abc", "xyz" ) is False
@@ -96,7 +96,7 @@ def test_who_matches():
 
 def test_commons_ts_skips_non_dict_and_mismatch_and_bad_ts():
     rows = [
-        "not-a-dict",                                            # skipped (non-dict)
+        "not-a-dict",                                            # skipped because it is not a dict
         { "session_id": "other", "last_post_ts": _iso( 5 ) },    # skipped (no match)
         { "session_id": "s1", "last_post_ts": "bad" },           # match but unparseable ts
         { "session_id": "s1", "last_post_ts": _iso( 5 ) },       # match + valid

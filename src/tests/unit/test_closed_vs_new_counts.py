@@ -203,7 +203,7 @@ def test_dropped_is_never_counted_as_closed( like ):
 # `%->done%` or a terminal-status enumeration) and the loop opens silently.
 #
 # ⚠️ AND THE ATTACK IS CHEAP TO RUN, which is why it is worth a guard rather than a note.
-# `_applyHoldingBatch` (notifications.js:12375) closes a WHOLE GROUP from one click, driving
+# `_applyHoldingBatch` (in notifications.js) closes a whole group from one click, driving
 # the ordinary per-task transition door N times. There is no batch endpoint to gate — see
 # `test_no_batch_endpoint_exists_for_task_verbs` — so the only thing standing between a
 # one-click group won't-fix and free ticket-gate headroom is this pattern.

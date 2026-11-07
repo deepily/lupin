@@ -1181,7 +1181,7 @@ class TestUnscopedGuardRules:
 # ---------------------------------------------------------------------------
 # Persona-key follow-on policy (2026-07-11, task c03d1870) — DEFAULT_OWNER_CLASSES,
 # persona_from_created_by, build_persona_advisory, _get_known_persona_keys.
-# Design: src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# Design: the persona-key follow-on policy note (removed by 8420e8b0a)
 # ---------------------------------------------------------------------------
 
 def test_default_owner_classes_are_the_owned_work_triple():

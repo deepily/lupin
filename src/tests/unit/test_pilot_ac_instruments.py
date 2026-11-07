@@ -161,7 +161,7 @@ def references_absent_library( body ):
         package, _, module = lib.rpartition( "." )        # google.cloud . bigquery
         dotted   = re.escape( lib )                                              # google.cloud.bigquery
         from_form = r"from\s+{pkg}\s+import\s+[^\n]*\b{mod}\b".format(
-            pkg=re.escape( package ), mod=re.escape( module ) )                  # from google.cloud import bigquery
+            pkg=re.escape( package ), mod=re.escape( module ) )                  # the line it must match: the google.cloud bigquery import
         if re.search( dotted, body ) or re.search( from_form, body ):
             hits.append( lib )
     return hits

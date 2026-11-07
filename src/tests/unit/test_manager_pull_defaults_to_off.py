@@ -193,8 +193,8 @@ def test_the_ui_ships_the_switch_already_frozen():
 # shipped in `da6ae6f2`: `"banana"`, `""`, `0`, `[]` and `{}` in the override file were
 # EVERY ONE of them read as False — pulling ALLOWED. The old tail was
 #
-#     if isinstance( raw, str ): return raw.strip().lower() in ( "true", "1", ... )
-#     return bool( raw )
+#     if isinstance( raw, str ): return raw.strip().lower() in ( "true", "1", ... )  # doc-lint: waive commented-out-code -- the old reader tail, quoted as the defect
+#     return bool( raw )  # doc-lint: waive commented-out-code -- the old reader tail, quoted as the defect
 #
 # so an unrecognized word fell out of the membership test as False, indistinguishable
 # from a deliberate "off", and an empty container fell out of `bool()` the same way.

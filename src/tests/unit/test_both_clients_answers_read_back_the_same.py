@@ -66,13 +66,13 @@ def test_a_bare_string_is_stored_under_value():
 
 def test_legacy_and_multiplexer_yes_no_answers_read_back_identically():
     legacy_body      = "yes"   # notifications.js submitResponse( id, "yes" )
-    multiplexer_body = "yes"   # ActionRequiredStore.toWireResponseValue( "yes" )
+    multiplexer_body = "yes"   # what ActionRequiredStore.toWireResponseValue gives for "yes"
     assert _read_back( legacy_body ) == "yes"
     assert _read_back( multiplexer_body ) == _read_back( legacy_body )
 
 
 def test_a_legacy_multiple_choice_answer_reads_back_as_its_json():
-    body = json.dumps( { "answers": { "Pick": "a" } } )   # JSON.stringify( { answers } )
+    body = json.dumps( { "answers": { "Pick": "a" } } )   # what the JS client sends: JSON.stringify of the answers object
     assert json.loads( _read_back( body ) ) == { "answers": { "Pick": "a" } }
 
 
