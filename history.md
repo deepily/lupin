@@ -8,6 +8,25 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.11.06 - Session 6bd4df2a (Mr. Radio 🦉, manager; crew Clayton, Rachel, Rio, Tiffany, Sam, John, Pocholo, María, Maya, Krishna, Tiberius, all reaped with mementos) | Backup cut from 22.3 GB to 5.3 GB; eight rows merged, including the trust model switch and BLR persistence
+
+- **Backup size** (Rick's broadcast b4fd692e, row b08f6dd9, `298ac866f`):
+  - The Postgres dump is now zstd custom format: 17.4 GB down to 314 MB.
+  - A new Baseline key, `io table capture embeddings = False`, stops embedding input/output rows.
+  - Rick approved clearing the notification vectors and running `VACUUM FULL`: the database went from 8.9 GB to 1.4 GB.
+  - Rick ran the cleanup himself (the old .sql dump, and `--delete-excluded` on DATA02). The DATA02 mirror is now 5.3 GB.
+- **Merged to wip-v0.2.3, each reviewed:**
+  - da64aaab, per-day decision history (`a32f9e7dc`, migration 5efa1547bd37).
+  - cfc7dd01, the trust model switch: the INI key `swe team trust proxy trust model` (count, beta or blr) and BLR fed from ratified decisions (`1b50e9bd9`). Its missed test fix is `dea6b42cb`, found by Cheech.
+  - db72d167 and ebd71917, speech link leaks (`f7718ee7d`, `853f37e1b`).
+  - 942d2b41: regeneration skips input_and_output while capture is off (`b049a7142`).
+  - a9643589: one shared `swe_team/strategy_builder.py` for the SWE team, BFE and the decision_proxy entry point. A bad trust model fails the BFE job, as Rick ruled (`4036803c5`).
+  - 5bb93a7b, BLR state persisted in `trust_states.blr_state` (`9924171d1`, migration a7c3e91b5d20, run on dev by the boot-time upgrade).
+- **Triage**: María's five archived-branch rows held no missing work, so all were closed. The janitor compares ancestry, not content, so the v0.2.2 squash `d0180365c` makes old branches look thousands of commits ahead (P3 row 8f3aa058, awaiting Rick's approval).
+- **Lesson**: after a merge, run the touched `src/tests/unit` files, not only the cosa agent directory. `1b50e9bd9` left `test_swe_team_config.py` red until `dea6b42cb`.
+- **Gates at `9924171d1`**: census guards 1593 passed, 11 skipped; agent unit tests 4868 passed at `4036803c5`. My full unit run is not evidence (the tree moved mid-run). Cheech's run at `853f37e1b` was 44,059 passed and 1 failed, and that failure was fixed in `dea6b42cb`.
+- **Not mine, still open**: the :7999 bounce warns of a stale client bundle (`npm run build`).
+
 ## 2026.11.05 - Session e801716f (Cheech 🌿, manager; crew Krishna, Maya, Rio, Pocholo, all reaped with mementos) | Nine decision proxy fixes merged onto wip-v0.2.3, plus optional need expansion for the reuse search
 
 - **Decision proxy fixes merged**, each reviewed before the merge:
