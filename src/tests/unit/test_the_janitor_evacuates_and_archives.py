@@ -648,3 +648,25 @@ def test_the_row_body_lists_files_capped_and_says_when_they_could_not_be_listed(
     assert "The files those commits touch could not be listed." in body
     body = st.compose_archive_row( _archived( "empty", False, unpushed_count=1, unpushed_files=[] ) )[ "body" ]
     assert "Files those commits" not in body and "could not be listed" not in body
+
+
+# ── "wip" protects only as a whole word (Rio's second review) ────────────────
+
+@pytest.mark.parametrize( "name, protected", [
+    ( "wip-v0.2.2-code-wiki", True ), ( "WIP-old", True ), ( "feat/wip", True ), ( "my_wip_line", True ),
+    ( "wip", True ), ( "main", True ), ( "fix-wipe-cache", False ), ( "swipe", False ), ( "wiping-4", False ),
+] )
+def test_wip_protects_a_branch_only_as_a_whole_word( name, protected ):
+    assert wr.is_protected_branch( name, "wip-v9" ) is protected
+
+
+def test_a_merged_local_branch_with_wipe_in_its_name_is_deleted_not_kept_as_protected( repo ):
+    tree = _tree( repo, "seat-w", "fix-wipe-cache" )
+    _commit( tree, "wipe.txt" )
+    _out( repo, "worktree", "remove", str( tree ) )
+    _out( repo, "merge", "-q", "--no-edit", "fix-wipe-cache" )
+
+    outcome = wr.retire_branch( str( repo ), "fix-wipe-cache", "wip-v9", now=NOW )
+
+    assert ( outcome[ "deleted" ], outcome[ "kept_reason" ] ) == ( True, None )
+    assert not _has_branch( repo, "fix-wipe-cache" )

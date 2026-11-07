@@ -729,6 +729,7 @@ def _newest_mtime_age_hours( path: str, now_ts: float ) -> float:
 
 PROTECTED_BRANCHES = ( "main", "master" )
 PROTECTED_MARK     = "wip"      # any branch whose name holds it is a working line (María, 2026-09-18)
+PROTECTED_MARK_RE  = re.compile( r"(?<![a-z0-9])" + PROTECTED_MARK + r"(?![a-z0-9])", re.IGNORECASE )
 
 
 def is_protected_branch( branch: str, target: Optional[ str ] ) -> bool:
@@ -737,10 +738,11 @@ def is_protected_branch( branch: str, target: Optional[ str ] ) -> bool:
 
     Ensures:
         - True for main, master, the repo's current WIP branch (`target`), and any
-          branch whose name contains "wip" in any case — the numbered release lines
-          (`wip-v0.2.1-…`) are all merged into each other and would all qualify
+          branch whose name has "wip" in any case as a whole word between characters that
+          are not letters or digits; "fix-wipe-cache" does not count. The numbered release
+          lines (`wip-v0.2.1-…`) are all merged into each other and would all qualify
     """
-    return branch in PROTECTED_BRANCHES or branch == target or PROTECTED_MARK in branch.lower()
+    return branch in PROTECTED_BRANCHES or branch == target or PROTECTED_MARK_RE.search( branch ) is not None
 
 
 def checked_out_branches( project_root: str, run: Callable ) -> Optional[ set ]:
