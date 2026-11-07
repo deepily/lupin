@@ -458,7 +458,7 @@ class QueueWorkflowSmokeTests:
         that has never existed, so every iteration hit a 404, took a `continue`, and
         executed none of the assertions below it. It was green, collected, and proved
         nothing — assertion-never-reached, shape 7 of
-        src/rnd/v0.2.0/2026.08.23-plausible-and-wrong-seven-vacuity-shapes.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.23-plausible-and-wrong-seven-vacuity-shapes.md
+        src/rnd/v0.2.0/2026.08.23-plausible-and-wrong-seven-vacuity-shapes.md. — REMOVED by 8420e8b0a (2026-09-30); recover: git show 8420e8b0a^:src/rnd/v0.2.0/2026.08.23-plausible-and-wrong-seven-vacuity-shapes.md
         The 404 branch is gone rather than tolerated: assert_response_ok now NAMES a
         404 instead of stepping around it.
 

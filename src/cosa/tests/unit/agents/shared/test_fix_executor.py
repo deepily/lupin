@@ -216,7 +216,7 @@ class TestExecuteFix( _ExecBase ):
 
 # ===========================================================================
 # Runtime brake — Leg (a): asyncio.wait_for wrapper around the SDK awaits
-# (design "Runtime Brake for a Runaway BFE — Design") — removed by c752ab9e, recoverable from that commit's parent
+# (design "Runtime Brake for a Runaway BFE — Design") — removed by 8420e8b0a, recoverable from that commit's parent
 # ===========================================================================
 class TestRuntimeBrake( _ExecBase ):
     """

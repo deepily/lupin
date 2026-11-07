@@ -368,7 +368,7 @@ async def allocate_voice_persona_endpoint(
             # env-var chain). STRICT ordered-fallback walk: first FREE element
             # wins; `*` = "then take anything free"; exhaustion without `*` is
             # a LOUD predictable fail (409 + conflict notify, NO silent random).
-            # See: the design note "2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix" (deleted in commit b113a3a7d)
+            # See: the design note "2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix" (deleted in commit 8420e8b0a)
             # Reserve-from-random (Rick, 2026-06-11): the SessionStart hook
             # threads its project's COSA_VOICE_MANAGERS__<PROJECT> roster as
             # a CSV `declared_managers` query param on BOTH the chain and the

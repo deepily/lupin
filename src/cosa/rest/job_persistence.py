@@ -87,7 +87,7 @@ AGENTIC_JOB_TYPES = frozenset( {
     "test_fix_expediter",  # Added 2026-04-11 Session 1b8c1cc0 (TFE forensics fix). Without this
                            # every TFE failure landed in the UI as "Unknown error" because the
                            # entire persistence layer was gated behind this allowlist. See plan:
-                           # the design note "2026.04.11-tfe-forensics-capture-plan" (deleted in commit b113a3a7d)
+                           # the design note "2026.04.11-tfe-forensics-capture-plan" (deleted in commit 8420e8b0a)
 } )
 
 
