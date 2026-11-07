@@ -373,7 +373,6 @@ def _assert_transition_extras_carries_no_boolean():
     os.path.join( "render", "HoldingAreaRenderer.ts" ),
     os.path.join( "render", "taskRowController.ts" ),  # parity A-2 #0: the shared row dispatcher
     os.path.join( "render", "EpicBoardRenderer.ts" ),  # parity A-2 #9: the Epic Board's row writer
-    os.path.join( "render", "approveLink.ts" ),        # row 54d62c0e: the one-click approve link's writer
 ] )
 def test_every_client_transition_DECLARATION_types_its_extras_string_only( relative_path ):
     """
@@ -413,6 +412,22 @@ def test_every_client_transition_DECLARATION_types_its_extras_string_only( relat
             f"already WRITTEN — task_list_store_202_leaves_no_optimistic_approval.test.ts, "
             f"commit b76fe07b, HELD on Rick's ruling — so this red means its hold needs "
             f"revisiting, NOT that a new arm needs writing." )
+
+
+def test_the_SHARED_approve_link_declaration_types_its_extras_string_only():
+    """
+    The shared approve-link declaration types its extras string-only.
+
+    Requires:
+        - shared/approve-link.d.ts exists and annotates an extras parameter
+
+    Ensures:
+        - every extras annotation in it is the string-only type
+    """
+    path = os.path.join( LUPIN_ROOT, "src", "lupin_app", "static", "js", "shared", "approve-link.d.ts" )
+    annotations = ANNOTATION_RE.findall( open( path, encoding="utf-8" ).read() )
+    assert annotations, "shared/approve-link.d.ts annotates no `extras` parameter: this guard has gone vacuous"
+    assert all( declared == STRING_ONLY_EXTRAS for declared in annotations ), annotations
 
 
 def test_the_UNTYPED_client_layer_does_not_opt_in_EITHER():
@@ -484,7 +499,8 @@ def test_the_transition_surface_is_still_SEVEN_FILES():
         if name.endswith( ".ts" ) and "testkit" not in where
         and ANNOTATION_RE.search( open( os.path.join( where, name ), encoding="utf-8" ).read() )
     )
-    # EIGHT files since row 54d62c0e (approveLink.ts); the function keeps its SEVEN name because rows cite it.
+    # Row 009d2d53 moved approveLink.ts's writer into shared/approve-link.js, which is watched by its own
+    # test below, so this walk is SEVEN files again.
     expected = sorted( [
         os.path.join( "render", "taskVerbs.ts" ),
         os.path.join( "stores", "TaskListStore.ts" ),
@@ -493,7 +509,6 @@ def test_the_transition_surface_is_still_SEVEN_FILES():
         os.path.join( "render", "HoldingAreaRenderer.ts" ),
         os.path.join( "render", "taskRowController.ts" ),
         os.path.join( "render", "EpicBoardRenderer.ts" ),
-        os.path.join( "render", "approveLink.ts" ),
     ] )
     assert declaring == expected, (
         f"the client transition surface changed.\n  on disk : {declaring}\n  watched : "

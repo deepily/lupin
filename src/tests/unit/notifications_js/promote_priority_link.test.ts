@@ -104,6 +104,9 @@ function mountOnce(): void {
   ( ui as unknown as { _initMasterDetailLayout(): void } )._initMasterDetailLayout();
 }
 
+// Row 009d2d53: the link parsing lives in shared/approve-link.js; notifications.js reads it off window.
+const LIB = (): Record<string, ( ...a: any[] ) => any> => ( window as unknown as { LUPIN_APPROVE_LINK: Record<string, ( ...a: any[] ) => any> } ).LUPIN_APPROVE_LINK;
+
 beforeEach( () => {
   calls = []; tabOpens = []; paneOpens = []; release = []; table = {}; asked = [];
   buildDOM();
@@ -111,8 +114,9 @@ beforeEach( () => {
   document.getElementById( "abstract-tooltip" )?.remove();
 } );
 
-before( () => {
+before( async () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
+  await import( "../../../lupin_app/static/js/shared/approve-link.js" );   // row 009d2d53: notifications.js reads the shared module off window
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );
@@ -133,7 +137,7 @@ test( "the plain approve link sends no P0 flag and the two hrefs are not confuse
   const [ plain ] = plantCard( [ APPROVE( ROW_A ) ] );
   click( plain! );
   assert.deepEqual( calls, [ { id: ROW_A, status: "queued", extras: {} } ] );
-  const ui2 = ui as unknown as { _approveLinkRowId( h: string ): string | null; _approvePriorityLink( h: string | null ): unknown };
+  const ui2 = { _approveLinkRowId: ( h: string ): unknown => LIB().approveRowId!( h ), _approvePriorityLink: ( h: string | null ): unknown => LIB().approvePriorityLink!( h ) };
   assert.equal( ui2._approveLinkRowId( P0LINK( ROW_A ) ), null );
   assert.equal( ui2._approvePriorityLink( APPROVE( ROW_A ) ), null );
   assert.equal( ui2._approvePriorityLink( null ), null );
@@ -165,7 +169,7 @@ test( "a malformed P0 href and a click off any link are not claimed", () => {
 test( "a drawn P0 link for a row that already left the holding area reads approved ✅", async () => {
   const [ a ] = plantCard( [ P0LINK( ROW_A ) ] );
   table[ ROW_A ] = { status: "queued" };
-  await ( ui as unknown as { _markApproveLinks( r: Element[] ): Promise<void> } )._markApproveLinks( [ a!.parentElement as Element ] );
+  await LIB().markApproveLinks!( [ a!.parentElement as Element ], ( id: string ) => ui._readTask( id ) );
   const host = document.getElementById( "action-required-content" ) as Element;
   assert.equal( host.querySelector( ".approve-link-approved" )?.textContent, "approved ✅" );
 } );

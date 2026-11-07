@@ -9,7 +9,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.dom.cssEscape@19a1400803
   - src.lupin_app.static.js.multiplexer.render.dom.messageEl@0795fb16f3
   - src.lupin_app.static.js.multiplexer.render.dom.teardownScaffold@5b5df63b3c
-  - src.lupin_app.static.js.multiplexer.render.docLink.normalizeDocLinkHref@ece06e01a1
+  - src.lupin_app.static.js.shared.approve-link.normalizeDocLinkHref@8f734ce906
   - src.lupin_app.static.js.multiplexer.render.docLink.isDocLinkHref@247cc56b79
   - src.lupin_app.static.js.multiplexer.render.docLink.isPaneResidentAnchor@a6526e76db
 ---
