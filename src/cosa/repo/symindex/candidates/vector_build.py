@@ -9,6 +9,8 @@ import time
 
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, ENGINE_NOT_LOADED, SERVICE_SATURATED
+from cosa.utils import secret_drift
+from cosa.utils.batch_halving import embed_in_halves
 
 # No-GPU rule (planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU"): this module reaches the model only through the embeddings service. A service that stays
 # crowded stops the pass at once with SERVICE_SATURATED (see embed_all's refusal_limit); nothing here asks for a GPU to be freed.
@@ -113,17 +115,18 @@ def _embed_halving( client, batch, content_type, role, pause_seconds, sleep, ref
     Raises:
         - CandidateError SERVICE_SATURATED when the count passes the limit or a single text is refused, chained to the client's error
     """
-    try: return client.embed( batch, content_type, role )
-    except Exception as exc:             # the server answers a crowded GPU with a 500 whatever the client wraps it in
-        if refusals is not None:
-            refusals[ "count" ] += 1
-            if refusals[ "count" ] > refusals[ "limit" ] or len( batch ) < 2: raise CandidateError( SERVICE_SATURATED, saturated_message( refusals, exc ) ) from exc
-        if len( batch ) < 2: raise
-        sleep( pause_seconds )
-        mid   = len( batch ) // 2
-        first = _embed_halving( client, batch[ :mid ], content_type, role, pause_seconds, sleep, refusals )
-        sleep( pause_seconds )
-        return first + _embed_halving( client, batch[ mid: ], content_type, role, pause_seconds, sleep, refusals )
+    def refused( error, refused_batch ):
+        """Ensures: counts the refusal; ends the pass past the limit or on a single text."""
+        if refusals is None: return
+        refusals[ "count" ] += 1
+        if refusals[ "count" ] > refusals[ "limit" ] or len( refused_batch ) < 2: raise CandidateError( SERVICE_SATURATED, saturated_message( refusals, error ) ) from error
+
+    def refused_alone( error, _batch ):
+        """Ensures: raises the error the client raised for the one text."""
+        raise error
+
+    # the server answers a crowded GPU with a 500 whatever the client wraps it in, so any exception is a refusal
+    return embed_in_halves( lambda b: client.embed( b, content_type, role ), batch, refused_alone, before_half=lambda _depth: sleep( pause_seconds ), on_failure=refused )
 
 
 def saturated_message( refusals, exc ):
@@ -277,7 +280,7 @@ def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pa
     out = pathlib.Path( out_dir )
     out.mkdir( parents=True, exist_ok=True )
     row_ids   = [ e[ "id" ] for e in rows ]
-    hashes    = { name: [ vs.text_hash( t ) for t in texts[ name ] ] for name in vs.MATRICES }
+    hashes    = { name: [ secret_drift.sha256_of( t ) for t in texts[ name ] ] for name in vs.MATRICES }
     usable    = reuse is not None and reuse.row_texts is not None and not reuse_mismatches( reuse.manifest, info )
     dimension = None
     for name in vs.MATRICES:

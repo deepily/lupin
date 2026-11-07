@@ -6,7 +6,6 @@ pins:
   - cosa.rest.db.embedding_regeneration.plan_batches_by_budget@49a49b54b6
   - cosa.rest.db.embedding_regeneration.bulk_update_shadow_sql@5f9169648a
   - cosa.rest.db.embedding_regeneration.AdaptiveBudget@537f9d2f2d
-  - cosa.rest.db.embedding_regeneration.split_batch@1d5480dd2b
 ---
 # Embedding regeneration: batching
 
@@ -16,7 +15,7 @@ How `fill` in [[rest-data-embedding-regeneration]] sizes the batches it sends to
 - `plan_batches( ids, batch_size )` cuts a list into consecutive chunks of at most `batch_size`. `fill` uses it, at four times the batch size, only to bound each row fetch.
 - `plan_batches_by_budget( items, size_of, char_budget=, max_count= )` starts a new batch when adding an item would pass `char_budget` or `max_count`. An item larger than the budget goes alone, not dropped.
 - `AdaptiveBudget` holds the character budget a run is currently using. It starts at 40,000. A good batch grows it by a factor of 1.5, up to 2,000,000. Every failed attempt halves it, split halves included, down to 5,000. Only a whole-batch success grows it. `fill` reads the budget once per chunk of ids, so a change lands on the next chunk.
-- `split_batch` cuts a refused batch into two halves. A batch of one or none returns `[]`, which the caller treats as a failure of that single row.
+- `split_batch` ([[utils-batch-halving]]) cuts a refused batch into two halves. A batch of one or none returns `[]`, which the caller treats as a failure of that single row.
 - `bulk_update_shadow_sql( table, pk, shadow_column )` returns one `UPDATE ... FROM ( VALUES %s )` statement. `fill` sends a whole chunk through it with one psycopg2 `execute_values` call, then commits.
 
 ## Don't

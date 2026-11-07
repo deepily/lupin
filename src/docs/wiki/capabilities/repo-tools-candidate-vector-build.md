@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.symindex.candidates.vector_build.EndpointClient@5098542e92
   - cosa.repo.symindex.candidates.vector_build.entry_texts@f1e5053a5e
-  - cosa.repo.symindex.candidates.vector_build.build_vectors@5032e82f20
+  - cosa.repo.symindex.candidates.vector_build.build_vectors@a7d52e4601
   - cosa.repo.symindex.candidates.vector_build.reuse_mismatches@702e022da1
   - cosa.repo.symindex.candidates.vector_build.embed_all@9d3ea53667
   - cosa.repo.symindex.candidates.vector_build.saturated_message@da5e94107c

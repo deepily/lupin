@@ -2,11 +2,13 @@
 import datetime
 import hashlib
 import json
+import pathlib
 import re
 
 import pytest
 
 from cosa.rest import task_store_rules as rules
+from cosa.utils import secret_drift
 from lupin_mcp import duplicate_check_filing as ff
 
 WINDOW = { "start": "aaa", "end": "bbb", "commits": 1 }
@@ -51,7 +53,7 @@ def test_the_key_is_the_definition_id_and_text_hash_never_the_day_and_matches_th
     key = ff.correlation_key( "d-1", "def a(): pass" )
     assert re.fullmatch( r"epic:[a-z0-9._-]+", key ) and key.startswith( "epic:dupcheck-" ) and len( key ) == len( "epic:dupcheck-" ) + 16
     assert key == ff.correlation_key( "d-1", "def a(): pass" ) and key != ff.correlation_key( "d-2", "def a(): pass" ) and key != ff.correlation_key( "d-1", "def a(): pass  " )
-    assert ff.content_hash( "x" ) == "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
+    assert secret_drift.sha256_of( "x" ) == "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
 
 
 def test_the_owner_is_the_roster_persona_that_matches_the_configured_manager_whatever_the_case_or_accent():
@@ -387,3 +389,13 @@ def test_one_finding_past_the_limit_lists_the_limit_and_counts_exactly_one_more(
     listed = [ l for l in row[ "body" ].splitlines() if l.startswith( "- f" ) ]
     assert len( listed ) == 200 and ff.LIST_LIMIT == 200 and row[ "body" ].splitlines()[ -1 ] == "- and 1 more in r.json" and f"f{ff.LIST_LIMIT} (" not in row[ "body" ]
     assert len( row[ "finding_keys" ] ) == 201
+
+
+def test_the_spool_is_written_by_temporary_file_and_rename_so_a_reader_never_sees_half( tmp_path, monkeypatch ):
+    seen = [ ]
+    real = ff.lq.os.replace
+    monkeypatch.setattr( ff.lq.os, "replace", lambda src, dst: seen.append( ( src, dst, pathlib.Path( src ).read_text( encoding="utf-8" ) ) ) or real( src, dst ) )
+    ff.write_pending( tmp_path, [ { "a": 1 } ] )
+    target = str( tmp_path / ff.PENDING_FILE )
+    assert seen == [ ( target + ".tmp", target, '{"a": 1}\n' ) ]
+    assert not ( tmp_path / ( ff.PENDING_FILE + ".tmp" ) ).exists() and ff.read_pending( tmp_path ) == [ { "a": 1 } ]

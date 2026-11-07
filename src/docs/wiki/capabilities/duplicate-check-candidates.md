@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.repo.duplicate_check.body_vectors.body_text@c765892c19
   - cosa.repo.duplicate_check.body_vectors.engine_tag@73eaf52263
-  - cosa.repo.duplicate_check.body_vectors.ensure_vectors@6c72c52211
+  - cosa.repo.duplicate_check.body_vectors.ensure_vectors@488ebf13cd
   - cosa.repo.duplicate_check.candidates.build_pool@5aa79c432f
   - cosa.repo.duplicate_check.candidates.candidate_rows@e914cff432
   - cosa.repo.duplicate_check.candidates.candidates_for@ae0ccf4fb7

@@ -11,6 +11,9 @@ import hashlib
 import json
 import pathlib
 
+from cosa.repo.symindex import librarian_queue as lq
+from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
+from cosa.utils import secret_drift
 from lupin_mcp.persona_normalization import canonical_persona_key
 
 KEY_PREFIX     = "epic:dupcheck-"
@@ -31,11 +34,6 @@ QUEUED         = "queued_for_retry"
 REFUSED        = "refused"
 
 
-def content_hash( text ):
-    """Ensures: returns the sha256 hex digest of the definition's text."""
-    return hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()
-
-
 def correlation_key( definition_id, text ):
     """
     Give the store key that makes one row per definition text.
@@ -44,7 +42,7 @@ def correlation_key( definition_id, text ):
         - returns "epic:dupcheck-" and the first 16 hex digits of the sha256 of the definition id, a colon and the text's content hash
         - the key holds no date, and it matches the store's epic key pattern
     """
-    return KEY_PREFIX + hashlib.sha256( f"{definition_id}:{content_hash( text )}".encode( "utf-8" ) ).hexdigest()[ :KEY_HEX ]
+    return KEY_PREFIX + hashlib.sha256( f"{definition_id}:{secret_drift.sha256_of( text )}".encode( "utf-8" ) ).hexdigest()[ :KEY_HEX ]
 
 
 def for_record( finding ):
@@ -133,13 +131,8 @@ def read_pending( folder ):
 
 
 def write_pending( folder, payloads ):
-    """Ensures: the spool holds exactly these payloads; an empty list removes the file."""
-    path = pathlib.Path( folder ) / PENDING_FILE
-    if not payloads:
-        path.unlink( missing_ok=True )
-        return
-    path.parent.mkdir( parents=True, exist_ok=True )
-    path.write_text( "".join( json.dumps( p, sort_keys=True ) + "\n" for p in payloads ), encoding="utf-8" )
+    """Ensures: the spool holds exactly these payloads, written atomically; none removes it."""
+    lq.write_pending( str( pathlib.Path( folder ) / PENDING_FILE ), payloads )
 
 
 def gated( body ):
@@ -221,14 +214,15 @@ def file_findings( findings, folder, store, declared, roster, day=None ):
     return out
 
 
-class LiveStore:
+class LiveStore( TaskStoreAdapter ):
     """The store over HTTP with the hooks' own client, needing no MCP session."""
+
+    amend_extra = { "reason": AMEND_REASON, "authority": "standing" }
 
     def __init__( self, settings=None, api_key=None ):
         from lupin_cli.claude_code.hooks.lib import task_store_client as client, task_store_settings
-        self.client   = client
-        self.settings = task_store_settings.load_task_store_settings() if settings is None else settings
-        self.api_key  = client.read_api_key() if api_key is None else api_key
+        super().__init__( task_store_settings.load_task_store_settings() if settings is None else settings,
+                          client.read_api_key() if api_key is None else api_key, client )
 
     def query( self, key ):
         """
@@ -240,18 +234,3 @@ class LiveStore:
             - never raises
         """
         return self.client.query_by_correlation_key( self.settings, self.api_key, key, every_state=True )
-
-    def create( self, payload ):
-        """Ensures: returns ( ok, status, body ) of the create; never raises."""
-        return self.client.create_task( self.settings, self.api_key, payload )
-
-    def amend( self, row_id, note ):
-        """
-        Append a note to a row's body.
-
-        Requires:
-            - row_id is the row's uuid text; note is the text to append
-        Ensures:
-            - returns ( ok, status, body ) of the amend; never raises
-        """
-        return self.client.amend_task( self.settings, self.api_key, row_id, { "note": note, "reason": AMEND_REASON, "authority": "standing" } )

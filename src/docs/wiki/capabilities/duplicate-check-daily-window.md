@@ -8,7 +8,8 @@ pins:
   - lupin_mcp.duplicate_check_daily.changes@69474b63bc
   - lupin_mcp.duplicate_check_daily.changed_files@af39eb4bf8
   - lupin_mcp.duplicate_check_daily.old_paths@44460499c8
-  - lupin_mcp.duplicate_check_daily.new_definitions@5f7efaf3d2
+  - lupin_mcp.duplicate_check_daily.new_definitions@a8ab2d3bb9
+  - lupin_mcp.duplicate_check_daily.definitions_held_at_start@12bbbb125c
   - lupin_mcp.duplicate_check_daily.release@78925fda8f
   - lupin_mcp.duplicate_check_daily.pool_without_earlier_versions@157e09aba7
   - lupin_mcp.duplicate_check_daily.progress@29d6340dbb
@@ -27,6 +28,7 @@ The first half of `lupin_mcp.duplicate_check_daily`: which commits a run judges,
 - Its `commits` are those after the start up to the end on the first-parent line, oldest first.
 - `changes( root, window )` returns `( old path, new path )` for each added, modified or renamed file. Old is None for an added file. A deleted file is not listed.
 - `changed_files` is the sorted new paths of Python and script files. `old_paths` maps each renamed file to the path it had at the start.
+- `definitions_held_at_start` reads what the start commit held, under the old path of a renamed file. `new_definitions` and [[reuse-merge-gate]] share it.
 - `new_definitions( tree, root, window )` returns `{ defs, commit_of }`, ordered by the commit that last touched the file, then file and line.
 - A definition is left out when the window's start held the same file, name and text. A renamed file is compared with its old path, so a rename alone judges nothing.
 - `baseline_window( root, branch )` is the whole branch, from its first commit. `baseline_definitions( tree, window )` lists every definition of the tree's Python and script files, in file and line order, each tied to the window's end.

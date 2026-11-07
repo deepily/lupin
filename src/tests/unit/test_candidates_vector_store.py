@@ -14,6 +14,7 @@ import pytest
 
 from cosa.repo.symindex.candidates import vector_build as vb
 from cosa.repo.symindex.candidates import vector_store as vs
+from cosa.utils.secret_drift import sha256_of
 from cosa.repo.symindex.candidates.errors import (
     CandidateError, DEPENDENCY_MISSING, ENGINE_MISMATCH, ENGINE_NOT_LOADED, VECTOR_SET_UNAVAILABLE, VECTOR_SET_CORRUPT )
 
@@ -373,7 +374,7 @@ def test_a_set_made_without_the_sidecar_seals_and_loads_with_no_row_texts( tmp_p
 def test_the_sidecar_names_each_row_text_by_hash_and_loads_in_id_order( built ):
     s = vs.load_vectors( built[ "dir" ] )
     assert s.ids == [ "m.a", "m.b" ]
-    assert s.row_texts[ "code" ][ 0 ] == vs.text_hash( "m.py::a()" )
+    assert s.row_texts[ "code" ][ 0 ] == sha256_of( "m.py::a()" )
     assert set( s.row_texts ) == set( vs.MATRICES ) and all( len( v ) == 2 for v in s.row_texts.values() )
 
 
@@ -392,7 +393,7 @@ def reseal_with_sidecar( built, text ):
     vs.seal( built[ "dir" ], [ "m.a", "m.b" ], manifest )
 
 
-GOOD = vs.text_hash( "x" )
+GOOD = sha256_of( "x" )
 
 
 @pytest.mark.parametrize( "text, why", [
@@ -426,7 +427,7 @@ def test_a_manifest_that_is_not_json_is_corrupt_not_a_value_error( built ):
 
 def test_text_hash_is_the_sha256_of_the_utf8_bytes():
     import hashlib
-    assert vs.text_hash( "é" ) == hashlib.sha256( "é".encode( "utf-8" ) ).hexdigest()
+    assert sha256_of( "é" ) == hashlib.sha256( "é".encode( "utf-8" ) ).hexdigest()
 
 
 @pytest.mark.parametrize( "text", [ "{}", "[]", "5", "null", json.dumps( { "manifest_hash": "x" } ),
