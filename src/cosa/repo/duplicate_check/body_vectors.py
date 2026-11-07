@@ -15,6 +15,7 @@ ROLE         = "document"
 # Refused embed calls one pass may take before it stops. A batch within the character budget is rarely refused, and
 # splitting one batch of 16 down to single texts refuses at most 15 calls, so 32 leaves room for two such batches.
 # Past it the service is saturated: the run fails fast with the service named (row d4fce2bb, the no-GPU rule).
+# Each counted refusal already cost 1+retries attempts with backoff inside EmbeddingProvider._post_with_retry, so the limit bounds wall time.
 REFUSAL_LIMIT = 32
 
 
