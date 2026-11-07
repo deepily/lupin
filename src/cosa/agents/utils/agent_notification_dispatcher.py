@@ -65,12 +65,14 @@ logger = logging.getLogger( __name__ )
 ctx_sender_id    : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_sender_id",    default=None )
 ctx_target_user  : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_target_user",  default=None )
 ctx_session_name : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_session_name", default=None )
+ctx_session_id   : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher_session_id",   default=None )
 
 
 def set_dispatch_context(
     sender_id    : Optional[ str ] = None,
     target_user  : Optional[ str ] = None,
     session_name : Optional[ str ] = None,
+    session_id   : Optional[ str ] = None,
 ) -> dict:
     """
     Set the per-task dispatch context for this asyncio task / thread.
@@ -80,7 +82,7 @@ def set_dispatch_context(
     so writing to them leaks state across jobs. ContextVars isolate each task.
 
     Requires:
-        - At least one of sender_id, target_user, session_name is provided.
+        - At least one of sender_id, target_user, session_name, session_id is provided.
           (None values are skipped — only set what's provided.)
 
     Ensures:
@@ -92,6 +94,7 @@ def set_dispatch_context(
         sender_id    : Per-task sender_id override (None = leave ContextVar unchanged).
         target_user  : Per-task target_user override.
         session_name : Per-task session_name override.
+        session_id   : Per-task session id, the sender suffix of a role-aware dispatcher.
 
     Returns:
         dict[str, contextvars.Token]: Tokens for resetting the ContextVars
@@ -107,6 +110,8 @@ def set_dispatch_context(
         tokens[ "target_user" ] = ctx_target_user.set( target_user )
     if session_name is not None:
         tokens[ "session_name" ] = ctx_session_name.set( session_name )
+    if session_id is not None:
+        tokens[ "session_id" ] = ctx_session_id.set( session_id )
     return tokens
 
 
@@ -128,6 +133,8 @@ def reset_dispatch_context( tokens: dict ) -> None:
         ctx_target_user.reset( tokens[ "target_user" ] )
     if "session_name" in tokens:
         ctx_session_name.reset( tokens[ "session_name" ] )
+    if "session_id" in tokens:
+        ctx_session_id.reset( tokens[ "session_id" ] )
 
 
 def _prepend_operator_routing( abstract: Optional[ str ], original_target: str ) -> str:
@@ -210,7 +217,7 @@ class AgentNotificationDispatcher:
         """
         Resolve the sender_id for a notification call.
 
-        Priority: a role-aware agent with a role builds a role-specific sender_id. Otherwise the `ctx_sender_id` ContextVar wins (per-task isolation, set by job execution). Otherwise `self.sender_id` applies (the instance default for CLI and single-job paths).
+        Priority: a role-aware agent with a role builds a role-specific sender_id, suffixed by the `ctx_session_id` ContextVar or else `self.session_id`. Otherwise the `ctx_sender_id` ContextVar wins (per-task isolation, set by job execution). Otherwise `self.sender_id` applies (the instance default for CLI and single-job paths).
         The role-aware path comes first because its role-suffixed id is orthogonal to the per-job sender. The ContextVar takes priority over instance state so concurrent agentic-pool jobs never see each other's sender_id leaking through the shared dispatcher instance.
 
         Args:
@@ -220,10 +227,11 @@ class AgentNotificationDispatcher:
             str: Resolved sender_id
         """
         if self.supports_role and role:
-            suffix = None
-            if self.session_id:
+            suffix     = None
+            session_id = ctx_session_id.get() or self.session_id
+            if session_id:
                 # Strip user-scope suffix (::user_id) — only the base hash is needed
-                suffix = self.session_id.split( "::" )[ 0 ] if "::" in self.session_id else self.session_id
+                suffix = session_id.split( "::" )[ 0 ] if "::" in session_id else session_id
             return build_sender_id( f"{self.agent_type}.{role}", suffix=suffix )
         ctx_value = ctx_sender_id.get()
         if ctx_value is not None:

@@ -25,6 +25,7 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from cosa.rest.job_state import JobState
 
 
@@ -221,6 +222,8 @@ class SweTeamJob( AgenticJobBase ):
         from cosa.agents.swe_team import cosa_interface
         cosa_interface.SESSION_ID   = self.id_hash
         cosa_interface.TARGET_USER  = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( target_user=self.user_email, session_id=self.id_hash )
 
         # Set job_id for auto-injection into all notify() calls
         voice_io.set_job_id( self.id_hash )
@@ -361,6 +364,8 @@ class SweTeamJob( AgenticJobBase ):
         from cosa.agents.swe_team import cosa_interface
         cosa_interface.SESSION_ID   = self.id_hash
         cosa_interface.TARGET_USER  = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( target_user=self.user_email, session_id=self.id_hash )
 
         # Loop through simulation phases
         num_phases = min( self.dry_run_phases, len( self.DRY_RUN_PHASE_LABELS ) )

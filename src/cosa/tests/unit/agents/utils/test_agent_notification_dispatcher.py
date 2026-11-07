@@ -96,6 +96,17 @@ def test_resolve_sender_id_role_aware_with_plain_session_id():
     assert d._resolve_sender_id( "coder" ).endswith( "#plainhash" )
 
 
+def test_resolve_sender_id_role_aware_prefers_the_per_task_session_id():
+    d = AgentNotificationDispatcher( agent_type="swe", supports_role=True )
+    d.session_id = "shared-instance-value"
+    tokens = mod.set_dispatch_context( session_id="task-hash::user42" )
+    try:
+        assert d._resolve_sender_id( "lead" ).endswith( "#task-hash" )
+    finally:
+        mod.reset_dispatch_context( tokens )
+    assert d._resolve_sender_id( "lead" ).endswith( "#shared-instance-value" )   # reset restores the instance fallback
+
+
 def test_resolve_sender_id_role_aware_without_session_id():
     d = AgentNotificationDispatcher( agent_type="swe", supports_role=True )
     # session_id None → suffix stays None

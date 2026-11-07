@@ -2,7 +2,7 @@
 capability: fix-expediter-bfe
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob@9e3e736da9
+  - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob@1555785121
   - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob.do_all@42afdb8dc9
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator@61bb3a740e
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_diagnosis@47e97bb180

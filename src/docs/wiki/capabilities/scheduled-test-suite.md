@@ -2,7 +2,7 @@
 capability: scheduled-test-suite
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - cosa.agents.test_suite.job.TestSuiteJob@eb62c39f39
+  - cosa.agents.test_suite.job.TestSuiteJob@80ff0f1e9e
   - cosa.agents.test_suite.job.TestSuiteJob.do_all@e22090c710
   - cosa.agents.test_suite.job.unknown_suite_names@9f548f8b52
   - cosa.agents.test_suite.job.BetweenSuiteResetError@d5be6190f9
