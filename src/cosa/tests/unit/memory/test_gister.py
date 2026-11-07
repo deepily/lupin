@@ -193,7 +193,7 @@ class TestGister( unittest.TestCase ):
         self.assertEqual( result, "the gist" )
         gen.assert_called_once_with( "what is the date", gister.DEFAULT_PROMPT_KEY )
         mocks["cache"].cache_gist.assert_called_once_with(
-            "what is the date", "the gist", normalized="what is the date"   # normalizer.lower()
+            "what is the date", "the gist", normalized="what is the date"   # the normalizer lowercases
         )
 
     def test_get_gist_cache_miss_empty_gist_not_stored( self ):

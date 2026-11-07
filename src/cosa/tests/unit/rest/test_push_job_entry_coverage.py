@@ -98,7 +98,7 @@ class TestModeBranchNeverCallsTheRouter( _PushJobHarness ):
     """A user in a mode has already chosen; the LLM router must not be consulted."""
 
     def test_direct_mode_bypasses_the_router( self ):
-        # "todo" is in MODE_TO_AGENT only — the f-string synthesis arm (todo_fifo_queue.py:726).
+        # "todo" is in MODE_TO_AGENT only — the f-string synthesis arm (in TodoFifoQueue.push_job).
         agent = Mock(); agent.id_hash = "ag"
         self.queue.set_user_mode( "u1", "todo" )
         with self._stub_registry_entry( "agent router go to todo", agent ), \

@@ -477,7 +477,7 @@ class TestTransitionToDead( _RFQBase ):
 
 
 # ── Runtime brake legs (b3) + (c) ───────────────────────────────────────────
-# design src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md
+# design "Runtime Brake for a Runaway BFE — Design" — removed by c752ab9e, recoverable from that commit's parent
 class TestRuntimeBrakeLegBC( _RFQBase ):
     """
     Leg (b3): a BFETimeoutError death must NOT re-arm the repair chain
@@ -839,7 +839,7 @@ class TestNonTestInflightClassifier( _RFQBase ):
         job = _AgenticFake( id_hash="dr9", job_type="deep_research" )   # spawned_by_id_hash defaults None
         self._enqueue( rq, job )
         rq._agentic_futures = { "dr9": self._future( done=False ) }
-        out = rq.get_non_test_inflight_agentic_jobs()                    # exclude_id_hash=None
+        out = rq.get_non_test_inflight_agentic_jobs()                    # no id_hash excluded
         self.assertEqual( out, [ { "id_hash": "dr9", "job_type": "deep_research" } ] )
 
 

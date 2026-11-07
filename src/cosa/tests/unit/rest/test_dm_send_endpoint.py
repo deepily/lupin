@@ -267,7 +267,7 @@ class TestPersistDmSendSync( unittest.TestCase ):
                 job_id            = "abcdef12",
             )
 
-        self.assertEqual( out, "row-id-42" )                    # str( created.id )
+        self.assertEqual( out, "row-id-42" )                    # the id as a string
         mock_get_db.assert_called_once_with()
         mock_repo_cls.assert_called_once_with( "the-session" )
         ck = repo.create_notification.call_args.kwargs

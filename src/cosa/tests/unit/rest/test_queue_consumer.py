@@ -262,7 +262,7 @@ class TestGateBIntakeHold( _ConsumerTestBase ):
         so Gate B's predicate rejects it (modeled as None while held); it dispatches
         once the hold clears, in order."""
         todo = _todo()
-        job2 = _job()                                        # monopolize=True (the 2nd sweep)
+        job2 = _job()                                        # the job is a monopolize job (the 2nd sweep)
         running = self._held_running( active="first-sweep" )  # first monopolize job holds
         running.await_monopolize_pool_drain.return_value = [ ]   # pool clean when it finally dispatches
         def _pop( *a, **k ):
@@ -296,7 +296,7 @@ class TestGateAPoolDrain( _ConsumerTestBase ):
 
     def test_drain_clean_then_dispatches( self ):
         todo = _todo()
-        todo.pop_next_eligible.return_value = _job()         # monopolize=True
+        todo.pop_next_eligible.return_value = _job()         # the job is a monopolize job
         running = self._mono_running()
         running.await_monopolize_pool_drain.return_value = [ ]   # drained clean
         running._process_job.side_effect = lambda job: setattr( todo, "consumer_running", False )
@@ -323,7 +323,7 @@ class TestGateAPoolDrain( _ConsumerTestBase ):
 
     def test_kill_switch_disabled_skips_drain( self ):
         todo = _todo()
-        todo.pop_next_eligible.return_value = _job()         # monopolize=True
+        todo.pop_next_eligible.return_value = _job()         # the job is a monopolize job
         running = self._mono_running( enabled=False )        # kill-switch OFF
         running._process_job.side_effect = lambda job: setattr( todo, "consumer_running", False )
         self._drive( todo, running )

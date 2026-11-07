@@ -114,8 +114,8 @@ class TestAnalyze:
         ( "+x = 42", "add", "a.py" ),          # python code
         ( "+# note", "add", "a.py" ),          # python comment
         ( "-old", "remove", "a.py" ),          # python removal
-        ( "diff --git ...", "meta", "a.py" ),  # skipped (meta)
-        ( " ctx", "context", "a.py" ),         # skipped (context)
+        ( "diff --git ...", "meta", "a.py" ),  # skipped, meta
+        ( " ctx", "context", "a.py" ),         # skipped, context
         ( "+orphan", "add", None ),            # skipped (no file_path)
         ( "+doc text", "add", "README.md" ),   # markdown add (no lang breakdown)
     ]

@@ -106,7 +106,7 @@ class TestAnalyzeDiff( unittest.TestCase ):
             "+    '''",             # docstring toggle OFF -> end docstring
             "+",                    # blank added -> uncategorized
             "-old_code = 1",        # removed
-            " context",             # context (ignored)
+            " context",             # context, ignored
             "diff --git a/bar.js b/bar.js",
             "index 333..444 100644",
             "--- a/bar.js",
