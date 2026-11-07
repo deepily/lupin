@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.reuse_needset.judge_probe.cached_key@f700ae33ac
   - lupin_mcp.reuse_needset.judge_probe.read_cached@11dd33157c
-  - lupin_mcp.reuse_needset.judge_probe.collect_records@d92a9cfa39
+  - lupin_mcp.reuse_needset.judge_probe.collect_records@5f84030059
   - lupin_mcp.reuse_needset.judge_probe.pair_records@a06d83b910
   - lupin_mcp.reuse_needset.judge_probe.rating_dump@64ebfd4f61
   - lupin_mcp.reuse_needset.judge_probe.threshold_sweep@768abd7a42

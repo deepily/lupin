@@ -36,10 +36,10 @@ NONE_CHOICE  = first_thousand.NONE_CHOICE
 EXTRA_FILES  = ( "ledger-control-draft.jsonl", "run-env.sh" )
 REPORT_FILE  = "forced-judge-report.json"
 CACHE_DIR    = "query-cache"
-DONE         = "done"
-CAP          = "cap_reached"
-BUDGET_HIT   = "budget_reached"
-FAILED       = "failed"
+DONE         = call_cap.DONE
+CAP          = call_cap.CAP_HIT
+BUDGET_HIT   = call_cap.BUDGET_HIT
+FAILED       = call_cap.FAILED
 ALONE        = "alone"             # the plant is asked in a pack of its own, after the 127 real places
 IN_PACK      = "in_pack"           # the plant is asked inside the 128 places, in the packs the real run would cut
 VARIANTS     = ( ALONE, IN_PACK )
@@ -420,28 +420,11 @@ def run_live( run_dir, rows, judge, limit, budget, summary=summarize ):
         - status is done, budget_reached, cap_reached or failed; a NeedsetError ends the run with a report and no exception
         - any other error writes the report with the finished rows and status failed first, then is raised
     """
-    cap     = call_cap.CallCap( f"{run_dir}/{first_thousand.CALLS_FILE}", limit, { STAGE_NAME: budget } )
-    results = [ ]
-    status, detail, raised = DONE, None, None
+    def work( results ):
+        """Ensures: appends the judge's result for each row."""
+        for row in rows: results.append( judge( row ) )
 
-    def write():
-        """Ensures: writes the report as it stands and returns it."""
-        out = { "used": cap.used(), "limit": limit, "by_stage": cap.by_stage(), "status": status, "detail": detail, "summary": summary( results ), "results": results }
-        pathlib.Path( f"{run_dir}/{REPORT_FILE}" ).write_text( json.dumps( out, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
-        return out
-
-    with cap.installed():
-        try:
-            with call_cap.stage( STAGE_NAME ):
-                for row in rows: results.append( judge( row ) )
-        except er.NeedsetError as error:
-            status = CAP if error.code == er.CALL_CAP_REACHED else BUDGET_HIT if error.code == er.STAGE_BUDGET_REACHED else FAILED
-            detail = str( error )
-        except BaseException as error:
-            status, detail, raised = FAILED, f"{type( error ).__name__}: {error}", error
-    out = write()
-    if raised is not None: raise raised
-    return out
+    return call_cap.run_under_cap( f"{run_dir}/{first_thousand.CALLS_FILE}", f"{run_dir}/{REPORT_FILE}", limit, STAGE_NAME, budget, work, lambda results, _cap: summary( results ) )
 
 
 def parse_args( argv ):
@@ -471,6 +454,36 @@ def parse_args( argv ):
     return args
 
 
+def plant_lines( control_report ):
+    """Ensures: returns { plant id: purpose line } for the control rows that have one."""
+    report = json.loads( pathlib.Path( control_report ).read_text( encoding="utf-8" ) )[ "stages" ][ "control" ][ "report" ]
+    return { r[ "rewrite" ]: r[ "purpose_line" ] for r in report[ "rows" ] if "purpose_line" in r and r[ "purpose_line" ] }
+
+
+def load_pairs_needs_labels( args, root, deps, copy_saved=False ):
+    """
+    Load the planted pairs, their frozen needs and their labels from files.
+
+    Requires:
+        - args holds planted, answer_key, labels_dir, run_dir, from_run, cli_path and server
+
+    Ensures:
+        - returns ( pairs, needs, labels ), the labels being the first rater's, then the second's, with the third rater for a disagreement
+        - with copy_saved the saved draft ledger is copied from --from-run first, an existing file in the run folder kept, so the pairs are not read from a stub
+        - builds no reuse context
+    """
+    pairs  = positive_control.load_pairs( args.planted, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
+    key    = json.loads( pathlib.Path( args.answer_key ).read_text( encoding="utf-8" ) )[ "items" ]
+    read   = first_thousand.read_latest_labels
+    first  = read( [ f"{args.labels_dir}/labels-rick.jsonl", f"{args.labels_dir}/labels-rick-redo.jsonl" ] )
+    second = read( [ f"{args.labels_dir}/labels-reviewer-2.jsonl" ] )
+    third  = read( [ f"{args.labels_dir}/labels-jason.jsonl" ] )
+    if copy_saved: yield_trace.copy_saved( args.from_run, args.run_dir, ( "ledger-control-draft.jsonl", ) )
+    ledger = draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
+    needs  = frozen_needs( pairs, ledger, lambda rec: strip.strip_member( rec, root ) )
+    return pairs, needs, pair_labels( pairs, key, first, second, third )
+
+
 def collect_rows( args, root, deps ):
     """
     Read the missed pairs, their frozen drafts and their labels from files.
@@ -481,19 +494,11 @@ def collect_rows( args, root, deps ):
         - the alone variant keeps the pairs retrieval missed; the in_pack variant keeps every pair with a frozen draft, since a plant asked among the real places needs no miss
         - the in_pack rows also carry plant_line, the purpose line the control report holds for the plant, or None
     """
-    pairs  = positive_control.load_pairs( args.planted, deps[ "planted_sha" ] if "planted_sha" in deps else positive_control.PLANTED_SHA )
-    key    = json.loads( pathlib.Path( args.answer_key ).read_text( encoding="utf-8" ) )[ "items" ]
-    read   = first_thousand.read_latest_labels
-    first  = read( [ f"{args.labels_dir}/labels-rick.jsonl", f"{args.labels_dir}/labels-rick-redo.jsonl" ] )
-    second = read( [ f"{args.labels_dir}/labels-reviewer-2.jsonl" ] )
-    third  = read( [ f"{args.labels_dir}/labels-jason.jsonl" ] )
-    ledger = draft.make_ledger( f"{args.run_dir}/ledger-control-draft.jsonl", args.cli_path, args.server )
-    needs  = frozen_needs( pairs, ledger, lambda rec: strip.strip_member( rec, root ) )
+    pairs, needs, labels = load_pairs_needs_labels( args, root, deps )
     missed  = { p[ "rewrite" ][ "id" ] for p in pairs } if args.variant == IN_PACK else set( missed_ids( args.control_report ) )
-    rows, undrafted = build_rows( pairs, missed, needs, pair_labels( pairs, key, first, second, third ) )
+    rows, undrafted = build_rows( pairs, missed, needs, labels )
     if args.variant == IN_PACK:
-        report = json.loads( pathlib.Path( args.control_report ).read_text( encoding="utf-8" ) )[ "stages" ][ "control" ][ "report" ]
-        lines  = { r[ "rewrite" ]: r[ "purpose_line" ] for r in report[ "rows" ] if "purpose_line" in r and r[ "purpose_line" ] }
+        lines  = plant_lines( args.control_report )
         rows   = [ { **r, "plant_line": lines[ r[ "id" ] ] if r[ "id" ] in lines else None } for r in rows ]
     return pairs, rows, undrafted
 

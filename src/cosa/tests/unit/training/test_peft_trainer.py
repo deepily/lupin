@@ -685,25 +685,16 @@ class TestPeftTrainer( unittest.TestCase ):
                 trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
             mock_quantizer_class.assert_not_called()
 
-    def test_quantize_merged_adapter_two_gpus_maps_cuda0( self ):
+    def test_quantize_merged_adapter_maps_cuda0_for_any_gpu_count( self ):
         """
-        Two GPUs: still maps to cuda:0 only.
+        One GPU or two, debug on: always maps to cuda:0 only.
         """
-        with self._quantize_patches( num_gpus=2 ) as ( mock_quantizer_class, _q, _t, _w ):
-            trainer = self._make_trainer()
-            trainer.debug = True
-            trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
-            mock_quantizer_class.assert_called_once_with( "/path/to/merged", device_map="cuda:0", local_files_only=True )
-
-    def test_quantize_merged_adapter_single_gpu_debug_branch( self ):
-        """
-        One GPU with debug on: same cuda:0 mapping.
-        """
-        with self._quantize_patches( num_gpus=1 ) as ( mock_quantizer_class, _q, _t, _w ):
-            trainer = self._make_trainer()
-            trainer.debug = True
-            trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
-            mock_quantizer_class.assert_called_once_with( "/path/to/merged", device_map="cuda:0", local_files_only=True )
+        for num_gpus in ( 1, 2 ):
+            with self.subTest( num_gpus=num_gpus ), self._quantize_patches( num_gpus=num_gpus ) as ( mock_quantizer_class, _q, _t, _w ):
+                trainer = self._make_trainer()
+                trainer.debug = True
+                trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
+                mock_quantizer_class.assert_called_once_with( "/path/to/merged", device_map="cuda:0", local_files_only=True )
 
     def test_quantize_merged_adapter_failed_release_wait_forces_clear( self ):
         """
@@ -750,28 +741,18 @@ class TestPeftTrainer( unittest.TestCase ):
 
     def test_quantize_merged_adapter_quantizer_error_wrapped( self ):
         """
-        A Quantizer exception becomes RuntimeError, with debug traceback path covered.
+        A Quantizer exception becomes RuntimeError; the traceback prints only with debug on.
         """
-        with self._quantize_patches( quantizer_error=OSError( "boom" ) ), \
-             patch( 'traceback.print_exc' ) as mock_print_exc:
-            trainer = self._make_trainer()
-            trainer.debug = True
-            with self.assertRaisesRegex( RuntimeError, "Quantization failed: boom" ) as ctx:
-                trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
-            self.assertIsInstance( ctx.exception.__cause__, OSError )
-            mock_print_exc.assert_called_once_with()
-
-    def test_quantize_merged_adapter_quantizer_error_wrapped_without_debug( self ):
-        """
-        Same wrapping with debug off: no traceback printed.
-        """
-        with self._quantize_patches( quantizer_error=OSError( "boom" ) ), \
-             patch( 'traceback.print_exc' ) as mock_print_exc:
-            trainer = self._make_trainer()
-            trainer.debug = False
-            with self.assertRaisesRegex( RuntimeError, "Quantization failed: boom" ):
-                trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
-            mock_print_exc.assert_not_called()
+        for debug in ( True, False ):
+            with self.subTest( debug=debug ), self._quantize_patches( quantizer_error=OSError( "boom" ) ), \
+                 patch( 'traceback.print_exc' ) as mock_print_exc:
+                trainer = self._make_trainer()
+                trainer.debug = debug
+                with self.assertRaisesRegex( RuntimeError, "Quantization failed: boom" ) as ctx:
+                    trainer.quantize_merged_adapter( merged_adapter_dir="/path/to/merged" )
+                self.assertIsInstance( ctx.exception.__cause__, OSError )
+                if debug: mock_print_exc.assert_called_once_with()
+                else: mock_print_exc.assert_not_called()
 
     def test_get_training_prompt_stats_success( self ):
         """
