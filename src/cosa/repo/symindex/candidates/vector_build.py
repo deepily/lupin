@@ -116,7 +116,7 @@ def _embed_halving( client, batch, content_type, role, pause_seconds, sleep, ref
         - CandidateError SERVICE_SATURATED when the count passes the limit or a single text is refused, chained to the client's error
     """
     def refused( error, refused_batch ):
-        """Ensures: counts the refusal and ends the pass when it passes the limit or a single text is refused."""
+        """Ensures: counts the refusal; ends the pass past the limit or on a single text."""
         if refusals is None: return
         refusals[ "count" ] += 1
         if refusals[ "count" ] > refusals[ "limit" ] or len( refused_batch ) < 2: raise CandidateError( SERVICE_SATURATED, saturated_message( refusals, error ) ) from error
