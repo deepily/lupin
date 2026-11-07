@@ -330,7 +330,7 @@ def pytest_runtest_setup( item ):
 # They now live in `cosa.utils.tree_state`, which this file imports and which
 # `src/scripts/lib/tree-state.sh` runs directly, so both paths render the SAME line from
 # the SAME code rather than drifting apart. Design: §6b of
-# the "Every green states the tree it was earned on" doc, written before the code. — REMOVED by c752ab9e (2026-08-29); recover it from c752ab9e^
+# the "Every green states the tree it was earned on" doc, written before the code. — REMOVED by 8420e8b0a (2026-09-30); recover it from 8420e8b0a^
 #
 # `_coarse_age` comes along because it has three call sites, not one: the fetch age, the
 # coverage-file age, and the module itself.
@@ -439,7 +439,7 @@ _COVERAGE_FILE_AT_START = _coverage_file_at_start()
 #
 # ONE git call, not a second full probe. The gap is a SHA question; branch/behind/ahead/
 # fetched/dirty at start answer questions nobody asked at eight times the cost. Design:
-# the "Gap 1 — a run states the tree it STARTED on as well as the one it ended on" doc §2. — REMOVED by c752ab9e (2026-08-29); recover it from c752ab9e^
+# the "Gap 1 — a run states the tree it STARTED on as well as the one it ended on" doc §2. — REMOVED by 8420e8b0a (2026-09-30); recover it from 8420e8b0a^
 _TREE_STATE_START_SHA = capture_start_sha( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
 # Row 105ff244: the served-bundle hash at the same moment. dist/ is gitignored, so the sha above is
 # blind to a bundle rebuild inside the run; this is what makes `bundle-span=` in the line.
