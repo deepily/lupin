@@ -432,7 +432,6 @@ async def get_queue(
     # job computed before dying. Previously fell through to the generic
     # todo/run branch which only returned basic fields; dead TFE/BFE jobs
     # that wrote a Phase 2 plan had no way to surface it to the UI.
-    # See: the design note "2026.04.11-tfe-forensics-capture-plan" (deleted in commit b113a3a7d) (Fix 8b)
     if queue_name == "dead":
         # Same bulk-count pattern as done bucket — accurate has_interactions
         notif_counts = _count_interactions_for_jobs( [ j.id_hash for j in jobs ] )

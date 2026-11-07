@@ -1332,7 +1332,6 @@ async def notify_user(
                 # re-arrivals against hydrated history by id. None (persist
                 # failed — non-fatal by design) falls back to a generated uuid4
                 # inside NotificationItem, preserving prior behavior.
-                # See: the design note "2026.06.11-mux-cold-load-notification-hydration-design" (deleted in commit b113a3a7d) §4
                 id                      = db_notification_id,
                 title                   = title,
                 sender_id               = resolved_sender_id,

@@ -558,7 +558,6 @@ def execute_broadcast(
 
 
 # ─── Phase 2.5/3.5 Step 2: broadcast-history aggregator helpers ─────────────
-# Per the design note "2026.05.14-commons-traffic-visibility-design" (deleted in commit b113a3a7d) (AC1 + AC4-AC6).
 
 
 _RESERVED_TOPICS = { "broadcasts", "broadcast-acks", "presence", "system-events" }

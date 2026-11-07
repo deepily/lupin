@@ -1039,8 +1039,6 @@ class MultiModalMunger:
 
         return code, mode
     
-    #     return python, mode
-    
     def _extract_string_from_backticked_llm_output( self, raw_string: str, tag_name: str="python" ) -> str:
         """
         Extract code from markdown-style backticks.
@@ -1458,7 +1456,6 @@ def quick_smoke_test():
 
     # ── Broadcast-mode coverage (added 2026-05-13 by Arnold) ──────────────────
     # Asserts EXACT output values for the new munge_text_broadcast method.
-    # See the design note "2026.05.13-broadcast-munger-mode-design" (deleted in commit b113a3a7d) §5.1.
     du.print_banner( "Broadcast Mode Coverage", prepend_nl=True )
     broadcast_cases = [
         ( "at sign you",                       "@you",                "single @-mention" ),
