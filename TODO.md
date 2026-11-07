@@ -627,6 +627,9 @@ last -x reboot | head -20      # then read the morning boot times yourself
 - 2026-11-06 — **The Dart candidate stage for lupin-mobile is due again (row `f25c661d`)?** → **Re-park it to 13 Nov** (Rick, about 12:17 Eastern, card). Why: he ruled that Dart follows a proven lupin implementation, and `fetch_similar` on lupin is only being fixed today.
 - 2026-11-06 — **The 0.85 match threshold admits only near-copies (row `35a79890`)?** → **Label the 133 pairs, then fit the cut** (Rick, about 16:25 Eastern, card). Why: the true-cosine median is 0.488 and paraphrases sit at 0.65–0.80, so any other number would be a guess.
 - 2026-11-06 — **The rescore `--write` (row `b3ba8f11`)?** → **Hold until `fa884f81` is fixed.** Rick ruled at about 16:25 Eastern, by card. Why: the dry run would write 2,316 misses. Most of them come from that bug. Cheech corrected the premise at 17:13 Eastern. The fix changes only new predictions. The rescore reads the stored ones. So it would still record 75 matches and 2,316 misses. The ruling goes back to Rick. The re-ask timed out; the chase is 7 Nov at 10:00 Eastern.
+- 2026-11-06 — **The rescore, asked again (row `b3ba8f11`)?** → **Write the true scores.** Rick answered the card at about 17:55 Eastern. Why: the old predictions really did answer other questions. The script dumps a before-image first.
+- 2026-11-06 — **The free-text match threshold (row `35a79890`)?** → **Set it to 0.75.** Rick answered the card at about 17:55 Eastern. Why: precision is 0.79 and recall 0.65 on the 133 labelled pairs. At 0.85 recall was 0.29.
+- 2026-11-06 — **The mobile composer bug (row `d10ef810`)?** → **Keep it as a ticket.** Rick will approve it in a lupin-mobile session. Its chase is 13 Nov.
 
 → entries dated 2026-08-26 to 2026-10-09 archived to `todo-history/2026-08-26-to-2026-10-10-todo.md`.
 
