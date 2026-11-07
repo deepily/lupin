@@ -8,7 +8,7 @@ pins:
   - lupin_mcp.duplicate_check_filing.NoTriageOwner@022bda2814
   - lupin_mcp.duplicate_check_filing.triage_owner@0b90ebd7c1
   - lupin_mcp.duplicate_check_filing.run_key@176353e748
-  - lupin_mcp.duplicate_check_filing.triage_payload@1bfd1a11c3
+  - lupin_mcp.duplicate_check_filing.triage_payload@857553a740
   - lupin_mcp.duplicate_check_filing.read_pending@3fed62ce79
   - lupin_mcp.duplicate_check_filing.write_pending@c972f92272
   - lupin_mcp.duplicate_check_filing.send_row@2f4f15f5b4
@@ -27,7 +27,7 @@ pins:
 - `triage_owner( declared, roster )` returns the lowercase persona key of the roster entry that matches the configured manager, whatever the case or accent. Otherwise it returns the first roster persona and the note says so. An empty roster raises `NoTriageOwner`: a row never lands on a role label.
 - `run_key( keys )` is `epic:dupcheck-run-` and 16 hex digits of the sha256 of the sorted finding keys. The same findings give the same row key.
 - `triage_payload( findings, owner, day )` builds a P5 task with no status, so the store's holding default applies. The title starts with `[LUPIN] Duplicate check <day>:` and asks whether the new functions should reuse existing ones.
-- The body says why the row exists and what to do: a `DUPCHECK-VERDICT` line per function, see [[duplicate-check-verdict-lines]]. It also names the owner and lists each finding with what it repeats. `created_by` is `duplicate-check-daily`, with no session id.
+- The body says why the row exists and what to do: a `DUPCHECK-VERDICT` line per function, see [[duplicate-check-verdict-lines]]. It also names the owner and lists the first 200 findings with what they repeat, then counts the rest and names the result file. Every finding key is still recorded as triaged. `created_by` is `duplicate-check-daily`, with no session id.
 - The row's title day is the findings' `day` field, else today; a refile sets it from the result file's date.
 - `file_findings` leaves out findings already in `triaged.jsonl` or in a spooled row. With none left it files nothing. Otherwise it sends the spooled rows, then the new one, and writes the findings of a row the store took to `triaged.jsonl`.
 - `send_row( payload, store )` asks the store for the key before the create. It answers `already_filed`, `filed`, `queued_for_retry` or `refused`.

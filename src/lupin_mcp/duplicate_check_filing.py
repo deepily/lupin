@@ -24,6 +24,7 @@ AMEND_REASON   = "daily duplicate check verdict line"
 GATED_PHRASE   = "New tickets are gated"          # how the store's ratio gate opens its refusal; the filing keeps such a row and tries again
 RUN_KEY_PREFIX = "epic:dupcheck-run-"
 TRIAGED_FILE   = "triaged.jsonl"
+LIST_LIMIT     = 200                              # findings named in a row's body; the rest are named by count and result file
 FILED          = "filed"
 ALREADY        = "already_filed"
 QUEUED         = "queued_for_retry"
@@ -103,20 +104,23 @@ def triage_payload( findings, owner, day ):
     Ensures:
         - returns a TaskCreateIn payload at P5 with no status, so the store's holding default applies and a manager raises it
         - the title starts with the project tag, names the check, the day and the question to answer
-        - the body says why the row exists, what to do, the owner and every finding with the definitions it repeats
+        - the body says why the row exists, what to do, the owner and the first LIST_LIMIT findings with the definitions they repeat
+        - the rest are counted in a last line naming the result file, the first finding's run_file; the title counts every finding
+        - finding_keys always lists every finding, so none is lost from the triaged file
         - created_by is the job's fixed name and carries no session id, so the store reads the caller as a worker, not a manager
         - owner_persona and accountable_manager are the owner's persona key
         - finding_keys lists the findings' keys so the filer can mark them triaged; send_row's caller removes it before the create
     """
     keys  = [ f[ "correlation_key" ] if "correlation_key" in f else correlation_key( f[ "id" ], f[ "text" ] ) for f in findings ]
     count = len( findings )
-    lines = "\n".join( f"- {f['name']} ({f['file']}:{f['line']}, {f['id']}) repeats: " + "; ".join( f"{o['name']} in {o['file']}" for o in f[ "others" ] ) for f in findings )
+    lines = [ f"- {f['name']} ({f['file']}:{f['line']}, {f['id']}) repeats: " + "; ".join( f"{o['name']} in {o['file']}" for o in f[ "others" ] ) for f in findings[ :LIST_LIMIT ] ]
+    if count > LIST_LIMIT: lines.append( f"- and {count - LIST_LIMIT} more in {findings[ 0 ].get( 'run_file', 'the result file' )}" )
     key   = run_key( keys )
     body  = ( f"Why this row exists: the daily duplicate check found {count} new function(s) that repeat code the tree already has.\n"
               f"What to do: for each function below, rule duplicate (reuse the existing one), extend (change the existing one) or distinct (keep both). "
               f"Write one DUPCHECK-VERDICT line per function with lupin_mcp.duplicate_check_verdicts; it amends this row.\n"
               f"Window: {findings[ 0 ][ 'window' ][ 'start' ]}..{findings[ 0 ][ 'window' ][ 'end' ]}. Owner: {owner[ 'owner' ]} ({owner[ 'note' ]}).\n"
-              f"Correlation: one row per run, key {key}; a function already on an earlier row is not listed again.\n\n{lines}" )
+              f"Correlation: one row per run, key {key}; a function already on an earlier row is not listed again.\n\n" + "\n".join( lines ) )
     return { "item_class": ITEM_CLASS, "title": f"[LUPIN] Duplicate check {day.day} {day.strftime( '%b' )}: decide whether {count} new function(s) should reuse existing ones",
              "project": PROJECT, "created_by": CREATED_BY, "body": body, "owner_persona": owner[ "owner" ], "accountable_manager": owner[ "owner" ],
              "priority": PRIORITY, "correlation_key": key, "finding_keys": keys }

@@ -6,7 +6,7 @@ pins:
   - lupin_mcp.duplicate_check_refile.FilingFailed@96b99fba14
   - lupin_mcp.duplicate_check_refile.RecordNotWritten@181aef2b24
   - lupin_mcp.duplicate_check_refile.read_result@d4d66d4973
-  - lupin_mcp.duplicate_check_refile.refile@57452750e2
+  - lupin_mcp.duplicate_check_refile.refile@18f8e984c1
   - lupin_mcp.duplicate_check_refile.main@bbdf347fd0
 ---
 # Duplicate check refile

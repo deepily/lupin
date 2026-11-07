@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.Counting@006524b7c4
   - lupin_mcp.duplicate_check_daily.findings_of@25bb8dd399
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
-  - lupin_mcp.duplicate_check_daily.run@2663cb755d
+  - lupin_mcp.duplicate_check_daily.run@81abbafe5c
   - lupin_mcp.duplicate_check_daily.cron_lines@2cb4000121
   - lupin_mcp.duplicate_check_daily.install_mode@59fca941a1
   - lupin_mcp.duplicate_check_daily.live_parts@4078b1680e

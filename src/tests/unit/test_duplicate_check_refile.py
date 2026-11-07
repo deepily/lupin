@@ -197,3 +197,18 @@ def test_a_finding_that_already_names_its_day_keeps_it_and_a_file_without_sessio
     path.write_text( json.dumps( doc ) )
     store = Store()
     assert rf.main( [ str( path ) ], out=io.StringIO(), filer=working_filer( store ) ) == 0 and "1 Oct:" in store.created[ 0 ][ "title" ]
+
+
+def test_a_refile_passes_the_files_name_to_the_filer_and_a_run_saves_its_own_file_name_and_day_in_each_finding( repo, tmp_path ):
+    path = a_day_whose_filing_failed( repo, tmp_path )
+    kept = json.loads( path.read_text() )[ "findings" ]
+    assert all( f[ "run_file" ] == path.name and f[ "day" ] == "2026-11-03" for f in kept )
+    seen = []
+    rf.refile( path, filer=lambda findings, folder: seen.extend( findings ) or { }, now=NOW )
+    assert {f[ "run_file" ] for f in seen} == { path.name }
+    doc = json.loads( path.read_text() )
+    for f in doc[ "findings" ]: f.pop( "run_file" )
+    path.write_text( json.dumps( doc ) )
+    seen.clear()
+    rf.refile( path, filer=lambda findings, folder: seen.extend( findings ) or { }, now=NOW )
+    assert {f[ "run_file" ] for f in seen} == { path.name }, "a file written before run_file existed gets its own name"

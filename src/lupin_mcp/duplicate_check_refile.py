@@ -75,6 +75,7 @@ def refile( path, filer=None, now=None ):
     Ensures:
         - the filer is given the file's findings and the folder the file lives in, which is where the spool is
         - each finding carries day, the date of the run that made the file, so the row's title names that day and not the day of the refile
+        - each finding carries run_file, the file's name, so a row that lists only part of them says where the rest are
         - the file gains one entry in "refilings", { at, answer }, written only after the filer has returned
         - returns the filer's answer
     Raises:
@@ -83,7 +84,7 @@ def refile( path, filer=None, now=None ):
         - RecordNotWritten when the filing returned and the file could not be rewritten; it carries the answer
     """
     doc = read_result( path )
-    dated = [ { **f, "day": f[ "day" ] if "day" in f else doc[ "date" ] } for f in doc[ "findings" ] ]
+    dated = [ { **f, "day": f[ "day" ] if "day" in f else doc[ "date" ], "run_file": f[ "run_file" ] if "run_file" in f else pathlib.Path( path ).name } for f in doc[ "findings" ] ]
     try: answer = ( filer if filer is not None else daily.live_filer )( dated, pathlib.Path( path ).parent )
     except Exception as e:                  # a store client or config that raises: the daily check records the same and goes on
         raise FilingFailed( f"the filing raised {type( e ).__name__}: {e}. The file is unchanged." ) from e

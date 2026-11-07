@@ -350,3 +350,32 @@ def test_the_live_store_amends_a_row_with_the_line_as_the_note_through_the_hooks
     live.client = Client()
     assert live.amend( "row-1", "a note" ) == ( True, 200, { "item": { } } )
     assert seen == [ ( { "api_base_url": "http://x" }, "k", "row-1", { "note": "a note", "reason": ff.AMEND_REASON, "authority": "standing" } ) ]
+
+
+def many_findings( n ):
+    """Ensures: returns n findings with distinct ids, names and keys."""
+    return [ finding( f"d-{i}", f"f{i}", f"def f{i}(): pass" ) for i in range( n ) ]
+
+
+def test_a_row_names_the_first_two_hundred_findings_counts_the_rest_and_keeps_every_key():
+    found = [ { **f, "run_file": "2026-11-06-190659-hand.json" } for f in many_findings( ff.LIST_LIMIT + 7 ) ]
+    row   = ff.triage_payload( found, { "owner": "cheech", "note": "n" }, DAY )
+    listed = [ l for l in row[ "body" ].splitlines() if l.startswith( "- f" ) ]
+    assert len( listed ) == ff.LIST_LIMIT and listed[ -1 ].startswith( f"- f{ff.LIST_LIMIT - 1} (" ) and f"f{ff.LIST_LIMIT} (" not in row[ "body" ]
+    assert row[ "body" ].splitlines()[ -1 ] == "- and 7 more in 2026-11-06-190659-hand.json" and f"decide whether {ff.LIST_LIMIT + 7} new function(s)" in row[ "title" ]
+    assert len( row[ "finding_keys" ] ) == ff.LIST_LIMIT + 7 and row[ "correlation_key" ] == ff.run_key( row[ "finding_keys" ] )
+
+
+def test_exactly_the_limit_lists_every_finding_and_names_no_more_and_a_missing_file_name_reads_the_result_file():
+    exact = ff.triage_payload( many_findings( ff.LIST_LIMIT ), { "owner": "cheech", "note": "n" }, DAY )
+    assert "more in" not in exact[ "body" ] and len( [ l for l in exact[ "body" ].splitlines() if l.startswith( "- f" ) ] ) == ff.LIST_LIMIT
+    over = ff.triage_payload( many_findings( ff.LIST_LIMIT + 1 ), { "owner": "cheech", "note": "n" }, DAY )
+    assert over[ "body" ].splitlines()[ -1 ] == "- and 1 more in the result file"
+
+
+def test_every_key_of_a_long_row_is_triaged_once_it_is_filed_so_the_unlisted_ones_are_not_filed_again( tmp_path ):
+    store = Store()
+    found = many_findings( ff.LIST_LIMIT + 3 )
+    run_once( tmp_path, found, store )
+    assert len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == ff.LIST_LIMIT + 3
+    assert run_once( tmp_path, found, store ) == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [] }
