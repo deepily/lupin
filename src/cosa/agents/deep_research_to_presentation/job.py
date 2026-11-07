@@ -286,6 +286,10 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
 
 **Cost**: ${result.total_cost:.4f}"""
 
+        skipped_names = [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
+        if skipped_names:
+            completion_abstract += f"\n\n**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names )
+
         return completion_abstract, ""
 
     def _store_dry_run_results( self ) -> str:

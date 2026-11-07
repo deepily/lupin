@@ -3,7 +3,7 @@ capability: research-chained-pipelines
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@6155ce4a93
-  - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@a7400ac725
+  - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@e0fac6866f
   - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@1bde28b1fd
   - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@3353b96e74
   - cosa.agents.deep_research_to_podcast.state.ChainedResult@69c6756c1a

@@ -191,6 +191,7 @@ class TestExecute:
         assert job.research_path == "/io/dr/r.md"
         assert job.yaml_path     == "/io/pres/d.yaml"
         assert job.marp_path     == "/io/pres/d.md"
+        assert job.artifacts[ "research_path" ]     == "/io/dr/r.md"
         assert job.artifacts[ "research_abstract" ] == "abs"
         assert job.artifacts[ "slide_count" ]       == 9
         assert job.cost_summary == {
@@ -202,6 +203,15 @@ class TestExecute:
         graph.voice_io.set_job_id.assert_called_once_with( job.id_hash )
         graph.voice_io.clear_job_id.assert_called_once_with()
         assert "Budget: $2.0" in capsys.readouterr().out
+
+    def test_completion_card_names_skipped_topics( self ):
+        result = self._completed_result()
+        result.dr_artifacts = { "skipped_topics" : [ { "topic" : "alpha" }, { "topic" : "beta" } ] }
+        job    = _job()
+        graph  = _ExecGraph( result )
+        with graph.patcher():
+            _run( job._execute() )
+        assert job.artifacts[ "abstract" ].endswith( "**Skipped topics (2)**: alpha; beta" )
 
     def test_completed_unlimited_budget_debug_line( self, capsys ):
         job   = _job( budget=None, debug=True )

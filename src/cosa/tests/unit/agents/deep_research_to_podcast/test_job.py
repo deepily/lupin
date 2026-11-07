@@ -226,6 +226,7 @@ class TestExecute:
         assert job.research_path == "/io/dr/r.md"
         assert job.audio_path    == "/io/pod/a.mp3"
         assert job.script_path   == "/io/pod/s.md"
+        assert job.artifacts[ "research_path" ]     == "/io/dr/r.md"
         assert job.artifacts[ "research_abstract" ] == "abs"
         assert job.cost_summary == {
             "dr_cost_usd"    : 1.0,
