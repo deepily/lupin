@@ -162,12 +162,17 @@ def test_query_all_asks_for_terminal_rows_so_a_closed_miss_is_still_exported():
     assert client.calls[ 0 ][ 1 ][ "include_terminal" ] == "true"
 
 
-def test_a_failed_page_a_truncated_page_and_an_empty_page_with_has_more_each_end_the_read_safely():
+def test_a_byte_budget_truncated_page_is_followed_to_the_next_offset_not_treated_as_a_failure():
+    page1  = ( True, 200, { "tasks": [ row( n ) for n in range( 3 ) ], "has_more": True, "truncated": True } )
+    page2  = ( True, 200, { "tasks": [ row( 3 ) ], "has_more": False, "truncated": False } )
+    client = Client( { ( None, "true", 0 ): page1, ( None, "true", 3 ): page2 } )
+    ok, status, body = lt.LiveStore( {}, "k", client ).query_all( "k" )
+    assert ok is True and status == 200 and len( body[ "tasks" ] ) == 4
+
+
+def test_a_failed_page_and_an_empty_page_with_has_more_each_end_the_read_safely():
     failing = Client( { ( None, None, 0 ): ( False, 500, { "error": "down" } ) } )
     assert lt.LiveStore( {}, "k", failing ).query( "k" ) == ( False, 500, { "error": "down" } )
-    cut = Client( { ( None, None, 0 ): ( True, 200, { "tasks": [ row( 1 ) ], "has_more": True, "truncated": True } ) } )
-    ok, _, body = lt.LiveStore( {}, "k", cut ).query( "k" )
-    assert ok is False and "truncated" in body[ "error" ]
     loop = Client( { ( None, None, 0 ): ( True, 200, { "tasks": [], "has_more": True } ) } )
     assert lt.LiveStore( {}, "k", loop ).query( "k" )[ 0 ] is True
 
