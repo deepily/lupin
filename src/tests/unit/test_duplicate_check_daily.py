@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import pathlib
 import subprocess
 
 import pytest
@@ -911,6 +912,47 @@ def test_main_passes_the_ceiling_the_baseline_flag_and_the_rise_limit_to_the_run
     argv = [ "--ceiling", "7", "--baseline", "--rise-limit", "5", "--root", str( repo ), "--claude-cli-path", "/bin/claude" ]
     assert dd.main( argv, parts=parts_of( tmp_path ), now=NOW, out=lambda text: None ) == 0
     assert ( seen[ "ceiling" ], seen[ "baseline" ], seen[ "rise_limit" ] ) == ( 7, True, 5 )
+
+
+HOLDER = "import fcntl, sys, time; h = open( sys.argv[ 1 ], 'a' ); fcntl.flock( h, fcntl.LOCK_EX ); print( 'held', flush=True ); time.sleep( 60 )"
+
+
+def hold_from_another_process( data_dir ):
+    """Ensures: returns a live process holding the run lock under data_dir, once it says so."""
+    import sys
+    folder = pathlib.Path( data_dir ) / "duplicate-check-daily"
+    folder.mkdir( parents=True, exist_ok=True )
+    proc = subprocess.Popen( [ sys.executable, "-c", HOLDER, str( folder / dd.RUN_LOCK ) ], stdout=subprocess.PIPE, text=True )
+    assert proc.stdout.readline().strip() == "held"
+    return proc
+
+
+def test_the_run_lock_is_refused_while_another_process_holds_it_and_is_free_once_that_process_ends( tmp_path ):
+    proc = hold_from_another_process( tmp_path )
+    try:
+        with dd.run_lock( tmp_path ) as held: assert held is False
+    finally:
+        proc.kill()
+        proc.wait()
+    with dd.run_lock( tmp_path ) as held: assert held is True, "a killed holder leaves nothing behind"
+    with dd.run_lock( tmp_path ) as first:
+        with dd.run_lock( tmp_path ) as second: assert ( first, second ) == ( True, False ), "two holders in one process are told apart too"
+    with dd.run_lock( tmp_path ) as again: assert again is True, "and the lock is let go when the block ends"
+
+
+def test_a_second_run_exits_cleanly_without_running_while_one_holds_the_lock( repo, tmp_path, monkeypatch ):
+    monkeypatch.setattr( dd.model_transport, "configure", lambda path=None: None )
+    calls = []
+    monkeypatch.setattr( dd, "run", lambda *a, **k: calls.append( 1 ) or { "status": "ok", "trigger": "reboot" } )
+    argv = [ "--cap", "1", "--trigger", "reboot", "--root", str( repo ), "--claude-cli-path", "/bin/claude" ]
+    proc, out = hold_from_another_process( tmp_path / "io" ), [ ]
+    try: code = dd.main( argv, parts=parts_of( tmp_path ), now=NOW, out=out.append )
+    finally:
+        proc.kill()
+        proc.wait()
+    assert code == 0 and calls == [ ] and json.loads( out[ 0 ] ) == { "status": "skipped", "trigger": "reboot", "note": "another run holds the run lock" }
+    out.clear()
+    assert dd.main( argv, parts=parts_of( tmp_path ), now=NOW, out=out.append ) == 0 and calls == [ 1 ] and json.loads( out[ 0 ] )[ "status" ] == "ok", "with the lock free the run goes ahead"
 
 
 def failed_line( tmp_path ):
