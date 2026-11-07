@@ -11,6 +11,7 @@ import hashlib
 import json
 import pathlib
 
+from cosa.utils import secret_drift
 from lupin_mcp.persona_normalization import canonical_persona_key
 
 KEY_PREFIX     = "epic:dupcheck-"
@@ -31,11 +32,6 @@ QUEUED         = "queued_for_retry"
 REFUSED        = "refused"
 
 
-def content_hash( text ):
-    """Ensures: returns the sha256 hex digest of the definition's text."""
-    return hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()
-
-
 def correlation_key( definition_id, text ):
     """
     Give the store key that makes one row per definition text.
@@ -44,7 +40,7 @@ def correlation_key( definition_id, text ):
         - returns "epic:dupcheck-" and the first 16 hex digits of the sha256 of the definition id, a colon and the text's content hash
         - the key holds no date, and it matches the store's epic key pattern
     """
-    return KEY_PREFIX + hashlib.sha256( f"{definition_id}:{content_hash( text )}".encode( "utf-8" ) ).hexdigest()[ :KEY_HEX ]
+    return KEY_PREFIX + hashlib.sha256( f"{definition_id}:{secret_drift.sha256_of( text )}".encode( "utf-8" ) ).hexdigest()[ :KEY_HEX ]
 
 
 def for_record( finding ):

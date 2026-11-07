@@ -10,6 +10,7 @@ import pytest
 import cosa.utils.util as cu
 from lupin_mcp.reuse_needset import control_report as cr
 from lupin_mcp.reuse_needset import errors as er
+from lupin_mcp.reuse_needset import finalize
 from lupin_mcp.reuse_needset import positive_control as pc
 from tests.unit.test_reuse_needset_first_thousand import real_pair
 
@@ -43,12 +44,12 @@ def test_agreeing_reviewers_decide_and_the_third_rater_settles_each_dispute_and_
     got = cr.same_job_labels( pairs, folder, key, expected_not_same=frozenset( ( "d-rew01", "d-rew02" ) ), expected_shas=None )
     assert got[ "same_job" ] == { "d-rew00": True, "d-rew01": False, "d-rew02": False, "d-rew03": True }
     assert sorted( got[ "label_shas" ] ) == sorted( cr.LABEL_FILES ) and got[ "label_shas" ][ "labels-jason.jsonl" ] == hashlib.sha256( ( folder / "labels-jason.jsonl" ).read_bytes() ).hexdigest()
-    assert got[ "answer_key_sha" ] == cr.file_sha( key ) and len( got[ "answer_key_sha" ] ) == 64
+    assert got[ "answer_key_sha" ] == finalize.file_sha256( key ) and len( got[ "answer_key_sha" ] ) == 64
 
 
 def test_label_files_and_key_that_do_not_hash_to_the_pins_are_refused_by_name_before_they_are_read( tmp_path ):
     pairs, folder, key = label_world( tmp_path )
-    pins = { **{ name: cr.file_sha( folder / name ) for name in cr.LABEL_FILES }, cr.KEY_FILE: cr.file_sha( key ) }
+    pins = { **{ name: finalize.file_sha256( folder / name ) for name in cr.LABEL_FILES }, cr.KEY_FILE: finalize.file_sha256( key ) }
     assert cr.same_job_labels( pairs, folder, key, expected_not_same=frozenset( ( "d-rew01", "d-rew02" ) ), expected_shas=pins )[ "same_job" ][ "d-rew00" ] is True
     ( folder / "labels-jason.jsonl" ).write_text( "garbage that is not a label file\n", encoding="utf-8" )
     with pytest.raises( er.NeedsetError ) as changed: cr.same_job_labels( pairs, folder, key, expected_shas=pins )

@@ -9,6 +9,7 @@ import uuid
 from cosa.repo.symindex.candidates import vector_build as vb
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE
+from cosa.utils import secret_drift
 
 CONTENT_TYPE = "code"
 ROLE         = "document"
@@ -118,7 +119,7 @@ def ensure_vectors( defs, client, cache_dir, body_chars, sleep=time.sleep ):
     texts, truncated, sha_of = {}, [], {}
     for d in defs:
         text, cut = body_text( d, body_chars )
-        sha = vs.text_hash( text )
+        sha = secret_drift.sha256_of( text )
         texts[ sha ] = text
         sha_of[ d[ "id" ] ] = sha
         if cut: truncated.append( d[ "id" ] )

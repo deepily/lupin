@@ -13,12 +13,12 @@ The out dir holds purpose-lines/purpose.jsonl (a copy of the live store), vector
 The embeddings endpoint on :7999 must be up. Only changed rows are embedded.
 """
 import argparse
-import hashlib
 import json
 import pathlib
 import sys
 
 from lupin_mcp.reuse_needset import errors as er
+from lupin_mcp.reuse_needset import finalize
 
 MATRICES     = ( "code.f32", "concat.f32", "prose.f32", "ids.txt" )
 PURPOSE_FILE = "purpose.jsonl"
@@ -31,7 +31,7 @@ REFUSALS     = ( er.PRIOR_GEN_MISSING, er.PURPOSE_STORE_NOT_LIVE, er.MATRICES_CH
 def _sha( path ):
     """Ensures: returns the sha256 of the file's bytes, or None when it is not a file."""
     path = pathlib.Path( path )
-    return hashlib.sha256( path.read_bytes() ).hexdigest() if path.is_file() else None
+    return finalize.file_sha256( path ) if path.is_file() else None
 
 
 def live_purpose_store( root ):

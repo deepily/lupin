@@ -7,6 +7,7 @@ import re
 import pytest
 
 from cosa.rest import task_store_rules as rules
+from cosa.utils import secret_drift
 from lupin_mcp import duplicate_check_filing as ff
 
 WINDOW = { "start": "aaa", "end": "bbb", "commits": 1 }
@@ -51,7 +52,7 @@ def test_the_key_is_the_definition_id_and_text_hash_never_the_day_and_matches_th
     key = ff.correlation_key( "d-1", "def a(): pass" )
     assert re.fullmatch( r"epic:[a-z0-9._-]+", key ) and key.startswith( "epic:dupcheck-" ) and len( key ) == len( "epic:dupcheck-" ) + 16
     assert key == ff.correlation_key( "d-1", "def a(): pass" ) and key != ff.correlation_key( "d-2", "def a(): pass" ) and key != ff.correlation_key( "d-1", "def a(): pass  " )
-    assert ff.content_hash( "x" ) == "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
+    assert secret_drift.sha256_of( "x" ) == "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
 
 
 def test_the_owner_is_the_roster_persona_that_matches_the_configured_manager_whatever_the_case_or_accent():

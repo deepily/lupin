@@ -64,23 +64,13 @@ def manifest_hash( manifest ):
     return hashlib.sha256( canonical( body ).encode( "utf-8" ) ).hexdigest()
 
 
-def text_hash( text ):
-    """
-    Name one embedded text.
-
-    Ensures:
-        - returns the hex sha256 of the text's utf-8 bytes
-    """
-    return hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()
-
-
 def write_row_texts( out_dir, ids, hashes ):
     """
     Write the sidecar that names the text each matrix row was embedded from.
 
     Requires:
         - ids is the sorted list of entry ids, one per matrix row
-        - hashes maps each matrix name (prose, code, concat) to the list of text_hash values, in id order
+        - hashes maps each matrix name (prose, code, concat) to the list of sha256 hashes of the texts, in id order
 
     Ensures:
         - writes one JSON line per id: { id, prose, code, concat }, each a text hash

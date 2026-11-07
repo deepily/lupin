@@ -9,6 +9,7 @@ import time
 
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, ENGINE_NOT_LOADED, SERVICE_SATURATED
+from cosa.utils import secret_drift
 
 # No-GPU rule (planning-is-prompting workflow/testing-baseline.md § "no test or job touches a GPU"): this module reaches the model only through the embeddings service. A service that stays
 # crowded stops the pass at once with SERVICE_SATURATED (see embed_all's refusal_limit); nothing here asks for a GPU to be freed.
@@ -277,7 +278,7 @@ def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pa
     out = pathlib.Path( out_dir )
     out.mkdir( parents=True, exist_ok=True )
     row_ids   = [ e[ "id" ] for e in rows ]
-    hashes    = { name: [ vs.text_hash( t ) for t in texts[ name ] ] for name in vs.MATRICES }
+    hashes    = { name: [ secret_drift.sha256_of( t ) for t in texts[ name ] ] for name in vs.MATRICES }
     usable    = reuse is not None and reuse.row_texts is not None and not reuse_mismatches( reuse.manifest, info )
     dimension = None
     for name in vs.MATRICES:
