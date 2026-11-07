@@ -163,6 +163,26 @@ def old_paths( root, window ):
     return { new: old for old, new in changes( root, window ) if old is not None and old != new }
 
 
+def definitions_held_at_start( root, window, files, start_sha, path, key ):
+    """
+    List the definitions of the changed files that an earlier commit already held.
+
+    Requires:
+        - files are the window's changed files at its end; path is a free place for a detached worktree at start_sha
+        - key( file, definition ) gives the part of a definition the caller compares: the file is the one it has now
+
+    Ensures:
+        - returns the set of key( file, definition ) over the definitions found at start_sha
+        - a renamed file is read under the path it had at start_sha, and a file absent there lists nothing
+        - the worktree is removed whether the read ends or fails
+    """
+    was  = old_paths( root, window )
+    back = { was.get( f, f ): f for f in files }
+    old  = source_at.ensure_worktree( root, start_sha, path )
+    try: return { key( back[ d[ "file" ] ], d ) for d in extract.extract_tree( old, [ pathlib.Path( old ) / o for o in back if ( pathlib.Path( old ) / o ).exists() ], "new" )[ "definitions" ] }
+    finally: release( root, old )
+
+
 def new_definitions( tree, root, window ):
     """
     List the definitions the window added or changed, oldest commit first.
@@ -177,13 +197,7 @@ def new_definitions( tree, root, window ):
     """
     files = changed_files( root, window )
     found = extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )[ "definitions" ] if files else []
-    held  = set()
-    if files:
-        was  = old_paths( root, window )
-        back = { was.get( f, f ): f for f in files }
-        old  = source_at.ensure_worktree( root, window[ "start" ], pathlib.Path( tree ).parent / f"{pathlib.Path( tree ).name}-start" )
-        try: held = { ( back[ d[ "file" ] ], d[ "name" ], d[ "text" ] ) for d in extract.extract_tree( old, [ pathlib.Path( old ) / o for o in back if ( pathlib.Path( old ) / o ).exists() ], "new" )[ "definitions" ] }
-        finally: release( root, old )
+    held  = definitions_held_at_start( root, window, files, window[ "start" ], pathlib.Path( tree ).parent / f"{pathlib.Path( tree ).name}-start", lambda f, d: ( f, d[ "name" ], d[ "text" ] ) ) if files else set()
     rank  = { c: i for i, c in enumerate( window[ "commits" ] ) }
     touch = { f: git( root, "log", "-1", "--first-parent", "--format=%H", f"{window[ 'start' ]}..{window[ 'end' ]}", "--", f ) for f in files }
     fresh = [ d for d in found if ( d[ "file" ], d[ "name" ], d[ "text" ] ) not in held ]

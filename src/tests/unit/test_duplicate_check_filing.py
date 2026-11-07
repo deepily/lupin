@@ -2,6 +2,7 @@
 import datetime
 import hashlib
 import json
+import pathlib
 import re
 
 import pytest
@@ -388,3 +389,13 @@ def test_one_finding_past_the_limit_lists_the_limit_and_counts_exactly_one_more(
     listed = [ l for l in row[ "body" ].splitlines() if l.startswith( "- f" ) ]
     assert len( listed ) == 200 and ff.LIST_LIMIT == 200 and row[ "body" ].splitlines()[ -1 ] == "- and 1 more in r.json" and f"f{ff.LIST_LIMIT} (" not in row[ "body" ]
     assert len( row[ "finding_keys" ] ) == 201
+
+
+def test_the_spool_is_written_by_temporary_file_and_rename_so_a_reader_never_sees_half( tmp_path, monkeypatch ):
+    seen = [ ]
+    real = ff.lq.os.replace
+    monkeypatch.setattr( ff.lq.os, "replace", lambda src, dst: seen.append( ( src, dst, pathlib.Path( src ).read_text( encoding="utf-8" ) ) ) or real( src, dst ) )
+    ff.write_pending( tmp_path, [ { "a": 1 } ] )
+    target = str( tmp_path / ff.PENDING_FILE )
+    assert seen == [ ( target + ".tmp", target, '{"a": 1}\n' ) ]
+    assert not ( tmp_path / ( ff.PENDING_FILE + ".tmp" ) ).exists() and ff.read_pending( tmp_path ) == [ { "a": 1 } ]

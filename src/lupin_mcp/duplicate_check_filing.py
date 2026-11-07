@@ -11,6 +11,7 @@ import hashlib
 import json
 import pathlib
 
+from cosa.repo.symindex import librarian_queue as lq
 from cosa.utils import secret_drift
 from lupin_mcp.persona_normalization import canonical_persona_key
 
@@ -129,13 +130,8 @@ def read_pending( folder ):
 
 
 def write_pending( folder, payloads ):
-    """Ensures: the spool holds exactly these payloads; an empty list removes the file."""
-    path = pathlib.Path( folder ) / PENDING_FILE
-    if not payloads:
-        path.unlink( missing_ok=True )
-        return
-    path.parent.mkdir( parents=True, exist_ok=True )
-    path.write_text( "".join( json.dumps( p, sort_keys=True ) + "\n" for p in payloads ), encoding="utf-8" )
+    """Ensures: the spool holds exactly these payloads, written atomically; none removes it."""
+    lq.write_pending( str( pathlib.Path( folder ) / PENDING_FILE ), payloads )
 
 
 def gated( body ):

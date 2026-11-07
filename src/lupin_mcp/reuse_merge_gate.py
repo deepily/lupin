@@ -191,12 +191,7 @@ def added_definition_ids( root, base_sha ):
     stem   = pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}"
     tree   = source_at.ensure_worktree( root, window[ "end" ], stem )
     try:
-        was  = daily.old_paths( root, window )
-        back = { was.get( f, f ): f for f in files }
-        old  = source_at.ensure_worktree( root, base_sha, stem.with_name( f"{stem.name}-base" ) )
-        try:
-            held = { ( back[ d[ "file" ] ], d[ "name" ] ) for d in extract.extract_tree( old, [ pathlib.Path( old ) / o for o in back if ( pathlib.Path( old ) / o ).exists() ], "new" )[ "definitions" ] }
-        finally: daily.release( root, old )
+        held = daily.definitions_held_at_start( root, window, files, base_sha, stem.with_name( f"{stem.name}-base" ), lambda f, d: ( f, d[ "name" ] ) )
         report = extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )
         if report[ "skipped_python" ]: raise ValueError( f"{', '.join( report[ 'skipped_python' ] )} did not parse, so its definitions cannot be listed" )
         extract.completeness( report )

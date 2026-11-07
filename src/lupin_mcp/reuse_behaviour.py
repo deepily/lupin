@@ -26,6 +26,7 @@ import shlex
 import sys
 
 import cosa.utils.util as cu
+from cosa.repo.symindex import librarian_queue as lq
 from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import shadow_audit as sa
 from cosa.repo.symindex.candidates.errors import CandidateError
@@ -79,14 +80,7 @@ def read_refusals( data_dir ):
         - returns the records in file order, one dict per line that is a JSON object
         - a missing file gives an empty list; a line that is not a JSON object is skipped, as the writer skips it
     """
-    path = pathlib.Path( data_dir ) / rr.REFUSALS_NAME
-    if not path.exists(): return []
-    out = []
-    for raw in path.read_text( encoding="utf-8" ).splitlines():
-        try: row = json.loads( raw )
-        except ValueError: continue
-        if isinstance( row, dict ): out.append( row )
-    return out
+    return lq.read_pending( str( pathlib.Path( data_dir ) / rr.REFUSALS_NAME ) )
 
 
 def reason_label( reason ):
