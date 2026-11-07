@@ -231,7 +231,7 @@ def test_the_live_hook_prints_the_line_before_any_early_return():
 # reads a run's result, so its shape is not cosmetic — it is an interface.
 #
 # WHAT HIS CHECK ACTUALLY ESTABLISHED, corrected: of the three parsers, only ONE
-# reads pytest output — `swe_team/test_runner.py:76`. The other two are
+# reads pytest output — `swe_team/test_runner.py`. The other two are
 # `_parse_node_tap_summary` (Node/TAP, the TypeScript suite) and a branch of
 # `_parse_non_pytest_stdout`; both are named for what they parse and do not match
 # pytest output with or without this line. My earlier review listed all three as if

@@ -497,7 +497,7 @@ def test_exactly_the_expected_pages_carry_cache_bust_tokens():
 # Measured 2026-09-02, and BOTH ARE EMPTY TODAY:
 #
 #   CSS `@import`  0 real, across 31 tracked .css files. There is exactly one textual
-#                  hit and it is a COMMENT — proxy-ratify.css:5 says badge classes are
+#                  hit and it is a comment — proxy-ratify.css says badge classes are
 #                  "shared with proxy-dashboard.css via @import" and the file contains
 #                  no @import at all. A comment describing an implementation that does
 #                  not exist, which is the same trap `strip_js_comments` was written

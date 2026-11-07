@@ -88,7 +88,7 @@ def _reload_kwargs_keys():
 
     keys = set()
     for node in ast.walk( tree ):
-        # reload_kwargs[ "x" ] = ...
+        # an assignment to a key of reload_kwargs
         if isinstance( node, ast.Assign ) and len( node.targets ) == 1:
             target = node.targets[ 0 ]
             if ( isinstance( target, ast.Subscript )
@@ -96,7 +96,7 @@ def _reload_kwargs_keys():
                  and target.value.id == "reload_kwargs"
                  and isinstance( target.slice, ast.Constant ) ):
                 keys.add( target.slice.value )
-            # reload_kwargs = { "x": ... }
+            # reload_kwargs assigned a dict literal
             if ( isinstance( target, ast.Name ) and target.id == "reload_kwargs"
                  and isinstance( node.value, ast.Dict ) ):
                 for k in node.value.keys:

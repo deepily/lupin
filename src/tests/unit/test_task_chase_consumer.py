@@ -98,7 +98,7 @@ def test_sweep_enabled_zero_due():
 
 
 # ---------------------------------------------------------------------------
-# stall_report (read-only, flag-independent)
+# stall_report, which is read-only and flag-independent
 # ---------------------------------------------------------------------------
 
 def test_stall_report_serializes_overdue_both_ts_branches():

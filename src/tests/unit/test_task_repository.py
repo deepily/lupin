@@ -1064,7 +1064,7 @@ def test_apply_amendment_live_row_keeps_ordinary_marker( repo, session ):
 # Persona-key follow-on policy (2026-07-11, task c03d1870) — flag_suffix folds
 # the off-roster persona marker into the EXISTING creation / patched event reason
 # (zero schema, zero new events). Design:
-# src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# the persona-key follow-on policy note (removed by 8420e8b0a)
 # ---------------------------------------------------------------------------
 
 def test_create_item_folds_flag_suffix_into_queued_event_reason( repo, session ):

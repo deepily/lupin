@@ -125,7 +125,7 @@ def client( repo, monkeypatch ):
     before the role check ever runs. Two derivations of one permission that happen to
     agree, with nothing checking that they must.
     """
-    # NO `raising=False`. The symbol is imported at tasks.py:57 and must be — if it is
+    # no `raising=False`. The symbol is imported at the top of tasks.py and must be — if it is
     # ever renamed or dropped, this patch should FAIL LOUD rather than silently no-op
     # and leave the file testing a door it no longer reaches. A patch that cannot fail
     # is the same shape as the assertions this crew spent tonight removing.

@@ -211,7 +211,7 @@ class TestDiagnoseCluster:
 
     @pytest.mark.asyncio
     async def test_exhausts_iterations_returns_best( self ):
-        orch = _make_orchestrator()   # max_iters=3
+        orch = _make_orchestrator()   # three iterations at most
         cluster = FailureCluster(
             cluster_id="C1", failure_indices=[ 0 ],
             shared_error_signature="sig",

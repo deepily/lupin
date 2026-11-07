@@ -1101,7 +1101,7 @@ def test_breakdown_NEVER_reaches_the_full_row_response( client, repo ):
     consumers.
     """
     repo.query_tasks.return_value = [ ]
-    r = client.get( "/api/tasks", params={ "owner_persona": "krishna" } )   # count_only=False
+    r = client.get( "/api/tasks", params={ "owner_persona": "krishna" } )   # count_only is off
 
     assert r.status_code == 200
     assert "breakdown" not in r.json(), "breakdown leaked into the full-row shape the multiplexer parses"
@@ -2405,7 +2405,7 @@ def test_amend_rejects_overlong_fields( client, repo, field, limit ):
 # Persona-key follow-on policy (2026-07-11, task c03d1870):
 #   (2) class-scoped owner default on CREATE, and
 #   (1) unknown-persona soft-flag on the CREATE and reassign(PATCH) paths.
-# Design: src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md
+# Design: the persona-key follow-on policy note (removed by 8420e8b0a)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize( "ownerless_class", [ "decision", "gate" ] )
