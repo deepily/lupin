@@ -2,7 +2,7 @@
 capability: reuse-behaviour-weekly-page
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - lupin_mcp.reuse_behaviour.read_refusals@ad3803c166
+  - lupin_mcp.reuse_behaviour.read_refusals@65432d3f1a
   - lupin_mcp.reuse_behaviour.reason_label@2baa431ee4
   - lupin_mcp.reuse_behaviour.count_lookups@4e8867f87f
   - lupin_mcp.reuse_behaviour.count_outcomes@58cdf68a73
@@ -24,7 +24,7 @@ pins:
 ## What it does
 - A report is seven calendar days ending on a date, in the host's zone (`local_tz`, `week_of`). The default end is the Sunday that closes the last complete Monday-to-Sunday week (`last_complete_week_end`).
 - `day_of` reads a stamp's day, or None without an offset. `in_week` splits items into those in the week and those with no readable date. The undated go on their own row.
-- `read_refusals` reads `refusals.jsonl`, skips lines that are not JSON objects, and returns an empty list for a missing file.
+- `read_refusals` reads `refusals.jsonl` with the librarian queue's reader, skips lines that are not JSON objects, and returns an empty list for a missing file.
 - `count_lookups` counts calls to each lookup tool that logged no error, then the failed ones. Looking up the same need twice counts twice.
 - `count_outcomes` counts scanned lines as `REUSED`, `EXTENDED`, `WROTE_NEW` or `unparsed`. `count_refusals` counts reasons under the labels from `reason_label`. A record with two reasons counts under each.
 - `report` draws four tables: lookups, scanned lines by status, outcomes by kind and refusals by reason.

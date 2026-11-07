@@ -12,6 +12,7 @@ import json
 import pathlib
 
 from cosa.repo.symindex import librarian_queue as lq
+from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
 from cosa.utils import secret_drift
 from lupin_mcp.persona_normalization import canonical_persona_key
 
@@ -213,14 +214,15 @@ def file_findings( findings, folder, store, declared, roster, day=None ):
     return out
 
 
-class LiveStore:
+class LiveStore( TaskStoreAdapter ):
     """The store over HTTP with the hooks' own client, needing no MCP session."""
+
+    amend_extra = { "reason": AMEND_REASON, "authority": "standing" }
 
     def __init__( self, settings=None, api_key=None ):
         from lupin_cli.claude_code.hooks.lib import task_store_client as client, task_store_settings
-        self.client   = client
-        self.settings = task_store_settings.load_task_store_settings() if settings is None else settings
-        self.api_key  = client.read_api_key() if api_key is None else api_key
+        super().__init__( task_store_settings.load_task_store_settings() if settings is None else settings,
+                          client.read_api_key() if api_key is None else api_key, client )
 
     def query( self, key ):
         """
@@ -232,18 +234,3 @@ class LiveStore:
             - never raises
         """
         return self.client.query_by_correlation_key( self.settings, self.api_key, key, every_state=True )
-
-    def create( self, payload ):
-        """Ensures: returns ( ok, status, body ) of the create; never raises."""
-        return self.client.create_task( self.settings, self.api_key, payload )
-
-    def amend( self, row_id, note ):
-        """
-        Append a note to a row's body.
-
-        Requires:
-            - row_id is the row's uuid text; note is the text to append
-        Ensures:
-            - returns ( ok, status, body ) of the amend; never raises
-        """
-        return self.client.amend_task( self.settings, self.api_key, row_id, { "note": note, "reason": AMEND_REASON, "authority": "standing" } )

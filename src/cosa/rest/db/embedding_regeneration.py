@@ -45,6 +45,8 @@ import sys
 import json
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 
+from cosa.utils.batch_halving import embed_in_halves
+
 # Bound on the /api/busy probe (row f6ce66f1).
 _BUSY_PROBE_TIMEOUT_SECONDS = 3
 
@@ -391,7 +393,7 @@ class AdaptiveBudget:
     when one is refused. The run finds the real ceiling on whatever hardware it
     meets, and no constant needs re-tuning by hand.
 
-    Pairs with split_batch(): this sets the target size, that recovers the batch
+    Pairs with batch_halving.split_batch(): this sets the target size, that recovers the batch
     that overshot.
     """
 
@@ -443,30 +445,6 @@ class AdaptiveBudget:
         """
         self._current = max( self.floor, self._current // 2 )
         return self._current
-
-
-def split_batch( batch: Sequence[Any] ) -> List[List[Any]]:
-    """
-    Halve a batch that the embedder refused, for retry.
-
-    A failed batch is not evidence that any row in it is bad. It may only have been
-    too big for the memory free at that moment. Halving converges on the real
-    culprit, or on success, in log2(n) attempts.
-
-    Requires:
-        - batch is a sequence
-
-    Ensures:
-        - returns [] for an empty batch
-        - returns [] for a single-item batch — one item cannot be split, and the
-          caller must treat that as a genuine per-row failure rather than retry
-          forever
-        - otherwise returns exactly two non-empty halves covering the batch in order
-    """
-    if len( batch ) <= 1:
-        return []
-    middle = len( batch ) // 2
-    return [ list( batch[ :middle ] ), list( batch[ middle: ] ) ]
 
 
 def is_off_peak( hour_edt: int, end_hour: int = OFF_PEAK_END_HOUR ) -> bool:
@@ -732,7 +710,7 @@ def _plan( session, prefix="", specs=None ):   # pragma: no cover - live DB boun
     return grand_total
 
 
-def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None ):   # pragma: no cover - live embedder boundary
+def _embed_with_split_retry( provider, rows, content_type, budget=None ):   # pragma: no cover - live embedder boundary
     """
     Embed (id, text) rows, halving the batch on failure until it fits or is one row.
 
@@ -751,25 +729,27 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None 
     """
     from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
 
-    try:
-        vectors = provider.generate_embeddings_batch( [ r[ 1 ] for r in rows ], content_type=content_type )
-        if budget is not None and depth == 0: budget.record_success()
-        return list( zip( [ r[ 0 ] for r in rows ], vectors ) )
-    except EmbeddingProviderUnreachable:
-        # Deliberately NOT recorded as a batch-size failure: the budget's job is to
-        # learn how big a batch the GPU tolerates, and a dead server teaches it nothing.
-        raise
-    except Exception as error:
+    def alone_failed( error, batch ):
+        """Ensures: reports the one row and returns it with no vector."""
+        print( f"    single row {batch[ 0 ][ 0 ]} failed to embed alone: {type( error ).__name__}: {str( error )[ :90 ]}" )
+        return [ ( batch[ 0 ][ 0 ], None ) ]
+
+    def on_failure( error, batch ):
+        """Ensures: teaches the budget the failure and says the batch is being split."""
+        # EmbeddingProviderUnreachable never gets here (it is passed through below). The budget learns how big a
+        # batch the GPU tolerates, and a dead server teaches it nothing.
         if budget is not None: budget.record_failure()
-        halves = split_batch( rows )
-        if not halves:
-            print( f"    single row {rows[ 0 ][ 0 ]} failed to embed alone: {type( error ).__name__}: {str( error )[ :90 ]}" )
-            return [ ( rows[ 0 ][ 0 ], None ) ]
-        print( f"    batch of {len( rows )} failed ({type( error ).__name__}) — splitting" )
-        out = []
-        for half in halves:
-            out.extend( _embed_with_split_retry( provider, half, content_type, depth + 1, budget ) )
-        return out
+        if len( batch ) > 1: print( f"    batch of {len( batch )} failed ({type( error ).__name__}) — splitting" )
+
+    def on_success( at_depth ):
+        """Ensures: teaches the budget a success of the whole batch, not of a half."""
+        if budget is not None and at_depth == 0: budget.record_success()
+
+    def embed( batch ):
+        """Ensures: returns ( row id, vector ) for each row."""
+        return list( zip( [ r[ 0 ] for r in batch ], provider.generate_embeddings_batch( [ r[ 1 ] for r in batch ], content_type=content_type ) ) )
+
+    return embed_in_halves( embed, rows, alone_failed, on_failure=on_failure, on_success=on_success, passthrough=( EmbeddingProviderUnreachable, ) )
 
 
 def _bulk_write_shadow( session, table, pk, shadow_column, pairs ):   # pragma: no cover - live DB boundary

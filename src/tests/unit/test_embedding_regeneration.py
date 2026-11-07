@@ -38,10 +38,11 @@ from cosa.rest.db.embedding_regeneration import (
     save_checkpoint,
     should_proceed,
     current_hour_in_configured_zone,
-    split_batch,
     summarize_verification,
     validate_fresh_vector,
 )
+
+from cosa.utils.batch_halving import split_batch
 
 
 def _vector_with_norm( norm, dim=EMBEDDING_DIM ):
@@ -590,6 +591,38 @@ class TestUnreachableServerIsNotABatchSizeProblem:
         assert provider.calls > 1, "an oversized batch must still be split and retried"
         assert [ r[ 0 ] for r in result ] == [ 0, 1, 2, 3 ]
         assert all( vector is None for _, vector in result )
+
+    class _Budget:
+        """Records what the splitter teaches the batch budget."""
+        def __init__( self ):
+            self.events = [ ]
+        def record_success( self ):
+            self.events.append( "success" )
+        def record_failure( self ):
+            self.events.append( "failure" )
+
+    class _FitsTwo:
+        """Refuses a batch of more than two texts, and a text called bad."""
+        def __init__( self ):
+            self.asked = [ ]
+        def generate_embeddings_batch( self, texts, content_type=None ):
+            self.asked.append( list( texts ) )
+            if len( texts ) > 2 or "bad" in texts: raise RuntimeError( "CUDA out of memory" )
+            return [ [ float( len( t ) ) ] for t in texts ]
+
+    def test_the_budget_learns_each_refusal_and_a_whole_batch_success_but_not_a_half( self ):
+        import cosa.rest.db.embedding_regeneration as er
+
+        budget = self._Budget()
+        whole  = er._embed_with_split_retry( self._FitsTwo(), [ ( 1, "a" ), ( 2, "bb" ) ], "prose", budget=budget )
+        assert whole == [ ( 1, [ 1.0 ] ), ( 2, [ 2.0 ] ) ] and budget.events == [ "success" ]
+
+        budget  = self._Budget()
+        provider = self._FitsTwo()
+        got = er._embed_with_split_retry( provider, [ ( 1, "a" ), ( 2, "bb" ), ( 3, "bad" ), ( 4, "d" ) ], "prose", budget=budget )
+        assert got == [ ( 1, [ 1.0 ] ), ( 2, [ 2.0 ] ), ( 3, None ), ( 4, [ 1.0 ] ) ]
+        assert provider.asked == [ [ "a", "bb", "bad", "d" ], [ "a", "bb" ], [ "bad", "d" ], [ "bad" ], [ "d" ] ]
+        assert budget.events == [ "failure", "failure", "failure" ]
 
     def test_the_exception_is_a_runtimeerror_so_existing_callers_still_catch_it( self ):
         # Subclassing is what keeps this a safe change for every other call site.

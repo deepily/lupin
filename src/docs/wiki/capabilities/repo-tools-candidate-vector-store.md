@@ -5,7 +5,6 @@ pins:
   - cosa.repo.symindex.candidates.vector_store.canonical@335bf66db1
   - cosa.repo.symindex.candidates.vector_store.file_sha256@ae79b421e0
   - cosa.repo.symindex.candidates.vector_store.manifest_hash@d6e63509e6
-  - cosa.repo.symindex.candidates.vector_store.text_hash@3afe6b4a27
   - cosa.repo.symindex.candidates.vector_store.write_row_texts@1d8056b5ce
   - cosa.repo.symindex.candidates.vector_store.read_row_texts@871ffe4a8b
   - cosa.repo.symindex.candidates.vector_store.seal@ecdbc8da53
@@ -18,7 +17,7 @@ pins:
 One vector set holds the current state of the repo: three float32 matrices (`prose.f32`, `code.f32`, `concat.f32`), `ids.txt`, `manifest.json` and the optional `row_texts.jsonl`. A rebuild writes a new folder and swaps it in. A missing or damaged set is a named error, never a recomputed answer.
 
 ## Hashes
-- `canonical( obj )` is JSON with sorted keys and no spaces. `file_sha256( path )` hashes a file in chunks. `text_hash( text )` hashes one embedded text.
+- `canonical( obj )` is JSON with sorted keys and no spaces. `file_sha256( path )` hashes a file in chunks. A text is hashed by `secret_drift.sha256_of`.
 - `manifest_hash( manifest )` ignores a stored `manifest_hash` key, so a sealed manifest hashes to its own value. It changes when any other field does.
 
 ## Writing a set

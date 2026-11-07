@@ -39,6 +39,7 @@ import sys
 from cosa.repo.symindex import build as build_mod
 from cosa.repo.symindex import paths
 from cosa.repo.symindex.librarian_queue import CORRELATION_KEY, MOBILE_CORRELATION_KEY, MOBILE_ROLLUP_PREFIX, Librarian
+from cosa.repo.symindex.task_store_adapter import TaskStoreAdapter
 from cosa.repo.symindex.wiki_lint import queue
 
 CRON_TAG         = "# wiki-librarian-tick"
@@ -241,7 +242,7 @@ def make_logger( path ):
     return log
 
 
-class LiveStore:
+class LiveStore( TaskStoreAdapter ):
     """
     The store adapter the tick uses: the task-store HTTP client behind three calls.
 
@@ -249,13 +250,13 @@ class LiveStore:
         - settings is the dict load_task_store_settings returns
         - api_key is the outbound key string
         - client is the task_store_client module, or a stand-in with the same functions
+
+    Ensures:
+        - a create is stamped with the tick as its actor and the standing authority; an amend with the same actor and authority
     """
 
-    def __init__( self, settings, api_key, client ):
-        """Keep the three collaborators."""
-        self.settings = settings
-        self.api_key  = api_key
-        self.client   = client
+    create_extra = { "created_by": ACTOR, "authority": "standing" }
+    amend_extra  = { "actor": ACTOR, "authority": "standing" }
 
     def _pages( self, correlation_key, extra ):
         """
@@ -292,14 +293,6 @@ class LiveStore:
     def query_all( self, correlation_key ):
         """Return ( ok, status, body ) for every row, done and dropped included."""
         return self._merged( correlation_key, ( { "include_terminal": "true", "hide_parked": "false" }, { "status": "not_approved" } ) )
-
-    def create( self, payload ):
-        """Return ( ok, status, body ) for one create; the actor is stamped here."""
-        return self.client.create_task( self.settings, self.api_key, { **payload, "created_by": ACTOR, "authority": "standing" } )
-
-    def amend( self, item_id, note ):
-        """Return ( ok, status, body ) for one append-only amendment."""
-        return self.client.amend_task( self.settings, self.api_key, item_id, { "note": note, "actor": ACTOR, "authority": "standing" } )
 
 
 def notify_owner( persona, text, environ, post=None, api_key=None ):
