@@ -1383,7 +1383,7 @@ class PodcastOrchestratorAgent:
             # script that reaches the review gate looking review-ready. The defect was
             # the MESSAGE: "try again in a few minutes" asserts a transience this
             # catch-all cannot verify. Surface `e`, plus the SDK stop_reason when we
-            # have it (captured at api_client.py:435, read by nobody). `from e` keeps
+            # have it (captured in api_client.py as stop_reason, read by nobody). `from e` keeps
             # the traceback chain.
             stop = f" [stop_reason={response.stop_reason}]" if response is not None else ""
             raise PodcastGenerationError(
@@ -1612,7 +1612,7 @@ class PodcastOrchestratorAgent:
 
                 # Split: /path/to/name-script.md → /path/to/name-script + .md
                 # Result: /path/to/name-script-v2.md
-                stem, ext   = os.path.splitext( base_path )  # ext = ".md"
+                stem, ext   = os.path.splitext( base_path )
                 output_path = f"{stem}-v{revision_num}{ext}"
 
             elif self._original_script_path:

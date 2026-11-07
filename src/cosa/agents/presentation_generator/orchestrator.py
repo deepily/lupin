@@ -1197,7 +1197,7 @@ class PresentationOrchestratorAgent:
         # One PINNED progress bubble for the whole batch sequence: every update
         # carries the same progress_group_id, so the UI updates one element in
         # place instead of appending a message per batch (same pattern podcast
-        # uses per-language, podcast_generator/orchestrator.py:666-726).
+        # uses per-language, the per-language audio progress group in podcast_generator/orchestrator.py).
         #
         # This exists because batched elaboration is SILENT for a long time: a
         # 32-slide deck spent 10m25s between "Phase 4" and "Phase 5" with no
@@ -1941,7 +1941,7 @@ class PresentationOrchestratorAgent:
                 return True
 
             else:
-                # Approve (default)
+                # Default: approve
                 return True
 
         except Exception as e:
@@ -2057,7 +2057,7 @@ class PresentationOrchestratorAgent:
                 return True
 
             else:
-                # Approve (default)
+                # Default: approve
                 # Clear human_feedback so it doesn't carry into elaboration
                 self._presentation_state[ "human_feedback" ] = None
                 return True
@@ -2204,7 +2204,7 @@ class PresentationOrchestratorAgent:
                 return True
 
             else:
-                # Approve (default)
+                # Default: approve
                 self._presentation_state[ "human_feedback" ] = None
                 return True
 

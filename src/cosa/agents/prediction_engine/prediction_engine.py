@@ -467,7 +467,7 @@ class PredictionEngine:
 
         consistency = self._bounded_consistency( { **votes, "yes": votes.get( "yes", 0.0 ) }, winner )
 
-        # Confidence = max_similarity * consistency
+        # Confidence is the product of max_similarity and consistency
         confidence = max_similarity * consistency
 
         # Qualifier retrieval from winning-side cases

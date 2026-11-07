@@ -175,8 +175,8 @@ def quick_smoke_test():
     assert trailing_window_allows( recent, now, 3, 60 ) is True        # 2 < 3 → room
     assert trailing_window_allows( recent, now, 2, 60 ) is False       # 2 >= 2 → full
     assert trailing_window_allows( recent + old, now, 2, 60 ) is False # old pruned → 2 in window → full
-    assert trailing_window_allows( recent, now, 0, 60 )  is True        # disabled (max<=0)
-    assert trailing_window_allows( recent, now, 2, 0 )   is True        # disabled (window<=0)
+    assert trailing_window_allows( recent, now, 0, 60 )  is True        # disabled when max is 0 or less
+    assert trailing_window_allows( recent, now, 2, 0 )   is True        # disabled when window is 0 or less
     return True
 
 

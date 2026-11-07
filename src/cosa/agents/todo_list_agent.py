@@ -77,13 +77,6 @@ class TodoListAgent( AgentBase ):
             - ValueError if DataFrame is empty
         """
         
-        # head = self.df.head( 2 ).to_xml( index=False )
-        # head = head.replace( "<?xml version='1.0' encoding='utf-8'?>", "" )
-        # head = head.replace( "data>", "todo>" )
-        #
-        # head = head + self.df.tail( 2 ).to_xml( index=False )
-        # head = head.replace( "<?xml version='1.0' encoding='utf-8'?>", "" )
-        # head = head.replace( "data>", "todo>" )
         
         head = self.df.head( 2 ).to_csv( index=False )
         head = head + self.df.tail( 2 ).to_csv( index=False )

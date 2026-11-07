@@ -234,7 +234,7 @@ class TestFixExpediterJob( AgenticJobBase ):
         # directly for TFE notifications to route correctly. This was the root
         # cause of tfe-d9e6b50f's "present_choices failed: Cannot resolve
         # target_user" crash at the Phase 2 voice gate.
-        # See: src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md (Fix 7)
+        # See: the TFE forensics capture plan, Fix 7 (removed from the tree; see 8420e8b0a^)
         from cosa.agents.bug_fix_expediter import cosa_interface as _bfe_ci
 
         _bfe_ci.TARGET_USER = self.user_email
@@ -481,7 +481,7 @@ class TestFixExpediterJob( AgenticJobBase ):
             # field (UI-only, not spoken via TTS) so the user gets in-UI access
             # to the failure without having to grep docker logs. Re-raises so
             # do_all()'s handler captures the traceback into self.error too.
-            # See: src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md (Fix 3)
+            # See: the TFE forensics capture plan, Fix 3 (removed from the tree; see 8420e8b0a^)
             tb_str = traceback.format_exc()
             try:
                 await voice_io.notify(

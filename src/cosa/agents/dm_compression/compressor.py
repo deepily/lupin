@@ -107,7 +107,7 @@ class DmCompressionAgent( AgentBase ):
         # literal braces of their own — code fences, dict literals, f-strings.
         # `str.format` reads every brace as a field and raises KeyError on the
         # first one it cannot resolve. The judge hit exactly this and documents
-        # it at judge.py:748.
+        # it in the comment above the .replace() call in dm_quality_judge/judge.py.
         template = self.prompt_template
 
         # Append the per-message target BEFORE the body is substituted, so the

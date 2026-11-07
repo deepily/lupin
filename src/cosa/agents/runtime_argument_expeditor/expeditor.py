@@ -646,7 +646,7 @@ class RuntimeArgumentExpeditor:
         # ("KISS") extracted from a natural utterance, so it is NOT in `missing`
         # above and its fuzzy handler is skipped — then the bare topic is handed
         # downstream where a file path is expected and the job dies with
-        # FileNotFoundError at runtime (podcast_generator/job.py:216-223). Treat a
+        # FileNotFoundError at runtime (the research-document check in podcast_generator/job.py). Treat a
         # present-but-non-existing-path value as UNRESOLVED and run the same fuzzy
         # matcher the missing case uses. The matcher SEED is original_question (the
         # full utterance, the validated input), not the bare pre-filled value; a
@@ -1228,7 +1228,7 @@ class RuntimeArgumentExpeditor:
             return None
 
         # MULTIPLE_CHOICE returns the raw label OR JSON { "answers": { <header>: label } }.
-        # Parsing copied verbatim in shape from todo_fifo_queue.py:1069-1077.
+        # Parsing copied verbatim in shape from the MULTIPLE_CHOICE parsing in todo_fifo_queue.py.
         selected = response.response_value.strip()
         if selected.startswith( "{" ):
             try:

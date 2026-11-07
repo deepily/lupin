@@ -100,7 +100,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, age
 # b33c8e96: cross-package SINGLE source of truth for the arbiter-poke sentinel. Both
 # poke bodies below DERIVE their prefix from this constant so the emitter (here) and
 # the Stop-hook matcher (is_heartbeat_poke_prompt) cannot drift — a wrapped arbiter
-# poke must NOT reset the recipient's Stop-hook poke-cap (user_prompt_submit.py:86).
+# poke must not reset the recipient's Stop-hook poke-cap (the reset_poke_count guard in user_prompt_submit.py).
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
 # Proactive-manager A2/A3 (fcb5dbc0): the PURE D4 operator-gate urgency router — the
 # arbiter is its single thin consumer (interrupt urgent / digest normal / queue low).

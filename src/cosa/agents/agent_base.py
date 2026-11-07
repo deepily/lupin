@@ -42,17 +42,6 @@ class AgentBase( RunnableCode, abc.ABC ):
     STATE_STOPPED_ERROR        = "error"
     STATE_STOPPED_DONE         = "done"
     
-    # ROUTING_COMMAND_TEMPLATE         = "agent router go to {routing_command}"
-    # PROMPT_TEMPLATE_KEY_TEMPLATE     = "prompt template for agent router go to {routing_command}"
-    # LLM_SPEC_KEY_TEMPLATE            = "llm spec key for agent router go to {routing_command}"
-    # SERIALIZATION_TOPIC_KEY_TEMPLATE = "serialization topic for agent router go to {routing_command}"
-    #
-    # @staticmethod
-    # def build_routing_command( routing_command ):
-    #     """
-    #     Returns the routing command for the given routing command.
-    #     """
-    #     return AgentBase.ROUTING_COMMAND_TEMPLATE.format( routing_command=routing_command )
     
     @abc.abstractmethod
     def restore_from_serialized_state( file_path: str ) -> 'AgentBase':

@@ -68,7 +68,7 @@ PODCAST_SCRIPT_TOOLS = []
 # job pg-efc6b2c8 (2026-08-04), where the response opened by apologising that it
 # could not create `/home/rruiz/.claude/plans/create-a-podcast-script-*.md`.
 #
-# Valid values, read from the installed SDK (claude_agent_sdk/types.py:24,
+# Valid values, read from the installed SDK (claude_agent_sdk/types.py (PermissionMode),
 # v0.1.56): "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk".
 PODCAST_PERMISSION_MODE = "default"
 

@@ -393,7 +393,7 @@ JOB_ARG_CONTRACTS = {
     "agent router go to test fix expediter" : {
         # START a fresh TFE run — SYSTEM-TRIGGERED, not voice. The test-suite
         # completion watchdog dispatches this command
-        # (test_suite_completion_watchdog.py:259) with source_test_suite_job_id =
+        # (_dispatch_tfe in test_suite_completion_watchdog.py) with source_test_suite_job_id =
         # the just-failed job's id_hash. That arg is a job hash no user can speak, so
         # this command is EXEMPT from the router prompt (the drift-guard exemption
         # carries the stated reason + the still-trained residual). It keeps a registry

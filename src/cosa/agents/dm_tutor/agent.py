@@ -113,7 +113,7 @@ class DmTutorAgent( AgentBase ):
         # DM bodies carry literal braces of their own — code fences, dict
         # literals, f-strings, [[Lnn]]-style markers. `str.format` reads every
         # brace as a field and raises KeyError on the first one it cannot
-        # resolve. The compression arm hit exactly this (compressor.py:110).
+        # resolve. The compression arm hit exactly this (see dm_compression/compressor.py).
         self.prompt = template.replace( "{dm}", dm_body )
 
         self.xml_response_tag_names = list( DmTutorResponse.TAG_FOR_FIELD.values() )
@@ -236,7 +236,7 @@ def quick_smoke_test():
 
     # Every check here guards a failure that is SILENT without it. An
     # unprocessed template does not raise: AgentBase swallows the processor's
-    # exception (agent_base.py:161) and ships the template as-is.
+    # exception (the except around process_template in AgentBase.__init__) and ships the template as-is.
     checks = [
         ( "body substituted",         "queue.py:412" in prompt ),
         ( "no unresolved {dm}",       "{dm}" not in prompt ),
