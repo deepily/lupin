@@ -283,7 +283,7 @@ def project_session_response(
     # 2026-05-13 fix: same projection mismatch as `_bridge_last_activity_epoch`.
     # Fall back to `idle_detection.last_interaction_at` so the API returns a real
     # ISO string instead of always-None. Per
-    # the design note "2026.05.13-broadcast-stale-bridge-phantom" (deleted in commit b113a3a7d).
+    # the design note "2026.05.13-broadcast-stale-bridge-phantom" (deleted in commit 8420e8b0a).
     # Defensive: `idle_detection` may be None / list / string under schema drift.
     idle_block = bridge.get( "idle_detection" )
     idle_iso   = idle_block.get( "last_interaction_at" ) if isinstance( idle_block, dict ) else None
@@ -364,7 +364,7 @@ def filter_and_project_sessions(
         # mtime >= last_interaction_at always, this can only INCLUDE MORE live
         # sessions than the old interaction-recency filter, never fewer — which is
         # the whole point: a broadcast must reach dormant-but-alive workers.
-        # See the design note "2026.06.05-broadcast-liveness-mtime-filter" (deleted in commit b113a3a7d)
+        # See the design note "2026.06.05-broadcast-liveness-mtime-filter" (deleted in commit 8420e8b0a)
         try:
             mtime_epoch = mtime_fn( path )
         except OSError:

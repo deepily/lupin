@@ -875,7 +875,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
 
         # TTS interaction mode (chorus / solo) — drives mode-conditional icon
         # rendering for the per-session DND toggle on each sender card. Added
-        # with the per-session DND toggle and slider move (the design note "2026.05.14-per-session-dnd-toggle-and-slider-move" was deleted in commit b113a3a7d).
+        # with the per-session DND toggle and slider move (the design note "2026.05.14-per-session-dnd-toggle-and-slider-move" was deleted in commit 8420e8b0a).
         "tts_interaction_mode"           : config_mgr.get( "tts interaction mode", default="chorus" ),
 
         # Commons Traffic Visibility (2026-05-14) — feature flag for the broadcast-card

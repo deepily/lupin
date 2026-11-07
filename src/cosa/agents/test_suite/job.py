@@ -112,7 +112,7 @@ SUITE_TIMEOUTS_SECONDS = {
                              # bare vs 29s under c8. The budget still holds comfortably, but note WHY it is not
                              # 29s for the suite: ONE file, audio_transport.test.ts, PASSES in 452s and owns
                              # essentially the entire wall clock. Fix that file and this budget could drop by an
-                             # order of magnitude. Provenance: the typescript-suite-memory-measured doc, removed by c752ab9e; recover it from c752ab9e^
+                             # order of magnitude. Provenance: the typescript-suite-memory-measured doc, removed by 8420e8b0a; recover it from 8420e8b0a^
     "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
     "typecheck"    : 300,    #  5 min. MEASURED 3.00s wall for all three projects (2026-09-09, row 7bc67019) — a 100x margin, and deliberately not the 600s default: a static gate that has run for five minutes has hung, not slowed down, and the budget is the only thing that says so.
     "stylelint"    : 300,    #  5 min. MEASURED 1.5s wall for 32 files (2026-09-18, row d3d4a18c) — the typecheck gate's reasoning: a static gate that has run for five minutes has hung, and the budget is the only thing that says so.

@@ -3,7 +3,7 @@
 Unit tests for the presentation orchestrator's slide-budget resolution and the
 soft-target drift warning.
 
-Spec: src/rnd/v0.2.0/2026.08.05-presentation-slide-count-control.md (T1 + T2b). — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.05-presentation-slide-count-control.md
+Spec: src/rnd/v0.2.0/2026.08.05-presentation-slide-count-control.md (T1 + T2b). — REMOVED by 8420e8b0a (2026-09-30); recover: git show 8420e8b0a^:src/rnd/v0.2.0/2026.08.05-presentation-slide-count-control.md
 
 These guard behavior that had ZERO unit coverage before this change:
     - the duration x slides_per_minute budget formula,
