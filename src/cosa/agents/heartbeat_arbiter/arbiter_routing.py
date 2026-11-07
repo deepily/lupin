@@ -68,7 +68,7 @@ ALL_TIERS = frozenset( {
 CASE_AUTO_POKE_REAP_REC = 13
 
 # Post-game ADDITIONS (2026-06-11, missed-poke post-game — design
-# doc removed from the tree; see 8420e8b0a^):
+# the arbiter-missed-poke-postgame-and-outreach-logging doc, removed from the tree; see 8420e8b0a^):
 #   14  MANAGER-STALE advisory — a MANAGER-role session silent past the staleness
 #       threshold (F2). RICK ONLY as of mini-plan 04 (2026-07-21). (The bounded
 #       staleness POKE itself is a direct send_to, like the stuck-tier wake-nudge,
@@ -141,7 +141,7 @@ CASE_USER_GATE_RESURFACE    = 18
 #     this extends the case-18 dark-only resurface to ALL open operator gates.
 CASE_OPERATOR_GATE          = 19
 # ff91cff4 ADDITION (2026-06-30, arbiter stuck-MANAGER peer-misroute — design
-# doc removed from the tree; see 8420e8b0a^):
+# the arbiter-stuck-manager-peer-misroute-bug doc, removed from the tree; see 8420e8b0a^):
 #   20  STUCK/DEAD MANAGER subject — when the SUBJECT of a stuck/dead escalation
 #       (the case-7 manager-tap OR the case-13 auto-poke reap-rec) is ITSELF a
 #       declared manager, the escalation is RICK-ONLY. Managers answer to Rick, not

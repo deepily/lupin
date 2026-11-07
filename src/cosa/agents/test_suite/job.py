@@ -1945,6 +1945,7 @@ class TestSuiteJob( AgenticJobBase ):
 
             # Parse structured junit-xml report (falls back to zeros if file missing)
             parsed = self._parse_junit_xml( junit_xml_path )
+            # The junit-xml file is left on disk: removing it was switched off while an empty failures array was debugged, and has not been re-enabled.
 
             # WG-7 (2026-04-28): For non-pytest suites (websocket today), the
             # junit-xml path is None, so _parse_junit_xml returned zero counts.

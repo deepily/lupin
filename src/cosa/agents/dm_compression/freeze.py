@@ -79,7 +79,7 @@ _PATTERNS = [
     # spans left uncovered by this pattern). 2026-08-07.
     # ⚠️ The closing guard is `(?!\w)(?!\.\d)`, NOT `(?![\w.])`.
     #
-    # `(?![\w.])` was there to stop `file.py:12.5` matching as `file.py:12`, and  # doc-lint: waive line-pointer -- example shape the pattern parses
+    # `(?![\w.])` was there to stop `file.py:12.5` matching as `file.py:12`, and  # doc-lint: waive line-pointer -- example shape the pattern parses or rejects
     # it did — while also refusing to match at all when a citation ends a
     # sentence. `judge.py:572.` matched nothing, and `judge.py:249-256.` matched  # doc-lint: waive line-pointer -- example shape the pattern parses
     # `judge.py:249`, silently reintroducing the truncation bug this pattern was  # doc-lint: waive line-pointer -- example shape the pattern parses

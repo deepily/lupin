@@ -156,7 +156,7 @@ class IterativeDebuggingAgent( AgentBase ):
             # AgentBase.run_prompt builds its client from self.model_name, so each pass must set it
             self.model_name      = llm_key
             prompt_response_dict = self.run_prompt()
-            
+            # The prompt response is not serialized to JSON here: that step was switched off and has not been reinstated.
             
             du.print_banner( f"{run_descriptor}: Prompt response dictionary" )
             print( json.dumps( prompt_response_dict, indent=4 ) )
