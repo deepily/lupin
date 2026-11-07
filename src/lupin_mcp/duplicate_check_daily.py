@@ -67,7 +67,7 @@ STAGE_GUARD       = "branch_guard"
 STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
 UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
-CARRIED           = ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR", "COSA_VOICE_MANAGERS__LUPIN" )     # names copied into the cron lines from the installer's environment
+CARRIED           = behaviour.CARRIED     # names copied into the cron lines from the installer's environment
 
 
 class Counting:

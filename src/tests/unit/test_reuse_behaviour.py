@@ -379,6 +379,18 @@ def test_print_cron_shows_the_two_lines_and_installs_nothing( tmp_path, monkeypa
     assert rb.main( [ "--print-cron" ], out=refused ) == 3 and "--print-cron needs --log-path" in refused.getvalue()
 
 
+def test_print_cron_carries_the_config_manager_variable_and_fails_without_it():
+    env = { "LUPIN_CONFIG_MGR_CLI_ARGS": "--config-path /c x", "DEEPILY_DATA_DIR": "/d", "OTHER": "no" }
+    out = io.StringIO()
+    assert rb.main( [ "--print-cron", "--log-path", "/l", "--python", "py" ], out=out, environ=env ) == 0
+    lines = out.getvalue().splitlines()
+    assert len( lines ) == 2 and all( "LUPIN_CONFIG_MGR_CLI_ARGS='--config-path /c x' " in l and "DEEPILY_DATA_DIR=/d " in l and "OTHER" not in l for l in lines )
+    bare = io.StringIO()
+    rb.main( [ "--print-cron", "--log-path", "/l", "--python", "py" ], out=bare, environ={} )
+    assert "LUPIN_CONFIG_MGR_CLI_ARGS" not in bare.getvalue(), "an unset variable is left out, never written empty"
+    assert "LUPIN_CONFIG_MGR_CLI_ARGS" in rb.CARRIED
+
+
 def test_a_compact_end_date_is_saved_under_the_dashed_date( tmp_path, utc ):
     seed( tmp_path, calls(), rows() )
     assert rb.main( [ "--data-dir", str( tmp_path ), "--end", "20261102", "--write" ], out=io.StringIO() ) == 0
