@@ -58,7 +58,7 @@ SNAPSHOT = "src/tmp/arm4/dm_traffic_snapshot_2026.08.07.jsonl"
 OUT_DIR  = pathlib.Path( "src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/live-runs" )
 OUT_JSON = OUT_DIR / "sentence-bands-2026.08.12.json"
 
-# The naive counter, copied verbatim from dm.py:249 rather than imported, because
+# The naive counter, copied verbatim from `_SENTENCE_SPLIT_RE` in dm.py rather than imported, because
 # importing that router drags the whole FastAPI app in for one regex.
 _NAIVE_SPLIT = re.compile( r"[.!?]+(?:\s+|$)" )
 

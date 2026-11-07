@@ -145,14 +145,14 @@ def main():
         #
         # The first version of this script read the raw text off
         # `XMLParsingError.xml_content`. That field is `xml_content[:200] +
-        # "..."` (util_xml_pydantic.py:69) — the exception truncates its own
+        # "..."` (in `XMLParsingError.__init__`, util_xml_pydantic.py) — the exception truncates its own
         # copy. Every capture came back at exactly 203 characters, every
         # response therefore looked unterminated, and the classifier was
         # naming the cut this harness had made. Uniform length across every row
         # is what gave it away; malformed output does not arrive all one size.
         #
         # `AgentBase.run_prompt` does `llm.run( self.prompt )` and parses the
-        # result (agent_base.py:306). Splitting those two steps here is the
+        # result. Splitting those two steps here is the
         # same shipping path with the raw string kept — no truncation anywhere.
         try:
             agent  = DmCompressionAgent( frozen_text=body )
