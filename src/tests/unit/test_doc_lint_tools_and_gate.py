@@ -774,6 +774,34 @@ def test_a_waived_docstring_finding_does_not_take_the_comment_finding_on_its_lin
     assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
 
 
+# ---- the same-line waiver for the three comment rules -------------------------------------------
+
+@pytest.mark.parametrize( "rel", [ "src/lupin_mcp/w.py", "src/pkg/w.py" ] )
+@pytest.mark.parametrize( "body, rule", [
+    ( "# x = 1\n", "commented-out-code" ),
+    ( "# see notes.md:50\n", "line-pointer" ),
+    ( "# see src/gone.py\n", "dangling-path" ),
+] )
+def test_the_three_comment_rules_accept_a_same_line_waiver_and_other_comment_rules_do_not( repo, monkeypatch, rel, body, rule ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/keep.py": "y = 1\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { rel: body } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and any( f":1: {rule}" in ln for ln in lines )
+    waiver = f"  # doc-lint: waive {rule} -- the worked example the page quotes\n"
+    _stage( repo, { rel: body.rstrip( "\n" ) + waiver } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] swept scope: " ) and " 1 waivers honoured" in ln ]
+    _stage( repo, { rel: body.rstrip( "\n" ) + f"  # doc-lint: waive {rule} -- no\n" } )                          # no word of three letters
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    _stage( repo, { rel: "# This is NOT fine  doc-lint: waive caps -- quoting a log line\n" } )                  # caps stays unwaivable in a comment
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and any( ":1: caps" in ln for ln in lines )
+
+
 # ---- concluding a merge or a cherry-pick --------------------------------------------------------
 
 MERGED_MARK = " (warn mode, commit allowed: this line came in with the merged or picked commit)"

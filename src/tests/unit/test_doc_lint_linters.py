@@ -568,3 +568,20 @@ def test_during_a_whole_corpus_run_the_listing_is_read_once_per_root( repo, monk
     assert len( calls ) == 1
     for _ in range( 2 ): comment_lint.tracked_paths( str( repo ) )
     assert len( calls ) == 3
+
+
+def test_a_dangling_path_skips_ignored_paths_dots_and_placeholder_names( repo ):
+    _commit( repo, { ".gitignore": "io/\n", "src/a.py": "x = 1\n", "io/keep.md": "k\n" } )
+    _git( repo, "add", "-f", "io/keep.md" )
+    text = " see io/mementos/rio.md, src/foo.py, src/a/b/x.py, src/....sh, src/lupin/.../lib/mf.py, src/tests/unit/test_foo.py and src/real_gone.py"
+    found = comment_lint.dangling_path_findings( text, "a.py", 2, repo )
+    assert [ f.message.split( "'" )[ 1 ] for f in found ] == [ "src/real_gone.py" ]
+    assert comment_lint.dangling_path_findings( " only src/foo.py and src/x.py here", "a.py", 2, repo ) == []     # every cited path is skipped, so git is not asked
+
+
+def test_ignored_paths_lists_the_matches_and_raises_when_git_cannot_answer( repo, tmp_path ):
+    _commit( repo, { ".gitignore": "io/\n", "src/a.py": "x = 1\n" } )
+    assert comment_lint.ignored_paths( str( repo ), [ "io/a.md", "src/z.md" ] ) == { "io/a.md" }
+    assert comment_lint.ignored_paths( str( repo ), [ "src/z.md" ] ) == set()
+    with pytest.raises( RuntimeError, match="git check-ignore failed" ):
+        comment_lint.ignored_paths( str( tmp_path / "not-a-repo" ), [ "x/y.md" ] )

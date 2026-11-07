@@ -977,7 +977,7 @@ def collect( root ):
         - findings are limited to lines the staged diff touched, minus anything already in refusals
         - a finding is_record_exempt names is left out, so a root record file is judged under rule set B
         - a refused or waived finding is left out as that one finding; a finding of another linter with the same place and words stays
-        - a docstring finding with an honoured waiver marker on its line is left out of findings, in a swept file and in any other Python file
+        - a docstring finding, or a line-pointer, dangling-path or commented-out-code finding, with an honoured waiver marker on its line is left out, in any Python file; no other comment finding can be waived
         - refusals hold every mechanical finding anywhere in a staged file inside BLOCKING_PACKAGES
         - refusals also hold every docstring finding anywhere in a staged swept file that no waiver covers
         - a swept file that does not parse is refused, counted in tally["unparsed"], and cannot be waived
@@ -1052,7 +1052,12 @@ def collect( root ):
             if ranges.get( path ) and BARE_RETURN.search( source ): ranges[ path ] = [ ( 1, len( split_lines( source ) ) ) ]
             py_sources[ path ] = source
             doc_findings = docstring_lint.lint_source( path, source, root )
-            findings += doc_findings + comment_lint.lint_source( path, source, root )
+            comment_findings = comment_lint.lint_source( path, source, root )
+            findings += doc_findings + comment_findings
+            kept_lines = split_lines( source )
+            honoured   = [ f for f in comment_findings if f.rule in comment_lint.WAIVABLE_RULES and waiver_state( f, line_text( kept_lines, f.line ) ) == "honoured" ]
+            waived    += honoured
+            tally[ "waivers" ] += len( honoured )
             if is_swept( path ): swept.append( ( path, source, doc_findings ) )
             else: waived += [ f for f in doc_findings if waiver_state( f, line_text( split_lines( source ), f.line ) ) == "honoured" ]
         elif path.endswith( ".md" ):

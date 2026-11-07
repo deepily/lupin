@@ -25,6 +25,8 @@ LINE_POINTER_RE    = re.compile( rf"(?<![\w/.~-])((?:[\w.-]+/)*[\w.-]+\.(?:{POIN
 CITED_PATH_RE      = re.compile( rf"(?<![\w/.~-])((?:[\w.-]+/)+[\w.-]+\.(?:{POINTER_EXTENSIONS}))\b" )
 HEADER_RE          = re.compile( r"(?:async\s+)?(?:if|for|while|with|def|class)\b.*:$" )
 BARE_HEADERS       = ( "else:", "try:", "finally:" )
+PLACEHOLDER_STEMS  = frozenset( { "foo", "bar", "baz", "x", "y", "a", "b", "example", "test_foo", "test_bar", "test_x" } )
+WAIVABLE_RULES     = frozenset( { "line-pointer", "dangling-path", "commented-out-code" } )
 CODE_STATEMENTS    = ( ast.Assign, ast.AugAssign, ast.Import, ast.ImportFrom, ast.Delete )
 KEYWORD_STATEMENTS = ( ast.Return, ast.Raise, ast.Assert )
 
@@ -53,6 +55,25 @@ def tracked_paths( root ):
     found = frozenset( name for name in res.stdout.split( "\0" ) if name )
     if listings is not None: listings[ root ] = found
     return found
+
+
+def ignored_paths( root, names ):
+    """
+    List which of the named paths git ignores.
+
+    Requires:
+        - root is a git working tree
+        - names is a non-empty list of repo-relative paths
+
+    Ensures:
+        - returns the subset `git check-ignore` matches, as a set
+
+    Raises:
+        - RuntimeError when git cannot answer
+    """
+    res = subprocess.run( [ "git", "-C", str( root ), "check-ignore", "-z", "--stdin" ], input="\0".join( names ) + "\0", capture_output=True, text=True )
+    if res.returncode not in ( 0, 1 ): raise RuntimeError( f"git check-ignore failed in {root}: {res.stderr.strip()}" )
+    return { name for name in res.stdout.split( "\0" ) if name }
 
 
 def line_pointer_findings( text, path, line ):
@@ -84,18 +105,22 @@ def dangling_path_findings( text, path, line, root ):
     Ensures:
         - a path counts as cited when it holds a slash, ends in a POINTER_EXTENSIONS suffix and starts with a top-level directory git tracks
         - returns one dangling-path Finding per cited path that is not tracked
-        - a path with a wildcard, a placeholder, a leading slash or a URL is never matched
+        - a path with a wildcard, a leading slash or a URL is never matched
+        - a path that holds `...`, names a placeholder such as foo or x, or that `git check-ignore` matches is not flagged
 
     Raises:
-        - RuntimeError from tracked_paths
+        - RuntimeError from tracked_paths or ignored_paths
     """
     if root is None: return []
     cited = [ hit.group( 1 ) for hit in CITED_PATH_RE.finditer( text ) ]
     if not cited: return []
     tracked = tracked_paths( str( root ) )
     tops    = { name.split( "/", 1 )[ 0 ] for name in tracked if "/" in name }
-    return [ Finding( path, line, "dangling-path", f"'{name}' is not a file git tracks" )
-             for name in cited if name.split( "/", 1 )[ 0 ] in tops and name not in tracked ]
+    missing = [ name for name in cited if name.split( "/", 1 )[ 0 ] in tops and name not in tracked
+                and "..." not in name and name.rsplit( "/", 1 )[ -1 ].rsplit( ".", 1 )[ 0 ] not in PLACEHOLDER_STEMS ]
+    if not missing: return []
+    ignored = ignored_paths( str( root ), missing )
+    return [ Finding( path, line, "dangling-path", f"'{name}' is not a file git tracks" ) for name in missing if name not in ignored ]
 
 
 def is_commented_out_code( text ):
