@@ -177,7 +177,7 @@ class TestRedactFailure:
 
 
 # ----------------------------------------------------------------------------
-# load_from_path (filesystem-mocked)
+# load_from_path, filesystem mocked
 # ----------------------------------------------------------------------------
 class TestLoadFromPath:
     """

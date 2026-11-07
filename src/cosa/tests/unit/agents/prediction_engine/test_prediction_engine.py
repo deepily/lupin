@@ -361,7 +361,7 @@ def test_yes_no_split_vote_confidence_and_qualifier( engine, monkeypatch ):
 
 
 # ---------------------------------------------------------------------------
-# _extract_valid_options (static)
+# _extract_valid_options, static
 # ---------------------------------------------------------------------------
 
 def test_extract_valid_options_none():
@@ -550,7 +550,7 @@ def test_mc_skips_unparseable_case_then_uses_valid( engine, monkeypatch ):
 
 
 # ---------------------------------------------------------------------------
-# _tally_multi_select_votes (direct)
+# _tally_multi_select_votes, called directly
 # ---------------------------------------------------------------------------
 
 def test_tally_multi_select_threshold_and_fallback( engine ):
@@ -613,7 +613,7 @@ def test_open_ended_llm_synthesis_tier2( engine, monkeypatch ):
     r = engine._predict_open_ended( "new question", "input", [ 0.1 ] )
     assert r.strategy == cfg.STRATEGY_LLM_SYNTHESIS
     assert r.predicted_value == "use kebab-case"
-    assert r.confidence == pytest.approx( 0.7 )         # min(0.9, 0.7)
+    assert r.confidence == pytest.approx( 0.7 )         # the lower of 0.9 and 0.7
     assert r.metadata[ "tier" ] == "llm_synthesis"
 
 

@@ -403,9 +403,9 @@ class TestRunProposal( unittest.TestCase ):
         self.assertEqual( cm.exception.phase, BFEPhase.PROPOSING.value )
         self.assertIn( "unreachable", str( cm.exception ) )
         # Krishna 🦚 flagged the assertion that used to sit here —
-        #   assertIsNone( getattr( orch, "selected_fix", None ) )
+        #   an assertIsNone on the selected_fix attribute
         # — as vacuous, and it was worse than he thought: __init__ sets
-        # self.selected_fix = None (orchestrator.py:135) and run_proposal only
+        # self.selected_fix = None (BFEOrchestrator.__init__) and run_proposal only
         # ever binds a LOCAL, so that line could not fail under any behaviour.
         # It asserted nothing while reading like the load-bearing check.
         # What actually matters is that no SELECTION reaches the writer — the

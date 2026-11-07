@@ -308,7 +308,7 @@ def test_last_question_asked():
 
 
 # =========================================================================== #
-# do_all  (success / cancelled / exception)
+# do_all: success, cancelled and exception
 # =========================================================================== #
 def test_do_all_success_sets_completed( monkeypatch ):
     """do_all bridges to _execute, stores result, transitions to COMPLETED."""
@@ -632,7 +632,7 @@ def test_execute_not_executed_tier_reports_not_run_not_failed( monkeypatch, tmp_
 # =========================================================================== #
 # c8 threshold miss  (row 1a11fe96 — 4020/4020 green read as ALL PASSED under c8 red)
 # =========================================================================== #
-# Verbatim from io/test-suite/2026.09.14-at-19:25-EDT-typescript-results.md:30342-30344 (ts-0678b4dc).
+# Verbatim from io/test-suite/2026.09.14-at-19:25-EDT-typescript-results.md, the last lines of the c8 red run (ts-0678b4dc).
 C8_RED_TAIL_2026_09_14 = (
     "# tests 4020\n# pass 4020\n# fail 0\n# skipped 0\n"
     "ERROR: Coverage for lines (99.99%) does not meet global threshold (100%)\n"
@@ -736,7 +736,7 @@ def test_execute_dry_run_delegates( monkeypatch, tmp_path, patched_voice ):
 
 
 # =========================================================================== #
-# _execute_dry_run  (direct)
+# _execute_dry_run, called directly
 # =========================================================================== #
 def test_execute_dry_run_direct_populates_artifacts( monkeypatch, patched_voice ):
     """Dry run sets mock results, cost summary, and abstract; clears job_id."""

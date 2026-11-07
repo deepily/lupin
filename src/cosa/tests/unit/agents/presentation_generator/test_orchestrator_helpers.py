@@ -288,7 +288,7 @@ class TestIngestAsync:
 
     def test_ingest_file_not_found_returns_none( self, _silence_voice_io ):
         # Post BUG-B fix: _ingest_async calls _read_file_or_raise, so the
-        # `except FileNotFoundError` arm (orchestrator.py:396-399) is now LIVE.
+        # `except FileNotFoundError` arm (in _ingest_async) is now live.
         agent = _agent( source_path="/abs/missing.md" )
         with patch.object( orch_mod.asyncio, "to_thread",
                            new=AsyncMock( side_effect=FileNotFoundError( "nope" ) ) ):
@@ -323,7 +323,7 @@ class TestReadFileVariants:
         assert PresentationOrchestratorAgent._read_file_or_raise( str( p ) ) == "hello"
 
     def test_read_file_or_raise_missing_raises( self ):
-        # closes the formerly-dead body (orchestrator.py:452-453) — now reachable
+        # closes the formerly-dead body (in _read_file_or_raise) — now reachable
         with pytest.raises( FileNotFoundError ):
             PresentationOrchestratorAgent._read_file_or_raise( "/no/such/file.xyz" )
 
@@ -682,7 +682,7 @@ class TestElaborateAsync:
 
         calls = [ c for c in _silence_voice_io[ "notify" ].await_args_list
                   if "batch" in str( c.args[ 0 ] if c.args else "" ) ]
-        assert len( calls ) == 6                                    # ceil(32/6)
+        assert len( calls ) == 6                                    # 32 items in batches of 6, rounded up
         group_ids = { c.kwargs.get( "progress_group_id" ) for c in calls }
         assert len( group_ids ) == 1                                # ONE pinned bubble
         gid = group_ids.pop()
@@ -1119,7 +1119,7 @@ class TestExportPptxAsync:
              patch( _BUILD_TARGET ) as build:
             _run( agent._export_pptx_async( _presentation() ) )
         build.assert_called_once()
-        # build( presentation, theme_config, visuals_dir, pptx_path )
+        # build takes presentation, theme_config, visuals_dir and pptx_path, in that order
         args = build.call_args.args
         assert args[ 3 ].endswith( ".pptx" )              # output path
         assert args[ 2 ].endswith( "/visuals" )           # visuals dir

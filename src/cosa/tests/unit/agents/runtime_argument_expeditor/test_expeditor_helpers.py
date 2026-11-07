@@ -143,7 +143,7 @@ class TestInitAndPureHelpers( unittest.TestCase ):
         """
         o = _mk_expeditor()
         o.config_mgr.get.side_effect = lambda key, default=None, **kw: "should-never-be-reached"
-        # "query" is a required_user_arg for research-to-podcast (agent_registry.py:83).
+        # "query" is a required_user_arg for research-to-podcast (JOB_ARG_CONTRACTS in agent_registry.py).
         out = o._resolve_default( "agent router go to research to podcast", "query", "registry-def" )
         self.assertEqual( out, "registry-def" )
         for call in o.config_mgr.get.call_args_list:
