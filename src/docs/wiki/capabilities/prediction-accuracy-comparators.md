@@ -31,7 +31,7 @@ One comparator exists for each question type the prediction engine ([[prediction
 - `select_rows` picks those rows; `open_ended_batch` rows are never selected. `classify` decodes each stored answer the way `record_outcome` does and reruns `get_comparator`.
 - A row is skipped, and counted under its reason, when it holds no answers mapping or no prediction. It is also skipped when the comparator still cannot score it.
 - It is report-only by default. `--write` first dumps every row it will change to a JSON-lines file (`dump_old_values`, `default_dump_path`), and writes nothing if the dump fails. Then it stores the decoded answer and the new score. It never changes `responded_at`.
-- `main` exits 0 after a run and 3 when a required import fails.
+- `main` returns 0 after a run. A required import that fails stops the script with exit 3 before `main` runs.
 
 ## Invariants
 - The embedding similarity is a transient field on the actual response, added by an earlier step. The comparators never compute it.
