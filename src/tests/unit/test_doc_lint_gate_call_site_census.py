@@ -60,8 +60,8 @@ ALIASED    = { "open" }
 
 EXPECTED = {
     "changed_ranges.changed_line_ranges:subprocess.run#0" : ( CRASH, CRASH ),
-    "comment_lint.ignored_paths:subprocess.run#0"         : ( CRASH, CRASH ),
-    "comment_lint.tracked_paths:subprocess.run#0"         : ( CRASH, CRASH ),
+    "comment_lint.ignored_paths:subprocess.run#0"         : ( SAID, SAID ),
+    "comment_lint.tracked_paths:subprocess.run#0"         : ( SAID, SAID ),
     "cli.run_linter:open#0"                               : OFF,
     "cli.tracked_files:subprocess.run#0"                  : ( CRASH, CRASH ),
     "counts._read_disk.read:open#0"                       : OFF,

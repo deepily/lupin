@@ -585,3 +585,64 @@ def test_ignored_paths_lists_the_matches_and_raises_when_git_cannot_answer( repo
     assert comment_lint.ignored_paths( str( repo ), [ "src/z.md" ] ) == set()
     with pytest.raises( RuntimeError, match="git check-ignore failed" ):
         comment_lint.ignored_paths( str( tmp_path / "not-a-repo" ), [ "x/y.md" ] )
+
+
+@pytest.mark.parametrize( "how", [ "nonzero", "missing", "timeout", "undecodable" ] )
+def test_a_git_failure_returns_no_dangling_finding_records_one_reason_and_stops_asking_git( repo, monkeypatch, how ):
+    _commit( repo, { "src/a.py": "x = 1\n" } )
+    calls = []
+    def run( cmd, *args, **kwargs ):
+        calls.append( cmd )
+        if how == "missing": raise FileNotFoundError( 2, "no git" )
+        if how == "timeout": raise subprocess.TimeoutExpired( cmd, kwargs[ "timeout" ] )
+        if how == "undecodable": raise UnicodeDecodeError( "utf-8", b"\xff", 0, 1, "bad name" )
+        return subprocess.CompletedProcess( cmd, 128, "", "fatal: injected" )
+    monkeypatch.setattr( comment_lint.subprocess, "run", run )
+    comment_lint.take_path_failure()
+    assert comment_lint.dangling_path_findings( " see src/gone.py", "a.py", 1, repo ) == []
+    assert comment_lint.dangling_path_findings( " see src/gone2.py", "a.py", 2, repo ) == []
+    assert len( calls ) == 1                                                                       # the second comment did not ask git again
+    assert all( c[ "timeout" ] == comment_lint.GIT_TIMEOUT_SECONDS for c in [ { "timeout": comment_lint.GIT_TIMEOUT_SECONDS } ] )
+    reason = comment_lint.take_path_failure()
+    assert reason is not None and reason.split( ":" )[ 0 ] in ( "RuntimeError", "FileNotFoundError", "TimeoutExpired", "UnicodeDecodeError" )
+    assert comment_lint.take_path_failure() is None                                                # reported once, then cleared
+
+
+def test_the_git_calls_carry_a_timeout( repo, monkeypatch ):
+    _commit( repo, { "src/a.py": "x = 1\n", ".gitignore": "io/\n" } )
+    seen = []
+    real = subprocess.run
+    monkeypatch.setattr( comment_lint.subprocess, "run", lambda *a, **k: seen.append( k.get( "timeout" ) ) or real( *a, **k ) )
+    comment_lint.tracked_paths( str( repo ) )
+    comment_lint.ignored_paths( str( repo ), [ "io/a.md" ] )
+    assert seen == [ comment_lint.GIT_TIMEOUT_SECONDS ] * 2
+
+
+def test_main_says_once_that_the_path_check_was_skipped_when_git_fails( repo, monkeypatch ):
+    _commit( repo, { "src/a.py": "# see src/gone.py\nx = 1\n" } )
+    monkeypatch.setattr( comment_lint, "tracked_paths", lambda root: ( _ for _ in () ).throw( OSError( 2, "no git" ) ) )
+    out = io.StringIO()
+    assert comment_lint.main( [ "--repo-root", str( repo ) ], out ) == 0
+    text = out.getvalue()
+    assert text.count( "the dangling-path check was skipped" ) == 1 and "dangling-path:" not in text
+    assert comment_lint.PATH_CACHE[ "failure" ] is None
+
+
+@pytest.mark.parametrize( "text, expected", [
+    ( " x = 1  doc-lint: waive commented-out-code -- the worked example", True ),                  # one hash: the marker no longer breaks the parse
+    ( " x = 1  # doc-lint: waive commented-out-code -- the worked example", True ),                # two hashes, as before
+    ( " x = 1  doc-lint: waive commented-out-code", True ),                                        # no reason: still code, so still refused
+    ( " if ready:  doc-lint: waive commented-out-code -- an example", True ),
+    ( " prose only doc-lint: waive commented-out-code -- an example", False ),
+    ( " doc-lint: waive line-pointer -- only a marker", False ),
+] )
+def test_a_waiver_marker_is_cut_off_before_the_commented_out_code_parse( text, expected ):
+    assert comment_lint.is_commented_out_code( text ) is expected
+
+
+def test_a_one_hash_marker_with_no_reason_is_refused_and_with_a_reason_is_honoured( repo ):
+    from cosa.repo.doc_lint.waivers import waiver_state
+    source = "# x = 1  doc-lint: waive commented-out-code\n# y = 2  doc-lint: waive commented-out-code -- the worked example\n"
+    found  = comment_lint.lint_source( "a.py", source )
+    lines  = source.split( "\n" )
+    assert [ ( f.line, waiver_state( f, lines[ f.line - 1 ] ) ) for f in found if f.rule == "commented-out-code" ] == [ ( 1, "no-reason" ), ( 2, "honoured" ) ]

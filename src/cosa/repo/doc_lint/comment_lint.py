@@ -18,6 +18,7 @@ import tokenize
 
 from .cli import run_linter
 from .text_rules import Finding, emphasis_findings, rhetoric_findings, history_findings
+from .waivers import WAIVER_REGEX
 
 
 POINTER_EXTENSIONS = "py|ts|js|mjs|md|ini|sh|json|yml|yaml|toml|css|html|dart|sql|txt|cfg"
@@ -31,7 +32,9 @@ CODE_STATEMENTS    = ( ast.Assign, ast.AugAssign, ast.Import, ast.ImportFrom, as
 KEYWORD_STATEMENTS = ( ast.Return, ast.Raise, ast.Assert )
 
 
-PATH_CACHE = { "listings": None }
+GIT_TIMEOUT_SECONDS = 30
+GIT_FAILURES        = ( RuntimeError, OSError, subprocess.TimeoutExpired, UnicodeDecodeError )
+PATH_CACHE          = { "listings": None, "failure": None }
 
 
 def tracked_paths( root ):
@@ -46,11 +49,11 @@ def tracked_paths( root ):
         - the answer is cached per root while main runs a whole-corpus pass, and read from git each time otherwise, so a commit sees the index as it is
 
     Raises:
-        - RuntimeError when git cannot list the files
+        - RuntimeError when git cannot list the files, OSError when git is missing, subprocess.TimeoutExpired when it does not answer in GIT_TIMEOUT_SECONDS
     """
     listings = PATH_CACHE[ "listings" ]
     if listings is not None and root in listings: return listings[ root ]
-    res = subprocess.run( [ "git", "-C", str( root ), "ls-files", "-z" ], capture_output=True, text=True )
+    res = subprocess.run( [ "git", "-C", str( root ), "ls-files", "-z" ], capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS )
     if res.returncode != 0: raise RuntimeError( f"git ls-files failed in {root}: {res.stderr.strip()}" )
     found = frozenset( name for name in res.stdout.split( "\0" ) if name )
     if listings is not None: listings[ root ] = found
@@ -69,11 +72,30 @@ def ignored_paths( root, names ):
         - returns the subset `git check-ignore` matches, as a set
 
     Raises:
-        - RuntimeError when git cannot answer
+        - RuntimeError when git cannot answer, OSError when git is missing, subprocess.TimeoutExpired when it does not answer in GIT_TIMEOUT_SECONDS
     """
-    res = subprocess.run( [ "git", "-C", str( root ), "check-ignore", "-z", "--stdin" ], input="\0".join( names ) + "\0", capture_output=True, text=True )
+    res = subprocess.run( [ "git", "-C", str( root ), "check-ignore", "-z", "--stdin" ], input="\0".join( names ) + "\0", capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS )
     if res.returncode not in ( 0, 1 ): raise RuntimeError( f"git check-ignore failed in {root}: {res.stderr.strip()}" )
     return { name for name in res.stdout.split( "\0" ) if name }
+
+
+def take_path_failure():
+    """
+    Hand over, and clear, the reason the dangling-path check could not run.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - returns the one-line reason since the last call, or None when git answered every time
+        - clears it, so each run reports at most once
+
+    Raises:
+        - nothing
+    """
+    reason = PATH_CACHE[ "failure" ]
+    PATH_CACHE[ "failure" ] = None
+    return reason
 
 
 def line_pointer_findings( text, path, line ):
@@ -108,18 +130,24 @@ def dangling_path_findings( text, path, line, root ):
         - a path with a wildcard, a leading slash or a URL is never matched
         - a path that holds `...`, names a placeholder such as foo or x, or that `git check-ignore` matches is not flagged
 
+        - a git failure (non-zero exit, git missing, no answer in time) turns this one rule off for the rest of the run: it returns [] and records the reason for take_path_failure, so every other rule still runs
+
     Raises:
-        - RuntimeError from tracked_paths or ignored_paths
+        - nothing
     """
-    if root is None: return []
+    if root is None or PATH_CACHE[ "failure" ] is not None: return []
     cited = [ hit.group( 1 ) for hit in CITED_PATH_RE.finditer( text ) ]
     if not cited: return []
-    tracked = tracked_paths( str( root ) )
-    tops    = { name.split( "/", 1 )[ 0 ] for name in tracked if "/" in name }
-    missing = [ name for name in cited if name.split( "/", 1 )[ 0 ] in tops and name not in tracked
-                and "..." not in name and name.rsplit( "/", 1 )[ -1 ].rsplit( ".", 1 )[ 0 ] not in PLACEHOLDER_STEMS ]
-    if not missing: return []
-    ignored = ignored_paths( str( root ), missing )
+    try:
+        tracked = tracked_paths( str( root ) )
+        tops    = { name.split( "/", 1 )[ 0 ] for name in tracked if "/" in name }
+        missing = [ name for name in cited if name.split( "/", 1 )[ 0 ] in tops and name not in tracked
+                    and "..." not in name and name.rsplit( "/", 1 )[ -1 ].rsplit( ".", 1 )[ 0 ] not in PLACEHOLDER_STEMS ]
+        if not missing: return []
+        ignored = ignored_paths( str( root ), missing )
+    except GIT_FAILURES as err:
+        PATH_CACHE[ "failure" ] = f"{type( err ).__name__}: {err}"
+        return []
     return [ Finding( path, line, "dangling-path", f"'{name}' is not a file git tracks" ) for name in missing if name not in ignored ]
 
 
@@ -135,11 +163,13 @@ def is_commented_out_code( text ):
         - True for a return, raise or assert that parses and holds a bracket, dot or equals sign, so prose such as `return early` passes
         - True for an if, for, while, with, def or class header ending in a colon, and for else:, try: and finally:
         - False for prose, a bare word, a pragma such as `noqa: E501`, and a bare name or attribute
+        - a `doc-lint: waive` marker, with or without its own hash, is cut off before the parse, so it never changes the answer
 
     Raises:
         - nothing
     """
-    body = text.strip()
+    marker = WAIVER_REGEX.search( text )
+    body   = ( text[ : marker.start() ] if marker else text ).strip()
     if not body: return False
     if body in BARE_HEADERS: return True
     source = body + "\n    pass\n" if HEADER_RE.match( body ) else body
@@ -216,13 +246,18 @@ def main( argv=None, out=None ):
 
     Ensures:
         - returns the exit code from run_linter
+        - when git could not answer, writes one warning line saying the dangling-path check was skipped
 
     Raises:
         - nothing beyond run_linter's
     """
     PATH_CACHE[ "listings" ] = {}
+    PATH_CACHE[ "failure" ]  = None
     try:
-        return run_linter( "Lint Python # comments for banners, shouting, pointers, dangling paths and dead code.", ( ".py", ), lint_source, sys.argv[ 1: ] if argv is None else argv, out )
+        code = run_linter( "Lint Python # comments for banners, shouting, pointers, dangling paths and dead code.", ( ".py", ), lint_source, sys.argv[ 1: ] if argv is None else argv, out )
+        reason = take_path_failure()
+        if reason is not None: ( out if out is not None else sys.stdout ).write( f"WARNING: the dangling-path check was skipped, git could not answer ({reason}); every other rule ran\n" )
+        return code
     finally:
         PATH_CACHE[ "listings" ] = None
 
