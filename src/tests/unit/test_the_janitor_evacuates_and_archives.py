@@ -240,6 +240,7 @@ def test_an_unmerged_branch_is_archived_with_its_tip_and_marked_not_landed( repo
     assert ( outcome[ "deleted" ], outcome[ "kept_reason" ], outcome[ "commits_ahead" ] ) == ( False, "archived", 1 )
     assert outcome[ "archive_ref" ] == "refs/archive/2026-10-02/feat-d"
     assert ( outcome[ "sha" ], outcome[ "landed" ], outcome[ "error" ] ) == ( tip, False, None )
+    assert ( outcome[ "unpushed_count" ], outcome[ "unpushed_files" ] ) == ( 1, [ "work.txt" ] )
     assert not _has_branch( repo, "feat-d" )
     assert _refs( repo, "refs/archive" ) == [ f"refs/archive/2026-10-02/feat-d {tip}" ]
     # the documented restore brings it back whole
@@ -257,6 +258,7 @@ def test_work_that_landed_by_cherry_pick_is_archived_and_marked_landed( repo ):
     outcome = wr.retire_branch( str( repo ), "feat-e", "wip-v9", now=NOW )
 
     assert ( outcome[ "kept_reason" ], outcome[ "landed" ] ) == ( "archived", True )
+    assert ( outcome[ "unpushed_count" ], outcome[ "unpushed_files" ] ) == ( 1, [ "picked.txt" ] )
     assert wr.merge_verdict( str( repo ), tip, "refs/heads/wip-v9", wr._default_run )[ "verdict" ] == "unmerged"
 
 
@@ -377,6 +379,7 @@ def test_retire_reports_a_failed_archive_and_an_unreadable_content_check( repo )
     outcome = wr.retire_branch( str( repo ), "feat-g", "wip-v9", run=run, now=NOW )
 
     assert ( outcome[ "kept_reason" ], outcome[ "landed" ] ) == ( "archive_failed", None )
+    assert ( outcome[ "unpushed_count" ], outcome[ "unpushed_files" ] ) == ( None, None )
     assert outcome[ "error" ] == "could not write refs/archive/2026-10-02/feat-g: scripted failure"
     assert _has_branch( repo, "feat-g" )
 
@@ -491,6 +494,7 @@ class _Store:
 
 def _archived( branch, landed, root="/repos/lupin-mobile", **extra ):
     return { "branch": branch, "target": "wip-v9", "kept_reason": "archived", "commits_ahead": 3,
+             "unpushed_count": 2, "unpushed_files": [ "a.py", "b.py" ],
              "archive_ref": f"refs/archive/2026-10-02/{branch}", "sha": "abc123", "landed": landed,
              "repo_root": root, **extra }
 
@@ -501,7 +505,7 @@ def test_one_row_per_archived_branch_that_did_not_land_and_none_for_one_that_did
     kept = [
         _archived( "wt-rescue/seat-cc-author-cheech-2-20261002T135947Z", False ),
         _archived( "wt-rescue/landed-by-pick-20261002T135947Z", True ),
-        _archived( "krishna-door18", None, root=None ),
+        _archived( "krishna-door18", None, root=None, unpushed_count=None, unpushed_files=None ),
         { "branch": "feat-live", "kept_reason": "checked_out" },
     ]
 
@@ -516,18 +520,22 @@ def test_one_row_per_archived_branch_that_did_not_land_and_none_for_one_that_did
     assert ( seat[ "owner" ], seat[ "accountable" ], seat[ "project" ] ) == ( "cheech", "cheech", "lupin-mobile" )
     assert seat[ "correlation_key" ] == "archive:" + refs[ 0 ]
     assert seat[ "title" ] == "[LUPIN-MOBILE] Archived unmerged branch: wt-rescue/seat-cc-author-cheech-2-20261002T135947Z"
-    assert "3 commits ahead of `wip-v9` and holds commits whose content is not on the working branch" in seat[ "body" ]
+    assert "2 of its commits are reachable from neither `wip-v9` nor any remote-tracking ref, and holds commits whose content is not on the working branch" in seat[ "body" ]
+    assert "Files those commits touch:\n- `a.py`\n- `b.py`" in seat[ "body" ]
+    assert "commits ahead" not in seat[ "body" ]
     assert "git update-ref refs/heads/wt-rescue/seat-cc-author-cheech-2-20261002T135947Z abc123" in seat[ "body" ]
     assert "No creator recorded" not in seat[ "body" ]
 
     assert ( stray[ "owner" ], stray[ "project" ] ) == ( st.NO_CREATOR_OWNER, "lupin" )
     assert "could not be checked for content already on the working branch" in stray[ "body" ]
+    assert "3 commits ahead of `wip-v9` by ancestry (the commits held on no remote could not be counted)" in stray[ "body" ]
+    assert "Files those commits" not in stray[ "body" ]
     assert "No creator recorded" in stray[ "body" ]
 
 
 def test_an_open_row_is_adopted_and_a_store_failure_does_not_stop_the_rest():
     from cosa.agents.shared import worktree_straggler_tickets as st
-    kept   = [ _archived( "a", False ), _archived( "b", False ), _archived( "c", False, commits_ahead=None ) ]
+    kept   = [ _archived( "a", False ), _archived( "b", False ), _archived( "c", False, commits_ahead=None, unpushed_count=None, unpushed_files=None ) ]
     store  = _Store( existing={ "archive:refs/archive/2026-10-02/a" }, fail_on="archive:refs/archive/2026-10-02/b" )
     events = []
 
@@ -545,3 +553,90 @@ def test_a_poll_with_nothing_archived_opens_nothing_and_logs_nothing():
     assert st.open_archive_tickets( None, _Store(), lambda name, **kw: events.append( name ) ) == \
         { "opened": [], "adopted": [], "errors": [] }
     assert events == []
+
+
+# ── only commits held nowhere else count (row 8f3aa058) ──────────────────────
+
+@pytest.fixture
+def pushed( repo, tmp_path ):
+    """The repo with a bare origin, and a branch `old-line` of three commits pushed to it."""
+    bare = tmp_path / "origin.git"
+    _out( tmp_path, "init", "-q", "--bare", str( bare ) )
+    _out( repo, "remote", "add", "origin", str( bare ) )
+    tree = _tree( repo, "seat-p", "old-line" )
+    for n in ( "one.txt", "two.txt", "three.txt" ): _commit( tree, n, n + "\n" )
+    _out( tree, "push", "-q", "origin", "old-line" )
+    _out( repo, "worktree", "remove", str( tree ) )
+    return repo
+
+
+def test_a_squash_of_a_pushed_line_counts_zero_commits_at_risk( pushed ):
+    _out( pushed, "merge", "--squash", "old-line" )
+    _out( pushed, "commit", "-q", "-m", "squash of old-line" )
+    assert int( _out( pushed, "rev-list", "--count", "wip-v9..old-line" ) ) == 3      # ancestry says 3 ahead
+
+    outcome = wr.retire_branch( str( pushed ), "old-line", "wip-v9", now=NOW )
+
+    assert ( outcome[ "kept_reason" ], outcome[ "commits_ahead" ] ) == ( "archived", 3 )
+    assert ( outcome[ "landed" ], outcome[ "unpushed_count" ], outcome[ "unpushed_files" ] ) == ( True, 0, [] )
+
+
+def test_the_same_squash_with_nothing_pushed_is_not_landed_and_counts_all_three( repo ):
+    tree = _tree( repo, "seat-q", "local-line" )
+    for n in ( "one.txt", "two.txt", "three.txt" ): _commit( tree, n, n + "\n" )
+    _out( repo, "worktree", "remove", str( tree ) )
+    _out( repo, "merge", "--squash", "local-line" )
+    _out( repo, "commit", "-q", "-m", "squash of local-line" )
+
+    outcome = wr.retire_branch( str( repo ), "local-line", "wip-v9", now=NOW )
+
+    assert ( outcome[ "landed" ], outcome[ "unpushed_count" ] ) == ( False, 3 )
+    assert outcome[ "unpushed_files" ] == [ "one.txt", "three.txt", "two.txt" ]
+
+
+def test_one_auto_save_on_top_of_a_pushed_line_counts_one_commit_and_its_files( pushed ):
+    tree = _tree( pushed, "seat-r", "feat-autosave", )
+    _out( tree, "reset", "-q", "--hard", "old-line" )
+    _commit( tree, "autosave.txt", "WIP: auto-saved at reap\n" )
+    _out( pushed, "worktree", "remove", str( tree ) )
+
+    outcome = wr.retire_branch( str( pushed ), "feat-autosave", "wip-v9", now=NOW )
+
+    assert ( outcome[ "landed" ], outcome[ "unpushed_count" ], outcome[ "unpushed_files" ] ) == ( False, 1, [ "autosave.txt" ] )
+
+
+def _scripted_work( replies ):
+    run, calls = _scripted( replies )
+    return wr.at_risk_work( "/x", "b", "t", run ), calls
+
+
+def test_a_failing_git_call_reads_could_not_look_never_landed():
+    rev  = ( "rev-list", )
+    chry = ( "cherry", )
+    assert _scripted_work( { rev: ( 128, "" ) } )[ 0 ] is None
+    assert _scripted_work( { rev: ( 0, "aaa" ), chry: ( 128, "" ) } )[ 0 ] is None
+    run, _ = _scripted( { rev: ( 128, "" ) } )
+    assert wr.content_landed( "/x", "b", "t", run ) is None
+
+
+def test_a_cherry_mark_for_a_commit_a_remote_holds_is_ignored_and_unlistable_files_are_none():
+    work, calls = _scripted_work( { ( "rev-list", ): ( 0, "aaa\nbbb" ),
+                                    ( "cherry", ): ( 0, "+ zzz\n- aaa\n+ bbb" ),
+                                    ( "log", ): ( 1, "" ) } )
+    assert work == { "count": 2, "landed": False, "files": None }
+    assert [ c[ 0 ] for c in calls ] == [ "rev-list", "cherry", "log" ]
+    only_foreign, _ = _scripted_work( { ( "rev-list", ): ( 0, "aaa" ), ( "cherry", ): ( 0, "+ zzz" ),
+                                        ( "log", ): ( 0, "f.py\n\nf.py\ng.py" ) } )
+    assert only_foreign == { "count": 1, "landed": True, "files": [ "f.py", "g.py" ] }
+
+
+def test_the_row_body_lists_files_capped_and_says_when_they_could_not_be_listed():
+    from cosa.agents.shared import worktree_straggler_tickets as st
+    many = [ f"f{n:02d}.py" for n in range( st.MAX_ROW_FILES + 5 ) ]
+    body = st.compose_archive_row( _archived( "big", False, unpushed_count=40, unpushed_files=many ) )[ "body" ]
+    assert body.count( "\n- `f" ) == st.MAX_ROW_FILES and "\n- and 5 more" in body
+    body = st.compose_archive_row( _archived( "blind", False, unpushed_count=4, unpushed_files=None ) )[ "body" ]
+    assert "4 of its commits are reachable from neither" in body
+    assert "The files those commits touch could not be listed." in body
+    body = st.compose_archive_row( _archived( "empty", False, unpushed_count=1, unpushed_files=[] ) )[ "body" ]
+    assert "Files those commits" not in body and "could not be listed" not in body
