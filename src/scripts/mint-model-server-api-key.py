@@ -41,7 +41,7 @@ if src_path not in sys.path: sys.path.insert( 0, src_path )
 import cosa.utils.util as cu
 
 # The SAME predicate the model server applies at boot AND to every incoming
-# request (lupin_model_server/main.py:80). Duplicated deliberately: this script
+# request (`_CK_LIVE_RE` in lupin_model_server/main.py). Kept as a copy: this script
 # must not import the model-server package (it ships in a separate GPU image),
 # and a key that fails this regex is refused at boot with `api_key_hash` left
 # None -> 503 on every authed endpoint. Minting one would be shipping a dud.
