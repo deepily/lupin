@@ -1264,7 +1264,7 @@ def test_the_ruled_root_source_still_CANNOT_delete_anything():
 
 # ── 2026-08-10: the disabled feature must not import the DB, and a ctor blow-up
 #    must not kill the supervisor.
-#    Record: the arbiter fleet-loop silent-death record, removed by c752ab9e
+#    Record: the arbiter fleet-loop silent-death record, removed by 8420e8b0a
 #
 #    Live failure: on lupin-host-test the watcher import chain
 #    (follow_through_escalation_watcher -> cosa.rest.db.database -> sqlalchemy)

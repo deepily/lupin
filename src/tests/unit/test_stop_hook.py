@@ -202,7 +202,7 @@ class TestShouldAskAnythingElse:
 # TestClassifyQualifier — COMMENTED OUT
 # classify_qualifier() is commented out in stop.py because its synchronous
 # LLM call to phi4 exceeds Claude Code's stop hook subprocess timeout (~5-10s).
-# The tests were deleted with the sweep; recover them from git history.
+# The tests for it were deleted; recover them from the git history of this file.
 # ═════════════════════════════════════════════════════════════════════════════
 
 

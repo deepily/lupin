@@ -388,7 +388,7 @@ def test_assemble_app_no_roster_env_yields_empty_declared( monkeypatch ):
 # days while /health returned {"status":"ok"} on every poll. The process was fine;
 # only the thread was gone. Liveness is now read from the Thread object itself,
 # because the "did we start it" intention was true the whole time it was dead.
-# Record: the arbiter fleet-loop silent-death record, removed by c752ab9e
+# Record: the arbiter fleet-loop silent-death record, removed by 8420e8b0a
 
 class _ThreadedFakeLoop:
     """A loop whose `_thread` liveness we control, mimicking the real loops' attr."""
