@@ -175,8 +175,25 @@ def test_the_command_defaults_to_the_live_filer_and_the_present_time( tmp_path, 
 
 
 def test_a_finding_with_a_key_and_no_text_makes_the_same_row_as_one_with_its_text():
-    found  = { "id": "d-1", "name": "a1", "file": "client/a1.py", "line": 3, "text": "def a1(): pass", "session_id": "s-1", "window": { "start": "a", "end": "b", "commits": 1 }, "others": [ { "id": "d-9", "name": "twin", "file": "s/t.py" } ] }
+    found  = { "id": "d-1", "name": "a1", "file": "client/a1.py", "line": 3, "text": "def a1(): pass", "window": { "start": "a", "end": "b", "commits": 1 }, "others": [ { "id": "d-9", "name": "twin", "file": "s/t.py" } ] }
     owner = { "owner": "cheech", "note": "n" }
     day   = datetime.date( 2026, 11, 7 )
     assert ff.triage_payload( [ ff.for_record( found ) ], owner, day ) == ff.triage_payload( [ found ], owner, day )
     assert "text" in found and "text" not in ff.for_record( found ) and ff.for_record( found )[ "correlation_key" ] == ff.correlation_key( "d-1", "def a1(): pass" )
+
+
+def test_a_refile_of_an_older_file_titles_the_row_with_the_day_of_the_run_not_the_day_of_the_refile( repo, tmp_path ):
+    path  = a_day_whose_filing_failed( repo, tmp_path )
+    store = Store()
+    assert json.loads( path.read_text() )[ "date" ] == "2026-11-03"
+    assert rf.main( [ str( path ) ], out=io.StringIO(), filer=working_filer( store ), now=NOW + datetime.timedelta( days=30 ) ) == 0
+    assert store.created[ 0 ][ "title" ].startswith( "[LUPIN] Duplicate check 3 Nov:" ), "the run was on the 3rd"
+
+
+def test_a_finding_that_already_names_its_day_keeps_it_and_a_file_without_session_ids_can_be_refiled( repo, tmp_path ):
+    path = a_day_whose_filing_failed( repo, tmp_path )
+    doc  = json.loads( path.read_text() )
+    for f in doc[ "findings" ]: f.pop( "session_id", None ); f[ "day" ] = "2026-10-01"
+    path.write_text( json.dumps( doc ) )
+    store = Store()
+    assert rf.main( [ str( path ) ], out=io.StringIO(), filer=working_filer( store ) ) == 0 and "1 Oct:" in store.created[ 0 ][ "title" ]

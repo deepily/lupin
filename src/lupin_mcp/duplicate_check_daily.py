@@ -53,7 +53,7 @@ CRON_SCHEDULE     = "7 12 * * *"      # 12:07, 30 minutes after the 11:37 shadow
 SECOND_SCHEDULE   = "7 18 * * *"      # 18:07, five hours before the host usually powers off
 BASELINE_SCHEDULE = "7 20 * * *"      # 20:07, after the evening daily run has had two hours
 RISE_LIMIT        = 3                 # daily runs in a row with a larger carried count before Rick is told
-MIN_LINES         = 3                 # two daily slots and the reboot line
+INSTALLED_LINES   = ( 3, 4 )          # two daily slots and the reboot line, with the baseline line when it was asked for
 BASELINE          = "baseline.json"
 BASELINE_DONE     = "complete"
 BASELINE_OPEN     = "in_progress"
@@ -242,14 +242,16 @@ def baseline_window( root, branch=BRANCH ):
 
 def baseline_definitions( tree, window ):
     """
-    List every definition of the Python and script files of a tree.
+    List every definition of the files the pool is built from.
 
     Requires:
         - tree is a worktree at the window's end commit
     Ensures:
         - returns { defs, commit_of } like new_definitions: new-origin definitions in file and line order, each mapped to the window's end commit
+        - the files are those label_prep.tree_definitions reads for the pool, so a file the pool cannot read is not asked for
     """
-    files = sorted( f for f in git( tree, "ls-files" ).splitlines() if f.endswith( extract.PY_SUFFIXES + extract.SCRIPT_SUFFIXES ) )
+    parts = label_prep.tree_definitions( tree )
+    files = sorted( { d[ "file" ] for d in [ *parts[ "server_defs" ], *parts[ "client_defs" ] ] } )
     found = extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )[ "definitions" ] if files else []
     found.sort( key=lambda d: ( d[ "file" ], d[ "line" ] ) )
     return { "defs": found, "commit_of": { d[ "id" ]: window[ "end" ] for d in found } }
@@ -270,10 +272,13 @@ def rising_guard( folder, doc, now, runs, notifier ):
     Ensures:
         - returns None unless this run's carried count, with the history's, rose on each of the last runs measured daily runs
         - otherwise returns { runs, series, notified }; a notifier that is missing or raises gives notified False
+        - alerts on the first run that crosses the line only: while the count keeps rising, the later runs return repeat True and notified False, until a fall resets it
     """
+    past   = history.read_lines( folder )
     probe  = history.line_of( { **doc, "started_at": now.isoformat() }, "" )
-    rising = history.rising_run( [ *history.read_lines( folder ), probe ], runs )
+    rising = history.rising_run( [ *past, probe ], runs )
     if rising is None: return None
+    if history.rising_run( past, runs ) is not None: return { **rising, "notified": False, "repeat": True }
     shown  = ", ".join( str( n ) for n in rising[ "series" ] )
     sent   = False
     if notifier is not None:
@@ -384,9 +389,10 @@ def limit_flag( cap, ceiling ):
     return f"--ceiling {ceiling}" if ceiling is not None else f"--cap {cap}"
 
 
-def reinstall_command( root, python, cap, cli_path, branch, ceiling=None ):
-    """Ensures: returns the command that pins the cron lines to the branch and keeps the limit."""
-    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {python} -m lupin_mcp.duplicate_check_daily --install {limit_flag( cap, ceiling )} --claude-cli-path {cli_path} --branch {shlex.quote( branch )}"
+def reinstall_command( root, python, cap, cli_path, branch, ceiling=None, with_baseline=False ):
+    """Ensures: returns the reinstall command, keeping the branch, limit and baseline line."""
+    more = " --with-baseline" if with_baseline else ""
+    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {python} -m lupin_mcp.duplicate_check_daily --install {limit_flag( cap, ceiling )} --claude-cli-path {cli_path} --branch {shlex.quote( branch )}{more}"
 
 
 def refusal_message( refusal, command ):
@@ -401,6 +407,21 @@ def refusal_message( refusal, command ):
     else:                                      spoken, why = f"The daily duplicate check refused to run: its branch {name} no longer exists.", f"Pinned branch `{name}` does not resolve to a commit."
     fix = f"Reinstall for the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
     return spoken, f"{why}\n\n{fix}"
+
+
+def baseline_installed( cmd=None ):
+    """
+    Say whether the crontab holds this job's baseline line.
+
+    Requires:
+        - cmd is the crontab command as a list, or None for the DUPLICATE_CHECK_DAILY_CRONTAB variable or crontab
+    Ensures:
+        - returns True when a line ending with CRON_TAG runs with --baseline
+        - returns False when there is no crontab or the command cannot run
+    """
+    try: read = subprocess.run( [ *( cmd or [ os.environ.get( "DUPLICATE_CHECK_DAILY_CRONTAB", "crontab" ) ] ), "-l" ], capture_output=True, text=True )
+    except OSError: return False
+    return read.returncode == 0 and any( line.rstrip().endswith( CRON_TAG ) and " --baseline" in line for line in read.stdout.splitlines() )
 
 
 def live_notifier( message, abstract, environ=None, query=None, api_key=None, target_of=None ):
@@ -457,7 +478,8 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap, "ceiling": ceiling, "mode": history.MODE_BASELINE if baseline else history.MODE_DAILY }
     refused = branch_guard( root, branch, now )
     if refused is not None:
-        command = reinstall_command( root, sys.executable, cap, cli_path, refused[ "newest" ], ceiling ) if refused[ "newest" ] is not None else None
+        again   = baseline or ( "cron_has_baseline" in parts and parts[ "cron_has_baseline" ]() )       # the reinstall replaces every tagged line, so it must name the baseline line
+        command = reinstall_command( root, sys.executable, cap, cli_path, refused[ "newest" ], ceiling, again ) if refused[ "newest" ] is not None else None
         sent    = False
         if "notifier" in parts:
             try: sent = parts[ "notifier" ]( *refusal_message( refused, command ) )
@@ -548,21 +570,6 @@ def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRAN
     return [ *lines, lt.cron_lines_for( run( "reboot" ), CRON_SCHEDULE, BOOT_DELAY )[ 1 ] ]
 
 
-def status_text( crontab_text ):
-    """
-    Say whether this job's cron lines are present.
-
-    Requires:
-        - crontab_text is the crontab's text, or "" when there is none
-    Ensures:
-        - returns "not installed" with no tagged line, "installed: n lines" with at least MIN_LINES, else "partly installed: n lines"
-        - so an install from before the second daily slot reads as partly installed
-    """
-    count = sum( 1 for line in crontab_text.splitlines() if line.rstrip().endswith( CRON_TAG ) )
-    if count == 0: return "not installed"
-    return f"installed: {count} lines" if count >= MIN_LINES else f"partly installed: {count} lines"
-
-
 def install_mode( args, environ, now, out, err, crontab_cmd ):
     """
     Print, install, remove or report the cron lines.
@@ -580,7 +587,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     try:
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
-            out( status_text( read.stdout if read.returncode == 0 else "" ) )
+            out( lt.status_text( read.stdout if read.returncode == 0 else "", CRON_TAG, INSTALLED_LINES ) )
             return 0
         if args.uninstall:
             lt.edit_crontab( [], environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
@@ -607,12 +614,14 @@ def live_parts():
         - the filer files the run's one triage row over HTTP; it builds its store client, reads the roster and the configured manager only when it is called
         - the auditor queues known-miss audits in the lookup tool's data folder, reading it only when it is called
         - the notifier sends the branch guard's alert, only when it is called
+        - cron_has_baseline reads the crontab, only when a branch guard refusal needs the reinstall command
         - writes nothing and makes no call
     """
     base = proof_cli.base_wiring( ".", lambda defs: [], 1, vector_build.EndpointClient() )
     return { "client": base[ "client" ], "backend": base[ "backend" ], "data_dir": base[ "data_dir" ], "version_fn": model_transport.cli_version,
              "verify": lambda: cfg_mod.verify_frozen( base[ "frozen_path" ], base[ "live" ] ),
-             "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor, "notifier": live_notifier }
+             "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor, "notifier": live_notifier,
+             "cron_has_baseline": baseline_installed }
 
 
 def live_filer( findings, folder ):

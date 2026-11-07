@@ -286,7 +286,7 @@ def test_git_names_the_command_when_it_fails( tmp_path ):
 
 def test_the_live_parts_are_built_without_a_call():
     parts = dd.live_parts()
-    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier" } and callable( parts[ "structural" ] )
+    assert set( parts ) == { "client", "backend", "data_dir", "version_fn", "verify", "structural", "filer", "auditor", "notifier", "cron_has_baseline" } and callable( parts[ "structural" ] )
 
 
 def lines_of( **over ):
@@ -433,7 +433,7 @@ def test_a_run_with_no_filer_still_writes_every_finding_with_the_eight_fields_th
     saved = json.loads( results( tmp_path )[ 0 ].read_text() )
     assert "filing" not in saved and len( saved[ "findings" ] ) == 3 and saved[ "findings" ] == doc[ "findings" ]
     for f in saved[ "findings" ]:
-        assert all( k in f for k in ( "id", "name", "file", "line", "session_id", "others", "window", "correlation_key" ) )
+        assert all( k in f for k in ( "id", "name", "file", "line", "others", "window", "correlation_key" ) )
         assert f[ "correlation_key" ].startswith( "epic:dupcheck-" ) and "text" not in f
 
 
@@ -875,10 +875,12 @@ def test_the_reinstall_command_keeps_the_ceiling_a_run_was_given( repo, tmp_path
     assert "--ceiling 1500" in doc[ "reinstall" ] and "--cap" not in doc[ "reinstall" ] and doc[ "ceiling" ] == 1500
 
 
-def test_the_status_reads_none_partly_and_fully_installed():
+def test_the_status_reads_none_partly_and_fully_installed_with_or_without_the_baseline_line():
     tag = dd.CRON_TAG
-    assert dd.status_text( "" ) == "not installed" and dd.status_text( f"0 1 * * * x {tag}\n@reboot y {tag}\n" ) == "partly installed: 2 lines"
-    assert dd.status_text( f"a {tag}\nb {tag}\nc {tag}\nother\n" ) == "installed: 3 lines"
+    status = lambda text: dd.lt.status_text( text, tag, dd.INSTALLED_LINES )
+    assert status( "" ) == "not installed" and status( f"0 1 * * * x {tag}\n@reboot y {tag}\n" ) == "partly installed: 2 lines"
+    assert status( f"a {tag}\nb {tag}\nc {tag}\nother\n" ) == "installed: 3 lines" and status( f"a {tag}\nb {tag}\nc {tag}\nd {tag}\n" ) == "installed: 4 lines"
+    assert status( f"a {tag}\n" * 5 ) == "partly installed: 5 lines"
 
 
 def test_main_takes_a_ceiling_or_a_cap_but_not_both_and_installs_the_baseline_line_when_asked( tmp_path, cron ):
@@ -951,3 +953,68 @@ def test_a_frozen_configuration_that_fails_to_load_after_the_prerequisites_passe
     calls = iter( range( 5 ) )
     doc   = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path, verify=verify ) )
     assert doc[ "stage" ] == dd.STAGE_SETUP and "changed between calls" in doc[ "error" ] and failed_line( tmp_path )[ "status" ] == "failed"
+
+
+def test_baseline_definitions_map_each_definition_to_the_end_commit_and_read_the_pools_files( repo ):
+    c1, c2, c3 = history( repo )
+    commit( repo, { "tools/outside.py": function( "outside", [ "MARKO" ], 3 ), "client/lib.min.js": "function minified(){return 1}\n", "client/types.d.ts": "export declare function typed(): void;\n" }, "files the pool skips", 1 )
+    window = dd.baseline_window( repo )
+    tree   = repo
+    got    = dd.baseline_definitions( tree, window )
+    names  = sorted( d[ "name" ] for d in got[ "defs" ] )
+    assert window[ "start" ] == c1 and window[ "end" ] == git( repo, "rev-parse", "main" ) != c1
+    pooled = sorted( d[ "name" ] for d in [ *dd.label_prep.tree_definitions( tree )[ "server_defs" ], *dd.label_prep.tree_definitions( tree )[ "client_defs" ] ] )
+    assert "minified" not in names and "typed" not in names, "the pool skips .min.js and .d.ts files, so the baseline does not ask for them"
+    assert names == pooled == [ "a1", "a2", "a3", "old", "outside", "s1" ] and all( d[ "origin" ] == "new" for d in got[ "defs" ] )
+    assert set( got[ "commit_of" ].values() ) == { window[ "end" ] } and set( got[ "commit_of" ] ) == { d[ "id" ] for d in got[ "defs" ] }
+    assert [ ( d[ "file" ], d[ "line" ] ) for d in got[ "defs" ] ] == sorted( ( d[ "file" ], d[ "line" ] ) for d in got[ "defs" ] )
+
+
+def test_a_baseline_finding_carries_the_end_commit_in_its_history_line( repo, tmp_path ):
+    history( repo )
+    dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path ), ceiling=100, baseline=True )
+    line = hist.read_lines( folder_of( tmp_path ) )[ 0 ]
+    assert set( line[ "findings_by_commit" ] ) == { git( repo, "rev-parse", "main" ) } and line[ "findings" ] == sum( line[ "findings_by_commit" ].values() )
+
+
+def test_the_reinstall_command_names_the_baseline_line_when_a_baseline_run_refused_or_the_crontab_holds_one( repo, tmp_path ):
+    stale_repo( repo )
+    plain = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path ), branch="wip-old", ceiling=1500 )
+    held  = dd.run( repo, NOW, "cron", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: True ), branch="wip-old", ceiling=1500 )
+    asked = dd.run( repo, NOW, "hand", None, "/bin/claude", parts_of( tmp_path, cron_has_baseline=lambda: False ), branch="wip-old", ceiling=1500, baseline=True )
+    assert "--with-baseline" not in plain[ "reinstall" ] and held[ "reinstall" ].endswith( " --with-baseline" ) and asked[ "reinstall" ].endswith( " --with-baseline" )
+    assert dd.reinstall_command( "/m", "/py", 40, "/c", "b" ) == "cd /m && LUPIN_ROOT=/m PYTHONPATH=/m/src /py -m lupin_mcp.duplicate_check_daily --install --cap 40 --claude-cli-path /c --branch b"
+
+
+def test_the_crontab_reader_finds_a_tagged_baseline_line_and_nothing_else( cron ):
+    assert dd.baseline_installed( cron[ "cmd" ] ) is False, "no crontab at all"
+    cron[ "file" ].write_text( f"0 * * * * other --baseline\n7 20 * * * run --baseline {dd.CRON_TAG}\n" )
+    assert dd.baseline_installed( cron[ "cmd" ] ) is True
+    cron[ "file" ].write_text( f"7 12 * * * run --cap 1 {dd.CRON_TAG}\n0 * * * * other --baseline\n" )
+    assert dd.baseline_installed( cron[ "cmd" ] ) is False, "a baseline flag on another tool's line is not ours"
+
+
+def test_the_crontab_reader_answers_false_when_the_command_cannot_run_and_reads_the_environment_by_default( monkeypatch ):
+    assert dd.baseline_installed( [ "/no/such/crontab-binary" ] ) is False
+    seen = []
+    monkeypatch.setattr( dd.subprocess, "run", lambda cmd, **k: seen.append( cmd ) or subprocess.CompletedProcess( cmd, 1, stdout="", stderr="" ) )
+    monkeypatch.setenv( "DUPLICATE_CHECK_DAILY_CRONTAB", "mycron" )
+    assert dd.baseline_installed() is False and seen == [ [ "mycron", "-l" ] ]
+
+
+def test_the_live_parts_give_the_branch_guard_the_crontab_reader():
+    assert dd.live_parts()[ "cron_has_baseline" ] is dd.baseline_installed
+
+
+def test_the_rising_alert_fires_on_the_first_crossing_only_and_a_fall_resets_it( repo, tmp_path ):
+    seed( tmp_path, 1, 2 )
+    notifier = Notifier()
+    doc = { "status": "carried", "trigger": "cron", "carried": [ "a", "b", "c" ] }
+    first = dd.rising_guard( folder_of( tmp_path ), doc, NOW, 2, notifier )
+    assert first[ "notified" ] is True and "repeat" not in first
+    hist.append_line( folder_of( tmp_path ), hist.line_of( { **doc, "started_at": NOW.isoformat() }, "x.json" ) )
+    again = dd.rising_guard( folder_of( tmp_path ), { **doc, "carried": [ 1, 2, 3, 4 ] }, NOW + datetime.timedelta( hours=6 ), 2, notifier )
+    assert again[ "repeat" ] is True and again[ "notified" ] is False and again[ "series" ] == [ 2, 3, 4 ] and len( notifier.sent ) == 1
+    hist.append_line( folder_of( tmp_path ), hist.line_of( { **doc, "carried": [], "started_at": ( NOW + datetime.timedelta( hours=7 ) ).isoformat() }, "y.json" ) )
+    after_fall = dd.rising_guard( folder_of( tmp_path ), doc, NOW + datetime.timedelta( hours=8 ), 2, notifier )
+    assert after_fall is None, "after a fall the series is short again"

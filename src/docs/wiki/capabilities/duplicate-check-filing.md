@@ -15,7 +15,7 @@ pins:
   - lupin_mcp.duplicate_check_filing.gated@eaa079cb6c
   - lupin_mcp.duplicate_check_filing.read_triaged@453a0be918
   - lupin_mcp.duplicate_check_filing.append_triaged@f2f7870125
-  - lupin_mcp.duplicate_check_filing.file_findings@7c2a8c3866
+  - lupin_mcp.duplicate_check_filing.file_findings@46e1f049b7
   - lupin_mcp.duplicate_check_filing.LiveStore@0eca9a45b2
 ---
 # Duplicate check filing
@@ -28,6 +28,7 @@ pins:
 - `run_key( keys )` is `epic:dupcheck-run-` and 16 hex digits of the sha256 of the sorted finding keys. The same findings give the same row key.
 - `triage_payload( findings, owner, day )` builds a P5 task with no status, so the store's holding default applies. The title starts with `[LUPIN] Duplicate check <day>:` and asks whether the new functions should reuse existing ones.
 - The body says why the row exists and what to do: a `DUPCHECK-VERDICT` line per function, see [[duplicate-check-verdict-lines]]. It also names the owner and lists each finding with what it repeats. `created_by` is `duplicate-check-daily`, with no session id.
+- The row's title day is the findings' `day` field, else today; a refile sets it from the result file's date.
 - `file_findings` leaves out findings already in `triaged.jsonl` or in a spooled row. With none left it files nothing. Otherwise it sends the spooled rows, then the new one, and writes the findings of a row the store took to `triaged.jsonl`.
 - `send_row( payload, store )` asks the store for the key before the create. It answers `already_filed`, `filed`, `queued_for_retry` or `refused`.
 - A probe that does not answer ok queues the row. A create with no status, a transport failure, queues it too. So does a 422 whose `detail` or `error` text contains `New tickets are gated`; `gated( body )` makes that test.

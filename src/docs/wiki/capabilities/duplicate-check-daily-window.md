@@ -14,7 +14,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.progress@29d6340dbb
   - lupin_mcp.duplicate_check_daily.write_json@d65f1e03d9
   - lupin_mcp.duplicate_check_daily.baseline_window@bd338e256d
-  - lupin_mcp.duplicate_check_daily.baseline_definitions@808875bb59
+  - lupin_mcp.duplicate_check_daily.baseline_definitions@c2329a0869
   - lupin_mcp.duplicate_check_daily.read_baseline@c51274d43b
 ---
 # Duplicate check daily: window and new definitions

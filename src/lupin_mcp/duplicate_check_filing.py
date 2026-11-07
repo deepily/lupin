@@ -191,7 +191,7 @@ def file_findings( findings, folder, store, declared, roster, day=None ):
 
     Requires:
         - findings are triage_payload's findings; folder is the daily check's record folder
-        - day is the date for the title, or None for today
+        - day is the date for the title; None takes the first finding's day field, an ISO date, else today
     Ensures:
         - returns { filed, already_filed, queued_for_retry, refused } as lists of { key, ... }, at most one entry for this run's row and one for each spooled row
         - a finding already on an earlier triage row, or on a spooled one, is left out; with none left no row is filed
@@ -200,7 +200,7 @@ def file_findings( findings, folder, store, declared, roster, day=None ):
     Raises:
         - NoTriageOwner when there are findings to file and the roster is empty, before anything is sent
     """
-    day     = datetime.date.today() if day is None else day
+    if day is None: day = datetime.date.fromisoformat( findings[ 0 ][ "day" ] ) if findings and "day" in findings[ 0 ] else datetime.date.today()
     out     = { FILED: [], ALREADY: [], QUEUED: [], REFUSED: [] }
     waiting = []
     spooled = read_pending( folder )

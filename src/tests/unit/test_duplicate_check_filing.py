@@ -121,6 +121,15 @@ def test_a_run_with_findings_and_an_empty_roster_raises_before_anything_is_sent(
     assert store.created == [] and store.probes == [] and not ( tmp_path / ff.TRIAGED_FILE ).exists()
 
 
+def test_the_day_comes_from_the_findings_when_none_is_given_and_a_given_day_wins( tmp_path ):
+    store = Store()
+    ff.file_findings( [ { **finding(), "day": "2026-09-30" } ], tmp_path, store, "Cheech", [ "Cheech" ] )
+    assert store.created[ 0 ][ "title" ].startswith( "[LUPIN] Duplicate check 30 Sep:" )
+    other = Store()
+    ff.file_findings( [ { **finding( "d-2", "b2", "def b2(): pass" ), "day": "2026-09-30" } ], tmp_path, other, "Cheech", [ "Cheech" ], datetime.date( 2026, 1, 2 ) )
+    assert other.created[ 0 ][ "title" ].startswith( "[LUPIN] Duplicate check 2 Jan:" )
+
+
 def test_the_default_day_is_today_and_the_row_is_owned_by_the_roster_persona( tmp_path ):
     store = Store()
     ff.file_findings( [ finding() ], tmp_path, store, "manager-on-duty", [ "Cheech" ] )
