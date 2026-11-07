@@ -1018,3 +1018,12 @@ def test_the_rising_alert_fires_on_the_first_crossing_only_and_a_fall_resets_it(
     hist.append_line( folder_of( tmp_path ), hist.line_of( { **doc, "carried": [], "started_at": ( NOW + datetime.timedelta( hours=7 ) ).isoformat() }, "y.json" ) )
     after_fall = dd.rising_guard( folder_of( tmp_path ), doc, NOW + datetime.timedelta( hours=8 ), 2, notifier )
     assert after_fall is None, "after a fall the series is short again"
+
+
+def test_baseline_definitions_include_the_client_script_files_under_the_pools_client_directory( repo ):
+    history( repo )
+    js = "function widgetTotal( items ) {\n    let total = 0;\n    for ( const item of items ) { total += item.price * item.count; }\n    return total;\n}\n"
+    commit( repo, { f"{dd.label_prep.CLIENT_DIR}/widget.js": js }, "a client script", 1 )
+    got = dd.baseline_definitions( repo, dd.baseline_window( repo ) )
+    mine = [ d for d in got[ "defs" ] if d[ "file" ] == f"{dd.label_prep.CLIENT_DIR}/widget.js" ]
+    assert [ d[ "name" ] for d in mine ] == [ "widgetTotal" ] and mine[ 0 ][ "origin" ] == "new" and mine[ 0 ][ "id" ] in got[ "commit_of" ]

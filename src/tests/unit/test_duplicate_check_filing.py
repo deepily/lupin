@@ -379,3 +379,11 @@ def test_every_key_of_a_long_row_is_triaged_once_it_is_filed_so_the_unlisted_one
     run_once( tmp_path, found, store )
     assert len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == ff.LIST_LIMIT + 3
     assert run_once( tmp_path, found, store ) == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [] }
+
+
+def test_one_finding_past_the_limit_lists_the_limit_and_counts_exactly_one_more():
+    found = [ { **f, "run_file": "r.json" } for f in many_findings( ff.LIST_LIMIT + 1 ) ]
+    row   = ff.triage_payload( found, { "owner": "cheech", "note": "n" }, DAY )
+    listed = [ l for l in row[ "body" ].splitlines() if l.startswith( "- f" ) ]
+    assert len( listed ) == 200 and ff.LIST_LIMIT == 200 and row[ "body" ].splitlines()[ -1 ] == "- and 1 more in r.json" and f"f{ff.LIST_LIMIT} (" not in row[ "body" ]
+    assert len( row[ "finding_keys" ] ) == 201
