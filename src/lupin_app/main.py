@@ -148,113 +148,6 @@ websocket_heartbeat_task = None
 websocket_cleanup_task = None
 notification_sweep_task = None
 
-# ============================================================================
-# DEPRECATED: Legacy emit_speech infrastructure (Session 97)
-# Queue classes now use notification service directly via _notify() method
-# Keeping commented for reference during migration verification
-# TODO: Remove after migration verified stable (target: Session 100+)
-# ============================================================================
-# async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ) -> None:
-#     """
-#     [DEPRECATED] Generate TTS speech and emit via WebSocket to specific user or broadcast.
-#
-#     Replaced by: Notification service with _notify() method in queue classes
-#     Reason: Migration to notification service for job_id routing, blocking queries, and suppress_ding
-#
-#     Requires:
-#         - websocket_manager must be initialized and running
-#         - msg must be a non-empty string
-#         - user_id or websocket_id must be valid if provided
-#
-#     Ensures:
-#         - TTS job request is emitted via WebSocket to target recipient
-#         - No exceptions are propagated to caller (errors are logged)
-#         - Speech data includes text and timestamp
-#
-#     Args:
-#         msg: The text message to be converted to speech
-#         user_id: User ID for user-specific routing (preferred method)
-#         websocket_id: Optional websocket identifier for backwards compatibility
-#
-#     Returns:
-#         None
-#
-#     Raises:
-#         No exceptions raised - all errors are caught and logged
-#     """
-#     print( f"[SPEECH] emit_speech called:" )
-#     print( f"  - Message: '{msg}'" )
-#     print( f"  - User ID: {user_id if user_id else 'none'}" )
-#     print( f"  - WebSocket ID: {websocket_id if websocket_id else 'none'}" )
-#
-#     try:
-#         # Emit speech_update event to trigger TTS in browser
-#         speech_data = {
-#             "text": msg,
-#             "timestamp": datetime.now().isoformat()
-#         }
-#
-#         if user_id and user_id != "ricardo_felipe_ruiz_6bdc":
-#             # Emit to specific user (preferred method)
-#             await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
-#             print( f"[SPEECH] Emitted tts_job_request to user {user_id}" )
-#         elif user_id == "ricardo_felipe_ruiz_6bdc":
-#             # Default user - still use user-based routing
-#             await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
-#             print( f"[SPEECH] Emitted tts_job_request to default user {user_id}" )
-#         elif websocket_id:
-#             # Backwards compatibility: Emit to specific session
-#             await websocket_manager.emit_to_session( websocket_id, "tts_job_request", speech_data )
-#             print( f"[SPEECH] Emitted tts_job_request to session {websocket_id} (backwards compatibility)" )
-#         else:
-#             # Fallback: Broadcast to all connected clients
-#             await websocket_manager.async_emit( "tts_job_request", speech_data )
-#             print( f"[SPEECH] Broadcasted tts_job_request to all connections (fallback)" )
-#
-#     except Exception as e:
-#         print( f"[SPEECH] Error emitting speech: {e}" )
-#         # Don't raise - this shouldn't break the calling flow
-#
-#
-# def create_emit_speech_callback():
-#     """
-#     [DEPRECATED] Creates a sync wrapper for the async emit_speech function with user-based routing.
-#
-#     Replaced by: Notification service - queue classes use _notify() directly
-#
-#     Requires:
-#         - No preconditions
-#
-#     Ensures:
-#         - Returns a callable synchronous wrapper function
-#         - Wrapper function runs emit_speech in isolated thread with own event loop
-#         - Thread execution is non-blocking and daemon-enabled
-#
-#     Args:
-#         None
-#
-#     Returns:
-#         function: Synchronous wrapper function that accepts (msg, user_id, websocket_id) parameters
-#
-#     Raises:
-#         No exceptions raised - wrapper function handles all errors internally
-#     """
-#     def sync_emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ):
-#         import threading
-#
-#         def run_in_thread():
-#             try:
-#                 # Run async function in isolated thread with its own event loop
-#                 asyncio.run( emit_speech( msg, user_id=user_id, websocket_id=websocket_id ) )
-#             except Exception as e:
-#                 print( f"[SPEECH] Error in speech thread: {e}" )
-#
-#         # Always run in separate thread to avoid event loop conflicts
-#         thread = threading.Thread( target=run_in_thread, daemon=True )
-#         thread.start()
-#         print( f"[SPEECH] Started speech emission thread for: '{msg}' (user: {user_id})" )
-#     return sync_emit_speech
-
 
 def _invalidate_snapshot_mgr():
     """
@@ -521,8 +414,7 @@ async def notification_expiry_sweep_loop():
 
 
 # ─── Managed-bounce broadcasts (R4 warning + R5 all-clear) ──────────────────
-# Design of record: src/rnd/v0.1.9/2026.08.01-managed-bounce-review-tiffany.md +
-# 2026.08.01-managed-bounce-for-7999.md Rev 2. Pure/injectable logic lives in
+# Pure/injectable logic lives in
 # cosa.rest.managed_bounce_broadcast; these thin wrappers bind it to the live
 # commons singletons (module globals set during startup).
 
@@ -1259,7 +1151,7 @@ if __name__ == "__main__":
     # Why not `reload_excludes`? Because it is INERT here. Verbatim from
     # uvicorn/supervisors/statreload.py:
     #
-    #     if config.reload_excludes or config.reload_includes:
+    #     if config.reload_excludes or config.reload_includes:  # doc-lint: waive commented-out-code -- verbatim quote of uvicorn's source, not our code
     #         logger.warning("--reload-include and --reload-exclude have no effect
     #                         unless watchfiles is installed.")
     #

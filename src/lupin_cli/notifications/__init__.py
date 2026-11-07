@@ -16,6 +16,6 @@ Main Components:
 __version__ = "0.1.0"
 
 # NOTE: Convenience imports removed to prevent any potential circular dependencies
-# Use direct imports instead, e.g.:
-#   from lupin_cli.notifications.notify_user import notify_user
-#   from lupin_cli.notifications.notification_types import NotificationType, NotificationPriority
+# Import from the submodules directly: notify_user comes from
+# lupin_cli.notifications.notify_user, and NotificationType and NotificationPriority
+# come from lupin_cli.notifications.notification_types.
