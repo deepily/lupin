@@ -502,3 +502,69 @@ def test_a_do_not_sentence_fires_on_a_plain_docstring_and_not_on_a_registered_to
     imperative = [ ( f.line, f.message ) for f in findings if f.rule == "agent-imperative" ]
     assert stats == { "exempted": 1 }
     assert imperative == [ ( 14, "text addressed to a model: 'Do not'" ) ]
+
+
+# ---- comment_lint: line pointers, dangling paths, commented-out code --------------------------
+
+@pytest.mark.parametrize( "text, expected", [
+    ( " x = 1", True ), ( " total += 2", True ), ( " import os", True ), ( " from a import b", True ), ( " del cache", True ),
+    ( " y: int = 3", True ), ( " print( x )", True ), ( " if ready:", True ), ( " else:", True ), ( " try:", True ), ( " finally:", True ),
+    ( " for item in items:", True ), ( " def helper( a ):", True ), ( " class Thing:", True ), ( " async def go():", True ),
+    ( " with open( p ) as f:", True ), ( " return self.value", True ), ( " raise ValueError( 'no' )", True ), ( " assert x == 1, 'bad'", True ),
+    ( "", False ), ( " ", False ), ( " yes", False ), ( " foo.bar", False ), ( " Note: a", False ), ( " noqa: E501", False ),
+    ( " for example x = 1", False ), ( " return early", False ), ( " raise alarm", False ), ( " assert truth", False ),
+    ( " x == 1", False ), ( " a = 1; b = 2", False ), ( " TODO( rick ): fix", False ), ( " if the file is missing:", False ),
+] )
+def test_commented_out_code_is_a_statement_that_parses_and_prose_is_not( text, expected ):
+    assert comment_lint.is_commented_out_code( text ) is expected
+    assert [ f.rule for f in comment_lint.commented_out_code_findings( text, "a.py", 3 ) ] == ( [ "commented-out-code" ] if expected else [] )
+
+
+def test_a_line_pointer_needs_a_known_extension_and_a_line_number():
+    found = comment_lint.line_pointer_findings( " see src/cosa/a.py:12 and notes.md:7, not host 127.0.0.1:8000 or example.com:443 or a.py", "a.py", 5 )
+    assert [ ( f.line, f.rule, f.message.split( "'" )[ 1 ] ) for f in found ] == [ ( 5, "line-pointer", "src/cosa/a.py:12" ), ( 5, "line-pointer", "notes.md:7" ) ]
+
+
+def test_a_cited_path_is_dangling_only_when_its_top_directory_is_tracked_and_the_file_is_not( repo ):
+    _commit( repo, { "src/a.py": "x = 1\n", "docs/real.md": "r\n" } )
+    text = " see src/a.py, docs/real.md, docs/gone.md, src/missing.py:4, scratch/none.py, /abs/src/gone.py, https://x.org/src/gone.py, src/*.py and ~/src/gone.py"
+    found = comment_lint.dangling_path_findings( text, "a.py", 9, repo )
+    assert [ ( f.line, f.rule, f.message.split( "'" )[ 1 ] ) for f in found ] == [ ( 9, "dangling-path", "docs/gone.md" ), ( 9, "dangling-path", "src/missing.py" ) ]
+    assert comment_lint.dangling_path_findings( text, "a.py", 9, None ) == []
+    assert comment_lint.dangling_path_findings( " no path here", "a.py", 9, repo ) == []
+
+
+def test_a_staged_new_file_counts_as_tracked_and_a_failed_listing_raises( repo, tmp_path ):
+    _commit( repo, { "src/a.py": "x = 1\n" } )
+    ( repo / "src" / "new.py" ).write_text( "y = 2\n" )
+    _git( repo, "add", "src/new.py" )
+    assert "src/new.py" in comment_lint.tracked_paths( str( repo ) )
+    with pytest.raises( RuntimeError, match="git ls-files failed" ):
+        comment_lint.tracked_paths( str( tmp_path / "not-a-repo" ) )
+
+
+def test_lint_source_applies_the_three_rules_per_comment_and_main_clears_the_path_cache( repo ):
+    source = "# x = 1\ny = 2  # see src/a.py:3 and src/gone.py\n# plain words\n"
+    _commit( repo, { "src/a.py": source } )
+    found = comment_lint.lint_source( "src/a.py", source, repo )
+    assert [ ( f.line, f.rule ) for f in found ] == [ ( 1, "commented-out-code" ), ( 2, "dangling-path" ), ( 2, "line-pointer" ) ]
+    assert [ f.rule for f in comment_lint.lint_source( "src/a.py", source ) ] == [ "commented-out-code", "line-pointer" ]
+    out = io.StringIO()
+    assert comment_lint.main( [ "--repo-root", str( repo ) ], out ) == 0
+    assert "src/a.py:2: dangling-path" in out.getvalue()
+    assert comment_lint.PATH_CACHE[ "listings" ] is None                                  # the cache lives for one run only
+
+
+def test_during_a_whole_corpus_run_the_listing_is_read_once_per_root( repo, monkeypatch ):
+    _commit( repo, { "src/a.py": "x = 1\n" } )
+    calls = []
+    real  = subprocess.run
+    monkeypatch.setattr( comment_lint.subprocess, "run", lambda *a, **k: calls.append( a ) or real( *a, **k ) )
+    comment_lint.PATH_CACHE[ "listings" ] = {}
+    try:
+        for _ in range( 3 ): comment_lint.tracked_paths( str( repo ) )
+    finally:
+        comment_lint.PATH_CACHE[ "listings" ] = None
+    assert len( calls ) == 1
+    for _ in range( 2 ): comment_lint.tracked_paths( str( repo ) )
+    assert len( calls ) == 3
