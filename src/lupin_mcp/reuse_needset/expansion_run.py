@@ -33,10 +33,10 @@ CACHE_DIR   = "query-cache"
 ENV_LINE    = re.compile( r"export (LUPIN_REUSE_[A-Z_]+)=(\S+)" )
 ENV_NEEDED  = ( rt.PACK_SIZE_VARIABLE, rt.CEILING_VARIABLE, rt.RUN_NAME_VARIABLE )
 WHOLE_LIST  = 10 ** 9
-DONE        = "done"
-CAP         = "cap_reached"
-BUDGET      = "budget_reached"
-FAILED      = "failed"
+DONE        = call_cap.DONE
+CAP         = call_cap.CAP_HIT
+BUDGET      = call_cap.BUDGET_HIT
+FAILED      = call_cap.FAILED
 
 
 def read_env_file( path ):
@@ -202,28 +202,11 @@ def run_live( run_dir, rows, ask, ledger, search, fusion, limit, budget, model_i
         - status is done, budget_reached, cap_reached or failed; a NeedsetError ends the run with a report and no exception
         - any other error writes the report with the finished rows and status failed first, then is raised
     """
-    cap     = call_cap.CallCap( f"{run_dir}/{first_thousand.CALLS_FILE}", limit, { ex.STAGE_NAME: budget } )
-    results = [ ]
-    status, detail, raised = DONE, None, None
+    def work( results ):
+        """Ensures: replays the rows, appending each result."""
+        ex.replay( rows, ask, ledger, search, fusion, model_id, into=results )
 
-    def write():
-        """Ensures: writes the report as it stands and returns it."""
-        out = { "used": cap.used(), "limit": limit, "by_stage": cap.by_stage(), "status": status, "detail": detail, "summary": ex.summarize( results ), "results": results }
-        pathlib.Path( f"{run_dir}/{REPORT_FILE}" ).write_text( json.dumps( out, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
-        return out
-
-    with cap.installed():
-        try:
-            with call_cap.stage( ex.STAGE_NAME ):
-                ex.replay( rows, ask, ledger, search, fusion, model_id, into=results )
-        except er.NeedsetError as error:
-            status = CAP if error.code == er.CALL_CAP_REACHED else BUDGET if error.code == er.STAGE_BUDGET_REACHED else FAILED
-            detail = str( error )
-        except BaseException as error:
-            status, detail, raised = FAILED, f"{type( error ).__name__}: {error}", error
-    out = write()
-    if raised is not None: raise raised
-    return out
+    return call_cap.run_under_cap( f"{run_dir}/{first_thousand.CALLS_FILE}", f"{run_dir}/{REPORT_FILE}", limit, ex.STAGE_NAME, budget, work, lambda results, _cap: ex.summarize( results ) )
 
 
 def parse_args( argv ):

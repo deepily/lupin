@@ -11,12 +11,17 @@ import datetime
 import fcntl
 import json
 import os
+import pathlib
 
 from cosa.repo.doc_lint import jev_transport, model_transport
 from lupin_mcp.reuse_needset import errors as er
 
 CALL_LIMIT = 1314
 NO_STAGE   = "unstaged"
+DONE       = "done"
+CAP_HIT    = "cap_reached"
+BUDGET_HIT = "budget_reached"
+FAILED     = "failed"
 _STAGE     = contextvars.ContextVar( "needset_call_stage", default=NO_STAGE )
 
 
@@ -196,3 +201,41 @@ def charge_attempt( model ):
         if _STAGE.get() != NO_STAGE: raise er.NeedsetError( er.CAP_NOT_INSTALLED, f"the {_STAGE.get()} stage reached a model with no cap installed" )
         return
     hook( model )
+
+
+def run_under_cap( ledger_path, report_path, limit, stage_name, budget, work, summarize ):
+    """
+    Run a stage's work under a call cap over one ledger file and write its report.
+
+    Requires:
+        - work( results ) makes the stage's counted calls and appends each finished result to the list results
+        - summarize( results, cap ) counts the results for the report and may read the cap
+
+    Ensures:
+        - the cap reads its count from ledger_path and gives the stage stage_name budget calls, inside a limit of limit
+        - returns { used, limit, by_stage, status, detail, summary, results } and writes it as JSON at report_path
+        - status is done, budget_reached, cap_reached or failed; a NeedsetError ends the run with a report and no exception
+        - any other error writes the report with the finished results and status failed first, then is raised
+    """
+    cap     = CallCap( ledger_path, limit, { stage_name: budget } )
+    results = [ ]
+    status, detail, raised = DONE, None, None
+
+    def write():
+        """Ensures: writes the report as it stands and returns it."""
+        out = { "used": cap.used(), "limit": limit, "by_stage": cap.by_stage(), "status": status, "detail": detail, "summary": summarize( results, cap ), "results": results }
+        pathlib.Path( report_path ).write_text( json.dumps( out, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+        return out
+
+    with cap.installed():
+        try:
+            with stage( stage_name ):
+                work( results )
+        except er.NeedsetError as error:
+            status = CAP_HIT if error.code == er.CALL_CAP_REACHED else BUDGET_HIT if error.code == er.STAGE_BUDGET_REACHED else FAILED
+            detail = str( error )
+        except BaseException as error:
+            status, detail, raised = FAILED, f"{type( error ).__name__}: {error}", error
+    out = write()
+    if raised is not None: raise raised
+    return out

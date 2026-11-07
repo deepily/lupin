@@ -10,6 +10,7 @@ pins:
   - lupin_mcp.reuse_needset.call_cap.CallCap.by_stage@76f106b896
   - lupin_mcp.reuse_needset.call_cap.CallCap.charge@a7d86b9836
   - lupin_mcp.reuse_needset.call_cap.CallCap.installed@fe4a57edf4
+  - lupin_mcp.reuse_needset.call_cap.run_under_cap@ee434b19b6
   - lupin_mcp.reuse_needset.call_cap.CallCap.guard@93b470386b
   - lupin_mcp.reuse_needset.call_cap.charge_attempt@a521d40754
 ---
@@ -28,3 +29,4 @@ One shared cap on model calls for Set B's first-thousand run, 1,314 in all. The 
 - `installed` sets the hook to the cap's `charge` for a block and puts the earlier hook back after it. It does the same for the Jev transport's hook, so each HTTP attempt to Jev, retries included, counts beside the drafter's calls.
 - `guard` wraps an async call that reaches a model by another door, so it charges first.
 - `charge_attempt` is for a caller that charges itself, as the agent probe does before each attempt. It raises `CAP_NOT_INSTALLED` when a stage is running and no cap is installed. Such a caller must not also be wrapped by `guard`.
+- `run_under_cap` is the one run-under-cap shape for a stage driver. It builds the cap over a ledger file, installs it, runs the driver's `work( results )` inside the named stage, and writes the JSON report. A cap or budget stop ends the run with a report and no exception. Any other error writes the report with status `failed` first, then is raised. [[needset-forced-judge]], [[needset-expansion-run]] and [[needset-judge-probe-arms]] all run through it.
