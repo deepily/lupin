@@ -601,6 +601,70 @@ async def upload_and_transcribe_mp3_file(
     finally:
         remove_audio_upload( path )
 
+def validate_tts_request( session_id, msg, tag, check_params=None ):
+    """
+    Validate and clean the session id and text of a TTS request, shared by both TTS endpoints.
+
+    Requires:
+        - tag names the endpoint in the error log line, for example "TTS"
+        - check_params is None or a callable that raises HTTPException on a bad extra parameter
+
+    Ensures:
+        - returns ( session_id, msg ) with msg stripped and each markdown link reduced to its label
+        - runs check_params after the length checks and before the text is stripped
+
+    Raises:
+        - HTTPException 400 when a field is missing, not a string, too long, or the text is empty after trimming
+    """
+    if not session_id or not msg:
+        print( f"[{tag}-ERROR] Missing session_id or text - session_id: {session_id}, text: {msg}" )
+        raise HTTPException( status_code=400, detail="Please provide both a session ID and text message for audio generation" )
+
+    if not isinstance( session_id, str ) or not isinstance( msg, str ):
+        raise HTTPException( status_code=400, detail="Both session_id and text must be strings" )
+
+    if len( session_id ) > 255:
+        raise HTTPException( status_code=400, detail="Session ID too long (max 255 characters)" )
+
+    if len( msg ) > 10000:  # 10KB limit for TTS text
+        raise HTTPException( status_code=400, detail="Text message too long (max 10,000 characters)" )
+
+    if check_params is not None: check_params()
+
+    msg = msg.strip()
+    if not msg:
+        raise HTTPException( status_code=400, detail="Text message cannot be empty after trimming whitespace" )
+
+    # Speech says a link's label and "URL omitted", never its address
+    return session_id, strip_markdown_links_for_speech( msg ).strip()
+
+
+def require_live_session( ws_manager, session_id, user_id, tag, debug=False ):
+    """
+    Register the session and require a live WebSocket, for both TTS endpoints.
+
+    Requires:
+        - tag names the endpoint in the log lines, for example "TTS"
+
+    Ensures:
+        - the session is registered with user_id
+        - returns None when the session is connected
+
+    Raises:
+        - HTTPException 404 when the session has no WebSocket connection
+    """
+    if debug: print( f"[{tag}-DEBUG] Registering session {session_id} for user {user_id}" )
+    ws_manager.register_session_user( session_id, user_id )
+
+    is_connected = ws_manager.is_connected( session_id )
+    if debug: print( f"[{tag}-DEBUG] WebSocket connection check for {session_id}: {is_connected}" )
+
+    if not is_connected:
+        print( f"[{tag}-ERROR] No WebSocket connection for session {session_id}" )
+        if debug: print( f"[{tag}-DEBUG] Active connections: {list( ws_manager.active_connections.keys() )}" )
+        raise HTTPException( status_code=404, detail="Audio connection lost. Please refresh the page and try again." )
+
+
 @router.post(
     "/get-speech",
     summary     = "Synthesize speech (OpenAI)",
@@ -669,47 +733,9 @@ async def get_tts_audio(
 
         if app_debug and app_verbose: print(f"[TTS-DEBUG] Extracted - session_id: '{session_id}', text: '{msg}'")
 
-        # Validate required fields
-        if not session_id or not msg:
-            error_msg = f"Missing session_id or text - session_id: {session_id}, text: {msg}"
-            print(f"[TTS-ERROR] {error_msg}")
-            raise HTTPException(status_code=400, detail="Please provide both a session ID and text message for audio generation")
+        session_id, msg = validate_tts_request( session_id, msg, "TTS" )
 
-        # Validate field types and formats
-        if not isinstance(session_id, str) or not isinstance(msg, str):
-            raise HTTPException(status_code=400, detail="Both session_id and text must be strings")
-
-        # Validate lengths to prevent abuse
-        if len(session_id) > 255:
-            raise HTTPException(status_code=400, detail="Session ID too long (max 255 characters)")
-
-        if len(msg) > 10000:  # 10KB limit for TTS text
-            raise HTTPException(status_code=400, detail="Text message too long (max 10,000 characters)")
-
-        # Sanitize text input
-        msg = msg.strip()
-        if not msg:
-            raise HTTPException(status_code=400, detail="Text message cannot be empty after trimming whitespace")
-
-        # Speech says a link's label and "URL omitted", never its address
-        msg = strip_markdown_links_for_speech( msg ).strip()
-
-        # Register session with authenticated user
-        if app_debug and app_verbose: print(f"[TTS-DEBUG] Registering session {session_id} for user {current_user_id}")
-        ws_manager.register_session_user(session_id, current_user_id)
-
-        # Check if WebSocket connection exists
-        is_connected = ws_manager.is_connected(session_id)
-        if app_debug and app_verbose: print(f"[TTS-DEBUG] WebSocket connection check for {session_id}: {is_connected}")
-
-        if not is_connected:
-            error_msg = f"No WebSocket connection for session {session_id}"
-            print(f"[TTS-ERROR] {error_msg}")
-            # List active connections for debugging
-            if app_debug and app_verbose:
-                active_connections = list(ws_manager.active_connections.keys())
-                print(f"[TTS-DEBUG] Active connections: {active_connections}")
-            raise HTTPException(status_code=404, detail="Audio connection lost. Please refresh the page and try again.")
+        require_live_session( ws_manager, session_id, current_user_id, "TTS", app_debug and app_verbose )
 
         if app_debug and app_verbose: print(f"[TTS-SUCCESS] Starting TTS for session: {session_id}, msg: '{msg}'")
         
@@ -812,62 +838,25 @@ async def get_tts_audio_elevenlabs(
         debug_simulate_error = request_data.get("debug_simulate_error", False)
         utterance_id = read_utterance_id( request_data )
 
-        # Validate required fields
-        if not session_id or not msg:
-            error_msg = f"Missing session_id or text - session_id: {session_id}, text: {msg}"
-            print(f"[TTS-ELEVENLABS-ERROR] {error_msg}")
-            raise HTTPException(status_code=400, detail="Please provide both a session ID and text message for audio generation")
+        def check_voice_settings():
+            # Validate numeric parameters
+            if not isinstance(stability, (int, float)) or not (0.0 <= stability <= 1.0):
+                raise HTTPException(status_code=400, detail="Stability must be a number between 0.0 and 1.0")
         
-        # Validate field types and formats
-        if not isinstance(session_id, str) or not isinstance(msg, str):
-            raise HTTPException(status_code=400, detail="Both session_id and text must be strings")
+            if not isinstance(similarity_boost, (int, float)) or not (0.0 <= similarity_boost <= 1.0):
+                raise HTTPException(status_code=400, detail="Similarity boost must be a number between 0.0 and 1.0")
         
-        # Validate lengths
-        if len(session_id) > 255:
-            raise HTTPException(status_code=400, detail="Session ID too long (max 255 characters)")
-        
-        if len(msg) > 10000:
-            raise HTTPException(status_code=400, detail="Text message too long (max 10,000 characters)")
-        
-        # Validate numeric parameters
-        if not isinstance(stability, (int, float)) or not (0.0 <= stability <= 1.0):
-            raise HTTPException(status_code=400, detail="Stability must be a number between 0.0 and 1.0")
-        
-        if not isinstance(similarity_boost, (int, float)) or not (0.0 <= similarity_boost <= 1.0):
-            raise HTTPException(status_code=400, detail="Similarity boost must be a number between 0.0 and 1.0")
-        
-        if not isinstance(speed, (int, float)) or not (0.1 <= speed <= 3.0):
-            raise HTTPException(status_code=400, detail="Speed must be a number between 0.1 and 3.0")
-        
-        # Sanitize text input
-        msg = msg.strip()
-        if not msg:
-            raise HTTPException(status_code=400, detail="Text message cannot be empty after trimming whitespace")
+            if not isinstance(speed, (int, float)) or not (0.1 <= speed <= 3.0):
+                raise HTTPException(status_code=400, detail="Speed must be a number between 0.1 and 3.0")
 
-        # Speech says a link's label and "URL omitted", never its address
-        msg = strip_markdown_links_for_speech( msg ).strip()
+        session_id, msg = validate_tts_request( session_id, msg, "TTS-ELEVENLABS", check_voice_settings )
 
         if app_debug and app_verbose:
             print(f"[TTS-ELEVENLABS-DEBUG] Extracted - session_id: '{session_id}', text: '{msg}', voice_id: '{voice_id}'")
             if debug_simulate_error:
                 print(f"[TTS-ELEVENLABS-DEBUG] 🧪 Debug mode: Error simulation enabled for this request")
 
-        # Register session with authenticated user
-        if app_debug and app_verbose: print(f"[TTS-ELEVENLABS-DEBUG] Registering session {session_id} for user {current_user_id}")
-        ws_manager.register_session_user(session_id, current_user_id)
-
-        # Check if WebSocket connection exists
-        is_connected = ws_manager.is_connected(session_id)
-        if app_debug and app_verbose: print(f"[TTS-ELEVENLABS-DEBUG] WebSocket connection check for {session_id}: {is_connected}")
-
-        if not is_connected:
-            error_msg = f"No WebSocket connection for session {session_id}"
-            print(f"[TTS-ELEVENLABS-ERROR] {error_msg}")
-            # List active connections for debugging
-            if app_debug and app_verbose:
-                active_connections = list(ws_manager.active_connections.keys())
-                print(f"[TTS-ELEVENLABS-DEBUG] Active connections: {active_connections}")
-            raise HTTPException(status_code=404, detail="Audio connection lost. Please refresh the page and try again.")
+        require_live_session( ws_manager, session_id, current_user_id, "TTS-ELEVENLABS", app_debug and app_verbose )
 
         if app_debug and app_verbose: print(f"[TTS-ELEVENLABS-SUCCESS] Starting ElevenLabs TTS for session: {session_id}, msg: '{msg}'")
         

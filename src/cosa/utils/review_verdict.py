@@ -25,6 +25,24 @@ SHA_LENGTH  = 12
 CENSUS_SECONDS = 1800
 
 
+def last_summary_counts( text ):
+    """
+    Read the result counts from the last pytest summary line of text.
+
+    Requires:
+        - text is pytest output
+
+    Ensures:
+        - returns { passed, failed, errors } from the last line that is a whole summary line
+        - returns None when no line is a summary line, so a test name such as "5 passed" cannot count
+    """
+    summaries = [ l for l in text.splitlines() if SUMMARY.match( l.strip() ) ]
+    if not summaries: return None
+    counts = { "passed": 0, "failed": 0, "errors": 0 }
+    for n, word in COUNT.findall( summaries[ -1 ] ): counts[ "errors" if word.startswith( "error" ) else word ] += int( n )
+    return counts
+
+
 def parse_census( text ):
     """
     Read the tree sha and the result counts from a census run's output.
@@ -40,10 +58,8 @@ def parse_census( text ):
     """
     tree = TREE_SHAPE.search( text )
     if tree is None: raise ValueError( "the census output has no tree-state line, so it names no tree" )
-    summaries = [ l for l in text.splitlines() if SUMMARY.match( l.strip() ) ]
-    if not summaries: raise ValueError( "the census output has no pytest summary line, so the guards may not have run" )
-    counts = { "passed": 0, "failed": 0, "errors": 0 }
-    for n, word in COUNT.findall( summaries[ -1 ] ): counts[ "errors" if word.startswith( "error" ) else word ] += int( n )
+    counts = last_summary_counts( text )
+    if counts is None: raise ValueError( "the census output has no pytest summary line, so the guards may not have run" )
     return { "sha": tree.group( 1 ), **counts }
 
 
