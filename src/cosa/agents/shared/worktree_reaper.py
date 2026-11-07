@@ -893,6 +893,8 @@ def at_risk_work( project_root: str, branch: str, target: str, run: Callable ) -
           short name passes is_protected_branch (main, master, target, any "wip" name) is
           never counted: it is safe on a line that is kept. A branch pushed under its own
           name does not protect its commits, because deleting it loses them
+          (a remote line whose name contains "wip" does protect commits, as intended: those lines
+          are kept, and the numbered release lines all carry the mark)
         - returns { count, landed, files }:
             count  - commits on the branch reachable from neither
             landed - True when count is 0, or when `git cherry` finds a patch-equivalent
