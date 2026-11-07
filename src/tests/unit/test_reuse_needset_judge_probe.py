@@ -303,6 +303,11 @@ def test_run_variant_writes_the_report_and_ends_by_name_on_a_cap( tmp_path ):
     proof = json.loads( ( tmp_path / jp.REPORT_FILE ).read_text( encoding="utf-8" ) )[ "summary" ][ "bypass_proof" ]
     assert proof[ "requests_posted" ] == 2 and proof[ "calls_charged_to_the_cap" ] == ok[ "used" ] == 0
 
+    charging = jp.run_variant( str( tmp_path / "charged" ) if ( tmp_path / "charged" ).mkdir() is None else "", reqs[ :2 ],
+                               lambda r: jp.call_cap.charge_attempt( "model-x" ) or result( r[ "pair" ], r[ "arm" ], r[ "repeat" ], 0.5 ), 10, 10 )
+    charged = json.loads( ( tmp_path / "charged" / jp.REPORT_FILE ).read_text( encoding="utf-8" ) )[ "summary" ][ "bypass_proof" ]
+    assert charging[ "used" ] == 2 and charged[ "calls_charged_to_the_cap" ] == 2 and charging[ "by_stage" ] == { jp.STAGE_NAME: 2 }
+
     def stop( code ):
         def ask( r ): raise er.NeedsetError( code, "stopped" )
         return ask
