@@ -122,10 +122,34 @@ def append_line( folder, line ):
     return path
 
 
+def read_history( folder ):
+    """
+    Read the history, oldest run first, and say which lines could not be read.
+
+    Ensures:
+        - returns { lines, bad }: lines are the readable history lines sorted by started_at, bad the 1-based numbers of the file's lines that are not a JSON object with an ISO-8601 started_at
+        - the sort keeps file order between equal times, so a backfill after newer runs still reads in time order
+        - a missing file gives no lines and no bad ones
+    """
+    path  = pathlib.Path( folder ) / RUNS_FILE
+    found = []
+    bad   = []
+    for number, text in enumerate( path.read_text( encoding="utf-8" ).splitlines() if path.exists() else [], start=1 ):
+        if not text.strip(): continue
+        try:
+            line = json.loads( text )
+            when = datetime.datetime.fromisoformat( line[ "started_at" ] ).timestamp()
+        except ( json.JSONDecodeError, TypeError, KeyError, ValueError ):
+            bad.append( number )
+            continue
+        found.append( ( when, line ) )
+    found.sort( key=lambda pair: pair[ 0 ] )
+    return { "lines": [ line for _, line in found ], "bad": bad }
+
+
 def read_lines( folder ):
-    """Ensures: returns the history lines in file order, or [] when there is no history."""
-    path = pathlib.Path( folder ) / RUNS_FILE
-    return [ json.loads( l ) for l in path.read_text( encoding="utf-8" ).splitlines() if l.strip() ] if path.exists() else []
+    """Ensures: returns the readable history lines, oldest run first, or [] with no history."""
+    return read_history( folder )[ "lines" ]
 
 
 def backfill( folder ):
@@ -194,7 +218,7 @@ def main( argv=None, out=print ):
     Requires:
         - argv holds at most one of --backfill and --table ( the default ), and optionally --folder
     Ensures:
-        - --table prints the series; --backfill adds the missing lines and prints the file names it added
+        - --table prints the series, then the numbers of any unreadable lines it skipped; --backfill adds the missing lines and prints the file names it added
         - returns 0
     """
     ap = argparse.ArgumentParser( description="The run history of the daily duplicate check." )
@@ -207,7 +231,9 @@ def main( argv=None, out=print ):
         out( f"added {len( done[ 'added' ] )}, skipped {len( done[ 'skipped' ] )}" )
         for name in done[ "added" ]: out( f"  {name}" )
         return 0
-    out( table( read_lines( folder ) ) )
+    read = read_history( folder )
+    out( table( read[ "lines" ] ) )
+    if read[ "bad" ]: out( f"skipped {len( read[ 'bad' ] )} unreadable line(s) of {RUNS_FILE}: {', '.join( str( n ) for n in read[ 'bad' ] )}" )
     return 0
 
 

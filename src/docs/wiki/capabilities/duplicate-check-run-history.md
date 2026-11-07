@@ -7,11 +7,12 @@ pins:
   - lupin_mcp.duplicate_check_history.started_from_name@a7bba8bc4c
   - lupin_mcp.duplicate_check_history.line_of@39d984af13
   - lupin_mcp.duplicate_check_history.append_line@8af6d2a2ba
-  - lupin_mcp.duplicate_check_history.read_lines@79db3e6ff4
+  - lupin_mcp.duplicate_check_history.read_lines@bd01db055b
   - lupin_mcp.duplicate_check_history.backfill@0454cced16
   - lupin_mcp.duplicate_check_history.rising_run@d0c7dbcf68
   - lupin_mcp.duplicate_check_history.table@adf6469d04
-  - lupin_mcp.duplicate_check_history.main@d1cea0560f
+  - lupin_mcp.duplicate_check_history.main@9582d0affc
+  - lupin_mcp.duplicate_check_history.read_history@e721b5069d
 ---
 # Duplicate check run history
 `lupin_mcp.duplicate_check_history` keeps `runs.jsonl` in the check's record folder (`io/duplicate-check-daily`): one JSON line per run, failed runs included. The run itself is in [[duplicate-check-daily-run]].
@@ -22,7 +23,7 @@ pins:
 - It also holds `findings`, `groups`, `group_sizes`, `findings_by_commit`, the four filing counts, `unreadable` and `backfilled`.
 - `failure_of( doc )` gives `<stage or prerequisite>: <error, refusal or detail>` for a failed run, else `None`.
 - `counts_of( filing )` turns the filer's lists into counts. A run with no filer, or a filer that raised, has `None` counts.
-- `append_line( folder, line )` appends and keeps earlier lines. `read_lines( folder )` reads them back, or `[]`.
+- `append_line( folder, line )` appends and keeps earlier lines. `read_history( folder )` returns `{ lines, bad }`. The lines are sorted by `started_at`, so a backfill after newer runs still reads in time order. `bad` holds the numbers of lines that are not a JSON object with an ISO-8601 `started_at`; they are skipped, never fatal. `read_lines` returns the lines only.
 - `backfill( folder )` adds a line for each result file the history lacks, oldest first, taking `started_at` from the file name. It skips files already listed, so a second call adds nothing. Each added line says `backfilled`.
 - `rising_run( lines, runs )` returns the carried series when the carried count rose on each of the last `runs` measured daily runs. Failed and baseline runs are skipped. The guard of [[duplicate-check-daily-run]] uses it.
-- `table( lines )` and `main` print the series: `python -m lupin_mcp.duplicate_check_history` (add `--backfill` to add the missing lines, `--folder` to read another folder).
+- `table( lines )` and `main` print the series: `python -m lupin_mcp.duplicate_check_history` (add `--backfill` to add the missing lines, `--folder` to read another folder). The table is followed by the numbers of any skipped lines.

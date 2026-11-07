@@ -61,19 +61,19 @@ def test_the_start_time_is_read_off_the_file_name_and_a_bad_name_is_refused():
 
 def test_an_append_keeps_the_earlier_lines_and_a_missing_history_reads_as_empty( tmp_path ):
     assert hist.read_lines( tmp_path / "none" ) == []
-    hist.append_line( tmp_path / "f", { "n": 1 } )
-    path = hist.append_line( tmp_path / "f", { "n": 2 } )
+    hist.append_line( tmp_path / "f", { "n": 1, "started_at": "2026-11-01T10:00:00+00:00" } )
+    path = hist.append_line( tmp_path / "f", { "n": 2, "started_at": "2026-11-02T10:00:00+00:00" } )
     assert path.name == "runs.jsonl" and [ l[ "n" ] for l in hist.read_lines( tmp_path / "f" ) ] == [ 1, 2 ]
 
 
 def test_the_backfill_adds_each_result_file_once_oldest_first_marks_it_and_skips_files_that_are_not_runs( tmp_path ):
     ( tmp_path / "2026-11-04-100406-hand.json" ).write_text( json.dumps( { "status": "failed", "trigger": "hand", "stage": "judging", "error": "E" } ) )
-    ( tmp_path / "2026-11-02-211352-hand.json" ).write_text( json.dumps( { "status": "ok", "trigger": "hand", "started_at": "keep-me" } ) )
+    ( tmp_path / "2026-11-02-211352-hand.json" ).write_text( json.dumps( { "status": "ok", "trigger": "hand", "started_at": "2026-11-02T21:13:52-05:00" } ) )
     ( tmp_path / "last-success.json" ).write_text( "{}" )
     first = hist.backfill( tmp_path )
     assert first == { "added": [ "2026-11-02-211352-hand.json", "2026-11-04-100406-hand.json" ], "skipped": [] }
     got = hist.read_lines( tmp_path )
-    assert [ ( l[ "started_at" ][ :10 ], l[ "backfilled" ] ) for l in got ] == [ ( "keep-me"[ :10 ], True ), ( "2026-11-04", True ) ]
+    assert [ ( l[ "started_at" ][ :10 ], l[ "backfilled" ] ) for l in got ] == [ ( "2026-11-02", True ), ( "2026-11-04", True ) ]
     assert hist.backfill( tmp_path ) == { "added": [], "skipped": [ "2026-11-02-211352-hand.json", "2026-11-04-100406-hand.json" ] }
     assert len( hist.read_lines( tmp_path ) ) == 2
 
@@ -120,3 +120,26 @@ def test_main_defaults_to_the_projects_duplicate_check_folder( tmp_path, monkeyp
     monkeypatch.setattr( hist.cu, "get_project_root", lambda: str( tmp_path ) )
     said = []
     assert hist.main( [], said.append ) == 0 and said == [ "no runs recorded" ]
+
+
+def test_a_backfill_after_newer_runs_reads_back_in_time_order_so_the_rising_test_sees_the_real_series( tmp_path ):
+    hist.append_line( tmp_path, { **line( 7 ), "run_file": "new.json", "started_at": "2026-11-09T10:00:00+00:00" } )
+    for day, carried in ( ( "05", 3 ), ( "06", 5 ) ): ( tmp_path / f"2026-11-{day}-100000-hand.json" ).write_text( json.dumps( { "status": "carried", "trigger": "hand", "carried": [ 0 ] * carried } ) )
+    hist.backfill( tmp_path )
+    assert [ l[ "run_file" ] for l in hist.read_lines( tmp_path ) ] == [ "2026-11-05-100000-hand.json", "2026-11-06-100000-hand.json", "new.json" ], "the file has the new run first"
+    assert hist.rising_run( hist.read_lines( tmp_path ), 2 ) == { "runs": 2, "series": [ 3, 5, 7 ] }
+
+
+def test_a_line_that_is_not_json_an_object_or_dated_is_skipped_and_counted_not_fatal( tmp_path ):
+    good = json.dumps( { **line( 1 ), "started_at": "2026-11-01T10:00:00+00:00" } )
+    ( tmp_path / hist.RUNS_FILE ).write_text( "\n".join( [ good, "{broken", "", "[1, 2]", "\"text\"", json.dumps( { "mode": "daily" } ), json.dumps( { "started_at": "yesterday" } ), json.dumps( { "started_at": 5 } ), good ] ) + "\n" )
+    got = hist.read_history( tmp_path )
+    assert len( got[ "lines" ] ) == 2 and got[ "bad" ] == [ 2, 4, 5, 6, 7, 8 ], "line 3 is blank, which is not a fault"
+    assert len( hist.read_lines( tmp_path ) ) == 2 and hist.rising_run( hist.read_lines( tmp_path ), 1 ) is None
+
+
+def test_the_table_reader_prints_the_series_and_then_the_numbers_of_the_lines_it_skipped( tmp_path ):
+    ( tmp_path / hist.RUNS_FILE ).write_text( json.dumps( hist.line_of( ok_doc(), "a.json" ) ) + "\nnot json\n" )
+    said = []
+    assert hist.main( [ "--folder", str( tmp_path ) ], said.append ) == 0
+    assert said[ 0 ].count( "\n" ) == 1 and said[ 1 ] == "skipped 1 unreadable line(s) of runs.jsonl: 2"

@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.duplicate_check_daily.Counting@006524b7c4
   - lupin_mcp.duplicate_check_daily.findings_of@25bb8dd399
   - lupin_mcp.duplicate_check_daily.failed_prerequisite@93f71d7cf3
-  - lupin_mcp.duplicate_check_daily.run@b43534cfcb
+  - lupin_mcp.duplicate_check_daily.run@1bc1cd0cef
   - lupin_mcp.duplicate_check_daily.cron_lines@2cb4000121
   - lupin_mcp.duplicate_check_daily.install_mode@628a527e77
   - lupin_mcp.duplicate_check_daily.live_parts@2818695534
@@ -26,7 +26,7 @@ The second half of `lupin_mcp.duplicate_check_daily`. The window is in [[duplica
 - `findings_of` makes one finding per new definition that sits in a cluster. `others` is the rest of the cluster. Without `session_of` the session is None.
 - `run( root, now, trigger, cap, cli_path, parts, ... )` first runs the branch guard of [[duplicate-check-branch-guard]]. Then it writes `<date>-<time>-<trigger>.json` under `duplicate-check-daily` in the data folder. A trigger other than `cron`, `reboot` or `hand` raises `ValueError`.
 - Before judging, a judge ledger written under another Claude Code version is renamed aside (see `rotate_ledger_for_new_cli` in [[duplicate-check-proof-command]]) and a new one started. The result then holds `ledger_rotated`. A failed prerequisite writes that file with status `failed` and changes nothing else.
-- An error while building the pool, embedding or judging writes status `failed`, stage `judging`. `last-success.json` does not move.
+- An error while reading the frozen configuration, choosing the window or making the worktree writes status `failed`, stage `setup`. An error while building the pool, embedding or judging writes stage `judging`. `last-success.json` does not move.
 - Otherwise status is `ok`, or `carried` when the cap left definitions. `last-success.json` advances to the last commit fully judged.
 - A filer or auditor that raises is caught and recorded as `filing` or `audit` with an `error`. The run still advances. The findings are kept in the file on every run; the weekly page counts them and [[duplicate-check-refile]] can file them again.
 - With `ceiling` (`--ceiling N`, instead of `--cap`) the cap is the number of definitions to judge, up to N. That is the carried backlog plus the day's inflow. Finished calls are in the ledger, so nothing is paid for twice.

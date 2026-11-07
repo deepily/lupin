@@ -64,6 +64,7 @@ STALE_DAYS        = 3                 # a pinned branch whose tip is this old, w
 STALE_BRANCH      = "stale_branch"
 MISSING_BRANCH    = "missing_branch"
 STAGE_GUARD       = "branch_guard"
+STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
 UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
 CARRIED           = ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR", "COSA_VOICE_MANAGERS__LUPIN" )     # names copied into the cron lines from the installer's environment
@@ -438,6 +439,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - before anything else, branch_guard runs: a pinned branch that is stale or gone writes that file with status failed, stage branch_guard, the refusal, the reinstall command and notified (the notifier hook's answer, False without one); nothing else changes and last-success does not move
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
+        - an exception while reading the frozen configuration, choosing the window or making the worktree writes that file with status failed, stage setup and the error, removes a worktree it began, and moves nothing
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
         - a baseline run leaves last-success alone and writes baseline.json: status complete when nothing is carried, else in_progress; once complete, a baseline run judges nothing
         - a daily run whose carried count, with the history's, rose on the last rise_limit measured daily runs records that as rising and alerts through the notifier
@@ -468,11 +470,18 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     if miss is not None:
         doc = { **base, "status": "failed", **miss, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
         return record( folder, stem, doc, now )
-    cfg    = parts[ "verify" ]()
-    last   = read_last_success( folder )
-    window = baseline_window( root, branch ) if baseline else window_of( root, last, now, branch )
-    doc    = { **base, "window": { "start": window[ "start" ], "end": window[ "end" ], "commits": len( window[ "commits" ] ) } }
-    tree   = source_at.ensure_worktree( root, window[ "end" ], pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}" )
+    doc, target = base, None
+    try:
+        cfg    = parts[ "verify" ]()
+        last   = read_last_success( folder )
+        window = baseline_window( root, branch ) if baseline else window_of( root, last, now, branch )
+        doc    = { **base, "window": { "start": window[ "start" ], "end": window[ "end" ], "commits": len( window[ "commits" ] ) } }
+        target = pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}"
+        tree   = source_at.ensure_worktree( root, window[ "end" ], target )
+    except Exception as exc:               # the frozen configuration, the window or the worktree failed: leave a record and change nothing else
+        if target is not None: release( root, target )
+        doc = { **doc, "status": "failed", "stage": STAGE_SETUP, "error": f"{type( exc ).__name__}: {exc}", "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
+        return record( folder, stem, doc, now )
     count = Counting( parts[ "backend" ] )
     try:
         fresh = baseline_definitions( tree, window ) if baseline else new_definitions( tree, root, window )

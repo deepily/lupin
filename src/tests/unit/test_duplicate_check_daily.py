@@ -811,8 +811,8 @@ def test_the_baseline_window_is_the_whole_branch_and_a_tree_with_no_source_files
 
 
 def rows_of( *carried ):
-    """Ensures: returns daily history lines that carried these counts."""
-    return [ { "mode": "daily", "status": "carried", "carried": n } for n in carried ]
+    """Ensures: returns daily history lines that carried these counts, one a day back."""
+    return [ { "mode": "daily", "status": "carried", "carried": n, "started_at": ( NOW - datetime.timedelta( days=len( carried ) - i ) ).isoformat() } for i, n in enumerate( carried ) ]
 
 
 def seed( tmp_path, *carried ):
@@ -896,3 +896,58 @@ def test_main_passes_the_ceiling_the_baseline_flag_and_the_rise_limit_to_the_run
     argv = [ "--ceiling", "7", "--baseline", "--rise-limit", "5", "--root", str( repo ), "--claude-cli-path", "/bin/claude" ]
     assert dd.main( argv, parts=parts_of( tmp_path ), now=NOW, out=lambda text: None ) == 0
     assert ( seen[ "ceiling" ], seen[ "baseline" ], seen[ "rise_limit" ] ) == ( 7, True, 5 )
+
+
+def failed_line( tmp_path ):
+    """Ensures: returns the one history line a failed run left, read back from runs.jsonl."""
+    got = hist.read_lines( folder_of( tmp_path ) )
+    assert len( got ) == 1
+    return got[ 0 ]
+
+
+def test_a_branch_guard_refusal_appends_a_failed_history_line_and_the_file_holds_the_schema_and_the_unmeasured_keys_as_none( repo, tmp_path ):
+    stale_repo( repo )
+    doc  = dd.run( repo, NOW, "cron", 300, "/bin/claude", parts_of( tmp_path ), branch="wip-old" )
+    line = failed_line( tmp_path )
+    assert ( line[ "status" ], line[ "failure" ], line[ "run_file" ], line[ "judge_calls" ] ) == ( "failed", "branch_guard: stale_branch", "2026-11-03-120000-cron.json", 0 )
+    assert doc[ "schema_version" ] == hist.SCHEMA_VERSION and all( doc[ k ] is None for k in dd.UNREACHED )
+
+
+def test_a_failure_while_judging_appends_a_failed_history_line_naming_the_stage_and_the_error_and_keeps_the_window( repo, tmp_path, monkeypatch ):
+    history( repo )
+    monkeypatch.setattr( dd, "pool_without_earlier_versions", lambda tree, fresh: ( _ for _ in () ).throw( RuntimeError( "pool broke" ) ) )
+    doc  = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    line = failed_line( tmp_path )
+    assert line[ "failure" ] == "judging: RuntimeError: pool broke" and line[ "window_end" ] == doc[ "window" ][ "end" ] and line[ "carried" ] is None
+    assert doc[ "schema_version" ] == hist.SCHEMA_VERSION and doc[ "findings" ] is None and not ( folder_of( tmp_path ) / dd.LAST_SUCCESS ).exists()
+
+
+def test_a_failure_choosing_the_window_is_recorded_as_a_failed_setup_run_that_moves_nothing( repo, tmp_path, monkeypatch ):
+    history( repo )
+    monkeypatch.setattr( dd, "window_of", lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "git failed" ) ) )
+    doc  = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    line = failed_line( tmp_path )
+    assert ( doc[ "status" ], doc[ "stage" ], doc[ "error" ] ) == ( "failed", dd.STAGE_SETUP, "RuntimeError: git failed" ) and doc[ "window" ] is None
+    assert line[ "failure" ] == "setup: RuntimeError: git failed" and line[ "window_end" ] is None and doc[ "judge_calls" ] == 0
+    assert not ( folder_of( tmp_path ) / dd.LAST_SUCCESS ).exists() and len( worktrees( repo ) ) == 1
+
+
+def test_a_failure_making_the_worktree_is_recorded_with_the_window_and_the_half_made_tree_is_released( repo, tmp_path, monkeypatch ):
+    history( repo )
+    released = []
+    monkeypatch.setattr( dd.source_at, "ensure_worktree", lambda *a, **k: ( _ for _ in () ).throw( OSError( "disk full" ) ) )
+    monkeypatch.setattr( dd, "release", lambda root, tree: released.append( tree ) )
+    doc = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path ) )
+    assert doc[ "stage" ] == dd.STAGE_SETUP and doc[ "error" ] == "OSError: disk full" and doc[ "window" ][ "end" ] == git( repo, "rev-parse", "main" )
+    assert len( released ) == 1 and released[ 0 ].name.startswith( dd.WORKTREE_PREFIX ) and failed_line( tmp_path )[ "failure" ] == "setup: OSError: disk full"
+
+
+def test_a_frozen_configuration_that_fails_to_load_after_the_prerequisites_passed_is_recorded_as_a_failed_setup_run( repo, tmp_path ):
+    history( repo )
+    good  = parts_of( tmp_path )[ "verify" ]
+    def verify():
+        if next( calls ) == 0: return good()
+        raise err.DuplicateCheckError( err.CONFIG_DRIFT, "changed between calls" )
+    calls = iter( range( 5 ) )
+    doc   = dd.run( repo, NOW, "cron", 10, "/bin/claude", parts_of( tmp_path, verify=verify ) )
+    assert doc[ "stage" ] == dd.STAGE_SETUP and "changed between calls" in doc[ "error" ] and failed_line( tmp_path )[ "status" ] == "failed"
