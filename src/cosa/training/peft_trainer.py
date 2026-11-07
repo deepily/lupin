@@ -302,8 +302,6 @@ class PeftTrainer:
                 f"Unsupported model_name: '{self.model_name}'. Must be one of: {', '.join( MODEL_CONFIG_MAP.keys() )}"
                 )
         
-        # Claude snuck another check in on me, don't know why it thought that I wanted backward compatibility
-        # # For backward compatibility, also check supported_model_names
     
     # Maps model base names to their environment variable names in ~/.lora_env
     LORA_ENV_VAR_MAP = {
@@ -522,7 +520,6 @@ class PeftTrainer:
         
         self._load_model_and_tokenizer( device_map=device_map, mode="training" )
         
-        # I used this when loading a quantized model. Since I'm not quantizing now, it's commented out
         peft_config = self._get_peft_config()
         training_arguments = self._get_training_args( output_dir=output_dir, batch_size=batch_size,
                                                       gradient_accumulation_steps=gradient_accumulation_steps,
@@ -536,9 +533,7 @@ class PeftTrainer:
         print( test_train_data[ "test" ] )
         
         self.trainer = SFTTrainer(
-            # self.trainer = MyKludgySFTTrainer(
             
-            # workaround for buggy safe tensors behavior when a model is loaded across multiple GPUs
             model=self.model,
             train_dataset=test_train_data[ "train" ],
             eval_dataset=test_train_data[ "test" ],
@@ -705,7 +700,6 @@ class PeftTrainer:
         
         if model is None:
             raise ValueError( "Model must be provided" )
-        # # this is dangerous?
         
         du.print_banner( f"{banner_prefix} Testing model [{model}]".strip(), prepend_nl=True )
         
@@ -1093,7 +1087,6 @@ class PeftTrainer:
             num_train_epochs=1,
             warmup_ratio=0.1,
             lr_scheduler_type="linear",
-            # what is this doing here?
             max_seq_length=self._get_max_seq_length()
         )
     
