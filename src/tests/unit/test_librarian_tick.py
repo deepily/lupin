@@ -170,7 +170,7 @@ def test_a_byte_budget_truncated_page_is_followed_to_the_next_offset_not_treated
     assert ok is True and status == 200 and len( body[ "tasks" ] ) == 4
 
 
-def test_a_failed_page_a_truncated_page_and_an_empty_page_with_has_more_each_end_the_read_safely():
+def test_a_failed_page_and_an_empty_page_with_has_more_each_end_the_read_safely():
     failing = Client( { ( None, None, 0 ): ( False, 500, { "error": "down" } ) } )
     assert lt.LiveStore( {}, "k", failing ).query( "k" ) == ( False, 500, { "error": "down" } )
     loop = Client( { ( None, None, 0 ): ( True, 200, { "tasks": [], "has_more": True } ) } )
