@@ -243,7 +243,7 @@ class TestExecute( unittest.IsolatedAsyncioTestCase ):
     async def test_budget_exceeded_notifies_and_reraises( self ):
         # Post-fix contract (BudgetExceededError now carries current_cost/budget_limit):
         # the handler formats the "Budget exceeded" notification from those attrs, then
-        # re-raises BudgetExceededError (job.py:379 — now reachable). Was an armed
+        # re-raises BudgetExceededError (the except BudgetExceededError arm in _execute — now reachable). Was an armed
         # xfail-strict TRIPWIRE while the bug stood (handler hit AttributeError on the
         # bare-Exception error); de-armed once the cost_tracker fix landed.
         job = make_job( budget=0.01 )

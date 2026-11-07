@@ -44,7 +44,7 @@ def _seed_init( self_inner, *args, **kwargs ):
     )
     cfg.get.side_effect = _lookup
     # get_required() answers the same way here. Without this the Mock hands back
-    # a Mock and the concatenation at iterative_debugging_agent.py:114 fails —
+    # a Mock and the concatenation in IterativeDebuggingAgent._get_prompt fails —
     # which is the very crash row 3e4a4a4a is about, just wearing a test costume.
     cfg.get_required.side_effect = lambda key, silent=False, return_type=None: _lookup( key )
     self_inner.config_mgr = cfg

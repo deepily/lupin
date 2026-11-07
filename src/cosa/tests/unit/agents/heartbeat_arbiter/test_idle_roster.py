@@ -95,7 +95,7 @@ def test_build_roster_excludes_stale_declared_session():
     # beyond alive_threshold → EXCLUDED once the threshold is threaded. THE bug.
     fv = {
         "s1": _v( session_id="s1", last_outcome="idle",
-                  last_activity_ts=NOW - datetime.timedelta( seconds=900 ) ),   # stale (900 > 600)
+                  last_activity_ts=NOW - datetime.timedelta( seconds=900 ) ),   # stale: 900 is over 600
     }
     roster = r.build_roster( fv, NOW, 300, alive_threshold_seconds=ALIVE )
     assert roster == [ ]                                                        # phantom dropped
@@ -105,7 +105,7 @@ def test_build_roster_includes_fresh_idle_session():
     # A genuinely-live idle session (ts within alive_threshold) stays counted.
     fv = {
         "s1": _v( session_id="s1", last_outcome="idle",
-                  last_activity_ts=NOW - datetime.timedelta( seconds=120 ) ),   # fresh (120 < 600)
+                  last_activity_ts=NOW - datetime.timedelta( seconds=120 ) ),   # fresh: 120 is under 600
     }
     roster = r.build_roster( fv, NOW, 300, alive_threshold_seconds=ALIVE )
     assert [ e[ "session_id" ] for e in roster ] == [ "s1" ]

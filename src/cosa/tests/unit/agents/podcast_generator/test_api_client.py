@@ -152,7 +152,7 @@ class TestInit:
         c = PodcastAPIClient()
         assert c.config is not None
         assert c.cost_estimate.total_api_calls == 0
-        assert capsys.readouterr().out == ""           # debug=False → no prints
+        assert capsys.readouterr().out == ""           # debug is off → no prints
 
     def test_provided_config_and_debug_prints( self, capsys ):
         from cosa.agents.podcast_generator.config import PodcastConfig
@@ -285,7 +285,7 @@ class TestCallApi:
     def test_bare_textblock_and_resultmessage_defaults_and_unknown_msg( self, capsys ):
         # bare top-level TextBlock branch; ResultMessage with usage=None / cost=None /
         # stop=None falling to defaults; an unknown message exercising the all-false arc.
-        c = _make_client()                                   # debug=False → no prints
+        c = _make_client()                                   # debug is off → no prints
         capture  = {}
         messages = [
             _FakeTextBlock( "bare-text" ),
@@ -299,7 +299,7 @@ class TestCallApi:
         assert out.output_tokens == 0
         assert out.sdk_cost_usd  == 0.0
         assert out.stop_reason   == "end_turn"               # None → default
-        assert capsys.readouterr().out == ""                 # debug=False
+        assert capsys.readouterr().out == ""                 # debug is off
 
 
 # ----------------------------------------------------------------------------

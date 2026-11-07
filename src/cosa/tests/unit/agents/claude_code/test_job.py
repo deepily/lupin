@@ -62,7 +62,7 @@ class TestConfigDefaults( unittest.TestCase ):
     def test_config_load_exception_falls_back_to_hardcoded( self ):
         # If ConfigurationManager construction/read raises, the bare except swallows it
         # and the hardcoded defaults stand. Covers the (now-valid) import + the
-        # try/except fallback at job.py:84-90.
+        # try/except fallback in ClaudeCodeJob._load_config_defaults.
         ClaudeCodeJob._config_defaults_loaded = False
         ClaudeCodeJob._default_max_turns = 50
         with patch( "cosa.config.configuration_manager.ConfigurationManager", side_effect=RuntimeError( "config unavailable" ) ):

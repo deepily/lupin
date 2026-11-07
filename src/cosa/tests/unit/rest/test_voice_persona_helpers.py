@@ -410,7 +410,7 @@ class TestAllocateRequestedPersonaForSession( unittest.TestCase ):
     def test_ok_stamps_assigned_at_and_excludes_self( self ):
         # The requesting session itself holds 'rachel'; a different session holds 'nora'.
         active = [
-            ( "/p1", "sid-self",  { "name": "rachel" } ),   # excluded (self)
+            ( "/p1", "sid-self",  { "name": "rachel" } ),   # excluded, it is the requester
             ( "/p2", "sid-other", { "name": "nora" } ),     # counts as occupied
             ( "/p3", "sid-bad",   "not-a-dict" ),           # skipped
             ( "/p4", "sid-noname",{ } ),                    # skipped (no name)

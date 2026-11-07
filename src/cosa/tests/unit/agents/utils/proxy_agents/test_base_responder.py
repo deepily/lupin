@@ -54,7 +54,7 @@ def test_abstract_handle_event_body_is_noop():
 
 
 # =========================================================================== #
-# route_to_strategies  ( sync )
+# route_to_strategies, sync
 # =========================================================================== #
 def test_route_sync_skips_unavailable_then_matches():
     unavailable = _strategy( "off", available=False )

@@ -244,8 +244,8 @@ class TestPeftTrainer( unittest.TestCase ):
             - Sets model attributes correctly
             - Handles device mapping properly
         """
-        # HF_HOME is a documented precondition of _load_model_and_tokenizer ( guard at
-        # peft_trainer.py:953 ); set it to an existing dir so the method reaches the
+        # HF_HOME is a documented precondition of _load_model_and_tokenizer ( the HF_HOME guard at the
+        # top of that method ); set it to an existing dir so the method reaches the
         # from_pretrained calls this test actually exercises ( the real os.chdir needs it ).
         with patch.dict( os.environ, { "HF_HOME": os.path.dirname( __file__ ) } ), \
              patch( 'cosa.training.peft_trainer.du.print_banner' ), \
@@ -288,8 +288,8 @@ class TestPeftTrainer( unittest.TestCase ):
             - Propagates model loading exceptions
             - Propagates tokenizer loading exceptions
         """
-        # HF_HOME is a documented precondition of _load_model_and_tokenizer ( guard at
-        # peft_trainer.py:953 ); set it so the method reaches the from_pretrained call
+        # HF_HOME is a documented precondition of _load_model_and_tokenizer ( the HF_HOME guard at the
+        # top of that method ); set it so the method reaches the from_pretrained call
         # whose RuntimeError this test asserts propagates.
         with patch.dict( os.environ, { "HF_HOME": os.path.dirname( __file__ ) } ), \
              patch( 'cosa.training.peft_trainer.du.print_banner' ), \

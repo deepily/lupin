@@ -128,7 +128,7 @@ class TestDoAll:
 
 
 # ----------------------------------------------------------------------------
-# _execute (non-dry-run)
+# _execute, non-dry-run
 # ----------------------------------------------------------------------------
 class _ExecGraph:
     """Installs fake deep_research + fake pipeline-agent modules for _execute."""

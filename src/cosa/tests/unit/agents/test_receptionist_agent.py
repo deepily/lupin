@@ -188,7 +188,7 @@ class TestReceptionistAgent( unittest.TestCase ):
         self.assertTrue( self._make_agent().code_ran_to_completion() )
 
     # ------------------------------------------------------------------ #
-    # run_formatter (category-gated)                                      #
+    # run_formatter, category-gated                                      #
     # ------------------------------------------------------------------ #
 
     def test_run_formatter_benign_skips_reformatting( self ):
