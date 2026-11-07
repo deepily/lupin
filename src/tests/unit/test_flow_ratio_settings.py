@@ -326,8 +326,8 @@ def test_a_non_numeric_value_already_on_disk_falls_back_and_reports_it(
 #
 # The assertions that cover it read:
 #
-#     assert frs.get_window_hours() == frs.FALLBACK_WINDOW_HOURS
-#     assert frs.get_allow_below()  == frs.FALLBACK_ALLOW_BELOW
+#     assert frs.get_window_hours() == frs.FALLBACK_WINDOW_HOURS  # doc-lint: waive commented-out-code -- the weak assertion, quoted as the example being criticised
+#     assert frs.get_allow_below()  == frs.FALLBACK_ALLOW_BELOW  # doc-lint: waive commented-out-code -- the weak assertion, quoted as the example being criticised
 #
 # They compare the function's result to THE SAME CONSTANT the function returns. Change
 # the constant and both sides move together, so the comparison is true for every possible

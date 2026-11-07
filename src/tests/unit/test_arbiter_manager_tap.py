@@ -252,7 +252,7 @@ class TestTapThrottle:
     def test_min_interval_rate_limits_a_change( self ):
         gw  = _Gateway()
         job = _job( gw, { "s1": "Tiberius", "s2": "Tiberius" }, min_interval=300 )
-        job._tap_managers( { "s1": _stuck( "s1", "A" ) }, _NO_GRAPH, [ ], NOW )   # fires (first)
+        job._tap_managers( { "s1": _stuck( "s1", "A" ) }, _NO_GRAPH, [ ], NOW )   # fires on the first call
         # crew CHANGES (add s2) but only 60s later → within min-interval → suppressed
         changed = { "s1": _stuck( "s1", "A" ), "s2": _stuck( "s2", "B" ) }
         fired_soon = job._tap_managers( changed, _NO_GRAPH, [ ], NOW + datetime.timedelta( seconds=60 ) )

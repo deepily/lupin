@@ -216,7 +216,7 @@ def test_route_rick_and_managers_fans_out():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
     job._route( 5, "deadlock!", active_managers=[ "M1", "M2" ] )
-    assert _unstamp_notes( notes ) == [ "deadlock!" ]                # Rick (notify)
+    assert _unstamp_notes( notes ) == [ "deadlock!" ]                # addressed to Rick, by notify
     assert _unstamp_sent( gw.sent ) == [ ( "M1", "deadlock!" ), ( "M2", "deadlock!" ) ]   # + each manager
 
 
@@ -476,7 +476,7 @@ def test_blocker_cc_reannounces_when_blocked_item_changes():
     p2s    = { "Bob": "bob-sid" }
     items1 = { ( "alice", "bob" ): frozenset( { "item-99399723" } ) }   # instance 1's blocked item
     items2 = { ( "alice", "bob" ): frozenset( { "item-ca8d6a19" } ) }   # instance 2's DIFFERENT blocked item
-    job._auto_ping( { "Alice": "Bob" }, NOW, persona_to_sid=p2s, edge_items=items1 )                                   # cc (item-1)
+    job._auto_ping( { "Alice": "Bob" }, NOW, persona_to_sid=p2s, edge_items=items1 )                                   # cc for item-1
     job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=60  ), persona_to_sid=p2s, edge_items=items1 )  # echo → suppressed
     job._auto_ping( { "Alice": "Bob" }, NOW + datetime.timedelta( seconds=360 ), persona_to_sid=p2s, edge_items=items2 )  # NEW item → cc again
     mgr_ccs = [ s for s in gw.sent if s[ 0 ] == "MgrB" ]

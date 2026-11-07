@@ -240,7 +240,7 @@ class TestCacheBypassPipeline:
         agent = _create_mock_agent()
         assert isinstance( agent, CrudForDataFramesAgent )
 
-        # Simulate the cache decision from running_fifo_queue.py:160-164
+        # Simulate the cache decision from the `CrudForDataFramesAgent` check in running_fifo_queue.py
         should_skip_cache = isinstance( agent, CrudForDataFramesAgent )
         assert should_skip_cache is True
 

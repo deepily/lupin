@@ -487,7 +487,7 @@ def _crashed( lines ):
 
 
 @pytest.mark.parametrize( "odd,printed", [
-    ( "src/notes/d\udcff.ts/y.ts",       "src/notes/d\\xff.ts/y.ts" ),                              # its old stand-in needed a folder where src/notes/d_.ts is a file
+    ( "src/notes/d\udcff.ts/y.ts",       "src/notes/d\\xff.ts/y.ts" ),                              # its old stand-in needed a folder where src/notes/d_.ts is a file  # doc-lint: waive dangling-path -- a path inside the synthetic repo the test builds
     ( "src/" + "a" * 250 + "\udcff.ts", "src/" + "a" * 250 + "\\xff.ts" ),                          # its old stand-in was two bytes longer than a file name may be
 ] )
 def test_a_script_name_that_is_not_utf8_is_counted_whatever_real_path_or_length_it_comes_with( repo, monkeypatch, odd, printed ):

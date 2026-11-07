@@ -78,7 +78,7 @@ def test_format_outreach_ts_is_ricks_outreach_shape():
 
 def test_format_outreach_ts_dst_flip_winter():
     tz, _ = resolve_tz( "America/New_York" )
-    assert format_outreach_ts( JAN, tz ) == "2026.01.11 at 16:28:46"   # EST (UTC-5)
+    assert format_outreach_ts( JAN, tz ) == "2026.01.11 at 16:28:46"   # Eastern standard time, five hours behind UTC
 
 
 # ── make_log_fn: the canonical line shape ────────────────────────────────────

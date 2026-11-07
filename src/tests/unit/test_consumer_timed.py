@@ -64,7 +64,7 @@ def wait_for( predicate, timeout=5.0, interval=0.005 ):
 # cannot Event.wait() for something that must never fire, so the first fix
 # (97fe3ec6, row 84db12a0) guarded those assertions with a wall-clock window:
 #
-#     if still_before( t0, SCHEDULED_SECONDS * 0.5 ):
+#     if still_before( t0, SCHEDULED_SECONDS * 0.5 ):  # doc-lint: waive commented-out-code -- the old wall-clock guard, quoted as the rejected pattern
 #         assert "timed-1" not in processed
 #
 # That traded a LOUD wrong answer for a QUIET one. When the box starved and the
@@ -80,8 +80,8 @@ def wait_for( predicate, timeout=5.0, interval=0.005 ):
 # takes. The absence is PERMANENT rather than time-boxed, which is exactly the
 # precondition the load-safe pattern already used further down this file needs:
 #
-#     ran = wait_for( lambda: "timed-1" in processed, timeout=... )
-#     assert not ran, "..."
+#     ran = wait_for( lambda: "timed-1" in processed, timeout=... )  # doc-lint: waive commented-out-code -- the load-safe pattern, quoted as the documented alternative
+#     assert not ran, "..."  # doc-lint: waive commented-out-code -- the load-safe pattern, quoted as the documented alternative
 #
 # ⚠️ THE PRECEDENT DOES NOT TRANSPLANT ON ITS OWN — this is the trap worth
 # naming. That pattern is load-safe at the two paused-job sites because a PAUSED
