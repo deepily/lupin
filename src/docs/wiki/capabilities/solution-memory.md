@@ -9,7 +9,7 @@ pins:
   - cosa.memory.two_tier_question_search.TwoTierQuestionSearch.lookup@2fbb24d57b
   - cosa.memory.two_tier_question_search.CacheLookup@ce53ddc2b7
   - cosa.memory.two_tier_question_search.pg_hierarchical_search@1c023a232c
-  - cosa.memory.input_and_output_table.InputAndOutputTable.insert_io_row@a0f8b99292
+  - cosa.memory.input_and_output_table.InputAndOutputTable.insert_io_row@cb5ac04827
   - cosa.memory.query_log_table.QueryLogTable.log_query@b3ad025a7f
 ---
 # Solution memory
@@ -22,7 +22,7 @@ Solution memory stores answered questions as snapshots, finds a cached snapshot 
 - `PostgresSolutionManager` saves, fetches, deletes and searches snapshots through `SolutionSnapshotRepository`. It keeps no in-memory lookup, so every search goes to Postgres: exact synonym probes first, then pgvector.
 - `TwoTierQuestionSearch.lookup` is the v2 flow's read-only lookup. Tier 1 is exact SQL, verbatim and then normalized. Tier 2 embeds the question and probes nearest-neighbour.
 - `pg_hierarchical_search` is the manager's own two-tier lookup. It returns `(percent, snapshot)` pairs and deletes ghost synonyms.
-- `InputAndOutputTable.insert_io_row` stores an input and output pair with embeddings. `QueryLogTable.log_query` appends one row per query.
+- `InputAndOutputTable.insert_io_row` stores an input and output pair. It generates the missing embeddings only when the INI key `io table capture embeddings` is true. When the key is false, the row is stored at once on the caller's thread, with only the embeddings the caller passed. The key read false in `lupin-app.ini` on 7 Nov 2026. `QueryLogTable.log_query` appends one row per query.
 
 ## Don't
 - Don't add a write to `TwoTierQuestionSearch.lookup`. The v2 flow relies on its reads staying free of side effects.
@@ -34,7 +34,7 @@ Solution memory stores answered questions as snapshots, finds a cached snapshot 
 - A synonym row pointing at a missing snapshot, a ghost, counts as a miss in `lookup`. The manager's search removes it.
 - Tier 2 asks for candidates at or above 70 percent by default. The caller applies its own higher decision floor, and `best_score` is recorded even when it falls below that.
 - `save_snapshot` upserts by verbatim question. An existing row for that question keeps its `id_hash`. A database or upsert failure returns `False`. An uninitialized manager or an empty question still raises.
-- With async embedding on and an embedding missing, `insert_io_row` returns at once. The row is built on the shared bounded pool.
+- With embeddings captured, async embedding on and an embedding missing, `insert_io_row` returns at once. The row is built on the shared bounded pool.
 - A failed async insert drops the row. `async_failure_count` counts the losses, and nothing retries them. A row refused by a full pool is counted in the pool's `dropped` instead.
 - A snapshot builds its own synonym, gist, code, stats and embedding containers when none is passed. `insert_io_row` reads the date and time per call.
 - `_orm_to_snapshot` pads or truncates a vector to the embedding dimension, and an empty one becomes zeros.
