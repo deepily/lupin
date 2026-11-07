@@ -10,6 +10,7 @@ definition of the tree, and the carried ones are drained over several runs. A ca
 import argparse
 import contextlib
 import datetime
+import fcntl
 import json
 import os
 import pathlib
@@ -37,6 +38,7 @@ from lupin_mcp.reuse_needset import source_at
 
 FOLDER            = ( "duplicate-check-daily", )
 LAST_SUCCESS      = "last-success.json"
+RUN_LOCK          = "run.lock"        # held by the one run in flight; a boot near 10:00 starts the cron line and the reboot line together
 VECTORS_DIR       = "vectors"
 WORKTREE_PREFIX   = "duplicate-check-daily-"
 WINDOW_HOURS      = 24
@@ -674,6 +676,31 @@ def live_auditor( findings, folder ):
     return audit.queue_audits( findings, tie, lambda rid: rt.load_receipt( ctx, rid ), ctx.data, datetime.date.today().isoformat() )
 
 
+@contextlib.contextmanager
+def run_lock( data_dir ):
+    """
+    Hold the run lock for the length of one run, or say another run holds it.
+
+    Requires:
+        - data_dir is the fleet data folder the result files go under
+
+    Ensures:
+        - yields True when this process took an exclusive lock on RUN_LOCK in the check's folder, and keeps it until the block ends
+        - yields False at once, waiting for nothing, when another live process holds it
+        - the operating system drops the lock when its holder ends, so a run that was killed leaves nothing behind
+        - the lock file is never removed, which keeps two processes from locking two different files
+    """
+    folder = pathlib.Path( data_dir ).joinpath( *FOLDER )
+    folder.mkdir( parents=True, exist_ok=True )
+    with open( folder / RUN_LOCK, "a" ) as handle:
+        try: fcntl.flock( handle, fcntl.LOCK_EX | fcntl.LOCK_NB )
+        except BlockingIOError:
+            yield False
+            return
+        try: yield True
+        finally: fcntl.flock( handle, fcntl.LOCK_UN )
+
+
 def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, crontab_cmd=None ):
     """
     Run the daily check from the command line.
@@ -685,6 +712,7 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     Ensures:
         - prints the result document as JSON and returns 0, REFUSED_EXIT (3) when the branch guard refused, or 1 when anything else failed
         - the cron modes never run the check
+        - a run takes run_lock first; when another run holds it, prints a skipped document and returns 0 without running anything, so a boot near 10:00 that starts the cron line and the reboot line together runs the check once
     """
     ap = argparse.ArgumentParser( description="Judge the day's new definitions for duplicates." )
     limit = ap.add_mutually_exclusive_group()
@@ -708,7 +736,12 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     model_transport.configure( args.claude_cli_path )
     root = args.root or git( ".", "rev-parse", "--show-toplevel" )
     with contextlib.redirect_stdout( sys.stderr ):
-        doc = run( root, now or datetime.datetime.now().astimezone(), args.trigger, args.cap, args.claude_cli_path, parts or live_parts(), args.branch, args.parallel, ceiling=args.ceiling, baseline=args.baseline, rise_limit=args.rise_limit )
+        parts = parts or live_parts()
+        with run_lock( parts[ "data_dir" ] ) as held:
+            if not held:
+                out( json.dumps( { "status": "skipped", "trigger": args.trigger, "note": "another run holds the run lock" }, indent=2, sort_keys=True ) )
+                return 0
+            doc = run( root, now or datetime.datetime.now().astimezone(), args.trigger, args.cap, args.claude_cli_path, parts, args.branch, args.parallel, ceiling=args.ceiling, baseline=args.baseline, rise_limit=args.rise_limit )
     out( json.dumps( doc, indent=2, sort_keys=True ) )
     return REFUSED_EXIT if "refusal" in doc else 1 if doc[ "status" ] == "failed" else 0
 
