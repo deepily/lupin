@@ -4,9 +4,10 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - lupin_mcp.duplicate_check_daily.other_branches@92d9e02451
   - lupin_mcp.duplicate_check_daily.branch_guard@3f4d857df9
-  - lupin_mcp.duplicate_check_daily.reinstall_command@9901509fc1
+  - lupin_mcp.duplicate_check_daily.reinstall_command@e8cb2a2616
   - lupin_mcp.duplicate_check_daily.refusal_message@91639bbf76
   - lupin_mcp.duplicate_check_daily.live_notifier@b8141a2be0
+  - lupin_mcp.duplicate_check_daily.baseline_installed@653a48e405
 ---
 # Duplicate check daily: the branch guard
 The cron lines are pinned to one branch with `--branch <name>`. The run itself is in [[duplicate-check-daily-run]].

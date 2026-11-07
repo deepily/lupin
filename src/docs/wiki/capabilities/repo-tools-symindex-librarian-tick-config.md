@@ -12,7 +12,7 @@ pins:
   - cosa.repo.symindex.librarian_tick.merge_lines@029adb24e5
   - cosa.repo.symindex.librarian_tick.load_crontab_lock@b5f0cfe1ba
   - cosa.repo.symindex.librarian_tick.edit_crontab@0df0429592
-  - cosa.repo.symindex.librarian_tick.status_text@09c14721a4
+  - cosa.repo.symindex.librarian_tick.status_text@e0e972f7d7
   - cosa.repo.symindex.librarian_tick.InstallRefused@9475ee3bd2
 ---
 # Wiki librarian tick: switches and cron

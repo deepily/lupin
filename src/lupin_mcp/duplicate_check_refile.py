@@ -4,9 +4,9 @@ File again the findings a saved result file of the daily check holds.
 A filing error leaves the day's findings in the result file and no rows in the store.
 The error may be a store that is down, a missing key file or a broken client.
 This command reads the file and files the findings.
-The store key of a finding is the definition id and its text, with no date.
-So a finding whose row exists is not filed again, and a finding already in the spool is not spooled twice.
-It asks the store before every create, as the daily check does.
+The run's one triage row lists the findings; its store key is made of the findings' keys, with no date.
+So a finding already on a triage row is not listed again, and a finding already in the spool is not spooled twice.
+It asks the store before the create, as the daily check does.
 Each run adds a record of its answer to the result file under "refilings".
 
 Exit 0 means every finding is filed or was already. Exit 1 means some are still queued or were refused.
@@ -23,7 +23,7 @@ from lupin_mcp import duplicate_check_daily as daily
 from lupin_mcp import duplicate_check_filing as filing
 
 REFILINGS  = "refilings"
-NEEDED     = ( "id", "name", "file", "line", "session_id", "others", "window", "correlation_key" )     # what row_payload reads of a finding that has no text
+NEEDED     = ( "id", "name", "file", "line", "others", "window", "correlation_key" )     # what triage_payload reads of a finding that has no text
 EXIT_LEFT  = 1
 EXIT_NONE  = 3
 
@@ -74,6 +74,8 @@ def refile( path, filer=None, now=None ):
         - now is a timezone-aware time, or None for the present
     Ensures:
         - the filer is given the file's findings and the folder the file lives in, which is where the spool is
+        - each finding carries day, the date of the run that made the file, so the row's title names that day and not the day of the refile
+        - each finding carries run_file, the file's name, so a row that lists only part of them says where the rest are
         - the file gains one entry in "refilings", { at, answer }, written only after the filer has returned
         - returns the filer's answer
     Raises:
@@ -82,7 +84,8 @@ def refile( path, filer=None, now=None ):
         - RecordNotWritten when the filing returned and the file could not be rewritten; it carries the answer
     """
     doc = read_result( path )
-    try: answer = ( filer if filer is not None else daily.live_filer )( doc[ "findings" ], pathlib.Path( path ).parent )
+    dated = [ { **f, "day": f[ "day" ] if "day" in f else doc[ "date" ], "run_file": f[ "run_file" ] if "run_file" in f else pathlib.Path( path ).name } for f in doc[ "findings" ] ]
+    try: answer = ( filer if filer is not None else daily.live_filer )( dated, pathlib.Path( path ).parent )
     except Exception as e:                  # a store client or config that raises: the daily check records the same and goes on
         raise FilingFailed( f"the filing raised {type( e ).__name__}: {e}. The file is unchanged." ) from e
     doc.setdefault( REFILINGS, [] ).append( { "at": ( now if now is not None else datetime.datetime.now().astimezone() ).isoformat(), "answer": answer } )

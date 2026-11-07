@@ -5,27 +5,33 @@ pins:
   - lupin_mcp.duplicate_check_filing.content_hash@b2cc48627f
   - lupin_mcp.duplicate_check_filing.correlation_key@ed891fbc89
   - lupin_mcp.duplicate_check_filing.for_record@630a473baf
-  - lupin_mcp.duplicate_check_filing.manager_for@9a48ea9ec3
-  - lupin_mcp.duplicate_check_filing.row_payload@da1516ef49
+  - lupin_mcp.duplicate_check_filing.NoTriageOwner@022bda2814
+  - lupin_mcp.duplicate_check_filing.triage_owner@0b90ebd7c1
+  - lupin_mcp.duplicate_check_filing.run_key@176353e748
+  - lupin_mcp.duplicate_check_filing.triage_payload@857553a740
   - lupin_mcp.duplicate_check_filing.read_pending@3fed62ce79
   - lupin_mcp.duplicate_check_filing.write_pending@c972f92272
   - lupin_mcp.duplicate_check_filing.send_row@2f4f15f5b4
   - lupin_mcp.duplicate_check_filing.gated@eaa079cb6c
-  - lupin_mcp.duplicate_check_filing.file_findings@a001bff541
+  - lupin_mcp.duplicate_check_filing.read_triaged@453a0be918
+  - lupin_mcp.duplicate_check_filing.append_triaged@f2f7870125
+  - lupin_mcp.duplicate_check_filing.file_findings@46e1f049b7
   - lupin_mcp.duplicate_check_filing.LiveStore@0eca9a45b2
 ---
 # Duplicate check filing
-`lupin_mcp.duplicate_check_filing` files one store row for each duplicate the daily check finds, once per definition text. To file a saved result again, see [[duplicate-check-refile]].
+`lupin_mcp.duplicate_check_filing` files one triage row for each run of the daily check, listing the duplicates it found. To file a saved result again, see [[duplicate-check-refile]].
 
 ## What it does
 - `content_hash( text )` is the sha256 hex of the definition's text. `correlation_key( id, text )` is `epic:dupcheck-` and 16 hex digits of the sha256 of the id and that hash. It holds no date.
-- A repeat run, a run the next day and a run that failed before it advanced file no second row.
 - `for_record( finding )` drops the text and adds the key, so the result file can be refiled with no source to hand.
-- `manager_for( session_id, declared, roster )` finds the manager from the seat's spawn lineage. If the bridge is gone, it uses the configured manager when that name is on the roster.
-- An unresolved finding still goes to the configured manager, with a note saying so. No row is ownerless.
-- `row_payload( finding, found )` builds a P5 task with no status, so the store's holding default applies. `created_by` is `duplicate-check-daily`, with no session id.
-- `send_row( payload, store )` asks the store for the key before every create. It answers `already_filed`, `filed`, `queued_for_retry` or `refused`.
-- A probe that does not answer ok queues the row, whatever the cause. A create with no status, a transport failure, queues it too. So does a 422 whose `detail` or `error` text contains `New tickets are gated`. `gated( body )` makes that test. The store puts a 422's text under `detail`.
-- `file_findings` tries the spooled rows first, then new ones. The spool, `pending-rows.jsonl` in the record folder, afterwards holds only the queued rows.
-- `read_pending` and `write_pending` read and write the spool. An empty list removes the file.
-- `LiveStore` is the store over HTTP with the hooks' own client. It needs no MCP session, and its `query` and `create` never raise. `query` asks for every state, held rows included, because every row this job files is held. `amend( row_id, note )` appends a note to a row; [[duplicate-check-verdict-lines]] uses it.
+- `triage_owner( declared, roster )` returns the lowercase persona key of the roster entry that matches the configured manager, whatever the case or accent. Otherwise it returns the first roster persona and the note says so. An empty roster raises `NoTriageOwner`: a row never lands on a role label.
+- `run_key( keys )` is `epic:dupcheck-run-` and 16 hex digits of the sha256 of the sorted finding keys. The same findings give the same row key.
+- `triage_payload( findings, owner, day )` builds a P5 task with no status, so the store's holding default applies. The title starts with `[LUPIN] Duplicate check <day>:` and asks whether the new functions should reuse existing ones.
+- The body says why the row exists and what to do: a `DUPCHECK-VERDICT` line per function, see [[duplicate-check-verdict-lines]]. It also names the owner and lists the first 200 findings with what they repeat, then counts the rest and names the result file. Every finding key is still recorded as triaged. `created_by` is `duplicate-check-daily`, with no session id.
+- The row's title day is the findings' `day` field, else today; a refile sets it from the result file's date.
+- `file_findings` leaves out findings already in `triaged.jsonl` or in a spooled row. With none left it files nothing. Otherwise it sends the spooled rows, then the new one, and writes the findings of a row the store took to `triaged.jsonl`.
+- `send_row( payload, store )` asks the store for the key before the create. It answers `already_filed`, `filed`, `queued_for_retry` or `refused`.
+- A probe that does not answer ok queues the row. A create with no status, a transport failure, queues it too. So does a 422 whose `detail` or `error` text contains `New tickets are gated`; `gated( body )` makes that test.
+- `read_pending` and `write_pending` read and write the spool, `pending-rows.jsonl` in the record folder. An empty list removes the file. A row spooled before the triage row existed has no finding keys and is still sent.
+- `read_triaged` and `append_triaged` read and append the triaged keys.
+- `LiveStore` is the store over HTTP with the hooks' own client. It needs no MCP session, and its `query` and `create` never raise. `query` asks for every state, held rows included. `amend( row_id, note )` appends a note to a row; [[duplicate-check-verdict-lines]] uses it.

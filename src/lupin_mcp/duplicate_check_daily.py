@@ -4,6 +4,8 @@ The daily duplicate check: judge the new definitions of main against the rest of
 The window runs from the last successful run to now. The pool and the new definitions come from a detached worktree
 at the window's end commit. The pool leaves out every earlier version of a new definition. Judge calls are capped per run.
 What the cap leaves is carried to the next run. It is the daily check of the third remediation plan.
+With --ceiling the cap is the carried backlog plus the day's inflow, up to the ceiling. With --baseline the new definitions are every
+definition of the tree, and the carried ones are drained over several runs. A carried count that rises on several daily runs in a row alerts Rick.
 """
 import argparse
 import contextlib
@@ -26,6 +28,7 @@ from cosa.repo.symindex import librarian_tick as lt
 from cosa.repo.symindex.candidates import vector_build
 from lupin_mcp import duplicate_check_audit as audit
 from lupin_mcp import duplicate_check_filing as filing
+from lupin_mcp import duplicate_check_history as history
 from lupin_mcp import reuse_behaviour as behaviour
 from lupin_mcp import reuse_exit_gate as eg
 from lupin_mcp import reuse_tie as tie_mod
@@ -47,6 +50,13 @@ STAGE_JUDGING     = "judging"                                   # the stage name
 UNREADABLE        = "unreadable"
 CRON_TAG          = "# duplicate-check-daily"
 CRON_SCHEDULE     = "7 12 * * *"      # 12:07, 30 minutes after the 11:37 shadow audit drain
+SECOND_SCHEDULE   = "7 18 * * *"      # 18:07, five hours before the host usually powers off
+BASELINE_SCHEDULE = "7 20 * * *"      # 20:07, after the evening daily run has had two hours
+RISE_LIMIT        = 3                 # daily runs in a row with a larger carried count before Rick is told
+INSTALLED_LINES   = ( 3, 4 )          # two daily slots and the reboot line, with the baseline line when it was asked for
+BASELINE          = "baseline.json"
+BASELINE_DONE     = "complete"
+BASELINE_OPEN     = "in_progress"
 BOOT_DELAY        = 300               # seconds the host waits after a boot before the reboot line runs
 LOG_NAME          = "daily.log"
 LOCK_OWNER        = "duplicate-check-daily"
@@ -54,7 +64,9 @@ STALE_DAYS        = 3                 # a pinned branch whose tip is this old, w
 STALE_BRANCH      = "stale_branch"
 MISSING_BRANCH    = "missing_branch"
 STAGE_GUARD       = "branch_guard"
+STAGE_SETUP       = "setup"           # the stage named in a result file when the configuration, the window or the worktree failed
 REFUSED_EXIT      = 3                 # distinct from 0 ok, 1 failed and argparse's 2
+UNREACHED         = ( "window", "judged", "carried", "advanced_to", "clusters", "findings", "unreadable" )     # keys a run that stopped early never measured; filing and audit stay absent without a hook
 CARRIED           = ( "LUPIN_CONFIG_MGR_CLI_ARGS", "DEEPILY_DATA_DIR", "COSA_VOICE_MANAGERS__LUPIN" )     # names copied into the cron lines from the installer's environment
 
 
@@ -216,12 +228,90 @@ def progress( defs, commit_of, unjudged, window ):
     return { "advanced_to": window[ "start" ] if first <= 0 else window[ "commits" ][ first - 1 ], "carried": carried }
 
 
+def baseline_window( root, branch=BRANCH ):
+    """
+    Choose the whole tree as a run's window.
+
+    Requires:
+        - branch names a branch of the checkout at root
+    Ensures:
+        - returns { start, end, commits }: end is the tip of the branch, start its first commit, commits an empty list
+    """
+    return { "start": git( root, "rev-list", "--max-parents=0", branch ).split()[ -1 ], "end": git( root, "rev-parse", branch ), "commits": [] }
+
+
+def baseline_definitions( tree, window ):
+    """
+    List every definition of the files the pool is built from.
+
+    Requires:
+        - tree is a worktree at the window's end commit
+    Ensures:
+        - returns { defs, commit_of } like new_definitions: new-origin definitions in file and line order, each mapped to the window's end commit
+        - the files are those label_prep.tree_definitions reads for the pool, so a file the pool cannot read is not asked for
+    """
+    parts = label_prep.tree_definitions( tree )
+    files = sorted( { d[ "file" ] for d in [ *parts[ "server_defs" ], *parts[ "client_defs" ] ] } )
+    found = extract.extract_tree( tree, [ pathlib.Path( tree ) / f for f in files ], "new" )[ "definitions" ] if files else []
+    found.sort( key=lambda d: ( d[ "file" ], d[ "line" ] ) )
+    return { "defs": found, "commit_of": { d[ "id" ]: window[ "end" ] for d in found } }
+
+
+def read_baseline( folder ):
+    """Ensures: returns the parsed baseline.json of the folder, or None when there is none."""
+    path = pathlib.Path( folder ) / BASELINE
+    return json.loads( path.read_text( encoding="utf-8" ) ) if path.exists() else None
+
+
+def rising_guard( folder, doc, now, runs, notifier ):
+    """
+    Tell Rick when the carried count has risen on several daily runs in a row.
+
+    Requires:
+        - doc is the finished result document of a daily run; notifier takes ( spoken, abstract ) and returns whether it was sent, or is None
+    Ensures:
+        - returns None unless this run's carried count, with the history's, rose on each of the last runs measured daily runs
+        - otherwise returns { runs, series, notified }; a notifier that is missing or raises gives notified False
+        - alerts on the first run that crosses the line only: while the count keeps rising, the later runs return repeat True and notified False, until a fall resets it
+    """
+    past   = history.read_lines( folder )
+    probe  = history.line_of( { **doc, "started_at": now.isoformat() }, "" )
+    rising = history.rising_run( [ *past, probe ], runs )
+    if rising is None: return None
+    if history.rising_run( past, runs ) is not None: return { **rising, "notified": False, "repeat": True }
+    shown  = ", ".join( str( n ) for n in rising[ "series" ] )
+    sent   = False
+    if notifier is not None:
+        try: sent = notifier( f"The daily duplicate check is falling behind: its carried count rose on {runs} runs in a row, to {rising[ 'series' ][ -1 ]}.",
+                              f"Carried definitions, oldest run first: {shown}. Raise the ceiling or add a slot; the history is `python -m lupin_mcp.duplicate_check_history`." )
+        except Exception: sent = False       # a broken notifier must not stop the run from advancing
+    return { **rising, "notified": sent }
+
+
 def write_json( path, doc ):
     """Ensures: writes the document to the path, making the folder, and returns the path."""
     path = pathlib.Path( path )
     path.parent.mkdir( parents=True, exist_ok=True )
     path.write_text( json.dumps( doc, indent=2, sort_keys=True ), encoding="utf-8" )
     return path
+
+
+def record( folder, stem, doc, now ):
+    """
+    Write a run's result file and append its line to the run history.
+
+    Requires:
+        - doc is the result document; stem is the file name without its extension; now is the run's start time
+    Ensures:
+        - the document gains schema_version and started_at, and None for each measure the run did not reach, so a failed run has the keys of a successful one
+        - writes <folder>/<stem>.json, then appends one line to runs.jsonl
+        - returns the document
+    """
+    doc.update( schema_version=history.SCHEMA_VERSION, started_at=now.isoformat() )
+    for key in UNREACHED: doc.setdefault( key, None )
+    write_json( folder / f"{stem}.json", doc )
+    history.append_line( folder, history.line_of( doc, f"{stem}.json" ) )
+    return doc
 
 
 def findings_of( groups, fresh, pool, window, parts, commit_of=None ):
@@ -294,9 +384,15 @@ def branch_guard( root, branch, now, days=STALE_DAYS ):
     return None
 
 
-def reinstall_command( root, python, cap, cli_path, branch ):
-    """Ensures: returns the command that pins the cron lines to the branch."""
-    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {python} -m lupin_mcp.duplicate_check_daily --install --cap {cap} --claude-cli-path {cli_path} --branch {shlex.quote( branch )}"
+def limit_flag( cap, ceiling ):
+    """Ensures: returns --ceiling and its number when a ceiling is given, else --cap and the cap."""
+    return f"--ceiling {ceiling}" if ceiling is not None else f"--cap {cap}"
+
+
+def reinstall_command( root, python, cap, cli_path, branch, ceiling=None, with_baseline=False ):
+    """Ensures: returns the reinstall command, keeping the branch, limit and baseline line."""
+    more = " --with-baseline" if with_baseline else ""
+    return f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {python} -m lupin_mcp.duplicate_check_daily --install {limit_flag( cap, ceiling )} --claude-cli-path {cli_path} --branch {shlex.quote( branch )}{more}"
 
 
 def refusal_message( refusal, command ):
@@ -311,6 +407,21 @@ def refusal_message( refusal, command ):
     else:                                      spoken, why = f"The daily duplicate check refused to run: its branch {name} no longer exists.", f"Pinned branch `{name}` does not resolve to a commit."
     fix = f"Reinstall for the newest branch:\n\n    {command}" if command is not None else "No other local branch exists, so there is nothing to reinstall for; restore the branch or pin another."
     return spoken, f"{why}\n\n{fix}"
+
+
+def baseline_installed( cmd=None ):
+    """
+    Say whether the crontab holds this job's baseline line.
+
+    Requires:
+        - cmd is the crontab command as a list, or None for the DUPLICATE_CHECK_DAILY_CRONTAB variable or crontab
+    Ensures:
+        - returns True when a line ending with CRON_TAG runs with --baseline
+        - returns False when there is no crontab or the command cannot run
+    """
+    try: read = subprocess.run( [ *( cmd or [ os.environ.get( "DUPLICATE_CHECK_DAILY_CRONTAB", "crontab" ) ] ), "-l" ], capture_output=True, text=True )
+    except OSError: return False
+    return read.returncode == 0 and any( line.rstrip().endswith( CRON_TAG ) and " --baseline" in line for line in read.stdout.splitlines() )
 
 
 def live_notifier( message, abstract, environ=None, query=None, api_key=None, target_of=None ):
@@ -334,12 +445,14 @@ def live_notifier( message, abstract, environ=None, query=None, api_key=None, ta
     return status == 200
 
 
-def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof_cli.DEFAULT_PARALLEL, clock=time.monotonic ):
+def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof_cli.DEFAULT_PARALLEL, clock=time.monotonic, ceiling=None, baseline=False, rise_limit=RISE_LIMIT ):
     """
     Run the daily check once.
 
     Requires:
-        - root is the main checkout; now is a timezone-aware datetime; trigger is cron, reboot or hand; cap is a whole number of judge calls, at least 0
+        - root is the main checkout; now is a timezone-aware datetime; trigger is cron, reboot or hand; cap is a whole number of judge calls, at least 0, or None when ceiling is given
+        - ceiling, when given, is the most judge calls a run may make; the run's cap is then the number of definitions it has to judge, up to the ceiling
+        - baseline judges every definition of the tree instead of the window's new ones; rise_limit is the number of rising daily runs that raises the alarm
         - parts holds client, backend, structural ( a function taking the tree and the frozen configuration and giving judge_all's structural_pairs ), verify, version_fn and data_dir
     Ensures:
         - writes <data_dir>/duplicate-check-daily/<date>-<time>-<trigger>.json: the verdicts' clusters, the window, the judge calls and elapsed_seconds
@@ -347,7 +460,10 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
         - before anything else, branch_guard runs: a pinned branch that is stale or gone writes that file with status failed, stage branch_guard, the refusal, the reinstall command and notified (the notifier hook's answer, False without one); nothing else changes and last-success does not move
         - a failed prerequisite writes that file with status failed, the prerequisite named, and changes nothing else
         - an exception while building the pool, embedding or judging writes that file with status failed, stage judging and the error, and last-success does not move
+        - an exception while reading the frozen configuration, choosing the window or making the worktree writes that file with status failed, stage setup and the error, removes a worktree it began, and moves nothing
         - last-success.json advances to the last commit fully judged; definitions the cap left are carried to the next run
+        - a baseline run leaves last-success alone and writes baseline.json: status complete when nothing is carried, else in_progress; once complete, a baseline run judges nothing
+        - a daily run whose carried count, with the history's, rose on the last rise_limit measured daily runs records that as rising and alerts through the notifier
         - a filer that raises is caught: the result holds filing { error } and the run ends as if it had filed nothing
         - the same holds for an auditor, whose answer is kept as audit
         - the detached worktrees are removed whether the run ends or fails
@@ -359,31 +475,40 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
     started = clock()
     folder  = pathlib.Path( parts[ "data_dir" ] ).joinpath( *FOLDER )
     stem    = f"{now.date().isoformat()}-{now.strftime( '%H%M%S' )}-{trigger}"
-    base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap }
+    base    = { "date": now.date().isoformat(), "trigger": trigger, "cap": cap, "ceiling": ceiling, "mode": history.MODE_BASELINE if baseline else history.MODE_DAILY }
     refused = branch_guard( root, branch, now )
     if refused is not None:
-        command = reinstall_command( root, sys.executable, cap, cli_path, refused[ "newest" ] ) if refused[ "newest" ] is not None else None
+        again   = baseline or ( "cron_has_baseline" in parts and parts[ "cron_has_baseline" ]() )       # the reinstall replaces every tagged line, so it must name the baseline line
+        command = reinstall_command( root, sys.executable, cap, cli_path, refused[ "newest" ], ceiling, again ) if refused[ "newest" ] is not None else None
         sent    = False
         if "notifier" in parts:
             try: sent = parts[ "notifier" ]( *refusal_message( refused, command ) )
             except Exception: sent = False       # a broken notifier must not hide the refusal: the file and the exit code still say it
         doc = { **base, "status": "failed", "stage": STAGE_GUARD, **refused, "reinstall": command, "notified": sent, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
-        write_json( folder / f"{stem}.json", doc )
-        return doc
+        return record( folder, stem, doc, now )
+    if baseline and ( read_baseline( folder ) or { } ).get( "status" ) == BASELINE_DONE:
+        return record( folder, stem, { **base, "status": "ok", "note": "baseline complete", "judged": 0, "judge_calls": 0, "carried": [], "elapsed_seconds": round( clock() - started, 3 ) }, now )
     miss    = failed_prerequisite( parts[ "client" ], cli_path, parts[ "verify" ], parts[ "version_fn" ] )
     if miss is not None:
         doc = { **base, "status": "failed", **miss, "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
-        write_json( folder / f"{stem}.json", doc )
-        return doc
-    cfg    = parts[ "verify" ]()
-    last   = read_last_success( folder )
-    window = window_of( root, last, now, branch )
-    doc    = { **base, "window": { "start": window[ "start" ], "end": window[ "end" ], "commits": len( window[ "commits" ] ) } }
-    tree   = source_at.ensure_worktree( root, window[ "end" ], pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}" )
+        return record( folder, stem, doc, now )
+    doc, target = base, None
+    try:
+        cfg    = parts[ "verify" ]()
+        last   = read_last_success( folder )
+        window = baseline_window( root, branch ) if baseline else window_of( root, last, now, branch )
+        doc    = { **base, "window": { "start": window[ "start" ], "end": window[ "end" ], "commits": len( window[ "commits" ] ) } }
+        target = pathlib.Path( root ) / source_at.WORKTREES / f"{WORKTREE_PREFIX}{window[ 'end' ][ :9 ]}"
+        tree   = source_at.ensure_worktree( root, window[ "end" ], target )
+    except Exception as exc:               # the frozen configuration, the window or the worktree failed: leave a record and change nothing else
+        if target is not None: release( root, target )
+        doc = { **doc, "status": "failed", "stage": STAGE_SETUP, "error": f"{type( exc ).__name__}: {exc}", "judge_calls": 0, "elapsed_seconds": round( clock() - started, 3 ) }
+        return record( folder, stem, doc, now )
     count = Counting( parts[ "backend" ] )
     try:
-        fresh = new_definitions( tree, root, window )
+        fresh = baseline_definitions( tree, window ) if baseline else new_definitions( tree, root, window )
         pool  = pool_without_earlier_versions( tree, fresh[ "defs" ] )
+        if ceiling is not None: cap = min( ceiling, len( fresh[ "defs" ] ) )
         out   = { "verdicts": [], "unjudged": [], "dropped": { "count": 0, "ids": [] } }
         if fresh[ "defs" ]:
             rotated = proof_cli.rotate_ledger_for_new_cli( parts[ "data_dir" ], cli_path, parts[ "backend" ], FOLDER )
@@ -393,8 +518,7 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
             out    = pipeline.judge_all( fresh[ "defs" ], [ *fresh[ "defs" ], *pool ], cfg, wiring, 0, max_calls=cap, skip_breaching=True )
     except Exception as exc:               # the pool build, the embeddings or the judge failed: leave a record and change nothing else
         doc.update( status="failed", stage=STAGE_JUDGING, error=f"{type( exc ).__name__}: {exc}", judge_calls=count.calls, elapsed_seconds=round( clock() - started, 3 ) )
-        write_json( folder / f"{stem}.json", doc )
-        return doc
+        return record( folder, stem, doc, now )
     finally:
         release( root, tree )
     ids    = [ d[ "id" ] for d in [ *fresh[ "defs" ], *pool ] if d[ "id" ] not in set( out[ "dropped" ][ "ids" ] ) ]
@@ -404,39 +528,47 @@ def run( root, now, trigger, cap, cli_path, parts, branch=BRANCH, parallel=proof
                 carried=moved[ "carried" ], advanced_to=moved[ "advanced_to" ], clusters=groups, unreadable=[ u for u in out[ "unjudged" ] if u[ "code" ] not in CARRIED_CODES ],
                 elapsed_seconds=round( clock() - started, 3 ) )
     found = findings_of( groups, fresh[ "defs" ], pool, doc[ "window" ], parts, fresh[ "commit_of" ] )
+    found = [ { **f, "day": doc[ "date" ], "run_file": f"{stem}.json" } for f in found ]       # the row names the run's day and the file that lists every finding
     doc[ "findings" ] = [ filing.for_record( f ) for f in found ]       # kept on every run, filer or not: the weekly page counts them, and duplicate_check_refile files them again after a filing error
     for hook, key in ( ( "filer", "filing" ), ( "auditor", "audit" ) ):
         if hook not in parts: continue
         try: doc[ key ] = parts[ hook ]( found, folder )
         except Exception as e: doc[ key ] = { "error": f"{type( e ).__name__}: {e}" }       # a broken store client or config must not stop last-success, or the next run re-judges and re-spends the cap
-    write_json( folder / LAST_SUCCESS, { "commit": moved[ "advanced_to" ], "at": now.isoformat() } )
-    write_json( folder / f"{stem}.json", doc )
-    return doc
+    if baseline: write_json( folder / BASELINE, { "status": BASELINE_OPEN if moved[ "carried" ] else BASELINE_DONE, "end": window[ "end" ], "carried": len( moved[ "carried" ] ), "at": now.isoformat() } )
+    else:
+        write_json( folder / LAST_SUCCESS, { "commit": moved[ "advanced_to" ], "at": now.isoformat() } )
+        rising = rising_guard( folder, doc, now, rise_limit, parts.get( "notifier" ) )
+        if rising is not None: doc[ "rising" ] = rising
+    doc[ "cap" ] = cap
+    return record( folder, stem, doc, now )
 
 
-def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRANCH ):
+def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRANCH, ceiling=None, baseline=False ):
     """
-    Build the two cron lines of the daily check.
+    Build the cron lines of the daily check.
 
     Requires:
-        - root is the main checkout path; python is the interpreter path; cap is a whole number of judge calls; cli_path is the Claude Code binary
-        - carried maps environment names to values, copied into both lines and shell-quoted
+        - root is the main checkout path; python is the interpreter path; cli_path is the Claude Code binary
+        - cap is a whole number of judge calls, or None when ceiling is given
+        - carried maps environment names to values, copied into every line and shell-quoted
         - branch is the branch the check judges
     Ensures:
-        - returns [ daily line, reboot line ], each ending with CRON_TAG
-        - the daily line runs at CRON_SCHEDULE with trigger cron, the reboot line BOOT_DELAY seconds after a boot with trigger reboot
-        - both run from root with LUPIN_ROOT and PYTHONPATH set, append to log_path, and carry the cap and the binary
-        - a branch other than the default is added as --branch, shell-quoted, after the trigger; the default adds nothing, so those lines are unchanged
+        - returns [ first daily line, second daily line, reboot line ], plus a baseline line before the reboot line when baseline is set; each ends with CRON_TAG
+        - the daily lines run at CRON_SCHEDULE and SECOND_SCHEDULE with trigger cron, the baseline line at BASELINE_SCHEDULE with --baseline, the reboot line BOOT_DELAY seconds after a boot with trigger reboot
+        - every line runs from root with LUPIN_ROOT and PYTHONPATH set, appends to log_path, and carries the limit (--cap, or --ceiling when given) and the binary
+        - a branch other than the default is added as --branch, shell-quoted, after the trigger; the default adds nothing
     """
     extra = "".join( f"{name}={shlex.quote( value )} " for name, value in ( carried or {} ).items() )
     named = "" if branch == BRANCH else f" --branch {shlex.quote( branch )}"
 
-    def run( trigger ):
+    def run( trigger, more="" ):
         """Ensures: returns the shell command of one line, its trigger named."""
         return ( f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {extra}{python} -m lupin_mcp.duplicate_check_daily "
-                 f"--cap {cap} --claude-cli-path {cli_path} --trigger {trigger}{named} >> {log_path} 2>&1 {CRON_TAG}" )
+                 f"{limit_flag( cap, ceiling )} --claude-cli-path {cli_path} --trigger {trigger}{more}{named} >> {log_path} 2>&1 {CRON_TAG}" )
 
-    return [ lt.cron_lines_for( run( "cron" ), CRON_SCHEDULE, BOOT_DELAY )[ 0 ], lt.cron_lines_for( run( "reboot" ), CRON_SCHEDULE, BOOT_DELAY )[ 1 ] ]
+    lines = [ lt.cron_lines_for( run( "cron" ), schedule, BOOT_DELAY )[ 0 ] for schedule in ( CRON_SCHEDULE, SECOND_SCHEDULE ) ]
+    if baseline: lines.append( lt.cron_lines_for( run( "cron", " --baseline" ), BASELINE_SCHEDULE, BOOT_DELAY )[ 0 ] )
+    return [ *lines, lt.cron_lines_for( run( "reboot" ), CRON_SCHEDULE, BOOT_DELAY )[ 1 ] ]
 
 
 def install_mode( args, environ, now, out, err, crontab_cmd ):
@@ -446,7 +578,7 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     Requires:
         - args holds the parsed flags; exactly one of print_install, install, uninstall or status is set; out and err take one line of text
     Ensures:
-        - --print-install prints the two lines and changes nothing; --install and --uninstall go through the librarian's locked crontab editor with this job's tag and owner
+        - --print-install prints the lines and changes nothing; --install and --uninstall go through the librarian's locked crontab editor with this job's tag and owner
         - --status says whether the lines are present
         - returns 0, or 1 with the reason on err when the install is refused or the crontab call fails
     """
@@ -456,18 +588,18 @@ def install_mode( args, environ, now, out, err, crontab_cmd ):
     try:
         if args.status:
             read = subprocess.run( [ *cmd, "-l" ], capture_output=True, text=True )
-            out( lt.status_text( read.stdout if read.returncode == 0 else "", CRON_TAG ) )
+            out( lt.status_text( read.stdout if read.returncode == 0 else "", CRON_TAG, INSTALLED_LINES ) )
             return 0
         if args.uninstall:
             lt.edit_crontab( [], environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
             out( "uninstalled" )
             return 0
-        lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) }, args.branch )
+        lines = cron_lines( root, args.python, f"{log_dir}/{LOG_NAME}", args.cap, args.claude_cli_path, { n: environ[ n ] for n in CARRIED if environ.get( n ) }, args.branch, args.ceiling, args.with_baseline )
         if args.print_install:
             out( "\n".join( lines ) )
             return 0
         lt.edit_crontab( lines, environ, cmd, f"{log_dir}/crontab-backups", now, tag=CRON_TAG, owner=LOCK_OWNER )
-        out( "installed: 2 lines" )
+        out( f"installed: {len( lines )} lines" )
         return 0
     except ( lt.InstallRefused, RuntimeError ) as e:
         err( f"duplicate-check-daily: {e}" )
@@ -480,25 +612,29 @@ def live_parts():
 
     Ensures:
         - returns the embedding client, the Claude Code backend, the staged structural source, verify_frozen over the live file, cli_version, the data root and the filer
-        - the filer files the findings' rows over HTTP; it builds its store client, reads the roster and the configured manager only when it is called
+        - the filer files the run's one triage row over HTTP; it builds its store client, reads the roster and the configured manager only when it is called
         - the auditor queues known-miss audits in the lookup tool's data folder, reading it only when it is called
         - the notifier sends the branch guard's alert, only when it is called
+        - cron_has_baseline reads the crontab, only when a branch guard refusal needs the reinstall command
         - writes nothing and makes no call
     """
     base = proof_cli.base_wiring( ".", lambda defs: [], 1, vector_build.EndpointClient() )
     return { "client": base[ "client" ], "backend": base[ "backend" ], "data_dir": base[ "data_dir" ], "version_fn": model_transport.cli_version,
              "verify": lambda: cfg_mod.verify_frozen( base[ "frozen_path" ], base[ "live" ] ),
-             "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor, "notifier": live_notifier }
+             "structural": lambda tree, cfg: proof_cli.structural_source( tree, {}, cfg ), "filer": live_filer, "auditor": live_auditor, "notifier": live_notifier,
+             "cron_has_baseline": baseline_installed }
 
 
 def live_filer( findings, folder ):
     """
-    File the findings' rows in the live store.
+    File the run's one triage row in the live store.
 
     Requires:
         - the environment holds LUPIN_ROOT, the configuration manager's argument and the project's declared manager roster
     Ensures:
         - returns file_findings' answer, made with the HTTP store, the configured manager on duty and the roster
+    Raises:
+        - NoTriageOwner when there are findings and the roster is empty; run records that as the filer's error
     """
     from cosa.rest.voice_persona_helpers import pick_declared_managers_from_env
     from cosa.config.configuration_manager import ConfigurationManager
@@ -529,14 +665,20 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     Run the daily check from the command line.
 
     Requires:
-        - argv holds --cap ( judge calls, no default, needed to run or to print or install the cron lines ) and --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch and --parallel
+        - argv holds one of --cap ( a fixed number of judge calls ) and --ceiling ( the most judge calls an adaptive run may make ), neither with a default, needed to run or to print or install the cron lines
+        - argv also holds --claude-cli-path, and optionally --root, --trigger ( default hand ), --branch, --parallel, --baseline ( judge every definition of the tree ), --rise-limit ( default RISE_LIMIT ) and, with the cron modes, --with-baseline ( add the baseline line )
         - one of --print-install, --install, --uninstall or --status, with --python, works on the cron lines instead of running
     Ensures:
         - prints the result document as JSON and returns 0, REFUSED_EXIT (3) when the branch guard refused, or 1 when anything else failed
         - the cron modes never run the check
     """
     ap = argparse.ArgumentParser( description="Judge the day's new definitions for duplicates." )
-    ap.add_argument( "--cap", type=int, default=None )
+    limit = ap.add_mutually_exclusive_group()
+    limit.add_argument( "--cap", type=int, default=None )
+    limit.add_argument( "--ceiling", type=int, default=None )
+    ap.add_argument( "--baseline", action="store_true" )
+    ap.add_argument( "--with-baseline", action="store_true" )
+    ap.add_argument( "--rise-limit", type=int, default=RISE_LIMIT )
     ap.add_argument( "--claude-cli-path", default=None )
     ap.add_argument( "--root", default=None )
     ap.add_argument( "--trigger", default="hand", choices=TRIGGERS )
@@ -547,12 +689,12 @@ def main( argv=None, parts=None, now=None, out=print, environ=None, err=None, cr
     for flag in ( "--install", "--uninstall", "--status", "--print-install" ): mode.add_argument( flag, action="store_true" )
     args = ap.parse_args( argv )
     cron = args.install or args.uninstall or args.status or args.print_install
-    if args.cap is None and not ( args.uninstall or args.status ): ap.error( "--cap is required: the daily check has no default cap" )
+    if args.cap is None and args.ceiling is None and not ( args.uninstall or args.status ): ap.error( "--cap or --ceiling is required: the daily check has no default limit" )
     if cron: return install_mode( args, os.environ if environ is None else environ, now or datetime.datetime.now(), out, err or ( lambda line: print( line, file=sys.stderr ) ), crontab_cmd )
     model_transport.configure( args.claude_cli_path )
     root = args.root or git( ".", "rev-parse", "--show-toplevel" )
     with contextlib.redirect_stdout( sys.stderr ):
-        doc = run( root, now or datetime.datetime.now().astimezone(), args.trigger, args.cap, args.claude_cli_path, parts or live_parts(), args.branch, args.parallel )
+        doc = run( root, now or datetime.datetime.now().astimezone(), args.trigger, args.cap, args.claude_cli_path, parts or live_parts(), args.branch, args.parallel, ceiling=args.ceiling, baseline=args.baseline, rise_limit=args.rise_limit )
     out( json.dumps( doc, indent=2, sort_keys=True ) )
     return REFUSED_EXIT if "refusal" in doc else 1 if doc[ "status" ] == "failed" else 0
 

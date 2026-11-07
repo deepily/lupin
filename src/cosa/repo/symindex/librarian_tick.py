@@ -540,19 +540,21 @@ def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, ow
     return new
 
 
-def status_text( crontab_text, tag=CRON_TAG ):
+def status_text( crontab_text, tag=CRON_TAG, expected=2 ):
     """
     Describe the tagged lines found in a crontab text.
 
     Requires:
         - tag is the comment that ends each line of one tool; the default is the librarian's
+        - expected is the number of lines a full install writes, or a tuple of the numbers that count as full
 
     Ensures:
-        - returns "installed: 2 lines", "partly installed: n lines" or "not installed"
+        - returns "installed: n lines" when n is expected, "partly installed: n lines" for any other n above 0, or "not installed"
     """
     count = sum( 1 for line in crontab_text.splitlines() if line.rstrip().endswith( tag ) )
     if count == 0: return "not installed"
-    return f"installed: {count} lines" if count == 2 else f"partly installed: {count} lines"
+    full = expected if isinstance( expected, tuple ) else ( expected, )
+    return f"installed: {count} lines" if count in full else f"partly installed: {count} lines"
 
 
 def _live_store():

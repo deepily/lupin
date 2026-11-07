@@ -1,4 +1,6 @@
 """The filing of duplicate rows, with every store write faked."""
+import datetime
+import hashlib
 import json
 import re
 
@@ -36,14 +38,13 @@ class Store:
         return True, 201, payload
 
 
-def resolver( source, persona="Tiberius" ):
-    """Ensures: returns a stand-in resolver that answers the given source."""
-    return lambda session_id, declared_manager=None: { "manager_session_id": "m", "manager_persona": persona if source == "lineage" else declared_manager, "source": source }
+DAY = datetime.date( 2026, 11, 7 )
 
 
-def run_once( tmp_path, findings, store, resolve=None, declared="Cheech", roster=( "Cheech", "Tiberius" ) ):
+def run_once( tmp_path, findings, store, declared="Cheech", roster=( "Cheech", "Tiberius" ) ):
     """Ensures: files the findings in the folder and returns the summary."""
-    return ff.file_findings( findings, tmp_path, store, declared, list( roster ), resolve or resolver( "lineage" ) )
+    return ff.file_findings( findings, tmp_path, store, declared, list( roster ), DAY )
+
 
 
 def test_the_key_is_the_definition_id_and_text_hash_never_the_day_and_matches_the_epic_pattern():
@@ -53,51 +54,109 @@ def test_the_key_is_the_definition_id_and_text_hash_never_the_day_and_matches_th
     assert ff.content_hash( "x" ) == "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
 
 
-def test_a_seat_with_a_lineage_manager_sends_the_row_to_that_manager():
-    got = ff.manager_for( "s-1", "Cheech", [ "Cheech" ], resolver( "lineage", "Tiberius" ) )
-    assert got == { "manager": "Tiberius", "rung": "lineage", "note": "manager found from the seat's spawn lineage" }
+def test_the_owner_is_the_roster_persona_that_matches_the_configured_manager_whatever_the_case_or_accent():
+    got = ff.triage_owner( "María", [ "Tiberius", "maria" ] )
+    assert got[ "owner" ] == "maria" and "is on the roster" in got[ "note" ]
 
 
-def test_a_reaped_seat_falls_to_the_configured_manager_when_the_roster_names_them_whatever_the_case_or_accent():
-    got = ff.manager_for( "s-1", "María", [ "maria", "Cheech" ], resolver( "declared" ) )
-    assert got[ "rung" ] == "declared" and got[ "manager" ] == "María"
+def test_a_role_label_that_is_not_on_the_roster_falls_to_the_first_roster_persona_and_says_so():
+    got = ff.triage_owner( "manager-on-duty", [ "Cheech", "Tiberius" ] )
+    assert got[ "owner" ] == "cheech" and "'manager-on-duty'" in got[ "note" ] and "first roster persona" in got[ "note" ]
 
 
-def test_a_configured_manager_that_is_not_on_the_roster_is_unresolved_and_still_the_owner():
-    got = ff.manager_for( "s-1", "manager-on-duty", [ "Cheech" ], resolver( "declared" ) )
-    assert got == { "manager": "manager-on-duty", "rung": "unresolved", "note": "manager unresolved" }
+def test_an_empty_roster_fails_loudly_and_a_blank_entry_is_not_a_persona():
+    with pytest.raises( ff.NoTriageOwner, match="no manager on the roster" ): ff.triage_owner( "manager-on-duty", [] )
+    with pytest.raises( ff.NoTriageOwner ): ff.triage_owner( "Cheech", [ "", None ] )
 
 
-def test_no_session_at_all_is_unresolved_and_never_asks_the_resolver():
-    def never( *a, **k ): pytest.fail( "the resolver was asked" )
-    assert ff.manager_for( None, "Cheech", [ "Cheech" ], never )[ "rung" ] == "unresolved"
-    assert ff.manager_for( "s-1", "Cheech", [ "Cheech" ], resolver( "unresolved" ) )[ "rung" ] == "unresolved"
+def test_the_run_key_is_the_sorted_finding_keys_hashed_so_the_same_set_has_the_same_row_key():
+    assert ff.run_key( [ "b", "a" ] ) == ff.run_key( [ "a", "b" ] ) != ff.run_key( [ "a" ] )
+    assert re.fullmatch( r"epic:dupcheck-run-[0-9a-f]{16}", ff.run_key( [ "a" ] ) )
+    assert ff.run_key( [ "a", "b" ] ) == "epic:dupcheck-run-" + hashlib.sha256( b"a\nb" ).hexdigest()[ :16 ]
 
 
-def test_the_row_is_p5_with_no_status_a_fixed_creator_with_no_session_and_the_manager_as_owner():
+def test_the_row_is_p5_with_no_status_a_fixed_creator_with_no_session_and_the_persona_as_owner_and_accountable():
     f   = finding()
-    row = ff.row_payload( f, { "manager": "Tiberius", "rung": "lineage", "note": "n" } )
-    assert row[ "priority" ] == "P5" and "status" not in row and row[ "created_by" ] == ff.CREATED_BY
+    row = ff.triage_payload( [ f ], { "owner": "cheech", "note": "n" }, DAY )
+    assert row[ "priority" ] == "P5" and "status" not in row and row[ "created_by" ] == ff.CREATED_BY and row[ "item_class" ] == "task"
     assert not re.search( r"[0-9a-f]{8}-[0-9a-f]{4}", row[ "created_by" ] ), "no session id: the store must read the caller as a worker"
-    assert row[ "owner_persona" ] == row[ "accountable_manager" ] == "Tiberius" and row[ "correlation_key" ] == ff.correlation_key( "d-1", f[ "text" ] )
-    assert "lineage" in row[ "body" ] and "twin" in row[ "body" ] and "aaa..bbb" in row[ "body" ] and row[ "item_class" ] == "task"
+    assert row[ "owner_persona" ] == row[ "accountable_manager" ] == "cheech" and row[ "finding_keys" ] == [ ff.correlation_key( "d-1", f[ "text" ] ) ]
+    assert row[ "correlation_key" ] == ff.run_key( row[ "finding_keys" ] )
 
 
-def test_a_seeded_duplicate_files_one_row_and_a_second_run_and_the_next_days_run_file_none( tmp_path ):
+def test_the_title_starts_with_lupin_and_says_the_job_the_day_and_the_question_and_the_body_says_why_and_what_to_do():
+    row = ff.triage_payload( [ finding(), finding( "d-2", "b2", "def b2(): pass" ) ], { "owner": "cheech", "note": "n" }, DAY )
+    assert row[ "title" ] == "[LUPIN] Duplicate check 7 Nov: decide whether 2 new function(s) should reuse existing ones" and len( row[ "title" ] ) <= 120
+    assert "Why this row exists" in row[ "body" ] and "What to do" in row[ "body" ] and "DUPCHECK-VERDICT" in row[ "body" ] and "Owner: cheech (n)" in row[ "body" ]
+    assert "a1 (client/a1.py:3, d-1) repeats: twin in server/twin.py" in row[ "body" ] and "b2 (client/b2.py:3, d-2)" in row[ "body" ] and "aaa..bbb" in row[ "body"]
+
+
+def test_a_finding_from_a_result_file_carries_its_key_and_needs_no_text():
+    f = ff.for_record( finding() )
+    assert ff.triage_payload( [ f ], { "owner": "cheech", "note": "n" }, DAY )[ "finding_keys" ] == [ f[ "correlation_key" ] ]
+
+
+
+def test_a_run_with_many_findings_files_one_row_and_a_second_run_and_the_next_days_run_file_none( tmp_path ):
     store = Store()
-    first = run_once( tmp_path, [ finding() ], store )
-    assert len( first[ "filed" ] ) == 1 and len( store.created ) == 1
-    for _ in range( 2 ):                                                                   # the same day, then the next
-        again = run_once( tmp_path, [ finding() ], store )
-        assert again[ "filed" ] == [ ] and len( again[ "already_filed" ] ) == 1
-    assert len( store.created ) == 1
+    many  = [ finding( "d-1", "a1", "def a1(): pass" ), finding( "d-2", "a2", "def a2(): pass" ), finding( "d-3", "a3", "def a3(): pass" ) ]
+    first = run_once( tmp_path, many, store )
+    assert len( first[ "filed" ] ) == 1 and len( store.created ) == 1, "three findings, one row"
+    assert "finding_keys" not in store.created[ 0 ], "the store is sent the payload without the filer's own bookkeeping"
+    for _ in range(2):                                                                     # the same day, then the next
+        again = run_once( tmp_path, many, store )
+        assert again == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [] }, "every finding is already on the first row: no row, no probe"
+    assert len( store.created ) == 1 and len( store.probes ) == 1
+    assert len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == 3
 
 
-def test_a_changed_text_is_a_new_key_and_files_a_new_row( tmp_path ):
+def test_a_run_with_no_findings_files_no_row_and_asks_for_no_owner( tmp_path ):
+    got = ff.file_findings( [], tmp_path, Store(), "x", [], DAY )
+    assert got == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [] } and not ( tmp_path / ff.TRIAGED_FILE ).exists()
+
+
+def test_a_run_with_findings_and_an_empty_roster_raises_before_anything_is_sent( tmp_path ):
+    store = Store()
+    with pytest.raises( ff.NoTriageOwner ): run_once( tmp_path, [ finding() ], store, roster=() )
+    assert store.created == [] and store.probes == [] and not ( tmp_path / ff.TRIAGED_FILE ).exists()
+
+
+def test_the_day_comes_from_the_findings_when_none_is_given_and_a_given_day_wins( tmp_path ):
+    store = Store()
+    ff.file_findings( [ { **finding(), "day": "2026-09-30" } ], tmp_path, store, "Cheech", [ "Cheech" ] )
+    assert store.created[ 0 ][ "title" ].startswith( "[LUPIN] Duplicate check 30 Sep:" )
+    other = Store()
+    ff.file_findings( [ { **finding( "d-2", "b2", "def b2(): pass" ), "day": "2026-09-30" } ], tmp_path, other, "Cheech", [ "Cheech" ], datetime.date( 2026, 1, 2 ) )
+    assert other.created[ 0 ][ "title" ].startswith( "[LUPIN] Duplicate check 2 Jan:" )
+
+
+def test_the_default_day_is_today_and_the_row_is_owned_by_the_roster_persona( tmp_path ):
+    store = Store()
+    ff.file_findings( [ finding() ], tmp_path, store, "manager-on-duty", [ "Cheech" ] )
+    row = store.created[ 0 ]
+    assert row[ "owner_persona" ] == "cheech" and f"{datetime.date.today().day} {datetime.date.today().strftime( '%b' )}" in row[ "title" ]
+
+
+def test_only_the_findings_not_yet_on_a_row_go_on_the_next_runs_row( tmp_path ):
+    store = Store()
+    run_once( tmp_path, [ finding() ], store )
+    got = run_once( tmp_path, [ finding(), finding( "d-2", "b2", "def b2(): pass" ) ], store )
+    assert len( got[ "filed" ] ) == 1 and len( store.created ) == 2 and store.created[ 1 ][ "title" ].count( "1 new function" ) == 1 and "b2" in store.created[ 1 ][ "body" ] and "a1" not in store.created[ 1 ][ "body" ].split( "\n\n", 1 )[ 1 ]
+
+
+def test_a_changed_text_is_a_new_finding_and_goes_on_a_new_row( tmp_path ):
     store = Store()
     run_once( tmp_path, [ finding() ], store )
     run_once( tmp_path, [ finding( text="def a1(): return 2" ) ], store )
     assert len( store.created ) == 2
+
+
+def test_a_row_the_store_already_holds_is_recorded_as_triaged_so_its_findings_are_not_listed_again( tmp_path ):
+    store = Store()
+    run_once( tmp_path, [ finding() ], store )
+    ( tmp_path / ff.TRIAGED_FILE ).unlink()                                                # a lost triaged file: the row is still in the store
+    got = run_once( tmp_path, [ finding() ], store )
+    assert len( got[ "already_filed" ] ) == 1 and len( store.created ) == 1 and len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == 1
 
 
 def test_a_transport_failure_is_spooled_and_the_next_run_files_it_first_and_clears_the_spool( tmp_path ):
@@ -106,8 +165,9 @@ def test_a_transport_failure_is_spooled_and_the_next_run_files_it_first_and_clea
     assert len( first[ "queued_for_retry" ] ) == 1 and len( ff.read_pending( tmp_path ) ) == 1
     up    = Store()
     later = run_once( tmp_path, [ finding( "d-2", "b2", "def b2(): pass" ) ], up )
-    assert [ k[ "key" ] for k in later[ "filed" ] ] == [ ff.correlation_key( "d-1", "def a1(): pass" ), ff.correlation_key( "d-2", "def b2(): pass" ) ], "the spooled row goes first"
-    assert not ( tmp_path / ff.PENDING_FILE ).exists()
+    first_key = ff.run_key( [ ff.correlation_key( "d-1", "def a1(): pass" ) ] )
+    assert [ k[ "key" ] for k in later[ "filed" ] ] == [ first_key, ff.run_key( [ ff.correlation_key( "d-2", "def b2(): pass" ) ] ) ], "the spooled row goes first"
+    assert not ( tmp_path / ff.PENDING_FILE ).exists() and len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == 2, "both rows' findings are triaged once filed"
 
 
 def test_a_failed_probe_queues_the_row_without_creating_one_so_a_row_is_never_filed_twice( tmp_path ):
@@ -194,13 +254,16 @@ def test_a_finding_already_in_the_spool_is_not_spooled_twice( tmp_path ):
     run_once( tmp_path, [ finding() ], down )
     run_once( tmp_path, [ finding() ], down )
     assert len( ff.read_pending( tmp_path ) ) == 1 and len( down.created ) == 2, "one retry of the spooled row each run, the finding is not added again"
+    assert not ( tmp_path / ff.TRIAGED_FILE ).exists(), "a queued row triages nothing"
 
 
-def test_the_row_goes_to_the_rung_found_per_finding( tmp_path ):
+def test_a_spooled_row_from_before_the_triage_row_has_no_finding_keys_and_is_still_sent( tmp_path ):
+    old = { "item_class": "task", "title": "Duplicate: a in b repeats 1 existing definition(s)", "project": "lupin", "correlation_key": "epic:dupcheck-0123456789abcdef", "priority": "P5" }
+    ff.write_pending( tmp_path, [ old ] )
     store = Store()
-    run_once( tmp_path, [ finding( session="s-1" ), finding( "d-2", "b2", "def b2(): pass", session=None ) ], store, resolver( "lineage", "Tiberius" ) )
-    owners = { p[ "owner_persona" ] for p in store.created }
-    assert owners == { "Tiberius", "Cheech" }, "the seat with a session reaches its lineage manager, the one without falls to the configured manager"
+    got   = run_once( tmp_path, [], store )
+    assert [ k[ "key" ] for k in got[ "filed" ] ] == [ old[ "correlation_key" ] ] and store.created == [ old ] and not ( tmp_path / ff.PENDING_FILE ).exists()
+    assert ( tmp_path / ff.TRIAGED_FILE ).read_text() == "", "no findings to mark"
 
 
 def test_the_spool_helpers_write_one_line_a_payload_and_remove_the_file_when_empty( tmp_path ):
@@ -245,12 +308,16 @@ class HeldRowClient:
         return True, 201, self.held[ payload[ "correlation_key" ] ]
 
 
-def test_a_second_run_over_held_rows_files_none_and_skips_them_as_already_filed( tmp_path ):
+def test_a_second_run_over_a_held_row_files_none_and_a_lost_triaged_file_reads_the_held_row_as_already_filed( tmp_path ):
     live = ff.LiveStore( settings={ "api_base_url": "http://x" }, api_key="k" )
     live.client = HeldRowClient()
-    first  = run_once( tmp_path, [ finding( "d-1", "a1", "def a1(): pass" ), finding( "d-2", "a2", "def a2(): pass" ) ], live )
-    second = run_once( tmp_path, [ finding( "d-1", "a1", "def a1(): pass" ), finding( "d-2", "a2", "def a2(): pass" ) ], live )
-    assert len( first[ "filed" ] ) == 2 and second[ "filed" ] == [ ] and len( second[ "already_filed" ] ) == 2 and len( live.client.held ) == 2
+    two    = [ finding( "d-1", "a1", "def a1(): pass" ), finding( "d-2", "a2", "def a2(): pass" ) ]
+    first  = run_once( tmp_path, two, live )
+    second = run_once( tmp_path, two, live )
+    assert len( first[ "filed" ] ) == 1 and second[ "filed" ] == [] and second[ "already_filed" ] == [] and len( live.client.held ) == 1
+    ( tmp_path / ff.TRIAGED_FILE ).unlink()
+    third  = run_once( tmp_path, two, live )
+    assert third[ "filed" ] == [] and len( third[ "already_filed" ] ) == 1 and len( live.client.held ) == 1, "the every-state read sees the held row"
 
 
 def test_a_plain_read_of_held_rows_sees_nothing_which_is_the_defect_the_every_state_read_removes():
@@ -283,3 +350,40 @@ def test_the_live_store_amends_a_row_with_the_line_as_the_note_through_the_hooks
     live.client = Client()
     assert live.amend( "row-1", "a note" ) == ( True, 200, { "item": { } } )
     assert seen == [ ( { "api_base_url": "http://x" }, "k", "row-1", { "note": "a note", "reason": ff.AMEND_REASON, "authority": "standing" } ) ]
+
+
+def many_findings( n ):
+    """Ensures: returns n findings with distinct ids, names and keys."""
+    return [ finding( f"d-{i}", f"f{i}", f"def f{i}(): pass" ) for i in range( n ) ]
+
+
+def test_a_row_names_the_first_two_hundred_findings_counts_the_rest_and_keeps_every_key():
+    found = [ { **f, "run_file": "2026-11-06-190659-hand.json" } for f in many_findings( ff.LIST_LIMIT + 7 ) ]
+    row   = ff.triage_payload( found, { "owner": "cheech", "note": "n" }, DAY )
+    listed = [ l for l in row[ "body" ].splitlines() if l.startswith( "- f" ) ]
+    assert len( listed ) == ff.LIST_LIMIT and listed[ -1 ].startswith( f"- f{ff.LIST_LIMIT - 1} (" ) and f"f{ff.LIST_LIMIT} (" not in row[ "body" ]
+    assert row[ "body" ].splitlines()[ -1 ] == "- and 7 more in 2026-11-06-190659-hand.json" and f"decide whether {ff.LIST_LIMIT + 7} new function(s)" in row[ "title" ]
+    assert len( row[ "finding_keys" ] ) == ff.LIST_LIMIT + 7 and row[ "correlation_key" ] == ff.run_key( row[ "finding_keys" ] )
+
+
+def test_exactly_the_limit_lists_every_finding_and_names_no_more_and_a_missing_file_name_reads_the_result_file():
+    exact = ff.triage_payload( many_findings( ff.LIST_LIMIT ), { "owner": "cheech", "note": "n" }, DAY )
+    assert "more in" not in exact[ "body" ] and len( [ l for l in exact[ "body" ].splitlines() if l.startswith( "- f" ) ] ) == ff.LIST_LIMIT
+    over = ff.triage_payload( many_findings( ff.LIST_LIMIT + 1 ), { "owner": "cheech", "note": "n" }, DAY )
+    assert over[ "body" ].splitlines()[ -1 ] == "- and 1 more in the result file"
+
+
+def test_every_key_of_a_long_row_is_triaged_once_it_is_filed_so_the_unlisted_ones_are_not_filed_again( tmp_path ):
+    store = Store()
+    found = many_findings( ff.LIST_LIMIT + 3 )
+    run_once( tmp_path, found, store )
+    assert len( ( tmp_path / ff.TRIAGED_FILE ).read_text().splitlines() ) == ff.LIST_LIMIT + 3
+    assert run_once( tmp_path, found, store ) == { "filed": [], "already_filed": [], "queued_for_retry": [], "refused": [] }
+
+
+def test_one_finding_past_the_limit_lists_the_limit_and_counts_exactly_one_more():
+    found = [ { **f, "run_file": "r.json" } for f in many_findings( ff.LIST_LIMIT + 1 ) ]
+    row   = ff.triage_payload( found, { "owner": "cheech", "note": "n" }, DAY )
+    listed = [ l for l in row[ "body" ].splitlines() if l.startswith( "- f" ) ]
+    assert len( listed ) == 200 and ff.LIST_LIMIT == 200 and row[ "body" ].splitlines()[ -1 ] == "- and 1 more in r.json" and f"f{ff.LIST_LIMIT} (" not in row[ "body" ]
+    assert len( row[ "finding_keys" ] ) == 201

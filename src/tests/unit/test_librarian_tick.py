@@ -808,3 +808,9 @@ def test_main_runs_the_sibling_lupin_mobile_when_the_root_key_is_blank( cron, tm
                     enabled_fn=lambda: True,
                     make_mobile_librarian=lambda corpus, env, p, log: seen.append( corpus[ "root" ] ) or FakeLibrarian() )
     assert code == 0 and seen == [ str( tmp_path / "lupin-mobile" ) ] and "lupin_mobile" in json.loads( out.getvalue() )
+
+
+def test_status_text_takes_the_number_or_numbers_of_lines_that_count_as_a_full_install():
+    three = "\n".join( f"{n} {lt.CRON_TAG}" for n in range( 3 ) )
+    assert lt.status_text( three, lt.CRON_TAG, 3 ) == "installed: 3 lines" and lt.status_text( three ) == "partly installed: 3 lines"
+    assert lt.status_text( three, lt.CRON_TAG, ( 3, 4 ) ) == "installed: 3 lines" and lt.status_text( three, lt.CRON_TAG, ( 4, 5 ) ) == "partly installed: 3 lines"
