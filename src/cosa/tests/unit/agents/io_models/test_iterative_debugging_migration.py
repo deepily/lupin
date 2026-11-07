@@ -283,12 +283,7 @@ class TestIterativeDebuggingFactoryIntegration:
         </response>'''
         
         # Should raise validation error for invalid line number
-        # ROW beffcddd — this used to read:
-        #     try:
-        #         self.factory.parse_agent_response( ... )
-        #         assert False, "Should have raised validation error for invalid line number"
-        #     except Exception:
-        #         pass  # Expected validation error
+        # Row beffcddd — this used to be a try block that held an assert False, with an except Exception handler below it.
         # AssertionError IS an Exception, so when the parser did NOT raise, the
         # `assert False` was caught by the very handler below it and the test went
         # green. It could not fail for the reason it names. pytest.raises does what
