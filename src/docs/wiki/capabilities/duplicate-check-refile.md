@@ -17,7 +17,7 @@ pins:
 - A file written before findings were kept on every run has no findings list and is refused.
 - `refile( path, filer, now )` hands the findings and the file's folder to the filer, where the spool lives. The default filer is `live_filer` from the daily check.
 - After the filer returns, the file gains one `refilings` entry, `{ at, answer }`. Nothing is written before that, so a failed run leaves the file as it was.
-- A finding whose row exists is not filed again, and one already in the spool is not spooled twice. The store key holds no date.
+- A finding already on a triage row is not listed again, and one already in the spool is not spooled twice. The keys hold no date.
 - `FilingFailed` means the filer raised and the file is unchanged. `RecordNotWritten` means the rows were filed but the record was not. It carries the answer.
 - `main` takes a result file path and prints the answer as JSON.
 

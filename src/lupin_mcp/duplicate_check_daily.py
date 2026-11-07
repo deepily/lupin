@@ -604,7 +604,7 @@ def live_parts():
 
     Ensures:
         - returns the embedding client, the Claude Code backend, the staged structural source, verify_frozen over the live file, cli_version, the data root and the filer
-        - the filer files the findings' rows over HTTP; it builds its store client, reads the roster and the configured manager only when it is called
+        - the filer files the run's one triage row over HTTP; it builds its store client, reads the roster and the configured manager only when it is called
         - the auditor queues known-miss audits in the lookup tool's data folder, reading it only when it is called
         - the notifier sends the branch guard's alert, only when it is called
         - writes nothing and makes no call
@@ -617,12 +617,14 @@ def live_parts():
 
 def live_filer( findings, folder ):
     """
-    File the findings' rows in the live store.
+    File the run's one triage row in the live store.
 
     Requires:
         - the environment holds LUPIN_ROOT, the configuration manager's argument and the project's declared manager roster
     Ensures:
         - returns file_findings' answer, made with the HTTP store, the configured manager on duty and the roster
+    Raises:
+        - NoTriageOwner when there are findings and the roster is empty; run records that as the filer's error
     """
     from cosa.rest.voice_persona_helpers import pick_declared_managers_from_env
     from cosa.config.configuration_manager import ConfigurationManager

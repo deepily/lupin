@@ -4,9 +4,9 @@ File again the findings a saved result file of the daily check holds.
 A filing error leaves the day's findings in the result file and no rows in the store.
 The error may be a store that is down, a missing key file or a broken client.
 This command reads the file and files the findings.
-The store key of a finding is the definition id and its text, with no date.
-So a finding whose row exists is not filed again, and a finding already in the spool is not spooled twice.
-It asks the store before every create, as the daily check does.
+The run's one triage row lists the findings; its store key is made of the findings' keys, with no date.
+So a finding already on a triage row is not listed again, and a finding already in the spool is not spooled twice.
+It asks the store before the create, as the daily check does.
 Each run adds a record of its answer to the result file under "refilings".
 
 Exit 0 means every finding is filed or was already. Exit 1 means some are still queued or were refused.
