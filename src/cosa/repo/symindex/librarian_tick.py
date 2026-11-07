@@ -264,14 +264,14 @@ class LiveStore( TaskStoreAdapter ):
 
         Ensures:
             - returns ( True, status, { "tasks": rows } ) holding every row, following offsets while the store says more remain
-            - returns ( False, status, body ) for a failed page, and for a page the store marks truncated
+            - returns ( False, status, body ) for a failed page
+            - a page the store cut short for size ("truncated") is followed to the next offset, since has_more stays true and the cut page holds at least one row
         """
         rows, offset = [], 0
         while True:
             params = { "correlation_key": correlation_key, "limit": PAGE_LIMIT, "offset": offset, **extra }
             ok, status, body = self.client.query_tasks( self.settings, self.api_key, params )
             if not ok: return False, status, body
-            if body.get( "truncated" ): return False, status, { "error": "the store truncated the read" }
             page  = body.get( "tasks", [] )
             rows += page
             if not body.get( "has_more" ) or not page: return True, status, { "tasks": rows }
