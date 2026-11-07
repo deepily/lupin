@@ -635,7 +635,7 @@ def _default_ask( **kwargs ):
     # that never left the process.
     #
     # `notify_user_sync` RETURNS on every transport failure rather than raising
-    # (notify_user_sync.py:457-490), with `response_value=None`. The `or` below then
+    # (lupin_cli/notifications/notify_user_sync.py), with `response_value=None`. The `or` below then
     # substituted `response_default` — which was "yes" at the time — and `bool( None )`
     # left `default_used` False. So the gate's `try/except` belt around `ask_fn` could
     # never fire: nothing raised.

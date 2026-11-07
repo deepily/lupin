@@ -28,7 +28,6 @@ from cosa.memory.embedding_manager import EmbeddingManager
 from cosa.memory.embedding_provider import get_embedding_provider
 from cosa.tools.search_lupin_v010 import LupinSearch
 
-# from app       import emit_audio
 from cosa.utils import util     as du
 from cosa.agents.io_models.xml_models import CommandResponse
 from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
@@ -520,13 +519,9 @@ class TodoFifoQueue( FifoQueue ):
         # DEMO KLUDGE: if the question doesn't start with "refactor", then we're going to search for similar snapshots
         if not question.lower().strip().startswith( "refactor " ):
 
-            # salutations, question = self.parse_salutations( question )
-            # question_gist = self.get_gist( question )
 
             du.print_banner( f"push_job( '{( salutations + ' ' + question ).strip()}' )", prepend_nl=True )
             # Top-1 + confirm strategy: no threshold filtering — all results returned by manager
-            # threshold_question = self.config_mgr.get( "similarity_threshold_question",      default=98.0, return_type="float" )  # OBSOLETE
-            # threshold_gist     = self.config_mgr.get( "similarity_threshold_question_gist", default=95.0, return_type="float" )  # OBSOLETE
             threshold_confirmation = self.config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
             print( f"push_job(): Top-1 + confirm strategy (ask floor: {threshold_confirmation}%)" )
 
@@ -770,7 +765,6 @@ class TodoFifoQueue( FifoQueue ):
                 agent = ReceptionistAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
                 # Randomly grab hemming and hawing string and prepend it to a randomly chosen thinking string
                 msg = f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}".strip()
-                # ding_for_new_job = False
             elif command in JOB_ARG_CONTRACTS:
                 # Skip disambiguation if user explicitly selected this agentic mode from dropdown
                 if user_mode and user_mode in AGENTIC_MODE_MAP:

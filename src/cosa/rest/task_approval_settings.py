@@ -844,7 +844,7 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
     # sits three functions up — so a later reader will be tempted to "restore" the
     # check. Do not. The line that used to be here was
     #
-    #     if is_approver( actor ): return None
+    #     if is_approver( actor ): return None  # doc-lint: waive commented-out-code -- the removed line this comment warns against
     #
     # and it made a CALLER-DECLARED STRING the authorization. Measured 2026-09-07 as a
     # pure function, all three moves, identical: actor="maria e2908f90" with no account

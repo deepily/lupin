@@ -683,7 +683,7 @@ def quick_smoke_test():
         assert "max attempts" in reason.lower()
         print( "✓ is_eligible_for_auto_fix: max attempts enforced" )
 
-        # OOM = ineligible
+        # OOM: ineligible
         job = MockJob( "presentation", JobState.FAILED, "MemoryError: out of memory" )
         ok, reason = is_eligible_for_auto_fix( job, [ "presentation" ] )
         assert not ok
