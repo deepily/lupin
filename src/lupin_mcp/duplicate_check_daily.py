@@ -49,11 +49,10 @@ PREREQ_FROZEN     = "frozen_config"
 STAGE_JUDGING     = "judging"                                   # the stage named in a result file when the pool build, the embeddings or the judge failed
 UNREADABLE        = "unreadable"
 CRON_TAG          = "# duplicate-check-daily"
-CRON_SCHEDULE     = "7 12 * * *"      # 12:07, 30 minutes after the 11:37 shadow audit drain
-SECOND_SCHEDULE   = "7 18 * * *"      # 18:07, five hours before the host usually powers off
-BASELINE_SCHEDULE = "7 20 * * *"      # 20:07, after the evening daily run has had two hours
+CRON_SCHEDULE     = "0 10 * * *"      # 10:00 every day, weekends included; nothing runs after last call, when the server is turned off
+BASELINE_SCHEDULE = "7 11 * * *"      # 11:07, an hour after the daily run and 30 minutes before the 11:37 shadow audit drain; a morning slot, never after last call
 RISE_LIMIT        = 3                 # daily runs in a row with a larger carried count before Rick is told
-INSTALLED_LINES   = ( 3, 4 )          # two daily slots and the reboot line, with the baseline line when it was asked for
+INSTALLED_LINES   = ( 2, 3 )          # the daily slot and the reboot line, with the baseline line when it was asked for
 BASELINE          = "baseline.json"
 BASELINE_DONE     = "complete"
 BASELINE_OPEN     = "in_progress"
@@ -567,8 +566,9 @@ def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRAN
         - carried maps environment names to values, copied into every line and shell-quoted
         - branch is the branch the check judges
     Ensures:
-        - returns [ first daily line, second daily line, reboot line ], plus a baseline line before the reboot line when baseline is set; each ends with CRON_TAG
-        - the daily lines run at CRON_SCHEDULE and SECOND_SCHEDULE with trigger cron, the baseline line at BASELINE_SCHEDULE with --baseline, the reboot line BOOT_DELAY seconds after a boot with trigger reboot
+        - returns [ daily line, reboot line ], plus a baseline line before the reboot line when baseline is set; each ends with CRON_TAG
+        - the daily line runs at CRON_SCHEDULE (10:00, every day) with trigger cron, the baseline line at BASELINE_SCHEDULE (11:07) with --baseline, the reboot line BOOT_DELAY seconds after a boot with trigger reboot; no line runs after last call
+        - the reboot line is the catch-up: it reads the window from the last successful run, so a day the host was off is covered at the next boot
         - every line runs from root with LUPIN_ROOT and PYTHONPATH set, appends to log_path, and carries the limit (--cap, or --ceiling when given) and the binary
         - a branch other than the default is added as --branch, shell-quoted, after the trigger; the default adds nothing
     """
@@ -580,7 +580,7 @@ def cron_lines( root, python, log_path, cap, cli_path, carried=None, branch=BRAN
         return ( f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {extra}{python} -m lupin_mcp.duplicate_check_daily "
                  f"{limit_flag( cap, ceiling )} --claude-cli-path {cli_path} --trigger {trigger}{more}{named} >> {log_path} 2>&1 {CRON_TAG}" )
 
-    lines = [ lt.cron_lines_for( run( "cron" ), schedule, BOOT_DELAY )[ 0 ] for schedule in ( CRON_SCHEDULE, SECOND_SCHEDULE ) ]
+    lines = [ lt.cron_lines_for( run( "cron" ), CRON_SCHEDULE, BOOT_DELAY )[ 0 ] ]
     if baseline: lines.append( lt.cron_lines_for( run( "cron", " --baseline" ), BASELINE_SCHEDULE, BOOT_DELAY )[ 0 ] )
     return [ *lines, lt.cron_lines_for( run( "reboot" ), CRON_SCHEDULE, BOOT_DELAY )[ 1 ] ]
 
