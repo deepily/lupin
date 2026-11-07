@@ -266,7 +266,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
             #    reload. Before this, the real path returned a bare "Pipeline complete!"
             #    string and stored NO abstract, so _transition_to_done emitted
             #    abstract=None → blank done card (bug 2da4095a). Mirrors
-            #    presentation_generator/job.py:304-335. ──
+            #    PresentationGeneratorJob._execute in presentation_generator/job.py. ──
             import urllib.parse
             io_base = cu.get_project_root() + "/io/"
 

@@ -285,8 +285,8 @@ class PodcastGeneratorJob( AgenticJobBase ):
             script_by_lang = dict( state.get( "script_paths_by_language" ) or {} )
 
             # Build relative paths under io/ for URL generation + UI job-card metadata.
-            # Mirrors presentation_generator/job.py:301-341 — match the receiving
-            # logic in cosa/rest/routers/io_files.py:88-98 (handles abs / "io/" / "/" prefixes).
+            # Mirrors PresentationGeneratorJob._execute in presentation_generator/job.py — match the receiving
+            # logic in get_io_file in cosa/rest/routers/io_files.py (handles abs / "io/" / "/" prefixes).
             from cosa.agents.podcast_generator.config import LANGUAGE_NAMES
             from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
             io_base = cu.get_project_root() + "/io/"
@@ -318,7 +318,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             script_rel = _to_rel( self.script_path )
 
             # Store relative paths in artifacts so the UI job-card builds correct URLs
-            # (matches presentation_generator convention at job.py:336-341). Primary
+            # (matches presentation_generator convention in PresentationGeneratorJob._execute). Primary
             # (English) stays under the historical keys; the full per-language maps are
             # added so any downstream consumer can reach every artifact.
             self.artifacts[ "audio_path" ]  = audio_rel
@@ -400,7 +400,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
             completion_abstract = "\n".join( lines )
 
             # Store the abstract in artifacts so it rides the running→done
-            # job_state_transition (running_fifo_queue.py:567 reads
+            # job_state_transition (running_fifo_queue.py reads
             # artifacts.get("abstract")). Without this the promoted done card
             # renders with no abstract → "loading…" + no Play Here until a page
             # reload re-fetches from the persisted notification (bug 9b481811).
@@ -493,7 +493,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
         self.artifacts[ "script_path" ] = self.script_path
         self.artifacts[ "podcast_id" ]  = f"dry-run-{self.id_hash}"
 
-        # Clickable audio links — same shape as the real path (job.py:346-348):
+        # Clickable audio links — same shape as the real path (the audio_triplet call in _execute):
         #   Play Here → &embed=1 floating overlay (auto-starts) · Listen → standalone
         #   tab · Download → raw mp3 attachment.
         from cosa.agents.podcast_generator.play_links import audio_triplet

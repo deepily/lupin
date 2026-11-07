@@ -197,7 +197,7 @@ class TFEOrchestrator:
             # passed as a kwarg → TypeError caught below → hundreds of
             # "[TFE notify error]" log lines per TFE run with no actual
             # progress notifications sent. See plan:
-            # src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md
+            # the TFE forensics capture plan (removed from the tree; see 8420e8b0a^)
             await cosa_interface.notify_progress(
                 message,
                 priority=priority,

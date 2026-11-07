@@ -334,7 +334,7 @@ class PresentationAPIClient( BoundedCCClientBase ):
         sdk_cost_usd  = 0.0
         # UNKNOWN until a ResultMessage reports it. Do NOT seed "end_turn": that
         # coerces "no completion signal arrived" into "completed cleanly", and
-        # orchestrator._elaborate_async (is_truncated = stop_reason != "end_turn")
+        # orchestrator._elaborate_async (it sets is_truncated when stop_reason is not "end_turn")
         # would then skip the chunked fallback exactly when it is needed (bug
         # 98d937c2, fail-open). None reads as truncated downstream — the safe way.
         stop_reason   = None

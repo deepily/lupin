@@ -56,7 +56,7 @@ from cosa.agents.utils.voice_io import read_gate_answer
 # it landed in (measured n=143: min 6.59s, median 6.91s, max 18.76s).
 #
 # 🔴 WHY THIS MODULE IS EXPOSED — an earlier pass excluded it, twice. Reached
-# via `agentic_job_factory.py:135` -> `SweTeamJob` it runs in the CJ Flow
+# via `create_agentic_job` in agentic_job_factory.py -> `SweTeamJob` it runs in the CJ Flow
 # agentic pool INSIDE `:7999`, where a reload tears the caller down alongside
 # the callee and a bigger budget buys nothing. That exclusion was verified by
 # asking which OTHER package imports this module — the one question that cannot
@@ -66,14 +66,14 @@ from cosa.agents.utils.voice_io import read_gate_answer
 # call site; any package with a `__main__.py` is dual-mode by construction and
 # must be classified per entry point.
 #
-# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+# Full derivation: the dev-server-reload-availability doc, section 9(a), removed from the tree; see 8420e8b0a^.
 #
 # 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
 # inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
-# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+# (Cited by symbol, not by line: this used to cite a line range in notify_user_async.py and a
 #  seven-line fix above it silently repointed every copy at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.

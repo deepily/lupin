@@ -270,7 +270,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             #    complete!" string and stored NO abstract, so _transition_to_done
             #    emitted abstract=None → blank done card (bug 2da4095a; sibling of
             #    9b481811, but a missing BUILD, not just a missing store). Mirrors
-            #    podcast_generator/job.py:358-406. ──
+            #    PodcastGeneratorJob._execute in podcast_generator/job.py. ──
             import urllib.parse
             from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
             io_base = cu.get_project_root() + "/io/"
