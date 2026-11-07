@@ -190,7 +190,7 @@ def test_get_embedding_store_failure_returns_none():
 
 
 # ---- prod bug #11 FIXED (Tiberius) — _get_llm_client wrong-import ------------------------ #
-# prediction_engine.py:990 imported LlmClientFactory from cosa.agents.llm_client (no such symbol)
+# _get_llm_client in prediction_engine.py imported LlmClientFactory from cosa.agents.llm_client (no such symbol)
 # instead of cosa.agents.llm_client_factory → ImportError swallowed by the bare except →
 # _get_llm_client() always returned None → the LLM-synthesis tier of open-ended prediction was
 # dead, silently falling back to CBR retrieval. Import corrected; 991-992 now reachable + covered
@@ -331,7 +331,7 @@ def test_yes_no_majority_vote_no_qualifier():
 
 
 # =========================================================================== #
-# _extract_valid_options ( staticmethod )
+# _extract_valid_options, a staticmethod
 # =========================================================================== #
 def test_extract_valid_options_none():
     assert PredictionEngine._extract_valid_options( None ) is None

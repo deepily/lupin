@@ -143,7 +143,7 @@ def test_mc_single_partial_match_is_false():
 
 
 # =========================================================================== #
-# compare_multiple_choice_multi  ( Jaccard )
+# compare_multiple_choice_multi, Jaccard overlap
 # =========================================================================== #
 def test_mc_multi_partial_overlap_below_threshold():
     match, detail = compare_multiple_choice_multi(
@@ -367,7 +367,7 @@ def test_open_ended_batch_predicted_missing_header_defaults_empty_string():
 
 
 # =========================================================================== #
-# get_comparator  ( dispatch )
+# get_comparator, dispatch by answer type
 # =========================================================================== #
 def test_get_comparator_yes_no():
     assert get_comparator( "yes_no" ) is compare_yes_no
