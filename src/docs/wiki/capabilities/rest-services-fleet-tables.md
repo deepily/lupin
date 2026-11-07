@@ -4,7 +4,7 @@ pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.postgres_models.Notification@74eecfa097
   - cosa.rest.postgres_models.ProxyDecision@08b7b65095
-  - cosa.rest.postgres_models.TrustState@0c29757d8e
+  - cosa.rest.postgres_models.TrustState@99b54483eb
   - cosa.rest.postgres_models.PredictionLog@3638bc1147
   - cosa.rest.postgres_models.JobHistory@9040d3c885
   - cosa.rest.postgres_models.ServerLifecycle@dc6a76b380
@@ -21,7 +21,7 @@ The models in `cosa.rest.postgres_models` behind notifications, the decision pro
 ## What it does
 - `Notification` is sender-aware: `sender_id`, `recipient_id` (a user UUID), `message`, and a `state` that defaults to `created`. Deleting the recipient cascades.
 - `ProxyDecision` logs every decision the proxy classified and acted on or shadowed; `ratification_state` defaults to `not_required` and extra data goes in JSONB.
-- `TrustState` holds the per-user, per-domain, per-category trust level and statistics, with the circuit breaker stored as JSONB.
+- `TrustState` holds the per-user, per-domain, per-category trust level and statistics, with the circuit breaker stored as JSONB. `decision_history` holds per-day approved and rejected counts as JSONB. `blr_state` holds the BLR trust model's saved state as JSONB. Both are NULL on rows written before they existed. `blr_state` also stays NULL unless the BLR model wrote it.
 - `PredictionLog` pairs one prediction with the human's later answer. `accuracy_match` stays null until the outcome is recorded.
 - `JobHistory` is the CJ Flow job record. Its primary key is the scoped `id_hash` string, not a UUID, and `user_id` is a string with no foreign key.
 - `ServerLifecycle` is one row, key `singleton`. The heartbeat stamps `last_available_at`; startup reads it to catch up scheduled jobs inside the downtime.

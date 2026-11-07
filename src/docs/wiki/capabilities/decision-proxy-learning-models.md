@@ -5,7 +5,8 @@ pins:
   - cosa.agents.decision_proxy.bayesian_trust.BayesianLogisticRegression@bb0b7b0250
   - cosa.agents.decision_proxy.conformal_wrapper.ConformalDecisionWrapper@fb9a2a2800
   - cosa.agents.decision_proxy.proxy_decision_embeddings.ProxyDecisionEmbeddings@5e3df3a239
-  - cosa.agents.decision_proxy.cbr_decision_store.CBRDecisionStore@0f9d22a77f
+  - cosa.agents.decision_proxy.cbr_decision_store.CBRDecisionStore@7672dd8fa0
+  - cosa.agents.decision_proxy.cbr_decision_store.is_blank_case@004584ffe1
   - cosa.agents.decision_proxy.cbr_decision_store.CBRPrediction@765fb1b2e7
   - cosa.agents.decision_proxy.prompts.icrl_decision.build_icrl_prompt@8870265226
   - cosa.agents.decision_proxy.prompts.icrl_decision.format_case_history@bad9a195a5
@@ -26,8 +27,8 @@ These are the statistical parts the trust system draws on. They are a Bayesian r
 ## Case-based voting
 - `ProxyDecisionEmbeddings` stores decision records with a 768-dimension question embedding, through `PredictionDecisionRepository`. Methods are `add_decision`, `find_similar`, `exists` and `update_ratification_state`.
 - `find_similar` returns similarity percent and record pairs, best first, above a threshold that defaults to 0.75. A failure gives an empty list.
-- `CBRDecisionStore.predict` fetches the top `top_k` cases for the category with no threshold, then takes the majority `decision_value`.
-- `CBRPrediction.confidence` is the best similarity (as a fraction) times the share of cases that agree. With no cases the verdict is `None` and the confidence 0.0.
+- `CBRDecisionStore.predict` fetches the top `top_k` cases for the category with no threshold, then takes the majority `decision_value`. Blank cases cast no vote. `is_blank_case` is true for a shadow row and for a row whose `decision_value` is missing or blank, which is how a deferred row is stored.
+- `CBRPrediction.confidence` is the best similarity (as a fraction) times the share of cases that agree. With no voting cases the verdict is `None` and the confidence 0.0.
 - `build_icrl_prompt` formats those cases into a prompt that asks for one word, `approved` or `requires_review`. `format_case_history` numbers the cases and writes `unknown` for a missing field.
 
 ## Don't

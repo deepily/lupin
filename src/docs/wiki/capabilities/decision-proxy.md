@@ -3,7 +3,7 @@ capability: decision-proxy
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.agents.decision_proxy.responder.DecisionResponder@a28d093366
-  - cosa.agents.decision_proxy.trust_tracker.TrustTracker@87b090a185
+  - cosa.agents.decision_proxy.trust_tracker.TrustTracker@e6ea84b97f
   - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@9a28bb3dc6
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker@ed1b3c7973
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker.check@37ecd22e31
@@ -29,7 +29,7 @@ The decision proxy answers questions that ask for a response, on the user's beha
 
 ## Trust
 - `TrustTracker` keeps one `CategoryTrust` per category. Its level runs from 1 to 5 and is capped per category.
-- The default model sums only the successful decisions, each weighted down as it ages, against thresholds for levels 2 to 5. A rejection adds nothing. `beta` and `blr` models are the alternatives. A circuit-breaker trip is recorded: the level stays capped at the demoted level until new successes close the gap to the next threshold. A stored trip is restored with the counters, so a demotion survives the next job.
+- The default model sums only the successful decisions, each weighted down as it ages, against thresholds for levels 2 to 5. A rejection adds nothing. `beta` and `blr` models are the alternatives, chosen by `swe team trust proxy trust model` (see [[decision-proxy-startup]]). A circuit-breaker trip is recorded: the level stays capped at the demoted level until new successes close the gap to the next threshold. A stored trip is restored with the counters, so a demotion survives the next job. `restore_category` restores a category's counters, its per-day decision history and, under the `blr` model only, its saved BLR state. `blr_state_for` returns that state for saving, and `None` under `count` or `beta`. `record_decision_with_features` feeds the BLR model a decision with its question's features.
 - The SWE orchestrator feeds the tracker: a success when the proxy acts alone, otherwise whether the proxy agreed with the user's answer. The ratify route updates stored counters, not the tracker.
 
 ## Circuit breaker

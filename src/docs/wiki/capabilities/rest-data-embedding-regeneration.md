@@ -10,6 +10,8 @@ pins:
   - cosa.rest.db.embedding_regeneration.classify_norm@9a33c333d3
   - cosa.rest.db.embedding_regeneration.l2_norm@37bc13134d
   - cosa.rest.db.embedding_regeneration.summarize_verification@dbdb3b568e
+  - cosa.rest.db.embedding_regeneration.capture_embeddings_enabled@1606fa7474
+  - cosa.rest.db.embedding_regeneration.active_specs@03dfe65cdf
 ---
 # Embedding regeneration: scope and verification
 
@@ -24,6 +26,7 @@ Run control is in [[rest-data-embedding-regen-run-control]] and batching in [[re
 - `shadow_column_ddl` returns one `ADD COLUMN IF NOT EXISTS ... vector(768)` statement per spec. It is safe to apply twice.
 - `l2_norm` is the Euclidean norm. `classify_norm` calls a norm `normalized` at 1.01 or less, `current` from 5.0 to 60.0 and `suspect` otherwise.
 - `summarize_verification` returns `ok` only when every in-scope row is filled and no vector has a bad norm or dimension.
+- `capture_embeddings_enabled` reads the INI key `io table capture embeddings`, true when the key is absent. `active_specs` drops the two `input_and_output` specs when that key is false, because those rows no longer carry vectors; with it true, every spec stays.
 
 ## Don't
 - Don't pick rows by norm. The band only checks fresh vectors. `validate_fresh_vector` applies it, and `fill` prints `REJECTED` for a vector outside it, skips that row and carries on. `verify` then blocks `swap`, because the row is unfilled. An unreachable embedding service aborts the run.
