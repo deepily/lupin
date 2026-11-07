@@ -54,7 +54,7 @@ from cosa.rest.task_store_rules import (
 # is the choke point all three readers funnel through (task_query / the Stop-hook
 # COUNT(*) seam / the :8001 arbiter), so applying the clause HERE is what makes
 # "three readers, one definition" true rather than aspirational. NEVER re-derive
-# park-expiry locally — import it. Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
+# park-expiry locally — import it. Design: the design note "2026.07.19-parked-status-board-hygiene" (deleted in commit b113a3a7d)
 from cosa.rest.task_store_owed import (
     NOT_APPROVED_STATUS,
     PARK_STATUS,

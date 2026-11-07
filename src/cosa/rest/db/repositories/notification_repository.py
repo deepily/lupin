@@ -453,7 +453,7 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         # Update appropriate timestamp based on state.
         # AWARE, not utcnow(): delivered_at / responded_at are TIMESTAMPTZ
-        # (postgres_models.py:600/604), and Postgres reads a NAIVE value in the
+        # (Notification in postgres_models.py), and Postgres reads a naive value in the
         # session's TimeZone GUC — so under a non-UTC session the stored instant
         # is shifted by the offset. Measured at exactly 14400s under
         # America/New_York before this changed (row 3b4002fe).

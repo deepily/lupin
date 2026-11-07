@@ -66,7 +66,7 @@ from .word_list import configure_root
 BLOCKING_PACKAGES = ()
 REFUSAL_EXIT      = 3
 # The locations --blocking leaves in warn mode. WARN_ONLY_PATHS holds exact repo-relative paths.
-# A file of the same name in any other folder, src/cosa/history.md among them, is held like every other page.
+# A file of the same name in any other folder, a history.md under src/cosa among them, is held like every other page.
 # WARN_ONLY_PREFIXES holds folders, each ending in a slash and matched from the repo root.
 # So src/cosa/history/ is not among them, and neither is a history/ folder below the root.
 # Rick's ruling on the card "María: four rulings", task-store row id=486cc499: history/ and todo-history/ stay warn-only as a

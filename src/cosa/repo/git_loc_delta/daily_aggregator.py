@@ -56,7 +56,7 @@ class DailyAggregator:
         config = loader.load()
         self.classifier = FileTypeClassifier( config, debug=False )
 
-        # by_type_counts[(date, file_type)] = {added, deleted}
+        # by_type_counts maps (date, file_type) to {added, deleted}
         self._by_type_counts: Dict[Tuple[str, str], Dict[str, int]] = {}
         # by_type_files[(date, file_type)] = set of unique paths
         self._by_type_files: Dict[Tuple[str, str], Set[str]] = {}
