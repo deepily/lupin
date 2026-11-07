@@ -378,8 +378,8 @@ MODEL_PINS = {
 #
 # AND THE TEST THAT EXISTED TO CATCH THIS SUBTRACTED THE ANSWER BEFORE ASKING THE QUESTION:
 #
-#     emitted = set( compose_vertex_env( env=CLEAN_ENV ) ) - set( MODEL_PINS )   # <-- !!
-#     assert emitted == set( VERTEX_SESSION_KEYS )
+#     emitted = set( compose_vertex_env( env=CLEAN_ENV ) ) - set( MODEL_PINS )   # <-- !!  # doc-lint: waive commented-out-code -- quotes the weakened test verbatim as the documented trap
+#     assert emitted == set( VERTEX_SESSION_KEYS )  # doc-lint: waive commented-out-code -- quotes the weakened test verbatim as the documented trap
 #
 # Its docstring said "a key we EMIT but never SCRUB is a key a tainted server can forge" —
 # and then it removed, by name, the only keys for which that was true. A TEST WEAKENED UNTIL

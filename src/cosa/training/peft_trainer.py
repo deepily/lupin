@@ -302,11 +302,6 @@ class PeftTrainer:
                 f"Unsupported model_name: '{self.model_name}'. Must be one of: {', '.join( MODEL_CONFIG_MAP.keys() )}"
                 )
         
-        # Claude snuck another check in on me, don't know why it thought that I wanted backward compatibility
-        # # For backward compatibility, also check supported_model_names
-        # if hasattr(self, 'supported_model_names') and self.model_name not in self.supported_model_names:
-        #     print(f"Warning: Model '{self.model_name}' not in self.supported_model_names. Updating supported_model_names.")
-        #     self.supported_model_names = list(MODEL_CONFIG_MAP.keys())
     
     # Maps model base names to their environment variable names in ~/.lora_env
     LORA_ENV_VAR_MAP = {
@@ -474,7 +469,6 @@ class PeftTrainer:
             if debug and verbose:
                 print( f"  Word count: {len( prompt.split( ' ' ) )}" )
                 print( f"Tokens count: {tokens_count}" )
-                # print( tokens_metadata[ "input_ids" ] )
             else:
                 counter += 1
                 if counter % 100 == 0: print( ".", end="" )
@@ -526,8 +520,6 @@ class PeftTrainer:
         
         self._load_model_and_tokenizer( device_map=device_map, mode="training" )
         
-        # I used this when loading a quantized model. Since I'm not quantizing now, it's commented out
-        # self.model         = prepare_model_for_kbit_training( self.model, gradientoow_checkpointing_kwargs={'use_reentrant': True} )
         peft_config = self._get_peft_config()
         training_arguments = self._get_training_args( output_dir=output_dir, batch_size=batch_size,
                                                       gradient_accumulation_steps=gradient_accumulation_steps,
@@ -541,17 +533,13 @@ class PeftTrainer:
         print( test_train_data[ "test" ] )
         
         self.trainer = SFTTrainer(
-            # self.trainer = MyKludgySFTTrainer(
             
-            # workaround for buggy safe tensors behavior when a model is loaded across multiple GPUs
-            # save_safetensors=False,
             model=self.model,
             train_dataset=test_train_data[ "train" ],
             eval_dataset=test_train_data[ "test" ],
             peft_config=peft_config,
             processing_class=self.tokenizer,
             args=training_arguments,
-            # packing=False,
             formatting_func=self._format_prompt,
         )
         
@@ -712,9 +700,6 @@ class PeftTrainer:
         
         if model is None:
             raise ValueError( "Model must be provided" )
-        # # this is dangerous?
-        # else:
-        #     self.model = model
         
         du.print_banner( f"{banner_prefix} Testing model [{model}]".strip(), prepend_nl=True )
         
@@ -967,7 +952,6 @@ class PeftTrainer:
         attn_implementation = "flash_attention_2"
         cache_dir = os.getenv( "HF_HOME" ) + "/hub"
         original_cwd = os.getcwd()
-        # quantization_config = AutoRoundConfig( backend=backend )
         
         # try/finally: the cwd is PROCESS-global. Restoring it only on the happy path
         # leaks the directory change into everything that runs after a load failure.
@@ -1033,7 +1017,6 @@ class PeftTrainer:
             if original_cwd != os.getcwd():
                 print( f"Switching back to original working directory: {original_cwd}" )
                 os.chdir( original_cwd )
-            # print( f"New working directory: {os.getcwd()}" )
     
     def _get_peft_config( self ) -> LoraConfig:
         """
@@ -1084,7 +1067,6 @@ class PeftTrainer:
         """
         return SFTConfig(
             # set logging dir
-            # output_dir=f"{output_dir}/peft-output-{du.get_current_date()}-at-{du.get_current_time( format='%H-%M', include_timezone=False )}",
             output_dir=f"{output_dir}/training-{du.get_current_date()}-at-{du.get_current_time( format='%H-%M', include_timezone=False )}",
             eval_strategy="steps",
             do_eval=True,
@@ -1105,8 +1087,6 @@ class PeftTrainer:
             num_train_epochs=1,
             warmup_ratio=0.1,
             lr_scheduler_type="linear",
-            # what is this doing here?
-            # dataset_text_field="text",
             max_seq_length=self._get_max_seq_length()
         )
     
@@ -2056,7 +2036,6 @@ class PeftTrainer:
                     print( f"  Still waiting for vLLM server... ({int( elapsed )}s of max {timeout}s)" )
         
         # If we reach here, the server did not start within the timeout
-        # if self.debug or self.verbose:
         print( "vLLM server startup timed out. Last log entries:" )
         for entry in server_log[ -10: ]:  # Show last 10 log entries
             print( f"  {entry}" )

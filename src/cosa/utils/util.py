@@ -304,9 +304,7 @@ def get_name_value_pairs(arg_list: list[str], debug: bool = False, verbose: bool
     else:
         max_len = 1  # Default width when no pairs exist
 
-    # iterate keys and print values w/ this format:
-    #       [foo] = [bar]
-    # [flibberty] = [jibbet]
+    # iterate keys and print values with the names right-aligned on the equals sign
     names = list(name_value_pairs.keys())
     names.sort()
 
@@ -497,8 +495,6 @@ def get_file_as_dictionary(path: str, lower_case: bool = False, omit_comments: b
             p0 = pipe_regex.sub("", pair[0].strip())
             p1 = pipe_regex.sub("", pair[1].strip())
             lines_as_dict[p0] = p1
-        # else:
-        #     if debug: print("ERROR: [{}]".format(pair[0]))
 
     return lines_as_dict
 
@@ -939,20 +935,6 @@ def generate_domain_names(count: int = 10, remove_dots: bool = False, debug: boo
     return domain_names
 
 
-# def get_search_terms( requested_length ):
-#
-#     # Load search terms file
-#     search_terms = get_file_as_list( get_project_root() + "/src/ephemera/prompts/data/search-terms.txt", lower_case=False, clean=True, randomize=True )
-#
-#     # If we don't have enough search terms, append copies of the search term list until we do
-#     while requested_length > len( search_terms ):
-#         search_terms += search_terms
-#
-#     # Truncate the search terms list to equal the requested len
-#     search_terms = search_terms[ :requested_length ]
-#
-#     return search_terms
-
 def is_jsonl(string: str) -> bool:
     """
     Check if a string is a valid JSONL (JSON Lines) format.
@@ -1203,9 +1185,7 @@ def get_name_value_pairs_v2(arg_list: list[str], decode_spaces: bool = True) -> 
     if name_value_pairs:
         max_len = max([len(key) for key in name_value_pairs.keys()]) + 1
 
-        # iterate keys and print values w/ this format:
-        #       [foo] = [bar]
-        # [flibberty] = [jibbet]
+        # iterate keys and print values with the names right-aligned on the equals sign
         names = list(name_value_pairs.keys())
         names.sort()
 

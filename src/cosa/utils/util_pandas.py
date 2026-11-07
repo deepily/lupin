@@ -27,9 +27,6 @@ def cast_to_datetime( df: pd.DataFrame, debug: bool=False ) -> pd.DataFrame:
             if pd.api.types.is_string_dtype( df[ column ] ):
                 df[ column ] = pd.to_datetime( df[ column ] )
     
-    # if debug:
-    #     du.print_banner( "df.dtypes:", prepend_nl=True, end="\n" )
-    #     print( df.dtypes )
         
     return df
 
@@ -154,14 +151,10 @@ class DeepilyDataFrame( pd.DataFrame ):
     
 if __name__ == '__main__':
     
-    # df = DeepilyDataFrame.read_csv( du.get_project_root() + "/src/conf/long-term-memory/events.csv" )
     df = read_csv( du.get_project_root() + "/src/conf/long-term-memory/todo.csv" )
     
-    # print( type( df ))
     print( df.head() )
     
-    # df = df.drop( index=[ 0, 1 ] )
-    # print( df.head() )
     
     df.save()
     
