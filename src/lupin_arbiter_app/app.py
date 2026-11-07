@@ -516,8 +516,7 @@ def assemble_app(
     # start() is a no-op and sweep_once does zero IO until the flag flips, so wiring
     # it in is behavior-neutral. Its session-lister / transcript-reader / pane-oracle
     # default to the real IO boundaries inside the watchdog; only the advisory sink
-    # is injected here to route onto the arbiter's outreach rail. Design:
-    # src/rnd/v0.1.9/2026.07.03-notify-turn-hold-fix-design.md §3 (lever ii).
+    # is injected here to route onto the arbiter's outreach rail.
     turn_age_watchdog_loop = TurnAgeWatchdog(
         cfg,
         advisory_fn = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),

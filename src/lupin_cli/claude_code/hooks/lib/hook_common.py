@@ -92,7 +92,7 @@ TMUX_INJECTION_DELAY = 0.25
 #
 # 🔴 WHY 6 AND NOT 30 — THIS PATH RETRIES, AND THE SCHEDULE IS DERIVED FROM
 # THIS VERY NUMBER. `calculate_retry_intervals( request.timeout )`
-# (`notify_user_async.py:47`) builds the retry ladder FROM the timeout, so
+# (in `notify_user_async.py`) builds the retry ladder from the timeout, so
 # raising it inflates BOTH the per-attempt budget AND the attempt count. The
 # cohort's 30 does not cost 30s here; it costs **267s**:
 #
@@ -121,9 +121,9 @@ TMUX_INJECTION_DELAY = 0.25
 # same quantity and should not be made to match.
 #
 # Ceiling note: `AsyncNotificationRequest.timeout` is `Field( ge=1, le=30 )`
-# (`notification_models.py:620-625`), so 6 sits well inside the bound.
+# (in `notification_models.py`), so 6 sits well inside the bound.
 #
-# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+# The derivation document is no longer in the tree; it is in git history.
 NOTIFY_TRANSPORT_TIMEOUT_SECONDS = 6
 
 # Fails loudly at import if THIS module's budget is pushed past the Pydantic bound
@@ -1527,10 +1527,8 @@ def build_permission_decision( behavior, message=None, interrupt=False ):
 
 # ── Speakerphone Wrap (per-turn rider) ────────────────────────────────────────
 #
-# Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md (Rick-approved
-# 2026-06-27; predecessors: .../2026.05.11-tts-interaction-mode-solo-chorus/
-# 14-phase5-hook-rider-design.md + .../2026.04.30-conv-mode-three-layer-
-# enforcement/01-design.md).
+# Slim-rider design, Rick-approved (its design documents are no longer
+# in the tree; they are in git history).
 #
 # The per-turn rider is now SLIM and UNCONDITIONAL: it carries only what is
 # true-now-and-changed (the live input modality + the one catastrophic rule,
@@ -1691,7 +1689,7 @@ def _routing_reminder():
 # ── A HOOK'S STDOUT IS ITS RETURN CHANNEL, NOT A LOG (row 298af249) ──────────
 #
 # `ConfigurationManager.__init__` prints a banner and a section table to stdout
-# (configuration_manager.py:164). In a terminal that is useful. Inside a hook it
+# (in configuration_manager.py). In a terminal that is useful. Inside a hook it
 # is prepended to the only channel the harness reads an answer from, and the
 # harness truncates a large payload to a ~2 KB preview, writing the rest to a
 # file nothing reads.

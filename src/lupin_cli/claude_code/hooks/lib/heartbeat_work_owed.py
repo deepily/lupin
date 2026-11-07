@@ -105,7 +105,7 @@ POKE_PROMPT_SENTINEL = "Do not stop yet"
 # arbiter (_format_poke + _format_manager_stale_poke) DERIVES both poke prefixes from
 # this constant so the emitter and this matcher cannot drift. Without the match, a
 # wrapped arbiter poke was mistaken for genuine user re-engagement and RESET the
-# Stop-hook poke-cap (user_prompt_submit.py:86), so each arbiter escalation reopened a
+# Stop-hook poke-cap (the `reset_poke_count` call in user_prompt_submit.py), so each arbiter escalation reopened a
 # fresh poke budget → the two detectors could reset each other → token burn while the
 # user is away.
 ARBITER_POKE_SENTINEL = "Heartbeat arbiter ("

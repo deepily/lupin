@@ -112,16 +112,7 @@ def get_agent_synonyms():
 # Create main method
 if __name__ == "__main__":
     
-    # remove_zero_length_strings( path=du.get_project_root() + "/src/ephemera/prompts/data/synthetic-data-agent-routing-todo-lists.txt" )
-    # remove_zero_length_strings( path=du.get_project_root() + "/src/ephemera/prompts/data/placeholders-cities-and-countries.txt")
     remove_zero_length_strings( path=du.get_project_root() + "/src/ephemera/prompts/data/placeholders-calendaring-places.txt" )
     
-    # remove_line_numbers( path = du.get_project_root() + "/src/prompts/data/synthetic-data-search-in-current-tab.txt", write_back=True )
-    # remove_line_numbers( path = du.get_project_root() + "/src/prompts/data/synthetic-data-search-google-in-current-tab.txt", write_back=True )
-    # remove_line_numbers( path = du.get_project_root() + "/src/prompts/data/synthetic-data-search-google-scholar-in-current-tab.txt", write_back=True )
-    # remove_line_numbers( path = du.get_project_root() + "/src/prompts/data/synthetic-data-search-in-new-tab.txt", write_back=True )
-    # remove_line_numbers( path = du.get_project_root() + "/src/prompts/data/synthetic-data-search-google-in-new-tab.txt", write_back=True )
-    # remove_line_numbers( path = du.get_project_root() + "/src/prompts/data/synthetic-data-search-google-scholar-in-new-tab.txt", write_back=True )
-    # remove_line_numbers( path = du.get_project_root() + "/src/prompts/data/synthetic-data-none-of-the-above.txt", write_back=True )
 
     # pass

@@ -53,14 +53,14 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 # instead of getting a fast ConnectionRefused. The prior 2s failed every reload
 # it landed in (measured min 6.59s, n=143).
 #
-# Full derivation: src/rnd/v0.1.9/2026.07.19-dev-server-reload-availability.md §9(a).
+# The derivation document is no longer in the tree; it is in git history.
 #
 # 🔴 DRIFT CONTROL — TWO SEARCHES, AND IT TOOK BOTH.
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
 # inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
-# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+# (Cited by symbol, not by line: this used to cite a line range in notify_user_async.py and a
 #  seven-line fix above it silently repointed every copy at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
