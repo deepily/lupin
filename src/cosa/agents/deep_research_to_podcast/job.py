@@ -26,7 +26,6 @@ from typing import Optional, List
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.deep_research.seed_context import normalize_source_document
-from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from cosa.rest.job_state import JobState
 
 
@@ -62,6 +61,16 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
 
     JOB_TYPE   = "research_to_podcast"
     JOB_PREFIX = "rp"
+
+    CHAIN_TITLE          = "Research→Podcast"
+    CHAIN_NOUN           = "podcast"
+    DRY_RUN_ICON         = "🧪 "
+    DRY_RUN_SECOND_STAGE = (
+        "[PODCAST] skipping content analysis",
+        "[PODCAST] skipping script generation",
+        "[PODCAST] skipping TTS generation (10 segments)",
+        "[PODCAST] skipping audio stitching",
+    )
 
     def __init__(
         self,
@@ -188,255 +197,158 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
 
     async def _execute( self ) -> str:
         """
-        Internal async pipeline execution.
-
-        Uses the DeepResearchToPodcastAgent to run the full workflow.
-        When dry_run=True, sends breadcrumb notifications and returns mock results.
+        Run the research→podcast pipeline, or its dry-run simulation when dry_run is set.
 
         Returns:
             str: Conversational summary of pipeline results
         """
-        from cosa.agents.deep_research import voice_io, cosa_interface
+        return await self._run_chained_pipeline()
 
-        # Handle dry-run mode with breadcrumb notifications
-        if self.dry_run:
-            return await self._execute_dry_run( voice_io, cosa_interface )
+    def _chain_pipeline_state( self ):
+        """
+        Return this pipeline's state enum, imported late so a test can fake the module graph.
 
-        # Import pipeline components
-        from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
+        Ensures:
+            - returns the PipelineState enum of deep_research_to_podcast.state
+        """
         from cosa.agents.deep_research_to_podcast.state import PipelineState
 
-        # Set sender_id and target_user for notifications (use base_id to strip ::user_id scope suffix)
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
+        return PipelineState
 
-        # Set job_id for auto-injection into all downstream notify() calls (same pattern as DeepResearchJob)
-        voice_io.set_job_id( self.id_hash )
-
-        if self.debug:
-            print( f"[DeepResearchToPodcastJob] Query: {self.query[ :80 ]}..." )
-            print( f"[DeepResearchToPodcastJob] Budget: ${self.budget}" if self.budget else "[DeepResearchToPodcastJob] Budget: unlimited" )
-            print( f"[DeepResearchToPodcastJob] Target languages: {self.target_languages}" )
-
-        try:
-            # Notify start
-            await voice_io.notify(
-                f"Starting research→podcast pipeline: {self.query[ :60 ]}...",
-                priority="medium",
-                job_id=self.id_hash,
-                queue_name="run"
-            )
-
-            # Create the chained agent
-            agent = self._make_agent()
-
-            # Run the full pipeline
-            result = await agent.run_async()
-
-            # Check result state
-            if result.state == PipelineState.CANCELLED:
-                await voice_io.notify( "Pipeline was cancelled.", priority="medium", job_id=self.id_hash, queue_name="run" )
-                return "Research→Podcast pipeline was cancelled by the user."
-
-            if result.state == PipelineState.FAILED:
-                error_msg = result.error or "Unknown error"
-                await voice_io.notify( f"Pipeline failed: {error_msg[ :80 ]}", priority="urgent", job_id=self.id_hash, queue_name="run" )
-                raise Exception( error_msg )
-
-            # Store results
-            self.research_path = result.research_path
-            self.audio_path    = result.audio_path
-            self.script_path   = result.script_path
-
-            # Store artifacts
-            self.artifacts[ "research_path" ]     = result.research_path
-            self.artifacts[ "research_abstract" ] = result.research_abstract
-            self.artifacts[ "audio_path" ]        = result.audio_path
-            self.artifacts[ "script_path" ]       = result.script_path
-
-            # Build cost summary
-            self.cost_summary = {
-                "dr_cost_usd"    : result.dr_cost,
-                "pg_cost_usd"    : result.pg_cost,
-                "total_cost_usd" : result.total_cost,
-            }
-            self.artifacts[ "cost_summary" ] = self.cost_summary
-
-            # ── Completion report: build a rich abstract with clickable per-language
-            #    links so the promoted running→done card renders Play Here WITHOUT a
-            #    page reload. Before this, the real path returned a bare "Pipeline
-            #    complete!" string and stored NO abstract, so _transition_to_done
-            #    emitted abstract=None → blank done card (bug 2da4095a; sibling of
-            #    9b481811, but a missing BUILD, not just a missing store). Mirrors
-            #    PodcastGeneratorJob._execute in podcast_generator/job.py. ──
-            import urllib.parse
-            from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
-            io_base = cu.get_project_root() + "/io/"
-
-            def _to_rel( p ):
-                if not p: return None
-                if p.startswith( io_base ): return p[ len( io_base ): ]
-                if p.startswith( "io/" ):   return p[ 3: ]
-                return p.lstrip( "/" )
-
-            # The original document rides the link when it lives inside the project.
-            source_rel = source_ref( result.research_path, cu.get_project_root() )
-
-            # One labelled link set PER language (bug 00e6aba1: a two-language run
-            # writes two mp3s but must link BOTH, not just the primary). The maps ride
-            # pg_artifacts from the orchestrator; fall back to the single primary path
-            # for single-language / older state so the loop below stays uniform.
-            audio_by_lang  = dict( result.pg_artifacts.get( "audio_paths_by_language" )  or {} )
-            script_by_lang = dict( result.pg_artifacts.get( "script_paths_by_language" ) or {} )
-            languages      = self.target_languages or [ "en" ]
-            if not audio_by_lang and result.audio_path:
-                audio_by_lang = { languages[ 0 ]: result.audio_path }
-            if not script_by_lang and result.script_path:
-                script_by_lang = { languages[ 0 ]: result.script_path }
-
-            # Requested order first, then any extra language that produced an artifact.
-            ordered_langs = [ l for l in languages if l in audio_by_lang or l in script_by_lang ]
-            for l in list( audio_by_lang ) + list( script_by_lang ):
-                if l not in ordered_langs:
-                    ordered_langs.append( l )
-
-            # Optional Google Drive copy (flag off = no-op and no Google import). The source document is
-            # the generated research report; the hook loads the config and resolves the path inside its
-            # own boundary, so a config error here cannot fail the job.
-            from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive
-            drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path, user_email=self.user_email )
-            if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
-
-            per_language_lines = []
-            for lang in ordered_langs:
-                label  = _LANGUAGE_NAMES.get( lang, lang )
-                a_rel  = _to_rel( audio_by_lang.get( lang ) )
-                s_rel  = _to_rel( script_by_lang.get( lang ) )
-                parts  = []
-                s_link = script_link( s_rel )
-                if s_link: parts.append( s_link )
-                if a_rel:
-                    title = read_script_title( io_base + s_rel ) if s_rel else None
-                    parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
-                if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
-                if parts:
-                    per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
-
-            lines   = [ "**Research → Podcast Complete!**", "" ]
-            r_rel   = _to_rel( result.research_path )
-            if r_rel:
-                lines.append( f"**Research Report**: [📄 View](/app/docs?path={urllib.parse.quote( r_rel )})" )
-            lines.extend( per_language_lines )
-            lines.extend( drive[ "extra_lines" ] )
-            skipped_names = [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
-            if skipped_names:
-                lines.append( f"**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names ) )
-            lines.append( f"**Cost**: ${result.total_cost:.4f}" )
-            completion_abstract = "\n".join( lines )
-
-            # Store the abstract in artifacts so it rides the running→done transition
-            # (running_fifo_queue._transition_to_done reads artifacts.get("abstract")).
-            self.artifacts[ "abstract" ] = completion_abstract
-
-            try:
-                await voice_io.notify(
-                    f"Research to podcast complete. Total cost ${result.total_cost:.4f}." + ( f" {len( skipped_names )} topics were skipped; see the card." if skipped_names else "" ),
-                    priority   = "medium",
-                    abstract   = completion_abstract,
-                    job_id     = self.id_hash,
-                    queue_name = "run",
-                )
-            except Exception as notify_err:
-                print( f"[DeepResearchToPodcastJob] completion notify failed: {notify_err}" )
-
-            # Return conversational answer
-            return f"Pipeline complete! Research report and podcast generated. Total cost: ${result.total_cost:.4f}. Audio: {self.audio_path}"
-
-        finally:
-            voice_io.clear_job_id()
-
-    async def _execute_dry_run( self, voice_io, cosa_interface ) -> str:
+    def _chain_debug_lines( self ) -> list:
         """
-        Execute dry-run mode with breadcrumb notifications.
+        Return the job-specific debug lines printed after the shared query and budget lines.
 
-        Simulates the full research→podcast pipeline without making API calls.
-        Sends low-priority notifications at each phase and returns mock results.
-
-        Args:
-            voice_io: Voice I/O module for notifications
-            cosa_interface: COSA interface module for sender ID
-
-        Returns:
-            str: Mock conversational summary
+        Ensures:
+            - returns a list with the target languages line
         """
-        import asyncio
+        return [ f"Target languages: {self.target_languages}" ]
 
-        # Set sender_id and target_user for notifications (use base_id to strip ::user_id scope suffix)
-        cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
-        cosa_interface.TARGET_USER = self.user_email
-        # Per-task identity: the module globals above are shared by every concurrent job in the pool
-        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
+    def _store_chain_artifacts( self, result ) -> None:
+        """
+        Keep the podcast paths from a finished run on the job and in its artifacts.
 
-        # Set job_id for auto-injection into all downstream notify() calls
-        voice_io.set_job_id( self.id_hash )
+        Requires:
+            - result carries research_path, audio_path and script_path
 
-        if self.debug:
-            print( f"[DeepResearchToPodcastJob] DRY RUN MODE for: {self.query[ :50 ]}..." )
+        Ensures:
+            - the three paths are job attributes and artifacts entries
+        """
+        self.research_path = result.research_path
+        self.audio_path    = result.audio_path
+        self.script_path   = result.script_path
 
-        # === Deep Research Phase Breadcrumbs ===
-        await voice_io.notify( f"🧪 Dry run: Starting research→podcast simulation", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+        self.artifacts[ "audio_path" ]  = result.audio_path
+        self.artifacts[ "script_path" ] = result.script_path
 
-        await voice_io.notify( "🧪 Dry run: [RESEARCH] skipping query clarification", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+    def _chain_return_tail( self ) -> str:
+        """
+        Return the last sentence of the conversational answer.
 
-        await voice_io.notify( "🧪 Dry run: [RESEARCH] skipping research planning", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+        Ensures:
+            - returns the audio path sentence
+        """
+        return f"Audio: {self.audio_path}"
 
-        await voice_io.notify( "🧪 Dry run: [RESEARCH] skipping subquery research (5 queries)", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+    async def _chain_completion( self, result ) -> tuple:
+        """
+        Build the completion card for a finished run.
 
-        await voice_io.notify( "🧪 Dry run: [RESEARCH] skipping report synthesis", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+        Requires:
+            - result is a completed ChainedResult
 
-        await voice_io.notify( "🧪 Dry run: [RESEARCH] skipping report write to disk", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+        Ensures:
+            - the card holds per-language links and the optional Drive copy
+            - returns ( abstract, spoken_suffix )
+            - the suffix is empty, or names how many topics were skipped
+            - a Drive folder link, when made, is stored in artifacts
+        """
+        import urllib.parse
+        from cosa.agents.podcast_generator.play_links import audio_triplet, read_script_title, script_link, source_ref
+        io_base = cu.get_project_root() + "/io/"
 
-        # === Podcast Generation Phase Breadcrumbs ===
-        await voice_io.notify( "🧪 Dry run: [PODCAST] skipping content analysis", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+        def _to_rel( p ):
+            if not p: return None
+            if p.startswith( io_base ): return p[ len( io_base ): ]
+            if p.startswith( "io/" ):   return p[ 3: ]
+            return p.lstrip( "/" )
 
-        await voice_io.notify( "🧪 Dry run: [PODCAST] skipping script generation", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+        # The original document rides the link when it lives inside the project.
+        source_rel = source_ref( result.research_path, cu.get_project_root() )
 
-        await voice_io.notify( "🧪 Dry run: [PODCAST] skipping TTS generation (10 segments)", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+        # One labelled link set for each language (bug 00e6aba1: a two-language run
+        # writes two mp3s and must link both, not just the primary). The maps ride
+        # pg_artifacts from the orchestrator; fall back to the single primary path
+        # for single-language / older state so the loop below stays uniform.
+        audio_by_lang  = dict( result.pg_artifacts.get( "audio_paths_by_language" )  or {} )
+        script_by_lang = dict( result.pg_artifacts.get( "script_paths_by_language" ) or {} )
+        languages      = self.target_languages or [ "en" ]
+        if not audio_by_lang and result.audio_path:
+            audio_by_lang = { languages[ 0 ]: result.audio_path }
+        if not script_by_lang and result.script_path:
+            script_by_lang = { languages[ 0 ]: result.script_path }
 
-        await voice_io.notify( "🧪 Dry run: [PODCAST] skipping audio stitching", priority="low", job_id=self.id_hash, queue_name="run" )
-        await asyncio.sleep( 1.0 )
+        # Requested order first, then any extra language that produced an artifact.
+        ordered_langs = [ l for l in languages if l in audio_by_lang or l in script_by_lang ]
+        for l in list( audio_by_lang ) + list( script_by_lang ):
+            if l not in ordered_langs:
+                ordered_langs.append( l )
 
-        # Set mock results
+        # Optional Google Drive copy (flag off = no-op and no Google import). The source document is
+        # the generated research report; the hook loads the config and resolves the path inside its
+        # own boundary, so a config error here cannot fail the job.
+        from cosa.agents.podcast_generator.drive_hook import publish_podcast_to_drive
+        drive = await publish_podcast_to_drive( audio_by_lang, script_by_lang, result.research_path, user_email=self.user_email )
+        if drive[ "folder_link" ]: self.artifacts[ "drive_folder_link" ] = drive[ "folder_link" ]
+
+        per_language_lines = []
+        for lang in ordered_langs:
+            label  = _LANGUAGE_NAMES.get( lang, lang )
+            a_rel  = _to_rel( audio_by_lang.get( lang ) )
+            s_rel  = _to_rel( script_by_lang.get( lang ) )
+            parts  = []
+            s_link = script_link( s_rel )
+            if s_link: parts.append( s_link )
+            if a_rel:
+                title = read_script_title( io_base + s_rel ) if s_rel else None
+                parts.append( audio_triplet( a_rel, s_rel, source_rel, title ) )
+            if lang in drive[ "language_links" ]: parts.append( f"[☁️ Drive]({drive[ 'language_links' ][ lang ]})" )
+            if parts:
+                per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
+
+        lines   = [ "**Research → Podcast Complete!**", "" ]
+        r_rel   = _to_rel( result.research_path )
+        if r_rel:
+            lines.append( f"**Research Report**: [📄 View](/app/docs?path={urllib.parse.quote( r_rel )})" )
+        lines.extend( per_language_lines )
+        lines.extend( drive[ "extra_lines" ] )
+        skipped_names = [ g[ "topic" ] for g in result.dr_artifacts.get( "skipped_topics", [] ) ]
+        if skipped_names:
+            lines.append( f"**Skipped topics ({len( skipped_names )})**: " + "; ".join( skipped_names ) )
+        lines.append( f"**Cost**: ${result.total_cost:.4f}" )
+        completion_abstract = "\n".join( lines )
+
+        spoken_suffix = f" {len( skipped_names )} topics were skipped; see the card." if skipped_names else ""
+        return completion_abstract, spoken_suffix
+
+    def _store_dry_run_results( self ) -> str:
+        """
+        Store the mock podcast results of a dry run.
+
+        Ensures:
+            - mock paths are job attributes and artifacts entries
+            - returns the dry-run completion abstract
+        """
         self.research_path = f"/io/deep-research/{self.user_email}/dry-run-{self.id_hash}/report.md"
         self.audio_path    = f"/io/podcasts/{self.user_email}/dry-run-{self.id_hash}/podcast.mp3"
         self.script_path   = f"/io/podcasts/{self.user_email}/dry-run-{self.id_hash}/script.md"
 
-        # Store mock artifacts
         self.artifacts[ "research_path" ]     = self.research_path
         self.artifacts[ "research_abstract" ] = "Mock abstract from dry-run mode."
         self.artifacts[ "audio_path" ]        = self.audio_path
         self.artifacts[ "script_path" ]       = self.script_path
 
-        # Mock cost summary
-        self.cost_summary = {
-            "dr_cost_usd"    : 0.0,
-            "pg_cost_usd"    : 0.0,
-            "total_cost_usd" : 0.0,
-        }
-        self.artifacts[ "cost_summary" ] = self.cost_summary
-
-        completion_abstract = f"""**🧪 Dry Run Complete!**
+        return f"""**🧪 Dry Run Complete!**
 
 **Research Report**: {self.research_path} (mock - not actually created)
 
@@ -445,21 +357,6 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
 **Podcast Audio**: {self.audio_path} (mock - not actually created)
 
 **Stats**: $0.00 total | 0 tokens | 10.0s (simulated)"""
-
-        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
-        self.artifacts[ "abstract" ] = completion_abstract
-
-        # Notify completion
-        await voice_io.notify(
-            "🧪 Dry run complete! Pipeline simulation finished.",
-            priority="medium",
-            abstract=completion_abstract,
-            job_id=self.id_hash,
-            queue_name="run"
-        )
-
-        voice_io.clear_job_id()
-        return "Dry run complete. Research and podcast simulation finished."
 
 
 def quick_smoke_test():

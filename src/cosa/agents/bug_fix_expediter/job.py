@@ -22,6 +22,7 @@ from typing import Optional
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from cosa.rest.job_state import JobState
 
 
@@ -221,6 +222,8 @@ class BugFixExpediterJob( AgenticJobBase ):
         # Set sender identity
         cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
         cosa_interface.TARGET_USER = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
 
         # Set job_id for auto-injection into all downstream notify() calls
         voice_io.set_job_id( self.id_hash )
@@ -641,6 +644,8 @@ class BugFixExpediterJob( AgenticJobBase ):
 
         cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
         cosa_interface.TARGET_USER = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
 
         # Set job_id for auto-injection into downstream notify() calls
         voice_io.set_job_id( self.id_hash )

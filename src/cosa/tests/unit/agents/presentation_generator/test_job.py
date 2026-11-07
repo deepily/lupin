@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
+from cosa.agents.presentation_generator.config import apply_job_overrides
 from cosa.agents.presentation_generator.job import PresentationGeneratorJob
 from cosa.rest.job_state import JobState
 
@@ -176,7 +177,7 @@ class _ExecGraph:
                 PresentationOrchestratorAgent=self.orch_ctor ),
             "cosa.agents.presentation_generator.config": _make_module(
                 "cosa.agents.presentation_generator.config",
-                PresentationConfig=pres_config ),
+                PresentationConfig=pres_config, apply_job_overrides=apply_job_overrides ),
             "cosa.config.configuration_manager": _make_module(
                 "cosa.config.configuration_manager",
                 ConfigurationManager=MagicMock() ),

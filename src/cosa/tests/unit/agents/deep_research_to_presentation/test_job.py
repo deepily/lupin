@@ -191,6 +191,7 @@ class TestExecute:
         assert job.research_path == "/io/dr/r.md"
         assert job.yaml_path     == "/io/pres/d.yaml"
         assert job.marp_path     == "/io/pres/d.md"
+        assert job.artifacts[ "research_path" ]     == "/io/dr/r.md"
         assert job.artifacts[ "research_abstract" ] == "abs"
         assert job.artifacts[ "slide_count" ]       == 9
         assert job.cost_summary == {
@@ -202,6 +203,15 @@ class TestExecute:
         graph.voice_io.set_job_id.assert_called_once_with( job.id_hash )
         graph.voice_io.clear_job_id.assert_called_once_with()
         assert "Budget: $2.0" in capsys.readouterr().out
+
+    def test_completion_card_names_skipped_topics( self ):
+        result = self._completed_result()
+        result.dr_artifacts = { "skipped_topics" : [ { "topic" : "alpha" }, { "topic" : "beta" } ] }
+        job    = _job()
+        graph  = _ExecGraph( result )
+        with graph.patcher():
+            _run( job._execute() )
+        assert job.artifacts[ "abstract" ].endswith( "**Skipped topics (2)**: alpha; beta" )
 
     def test_completed_unlimited_budget_debug_line( self, capsys ):
         job   = _job( budget=None, debug=True )
@@ -239,7 +249,7 @@ class TestExecute:
         job   = _job( dry_run=True )
         graph = _ExecGraph( self._completed_result() )
         with graph.patcher(), patch.object(
-            job, "_execute_dry_run", AsyncMock( return_value="DRY" )
+            job, "_run_chained_dry_run", AsyncMock( return_value="DRY" )
         ) as dry:
             out = _run( job._execute() )
         assert out == "DRY"
@@ -270,7 +280,7 @@ class TestExecuteDryRun:
         job = _job( debug=True )
         voice_io, cosa_interface = self._voice_and_iface()
         with patch( "asyncio.sleep", AsyncMock() ) as slp:
-            out = _run( job._execute_dry_run( voice_io, cosa_interface ) )
+            out = _run( job._run_chained_dry_run( voice_io, cosa_interface ) )
         assert out == "Dry run complete. Research and presentation simulation finished."
         assert voice_io.notify.await_count == 13            # 12 breadcrumbs + completion
         assert slp.await_count == 12
@@ -292,7 +302,7 @@ class TestExecuteDryRun:
         job = _job( debug=False )
         voice_io, cosa_interface = self._voice_and_iface()
         with patch( "asyncio.sleep", AsyncMock() ):
-            _run( job._execute_dry_run( voice_io, cosa_interface ) )
+            _run( job._run_chained_dry_run( voice_io, cosa_interface ) )
         assert "DRY RUN MODE" not in capsys.readouterr().out
 
 

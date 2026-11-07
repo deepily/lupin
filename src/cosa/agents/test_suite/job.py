@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo
 
 from cosa.rest import suite_run_token
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from cosa.rest.job_state import JobState
 from cosa.rest.pytest_args_policy import validate_pytest_args, validate_timeout_against_suite_budget
 import cosa.utils.util as cu
@@ -843,6 +844,8 @@ class TestSuiteJob( AgenticJobBase ):
         # Set sender_id and target_user for notifications
         cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
         cosa_interface.TARGET_USER = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
 
         # Set job_id for auto-injection into all notify() calls
         voice_io.set_job_id( self.id_hash )
@@ -1242,6 +1245,8 @@ class TestSuiteJob( AgenticJobBase ):
         # Set sender_id and target_user
         cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
         cosa_interface.TARGET_USER = self.user_email
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( sender_id=cosa_interface.SENDER_ID, target_user=self.user_email )
 
         voice_io.set_job_id( self.id_hash )
 

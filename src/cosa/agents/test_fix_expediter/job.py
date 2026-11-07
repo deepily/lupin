@@ -26,6 +26,7 @@ from typing import Optional
 import cosa.utils.util as cu
 
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.utils.agent_notification_dispatcher import set_dispatch_context
 from cosa.agents.test_fix_expediter.state import StalledException
 from cosa.rest.job_state import JobState
 
@@ -239,6 +240,8 @@ class TestFixExpediterJob( AgenticJobBase ):
 
         _bfe_ci.TARGET_USER = self.user_email
         _bfe_ci.SENDER_ID   = _bfe_ci._get_sender_id( suffix=self.base_id )
+        # Per-task identity: the module globals above are shared by every concurrent job in the pool
+        set_dispatch_context( sender_id=_bfe_ci.SENDER_ID, target_user=self.user_email )
 
         # Config load has its own fallback; not inside the main try/except
         # because using defaults is acceptable, not a TFE failure.

@@ -20,6 +20,7 @@ import pytest
 
 from cosa.agents.deep_research_to_presentation.agent import DeepResearchToPresentationAgent
 from cosa.agents.deep_research_to_presentation.state import PipelineState, ChainedResult
+from cosa.agents.presentation_generator.config import apply_job_overrides
 
 
 def _make_module( name, **attrs ):
@@ -454,6 +455,7 @@ class _PGGraph:
             "cosa.agents.presentation_generator.config": _make_module(
                 "cosa.agents.presentation_generator.config",
                 PresentationConfig=self.presentation_config,
+                apply_job_overrides=apply_job_overrides,
             ),
             "cosa.config.configuration_manager": _make_module(
                 "cosa.config.configuration_manager",
@@ -529,6 +531,21 @@ class TestRunPresentationGenerator:
             _run( agent._run_presentation_generator( "/io/dr/report.md" ) )
         assert graph.config_obj.target_slide_count == 8
 
+    def test_audience_context_reaches_the_inner_config( self ):
+        # The chain once kept an older copy of the overrides that dropped audience_context.
+        graph = _PGGraph()
+        agent = self._agent( audience_context="startup founders" )
+        with graph.patcher(), patch( "os.path.exists", return_value=True ):
+            _run( agent._run_presentation_generator( "/io/dr/report.md" ) )
+        assert graph.config_obj.audience_context == "startup founders"
+
+    def test_none_sentinel_audience_context_is_not_copied( self ):
+        graph = _PGGraph()
+        agent = self._agent( audience_context="None" )
+        with graph.patcher(), patch( "os.path.exists", return_value=True ):
+            _run( agent._run_presentation_generator( "/io/dr/report.md" ) )
+        assert graph.config_obj.audience_context != "None"
+
     def test_no_overrides_debug_skips_optional_lines( self, capsys ):
         # debug=True but no duration/theme exercises the 417->422 and 419->422
         # skip arcs AND the override-false arcs (427/429/431 all False).
@@ -569,3 +586,10 @@ class TestSlideCountFromTheRealProducer:
         assert result.state == PipelineState.COMPLETED
         assert result.pg_artifacts[ "total_slides" ] == 9 and "slide_count" not in result.pg_artifacts
         assert result.slide_count == 9
+
+
+class TestPipelineStateBinding:
+    """The shared Deep Research stage reads each agent's own state enum."""
+
+    def test_presentation_agent_uses_its_own_enum( self ):
+        assert DeepResearchToPresentationAgent.PIPELINE_STATE is PipelineState
