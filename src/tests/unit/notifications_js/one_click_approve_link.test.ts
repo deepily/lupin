@@ -104,6 +104,9 @@ function mountOnce(): void {
   ( ui as unknown as { _initMasterDetailLayout(): void } )._initMasterDetailLayout();
 }
 
+// Row 009d2d53: the link parsing lives in shared/approve-link.js; notifications.js reads it off window.
+const LIB = (): Record<string, ( ...a: any[] ) => any> => ( window as unknown as { LUPIN_APPROVE_LINK: Record<string, ( ...a: any[] ) => any> } ).LUPIN_APPROVE_LINK;
+
 beforeEach( () => {
   calls = []; tabOpens = []; paneOpens = []; release = []; table = {}; asked = [];
   buildDOM();
@@ -122,9 +125,10 @@ class PinnedWeakRef<T extends object> {
   deref(): T { return this.#target; }
 }
 
-before( () => {
+before( async () => {
   ( globalThis as unknown as { WeakRef: unknown } ).WeakRef = PinnedWeakRef;
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
+  await import( "../../../lupin_app/static/js/shared/approve-link.js" );   // row 009d2d53: notifications.js reads the shared module off window
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );
@@ -396,7 +400,7 @@ test( "a link already checked is not read again, and a disconnected one is skipp
   const a   = document.createElement( "a" );
   a.setAttribute( "href", APPROVE( ROW_A ) );
   box.appendChild( a );
-  const n = ui as unknown as { _markApproveLinks( roots: Element[] ): Promise<void> };
+  const n = { _markApproveLinks: ( roots: Element[] ): Promise<void> => LIB().markApproveLinks!( roots, ( id: string ) => ui._readTask( id ) ) };
   const pending = n._markApproveLinks( [ box ] );
   a.remove();
   await pending;
@@ -413,7 +417,7 @@ test( "a link already checked is not read again, and a disconnected one is skipp
 test( "an anchor passed directly as a root is checked", async () => {
   table[ ROW_A ] = { status: "done" };
   const [ a ] = plantCard( [ APPROVE( ROW_A ) ] );
-  await ( ui as unknown as { _markApproveLinks( roots: Element[] ): Promise<void> } )._markApproveLinks( [ a! ] );
+  await LIB().markApproveLinks!( [ a! ], ( id: string ) => ui._readTask( id ) );
   assert.equal( host().querySelector( ".approve-link-approved" )?.textContent, "approved ✅" );
 } );
 
@@ -423,8 +427,8 @@ test( "text nodes drawn into the page start no read", async () => {
   assert.deepEqual( asked, [] );
 } );
 
-test( "_taskOverlayText fills a missing field with a dash, unowned or (no body), never undefined", () => {
-  const f = ( ui as unknown as { _taskOverlayText( r: Row ): string } )._taskOverlayText.bind( ui );
+test( "taskOverlayText fills a missing field with a dash, unowned or (no body), never undefined", () => {
+  const f = ( r: Row ): string => LIB().taskOverlayText!( r );
   assert.equal( f( {} ), "(no title)\nPriority: — · Owner: unowned · Status: —\n\n(no body)" );
   assert.equal( f( { title: "T", status: "queued" } ), "T\nPriority: — · Owner: unowned · Status: queued\n\n(no body)" );
 } );

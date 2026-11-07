@@ -6,13 +6,13 @@ pins:
   - cosa.rest.task_approve_link.parse_batch_row_ids@7d083d848c
   - lupin_mcp.cosa_voice_mcp.task_approve_batch_line@e290cde912
   - lupin_mcp.task_store_tools.task_approve_batch_line_impl@b9f218cfe4
-  - src.lupin_app.static.js.multiplexer.render.approveLink.applyBatch@82ec986d21
-  - src.lupin_app.static.js.multiplexer.render.approveLink.batchLinkOf@83bb456650
-  - src.lupin_app.static.js.multiplexer.render.approveLink.batchParams@1e257f99fb
-  - src.lupin_app.static.js.multiplexer.render.approveLink.batchViewIds@0d337b8df8
-  - src.lupin_app.static.js.multiplexer.render.approveLink.handleBatchApproveLinkClick@16ca72fa90
-  - src.lupin_app.static.js.multiplexer.render.approveLink.handleBatchViewLinkClick@9d654d0f1e
-  - src.lupin_app.static.js.multiplexer.render.approveLink.parseBatchIds@ba00cb3e7d
+  - src.lupin_app.static.js.shared.approve-link.applyBatch@6b37bc74e2
+  - src.lupin_app.static.js.shared.approve-link.batchLinkOf@696bdcbd77
+  - src.lupin_app.static.js.shared.approve-link.batchParams@ece0b947e1
+  - src.lupin_app.static.js.shared.approve-link.batchViewIds@b3c139e8e8
+  - src.lupin_app.static.js.shared.approve-link.handleBatchApproveLinkClick@9ca763714b
+  - src.lupin_app.static.js.shared.approve-link.handleBatchViewLinkClick@85b248c7e4
+  - src.lupin_app.static.js.shared.approve-link.parseBatchIds@5e6c5bd4c0
 ---
 # One-click batch link
 
@@ -27,11 +27,11 @@ For more than one held row, a manager sends one batch line. One click then moves
 
 ## Claiming the click
 - Both clients find the link by its address, not its label. A list that fails the rules above is claimed so the browser stays put, and nothing is sent.
-- `parseBatchIds` and `batchParams` read the list. `batchLinkOf` and `batchViewIds` return the ids, the move and the reason. The older page has `_parseBatchIds` and `_batchLinkOf`.
+- `parseBatchIds` and `batchParams` read the list. `batchLinkOf` and `batchViewIds` return the ids, the move and the reason. The older page calls these same functions through `window.LUPIN_APPROVE_LINK`; it keeps no copy.
 - `applyBatch` sends one `HoldingAreaStore.transitionTask` per row, all together, under Rick's login with `user_direct`. A drop carries its reason.
 - `handleBatchApproveLinkClick` replaces the link with `N of M applied` and one line per row. A second click while it is out sends nothing. A line reads `<first 8> applied ✅` or `<first 8> refused: <server words>`, so a refusal never hides the others.
 - `handleBatchViewLinkClick` reads every row and shows `<first 8> · <status> · <title>` per row, the way the abstract 📋 shows text.
-- An unreadable row says so, and the rest still show. The older page does the same in `_handleBatchApproveLinkClick` and `_handleBatchViewLinkClick`.
+- An unreadable row says so, and the rest still show. The older page gets the same behaviour through `_handleBatchApproveLinkClick` and `_handleBatchViewLinkClick`, which call the shared handlers.
 - The single-row readers `approveRowId` and `viewRowId` do not claim a batch address. The batch handlers do not claim a single one.
 - `/app/tasks/approve?rows=...&move=...` lists the rows and has one button, and `/app/tasks/view?rows=...` only lists them. Opening either changes nothing.
 

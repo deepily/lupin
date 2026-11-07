@@ -2,7 +2,7 @@
 capability: web-client-task-board-panes
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
-  - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.TaskListRendererImpl@46c6a2c625
+  - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.TaskListRendererImpl@73c8a939cf
   - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.HoldingAreaRendererImpl@47a4aeedb5
   - src.lupin_app.static.js.multiplexer.render.EpicBoardRenderer.EpicBoardRendererImpl@2a8d10c29c
   - src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.FinishedTasksRendererImpl@4a94e873fb
@@ -15,7 +15,7 @@ pins:
 Four panes show the task store: the task list, the epic board, the holding area and the finished tasks. Each repaints on its store's change event. State lives in [[web-client-stores]]; the transport is [[web-client-transport-and-auth]].
 
 ## What it does
-- `TaskListRenderer` has four states: sign-in banner, unreachable (last-known rows kept after one good fetch), empty, and a table of open rows grouped by owner.
+- `TaskListRenderer` has five states: sign-in banner, query unavailable, unreachable, empty, and a table of open rows grouped by owner. Query unavailable means the shared query module did not load: a deploy problem, not an outage. Unreachable keeps the last-known rows after one good fetch. The All button and four status chips narrow the rows on screen, from the table in `shared/task-status-filter.js`. The held rows stay whole, so a chip never loses rows to the unreachable replay.
 - The task list and epic board keep their collapse state in raw `localStorage` keys, not `StorageService`. Owners start expanded; epics start collapsed except the group waiting on Rick.
 - `taskVerbs` offers park, drop, demote, wont_fix, fixed, unpark and approve. `verbLegality` offers nothing on a terminal row, and approve only on `not_approved`.
 - `transitionExtras` sends the park reason as `park_reason` and other reasons as `reason`. Fixed sends the attestation "operator (multiplexer)", which the server replaces with the login identity.

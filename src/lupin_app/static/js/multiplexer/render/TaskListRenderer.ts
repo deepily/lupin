@@ -32,6 +32,7 @@ import {
 import { renderTruncationBanner } from "./templates/truncationBanner";
 import { heldHeaderCount } from "./holdingAreaModel";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
+import { TASK_STATUS_CHIPS, activeChips, toggleChip, filterTasksByChips } from "../../shared/task-status-filter.js";
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
 import type { TransitionExtras } from "./taskVerbs";
 import { TaskRowController, type TaskRowRecorderLike } from "./taskRowController";
@@ -55,6 +56,10 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { teardownScaffold, messageEl } from "./dom";
+
+/** Shown when the shared query module did not load. */
+export const TASK_LIST_QUERY_UNAVAILABLE_MESSAGE =
+  "🧩 Task-list query did not load — /static/js/shared/task-list-query.js is missing or failed to parse. This is a deploy problem, not a store outage.";
 
 /**
  * The slice of the task list store the renderer uses.
@@ -227,6 +232,15 @@ class TaskListRendererImpl implements TaskListRenderer {
   private pinnedTask : TaskItem | null = null;
   private lookupBox  : TaskLookupBoxHandle | null = null;
 
+  /**
+   * The selected status-chip keys; [] is All.
+   *
+   * The table and rules live in shared/task-status-filter.js, which notifications.js reads too.
+   * Chips narrow the rows on screen only. `lastGoodTasks` stays whole, so the unreachable replay never loses rows to a chip.
+   */
+  private statusChips : string[] = [];
+  private chipHost    : HTMLElement | null = null;
+
   private readonly recorder     : TaskRowRecorderLike | undefined;
   private readonly getAuthToken : ( () => string | null ) | undefined;
   // Parity A-2 #0 — every row control's click/change/key is dispatched here, the
@@ -337,7 +351,7 @@ class TaskListRendererImpl implements TaskListRenderer {
       icon    : "📋",
       title   : "Task List",
       testid  : "multiplexer-task-list-header",
-      actions : [ ...lookupActions, refreshBtn, collapseAllBtn, expandAllBtn, this.updatedEl ],
+      actions : [ ...lookupActions, this.buildStatusChips(), refreshBtn, collapseAllBtn, expandAllBtn, this.updatedEl ],
     } );
     this.header  = header;
     this.countEl = header.countEl;
@@ -439,6 +453,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.noticesEl = null;
     this.updatedEl = null;
     this.header = null;
+    this.chipHost = null;
     this.requests = null;
     this.mounted = false;
   }
@@ -474,6 +489,15 @@ class TaskListRendererImpl implements TaskListRenderer {
       return;
     }
 
+    // A missing query module is a deploy defect and says so, naming the file. It is not
+    // "unreachable": same blank board, different remedy, and it never resolves by itself.
+    if ( composite && composite.status === "query_unavailable" ) {
+      this.clearNotices();
+      this.container.replaceChildren( messageEl( "task-list", "task-list-query-unavailable", TASK_LIST_QUERY_UNAVAILABLE_MESSAGE ) );
+      this.setCountText( "Live: 0" );
+      return;
+    }
+
     if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
       this.clearNotices();
       this.renderUnreachable();
@@ -488,7 +512,9 @@ class TaskListRendererImpl implements TaskListRenderer {
     // snapshot from whenever the filter was applied — then re-assert the pin.
     if ( this.pinnedTask !== null ) { this.renderPinned(); return; }
 
-    this.setCountText( taskListCountText( openTasks ) );
+    // The chips narrow what is on screen; `openTasks` stays whole (see `statusChips`).
+    const shownTasks = filterTasksByChips( openTasks, this.statusChips );
+    this.setCountText( taskListCountText( shownTasks ) );
 
     // Parity A-2 #7 — a query that came back short says so. Placed BEFORE the
     // rows are painted so the two never disagree about the same poll, and given
@@ -498,12 +524,62 @@ class TaskListRendererImpl implements TaskListRenderer {
 
     if ( openTasks.length === 0 ) {
       this.container.replaceChildren( messageEl( "task-list", "task-list-empty", "✅ No open tasks." ) );
+    } else if ( shownTasks.length === 0 ) {
+      this.container.replaceChildren( messageEl( "task-list", "task-list-empty", "No tasks match the selected statuses — press All to see the whole list." ) );
     } else {
-      const model = groupTasksByOwner( openTasks );
+      const model = groupTasksByOwner( shownTasks );
       this.paintRows( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
     }
 
     if ( stampUpdated ) this.stampUpdated();
+  }
+
+  /**
+   * Builds the All button and one button per chip in the shared table.
+   *
+   * Ensures: buttons are built once. Later clicks change only `aria-pressed` and `is-selected`.
+   */
+  private buildStatusChips(): HTMLElement {
+    const host = document.createElement( "div" );
+    host.className = "task-status-chips";
+    host.setAttribute( "data-testid", "task-status-chips" );
+    host.setAttribute( "role", "group" );
+    host.setAttribute( "aria-label", "Filter the task list by status" );
+    const make = ( key: string, label: string, onClick: () => void ): void => {
+      const button = document.createElement( "button" );
+      button.type = "button";
+      button.className = "task-status-chip";
+      button.setAttribute( "data-chip", key );
+      button.setAttribute( "data-testid", `task-status-chip-${ key }` );
+      button.textContent = label;
+      button.addEventListener( "click", onClick );
+      host.appendChild( button );
+    };
+    make( "all", "All", () => this.setStatusChips( [] ) );
+    for ( const chip of TASK_STATUS_CHIPS ) make( chip.key, chip.label, () => this.setStatusChips( toggleChip( this.statusChips, chip.key ) ) );
+    this.chipHost = host;
+    this.syncStatusChips();
+    return host;
+  }
+
+  /** Sets the selection, marks the buttons and repaints from the held rows. */
+  private setStatusChips( next: string[] ): void {
+    this.statusChips = next;
+    this.syncStatusChips();
+    this.renderFromStore( false );
+  }
+
+  /** All is pressed exactly when no chip is active. */
+  private syncStatusChips(): void {
+    /* c8 ignore next */ // defensive: only called from buildStatusChips (host just set) and setStatusChips (button handlers exist only while mounted).
+    if ( this.chipHost === null ) return;
+    const active = activeChips( this.statusChips );
+    for ( const button of Array.from( this.chipHost.children ) ) {
+      const key     = button.getAttribute( "data-chip" ) as string;
+      const pressed = key === "all" ? active.length === 0 : active.includes( key );
+      button.setAttribute( "aria-pressed", pressed ? "true" : "false" );
+      button.classList.toggle( "is-selected", pressed );
+    }
   }
 
   // The owner-reassignment roster: active personas (Sam INCLUDED — Q5) from the

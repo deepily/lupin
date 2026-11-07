@@ -3,8 +3,8 @@ capability: task-approve-priority-link
 pin_algorithm: py3.13.x6a05a1/ts5.9.3
 pins:
   - cosa.rest.task_priority_firewall.refusal_for_promote_priority@b03a59afc5
-  - src.lupin_app.static.js.multiplexer.render.approveLink.approvePriorityLink@b9090ffbe4
-  - src.lupin_app.static.js.multiplexer.render.approveLink.handleApprovePriorityLinkClick@7ba0308cfc
+  - src.lupin_app.static.js.shared.approve-link.approvePriorityLink@69091f14fc
+  - src.lupin_app.static.js.shared.approve-link.handleApprovePriorityLinkClick@043747fa7a
 ---
 # One-click priority link
 
@@ -16,7 +16,7 @@ An optional third link on a held-row card admits the row to queued at a higher p
 - The MCP verb `task_approve_line( task_id, priority )` calls it ([[mcp-task-store-impls]]). A level outside P0 to P5 returns `invalid_priority`.
 
 ## Claiming the click
-- `handleApprovePriorityLinkClick` sends the approve move plus `promote_priority: "<level>"`. The older page has `_handleApprovePriorityLinkClick`.
+- `handleApprovePriorityLinkClick` sends the approve move plus `promote_priority: "<level>"`. The older page calls the same function through `NotificationsUI._handleApprovePriorityLinkClick`, which only passes its own sender.
 - Success reads "approved at P0 ✅" in place. A refusal reads the server's words.
 - `approvePriorityLink` and `approveRowId` each return null for the other's href, so a click has one handler.
 - The landing page takes `&priority=<level>` too. Its one button reads "Approve at P0".

@@ -17,22 +17,12 @@
 /** Every in-app doc link starts here, after loopback normalization. */
 export const DOC_LINK_PREFIX = "/app/docs?path=";
 
-// `http://localhost:7999/app/docs?…` and `/app/docs?…` are the same document.
-// Senders emit both, so the prefix test must run on a normalized href or it
-// silently misses the absolute form.
-const LOOPBACK_PREFIX_RE = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/;
 
-/**
- * Strip an absolute loopback origin so an href can be compared and fetched
- * relative to whatever host is serving the page.
- *
- * Returns null for a null/empty href — callers treat that as "not a doc link"
- * rather than as an error, because an `<a>` with no href is ordinary markup.
- */
-export function normalizeDocLinkHref( href: string | null ): string | null {
-  if (href === null || href === "") return null;
-  return href.replace(LOOPBACK_PREFIX_RE, "");
-}
+// Row 009d2d53: the loopback strip lives in shared/approve-link.js, which notifications.js reads
+// too (`http://localhost:7999/app/docs?…` and `/app/docs?…` are the same document, and senders emit
+// both). Re-exported here so every importer keeps its path.
+import { normalizeDocLinkHref } from "../../shared/approve-link.js";
+export { normalizeDocLinkHref };
 
 /**
  * True when this href addresses the in-app doc viewer, in either the relative
