@@ -298,7 +298,7 @@ def _build_research_to_podcast( command, args_dict, user_id, user_email, session
         audience         = args_dict.get( "audience" ),
         audience_context = args_dict.get( "audience_context" ),
         # THE SAME SEAM, TWO COMMANDS LATER (row 5726e3c5). Measured 2026-09-08:
-        # `_refuse_bad_source_documents` (v2/flow.py:692) never branches on `command`, so
+        # `_refuse_bad_source_documents` (in v2/flow.py) never branches on `command`, so
         # the door was ALREADY validating and resolving `source_document` for this command
         # -- and this builder was already dropping it. A caller got a 200, the job ran, and
         # the research read nothing. Krishna's no-op shape, live on two more doors.
@@ -416,7 +416,7 @@ def _build_research_to_presentation( command, args_dict, user_id, user_email, se
         audience                = args_dict.get( "audience" ),
         audience_context        = args_dict.get( "audience_context" ),
         # THE SAME SEAM, TWO COMMANDS LATER (row 5726e3c5). Measured 2026-09-08:
-        # `_refuse_bad_source_documents` (v2/flow.py:692) never branches on `command`, so
+        # `_refuse_bad_source_documents` (in v2/flow.py) never branches on `command`, so
         # the door was ALREADY validating and resolving `source_document` for this command
         # -- and this builder was already dropping it. A caller got a 200, the job ran, and
         # the research read nothing. Krishna's no-op shape, live on two more doors.
@@ -718,7 +718,7 @@ def _build_test_fix_expediter_resume( command, args_dict, user_id, user_email, s
     from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
     from cosa.agents.test_suite.job                      import TestSuiteJob
     # Voice resume — mirrors POST /api/test-fix-expediter/resume-from
-    # (queues.py:1857). resume_from is already fuzzy-matched by the expeditor's
+    # (routers/queues.py). resume_from is already fuzzy-matched by the expeditor's
     # tfe_checkpoint_match handler; resolve it to a single stalled job, then
     # rebuild via resume_job(). No single match (not-found / still-ambiguous) →
     # return None so the flow routes to the receptionist to speak the failure

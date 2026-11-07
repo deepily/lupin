@@ -486,7 +486,6 @@ class SolutionSnapshot( RunnableCode ):
                        session_id=agent.session_id
 
                # TODO: Reconcile how we're going to get a dynamic path to the solution file's directory
-               # solution_directory=calendaring_agent.solution_directory
         )
     
     def add_synonymous_question( self, question: str, salutation: str="", score: float=100.0 ) -> None:
@@ -553,7 +552,6 @@ class SolutionSnapshot( RunnableCode ):
         self.answer = answer
         self.set_code( code )
         self.set_solution_summary( solution_summary )
-        # self.completion_date  = SolutionSnapshot.get_current_datetime()
         
     def set_solution_summary( self, solution_summary: str ) -> None:
         """
@@ -746,7 +744,6 @@ class SolutionSnapshot( RunnableCode ):
             
             print( "NO solution_file value provided (Must be a new object). Generating a unique file name..." )
             # Generate filename based on the first 64 characters of the question
-            # filename_base = du.truncate_string( self.question, max_len=64 ).replace( " ", "-" )
             filename_base = du.truncate_string( self.remove_non_alphanumerics( self.question, replacement_char="_" ), max_len=64 ).replace( " ", "-" )
             # Get a list of all files that start with the filename base
             existing_files = glob.glob( f"{directory}{filename_base}-*.json" )

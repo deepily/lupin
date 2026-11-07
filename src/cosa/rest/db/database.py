@@ -151,7 +151,7 @@ def get_database_url() -> str:
 
         return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
 
-    else:  # development (default)
+    else:  # development, the default
         # Local PostgreSQL-in-Docker
         user = os.environ.get( "DB_USER", "lupin_dev" )
         # No baked-in password default (row baac2474). This module builds the URL at

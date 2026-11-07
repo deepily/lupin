@@ -67,7 +67,7 @@ TICKET_TERMINAL_STATES = frozenset( {
 # and Mr. Radio ruled the fix: derive it from the notification grace, at mint time.
 #
 # The notification API accepts a LATE answer for `notification grace period seconds`
-# after the ask expired — `routers/notifications.py:616-629`, which reads that same INI
+# after the ask expired — the late-answer branch of the respond handler in `routers/notifications.py`, which reads that same INI
 # key. With the shipped values that answer stayed valid until requested_at + 420 while
 # this deadline stalled the ticket at requested_at + 180: a 240-second window in which a
 # real keypress was still being accepted by one half of the system and the other half had

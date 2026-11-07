@@ -131,7 +131,7 @@ class UserRepository(BaseRepository[User]):
         Returns:
             Updated User instance or None if not found
         """
-        # AWARE — last_login_at is TIMESTAMPTZ (postgres_models.py:104); a naive
+        # aware — last_login_at is TIMESTAMPTZ (User in postgres_models.py); a naive
         # value is read in the session timezone and stores the wrong instant
         # (row 3b4002fe).
         return self.update( user_id, last_login_at = datetime.now( timezone.utc ) )

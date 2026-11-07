@@ -3260,8 +3260,8 @@ def query_tasks(
             #
             # ⛔ SCOPED TO THIS BRANCH ON PURPOSE. /api/tasks is NOT internal-only —
             # the multiplexer parses the FULL-ROW shape (render/taskListModel.ts,
-            # render/TaskListRenderer.ts, notifications.js:386, a 60s poll at
-            # multiplexer/boot.ts:586). This branch returns BEFORE any row is
+            # render/TaskListRenderer.ts, notifications.js, a 60s poll in
+            # multiplexer/boot.ts). This branch returns before any row is
             # materialized, so `breakdown` provably cannot reach that shape.
             # count_only has exactly ONE non-test consumer in the tree (the hook's
             # query_owed), which is what makes always-return safe HERE and only here.

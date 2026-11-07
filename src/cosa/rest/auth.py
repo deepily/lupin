@@ -22,8 +22,7 @@ class TokenExpiredException( HTTPException ):
         )
 
 # For now, we'll mock the Firebase Admin SDK
-# In production, you would use: import firebase_admin
-# from firebase_admin import credentials, auth
+# In production, you would import firebase_admin and its credentials and auth modules
 
 # Mock Firebase initialization
 FIREBASE_INITIALIZED = False
@@ -47,8 +46,7 @@ def init_firebase():
     if not FIREBASE_INITIALIZED:
         print("[AUTH] Initializing Firebase Admin SDK (MOCKED)")
         # In production:
-        # cred = credentials.Certificate("path/to/serviceAccountKey.json")
-        # firebase_admin.initialize_app(cred)
+        # build a credentials.Certificate from the service-account key file, then call firebase_admin.initialize_app with it
         FIREBASE_INITIALIZED = True
 
 
@@ -254,7 +252,7 @@ async def verify_mock_token(token: str) -> Dict:
     """
     try:
         # MOCK: In production, this would be:
-        # decoded_token = auth.verify_id_token(token)
+        # auth.verify_id_token would decode the token here
 
         # SECURITY: Validate token input
         if not isinstance(token, str):

@@ -39,7 +39,7 @@ import shlex
 
 # ---- The legitimate surface -------------------------------------------------
 # Sources: a census of every pytest_args usage in the tree, plus the per-suite
-# INI keys at lupin-app.ini:2097-2102. Adding a flag here is a deliberate act;
+# INI keys at the `test suite <suite> extra pytest args` keys in lupin-app.ini. Adding a flag here is a deliberate act;
 # a flag absent from these sets is refused, which is the point.
 
 # Flags that stand alone and take no value.
@@ -88,7 +88,7 @@ ALLOWED_VALUE_FLAGS = {
 #   --junitxml     roots does not make it safe — that is where the source lives,
 #                  so a caller could overwrite src/tests/conftest.py, which
 #                  pytest imports on the next run. The job appends its own
-#                  --junit-xml at job.py:1180 AFTER validation, so nothing
+#                  --junit-xml in TestSuiteJob._run_suite (agents/test_suite/job.py) after validation, so nothing
 #                  legitimate needs the caller to supply one.
 #
 #   --rootdir      Relocates pytest's config discovery, which changes which

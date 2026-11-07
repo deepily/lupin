@@ -1267,8 +1267,8 @@ def validate_edit_title_length( title, cap=TITLE_SOFT_CAP ):
 # Persona roster + policy helpers (persona-key follow-on policy, 2026-07-11)
 # ---------------------------------------------------------------------------
 #
-# Two soft, non-blocking policies spun out of bug 951a22be (design note
-# src/rnd/v0.1.9/2026.07.11-persona-key-followon-policy.md):
+# Two soft, non-blocking policies spun out of bug 951a22be, described in
+# the design note "2026.07.11-persona-key-followon-policy", deleted in commit b113a3a7d:
 #
 #   (1) UNKNOWN-PERSONA SOFT-FLAG: an owner_persona / accountable_manager that
 #       matches NO known persona earns a log-warn + advisory — NEVER a 422 (new
@@ -1730,7 +1730,7 @@ def validate_transition(
 
 
 # ---------------------------------------------------------------------------
-# Park rules (2026-07-19 — src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md)
+# Park rules, from the design note "2026.07.19-parked-status-board-hygiene" (deleted in commit b113a3a7d)
 # ---------------------------------------------------------------------------
 #
 # `parked` says a HUMAN ruled this row not-now: approved, not abandoned, not

@@ -626,7 +626,7 @@ class Notification( Base ):
     # ask that has not yet been confirmed-received. RECEIPT-gated — set only by
     # the three setters in the §4.3 contract (a woken SSE waiter, the §4.4 pull
     # ack, or a §4.5 re-attach land), NEVER by a send signal or an emit attempt.
-    # See src/rnd/v0.1.9/2026.08.01-late-answer-handback.md §4.1.
+    # See the design note "2026.08.01-late-answer-handback" (deleted in commit b113a3a7d) §4.1.
     answer_delivered_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime( timezone=True ),
         nullable=True
@@ -1466,7 +1466,7 @@ class TaskItem( Base ):
        # Invariant immediately after park: park_reason_captured_at == updated_ts,
        # EXACTLY. A later BODY CHANGE stamps body_changed_ts strictly greater, and
        # task_store_owed.park_reason_is_stale reads THAT gap as the quote having
-       # expired. Design: src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md
+       # expired. Design: the design note "2026.07.19-park-reason-staleness-detection" (deleted in commit b113a3a7d)
        #
        # ⚠️ THE PREDICATE READS `body_changed_ts` (below), NOT `updated_ts`. That
        # was bug 54924128 (2026-07-26): `updated_ts` moves on EVERY write, so a

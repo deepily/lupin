@@ -198,7 +198,7 @@ class SpeechToTextProvider:
                     "caller must pass the Depends-injected pipeline handle"
                 )
             # CUDA OOM retry — mirrors the historical `_run_whisper_with_retry`
-            # logic in cosa/rest/routers/speech.py:39-60 so the local path
+            # logic in `_run_whisper_with_retry` in cosa/rest/routers/speech.py so the local path
             # retains the same one-retry-on-OOM behavior post-refactor.
             # torch + gc imported lazily so non-GPU processes (test workers,
             # cloud-run cold-paths) don't pay the import tax.

@@ -305,7 +305,7 @@ _AGENTIC = tuple( _agentic_spec( command, entry ) for command, entry in JOB_ARG_
 
 # ── Mode-control and the receptionist/none outcomes, as class-labelled specs ──
 # So the four template buckets can be DERIVED from cls (§5.1.2). `automatic` clears
-# the user's mode and returns early (todo_fifo_queue.py:739-747); it never routes to
+# the user's mode and returns early (in todo_fifo_queue.py); it never routes to
 # an agent. `receptionist` is a router template command; `none` is the internal
 # no-command outcome. None of the three is an agent, so factory stays None and
 # resolve() returns None for all of them (unchanged, §4).
@@ -385,7 +385,7 @@ REGISTRY = _build_registry( _CONVERSATIONAL, _AGENTIC, _CONTROL, _NONE )
 # one; a job command runs an argument interview first. Then what comes back — an answer, versus an
 # artifact (podcast, deck, document, code change) — and answers are snapshotable where jobs are not.
 #
-# It is NOT a speed distinction, and the code says so: todo_fifo_queue.py:831-834 registers BOTH
+# It is not a speed distinction, and the code says so: todo_fifo_queue.py registers both
 # kinds with user_job_tracker and pushes them onto the SAME queue, both surfacing a card. `weather`
 # calls an external API; `todo` and `calendar` hit a database. An earlier proposal named these six
 # INSTANT_COMMANDS and described them as answering "in the same breath, no job, no card" — that
@@ -399,7 +399,7 @@ NO_MATCH = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.NO
 # Was a hand-kept frozenset of 9 that had to equal JOB_COMMANDS ∩ template. The
 # hand-kept LIST is gone: this is a PROJECTION of the ratified `speakable` field
 # (_SPEAKABLE_AGENTIC), the template-emittable agentic subset. The §9 drift guard
-# (test_v2_registry.py:59) still imports this name and asserts
+# (test_v2_registry.py) still imports this name and asserts
 #   template == ANSWER_COMMANDS ∪ SPEAKABLE_JOBS ∪ CONTROL_COMMANDS ∪ NO_MATCH.
 # Phase 2 retires the NAME when that guard is rewritten class-aware; there is no
 # longer a second definition to drift from the owned set.
